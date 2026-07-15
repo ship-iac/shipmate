@@ -110,6 +110,18 @@ when the same stack participates in more than one environment.
   so that a stack's applies only wait on the specific stacks it actually
   depends on, not on the entire fan-out.
 
+## Apply-match fingerprint
+
+Each plan stores a fingerprint (`fingerprint.txt`, artifact `external_id` on the
+apply check): `sha256` over the sorted JSON of every `TF_VAR_*` environment
+variable (name→value) **plus `TF_WORKSPACE` when it is set**. Ephemeral
+credential vars (`AWS_*`, etc.) are excluded. `TF_WORKSPACE` is included because
+it is the workspaces-flavor env identity and is not a `TF_VAR_*`; without it two
+environments of a workspaces stack would fingerprint identically and an apply
+could match the wrong environment's reviewed plan. plan-cell and apply-cell use
+a byte-identical algorithm (`scripts/plan-classify`). On mismatch, apply fails
+safe and reports differing variable **names** only — never values.
+
 ## OpenTofu note
 
 OpenTofu reserves the variable name `version` as a meta-argument; it cannot
