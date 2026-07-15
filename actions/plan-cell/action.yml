@@ -14,6 +14,11 @@ runs:
       shell: bash
       run: terramate script run --no-recursive -C "${{ inputs.stack }}" plan
 
+    - name: Stack slug (artifact names forbid '/')
+      id: ids
+      shell: bash
+      run: echo "slug=$(echo '${{ inputs.stack }}' | tr / -)" >> "$GITHUB_OUTPUT"
+
     - name: Render + classify plan
       id: plan
       shell: bash
@@ -58,7 +63,7 @@ runs:
     - name: Upload plan artifact
       uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
       with:
-        name: plan-${{ inputs.stack-name }}-${{ inputs.env }}
+        name: plan-${{ steps.ids.outputs.slug }}-${{ inputs.env }}
         path: |
           ${{ inputs.stack }}/stack.otplan
           fingerprint.txt
@@ -76,7 +81,7 @@ runs:
     - name: Upload cell summary
       uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
       with:
-        name: cell-summary-${{ inputs.stack-name }}-${{ inputs.env }}
+        name: cell-summary-${{ steps.ids.outputs.slug }}-${{ inputs.env }}
         path: cell.json
         retention-days: ${{ inputs.retention-days }}
 
