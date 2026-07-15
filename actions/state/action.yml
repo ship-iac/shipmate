@@ -1,0 +1,33 @@
+name: shipmate state
+description: Restore or save OpenTofu local state for one stack x environment via actions/cache (loss-tolerant).
+inputs:
+  stack-slug:
+    description: Filesystem-safe stack id (path separators replaced by '-').
+    required: true
+  env:
+    description: Environment name, e.g. dev-eu.
+    required: true
+  mode:
+    description: '"restore" (before plan/apply) or "save" (after apply).'
+    required: true
+  path:
+    description: State directory to cache.
+    required: false
+    default: .state
+runs:
+  using: composite
+  steps:
+    - name: Restore state
+      if: ${{ inputs.mode == 'restore' }}
+      uses: actions/cache/restore@v4
+      with:
+        path: ${{ inputs.path }}
+        key: state-${{ inputs.stack-slug }}-${{ inputs.env }}-${{ github.run_id }}
+        restore-keys: |
+          state-${{ inputs.stack-slug }}-${{ inputs.env }}-
+    - name: Save state
+      if: ${{ inputs.mode == 'save' }}
+      uses: actions/cache/save@v4
+      with:
+        path: ${{ inputs.path }}
+        key: state-${{ inputs.stack-slug }}-${{ inputs.env }}-${{ github.run_id }}
