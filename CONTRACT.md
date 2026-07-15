@@ -30,8 +30,24 @@ need to be edited every time a stack or environment is added or removed.
 ## Env model
 
 - One GitHub Environment exists per logical environment (for example,
-  `staging`, `production`). That Environment supplies two variables to the
-  jobs that run against it: `TF_VAR_env` and `TF_VAR_region`.
+  `staging`, `production`). The Environment is always the unit of binding,
+  apply-gating, protection, and the plan/apply split — **even when it carries
+  no variables**. What it injects depends on how the consumer repo models
+  environments (its IaC layout):
+
+  | Repo layout | Env identity injected by the GitHub Environment | Mechanism |
+  |-------------|--------------------------------------------------|-----------|
+  | **DRY / dynamic backend** (one stack config deployed N×; backend path `…/${var.env}/${var.region}/…`) | `TF_VAR_env`, `TF_VAR_region` | OpenTofu variables drive the backend path and resources |
+  | **Workspace-per-env** | `TF_WORKSPACE` | OpenTofu auto-selects (and auto-creates) the named workspace |
+  | **Folder-per-env/region** (leaf per env×region, hardcoded state) | *none* | env/region are fixed by the leaf's path; each leaf owns its state |
+
+  This is the **DRY model's** injection (`TF_VAR_env`/`TF_VAR_region`) — the
+  target for real consumer repos and shipmate's internal adoption. The other
+  two are proven-generalization layouts (sample repos
+  `repo-example-workspaces` / `repo-example-folders`). Note the folder layout
+  trades away shipmate's "add an env = GitHub Environment + tags, zero code"
+  property: adding an env there means adding leaf directories (a code change).
+  Membership in an environment is always by **tag**, regardless of layout.
 - Protected environments (typically anything beyond the lowest-trust
   environment) carry required reviewers configured on the GitHub
   Environment itself, so approval gating is enforced by GitHub, not by
