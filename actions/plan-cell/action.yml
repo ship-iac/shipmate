@@ -1,0 +1,109 @@
+name: shipmate plan-cell
+description: Plan one stack x env, publish plan text + artifacts, create the pending apply check.
+inputs:
+  stack:        { description: Stack path, e.g. stacks/app., required: true }
+  stack-name:   { description: Stack display name for the check, e.g. app., required: true }
+  env:          { description: Environment name, e.g. dev-eu., required: true }
+  head-sha:     { description: PR head commit SHA for the apply check., required: true }
+  github-token: { description: GITHUB_TOKEN with checks:write., required: true }
+  retention-days: { description: Plan artifact retention., required: false, default: "3" }
+runs:
+  using: composite
+  steps:
+    - name: Plan
+      shell: bash
+      run: terramate script run --no-recursive -C "${{ inputs.stack }}" plan
+
+    - name: Render + classify plan
+      id: plan
+      shell: bash
+      run: |
+        set -euo pipefail
+        planfile="${{ inputs.stack }}/stack.otplan"
+        tofu -chdir="${{ inputs.stack }}" show -no-color stack.otplan > plan.txt
+        tofu -chdir="${{ inputs.stack }}" show -json stack.otplan > plan.json
+        python3 - "$planfile" <<'PY'
+        import json, os, sys
+        data = json.load(open("plan.json"))
+        rcs = data.get("resource_changes", []) or []
+        changed = [r for r in rcs if any(a != "no-op" for a in r["change"]["actions"])]
+        add = sum(1 for r in changed if "create" in r["change"]["actions"])
+        destroy = sum(1 for r in changed if "delete" in r["change"]["actions"])
+        change = sum(1 for r in changed if set(r["change"]["actions"]) == {"update"})
+        with open(os.environ["GITHUB_OUTPUT"], "a") as fh:
+            fh.write(f"changed={'true' if changed else 'false'}\n")
+            fh.write(f"add={add}\nchange={change}\ndestroy={destroy}\n")
+        # Fingerprint: sha256 over sorted TF_VAR_* (names+values) only.
+        import hashlib
+        tfvars = {k: v for k, v in os.environ.items() if k.startswith("TF_VAR_")}
+        payload = json.dumps(dict(sorted(tfvars.items())), sort_keys=True)
+        open("fingerprint.txt", "w").write(hashlib.sha256(payload.encode()).hexdigest())
+        PY
+
+    - name: Step summary (plan text, 64KiB cap)
+      shell: bash
+      run: |
+        {
+          echo "## plan / ${{ inputs.env }} / ${{ inputs.stack-name }}"
+          echo '```'
+          head -c 65536 plan.txt
+          bytes=$(wc -c < plan.txt)
+          echo ''
+          echo '```'
+          if [ "$bytes" -gt 65536 ]; then
+            echo "_Plan truncated at 64 KiB ($bytes bytes total) — full plan in this job's raw log._"
+          fi
+        } >> "$GITHUB_STEP_SUMMARY"
+
+    - name: Upload plan artifact
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      with:
+        name: plan-${{ inputs.stack-name }}-${{ inputs.env }}
+        path: |
+          ${{ inputs.stack }}/stack.otplan
+          fingerprint.txt
+        retention-days: ${{ inputs.retention-days }}
+
+    - name: Write cell summary
+      shell: bash
+      run: |
+        cat > cell.json <<JSON
+        {"stack":"${{ inputs.stack-name }}","environment":"${{ inputs.env }}",
+         "add":${{ steps.plan.outputs.add }},"change":${{ steps.plan.outputs.change }},
+         "destroy":${{ steps.plan.outputs.destroy }},"changed":${{ steps.plan.outputs.changed }}}
+        JSON
+
+    - name: Upload cell summary
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      with:
+        name: cell-summary-${{ inputs.stack-name }}-${{ inputs.env }}
+        path: cell.json
+        retention-days: ${{ inputs.retention-days }}
+
+    - name: Create apply check (pending / no-changes)
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+      run: |
+        set -euo pipefail
+        # gh api does NOT support -f bracket-nesting (output[title]=...); it would
+        # POST a flat literal key. Build the JSON body with python and pipe it in.
+        name="apply / ${{ inputs.env }} / ${{ inputs.stack-name }}"
+        fp="$(cat fingerprint.txt)"
+        if [ "${{ steps.plan.outputs.changed }}" = "true" ]; then
+          status="queued"; conclusion=""; title="apply pending"
+          summary="Waiting to be applied. Merge after apply completes for this stack x environment."
+        else
+          status="completed"; conclusion="neutral"; title="no changes"
+          summary="Plan produced no changes for this stack x environment."
+        fi
+        python3 - "$name" "${{ inputs.head-sha }}" "$status" "$conclusion" "$fp" "$title" "$summary" > body.json <<'PY'
+        import json, sys
+        name, head, status, conclusion, fp, title, summary = sys.argv[1:8]
+        body = {"name": name, "head_sha": head, "status": status,
+                "external_id": fp, "output": {"title": title, "summary": summary}}
+        if conclusion:
+            body["conclusion"] = conclusion
+        print(json.dumps(body))
+        PY
+        gh api "repos/$GITHUB_REPOSITORY/check-runs" --input body.json >/dev/null
