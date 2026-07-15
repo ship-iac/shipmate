@@ -37,3 +37,27 @@ def test_raises_above_256_cells():
     stacks = [f"stacks/s{i}" for i in range(257)]
     with pytest.raises(bm.MatrixTooLarge):
         bm.build_matrix(["dev-eu"], {"dev-eu": stacks}, {s: ["env/dev-eu"] for s in stacks})
+
+
+def test_list_stacks_changed_uses_changed_flag(monkeypatch):
+    captured = {}
+    monkeypatch.setattr(bm, "_run", lambda args: captured.update(args=args) or "stacks/a\n")
+    assert bm._list_stacks(all_stacks=False, base="deadbeef") == ["stacks/a"]
+    assert captured["args"] == ["terramate", "list", "--changed", "-B", "deadbeef"]
+
+
+def test_list_stacks_all_omits_changed_flag(monkeypatch):
+    captured = {}
+    monkeypatch.setattr(bm, "_run", lambda args: captured.update(args=args) or "stacks/a\nstacks/b\n")
+    assert bm._list_stacks(all_stacks=True, base="") == ["stacks/a", "stacks/b"]
+    assert captured["args"] == ["terramate", "list"]
+
+
+def test_compute_cells_fans_out_and_guards_untagged(monkeypatch):
+    monkeypatch.setattr(bm, "_list_stacks", lambda all_stacks, base: ["stacks/app"])
+    monkeypatch.setattr(bm, "_tags", lambda s: ["env/dev-eu", "env/dev-us", "workload/app"])
+    cells = bm.compute_cells(all_stacks=True)
+    assert cells == [
+        {"stack": "stacks/app", "environment": "dev-eu", "workload": "app"},
+        {"stack": "stacks/app", "environment": "dev-us", "workload": "app"},
+    ]
