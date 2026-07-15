@@ -4,8 +4,8 @@ inputs:
   pr-number:     { description: Pull request number., required: true }
   head-sha:      { description: PR head commit SHA., required: true }
   cells-dir:     { description: Directory holding downloaded cell-summary-*/cell.json., required: false, default: cells }
-  plan-result:   { description: 'Result of the plan matrix job (${{ needs.plan.result }}): success|failure|cancelled|skipped.', required: true }
-  detect-result: { description: 'Result of the detect job (${{ needs.detect.result }}): success|failure|cancelled|skipped.', required: true }
+  plan-result:   { description: 'Result of the plan matrix job (needs.plan.result): success|failure|cancelled|skipped.', required: true }
+  detect-result: { description: 'Result of the detect job (needs.detect.result): success|failure|cancelled|skipped.', required: true }
   github-token:  { description: GITHUB_TOKEN with checks:write + pull-requests:write., required: true }
 runs:
   using: composite

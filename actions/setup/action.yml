@@ -2,10 +2,10 @@ name: shipmate setup
 description: Install pinned Terramate + OpenTofu and enable a shared provider plugin cache.
 inputs:
   terramate-version:
-    description: Terramate CLI version, e.g. 0.17.1 (pass ${{ vars.TERRAMATE_VERSION }}).
+    description: Terramate CLI version, e.g. 0.17.1 (pass vars.TERRAMATE_VERSION).
     required: true
   tofu-version:
-    description: OpenTofu version, e.g. 1.12.4 (pass ${{ vars.TOFU_VERSION }}).
+    description: OpenTofu version, e.g. 1.12.4 (pass vars.TOFU_VERSION).
     required: true
 runs:
   using: composite
