@@ -52,7 +52,8 @@ terramate experimental run-graph
 # Changed set for a matrix (ordering comes from run-graph, not this)
 terramate list --changed
 
-# Dry-run the pipeline — workspaces flavor shows the workspace step, others don't
+# Dry-run the pipeline (all flavors: init + plan; workspaces selects its env via
+# the TF_WORKSPACE env var, not a script step)
 terramate script run --dry-run plan
 
 # Stale-codegen check (used by the detect job)
