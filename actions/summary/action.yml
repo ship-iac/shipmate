@@ -1,10 +1,12 @@
 name: shipmate summary
 description: Upsert the sticky preview comment and create/refresh the shipmate / checkmate gate check.
 inputs:
-  pr-number:    { description: Pull request number., required: true }
-  head-sha:     { description: PR head commit SHA., required: true }
-  cells-dir:    { description: Directory holding downloaded cell-summary-*/cell.json., required: false, default: cells }
-  github-token: { description: GITHUB_TOKEN with checks:write + pull-requests:write., required: true }
+  pr-number:     { description: Pull request number., required: true }
+  head-sha:      { description: PR head commit SHA., required: true }
+  cells-dir:     { description: Directory holding downloaded cell-summary-*/cell.json., required: false, default: cells }
+  plan-result:   { description: 'Result of the plan matrix job (${{ needs.plan.result }}): success|failure|cancelled|skipped.', required: true }
+  detect-result: { description: 'Result of the detect job (${{ needs.detect.result }}): success|failure|cancelled|skipped.', required: true }
+  github-token:  { description: GITHUB_TOKEN with checks:write + pull-requests:write., required: true }
 runs:
   using: composite
   steps:
@@ -60,7 +62,13 @@ runs:
       run: |
         set -euo pipefail
         # gh api has no -f bracket-nesting; build the JSON body with python (same as plan-cell).
-        if [ "${{ steps.build.outputs.pending }}" = "true" ]; then
+        # Gate soundness: a failed plan cell uploads no cell.json, so pending alone
+        # would let a broken preview resolve green. Read the upstream job results.
+        pr="${{ inputs.plan-result }}"; dr="${{ inputs.detect-result }}"
+        if [ "$dr" != "success" ] || { [ "$pr" != "success" ] && [ "$pr" != "skipped" ]; }; then
+          status="completed"; conclusion="failure"; title="preview incomplete"
+          summary="detect or a plan cell did not succeed (detect=$dr, plan=$pr). Fix the failing plan / <env> / <stack> check before merging."
+        elif [ "${{ steps.build.outputs.pending }}" = "true" ]; then
           status="queued"; conclusion=""; title="apply pending"
           summary="One or more stacks are waiting to be applied. Merge is blocked until applies complete."
         else
