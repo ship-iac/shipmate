@@ -1,0 +1,21 @@
+name: shipmate build-matrix
+description: Compute the changed stack x environment plan matrix (fails above 256 cells).
+inputs:
+  base-sha:
+    description: Base commit to diff against for change detection (PR base SHA).
+    required: true
+outputs:
+  matrix:
+    description: 'JSON {"include":[{stack,environment,workload},...]} for the plan matrix.'
+    value: ${{ steps.build.outputs.matrix }}
+  empty:
+    description: '"true" when no stack changed in any environment.'
+    value: ${{ steps.build.outputs.empty }}
+runs:
+  using: composite
+  steps:
+    - id: build
+      shell: bash
+      env:
+        SHIPMATE_BASE_SHA: ${{ inputs.base-sha }}
+      run: python3 "$GITHUB_ACTION_PATH/../../scripts/build-matrix"

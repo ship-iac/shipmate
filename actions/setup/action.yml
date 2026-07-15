@@ -1,0 +1,32 @@
+name: shipmate setup
+description: Install pinned Terramate + OpenTofu and enable a shared provider plugin cache.
+inputs:
+  terramate-version:
+    description: Terramate CLI version, e.g. 0.17.1 (pass vars.TERRAMATE_VERSION).
+    required: true
+  tofu-version:
+    description: OpenTofu version, e.g. 1.12.4 (pass vars.TOFU_VERSION).
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Install OpenTofu
+      uses: opentofu/setup-opentofu@592200bd4b9bbf4772ace78f887668b1aee8f716 # v1.0.5
+      with:
+        tofu_version: ${{ inputs.tofu-version }}
+        tofu_wrapper: false
+    - name: Install Terramate
+      uses: terramate-io/terramate-action@b5d1461d435ba454179045ea062bbecb32738913 # v2.0.0
+      with:
+        version: ${{ inputs.terramate-version }}
+    - name: Provider plugin cache
+      shell: bash
+      run: |
+        echo "TF_PLUGIN_CACHE_DIR=$RUNNER_TEMP/.tofu-plugin-cache" >> "$GITHUB_ENV"
+        mkdir -p "$RUNNER_TEMP/.tofu-plugin-cache"
+    - name: Restore plugin cache
+      uses: actions/cache@d4323d4df104b026a6aa633fdb11d772146be0bf # v4.2.2
+      with:
+        path: ${{ env.TF_PLUGIN_CACHE_DIR }}
+        key: tofu-plugins-${{ runner.os }}-${{ hashFiles('**/.terraform.lock.hcl') }}
+        restore-keys: tofu-plugins-${{ runner.os }}-

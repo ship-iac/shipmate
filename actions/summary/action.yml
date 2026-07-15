@@ -1,0 +1,100 @@
+name: shipmate summary
+description: Upsert the sticky preview comment and create/refresh the shipmate / checkmate gate check.
+inputs:
+  pr-number:     { description: Pull request number., required: true }
+  head-sha:      { description: PR head commit SHA., required: true }
+  cells-dir:     { description: Directory holding downloaded cell-summary-*/cell.json., required: false, default: cells }
+  plan-result:   { description: 'Result of the plan matrix job (needs.plan.result): success|failure|cancelled|skipped.', required: true }
+  detect-result: { description: 'Result of the detect job (needs.detect.result): success|failure|cancelled|skipped.', required: true }
+  github-token:  { description: 'GITHUB_TOKEN with checks:write + pull-requests:write.', required: true }
+runs:
+  using: composite
+  steps:
+    - name: Build comment + gate state
+      id: build
+      shell: bash
+      run: |
+        set -euo pipefail
+        python3 - <<'PY'
+        import glob, json, os
+        cells = [json.load(open(p)) for p in glob.glob(os.environ["CELLS"] + "/**/cell.json", recursive=True)]
+        cells.sort(key=lambda c: (c["environment"], c["stack"]))
+        run_url = f"{os.environ['GITHUB_SERVER_URL']}/{os.environ['GITHUB_REPOSITORY']}/actions/runs/{os.environ['GITHUB_RUN_ID']}"
+        lines = ["<!-- shipmate:summary -->",
+                 "### shipmate preview",
+                 "", "| stack | env | + | ~ | - | status |",
+                 "|---|---|--:|--:|--:|---|"]
+        pending = False
+        for c in cells:
+            st = "apply pending" if c["changed"] else "no changes"
+            if c["changed"]:
+                pending = True
+            lines.append(f"| {c['stack']} | {c['environment']} | {c['add']} | {c['change']} | {c['destroy']} | {st} |")
+        if not cells:
+            lines.append("| _(no stacks changed)_ |  |  |  |  |  |")
+        lines += ["", f"[Plans, logs & artifacts]({run_url}) — plan text is in each `plan / <env> / <stack>` job summary."]
+        open("comment.md", "w").write("\n".join(lines))
+        with open(os.environ["GITHUB_OUTPUT"], "a") as fh:
+            fh.write(f"pending={'true' if pending else 'false'}\n")
+            fh.write(f"count={len(cells)}\n")
+        PY
+      env:
+        CELLS: ${{ inputs.cells-dir }}
+
+    - name: Upsert sticky comment
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        PR: ${{ inputs.pr-number }}
+      run: |
+        set -euo pipefail
+        marker='<!-- shipmate:summary -->'
+        # --paginate evaluates --jq per page, so a marker match on >1 page emits
+        # multiple ids; head -n1 keeps the single id the PATCH URL needs.
+        id=$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR/comments" --paginate \
+               --jq "map(select(.body | contains(\"$marker\"))) | .[0].id // empty" | head -n1)
+        if [ -n "$id" ]; then
+          gh api -X PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$id" -F body=@comment.md >/dev/null
+        else
+          gh api "repos/$GITHUB_REPOSITORY/issues/$PR/comments" -F body=@comment.md >/dev/null
+        fi
+
+    - name: Create/refresh checkmate gate
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        HEAD_SHA: ${{ inputs.head-sha }}
+        PLAN_RESULT: ${{ inputs.plan-result }}
+        DETECT_RESULT: ${{ inputs.detect-result }}
+        PENDING: ${{ steps.build.outputs.pending }}
+        CELL_COUNT: ${{ steps.build.outputs.count }}
+      run: |
+        set -euo pipefail
+        # gh api has no -f bracket-nesting; build the JSON body with python (same as plan-cell).
+        # Gate soundness: read the upstream job results, not just the cell artifacts.
+        pr="$PLAN_RESULT"; dr="$DETECT_RESULT"
+        if [ "$dr" != "success" ] || { [ "$pr" != "success" ] && [ "$pr" != "skipped" ]; }; then
+          status="completed"; conclusion="failure"; title="preview incomplete"
+          summary="detect or a plan cell did not succeed (detect=$dr, plan=$pr). Fix the failing plan / <env> / <stack> check before merging."
+        elif [ "$pr" = "success" ] && [ "$CELL_COUNT" = "0" ]; then
+          # Plan jobs ran (matrix was non-empty) but no cell summaries arrived —
+          # an artifact-download failure must not resolve the gate green.
+          status="completed"; conclusion="failure"; title="preview incomplete"
+          summary="Plan jobs ran but produced no cell summaries (artifact download issue). Re-run before merging."
+        elif [ "$PENDING" = "true" ]; then
+          status="queued"; conclusion=""; title="apply pending"
+          summary="One or more stacks are waiting to be applied. Merge is blocked until applies complete."
+        else
+          status="completed"; conclusion="success"; title="nothing to apply"
+          summary="No pending applies for this PR."
+        fi
+        python3 - "$HEAD_SHA" "$status" "$conclusion" "$title" "$summary" > gate.json <<'PY'
+        import json, sys
+        head, status, conclusion, title, summary = sys.argv[1:6]
+        body = {"name": "shipmate / checkmate", "head_sha": head, "status": status,
+                "output": {"title": title, "summary": summary}}
+        if conclusion:
+            body["conclusion"] = conclusion
+        print(json.dumps(body))
+        PY
+        gh api "repos/$GITHUB_REPOSITORY/check-runs" --input gate.json >/dev/null

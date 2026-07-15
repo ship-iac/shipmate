@@ -53,6 +53,37 @@ tag the relevant stacks), never a workflow code change. This keeps the
 number of environments a repository supports independent of the complexity
 of its CI configuration.
 
+## Preview (PRD 1)
+
+The `preview.yml` workflow (thin and identical across repo layouts; see the
+`repo-example-*` samples) runs on every pull request:
+
+- **`detect`** — `terramate fmt --check`, a stale-codegen check
+  (`terramate generate --detailed-exit-code`), and `actions/build-matrix`,
+  which computes the plan matrix from the *changed* stacks × their `env/*`
+  tags. Environment membership comes purely from stack tags — no environment
+  names in YAML, no GitHub API/token needed.
+- **`plan`** — one matrix job per stack × environment, bound to that GitHub
+  Environment (which injects `TF_VAR_*` / `TF_WORKSPACE` / nothing, per
+  layout). Each job is the `plan / <env> / <stack>` check; `actions/plan-cell`
+  writes the **full plan text to the job's step summary** (reachable one click
+  from the check), uploads the `.otplan` + a TF_VAR fingerprint as an
+  artifact, and creates the `apply / <env> / <stack>` check **pending** (or
+  completed "no changes").
+- **`summary`** — `actions/summary` upserts one sticky PR comment (a stack ×
+  env table) and creates/refreshes the aggregate **`shipmate / checkmate`**
+  gate check, which stays non-green while any apply is pending or any plan
+  cell failed.
+
+Note on plan output: plan text lives in each `plan / <env> / <stack>` job's
+**Summary**, not in a separate Checks-API check-run — the matrix job already
+emits the check of that name, so a second API check would duplicate it. The
+`apply` and `checkmate` checks *are* API check-runs (created pending; they
+have no backing job in `preview.yml`).
+
+To make the gate enforce apply-before-merge, configure branch protection to
+require `shipmate / checkmate`; see [`docs/branch-protection.md`](docs/branch-protection.md).
+
 ---
 
 **shipmate is not affiliated with Terramate GmbH.**
