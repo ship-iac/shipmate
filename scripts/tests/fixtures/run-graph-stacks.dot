@@ -1,0 +1,19 @@
+digraph  {
+	
+	n1[label="/stacks/app"];
+	n2[label="/stacks/auth"];
+	n4[label="/stacks/dns"];
+	n3[label="/stacks/platform"];
+	n6[label="/stacks/sandbox/box"];
+	n7[label="/stacks/tenant-a"];
+	n8[label="/stacks/tenant-b"];
+	n5[label="/stacks/workers"];
+	n1->n7;
+	n1->n8;
+	n2->n1;
+	n4->n3;
+	n3->n2;
+	n3->n5;
+	n5->n1;
+	
+}
