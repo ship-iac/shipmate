@@ -1,0 +1,64 @@
+# shipmate
+
+shipmate is a set of GitHub Actions composite actions and supporting scripts
+that orchestrate infrastructure-as-code delivery using the Terramate CLI and
+OpenTofu. There is no server, no database, and no long-running service:
+everything shipmate does happens inside a GitHub Actions workflow run,
+reading and writing state through GitHub's own primitives (Environments,
+caches, checks, PR comments) and the Terramate/OpenTofu CLIs. When the
+workflow run ends, shipmate's job ends with it.
+
+Consuming repositories pin every shipmate action **by commit SHA**, never by
+a tag or branch name. This is a deliberate supply-chain choice: a commit SHA
+is immutable, so a consumer's workflow behavior cannot change underneath it
+without an explicit, reviewed bump of the pinned SHA. See `CONTRACT.md` for
+the full contract this project follows, including check names, the
+environment model, tag grammar, and pinning rules.
+
+## Fan-out (stack x environment)
+
+shipmate treats each Terramate stack and each target environment as
+independent units of work. A repository with, say, three stacks (network,
+database, app) and two environments (staging, production) fans out into up
+to six plan/apply units, each tracked and checked independently. This lets
+a change to one stack in one environment proceed (or be blocked) without
+being entangled with unrelated stack/environment combinations, and lets
+waves of applies respect dependency ordering only where a real dependency
+exists.
+
+## Checks-first
+
+Every unit of work — a plan, an apply — surfaces as its own GitHub check
+with a predictable, parseable name (see `CONTRACT.md`). Checks are the
+primary UI: reviewers approve or block a pull request by looking at check
+status and check output, not by reading raw workflow logs. An aggregate
+check rolls up the fan-out into a single required status so branch
+protection rules stay simple even as the number of underlying units grows.
+
+## Comment-ops
+
+Humans drive plan/apply behavior for a pull request through PR comments
+(for example, requesting a re-plan, or approving an apply for a specific
+stack/environment unit) rather than through bespoke UI or external tooling.
+Comment-ops keep the entire interaction surface inside the pull request
+that is already the unit of review, with an auditable history of who asked
+for what and when.
+
+## Dynamic environments
+
+Environments are not hardcoded into workflow YAML. An environment is
+defined by a GitHub Environment plus tags applied to the stacks that belong
+to it; adding a new environment is a data change (create the Environment,
+tag the relevant stacks), never a workflow code change. This keeps the
+number of environments a repository supports independent of the complexity
+of its CI configuration.
+
+---
+
+**shipmate is not affiliated with Terramate GmbH.**
+
+---
+
+See `CONTRACT.md` for the full naming, environment, tag-grammar, and
+pinning contract that every shipmate action and every consuming repository
+follows.
