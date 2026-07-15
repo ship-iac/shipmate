@@ -12,31 +12,43 @@ runs:
   steps:
     - name: Plan
       shell: bash
-      run: terramate script run --no-recursive -C "${{ inputs.stack }}" plan
+      env:
+        STACK: ${{ inputs.stack }}
+      run: terramate script run --no-recursive -C "$STACK" plan
 
     - name: Stack slug (artifact names forbid '/')
       id: ids
       shell: bash
-      run: echo "slug=$(echo '${{ inputs.stack }}' | tr / -)" >> "$GITHUB_OUTPUT"
+      env:
+        STACK: ${{ inputs.stack }}
+      # Author-controlled input passed via env (never interpolated into the
+      # script text) to avoid GitHub Actions script injection.
+      run: echo "slug=$(printf '%s' "$STACK" | tr / -)" >> "$GITHUB_OUTPUT"
 
     - name: Render + classify plan
       id: plan
       shell: bash
+      env:
+        STACK: ${{ inputs.stack }}
       run: |
         set -euo pipefail
-        tofu -chdir="${{ inputs.stack }}" show -no-color stack.otplan > plan.txt
-        tofu -chdir="${{ inputs.stack }}" show -json stack.otplan > plan.json
+        tofu -chdir="$STACK" show -no-color stack.otplan > plan.txt
+        tofu -chdir="$STACK" show -json stack.otplan > plan.json
         python3 - <<'PY'
         import json, os
         data = json.load(open("plan.json"))
         rcs = data.get("resource_changes", []) or []
         # "no-op" = unchanged; "read" = deferred data-source read (not a real change).
         changed = [r for r in rcs if any(a not in ("no-op", "read") for a in r["change"]["actions"])]
+        # Output-only plans (no resource delta) are still real changes to apply.
+        oc = data.get("output_changes", {}) or {}
+        out_changed = any(c.get("actions", ["no-op"]) != ["no-op"] for c in oc.values())
+        has_changes = bool(changed) or out_changed
         add = sum(1 for r in changed if "create" in r["change"]["actions"])
         destroy = sum(1 for r in changed if "delete" in r["change"]["actions"])
         change = sum(1 for r in changed if set(r["change"]["actions"]) == {"update"})
         with open(os.environ["GITHUB_OUTPUT"], "a") as fh:
-            fh.write(f"changed={'true' if changed else 'false'}\n")
+            fh.write(f"changed={'true' if has_changes else 'false'}\n")
             fh.write(f"add={add}\nchange={change}\ndestroy={destroy}\n")
         # Fingerprint: sha256 over sorted TF_VAR_* (names+values) only.
         import hashlib
@@ -47,9 +59,12 @@ runs:
 
     - name: Step summary (plan text, 64KiB cap)
       shell: bash
+      env:
+        ENV: ${{ inputs.env }}
+        STACK_NAME: ${{ inputs.stack-name }}
       run: |
         {
-          echo "## plan / ${{ inputs.env }} / ${{ inputs.stack-name }}"
+          echo "## plan / $ENV / $STACK_NAME"
           echo '```'
           head -c 65536 plan.txt
           bytes=$(wc -c < plan.txt)
@@ -71,12 +86,27 @@ runs:
 
     - name: Write cell summary
       shell: bash
+      # Build via python from env vars so an author-controlled stack-name/env
+      # cannot inject shell or break the JSON.
+      env:
+        STACK_NAME: ${{ inputs.stack-name }}
+        ENV: ${{ inputs.env }}
+        ADD: ${{ steps.plan.outputs.add }}
+        CHANGE: ${{ steps.plan.outputs.change }}
+        DESTROY: ${{ steps.plan.outputs.destroy }}
+        CHANGED: ${{ steps.plan.outputs.changed }}
       run: |
-        cat > cell.json <<JSON
-        {"stack":"${{ inputs.stack-name }}","environment":"${{ inputs.env }}",
-         "add":${{ steps.plan.outputs.add }},"change":${{ steps.plan.outputs.change }},
-         "destroy":${{ steps.plan.outputs.destroy }},"changed":${{ steps.plan.outputs.changed }}}
-        JSON
+        python3 - <<'PY'
+        import json, os
+        json.dump({
+            "stack": os.environ["STACK_NAME"],
+            "environment": os.environ["ENV"],
+            "add": int(os.environ["ADD"]),
+            "change": int(os.environ["CHANGE"]),
+            "destroy": int(os.environ["DESTROY"]),
+            "changed": os.environ["CHANGED"] == "true",
+        }, open("cell.json", "w"))
+        PY
 
     - name: Upload cell summary
       uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -89,20 +119,25 @@ runs:
       shell: bash
       env:
         GH_TOKEN: ${{ inputs.github-token }}
+        ENV: ${{ inputs.env }}
+        STACK_NAME: ${{ inputs.stack-name }}
+        HEAD_SHA: ${{ inputs.head-sha }}
+        CHANGED: ${{ steps.plan.outputs.changed }}
       run: |
         set -euo pipefail
         # gh api does NOT support -f bracket-nesting (output[title]=...); it would
         # POST a flat literal key. Build the JSON body with python and pipe it in.
-        name="apply / ${{ inputs.env }} / ${{ inputs.stack-name }}"
+        # Author-controlled values pass via env, never interpolated into the script.
+        name="apply / $ENV / $STACK_NAME"
         fp="$(cat fingerprint.txt)"
-        if [ "${{ steps.plan.outputs.changed }}" = "true" ]; then
+        if [ "$CHANGED" = "true" ]; then
           status="queued"; conclusion=""; title="apply pending"
           summary="Waiting to be applied. Merge after apply completes for this stack x environment."
         else
           status="completed"; conclusion="neutral"; title="no changes"
           summary="Plan produced no changes for this stack x environment."
         fi
-        python3 - "$name" "${{ inputs.head-sha }}" "$status" "$conclusion" "$fp" "$title" "$summary" > body.json <<'PY'
+        python3 - "$name" "$HEAD_SHA" "$status" "$conclusion" "$fp" "$title" "$summary" > body.json <<'PY'
         import json, sys
         name, head, status, conclusion, fp, title, summary = sys.argv[1:8]
         body = {"name": name, "head_sha": head, "status": status,

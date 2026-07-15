@@ -62,6 +62,16 @@ def main():
     base = os.environ.get("SHIPMATE_BASE_SHA", "")
     changed = _changed_stacks(base)
     tags_by_stack = {s: _tags(s) for s in changed}
+    # A changed stack with no env/* tag would contribute no cells and vanish
+    # from preview/apply — fail loud instead of silently skipping it.
+    untagged = [s for s in changed
+                if not any(t.startswith("env/") for t in tags_by_stack[s])]
+    if untagged:
+        raise SystemExit(
+            "::error::changed stack(s) have no env/* tag and cannot fan out to any "
+            "environment (they would silently skip preview and apply): "
+            + ", ".join(sorted(untagged))
+        )
     # Fan out each changed stack to every environment it is tagged into.
     stacks_by_env = {}
     for s in changed:
