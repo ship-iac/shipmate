@@ -120,6 +120,44 @@ Two model notes vs a hosted service: with no server-side queue, GHA can drop a
 by re-running that deploy; and the manual **pre-merge** exact-plan apply
 (`mate apply`) is on the roadmap (it needs a GitHub App to update checks).
 
+## Example repositories
+
+Three sample repos exercise shipmate end to end against local state with **zero
+cloud credentials**, one per common IaC layout — the best place to see the
+workflows wired up:
+
+- [repo-example-stacks](https://github.com/shipmate-iac/repo-example-stacks) — DRY / dynamic-backend (`TF_VAR_env` / `TF_VAR_region`)
+- [repo-example-folders](https://github.com/shipmate-iac/repo-example-folders) — folder-per-env/region (no injected vars)
+- [repo-example-workspaces](https://github.com/shipmate-iac/repo-example-workspaces) — workspace-per-env (`TF_WORKSPACE`)
+
+## Development
+
+The engine's logic lives in a few small Python helper scripts under `scripts/`
+(they run as GitHub Actions steps, so they're executable and have no `.py`
+extension) plus their unit tests in `scripts/tests/`. The dev toolchain is
+[Astral](https://astral.sh)'s:
+
+- **[uv](https://docs.astral.sh/uv/)** — manages the dev environment and pinned
+  tool versions (`pyproject.toml` + `uv.lock`). shipmate ships no importable
+  package and has no runtime dependencies (stdlib only); uv is only for tooling.
+- **[ruff](https://docs.astral.sh/ruff/)** — lint + format. The lint set
+  includes `S` (flake8-bandit) for security checks.
+- **[ty](https://github.com/astral-sh/ty)** — type checker (still beta, so it's
+  non-blocking in CI).
+- **pytest** — unit tests for the helper scripts.
+
+```bash
+uv run ruff check .            # lint (incl. security S rules)
+uv run ruff format .           # auto-format  (--check to verify only)
+uv run pytest scripts/tests    # unit tests
+uv run ty check                # type-check (beta)
+```
+
+CI (`.github/workflows/ci.yml`) runs ruff check, `ruff format --check`, and
+pytest as required checks on every pull request; ty runs non-blocking. End-to-end
+behavior is exercised by the `repo-example-*` sample repositories, which run
+these actions against local state with zero cloud credentials.
+
 ---
 
 **Trademarks.** Terramate is a trademark of Terramate GmbH; Terraform is a

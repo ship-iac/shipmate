@@ -1,19 +1,34 @@
 name: shipmate apply-cell
 description: Apply one stack x env from its reviewed .otplan artifact; complete the apply check. Never re-plans.
 inputs:
-  stack:          { description: 'Stack path, e.g. stacks/app.', required: true }
-  stack-name:     { description: 'Stack display name for the check, e.g. app.', required: true }
-  env:            { description: 'Environment name, e.g. dev-eu.', required: true }
-  head-sha:       { description: 'PR head SHA carrying the pending apply check.', required: true }
-  preview-run-id: { description: 'Preview run id holding the reviewed plan artifact.', required: true }
-  state-path:     { description: 'Flavor state path, e.g. stacks/app/.state.', required: true }
-  github-token:   { description: 'GITHUB_TOKEN with checks:write and actions:read.', required: true }
+  stack:
+    description: Stack path, e.g. stacks/app.
+    required: true
+  stack-name:
+    description: Stack display name for the check, e.g. app.
+    required: true
+  env:
+    description: Environment name, e.g. dev-eu.
+    required: true
+  head-sha:
+    description: PR head SHA carrying the pending apply check.
+    required: true
+  preview-run-id:
+    description: Preview run id holding the reviewed plan artifact.
+    required: true
+  state-path:
+    description: Flavor state path, e.g. stacks/app/.state.
+    required: true
+  github-token:
+    description: GITHUB_TOKEN with checks:write and actions:read.
+    required: true
 runs:
   using: composite
   steps:
-    - name: Stack slug (artifact names forbid '/')
+    - name: Stack slug
       id: ids
       shell: bash
+      # Author-controlled $STACK via env (never interpolated) — injection-safe.
       env:
         STACK: ${{ inputs.stack }}
       run: echo "slug=$(printf '%s' "$STACK" | tr / -)" >> "$GITHUB_OUTPUT"
@@ -32,10 +47,13 @@ runs:
           echo "::error::no successful preview run for this head SHA — no reviewed plan to apply for $ENV/$STACK_NAME. Re-run preview."
           exit 1
         fi
+        echo "::group::download reviewed plan: $ART"
         if ! gh run download "$RUN_ID" -n "$ART" -D . ; then
+          echo "::endgroup::"
           echo "::error::reviewed plan artifact '$ART' missing/expired — cannot apply $ENV/$STACK_NAME without re-planning (fail-safe). Re-run preview."
           exit 1
         fi
+        echo "::endgroup::"
 
     - name: Verify fingerprint matches the reviewed plan
       shell: bash
@@ -52,7 +70,8 @@ runs:
           exit 1
         fi
 
-    - uses: shipmate-iac/shipmate/actions/state@7ce13c7b84def695f3696f6e5812986aa8fecfa8
+    - name: Restore state
+      uses: shipmate-iac/shipmate/actions/state@45681c52b0cbe1c70d1da64f4418c31e4af891e3 # main; re-bump to the release SHA
       with:
         stack-slug: ${{ steps.ids.outputs.slug }}
         env: ${{ inputs.env }}
@@ -66,9 +85,14 @@ runs:
       # The fixture 'apply' script runs `tofu apply stack.otplan` (honors the
       # auth subtree override). tofu rejects a plan whose state moved since it
       # was generated -> non-zero exit -> apply check stays pending (fail-safe).
-      run: terramate script run --no-recursive -C "$STACK" apply
+      run: |
+        set -euo pipefail
+        echo "::group::terramate apply: $STACK"
+        terramate script run --no-recursive -C "$STACK" apply
+        echo "::endgroup::"
 
-    - uses: shipmate-iac/shipmate/actions/state@7ce13c7b84def695f3696f6e5812986aa8fecfa8
+    - name: Save state
+      uses: shipmate-iac/shipmate/actions/state@45681c52b0cbe1c70d1da64f4418c31e4af891e3 # main; re-bump to the release SHA
       with:
         stack-slug: ${{ steps.ids.outputs.slug }}
         env: ${{ inputs.env }}
@@ -88,8 +112,10 @@ runs:
         gh api --paginate --jq '.check_runs[]' "repos/$GITHUB_REPOSITORY/commits/$HEAD_SHA/check-runs?per_page=100" > checks.jsonl
         # Author-controlled ENV/STACK pass via env; JSON handled in python. The
         # check name uses the stack PATH ($STACK) — the value deploy-detect
-        # reconstructs — so plan/complete/detect always agree.
-        id=$(python3 - <<'PY'
+        # reconstructs — so plan/complete/detect always agree. Emit EVERY id with
+        # this name: a re-run preview can create duplicate apply checks, and
+        # leaving any one pending would block the merge/deploy forever.
+        python3 - > ids.txt <<'PY'
         import json, os
         name = f"apply / {os.environ['ENV']} / {os.environ['STACK']}"
         ids = [c["id"] for c in map(json.loads, open("checks.jsonl")) if c.get("name") == name]
@@ -98,7 +124,17 @@ runs:
         json.dump({"status": "completed", "conclusion": "success",
                    "output": {"title": "applied", "summary": "Applied the reviewed plan for this stack x environment."}},
                   open("body.json", "w"))
-        print(ids[0])
+        print("\n".join(str(i) for i in ids))
         PY
-        )
-        gh api -X PATCH "repos/$GITHUB_REPOSITORY/check-runs/$id" --input body.json >/dev/null
+        # State is already saved; retry each completion so a transient API blip
+        # doesn't strand a check pending — re-running can't recover it (the saved
+        # plan is now stale against the advanced state).
+        while read -r id; do
+          [ -z "$id" ] && continue
+          ok=""
+          for _ in 1 2 3 4 5; do
+            if gh api -X PATCH "repos/$GITHUB_REPOSITORY/check-runs/$id" --input body.json >/dev/null; then ok=1; break; fi
+            sleep 3
+          done
+          [ -n "$ok" ] || { echo "::error::failed to complete apply check $id after retries"; exit 1; }
+        done < ids.txt

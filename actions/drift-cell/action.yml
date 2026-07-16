@@ -1,23 +1,38 @@
 name: shipmate drift-cell
 description: Plan one stack x env; open/update a drift Issue on changes, auto-close it when clean.
 inputs:
-  stack:         { description: 'Stack path, e.g. stacks/app.', required: true }
-  stack-name:    { description: 'Stack display name, e.g. app.', required: true }
-  env:           { description: 'Environment name, e.g. dev-eu.', required: true }
-  state-path:    { description: 'Flavor state path, e.g. stacks/app/.state.', required: true }
-  github-token:  { description: 'GITHUB_TOKEN with issues:write.', required: true }
-  slack-webhook: { description: 'Optional Slack webhook URL; drift is posted when set.', required: false, default: "" }
+  stack:
+    description: Stack path, e.g. stacks/app.
+    required: true
+  stack-name:
+    description: Stack display name for the issue, e.g. app.
+    required: true
+  env:
+    description: Environment name, e.g. dev-eu.
+    required: true
+  state-path:
+    description: Flavor state path, e.g. stacks/app/.state.
+    required: true
+  github-token:
+    description: GITHUB_TOKEN with issues:write.
+    required: true
+  slack-webhook:
+    description: Optional Slack webhook URL; drift is posted when set.
+    required: false
+    default: ""
 runs:
   using: composite
   steps:
     - name: Stack slug
       id: ids
       shell: bash
+      # Author-controlled $STACK via env (never interpolated) — injection-safe.
       env:
         STACK: ${{ inputs.stack }}
       run: echo "slug=$(printf '%s' "$STACK" | tr / -)" >> "$GITHUB_OUTPUT"
 
-    - uses: shipmate-iac/shipmate/actions/state@7ce13c7b84def695f3696f6e5812986aa8fecfa8
+    - name: Restore state
+      uses: shipmate-iac/shipmate/actions/state@45681c52b0cbe1c70d1da64f4418c31e4af891e3 # main; re-bump to the release SHA
       with:
         stack-slug: ${{ steps.ids.outputs.slug }}
         env: ${{ inputs.env }}
@@ -31,7 +46,9 @@ runs:
         STACK: ${{ inputs.stack }}
       run: |
         set -euo pipefail
+        echo "::group::terramate plan: $STACK"
         terramate script run --no-recursive -C "$STACK" plan
+        echo "::endgroup::"
         tofu -chdir="$STACK" show -json stack.otplan > plan.json
         python3 "$GITHUB_ACTION_PATH/../../scripts/plan-classify" plan.json
 
@@ -48,8 +65,12 @@ runs:
       run: |
         set -euo pipefail
         title="drift: $ENV / $STACK_NAME"
-        existing=$(gh issue list --label drift --state open --limit 200 --json number,title \
-          | TITLE="$title" python3 -c "import json,os,sys;print(next((str(i['number']) for i in json.load(sys.stdin) if i['title']==os.environ['TITLE']),''))")
+        # gh filters natively via --jq (same idiom as actions/summary) — no extra process.
+        # --limit caps how many open drift issues we scan for the match; keep it
+        # well above the realistic count of simultaneously-drifting stack x envs
+        # so an existing issue is never missed (which would open a duplicate).
+        existing=$(TITLE="$title" gh issue list --label drift --state open --limit 1000 \
+          --json number,title --jq 'map(select(.title == env.TITLE)) | .[0].number // empty')
         if [ "$DRIFTED" = "true" ]; then
           body="Drift detected in \`$STACK_NAME\` @ \`$ENV\`: +$ADD ~$CHANGE -$DESTROY. Auto-closed on the next clean drift run."
           if [ -n "$existing" ]; then

@@ -1,5 +1,6 @@
 # scripts/tests/test_plan_classify.py
-import importlib.util, pathlib
+import importlib.util
+import pathlib
 from importlib.machinery import SourceFileLoader
 
 _p = pathlib.Path(__file__).resolve().parents[1] / "plan-classify"
@@ -14,10 +15,15 @@ def _rc(*actions):
 
 
 def test_classify_counts_add_change_destroy():
-    plan = {"resource_changes": [
-        _rc("create"), _rc("update"), _rc("delete"),
-        _rc("no-op"), _rc("read"),
-    ]}
+    plan = {
+        "resource_changes": [
+            _rc("create"),
+            _rc("update"),
+            _rc("delete"),
+            _rc("no-op"),
+            _rc("read"),
+        ]
+    }
     assert pc.classify(plan) == {"changed": True, "add": 1, "change": 1, "destroy": 1}
 
 
@@ -36,7 +42,9 @@ def test_classify_empty_plan():
 
 
 def test_fingerprint_excludes_non_tfvar_and_is_sorted_deterministic():
-    a = pc.fingerprint({"TF_VAR_env": "dev-eu", "TF_VAR_region": "eu", "AWS_SECRET": "x", "PATH": "/"})
+    a = pc.fingerprint(
+        {"TF_VAR_env": "dev-eu", "TF_VAR_region": "eu", "AWS_SECRET": "x", "PATH": "/"}
+    )
     b = pc.fingerprint({"TF_VAR_region": "eu", "TF_VAR_env": "dev-eu"})
     assert a == b and len(a) == 64
 
@@ -46,13 +54,27 @@ def test_fingerprint_includes_tf_workspace_only_when_set():
     with_ws2 = pc.fingerprint({"TF_WORKSPACE": "dev-eu"})
     empty = pc.fingerprint({})
     empty_blank_ws = pc.fingerprint({"TF_WORKSPACE": ""})
-    assert with_ws != with_ws2          # env identity disambiguates workspaces
-    assert empty == empty_blank_ws      # unset/blank == excluded (stacks/folders unchanged)
+    assert with_ws != with_ws2  # env identity disambiguates workspaces
+    assert empty == empty_blank_ws  # unset/blank == excluded (stacks/folders unchanged)
+
+
+def test_fingerprint_set_but_empty_tfvar_diverges_from_absent():
+    # Unlike TF_WORKSPACE, a set-but-empty TF_VAR_* IS hashed, so it must differ
+    # from omitting it — plan and apply must present the identical env set or the
+    # apply fails safe (CONTRACT apply-match fingerprint).
+    with_empty = pc.fingerprint({"TF_VAR_env": "dev-eu", "TF_VAR_x": ""})
+    without = pc.fingerprint({"TF_VAR_env": "dev-eu"})
+    assert with_empty != without
+    assert "TF_VAR_x" in pc.fingerprint_keys({"TF_VAR_x": ""})
 
 
 def test_fingerprint_stacks_flavor_matches_tfvar_only_algo():
     # Base algo is sorted TF_VAR_* name->value JSON; TF_WORKSPACE unset must not change it.
-    import json, hashlib
+    import hashlib
+    import json
+
     env = {"TF_VAR_env": "dev-eu", "TF_VAR_region": "eu-west-1"}
-    base = hashlib.sha256(json.dumps(dict(sorted(env.items())), sort_keys=True).encode()).hexdigest()
+    base = hashlib.sha256(
+        json.dumps(dict(sorted(env.items())), sort_keys=True).encode()
+    ).hexdigest()
     assert pc.fingerprint(env) == base

@@ -5,3 +5,9 @@
 # local agent guidance, not shipped
 CLAUDE.md
 __pycache__/
+
+# tooling / IDE
+.venv/
+.idea/
+.ruff_cache/
+.pytest_cache/

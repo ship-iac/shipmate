@@ -18,7 +18,8 @@ outputs:
 runs:
   using: composite
   steps:
-    - id: build
+    - name: Compute plan matrix
+      id: build
       shell: bash
       env:
         SHIPMATE_BASE_SHA: ${{ inputs.base-sha }}

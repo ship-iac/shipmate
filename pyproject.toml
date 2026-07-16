@@ -1,0 +1,47 @@
+[project]
+name = "shipmate"
+version = "0.0.0"
+description = "Serverless TACO engine — GitHub Actions composite actions + scripts over Terramate and OpenTofu"
+requires-python = ">=3.11"
+
+# shipmate ships no importable package — just standalone GHA helper scripts and
+# their tests. Tell uv not to try to build/install this as a package.
+[tool.uv]
+package = false
+
+[dependency-groups]
+dev = [
+    "ruff>=0.14",
+    "ty>=0.0.1a1",  # Astral type checker — still beta; kept non-blocking in CI
+    "pytest>=8",
+    "pyyaml>=6",         # parse composite action.yml in the shellcheck test
+    "shellcheck-py>=0.10",  # pip-packaged shellcheck binary (cross-platform)
+]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+# The helper scripts are executable, extension-less files (they run as GHA
+# steps, not as an importable module), so ruff won't discover them by glob —
+# list them explicitly.
+extend-include = [
+    "scripts/build-matrix",
+    "scripts/deploy-detect",
+    "scripts/plan-classify",
+    "scripts/waves",
+]
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle
+    "F",   # pyflakes
+    "I",   # import sorting
+    "B",   # bugbear
+    "UP",  # pyupgrade
+    "S",   # flake8-bandit (security)
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests: assert is the point (S101); they invoke trusted dev tools by name
+# (shellcheck) via subprocess (S603/S607).
+"scripts/tests/*" = ["S101", "S603", "S607"]

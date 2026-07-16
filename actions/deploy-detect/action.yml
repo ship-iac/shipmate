@@ -10,41 +10,42 @@ inputs:
 outputs:
   wave0:
     description: JSON cell array for wave 0.
-    value: ${{ steps.d.outputs.wave0 }}
+    value: ${{ steps.detect.outputs.wave0 }}
   wave1:
     description: JSON cell array for wave 1.
-    value: ${{ steps.d.outputs.wave1 }}
+    value: ${{ steps.detect.outputs.wave1 }}
   wave2:
     description: JSON cell array for wave 2.
-    value: ${{ steps.d.outputs.wave2 }}
+    value: ${{ steps.detect.outputs.wave2 }}
   wave3:
     description: JSON cell array for wave 3.
-    value: ${{ steps.d.outputs.wave3 }}
+    value: ${{ steps.detect.outputs.wave3 }}
   wave4:
     description: JSON cell array for wave 4.
-    value: ${{ steps.d.outputs.wave4 }}
+    value: ${{ steps.detect.outputs.wave4 }}
   wave5:
     description: JSON cell array for wave 5.
-    value: ${{ steps.d.outputs.wave5 }}
+    value: ${{ steps.detect.outputs.wave5 }}
   wave6:
     description: JSON cell array for wave 6.
-    value: ${{ steps.d.outputs.wave6 }}
+    value: ${{ steps.detect.outputs.wave6 }}
   wave7:
     description: JSON cell array for wave 7.
-    value: ${{ steps.d.outputs.wave7 }}
+    value: ${{ steps.detect.outputs.wave7 }}
   head_sha:
     description: PR head SHA for the merged commit.
-    value: ${{ steps.d.outputs.head_sha }}
+    value: ${{ steps.detect.outputs.head_sha }}
   preview_run_id:
     description: Preview workflow run id holding the reviewed plan artifacts.
-    value: ${{ steps.d.outputs.preview_run_id }}
+    value: ${{ steps.detect.outputs.preview_run_id }}
   empty:
     description: "'true' when no wave has any cell."
-    value: ${{ steps.d.outputs.empty }}
+    value: ${{ steps.detect.outputs.empty }}
 runs:
   using: composite
   steps:
-    - id: d
+    - name: Detect pending applies and order into waves
+      id: detect
       shell: bash
       env:
         GH_TOKEN: ${{ inputs.github-token }}

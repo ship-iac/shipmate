@@ -1,4 +1,5 @@
-import importlib.util, pathlib
+import importlib.util
+import pathlib
 from importlib.machinery import SourceFileLoader
 
 _p = pathlib.Path(__file__).resolve().parents[1] / "deploy-detect"
@@ -13,7 +14,7 @@ def test_filter_pending_drops_completed_applies():
         {"stack": "stacks/dns", "environment": "dev-eu", "workload": ""},
         {"stack": "stacks/app", "environment": "dev-eu", "workload": ""},
     ]
-    completed = {"apply / dev-eu / stacks/dns"}   # applied pre-merge -> skip
+    completed = {"apply / dev-eu / stacks/dns"}  # applied pre-merge -> skip
     assert dd.filter_pending(cells, completed) == [
         {"stack": "stacks/app", "environment": "dev-eu", "workload": ""},
     ]

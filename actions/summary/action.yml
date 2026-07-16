@@ -1,18 +1,33 @@
 name: shipmate summary
 description: Upsert the sticky preview comment and create/refresh the shipmate / checkmate gate check.
 inputs:
-  pr-number:     { description: Pull request number., required: true }
-  head-sha:      { description: PR head commit SHA., required: true }
-  cells-dir:     { description: Directory holding downloaded cell-summary-*/cell.json., required: false, default: cells }
-  plan-result:   { description: 'Result of the plan matrix job (needs.plan.result): success|failure|cancelled|skipped.', required: true }
-  detect-result: { description: 'Result of the detect job (needs.detect.result): success|failure|cancelled|skipped.', required: true }
-  github-token:  { description: 'GITHUB_TOKEN with checks:write + pull-requests:write.', required: true }
+  pr-number:
+    description: Pull request number.
+    required: true
+  head-sha:
+    description: PR head commit SHA.
+    required: true
+  cells-dir:
+    description: Directory holding downloaded cell-summary-*/cell.json.
+    required: false
+    default: cells
+  plan-result:
+    description: 'Result of the plan matrix job (needs.plan.result): success|failure|cancelled|skipped.'
+    required: true
+  detect-result:
+    description: 'Result of the detect job (needs.detect.result): success|failure|cancelled|skipped.'
+    required: true
+  github-token:
+    description: GITHUB_TOKEN with checks:write + pull-requests:write.
+    required: true
 runs:
   using: composite
   steps:
     - name: Build comment + gate state
       id: build
       shell: bash
+      env:
+        CELLS: ${{ inputs.cells-dir }}
       run: |
         set -euo pipefail
         python3 - <<'PY'
@@ -38,8 +53,6 @@ runs:
             fh.write(f"pending={'true' if pending else 'false'}\n")
             fh.write(f"count={len(cells)}\n")
         PY
-      env:
-        CELLS: ${{ inputs.cells-dir }}
 
     - name: Upsert sticky comment
       shell: bash

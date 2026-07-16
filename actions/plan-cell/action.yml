@@ -1,12 +1,25 @@
 name: shipmate plan-cell
 description: Plan one stack x env, publish plan text + artifacts, create the pending apply check.
 inputs:
-  stack:        { description: 'Stack path, e.g. stacks/app.', required: true }
-  stack-name:   { description: 'Stack display name for the check, e.g. app.', required: true }
-  env:          { description: 'Environment name, e.g. dev-eu.', required: true }
-  head-sha:     { description: 'PR head commit SHA for the apply check.', required: true }
-  github-token: { description: 'GITHUB_TOKEN with checks:write.', required: true }
-  retention-days: { description: Plan artifact retention., required: false, default: "3" }
+  stack:
+    description: Stack path, e.g. stacks/app.
+    required: true
+  stack-name:
+    description: Stack display name for the check, e.g. app.
+    required: true
+  env:
+    description: Environment name, e.g. dev-eu.
+    required: true
+  head-sha:
+    description: PR head commit SHA for the apply check.
+    required: true
+  github-token:
+    description: GITHUB_TOKEN with checks:write.
+    required: true
+  retention-days:
+    description: Plan artifact retention (days).
+    required: false
+    default: "3"
 runs:
   using: composite
   steps:
@@ -14,15 +27,18 @@ runs:
       shell: bash
       env:
         STACK: ${{ inputs.stack }}
-      run: terramate script run --no-recursive -C "$STACK" plan
+      run: |
+        set -euo pipefail
+        echo "::group::terramate plan: $STACK"
+        terramate script run --no-recursive -C "$STACK" plan
+        echo "::endgroup::"
 
-    - name: Stack slug (artifact names forbid '/')
+    - name: Stack slug
       id: ids
       shell: bash
+      # Author-controlled $STACK via env (never interpolated) — injection-safe.
       env:
         STACK: ${{ inputs.stack }}
-      # Author-controlled input passed via env (never interpolated into the
-      # script text) to avoid GitHub Actions script injection.
       run: echo "slug=$(printf '%s' "$STACK" | tr / -)" >> "$GITHUB_OUTPUT"
 
     - name: Render + classify plan
