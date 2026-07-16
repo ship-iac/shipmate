@@ -53,11 +53,13 @@ def main(argv):
     if "--keys" in argv:
         print(" ".join(fingerprint_keys(os.environ)))
         return
-    open("fingerprint.txt", "w", encoding="utf-8").write(fingerprint(os.environ))
+    with open("fingerprint.txt", "w", encoding="utf-8") as fh:
+        fh.write(fingerprint(os.environ))
     if "--fingerprint-only" in argv:
         return
     plan_json = next((a for a in argv[1:] if not a.startswith("--")), "plan.json")
-    counts = classify(json.load(open(plan_json, encoding="utf-8")))
+    with open(plan_json, encoding="utf-8") as fh:
+        counts = classify(json.load(fh))
     with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
         fh.write(f"changed={'true' if counts['changed'] else 'false'}\n")
         fh.write(f"add={counts['add']}\nchange={counts['change']}\ndestroy={counts['destroy']}\n")
