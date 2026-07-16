@@ -1,5 +1,10 @@
 # shipmate
 
+> **Status: early development.** shipmate is a work in progress. Action inputs,
+> check names, and tag grammar may change between commits, and some pieces
+> described below are still on the roadmap. Pin by commit SHA (see below) and
+> expect breaking changes.
+
 shipmate is a set of GitHub Actions composite actions and supporting scripts
 that orchestrate infrastructure-as-code delivery using the Terramate CLI and
 OpenTofu. There is no server, no database, and no long-running service:
@@ -53,7 +58,7 @@ tag the relevant stacks), never a workflow code change. This keeps the
 number of environments a repository supports independent of the complexity
 of its CI configuration.
 
-## Preview (phase 1)
+## Preview
 
 The `preview.yml` workflow (thin and identical across repo layouts; see the
 `repo-example-*` samples) runs on every pull request:
@@ -84,11 +89,11 @@ have no backing job in `preview.yml`).
 To make the gate enforce apply-before-merge, configure branch protection to
 require `shipmate / checkmate`; see [`docs/branch-protection.md`](docs/branch-protection.md).
 
-## Deploy + drift (phase 2)
+## Deploy + drift
 
-shipmate is a **serverless [TACO](https://docs.taco.io)**: the same
-plan→store→review→apply model with no server or database. `deploy.yml` and
-`drift.yml` are thin sample-repo workflows over shipmate actions.
+shipmate follows a **serverless plan→store→review→apply** model — the reviewed
+plan is stored and applied verbatim, with no server or database. `deploy.yml`
+and `drift.yml` are thin sample-repo workflows over shipmate actions.
 
 - **`deploy.yml`** (`on: push main`) is the **exact-plan apply** path.
   `actions/deploy-detect` maps the merge commit → its PR head SHA, takes the
@@ -100,7 +105,7 @@ plan→store→review→apply model with no server or database. `deploy.yml` and
   `actions/apply-cell` downloads the reviewed `.otplan` from the preview run,
   verifies the fingerprint, applies **that exact plan** (never re-plans; stale
   state → fail-safe), and completes the apply check. A stack already applied
-  (pre-merge via phase 3, or a no-change re-plan) has a completed check → deploy
+  (pre-merge, or a no-change re-plan) has a completed check → deploy
   **no-ops** it.
 - **`drift.yml`** (nightly cron) fans out over **all** stacks × envs, plans
   each with `actions/drift-cell`, and opens one labeled GitHub Issue per
@@ -110,11 +115,10 @@ plan→store→review→apply model with no server or database. `deploy.yml` and
   the per-flavor `env:` block and state path differ (folders inject nothing,
   workspaces inject `TF_WORKSPACE`).
 
-Two model notes vs a hosted TACO: with no server-side queue, GHA can drop a
+Two model notes vs a hosted service: with no server-side queue, GHA can drop a
 **superseded** deploy run — its stacks stay pending + visible and are recovered
 by re-running that deploy; and the manual **pre-merge** exact-plan apply
-(`mate apply`) is delivered in phase 3 (it needs the GitHub App to update
-checks).
+(`mate apply`) is on the roadmap (it needs a GitHub App to update checks).
 
 ---
 
