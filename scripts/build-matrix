@@ -46,10 +46,12 @@ def _run(args):
     return p.stdout
 
 
-def _changed_stacks(base):
-    args = ["terramate", "list", "--changed"]
-    if base:
-        args += ["-B", base]
+def _list_stacks(all_stacks, base):
+    args = ["terramate", "list"]
+    if not all_stacks:
+        args.append("--changed")
+        if base:
+            args += ["-B", base]
     return [s.strip() for s in _run(args).splitlines() if s.strip()]
 
 
@@ -58,35 +60,36 @@ def _tags(stack):
     return json.loads(out)
 
 
-def main():
-    base = os.environ.get("SHIPMATE_BASE_SHA", "")
-    changed = _changed_stacks(base)
-    tags_by_stack = {s: _tags(s) for s in changed}
-    # A changed stack with no env/* tag would contribute no cells and vanish
-    # from preview/apply — fail loud instead of silently skipping it.
-    untagged = [s for s in changed
+def compute_cells(all_stacks=False, base=""):
+    stacks = _list_stacks(all_stacks, base)
+    tags_by_stack = {s: _tags(s) for s in stacks}
+    # A stack with no env/* tag would contribute no cells and vanish from
+    # preview/apply/drift — fail loud instead of silently skipping it.
+    untagged = [s for s in stacks
                 if not any(t.startswith("env/") for t in tags_by_stack[s])]
     if untagged:
         raise SystemExit(
-            "::error::changed stack(s) have no env/* tag and cannot fan out to any "
-            "environment (they would silently skip preview and apply): "
-            + ", ".join(sorted(untagged))
+            "::error::stack(s) have no env/* tag and cannot fan out to any "
+            "environment (they would silently skip): " + ", ".join(sorted(untagged))
         )
-    # Fan out each changed stack to every environment it is tagged into.
     stacks_by_env = {}
-    for s in changed:
+    for s in stacks:
         for t in tags_by_stack[s]:
             if t.startswith("env/"):
                 stacks_by_env.setdefault(t[len("env/"):], []).append(s)
-    envs = sorted(stacks_by_env)
-    cells = build_matrix(envs, stacks_by_env, tags_by_stack)
-    out_path = os.environ["GITHUB_OUTPUT"]
-    with open(out_path, "a", encoding="utf-8") as fh:
+    return build_matrix(sorted(stacks_by_env), stacks_by_env, tags_by_stack)
+
+
+def main():
+    all_stacks = os.environ.get("SHIPMATE_ALL_STACKS", "") == "true"
+    base = os.environ.get("SHIPMATE_BASE_SHA", "")
+    cells = compute_cells(all_stacks, base)
+    with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
         fh.write(f"matrix={json.dumps({'include': cells})}\n")
         fh.write(f"empty={'true' if not cells else 'false'}\n")
         fh.write(f"count={len(cells)}\n")
     listing = ", ".join(f"{c['environment']}/{c['stack']}" for c in cells) or "(none)"
-    print(f"{len(cells)} plan cell(s) across {len(envs)} env(s): {listing}")
+    print(f"{len(cells)} cell(s): {listing}")
 
 
 if __name__ == "__main__":

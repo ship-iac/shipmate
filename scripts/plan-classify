@@ -1,0 +1,61 @@
+#!/usr/bin/env python3
+"""Shared plan classification + TF_VAR/TF_WORKSPACE fingerprint.
+
+Used by plan-cell (phase 1), apply-cell, and drift-cell (phase 2) so change
+classification and the apply-match fingerprint have exactly one definition.
+"""
+import hashlib
+import json
+import os
+import sys
+
+
+def classify(plan):
+    """Classify an OpenTofu `show -json` plan dict into change counts."""
+    rcs = plan.get("resource_changes") or []
+    # "no-op" = unchanged; "read" = deferred data-source read (not a real change).
+    changed = [r for r in rcs if any(a not in ("no-op", "read") for a in r["change"]["actions"])]
+    oc = plan.get("output_changes") or {}
+    out_changed = any(c.get("actions", ["no-op"]) != ["no-op"] for c in oc.values())
+    add = sum(1 for r in changed if "create" in r["change"]["actions"])
+    destroy = sum(1 for r in changed if "delete" in r["change"]["actions"])
+    change = sum(1 for r in changed if set(r["change"]["actions"]) == {"update"})
+    return {"changed": bool(changed) or out_changed, "add": add, "change": change, "destroy": destroy}
+
+
+def fingerprint(environ):
+    """sha256 over sorted TF_VAR_* (name->value) plus TF_WORKSPACE when set.
+
+    TF_WORKSPACE is env identity for the workspaces flavor and is NOT a TF_VAR_*,
+    so without it two envs of a workspaces stack hash identically. It is included
+    only when non-empty, so stacks/folders fingerprints match the phase-1 algo.
+    """
+    payload = {k: environ[k] for k in fingerprint_keys(environ)}
+    return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
+
+
+def fingerprint_keys(environ):
+    """The env-var names that feed the fingerprint: TF_VAR_* plus TF_WORKSPACE
+    when set. Single source of truth for both the hash and its diagnostic."""
+    keys = [k for k in environ if k.startswith("TF_VAR_")]
+    if environ.get("TF_WORKSPACE"):
+        keys.append("TF_WORKSPACE")
+    return sorted(keys)
+
+
+def main(argv):
+    if "--keys" in argv:
+        print(" ".join(fingerprint_keys(os.environ)))
+        return
+    open("fingerprint.txt", "w", encoding="utf-8").write(fingerprint(os.environ))
+    if "--fingerprint-only" in argv:
+        return
+    plan_json = next((a for a in argv[1:] if not a.startswith("--")), "plan.json")
+    counts = classify(json.load(open(plan_json, encoding="utf-8")))
+    with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
+        fh.write(f"changed={'true' if counts['changed'] else 'false'}\n")
+        fh.write(f"add={counts['add']}\nchange={counts['change']}\ndestroy={counts['destroy']}\n")
+
+
+if __name__ == "__main__":
+    main(sys.argv)

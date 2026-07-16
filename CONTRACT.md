@@ -15,8 +15,13 @@ these names verbatim:
 - `apply / <env> / <stack>`
 
 `<env>` and `<stack>` are placeholders substituted with the actual
-environment name and stack name for that unit of work (for example,
-`plan / staging / network`).
+environment name and the Terramate **stack path** (as emitted by
+`terramate list` / `experimental run-graph`, e.g. `stacks/network`) for that
+unit of work (for example, `plan / staging / stacks/network`). The check name
+uses the stack **path**, never a display name — so the code that *creates* the
+apply check (`plan-cell`), *completes* it (`apply-cell`), and *filters the
+still-pending queue* (`deploy-detect`, which only ever has the path) all
+reconstruct the identical name from the one value they share.
 
 In addition to the per-unit checks, one aggregate check rolls up the full
 fan-out into a single required status, named verbatim:
@@ -109,6 +114,18 @@ when the same stack participates in more than one environment.
   units at one level must complete before the next level's units start —
   so that a stack's applies only wait on the specific stacks it actually
   depends on, not on the entire fan-out.
+
+## Apply-match fingerprint
+
+Each plan stores a fingerprint (`fingerprint.txt`, artifact `external_id` on the
+apply check): `sha256` over the sorted JSON of every `TF_VAR_*` environment
+variable (name→value) **plus `TF_WORKSPACE` when it is set**. Ephemeral
+credential vars (`AWS_*`, etc.) are excluded. `TF_WORKSPACE` is included because
+it is the workspaces-flavor env identity and is not a `TF_VAR_*`; without it two
+environments of a workspaces stack would fingerprint identically and an apply
+could match the wrong environment's reviewed plan. plan-cell and apply-cell use
+a byte-identical algorithm (`scripts/plan-classify`). On mismatch, apply fails
+safe and reports differing variable **names** only — never values.
 
 ## OpenTofu note
 

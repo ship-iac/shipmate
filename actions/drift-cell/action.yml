@@ -1,0 +1,78 @@
+name: shipmate drift-cell
+description: Plan one stack x env; open/update a drift Issue on changes, auto-close it when clean.
+inputs:
+  stack:         { description: 'Stack path, e.g. stacks/app.', required: true }
+  stack-name:    { description: 'Stack display name, e.g. app.', required: true }
+  env:           { description: 'Environment name, e.g. dev-eu.', required: true }
+  state-path:    { description: 'Flavor state path, e.g. stacks/app/.state.', required: true }
+  github-token:  { description: 'GITHUB_TOKEN with issues:write.', required: true }
+  slack-webhook: { description: 'Optional Slack webhook URL; drift is posted when set.', required: false, default: "" }
+runs:
+  using: composite
+  steps:
+    - name: Stack slug
+      id: ids
+      shell: bash
+      env:
+        STACK: ${{ inputs.stack }}
+      run: echo "slug=$(printf '%s' "$STACK" | tr / -)" >> "$GITHUB_OUTPUT"
+
+    - uses: shipmate-iac/shipmate/actions/state@7ce13c7b84def695f3696f6e5812986aa8fecfa8
+      with:
+        stack-slug: ${{ steps.ids.outputs.slug }}
+        env: ${{ inputs.env }}
+        mode: restore
+        path: ${{ inputs.state-path }}
+
+    - name: Plan + classify drift
+      id: plan
+      shell: bash
+      env:
+        STACK: ${{ inputs.stack }}
+      run: |
+        set -euo pipefail
+        terramate script run --no-recursive -C "$STACK" plan
+        tofu -chdir="$STACK" show -json stack.otplan > plan.json
+        python3 "$GITHUB_ACTION_PATH/../../scripts/plan-classify" plan.json
+
+    - name: Upsert / close drift issue
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        ENV: ${{ inputs.env }}
+        STACK_NAME: ${{ inputs.stack-name }}
+        DRIFTED: ${{ steps.plan.outputs.changed }}
+        ADD: ${{ steps.plan.outputs.add }}
+        CHANGE: ${{ steps.plan.outputs.change }}
+        DESTROY: ${{ steps.plan.outputs.destroy }}
+      run: |
+        set -euo pipefail
+        title="drift: $ENV / $STACK_NAME"
+        existing=$(gh issue list --label drift --state open --limit 200 --json number,title \
+          | TITLE="$title" python3 -c "import json,os,sys;print(next((str(i['number']) for i in json.load(sys.stdin) if i['title']==os.environ['TITLE']),''))")
+        if [ "$DRIFTED" = "true" ]; then
+          body="Drift detected in \`$STACK_NAME\` @ \`$ENV\`: +$ADD ~$CHANGE -$DESTROY. Auto-closed on the next clean drift run."
+          if [ -n "$existing" ]; then
+            gh issue edit "$existing" --body "$body" >/dev/null
+          else
+            gh label create drift --color FBCA04 --description "shipmate drift" --force >/dev/null 2>&1 || true
+            gh issue create --title "$title" --label drift --body "$body" >/dev/null
+          fi
+        elif [ -n "$existing" ]; then
+          gh issue close "$existing" --comment "Drift resolved — clean plan for $ENV / $STACK_NAME." >/dev/null
+        fi
+
+    - name: Slack notify on drift (optional)
+      if: ${{ inputs.slack-webhook != '' && steps.plan.outputs.changed == 'true' }}
+      shell: bash
+      env:
+        SLACK: ${{ inputs.slack-webhook }}
+        ENV: ${{ inputs.env }}
+        STACK_NAME: ${{ inputs.stack-name }}
+      run: |
+        set -euo pipefail
+        python3 - > payload.json <<'PY'
+        import json, os
+        print(json.dumps({"text": f":ocean: drift detected: {os.environ['ENV']} / {os.environ['STACK_NAME']}"}))
+        PY
+        curl -sS -X POST -H 'Content-Type: application/json' --data @payload.json "$SLACK" >/dev/null

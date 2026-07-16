@@ -84,6 +84,38 @@ have no backing job in `preview.yml`).
 To make the gate enforce apply-before-merge, configure branch protection to
 require `shipmate / checkmate`; see [`docs/branch-protection.md`](docs/branch-protection.md).
 
+## Deploy + drift (phase 2)
+
+shipmate is a **serverless [TACO](https://docs.taco.io)**: the same
+plan→store→review→apply model with no server or database. `deploy.yml` and
+`drift.yml` are thin sample-repo workflows over shipmate actions.
+
+- **`deploy.yml`** (`on: push main`) is the **exact-plan apply** path.
+  `actions/deploy-detect` maps the merge commit → its PR head SHA, takes the
+  stacks whose `apply / <env> / <stack>` check is still **pending**, and orders
+  them into **waves** (`scripts/waves` = topological levels of the Terramate
+  `after` DAG). Pre-declared `wave0..wave7` jobs each `needs` the previous; the
+  skip-propagation guard (`if: !failure() && !cancelled() && waveN != '[]'`)
+  lets empty middle waves pass through without blocking successors.
+  `actions/apply-cell` downloads the reviewed `.otplan` from the preview run,
+  verifies the fingerprint, applies **that exact plan** (never re-plans; stale
+  state → fail-safe), and completes the apply check. A stack already applied
+  (pre-merge via phase 3, or a no-change re-plan) has a completed check → deploy
+  **no-ops** it.
+- **`drift.yml`** (nightly cron) fans out over **all** stacks × envs, plans
+  each with `actions/drift-cell`, and opens one labeled GitHub Issue per
+  drifted stack × env — auto-closed on the next clean run. Optional Slack.
+- **Generalization:** deploy + drift run unchanged across all three layouts
+  (`repo-example-{stacks,folders,workspaces}`) — same pinned shipmate SHA, only
+  the per-flavor `env:` block and state path differ (folders inject nothing,
+  workspaces inject `TF_WORKSPACE`).
+
+Two model notes vs a hosted TACO: with no server-side queue, GHA can drop a
+**superseded** deploy run — its stacks stay pending + visible and are recovered
+by re-running that deploy; and the manual **pre-merge** exact-plan apply
+(`mate apply`) is delivered in phase 3 (it needs the GitHub App to update
+checks).
+
 ---
 
 **shipmate is not affiliated with Terramate GmbH.**
