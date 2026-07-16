@@ -99,7 +99,7 @@ runs:
       env:
         GH_TOKEN: ${{ inputs.github-token }}
         ENV: ${{ inputs.env }}
-        STACK_NAME: ${{ inputs.stack-name }}
+        STACK: ${{ inputs.stack }}
         HEAD_SHA: ${{ inputs.head-sha }}
         CHANGED: ${{ steps.plan.outputs.changed }}
       run: |
@@ -107,7 +107,9 @@ runs:
         # gh api does NOT support -f bracket-nesting (output[title]=...); it would
         # POST a flat literal key. Build the JSON body with python and pipe it in.
         # Author-controlled values pass via env, never interpolated into the script.
-        name="apply / $ENV / $STACK_NAME"
+        # Check name uses the stack PATH ($STACK) so deploy-detect (which only
+        # has the path) can reconstruct it exactly, independent of stack-name.
+        name="apply / $ENV / $STACK"
         fp="$(cat fingerprint.txt)"
         if [ "$CHANGED" = "true" ]; then
           status="queued"; conclusion=""; title="apply pending"

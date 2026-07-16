@@ -12,6 +12,7 @@ import pathlib
 import subprocess
 import sys
 from importlib.machinery import SourceFileLoader
+from graphlib import CycleError
 
 _D = pathlib.Path(__file__).resolve().parent
 
@@ -41,6 +42,19 @@ def _gh_json(path):
     return json.loads(p.stdout)
 
 
+def _gh_check_runs(repo, sha):
+    """All check-runs for a commit, paginated — a 256-cell PR yields >100 checks,
+    so a single per_page=100 page would silently drop completed applies."""
+    p = subprocess.run(
+        ["gh", "api", "--paginate", "--jq", ".check_runs[]",
+         f"repos/{repo}/commits/{sha}/check-runs?per_page=100"],
+        capture_output=True, text=True)
+    if p.returncode != 0:
+        sys.stderr.write(p.stderr)
+        raise SystemExit("::error::gh api check-runs failed")
+    return [json.loads(line) for line in p.stdout.splitlines() if line.strip()]
+
+
 def main():
     repo = os.environ["GITHUB_REPOSITORY"]
     merge_sha = os.environ["GITHUB_SHA"]
@@ -48,7 +62,7 @@ def main():
     # squash merges drop the PR head SHA from main -> map via the commit's PRs.
     head = pulls[0]["head"]["sha"] if pulls else merge_sha
     cells = bm.compute_cells(all_stacks=False, base=os.environ.get("SHIPMATE_BASE_SHA", ""))
-    checks = _gh_json(f"repos/{repo}/commits/{head}/check-runs?per_page=100").get("check_runs", [])
+    checks = _gh_check_runs(repo, head)
     completed = {c["name"] for c in checks
                  if c["name"].startswith("apply / ") and c["status"] == "completed"}
     pending = filter_pending(cells, completed)
@@ -75,4 +89,9 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except bm.MatrixTooLarge as e:
+        raise SystemExit(f"::error::{e}")
+    except CycleError as e:
+        raise SystemExit(f"::error::dependency cycle in run-graph: {e}")

@@ -61,6 +61,11 @@ def assign_waves(levels_, cells):
         return []
     waves = [[] for _ in range(len(levels_))]
     for c in cells:
+        if c["stack"] not in level_of:
+            raise SystemExit(
+                f"::error::stack '{c['stack']}' is not a node in the run-graph; "
+                "cannot order it into a wave (regenerate run-graph or check the label)."
+            )
         waves[level_of[c["stack"]]].append(c)
     return waves
 

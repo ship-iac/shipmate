@@ -80,17 +80,19 @@ runs:
       env:
         GH_TOKEN: ${{ inputs.github-token }}
         ENV: ${{ inputs.env }}
-        STACK_NAME: ${{ inputs.stack-name }}
+        STACK: ${{ inputs.stack }}
         HEAD_SHA: ${{ inputs.head-sha }}
       run: |
         set -euo pipefail
-        gh api "repos/$GITHUB_REPOSITORY/commits/$HEAD_SHA/check-runs?per_page=100" > checks.json
-        # Author-controlled ENV/STACK_NAME pass via env; JSON handled in python.
-        # One python call: match the check by name, write the PATCH body, print the id.
+        # Check-runs are paginated (a 256-cell PR yields >100); stream them all.
+        gh api --paginate --jq '.check_runs[]' "repos/$GITHUB_REPOSITORY/commits/$HEAD_SHA/check-runs?per_page=100" > checks.jsonl
+        # Author-controlled ENV/STACK pass via env; JSON handled in python. The
+        # check name uses the stack PATH ($STACK) — the value deploy-detect
+        # reconstructs — so plan/complete/detect always agree.
         id=$(python3 - <<'PY'
         import json, os
-        name = f"apply / {os.environ['ENV']} / {os.environ['STACK_NAME']}"
-        ids = [c["id"] for c in json.load(open("checks.json"))["check_runs"] if c["name"] == name]
+        name = f"apply / {os.environ['ENV']} / {os.environ['STACK']}"
+        ids = [c["id"] for c in map(json.loads, open("checks.jsonl")) if c.get("name") == name]
         if not ids:
             raise SystemExit(f"::error::no apply check named '{name}' on head SHA; nothing to complete.")
         json.dump({"status": "completed", "conclusion": "success",
