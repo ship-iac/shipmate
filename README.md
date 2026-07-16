@@ -122,7 +122,11 @@ by re-running that deploy; and the manual **pre-merge** exact-plan apply
 
 ---
 
-**shipmate is not affiliated with Terramate GmbH.**
+**Trademarks.** Terramate is a trademark of Terramate GmbH; Terraform is a
+trademark of HashiCorp; OpenTofu is a project of the Linux Foundation. shipmate
+is an independent project and is not affiliated with, endorsed by, or sponsored
+by any of them; their marks are used only to identify the tools shipmate works
+with.
 
 ---
 

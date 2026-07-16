@@ -1,3 +1,7 @@
 # nothing built here yet; keep noise out
 *.log
 .DS_Store
+
+# local agent guidance, not shipped
+CLAUDE.md
+__pycache__/
