@@ -6,6 +6,7 @@ Pure core (build_matrix) is unit-tested; main() gathers inputs from terramate
 outputs. Environment membership comes purely from stack tags (CONTRACT tag
 grammar: env/<name>) -- no GitHub API or token required.
 """
+
 import json
 import os
 import subprocess
@@ -22,8 +23,11 @@ def build_matrix(envs, stacks_by_env, tags_by_stack):
     cells = []
     for env in envs:
         for stack in stacks_by_env.get(env, []):
-            workload = next((t[len("workload/"):] for t in tags_by_stack.get(stack, [])
-                             if t.startswith("workload/")), "")
+            workload = ""
+            for tag in tags_by_stack.get(stack, []):
+                if tag.startswith("workload/"):
+                    workload = tag[len("workload/") :]
+                    break
             cells.append({"stack": stack, "environment": env, "workload": workload})
     cells.sort(key=lambda c: (c["environment"], c["stack"]))
     if len(cells) > MATRIX_LIMIT:
@@ -35,7 +39,9 @@ def build_matrix(envs, stacks_by_env, tags_by_stack):
 
 
 def _run(args):
-    p = subprocess.run(args, capture_output=True, text=True)
+    # args is a code-controlled tool invocation (gh/terramate/tofu by PATH name),
+    # never user input, and shell=False — safe.
+    p = subprocess.run(args, capture_output=True, text=True)  # noqa: S603
     if p.returncode != 0:
         # Surface the tool's own error; a swallowed stderr makes CI opaque.
         sys.stderr.write(p.stderr)
@@ -62,8 +68,7 @@ def compute_cells(all_stacks=False, base=""):
     tags_by_stack = {s: _tags(s) for s in stacks}
     # A stack with no env/* tag would contribute no cells and vanish from
     # preview/apply/drift — fail loud instead of silently skipping it.
-    untagged = [s for s in stacks
-                if not any(t.startswith("env/") for t in tags_by_stack[s])]
+    untagged = [s for s in stacks if not any(t.startswith("env/") for t in tags_by_stack[s])]
     if untagged:
         raise SystemExit(
             "::error::stack(s) have no env/* tag and cannot fan out to any "
@@ -73,7 +78,7 @@ def compute_cells(all_stacks=False, base=""):
     for s in stacks:
         for t in tags_by_stack[s]:
             if t.startswith("env/"):
-                stacks_by_env.setdefault(t[len("env/"):], []).append(s)
+                stacks_by_env.setdefault(t[len("env/") :], []).append(s)
     return build_matrix(sorted(stacks_by_env), stacks_by_env, tags_by_stack)
 
 

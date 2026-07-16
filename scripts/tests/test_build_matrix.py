@@ -1,7 +1,8 @@
 import importlib.util
 import pathlib
-import pytest
 from importlib.machinery import SourceFileLoader
+
+import pytest
 
 # build-matrix has no file extension, so spec_from_file_location can't infer a
 # loader from the suffix (it returns None on every platform, not just Windows).
@@ -48,7 +49,9 @@ def test_list_stacks_changed_uses_changed_flag(monkeypatch):
 
 def test_list_stacks_all_omits_changed_flag(monkeypatch):
     captured = {}
-    monkeypatch.setattr(bm, "_run", lambda args: captured.update(args=args) or "stacks/a\nstacks/b\n")
+    monkeypatch.setattr(
+        bm, "_run", lambda args: captured.update(args=args) or "stacks/a\nstacks/b\n"
+    )
     assert bm._list_stacks(all_stacks=True, base="") == ["stacks/a", "stacks/b"]
     assert captured["args"] == ["terramate", "list"]
 

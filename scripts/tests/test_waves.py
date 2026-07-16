@@ -1,4 +1,5 @@
-import importlib.util, pathlib
+import importlib.util
+import pathlib
 from importlib.machinery import SourceFileLoader
 
 _dir = pathlib.Path(__file__).resolve().parents[1]
@@ -12,10 +13,10 @@ FIXTURE = (_dir / "tests" / "fixtures" / "run-graph-stacks.dot").read_text()
 
 def test_parse_dot_matches_fixture_dag():
     deps = w.parse_dot(FIXTURE)
-    assert deps["stacks/platform"] == {"stacks/dns"}          # n4->n3
+    assert deps["stacks/platform"] == {"stacks/dns"}  # n4->n3
     assert deps["stacks/app"] == {"stacks/auth", "stacks/workers"}  # n2->n1, n5->n1
     assert deps["stacks/dns"] == set()
-    assert deps["stacks/sandbox/box"] == set()                # isolated node, still present
+    assert deps["stacks/sandbox/box"] == set()  # isolated node, still present
 
 
 def test_levels_are_topological():

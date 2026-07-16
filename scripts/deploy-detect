@@ -5,12 +5,13 @@ Exact-plan / fail-safe model: the work set is the merged PR's changed stacks
 whose apply check is still pending (completed = applied pre-merge, or
 no-change). No 'last deployed ref' diff — pending checks ARE the queue.
 """
+
 import importlib.util
 import json
 import os
 import pathlib
-from importlib.machinery import SourceFileLoader
 from graphlib import CycleError
+from importlib.machinery import SourceFileLoader
 
 _D = pathlib.Path(__file__).resolve().parent
 
@@ -28,8 +29,7 @@ wv = _load("waves")
 
 
 def filter_pending(cells, completed_names):
-    return [c for c in cells
-            if f"apply / {c['environment']} / {c['stack']}" not in completed_names]
+    return [c for c in cells if f"apply / {c['environment']} / {c['stack']}" not in completed_names]
 
 
 # All subprocess calls go through bm._run (surfaces the tool's stderr, then
@@ -47,11 +47,20 @@ def main():
     cells = bm.compute_cells(all_stacks=False, base=os.environ.get("SHIPMATE_BASE_SHA", ""))
     # Check-runs are paginated (a 256-cell PR yields >100); --paginate --jq streams
     # them as JSONL so no page — hence no completed apply — is silently dropped.
-    checks_jsonl = bm._run(["gh", "api", "--paginate", "--jq", ".check_runs[]",
-                            f"repos/{repo}/commits/{head}/check-runs?per_page=100"])
+    checks_jsonl = bm._run(
+        [
+            "gh",
+            "api",
+            "--paginate",
+            "--jq",
+            ".check_runs[]",
+            f"repos/{repo}/commits/{head}/check-runs?per_page=100",
+        ]
+    )
     checks = [json.loads(line) for line in checks_jsonl.splitlines() if line.strip()]
-    completed = {c["name"] for c in checks
-                 if c["name"].startswith("apply / ") and c["status"] == "completed"}
+    completed = {
+        c["name"] for c in checks if c["name"].startswith("apply / ") and c["status"] == "completed"
+    }
     pending = filter_pending(cells, completed)
     graph = bm._run(["terramate", "experimental", "run-graph", "--label", "stack.dir"])
     waves = wv.assign_waves(wv.levels(wv.parse_dot(graph)), pending)
@@ -60,9 +69,11 @@ def main():
         f"repos/{repo}/actions/workflows/preview.yml/runs?head_sha={head}&status=success"
     ).get("workflow_runs", [])
     preview_run = runs[0]["id"] if runs else ""
-    print(f"::notice title=deploy-detect::base={os.environ.get('SHIPMATE_BASE_SHA', '')} "
-          f"head={head} cells={len(cells)} completed={len(completed)} pending={len(pending)} "
-          f"waves={[len(w) for w in waves]} preview_run={preview_run} empty={not any(waves)}")
+    print(
+        f"::notice title=deploy-detect::base={os.environ.get('SHIPMATE_BASE_SHA', '')} "
+        f"head={head} cells={len(cells)} completed={len(completed)} pending={len(pending)} "
+        f"waves={[len(w) for w in waves]} preview_run={preview_run} empty={not any(waves)}"
+    )
     # Output names must be hyphen-free: `steps.d.outputs.head-sha` parses the '-'
     # as subtraction, breaking the composite action's outputs block. Underscores.
     with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
@@ -75,6 +86,6 @@ if __name__ == "__main__":
     try:
         main()
     except bm.MatrixTooLarge as e:
-        raise SystemExit(f"::error::{e}")
+        raise SystemExit(f"::error::{e}") from e
     except CycleError as e:
-        raise SystemExit(f"::error::dependency cycle in run-graph: {e}")
+        raise SystemExit(f"::error::dependency cycle in run-graph: {e}") from e

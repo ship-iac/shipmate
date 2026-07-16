@@ -4,6 +4,7 @@
 Used by plan-cell, apply-cell, and drift-cell so change classification and
 the apply-match fingerprint have exactly one definition.
 """
+
 import hashlib
 import json
 import os
@@ -20,7 +21,12 @@ def classify(plan):
     add = sum(1 for r in changed if "create" in r["change"]["actions"])
     destroy = sum(1 for r in changed if "delete" in r["change"]["actions"])
     change = sum(1 for r in changed if set(r["change"]["actions"]) == {"update"})
-    return {"changed": bool(changed) or out_changed, "add": add, "change": change, "destroy": destroy}
+    return {
+        "changed": bool(changed) or out_changed,
+        "add": add,
+        "change": change,
+        "destroy": destroy,
+    }
 
 
 def fingerprint(environ):

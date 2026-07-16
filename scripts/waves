@@ -7,6 +7,7 @@ wave0..wave7 cell arrays. Ordering is over the FULL graph, then filtered to the
 work set, so transitive order through unchanged stacks is preserved and empty
 middle waves are normal.
 """
+
 import json
 import os
 import re
@@ -15,7 +16,7 @@ from graphlib import CycleError, TopologicalSorter
 
 MAX_WAVES = 8
 _NODE = re.compile(r'(\w+)\s*\[label="([^"]+)"\]')
-_EDGE = re.compile(r'^\s*(\w+)\s*->\s*(\w+)')
+_EDGE = re.compile(r"^\s*(\w+)\s*->\s*(\w+)")
 
 
 def parse_dot(text):
@@ -30,7 +31,7 @@ def parse_dot(text):
     ids = {nid: label.lstrip("/") for nid, label in _NODE.findall(text)}
     deps = {path: set() for path in ids.values()}
     for line in text.splitlines():
-        if "[label=" in line:                     # node declaration, not an edge
+        if "[label=" in line:  # node declaration, not an edge
             continue
         m = _EDGE.match(line)
         if not m:
@@ -94,7 +95,7 @@ def main(argv):
     try:
         lv = levels(deps)
     except CycleError as e:
-        raise SystemExit(f"::error::dependency cycle in run-graph: {e}")
+        raise SystemExit(f"::error::dependency cycle in run-graph: {e}") from e
     waves = assign_waves(lv, json.loads(os.environ.get("SHIPMATE_WORKSET", "[]")))
     guard_max_waves(waves)
     if "--reverse" in argv:
