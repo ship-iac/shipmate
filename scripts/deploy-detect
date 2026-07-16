@@ -2,7 +2,7 @@
 """deploy.yml detect: merge commit -> PR head SHA -> pending applies -> waves.
 
 Exact-plan / fail-safe model: the work set is the merged PR's changed stacks
-whose apply check is still pending (completed = applied pre-merge via PRD 3, or
+whose apply check is still pending (completed = applied pre-merge, or
 no-change). No 'last deployed ref' diff — pending checks ARE the queue.
 """
 import importlib.util

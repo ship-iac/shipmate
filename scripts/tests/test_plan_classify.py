@@ -51,8 +51,8 @@ def test_fingerprint_includes_tf_workspace_only_when_set():
 
 
 def test_fingerprint_stacks_flavor_matches_tfvar_only_algo():
-    # PRD-1 algo was sorted TF_VAR_* name->value JSON; TF_WORKSPACE unset must not change it.
+    # Base algo is sorted TF_VAR_* name->value JSON; TF_WORKSPACE unset must not change it.
     import json, hashlib
     env = {"TF_VAR_env": "dev-eu", "TF_VAR_region": "eu-west-1"}
-    prd1 = hashlib.sha256(json.dumps(dict(sorted(env.items())), sort_keys=True).encode()).hexdigest()
-    assert pc.fingerprint(env) == prd1
+    base = hashlib.sha256(json.dumps(dict(sorted(env.items())), sort_keys=True).encode()).hexdigest()
+    assert pc.fingerprint(env) == base
