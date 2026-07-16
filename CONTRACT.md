@@ -1,7 +1,7 @@
 # CONTRACT
 
 This document is the naming, environment, tag-grammar, and pinning contract
-that every shipmate action and every PRD in this project must follow. Where
+that every shipmate action and every consuming repository must follow. Where
 a value is marked verbatim, it must be used exactly as written — these
 strings are parsed by other parts of the system (check-name matching,
 comment-ops, tag-based stack selection) and are not free-form prose.

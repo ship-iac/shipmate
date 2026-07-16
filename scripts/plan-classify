@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Shared plan classification + TF_VAR/TF_WORKSPACE fingerprint.
 
-Used by plan-cell (PRD 1), apply-cell, and drift-cell (PRD 2) so change
-classification and the apply-match fingerprint have exactly one definition.
+Used by plan-cell, apply-cell, and drift-cell so change classification and
+the apply-match fingerprint have exactly one definition.
 """
 import hashlib
 import json
@@ -28,7 +28,7 @@ def fingerprint(environ):
 
     TF_WORKSPACE is env identity for the workspaces flavor and is NOT a TF_VAR_*,
     so without it two envs of a workspaces stack hash identically. It is included
-    only when non-empty, so stacks/folders fingerprints match the PRD-1 algo.
+    only when non-empty, so stacks/folders fingerprints match the base algo.
     """
     payload = {k: environ[k] for k in fingerprint_keys(environ)}
     return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()

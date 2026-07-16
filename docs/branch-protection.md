@@ -44,18 +44,16 @@ JSON
 `strict_required_status_checks_policy: true` is the "require branches up to date"
 setting above.
 
-## POC note (free-tier private repos)
+## Note: free-tier private repos
 
 Repository rulesets and classic branch protection require a paid plan
 (Pro/Team/Enterprise) **for private repositories**, or a public repository.
-The POC sample repos (`repo-example-*`) are private on the free tier, so the
-required-check gate could not be created live during PRD-1 acceptance.
+On a free-tier private repo the required-check gate cannot be created at all.
 
-What was verified live instead: `actions/summary` emits the correct
-`shipmate / checkmate` state in every case — `pending` while apply checks are
-outstanding, `failure` ("preview incomplete") when a plan cell fails, and
-`success` when nothing is left to apply. The gate *enforcement* is a pure
-GitHub configuration step (the ruleset above); shipmate's responsibility —
-producing a correct, stable, single required status — is proven. Real
-consumer repos, which hold deploy credentials and are on paid plans (or are
-public), apply the ruleset above unchanged.
+This is purely a GitHub configuration constraint, not a shipmate one:
+`actions/summary` still emits the correct `shipmate / checkmate` state in every
+case — `pending` while apply checks are outstanding, `failure` ("preview
+incomplete") when a plan cell fails, and `success` when nothing is left to
+apply. shipmate's responsibility — producing a correct, stable, single
+required status — holds regardless of plan; the ruleset above just enforces it
+once the repo is public or on a paid plan.
