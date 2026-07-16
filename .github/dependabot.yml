@@ -1,0 +1,20 @@
+version: 2
+updates:
+  # Composite-action + workflow `uses:` SHA pins.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        # Group minor + patch into one PR; majors open individually for review.
+        update-types: [minor, patch]
+
+  # Dev toolchain pinned in pyproject.toml / uv.lock (ruff, ty, pytest, ...).
+  - package-ecosystem: uv
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      dev:
+        update-types: [minor, patch]
