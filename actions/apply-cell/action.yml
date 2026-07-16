@@ -1,0 +1,104 @@
+name: shipmate apply-cell
+description: Apply one stack x env from its reviewed .otplan artifact; complete the apply check. Never re-plans.
+inputs:
+  stack:          { description: 'Stack path, e.g. stacks/app.', required: true }
+  stack-name:     { description: 'Stack display name for the check, e.g. app.', required: true }
+  env:            { description: 'Environment name, e.g. dev-eu.', required: true }
+  head-sha:       { description: 'PR head SHA carrying the pending apply check.', required: true }
+  preview-run-id: { description: 'Preview run id holding the reviewed plan artifact.', required: true }
+  state-path:     { description: 'Flavor state path, e.g. stacks/app/.state.', required: true }
+  github-token:   { description: 'GITHUB_TOKEN with checks:write and actions:read.', required: true }
+runs:
+  using: composite
+  steps:
+    - name: Stack slug (artifact names forbid '/')
+      id: ids
+      shell: bash
+      env:
+        STACK: ${{ inputs.stack }}
+      run: echo "slug=$(printf '%s' "$STACK" | tr / -)" >> "$GITHUB_OUTPUT"
+
+    - name: Download reviewed plan artifact (fail-safe if missing)
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        RUN_ID: ${{ inputs.preview-run-id }}
+        ART: plan-${{ steps.ids.outputs.slug }}-${{ inputs.env }}
+        ENV: ${{ inputs.env }}
+        STACK_NAME: ${{ inputs.stack-name }}
+      run: |
+        set -euo pipefail
+        if [ -z "$RUN_ID" ]; then
+          echo "::error::no successful preview run for this head SHA — no reviewed plan to apply for $ENV/$STACK_NAME. Re-run preview."
+          exit 1
+        fi
+        if ! gh run download "$RUN_ID" -n "$ART" -D . ; then
+          echo "::error::reviewed plan artifact '$ART' missing/expired — cannot apply $ENV/$STACK_NAME without re-planning (fail-safe). Re-run preview."
+          exit 1
+        fi
+
+    - name: Verify fingerprint matches the reviewed plan
+      shell: bash
+      env:
+        ENV: ${{ inputs.env }}
+        STACK_NAME: ${{ inputs.stack-name }}
+      run: |
+        set -euo pipefail
+        mv fingerprint.txt expected-fingerprint.txt
+        python3 "$GITHUB_ACTION_PATH/../../scripts/plan-classify" --fingerprint-only
+        if ! diff -q fingerprint.txt expected-fingerprint.txt >/dev/null; then
+          names=$(python3 "$GITHUB_ACTION_PATH/../../scripts/plan-classify" --keys)
+          echo "::error::apply aborted for $ENV/$STACK_NAME: current env does not match the reviewed plan's fingerprint. Current variable names: $names. Values differ or a variable was added/removed — re-plan."
+          exit 1
+        fi
+
+    - uses: shipmate-iac/shipmate/actions/state@7ce13c7b84def695f3696f6e5812986aa8fecfa8
+      with:
+        stack-slug: ${{ steps.ids.outputs.slug }}
+        env: ${{ inputs.env }}
+        mode: restore
+        path: ${{ inputs.state-path }}
+
+    - name: Apply the stored plan (exact-plan; stale -> fail-safe)
+      shell: bash
+      env:
+        STACK: ${{ inputs.stack }}
+      # The fixture 'apply' script runs `tofu apply stack.otplan` (honors the
+      # auth subtree override). tofu rejects a plan whose state moved since it
+      # was generated -> non-zero exit -> apply check stays pending (fail-safe).
+      run: terramate script run --no-recursive -C "$STACK" apply
+
+    - uses: shipmate-iac/shipmate/actions/state@7ce13c7b84def695f3696f6e5812986aa8fecfa8
+      with:
+        stack-slug: ${{ steps.ids.outputs.slug }}
+        env: ${{ inputs.env }}
+        mode: save
+        path: ${{ inputs.state-path }}
+
+    - name: Complete the apply check
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        ENV: ${{ inputs.env }}
+        STACK: ${{ inputs.stack }}
+        HEAD_SHA: ${{ inputs.head-sha }}
+      run: |
+        set -euo pipefail
+        # Check-runs are paginated (a 256-cell PR yields >100); stream them all.
+        gh api --paginate --jq '.check_runs[]' "repos/$GITHUB_REPOSITORY/commits/$HEAD_SHA/check-runs?per_page=100" > checks.jsonl
+        # Author-controlled ENV/STACK pass via env; JSON handled in python. The
+        # check name uses the stack PATH ($STACK) — the value deploy-detect
+        # reconstructs — so plan/complete/detect always agree.
+        id=$(python3 - <<'PY'
+        import json, os
+        name = f"apply / {os.environ['ENV']} / {os.environ['STACK']}"
+        ids = [c["id"] for c in map(json.loads, open("checks.jsonl")) if c.get("name") == name]
+        if not ids:
+            raise SystemExit(f"::error::no apply check named '{name}' on head SHA; nothing to complete.")
+        json.dump({"status": "completed", "conclusion": "success",
+                   "output": {"title": "applied", "summary": "Applied the reviewed plan for this stack x environment."}},
+                  open("body.json", "w"))
+        print(ids[0])
+        PY
+        )
+        gh api -X PATCH "repos/$GITHUB_REPOSITORY/check-runs/$id" --input body.json >/dev/null

@@ -1,0 +1,97 @@
+#!/usr/bin/env python3
+"""deploy.yml detect: merge commit -> PR head SHA -> pending applies -> waves.
+
+Exact-plan / fail-safe model: the work set is the merged PR's changed stacks
+whose apply check is still pending (completed = applied pre-merge via PRD 3, or
+no-change). No 'last deployed ref' diff — pending checks ARE the queue.
+"""
+import importlib.util
+import json
+import os
+import pathlib
+import subprocess
+import sys
+from importlib.machinery import SourceFileLoader
+from graphlib import CycleError
+
+_D = pathlib.Path(__file__).resolve().parent
+
+
+def _load(fname):
+    loader = SourceFileLoader(fname.replace("-", "_"), str(_D / fname))
+    spec = importlib.util.spec_from_loader(loader.name, loader)
+    mod = importlib.util.module_from_spec(spec)
+    loader.exec_module(mod)
+    return mod
+
+
+bm = _load("build-matrix")
+wv = _load("waves")
+
+
+def filter_pending(cells, completed_names):
+    return [c for c in cells
+            if f"apply / {c['environment']} / {c['stack']}" not in completed_names]
+
+
+def _gh_json(path):
+    p = subprocess.run(["gh", "api", path], capture_output=True, text=True)
+    if p.returncode != 0:
+        sys.stderr.write(p.stderr)
+        raise SystemExit(f"::error::gh api failed: {path}")
+    return json.loads(p.stdout)
+
+
+def _gh_check_runs(repo, sha):
+    """All check-runs for a commit, paginated — a 256-cell PR yields >100 checks,
+    so a single per_page=100 page would silently drop completed applies."""
+    p = subprocess.run(
+        ["gh", "api", "--paginate", "--jq", ".check_runs[]",
+         f"repos/{repo}/commits/{sha}/check-runs?per_page=100"],
+        capture_output=True, text=True)
+    if p.returncode != 0:
+        sys.stderr.write(p.stderr)
+        raise SystemExit("::error::gh api check-runs failed")
+    return [json.loads(line) for line in p.stdout.splitlines() if line.strip()]
+
+
+def main():
+    repo = os.environ["GITHUB_REPOSITORY"]
+    merge_sha = os.environ["GITHUB_SHA"]
+    pulls = _gh_json(f"repos/{repo}/commits/{merge_sha}/pulls")
+    # squash merges drop the PR head SHA from main -> map via the commit's PRs.
+    head = pulls[0]["head"]["sha"] if pulls else merge_sha
+    cells = bm.compute_cells(all_stacks=False, base=os.environ.get("SHIPMATE_BASE_SHA", ""))
+    checks = _gh_check_runs(repo, head)
+    completed = {c["name"] for c in checks
+                 if c["name"].startswith("apply / ") and c["status"] == "completed"}
+    pending = filter_pending(cells, completed)
+    graph = subprocess.run(["terramate", "experimental", "run-graph", "--label", "stack.dir"],
+                           capture_output=True, text=True)
+    if graph.returncode != 0:
+        sys.stderr.write(graph.stderr)
+        raise SystemExit("::error::run-graph failed")
+    waves = wv.assign_waves(wv.levels(wv.parse_dot(graph.stdout)), pending)
+    wv.guard_max_waves(waves)
+    runs = _gh_json(
+        f"repos/{repo}/actions/workflows/preview.yml/runs?head_sha={head}&status=success"
+    ).get("workflow_runs", [])
+    preview_run = runs[0]["id"] if runs else ""
+    print(f"::notice title=deploy-detect::base={os.environ.get('SHIPMATE_BASE_SHA', '')} "
+          f"head={head} cells={len(cells)} completed={len(completed)} pending={len(pending)} "
+          f"waves={[len(w) for w in waves]} preview_run={preview_run} empty={not any(waves)}")
+    # Output names must be hyphen-free: `steps.d.outputs.head-sha` parses the '-'
+    # as subtraction, breaking the composite action's outputs block. Underscores.
+    with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
+        wv.write_waves(fh, waves)
+        fh.write(f"head_sha={head}\n")
+        fh.write(f"preview_run_id={preview_run}\n")
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except bm.MatrixTooLarge as e:
+        raise SystemExit(f"::error::{e}")
+    except CycleError as e:
+        raise SystemExit(f"::error::dependency cycle in run-graph: {e}")
