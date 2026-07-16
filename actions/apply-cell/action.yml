@@ -71,7 +71,7 @@ runs:
         fi
 
     - name: Restore state
-      uses: shipmate-iac/shipmate/actions/state@45681c52b0cbe1c70d1da64f4418c31e4af891e3 # main; re-bump to the release SHA
+      uses: shipmate-iac/shipmate/actions/state@211876ec7ef7ff7993216ac29ad15508e54b1640 # v0 (PR #5 merge)
       with:
         stack-slug: ${{ steps.ids.outputs.slug }}
         env: ${{ inputs.env }}
@@ -92,7 +92,7 @@ runs:
         echo "::endgroup::"
 
     - name: Save state
-      uses: shipmate-iac/shipmate/actions/state@45681c52b0cbe1c70d1da64f4418c31e4af891e3 # main; re-bump to the release SHA
+      uses: shipmate-iac/shipmate/actions/state@211876ec7ef7ff7993216ac29ad15508e54b1640 # v0 (PR #5 merge)
       with:
         stack-slug: ${{ steps.ids.outputs.slug }}
         env: ${{ inputs.env }}
