@@ -11,6 +11,10 @@ import json
 import subprocess
 from graphlib import TopologicalSorter
 
+# Cap on env-DAG depth. COUPLED: bumping this requires matching output slots
+# (envlevelN_waves/_empty) in actions/deploy-detect/action.yml and one caller
+# job per env-level in each consumer deploy.yml — GHA can't declare jobs/outputs
+# dynamically, so the count is fixed in all three places.
 MAX_ENV_LEVELS = 4
 
 
