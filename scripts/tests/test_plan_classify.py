@@ -58,14 +58,15 @@ def test_fingerprint_includes_tf_workspace_only_when_set():
     assert empty == empty_blank_ws  # unset/blank == excluded (stacks/folders unchanged)
 
 
-def test_fingerprint_set_but_empty_tfvar_diverges_from_absent():
-    # Unlike TF_WORKSPACE, a set-but-empty TF_VAR_* IS hashed, so it must differ
-    # from omitting it — plan and apply must present the identical env set or the
-    # apply fails safe (CONTRACT apply-match fingerprint).
-    with_empty = pc.fingerprint({"TF_VAR_env": "dev-eu", "TF_VAR_x": ""})
-    without = pc.fingerprint({"TF_VAR_env": "dev-eu"})
-    assert with_empty != without
-    assert "TF_VAR_x" in pc.fingerprint_keys({"TF_VAR_x": ""})
+def test_fingerprint_excludes_empty_tfvar():
+    # set-empty TF_VAR_* must hash identically to absent (folders inject nothing)
+    assert pc.fingerprint({"TF_VAR_env": ""}) == pc.fingerprint({})
+
+
+def test_fingerprint_empty_tfvar_matches_absent_with_others():
+    a = pc.fingerprint({"TF_VAR_env": "dev-eu", "TF_VAR_region": ""})
+    b = pc.fingerprint({"TF_VAR_env": "dev-eu"})
+    assert a == b
 
 
 def test_fingerprint_stacks_flavor_matches_tfvar_only_algo():

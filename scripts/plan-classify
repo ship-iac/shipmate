@@ -41,9 +41,10 @@ def fingerprint(environ):
 
 
 def fingerprint_keys(environ):
-    """The env-var names that feed the fingerprint: TF_VAR_* plus TF_WORKSPACE
-    when set. Single source of truth for both the hash and its diagnostic."""
-    keys = [k for k in environ if k.startswith("TF_VAR_")]
+    """Env-var names feeding the fingerprint: non-empty TF_VAR_* plus
+    TF_WORKSPACE when set. Empty TF_VAR_* are excluded so a set-but-empty var
+    (e.g. a flavor that injects nothing) hashes identically to an absent one."""
+    keys = [k for k in environ if k.startswith("TF_VAR_") and environ[k] != ""]
     if environ.get("TF_WORKSPACE"):
         keys.append("TF_WORKSPACE")
     return sorted(keys)
