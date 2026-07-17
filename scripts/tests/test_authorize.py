@@ -84,11 +84,13 @@ def test_stale_head_sha_rejected():
     assert not ok and "stale" in reason and "re-plan" in reason
 
 
-def test_mergeable_null_treated_as_not_ready():
+def test_mergeable_null_reports_still_computing_not_conflict():
+    # null/unknown = GitHub hasn't finished computing → distinct, non-blaming
+    # message (must NOT say conflicts/not-mergeable).
     ok, reason = _decide(
         pr={"mergeable": None, "mergeable_state": "unknown", "head": {"sha": "abc123"}}
     )
-    assert not ok and "not mergeable" in reason
+    assert not ok and "computing" in reason and "conflict" not in reason
 
 
 def test_approved_ignores_null_user_review():

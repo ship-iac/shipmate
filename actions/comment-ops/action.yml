@@ -134,7 +134,7 @@ runs:
         set -euo pipefail
         gh api -X POST "repos/$GITHUB_REPOSITORY/issues/comments/$COMMENT_ID/reactions" \
           -f content=rocket >/dev/null
-        echo "::notice title=comment-ops::authorized apply dispatched"
+        echo "::notice title=comment-ops::command authorized (apply is dispatched by the caller's next step)"
 
     - name: Reject with reason
       if: ${{ steps.parse.outputs.valid == 'true' && steps.authz.outputs.authorized != 'true' }}

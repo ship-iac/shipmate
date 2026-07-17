@@ -36,6 +36,13 @@ def decide(*, is_member, approvers_team, reviews, pr, plan_run):
         )
     if not pr.get("mergeable"):
         state = pr.get("mergeable_state", "unknown")
+        if state in ("", "unknown"):
+            # GitHub computes mergeability asynchronously; null/unknown means
+            # "not computed yet", NOT a real conflict — don't misattribute.
+            return False, (
+                "GitHub is still computing this PR's mergeability; "
+                "wait a moment and re-run `mate apply`."
+            )
         return False, (
             f"PR is not mergeable (state: {state}); resolve conflicts "
             f"or branch-protection requirements first."
