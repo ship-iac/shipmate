@@ -171,6 +171,42 @@ reviewed plan. plan-cell and apply-cell use a byte-identical algorithm
 (`scripts/plan-classify`). On mismatch, apply fails safe and reports differing
 variable **names** only — never values.
 
+## Terramate safeguards
+
+Terramate ships four default-on safeguards that run before `terramate run` /
+`terramate script run` (not before `list` / `generate` / `experimental`).
+shipmate applies a **specific reviewed SHA** — the plan artifact reviewed on the
+pull request — which on the merge-deploy path is legitimately **behind `main`**
+(the squash-merge drops the PR-head SHA from `main`). Exactly one safeguard is
+incompatible with that model; the engine disables it and keeps the rest:
+
+| Safeguard | Policy | Rationale |
+|---|---|---|
+| `git-out-of-sync` | **disabled** | shipmate applies a chosen reviewed SHA that is legitimately behind `main`; remote-freshness is the wrong assertion for the exact-plan model. |
+| `git-untracked` | kept | A genuinely unexpected untracked file must still block. shipmate's own artifacts are gitignored (below). |
+| `git-uncommitted` | kept | A real dirty tree must block; gitignored artifacts are not tracked-file changes. |
+| `outdated-code` | kept | Catches hand-edited / stale generated `.tf`, complementing the preview codegen check. |
+
+**Mechanism (engine-controlled).** The three `terramate script run` sites —
+`plan-cell`, `apply-cell`, `drift-cell` — pass `--disable-safeguards=git-out-of-sync`
+on the invocation. The policy is versioned in the engine actions (pinned by SHA);
+consumers get the correct policy for free by pinning, and never set it in their
+own `terramate.config`. The engine never disables via the meta `git` or `all`
+keywords (either would silently drop `outdated-code` / `git-untracked` /
+`git-uncommitted`).
+
+**Consistency invariant.** The disabled-safeguard set is identical across
+`plan-cell`, `apply-cell`, and `drift-cell` — exactly `{git-out-of-sync}`. A
+drift between the three cells is a defect (guarded by a test, like the TF_VAR
+fingerprint).
+
+**Consumer gitignore requirement.** Because `git-untracked` and
+`git-uncommitted` stay live, a consuming repository **must gitignore** the
+artifacts shipmate materializes in the working tree during a run — the reviewed
+plan (`*.otplan`), the fingerprint (`fingerprint.txt`), and the flavor's state
+path. An ungitignored artifact, or a genuinely dirty tree, then still fails
+loud (by design) rather than producing a silent wrong apply.
+
 ## Env apply order
 
 A repository may declare a partial order over its GitHub Environments so that

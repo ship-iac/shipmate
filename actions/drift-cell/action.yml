@@ -47,7 +47,7 @@ runs:
       run: |
         set -euo pipefail
         echo "::group::terramate plan: $STACK"
-        terramate script run --no-recursive -C "$STACK" plan
+        terramate script run --disable-safeguards=git-out-of-sync --no-recursive -C "$STACK" plan
         echo "::endgroup::"
         tofu -chdir="$STACK" show -json stack.otplan > plan.json
         python3 "$GITHUB_ACTION_PATH/../../scripts/plan-classify" plan.json

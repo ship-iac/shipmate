@@ -30,7 +30,7 @@ runs:
       run: |
         set -euo pipefail
         echo "::group::terramate plan: $STACK"
-        terramate script run --no-recursive -C "$STACK" plan
+        terramate script run --disable-safeguards=git-out-of-sync --no-recursive -C "$STACK" plan
         echo "::endgroup::"
 
     - name: Stack slug

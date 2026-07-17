@@ -62,9 +62,14 @@ runs:
         STACK_NAME: ${{ inputs.stack-name }}
       run: |
         set -euo pipefail
-        mv fingerprint.txt expected-fingerprint.txt
+        # Move the reviewed fingerprint OUT of the repo tree: once git-out-of-sync
+        # is disabled, git-untracked runs on the apply path, and a stray untracked
+        # file at repo root would fail the apply. Only the regenerated
+        # fingerprint.txt (a gitignored artifact) may remain in the tree.
+        expected="$RUNNER_TEMP/expected-fingerprint.txt"
+        mv fingerprint.txt "$expected"
         python3 "$GITHUB_ACTION_PATH/../../scripts/plan-classify" --fingerprint-only
-        if ! diff -q fingerprint.txt expected-fingerprint.txt >/dev/null; then
+        if ! diff -q fingerprint.txt "$expected" >/dev/null; then
           names=$(python3 "$GITHUB_ACTION_PATH/../../scripts/plan-classify" --keys)
           echo "::error::apply aborted for $ENV/$STACK_NAME: current env does not match the reviewed plan's fingerprint. Current variable names: $names. Values differ or a variable was added/removed — re-plan."
           exit 1
@@ -88,7 +93,7 @@ runs:
       run: |
         set -euo pipefail
         echo "::group::terramate apply: $STACK"
-        terramate script run --no-recursive -C "$STACK" apply
+        terramate script run --disable-safeguards=git-out-of-sync --no-recursive -C "$STACK" apply
         echo "::endgroup::"
 
     - name: Save state
