@@ -2,8 +2,9 @@ import importlib.util
 import pathlib
 from importlib.machinery import SourceFileLoader
 
+import pytest
+
 _D = pathlib.Path(__file__).resolve().parents[1]
-_FIX = _D / "tests" / "fixtures" / "run-graph-stacks.dot"
 
 
 def _load(fname):
@@ -35,6 +36,19 @@ def test_workset_ignores_slug_with_wrong_env_suffix():
     names = ["plan-stacks-app-dev-eu-apply"]  # not the plain env
     cells = ad.workset_from_artifacts(names, "dev-eu", ["stacks/app"])
     assert cells == []
+
+
+def test_workset_env_suffix_no_cross_match():
+    # env "eu" must NOT match "dev-eu" artifacts (forward-construct, no reverse split)
+    names = ["plan-stacks-app-dev-eu"]
+    assert ad.workset_from_artifacts(names, "eu", ["stacks/app"]) == []
+
+
+def test_workset_slug_collision_fails_loud():
+    # two distinct paths slug identically -> ambiguous artifact match -> fail loud
+    names = ["plan-stacks-a-b-dev-eu"]
+    with pytest.raises(SystemExit):
+        ad.workset_from_artifacts(names, "dev-eu", ["stacks/a/b", "stacks-a/b"])
 
 
 def test_filter_pending_drops_completed():
