@@ -67,6 +67,9 @@ runs:
     - name: Mint App token (members:read)
       id: apptoken
       if: ${{ steps.parse.outputs.valid == 'true' }}
+      # Don't hard-fail the job if the token can't be minted (e.g. the App isn't
+      # installed on this repo) — the next step reports it to the commenter.
+      continue-on-error: true
       uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
       with:
         app-id: ${{ inputs.app-id }}
@@ -74,9 +77,19 @@ runs:
         owner: ${{ github.repository_owner }}
         repositories: ${{ github.event.repository.name }}
 
+    - name: App token unavailable (App not installed?)
+      if: ${{ steps.parse.outputs.valid == 'true' && steps.apptoken.outcome != 'success' }}
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        PR_NUMBER: ${{ inputs.pr-number }}
+      run: |
+        set -euo pipefail
+        gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -f body=":x: shipmate: could not mint a GitHub App token — is the shipmate App installed on this repository (with members:read)? Ask an org admin to install it, then retry." >/dev/null
+
     - name: Gather authorization inputs
       id: gather
-      if: ${{ steps.parse.outputs.valid == 'true' }}
+      if: ${{ steps.parse.outputs.valid == 'true' && steps.apptoken.outcome == 'success' }}
       shell: bash
       env:
         GH_TOKEN: ${{ inputs.github-token }}
@@ -113,7 +126,7 @@ runs:
 
     - name: Authorize
       id: authz
-      if: ${{ steps.parse.outputs.valid == 'true' }}
+      if: ${{ steps.parse.outputs.valid == 'true' && steps.apptoken.outcome == 'success' }}
       shell: bash
       env:
         IS_MEMBER: ${{ steps.gather.outputs.is_member }}
@@ -137,7 +150,7 @@ runs:
         echo "::notice title=comment-ops::command authorized (apply is dispatched by the caller's next step)"
 
     - name: Reject with reason
-      if: ${{ steps.parse.outputs.valid == 'true' && steps.authz.outputs.authorized != 'true' }}
+      if: ${{ steps.parse.outputs.valid == 'true' && steps.apptoken.outcome == 'success' && steps.authz.outputs.authorized != 'true' }}
       shell: bash
       env:
         GH_TOKEN: ${{ inputs.github-token }}
