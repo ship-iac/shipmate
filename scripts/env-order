@@ -1,0 +1,61 @@
+#!/usr/bin/env python3
+"""Env apply-ordering: read the env-order global and assign env-levels.
+
+`global.shipmate.env_order` maps an env -> the envs that must fully apply
+before it. Topologically sorted into levels; deploy applies level 0 fully,
+then level 1, etc. Unlisted envs are level 0. Absent global -> {} -> all level 0
+(unchanged behavior).
+"""
+
+import json
+import subprocess
+from graphlib import TopologicalSorter
+
+MAX_ENV_LEVELS = 4
+
+
+def _run(args):
+    return subprocess.run(  # noqa: S603 - fixed argv, no shell, no untrusted exe
+        args, check=True, capture_output=True, text=True
+    ).stdout
+
+
+def read_env_order(run=None):
+    """env -> [predecessor envs], or {} when the global/config is absent."""
+    run = run or _run
+    out = run(
+        [
+            "terramate",
+            "experimental",
+            "eval",
+            "--as-json",
+            "tm_try(global.shipmate.env_order, {})",
+        ]
+    )
+    return json.loads(out)
+
+
+def env_levels(order, envs):
+    """Topological level (0-based) per env in `envs`. Predecessors absent from
+    `envs` (no changed cells this run) still constrain ordering."""
+    nodes = set(envs) | set(order) | {p for preds in order.values() for p in preds}
+    graph = {n: set(order.get(n, [])) for n in nodes}
+    ts = TopologicalSorter(graph)
+    ts.prepare()  # raises CycleError on a cycle
+    level, i = {}, 0
+    while ts.is_active():
+        ready = ts.get_ready()
+        for n in ready:
+            level[n] = i
+            ts.done(n)
+        i += 1
+    return {e: level[e] for e in envs}
+
+
+def guard_max_env_levels(levels):
+    over = [e for e, lv in levels.items() if lv >= MAX_ENV_LEVELS]
+    if over:
+        raise SystemExit(
+            f"::error::env order spans more than {MAX_ENV_LEVELS} levels "
+            f"({sorted(over)}); flatten the env dependency chain."
+        )

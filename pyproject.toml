@@ -30,6 +30,7 @@ extend-include = [
     "scripts/build-matrix",
     "scripts/comment-parse",
     "scripts/deploy-detect",
+    "scripts/env-order",
     "scripts/plan-classify",
     "scripts/register-app",
     "scripts/waves",
