@@ -31,10 +31,8 @@ def parse(body):
         "tag_filter": None,
         "error": None,
     }
-    line = next(
-        (ln.strip() for ln in body.splitlines() if _MATE_LINE.match(ln.strip())),
-        None,
-    )
+    stripped = (ln.strip() for ln in body.splitlines())
+    line = next((ln for ln in stripped if _MATE_LINE.match(ln)), None)
     if line is None:
         return result
     result["is_command"] = True

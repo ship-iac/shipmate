@@ -62,11 +62,7 @@ runs:
         ERROR: ${{ steps.parse.outputs.error }}
       run: |
         set -euo pipefail
-        python3 - "$ERROR" > body.json <<'PY'
-        import json, sys
-        print(json.dumps({"body": f":x: shipmate: {sys.argv[1]}"}))
-        PY
-        gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" --input body.json >/dev/null
+        gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -f body=":x: shipmate: $ERROR" >/dev/null
 
     - name: Mint App token (members:read)
       id: apptoken
@@ -149,8 +145,4 @@ runs:
         REASON: ${{ steps.authz.outputs.reason }}
       run: |
         set -euo pipefail
-        python3 - "$REASON" > body.json <<'PY'
-        import json, sys
-        print(json.dumps({"body": f":x: shipmate: {sys.argv[1]}"}))
-        PY
-        gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" --input body.json >/dev/null
+        gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -f body=":x: shipmate: $REASON" >/dev/null

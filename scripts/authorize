@@ -80,8 +80,8 @@ def main():
         fh.write(f"authorized={'true' if ok else 'false'}\n")
         fh.write(f"reason={reason}\n")
         fh.write(f"environment={os.environ.get('SHIPMATE_ENV', '')}\n")
-        fh.write(f"plan_run_id={plan_run.get('id', '') if plan_run else ''}\n")
-        fh.write(f"head_sha={pr.get('head', {}).get('sha', '') if pr else ''}\n")
+        fh.write(f"plan_run_id={plan_run.get('id', '')}\n")
+        fh.write(f"head_sha={pr.get('head', {}).get('sha', '')}\n")
     print(f"::notice title=authorize::authorized={ok} reason={reason or 'ok'}")
 
 
