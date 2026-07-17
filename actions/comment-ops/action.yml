@@ -1,0 +1,156 @@
+name: shipmate comment-ops
+description: Parse a mate command comment, authorize it (team membership via a short-lived App token, PR approved + mergeable + reviewed-plan-exists), and react or reject. Outputs feed actions/dispatch.
+inputs:
+  app-id:
+    description: GitHub App id (a repo/org variable).
+    required: true
+  private-key:
+    description: GitHub App private key (from a repo/org secret).
+    required: true
+  approvers-team:
+    description: GitHub team slug whose members may apply.
+    required: true
+  comment-body:
+    description: The PR comment body (author-controlled; never interpolated into a shell).
+    required: true
+  comment-user:
+    description: Login of the commenter.
+    required: true
+  comment-id:
+    description: Issue-comment id (for the reaction).
+    required: true
+  pr-number:
+    description: PR number.
+    required: true
+  github-token:
+    description: 'GITHUB_TOKEN with issues:write and pull-requests:write (reactions + reject comments + PR reads).'
+    required: true
+outputs:
+  authorized:
+    description: true when the command is valid and authorized.
+    value: ${{ steps.authz.outputs.authorized }}
+  is-command:
+    description: true when the comment is a mate command at all.
+    value: ${{ steps.parse.outputs.is_command }}
+  environment:
+    description: Parsed target environment.
+    value: ${{ steps.authz.outputs.environment }}
+  plan-run-id:
+    description: Preview run id holding the reviewed plan.
+    value: ${{ steps.authz.outputs.plan_run_id }}
+  head-sha:
+    description: PR head SHA.
+    value: ${{ steps.authz.outputs.head_sha }}
+runs:
+  using: composite
+  steps:
+    - name: Parse command
+      id: parse
+      shell: bash
+      env:
+        COMMENT_BODY: ${{ inputs.comment-body }}
+      run: python3 "$GITHUB_ACTION_PATH/../../scripts/comment-parse"
+
+    - name: Reject malformed / reserved command
+      # Runs only when it IS a mate command but not valid. Non-commands are
+      # silently ignored (no output). GITHUB_TOKEN posts the comment.
+      if: ${{ steps.parse.outputs.is_command == 'true' && steps.parse.outputs.valid != 'true' }}
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        PR_NUMBER: ${{ inputs.pr-number }}
+        ERROR: ${{ steps.parse.outputs.error }}
+      run: |
+        set -euo pipefail
+        python3 - "$ERROR" > body.json <<'PY'
+        import json, sys
+        print(json.dumps({"body": f":x: shipmate: {sys.argv[1]}"}))
+        PY
+        gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" --input body.json >/dev/null
+
+    - name: Mint App token (members:read)
+      id: apptoken
+      if: ${{ steps.parse.outputs.valid == 'true' }}
+      uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+      with:
+        app-id: ${{ inputs.app-id }}
+        private-key: ${{ inputs.private-key }}
+        owner: ${{ github.repository_owner }}
+        repositories: ${{ github.event.repository.name }}
+
+    - name: Gather authorization inputs
+      id: gather
+      if: ${{ steps.parse.outputs.valid == 'true' }}
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        APP_TOKEN: ${{ steps.apptoken.outputs.token }}
+        OWNER: ${{ github.repository_owner }}
+        TEAM: ${{ inputs.approvers-team }}
+        USER: ${{ inputs.comment-user }}
+        PR_NUMBER: ${{ inputs.pr-number }}
+      run: |
+        set -euo pipefail
+        # PR (retry until mergeable is computed; GitHub computes it async).
+        pr_ok=""
+        for _ in 1 2 3 4 5; do
+          gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" > pr.json
+          m=$(python3 -c "import json;print(json.load(open('pr.json')).get('mergeable'))")
+          if [ "$m" != "None" ]; then pr_ok=1; break; fi
+          sleep 3
+        done
+        [ -n "$pr_ok" ] || echo "::warning::PR mergeable still unknown after retries; treating as not-ready"
+        # Reviews (paginated).
+        gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/reviews?per_page=100" > reviews.json
+        # Team membership via the App token (members:read). 200 + active = member.
+        if GH_TOKEN="$APP_TOKEN" gh api "orgs/$OWNER/teams/$TEAM/memberships/$USER" --jq '.state' 2>/dev/null | grep -q active; then
+          echo "is_member=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "is_member=false" >> "$GITHUB_OUTPUT"
+        fi
+        # Successful preview run for the CURRENT head (the reviewed-plan lookup).
+        head=$(python3 -c "import json;print(json.load(open('pr.json'))['head']['sha'])")
+        gh api "repos/$GITHUB_REPOSITORY/actions/workflows/preview.yml/runs?head_sha=$head&status=success" \
+          --jq '{id: (.workflow_runs[0].id // ""), head_sha: (.workflow_runs[0].head_sha // "")}' > plan_run.json
+        # Empty id -> no plan run; normalize to {} so authorize treats it as stale.
+        python3 -c "import json;d=json.load(open('plan_run.json'));open('plan_run.json','w').write(json.dumps(d if d.get('id') else {}))"
+
+    - name: Authorize
+      id: authz
+      if: ${{ steps.parse.outputs.valid == 'true' }}
+      shell: bash
+      env:
+        IS_MEMBER: ${{ steps.gather.outputs.is_member }}
+        APPROVERS_TEAM: ${{ inputs.approvers-team }}
+        REVIEWS_JSON: reviews.json
+        PR_JSON: pr.json
+        PLAN_RUN_JSON: plan_run.json
+        SHIPMATE_ENV: ${{ steps.parse.outputs.env }}
+      run: python3 "$GITHUB_ACTION_PATH/../../scripts/authorize"
+
+    - name: React on accept
+      if: ${{ steps.authz.outputs.authorized == 'true' }}
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        COMMENT_ID: ${{ inputs.comment-id }}
+      run: |
+        set -euo pipefail
+        gh api -X POST "repos/$GITHUB_REPOSITORY/issues/comments/$COMMENT_ID/reactions" \
+          -f content=rocket >/dev/null
+        echo "::notice title=comment-ops::authorized apply dispatched"
+
+    - name: Reject with reason
+      if: ${{ steps.parse.outputs.valid == 'true' && steps.authz.outputs.authorized != 'true' }}
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        PR_NUMBER: ${{ inputs.pr-number }}
+        REASON: ${{ steps.authz.outputs.reason }}
+      run: |
+        set -euo pipefail
+        python3 - "$REASON" > body.json <<'PY'
+        import json, sys
+        print(json.dumps({"body": f":x: shipmate: {sys.argv[1]}"}))
+        PY
+        gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" --input body.json >/dev/null
