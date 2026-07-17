@@ -1,0 +1,71 @@
+name: shipmate dispatch
+description: Mint a short-lived GitHub App installation token and workflow_dispatch the apply workflow. Passes IDs only (dispatch inputs are size-limited).
+inputs:
+  app-id:
+    description: GitHub App id (a repo/org variable, not a secret).
+    required: true
+  private-key:
+    description: GitHub App private key (from a repo/org secret).
+    required: true
+  environment:
+    description: Target environment, e.g. dev-eu.
+    required: true
+  ref:
+    description: PR head SHA to check out and apply.
+    required: true
+  pr-number:
+    description: PR number the apply belongs to.
+    required: true
+  plan-run-id:
+    description: Preview run id holding the reviewed plan artifacts.
+    required: true
+  workflow:
+    description: Workflow file to dispatch.
+    required: false
+    default: apply.yml
+  dispatch-ref:
+    description: Branch whose workflow file runs (usually the default branch).
+    required: true
+  repository:
+    description: owner/repo to dispatch in.
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Mint App installation token
+      id: token
+      uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+      with:
+        app-id: ${{ inputs.app-id }}
+        private-key: ${{ inputs.private-key }}
+        owner: ${{ github.repository_owner }}
+        repositories: ${{ github.event.repository.name }}
+    - name: workflow_dispatch apply
+      shell: bash
+      # All author-controlled values pass via env; the JSON body is built in
+      # python (never a shell heredoc with interpolation) — injection-safe.
+      env:
+        GH_TOKEN: ${{ steps.token.outputs.token }}
+        REPO: ${{ inputs.repository }}
+        WORKFLOW: ${{ inputs.workflow }}
+        DISPATCH_REF: ${{ inputs.dispatch-ref }}
+        ENVIRONMENT: ${{ inputs.environment }}
+        REF: ${{ inputs.ref }}
+        PR_NUMBER: ${{ inputs.pr-number }}
+        PLAN_RUN_ID: ${{ inputs.plan-run-id }}
+      run: |
+        set -euo pipefail
+        python3 - > body.json <<'PY'
+        import json, os
+        print(json.dumps({
+            "ref": os.environ["DISPATCH_REF"],
+            "inputs": {
+                "environment": os.environ["ENVIRONMENT"],
+                "ref": os.environ["REF"],
+                "pr_number": os.environ["PR_NUMBER"],
+                "plan_run_id": os.environ["PLAN_RUN_ID"],
+            },
+        }))
+        PY
+        gh api -X POST "repos/$REPO/actions/workflows/$WORKFLOW/dispatches" --input body.json
+        echo "::notice title=dispatch::dispatched $WORKFLOW on $DISPATCH_REF for $ENVIRONMENT (ref $REF, plan run $PLAN_RUN_ID)"
