@@ -45,7 +45,14 @@ select = [
     "B",   # bugbear
     "UP",  # pyupgrade
     "S",   # flake8-bandit (security)
+    "C90", # mccabe — cyclomatic complexity ceiling
 ]
+
+[tool.ruff.lint.mccabe]
+# Complexity is the budgeted resource in this codebase: helper scripts must
+# stay individually reviewable. Current worst offender is 7; do not raise
+# this without splitting the function first.
+max-complexity = 8
 
 [tool.ruff.lint.per-file-ignores]
 # Tests: assert is the point (S101); they invoke trusted dev tools by name
