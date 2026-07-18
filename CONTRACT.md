@@ -141,6 +141,21 @@ triggered by a pre-merge comment or a post-merge push.
   workflow files (including pin bumps) require review from the designated
   owners before merge.
 
+## Runner prerequisites
+
+- shipmate's actions are composite actions: their steps run under `bash`
+  and call standard-library-only Python scripts, `git`, `curl`, `jq`, and
+  the `gh` CLI. A runner must therefore provide: `bash`, `python3`
+  (Python ≥ 3.11), `git`, `curl`, `jq`, and `gh`.
+- Every GitHub-hosted Ubuntu image satisfies this, including the minimal
+  `ubuntu-slim` image. Self-hosted runners must preinstall these tools.
+- The Python scripts have **no third-party dependencies** — nothing is
+  `pip install`ed at runtime, so no Python setup step (or network access
+  to a package index) is required or performed.
+- Terramate and OpenTofu are **not** assumed to be on the image: the
+  `setup` action installs the pinned versions declared by the consuming
+  repository (`TERRAMATE_VERSION` / `TOFU_VERSION`).
+
 ## Fan-out
 
 - One unit of work is one stack × one environment. A repository with N
