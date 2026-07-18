@@ -103,12 +103,21 @@ runs:
 
     - name: Save state
       # Persist state whenever the apply was attempted (restore succeeded), not
-      # only on a clean apply: a partial `tofu apply` failure still mutates
-      # local state per-resource, and dropping it would orphan resources on
-      # the next run's restore-then-retry. Guard on restore's outcome so we
-      # never save a state that was never actually restored (e.g. this step
-      # itself failed) and skip entirely on cancellation.
-      if: ${{ !cancelled() && steps.restore-state.outcome == 'success' }}
+      # only on a clean apply: a partial `tofu apply` mutates local state
+      # per-resource whether it failed OR was cancelled (manual, or
+      # apply-<env>-<stack> concurrency displacement), and dropping that delta
+      # would orphan resources on the next run's restore-then-retry. always()
+      # (not !cancelled()) is safe here because the sink is actions/cache:
+      # entries commit only on a completed, size-validated upload and are keyed
+      # per run_id-run_attempt, so a teardown mid-upload never commits and can
+      # never clobber the last-good state — worst case is today's behaviour
+      # (delta lost), best case the partial state persists and the next retry
+      # hits tofu's stale-plan fail-safe loudly. Guard on restore's outcome so
+      # we never save a state that was never actually restored (e.g. restore
+      # itself failed). On cancellation the later "Complete the apply check"
+      # step still skips (default success()), leaving the check pending so the
+      # work is re-detected.
+      if: ${{ always() && steps.restore-state.outcome == 'success' }}
       uses: ship-iac/shipmate/actions/state@fe5839319aa2fcec472e6f68d97ca8a603e54ba5 # pinned to a commit on main
       with:
         stack-slug: ${{ steps.ids.outputs.slug }}
