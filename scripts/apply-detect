@@ -89,7 +89,7 @@ def verify_plan_run(repo, run_id, head_sha):
             "expected 'success'"
         )
     path = run.get("path") or ""
-    if not path.endswith("preview.yml"):
+    if not path.endswith("/preview.yml"):
         raise SystemExit(
             f"::error::plan run {run_id} is not a preview.yml run: workflow path is {path!r}"
         )

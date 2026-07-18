@@ -120,6 +120,23 @@ def test_verify_plan_run_rejects_wrong_workflow_path(monkeypatch):
         ad.verify_plan_run("o/r", "123", "bbb")
 
 
+def test_verify_plan_run_rejects_lookalike_workflow_name(monkeypatch):
+    # "evil-preview.yml" / "not-preview.yml" end with the substring "preview.yml"
+    # but are not THE preview.yml at the repo root of workflows -- endswith on
+    # the raw string is bypassable by a same-named-suffix workflow.
+    monkeypatch.setattr(
+        ad,
+        "_gh_json",
+        lambda path: {
+            "head_sha": "bbb",
+            "conclusion": "success",
+            "path": ".github/workflows/evil-preview.yml",
+        },
+    )
+    with pytest.raises(SystemExit):
+        ad.verify_plan_run("o/r", "123", "bbb")
+
+
 def test_verify_plan_run_passes_when_all_match(monkeypatch):
     monkeypatch.setattr(
         ad,
