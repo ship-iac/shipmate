@@ -68,3 +68,35 @@ def test_read_env_order_parses_json(monkeypatch):
 
 def test_read_env_order_absent_is_empty():
     assert eo.read_env_order(run=lambda args: "{}") == {}
+
+
+def test_env_levels_rejects_string_predecessor():
+    # HCL author typo: "dev-eu" instead of ["dev-eu"] -- must not silently
+    # iterate the string char-by-char.
+    with pytest.raises(SystemExit):
+        eo.env_levels({"dev-us": "dev-eu"}, ["dev-eu", "dev-us"])
+
+
+def test_env_levels_rejects_non_dict_order():
+    with pytest.raises(SystemExit):
+        eo.env_levels(["dev-us", "dev-eu"], ["dev-eu", "dev-us"])
+
+
+def test_env_levels_rejects_non_str_predecessor_element():
+    with pytest.raises(SystemExit):
+        eo.env_levels({"dev-us": ["dev-eu", 123]}, ["dev-eu", "dev-us"])
+
+
+def test_read_env_order_rejects_string_predecessor():
+    with pytest.raises(SystemExit):
+        eo.read_env_order(run=lambda args: '{"dev-us":"dev-eu"}')
+
+
+def test_read_env_order_rejects_non_dict_global():
+    with pytest.raises(SystemExit):
+        eo.read_env_order(run=lambda args: '["dev-us","dev-eu"]')
+
+
+def test_read_env_order_rejects_non_str_predecessor_element():
+    with pytest.raises(SystemExit):
+        eo.read_env_order(run=lambda args: '{"dev-us":["dev-eu", 123]}')

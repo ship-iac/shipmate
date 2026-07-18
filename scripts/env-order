@@ -24,6 +24,35 @@ def _run(args):
     ).stdout
 
 
+def _validate_predecessors(env, preds):
+    if not isinstance(preds, list):
+        raise SystemExit(
+            f"::error::env_order[{env!r}] must be a list of predecessor envs, "
+            f"got {type(preds).__name__} ({preds!r}); did you mean [{preds!r}]?"
+        )
+    bad = [p for p in preds if not isinstance(p, str)]
+    if bad:
+        raise SystemExit(
+            f"::error::env_order[{env!r}] predecessors must all be env-name "
+            f"strings; got non-string element(s) {bad!r}"
+        )
+
+
+def _validate_env_order(order):
+    """Raise SystemExit if `order` isn't a dict of str -> list[str]. Guards
+    against the HCL author typo of a bare string predecessor (silently
+    iterated character-by-character) and a non-dict global (raw
+    AttributeError)."""
+    if not isinstance(order, dict):
+        raise SystemExit(
+            "::error::env_order global must be a dict mapping env -> "
+            f"[predecessor envs], got {type(order).__name__} ({order!r})"
+        )
+    for env, preds in order.items():
+        _validate_predecessors(env, preds)
+    return order
+
+
 def read_env_order(run=None):
     """env -> [predecessor envs], or {} when the global/config is absent."""
     run = run or _run
@@ -36,12 +65,13 @@ def read_env_order(run=None):
             "tm_try(global.shipmate.env_order, {})",
         ]
     )
-    return json.loads(out)
+    return _validate_env_order(json.loads(out))
 
 
 def env_levels(order, envs):
     """Topological level (0-based) per env in `envs`. Predecessors absent from
     `envs` (no changed cells this run) still constrain ordering."""
+    _validate_env_order(order)
     nodes = set(envs) | set(order) | {p for preds in order.values() for p in preds}
     graph = {n: set(order.get(n, [])) for n in nodes}
     ts = TopologicalSorter(graph)
