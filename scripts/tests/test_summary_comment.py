@@ -84,6 +84,10 @@ def test_md_escape_neutralizes_pipes_and_newlines():
     assert sc._md_escape("a|b\nc") == "a\\|b c"
 
 
+def test_md_escape_neutralizes_angle_brackets():
+    assert sc._md_escape("x</summary><b>") == "x&lt;/summary&gt;&lt;b&gt;"
+
+
 # --- table / sections -------------------------------------------------------
 
 CHECKS = {
@@ -171,6 +175,16 @@ def test_build_comment_hard_cap_fallback_drops_details_never_the_table():
 def test_build_comment_footer_links_run():
     body = sc.build_comment([], {}, RUN_URL)
     assert RUN_URL in body
+
+
+def test_build_comment_fails_loud_when_even_the_table_overflows():
+    long_name = "s" * 400
+    cells = [
+        (_cell(stack=f"stacks/{long_name}{i:03}", stack_path=f"stacks/{long_name}{i:03}"), "  + r")
+        for i in range(300)
+    ]
+    with pytest.raises(SystemExit, match="comment cap"):
+        sc.build_comment(cells, {}, RUN_URL)
 
 
 # --- load_cells --------------------------------------------------------------

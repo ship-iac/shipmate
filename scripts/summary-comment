@@ -81,8 +81,16 @@ def emoji(cell):
 
 def _md_escape(s):
     """Neutralize table/summary-line structure characters in author-controlled
-    display names (stack-name is a free-form action input)."""
-    return s.replace("|", "\\|").replace("\r", " ").replace("\n", " ")
+    display names (stack-name is a free-form action input). `<`/`>` are
+    escaped so a name like `x</summary><b>` cannot close the `<summary>` /
+    `<details>` HTML elements the table and section headers are built from."""
+    return (
+        s.replace("|", "\\|")
+        .replace("\r", " ")
+        .replace("\n", " ")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+    )
 
 
 def check_url(cell, checks, run_url):
@@ -173,9 +181,18 @@ def build_comment(cells, checks, run_url):
     body = "\n\n".join(parts) + footer
     if len(body) > HARD_CAP:
         # Extreme fan-out: even link-only sections overflow. The table alone
-        # (<=256 rows) always fits; each row keeps its check-run link.
+        # (<=256 rows) normally fits; each row keeps its check-run link.
         fallback = "_Too many changed stacks for inline plans — use each row's check link._"
         body = header + "\n\n" + fallback + footer
+        if len(body) > HARD_CAP:
+            # Stack/env display names are author-controlled (fork-PR input);
+            # at extreme fan-out even the table-only fallback can exceed the
+            # hard cap. Fail loud rather than let GitHub's POST 422 on an
+            # oversized comment body.
+            raise SystemExit(
+                "::error::preview table alone exceeds the 65,536-char comment "
+                "cap — shorten stack/env display names"
+            )
     return body
 
 
