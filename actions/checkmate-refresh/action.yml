@@ -19,12 +19,10 @@ runs:
         GH_TOKEN: ${{ inputs.github-token }}
         HEAD_SHA: ${{ inputs.head-sha }}
       # filter=all: a re-created check name keeps its historical runs; apply-gate
-      # groups by name and judges the newest run per name.
-      # Known narrow race (documented limitation, fix deferred): a preview
-      # re-run mid-apply can create a fresh queued duplicate of an apply
-      # check whose earlier run is already applying; apply-cell's PATCH
-      # completes all matching ids for that name, so the fresh duplicate
-      # also gets marked complete even though nothing applied it.
+      # groups by name and judges the newest run per name. A duplicate apply
+      # check created mid-apply is left pending by apply-cell (it completes only
+      # ids snapshotted before its apply began), so the gate correctly stays
+      # pending until that duplicate's plan is itself applied.
       run: |
         set -euo pipefail
         [[ "$HEAD_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::head-sha must be a 40-char lowercase hex SHA (got: $HEAD_SHA)"; exit 1; }

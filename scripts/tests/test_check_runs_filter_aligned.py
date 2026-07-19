@@ -4,13 +4,12 @@ _ENGINE = pathlib.Path(__file__).resolve().parents[2]
 
 # Every shipmate call that lists a commit's check-runs must use filter=all so the
 # gate (checkmate-refresh) and the detects judge the identical run set per name.
-# Coupling row 9 (apply "done" predicate). Add a site here when a new one appears
-# (apply-cell's site is added in the M6 task, once its query moves to the
-# pre-apply snapshot step).
+# Coupling row 9 (apply "done" predicate). Add a site here when a new one appears.
 _SITES = [
     _ENGINE / "scripts" / "apply-detect",
     _ENGINE / "scripts" / "deploy-detect",
     _ENGINE / "actions" / "checkmate-refresh" / "action.yml",
+    _ENGINE / "actions" / "apply-cell" / "action.yml",
 ]
 
 
