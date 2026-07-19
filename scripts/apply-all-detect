@@ -1,0 +1,130 @@
+#!/usr/bin/env python3
+"""apply-all.yml detect: the bare `mate apply` work set -> env-levels -> waves.
+
+The pre-merge equivalent of deploy-detect, sourced like apply-detect: cells
+come from the reviewed plan artifacts of ONE verified preview run (never a
+re-plan), the pending `apply / <env> / <stack>` checks are the work queue, and
+`global.shipmate.env_order` buckets pending cells into env-levels exactly as
+on the merge-deploy path. Env membership comes from stack tags
+(build-matrix.env_membership) so artifact and check names are only ever
+constructed forward, never reverse-parsed.
+
+Two exclusions distinguish the bare form from deploy:
+- envs listed in `global.shipmate.explicit_envs` (typically prod) are removed
+  before env-levels are built; their apply checks simply stay pending, so
+  `shipmate / checkmate` keeps gating the merge until a targeted
+  `mate apply <env>` completes them;
+- envs ordered (transitively) after an unapplied explicit env are skipped
+  with a notice — their ordering precondition cannot be met this run,
+  exactly like a failed predecessor level.
+"""
+
+import importlib.util
+import json
+import os
+import pathlib
+from graphlib import CycleError
+from importlib.machinery import SourceFileLoader
+
+_D = pathlib.Path(__file__).resolve().parent
+
+
+def _load(fname):
+    loader = SourceFileLoader(fname.replace("-", "_"), str(_D / fname))
+    spec = importlib.util.spec_from_loader(loader.name, loader)
+    mod = importlib.util.module_from_spec(spec)
+    loader.exec_module(mod)
+    return mod
+
+
+ad = _load("apply-detect")
+dd = _load("deploy-detect")
+bm = _load("build-matrix")
+wv = _load("waves")
+eo = _load("env-order")
+ag = _load("apply-gate")
+
+
+def cells_from_artifacts(artifact_names, stacks_by_env):
+    """All-envs workset: per env (from tags, never from artifact-name
+    parsing), forward-match `plan.<env>.<slug>` exactly like the single-env
+    path — including its slug-collision and dotted-env fail-louds."""
+    cells = []
+    for env in sorted(stacks_by_env):
+        ad.validate_env(env)
+        cells.extend(ad.workset_from_artifacts(artifact_names, env, stacks_by_env[env]))
+    return cells
+
+
+def partition_envs(pending_envs, explicit, order):
+    """(excluded, skipped): explicit envs that still have pending work, and
+    envs whose ordering (transitively) waits on one of them. An explicit env
+    with NO pending cells excludes nothing — it is already applied."""
+    excluded = sorted(set(pending_envs) & set(explicit))
+    skipped = sorted(eo.blocked_envs(order, set(excluded), set(pending_envs) - set(excluded)))
+    return excluded, skipped
+
+
+def main():
+    repo = os.environ["GITHUB_REPOSITORY"]
+    plan_run_id = os.environ["SHIPMATE_PLAN_RUN_ID"]
+    head = os.environ["SHIPMATE_HEAD_SHA"]
+
+    ad.validate_head_sha(head)
+    ad.validate_plan_run_id(plan_run_id)
+    ad.verify_plan_run(repo, plan_run_id, head)
+
+    stacks_by_env, _ = bm.env_membership(all_stacks=True)
+    names = ad._artifact_names(repo, plan_run_id)
+    cells = cells_from_artifacts(names, stacks_by_env)
+
+    checks_jsonl = bm._run(
+        [
+            "gh",
+            "api",
+            "--paginate",
+            "--jq",
+            ".check_runs[]",
+            f"repos/{repo}/commits/{head}/check-runs?filter=all&per_page=100",
+        ]
+    )
+    completed = ag.done_names(ag.parse_jsonl(checks_jsonl.splitlines()))
+    pending = ad.filter_pending(cells, completed)
+
+    order = eo.read_env_order()
+    excluded, skipped = partition_envs(
+        {c["environment"] for c in pending}, eo.read_explicit_envs(), order
+    )
+    dropped = set(excluded) | set(skipped)
+    runnable = [c for c in pending if c["environment"] not in dropped]
+
+    graph = bm._run(["terramate", "experimental", "run-graph", "--label", "stack.dir"])
+    deps = wv.parse_dot(graph)
+    levels = eo.env_levels(order, {c["environment"] for c in runnable})
+    eo.guard_max_env_levels(levels)
+    per_level = dd.waves_by_env_level(runnable, deps, levels)
+
+    level_counts = [sum(len(w[f"wave{i}"]) for i in range(wv.MAX_WAVES)) for w in per_level]
+    print(
+        f"::notice title=apply-all-detect::plan_run={plan_run_id} head={head} "
+        f"cells={len(cells)} pending={len(pending)} envlevels={level_counts} "
+        f"excluded_explicit={excluded} skipped_after_explicit={skipped}"
+    )
+    with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
+        for lvl, w in enumerate(per_level):
+            fh.write(f"envlevel{lvl}_waves={json.dumps(w)}\n")
+            fh.write(
+                f"envlevel{lvl}_empty="
+                f"{'false' if any(w[f'wave{i}'] for i in range(wv.MAX_WAVES)) else 'true'}\n"
+            )
+        fh.write(f"head_sha={head}\n")
+        fh.write(f"preview_run_id={plan_run_id}\n")
+        fh.write(f"excluded_envs={json.dumps(excluded)}\n")
+        fh.write(f"skipped_envs={json.dumps(skipped)}\n")
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except CycleError as e:
+        raise SystemExit(f"::error::dependency cycle in run-graph or env-order: {e}") from e

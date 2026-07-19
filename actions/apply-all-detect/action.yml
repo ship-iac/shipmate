@@ -1,0 +1,36 @@
+name: shipmate apply-all-detect
+description: Compute the bare `mate apply` work set (all non-explicit envs, from a preview run's plan artifacts), bucket it into env-levels, and wave-order each level. Skips already-applied cells; explicit envs stay pending.
+inputs:
+  plan-run-id:
+    description: Preview run id holding the reviewed plan artifacts.
+    required: true
+  head-sha:
+    description: PR head SHA carrying the pending apply checks.
+    required: true
+  github-token:
+    description: 'GITHUB_TOKEN with actions:read, checks:read, contents:read.'
+    required: true
+outputs:
+  envlevel0_waves: { description: JSON wave0..wave7 map for env-level 0, value: "${{ steps.d.outputs.envlevel0_waves }}" }
+  envlevel1_waves: { description: JSON wave0..wave7 map for env-level 1, value: "${{ steps.d.outputs.envlevel1_waves }}" }
+  envlevel2_waves: { description: JSON wave0..wave7 map for env-level 2, value: "${{ steps.d.outputs.envlevel2_waves }}" }
+  envlevel3_waves: { description: JSON wave0..wave7 map for env-level 3, value: "${{ steps.d.outputs.envlevel3_waves }}" }
+  envlevel0_empty: { description: "'true' when env-level 0 has no cell in any wave.", value: "${{ steps.d.outputs.envlevel0_empty }}" }
+  envlevel1_empty: { description: "'true' when env-level 1 has no cell in any wave.", value: "${{ steps.d.outputs.envlevel1_empty }}" }
+  envlevel2_empty: { description: "'true' when env-level 2 has no cell in any wave.", value: "${{ steps.d.outputs.envlevel2_empty }}" }
+  envlevel3_empty: { description: "'true' when env-level 3 has no cell in any wave.", value: "${{ steps.d.outputs.envlevel3_empty }}" }
+  head_sha: { description: Echoed head SHA, value: "${{ steps.d.outputs.head_sha }}" }
+  preview_run_id: { description: Echoed plan run id, value: "${{ steps.d.outputs.preview_run_id }}" }
+  excluded_envs: { description: JSON list of explicit envs left pending (target them with `mate apply <env>`), value: "${{ steps.d.outputs.excluded_envs }}" }
+  skipped_envs: { description: JSON list of envs skipped because they are ordered after an unapplied explicit env, value: "${{ steps.d.outputs.skipped_envs }}" }
+runs:
+  using: composite
+  steps:
+    - name: Detect
+      id: d
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        SHIPMATE_PLAN_RUN_ID: ${{ inputs.plan-run-id }}
+        SHIPMATE_HEAD_SHA: ${{ inputs.head-sha }}
+      run: python3 "$GITHUB_ACTION_PATH/../../scripts/apply-all-detect"
