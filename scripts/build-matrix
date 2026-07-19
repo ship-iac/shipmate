@@ -49,6 +49,13 @@ def _run(args):
     return p.stdout
 
 
+def gh_json(path):
+    """`gh api <path>` -> parsed JSON, through _run so a nonzero exit surfaces
+    the tool's stderr then raises ::error:: from a single definition. Shared by
+    apply-detect and deploy-detect (each aliases it as `_gh_json`)."""
+    return json.loads(_run(["gh", "api", path]))
+
+
 _ZERO_SHA = "0" * 40
 
 

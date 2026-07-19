@@ -13,7 +13,6 @@ envs is handled separately on the apply-all path.
 """
 
 import importlib.util
-import json
 import os
 import pathlib
 import re
@@ -68,10 +67,9 @@ def filter_pending(cells, completed_names):
     return [c for c in cells if f"apply / {c['environment']} / {c['stack']}" not in completed_names]
 
 
-# Shared with deploy-detect's `_gh_json`: gh api -> json.loads through bm._run
-# so error handling (nonzero exit -> ::error::) has a single definition.
-def _gh_json(path):
-    return json.loads(bm._run(["gh", "api", path]))
+# Single-sourced in build-matrix (next to _run); aliased here so error handling
+# (nonzero exit -> ::error::) has one definition and tests can monkeypatch it.
+_gh_json = bm.gh_json
 
 
 def verify_plan_run(repo, run_id, head_sha):
