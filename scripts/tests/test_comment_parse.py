@@ -62,9 +62,40 @@ def test_unknown_verb_is_rejected():
     assert r["is_command"] and not r["valid"] and "unknown verb" in r["error"]
 
 
-def test_missing_env_is_rejected():
+def test_bare_apply_targets_all_envs():
+    # env is optional: bare `mate apply` = apply every non-explicit env.
     r = cp.parse("mate apply")
-    assert r["is_command"] and not r["valid"] and "malformed" in r["error"]
+    assert r == {
+        "is_command": True,
+        "valid": True,
+        "verb": "apply",
+        "env": None,
+        "tag_filter": None,
+        "error": None,
+    }
+
+
+def test_bare_apply_with_whitespace_and_crlf():
+    r = cp.parse("\r\n  mate apply  \r\n")
+    assert r["valid"] and r["env"] is None
+
+
+def test_bare_apply_with_tag_filter_rejected():
+    # A tag can't be mistaken for an env (':' is outside the env charset);
+    # bare + tag parses env=None and still rejects on the unsupported tag.
+    r = cp.parse("mate apply workload:app")
+    assert r["is_command"] and not r["valid"] and "tag-filter" in r["error"]
+    assert r["env"] is None and r["tag_filter"] == "workload:app"
+
+
+def test_bare_reserved_verb_rejected():
+    r = cp.parse("mate plan")
+    assert r["is_command"] and not r["valid"] and "reserved" in r["error"]
+
+
+def test_bare_unknown_verb_rejected():
+    r = cp.parse("mate frobnicate")
+    assert r["is_command"] and not r["valid"] and "unknown verb" in r["error"]
 
 
 def test_injection_attempt_is_rejected():

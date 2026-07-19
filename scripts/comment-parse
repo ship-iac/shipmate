@@ -1,19 +1,24 @@
 #!/usr/bin/env python3
 """Parse a PR comment against the strict comment-ops grammar.
 
-Grammar: `mate <verb> <env> [tag-filter]`. Injection-safe: the whole command
+Grammar: `mate <verb> [env] [tag-filter]`. Injection-safe: the whole command
 line must match one anchored regex; nothing is ever passed to a shell. `apply`
 is active from day one; `plan`/`destroy` are reserved (recognized, rejected
 with a "reserved" message so the grammar is stable as verbs are added).
+env is optional: a bare `mate apply` targets every non-explicit environment
+(env=None -> "all"); a tag-filter cannot be mistaken for an env because ':'
+is outside the env charset.
 """
 
 import os
 import re
 
-# `mate` as a whole word, then verb, env, optional tag-filter. env is lower
-# kebab (matches GitHub env naming); tag-filter allows the on-disk tag charset.
+# `mate` as a whole word, then verb, optional env, optional tag-filter. env is
+# lower kebab (matches GitHub env naming); tag-filter allows the on-disk tag
+# charset. env is tried first (leftmost), so a bare token that fits both
+# charsets parses as the env.
 _CMD = re.compile(
-    r"^mate (?P<verb>[a-z]+) (?P<env>[a-z0-9][a-z0-9-]*)"
+    r"^mate (?P<verb>[a-z]+)(?: (?P<env>[a-z0-9][a-z0-9-]*))?"
     r"(?: (?P<tag>[A-Za-z0-9][A-Za-z0-9/_:.-]*))?$"
 )
 _MATE_LINE = re.compile(r"^mate\b")
