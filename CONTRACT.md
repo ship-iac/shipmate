@@ -254,8 +254,10 @@ fence computed to be longer than any backtick run in the text —
 author-controlled plan output cannot escape the fence.
 
 The data feeding the comment ships in the per-cell artifact
-`cell-summary-<slug>-<env>` (same `<slug>`/`<env>` grammar as plan
-artifacts), containing verbatim:
+`cell-summary.<env>.<slug>` (same dot-delimited, env-first grammar as
+`plan.<env>.<slug>`: the name is built forward from the `(env, slug)` pair
+exactly like the plan artifact, never reverse-parsed). Consumers download it
+with the glob pattern `cell-summary.*`. It contains verbatim:
 
 - `cell.json` — keys `stack` (display name), `stack_path` (Terramate stack
   path, feeds the check-name construction), `environment`, `add`, `change`,

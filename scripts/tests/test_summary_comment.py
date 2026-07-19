@@ -191,13 +191,13 @@ def test_build_comment_fails_loud_when_even_the_table_overflows():
 
 
 def test_load_cells_reads_json_and_plan_text_sorted(tmp_path):
-    a = tmp_path / "cell-summary-stacks-db-dev-us"
+    a = tmp_path / "cell-summary.dev-us.stacks-db"
     a.mkdir()
     (a / "cell.json").write_text(
         json.dumps(_cell(stack="stacks/db", stack_path="stacks/db", environment="dev-us"))
     )
     (a / "plan.txt").write_text("  + db")
-    b = tmp_path / "cell-summary-stacks-app-dev-eu"
+    b = tmp_path / "cell-summary.dev-eu.stacks-app"
     b.mkdir()
     (b / "cell.json").write_text(json.dumps(_cell()))
     cells = sc.load_cells(str(tmp_path))
@@ -209,7 +209,7 @@ def test_load_cells_reads_json_and_plan_text_sorted(tmp_path):
 
 
 def test_load_cells_fails_loud_on_missing_schema_keys(tmp_path):
-    d = tmp_path / "cell-summary-x-y"
+    d = tmp_path / "cell-summary.x.y"
     d.mkdir()
     legacy = _cell()
     del legacy["stack_path"]
@@ -234,6 +234,15 @@ def test_cell_schema_guard_plan_cell_writes_every_required_key():
     src = (_ENGINE / "actions" / "plan-cell" / "action.yml").read_text(encoding="utf-8")
     missing = [k for k in sc.CELL_KEYS if f'"{k}"' not in src]
     assert missing == [], f"plan-cell action.yml no longer writes cell.json keys: {missing}"
+
+
+def test_cell_summary_artifact_name_is_dot_delimited_env_first():
+    # Fix for the ambiguity plan.<env>.<slug> was invented to solve: a
+    # dash-delimited cell-summary-<slug>-<env> name collides for
+    # (stacks/app-dev, eu) and (stacks/app, dev-eu). The artifact name must
+    # use the same dot-delimited, env-first grammar as the plan artifact.
+    src = (_ENGINE / "actions" / "plan-cell" / "action.yml").read_text(encoding="utf-8")
+    assert "cell-summary.${{ inputs.env }}.${{ steps.ids.outputs.slug }}" in src
 
 
 def test_cell_summary_artifact_uploads_plan_text():

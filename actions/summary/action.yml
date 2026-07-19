@@ -8,7 +8,7 @@ inputs:
     description: PR head commit SHA.
     required: true
   cells-dir:
-    description: Directory holding downloaded cell-summary-*/cell.json.
+    description: Directory holding downloaded cell-summary.*/cell.json.
     required: false
     default: cells
   plan-result:
@@ -36,11 +36,18 @@ runs:
         # filter=all + latest-run-per-name (apply-gate.latest_by_name): the
         # same check-runs read discipline as checkmate-refresh / the detects.
         # summary-comment resolves each cell's plan-check link from this list
-        # and writes comment.md + pending/count to GITHUB_OUTPUT.
-        gh api --paginate \
+        # and writes comment.md + pending/count to GITHUB_OUTPUT. A transient
+        # listing failure must not block creation of the shipmate / checkmate
+        # gate over what only feeds cosmetic links — degrade to an empty
+        # listing (summary-comment already falls back to the workflow-run URL
+        # when a check can't be resolved) instead of failing the step.
+        if ! gh api --paginate \
           "repos/$GITHUB_REPOSITORY/commits/$HEAD_SHA/check-runs?filter=all&per_page=100" \
-          --jq '.check_runs[] | {name, html_url, id}' \
-          | python3 "$GITHUB_ACTION_PATH/../../scripts/summary-comment"
+          --jq '.check_runs[] | {name, html_url, id}' > check-runs.jsonl; then
+          echo "::warning::check-runs listing failed; comment links degrade to the workflow-run URL"
+          : > check-runs.jsonl
+        fi
+        python3 "$GITHUB_ACTION_PATH/../../scripts/summary-comment" < check-runs.jsonl
 
     - name: Upsert sticky comment
       shell: bash
