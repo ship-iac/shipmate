@@ -3,7 +3,7 @@
 
 Reads `plan / <env> / <stack>` check-runs as JSON Lines on stdin (as emitted
 by `gh api --paginate ... --jq '.check_runs[]'`), cell summaries + rendered
-plan text from the $CELLS directory (cell-summary-* artifacts), and writes
+plan text from the $CELLS directory (cell-summary.* artifacts), and writes
 comment.md plus pending/count to GITHUB_OUTPUT.
 
 GitHub rejects issue-comment bodies over 65,536 characters. SIZE_BUDGET
@@ -49,7 +49,9 @@ CELL_KEYS = ("stack", "stack_path", "environment", "add", "change", "destroy", "
 _SIGN = re.compile(r"^( *)(-/\+|\+/-|[-+~])")
 
 # A heredoc opener (`<<EOT` / `<<-EOT`), capturing the terminator word.
-_HEREDOC_OPEN = re.compile(r"<<-?([A-Za-z_][A-Za-z0-9_]*)")
+# Anchored to end-of-line (tofu renders openers there) so a `<<WORD` inside a
+# quoted single-line value cannot suppress diff mapping for the rest of a plan.
+_HEREDOC_OPEN = re.compile(r"<<-?([A-Za-z_][A-Za-z0-9_]*)\s*$")
 
 
 def diff_map(text):

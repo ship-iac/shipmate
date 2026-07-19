@@ -23,7 +23,7 @@ def test_workset_matches_plan_artifacts_for_env():
         "plan.dev-eu.stacks-app",
         "plan.dev-eu.stacks-dns",
         "plan.dev-us.stacks-app",  # other env — excluded
-        "cell-summary-stacks-app-dev-eu",
+        "cell-summary.dev-eu.stacks-app",
     ]  # not a plan artifact — excluded
     graph_paths = ["stacks/app", "stacks/dns", "stacks/platform"]
     cells = ad.workset_from_artifacts(names, "dev-eu", graph_paths)
