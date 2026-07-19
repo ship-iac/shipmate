@@ -20,9 +20,9 @@ ad = _load("apply-detect")
 
 def test_workset_matches_plan_artifacts_for_env():
     names = [
-        "plan-stacks-app-dev-eu",
-        "plan-stacks-dns-dev-eu",
-        "plan-stacks-app-dev-us",  # other env — excluded
+        "plan.dev-eu.stacks-app",
+        "plan.dev-eu.stacks-dns",
+        "plan.dev-us.stacks-app",  # other env — excluded
         "cell-summary-stacks-app-dev-eu",
     ]  # not a plan artifact — excluded
     graph_paths = ["stacks/app", "stacks/dns", "stacks/platform"]
@@ -33,20 +33,31 @@ def test_workset_matches_plan_artifacts_for_env():
 
 
 def test_workset_ignores_slug_with_wrong_env_suffix():
-    names = ["plan-stacks-app-dev-eu-apply"]  # not the plain env
+    names = ["plan.dev-eu-apply.stacks-app"]  # not the plain env
     cells = ad.workset_from_artifacts(names, "dev-eu", ["stacks/app"])
     assert cells == []
 
 
 def test_workset_env_suffix_no_cross_match():
     # env "eu" must NOT match "dev-eu" artifacts (forward-construct, no reverse split)
-    names = ["plan-stacks-app-dev-eu"]
+    names = ["plan.dev-eu.stacks-app"]
     assert ad.workset_from_artifacts(names, "eu", ["stacks/app"]) == []
+
+
+def test_old_delimiter_collision_no_longer_forward_matches():
+    # The L9 collision: (stacks/app, dev-eu) planned; apply-detect runs for env
+    # "eu" with a graph path "stacks/app-dev". Under the old `plan-<slug>-<env>`
+    # scheme both rendered `plan-stacks-app-dev-eu`, so env "eu" wrongly enrolled
+    # stacks/app-dev. Under `plan.<env>.<slug>` the artifact is
+    # `plan.dev-eu.stacks-app` and env "eu" constructs `plan.eu.stacks-app-dev`
+    # -> no match.
+    names = ["plan.dev-eu.stacks-app"]
+    assert ad.workset_from_artifacts(names, "eu", ["stacks/app-dev"]) == []
 
 
 def test_workset_slug_collision_fails_loud():
     # two distinct paths slug identically -> ambiguous artifact match -> fail loud
-    names = ["plan-stacks-a-b-dev-eu"]
+    names = ["plan.dev-eu.stacks-a-b"]
     with pytest.raises(SystemExit):
         ad.workset_from_artifacts(names, "dev-eu", ["stacks/a/b", "stacks-a/b"])
 
@@ -182,6 +193,18 @@ def test_validate_plan_run_id_rejects_empty():
 
 def test_validate_plan_run_id_accepts_valid():
     ad.validate_plan_run_id("123456")  # must not raise
+
+
+def test_validate_env_rejects_dot():
+    # A '.' in env would break plan.<env>.<slug> disambiguation (env-first only
+    # works because env has no '.') — fail loud at the trust boundary.
+    with pytest.raises(SystemExit):
+        ad.validate_env("dev.eu")
+
+
+def test_validate_env_accepts_normal():
+    ad.validate_env("dev-eu")  # hyphenated env is fine
+    ad.validate_env("eu")  # must not raise
 
 
 def test_verify_plan_run_passes_when_all_match(monkeypatch):

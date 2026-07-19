@@ -54,10 +54,9 @@ def waves_by_env_level(pending, deps, levels):
     return out
 
 
-# All subprocess calls go through bm._run (surfaces the tool's stderr, then
-# raises ::error:: on nonzero) so error handling has a single definition.
-def _gh_json(path):
-    return json.loads(bm._run(["gh", "api", path]))
+# Single-sourced in build-matrix (next to _run); aliased here so error handling
+# (nonzero exit -> ::error::) has one definition and tests can monkeypatch it.
+_gh_json = bm.gh_json
 
 
 def _merged_head(repo, merge_sha, _attempts=3, _sleep=2):
@@ -101,7 +100,7 @@ def main():
             "--paginate",
             "--jq",
             ".check_runs[]",
-            f"repos/{repo}/commits/{head}/check-runs?per_page=100",
+            f"repos/{repo}/commits/{head}/check-runs?filter=all&per_page=100",
         ]
     )
     checks = ag.parse_jsonl(checks_jsonl.splitlines())

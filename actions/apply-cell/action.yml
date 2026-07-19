@@ -41,7 +41,7 @@ runs:
       env:
         GH_TOKEN: ${{ inputs.github-token }}
         RUN_ID: ${{ inputs.preview-run-id }}
-        ART: plan-${{ steps.ids.outputs.slug }}-${{ inputs.env }}
+        ART: plan.${{ inputs.env }}.${{ steps.ids.outputs.slug }}
         ENV: ${{ inputs.env }}
         STACK_NAME: ${{ inputs.stack-name }}
       run: |
@@ -78,6 +78,38 @@ runs:
           echo "::error::apply aborted for $ENV/$STACK_NAME: current env does not match the reviewed plan's fingerprint. Current variable names: $names. Values differ or a variable was added/removed — re-plan."
           exit 1
         fi
+
+    - name: Snapshot pre-existing apply-check ids
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        ENV: ${{ inputs.env }}
+        STACK: ${{ inputs.stack }}
+        HEAD_SHA: ${{ inputs.head-sha }}
+      # M6: record the apply-check ids that exist for this (env, stack) BEFORE
+      # the apply runs. The completion step marks only these done, so a preview
+      # re-run that creates a fresh duplicate apply check mid-apply is left
+      # pending (its plan was never applied by this run) instead of being greened.
+      # filter=all sees every pre-existing duplicate; writing to RUNNER_TEMP keeps
+      # the live git-untracked safeguard from failing the apply on a repo-root file.
+      run: |
+        set -euo pipefail
+        [[ "$HEAD_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::head-sha must be a 40-char lowercase hex SHA (got: $HEAD_SHA)"; exit 1; }
+        # Check-runs are paginated (a 256-cell PR yields >100); stream them all.
+        gh api --paginate --jq '.check_runs[]' \
+          "repos/$GITHUB_REPOSITORY/commits/$HEAD_SHA/check-runs?filter=all&per_page=100" \
+          > "$RUNNER_TEMP/checks.jsonl"
+        # Author-controlled ENV/STACK via env; JSON handled in python. The check
+        # name uses the stack PATH ($STACK) — the value deploy-detect reconstructs.
+        python3 - > "$RUNNER_TEMP/preexisting-apply-ids.txt" <<'PY'
+        import json, os
+        name = f"apply / {os.environ['ENV']} / {os.environ['STACK']}"
+        with open(os.environ["RUNNER_TEMP"] + "/checks.jsonl") as fh:
+            ids = [c["id"] for c in map(json.loads, fh) if c.get("name") == name]
+        if not ids:
+            raise SystemExit(f"::error::no apply check named '{name}' on head SHA before apply; nothing to complete.")
+        print("\n".join(str(i) for i in ids))
+        PY
 
     - name: Restore state
       id: restore-state
@@ -129,32 +161,14 @@ runs:
       shell: bash
       env:
         GH_TOKEN: ${{ inputs.github-token }}
-        ENV: ${{ inputs.env }}
-        STACK: ${{ inputs.stack }}
-        HEAD_SHA: ${{ inputs.head-sha }}
+      # Complete ONLY the ids snapshotted before the apply (see M6 note above):
+      # a duplicate apply check created mid-apply is not in the snapshot and stays
+      # pending. The body is static (no author input) so it is a plain heredoc.
       run: |
         set -euo pipefail
-        [[ "$HEAD_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::head-sha must be a 40-char lowercase hex SHA (got: $HEAD_SHA)"; exit 1; }
-        # Check-runs are paginated (a 256-cell PR yields >100); stream them all.
-        gh api --paginate --jq '.check_runs[]' "repos/$GITHUB_REPOSITORY/commits/$HEAD_SHA/check-runs?per_page=100" > checks.jsonl
-        # Author-controlled ENV/STACK pass via env; JSON handled in python. The
-        # check name uses the stack PATH ($STACK) — the value deploy-detect
-        # reconstructs — so plan/complete/detect always agree. Emit EVERY id with
-        # this name: a re-run preview can create duplicate apply checks, and
-        # leaving any one pending would block the merge/deploy forever.
-        python3 - > ids.txt <<'PY'
-        import json, os
-        name = f"apply / {os.environ['ENV']} / {os.environ['STACK']}"
-        with open("checks.jsonl") as fh:
-            ids = [c["id"] for c in map(json.loads, fh) if c.get("name") == name]
-        if not ids:
-            raise SystemExit(f"::error::no apply check named '{name}' on head SHA; nothing to complete.")
-        with open("body.json", "w") as fh:
-            json.dump({"status": "completed", "conclusion": "success",
-                       "output": {"title": "applied", "summary": "Applied the reviewed plan for this stack x environment."}},
-                      fh)
-        print("\n".join(str(i) for i in ids))
-        PY
+        cat > body.json <<'JSON'
+        {"status": "completed", "conclusion": "success", "output": {"title": "applied", "summary": "Applied the reviewed plan for this stack x environment."}}
+        JSON
         # State is already saved; retry each completion so a transient API blip
         # doesn't strand a check pending — re-running can't recover it (the saved
         # plan is now stale against the advanced state).
@@ -166,4 +180,4 @@ runs:
             sleep 3
           done
           [ -n "$ok" ] || { echo "::error::failed to complete apply check $id after retries"; exit 1; }
-        done < ids.txt
+        done < "$RUNNER_TEMP/preexisting-apply-ids.txt"

@@ -15,7 +15,9 @@ verdict to GITHUB_OUTPUT:
 
 The GitHub API returns every historical run of a re-created check name, so
 runs are grouped by name and judged by the newest run per name, ordered by
-(started_at, id).
+check-run id (monotonically increasing with creation, and always present --
+unlike a queued run's nullable started_at, which could otherwise sort a newer
+queued duplicate below an older completed run).
 """
 
 import json
@@ -28,14 +30,18 @@ DONE_CONCLUSIONS = {"success", "neutral"}
 
 def latest_by_name(check_runs):
     """Group `apply / <env> / <stack>` check-runs by name, keeping only the
-    newest run per name (ordered by (started_at, id), matching the module
-    docstring). Non-apply check-runs are dropped. Returns {name: run}."""
+    newest run per name. "Newest" is by check-run `id`: GitHub assigns ids
+    monotonically at creation, so the highest id is the most recently created
+    run -- and unlike `started_at` (nullable; a freshly-created queued run may
+    carry none) it is always present, so a newer queued duplicate never sorts
+    below an older completed run. Non-apply check-runs are dropped.
+    Returns {name: run}."""
     latest = {}
     for run in check_runs:
         name = run["name"]
         if not name.startswith(APPLY_PREFIX):
             continue
-        key = (run.get("started_at") or "", run.get("id") or 0)
+        key = run.get("id") or 0
         if name not in latest or key > latest[name][0]:
             latest[name] = (key, run)
     return {name: run for name, (_, run) in latest.items()}

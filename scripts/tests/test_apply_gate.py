@@ -63,7 +63,7 @@ def test_neutral_no_change_apply_counts_as_done():
 
 def test_latest_run_per_name_wins():
     # A re-created check (e.g. preview rerun superseding an older pending one)
-    # must be judged by its newest run, picked by (started_at, id).
+    # must be judged by its newest run, picked by check-run id (creation order).
     runs = [
         _run(
             "apply / dev-eu / stacks/app",
@@ -173,9 +173,9 @@ def test_parse_jsonl_malformed_line_raises_systemexit_naming_line():
 
 
 def test_latest_by_name_handles_missing_started_at_key():
-    # A run missing the 'started_at' key entirely (not merely None/"") must
-    # not KeyError -- a refactor from `run.get("started_at") or ""` to plain
-    # `run["started_at"]` must fail this test.
+    # A run missing the 'started_at' key entirely (not merely None/"") must not
+    # KeyError. Ordering no longer uses started_at at all, but a run may still
+    # arrive without it, so latest_by_name must tolerate its absence.
     runs = [
         {
             "name": "apply / dev-eu / stacks/app",
@@ -203,24 +203,30 @@ def test_latest_by_name_handles_missing_id_key():
     assert latest["apply / dev-eu / stacks/app"]["started_at"] == "2026-07-18T10:00:00Z"
 
 
-def test_latest_by_name_missing_started_at_sorts_as_earliest():
-    # A run with no started_at key at all falls back to "" (sorts before any
-    # real ISO timestamp), so a later real run must still win as "latest".
-    missing_started_at = {
-        "name": "apply / dev-eu / stacks/app",
-        "status": "queued",
-        "conclusion": None,
-        "id": 1,
-    }
-    real_started_at = {
+def test_latest_by_name_newer_queued_null_started_at_beats_older_completed():
+    # The [0] regression: a queued duplicate created AFTER an apply completed
+    # carries a null started_at but a higher (newer) id. Ordering by id means
+    # the newer queued run wins, so the name is judged pending and is NOT masked
+    # by the older completed run. Under the old (started_at, id) ordering the
+    # null started_at ('') sorted below the completed run's real timestamp and
+    # the completed run wrongly won -- silently marking unapplied work done.
+    older_completed = {
         "name": "apply / dev-eu / stacks/app",
         "status": "completed",
         "conclusion": "success",
         "started_at": "2026-07-18T10:00:00Z",
+        "id": 1,
+    }
+    newer_queued_null = {
+        "name": "apply / dev-eu / stacks/app",
+        "status": "queued",
+        "conclusion": None,
+        "started_at": None,
         "id": 2,
     }
-    latest = ag.latest_by_name([missing_started_at, real_started_at])
+    latest = ag.latest_by_name([older_completed, newer_queued_null])
     assert latest["apply / dev-eu / stacks/app"]["id"] == 2
+    assert ag.done_names([older_completed, newer_queued_null]) == set()
 
 
 def test_verdict_does_not_crash_on_runs_missing_started_at_and_id():

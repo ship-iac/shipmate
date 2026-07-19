@@ -3,7 +3,7 @@
 
 Unlike deploy-detect (merge-driven, all envs), the work set here is scoped to
 ONE environment and sourced from a specific preview run's plan artifacts:
-`plan-<slug>-<env>` artifacts present in SHIPMATE_PLAN_RUN_ID name exactly the
+`plan.<env>.<slug>` artifacts present in SHIPMATE_PLAN_RUN_ID name exactly the
 stacks that were planned for this env. We map each present slug back to a stack
 PATH via the run-graph (path->slug is one-way; we slug each graph node forward
 and match), drop cells whose apply check already completed (idempotent no-op),
@@ -13,7 +13,6 @@ envs is handled separately on the apply-all path.
 """
 
 import importlib.util
-import json
 import os
 import pathlib
 import re
@@ -44,15 +43,18 @@ def _slug(path):
 
 
 def workset_from_artifacts(artifact_names, env, graph_paths):
-    """Cells for `env` = graph stacks whose exact `plan-<slug>-<env>` artifact is
+    """Cells for `env` = graph stacks whose exact `plan.<env>.<slug>` artifact is
     present in the plan run. Forward-construct the expected name per graph path
-    (never reverse-parse the artifact name): both `slug` and `env` can contain
-    '-', so a reverse split is ambiguous and lets a dash-suffix env (e.g. `eu`)
-    cross-match another env's artifacts (`...-dev-eu`). Forward matching avoids
-    that. path->slug is many-to-one, so fail loud if two paths collide."""
+    (never reverse-parse the artifact name). The `.` delimiter is unambiguous
+    because a Terramate env name cannot contain `.` (tag grammar forbids it), so
+    with env first the first `.` after the `plan.` prefix is always the env<->slug
+    boundary -- distinct (env, slug) pairs always render distinct names, unlike
+    the old `plan-<slug>-<env>` where a dash-bearing env (e.g. `eu`) could
+    cross-match another env's artifacts (`...-dev-eu`). path->slug is
+    many-to-one, so fail loud if two paths collide."""
     names = set(artifact_names)
     cells = [
-        {"stack": p, "environment": env} for p in graph_paths if f"plan-{_slug(p)}-{env}" in names
+        {"stack": p, "environment": env} for p in graph_paths if f"plan.{env}.{_slug(p)}" in names
     ]
     slugs = [_slug(c["stack"]) for c in cells]
     dupes = sorted({s for s in slugs if slugs.count(s) > 1})
@@ -68,10 +70,9 @@ def filter_pending(cells, completed_names):
     return [c for c in cells if f"apply / {c['environment']} / {c['stack']}" not in completed_names]
 
 
-# Shared with deploy-detect's `_gh_json`: gh api -> json.loads through bm._run
-# so error handling (nonzero exit -> ::error::) has a single definition.
-def _gh_json(path):
-    return json.loads(bm._run(["gh", "api", path]))
+# Single-sourced in build-matrix (next to _run); aliased here so error handling
+# (nonzero exit -> ::error::) has one definition and tests can monkeypatch it.
+_gh_json = bm.gh_json
 
 
 def verify_plan_run(repo, run_id, head_sha):
@@ -129,6 +130,21 @@ def validate_plan_run_id(value):
         raise SystemExit(f"::error::SHIPMATE_PLAN_RUN_ID must be a numeric run id (got: {value!r})")
 
 
+def validate_env(value):
+    """The `plan.<env>.<slug>` artifact name is unambiguous only because an env
+    name never contains '.' — with env first, the first '.' after the `plan.`
+    prefix is the env<->slug boundary. Terramate tag grammar forbids '.' in tags
+    (the source of env names), but that is an upstream tool's invariant; enforce
+    it here at the trust boundary rather than trusting it silently. A dotted env
+    would let distinct (env, slug) pairs render the same artifact name and
+    cross-enrol the wrong stack into a wave — the exact bug the rename removed."""
+    if "." in value:
+        raise SystemExit(
+            f"::error::SHIPMATE_ENV must not contain '.' (would break plan.<env>.<slug> "
+            f"artifact-name disambiguation): {value!r}"
+        )
+
+
 def main():
     repo = os.environ["GITHUB_REPOSITORY"]
     env = os.environ["SHIPMATE_ENV"]
@@ -137,6 +153,7 @@ def main():
 
     validate_head_sha(head)
     validate_plan_run_id(plan_run_id)
+    validate_env(env)
 
     verify_plan_run(repo, plan_run_id, head)
 
@@ -154,7 +171,7 @@ def main():
             "--paginate",
             "--jq",
             ".check_runs[]",
-            f"repos/{repo}/commits/{head}/check-runs?per_page=100",
+            f"repos/{repo}/commits/{head}/check-runs?filter=all&per_page=100",
         ]
     )
     checks = ag.parse_jsonl(checks_jsonl.splitlines())

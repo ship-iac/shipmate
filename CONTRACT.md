@@ -43,6 +43,14 @@ first:
 - the post-merge deploy, which completes the gate on the merged PR's head
   SHA after its env-level applies finish.
 
+When apply-cell completes an `apply / <env> / <stack>` check, it completes only
+the check-run ids that already existed for that name **before its apply began**.
+A preview re-run can create a fresh duplicate apply check; a duplicate created
+*mid-apply* is therefore left pending (its plan was not applied by this run),
+while duplicates that predate the apply are all completed so the gate never
+sticks. This keeps `shipmate / checkmate` from greening on a plan the apply
+never used.
+
 ## Env model
 
 - One GitHub Environment exists per logical environment (for example,
@@ -180,6 +188,39 @@ triggered by a pre-merge comment or a post-merge push.
   units at one level must complete before the next level's units start —
   so that a stack's applies only wait on the specific stacks it actually
   depends on, not on the entire fan-out.
+
+## Plan artifacts
+
+Each planned stack × environment uploads its reviewed plan under a name built
+verbatim as:
+
+- `plan.<env>.<slug>`
+
+where `<env>` is the environment name and `<slug>` is the Terramate stack
+**path** with every `/` replaced by `-` (e.g. `stacks/app` → `stacks-app`, so
+`(stacks/app, dev-eu)` → `plan.dev-eu.stacks-app`). plan-cell creates it,
+apply-cell downloads it, and apply-detect matches it — all three **construct**
+the name forward from the `(env, slug)` pair; **no component reverse-parses it**.
+
+The delimiter is `.` and the environment comes first on purpose. Terramate tag
+values (the source of every env name) cannot contain `.`, so the first `.`
+after the `plan.` prefix is always the env↔slug boundary. This makes the name
+unambiguous across all `(slug, env)` pairs — unlike the earlier
+`plan-<slug>-<env>` form, where `-` appears in both fields and
+`(stacks/app-dev, eu)` and `(stacks/app, dev-eu)` both rendered
+`plan-stacks-app-dev-eu`, letting apply-detect enrol the wrong stack into a
+wave. A slug may itself contain `.` (a path character); that is harmless
+because the name is only ever built forward, never split. Two distinct stack
+paths that slug to the same value still collide by construction and fail loud
+in apply-detect (rename so the path→`-` slug is unique).
+
+This naming contract is breaking for any in-flight plan artifacts: land the
+change when no applies are mid-flight. It also spans two consumer workflow
+files pinned independently — `preview.yml` pins `plan-cell` (the uploader) and
+`apply.yml` pins `apply-cell`/`apply-detect` (the downloader/matcher). Bump
+both pins **together** when adopting a build that changes this name: a partial
+bump (uploader on the new name, downloader on the old, or vice versa) makes
+every apply fail its reviewed-plan download fail-safe until the pins agree.
 
 ## Apply-match fingerprint
 
