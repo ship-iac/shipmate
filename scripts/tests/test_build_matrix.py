@@ -97,3 +97,22 @@ def test_compute_cells_raises_on_untagged_stack(monkeypatch):
         bm.compute_cells(all_stacks=True)
     assert "stacks/orphan" in str(exc_info.value)
     assert "stacks/app" not in str(exc_info.value)
+
+
+def test_env_membership_groups_stacks_by_env_tag(monkeypatch):
+    monkeypatch.setattr(bm, "_list_stacks", lambda all_stacks, base: ["stacks/app", "stacks/dns"])
+    tags = {
+        "stacks/app": ["env/dev-eu", "env/dev-us"],
+        "stacks/dns": ["env/dev-eu", "workload/dns"],
+    }
+    monkeypatch.setattr(bm, "_tags", lambda s: tags[s])
+    stacks_by_env, tags_by_stack = bm.env_membership(all_stacks=True)
+    assert stacks_by_env == {"dev-eu": ["stacks/app", "stacks/dns"], "dev-us": ["stacks/app"]}
+    assert tags_by_stack == tags
+
+
+def test_env_membership_fails_loud_on_untagged_stack(monkeypatch):
+    monkeypatch.setattr(bm, "_list_stacks", lambda all_stacks, base: ["stacks/orphan"])
+    monkeypatch.setattr(bm, "_tags", lambda s: ["workload/app"])
+    with pytest.raises(SystemExit):
+        bm.env_membership(all_stacks=True)

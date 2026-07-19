@@ -78,11 +78,12 @@ def _tags(stack):
     return json.loads(out)
 
 
-def compute_cells(all_stacks=False, base=""):
+def env_membership(all_stacks=False, base=""):
+    """({env: [stacks...]}, {stack: [tags...]}) from Terramate tags (CONTRACT
+    tag grammar: env/<name>). Fails loud on a stack with no env/* tag -- it
+    would contribute no cells and silently vanish from every fan-out."""
     stacks = _list_stacks(all_stacks, base)
     tags_by_stack = {s: _tags(s) for s in stacks}
-    # A stack with no env/* tag would contribute no cells and vanish from
-    # preview/apply/drift — fail loud instead of silently skipping it.
     untagged = [s for s in stacks if not any(t.startswith("env/") for t in tags_by_stack[s])]
     if untagged:
         raise SystemExit(
@@ -94,6 +95,11 @@ def compute_cells(all_stacks=False, base=""):
         for t in tags_by_stack[s]:
             if t.startswith("env/"):
                 stacks_by_env.setdefault(t[len("env/") :], []).append(s)
+    return stacks_by_env, tags_by_stack
+
+
+def compute_cells(all_stacks=False, base=""):
+    stacks_by_env, tags_by_stack = env_membership(all_stacks, base)
     return build_matrix(sorted(stacks_by_env), stacks_by_env, tags_by_stack)
 
 
