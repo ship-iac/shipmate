@@ -1,0 +1,139 @@
+name: apply-all
+on:
+  workflow_call:
+    inputs:
+      ref: { required: true, type: string }
+      pr_number: { required: true, type: string }
+      plan_run_id: { required: true, type: string }
+      state_suffix: { required: true, type: string }
+jobs:
+  detect:
+    runs-on: ubuntu-latest
+    permissions: { contents: read, checks: read, actions: read }
+    outputs:
+      envlevel0_waves: ${{ steps.d.outputs.envlevel0_waves }}
+      envlevel1_waves: ${{ steps.d.outputs.envlevel1_waves }}
+      envlevel2_waves: ${{ steps.d.outputs.envlevel2_waves }}
+      envlevel3_waves: ${{ steps.d.outputs.envlevel3_waves }}
+      envlevel0_empty: ${{ steps.d.outputs.envlevel0_empty }}
+      envlevel1_empty: ${{ steps.d.outputs.envlevel1_empty }}
+      envlevel2_empty: ${{ steps.d.outputs.envlevel2_empty }}
+      envlevel3_empty: ${{ steps.d.outputs.envlevel3_empty }}
+      head_sha: ${{ steps.d.outputs.head_sha }}
+      preview_run_id: ${{ steps.d.outputs.preview_run_id }}
+      excluded_envs: ${{ steps.d.outputs.excluded_envs }}
+      skipped_envs: ${{ steps.d.outputs.skipped_envs }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with: { fetch-depth: 0, ref: "${{ inputs.ref }}" }
+      - uses: ship-iac/shipmate/actions/setup@6ddf3692a0ed6f00a0c0f8549e1fd2c9755b01ac
+        with:
+          terramate-version: ${{ vars.TERRAMATE_VERSION }}
+          tofu-version: ${{ vars.TOFU_VERSION }}
+      - id: d
+        uses: ship-iac/shipmate/actions/apply-all-detect@6ddf3692a0ed6f00a0c0f8549e1fd2c9755b01ac
+        with:
+          plan-run-id: ${{ inputs.plan_run_id }}
+          head-sha: ${{ inputs.ref }}
+          github-token: ${{ github.token }}
+
+  envlevel0:
+    needs: [detect]
+    if: ${{ !failure() && !cancelled() && needs.detect.outputs.envlevel0_empty != 'true' && !contains(join(needs.*.result, ','), 'cancelled') }}
+    uses: ship-iac/shipmate/.github/workflows/apply-env-level.yml@6ddf3692a0ed6f00a0c0f8549e1fd2c9755b01ac
+    permissions: { contents: read, checks: write, actions: read }
+    with:
+      waves_json: ${{ needs.detect.outputs.envlevel0_waves }}
+      head_sha: ${{ needs.detect.outputs.head_sha }}
+      preview_run_id: ${{ needs.detect.outputs.preview_run_id }}
+      state_suffix: ${{ inputs.state_suffix }}
+
+  envlevel1:
+    needs: [detect, envlevel0]
+    if: ${{ !failure() && !cancelled() && needs.detect.outputs.envlevel1_empty != 'true' && !contains(join(needs.*.result, ','), 'cancelled') }}
+    uses: ship-iac/shipmate/.github/workflows/apply-env-level.yml@6ddf3692a0ed6f00a0c0f8549e1fd2c9755b01ac
+    permissions: { contents: read, checks: write, actions: read }
+    with:
+      waves_json: ${{ needs.detect.outputs.envlevel1_waves }}
+      head_sha: ${{ needs.detect.outputs.head_sha }}
+      preview_run_id: ${{ needs.detect.outputs.preview_run_id }}
+      state_suffix: ${{ inputs.state_suffix }}
+
+  envlevel2:
+    needs: [detect, envlevel0, envlevel1]
+    if: ${{ !failure() && !cancelled() && needs.detect.outputs.envlevel2_empty != 'true' && !contains(join(needs.*.result, ','), 'cancelled') }}
+    uses: ship-iac/shipmate/.github/workflows/apply-env-level.yml@6ddf3692a0ed6f00a0c0f8549e1fd2c9755b01ac
+    permissions: { contents: read, checks: write, actions: read }
+    with:
+      waves_json: ${{ needs.detect.outputs.envlevel2_waves }}
+      head_sha: ${{ needs.detect.outputs.head_sha }}
+      preview_run_id: ${{ needs.detect.outputs.preview_run_id }}
+      state_suffix: ${{ inputs.state_suffix }}
+
+  envlevel3:
+    needs: [detect, envlevel0, envlevel1, envlevel2]
+    if: ${{ !failure() && !cancelled() && needs.detect.outputs.envlevel3_empty != 'true' && !contains(join(needs.*.result, ','), 'cancelled') }}
+    uses: ship-iac/shipmate/.github/workflows/apply-env-level.yml@6ddf3692a0ed6f00a0c0f8549e1fd2c9755b01ac
+    permissions: { contents: read, checks: write, actions: read }
+    with:
+      waves_json: ${{ needs.detect.outputs.envlevel3_waves }}
+      head_sha: ${{ needs.detect.outputs.head_sha }}
+      preview_run_id: ${{ needs.detect.outputs.preview_run_id }}
+      state_suffix: ${{ inputs.state_suffix }}
+
+  summary:
+    needs: [detect, envlevel0, envlevel1, envlevel2, envlevel3]
+    if: always()
+    runs-on: ubuntu-latest
+    permissions: { checks: write }
+    steps:
+      - name: Complete checkmate if every apply check is done
+        id: gate
+        uses: ship-iac/shipmate/actions/checkmate-refresh@6ddf3692a0ed6f00a0c0f8549e1fd2c9755b01ac
+        with:
+          head-sha: ${{ inputs.ref }}
+          github-token: ${{ github.token }}
+      - name: App token for result comment
+        id: token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ vars.SHIPMATE_APP_ID }}
+          private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+      - name: Result comment via the App
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          PR_NUMBER: ${{ inputs.pr_number }}
+          RESULTS: ${{ join(needs.*.result, ',') }}
+          GATE: ${{ steps.gate.outputs.verdict }}
+          EXCLUDED: ${{ needs.detect.outputs.excluded_envs }}
+          SKIPPED: ${{ needs.detect.outputs.skipped_envs }}
+        run: |
+          set -euo pipefail
+          # Any result other than success/skipped (failure, cancelled, ...) is a failed run.
+          if echo "$RESULTS" | tr ',' '\n' | grep -qvE '^(success|skipped)$'; then
+            emoji=":x:"; word="failed"
+          else emoji=":white_check_mark:"; word="applied"; fi
+          python3 - "$emoji" "$word" "$GATE" > body.json <<'PY'
+          import json, os, sys
+          emoji, word, gate = sys.argv[1:4]
+          excluded = json.loads(os.environ.get("EXCLUDED") or "[]")
+          skipped = json.loads(os.environ.get("SKIPPED") or "[]")
+          parts = [f"{emoji} shipmate: `mate apply` (all environments) {word}."]
+          if excluded:
+              envs = ", ".join(f"`{e}`" for e in excluded)
+              cmds = ", ".join(f"`mate apply {e}`" for e in excluded)
+              parts.append(f"Explicit environment(s) left pending: {envs} — run {cmds} to apply them.")
+          if skipped:
+              envs = ", ".join(f"`{e}`" for e in skipped)
+              parts.append(f"Skipped (ordered after an unapplied explicit environment): {envs}.")
+          parts.append(
+              "`shipmate / checkmate` is complete — every environment is applied."
+              if gate == "complete" else
+              "`shipmate / checkmate` stays pending until every environment is applied "
+              "(or the merge deploy runs)."
+          )
+          print(json.dumps({"body": " ".join(parts)}))
+          PY
+          gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" --input body.json >/dev/null
