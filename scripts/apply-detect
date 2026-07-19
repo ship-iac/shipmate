@@ -130,6 +130,21 @@ def validate_plan_run_id(value):
         raise SystemExit(f"::error::SHIPMATE_PLAN_RUN_ID must be a numeric run id (got: {value!r})")
 
 
+def validate_env(value):
+    """The `plan.<env>.<slug>` artifact name is unambiguous only because an env
+    name never contains '.' — with env first, the first '.' after the `plan.`
+    prefix is the env<->slug boundary. Terramate tag grammar forbids '.' in tags
+    (the source of env names), but that is an upstream tool's invariant; enforce
+    it here at the trust boundary rather than trusting it silently. A dotted env
+    would let distinct (env, slug) pairs render the same artifact name and
+    cross-enrol the wrong stack into a wave — the exact bug the rename removed."""
+    if "." in value:
+        raise SystemExit(
+            f"::error::SHIPMATE_ENV must not contain '.' (would break plan.<env>.<slug> "
+            f"artifact-name disambiguation): {value!r}"
+        )
+
+
 def main():
     repo = os.environ["GITHUB_REPOSITORY"]
     env = os.environ["SHIPMATE_ENV"]
@@ -138,6 +153,7 @@ def main():
 
     validate_head_sha(head)
     validate_plan_run_id(plan_run_id)
+    validate_env(env)
 
     verify_plan_run(repo, plan_run_id, head)
 

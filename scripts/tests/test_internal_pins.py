@@ -66,15 +66,16 @@ def _release_baseline():
     release line this branch derives from. That keeps the real guard -- once an
     action change merges to main without a pin bump, merge-base == main and the
     stale pin fails, exactly where the bump can be done -- while an in-flight
-    branch that has only *its own* unmerged edits stays green. Falls back to
-    HEAD when no mainline ref is reachable (shallow/detached), preserving the
-    prior behavior rather than silently passing.
+    branch that has only *its own* unmerged edits stays green. Returns None when
+    no mainline ref is reachable (shallow clone / detached HEAD with truncated
+    history); the caller then skips rather than comparing against HEAD, which
+    would re-introduce the self-edit false-positive this reframe removes.
     """
     for base in ("origin/main", "main"):
         r = _git("merge-base", "HEAD", base)
         if r.returncode == 0 and r.stdout.strip():
             return r.stdout.strip()
-    return "HEAD"
+    return None
 
 
 def test_internal_action_pins_are_current():
@@ -82,6 +83,14 @@ def test_internal_action_pins_are_current():
     assert refs, "no internal shipmate self-references found -- regex or repo layout changed?"
 
     baseline = _release_baseline()
+    if baseline is None:
+        # No mainline ref reachable (shallow clone / detached HEAD with truncated
+        # history). Falling back to HEAD here would re-introduce the very
+        # self-edit false-positive the mainline comparison exists to remove, so
+        # skip rather than assert against the wrong baseline. CI checks out with
+        # fetch-depth: 0, where merge-base always resolves.
+        pytest.skip("no mainline ref reachable (need main/origin/main with full history)")
+
     stale, unverifiable = [], []
     for path, sha, src in refs:
         if not _commit_present(sha):

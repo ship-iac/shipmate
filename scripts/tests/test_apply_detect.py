@@ -195,6 +195,18 @@ def test_validate_plan_run_id_accepts_valid():
     ad.validate_plan_run_id("123456")  # must not raise
 
 
+def test_validate_env_rejects_dot():
+    # A '.' in env would break plan.<env>.<slug> disambiguation (env-first only
+    # works because env has no '.') — fail loud at the trust boundary.
+    with pytest.raises(SystemExit):
+        ad.validate_env("dev.eu")
+
+
+def test_validate_env_accepts_normal():
+    ad.validate_env("dev-eu")  # hyphenated env is fine
+    ad.validate_env("eu")  # must not raise
+
+
 def test_verify_plan_run_passes_when_all_match(monkeypatch):
     monkeypatch.setattr(
         ad,

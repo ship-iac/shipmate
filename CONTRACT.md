@@ -215,7 +215,12 @@ paths that slug to the same value still collide by construction and fail loud
 in apply-detect (rename so the path→`-` slug is unique).
 
 This naming contract is breaking for any in-flight plan artifacts: land the
-change when no applies are mid-flight.
+change when no applies are mid-flight. It also spans two consumer workflow
+files pinned independently — `preview.yml` pins `plan-cell` (the uploader) and
+`apply.yml` pins `apply-cell`/`apply-detect` (the downloader/matcher). Bump
+both pins **together** when adopting a build that changes this name: a partial
+bump (uploader on the new name, downloader on the old, or vice versa) makes
+every apply fail its reviewed-plan download fail-safe until the pins agree.
 
 ## Apply-match fingerprint
 
