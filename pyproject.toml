@@ -34,6 +34,7 @@ extend-include = [
     "scripts/env-order",
     "scripts/plan-classify",
     "scripts/register-app",
+    "scripts/summary-comment",
     "scripts/waves",
 ]
 

@@ -14,13 +14,9 @@ any backtick run in the text, so author-controlled plan output cannot escape
 the fence (the comment-body injection surface).
 """
 
-import glob
 import importlib.util
-import json
-import os
 import pathlib
 import re
-import sys
 from importlib.machinery import SourceFileLoader
 
 _D = pathlib.Path(__file__).resolve().parent
