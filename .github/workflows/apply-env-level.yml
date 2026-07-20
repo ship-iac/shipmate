@@ -6,6 +6,9 @@ on:
       head_sha: { required: true, type: string }
       preview_run_id: { required: true, type: string }
       state_suffix: { required: true, type: string }
+    secrets:
+      SHIPMATE_PLAN_PASSPHRASE:
+        required: false
 jobs:
   wave0:
     if: ${{ !failure() && !cancelled() && toJSON(fromJSON(inputs.waves_json).wave0) != '[]' }}
@@ -42,6 +45,7 @@ jobs:
           preview-run-id: ${{ inputs.preview_run_id }}
           state-path: ${{ matrix.stack }}/${{ inputs.state_suffix }}
           github-token: ${{ github.token }}
+          plan-passphrase: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
   wave1:
     needs: [wave0]
     if: ${{ !failure() && !cancelled() && !contains(join(needs.*.result, ','), 'cancelled') && toJSON(fromJSON(inputs.waves_json).wave1) != '[]' }}
@@ -78,6 +82,7 @@ jobs:
           preview-run-id: ${{ inputs.preview_run_id }}
           state-path: ${{ matrix.stack }}/${{ inputs.state_suffix }}
           github-token: ${{ github.token }}
+          plan-passphrase: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
   wave2:
     needs: [wave0, wave1]
     if: ${{ !failure() && !cancelled() && !contains(join(needs.*.result, ','), 'cancelled') && toJSON(fromJSON(inputs.waves_json).wave2) != '[]' }}
@@ -114,6 +119,7 @@ jobs:
           preview-run-id: ${{ inputs.preview_run_id }}
           state-path: ${{ matrix.stack }}/${{ inputs.state_suffix }}
           github-token: ${{ github.token }}
+          plan-passphrase: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
   wave3:
     needs: [wave0, wave1, wave2]
     if: ${{ !failure() && !cancelled() && !contains(join(needs.*.result, ','), 'cancelled') && toJSON(fromJSON(inputs.waves_json).wave3) != '[]' }}
@@ -150,6 +156,7 @@ jobs:
           preview-run-id: ${{ inputs.preview_run_id }}
           state-path: ${{ matrix.stack }}/${{ inputs.state_suffix }}
           github-token: ${{ github.token }}
+          plan-passphrase: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
   wave4:
     needs: [wave0, wave1, wave2, wave3]
     if: ${{ !failure() && !cancelled() && !contains(join(needs.*.result, ','), 'cancelled') && toJSON(fromJSON(inputs.waves_json).wave4) != '[]' }}
@@ -186,6 +193,7 @@ jobs:
           preview-run-id: ${{ inputs.preview_run_id }}
           state-path: ${{ matrix.stack }}/${{ inputs.state_suffix }}
           github-token: ${{ github.token }}
+          plan-passphrase: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
   wave5:
     needs: [wave0, wave1, wave2, wave3, wave4]
     if: ${{ !failure() && !cancelled() && !contains(join(needs.*.result, ','), 'cancelled') && toJSON(fromJSON(inputs.waves_json).wave5) != '[]' }}
@@ -222,6 +230,7 @@ jobs:
           preview-run-id: ${{ inputs.preview_run_id }}
           state-path: ${{ matrix.stack }}/${{ inputs.state_suffix }}
           github-token: ${{ github.token }}
+          plan-passphrase: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
   wave6:
     needs: [wave0, wave1, wave2, wave3, wave4, wave5]
     if: ${{ !failure() && !cancelled() && !contains(join(needs.*.result, ','), 'cancelled') && toJSON(fromJSON(inputs.waves_json).wave6) != '[]' }}
@@ -258,6 +267,7 @@ jobs:
           preview-run-id: ${{ inputs.preview_run_id }}
           state-path: ${{ matrix.stack }}/${{ inputs.state_suffix }}
           github-token: ${{ github.token }}
+          plan-passphrase: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
   wave7:
     needs: [wave0, wave1, wave2, wave3, wave4, wave5, wave6]
     if: ${{ !failure() && !cancelled() && !contains(join(needs.*.result, ','), 'cancelled') && toJSON(fromJSON(inputs.waves_json).wave7) != '[]' }}
@@ -294,3 +304,4 @@ jobs:
           preview-run-id: ${{ inputs.preview_run_id }}
           state-path: ${{ matrix.stack }}/${{ inputs.state_suffix }}
           github-token: ${{ github.token }}
+          plan-passphrase: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}

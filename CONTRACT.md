@@ -308,11 +308,18 @@ variable **names** only — never values.
 
 The reviewed machine plan file (`stack.otplan`) can be encrypted at rest in the
 uploaded artifact. When the consumer sets the optional `plan-passphrase` input
-on both `plan-cell` (in `preview.yml`) and `apply-cell` (in `apply.yml`), the
-engine encrypts the plan before upload and decrypts it after download using a
-single symmetric cipher: `openssl enc -aes-256-ctr -pbkdf2 -salt`, passphrase
-supplied via `-pass env:` (never on the command line). Consumers pass the
-passphrase from a secret, conventionally `${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}`.
+on `plan-cell` (in `preview.yml`), the engine encrypts the plan before upload
+using a single symmetric cipher: `openssl enc -aes-256-ctr -pbkdf2 -salt`,
+passphrase supplied via `-pass env:` (never on the command line). `apply-cell`
+decrypts it after download on **every** apply path: the targeted
+`mate apply <env>` path (`apply.yml`) passes `plan-passphrase` as a direct
+input; the post-merge deploy and the bare `mate apply` path both pass it as
+the optional `SHIPMATE_PLAN_PASSPHRASE` secret into the reusable
+`apply-env-level.yml` workflow — directly from `deploy.yml`, and via
+`apply-all.yml` for the bare form. Consumers set the repo/environment secret
+`SHIPMATE_PLAN_PASSPHRASE` and forward it with `secrets:` (or
+`secrets: inherit`) in their `deploy.yml` and `apply-all.yml` wrapper
+workflows.
 
 - **Backward compatible.** An empty/unset `plan-passphrase` leaves the plan
   plaintext and the uploaded bytes byte-identical to a no-encryption run.
