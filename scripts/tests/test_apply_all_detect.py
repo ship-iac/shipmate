@@ -85,8 +85,12 @@ def test_partition_applied_explicit_env_blocks_nothing():
 def test_reuses_single_sourced_helpers():
     # Workset matching, pending filter, env-level bucketing and the done
     # predicate must come from the existing single-sourced implementations,
-    # not private copies (complexity-budget rows 6 and 9).
+    # not private copies (complexity-budget rows 6 and 9). env-level bucketing
+    # and the GITHUB_OUTPUT writer live in env-order (shared with deploy-detect),
+    # so this script no longer loads the deploy-detect entry-point module at all.
     assert aad.ad.workset_from_artifacts is not None
-    assert aad.dd.waves_by_env_level is not None
+    assert aad.eo.waves_by_env_level is not None
+    assert aad.eo.write_env_level_waves is not None
     assert aad.ag.done_names is not None
+    assert not hasattr(aad, "dd")
     assert not hasattr(aad, "workset_from_artifacts_impl")

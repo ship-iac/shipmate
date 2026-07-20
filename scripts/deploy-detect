@@ -7,7 +7,6 @@ no-change). No 'last deployed ref' diff — pending checks ARE the queue.
 """
 
 import importlib.util
-import json
 import os
 import pathlib
 import time
@@ -33,25 +32,6 @@ ag = _load("apply-gate")
 
 def filter_pending(cells, completed_names):
     return [c for c in cells if f"apply / {c['environment']} / {c['stack']}" not in completed_names]
-
-
-def waves_by_env_level(pending, deps, levels):
-    """Return a list of MAX_ENV_LEVELS dicts, each {wave0..wave7: [cells]}.
-
-    Cells are bucketed by their env's level (0 = no env-order global, or an env
-    with no predecessors), then stack-wave-ordered within it. Env-levels apply
-    fully in order (level 0 entirely before level 1, etc); stack waves within a
-    level run as today. No env-order global -> every env is level 0 -> a single
-    populated level -> unchanged behavior.
-    """
-    stack_levels = wv.levels(deps)
-    out = []
-    for lvl in range(eo.MAX_ENV_LEVELS):
-        cells = [c for c in pending if levels.get(c["environment"], 0) == lvl]
-        waves = wv.assign_waves(stack_levels, cells)
-        wv.guard_max_waves(waves)
-        out.append({f"wave{i}": (waves[i] if i < len(waves) else []) for i in range(wv.MAX_WAVES)})
-    return out
 
 
 # Single-sourced in build-matrix (next to _run); aliased here so error handling
@@ -114,7 +94,7 @@ def main():
     order = eo.read_env_order()
     levels = eo.env_levels(order, {c["environment"] for c in pending})
     eo.guard_max_env_levels(levels)
-    per_level = waves_by_env_level(pending, deps, levels)
+    per_level = eo.waves_by_env_level(pending, deps, levels)
     runs = _gh_json(
         f"repos/{repo}/actions/workflows/preview.yml/runs?head_sha={head}&status=success"
     ).get("workflow_runs", [])
@@ -128,12 +108,7 @@ def main():
     # Output names must be hyphen-free: `steps.d.outputs.head-sha` parses the '-'
     # as subtraction, breaking the composite action's outputs block. Underscores.
     with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
-        for lvl, waves in enumerate(per_level):
-            fh.write(f"envlevel{lvl}_waves={json.dumps(waves)}\n")
-            fh.write(
-                f"envlevel{lvl}_empty="
-                f"{'false' if any(waves[f'wave{i}'] for i in range(wv.MAX_WAVES)) else 'true'}\n"
-            )
+        eo.write_env_level_waves(fh, per_level)
         fh.write(f"head_sha={head}\n")
         fh.write(f"preview_run_id={preview_run}\n")
 

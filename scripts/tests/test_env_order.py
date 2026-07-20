@@ -123,6 +123,56 @@ def test_read_env_order_rejects_non_str_predecessor_element():
         eo.read_env_order(run=lambda args: '{"dev-us":["dev-eu", 123]}')
 
 
+def test_waves_by_env_level_buckets_and_orders():
+    # Env-level bucketing lives in env-order (shared by deploy-detect and
+    # apply-all-detect); it buckets cells by their env's level, then
+    # stack-wave-orders within each level.
+    pending = [
+        {"stack": "stacks/dns", "environment": "dev-eu"},
+        {"stack": "stacks/app", "environment": "dev-eu"},
+        {"stack": "stacks/dns", "environment": "dev-us"},
+    ]
+    deps = {"stacks/dns": set(), "stacks/app": {"stacks/dns"}}
+    levels = {"dev-eu": 0, "dev-us": 1}
+    out = eo.waves_by_env_level(pending, deps, levels)
+    assert out[0]["wave0"] == [{"stack": "stacks/dns", "environment": "dev-eu"}]
+    assert out[0]["wave1"] == [{"stack": "stacks/app", "environment": "dev-eu"}]
+    assert out[1]["wave0"] == [{"stack": "stacks/dns", "environment": "dev-us"}]
+    assert out[1]["wave1"] == []
+
+
+def test_waves_by_env_level_backward_compat_single_level():
+    pending = [
+        {"stack": "stacks/dns", "environment": "dev-eu"},
+        {"stack": "stacks/dns", "environment": "dev-us"},
+    ]
+    deps = {"stacks/dns": set()}
+    levels = {"dev-eu": 0, "dev-us": 0}  # no env-order -> all level 0
+    out = eo.waves_by_env_level(pending, deps, levels)
+    assert sorted(out[0]["wave0"], key=str) == sorted(pending, key=str)
+    assert out[1]["wave0"] == [] and out[2]["wave0"] == [] and out[3]["wave0"] == []
+
+
+def test_write_env_level_waves_emits_waves_and_empty_flags(tmp_path):
+    # The shared GITHUB_OUTPUT writer must emit envlevelN_waves (JSON) plus an
+    # envlevelN_empty flag per level: 'false' for a level with any cell,
+    # 'true' for an empty one. Single-sourced so deploy-detect and
+    # apply-all-detect cannot drift apart on the shared apply-env-level.yml
+    # output contract.
+    cell = {"stack": "s", "environment": "dev-eu"}
+    per_level = [
+        {f"wave{i}": ([cell] if i == 0 else []) for i in range(8)},
+        {f"wave{i}": [] for i in range(8)},
+    ]
+    out = tmp_path / "gh_output"
+    with out.open("a", encoding="utf-8") as fh:
+        eo.write_env_level_waves(fh, per_level)
+    lines = out.read_text(encoding="utf-8").splitlines()
+    assert 'envlevel0_waves={"wave0": [{"stack": "s", "environment": "dev-eu"}]' in lines[0]
+    assert "envlevel0_empty=false" in lines
+    assert "envlevel1_empty=true" in lines
+
+
 def test_read_explicit_envs_default_invocation(monkeypatch):
     captured = {}
     monkeypatch.setattr(eo.bm, "_run", lambda args: captured.update(args=args) or "[]")

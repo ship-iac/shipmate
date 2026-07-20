@@ -38,7 +38,6 @@ def _load(fname):
 
 
 ad = _load("apply-detect")
-dd = _load("deploy-detect")
 bm = _load("build-matrix")
 wv = _load("waves")
 eo = _load("env-order")
@@ -74,7 +73,7 @@ def main():
     ad.validate_plan_run_id(plan_run_id)
     ad.verify_plan_run(repo, plan_run_id, head)
 
-    stacks_by_env, _ = bm.env_membership(all_stacks=True)
+    stacks_by_env, _ = bm.env_membership(all_stacks=True, require_env_tag=False)
     names = ad._artifact_names(repo, plan_run_id)
     cells = cells_from_artifacts(names, stacks_by_env)
 
@@ -102,7 +101,7 @@ def main():
     deps = wv.parse_dot(graph)
     levels = eo.env_levels(order, {c["environment"] for c in runnable})
     eo.guard_max_env_levels(levels)
-    per_level = dd.waves_by_env_level(runnable, deps, levels)
+    per_level = eo.waves_by_env_level(runnable, deps, levels)
 
     level_counts = [sum(len(w[f"wave{i}"]) for i in range(wv.MAX_WAVES)) for w in per_level]
     print(
@@ -111,12 +110,7 @@ def main():
         f"excluded_explicit={excluded} skipped_after_explicit={skipped}"
     )
     with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
-        for lvl, w in enumerate(per_level):
-            fh.write(f"envlevel{lvl}_waves={json.dumps(w)}\n")
-            fh.write(
-                f"envlevel{lvl}_empty="
-                f"{'false' if any(w[f'wave{i}'] for i in range(wv.MAX_WAVES)) else 'true'}\n"
-            )
+        eo.write_env_level_waves(fh, per_level)
         fh.write(f"head_sha={head}\n")
         fh.write(f"preview_run_id={plan_run_id}\n")
         fh.write(f"excluded_envs={json.dumps(excluded)}\n")

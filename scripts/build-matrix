@@ -78,18 +78,26 @@ def _tags(stack):
     return json.loads(out)
 
 
-def env_membership(all_stacks=False, base=""):
+def env_membership(all_stacks=False, base="", require_env_tag=True):
     """({env: [stacks...]}, {stack: [tags...]}) from Terramate tags (CONTRACT
-    tag grammar: env/<name>). Fails loud on a stack with no env/* tag -- it
-    would contribute no cells and silently vanish from every fan-out."""
+    tag grammar: env/<name>).
+
+    `require_env_tag` (default True) is the preview/deploy fan-out posture: a
+    stack with no env/* tag fails loud, because there it would contribute no
+    cells and silently vanish from the matrix. The artifact-sourced bare-apply
+    path passes False -- an untagged stack produces no `plan.<env>.<slug>`
+    artifact and so contributes no cell regardless, and an unrelated untagged
+    stack anywhere else in the repo must not abort the apply (the targeted
+    `mate apply <env>` path never tag-validates either)."""
     stacks = _list_stacks(all_stacks, base)
     tags_by_stack = {s: _tags(s) for s in stacks}
-    untagged = [s for s in stacks if not any(t.startswith("env/") for t in tags_by_stack[s])]
-    if untagged:
-        raise SystemExit(
-            "::error::stack(s) have no env/* tag and cannot fan out to any "
-            "environment (they would silently skip): " + ", ".join(sorted(untagged))
-        )
+    if require_env_tag:
+        untagged = [s for s in stacks if not any(t.startswith("env/") for t in tags_by_stack[s])]
+        if untagged:
+            raise SystemExit(
+                "::error::stack(s) have no env/* tag and cannot fan out to any "
+                "environment (they would silently skip): " + ", ".join(sorted(untagged))
+            )
     stacks_by_env = {}
     for s in stacks:
         for t in tags_by_stack[s]:

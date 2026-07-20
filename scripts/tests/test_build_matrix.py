@@ -116,3 +116,17 @@ def test_env_membership_fails_loud_on_untagged_stack(monkeypatch):
     monkeypatch.setattr(bm, "_tags", lambda s: ["workload/app"])
     with pytest.raises(SystemExit):
         bm.env_membership(all_stacks=True)
+
+
+def test_env_membership_require_env_tag_false_ignores_untagged(monkeypatch):
+    # The artifact-sourced bare-apply path passes require_env_tag=False: an
+    # untagged stack anywhere in the repo must NOT abort membership — it simply
+    # produces no plan.<env>.<slug> artifact and contributes no cell. The tagged
+    # stacks still bucket normally; the untagged one just vanishes from the map.
+    stacks = ["stacks/app", "stacks/orphan"]
+    monkeypatch.setattr(bm, "_list_stacks", lambda all_stacks, base: stacks)
+    tags = {"stacks/app": ["env/dev-eu"], "stacks/orphan": ["workload/util"]}
+    monkeypatch.setattr(bm, "_tags", lambda s: tags[s])
+    stacks_by_env, tags_by_stack = bm.env_membership(all_stacks=True, require_env_tag=False)
+    assert stacks_by_env == {"dev-eu": ["stacks/app"]}
+    assert tags_by_stack == tags  # orphan still reported in tags, just not bucketed

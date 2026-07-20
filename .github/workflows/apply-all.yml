@@ -6,6 +6,13 @@ on:
       pr_number: { required: true, type: string }
       plan_run_id: { required: true, type: string }
       state_suffix: { required: true, type: string }
+    secrets:
+      # Declared explicitly so the interface fails loud if a consumer wrapper
+      # forgets it. `vars` (SHIPMATE_APP_ID, TERRAMATE_VERSION, TOFU_VERSION)
+      # are inherited by a called workflow automatically; secrets are NOT — a
+      # wrapper must pass this (or use `secrets: inherit`), else the App-token
+      # step in `summary` mints an empty key and the whole run reports red.
+      SHIPMATE_APP_PRIVATE_KEY: { required: true }
 jobs:
   detect:
     runs-on: ubuntu-latest
@@ -109,11 +116,19 @@ jobs:
           GATE: ${{ steps.gate.outputs.verdict }}
           EXCLUDED: ${{ needs.detect.outputs.excluded_envs }}
           SKIPPED: ${{ needs.detect.outputs.skipped_envs }}
+          # true only when every env-level was empty (nothing runnable pending) —
+          # detect failure leaves these outputs '' so ALL_EMPTY is 'false' and the
+          # failure branch below wins.
+          ALL_EMPTY: ${{ needs.detect.outputs.envlevel0_empty == 'true' && needs.detect.outputs.envlevel1_empty == 'true' && needs.detect.outputs.envlevel2_empty == 'true' && needs.detect.outputs.envlevel3_empty == 'true' }}
         run: |
           set -euo pipefail
           # Any result other than success/skipped (failure, cancelled, ...) is a failed run.
           if echo "$RESULTS" | tr ',' '\n' | grep -qvE '^(success|skipped)$'; then
             emoji=":x:"; word="failed"
+          elif [ "$ALL_EMPTY" = "true" ]; then
+            # Every env-level skipped: nothing was applied (all already complete,
+            # or all envs excluded/skipped). Don't claim a fresh apply happened.
+            emoji=":white_check_mark:"; word="found no pending applies to run"
           else emoji=":white_check_mark:"; word="applied"; fi
           python3 - "$emoji" "$word" "$GATE" > body.json <<'PY'
           import json, os, sys

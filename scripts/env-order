@@ -39,6 +39,10 @@ def _load(fname):
 # (no import-time side effects), which matters because this module is itself
 # loaded by deploy-detect the same way.
 bm = _load("build-matrix")
+# waves_by_env_level / write_env_level_waves live here (env-level logic's home)
+# and use these; loading waves only defines functions/constants (no import-time
+# side effects), same as build-matrix above.
+wv = _load("waves")
 
 
 def _validate_predecessors(env, preds):
@@ -159,4 +163,37 @@ def guard_max_env_levels(levels):
         raise SystemExit(
             f"::error::env order spans more than {MAX_ENV_LEVELS} levels "
             f"({sorted(over)}); flatten the env dependency chain."
+        )
+
+
+def waves_by_env_level(pending, deps, levels):
+    """Return a list of MAX_ENV_LEVELS dicts, each {wave0..wave7: [cells]}.
+
+    Cells are bucketed by their env's level (0 = no env-order global, or an env
+    with no predecessors), then stack-wave-ordered within it. Env-levels apply
+    fully in order (level 0 entirely before level 1, etc); stack waves within a
+    level run as today. No env-order global -> every env is level 0 -> a single
+    populated level -> unchanged behavior. Shared by deploy-detect (merge path)
+    and apply-all-detect (bare `mate apply`)."""
+    stack_levels = wv.levels(deps)
+    out = []
+    for lvl in range(MAX_ENV_LEVELS):
+        cells = [c for c in pending if levels.get(c["environment"], 0) == lvl]
+        waves = wv.assign_waves(stack_levels, cells)
+        wv.guard_max_waves(waves)
+        out.append({f"wave{i}": (waves[i] if i < len(waves) else []) for i in range(wv.MAX_WAVES)})
+    return out
+
+
+def write_env_level_waves(fh, per_level):
+    """Emit envlevel{0..N}_waves (JSON) + envlevel{0..N}_empty flags for a list
+    of per-env-level wave dicts, to a GITHUB_OUTPUT file handle. Shared by
+    deploy-detect and apply-all-detect so the env-level output contract that the
+    reusable apply-env-level.yml consumes stays single-sourced -- a format drift
+    between the two detect paths would silently break that shared consumer."""
+    for lvl, w in enumerate(per_level):
+        fh.write(f"envlevel{lvl}_waves={json.dumps(w)}\n")
+        fh.write(
+            f"envlevel{lvl}_empty="
+            f"{'false' if any(w[f'wave{i}'] for i in range(wv.MAX_WAVES)) else 'true'}\n"
         )

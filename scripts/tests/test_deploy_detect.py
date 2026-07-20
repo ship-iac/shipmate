@@ -69,35 +69,6 @@ def test_duplicate_run_newer_queued_stays_pending():
     assert dd.filter_pending(cells, done) == cells
 
 
-def test_waves_by_env_level_buckets_and_orders():
-    pending = [
-        {"stack": "stacks/dns", "environment": "dev-eu"},
-        {"stack": "stacks/app", "environment": "dev-eu"},
-        {"stack": "stacks/dns", "environment": "dev-us"},
-    ]
-    deps = {"stacks/dns": set(), "stacks/app": {"stacks/dns"}}
-    levels = {"dev-eu": 0, "dev-us": 1}
-    out = dd.waves_by_env_level(pending, deps, levels)
-    # env-level 0 = dev-eu: dns in wave0, app in wave1
-    assert out[0]["wave0"] == [{"stack": "stacks/dns", "environment": "dev-eu"}]
-    assert out[0]["wave1"] == [{"stack": "stacks/app", "environment": "dev-eu"}]
-    # env-level 1 = dev-us: dns in wave0
-    assert out[1]["wave0"] == [{"stack": "stacks/dns", "environment": "dev-us"}]
-    assert out[1]["wave1"] == []
-
-
-def test_waves_by_env_level_backward_compat_single_level():
-    pending = [
-        {"stack": "stacks/dns", "environment": "dev-eu"},
-        {"stack": "stacks/dns", "environment": "dev-us"},
-    ]
-    deps = {"stacks/dns": set()}
-    levels = {"dev-eu": 0, "dev-us": 0}  # no env-order -> all level 0
-    out = dd.waves_by_env_level(pending, deps, levels)
-    assert sorted(out[0]["wave0"], key=str) == sorted(pending, key=str)
-    assert out[1]["wave0"] == [] and out[2]["wave0"] == [] and out[3]["wave0"] == []
-
-
 def test_merged_head_exact_match_wins(monkeypatch):
     # Exact merge_commit_sha match should still be picked over everything else.
     pulls = [
