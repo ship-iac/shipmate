@@ -55,8 +55,13 @@ jobs:
       head_sha: ${{ needs.detect.outputs.head_sha }}
       preview_run_id: ${{ needs.detect.outputs.preview_run_id }}
       state_suffix: ${{ inputs.state_suffix }}
-    secrets:
-      SHIPMATE_PLAN_PASSPHRASE: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
+    # `inherit`, not an explicit `secrets:` mapping: apply-env-level.yml is pinned
+    # by SHA, and in the window before the post-merge pin bump that pinned revision
+    # may not yet declare SHIPMATE_PLAN_PASSPHRASE. Passing an undeclared secret via
+    # an explicit mapping is a hard load-time error (unlike an undeclared action
+    # input, which is silently ignored); `inherit` is not validated against the
+    # callee and forwards the optional passphrase when the consumer set it.
+    secrets: inherit
 
   envlevel1:
     needs: [detect, envlevel0]
@@ -68,8 +73,7 @@ jobs:
       head_sha: ${{ needs.detect.outputs.head_sha }}
       preview_run_id: ${{ needs.detect.outputs.preview_run_id }}
       state_suffix: ${{ inputs.state_suffix }}
-    secrets:
-      SHIPMATE_PLAN_PASSPHRASE: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
+    secrets: inherit
 
   envlevel2:
     needs: [detect, envlevel0, envlevel1]
@@ -81,8 +85,7 @@ jobs:
       head_sha: ${{ needs.detect.outputs.head_sha }}
       preview_run_id: ${{ needs.detect.outputs.preview_run_id }}
       state_suffix: ${{ inputs.state_suffix }}
-    secrets:
-      SHIPMATE_PLAN_PASSPHRASE: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
+    secrets: inherit
 
   envlevel3:
     needs: [detect, envlevel0, envlevel1, envlevel2]
@@ -94,8 +97,7 @@ jobs:
       head_sha: ${{ needs.detect.outputs.head_sha }}
       preview_run_id: ${{ needs.detect.outputs.preview_run_id }}
       state_suffix: ${{ inputs.state_suffix }}
-    secrets:
-      SHIPMATE_PLAN_PASSPHRASE: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
+    secrets: inherit
 
   summary:
     needs: [detect, envlevel0, envlevel1, envlevel2, envlevel3]
