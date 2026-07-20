@@ -17,9 +17,9 @@ inputs:
     description: GITHUB_TOKEN with checks:write.
     required: true
   retention-days:
-    description: Plan artifact retention (days). Empty = the repository default.
+    description: Plan artifact retention (days); caps how long the plan artifact stays downloadable. Empty = the repository default.
     required: false
-    default: ""
+    default: "7"
   plan-passphrase:
     description: Optional passphrase to encrypt the .otplan artifact at rest. Empty = plaintext (backward compatible).
     required: false
