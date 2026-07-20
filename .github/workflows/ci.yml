@@ -13,9 +13,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        # Full history so test_internal_pins can diff the internally-pinned action
-        # SHAs against HEAD (a shallow clone lacks those commit objects).
-        with: { fetch-depth: 0 }
       - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
 
       # Lint the workflow files (and shellcheck their run: blocks). actionlint
@@ -32,10 +29,30 @@ jobs:
       - name: Ruff format check
         run: uv run ruff format --check .
 
+      # Everything except the internal-pin guard, which runs as its own
+      # non-required job (below) because it is intentionally red during the
+      # two-step release pin bump.
       - name: Unit tests
-        run: uv run pytest scripts/tests -q
+        run: uv run pytest scripts/tests -q --ignore=scripts/tests/test_internal_pins.py
 
       # ty is still beta; surface type findings without gating CI on them.
       - name: Type check (ty, beta)
         run: uv run ty check
         continue-on-error: true
+
+  # Advisory guard — deliberately NOT in the branch ruleset's required checks.
+  # test_internal_pins compares each internal action pin against the mainline
+  # baseline, so it is unavoidably red on a release pin-bump PR (a commit cannot
+  # pin its own unborn merge SHA — see docs/releasing.md). Keeping it non-required
+  # lets those pin-bump PRs merge without an admin bypass, while the check still
+  # fails loudly on the PR and on main when a pin is genuinely stale.
+  internal-pins:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        # Full history so the guard can diff the internally-pinned action SHAs
+        # against the mainline (a shallow clone lacks those commit objects).
+        with: { fetch-depth: 0 }
+      - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+      - name: Internal action pins are current
+        run: uv run pytest scripts/tests/test_internal_pins.py -q
