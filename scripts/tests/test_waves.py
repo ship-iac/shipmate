@@ -145,3 +145,19 @@ def test_main_guard_fires_only_after_reverse_moves_wave_past_max(monkeypatch, tm
     monkeypatch.setattr("sys.stdin", io.StringIO(chain))
     with pytest.raises(SystemExit):
         w.main(["--reverse"])
+
+
+def test_write_waves_emits_aggregate_waves_json():
+    # apply-env-level.yml consumes a single waves_json object and errors on a
+    # missing waveN key -- the aggregate must always carry all 8 keys.
+    fh = io.StringIO()
+    cells = [{"stack": "stacks/dns", "environment": "dev-eu"}]
+    w.write_waves(fh, [cells, []])
+    out = dict(line.split("=", 1) for line in fh.getvalue().strip().splitlines())
+    agg = json.loads(out["waves"])
+    assert set(agg) == {f"wave{i}" for i in range(w.MAX_WAVES)}
+    assert agg["wave0"] == cells
+    assert all(agg[f"wave{i}"] == [] for i in range(1, w.MAX_WAVES))
+    # the flat outputs and the aggregate must agree
+    assert json.loads(out["wave0"]) == agg["wave0"]
+    assert out["empty"] == "false"
