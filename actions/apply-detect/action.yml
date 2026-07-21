@@ -22,6 +22,7 @@ outputs:
   wave5: { description: Wave 5 cells (JSON), value: "${{ steps.d.outputs.wave5 }}" }
   wave6: { description: Wave 6 cells (JSON), value: "${{ steps.d.outputs.wave6 }}" }
   wave7: { description: Wave 7 cells (JSON), value: "${{ steps.d.outputs.wave7 }}" }
+  waves: { description: "All waves as one JSON object {wave0..wave7} (apply-env-level.yml waves_json shape)", value: "${{ steps.d.outputs.waves }}" }
   empty: { description: true when no cell is pending, value: "${{ steps.d.outputs.empty }}" }
   head_sha: { description: Echoed head SHA, value: "${{ steps.d.outputs.head_sha }}" }
   preview_run_id: { description: Echoed plan run id, value: "${{ steps.d.outputs.preview_run_id }}" }
