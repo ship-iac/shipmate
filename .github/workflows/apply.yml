@@ -1,0 +1,112 @@
+name: apply
+on:
+  workflow_call:
+    inputs:
+      environment: { required: true, type: string }
+      ref: { required: true, type: string }
+      pr_number: { required: true, type: string }
+      plan_run_id: { required: true, type: string }
+      state_suffix: { required: true, type: string }
+    secrets:
+      # Declared explicitly so the interface fails loud if a consumer wrapper
+      # forgets it. `vars` (SHIPMATE_APP_ID, TERRAMATE_VERSION, TOFU_VERSION)
+      # are inherited by a called workflow automatically; secrets are NOT — a
+      # wrapper must pass this (or use `secrets: inherit`), else the App-token
+      # step in `summary` mints an empty key and the whole run reports red.
+      SHIPMATE_APP_PRIVATE_KEY: { required: true }
+      SHIPMATE_PLAN_PASSPHRASE: { required: false }
+jobs:
+  detect:
+    runs-on: ubuntu-latest
+    permissions: { contents: read, checks: read, actions: read }
+    outputs:
+      waves: ${{ steps.d.outputs.waves }}
+      empty: ${{ steps.d.outputs.empty }}
+      head_sha: ${{ steps.d.outputs.head_sha }}
+      preview_run_id: ${{ steps.d.outputs.preview_run_id }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with: { fetch-depth: 0, ref: "${{ inputs.ref }}" }
+      - uses: ship-iac/shipmate/actions/setup@30ea42bfbeaca73c76891dfed881ca5db2b1f410
+        with:
+          terramate-version: ${{ vars.TERRAMATE_VERSION }}
+          tofu-version: ${{ vars.TOFU_VERSION }}
+      - id: d
+        uses: ship-iac/shipmate/actions/apply-detect@30ea42bfbeaca73c76891dfed881ca5db2b1f410
+        with:
+          environment: ${{ inputs.environment }}
+          plan-run-id: ${{ inputs.plan_run_id }}
+          head-sha: ${{ inputs.ref }}
+          github-token: ${{ github.token }}
+
+  # A targeted apply is single-env by design, so its pending wave set is exactly
+  # one env-level's wave matrix — run it through the same engine the deploy and
+  # bare-apply paths use instead of duplicating wave0..wave7 here.
+  apply:
+    needs: [detect]
+    if: ${{ !failure() && !cancelled() && needs.detect.outputs.empty != 'true' }}
+    uses: ship-iac/shipmate/.github/workflows/apply-env-level.yml@30ea42bfbeaca73c76891dfed881ca5db2b1f410
+    permissions: { contents: read, checks: write, actions: read }
+    with:
+      waves_json: ${{ needs.detect.outputs.waves }}
+      head_sha: ${{ needs.detect.outputs.head_sha }}
+      preview_run_id: ${{ needs.detect.outputs.preview_run_id }}
+      state_suffix: ${{ inputs.state_suffix }}
+    # `inherit`, not an explicit `secrets:` mapping: apply-env-level.yml is pinned
+    # by SHA, and in the window before the post-merge pin bump that pinned revision
+    # may not yet declare SHIPMATE_PLAN_PASSPHRASE. Passing an undeclared secret via
+    # an explicit mapping is a hard load-time error (unlike an undeclared action
+    # input, which is silently ignored); `inherit` is not validated against the
+    # callee and forwards the optional passphrase when the consumer set it.
+    secrets: inherit
+
+  summary:
+    needs: [detect, apply]
+    if: always()
+    runs-on: ubuntu-latest
+    permissions: { checks: write }
+    steps:
+      - name: Complete checkmate if every apply check is done
+        id: gate
+        uses: ship-iac/shipmate/actions/checkmate-refresh@30ea42bfbeaca73c76891dfed881ca5db2b1f410
+        with:
+          head-sha: ${{ inputs.ref }}
+          github-token: ${{ github.token }}
+      - name: App token for result comment
+        id: token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ vars.SHIPMATE_APP_ID }}
+          private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+      - name: Result comment via the App
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          PR_NUMBER: ${{ inputs.pr_number }}
+          ENVIRONMENT: ${{ inputs.environment }}
+          RESULTS: ${{ join(needs.*.result, ',') }}
+          GATE: ${{ steps.gate.outputs.verdict }}
+          # detect failure leaves this '' so EMPTY != 'true' and the failure
+          # branch below wins via RESULTS.
+          EMPTY: ${{ needs.detect.outputs.empty }}
+        run: |
+          set -euo pipefail
+          # Any result other than success/skipped (failure, cancelled, ...) is a failed run.
+          if echo "$RESULTS" | tr ',' '\n' | grep -qvE '^(success|skipped)$'; then
+            emoji=":x:"; word="failed"
+          elif [ "$EMPTY" = "true" ]; then
+            # Nothing pending (all already applied, or nothing planned for this
+            # env). Don't claim a fresh apply happened.
+            emoji=":white_check_mark:"; word="found no pending applies to run"
+          else emoji=":white_check_mark:"; word="applied"; fi
+          python3 - "$emoji" "$word" "$ENVIRONMENT" "$GATE" > body.json <<'PY'
+          import json, sys
+          emoji, word, env, gate = sys.argv[1:5]
+          tail = ("`shipmate / checkmate` is complete — every environment is applied."
+                  if gate == "complete" else
+                  "`shipmate / checkmate` stays pending until every "
+                  "environment is applied (or the merge deploy runs).")
+          print(json.dumps({"body": f"{emoji} shipmate: `mate apply {env}` {word}. " + tail}))
+          PY
+          gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" --input body.json >/dev/null
