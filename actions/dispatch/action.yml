@@ -1,5 +1,5 @@
 name: shipmate dispatch
-description: Mint a short-lived GitHub App installation token and workflow_dispatch the apply workflow (apply.yml for a targeted env, apply-all.yml for a bare `mate apply`). Passes IDs only (dispatch inputs are size-limited).
+description: Mint a short-lived GitHub App installation token and workflow_dispatch the consumer apply wrapper (apply.yml — its optional `environment` input selects a targeted env; empty means bare `mate apply`). Passes IDs only (dispatch inputs are size-limited).
 inputs:
   app-id:
     description: GitHub App id (a repo/org variable, not a secret).
@@ -21,7 +21,7 @@ inputs:
     description: Preview run id holding the reviewed plan artifacts.
     required: true
   workflow:
-    description: Workflow file to dispatch. Empty selects by environment — apply.yml (targeted) or apply-all.yml (bare).
+    description: Workflow file to dispatch. Default apply.yml (the merged wrapper); set explicitly for a split apply.yml/apply-all.yml consumer layout.
     required: false
     default: ''
   dispatch-ref:
@@ -57,9 +57,7 @@ runs:
         PLAN_RUN_ID: ${{ inputs.plan-run-id }}
       run: |
         set -euo pipefail
-        if [ -z "$WORKFLOW" ]; then
-          if [ -n "$ENVIRONMENT" ]; then WORKFLOW=apply.yml; else WORKFLOW=apply-all.yml; fi
-        fi
+        if [ -z "$WORKFLOW" ]; then WORKFLOW=apply.yml; fi
         [[ "$WORKFLOW" =~ ^[A-Za-z0-9._-]+$ ]] || { echo "::error::workflow must match ^[A-Za-z0-9._-]+$ (got: $WORKFLOW)"; exit 1; }
         python3 - > body.json <<'PY'
         import json, os
@@ -68,8 +66,10 @@ runs:
             "pr_number": os.environ["PR_NUMBER"],
             "plan_run_id": os.environ["PLAN_RUN_ID"],
         }
-        # apply-all.yml has no `environment` input; a workflow_dispatch with an
-        # undeclared input is rejected (422), so the key is included only when set.
+        # The `environment` key is included only when set: the merged apply.yml
+        # wrapper declares it optional (empty = bare `mate apply`), and a
+        # split-layout apply-all.yml declares no such input at all — a
+        # workflow_dispatch with an undeclared input is rejected (422).
         if os.environ.get("ENVIRONMENT"):
             inputs["environment"] = os.environ["ENVIRONMENT"]
         print(json.dumps({"ref": os.environ["DISPATCH_REF"], "inputs": inputs}))
