@@ -90,10 +90,14 @@ def guard_max_waves(waves):
 
 
 def write_waves(fh, waves):
-    """Emit wave0..wave{MAX_WAVES-1} (JSON arrays) + the `empty` flag to a
-    GITHUB_OUTPUT file handle. Shared by this script and deploy-detect."""
+    """Emit wave0..wave{MAX_WAVES-1} (JSON arrays), an aggregate `waves` JSON
+    object (all MAX_WAVES keys, shaped for apply-env-level.yml's waves_json
+    input), + the `empty` flag to a GITHUB_OUTPUT file handle. Shared by this
+    script and apply-detect."""
+    padded = {f"wave{i}": (waves[i] if i < len(waves) else []) for i in range(MAX_WAVES)}
     for i in range(MAX_WAVES):
-        fh.write(f"wave{i}={json.dumps(waves[i] if i < len(waves) else [])}\n")
+        fh.write(f"wave{i}={json.dumps(padded[f'wave{i}'])}\n")
+    fh.write(f"waves={json.dumps(padded)}\n")
     fh.write(f"empty={'false' if any(waves) else 'true'}\n")
 
 
