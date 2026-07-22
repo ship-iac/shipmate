@@ -204,7 +204,7 @@ def build_comment(cells, checks, run_url):
     cannot starve later cells of their links."""
     meta = [c for c, _ in cells]
     header = f"{MARKER}\n### shipmate plan\n\n{build_table(meta, checks, run_url)}"
-    footer = f"\n\n[Plans, logs & artifacts]({run_url})"
+    footer = f"\n\n[Logs & artifacts]({run_url})"
     changed = [(c, t) for c, t in cells if c["changed"]]
     parts = [header]
     used = len(header) + len(footer)
