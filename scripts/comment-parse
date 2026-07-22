@@ -1,27 +1,28 @@
 #!/usr/bin/env python3
 """Parse a PR comment against the strict comment-ops grammar.
 
-Grammar: `mate <verb> [env] [tag-filter]`. Injection-safe: the whole command
-line must match one anchored regex; nothing is ever passed to a shell. `apply`
-is active from day one; `plan`/`destroy` are reserved (recognized, rejected
-with a "reserved" message so the grammar is stable as verbs are added).
-env is optional: a bare `mate apply` targets every non-explicit environment
-(env=None -> "all"); a tag-filter cannot be mistaken for an env because ':'
-is outside the env charset.
+Grammar: `shipmate <verb> [env] [tag-filter]`. Injection-safe: the whole
+command line must match one anchored regex; nothing is ever passed to a
+shell. `apply` is active from day one; `plan`/`destroy` are reserved
+(recognized, rejected with a "reserved" message so the grammar is stable as
+verbs are added).
+env is optional: a bare `shipmate apply` targets every non-explicit
+environment (env=None -> "all"); a tag-filter cannot be mistaken for an env
+because ':' is outside the env charset.
 """
 
 import os
 import re
 
-# `mate` as a whole word, then verb, optional env, optional tag-filter. env is
-# lower kebab (matches GitHub env naming); tag-filter allows the on-disk tag
-# charset. env is tried first (leftmost), so a bare token that fits both
-# charsets parses as the env.
+# `shipmate` as a whole word, then verb, optional env, optional tag-filter.
+# env is lower kebab (matches GitHub env naming); tag-filter allows the
+# on-disk tag charset. env is tried first (leftmost), so a bare token that
+# fits both charsets parses as the env.
 _CMD = re.compile(
-    r"^mate (?P<verb>[a-z]+)(?: (?P<env>[a-z0-9][a-z0-9-]*))?"
+    r"^shipmate (?P<verb>[a-z]+)(?: (?P<env>[a-z0-9][a-z0-9-]*))?"
     r"(?: (?P<tag>[A-Za-z0-9][A-Za-z0-9/_:.-]*))?$"
 )
-_MATE_LINE = re.compile(r"^mate\b")
+_SHIPMATE_LINE = re.compile(r"^shipmate\b")
 VERBS_ACTIVE = {"apply"}
 VERBS_RESERVED = {"plan", "destroy"}
 
@@ -29,7 +30,7 @@ VERBS_RESERVED = {"plan", "destroy"}
 def _is_recognized_command(line):
     """True if `line` fully matches the command grammar AND its verb is one
     shipmate knows about (active or reserved) -- as opposed to merely fitting
-    the generic `mate <word> <word>` shape (e.g. `mate is great`)."""
+    the generic `shipmate <word> <word>` shape (e.g. `shipmate is great`)."""
     m = _CMD.match(line)
     return m is not None and m.group("verb") in (VERBS_ACTIVE | VERBS_RESERVED)
 
@@ -46,18 +47,18 @@ def parse(body):
     }
     lines = [ln.strip() for ln in body.splitlines()]
     # Prefer the first line that's a fully recognized command over the first
-    # merely mate-prefixed line -- otherwise incidental chatter like
-    # "mate is great" ahead of a real "mate apply dev-eu" would win and bury
-    # the actual command behind an "unknown verb" error.
+    # merely shipmate-prefixed line -- otherwise incidental chatter like
+    # "shipmate is great" ahead of a real "shipmate apply dev-eu" would win
+    # and bury the actual command behind an "unknown verb" error.
     line = next((ln for ln in lines if _is_recognized_command(ln)), None)
     if line is None:
-        line = next((ln for ln in lines if _MATE_LINE.match(ln)), None)
+        line = next((ln for ln in lines if _SHIPMATE_LINE.match(ln)), None)
     if line is None:
         return result
     result["is_command"] = True
     m = _CMD.match(line)
     if not m:
-        result["error"] = "malformed: expected `mate <verb> [env] [tag-filter]`"
+        result["error"] = "malformed: expected `shipmate <verb> [env] [tag-filter]`"
         return result
     verb, env, tag = m.group("verb"), m.group("env"), m.group("tag")
     result.update(verb=verb, env=env, tag_filter=tag)
@@ -70,7 +71,7 @@ def parse(body):
     if tag is not None:
         # Parsed for forward-compat, but no component honors it yet — reject
         # rather than silently apply the whole env (matches reserved-verb handling).
-        result["error"] = "tag-filter is not yet supported (omit it: `mate <verb> [env]`)"
+        result["error"] = "tag-filter is not yet supported (omit it: `shipmate <verb> [env]`)"
         return result
     result["valid"] = True
     return result

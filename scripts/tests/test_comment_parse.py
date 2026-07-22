@@ -17,7 +17,7 @@ cp = _load("comment-parse")
 
 
 def test_valid_apply():
-    r = cp.parse("mate apply dev-eu")
+    r = cp.parse("shipmate apply dev-eu")
     assert r == {
         "is_command": True,
         "valid": True,
@@ -31,40 +31,40 @@ def test_valid_apply():
 def test_tag_filter_rejected_not_yet_supported():
     # Parsed for forward-compat but no component honors it → reject rather than
     # silently apply the whole env.
-    r = cp.parse("mate apply dev-eu workload:app")
+    r = cp.parse("shipmate apply dev-eu workload:app")
     assert r["is_command"] and not r["valid"] and "tag-filter" in r["error"]
     assert r["verb"] == "apply" and r["env"] == "dev-eu" and r["tag_filter"] == "workload:app"
 
 
 def test_leading_trailing_whitespace_and_crlf():
-    r = cp.parse("\r\n  mate apply dev-eu  \r\n")
+    r = cp.parse("\r\n  shipmate apply dev-eu  \r\n")
     assert r["valid"] and r["env"] == "dev-eu"
 
 
 def test_command_on_first_matching_line_of_multiline():
-    r = cp.parse("thanks!\nmate apply dev-us\n/cc @team")
+    r = cp.parse("thanks!\nshipmate apply dev-us\n/cc @team")
     assert r["valid"] and r["env"] == "dev-us"
 
 
 def test_reserved_verb_plan_is_rejected():
-    r = cp.parse("mate plan dev-eu")
+    r = cp.parse("shipmate plan dev-eu")
     assert r["is_command"] and not r["valid"] and r["verb"] == "plan"
     assert "reserved" in r["error"]
 
 
 def test_reserved_verb_destroy_is_rejected():
-    r = cp.parse("mate destroy dev-eu")
+    r = cp.parse("shipmate destroy dev-eu")
     assert r["is_command"] and not r["valid"] and "reserved" in r["error"]
 
 
 def test_unknown_verb_is_rejected():
-    r = cp.parse("mate frobnicate dev-eu")
+    r = cp.parse("shipmate frobnicate dev-eu")
     assert r["is_command"] and not r["valid"] and "unknown verb" in r["error"]
 
 
 def test_bare_apply_targets_all_envs():
-    # env is optional: bare `mate apply` = apply every non-explicit env.
-    r = cp.parse("mate apply")
+    # env is optional: bare `shipmate apply` = apply every non-explicit env.
+    r = cp.parse("shipmate apply")
     assert r == {
         "is_command": True,
         "valid": True,
@@ -76,35 +76,35 @@ def test_bare_apply_targets_all_envs():
 
 
 def test_bare_apply_with_whitespace_and_crlf():
-    r = cp.parse("\r\n  mate apply  \r\n")
+    r = cp.parse("\r\n  shipmate apply  \r\n")
     assert r["valid"] and r["env"] is None
 
 
 def test_bare_apply_with_tag_filter_rejected():
     # A tag can't be mistaken for an env (':' is outside the env charset);
     # bare + tag parses env=None and still rejects on the unsupported tag.
-    r = cp.parse("mate apply workload:app")
+    r = cp.parse("shipmate apply workload:app")
     assert r["is_command"] and not r["valid"] and "tag-filter" in r["error"]
     assert r["env"] is None and r["tag_filter"] == "workload:app"
 
 
 def test_bare_reserved_verb_rejected():
-    r = cp.parse("mate plan")
+    r = cp.parse("shipmate plan")
     assert r["is_command"] and not r["valid"] and "reserved" in r["error"]
 
 
 def test_bare_unknown_verb_rejected():
-    r = cp.parse("mate frobnicate")
+    r = cp.parse("shipmate frobnicate")
     assert r["is_command"] and not r["valid"] and "unknown verb" in r["error"]
 
 
 def test_injection_attempt_is_rejected():
-    r = cp.parse("mate apply dev-eu; rm -rf /")
+    r = cp.parse("shipmate apply dev-eu; rm -rf /")
     assert r["is_command"] and not r["valid"]
 
 
 def test_backtick_injection_in_env_rejected():
-    r = cp.parse("mate apply $(whoami)")
+    r = cp.parse("shipmate apply $(whoami)")
     assert r["is_command"] and not r["valid"]
 
 
@@ -113,9 +113,9 @@ def test_non_command_comment_is_not_a_command():
     assert not r["is_command"] and not r["valid"]
 
 
-def test_matey_prefix_is_not_a_command():
-    # 'mate' must be a whole word, not a prefix of another word.
-    r = cp.parse("matey apply dev-eu")
+def test_shipmatey_prefix_is_not_a_command():
+    # 'shipmate' must be a whole word, not a prefix of another word.
+    r = cp.parse("shipmatey apply dev-eu")
     assert not r["is_command"]
 
 
@@ -125,16 +125,16 @@ def test_env_uppercase_rejected():
     # uppercase), so this now falls through to the tag branch rather than
     # "malformed". Pinned here as a deliberate, tested choice: the user sees a
     # "tag-filter is not yet supported" error, not a missing/invalid-env one.
-    r = cp.parse("mate apply DEV-EU")
+    r = cp.parse("shipmate apply DEV-EU")
     assert r["is_command"] and not r["valid"]
     assert r["env"] is None and r["tag_filter"] == "DEV-EU"
     assert "tag-filter" in r["error"]
 
 
-def test_earlier_mate_prefixed_chatter_does_not_block_later_valid_command():
-    # A prior mate-prefixed line that isn't a recognized command (unknown verb)
-    # must not win over a later line that is a full, valid command.
-    r = cp.parse("mate is great\nmate apply dev-eu")
+def test_earlier_shipmate_prefixed_chatter_does_not_block_later_valid_command():
+    # A prior shipmate-prefixed line that isn't a recognized command (unknown
+    # verb) must not win over a later line that is a full, valid command.
+    r = cp.parse("shipmate is great\nshipmate apply dev-eu")
     assert r == {
         "is_command": True,
         "valid": True,
@@ -145,6 +145,6 @@ def test_earlier_mate_prefixed_chatter_does_not_block_later_valid_command():
     }
 
 
-def test_pure_garbage_mate_line_still_errors():
-    r = cp.parse("mate is great")
+def test_pure_garbage_shipmate_line_still_errors():
+    r = cp.parse("shipmate is great")
     assert r["is_command"] and not r["valid"] and r["error"]

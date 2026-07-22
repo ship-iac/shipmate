@@ -88,7 +88,7 @@ def env_membership(all_stacks=False, base="", require_env_tag=True):
     path passes False -- an untagged stack produces no `plan.<env>.<slug>`
     artifact and so contributes no cell regardless, and an unrelated untagged
     stack anywhere else in the repo must not abort the apply (the targeted
-    `mate apply <env>` path never tag-validates either)."""
+    `shipmate apply <env>` path never tag-validates either)."""
     stacks = _list_stacks(all_stacks, base)
     tags_by_stack = {s: _tags(s) for s in stacks}
     if require_env_tag:

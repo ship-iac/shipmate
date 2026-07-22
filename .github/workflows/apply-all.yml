@@ -146,10 +146,10 @@ jobs:
           emoji, word, gate = sys.argv[1:4]
           excluded = json.loads(os.environ.get("EXCLUDED") or "[]")
           skipped = json.loads(os.environ.get("SKIPPED") or "[]")
-          parts = [f"{emoji} shipmate: `mate apply` (all environments) {word}."]
+          parts = [f"{emoji} shipmate: `shipmate apply` (all environments) {word}."]
           if excluded:
               envs = ", ".join(f"`{e}`" for e in excluded)
-              cmds = ", ".join(f"`mate apply {e}`" for e in excluded)
+              cmds = ", ".join(f"`shipmate apply {e}`" for e in excluded)
               parts.append(f"Explicit environment(s) left pending: {envs} — run {cmds} to apply them.")
           if skipped:
               envs = ", ".join(f"`{e}`" for e in skipped)

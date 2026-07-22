@@ -108,8 +108,8 @@ def _validate_explicit_envs(envs):
 
 
 def read_explicit_envs(run=None):
-    """Envs excluded from a bare `mate apply` (they must be targeted by name:
-    `mate apply <env>`), or [] when the global/config is absent."""
+    """Envs excluded from a bare `shipmate apply` (they must be targeted by name:
+    `shipmate apply <env>`), or [] when the global/config is absent."""
     run = run or bm._run
     out = run(
         [
@@ -174,7 +174,7 @@ def waves_by_env_level(pending, deps, levels):
     fully in order (level 0 entirely before level 1, etc); stack waves within a
     level run as today. No env-order global -> every env is level 0 -> a single
     populated level -> unchanged behavior. Shared by deploy-detect (merge path)
-    and apply-all-detect (bare `mate apply`)."""
+    and apply-all-detect (bare `shipmate apply`)."""
     stack_levels = wv.levels(deps)
     out = []
     for lvl in range(MAX_ENV_LEVELS):

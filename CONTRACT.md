@@ -38,7 +38,7 @@ first:
 
 - the pre-merge apply path (`checkmate-refresh`, called from the apply
   workflow's summary job) once **every** `apply / <env> / <stack>` check on
-  the PR head is complete — a targeted `mate apply <env>` of only some
+  the PR head is complete — a targeted `shipmate apply <env>` of only some
   environments leaves the gate pending;
 - the post-merge deploy, which completes the gate on the merged PR's head
   SHA after its env-level applies finish.
@@ -110,39 +110,42 @@ when the same stack participates in more than one environment.
 
 ## Comment-ops
 
-`mate <verb> [env] [tag-filter]` in a PR comment drives a manual, pre-merge
+`shipmate <verb> [env] [tag-filter]` in a PR comment drives a manual, pre-merge
 apply. The grammar is strict and anchored — the whole comment line must match
 one regex, and the parsed values are never interpolated into a shell. `apply`
 is the only active verb; `plan` and `destroy` are reserved (recognized and
 rejected with a "reserved" message) so the grammar does not need to change
 shape when those verbs are implemented.
 
-The env is optional for `apply`. A targeted `mate apply <env>` applies one
-environment; a bare `mate apply` applies **every** environment that has a
+The env is optional for `apply`. A targeted `shipmate apply <env>` applies one
+environment; a bare `shipmate apply` applies **every** environment that has a
 reviewed plan for the current PR head, in `env_order` env-levels (see Env
 apply order, below), **except** environments listed in the Terramate global
 `global.shipmate.explicit_envs`. Explicit environments (typically production)
 must always be named: their `apply / <env> / <stack>` checks simply stay
 pending under a bare apply — so `shipmate / checkmate` keeps gating the
-merge — until someone runs `mate apply <env>` for them. An absent global (or
-`[]`) means a bare apply targets everything. Malformed `explicit_envs` shapes
-(not a list of strings) fail loud, like `env_order`.
+merge — until someone runs `shipmate apply <env>` for them. An absent global
+(or `[]`) means a bare apply targets everything. Malformed `explicit_envs`
+shapes (not a list of strings) fail loud, like `env_order`.
 
-A parsed `mate apply <env>` command is authorized only when **all** of the
-following hold, checked in order, each with its own actionable rejection
-reason:
+A parsed `shipmate apply <env>` command is authorized only when it satisfies
+**apply requirements** — named, Atlantis-style, checked in order, each with
+its own actionable rejection reason:
 
-- the commenter is a member of the configured approvers team (checked via a
-  short-lived GitHub App installation token, `members:read`);
-- the pull request is mergeable;
-- the pull request has an approving review outstanding (the latest review per
-  reviewer wins; any `CHANGES_REQUESTED` blocks);
-- a reviewed plan exists for the pull request's **current** head SHA (the
-  most recent successful preview run whose head matches; a plan for an older
-  head means new commits landed since — stale, re-plan required).
+- **shipmate team**: the commenter is a member of the configured approvers
+  team (checked via a short-lived GitHub App installation token,
+  `members:read`);
+- **mergeable**: the pull request is mergeable;
+- **approved**: the pull request has an approving review outstanding (the
+  latest review per reviewer wins; any `CHANGES_REQUESTED` blocks);
+- **undiverged**: a reviewed plan exists for the pull request's **current**
+  head SHA (the most recent successful preview run whose head matches; a plan
+  for an older head means new commits landed since — stale, re-plan
+  required).
 
-A bare `mate apply` is authorized exactly once, by the same four checks — one
-authorization decision covers the whole multi-environment run. Both forms
+A bare `shipmate apply` is authorized exactly once, by the same four apply
+requirements — one authorization decision covers the whole multi-environment
+run. Both forms
 dispatch the consumer's single `apply.yml` wrapper; its optional `environment`
 input selects the path (set → targeted, empty → bare). Both share the same
 App-minted `workflow_dispatch` mechanism and the same per-env
@@ -161,7 +164,7 @@ and every workflow in a repo shares the `github-actions` identity, so keeping
 check writes on `GITHUB_TOKEN` keeps that identity consistent across the
 pre-merge and post-merge paths.
 
-`mate apply` and `deploy.yml` share the same per-env, per-stack
+`shipmate apply` and `deploy.yml` share the same per-env, per-stack
 `apply-<env>-<stack>` concurrency group, so exactly one apply ever runs
 against a given stack × environment at a time, regardless of whether it was
 triggered by a pre-merge comment or a post-merge push.
@@ -399,10 +402,10 @@ downstream environments are not touched until it is fixed and re-run.
 `MAX_ENV_LEVELS` is `4`; an env-order graph that would span more levels than
 that fails loud rather than silently truncating.
 
-Targeted applies (`mate apply <env>`) act on a single environment and skip
+Targeted applies (`shipmate apply <env>`) act on a single environment and skip
 env-level ordering entirely — there is nothing to order across.
 
-A bare `mate apply` is the pre-merge equivalent of the merge-deploy path: it
+A bare `shipmate apply` is the pre-merge equivalent of the merge-deploy path: it
 buckets the pending applies of every non-explicit environment into the same
 env-levels and applies level 0 fully before level 1, with the same
 failure-skips-successor-levels rule. An environment excluded as explicit
@@ -410,7 +413,7 @@ keeps its position in the order: environments that do not depend on it run
 normally at their own level, while environments ordered (transitively) after
 an unapplied explicit environment are skipped with a notice — their ordering
 precondition cannot be met in that run, exactly like a failed predecessor
-level. Completed cells skip idempotently, so re-commenting `mate apply`
+level. Completed cells skip idempotently, so re-commenting `shipmate apply`
 resumes where the previous run stopped.
 
 The engine ships this as a reusable, parameterized workflow

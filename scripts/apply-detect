@@ -7,7 +7,7 @@ ONE environment and sourced from a specific preview run's plan artifacts:
 stacks that were planned for this env. We map each present slug back to a stack
 PATH via the run-graph (path->slug is one-way; we slug each graph node forward
 and match), drop cells whose apply check already completed (idempotent no-op),
-then wave-order. A targeted `mate apply <env>` is single-env and explicit by
+then wave-order. A targeted `shipmate apply <env>` is single-env and explicit by
 design — it never blocks on other environments; region-level sequencing across
 envs is handled separately on the apply-all path.
 """

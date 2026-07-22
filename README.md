@@ -42,7 +42,7 @@ protection rules stay simple even as the number of underlying units grows.
 ## Comment-ops
 
 Humans drive apply behavior for a pull request through PR comments —
-`mate apply <env>` — rather than through bespoke UI or external tooling.
+`shipmate apply <env>` — rather than through bespoke UI or external tooling.
 A private GitHub App mints the short-lived token needed to dispatch the apply
 workflow from a comment (events created with the default `GITHUB_TOKEN` never
 trigger other workflows); the App itself has no `checks` or `issues`
@@ -127,7 +127,7 @@ workflow over shipmate actions.
 One model note vs a hosted service: with no server-side queue, GHA can drop a
 **superseded** deploy run — its stacks stay pending + visible and are recovered
 by re-running that deploy. The manual **pre-merge** exact-plan apply
-(`mate apply <env>` in a PR comment) shares the same exact-plan `apply-cell`
+(`shipmate apply <env>` in a PR comment) shares the same exact-plan `apply-cell`
 path and the same per-env, per-stack concurrency group as `deploy.yml`, so a
 comment-triggered apply and a post-merge deploy can never race against the
 same stack × environment; see Comment-ops above and `CONTRACT.md`.

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""apply-all.yml detect: the bare `mate apply` work set -> env-levels -> waves.
+"""apply-all.yml detect: the bare `shipmate apply` work set -> env-levels -> waves.
 
 The pre-merge equivalent of deploy-detect, sourced like apply-detect: cells
 come from the reviewed plan artifacts of ONE verified preview run (never a
@@ -13,7 +13,7 @@ Two exclusions distinguish the bare form from deploy:
 - envs listed in `global.shipmate.explicit_envs` (typically prod) are removed
   before env-levels are built; their apply checks simply stay pending, so
   `shipmate / checkmate` keeps gating the merge until a targeted
-  `mate apply <env>` completes them;
+  `shipmate apply <env>` completes them;
 - envs ordered (transitively) after an unapplied explicit env are skipped
   with a notice — their ordering precondition cannot be met this run,
   exactly like a failed predecessor level.

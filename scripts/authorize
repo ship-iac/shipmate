@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Decide whether a `mate apply` comment is authorized to dispatch.
+"""Decide whether a `shipmate apply` comment is authorized to dispatch.
 
 Pure decision from already-fetched GitHub API JSON. Checks run in fail-fast
 order and each returns a DISTINCT, actionable reason (the reject comment). The
@@ -41,7 +41,7 @@ def decide(*, is_member, approvers_team, reviews, pr, plan_run):
             # "not computed yet", NOT a real conflict — don't misattribute.
             return False, (
                 "GitHub is still computing this PR's mergeability; "
-                "wait a moment and re-run `mate apply`."
+                "wait a moment and re-run `shipmate apply`."
             )
         return False, (
             f"PR is not mergeable (state: {state}); resolve conflicts "
@@ -58,7 +58,7 @@ def decide(*, is_member, approvers_team, reviews, pr, plan_run):
         return False, (
             f"stale: the latest reviewed plan is for {plan_run.get('head_sha')} "
             f"but the PR head is now {pr['head']['sha']}; re-plan "
-            f"(push or `mate plan`) before applying."
+            f"(push or `shipmate plan`) before applying."
         )
     return True, ""
 

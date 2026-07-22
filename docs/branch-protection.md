@@ -56,15 +56,15 @@ the last green check, so the PR merges itself:
    "Allow auto-merge").
 2. **Per PR:** review and approve, arm auto-merge
    (`gh pr merge <n> --auto --merge`, or the "Enable auto-merge" button), then
-   comment `mate apply`. When every environment's applies complete,
+   comment `shipmate apply`. When every environment's applies complete,
    `shipmate / checkmate` flips to `success` and GitHub merges the PR.
 
 Properties that fall out of the existing gate semantics:
 
 - **Explicit environments still gate.** An environment listed in
-  `global.shipmate.explicit_envs` is skipped by the bare `mate apply` and its
+  `global.shipmate.explicit_envs` is skipped by the bare `shipmate apply` and its
   apply checks stay pending — checkmate stays pending, so auto-merge waits
-  until someone runs the targeted `mate apply <env>`. Arming auto-merge never
+  until someone runs the targeted `shipmate apply <env>`. Arming auto-merge never
   weakens the apply-before-merge guarantee; it only removes the final click.
 - **Stale bases don't sneak through.** With "require branches up to date"
   (strict), a base moved since the plans ran blocks the auto-merge until the

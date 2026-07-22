@@ -1,5 +1,5 @@
 name: shipmate comment-ops
-description: Parse a mate command comment, authorize it (team membership via a short-lived App token, PR approved + mergeable + reviewed-plan-exists), and react or reject. Outputs feed actions/dispatch.
+description: Parse a shipmate command comment, authorize it (team membership via a short-lived App token, PR approved + mergeable + reviewed-plan-exists), and react or reject. Outputs feed actions/dispatch.
 inputs:
   app-id:
     description: GitHub App id (a repo/org variable).
@@ -30,10 +30,10 @@ outputs:
     description: true when the command is valid and authorized.
     value: ${{ steps.authz.outputs.authorized }}
   is-command:
-    description: true when the comment is a mate command at all.
+    description: true when the comment is a shipmate command at all.
     value: ${{ steps.parse.outputs.is_command }}
   environment:
-    description: Parsed target environment; empty for a bare `mate apply` (all non-explicit environments).
+    description: Parsed target environment; empty for a bare `shipmate apply` (all non-explicit environments).
     value: ${{ steps.authz.outputs.environment }}
   plan-run-id:
     description: Preview run id holding the reviewed plan.
@@ -58,7 +58,7 @@ runs:
         python3 "$GITHUB_ACTION_PATH/../../scripts/comment-parse"
 
     - name: Reject malformed / reserved command
-      # Runs only when it IS a mate command but not valid. Non-commands are
+      # Runs only when it IS a shipmate command but not valid. Non-commands are
       # silently ignored (no output). GITHUB_TOKEN posts the comment.
       if: ${{ steps.parse.outputs.is_command == 'true' && steps.parse.outputs.valid != 'true' }}
       shell: bash

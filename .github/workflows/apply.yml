@@ -107,6 +107,6 @@ jobs:
                   if gate == "complete" else
                   "`shipmate / checkmate` stays pending until every "
                   "environment is applied (or the merge deploy runs).")
-          print(json.dumps({"body": f"{emoji} shipmate: `mate apply {env}` {word}. " + tail}))
+          print(json.dumps({"body": f"{emoji} shipmate: `shipmate apply {env}` {word}. " + tail}))
           PY
           gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" --input body.json >/dev/null

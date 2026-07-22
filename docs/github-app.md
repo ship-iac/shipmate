@@ -1,6 +1,6 @@
 # GitHub App setup (one-time)
 
-shipmate's comment-ops path (`mate apply <env>` in a PR comment) needs a
+shipmate's comment-ops path (`shipmate apply <env>` in a PR comment) needs a
 private GitHub App to mint a short-lived `workflow_dispatch` token — events
 created with `GITHUB_TOKEN` never trigger other workflows, so the manual
 pre-merge apply cannot be kicked off with the default token. The bot identity
@@ -85,7 +85,7 @@ installation later from the same page as new consumer repos come online.
 ## 4. Set the approvers team + propagate credentials
 
 Each consumer repo needs `SHIPMATE_APPROVERS_TEAM` (the GitHub team slug whose
-members may run `mate apply`) plus the app id/key from step 2. `gh` cannot read
+members may run `shipmate apply`) plus the app id/key from step 2. `gh` cannot read
 back a secret's value once set (GitHub never exposes it), so keep the PEM from
 `register-app`'s conversion around (or re-download it from App settings) until
 every consumer repo has it.
