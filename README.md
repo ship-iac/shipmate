@@ -98,7 +98,7 @@ require `shipmate / checkmate`; see [`docs/branch-protection.md`](docs/branch-pr
 
 shipmate follows a **serverless plan→store→review→apply** model — the reviewed
 plan is stored and applied verbatim, with no server or database. A consumer's
-`deploy.yml` is a ~16-line wrapper over the engine's reusable deploy workflow
+`deploy.yml` is a 19-line wrapper over the engine's reusable deploy workflow
 (passing only its flavor's `state_suffix`); `drift.yml` is a thin sample-repo
 workflow over shipmate actions.
 
@@ -120,8 +120,9 @@ workflow over shipmate actions.
   drifted stack × env — auto-closed on the next clean run. Optional Slack.
 - **Generalization:** deploy + drift run unchanged across all three layouts
   (`repo-example-{stacks,folders,workspaces}`) — same pinned shipmate SHA, only
-  the per-flavor `env:` block and state path differ (folders inject nothing,
-  workspaces inject `TF_WORKSPACE`).
+  the per-flavor state path (deploy wrapper's `state_suffix`) and, for drift,
+  the per-flavor `env:` block differ (folders inject nothing, workspaces
+  inject `TF_WORKSPACE`).
 
 One model note vs a hosted service: with no server-side queue, GHA can drop a
 **superseded** deploy run — its stacks stay pending + visible and are recovered
