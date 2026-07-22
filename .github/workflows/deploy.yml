@@ -127,7 +127,7 @@ jobs:
           PY
           gh api "repos/$GITHUB_REPOSITORY/check-runs" --input body.json >/dev/null
       - name: Slack on failed deploy (outranks drift)
-        if: ${{ (contains(join(needs.*.result, ','), 'failure') || contains(join(needs.*.result, ','), 'cancelled')) && vars.SLACK_WEBHOOK != '' }}
+        if: ${{ always() && (contains(join(needs.*.result, ','), 'failure') || contains(join(needs.*.result, ','), 'cancelled')) && vars.SLACK_WEBHOOK != '' }}
         env:
           SLACK: ${{ vars.SLACK_WEBHOOK }}
         run: |
