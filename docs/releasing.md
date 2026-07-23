@@ -32,8 +32,32 @@ sequence:
 
 ## The guard
 
-`scripts/tests/test_internal_pins.py` fails CI if any internal
-`ship-iac/shipmate/<path>@<sha>` reference pins a commit whose `<path>` no
-longer matches the current tree. A red run here after an action change means step
-2 above is still pending. (CI checks out with `fetch-depth: 0` so the test can
-read the pinned commit objects.)
+`scripts/tests/test_internal_pins.py` fails if any internal
+`ship-iac/shipmate/<path>@<sha>` reference pins a commit whose `<path>` no longer
+matches the mainline tree. A red run after an action change means step 2 above is
+still pending.
+
+It runs in its own workflow (`.github/workflows/internal-pins.yml`) on **push to
+main only — never on pull_request**. The guard reads the pins from the working
+tree and diffs each pinned SHA's `<path>` content against the merge-base with
+`main`. On a branch this means:
+
+- A PR that edits a *pinned action's code* is **not** flagged for its own
+  not-yet-merged change — the comparison is against the fork point, and step 1's
+  commit cannot pin its own unborn SHA. This is the false positive the mainline
+  baseline exists to suppress.
+- A PR that edits a *pin reference itself* to a SHA whose content is already
+  stale (a fat-fingered step-2 bump) **is** something the guard could catch
+  pre-merge — and the PR trigger did catch it.
+
+Not running on PRs is a deliberate tradeoff: it trades that pre-merge catch of a
+PR-introduced bad pin for silence during the step-1→step-2 window, when a stale
+pin genuinely sits on `main` and thus on every branch's fork point — actionable
+only by the release owner, not by unrelated PR authors (dependabot included).
+The push-to-main run still catches a bad pin, one step later, exactly where and
+when the bump is done. (The workflow checks out with `fetch-depth: 0` so the test
+can read the pinned commit objects.)
+
+Because this workflow reports **no status on PR heads**, it must **never** be
+added to this repo's required status checks — a required check that never
+reports deadlocks every PR.
