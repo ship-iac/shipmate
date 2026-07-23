@@ -45,7 +45,7 @@ jobs:
   apply:
     needs: [detect]
     if: ${{ !failure() && !cancelled() && needs.detect.outputs.empty != 'true' }}
-    uses: ship-iac/shipmate/.github/workflows/apply-env-level.yml@cc54ebf89eb763a243a0dc2fc2504ba7dbed5b92
+    uses: ship-iac/shipmate/.github/workflows/apply-env-level.yml@1ddcad409bd388ed437c78522e74cff839c02b20
     permissions: { contents: read, checks: write, actions: read }
     with:
       waves_json: ${{ needs.detect.outputs.waves }}
