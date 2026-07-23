@@ -34,12 +34,12 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { fetch-depth: 0, ref: "${{ inputs.ref }}" }
-      - uses: ship-iac/shipmate/actions/setup@264d57ad2a55445865ea068302d0607a22cbb062
+      - uses: ship-iac/shipmate/actions/setup@cc54ebf89eb763a243a0dc2fc2504ba7dbed5b92
         with:
           terramate-version: ${{ vars.TERRAMATE_VERSION }}
           tofu-version: ${{ vars.TOFU_VERSION }}
       - id: d
-        uses: ship-iac/shipmate/actions/apply-all-detect@5cca773f540eda646b9de9e2c9fbda43e461fc63
+        uses: ship-iac/shipmate/actions/apply-all-detect@cc54ebf89eb763a243a0dc2fc2504ba7dbed5b92
         with:
           plan-run-id: ${{ inputs.plan_run_id }}
           head-sha: ${{ inputs.ref }}
@@ -48,7 +48,7 @@ jobs:
   envlevel0:
     needs: [detect]
     if: ${{ !failure() && !cancelled() && needs.detect.outputs.envlevel0_empty != 'true' && !contains(join(needs.*.result, ','), 'cancelled') }}
-    uses: ship-iac/shipmate/.github/workflows/apply-env-level.yml@264d57ad2a55445865ea068302d0607a22cbb062
+    uses: ship-iac/shipmate/.github/workflows/apply-env-level.yml@cc54ebf89eb763a243a0dc2fc2504ba7dbed5b92
     permissions: { contents: read, checks: write, actions: read }
     with:
       waves_json: ${{ needs.detect.outputs.envlevel0_waves }}
@@ -66,7 +66,7 @@ jobs:
   envlevel1:
     needs: [detect, envlevel0]
     if: ${{ !failure() && !cancelled() && needs.detect.outputs.envlevel1_empty != 'true' && !contains(join(needs.*.result, ','), 'cancelled') }}
-    uses: ship-iac/shipmate/.github/workflows/apply-env-level.yml@264d57ad2a55445865ea068302d0607a22cbb062
+    uses: ship-iac/shipmate/.github/workflows/apply-env-level.yml@cc54ebf89eb763a243a0dc2fc2504ba7dbed5b92
     permissions: { contents: read, checks: write, actions: read }
     with:
       waves_json: ${{ needs.detect.outputs.envlevel1_waves }}
@@ -78,7 +78,7 @@ jobs:
   envlevel2:
     needs: [detect, envlevel0, envlevel1]
     if: ${{ !failure() && !cancelled() && needs.detect.outputs.envlevel2_empty != 'true' && !contains(join(needs.*.result, ','), 'cancelled') }}
-    uses: ship-iac/shipmate/.github/workflows/apply-env-level.yml@264d57ad2a55445865ea068302d0607a22cbb062
+    uses: ship-iac/shipmate/.github/workflows/apply-env-level.yml@cc54ebf89eb763a243a0dc2fc2504ba7dbed5b92
     permissions: { contents: read, checks: write, actions: read }
     with:
       waves_json: ${{ needs.detect.outputs.envlevel2_waves }}
@@ -90,7 +90,7 @@ jobs:
   envlevel3:
     needs: [detect, envlevel0, envlevel1, envlevel2]
     if: ${{ !failure() && !cancelled() && needs.detect.outputs.envlevel3_empty != 'true' && !contains(join(needs.*.result, ','), 'cancelled') }}
-    uses: ship-iac/shipmate/.github/workflows/apply-env-level.yml@264d57ad2a55445865ea068302d0607a22cbb062
+    uses: ship-iac/shipmate/.github/workflows/apply-env-level.yml@cc54ebf89eb763a243a0dc2fc2504ba7dbed5b92
     permissions: { contents: read, checks: write, actions: read }
     with:
       waves_json: ${{ needs.detect.outputs.envlevel3_waves }}
@@ -103,15 +103,13 @@ jobs:
     needs: [detect, envlevel0, envlevel1, envlevel2, envlevel3]
     if: always()
     runs-on: ubuntu-latest
-    # gate-refresh scans the apply check-runs and completes the gate as a commit
-    # status (statuses:write). checks:write is retained transitionally: the pinned
-    # gate-refresh SHA still POSTs a check-run until the internal pin is bumped to
-    # this change -- narrow to checks:read in that pin-bump.
-    permissions: { checks: write, statuses: write }
+    # gate-refresh scans the apply check-runs (checks:read) and completes the
+    # gate as a commit status (statuses:write); it no longer writes a check-run.
+    permissions: { checks: read, statuses: write }
     steps:
       - name: Complete gate if every apply check is done
         id: gate
-        uses: ship-iac/shipmate/actions/gate-refresh@5cca773f540eda646b9de9e2c9fbda43e461fc63
+        uses: ship-iac/shipmate/actions/gate-refresh@cc54ebf89eb763a243a0dc2fc2504ba7dbed5b92
         with:
           head-sha: ${{ inputs.ref }}
           github-token: ${{ github.token }}
