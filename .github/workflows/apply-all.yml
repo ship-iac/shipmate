@@ -103,7 +103,11 @@ jobs:
     needs: [detect, envlevel0, envlevel1, envlevel2, envlevel3]
     if: always()
     runs-on: ubuntu-latest
-    permissions: { checks: write }
+    # gate-refresh scans the apply check-runs and completes the gate as a commit
+    # status (statuses:write). checks:write is retained transitionally: the pinned
+    # gate-refresh SHA still POSTs a check-run until the internal pin is bumped to
+    # this change -- narrow to checks:read in that pin-bump.
+    permissions: { checks: write, statuses: write }
     steps:
       - name: Complete gate if every apply check is done
         id: gate

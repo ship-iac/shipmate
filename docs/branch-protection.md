@@ -18,8 +18,14 @@ resolves to:
 | State | gate | Merge |
 |-------|-----------|-------|
 | A plan cell (or `detect`) failed | `failure` — "plan incomplete" | blocked |
-| Plans succeeded, applies still pending | `queued` (pending) | blocked |
+| Plans succeeded, applies still pending | `pending` | blocked |
 | Nothing left to apply | `success` | allowed |
+
+`shipmate / gate` is a **commit status**, not a check-run (it is commit-scoped,
+so a commit that carries two plan runs — draft→ready, or a rapid re-push —
+cannot strand the gate in a stale check-suite). The required-check contract is
+unchanged: a ruleset `required_status_checks` entry matches a commit status by
+`context` exactly as it matches a check-run.
 
 ## Reproducible ruleset (GitHub Pro / Team / Enterprise, or a public repo)
 
@@ -95,6 +101,23 @@ once the repo is public or on a paid plan.
 
 ## Upgrading
 
+- **Gate is now a commit status — grant `statuses: write`.** The aggregate gate
+  moved from the check-runs API to the commit-statuses API. Every consumer
+  workflow **job** that runs `actions/summary` or `actions/gate-refresh` must now
+  grant `statuses: write` (previously `checks: write`) — in the **same change**
+  that bumps your pinned engine SHA, or the gate POST 403s and the required
+  `shipmate / gate` status is never reported, blocking every PR. Recommended
+  minimal grants:
+  - `plan.yml` summary job (runs `actions/summary`): `statuses: write` +
+    `checks: read` (the sticky comment lists the per-cell `plan` check-runs to
+    link them) + `pull-requests: write` (the sticky comment itself).
+  - `apply.yml` / apply-dispatch summary job (runs `actions/gate-refresh`):
+    `statuses: write` + `checks: read` (it scans the `apply` check-runs).
+
+  Keep `checks: read` — do not simply swap `checks: write` → `statuses: write`,
+  or the check-runs the comment/scan read will 403 (a silent link degradation on
+  the plan path; a stuck gate on the apply path). The ruleset required-check
+  string does not change: `shipmate / gate` matches a status by context.
 - **Required status check renamed.** If your branch protection currently
   requires the aggregate gate check under its pre-rename name, update it to
   require `shipmate / gate` instead — in the **same change** that bumps your

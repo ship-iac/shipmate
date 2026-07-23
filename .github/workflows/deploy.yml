@@ -100,7 +100,7 @@ jobs:
     needs: [detect, envlevel0, envlevel1, envlevel2, envlevel3]
     if: always()
     runs-on: ubuntu-latest
-    permissions: { checks: write }
+    permissions: { statuses: write }
     steps:
       - name: Complete gate on the merged PR head SHA
         env:
@@ -118,14 +118,19 @@ jobs:
           if echo "$RESULTS" | tr ',' '\n' | grep -qvE '^(success|skipped)$'; then
             concl=failure; title="deploy incomplete";
           else concl=success; title="all env-levels applied"; fi
-          python3 - "$HEAD_SHA" "$concl" "$title" > body.json <<'PY'
-          import json, sys
-          head, concl, title = sys.argv[1:4]
-          print(json.dumps({"name": "shipmate / gate", "head_sha": head,
-              "status": "completed", "conclusion": concl,
-              "output": {"title": title, "summary": "Deploy env-level applies completed."}}))
+          python3 - "$concl" "$title" > body.json <<'PY'
+          import json, os, sys
+          # Commit status, not a check-run (see actions/summary for why).
+          concl, title = sys.argv[1:3]
+          body = {"state": concl, "context": "shipmate / gate",
+                  "description": (title + " — deploy env-level applies completed")[:140]}
+          server, repo, run_id = (os.environ.get(k, "") for k in
+                                  ("GITHUB_SERVER_URL", "GITHUB_REPOSITORY", "GITHUB_RUN_ID"))
+          if server and repo and run_id:
+              body["target_url"] = f"{server}/{repo}/actions/runs/{run_id}"
+          print(json.dumps(body))
           PY
-          gh api "repos/$GITHUB_REPOSITORY/check-runs" --input body.json >/dev/null
+          gh api "repos/$GITHUB_REPOSITORY/statuses/$HEAD_SHA" --input body.json >/dev/null
       - name: Slack on failed deploy (outranks drift)
         if: ${{ always() && (contains(join(needs.*.result, ','), 'failure') || contains(join(needs.*.result, ','), 'cancelled')) && vars.SLACK_WEBHOOK != '' }}
         env:

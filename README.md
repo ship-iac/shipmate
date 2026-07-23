@@ -82,14 +82,17 @@ The `plan.yml` workflow (thin and identical across repo layouts; see the
   completed "no changes").
 - **`summary`** — `actions/summary` upserts one sticky PR comment (a stack ×
   env table) and creates/refreshes the aggregate **`shipmate / gate`**
-  check, which stays non-green while any apply is pending or any plan
-  cell failed.
+  commit status, which stays non-green while any apply is pending or any
+  plan cell failed.
 
 Note on plan output: plan text lives in each `plan / <env> / <stack>` job's
 **Summary**, not in a separate Checks-API check-run — the matrix job already
 emits the check of that name, so a second API check would duplicate it. The
-`apply` and `gate` checks *are* API check-runs (created pending; they
-have no backing job in `plan.yml`).
+`apply` checks *are* API check-runs (created pending; they have no backing
+job in `plan.yml`). The aggregate `gate` is a **commit status**, not a
+check-run: a status is commit-scoped, so it cannot be misattributed to a
+stale check-suite when a commit carries two plan runs (draft→ready, or a
+rapid re-push) — a check-run can, silently blocking the merge forever.
 
 To make the gate enforce apply-before-merge, configure branch protection to
 require `shipmate / gate`; see [`docs/branch-protection.md`](docs/branch-protection.md).

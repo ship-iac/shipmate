@@ -5,7 +5,7 @@ inputs:
     description: PR head SHA carrying the apply checks and the gate.
     required: true
   github-token:
-    description: 'GITHUB_TOKEN with checks:write.'
+    description: 'GITHUB_TOKEN with statuses:write (gate) + checks:read (apply-check scan).'
     required: true
 outputs:
   verdict: { description: "complete, pending, or no-applies", value: "${{ steps.scan.outputs.verdict }}" }
@@ -38,12 +38,17 @@ runs:
         HEAD_SHA: ${{ inputs.head-sha }}
       run: |
         set -euo pipefail
-        python3 - "$HEAD_SHA" > gate.json <<'PY'
-        import json, sys
-        print(json.dumps({"name": "shipmate / gate", "head_sha": sys.argv[1],
-            "status": "completed", "conclusion": "success",
-            "output": {"title": "all applies complete",
-                       "summary": "Every apply / <env> / <stack> check for this "
-                                  "commit is complete. Nothing left to apply."}}))
+        python3 - > gate.json <<'PY'
+        import json, os
+        # Commit status, not a check-run — see actions/summary for the rationale
+        # (check-runs bind to a suite; a commit status is commit-scoped and so
+        # survives the multi-suite attribution race).
+        body = {"state": "success", "context": "shipmate / gate",
+                "description": "all applies complete — nothing left to apply"}
+        server, repo, run_id = (os.environ.get(k, "") for k in
+                                ("GITHUB_SERVER_URL", "GITHUB_REPOSITORY", "GITHUB_RUN_ID"))
+        if server and repo and run_id:
+            body["target_url"] = f"{server}/{repo}/actions/runs/{run_id}"
+        print(json.dumps(body))
         PY
-        gh api "repos/$GITHUB_REPOSITORY/check-runs" --input gate.json >/dev/null
+        gh api "repos/$GITHUB_REPOSITORY/statuses/$HEAD_SHA" --input gate.json >/dev/null
