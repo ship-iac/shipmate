@@ -30,12 +30,12 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { fetch-depth: 0 }
-      - uses: ship-iac/shipmate/actions/setup@264d57ad2a55445865ea068302d0607a22cbb062
+      - uses: ship-iac/shipmate/actions/setup@cc54ebf89eb763a243a0dc2fc2504ba7dbed5b92
         with:
           terramate-version: ${{ vars.TERRAMATE_VERSION }}
           tofu-version: ${{ vars.TOFU_VERSION }}
       - id: d
-        uses: ship-iac/shipmate/actions/deploy-detect@5cca773f540eda646b9de9e2c9fbda43e461fc63
+        uses: ship-iac/shipmate/actions/deploy-detect@cc54ebf89eb763a243a0dc2fc2504ba7dbed5b92
         with:
           # The caller is `on: push` to the default branch; its event payload
           # (and so the previous main tip) is visible here.
@@ -45,7 +45,7 @@ jobs:
   envlevel0:
     needs: [detect]
     if: ${{ !failure() && !cancelled() && needs.detect.outputs.envlevel0_empty != 'true' && !contains(join(needs.*.result, ','), 'cancelled') }}
-    uses: ship-iac/shipmate/.github/workflows/apply-env-level.yml@264d57ad2a55445865ea068302d0607a22cbb062
+    uses: ship-iac/shipmate/.github/workflows/apply-env-level.yml@1ddcad409bd388ed437c78522e74cff839c02b20
     permissions: { contents: read, checks: write, actions: read }
     with:
       waves_json: ${{ needs.detect.outputs.envlevel0_waves }}
@@ -63,7 +63,7 @@ jobs:
   envlevel1:
     needs: [detect, envlevel0]
     if: ${{ !failure() && !cancelled() && needs.detect.outputs.envlevel1_empty != 'true' && !contains(join(needs.*.result, ','), 'cancelled') }}
-    uses: ship-iac/shipmate/.github/workflows/apply-env-level.yml@264d57ad2a55445865ea068302d0607a22cbb062
+    uses: ship-iac/shipmate/.github/workflows/apply-env-level.yml@1ddcad409bd388ed437c78522e74cff839c02b20
     permissions: { contents: read, checks: write, actions: read }
     with:
       waves_json: ${{ needs.detect.outputs.envlevel1_waves }}
@@ -75,7 +75,7 @@ jobs:
   envlevel2:
     needs: [detect, envlevel0, envlevel1]
     if: ${{ !failure() && !cancelled() && needs.detect.outputs.envlevel2_empty != 'true' && !contains(join(needs.*.result, ','), 'cancelled') }}
-    uses: ship-iac/shipmate/.github/workflows/apply-env-level.yml@264d57ad2a55445865ea068302d0607a22cbb062
+    uses: ship-iac/shipmate/.github/workflows/apply-env-level.yml@1ddcad409bd388ed437c78522e74cff839c02b20
     permissions: { contents: read, checks: write, actions: read }
     with:
       waves_json: ${{ needs.detect.outputs.envlevel2_waves }}
@@ -87,7 +87,7 @@ jobs:
   envlevel3:
     needs: [detect, envlevel0, envlevel1, envlevel2]
     if: ${{ !failure() && !cancelled() && needs.detect.outputs.envlevel3_empty != 'true' && !contains(join(needs.*.result, ','), 'cancelled') }}
-    uses: ship-iac/shipmate/.github/workflows/apply-env-level.yml@264d57ad2a55445865ea068302d0607a22cbb062
+    uses: ship-iac/shipmate/.github/workflows/apply-env-level.yml@1ddcad409bd388ed437c78522e74cff839c02b20
     permissions: { contents: read, checks: write, actions: read }
     with:
       waves_json: ${{ needs.detect.outputs.envlevel3_waves }}
@@ -100,7 +100,7 @@ jobs:
     needs: [detect, envlevel0, envlevel1, envlevel2, envlevel3]
     if: always()
     runs-on: ubuntu-latest
-    permissions: { checks: write }
+    permissions: { statuses: write }
     steps:
       - name: Complete gate on the merged PR head SHA
         env:
@@ -118,14 +118,19 @@ jobs:
           if echo "$RESULTS" | tr ',' '\n' | grep -qvE '^(success|skipped)$'; then
             concl=failure; title="deploy incomplete";
           else concl=success; title="all env-levels applied"; fi
-          python3 - "$HEAD_SHA" "$concl" "$title" > body.json <<'PY'
-          import json, sys
-          head, concl, title = sys.argv[1:4]
-          print(json.dumps({"name": "shipmate / gate", "head_sha": head,
-              "status": "completed", "conclusion": concl,
-              "output": {"title": title, "summary": "Deploy env-level applies completed."}}))
+          python3 - "$concl" "$title" > body.json <<'PY'
+          import json, os, sys
+          # Commit status, not a check-run (see actions/summary for why).
+          concl, title = sys.argv[1:3]
+          body = {"state": concl, "context": "shipmate / gate",
+                  "description": (title + " — deploy env-level applies completed")[:140]}
+          server, repo, run_id = (os.environ.get(k, "") for k in
+                                  ("GITHUB_SERVER_URL", "GITHUB_REPOSITORY", "GITHUB_RUN_ID"))
+          if server and repo and run_id:
+              body["target_url"] = f"{server}/{repo}/actions/runs/{run_id}"
+          print(json.dumps(body))
           PY
-          gh api "repos/$GITHUB_REPOSITORY/check-runs" --input body.json >/dev/null
+          gh api "repos/$GITHUB_REPOSITORY/statuses/$HEAD_SHA" --input body.json >/dev/null
       - name: Slack on failed deploy (outranks drift)
         if: ${{ always() && (contains(join(needs.*.result, ','), 'failure') || contains(join(needs.*.result, ','), 'cancelled')) && vars.SLACK_WEBHOOK != '' }}
         env:

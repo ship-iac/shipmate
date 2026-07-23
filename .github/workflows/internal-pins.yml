@@ -1,0 +1,28 @@
+name: internal-pins
+
+# The internal-pin guard runs on push to main only — never on pull_request.
+# Rationale, and the accepted tradeoff (a PR that itself mis-pins is caught
+# post-merge, not pre-merge), live in docs/releasing.md § The guard.
+#
+# WARNING: because this workflow does not run on pull_request, it reports NO
+# status on PR heads. It MUST NOT be added to this repo's required status
+# checks — a required check that never reports deadlocks every PR.
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  internal-pins:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        # Full history so the guard can diff the internally-pinned action SHAs
+        # against the mainline (a shallow clone lacks those commit objects).
+        with: { fetch-depth: 0 }
+      - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+      - name: Internal action pins are current
+        run: uv run pytest scripts/tests/test_internal_pins.py -q

@@ -23,14 +23,23 @@ apply check (`plan-cell`), *completes* it (`apply-cell`), and *filters the
 still-pending queue* (`deploy-detect`, which only ever has the path) all
 reconstruct the identical name from the one value they share.
 
-In addition to the per-unit checks, one aggregate check rolls up the full
-fan-out into a single required status, named verbatim:
+In addition to the per-unit checks, one aggregate **commit status** rolls up
+the full fan-out into a single required status, named verbatim:
 
 - `shipmate / gate`
 
 Branch protection rules should require `shipmate / gate`, not the
 individual per-unit checks, so that the set of required checks does not
 need to be edited every time a stack or environment is added or removed.
+
+The gate is a commit status rather than a check-run deliberately: a check-run
+is bound to a check-suite, and an imperatively-created one attaches to an
+arbitrary suite when a commit carries more than one plan run (a draft→ready
+transition or a rapid re-push spawns two runs = two suites). The merge
+evaluator then reads the live suite, finds no gate there, and blocks the PR
+forever while the green gate sits in the stale suite. A commit status is
+commit-scoped and immune. (The per-unit `plan`/`apply` checks stay check-runs;
+they are not required, so a stale-suite copy is only cosmetic.)
 
 `shipmate / gate` is created (and refreshed on every plan run) by the
 `summary` action, and is completed to success by whichever of these happens

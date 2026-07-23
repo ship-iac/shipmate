@@ -18,7 +18,7 @@ inputs:
     description: 'Result of the detect job (needs.detect.result): success|failure|cancelled|skipped.'
     required: true
   github-token:
-    description: GITHUB_TOKEN with checks:write + pull-requests:write.
+    description: GITHUB_TOKEN with statuses:write (gate) + checks:read (plan-check links) + pull-requests:write (sticky comment).
     required: true
 runs:
   using: composite
@@ -78,31 +78,35 @@ runs:
         CELL_COUNT: ${{ steps.build.outputs.count }}
       run: |
         set -euo pipefail
-        # gh api has no -f bracket-nesting; build the JSON body with python (same as plan-cell).
+        # The gate is a commit STATUS, not a check-run. A check-run is bound to a
+        # check-suite; an imperatively-created one lands in an arbitrary suite
+        # when a commit carries more than one plan run (draft->ready, or a rapid
+        # re-push, spawns two runs = two suites). The merge evaluator then reads
+        # the live suite, finds no gate there, and blocks the PR forever while
+        # the green gate sits in the stale suite. A commit status is
+        # commit-scoped, so it is immune to that attribution race.
+        # gh api has no -f bracket-nesting; build the JSON body with python.
         # Gate soundness: read the upstream job results, not just the cell artifacts.
         pr="$PLAN_RESULT"; dr="$DETECT_RESULT"
         if [ "$dr" != "success" ] || { [ "$pr" != "success" ] && [ "$pr" != "skipped" ]; }; then
-          status="completed"; conclusion="failure"; title="plan incomplete"
-          summary="detect or a plan cell did not succeed (detect=$dr, plan=$pr). Fix the failing plan / <env> / <stack> check before merging."
+          state="failure"; desc="plan incomplete (detect=$dr, plan=$pr) — fix the failing plan / <env> / <stack> check before merging"
         elif [ "$pr" = "success" ] && [ "$CELL_COUNT" = "0" ]; then
           # Plan jobs ran (matrix was non-empty) but no cell summaries arrived —
           # an artifact-download failure must not resolve the gate green.
-          status="completed"; conclusion="failure"; title="plan incomplete"
-          summary="Plan jobs ran but produced no cell summaries (artifact download issue). Re-run before merging."
+          state="failure"; desc="plan jobs ran but produced no cell summaries (artifact download issue) — re-run before merging"
         elif [ "$PENDING" = "true" ]; then
-          status="queued"; conclusion=""; title="apply pending"
-          summary="One or more stacks are waiting to be applied. Merge is blocked until applies complete."
+          state="pending"; desc="one or more stacks are waiting to be applied — merge is blocked until applies complete"
         else
-          status="completed"; conclusion="success"; title="nothing to apply"
-          summary="No pending applies for this PR."
+          state="success"; desc="no pending applies for this PR"
         fi
-        python3 - "$HEAD_SHA" "$status" "$conclusion" "$title" "$summary" > gate.json <<'PY'
-        import json, sys
-        head, status, conclusion, title, summary = sys.argv[1:6]
-        body = {"name": "shipmate / gate", "head_sha": head, "status": status,
-                "output": {"title": title, "summary": summary}}
-        if conclusion:
-            body["conclusion"] = conclusion
+        python3 - "$state" "$desc" > gate.json <<'PY'
+        import json, os, sys
+        state, desc = sys.argv[1:3]
+        body = {"state": state, "context": "shipmate / gate", "description": desc[:140]}
+        server, repo, run_id = (os.environ.get(k, "") for k in
+                                ("GITHUB_SERVER_URL", "GITHUB_REPOSITORY", "GITHUB_RUN_ID"))
+        if server and repo and run_id:
+            body["target_url"] = f"{server}/{repo}/actions/runs/{run_id}"
         print(json.dumps(body))
         PY
-        gh api "repos/$GITHUB_REPOSITORY/check-runs" --input gate.json >/dev/null
+        gh api "repos/$GITHUB_REPOSITORY/statuses/$HEAD_SHA" --input gate.json >/dev/null

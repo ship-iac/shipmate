@@ -126,7 +126,7 @@ runs:
 
     - name: Restore state
       id: restore-state
-      uses: ship-iac/shipmate/actions/state@264d57ad2a55445865ea068302d0607a22cbb062 # pinned to a commit on main
+      uses: ship-iac/shipmate/actions/state@cc54ebf89eb763a243a0dc2fc2504ba7dbed5b92 # pinned to a commit on main
       with:
         stack-slug: ${{ steps.ids.outputs.slug }}
         env: ${{ inputs.env }}
@@ -163,7 +163,7 @@ runs:
       # step still skips (default success()), leaving the check pending so the
       # work is re-detected.
       if: ${{ always() && steps.restore-state.outcome == 'success' }}
-      uses: ship-iac/shipmate/actions/state@264d57ad2a55445865ea068302d0607a22cbb062 # pinned to a commit on main
+      uses: ship-iac/shipmate/actions/state@cc54ebf89eb763a243a0dc2fc2504ba7dbed5b92 # pinned to a commit on main
       with:
         stack-slug: ${{ steps.ids.outputs.slug }}
         env: ${{ inputs.env }}
