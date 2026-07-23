@@ -36,7 +36,7 @@ jobs:
         with:
           terramate-version: ${{ vars.TERRAMATE_VERSION }}
           tofu-version: ${{ vars.TOFU_VERSION }}
-      - uses: ship-iac/shipmate/actions/apply-cell@cc54ebf89eb763a243a0dc2fc2504ba7dbed5b92
+      - uses: ship-iac/shipmate/actions/apply-cell@238e327f03952849eed97712b658fc10513e0f18
         with:
           stack: ${{ matrix.stack }}
           stack-name: ${{ matrix.stack }}
@@ -73,7 +73,7 @@ jobs:
         with:
           terramate-version: ${{ vars.TERRAMATE_VERSION }}
           tofu-version: ${{ vars.TOFU_VERSION }}
-      - uses: ship-iac/shipmate/actions/apply-cell@cc54ebf89eb763a243a0dc2fc2504ba7dbed5b92
+      - uses: ship-iac/shipmate/actions/apply-cell@238e327f03952849eed97712b658fc10513e0f18
         with:
           stack: ${{ matrix.stack }}
           stack-name: ${{ matrix.stack }}
@@ -110,7 +110,7 @@ jobs:
         with:
           terramate-version: ${{ vars.TERRAMATE_VERSION }}
           tofu-version: ${{ vars.TOFU_VERSION }}
-      - uses: ship-iac/shipmate/actions/apply-cell@cc54ebf89eb763a243a0dc2fc2504ba7dbed5b92
+      - uses: ship-iac/shipmate/actions/apply-cell@238e327f03952849eed97712b658fc10513e0f18
         with:
           stack: ${{ matrix.stack }}
           stack-name: ${{ matrix.stack }}
@@ -147,7 +147,7 @@ jobs:
         with:
           terramate-version: ${{ vars.TERRAMATE_VERSION }}
           tofu-version: ${{ vars.TOFU_VERSION }}
-      - uses: ship-iac/shipmate/actions/apply-cell@cc54ebf89eb763a243a0dc2fc2504ba7dbed5b92
+      - uses: ship-iac/shipmate/actions/apply-cell@238e327f03952849eed97712b658fc10513e0f18
         with:
           stack: ${{ matrix.stack }}
           stack-name: ${{ matrix.stack }}
@@ -184,7 +184,7 @@ jobs:
         with:
           terramate-version: ${{ vars.TERRAMATE_VERSION }}
           tofu-version: ${{ vars.TOFU_VERSION }}
-      - uses: ship-iac/shipmate/actions/apply-cell@cc54ebf89eb763a243a0dc2fc2504ba7dbed5b92
+      - uses: ship-iac/shipmate/actions/apply-cell@238e327f03952849eed97712b658fc10513e0f18
         with:
           stack: ${{ matrix.stack }}
           stack-name: ${{ matrix.stack }}
@@ -221,7 +221,7 @@ jobs:
         with:
           terramate-version: ${{ vars.TERRAMATE_VERSION }}
           tofu-version: ${{ vars.TOFU_VERSION }}
-      - uses: ship-iac/shipmate/actions/apply-cell@cc54ebf89eb763a243a0dc2fc2504ba7dbed5b92
+      - uses: ship-iac/shipmate/actions/apply-cell@238e327f03952849eed97712b658fc10513e0f18
         with:
           stack: ${{ matrix.stack }}
           stack-name: ${{ matrix.stack }}
@@ -258,7 +258,7 @@ jobs:
         with:
           terramate-version: ${{ vars.TERRAMATE_VERSION }}
           tofu-version: ${{ vars.TOFU_VERSION }}
-      - uses: ship-iac/shipmate/actions/apply-cell@cc54ebf89eb763a243a0dc2fc2504ba7dbed5b92
+      - uses: ship-iac/shipmate/actions/apply-cell@238e327f03952849eed97712b658fc10513e0f18
         with:
           stack: ${{ matrix.stack }}
           stack-name: ${{ matrix.stack }}
@@ -295,7 +295,7 @@ jobs:
         with:
           terramate-version: ${{ vars.TERRAMATE_VERSION }}
           tofu-version: ${{ vars.TOFU_VERSION }}
-      - uses: ship-iac/shipmate/actions/apply-cell@cc54ebf89eb763a243a0dc2fc2504ba7dbed5b92
+      - uses: ship-iac/shipmate/actions/apply-cell@238e327f03952849eed97712b658fc10513e0f18
         with:
           stack: ${{ matrix.stack }}
           stack-name: ${{ matrix.stack }}
