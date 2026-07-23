@@ -89,7 +89,7 @@ runs:
         # Gate soundness: read the upstream job results, not just the cell artifacts.
         pr="$PLAN_RESULT"; dr="$DETECT_RESULT"
         if [ "$dr" != "success" ] || { [ "$pr" != "success" ] && [ "$pr" != "skipped" ]; }; then
-          state="failure"; desc="plan incomplete (detect=$dr, plan=$pr) — fix the failing plan / <env> / <stack> check before merging"
+          state="failure"; desc="plan incomplete (detect=$dr, plan=$pr) — fix the failing <stack> / <env> plan check before merging"
         elif [ "$pr" = "success" ] && [ "$CELL_COUNT" = "0" ]; then
           # Plan jobs ran (matrix was non-empty) but no cell summaries arrived —
           # an artifact-download failure must not resolve the gate green.

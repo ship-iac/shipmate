@@ -30,6 +30,17 @@ def build_matrix(envs, stacks_by_env, tags_by_stack):
                     break
             cells.append({"stack": stack, "environment": env, "workload": workload})
     cells.sort(key=lambda c: (c["environment"], c["stack"]))
+    # A stack whose path is exactly `apply` renders a plan check named
+    # `apply / <env>` (plan check grammar is `<stack> / <env>`, verb-less),
+    # which falls inside the `apply / ` namespace that apply-gate / gate-refresh
+    # select the pending-apply queue by — a phantom entry there corrupts the
+    # gate. Reject it loud; nest or rename the stack.
+    if any(c["stack"] == "apply" for c in cells):
+        raise SystemExit(
+            "::error::a stack path may not be exactly 'apply': its plan check "
+            "'apply / <env>' collides with the apply-check namespace "
+            "('apply / <env> / <stack>'). Rename or nest the stack."
+        )
     if len(cells) > MATRIX_LIMIT:
         raise MatrixTooLarge(
             f"{len(cells)} plan cells exceeds the GitHub Actions matrix limit of {MATRIX_LIMIT}. "

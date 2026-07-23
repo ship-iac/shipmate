@@ -11,17 +11,30 @@ comment-ops, tag-based stack selection) and are not free-form prose.
 Every plan and apply unit of work reports as its own GitHub check, using
 these names verbatim:
 
-- `plan / <env> / <stack>`
-- `apply / <env> / <stack>`
+- plan job check-run: `<stack> / <env>`
+- apply check-run: `apply / <env> / <stack>`
 
 `<env>` and `<stack>` are placeholders substituted with the actual
 environment name and the Terramate **stack path** (as emitted by
 `terramate list` / `experimental run-graph`, e.g. `stacks/network`) for that
-unit of work (for example, `plan / staging / stacks/network`). The check name
-uses the stack **path**, never a display name — so the code that *creates* the
-apply check (`plan-cell`), *completes* it (`apply-cell`), and *filters the
-still-pending queue* (`deploy-detect`, which only ever has the path) all
-reconstruct the identical name from the one value they share.
+unit of work (for example, `stacks/network / staging` and
+`apply / staging / stacks/network`). The check name uses the stack **path**,
+never a display name — so the code that *creates* the apply check
+(`plan-cell`), *completes* it (`apply-cell`), and *filters the still-pending
+queue* (`deploy-detect`, which only ever has the path) all reconstruct the
+identical name from the one value they share.
+
+The plan check has **no verb prefix**: it is the plan matrix job's own
+auto-generated check-run, whose name is the job's `name:` (`<stack> / <env>`).
+The consuming workflow is named `shipmate · plan`, so GitHub's UI already
+shows the verb — `shipmate · plan / <stack> / <env>`. The apply check
+**keeps** its `apply / ` verb prefix: `plan-cell` creates it pending on the
+**same** head SHA that carries the plan job's check, so that prefix is the
+disambiguator that keeps the two apart — and keeps `apply-gate` /
+`gate-refresh`, which select the pending-apply queue by the `apply / ` prefix,
+from ever picking up a plan check. For the same reason `build-matrix` rejects
+a stack whose path is exactly `apply` — its plan check `apply / <env>` would
+fall inside the apply-check namespace.
 
 In addition to the per-unit checks, one aggregate **commit status** rolls up
 the full fan-out into a single required status, named verbatim:
@@ -267,11 +280,11 @@ doubles as the audit trail of previous plans for the PR.
 Structure, in order: an overview table (one row per planned stack ×
 environment: verdict emoji — 🟢 no changes / 🟡 changes / 🔴 contains
 destroys — add/change/destroy counts, and a link to that cell's
-`plan / <env> / <stack>` check run), then one `<details>` section per
+`<stack> / <env>` plan-job check run), then one `<details>` section per
 **changed** cell containing the rendered plan inside a `diff`-tagged code
 fence (change signs moved to column 0; `~` mapped to `!`). Cells with no
 changes get a table row only. Check links are built **forward** from the
-cell's `(environment, stack-path)` pair using the check-name grammar above;
+cell's `(stack-path, environment)` pair using the check-name grammar above;
 when the check run cannot be resolved, the link degrades to the workflow-run
 URL.
 

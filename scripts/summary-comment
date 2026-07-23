@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Build the sticky plan comment: overview table + per-cell plan details.
 
-Reads `plan / <env> / <stack>` check-runs as JSON Lines on stdin (as emitted
-by `gh api --paginate ... --jq '.check_runs[]'`), cell summaries + rendered
+Reads the plan matrix jobs' auto check-runs (named `<stack> / <env>`) as JSON
+Lines on stdin (as emitted by `gh api --paginate ... --jq '.check_runs[]'`),
+cell summaries + rendered
 plan text from the $CELLS directory (cell-summary.* artifacts), and writes
 comment.md plus pending/count to GITHUB_OUTPUT.
 
@@ -37,7 +38,6 @@ def _load(fname):
 ag = _load("apply-gate")
 
 MARKER = "<!-- shipmate:summary -->"
-PLAN_PREFIX = "plan / "
 SIZE_BUDGET = 60_000
 HARD_CAP = 65_536
 MIN_PLAN_CHARS = 500
@@ -125,11 +125,11 @@ def _md_escape(s):
 
 
 def check_url(cell, checks, run_url):
-    """Link target for a cell: the latest `plan / <env> / <stack-path>` check
-    run. Name is built FORWARD from the cell's (environment, stack_path) —
+    """Link target for a cell: the latest `<stack-path> / <env>` plan-job check
+    run. Name is built FORWARD from the cell's (stack_path, environment) —
     the CONTRACT check-name grammar; never parsed back. Falls back to the
     workflow-run URL when the name is absent (e.g. consumer job renamed)."""
-    run = checks.get(f"{PLAN_PREFIX}{cell['environment']} / {cell['stack_path']}")
+    run = checks.get(f"{cell['stack_path']} / {cell['environment']}")
     return run["html_url"] if run and run.get("html_url") else run_url
 
 
@@ -151,8 +151,8 @@ def build_table(cells, checks, run_url):
 
 def _summary_line(cell):
     return (
-        f"<summary>{emoji(cell)} {_md_escape(cell['environment'])} / "
-        f"{_md_escape(cell['stack'])} — "
+        f"<summary>{emoji(cell)} {_md_escape(cell['stack'])} / "
+        f"{_md_escape(cell['environment'])} — "
         f"+{cell['add']} ~{cell['change']} -{cell['destroy']}</summary>"
     )
 
@@ -286,12 +286,17 @@ def load_cells(cells_dir):
             with open(txt, encoding="utf-8") as fh:
                 text = fh.read(SIZE_BUDGET)
         out.append((cell, text))
-    out.sort(key=lambda ct: (ct[0]["environment"], ct[0]["stack"]))
+    out.sort(key=lambda ct: (ct[0]["stack"], ct[0]["environment"]))
     return out
 
 
 def main():
-    checks = ag.latest_by_name(ag.parse_jsonl(sys.stdin), prefix=PLAN_PREFIX)
+    # prefix="" gathers every check-run on the head SHA (plan jobs, the pending
+    # apply checks, detect/summary). Plan check names carry no verb prefix now
+    # (the workflow is "shipmate · plan"), so the anchor is check_url's exact
+    # forward-built `<stack> / <env>` lookup, not a prefix filter; the coexisting
+    # apply checks keep their `apply / ` verb and so never collide.
+    checks = ag.latest_by_name(ag.parse_jsonl(sys.stdin), prefix="")
     cells = load_cells(os.environ.get("CELLS", "cells"))
     run_url = (
         f"{os.environ['GITHUB_SERVER_URL']}/{os.environ['GITHUB_REPOSITORY']}"

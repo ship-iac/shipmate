@@ -120,8 +120,8 @@ def test_md_escape_neutralizes_markdown_link_syntax():
 # --- table / sections -------------------------------------------------------
 
 CHECKS = {
-    "plan / dev-eu / stacks/app": {"html_url": "https://ck/app-eu"},
-    "plan / dev-us / stacks/db": {"html_url": "https://ck/db-us"},
+    "stacks/app / dev-eu": {"html_url": "https://ck/app-eu"},
+    "stacks/db / dev-us": {"html_url": "https://ck/db-us"},
 }
 RUN_URL = "https://gh/run/1"
 
@@ -147,7 +147,7 @@ def test_build_table_empty_case():
 
 def test_render_section_full_plan_in_diff_fence():
     s = sc.render_section(_cell(), "  + resource added", "https://ck/app-eu", 10_000)
-    assert s.startswith("<details><summary>🟡 dev-eu / stacks/app — +1 ~0 -0</summary>")
+    assert s.startswith("<details><summary>🟡 stacks/app / dev-eu — +1 ~0 -0</summary>")
     assert "```diff\n+   resource added\n```" in s
     assert s.endswith("</details>")
 
@@ -188,7 +188,7 @@ def test_build_comment_marker_first_no_change_cells_have_no_details():
     body = sc.build_comment(cells, CHECKS, RUN_URL)
     assert body.startswith(sc.MARKER)
     assert body.count("<details>") == 1
-    assert "dev-us / stacks/db" in body
+    assert "stacks/db / dev-us" in body
 
 
 def test_build_comment_stays_under_budget_and_keeps_every_cells_link():

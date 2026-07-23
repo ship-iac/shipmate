@@ -75,7 +75,7 @@ runs:
         STACK_NAME: ${{ inputs.stack-name }}
       run: |
         {
-          echo "## plan / $ENV / $STACK_NAME"
+          echo "## $STACK_NAME / $ENV"
           echo '```'
           head -c 65536 plan.txt
           bytes=$(wc -c < plan.txt)

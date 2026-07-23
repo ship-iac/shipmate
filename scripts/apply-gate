@@ -35,8 +35,8 @@ def latest_by_name(check_runs, prefix=APPLY_PREFIX):
     the most recently created run -- and unlike `started_at` (nullable; a
     freshly-created queued run may carry none) it is always present, so a
     newer queued duplicate never sorts below an older completed run.
-    summary-comment reuses this with prefix="plan / " to resolve plan-check
-    links. Returns {name: run}."""
+    summary-comment reuses this with prefix="" (it resolves plan-check links by
+    an exact `<stack> / <env>` lookup, not a prefix filter). Returns {name: run}."""
     latest = {}
     for run in check_runs:
         name = run["name"]

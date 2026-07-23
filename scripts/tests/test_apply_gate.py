@@ -105,7 +105,7 @@ def test_stale_completed_run_does_not_mask_newer_pending():
 
 def test_non_apply_checks_ignored():
     runs = [
-        _run("plan / dev-eu / stacks/app", "completed", "success"),
+        _run("stacks/app / dev-eu", "completed", "success"),
         _run("shipmate / gate", "queued", None),
         _run("apply / dev-eu / stacks/app", "completed", "success"),
     ]
@@ -113,7 +113,7 @@ def test_non_apply_checks_ignored():
 
 
 def test_no_apply_checks_at_all():
-    runs = [_run("plan / dev-eu / stacks/app", "completed", "success")]
+    runs = [_run("stacks/app / dev-eu", "completed", "success")]
     assert ag.verdict(runs) == "no-applies"
 
 
@@ -156,7 +156,7 @@ def test_done_names_uses_latest_run_per_name():
 
 
 def test_latest_by_name_ignores_non_apply_checks():
-    runs = [_run("plan / dev-eu / stacks/app", "completed", "success")]
+    runs = [_run("stacks/app / dev-eu", "completed", "success")]
     assert ag.latest_by_name(runs) == {}
 
 
@@ -243,20 +243,24 @@ def test_parse_jsonl_truncates_long_offending_line():
     assert "xxx" in msg
 
 
-def test_latest_by_name_prefix_parameter_selects_plan_checks():
+def test_latest_by_name_empty_prefix_gathers_all_latest_per_name():
+    # summary-comment calls latest_by_name(prefix="") to gather every check-run
+    # on the head SHA; the plan-link anchor is check_url's exact `<stack> / <env>`
+    # lookup, not a prefix filter. Latest-id-per-name still applies, and the
+    # coexisting apply check keeps its distinct `apply / ` name.
     runs = [
-        {"name": "plan / dev-eu / stacks/app", "id": 1, "html_url": "u1"},
-        {"name": "plan / dev-eu / stacks/app", "id": 3, "html_url": "u3"},
+        {"name": "stacks/app / dev-eu", "id": 1, "html_url": "u1"},
+        {"name": "stacks/app / dev-eu", "id": 3, "html_url": "u3"},
         {"name": "apply / dev-eu / stacks/app", "id": 2, "html_url": "u2"},
     ]
-    latest = ag.latest_by_name(runs, prefix="plan / ")
-    assert set(latest) == {"plan / dev-eu / stacks/app"}
-    assert latest["plan / dev-eu / stacks/app"]["html_url"] == "u3"
+    latest = ag.latest_by_name(runs, prefix="")
+    assert set(latest) == {"stacks/app / dev-eu", "apply / dev-eu / stacks/app"}
+    assert latest["stacks/app / dev-eu"]["html_url"] == "u3"
 
 
 def test_latest_by_name_default_prefix_unchanged():
     runs = [
-        {"name": "plan / dev-eu / stacks/app", "id": 1},
+        {"name": "stacks/app / dev-eu", "id": 1},
         {
             "name": "apply / dev-eu / stacks/app",
             "id": 2,

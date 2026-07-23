@@ -75,7 +75,8 @@ The `plan.yml` workflow (thin and identical across repo layouts; see the
   names in YAML, no GitHub API/token needed.
 - **`plan`** — one matrix job per stack × environment, bound to that GitHub
   Environment (which injects `TF_VAR_*` / `TF_WORKSPACE` / nothing, per
-  layout). Each job is the `plan / <env> / <stack>` check; `actions/plan-cell`
+  layout). Each job is the `<stack> / <env>` check (shown as
+  `shipmate · plan / <stack> / <env>` in the UI); `actions/plan-cell`
   writes the **full plan text to the job's step summary** (reachable one click
   from the check), uploads the `.otplan` + a TF_VAR fingerprint as an
   artifact, and creates the `apply / <env> / <stack>` check **pending** (or
@@ -85,7 +86,7 @@ The `plan.yml` workflow (thin and identical across repo layouts; see the
   commit status, which stays non-green while any apply is pending or any
   plan cell failed.
 
-Note on plan output: plan text lives in each `plan / <env> / <stack>` job's
+Note on plan output: plan text lives in each `<stack> / <env>` plan job's
 **Summary**, not in a separate Checks-API check-run — the matrix job already
 emits the check of that name, so a second API check would duplicate it. The
 `apply` checks *are* API check-runs (created pending; they have no backing

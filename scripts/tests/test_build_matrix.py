@@ -40,6 +40,22 @@ def test_raises_above_256_cells():
         bm.build_matrix(["dev-eu"], {"dev-eu": stacks}, {s: ["env/dev-eu"] for s in stacks})
 
 
+def test_rejects_stack_path_exactly_apply():
+    # A stack literally named `apply` renders a plan check `apply / <env>`, which
+    # collides with the apply-check namespace apply-gate selects the queue by.
+    with pytest.raises(SystemExit, match="may not be exactly 'apply'"):
+        bm.build_matrix(["dev-eu"], {"dev-eu": ["apply"]}, {"apply": ["env/dev-eu"]})
+
+
+def test_nested_apply_stack_is_allowed():
+    # Only an exact top-level `apply` collides; `infra/apply` renders
+    # `infra/apply / <env>`, outside the `apply / ` namespace.
+    cells = bm.build_matrix(
+        ["dev-eu"], {"dev-eu": ["infra/apply"]}, {"infra/apply": ["env/dev-eu"]}
+    )
+    assert cells == [{"stack": "infra/apply", "environment": "dev-eu", "workload": ""}]
+
+
 def test_list_stacks_changed_uses_changed_flag(monkeypatch):
     captured = {}
     monkeypatch.setattr(bm, "_run", lambda args: captured.update(args=args) or "stacks/a\n")
