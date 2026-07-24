@@ -57,10 +57,17 @@ NOT_ATTEMPTED_NOTE = (
 
 # `Apply complete! Resources: <int> added, <int> changed, <int> destroyed` --
 # digits-only captures, so a look-alike line in author-controlled apply.txt
-# cannot inject anything into the resources table cell. Scans the whole text
-# (no anchors needed) and the caller keeps the *last* match.
+# cannot inject anything into the resources table cell. Anchored to the whole
+# line (^...$, re.M): OpenTofu prints the `Outputs:` block AFTER the "Apply
+# complete!" line, so an *unanchored* match would let an output value merely
+# containing that literal string (e.g. `foo = "Apply complete! Resources: 99
+# added, ..."`) win as the "last" match -- a wrong number, not an injection
+# (still digits-only), but wrong. Anchoring requires the match to BE the
+# whole line, which a `name = "..."`-embedded copy never is. The caller keeps
+# the *last* genuine match.
 _RESOURCES_RE = re.compile(
-    r"Apply complete! Resources: (\d+) added, (\d+) changed, (\d+) destroyed\.?"
+    r"^Apply complete! Resources: (\d+) added, (\d+) changed, (\d+) destroyed\.?$",
+    re.MULTILINE,
 )
 
 
@@ -260,31 +267,45 @@ def _gate_sentence(gate):
     )
 
 
+def _excluded_skipped_lines(excluded, skipped):
+    """The excluded/skipped-env sentences, copied verbatim from apply-all.yml's
+    inline shell. Callers gate this on the all-environments form (`not
+    env_name`) themselves -- shared by `_footer` (full table render) and
+    `_short_form` (nothing to tabulate) so both surfaces carry the same
+    actionable warning instead of the short form silently dropping it."""
+    lines = []
+    if excluded:
+        envs = ", ".join(f"`{e}`" for e in excluded)
+        cmds = ", ".join(f"`shipmate apply {e}`" for e in excluded)
+        lines.append(f"Explicit environment(s) left pending: {envs} — run {cmds} to apply them.")
+    if skipped:
+        envs = ", ".join(f"`{e}`" for e in skipped)
+        lines.append(f"Skipped (ordered after an unapplied explicit environment): {envs}.")
+    return lines
+
+
 def _footer(gate, run_url, excluded, skipped, env_name):
     """Excluded/skipped-env lines (all-environments form only), the gate
     sentence, then the run link -- copied verbatim from the existing inline
     shell in apply.yml / apply-all.yml's 'Result comment via the App' steps."""
     parts = []
     if not env_name:
-        if excluded:
-            envs = ", ".join(f"`{e}`" for e in excluded)
-            cmds = ", ".join(f"`shipmate apply {e}`" for e in excluded)
-            parts.append(
-                f"Explicit environment(s) left pending: {envs} — run {cmds} to apply them."
-            )
-        if skipped:
-            envs = ", ".join(f"`{e}`" for e in skipped)
-            parts.append(f"Skipped (ordered after an unapplied explicit environment): {envs}.")
+        parts.extend(_excluded_skipped_lines(excluded, skipped))
     parts.append(_gate_sentence(gate))
     parts.append(f"[Logs & artifacts]({run_url})")
     return "\n\n".join(parts)
 
 
-def _short_form(results_csv, env_name, gate, run_url):
+def _short_form(results_csv, env_name, gate, run_url, excluded, skipped):
     """Used only when the expected set is empty and no cells were downloaded
     (nothing to tabulate). Reuses the existing one-liner sentences from
     apply.yml / apply-all.yml, plus the run link (new -- the old inline
-    one-liner never linked the run)."""
+    one-liner never linked the run). Also carries the excluded/skipped-env
+    lines (all-environments form only) -- today's inline shell
+    (apply-all.yml) appends them unconditionally in every branch, including
+    this nothing-pending one, so dropping them here would regress the most
+    actionable case: an all-levels-empty run whose only pending work is an
+    explicit env."""
     tokens = [t for t in results_csv.split(",") if t]
     failed = any(t not in ("success", "skipped") for t in tokens)
     if failed:
@@ -295,7 +316,12 @@ def _short_form(results_csv, env_name, gate, run_url):
         head = f"{emoji} shipmate: `shipmate apply {sc._md_escape(env_name)}` {word}."
     else:
         head = f"{emoji} shipmate: `shipmate apply` (all environments) {word}."
-    return f"{head} {_gate_sentence(gate)} [Logs & artifacts]({run_url})"
+    parts = [head]
+    if not env_name:
+        parts.extend(_excluded_skipped_lines(excluded, skipped))
+    parts.append(_gate_sentence(gate))
+    parts.append(f"[Logs & artifacts]({run_url})")
+    return " ".join(parts)
 
 
 def build_comment(rows, jobs, run_url, gate, excluded, skipped, env_name):
@@ -365,13 +391,16 @@ def main():
         f"{os.environ['GITHUB_SERVER_URL']}/{os.environ['GITHUB_REPOSITORY']}"
         f"/actions/runs/{os.environ['GITHUB_RUN_ID']}"
     )
+    # Hoisted out of the branch below: the short form needs these too (an
+    # excluded explicit env can be the *entire* reason nothing else is
+    # pending), not just the full table render.
+    excluded = json.loads(os.environ.get("SHIPMATE_EXCLUDED_ENVS") or "[]")
+    skipped = json.loads(os.environ.get("SHIPMATE_SKIPPED_ENVS") or "[]")
 
     if not rows:
         results_csv = os.environ.get("SHIPMATE_RESULTS", "") or ""
-        body = _short_form(results_csv, env_name, gate, run_url)
+        body = _short_form(results_csv, env_name, gate, run_url, excluded, skipped)
     else:
-        excluded = json.loads(os.environ.get("SHIPMATE_EXCLUDED_ENVS") or "[]")
-        skipped = json.loads(os.environ.get("SHIPMATE_SKIPPED_ENVS") or "[]")
         body = build_comment(rows, jobs, run_url, gate, excluded, skipped, env_name)
 
     with open("comment.md", "w", encoding="utf-8") as fh:

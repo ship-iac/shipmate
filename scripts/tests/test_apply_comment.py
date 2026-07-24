@@ -3,6 +3,7 @@ import importlib.util
 import io
 import json
 import pathlib
+import re
 from importlib.machinery import SourceFileLoader
 
 import pytest
@@ -115,6 +116,37 @@ def test_build_table_statuses_emoji_and_not_attempted_note_present():
     assert ac.NOT_ATTEMPTED_NOTE in comment
 
 
+def test_build_table_escapes_evil_stack_display_name():
+    # stack_display is author-controlled (apply-cell's stack-name input); a
+    # value like `x</summary><b>evil` must not survive as live HTML in the
+    # table cell.
+    rows = [_row(stack_display="x</summary><b>evil", environment="dev-eu")]
+    table = ac.build_table(rows, [], RUN_URL)
+    assert "</summary>" not in table
+    assert "<b>" not in table
+    assert "&lt;/summary&gt;&lt;b&gt;evil" in table
+
+
+def test_summary_line_escapes_evil_stack_display_name():
+    # Same author-controlled value, but in the <summary> a details section is
+    # built from -- an unescaped `</summary>` here would close the tag early.
+    row = _row(stack_display="x</summary><b>evil", environment="dev-eu")
+    line = ac._summary_line(row)
+    assert "</summary><b>evil" not in line
+    assert "&lt;/summary&gt;&lt;b&gt;evil" in line
+    assert line.endswith("</summary>")  # the tag itself is still the real one
+
+
+def test_build_table_and_summary_escape_markdown_link_syntax_in_stack_name():
+    rows = [_row(stack_display="[x](https://evil)", environment="dev-eu")]
+    table = ac.build_table(rows, [], RUN_URL)
+    assert "&#91;x&#93;(https://evil)" in table
+    assert "[x](https://evil)" not in table
+    line = ac._summary_line(rows[0])
+    assert "&#91;x&#93;(https://evil)" in line
+    assert "[x](https://evil)" not in line
+
+
 # --- blocked-reason rendering ------------------------------------------------
 
 
@@ -192,22 +224,67 @@ def test_build_comment_reserves_link_only_space_for_every_cell():
     body = ac.build_comment(rows, [], RUN_URL, "pending", [], [], "dev-eu")
     assert len(body) <= ac.sc.SIZE_BUDGET
     for i in range(20):
-        assert f"s{i:02}" in body
+        # Each later cell actually got its own <details> section (not merely
+        # a table-row mention, which is present regardless of the reserve
+        # logic) -- proves the up-front reserve left it room for at least a
+        # link, rather than the giant early cell starving it.
+        assert f"<summary>✅ s{i:02} / dev-eu — applied</summary>" in body
 
 
 # --- fence-escape attempt ------------------------------------------------------
 
 
+def _fence_delimiter_lines(rendered):
+    """All-backtick lines actually emitted in `rendered` -- the real fence
+    delimiters, read from the output itself rather than re-derived from the
+    helper the renderer is supposed to have called. A renderer that hardcodes
+    a 3-backtick fence (ignoring the computed length entirely) must fail an
+    assertion built from this, not just an assertion built from the helper."""
+    return [ln for ln in rendered.splitlines() if ln and set(ln) == {"`"}]
+
+
 def test_fence_escape_attempt_cannot_break_out_of_fence():
-    evil = "````` " + "`" * 50 + "\nrm -rf /\n" + "`" * 50
+    # Trailing non-backtick chars ("x"/"y") keep every body LINE from being
+    # pure backticks itself (which would otherwise masquerade as a third
+    # "delimiter" line to _fence_delimiter_lines) while leaving the longest
+    # contiguous backtick RUN at 50 either way.
+    evil = "````` " + "`" * 50 + "x\nrm -rf /\n" + "`" * 50 + "y"
     row = _row(apply_text=evil)
     s = ac.render_apply_section(row, evil, RUN_URL, 10_000)
-    # The fence used must be strictly longer than any backtick run in the text.
-    fence_len = len(ac.sc._fence_of(evil))
-    assert "`" * (fence_len + 1) not in s.replace(evil, "")
+    longest_run_in_evil = max(len(m) for m in re.findall(r"`+", evil))
+    fence_lines = _fence_delimiter_lines(s)
+    assert len(fence_lines) == 2  # opening + closing delimiter
+    assert fence_lines[0] == fence_lines[1]
+    # The delimiter actually emitted must be strictly longer than the longest
+    # backtick run in the body -- checked against the RENDERED fence line,
+    # not merely against a length computed off to the side.
+    assert len(fence_lines[0]) > longest_run_in_evil
     # The section still closes with </details> — no early close from the
     # injected backtick run.
     assert s.endswith("</details>")
+
+
+def test_fence_escape_attempt_truncated_path_reuses_full_bodys_fence():
+    # The backtick run lives near the END of the text; degradation must cut
+    # it away, but the fence surrounding the KEPT (backtick-free) slice must
+    # still be sized against the WHOLE original body (computed once, up
+    # front) -- not recomputed against the backtick-free slice, which would
+    # only need the minimum 3-backtick fence and would reopen the
+    # fence-escape hole the moment a later, less-truncated render includes
+    # the backtick run again.
+    lines = [f"line {i}" for i in range(3_000)]
+    evil = "\n".join(lines) + "\n" + "`" * 60 + "z\nafter the backticks"
+    longest_run_in_evil = max(len(m) for m in re.findall(r"`+", evil))
+    row = _row(apply_text=evil)
+    s = ac.render_apply_section(row, evil, RUN_URL, 2_000)
+    assert "Truncated" in s
+    fence_lines = _fence_delimiter_lines(s)
+    assert len(fence_lines) == 2
+    assert fence_lines[0] == fence_lines[1]
+    assert len(fence_lines[0]) > longest_run_in_evil
+    # The 60-backtick run itself was truncated away -- the kept body never
+    # reaches it (proving this is a real cut, not a coincidence).
+    assert "`" * 60 not in s.replace(fence_lines[0], "")
 
 
 # --- resources-line parsing ----------------------------------------------------
@@ -243,6 +320,22 @@ def test_resources_regex_ignores_lookalike_author_text_digits_only_capture():
     # match rather than smuggling arbitrary text into the table cell.
     text = "Apply complete! Resources: <script>alert(1)</script> added, 0 changed, 0 destroyed."
     assert ac._resources(text) == ""
+
+
+def test_resources_ignores_embedded_lookalike_in_later_output_line():
+    # OpenTofu prints the `Outputs:` block AFTER the "Apply complete!" line;
+    # an output value that happens to CONTAIN the literal string (embedded
+    # mid-line, not starting the line) must not be mistaken for -- and, being
+    # textually last, must not override -- the real line. Anchoring
+    # (^...$, re.M) is what defeats this: an unanchored regex would match the
+    # embedded copy too and, being last, would incorrectly win.
+    text = (
+        "Apply complete! Resources: 1 added, 0 changed, 0 destroyed.\n"
+        "\n"
+        "Outputs:\n"
+        'fake = "Apply complete! Resources: 99 added, 99 changed, 99 destroyed."\n'
+    )
+    assert ac._resources(text) == "+1 ~0 -0"
 
 
 # --- validation, loud ----------------------------------------------------------
@@ -304,20 +397,47 @@ def test_load_cells_reads_apply_text_only_when_present(tmp_path):
 
 
 def test_short_form_detect_failed_targeted():
-    body = ac._short_form("success,failure", "dev-eu", "pending", RUN_URL)
+    body = ac._short_form("success,failure", "dev-eu", "pending", RUN_URL, [], [])
     assert body.startswith(":x: shipmate: `shipmate apply dev-eu` failed.")
     assert "gate` stays pending" in body
     assert RUN_URL in body
 
 
 def test_short_form_nothing_pending_all_environments():
-    body = ac._short_form("success,skipped", "", "complete", RUN_URL)
+    body = ac._short_form("success,skipped", "", "complete", RUN_URL, [], [])
     assert body.startswith(
         ":white_check_mark: shipmate: `shipmate apply` (all environments) "
         "found no pending applies to run."
     )
     assert "gate` is complete" in body
     assert RUN_URL in body
+
+
+def test_short_form_includes_excluded_and_skipped_lines_all_environments():
+    # I3 regression: today's live apply-all.yml one-liner appends these
+    # sentences unconditionally, including in the nothing-pending branch --
+    # this is the actionable case where the ONLY reason nothing is pending is
+    # an excluded explicit env (apply-all-detect derives `excluded` from
+    # pending cells' envs and removes them from `runnable`, so an
+    # explicit-only-pending repo is simultaneously all-levels-empty AND
+    # carries a non-empty excluded_envs). Dropping the sentence here would be
+    # actively false: it would claim nothing is pending when work is.
+    body = ac._short_form("success,skipped", "", "complete", RUN_URL, ["prod"], ["staging"])
+    assert (
+        "Explicit environment(s) left pending: `prod` — run `shipmate apply prod` to apply them."
+        in body
+    )
+    assert "Skipped (ordered after an unapplied explicit environment): `staging`." in body
+    assert "gate` is complete" in body
+    assert RUN_URL in body
+
+
+def test_short_form_omits_excluded_skipped_for_targeted_env():
+    # The targeted (single-env) form never carries excluded/skipped envs --
+    # that's an apply-all-only concept.
+    body = ac._short_form("success,skipped", "dev-eu", "complete", RUN_URL, ["prod"], ["staging"])
+    assert "Explicit environment" not in body
+    assert "Skipped" not in body
 
 
 def test_build_comment_uses_short_form_when_no_rows_and_no_expected(monkeypatch, tmp_path):
@@ -344,14 +464,24 @@ def test_build_comment_uses_short_form_when_no_rows_and_no_expected(monkeypatch,
 
 
 def test_build_comment_hard_cap_fallback_keeps_table_drops_details():
+    # 400 short-named rows: enough that even every cell degraded to link-only
+    # still overflows HARD_CAP (verified: 300 rows stays just under the cap
+    # without needing the fallback at all -- 400 is the margin that actually
+    # exercises it), while the table alone (short 4-char stack names) stays
+    # comfortably within it.
     rows = [
         _row(stack_display=f"s{i:03}", stack_path=f"stacks/s{i:03}", apply_text="x" * 500)
-        for i in range(300)
+        for i in range(400)
     ]
     body = ac.build_comment(rows, [], RUN_URL, "pending", [], [], "dev-eu")
     assert len(body) <= ac.sc.HARD_CAP
-    assert "s299" in body  # table row always present
-    assert "too large" in body
+    assert "s399" in body  # table row always present
+    # The table-only fallback's specific wording, not merely "too large" --
+    # _link_only's per-cell fallback text ("Output too large for this
+    # comment") ALSO contains "too large", so that check alone can't tell the
+    # two paths apart. No <details> section may survive this fallback.
+    assert "use each row's log link" in body
+    assert "<details>" not in body
 
 
 def test_build_comment_fails_loud_when_even_table_overflows():
