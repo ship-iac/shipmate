@@ -94,9 +94,13 @@ def _fence_of(text):
     return "`" * max(3, longest + 1)
 
 
-def fence(text, f=None):
+def fence(text, f=None, lang="diff"):
+    """Wrap `text` in a backtick fence of length `f` (or a computed minimum
+    length). `lang` is the fence's language token (`diff` by default, for the
+    plan-diff coloring below); pass `lang=""` for a plain, language-less
+    fence."""
     f = f or _fence_of(text)
-    return f"{f}diff\n{text}\n{f}"
+    return f"{f}{lang}\n{text}\n{f}"
 
 
 def emoji(cell):
