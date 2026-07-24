@@ -158,8 +158,14 @@ its own actionable rejection reason:
   team (checked via a short-lived GitHub App installation token,
   `members:read`);
 - **mergeable**: the pull request is mergeable;
-- **approved**: the pull request has an approving review outstanding (the
-  latest review per reviewer wins; any `CHANGES_REQUESTED` blocks);
+- **reviewed**: the pull request satisfies the branch ruleset's review policy
+  — GitHub's `reviewDecision` is `APPROVED`, or is null (no review required by
+  the ruleset; normalized to the explicit `NONE` sentinel in transit). The
+  ruleset (required approving reviews, CODEOWNERS, last-push approval) is the
+  single source of review policy; shipmate imposes none of its own. A ruleset
+  requiring zero approvals reports no decision even when an approval exists,
+  but a `CHANGES_REQUESTED` review still blocks. Any other value — including
+  an absent or empty decision — fails closed with a wiring-error reason;
 - **undiverged**: a reviewed plan exists for the pull request's **current**
   head SHA (the most recent successful plan run — the automatic plan run on
   pull-request open, autoplan — whose head matches; a plan for an older head

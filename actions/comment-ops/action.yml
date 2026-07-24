@@ -1,5 +1,5 @@
 name: shipmate comment-ops
-description: Parse a shipmate command comment, authorize it (team membership via a short-lived App token, PR approved + mergeable + reviewed-plan-exists), and react or reject. Outputs feed actions/dispatch.
+description: Parse a shipmate command comment, authorize it (team membership via a short-lived App token, PR satisfies the branch ruleset's review policy + mergeable + reviewed-plan-exists), and react or reject. Outputs feed actions/dispatch.
 inputs:
   app-id:
     description: GitHub App id (a repo/org variable).
@@ -116,8 +116,17 @@ runs:
           sleep 3
         done
         [ -n "$pr_ok" ] || echo "::warning::PR mergeable still unknown after retries; treating as not-ready"
-        # Reviews (paginated).
-        gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/reviews?per_page=100" > reviews.json
+        # Review decision (ruleset-driven). A null decision means the ruleset
+        # requires no review; normalize it to the explicit NONE sentinel —
+        # authorize fails closed on anything that isn't NONE or a decision
+        # enum value, so an empty string must never be a pass value.
+        # The $owner/$repo/$pr tokens are GraphQL query variables (bound via -F), not
+        # shell variables — single quotes are intentional.
+        # shellcheck disable=SC2016
+        rd=$(gh api graphql -f query='query($owner:String!,$repo:String!,$pr:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$pr){reviewDecision}}}' \
+          -F owner="$OWNER" -F repo="${GITHUB_REPOSITORY#*/}" -F pr="$PR_NUMBER" \
+          --jq '.data.repository.pullRequest.reviewDecision // "NONE"')
+        echo "review_decision=$rd" >> "$GITHUB_OUTPUT"
         # Team membership via the App token (members:read). 200 + active = member.
         if GH_TOKEN="$APP_TOKEN" gh api "orgs/$OWNER/teams/$TEAM/memberships/$USER" --jq '.state' 2>/dev/null | grep -q active; then
           echo "is_member=true" >> "$GITHUB_OUTPUT"
@@ -138,7 +147,7 @@ runs:
       env:
         IS_MEMBER: ${{ steps.gather.outputs.is_member }}
         APPROVERS_TEAM: ${{ inputs.approvers-team }}
-        REVIEWS_JSON: reviews.json
+        REVIEW_DECISION: ${{ steps.gather.outputs.review_decision }}
         PR_JSON: pr.json
         PLAN_RUN_JSON: plan_run.json
         SHIPMATE_ENV: ${{ steps.parse.outputs.env }}
