@@ -46,10 +46,15 @@ Humans drive apply behavior for a pull request through PR comments —
 A private GitHub App mints the short-lived token needed to dispatch the apply
 workflow from a comment (events created with the default `GITHUB_TOKEN` never
 trigger other workflows); the same App also authors the apply checks, the
-`shipmate / gate` status, sticky/result comments, and drift issues, each via
-a freshly minted installation token. The plan matrix job's own
-`<stack> / <env>` check-run stays on the shared `github-actions` identity —
-it's the job's own auto check-run, not something the App creates separately.
+`shipmate / gate` status, the sticky plan comment, a fresh apply result
+comment on every apply run, and drift issues, each via a freshly minted
+installation token. Unlike the sticky plan comment, the apply result
+comment is never upserted: each run posts a new comment with a per-cell
+status table and the collapsed full apply output for every attempted cell,
+so a failure-then-retry sequence stays visible as an audit trail. The plan
+matrix job's own `<stack> / <env>` check-run stays on the shared
+`github-actions` identity — it's the job's own auto check-run, not something
+the App creates separately.
 Authorization requires team membership, a mergeable PR that satisfies the
 branch ruleset's review policy, and a reviewed plan for the PR's current head.
 Comment-ops keeps the entire interaction surface inside the pull request
