@@ -116,8 +116,11 @@ runs:
           sleep 3
         done
         [ -n "$pr_ok" ] || echo "::warning::PR mergeable still unknown after retries; treating as not-ready"
-        # Reviews (paginated).
-        gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/reviews?per_page=100" > reviews.json
+        # Review decision (ruleset-driven: null/absent means no review required).
+        rd=$(gh api graphql -f query='query($owner:String!,$repo:String!,$pr:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$pr){reviewDecision}}}' \
+          -F owner="$OWNER" -F repo="${GITHUB_REPOSITORY#*/}" -F pr="$PR_NUMBER" \
+          --jq '.data.repository.pullRequest.reviewDecision // ""')
+        echo "review_decision=$rd" >> "$GITHUB_OUTPUT"
         # Team membership via the App token (members:read). 200 + active = member.
         if GH_TOKEN="$APP_TOKEN" gh api "orgs/$OWNER/teams/$TEAM/memberships/$USER" --jq '.state' 2>/dev/null | grep -q active; then
           echo "is_member=true" >> "$GITHUB_OUTPUT"
@@ -138,7 +141,7 @@ runs:
       env:
         IS_MEMBER: ${{ steps.gather.outputs.is_member }}
         APPROVERS_TEAM: ${{ inputs.approvers-team }}
-        REVIEWS_JSON: reviews.json
+        REVIEW_DECISION: ${{ steps.gather.outputs.review_decision }}
         PR_JSON: pr.json
         PLAN_RUN_JSON: plan_run.json
         SHIPMATE_ENV: ${{ steps.parse.outputs.env }}
