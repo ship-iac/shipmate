@@ -1,0 +1,146 @@
+"""Guard the actions/apply-summary <-> scripts/apply-comment env-var coupling.
+
+`actions/apply-summary/action.yml`'s render step feeds `scripts/apply-comment`
+entirely through `env:` (never a `${{ }}`-interpolated shell body -- see
+test_actions_shellcheck.py's injection-safety check). Nothing else ties the two
+sides together: a typo'd `env:` key in the action, or a renamed
+`os.environ` read in the script, would silently render a wrong comment with no
+local way to catch it (Actions can't be run outside GitHub). This test derives
+the set of environment variables the script actually reads by parsing its
+source (not a second hardcoded list, which could itself drift from either
+side) and asserts it is fed byte-for-byte by the render step's `env:` block.
+
+Also asserts the artifact-download `pattern` lines up with the
+`apply-summary.<env>.<slug>` name `actions/apply-cell` uploads under.
+"""
+
+import pathlib
+import re
+
+import yaml
+
+ENGINE = pathlib.Path(__file__).resolve().parents[2]
+SCRIPT = ENGINE / "scripts" / "apply-comment"
+ACTION = ENGINE / "actions" / "apply-summary" / "action.yml"
+APPLY_CELL_ACTION = ENGINE / "actions" / "apply-cell" / "action.yml"
+
+# GHA sets these three for every step of every job (composite or plain) --
+# there is nothing for a caller to thread and no `env:` key to typo. The rest
+# of the engine relies on the same ambient availability (e.g.
+# actions/summary's gate-write step reads GITHUB_SERVER_URL/REPOSITORY/RUN_ID
+# without declaring them in `env:`). Excluded from the "fed by render step"
+# assertion below -- but still required to come out of `_read_names()`, so a
+# rename in the script (e.g. GITHUB_RUN_ID -> RUN_ID) still surfaces as a
+# clear diff instead of silently vanishing from this guard.
+_AMBIENT_GHA_VARS = frozenset({"GITHUB_SERVER_URL", "GITHUB_REPOSITORY", "GITHUB_RUN_ID"})
+
+_SUBSCRIPT_RE = re.compile(r'os\.environ\[\s*f?"([A-Za-z0-9_{}]+)"\s*\]')
+_GET_RE = re.compile(r'os\.environ\.get\(\s*f?"([A-Za-z0-9_{}]+)"')
+_RANGE_RE = re.compile(r"range\((\d+)\)")
+_PLACEHOLDER_RE = re.compile(r"\{[^}]*\}")
+
+
+def _read_names():
+    """Every environment variable name `scripts/apply-comment` reads, derived
+    from its source. A literal name is captured as-is; a name carrying an
+    f-string placeholder (only `SHIPMATE_ENVLEVEL{i}_WAVES`, expanded over
+    `range(4)` on the same source line) is expanded to its concrete instances
+    so the derived set is genuinely comparable to a `env:` block's keys."""
+    names = set()
+    for line in SCRIPT.read_text(encoding="utf-8").splitlines():
+        raws = [m.group(1) for m in _SUBSCRIPT_RE.finditer(line)]
+        raws += [m.group(1) for m in _GET_RE.finditer(line)]
+        for raw in raws:
+            if "{" not in raw:
+                names.add(raw)
+                continue
+            rm = _RANGE_RE.search(line)
+            assert rm, (
+                f"env var pattern {raw!r} carries an f-string placeholder but "
+                f"no range(N) on the same line to expand it against: {line!r}"
+            )
+            for i in range(int(rm.group(1))):
+                names.add(_PLACEHOLDER_RE.sub(str(i), raw, count=1))
+    return names
+
+
+def _load_action():
+    return yaml.safe_load(ACTION.read_text(encoding="utf-8"))
+
+
+def _find_step(steps, *, uses_contains=None, run_contains=None):
+    for step in steps:
+        if uses_contains and uses_contains in (step.get("uses") or ""):
+            return step
+        if run_contains and run_contains in (step.get("run") or ""):
+            return step
+    return None
+
+
+def test_render_step_feeds_every_env_var_the_script_reads():
+    read_names = _read_names()
+    assert read_names, (
+        "no os.environ reads found in scripts/apply-comment -- parser or script changed?"
+    )
+
+    steps = _load_action()["runs"]["steps"]
+    render_step = _find_step(steps, run_contains="scripts/apply-comment")
+    assert render_step is not None, "no run step invokes scripts/apply-comment"
+
+    fed = set((render_step.get("env") or {}).keys())
+    required = read_names - _AMBIENT_GHA_VARS
+
+    missing = required - fed
+    assert not missing, (
+        f"render step does not feed {sorted(missing)} — scripts/apply-comment "
+        "reads these via os.environ but the action's env: block omits them"
+    )
+    extra = fed - required
+    assert not extra, (
+        f"render step's env: block feeds {sorted(extra)} which "
+        "scripts/apply-comment never reads — stale input or a typo'd name "
+        "that was meant to match one of the required vars"
+    )
+
+
+def test_render_step_never_interpolates_expr_directly():
+    """Belt-and-suspenders alongside test_actions_shellcheck.py: every
+    author-controlled value must reach the script through env:, never a
+    ${{ }} interpolated into the shell body."""
+    steps = _load_action()["runs"]["steps"]
+    render_step = _find_step(steps, run_contains="scripts/apply-comment")
+    assert "${{" not in (render_step.get("run") or "")
+
+
+def test_download_pattern_matches_apply_cell_upload_prefix():
+    upload_step = _find_step(_load_action()["runs"]["steps"], uses_contains="download-artifact")
+    assert upload_step is not None, "no download-artifact step found"
+    pattern = (upload_step.get("with") or {}).get("pattern")
+
+    apply_cell_steps = yaml.safe_load(APPLY_CELL_ACTION.read_text(encoding="utf-8"))["runs"][
+        "steps"
+    ]
+    upload_apply_cell_step = _find_step(apply_cell_steps, uses_contains="upload-artifact")
+    assert upload_apply_cell_step is not None, "apply-cell has no upload-artifact step"
+    name = (upload_apply_cell_step.get("with") or {}).get("name", "")
+    # `apply-summary.${{ inputs.env }}.${{ steps.ids.outputs.slug }}` -> the
+    # literal prefix before the first templated segment.
+    prefix = name.split("${{", 1)[0]
+    assert prefix, "could not extract a literal prefix from apply-cell's artifact name"
+    assert pattern == f"{prefix}*", (
+        f"apply-summary's download pattern {pattern!r} does not match "
+        f"apply-cell's upload name prefix {prefix!r}"
+    )
+
+
+def test_download_step_does_not_fail_on_zero_matches():
+    """`pattern:`-mode download-artifact does not fail when zero artifacts
+    match (verified against v7.0.0 source: the pattern branch never throws on
+    an empty result, unlike the `name:`/`artifact-ids:` single-artifact
+    modes) -- so no extra 'ignore missing' option is needed. This test
+    guards against silently switching to `name:` (single-artifact mode,
+    which DOES throw on a miss) in a future edit."""
+    download_step = _find_step(_load_action()["runs"]["steps"], uses_contains="download-artifact")
+    with_ = download_step.get("with") or {}
+    assert "pattern" in with_
+    assert "name" not in with_

@@ -1,0 +1,123 @@
+name: shipmate apply-summary
+description: Download per-cell apply-summary.* artifacts, list the run's jobs for per-cell log links, render the apply result comment, mint a shipmate App installation token, and post a fresh PR comment.
+inputs:
+  pr-number:
+    description: Pull request number to comment on.
+    required: true
+  environment:
+    description: Environment name for the targeted apply form. Empty = the all-environments form.
+    required: false
+    default: ""
+  waves-json:
+    description: Targeted form's waves JSON (one wave array). Empty when unused.
+    required: false
+    default: ""
+  envlevel0-waves:
+    description: All-environments form's env-level 0 waves JSON. Empty when unused.
+    required: false
+    default: ""
+  envlevel1-waves:
+    description: All-environments form's env-level 1 waves JSON. Empty when unused.
+    required: false
+    default: ""
+  envlevel2-waves:
+    description: All-environments form's env-level 2 waves JSON. Empty when unused.
+    required: false
+    default: ""
+  envlevel3-waves:
+    description: All-environments form's env-level 3 waves JSON. Empty when unused.
+    required: false
+    default: ""
+  excluded-envs:
+    description: JSON array of explicit environments left pending (all-environments form only). Empty = [].
+    required: false
+    default: ""
+  skipped-envs:
+    description: JSON array of environments skipped after an unapplied explicit environment (all-environments form only). Empty = [].
+    required: false
+    default: ""
+  results:
+    description: "join(needs.*.result, ',') from the caller — feeds the short-form nothing-pending sentence."
+    required: true
+  gate-verdict:
+    description: Gate verdict from gate-refresh — 'complete' or anything else. Empty until the gate has run.
+    required: false
+    default: ""
+  cells-dir:
+    description: Directory to download apply-summary.*/cell.json trees into.
+    required: false
+    default: cells
+  github-token:
+    description: GITHUB_TOKEN with actions:read (artifact download + run jobs listing).
+    required: true
+  app-id:
+    description: shipmate App id (a repo/org variable, not a secret).
+    required: true
+  private-key:
+    description: shipmate App private key (from a repo/org secret).
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Download apply cell summaries
+      uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+      with:
+        pattern: apply-summary.*
+        path: ${{ inputs.cells-dir }}
+        github-token: ${{ inputs.github-token }}
+        merge-multiple: false
+
+    - name: List run jobs (log links; degrade to none on failure)
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+      run: |
+        set -euo pipefail
+        # Costs only per-cell log links (apply-comment falls back to the
+        # workflow-run URL per row) -- mirror actions/summary's treatment of
+        # a cosmetic API listing: warn and degrade to an empty file, never
+        # fail the step.
+        if ! gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs" --jq '.jobs[] | {name, html_url}' > jobs.jsonl; then
+          echo "::warning::run jobs listing failed; per-cell log links degrade to the workflow-run URL"
+          : > jobs.jsonl
+        fi
+
+    - name: Render apply result comment
+      shell: bash
+      env:
+        CELLS: ${{ inputs.cells-dir }}
+        SHIPMATE_ENVIRONMENT: ${{ inputs.environment }}
+        SHIPMATE_WAVES_JSON: ${{ inputs.waves-json }}
+        SHIPMATE_ENVLEVEL0_WAVES: ${{ inputs.envlevel0-waves }}
+        SHIPMATE_ENVLEVEL1_WAVES: ${{ inputs.envlevel1-waves }}
+        SHIPMATE_ENVLEVEL2_WAVES: ${{ inputs.envlevel2-waves }}
+        SHIPMATE_ENVLEVEL3_WAVES: ${{ inputs.envlevel3-waves }}
+        SHIPMATE_RESULTS: ${{ inputs.results }}
+        SHIPMATE_GATE: ${{ inputs.gate-verdict }}
+        SHIPMATE_EXCLUDED_ENVS: ${{ inputs.excluded-envs }}
+        SHIPMATE_SKIPPED_ENVS: ${{ inputs.skipped-envs }}
+      run: |
+        set -euo pipefail
+        python3 "$GITHUB_ACTION_PATH/../../scripts/apply-comment" < jobs.jsonl
+
+    - name: Mint App installation token
+      id: token
+      uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+      with:
+        app-id: ${{ inputs.app-id }}
+        private-key: ${{ inputs.private-key }}
+        owner: ${{ github.repository_owner }}
+        repositories: ${{ github.event.repository.name }}
+        permission-pull-requests: write
+
+    - name: Post apply result comment
+      shell: bash
+      env:
+        GH_TOKEN: ${{ steps.token.outputs.token }}
+        PR_NUMBER: ${{ inputs.pr-number }}
+      run: |
+        set -euo pipefail
+        # Fresh comment every run (audit trail, not a sticky comment) -- never
+        # search for or PATCH an existing one.
+        [[ "$PR_NUMBER" =~ ^[0-9]+$ ]] || { echo "::error::pr-number must be numeric (got: $PR_NUMBER)"; exit 1; }
+        gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -F body=@comment.md >/dev/null
