@@ -116,13 +116,16 @@ runs:
           sleep 3
         done
         [ -n "$pr_ok" ] || echo "::warning::PR mergeable still unknown after retries; treating as not-ready"
-        # Review decision (ruleset-driven: null/absent means no review required).
+        # Review decision (ruleset-driven). A null decision means the ruleset
+        # requires no review; normalize it to the explicit NONE sentinel —
+        # authorize fails closed on anything that isn't NONE or a decision
+        # enum value, so an empty string must never be a pass value.
         # The $owner/$repo/$pr tokens are GraphQL query variables (bound via -F), not
         # shell variables — single quotes are intentional.
         # shellcheck disable=SC2016
         rd=$(gh api graphql -f query='query($owner:String!,$repo:String!,$pr:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$pr){reviewDecision}}}' \
           -F owner="$OWNER" -F repo="${GITHUB_REPOSITORY#*/}" -F pr="$PR_NUMBER" \
-          --jq '.data.repository.pullRequest.reviewDecision // ""')
+          --jq '.data.repository.pullRequest.reviewDecision // "NONE"')
         echo "review_decision=$rd" >> "$GITHUB_OUTPUT"
         # Team membership via the App token (members:read). 200 + active = member.
         if GH_TOKEN="$APP_TOKEN" gh api "orgs/$OWNER/teams/$TEAM/memberships/$USER" --jq '.state' 2>/dev/null | grep -q active; then

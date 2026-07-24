@@ -7,11 +7,43 @@ order and each returns a DISTINCT, actionable reason (the reject comment). The
 looked up by the PR's current head, so a plan for an older head (or none at all)
 means new commits landed since the last plan -> stale -> re-plan. Review policy
 is delegated to the branch ruleset via GitHub's `reviewDecision`, not re-derived
-here.
+here: only the explicit pass values `NONE` (comment-ops' sentinel for a null
+decision — no review required by the ruleset) and `APPROVED` authorize; any
+other value — including an absent/empty one — fails closed.
 """
 
 import json
 import os
+
+
+def _review_reason(review_decision):
+    """Reject reason for the ruleset-delegated review check, or None to pass.
+
+    Only the explicit pass values authorize: NONE (comment-ops' sentinel for a
+    null decision — no review required by the ruleset) and APPROVED. Anything
+    else fails closed."""
+    if review_decision == "REVIEW_REQUIRED":
+        return (
+            "not authorized: PR review is required by the branch ruleset and "
+            "has not been satisfied; obtain the required approving review(s), "
+            "then re-run `shipmate apply`."
+        )
+    if review_decision == "CHANGES_REQUESTED":
+        return (
+            "not authorized: changes were requested on this PR; resolve them "
+            "and get a fresh approval — or dismiss the review — then re-run "
+            "`shipmate apply`."
+        )
+    if review_decision not in ("NONE", "APPROVED"):
+        # Fail closed: comment-ops always sends NONE (null decision) or a
+        # decision enum value. Anything else means the review signal never
+        # arrived (wiring drift, unknown future enum) — never authorize on it.
+        return (
+            f"not authorized: could not determine the PR's review decision "
+            f"(got {review_decision!r}); this indicates a comment-ops wiring "
+            f"problem — check the pinned engine version, then retry."
+        )
+    return None
 
 
 def decide(*, is_member, approvers_team, review_decision, pr, plan_run):
@@ -34,17 +66,9 @@ def decide(*, is_member, approvers_team, review_decision, pr, plan_run):
             f"PR is not mergeable (state: {state}); resolve conflicts "
             f"or branch-protection requirements first."
         )
-    if review_decision == "REVIEW_REQUIRED":
-        return False, (
-            "not authorized: PR review is required by the branch ruleset and "
-            "has not been satisfied; obtain the required approving review(s), "
-            "then re-run `shipmate apply`."
-        )
-    if review_decision == "CHANGES_REQUESTED":
-        return False, (
-            "not authorized: changes were requested on this PR; resolve the "
-            "review and get an approval, then re-run `shipmate apply`."
-        )
+    review_reason = _review_reason(review_decision)
+    if review_reason:
+        return False, review_reason
     if not plan_run:
         return False, (
             "no reviewed plan for the current PR head — no successful "

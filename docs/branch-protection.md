@@ -75,8 +75,10 @@ to `rules/branches` or `environments`) never fails the plan run itself.
 ## Review policy for `shipmate apply`
 
 shipmate delegates review policy to the branch ruleset. `shipmate apply`
-blocks only when GitHub's `reviewDecision` is `REVIEW_REQUIRED` or
-`CHANGES_REQUESTED`; it imposes no approval rule of its own.
+blocks when GitHub's `reviewDecision` is `REVIEW_REQUIRED` or
+`CHANGES_REQUESTED`; it imposes no approval rule of its own. (If the decision
+cannot be determined at all — a wiring failure, never a policy state — apply
+fails closed rather than proceeding unreviewed.)
 
 - **Sole-maintainer mode** (`required_approving_review_count: 0`): `shipmate
   apply` needs no approving review (a one-person repo can never self-approve
