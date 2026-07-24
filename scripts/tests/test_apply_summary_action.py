@@ -34,8 +34,8 @@ APPLY_CELL_ACTION = ENGINE / "actions" / "apply-cell" / "action.yml"
 # clear diff instead of silently vanishing from this guard.
 _AMBIENT_GHA_VARS = frozenset({"GITHUB_SERVER_URL", "GITHUB_REPOSITORY", "GITHUB_RUN_ID"})
 
-_SUBSCRIPT_RE = re.compile(r'os\.environ\[\s*f?"([A-Za-z0-9_{}]+)"\s*\]')
-_GET_RE = re.compile(r'os\.environ\.get\(\s*f?"([A-Za-z0-9_{}]+)"')
+_SUBSCRIPT_RE = re.compile(r'os\.environ\[\s*f?([\'"])([A-Za-z0-9_{}]+)\1\s*\]')
+_GET_RE = re.compile(r'os\.environ\.get\(\s*f?([\'"])([A-Za-z0-9_{}]+)\1')
 _RANGE_RE = re.compile(r"range\((\d+)\)")
 _PLACEHOLDER_RE = re.compile(r"\{[^}]*\}")
 
@@ -48,8 +48,8 @@ def _read_names():
     so the derived set is genuinely comparable to a `env:` block's keys."""
     names = set()
     for line in SCRIPT.read_text(encoding="utf-8").splitlines():
-        raws = [m.group(1) for m in _SUBSCRIPT_RE.finditer(line)]
-        raws += [m.group(1) for m in _GET_RE.finditer(line)]
+        raws = [m.group(2) for m in _SUBSCRIPT_RE.finditer(line)]
+        raws += [m.group(2) for m in _GET_RE.finditer(line)]
         for raw in raws:
             if "{" not in raw:
                 names.add(raw)
