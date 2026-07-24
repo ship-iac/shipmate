@@ -50,8 +50,8 @@ trigger other workflows); the same App also authors the apply checks, the
 a freshly minted installation token. The plan matrix job's own
 `<stack> / <env>` check-run stays on the shared `github-actions` identity —
 it's the job's own auto check-run, not something the App creates separately.
-Authorization requires team membership, an
-approved and mergeable PR, and a reviewed plan for the PR's current head.
+Authorization requires team membership, a mergeable PR that satisfies the
+branch ruleset's review policy, and a reviewed plan for the PR's current head.
 Comment-ops keeps the entire interaction surface inside the pull request
 that is already the unit of review, with an auditable history of who asked
 for what and when. See `CONTRACT.md` for the full grammar and authorization

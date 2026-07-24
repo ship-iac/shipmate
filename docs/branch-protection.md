@@ -72,6 +72,37 @@ Doctor degrades to a `could not verify` note on an API error and always
 exits 0, so a probe failure (for example, the App token lacking read access
 to `rules/branches` or `environments`) never fails the plan run itself.
 
+## Review policy for `shipmate apply`
+
+shipmate delegates review policy to the branch ruleset. `shipmate apply`
+blocks only when GitHub's `reviewDecision` is `REVIEW_REQUIRED` or
+`CHANGES_REQUESTED`; it imposes no approval rule of its own.
+
+- **Sole-maintainer mode** (`required_approving_review_count: 0`): `shipmate
+  apply` needs no approving review (a one-person repo can never self-approve
+  on GitHub) — but a `CHANGES_REQUESTED` review still blocks apply until
+  resolved.
+- **Team mode** (`required_approving_review_count` ≥ 1 and/or code-owner
+  review): GitHub enforces the approval count / CODEOWNERS / last-push-approval,
+  and `shipmate apply` stays blocked until `reviewDecision` clears. No shipmate
+  config — set it on the ruleset (the `pull_request` rule).
+- **Per-environment approval** (e.g. dev applies freely, prod needs a human):
+  configure **required reviewers on the `<env>-apply` GitHub Environment**, not
+  in the ruleset. This gates both pre-merge `shipmate apply <env>` and the
+  post-merge `deploy.yml` apply, since both run against `<env>-apply`.
+  - Deployment approvals differ from PR reviews: a reviewer **can approve
+    their own deployment** by default, so a sole maintainer still gets a
+    confirm-step on prod. Tick "Prevent self-review" on the environment for
+    genuine four-eyes once there's a team.
+  - Pair a reviewer-gated production env with
+    `global.shipmate.explicit_envs` so the bare `shipmate apply` skips it and
+    it is only ever applied via the targeted `shipmate apply <env>` (which
+    then pauses for the environment reviewer).
+- **Private-repo caveat:** GitHub Environment protection rules (required
+  reviewers) are free on public repos but require GitHub Pro/Team/Enterprise on
+  private repos — the same class of constraint as the ruleset note in
+  "free-tier private repos" below.
+
 ## Recipe: automerge after apply
 
 Because the merge gate is the single `shipmate / gate` check, GitHub's
