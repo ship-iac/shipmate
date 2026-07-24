@@ -15,14 +15,17 @@ def _load(fname):
 
 az = _load("authorize")
 
-APPROVED = [{"user": {"login": "rev"}, "state": "APPROVED"}]
 PR_OK = {"mergeable": True, "mergeable_state": "clean", "head": {"sha": "abc123"}}
 RUN_OK = {"id": 555, "head_sha": "abc123"}
 
 
 def _decide(**kw):
     base = dict(
-        is_member=True, approvers_team="deployers", reviews=APPROVED, pr=PR_OK, plan_run=RUN_OK
+        is_member=True,
+        approvers_team="deployers",
+        review_decision="",
+        pr=PR_OK,
+        plan_run=RUN_OK,
     )
     base.update(kw)
     return az.decide(**base)
@@ -45,28 +48,39 @@ def test_unmergeable_rejected():
     assert not ok and "not mergeable" in reason and "dirty" in reason
 
 
-def test_unapproved_rejected():
-    ok, reason = _decide(reviews=[])
-    assert not ok and "not approved" in reason
+def test_review_decision_empty_authorizes():
+    ok, reason = _decide(review_decision="")
+    assert ok and reason == ""
 
 
-def test_changes_requested_outranks_approval():
-    reviews = [
-        {"user": {"login": "a"}, "state": "APPROVED"},
-        {"user": {"login": "b"}, "state": "CHANGES_REQUESTED"},
-    ]
-    ok, reason = _decide(reviews=reviews)
-    assert not ok and "not approved" in reason
+def test_review_decision_approved_authorizes():
+    ok, reason = _decide(review_decision="APPROVED")
+    assert ok and reason == ""
 
 
-def test_latest_review_per_user_wins():
-    # same user requested changes then approved -> approved
-    reviews = [
-        {"user": {"login": "a"}, "state": "CHANGES_REQUESTED"},
-        {"user": {"login": "a"}, "state": "APPROVED"},
-    ]
-    ok, _ = _decide(reviews=reviews)
-    assert ok
+def test_review_decision_literal_null_string_authorizes():
+    # GraphQL null serialized as the literal string "null" — same as absent.
+    ok, reason = _decide(review_decision="null")
+    assert ok and reason == ""
+
+
+def test_review_decision_review_required_rejected():
+    ok, reason = _decide(review_decision="REVIEW_REQUIRED")
+    assert not ok
+    assert "review is required" in reason
+    assert "shipmate apply" in reason
+
+
+def test_review_decision_changes_requested_rejected():
+    ok, reason = _decide(review_decision="CHANGES_REQUESTED")
+    assert not ok
+    assert "changes were requested" in reason
+
+
+def test_review_reject_reasons_are_distinct():
+    _, review_required_reason = _decide(review_decision="REVIEW_REQUIRED")
+    _, changes_requested_reason = _decide(review_decision="CHANGES_REQUESTED")
+    assert review_required_reason != changes_requested_reason
 
 
 def test_no_reviewed_plan_rejected_as_stale():
@@ -91,15 +105,3 @@ def test_mergeable_null_reports_still_computing_not_conflict():
         pr={"mergeable": None, "mergeable_state": "unknown", "head": {"sha": "abc123"}}
     )
     assert not ok and "computing" in reason and "conflict" not in reason
-
-
-def test_approved_ignores_null_user_review():
-    # a review from a deleted account arrives with "user": null; it must be
-    # skipped rather than crashing, and a valid approval alongside it still
-    # authorizes.
-    reviews = [
-        {"user": None, "state": "APPROVED"},
-        {"user": {"login": "rev"}, "state": "APPROVED"},
-    ]
-    ok, reason = _decide(reviews=reviews)
-    assert ok and reason == ""
