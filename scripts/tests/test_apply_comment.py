@@ -209,10 +209,19 @@ def test_render_apply_section_link_only_when_apply_text_missing():
 
 
 def test_build_comment_reserves_link_only_space_for_every_cell():
-    # An early giant apply.txt must not starve a later cell of its link.
+    # An early giant apply.txt must not starve a later cell of its link. The
+    # giant body MUST contain newlines: a single unbroken line (no "\n")
+    # degrades straight to link-only (tiny, ~200 chars) regardless of
+    # whether the reserve logic exists at all, so it can never actually
+    # exercise -- or disprove -- the reserve (verified: with the reserve
+    # deleted entirely, this exact fixture with a no-newline giant still
+    # yields a body under SIZE_BUDGET with every section present -- see the
+    # fix report's probe output).
+    giant_text = "\n".join("X" * 80 for _ in range(3_000))
     rows = [
-        _row(stack_display="giant", stack_path="stacks/giant", apply_text="X" * 200_000),
+        _row(stack_display="giant", stack_path="stacks/giant", apply_text=giant_text),
     ]
+    jobs = []
     for i in range(20):
         rows.append(
             _row(
@@ -221,14 +230,26 @@ def test_build_comment_reserves_link_only_space_for_every_cell():
                 apply_text="\n".join(f"line {j}" for j in range(200)),
             )
         )
-    body = ac.build_comment(rows, [], RUN_URL, "pending", [], [], "dev-eu")
+        # Distinct, zero-padded (no prefix collisions between e.g. job/s01 and
+        # job/s10) per-cell job URLs, so "the URL appears" can only be
+        # satisfied by that cell's OWN section, not a neighbor's.
+        jobs.append(_job(f"apply / dev-eu / stacks/s{i:02}", f"https://gh/job/s{i:02}"))
+    body = ac.build_comment(rows, jobs, RUN_URL, "pending", [], [], "dev-eu")
     assert len(body) <= ac.sc.SIZE_BUDGET
     for i in range(20):
+        url = f"https://gh/job/s{i:02}"
         # Each later cell actually got its own <details> section (not merely
         # a table-row mention, which is present regardless of the reserve
         # logic) -- proves the up-front reserve left it room for at least a
-        # link, rather than the giant early cell starving it.
+        # section, rather than the giant early cell starving it.
         assert f"<summary>✅ s{i:02} / dev-eu — applied</summary>" in body
+        # ...AND that section itself carries the cell's own log link (not
+        # just the table row's mention of it) -- the whole point of the
+        # reserve. Under this budget every one of these degrades to
+        # link-only/truncated, both of which cite the job URL, so a genuine
+        # per-cell section produces >=2 occurrences (table + section); a
+        # cell that lost its section entirely would have only the table's 1.
+        assert body.count(url) >= 2
 
 
 # --- fence-escape attempt ------------------------------------------------------
