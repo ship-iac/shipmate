@@ -1,5 +1,5 @@
 name: shipmate comment-ops
-description: Parse a shipmate command comment, authorize it (team membership via a short-lived App token, PR approved + mergeable + reviewed-plan-exists), and react or reject. Outputs feed actions/dispatch.
+description: Parse a shipmate command comment, authorize it (team membership via a short-lived App token, PR satisfies the branch ruleset's review policy + mergeable + reviewed-plan-exists), and react or reject. Outputs feed actions/dispatch.
 inputs:
   app-id:
     description: GitHub App id (a repo/org variable).
