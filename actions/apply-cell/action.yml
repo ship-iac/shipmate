@@ -57,6 +57,7 @@ runs:
         permission-checks: write
 
     - name: Download reviewed plan artifact (fail-safe if missing)
+      id: download
       shell: bash
       env:
         GH_TOKEN: ${{ inputs.github-token }}
@@ -80,6 +81,7 @@ runs:
         echo "::endgroup::"
 
     - name: Decrypt reviewed plan artifact (fail-safe on config/plaintext mismatch)
+      id: decrypt
       shell: bash
       env:
         STACK: ${{ inputs.stack }}
@@ -89,6 +91,7 @@ runs:
         python3 "$GITHUB_ACTION_PATH/../../scripts/plan-crypt" decrypt "$STACK/stack.otplan"
 
     - name: Verify fingerprint matches the reviewed plan
+      id: fingerprint
       shell: bash
       env:
         ENV: ${{ inputs.env }}
@@ -158,16 +161,21 @@ runs:
         path: ${{ inputs.state-path }}
 
     - name: Apply the stored plan (exact-plan; stale -> fail-safe)
+      id: apply
       shell: bash
       env:
         STACK: ${{ inputs.stack }}
       # The fixture 'apply' script runs `tofu apply stack.otplan` (honors the
       # auth subtree override). tofu rejects a plan whose state moved since it
       # was generated -> non-zero exit -> apply check stays pending (fail-safe).
+      # Tee combined stdout+stderr to RUNNER_TEMP (never the repo tree -- the
+      # live git-untracked safeguard runs on this path) for the cell-summary
+      # artifact. `set -o pipefail` (already on) makes the step's exit code
+      # tofu's, not tee's, so the fail-safe above still fires on a real error.
       run: |
         set -euo pipefail
         echo "::group::terramate apply: $STACK"
-        terramate script run --disable-safeguards=git-out-of-sync --no-recursive -C "$STACK" apply
+        terramate script run --disable-safeguards=git-out-of-sync --no-recursive -C "$STACK" apply 2>&1 | tee "$RUNNER_TEMP/apply.txt"
         echo "::endgroup::"
 
     - name: Save state
@@ -193,6 +201,81 @@ runs:
         env: ${{ inputs.env }}
         mode: save
         path: ${{ inputs.state-path }}
+
+    - name: Compose cell summary
+      # Runs even when a fail-safe or the apply itself failed/was cancelled --
+      # the aggregator needs a result for every attempted-or-blocked cell.
+      # Built via python from env vars only: stack/env/reason text is
+      # author-controlled (Terramate tags, workflow inputs) and must never be
+      # shell-interpolated into the script or spliced into JSON by string
+      # concat.
+      if: always()
+      shell: bash
+      env:
+        STACK: ${{ inputs.stack }}
+        STACK_NAME: ${{ inputs.stack-name }}
+        ENV: ${{ inputs.env }}
+        DOWNLOAD_OUTCOME: ${{ steps.download.outcome }}
+        DECRYPT_OUTCOME: ${{ steps.decrypt.outcome }}
+        FINGERPRINT_OUTCOME: ${{ steps.fingerprint.outcome }}
+        RESTORE_OUTCOME: ${{ steps.restore-state.outcome }}
+        APPLY_OUTCOME: ${{ steps.apply.outcome }}
+      run: |
+        set -euo pipefail
+        python3 - <<'PY'
+        import json, os, shutil
+
+        # Checked in pipeline order: the four pre-apply fail-safes run
+        # sequentially, so on a real failure every later one is 'skipped',
+        # not 'success' -- the first non-success in this order is the one
+        # that actually tripped.
+        FAILSAFES = [
+            ("DOWNLOAD_OUTCOME", "reviewed plan artifact missing or expired — re-run plan"),
+            ("DECRYPT_OUTCOME", "plan artifact could not be decrypted — passphrase/config mismatch"),
+            (
+                "FINGERPRINT_OUTCOME",
+                "environment does not match the reviewed plan's fingerprint — re-plan",
+            ),
+            ("RESTORE_OUTCOME", "state restore failed"),
+        ]
+
+        result, reason = None, ""
+        for env_key, message in FAILSAFES:
+            if os.environ[env_key] != "success":
+                result, reason = "blocked", message
+                break
+
+        if result is None:
+            # apply ran: success -> applied; anything else (failure,
+            # cancelled) -> failed. Blocked is reserved for the fail-safes above.
+            result = "applied" if os.environ["APPLY_OUTCOME"] == "success" else "failed"
+
+        with open("cell.json", "w") as fh:
+            json.dump(
+                {
+                    "stack": os.environ["STACK_NAME"],
+                    "stack_path": os.environ["STACK"],
+                    "environment": os.environ["ENV"],
+                    "result": result,
+                    "reason": reason,
+                },
+                fh,
+            )
+
+        # A blocked cell never reached the apply step -- no apply.txt to copy.
+        apply_log = os.path.join(os.environ["RUNNER_TEMP"], "apply.txt")
+        if os.path.exists(apply_log):
+            shutil.copyfile(apply_log, "apply.txt")
+        PY
+
+    - name: Upload apply summary
+      if: always()
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      with:
+        name: apply-summary.${{ inputs.env }}.${{ steps.ids.outputs.slug }}
+        path: |
+          cell.json
+          apply.txt
 
     - name: Mint App installation token for completion
       # Re-mint: a long (>1h) apply can outlive the job-start token; completion needs a fresh one.
