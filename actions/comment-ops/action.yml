@@ -117,6 +117,9 @@ runs:
         done
         [ -n "$pr_ok" ] || echo "::warning::PR mergeable still unknown after retries; treating as not-ready"
         # Review decision (ruleset-driven: null/absent means no review required).
+        # The $owner/$repo/$pr tokens are GraphQL query variables (bound via -F), not
+        # shell variables — single quotes are intentional.
+        # shellcheck disable=SC2016
         rd=$(gh api graphql -f query='query($owner:String!,$repo:String!,$pr:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$pr){reviewDecision}}}' \
           -F owner="$OWNER" -F repo="${GITHUB_REPOSITORY#*/}" -F pr="$PR_NUMBER" \
           --jq '.data.repository.pullRequest.reviewDecision // ""')
