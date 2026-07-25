@@ -377,8 +377,16 @@ def _results_failed(results_csv):
     whether any job-level outcome signals failure. The one tokenizer shared
     by the short form and the table path's failure line -- so the two
     can never disagree about what 'failed' means for the same results
-    string."""
-    tokens = [t for t in results_csv.split(",") if t]
+    string.
+
+    A blank token counts as failure -- this restores the semantics of the
+    shell tokenizer this replaced (`echo "$RESULTS" | tr ',' '\\n' | grep
+    -qvE '^(success|skipped)$'`): an empty line never matches that
+    alternation, so a blank segment (or a wholly empty string) read as
+    failure. Dropping empty tokens instead would let a blank result read as
+    clean, silently turning "failed" into "found no pending applies to
+    run"."""
+    tokens = results_csv.split(",")
     return any(t not in ("success", "skipped") for t in tokens)
 
 

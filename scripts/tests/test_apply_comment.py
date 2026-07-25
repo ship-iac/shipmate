@@ -815,6 +815,24 @@ def test_results_failed_tokenizer_shared_by_short_form_and_failure_line(results_
     assert bool(fail_line) == failed
 
 
+def test_results_failed_blank_token_counts_as_failure():
+    # Restores the semantics of the shell tokenizer this replaced
+    # (`tr ',' '\n' | grep -qvE '^(success|skipped)$'`): an empty line never
+    # matches that alternation, so a blank segment reads as failure.
+    # Filtering blank tokens out let an empty/blank result read as clean.
+    assert ac._results_failed("") is True
+    assert ac._results_failed("success,,skipped") is True  # embedded blank segment
+    assert ac._results_failed("success,") is True  # trailing blank segment
+    assert ac._results_failed("success,skipped") is False  # sanity: no blanks, no failure
+
+
+def test_short_form_and_failure_line_agree_blank_token_is_failure():
+    # Same anti-divergence property as the parametrized test above, exercised
+    # specifically on the blank-token case the parametrization didn't cover.
+    assert ac._short_form("", "", "pending", RUN_URL, [], []).startswith(":x:")
+    assert ac._failure_line("", [], "") != ""
+
+
 # --- coupling guards ----------------------------------------------------------------
 
 _ENGINE = pathlib.Path(__file__).resolve().parents[2]
