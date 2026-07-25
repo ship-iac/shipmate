@@ -122,6 +122,7 @@ jobs:
         uses: ship-iac/shipmate/actions/apply-summary@f95bfe7f18602db850c68ef093ca8692a5ead2e9
         with:
           pr-number: ${{ inputs.pr_number }}
+          head-sha: ${{ inputs.ref }}
           envlevel0-waves: ${{ needs.detect.outputs.envlevel0_waves }}
           envlevel1-waves: ${{ needs.detect.outputs.envlevel1_waves }}
           envlevel2-waves: ${{ needs.detect.outputs.envlevel2_waves }}

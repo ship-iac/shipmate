@@ -723,7 +723,15 @@ def main():
     jobs = ag.parse_jsonl(sys.stdin)
     downloaded = load_cells(os.environ.get("CELLS", "cells"))
     expected = _expected_cells()
-    rows = build_rows(expected, downloaded)
+    # The apply checks are the work queue and therefore the authority on what
+    # is done; the artifacts only say what each cell's own job believed. See
+    # apply_check_state. Absent/unreadable check data degrades to artifact-only
+    # rendering rather than inventing a state.
+    present, done = load_check_maps(
+        os.environ.get("SHIPMATE_CHECKS", "checks.jsonl"),
+        os.environ.get("SHIPMATE_APP_ID", ""),
+    )
+    rows = apply_check_state(build_rows(expected, downloaded), present, done)
     env_name = os.environ.get("SHIPMATE_ENVIRONMENT", "") or ""
     gate = os.environ.get("SHIPMATE_GATE", "")
     run_url = (

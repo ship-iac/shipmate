@@ -83,6 +83,7 @@ jobs:
         uses: ship-iac/shipmate/actions/apply-summary@f95bfe7f18602db850c68ef093ca8692a5ead2e9
         with:
           pr-number: ${{ inputs.pr_number }}
+          head-sha: ${{ inputs.ref }}
           environment: ${{ inputs.environment }}
           waves-json: ${{ needs.detect.outputs.waves }}
           results: ${{ join(needs.*.result, ',') }}
