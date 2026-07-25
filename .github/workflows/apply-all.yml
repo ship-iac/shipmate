@@ -119,7 +119,7 @@ jobs:
           app-id: ${{ vars.SHIPMATE_APP_ID }}
           private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
       - name: Post apply result comment
-        uses: ship-iac/shipmate/actions/apply-summary@cea06ddc41c39067780c8274aaf9cb0ad837e690
+        uses: ship-iac/shipmate/actions/apply-summary@f95bfe7f18602db850c68ef093ca8692a5ead2e9
         with:
           pr-number: ${{ inputs.pr_number }}
           envlevel0-waves: ${{ needs.detect.outputs.envlevel0_waves }}
