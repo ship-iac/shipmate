@@ -1109,6 +1109,17 @@ def test_load_check_maps_missing_file_stays_silent(tmp_path, capsys):
     assert "::warning::" not in capsys.readouterr().out
 
 
+def test_load_check_maps_non_numeric_app_id_degrades_with_a_warning(tmp_path, capsys):
+    # A non-numeric SHIPMATE_APP_ID (e.g. the App's client id pasted in place
+    # of its numeric app id) makes ag.from_app's int(app_id) raise ValueError.
+    # That must cost only the check-state display axis, never the whole
+    # render step -- same degradation as a malformed checks.jsonl.
+    p = tmp_path / "checks.jsonl"
+    p.write_text("\n".join(_jsonl(_check("apply / dev-eu / stacks/app"))), encoding="utf-8")
+    assert ac.load_check_maps(str(p), "Iv1.notanumericid") == (set(), set())
+    assert "::warning::" in capsys.readouterr().out
+
+
 def test_unrecorded_has_its_own_emoji():
     assert ac._EMOJI["unrecorded"] == "⚠️"
 
@@ -1128,6 +1139,13 @@ def test_unrecorded_note_names_the_cell_and_the_recovery():
     note = ac._unrecorded_note(rows)
     assert "**db / prod**" in note
     assert "applied but not recorded" in note
+    # The cause is not "could not be completed" (implying only one possible
+    # cause) -- a duplicate apply check re-created by a later plan run on the
+    # same head SHA reads pending even though its OWN run completed, so the
+    # note must name all three reachable causes.
+    assert (
+        "not recorded as complete (it failed, was cancelled, or a newer plan re-created it)" in note
+    )
     assert "`shipmate / gate` stays pending" in note
     assert "Re-plan and re-apply" in note
 
@@ -1192,11 +1210,41 @@ def test_build_comment_no_unrecorded_note_when_nothing_is_unrecorded():
     assert "applied but not recorded" not in comment
 
 
-def test_failure_line_absent_when_an_unrecorded_row_already_explains_it():
-    # A ⚠️ row plus its note IS the per-cell explanation; the generic
-    # "shipmate apply <env> failed." sentence is noise next to it.
+def test_failure_line_present_even_when_an_unrecorded_row_already_explains_it():
+    # A ⚠️ row plus its note explains ONE cell in ONE environment; it says
+    # nothing about a different environment whose job died before any cell
+    # reported. Suppressing the generic ❌ on `unrecorded` would let that ⚠️
+    # silently swallow the only failure signal a dead-before-any-cell
+    # environment ever gets (see the mixed-environments test below), so the
+    # line must still render even in this single-row, same-environment case:
+    # the redundancy beside the ⚠️ never loses a signal.
     rows = [_row(status="unrecorded", stack_display="db", environment="prod")]
-    assert ac._failure_line("success,failure", rows, "prod") == ""
+    assert ac._failure_line("success,failure", rows, "prod") == (
+        ":x: shipmate: `shipmate apply prod` failed."
+    )
+
+
+def test_failure_line_present_for_mixed_unrecorded_and_not_attempted_across_envs():
+    # The finding: an all-environments run where env A reports one
+    # `unrecorded` cell (its apply ran but the check never completed) while
+    # env B's job died before any cell reported at all (a denied
+    # `<env>-apply` environment, a job-level cancel) -- env B has only
+    # `not_attempted` rows, never `failed`. Pre-fix, the `unrecorded` row in
+    # env A suppressed the job-level failure line, leaving the whole bare-form
+    # comment with a ⚠️, an ⏭️ note, and no ❌ anywhere despite the run
+    # genuinely having failed.
+    rows = [
+        _row(status="unrecorded", stack_display="db", environment="dev-eu"),
+        _row(
+            status="not_attempted",
+            stack_display="app",
+            stack_path="stacks/app",
+            environment="dev-us",
+            apply_text=None,
+        ),
+    ]
+    line = ac._failure_line("success,failure", rows, "")
+    assert line == ":x: shipmate: `shipmate apply` (all environments) failed."
 
 
 def test_build_comment_promoted_row_carries_no_stays_pending_note():

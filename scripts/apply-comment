@@ -105,11 +105,18 @@ def _unrecorded_note(rows):
     the same **bold** form _blocked_line uses -- deliberately not a backtick
     code span, since _md_escape does not escape a backtick.
 
-    Uncapped: a 256-cell worst case is ~8k characters, which lands in
-    _top_section and is therefore counted in build_comment's `used` before the
-    section loop, so it degrades sections to link-only and then to the
-    HARD_CAP table-only fallback -- the same posture unbounded blocked lines
-    already have."""
+    Uncapped: a 256-cell worst case is ~8k characters. This note rides in
+    `top` (built by _top_section), not in the per-row section/blocked-line
+    loop, so it is counted in build_comment's `used` before that loop the same
+    way the header and table are -- it correctly starves later sections'
+    link-only budget under normal degradation. But `top` is exactly what the
+    HARD_CAP table-only fallback re-emits verbatim (`top + fallback + footer`)
+    when even every link-only section and blocked one-liner still overflows,
+    so unlike unbounded blocked lines -- which the fallback sheds along with
+    every other per-row line -- this note can never be shed. At extreme
+    fan-out it can only push the render past HARD_CAP into the final
+    `SystemExit`, whose message then blames "shorten stack/env display names"
+    even when this note, not the display names, is what tipped it over."""
     cells = [
         f"**{sc._md_escape(r['stack_display'])} / {sc._md_escape(r['environment'])}**"
         for r in rows
@@ -120,8 +127,9 @@ def _unrecorded_note(rows):
     return (
         "⚠️ applied but not recorded: "
         + ", ".join(cells)
-        + " — the apply succeeded but the apply check could not be completed, so "
-        "`shipmate / gate` stays pending. Re-plan and re-apply."
+        + " — the apply succeeded but the apply check is not recorded as "
+        "complete (it failed, was cancelled, or a newer plan re-created it), "
+        "so `shipmate / gate` stays pending. Re-plan and re-apply."
     )
 
 
@@ -382,13 +390,22 @@ def load_check_maps(path, app_id):
     feedback channel, so a bad checks.jsonl must degrade to no data with a
     warning rather than propagate and kill the render step entirely. Both
     cases are simply no data -- see apply_check_state for why no data is the
-    safe state."""
+    safe state.
+
+    A non-numeric SHIPMATE_APP_ID (e.g. the App's *client id* pasted in place
+    of its numeric app id) makes `ag.from_app`'s `int(app_id)` raise
+    ValueError -- also just this one display axis, same degradation. The
+    token-mint step in actions/apply-summary's action.yml runs before the
+    render step and would itself fail first on the same bad id (it needs the
+    numeric app id too), so in practice this ValueError guard is defence in
+    depth for a misconfiguration that should already have failed loud
+    upstream, not the primary place a bad app id is expected to be caught."""
     try:
         with open(path, encoding="utf-8") as fh:
             return check_state_maps(fh, app_id)
     except FileNotFoundError:
         return set(), set()
-    except (OSError, SystemExit) as exc:
+    except (OSError, SystemExit, ValueError) as exc:
         print(
             f"::warning::{path} could not be read as apply checks ({exc}) -- "
             "the apply result comment falls back to artifact-only status"
@@ -645,12 +662,21 @@ def _failure_line(results_csv, rows, env_name):
     rows and needs no extra line), surface the short form's own failure
     sentence -- reusing _apply_head via the shared _results_failed tokenizer
     -- so the old one-liner's failure signal survives verbatim even though
-    the table now carries the per-cell detail."""
+    the table now carries the per-cell detail.
+
+    `unrecorded` is deliberately NOT in the suppression set, even though it
+    gets its own ⚠️ row and its own note: those describe ONE cell in ONE
+    environment, and say nothing about a different environment whose job
+    died before any cell reported at all (a denied `<env>-apply` environment,
+    a job-level cancel) -- exactly the all-environments mixed case this
+    function exists to catch. Suppressing on `unrecorded` would let a ⚠️ in
+    env A silently swallow the only ❌ that env B's dead-before-any-cell
+    failure is ever going to get. A ⚠️ row is allowed to sit beside the
+    generic ❌ in the common single-environment case too: the run genuinely
+    did fail, and the redundancy never loses a signal."""
     if not _results_failed(results_csv):
         return ""
-    # An `unrecorded` row plus its note is itself the per-cell explanation, so
-    # the generic job-level sentence would only add noise beside it.
-    if any(r["status"] in ("failed", "blocked", "unrecorded") for r in rows):
+    if any(r["status"] in ("failed", "blocked") for r in rows):
         return ""
     return _apply_head(env_name, ":x:", "failed")
 

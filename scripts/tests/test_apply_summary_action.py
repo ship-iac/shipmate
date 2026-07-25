@@ -180,10 +180,6 @@ def _steps():
     return _load_action()["runs"]["steps"]
 
 
-def _index_of(step):
-    return _steps().index(step)
-
-
 def test_head_sha_is_a_required_input():
     inputs = _load_action()["inputs"]
     assert "head-sha" in inputs, "apply-summary needs the head SHA to read the apply checks"

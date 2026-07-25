@@ -409,22 +409,24 @@ signal; an overview table (one row per expected cell — status emoji
 ✅ applied / ⚠️ applied but not recorded / ❌ failed /
 🚫 blocked / ⏭️ not attempted, stack, env, `+A ~C -D`
 resources parsed from the apply output's last `Apply complete!` line, and a
-per-cell log link); one `<details>` section per **attempted** (applied or
-failed) cell with the full apply output in a plain code fence; one
+per-cell log link); one `<details>` section per **attempted** (applied,
+failed, or applied-but-not-recorded) cell with the full apply output in a
+plain code fence; one
 no-fence line per **blocked** cell naming its `reason`. An expected cell
 whose artifact never arrived (its wave/env-level was skipped after an
 upstream failure, or the run was cancelled before upload) renders as
-**not attempted** — a table row only; the comment also carries a single note,
+**not attempted** unless its apply check is already done (see the derivation
+rules below) — a table row only; the comment also carries a single note,
 once, whenever any cell is not attempted, that those apply checks stay
 pending and can be retried — naming `shipmate apply <env>` for a targeted
 run, or the bare `shipmate apply` when the run covered all environments.
 There is no separate "nothing pending" input: the expected cell set is the
 same waves JSON `apply-detect` / `apply-all-detect` already compute, and a
-cell counts as attempted only when its artifact actually downloaded — the
-render can never claim nothing is pending while holding evidence that an
-apply ran. The footer carries the bare-apply form's excluded/skipped-environment
-sentences, a gate-completion sentence (complete or still-pending, from the
-gate verdict), and the run link.
+cell counts as attempted when its artifact actually downloaded or its apply
+check is already done — the render can never claim nothing is pending while
+holding evidence that an apply ran. The footer carries the bare-apply form's
+excluded/skipped-environment sentences, a gate-completion sentence (complete
+or still-pending, from the gate verdict), and the run link.
 
 Row status is derived from **both** the per-cell artifact and the real state of
 that cell's `apply / <env> / <stack>` check on the head SHA, which
