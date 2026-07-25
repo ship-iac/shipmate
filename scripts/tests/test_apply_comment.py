@@ -113,7 +113,7 @@ def test_build_table_statuses_emoji_and_not_attempted_note_present():
     assert "| 🚫 | auth | dev-eu |" in table
     assert "| ⏭️ | stacks/x | dev-eu |" in table
     comment = ac.build_comment(rows, [], RUN_URL, "pending", [], [], "dev-eu")
-    assert ac.NOT_ATTEMPTED_NOTE in comment
+    assert ac._not_attempted_note("dev-eu") in comment
 
 
 def test_build_table_escapes_evil_stack_display_name():
@@ -555,6 +555,117 @@ def test_footer_excluded_and_skipped_only_for_all_environments_form():
         in footer_all
     )
     assert "Skipped (ordered after an unapplied explicit environment): `staging`." in footer_all
+
+
+# --- I2: not-attempted note names the targeted env -------------------------------
+
+
+def test_not_attempted_note_targeted_form_names_the_env():
+    note = ac._not_attempted_note("prod")
+    assert note == (
+        "_⏭️ not attempted — the apply check stays pending; retry with `shipmate apply prod`._"
+    )
+
+
+def test_not_attempted_note_bare_form_stays_bare():
+    note = ac._not_attempted_note("")
+    assert note == (
+        "_⏭️ not attempted — the apply check stays pending; retry with `shipmate apply`._"
+    )
+
+
+def test_not_attempted_note_escapes_evil_env_name():
+    note = ac._not_attempted_note("x</summary><b>evil")
+    assert "x</summary><b>evil" not in note
+    assert "shipmate apply x&lt;/summary&gt;&lt;b&gt;evil" in note
+
+
+def test_build_comment_not_attempted_note_in_targeted_run_names_the_env():
+    # I2 reproduced end to end: a targeted `shipmate apply prod` run with a
+    # not-attempted cell must not tell the reader to retry with the bare
+    # form, which cannot retry an explicit env.
+    rows = [_row(status="not_attempted", environment="prod", apply_text=None)]
+    comment = ac.build_comment(rows, [], RUN_URL, "pending", [], [], "prod")
+    assert "retry with `shipmate apply prod`" in comment
+    assert "retry with `shipmate apply`._" not in comment
+
+
+def test_build_comment_not_attempted_note_in_bare_run_stays_bare():
+    rows = [_row(status="not_attempted", environment="dev-eu", apply_text=None)]
+    comment = ac.build_comment(rows, [], RUN_URL, "pending", [], [], "")
+    assert "retry with `shipmate apply`._" in comment
+
+
+# --- I1: job-level SHIPMATE_RESULTS failure surfaces on the table path too -------
+
+
+def test_failure_line_present_when_results_failed_and_no_row_shows_it():
+    rows = [
+        _row(status="not_attempted", stack_display="app", apply_text=None),
+        _row(
+            status="not_attempted",
+            stack_display="db",
+            stack_path="stacks/db",
+            apply_text=None,
+        ),
+    ]
+    line = ac._failure_line("success,failure", rows, "prod")
+    assert line == ":x: shipmate: `shipmate apply prod` failed."
+
+
+def test_failure_line_absent_when_results_clean():
+    rows = [_row(status="not_attempted", apply_text=None)]
+    assert ac._failure_line("success,skipped", rows, "prod") == ""
+
+
+def test_failure_line_absent_when_a_row_already_shows_failed_or_blocked():
+    # No double-signaling: a run with a real ❌/🚫 row already carries the
+    # failure in the table itself.
+    failed_rows = [_row(status="failed")]
+    assert ac._failure_line("success,failure", failed_rows, "prod") == ""
+    blocked_rows = [_row(status="blocked", reason="x", apply_text=None)]
+    assert ac._failure_line("success,failure", blocked_rows, "prod") == ""
+
+
+def test_build_comment_reproduces_i1_red_run_with_no_cell_reports():
+    # Reproduces the review's failure scenario verbatim: SHIPMATE_ENVIRONMENT
+    # set, a non-empty expected cell set, no artifacts downloaded (the apply
+    # job died before any cell reported), SHIPMATE_RESULTS carries a failure
+    # token. Pre-fix this rendered with no ❌ and no "failed" anywhere.
+    rows = ac.build_rows({("prod", "stacks/app"), ("prod", "stacks/db")}, [])
+    body = ac.build_comment(rows, [], RUN_URL, "pending", [], [], "prod", "success,failure")
+    assert ":x: shipmate: `shipmate apply prod` failed." in body
+    assert all(r["status"] == "not_attempted" for r in rows)  # the scenario's own precondition
+
+
+def test_build_comment_no_failure_line_when_results_clean_and_nothing_attempted():
+    rows = ac.build_rows({("prod", "stacks/app")}, [])
+    body = ac.build_comment(rows, [], RUN_URL, "pending", [], [], "prod", "success,skipped")
+    assert ":x: shipmate:" not in body
+
+
+def test_build_comment_failure_line_sits_between_header_and_table():
+    rows = [_row(status="not_attempted", apply_text=None)]
+    body = ac.build_comment(rows, [], RUN_URL, "pending", [], [], "prod", "success,failure")
+    header_idx = body.index("### shipmate apply prod")
+    fail_idx = body.index(":x: shipmate: `shipmate apply prod` failed.")
+    table_idx = body.index("| | stack | env | resources | logs |")
+    assert header_idx < fail_idx < table_idx
+
+
+@pytest.mark.parametrize(
+    "results_csv", ["", "success", "success,skipped", "success,failure", "failure", "cancelled"]
+)
+def test_results_failed_tokenizer_shared_by_short_form_and_failure_line(results_csv):
+    # Anti-divergence guard (ledger item T3d): the table path's failure line
+    # and the short form must use ONE shared tokenizer, so a given
+    # SHIPMATE_RESULTS string can never read as "failed" on one path and
+    # "not failed" on the other.
+    failed = ac._results_failed(results_csv)
+    short = ac._short_form(results_csv, "", "pending", RUN_URL, [], [])
+    assert short.startswith(":x:") == failed
+    fail_line = ac._failure_line(results_csv, [], "")
+    assert bool(fail_line) == failed
 
 
 # --- coupling guards ----------------------------------------------------------------

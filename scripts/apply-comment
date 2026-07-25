@@ -51,9 +51,19 @@ CELL_KEYS = ("stack", "stack_path", "environment", "result", "reason")
 _RESULTS = frozenset({"applied", "failed", "blocked"})
 _EMOJI = {"applied": "✅", "failed": "❌", "blocked": "🚫", "not_attempted": "⏭️"}
 
-NOT_ATTEMPTED_NOTE = (
-    "_⏭️ not attempted — the apply check stays pending; retry with `shipmate apply`._"
-)
+
+def _not_attempted_note(env_name):
+    """The 'apply check stays pending' note, parameterized on the targeted
+    environment (I2): a targeted `shipmate apply <env>` run must tell the
+    reader to retry with that same targeted form, not the bare `shipmate
+    apply` -- the bare form excludes explicit envs
+    (`global.shipmate.explicit_envs`) from its work set and therefore cannot
+    retry an explicit env. env_name is author-controlled (a Terramate tag /
+    GitHub Environment name) so it is escaped the same way every other
+    display value in this file is."""
+    cmd = f"shipmate apply {sc._md_escape(env_name)}" if env_name else "shipmate apply"
+    return f"_⏭️ not attempted — the apply check stays pending; retry with `{cmd}`._"
+
 
 # `Apply complete! Resources: <int> added, <int> changed, <int> destroyed` --
 # digits-only captures, so a look-alike line in author-controlled apply.txt
@@ -296,6 +306,25 @@ def _footer(gate, run_url, excluded, skipped, env_name):
     return "\n\n".join(parts)
 
 
+def _results_failed(results_csv):
+    """Tokenize SHIPMATE_RESULTS (`join(needs.*.result, ',')`) and report
+    whether any job-level outcome signals failure. The one tokenizer shared
+    by the short form and the table path's failure line (I1) -- so the two
+    can never disagree about what 'failed' means for the same results
+    string (ledger item T3d)."""
+    tokens = [t for t in results_csv.split(",") if t]
+    return any(t not in ("success", "skipped") for t in tokens)
+
+
+def _apply_head(env_name, emoji, word):
+    """The `:x:`/`:white_check_mark:` lead sentence, byte-identical to the
+    pre-change inline shell. Shared so the table path's failure line (I1)
+    reuses the exact failed-form wording instead of a reworded duplicate."""
+    if env_name:
+        return f"{emoji} shipmate: `shipmate apply {sc._md_escape(env_name)}` {word}."
+    return f"{emoji} shipmate: `shipmate apply` (all environments) {word}."
+
+
 def _short_form(results_csv, env_name, gate, run_url, excluded, skipped):
     """Used only when the expected set is empty and no cells were downloaded
     (nothing to tabulate). Reuses the existing one-liner sentences from
@@ -306,16 +335,10 @@ def _short_form(results_csv, env_name, gate, run_url, excluded, skipped):
     this nothing-pending one, so dropping them here would regress the most
     actionable case: an all-levels-empty run whose only pending work is an
     explicit env."""
-    tokens = [t for t in results_csv.split(",") if t]
-    failed = any(t not in ("success", "skipped") for t in tokens)
-    if failed:
-        emoji, word = ":x:", "failed"
+    if _results_failed(results_csv):
+        head = _apply_head(env_name, ":x:", "failed")
     else:
-        emoji, word = ":white_check_mark:", "found no pending applies to run"
-    if env_name:
-        head = f"{emoji} shipmate: `shipmate apply {sc._md_escape(env_name)}` {word}."
-    else:
-        head = f"{emoji} shipmate: `shipmate apply` (all environments) {word}."
+        head = _apply_head(env_name, ":white_check_mark:", "found no pending applies to run")
     parts = [head]
     if not env_name:
         parts.extend(_excluded_skipped_lines(excluded, skipped))
@@ -324,7 +347,41 @@ def _short_form(results_csv, env_name, gate, run_url, excluded, skipped):
     return " ".join(parts)
 
 
-def build_comment(rows, jobs, run_url, gate, excluded, skipped, env_name):
+def _failure_line(results_csv, rows, env_name):
+    """I1: SHIPMATE_RESULTS is the job-level failure signal (the old inline
+    shell's only source of a 'failed' word). Once the expected cell set is
+    non-empty, the table becomes the comment's status source and this signal
+    was previously dropped -- so an apply run that dies before any cell
+    reports (a missing/denied `<env>-apply` environment, a job-level cancel)
+    rendered every expected cell as an all-benign not_attempted, with no ❌
+    and no 'failed' anywhere. When results signals failure and no row
+    already carries failed/blocked (the common case still has its own ❌/🚫
+    rows and needs no extra line), surface the short form's own failure
+    sentence -- reusing _apply_head via the shared _results_failed tokenizer
+    -- so the old one-liner's failure signal survives verbatim even though
+    the table now carries the per-cell detail."""
+    if not _results_failed(results_csv):
+        return ""
+    if any(r["status"] in ("failed", "blocked") for r in rows):
+        return ""
+    return _apply_head(env_name, ":x:", "failed")
+
+
+def _top_section(env_name, results_csv, rows, jobs, run_url):
+    """Header, the I1 failure line (if any) directly beneath it, then the
+    table, then the not-attempted note. Split out of build_comment so the
+    latter's complexity budget (C901 ceiling 8) isn't spent on this
+    concatenation."""
+    header = _header(env_name)
+    table = build_table(rows, jobs, run_url)
+    fail_line = _failure_line(results_csv, rows, env_name)
+    top = "\n\n".join(s for s in (header, fail_line, table) if s)
+    if any(r["status"] == "not_attempted" for r in rows):
+        top += "\n\n" + _not_attempted_note(env_name)
+    return top
+
+
+def build_comment(rows, jobs, run_url, gate, excluded, skipped, env_name, results_csv=""):
     """Assemble the comment under SIZE_BUDGET. Sections render in table order
     (not grouped by status): attempted cells (applied/failed) get a details
     section with the same degradation as summary-comment; blocked cells get a
@@ -332,11 +389,7 @@ def build_comment(rows, jobs, run_url, gate, excluded, skipped, env_name):
     cell is guaranteed at least a link-only section: the space all remaining
     attempted cells' link-only fallbacks need is reserved up front, so an
     early giant apply.txt cannot starve later cells of their links."""
-    header = _header(env_name)
-    table = build_table(rows, jobs, run_url)
-    top = header + "\n\n" + table
-    if any(r["status"] == "not_attempted" for r in rows):
-        top += "\n\n" + NOT_ATTEMPTED_NOTE
+    top = _top_section(env_name, results_csv, rows, jobs, run_url)
     footer = "\n\n" + _footer(gate, run_url, excluded, skipped, env_name)
     used = len(top) + len(footer)
 
@@ -393,15 +446,16 @@ def main():
     )
     # Hoisted out of the branch below: the short form needs these too (an
     # excluded explicit env can be the *entire* reason nothing else is
-    # pending), not just the full table render.
+    # pending), not just the full table render. SHIPMATE_RESULTS likewise --
+    # I1 threads it into the table path too, not just the short form.
     excluded = json.loads(os.environ.get("SHIPMATE_EXCLUDED_ENVS") or "[]")
     skipped = json.loads(os.environ.get("SHIPMATE_SKIPPED_ENVS") or "[]")
+    results_csv = os.environ.get("SHIPMATE_RESULTS", "") or ""
 
     if not rows:
-        results_csv = os.environ.get("SHIPMATE_RESULTS", "") or ""
         body = _short_form(results_csv, env_name, gate, run_url, excluded, skipped)
     else:
-        body = build_comment(rows, jobs, run_url, gate, excluded, skipped, env_name)
+        body = build_comment(rows, jobs, run_url, gate, excluded, skipped, env_name, results_csv)
 
     with open("comment.md", "w", encoding="utf-8") as fh:
         fh.write(body)
