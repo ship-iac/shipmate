@@ -406,7 +406,8 @@ rows and needs no extra line), reusing the header's own wording with a ❌ so
 an apply run that dies before any cell reports (a missing/denied
 `<env>-apply` environment, a job-level cancel) still surfaces a failure
 signal; an overview table (one row per expected cell — status emoji
-✅ applied / ❌ failed / 🚫 blocked / ⏭️ not attempted, stack, env, `+A ~C -D`
+✅ applied / ⚠️ applied but not recorded / ❌ failed /
+🚫 blocked / ⏭️ not attempted, stack, env, `+A ~C -D`
 resources parsed from the apply output's last `Apply complete!` line, and a
 per-cell log link); one `<details>` section per **attempted** (applied or
 failed) cell with the full apply output in a plain code fence; one
@@ -424,6 +425,42 @@ render can never claim nothing is pending while holding evidence that an
 apply ran. The footer carries the bare-apply form's excluded/skipped-environment
 sentences, a gate-completion sentence (complete or still-pending, from the
 gate verdict), and the run link.
+
+Row status is derived from **both** the per-cell artifact and the real state of
+that cell's `apply / <env> / <stack>` check on the head SHA, which
+`actions/apply-summary` reads with its own App installation token (only checks
+authored by the shipmate App count, judged by the newest run per name — the
+same predicate the gate and both detects use). The pending apply checks are the
+work queue, so they outrank the artifact, which only records what a cell's own
+job believed before its check was completed:
+
+- ✅ **applied** — the apply succeeded **and** its check is recorded.
+- ⚠️ **applied but not recorded** — the apply succeeded but its check is still
+  pending, because `Save state`, the completion-token mint or `Complete the
+  apply check` failed (or the job was cancelled) after the cell summary was
+  already composed. `shipmate / gate` stays pending, and the stack needs a
+  re-plan: state has advanced past the reviewed `.otplan`, so the saved plan is
+  stale. The comment carries one note naming every such cell, and the cell
+  keeps its full `<details>` output.
+- A cell whose check is **done** but whose artifact never arrived (the
+  cosmetic, `continue-on-error` upload dropped) renders ✅ with its output
+  unavailable — never ⏭️, and it does not drag the "apply check stays pending"
+  note along with it.
+- ❌ **failed** / 🚫 **blocked** rows are never re-derived from check state. A
+  red row against a completed check means some other run applied that cell:
+  the row over-reports, nothing is stranded, and downgrading it would let an
+  unrelated run's completed check hide a real failure in this one.
+
+If the check scan is unavailable — an API failure (warned, degraded to no
+data), an older pinned `apply-summary` that never wrote the file, or an empty
+`SHIPMATE_APP_ID` (warned) — every name reads as *absent*, which means
+*unknown*, and the comment falls back to artifact-only status. Absence never
+manufactures a ⚠️.
+
+`cell.json`'s `result` grammar is **unchanged** (`applied | failed | blocked`).
+⚠️ is a display status derived at render time, never a value `apply-cell`
+writes, so the fail-loud validator still rejects an out-of-enum artifact value
+as pin skew.
 
 The 65,536-character comment cap and the up-front link-only-space reserve
 work the same way as the plan comment's, above, but the truncation direction
