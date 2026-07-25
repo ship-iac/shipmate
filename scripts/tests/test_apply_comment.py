@@ -1100,3 +1100,113 @@ def test_cell_json_result_enum_is_unchanged():
     # cell.json grammar in CONTRACT.md must not drift because the comment grew
     # a display state.
     assert ac._RESULTS == frozenset({"applied", "failed", "blocked"})
+
+
+# --- unrecorded rendering ----------------------------------------------------
+
+
+def test_unrecorded_note_names_the_cell_and_the_recovery():
+    rows = [_row(status="unrecorded", stack_display="db", environment="prod")]
+    note = ac._unrecorded_note(rows)
+    assert "**db / prod**" in note
+    assert "applied but not recorded" in note
+    assert "`shipmate / gate` stays pending" in note
+    assert "Re-plan and re-apply" in note
+
+
+def test_unrecorded_note_empty_when_no_unrecorded_row():
+    assert ac._unrecorded_note([_row(status="applied"), _row(status="failed")]) == ""
+
+
+def test_unrecorded_note_lists_every_affected_cell():
+    rows = [
+        _row(status="unrecorded", stack_display="db", environment="prod"),
+        _row(status="unrecorded", stack_display="auth", environment="prod"),
+    ]
+    note = ac._unrecorded_note(rows)
+    assert "**db / prod**" in note and "**auth / prod**" in note
+
+
+def test_unrecorded_note_escapes_evil_stack_and_env_names():
+    # stack_display and environment are author-controlled (a Terramate tag /
+    # GitHub Environment name / apply-cell's stack-name input). Bold, not a
+    # backtick code span: _md_escape does not escape a backtick, so a code
+    # span would be the one place the escape could be broken out of.
+    rows = [
+        _row(
+            status="unrecorded",
+            stack_display="x</summary><b>evil",
+            environment="e</summary>vil",
+        )
+    ]
+    note = ac._unrecorded_note(rows)
+    assert "</summary>" not in note
+    assert "<b>" not in note
+    assert "&lt;/summary&gt;&lt;b&gt;evil" in note
+    assert "`" not in note.split("`shipmate / gate`")[0]
+
+
+def test_build_table_renders_unrecorded_with_the_warning_emoji():
+    rows = [_row(status="unrecorded", stack_display="db", environment="prod")]
+    table = ac.build_table(rows, [], RUN_URL)
+    assert "| ⚠️ | db | prod |" in table
+
+
+def test_build_table_unrecorded_still_shows_its_resources_count():
+    # The apply genuinely ran and its output is real -- the resources column
+    # must not go blank just because the check was never completed.
+    rows = [_row(status="unrecorded", stack_display="db", environment="prod")]
+    table = ac.build_table(rows, [], RUN_URL)
+    assert "+1 ~0 -0" in table
+
+
+def test_build_comment_unrecorded_keeps_its_details_section_and_carries_the_note():
+    rows = [_row(status="unrecorded", stack_display="db", environment="prod")]
+    comment = ac.build_comment(rows, [], RUN_URL, "pending", [], [], "prod")
+    assert "<details><summary>⚠️ db / prod — unrecorded</summary>" in comment
+    assert "```\nApply complete! Resources: 1 added, 0 changed, 0 destroyed.\n```" in comment
+    assert ac._unrecorded_note(rows) in comment
+
+
+def test_build_comment_no_unrecorded_note_when_nothing_is_unrecorded():
+    rows = [_row(status="applied")]
+    comment = ac.build_comment(rows, [], RUN_URL, "pending", [], [], "dev-eu")
+    assert "applied but not recorded" not in comment
+
+
+def test_failure_line_absent_when_an_unrecorded_row_already_explains_it():
+    # A ⚠️ row plus its note IS the per-cell explanation; the generic
+    # "shipmate apply <env> failed." sentence is noise next to it.
+    rows = [_row(status="unrecorded", stack_display="db", environment="prod")]
+    assert ac._failure_line("success,failure", rows, "prod") == ""
+
+
+def test_build_comment_promoted_row_carries_no_stays_pending_note():
+    # not_attempted + done check -> applied: the comment must stop telling the
+    # reader to retry a cell that actually applied.
+    rows = [_row(status="not_attempted", stack_path="stacks/app", apply_text=None)]
+    ac.apply_check_state(rows, {"apply / dev-eu / stacks/app"}, {"apply / dev-eu / stacks/app"})
+    comment = ac.build_comment(rows, [], RUN_URL, "pending", [], [], "dev-eu")
+    assert "| ✅ |" in comment
+    assert ac._not_attempted_note("dev-eu") not in comment
+    assert "full output in the job log" in comment  # link-only section, no fence
+    assert "```" not in comment
+
+
+def test_build_comment_genuinely_pending_row_keeps_the_stays_pending_note():
+    rows = [_row(status="not_attempted", stack_path="stacks/app", apply_text=None)]
+    ac.apply_check_state(rows, {"apply / dev-eu / stacks/app"}, set())
+    comment = ac.build_comment(rows, [], RUN_URL, "pending", [], [], "dev-eu")
+    assert "| ⏭️ |" in comment
+    assert ac._not_attempted_note("dev-eu") in comment
+
+
+def test_build_comment_unrecorded_note_precedes_the_not_attempted_note():
+    # A stranded applied cell needs a re-plan; a not-attempted one just needs a
+    # retry. The more urgent statement reads first.
+    rows = [
+        _row(status="unrecorded", stack_display="db", environment="prod"),
+        _row(status="not_attempted", stack_display="stacks/x", environment="prod", apply_text=None),
+    ]
+    comment = ac.build_comment(rows, [], RUN_URL, "pending", [], [], "prod")
+    assert comment.index("applied but not recorded") < comment.index("not attempted —")

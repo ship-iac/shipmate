@@ -69,6 +69,11 @@ _EMOJI = {
     "unrecorded": "⚠️",
 }
 
+# Statuses that get a <details> section with the cell's apply output.
+# `unrecorded` is here because its apply genuinely ran: the output is the
+# evidence a reader needs to confirm what landed before re-planning.
+_SECTION_STATUSES = ("applied", "failed", "unrecorded")
+
 
 def _not_attempted_note(env_name):
     """The 'apply check stays pending' note, parameterized on the targeted
@@ -81,6 +86,43 @@ def _not_attempted_note(env_name):
     display value in this file is."""
     cmd = f"shipmate apply {sc._md_escape(env_name)}" if env_name else "shipmate apply"
     return f"_⏭️ not attempted — the apply check stays pending; retry with `{cmd}`._"
+
+
+def _unrecorded_note(rows):
+    """The 'applied but not recorded' note, naming every affected cell.
+
+    One comment-wide note rather than a per-cell line (the shape `blocked`
+    cells get) on purpose: a per-cell line needs a third branch in
+    build_comment's render loop plus its own entry in the up-front size
+    reserve, and build_comment is at 7 of the C901 ceiling of 8. This lives in
+    its own function, called from _top_section, so build_comment's budget is
+    untouched -- and an unrecorded cell still gets a full <details> section
+    (see _SECTION_STATUSES), because its apply output is real and is exactly
+    what the reader needs.
+
+    Cell names are author-controlled (Terramate tags, GitHub Environment
+    names, apply-cell's stack-name input) so both go through _md_escape, in
+    the same **bold** form _blocked_line uses -- deliberately not a backtick
+    code span, since _md_escape does not escape a backtick.
+
+    Uncapped: a 256-cell worst case is ~8k characters, which lands in
+    _top_section and is therefore counted in build_comment's `used` before the
+    section loop, so it degrades sections to link-only and then to the
+    HARD_CAP table-only fallback -- the same posture unbounded blocked lines
+    already have."""
+    cells = [
+        f"**{sc._md_escape(r['stack_display'])} / {sc._md_escape(r['environment'])}**"
+        for r in rows
+        if r["status"] == "unrecorded"
+    ]
+    if not cells:
+        return ""
+    return (
+        "⚠️ applied but not recorded: "
+        + ", ".join(cells)
+        + " — the apply succeeded but the apply check could not be completed, so "
+        "`shipmate / gate` stays pending. Re-plan and re-apply."
+    )
 
 
 # `Apply complete! Resources: <int> added, <int> changed, <int> destroyed` --
@@ -592,7 +634,9 @@ def _failure_line(results_csv, rows, env_name):
     the table now carries the per-cell detail."""
     if not _results_failed(results_csv):
         return ""
-    if any(r["status"] in ("failed", "blocked") for r in rows):
+    # An `unrecorded` row plus its note is itself the per-cell explanation, so
+    # the generic job-level sentence would only add noise beside it.
+    if any(r["status"] in ("failed", "blocked", "unrecorded") for r in rows):
         return ""
     return _apply_head(env_name, ":x:", "failed")
 
@@ -606,6 +650,11 @@ def _top_section(env_name, results_csv, rows, jobs, run_url):
     table = build_table(rows, jobs, run_url)
     fail_line = _failure_line(results_csv, rows, env_name)
     top = "\n\n".join(s for s in (header, fail_line, table) if s)
+    unrecorded = _unrecorded_note(rows)
+    if unrecorded:
+        # Before the not-attempted note: a stranded applied cell needs a
+        # re-plan, a not-attempted one only a retry.
+        top += "\n\n" + unrecorded
     if any(r["status"] == "not_attempted" for r in rows):
         top += "\n\n" + _not_attempted_note(env_name)
     return top
@@ -629,7 +678,7 @@ def build_comment(rows, jobs, run_url, gate, excluded, skipped, env_name, result
 
     urls = {id(r): _job_url(r, jobs, run_url) for r in rows}
     link_onlys = {
-        id(r): _link_only(r, urls[id(r)]) for r in rows if r["status"] in ("applied", "failed")
+        id(r): _link_only(r, urls[id(r)]) for r in rows if r["status"] in _SECTION_STATUSES
     }
     blocked_lines = {id(r): _blocked_line(r, urls[id(r)]) for r in rows if r["status"] == "blocked"}
     reserve = sum(len(lo) + 2 for lo in link_onlys.values())
@@ -638,7 +687,7 @@ def build_comment(rows, jobs, run_url, gate, excluded, skipped, env_name, result
     parts = [top]
     for r in rows:
         url = urls[id(r)]
-        if r["status"] in ("applied", "failed"):
+        if r["status"] in _SECTION_STATUSES:
             reserve -= len(link_onlys[id(r)]) + 2
             limit = sc.SIZE_BUDGET - used - reserve - 2
             section = render_apply_section(r, r["apply_text"], url, limit)
