@@ -49,7 +49,7 @@ jobs:
   envlevel0:
     needs: [detect]
     if: ${{ !failure() && !cancelled() && needs.detect.outputs.envlevel0_empty != 'true' && !contains(join(needs.*.result, ','), 'cancelled') }}
-    uses: ship-iac/shipmate/.github/workflows/apply-env-level.yml@ccf333a1c13e99a1996f618c5de9efb53f1635df
+    uses: ship-iac/shipmate/.github/workflows/apply-env-level.yml@7eecc96403d2598ac3dcc2c477d731413fa61ffb
     permissions: { contents: read, actions: read }
     with:
       waves_json: ${{ needs.detect.outputs.envlevel0_waves }}
@@ -67,7 +67,7 @@ jobs:
   envlevel1:
     needs: [detect, envlevel0]
     if: ${{ !failure() && !cancelled() && needs.detect.outputs.envlevel1_empty != 'true' && !contains(join(needs.*.result, ','), 'cancelled') }}
-    uses: ship-iac/shipmate/.github/workflows/apply-env-level.yml@ccf333a1c13e99a1996f618c5de9efb53f1635df
+    uses: ship-iac/shipmate/.github/workflows/apply-env-level.yml@7eecc96403d2598ac3dcc2c477d731413fa61ffb
     permissions: { contents: read, actions: read }
     with:
       waves_json: ${{ needs.detect.outputs.envlevel1_waves }}
@@ -79,7 +79,7 @@ jobs:
   envlevel2:
     needs: [detect, envlevel0, envlevel1]
     if: ${{ !failure() && !cancelled() && needs.detect.outputs.envlevel2_empty != 'true' && !contains(join(needs.*.result, ','), 'cancelled') }}
-    uses: ship-iac/shipmate/.github/workflows/apply-env-level.yml@ccf333a1c13e99a1996f618c5de9efb53f1635df
+    uses: ship-iac/shipmate/.github/workflows/apply-env-level.yml@7eecc96403d2598ac3dcc2c477d731413fa61ffb
     permissions: { contents: read, actions: read }
     with:
       waves_json: ${{ needs.detect.outputs.envlevel2_waves }}
@@ -91,7 +91,7 @@ jobs:
   envlevel3:
     needs: [detect, envlevel0, envlevel1, envlevel2]
     if: ${{ !failure() && !cancelled() && needs.detect.outputs.envlevel3_empty != 'true' && !contains(join(needs.*.result, ','), 'cancelled') }}
-    uses: ship-iac/shipmate/.github/workflows/apply-env-level.yml@ccf333a1c13e99a1996f618c5de9efb53f1635df
+    uses: ship-iac/shipmate/.github/workflows/apply-env-level.yml@7eecc96403d2598ac3dcc2c477d731413fa61ffb
     permissions: { contents: read, actions: read }
     with:
       waves_json: ${{ needs.detect.outputs.envlevel3_waves }}
