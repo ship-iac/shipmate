@@ -199,14 +199,20 @@ def test_token_mint_also_grants_checks_read():
     assert with_.get("permission-pull-requests") == "write"
 
 
-def test_token_mint_precedes_the_scan_and_render_steps():
-    # Ordering is load-bearing: the scan step needs the token, and the render
-    # step reads the file the scan step writes.
+def test_token_mint_precedes_the_scan_render_and_post_steps():
+    # Ordering is load-bearing: the scan step needs the token, the render step
+    # reads the file the scan step writes, and the POST step's GH_TOKEN below
+    # is the same mint -- a reorder that pushed the mint below the POST would
+    # yield an empty token and a 401 rather than a workflow error.
     steps = _steps()
     mint = _find_step(steps, uses_contains="create-github-app-token")
     scan = _find_step(steps, run_contains="check-runs")
     render = _find_step(steps, run_contains="scripts/apply-comment")
-    assert steps.index(mint) < steps.index(scan) < steps.index(render)
+    post = _find_step(steps, run_contains="issues/$PR_NUMBER/comments")
+    assert steps.index(mint) < steps.index(scan) < steps.index(render) < steps.index(post)
+    assert (post.get("env") or {}).get("GH_TOKEN") == (
+        "${{ steps." + mint["id"] + ".outputs.token }}"
+    )
 
 
 def test_scan_step_validates_head_sha():
@@ -227,6 +233,22 @@ def test_scan_step_degrades_to_an_empty_file_with_a_warning():
     scan = _find_step(_steps(), run_contains="check-runs")
     assert ": > checks.jsonl" in scan["run"]
     assert "::warning::" in scan["run"]
+
+
+def test_scan_step_writes_the_file_the_render_step_reads():
+    # The coupling between the filename the scan step redirects to and the
+    # path the renderer reads (SHIPMATE_CHECKS) is otherwise untested -- a
+    # rename of either side would silently blank the whole check-state axis
+    # with no local test failing. Derive the expected filename from the
+    # render step's env: block (never hardcode it here) so a rename on that
+    # side reds this test too.
+    steps = _steps()
+    scan = _find_step(steps, run_contains="check-runs")
+    render = _find_step(steps, run_contains="scripts/apply-comment")
+    checks_file = (render.get("env") or {}).get("SHIPMATE_CHECKS")
+    assert checks_file, "render step's env: block has no SHIPMATE_CHECKS key"
+    assert f"> {checks_file}" in scan["run"]
+    assert f": > {checks_file}" in scan["run"]
 
 
 def test_scan_step_never_interpolates_expr_directly():

@@ -106,9 +106,11 @@ jobs:
     if: always()
     runs-on: ubuntu-latest
     # gate-refresh mints its own App token (checks:read scan + statuses:write
-    # gate write); apply-summary mints its own App token for the result
-    # comment. actions:read is needed here for apply-summary's artifact
-    # download and run-jobs listing.
+    # gate write); apply-summary mints its own App token too, also
+    # checks:read now -- it scans the head SHA's apply checks to fold their
+    # state into the result comment, not just the comment POST. actions:read
+    # is needed here for apply-summary's artifact download and run-jobs
+    # listing.
     permissions: { actions: read }
     steps:
       - name: Complete gate if every apply check is done

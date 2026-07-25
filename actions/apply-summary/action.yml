@@ -1,5 +1,5 @@
 name: shipmate apply-summary
-description: Download per-cell apply-summary.* artifacts, list the run's jobs for per-cell log links, render the apply result comment, mint a shipmate App installation token, and post a fresh PR comment.
+description: Download per-cell apply-summary.* artifacts, mint a shipmate App installation token, scan the head SHA's apply checks, list the run's jobs for per-cell log links, render the apply result comment, and post a fresh PR comment.
 inputs:
   pr-number:
     description: Pull request number to comment on.

@@ -368,17 +368,31 @@ def check_state_maps(check_run_lines, app_id):
 
 
 def load_check_maps(path, app_id):
-    """check_state_maps over the scan step's output file, tolerating absence.
+    """check_state_maps over the scan step's output file, tolerating absence
+    or corruption.
 
     The scan step already degrades a failed fetch to an empty file, so a
     MISSING file means the caller is an older pinned apply-summary that has no
-    scan step at all (the two-step internal-pin window in docs/releasing.md).
-    Both cases are simply no data -- see apply_check_state for why no data is
-    the safe state."""
+    scan step at all (the two-step internal-pin window in docs/releasing.md) --
+    silent no-data, no warning: that skew window is expected, not an error.
+
+    A malformed line (parse_jsonl's SystemExit) or an unreadable file (a
+    generic OSError, e.g. a permissions error) must cost this one display axis
+    only, never the whole comment -- for comment-ops the comment IS the
+    feedback channel, so a bad checks.jsonl must degrade to no data with a
+    warning rather than propagate and kill the render step entirely. Both
+    cases are simply no data -- see apply_check_state for why no data is the
+    safe state."""
     try:
         with open(path, encoding="utf-8") as fh:
             return check_state_maps(fh, app_id)
     except FileNotFoundError:
+        return set(), set()
+    except (OSError, SystemExit) as exc:
+        print(
+            f"::warning::{path} could not be read as apply checks ({exc}) -- "
+            "the apply result comment falls back to artifact-only status"
+        )
         return set(), set()
 
 

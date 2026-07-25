@@ -1091,6 +1091,24 @@ def test_load_check_maps_reads_jsonl(tmp_path):
     assert present == done == {"apply / dev-eu / stacks/app"}
 
 
+def test_load_check_maps_malformed_line_degrades_with_a_warning(tmp_path, capsys):
+    # A malformed checks.jsonl (parse_jsonl's SystemExit) must cost only the
+    # check-state axis, never the whole render step -- degrade to no data with
+    # a warning, exactly like the missing-file case, rather than propagate.
+    p = tmp_path / "checks.jsonl"
+    p.write_text("not json\n", encoding="utf-8")
+    assert ac.load_check_maps(str(p), APP_ID) == (set(), set())
+    assert "::warning::" in capsys.readouterr().out
+
+
+def test_load_check_maps_missing_file_stays_silent(tmp_path, capsys):
+    # Pins the deliberate asymmetry: the pinned-action skew window (an older
+    # apply-summary that never writes checks.jsonl) is expected, not an error,
+    # so it must NOT warn -- unlike a malformed or otherwise unreadable file.
+    ac.load_check_maps(str(tmp_path / "nope.jsonl"), APP_ID)
+    assert "::warning::" not in capsys.readouterr().out
+
+
 def test_unrecorded_has_its_own_emoji():
     assert ac._EMOJI["unrecorded"] == "⚠️"
 
