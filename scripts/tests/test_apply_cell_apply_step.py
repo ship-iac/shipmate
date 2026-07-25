@@ -51,6 +51,7 @@ def _run_step(tmp_path, *, terramate_body, tee_body):
     `terramate` and `tee` replaced by bash functions -- bash resolves a
     function before searching PATH, so this needs no fake executables or
     exec bits (fragile to set up portably on a Windows dev box)."""
+    assert _BASH is not None  # callers are skipif-gated on this; narrows the type too
     run = _apply_step()["run"]
     harness = f"terramate() {{ {terramate_body} ; }}\ntee() {{ {tee_body} ; }}\n" + run
     script = tmp_path / "step.sh"
