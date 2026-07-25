@@ -442,8 +442,11 @@ job believed before its check was completed:
   apply check` failed (or the job was cancelled) after the cell summary was
   already composed. `shipmate / gate` stays pending, and the stack needs a
   re-plan: state has advanced past the reviewed `.otplan`, so the saved plan is
-  stale. The comment carries one note naming every such cell, and the cell
-  keeps its full `<details>` output.
+  stale. The comment carries one note naming the affected cells — capped, with
+  any remainder summarized as a count, since the note is part of the header
+  block the size fallback cannot shed and the usual cause strands a whole
+  matrix at once; the table above always carries a ⚠️ row for every one of
+  them. Each such cell keeps its full `<details>` output.
 - A cell whose check is **done** but whose artifact never arrived (the
   cosmetic, `continue-on-error` upload dropped) renders ✅ with its output
   unavailable — never ⏭️, and it does not drag the "apply check stays pending"

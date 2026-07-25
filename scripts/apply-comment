@@ -47,11 +47,17 @@ def _load(fname):
 
 
 sc = _load("summary-comment")
-# Reused for its stdin JSONL parser only (same contract this script's own
-# jobs-listing input follows: newline-delimited JSON, blank lines skipped,
-# a malformed line fails loud naming the offending line) -- not the
-# check-run-specific helpers (`latest_by_name`, `done_names`) that live
-# alongside it.
+# Reused for BOTH its stdin JSONL parser (same contract this script's own
+# jobs-listing input follows: newline-delimited JSON, blank lines skipped, a
+# malformed line fails loud naming the offending line) AND its check-run
+# helpers -- `from_app`, `latest_by_name`, `done_names` -- which
+# `check_state_maps` below calls to decide which apply checks are done. That
+# reuse is load-bearing, not incidental: "what counts as a done apply check"
+# must stay written once in apply-gate, shared with the `shipmate / gate`
+# status and both detect paths, so this comment's row states can never
+# disagree with the work queue they report on. Changing `DONE_CONCLUSIONS` or
+# `latest_by_name` in apply-gate therefore changes what this comment claims
+# about a cell -- see apply_check_state.
 ag = _load("apply-gate")
 
 CELL_KEYS = ("stack", "stack_path", "environment", "result", "reason")
@@ -73,6 +79,25 @@ _EMOJI = {
 # `unrecorded` is here because its apply genuinely ran: the output is the
 # evidence a reader needs to confirm what landed before re-planning.
 _SECTION_STATUSES = ("applied", "failed", "unrecorded")
+
+# Human phrase per display status, for the <details> summary line. `unrecorded`
+# is an internal enum token: leaking it into the comment would make a section
+# header read "— unrecorded" where the table legend, the note below and
+# CONTRACT.md all say "applied but not recorded", leaving the reader to guess
+# whether it means "not applied" or "applied but the check is pending" -- the
+# exact ambiguity the note exists to remove.
+_STATUS_PHRASE = {
+    "applied": "applied",
+    "failed": "failed",
+    "blocked": "blocked",
+    "not_attempted": "not attempted",
+    "unrecorded": "applied but not recorded",
+}
+
+# How many cells the unrecorded note names before it summarizes the rest. The
+# cap exists because this note rides in `top`, the one string the HARD_CAP
+# table-only fallback re-emits verbatim -- see _unrecorded_note.
+_UNRECORDED_NAMED = 5
 
 
 def _not_attempted_note(env_name):
@@ -105,18 +130,21 @@ def _unrecorded_note(rows):
     the same **bold** form _blocked_line uses -- deliberately not a backtick
     code span, since _md_escape does not escape a backtick.
 
-    Uncapped: a 256-cell worst case is ~8k characters. This note rides in
-    `top` (built by _top_section), not in the per-row section/blocked-line
-    loop, so it is counted in build_comment's `used` before that loop the same
-    way the header and table are -- it correctly starves later sections'
-    link-only budget under normal degradation. But `top` is exactly what the
-    HARD_CAP table-only fallback re-emits verbatim (`top + fallback + footer`)
-    when even every link-only section and blocked one-liner still overflows,
-    so unlike unbounded blocked lines -- which the fallback sheds along with
-    every other per-row line -- this note can never be shed. At extreme
-    fan-out it can only push the render past HARD_CAP into the final
-    `SystemExit`, whose message then blames "shorten stack/env display names"
-    even when this note, not the display names, is what tipped it over."""
+    Capped at _UNRECORDED_NAMED cells, with the rest summarized as a count.
+    The cap is not cosmetic. This note rides in `top` (built by _top_section),
+    not in the per-row section/blocked-line loop, so it is counted in
+    build_comment's `used` before that loop the same way the header and table
+    are -- and `top` is exactly what the HARD_CAP table-only fallback re-emits
+    verbatim (`top + fallback + footer`) when even every link-only section and
+    blocked one-liner still overflows. Unlike unbounded blocked lines, which
+    that fallback sheds along with every other per-row line, this note can
+    never be shed: uncapped it could only push the render past HARD_CAP into
+    the final `SystemExit`, which skips the POST step and costs the whole
+    comment -- on precisely the run that needed it most, since the usual cause
+    of `unrecorded` rows is correlated across cells (an expired App key, a
+    checks-API outage) and so strands a whole wide matrix at once. Capping
+    bounds the note to a few hundred characters regardless of fan-out; the
+    table above still lists every affected cell with its own ⚠️."""
     cells = [
         f"**{sc._md_escape(r['stack_display'])} / {sc._md_escape(r['environment'])}**"
         for r in rows
@@ -124,9 +152,13 @@ def _unrecorded_note(rows):
     ]
     if not cells:
         return ""
+    named, rest = cells[:_UNRECORDED_NAMED], len(cells) - _UNRECORDED_NAMED
+    listed = ", ".join(named)
+    if rest > 0:
+        listed += f", and {rest} more (see the ⚠️ rows above)"
     return (
         "⚠️ applied but not recorded: "
-        + ", ".join(cells)
+        + listed
         + " — the apply succeeded but the apply check is not recorded as "
         "complete (it failed, was cancelled, or a newer plan re-created it), "
         "so `shipmate / gate` stays pending. Re-plan and re-apply."
@@ -399,13 +431,21 @@ def load_check_maps(path, app_id):
     render step and would itself fail first on the same bad id (it needs the
     numeric app id too), so in practice this ValueError guard is defence in
     depth for a misconfiguration that should already have failed loud
-    upstream, not the primary place a bad app id is expected to be caught."""
+    upstream, not the primary place a bad app id is expected to be caught.
+
+    KeyError/TypeError/AttributeError are caught for the same reason: a line
+    that is valid JSON but not the expected check-run shape (a null or scalar
+    element inside `.check_runs`, or a payload change that projects `.name` to
+    null) reaches `latest_by_name`'s `run["name"].startswith(...)` and raises
+    from there. The scan step's `--jq` projection makes that unlikely, but the
+    cost of being wrong is the whole comment, so the net is closed by shape
+    rather than left to trust in the projection."""
     try:
         with open(path, encoding="utf-8") as fh:
             return check_state_maps(fh, app_id)
     except FileNotFoundError:
         return set(), set()
-    except (OSError, SystemExit, ValueError) as exc:
+    except (OSError, SystemExit, ValueError, KeyError, TypeError, AttributeError) as exc:
         print(
             f"::warning::{path} could not be read as apply checks ({exc}) -- "
             "the apply result comment falls back to artifact-only status"
@@ -502,16 +542,30 @@ def build_table(rows, jobs, run_url):
 def _summary_line(row):
     return (
         f"<summary>{_EMOJI[row['status']]} {sc._md_escape(row['stack_display'])} / "
-        f"{sc._md_escape(row['environment'])} — {row['status']}</summary>"
+        f"{sc._md_escape(row['environment'])} — {_STATUS_PHRASE[row['status']]}</summary>"
     )
 
 
 def _link_only(row, url):
-    return (
-        f"<details>{_summary_line(row)}\n\n"
-        f"_Output too large for this comment — [full output in the job log]({url})._\n"
-        f"</details>"
-    )
+    """The smallest possible section for a row: no output, just a link.
+
+    Two distinct reasons land here and they must not share one sentence. Output
+    that exists but does not fit is "too large"; output that never arrived is
+    unavailable, and saying "too large" about it is simply false -- a row
+    promoted from not_attempted (its check is done, only the cosmetic
+    continue-on-error artifact upload dropped) has no apply.txt at all. The
+    linked run may not even contain that cell's apply: when another run
+    completed the check, `_job_url` finds no matching job name in this run's
+    jobs listing and falls back to this run's URL, so the missing-output
+    wording deliberately does not promise the output is at the other end.
+    The branch lives here rather than at the call sites so build_comment's
+    up-front size reserve -- which calls this same function per row -- reserves
+    exactly what will be rendered, and so its C901 budget is untouched."""
+    if row["apply_text"] is None:
+        body = f"_Apply output unavailable for this cell — [run log]({url})._"
+    else:
+        body = f"_Output too large for this comment — [full output in the job log]({url})._"
+    return f"<details>{_summary_line(row)}\n\n{body}\n</details>"
 
 
 def render_apply_section(row, text, url, limit):
