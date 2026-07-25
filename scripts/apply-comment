@@ -56,7 +56,18 @@ ag = _load("apply-gate")
 
 CELL_KEYS = ("stack", "stack_path", "environment", "result", "reason")
 _RESULTS = frozenset({"applied", "failed", "blocked"})
-_EMOJI = {"applied": "✅", "failed": "❌", "blocked": "🚫", "not_attempted": "⏭️"}
+# Display statuses are a SUPERSET of cell.json's `result` enum above:
+# `unrecorded` is derived at render time from the real apply-check state (see
+# apply_check_state), never written by apply-cell, so the artifact grammar in
+# CONTRACT.md is unchanged and _validate_cell keeps rejecting an out-of-enum
+# artifact value as pin skew.
+_EMOJI = {
+    "applied": "✅",
+    "failed": "❌",
+    "blocked": "🚫",
+    "not_attempted": "⏭️",
+    "unrecorded": "⚠️",
+}
 
 
 def _not_attempted_note(env_name):
@@ -283,6 +294,96 @@ def build_rows(expected, downloaded):
             }
     rows = list(by_key.values())
     rows.sort(key=lambda r: (r["environment"], r["stack_display"]))
+    return rows
+
+
+CHECK_UNKNOWN, CHECK_DONE, CHECK_PENDING = "unknown", "done", "pending"
+
+
+def check_state_maps(check_run_lines, app_id):
+    """(present, done) apply-check name sets from check-runs JSONL.
+
+    `present` is every App-authored `apply / ...` check name on the head SHA
+    (newest run per name); `done` is the subset whose newest run completed with
+    a good conclusion. Both come from `apply-gate`'s public helpers, so the
+    "what counts as done" predicate stays written once and shared with the gate
+    and both detects -- a second predicate here could disagree with the work
+    queue it is supposed to be reporting on.
+
+    An empty app id warns and reports no data rather than raising the way
+    `from_app` does on its own: a missing SHIPMATE_APP_ID must cost this one
+    display axis, never the whole comment (for comment-ops the comment IS the
+    feedback channel). Nothing else is printed to stdout -- comment.md is
+    written to a file -- so a workflow command here is safe."""
+    if not app_id:
+        print(
+            "::warning::SHIPMATE_APP_ID is empty — the apply result comment falls back "
+            "to artifact-only status (see docs/github-app.md)."
+        )
+        return set(), set()
+    runs = ag.from_app(ag.parse_jsonl(check_run_lines), app_id)
+    return set(ag.latest_by_name(runs)), ag.done_names(runs)
+
+
+def load_check_maps(path, app_id):
+    """check_state_maps over the scan step's output file, tolerating absence.
+
+    The scan step already degrades a failed fetch to an empty file, so a
+    MISSING file means the caller is an older pinned apply-summary that has no
+    scan step at all (the two-step internal-pin window in docs/releasing.md).
+    Both cases are simply no data -- see apply_check_state for why no data is
+    the safe state."""
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return check_state_maps(fh, app_id)
+    except FileNotFoundError:
+        return set(), set()
+
+
+def _check_state(row, present, done):
+    """This row's apply check: CHECK_DONE, CHECK_PENDING, or CHECK_UNKNOWN.
+
+    The name is the forward-built CONTRACT grammar `_job_url` also constructs.
+    Absence means UNKNOWN, never pending: a failed scan, an empty file, an
+    app-id mismatch and from_app dropping a forged same-name check all land
+    here, and every one of them must fall back to the artifact-only rendering
+    rather than invent a stranded cell."""
+    name = f"apply / {row['environment']} / {row['stack_path']}"
+    if name in done:
+        return CHECK_DONE
+    if name in present:
+        return CHECK_PENDING
+    return CHECK_UNKNOWN
+
+
+def apply_check_state(rows, present, done):
+    """Re-derive display status from the real apply-check state (in place).
+
+    The pending apply checks ARE the work queue, so they -- not the per-cell
+    artifact -- are the authority on whether a unit is done. `Compose cell
+    summary` derives its verdict from the apply step alone and uploads it
+    BEFORE `Save state`, the completion-token mint and `Complete the apply
+    check` can fail (or be skipped on cancellation), so an `applied` artifact
+    can coexist with a still-pending check; and the cosmetic
+    continue-on-error upload can drop, leaving a genuinely applied cell with no
+    artifact at all. Two directions, therefore:
+
+    - applied + pending check -> `unrecorded`: the apply succeeded but was not
+      recorded, the gate stays pending, and the stack needs a re-plan (state
+      has advanced past the reviewed .otplan).
+    - not_attempted + done check -> `applied`: the check proves the apply
+      landed; apply_text stays None so the section degrades to link-only.
+
+    `failed`/`blocked` are never re-derived. A red row against a done check
+    means some other run applied that cell -- over-reporting, nothing
+    stranded -- and downgrading on check state would let an unrelated run's
+    green check hide a real failure in this one."""
+    for row in rows:
+        state = _check_state(row, present, done)
+        if row["status"] == "applied" and state == CHECK_PENDING:
+            row["status"] = "unrecorded"
+        elif row["status"] == "not_attempted" and state == CHECK_DONE:
+            row["status"] = "applied"
     return rows
 
 

@@ -952,3 +952,151 @@ def test_apply_summary_artifact_name_matches_contract():
     # loud failure), so pin the exact artifact-name grammar.
     src = (_ENGINE / "actions" / "apply-cell" / "action.yml").read_text(encoding="utf-8")
     assert "apply-summary.${{ inputs.env }}.${{ steps.ids.outputs.slug }}" in src
+
+
+# --- apply-check state: three-way lookup, absence is unknown -----------------
+
+APP_ID = "12345"
+
+
+def _check(name, *, status="completed", conclusion="success", run_id=1, app_id=int(APP_ID)):
+    # `run_id`, not `id`: shadowing the builtin in a parameter name is a lint
+    # finding, and the JSON key stays `id` either way.
+    return {
+        "name": name,
+        "status": status,
+        "conclusion": conclusion,
+        "id": run_id,
+        "app": {"id": app_id},
+    }
+
+
+def _jsonl(*checks):
+    return [json.dumps(c) for c in checks]
+
+
+def test_check_state_maps_splits_present_and_done():
+    lines = _jsonl(
+        _check("apply / dev-eu / stacks/app", run_id=1),
+        _check("apply / dev-eu / stacks/db", status="in_progress", conclusion=None, run_id=2),
+    )
+    present, done = ac.check_state_maps(lines, APP_ID)
+    assert present == {"apply / dev-eu / stacks/app", "apply / dev-eu / stacks/db"}
+    assert done == {"apply / dev-eu / stacks/app"}
+
+
+def test_check_state_maps_ignores_checks_from_another_app_identity():
+    # Security-relevant: a same-name check created by any other identity must
+    # not be able to paint an applied cell as stranded (nor green a pending
+    # one). Same posture as the gate's own from_app filter.
+    lines = _jsonl(
+        _check("apply / dev-eu / stacks/app", status="in_progress", conclusion=None, app_id=15368)
+    )
+    present, done = ac.check_state_maps(lines, APP_ID)
+    assert present == set()
+    assert done == set()
+
+
+def test_check_state_maps_judges_the_newest_run_per_name():
+    # A duplicate apply check created mid-apply is deliberately left pending by
+    # apply-cell; the newest run per name (highest id) must win, so the cell
+    # reads pending even though an older completed run exists.
+    lines = _jsonl(
+        _check("apply / dev-eu / stacks/app", run_id=1),
+        _check("apply / dev-eu / stacks/app", status="queued", conclusion=None, run_id=2),
+    )
+    present, done = ac.check_state_maps(lines, APP_ID)
+    assert present == {"apply / dev-eu / stacks/app"}
+    assert done == set()
+
+
+def test_check_state_maps_empty_app_id_warns_and_returns_no_data(capsys):
+    # Must NOT fail loud the way from_app does: a missing SHIPMATE_APP_ID is
+    # only allowed to cost this one display axis, never the whole comment.
+    lines = _jsonl(_check("apply / dev-eu / stacks/app"))
+    present, done = ac.check_state_maps(lines, "")
+    assert (present, done) == (set(), set())
+    assert "::warning::" in capsys.readouterr().out
+
+
+def test_check_state_three_way_lookup():
+    present = {"apply / dev-eu / stacks/app", "apply / dev-eu / stacks/db"}
+    done = {"apply / dev-eu / stacks/app"}
+    assert ac._check_state(_row(stack_path="stacks/app"), present, done) == ac.CHECK_DONE
+    assert ac._check_state(_row(stack_path="stacks/db"), present, done) == ac.CHECK_PENDING
+    assert ac._check_state(_row(stack_path="stacks/gone"), present, done) == ac.CHECK_UNKNOWN
+
+
+def test_apply_check_state_applied_with_pending_check_becomes_unrecorded():
+    # The finding: tofu apply succeeded, but Save state / the completion token
+    # mint / Complete the apply check failed (or the job was cancelled) after
+    # the cell summary was already composed and uploaded.
+    rows = [_row(status="applied", stack_path="stacks/app")]
+    ac.apply_check_state(rows, {"apply / dev-eu / stacks/app"}, set())
+    assert rows[0]["status"] == "unrecorded"
+
+
+def test_apply_check_state_not_attempted_with_done_check_becomes_applied():
+    # The mirror image: the apply landed and completed its check, but the
+    # cosmetic (continue-on-error) artifact upload dropped, so no cell.json
+    # arrived and the row would otherwise claim the check stays pending.
+    rows = [_row(status="not_attempted", stack_path="stacks/app", apply_text=None)]
+    ac.apply_check_state(rows, {"apply / dev-eu / stacks/app"}, {"apply / dev-eu / stacks/app"})
+    assert rows[0]["status"] == "applied"
+    assert rows[0]["apply_text"] is None  # no output to show; renders link-only
+
+
+def test_apply_check_state_leaves_rows_alone_when_check_state_is_unknown():
+    # Degradation contract: no data (scan failed, empty file, pin skew) must
+    # render byte-identically to the artifact-only behaviour.
+    rows = [
+        _row(status="applied", stack_path="stacks/app"),
+        _row(status="not_attempted", stack_path="stacks/db", apply_text=None),
+    ]
+    ac.apply_check_state(rows, set(), set())
+    assert [r["status"] for r in rows] == ["applied", "not_attempted"]
+
+
+def test_apply_check_state_never_downgrades_failed_or_blocked():
+    # A red row against a green check means another run applied that cell:
+    # over-reporting, nothing stranded, and the gate remains the truth.
+    # Downgrading here would let an unrelated run's green check hide a real
+    # failure in this one.
+    done = {"apply / dev-eu / stacks/app", "apply / dev-eu / stacks/db"}
+    rows = [
+        _row(status="failed", stack_path="stacks/app"),
+        _row(status="blocked", stack_path="stacks/db", reason="state restore failed"),
+    ]
+    ac.apply_check_state(rows, done, done)
+    assert [r["status"] for r in rows] == ["failed", "blocked"]
+
+
+def test_load_check_maps_missing_file_is_no_data(tmp_path):
+    # The pinned-action skew window: an older apply-summary never writes
+    # checks.jsonl. Silent no-data, not a crash.
+    present, done = ac.load_check_maps(str(tmp_path / "nope.jsonl"), APP_ID)
+    assert (present, done) == (set(), set())
+
+
+def test_load_check_maps_empty_file_is_no_data(tmp_path):
+    p = tmp_path / "checks.jsonl"
+    p.write_text("", encoding="utf-8")
+    assert ac.load_check_maps(str(p), APP_ID) == (set(), set())
+
+
+def test_load_check_maps_reads_jsonl(tmp_path):
+    p = tmp_path / "checks.jsonl"
+    p.write_text("\n".join(_jsonl(_check("apply / dev-eu / stacks/app"))), encoding="utf-8")
+    present, done = ac.load_check_maps(str(p), APP_ID)
+    assert present == done == {"apply / dev-eu / stacks/app"}
+
+
+def test_unrecorded_has_its_own_emoji():
+    assert ac._EMOJI["unrecorded"] == "⚠️"
+
+
+def test_cell_json_result_enum_is_unchanged():
+    # Display statuses are a superset of the artifact enum. The normative
+    # cell.json grammar in CONTRACT.md must not drift because the comment grew
+    # a display state.
+    assert ac._RESULTS == frozenset({"applied", "failed", "blocked"})
