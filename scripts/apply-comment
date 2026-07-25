@@ -344,14 +344,18 @@ def _excluded_skipped_lines(excluded, skipped):
     inline shell. Callers gate this on the all-environments form (`not
     env_name`) themselves -- shared by `_footer` (full table render) and
     `_short_form` (nothing to tabulate) so both surfaces carry the same
-    actionable warning instead of the short form silently dropping it."""
+    actionable warning instead of the short form silently dropping it.
+    Environment names here are author-controlled (Terramate tags / GitHub
+    Environment names, same as everywhere else in this file) so every one is
+    `_md_escape`d -- these are the comment's most actionable sentences, not
+    a place to let that guarantee lapse."""
     lines = []
     if excluded:
-        envs = ", ".join(f"`{e}`" for e in excluded)
-        cmds = ", ".join(f"`shipmate apply {e}`" for e in excluded)
+        envs = ", ".join(f"`{sc._md_escape(e)}`" for e in excluded)
+        cmds = ", ".join(f"`shipmate apply {sc._md_escape(e)}`" for e in excluded)
         lines.append(f"Explicit environment(s) left pending: {envs} — run {cmds} to apply them.")
     if skipped:
-        envs = ", ".join(f"`{e}`" for e in skipped)
+        envs = ", ".join(f"`{sc._md_escape(e)}`" for e in skipped)
         lines.append(f"Skipped (ordered after an unapplied explicit environment): {envs}.")
     return lines
 

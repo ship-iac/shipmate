@@ -582,6 +582,31 @@ def test_short_form_omits_excluded_skipped_for_targeted_env():
     assert "Skipped" not in body
 
 
+def test_excluded_skipped_lines_escape_evil_env_names():
+    # excluded/skipped env names are author-controlled (Terramate tags /
+    # GitHub Environment names), same as every other display value in this
+    # file -- these sentences must not be the one place that guarantee lapses.
+    evil = "x</summary><b>evil"
+    lines = ac._excluded_skipped_lines([evil], [evil])
+    joined = " ".join(lines)
+    assert "</summary><b>evil" not in joined
+    assert "&lt;/summary&gt;&lt;b&gt;evil" in joined
+
+
+def test_short_form_escapes_evil_excluded_and_skipped_env_names():
+    evil = "x</summary><b>evil"
+    body = ac._short_form("success,skipped", "", "complete", RUN_URL, [evil], [evil])
+    assert "</summary><b>evil" not in body
+    assert "&lt;/summary&gt;&lt;b&gt;evil" in body
+
+
+def test_footer_escapes_evil_excluded_and_skipped_env_names():
+    evil = "x</summary><b>evil"
+    footer = ac._footer("pending", RUN_URL, [evil], [evil], "")
+    assert "</summary><b>evil" not in footer
+    assert "&lt;/summary&gt;&lt;b&gt;evil" in footer
+
+
 def test_build_comment_uses_short_form_when_no_rows_and_no_expected(monkeypatch, tmp_path):
     monkeypatch.setenv("CELLS", str(tmp_path / "empty"))
     monkeypatch.setenv("SHIPMATE_ENVIRONMENT", "dev-eu")
