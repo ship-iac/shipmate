@@ -96,6 +96,11 @@ def test_fence_minimum_three_backticks():
     assert sc.fence("no ticks").startswith("```diff\n")
 
 
+def test_fence_lang_param_plain_vs_default_diff():
+    assert sc.fence("x") == "```diff\nx\n```"
+    assert sc.fence("x", lang="") == "```\nx\n```"
+
+
 # --- emoji / escape ---------------------------------------------------------
 
 

@@ -67,9 +67,10 @@ jobs:
     if: always()
     runs-on: ubuntu-latest
     # gate-refresh mints its own App token (checks:read scan + statuses:write
-    # gate write) and completes the gate as a commit status; no GITHUB_TOKEN
-    # scope is needed here.
-    permissions: {}
+    # gate write); apply-summary mints its own App token for the result
+    # comment. actions:read is needed here for apply-summary's artifact
+    # download and run-jobs listing.
+    permissions: { actions: read }
     steps:
       - name: Complete gate if every apply check is done
         id: gate
@@ -78,42 +79,14 @@ jobs:
           head-sha: ${{ inputs.ref }}
           app-id: ${{ vars.SHIPMATE_APP_ID }}
           private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
-      - name: App token for result comment
-        id: token
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+      - name: Post apply result comment
+        uses: ship-iac/shipmate/actions/apply-summary@1c7688d2465f6ed349fe8e5c2bd8f69ff55bbf12
         with:
+          pr-number: ${{ inputs.pr_number }}
+          environment: ${{ inputs.environment }}
+          waves-json: ${{ needs.detect.outputs.waves }}
+          results: ${{ join(needs.*.result, ',') }}
+          gate-verdict: ${{ steps.gate.outputs.verdict }}
+          github-token: ${{ github.token }}
           app-id: ${{ vars.SHIPMATE_APP_ID }}
           private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
-          owner: ${{ github.repository_owner }}
-          repositories: ${{ github.event.repository.name }}
-          permission-pull-requests: write
-      - name: Result comment via the App
-        env:
-          GH_TOKEN: ${{ steps.token.outputs.token }}
-          PR_NUMBER: ${{ inputs.pr_number }}
-          ENVIRONMENT: ${{ inputs.environment }}
-          RESULTS: ${{ join(needs.*.result, ',') }}
-          GATE: ${{ steps.gate.outputs.verdict }}
-          # detect failure leaves this '' so EMPTY != 'true' and the failure
-          # branch below wins via RESULTS.
-          EMPTY: ${{ needs.detect.outputs.empty }}
-        run: |
-          set -euo pipefail
-          # Any result other than success/skipped (failure, cancelled, ...) is a failed run.
-          if echo "$RESULTS" | tr ',' '\n' | grep -qvE '^(success|skipped)$'; then
-            emoji=":x:"; word="failed"
-          elif [ "$EMPTY" = "true" ]; then
-            # Nothing pending (all already applied, or nothing planned for this
-            # env). Don't claim a fresh apply happened.
-            emoji=":white_check_mark:"; word="found no pending applies to run"
-          else emoji=":white_check_mark:"; word="applied"; fi
-          python3 - "$emoji" "$word" "$ENVIRONMENT" "$GATE" > body.json <<'PY'
-          import json, sys
-          emoji, word, env, gate = sys.argv[1:5]
-          tail = ("`shipmate / gate` is complete — every environment is applied."
-                  if gate == "complete" else
-                  "`shipmate / gate` stays pending until every "
-                  "environment is applied (or the merge deploy runs).")
-          print(json.dumps({"body": f"{emoji} shipmate: `shipmate apply {env}` {word}. " + tail}))
-          PY
-          gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" --input body.json >/dev/null

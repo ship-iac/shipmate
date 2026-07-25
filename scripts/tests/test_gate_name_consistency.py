@@ -105,6 +105,7 @@ CREDENTIALED_ACTIONS = (
     "actions/summary",
     "actions/apply-cell",
     "actions/drift-cell",
+    "actions/apply-summary",
 )
 
 

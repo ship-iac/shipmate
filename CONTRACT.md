@@ -36,6 +36,15 @@ from ever picking up a plan check. For the same reason `build-matrix` rejects
 a stack whose path is exactly `apply` — its plan check `apply / <env>` would
 fall inside the apply-check namespace.
 
+This same forward-built string is also the apply-env-level job's own `name:`
+(so the job's display name and the apply check-run name coincide), which
+gives the apply check-run grammar a second consumer: `scripts/apply-comment`
+(see Apply result comment, below) resolves each row's per-cell log link by
+matching this name as a **suffix** of the run's job-name listing — a called
+reusable workflow's jobs display as `<caller-job> / apply / <env> /
+<stack>` — never by reverse-parsing it. No match falls back to the
+workflow-run URL.
+
 In addition to the per-unit checks, one aggregate **commit status** rolls up
 the full fan-out into a single required status, named verbatim:
 
@@ -197,9 +206,13 @@ crosses a workflow-run boundary:
 - **The aggregate gate** (`shipmate / gate`) — created/refreshed by
   `actions/summary`, completed pre-merge by `actions/gate-refresh`, completed
   post-merge inline in `deploy.yml` — all three via App token.
-- **The sticky plan comment** and **result comments** — App-authored (marker
-  + any Bot author for the sticky comment's lookup, since a consumer org's
-  App bot login may differ from `shipmate[bot]`).
+- **The sticky plan comment** — App-authored (marker + any Bot author for the
+  lookup, since a consumer org's App bot login may differ from
+  `shipmate[bot]`), upserted in place by `actions/summary`.
+- **The apply result comment** — posted fresh by `actions/apply-summary` on
+  every comment-ops apply run (targeted and bare); unlike the sticky plan
+  comment it is never upserted against a marker, so a failure-then-retry
+  sequence stays visible across separate comments — an audit trail.
 - **Drift issues** — opened/updated/closed by `actions/drift-cell` via App
   token.
 
@@ -288,6 +301,34 @@ pins **together** when adopting a build that changes this name: a partial
 bump (uploader on the new name, downloader on the old, or vice versa) makes
 every apply fail its reviewed-plan download fail-safe until the pins agree.
 
+## Apply summary artifacts
+
+Each attempted-or-blocked apply cell uploads its outcome under a name built
+verbatim as:
+
+- `apply-summary.<env>.<slug>`
+
+using the same dot-delimited, env-first grammar as `plan.<env>.<slug>` above
+(the `.` delimiter is unambiguous for the same reason: an env name cannot
+contain `.`). `apply-cell` uploads it (`if: always()`, so a blocked cell
+still reports); `actions/apply-summary` downloads every `apply-summary.*`
+artifact for the run with the glob pattern `apply-summary.*`. It contains
+verbatim:
+
+- `cell.json` — always present, keys `stack` (display name), `stack_path`
+  (Terramate stack path, feeds the check-name construction), `environment`,
+  `result` (one of `applied`, `failed`, `blocked`), `reason` (which fail-safe
+  blocked it, or why an earlier step failed first; the empty string for
+  `applied`/`failed`).
+- `apply.txt` — the apply step's combined stdout+stderr, present only when
+  the apply step actually ran (absent for a cell blocked before then).
+
+`apply-cell` (writer) and `scripts/apply-comment` (reader, via
+`actions/apply-summary`) are pinned by the same SHA in a consumer's
+`apply.yml` / `apply-all.yml`, so the schema upgrades atomically; the reader
+fails loud on a `cell.json` missing schema keys or carrying an out-of-enum
+`result` rather than rendering around pin skew.
+
 ## Plan comment
 
 The `summary` action maintains exactly one sticky comment per pull request,
@@ -346,6 +387,65 @@ with the glob pattern `cell-summary.*`. It contains verbatim:
 consumer's `plan.yml`, so the schema upgrades atomically; the summary
 fails loud on a `cell.json` missing schema keys rather than rendering around
 pin skew.
+
+## Apply result comment
+
+Every comment-ops apply run — targeted `shipmate apply <env>` (`apply.yml`)
+and bare `shipmate apply` (`apply-all.yml`); the merge-deploy path,
+`deploy.yml`, stays comment-less — posts a **fresh** PR comment via
+`actions/apply-summary`. Unlike the plan comment above, it is deliberately
+**not** upserted against a marker: every run's comment is new, so a
+failure-then-retry sequence stays visible as separate comments rather than
+overwriting the evidence of the failure — an audit trail.
+
+Structure, in order: a header naming the targeted environment or "(all
+environments)"; directly beneath it, a job-level failure line — rendered
+only when the job-level `SHIPMATE_RESULTS` outcome signals a failure and no
+row already carries `failed`/`blocked` (the common case has its own ❌/🚫
+rows and needs no extra line), reusing the header's own wording with a ❌ so
+an apply run that dies before any cell reports (a missing/denied
+`<env>-apply` environment, a job-level cancel) still surfaces a failure
+signal; an overview table (one row per expected cell — status emoji
+✅ applied / ❌ failed / 🚫 blocked / ⏭️ not attempted, stack, env, `+A ~C -D`
+resources parsed from the apply output's last `Apply complete!` line, and a
+per-cell log link); one `<details>` section per **attempted** (applied or
+failed) cell with the full apply output in a plain code fence; one
+no-fence line per **blocked** cell naming its `reason`. An expected cell
+whose artifact never arrived (its wave/env-level was skipped after an
+upstream failure, or the run was cancelled before upload) renders as
+**not attempted** — a table row only; the comment also carries a single note,
+once, whenever any cell is not attempted, that those apply checks stay
+pending and can be retried — naming `shipmate apply <env>` for a targeted
+run, or the bare `shipmate apply` when the run covered all environments.
+There is no separate "nothing pending" input: the expected cell set is the
+same waves JSON `apply-detect` / `apply-all-detect` already compute, and a
+cell counts as attempted only when its artifact actually downloaded — the
+render can never claim nothing is pending while holding evidence that an
+apply ran. The footer carries the bare-apply form's excluded/skipped-environment
+sentences, a gate-completion sentence (complete or still-pending, from the
+gate verdict), and the run link.
+
+The 65,536-character comment cap and the up-front link-only-space reserve
+work the same way as the plan comment's, above, but the truncation direction
+is the opposite. A plan diff is read top-down, so the plan comment's section
+keeps the head. Apply output is read for its END: a failing apply's fatal
+`Error:` line and a successful apply's closing `Apply complete! Resources:
+...` line are both the last thing tofu prints, so each attempted cell's
+section instead keeps the TAIL — full output → truncated (front cut at a
+line boundary, noting that earlier output was elided, with a link to the job
+log) → link-only. `apply.txt` itself is read from the end of the file
+(bounded — a fixed-size read near the tail, never the whole file) and
+decoded permissively: a non-UTF-8 byte anywhere in it becomes a replacement
+character instead of aborting the render. Every remaining attempted cell's
+link-only space, and every blocked cell's one-line reason, are reserved up
+front, and the render fails loud rather than post a comment that would
+exceed GitHub's cap.
+
+The data feeding the comment ships in the per-cell artifact
+`apply-summary.<env>.<slug>` (see Apply summary artifacts, above); per-cell
+log links resolve against the run's job-name listing using the
+`apply / <env> / <stack>` check-name grammar (see Check names, above), and
+degrade to the workflow-run URL on no match.
 
 ## Apply-match fingerprint
 
