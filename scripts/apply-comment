@@ -448,9 +448,13 @@ def build_comment(rows, jobs, run_url, gate, excluded, skipped, env_name, result
     (not grouped by status): attempted cells (applied/failed) get a details
     section with the same degradation as summary-comment; blocked cells get a
     single no-fence line; not-attempted cells get no section. Every attempted
-    cell is guaranteed at least a link-only section: the space all remaining
-    attempted cells' link-only fallbacks need is reserved up front, so an
-    early giant apply.txt cannot starve later cells of their links."""
+    cell is guaranteed at least a link-only section, and every blocked cell
+    its one-line reason: the space ALL remaining attempted cells' link-only
+    fallbacks and ALL remaining blocked cells' one-liners need is reserved up
+    front (together), so an early giant apply.txt cannot starve a later
+    cell's link -- or a run with hundreds of blocked cells (each a small,
+    fixed-size line) starve the FIRST attempted cell's guaranteed minimum by
+    going uncounted until it was already too late."""
     top = _top_section(env_name, results_csv, rows, jobs, run_url)
     footer = "\n\n" + _footer(gate, run_url, excluded, skipped, env_name)
     used = len(top) + len(footer)
@@ -459,7 +463,9 @@ def build_comment(rows, jobs, run_url, gate, excluded, skipped, env_name, result
     link_onlys = {
         id(r): _link_only(r, urls[id(r)]) for r in rows if r["status"] in ("applied", "failed")
     }
+    blocked_lines = {id(r): _blocked_line(r, urls[id(r)]) for r in rows if r["status"] == "blocked"}
     reserve = sum(len(lo) + 2 for lo in link_onlys.values())
+    reserve += sum(len(bl) + 2 for bl in blocked_lines.values())
 
     parts = [top]
     for r in rows:
@@ -471,7 +477,8 @@ def build_comment(rows, jobs, run_url, gate, excluded, skipped, env_name, result
             parts.append(section)
             used += len(section) + 2
         elif r["status"] == "blocked":
-            line = _blocked_line(r, url)
+            line = blocked_lines[id(r)]
+            reserve -= len(line) + 2
             parts.append(line)
             used += len(line) + 2
         # not_attempted: the table row + the note above is the whole statement.

@@ -252,6 +252,42 @@ def test_build_comment_reserves_link_only_space_for_every_cell():
         assert body.count(url) >= 2
 
 
+def test_build_comment_reserves_blocked_one_liners_up_front():
+    # A run with many blocked cells (expired plan artifacts) plus a few large
+    # attempted cells: pre-fix, only applied/failed link-onlys were counted
+    # in the up-front reserve, so an early giant applied cell's section was
+    # sized as if the blocked one-liners cost nothing -- they were appended
+    # afterward, uncounted, and could push the body over HARD_CAP, at which
+    # point the table-only fallback silently discarded every blocked reason
+    # (the only place a 🚫 row's cause appears). Every blocked reason must
+    # survive intact.
+    reason = "reviewed plan artifact missing or expired -- re-run plan"
+    blocked_rows = [
+        _row(
+            status="blocked",
+            stack_display=f"b{i:03}",
+            stack_path=f"stacks/b{i:03}",
+            reason=reason,
+            apply_text=None,
+        )
+        for i in range(200)
+    ]
+    giant_text = "\n".join("X" * 80 for _ in range(3_000))
+    applied_rows = [
+        _row(stack_display=f"a{i}", stack_path=f"stacks/a{i}", apply_text=giant_text)
+        for i in range(3)
+    ]
+    rows = applied_rows + blocked_rows
+    body = ac.build_comment(rows, [], RUN_URL, "pending", [], [], "dev-eu")
+    assert len(body) <= ac.sc.HARD_CAP
+    # No fallback wipe: the hard-cap fallback's marker text must be absent,
+    # and every one of the 200 blocked rows must carry its own copy of the
+    # reason (a fallback would drop all of them at once; a starved-but-not-
+    # quite-fallback scenario could drop only some).
+    assert "use each row's log link" not in body
+    assert body.count(reason) == 200
+
+
 # --- fence-escape attempt ------------------------------------------------------
 
 
