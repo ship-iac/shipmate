@@ -286,15 +286,15 @@ def test_fence_escape_attempt_cannot_break_out_of_fence():
 
 
 def test_fence_escape_attempt_truncated_path_reuses_full_bodys_fence():
-    # The backtick run lives near the END of the text; degradation must cut
-    # it away, but the fence surrounding the KEPT (backtick-free) slice must
-    # still be sized against the WHOLE original body (computed once, up
-    # front) -- not recomputed against the backtick-free slice, which would
-    # only need the minimum 3-backtick fence and would reopen the
-    # fence-escape hole the moment a later, less-truncated render includes
-    # the backtick run again.
+    # The backtick run lives near the START of the text; tail-oriented
+    # degradation keeps the END and cuts the front away, but the fence
+    # surrounding the KEPT (backtick-free) slice must still be sized against
+    # the WHOLE original body (computed once, up front) -- not recomputed
+    # against the backtick-free slice, which would only need the minimum
+    # 3-backtick fence and would reopen the fence-escape hole the moment a
+    # later, less-truncated render includes the backtick run again.
     lines = [f"line {i}" for i in range(3_000)]
-    evil = "\n".join(lines) + "\n" + "`" * 60 + "z\nafter the backticks"
+    evil = "`" * 60 + "z\nbefore the backticks\n" + "\n".join(lines)
     longest_run_in_evil = max(len(m) for m in re.findall(r"`+", evil))
     row = _row(apply_text=evil)
     s = ac.render_apply_section(row, evil, RUN_URL, 2_000)
@@ -388,6 +388,91 @@ def test_load_cells_fails_loud_on_out_of_enum_result(tmp_path):
     (d / "cell.json").write_text(json.dumps(bad))
     with pytest.raises(SystemExit, match="result"):
         ac.load_cells(str(tmp_path))
+
+
+def test_read_tail_drops_partial_leading_line(tmp_path):
+    # Every line kept in the tail must be a genuine, complete line from the
+    # source -- proof that a mid-line seek point is dropped rather than
+    # emitted as a fragment.
+    p = tmp_path / "apply.txt"
+    lines = [f"line {i}" for i in range(10_000)]
+    p.write_text("\n".join(lines), encoding="utf-8", newline="\n")
+    tail = ac._read_tail(p, 100)
+    assert 0 < len(tail) <= 100
+    for ln in tail.splitlines():
+        assert ln in lines
+
+
+def test_read_tail_keeps_the_end_not_the_start(tmp_path):
+    p = tmp_path / "apply.txt"
+    p.write_text("A" * 200_000 + "\nTAILMARKER\n", encoding="utf-8", newline="\n")
+    tail = ac._read_tail(p, 1_000)
+    assert "TAILMARKER" in tail
+    assert "A" * 500 not in tail  # the head is gone
+
+
+def test_read_tail_small_file_is_returned_whole_no_leading_drop(tmp_path):
+    # A file smaller than the budget needs no truncation at all -- its first
+    # line must survive intact (nothing to "drop" when nothing was cut).
+    p = tmp_path / "apply.txt"
+    p.write_text("first line\nsecond line\n", encoding="utf-8", newline="\n")
+    tail = ac._read_tail(p, 10_000)
+    assert tail == "first line\nsecond line\n"
+
+
+def test_read_tail_tolerates_non_utf8_byte(tmp_path):
+    # A single non-UTF-8 byte anywhere in the file must not raise
+    # UnicodeDecodeError -- it must decode to a replacement character.
+    p = tmp_path / "apply.txt"
+    p.write_bytes(b"before\n\xff\nafter\n")
+    tail = ac._read_tail(p, 10_000)  # must not raise
+    assert "before" in tail
+    assert "after" in tail
+
+
+def test_load_cells_preserves_trailing_error_in_huge_failed_apply(tmp_path):
+    # Finding scenario: a long failed apply whose fatal diagnostic is the
+    # very last line. Head-first reading/truncation used to drop it entirely.
+    d = tmp_path / "apply-summary.dev-eu.stacks-app"
+    d.mkdir()
+    (d / "cell.json").write_text(json.dumps(_cell(result="failed")))
+    body = "\n".join("Still creating..." for _ in range(6_000))
+    text = body + "\nError: Provider produced inconsistent result after apply\n"
+    assert len(text) > 100_000
+    (d / "apply.txt").write_text(text, encoding="utf-8", newline="\n")
+    cells = ac.load_cells(str(tmp_path))
+    _, loaded_text = cells[0]
+    assert "Error:" in loaded_text
+    row = _row(status="failed", apply_text=loaded_text)
+    section = ac.render_apply_section(row, loaded_text, RUN_URL, 4_000)
+    assert "Error:" in section
+
+
+def test_load_cells_reads_resources_line_from_large_successful_apply(tmp_path):
+    d = tmp_path / "apply-summary.dev-eu.stacks-app"
+    d.mkdir()
+    (d / "cell.json").write_text(json.dumps(_cell(result="applied")))
+    noise = "\n".join(f"aws_instance.node[{i}]: Creation complete" for i in range(3_000))
+    text = noise + "\nApply complete! Resources: 1200 added, 0 changed, 0 destroyed.\n"
+    assert len(text) > 60_000
+    (d / "apply.txt").write_text(text, encoding="utf-8", newline="\n")
+    cells = ac.load_cells(str(tmp_path))
+    _, loaded_text = cells[0]
+    assert ac._resources(loaded_text) == "+1200 ~0 -0"
+
+
+def test_load_cells_tolerates_non_utf8_byte_in_apply_txt(tmp_path):
+    d = tmp_path / "apply-summary.dev-eu.stacks-app"
+    d.mkdir()
+    (d / "cell.json").write_text(json.dumps(_cell(result="applied")))
+    (d / "apply.txt").write_bytes(
+        b"Apply complete! Resources: 1 added, 0 changed, 0 destroyed.\n"
+        b"trailer with a bad byte: \xff\n"
+    )
+    cells = ac.load_cells(str(tmp_path))  # must not raise UnicodeDecodeError
+    _, loaded_text = cells[0]
+    assert loaded_text is not None
+    assert "Apply complete!" in loaded_text
 
 
 def test_load_cells_reads_apply_text_only_when_present(tmp_path):

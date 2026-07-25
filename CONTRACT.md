@@ -425,11 +425,21 @@ apply ran. The footer carries the bare-apply form's excluded/skipped-environment
 sentences, a gate-completion sentence (complete or still-pending, from the
 gate verdict), and the run link.
 
-Size degradation and the 65,536-character comment cap behave exactly as the
-plan comment's, above: each attempted cell's section degrades full output →
-truncated at a line boundary (with a link to the job log) → link-only, with
-every remaining cell's link-only space reserved up front, and the render
-fails loud rather than post a comment that would exceed GitHub's cap.
+The 65,536-character comment cap and the up-front link-only-space reserve
+work the same way as the plan comment's, above, but the truncation direction
+is the opposite. A plan diff is read top-down, so the plan comment's section
+keeps the head. Apply output is read for its END: a failing apply's fatal
+`Error:` line and a successful apply's closing `Apply complete! Resources:
+...` line are both the last thing tofu prints, so each attempted cell's
+section instead keeps the TAIL — full output → truncated (front cut at a
+line boundary, noting that earlier output was elided, with a link to the job
+log) → link-only. `apply.txt` itself is read from the end of the file
+(bounded — a fixed-size read near the tail, never the whole file) and
+decoded permissively: a non-UTF-8 byte anywhere in it becomes a replacement
+character instead of aborting the render. Every remaining attempted cell's
+link-only space, and every blocked cell's one-line reason, are reserved up
+front, and the render fails loud rather than post a comment that would
+exceed GitHub's cap.
 
 The data feeding the comment ships in the per-cell artifact
 `apply-summary.<env>.<slug>` (see Apply summary artifacts, above); per-cell

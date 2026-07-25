@@ -15,8 +15,15 @@ degradation, up-front link-only budget reserve) rather than adding a
 renderer: the injection-critical primitives (fence escaping, `_md_escape`,
 size budgeting) are imported from summary-comment and written once, but the
 layout genuinely differs -- a different summary line, different trailer
-wording, no diff_map (apply output is not a plan diff), and a blocked-cell
-form with no fence at all. Do not "fix" this into a shared mode switch.
+wording, no diff_map (apply output is not a plan diff), a blocked-cell form
+with no fence at all, and the direction truncation cuts from. A plan diff is
+read top-down, so summary-comment's degradation keeps the head. Apply output
+is the opposite: the diagnostic that matters -- a fatal `Error:`, or the
+closing `Apply complete! Resources: ...` line -- is always at the END, so
+this script's read (`_read_tail`) and truncation (`render_apply_section`)
+both keep the TAIL instead, and the file read is decoded permissively
+(`errors="replace"`) since apply.txt is arbitrary provider/local-exec stdout,
+not guaranteed valid UTF-8. Do not "fix" this into a shared mode switch.
 """
 
 import glob
@@ -98,6 +105,56 @@ def _validate_cell(cell, path):
         )
 
 
+def _read_tail(path, budget):
+    """Read the trailing `budget` characters of `path`, decoded permissively.
+
+    Apply output is tail-oriented: the diagnostic that matters -- a fatal
+    `Error:` line, or the closing `Apply complete! Resources: ...` line -- is
+    always the LAST thing tofu prints, never the first. That is the opposite
+    of plan.txt, whose identical-looking head-first cap was harmless: a plan
+    is only ever rendered (in full, truncated, or not at all), never parsed
+    for a line that lives at a particular end of it. Apply output IS parsed
+    for a trailing line (`_resources`), so a head cap here silently blanks
+    that parse on any output long enough to need capping, and a head-first
+    truncation of a failed apply's body drops the one line the table's ❌
+    sends the reader looking for. So this seeks from the end instead of
+    reading from the start -- bounded (a fixed-size read near the tail, never
+    the whole file) but keeping the characters that matter.
+
+    Decoded with errors="replace": apply.txt is provider/local-exec stdout,
+    not guaranteed valid UTF-8. A single non-UTF-8 byte anywhere in the file
+    must not raise UnicodeDecodeError and abort the whole render -- every
+    cell's comment, including ones that applied cleanly, would be lost with
+    it. A stray byte becomes a replacement character instead.
+
+    The byte window read is wider than `budget` characters could ever need
+    (UTF-8's worst case is 4 bytes/char) so a multi-byte codepoint straddling
+    the seek point still has room to decode before the result is sliced down
+    to exactly `budget` characters. Whatever the seek point lands inside --
+    a partial line, a partial character -- the caller drops the leading
+    fragment rather than emit it (see the truncated_front handling below).
+    """
+    with open(path, "rb") as fh:
+        fh.seek(0, os.SEEK_END)
+        size = fh.tell()
+        window = budget * 4
+        start = max(0, size - window)
+        fh.seek(start)
+        data = fh.read()
+    text = data.decode("utf-8", errors="replace")
+    truncated_front = start > 0 or len(text) > budget
+    if len(text) > budget:
+        text = text[-budget:]
+    if truncated_front:
+        # The seek point (or the subsequent budget-slice) can land mid-line
+        # (or mid-character, now smoothed over by errors="replace"); drop
+        # that leading fragment rather than emit a line that never really
+        # existed in the source.
+        nl = text.find("\n")
+        text = text[nl + 1 :] if nl != -1 else ""
+    return text
+
+
 def load_cells(cells_dir):
     """(cell, apply_text) per downloaded apply-summary artifact. A cell.json
     missing schema keys, or carrying the right keys with the wrong types/an
@@ -117,10 +174,7 @@ def load_cells(cells_dir):
         txt = pathlib.Path(p).with_name("apply.txt")
         text = None
         if txt.exists():
-            # Cap the read at SIZE_BUDGET: same reasoning as summary-comment's
-            # plan.txt cap -- bytes beyond it can never be emitted anyway.
-            with open(txt, encoding="utf-8") as fh:
-                text = fh.read(sc.SIZE_BUDGET)
+            text = _read_tail(txt, sc.SIZE_BUDGET)
         out.append((cell, text))
     return out
 
@@ -233,11 +287,17 @@ def _link_only(row, url):
 
 def render_apply_section(row, text, url, limit):
     """Largest details section that fits in `limit` characters: full apply.txt
-    -> truncated (cut at a line boundary, job-log link appended) -> link-only.
-    The fence for the truncated body reuses the full body's fence so a cut can
-    never re-open the fence-escape hole. A cell whose apply.txt is missing
-    (result applied/failed but the artifact carries no apply.txt) degrades to
-    link-only rather than crashing."""
+    -> truncated -> link-only. Truncation keeps the TAIL, not the head: a
+    failed apply's fatal `Error:` line and a successful apply's closing
+    `Apply complete! Resources: ...` line are both at the END of the output,
+    so cutting the FRONT (and saying so) keeps the line a reader opens this
+    section for; cutting the back the way the plan renderer does would drop
+    exactly that. Still cut at a line boundary -- the leading partial line
+    left over from the cut is dropped, never emitted as a fragment -- and the
+    fence for the truncated body still reuses the full body's fence so a cut
+    can never re-open the fence-escape hole. A cell whose apply.txt is
+    missing (result applied/failed but the artifact carries no apply.txt)
+    degrades to link-only rather than crashing."""
     if text is None:
         return _link_only(row, url)
     f = sc._fence_of(text)
@@ -245,11 +305,13 @@ def render_apply_section(row, text, url, limit):
     full = f"{head}{sc.fence(text, f, lang='')}\n</details>"
     if len(full) <= limit and limit >= sc.MIN_PLAN_CHARS:
         return full
-    trailer = f"\n\n_Truncated — [full output in the job log]({url})._\n</details>"
+    trailer = (
+        f"\n\n_Truncated — earlier output elided; [full output in the job log]({url})._\n</details>"
+    )
     room = limit - len(head) - len(sc.fence("", f, lang="")) - len(trailer)
     if room >= sc.MIN_PLAN_CHARS:
-        sliced = text[:room]
-        cut = sliced[: sliced.rfind("\n")] if "\n" in sliced else ""
+        sliced = text[-room:]
+        cut = sliced[sliced.find("\n") + 1 :] if "\n" in sliced else ""
         if cut:
             return f"{head}{sc.fence(cut, f, lang='')}{trailer}"
     return _link_only(row, url)
