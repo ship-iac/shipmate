@@ -511,6 +511,105 @@ def test_load_cells_tolerates_non_utf8_byte_in_apply_txt(tmp_path):
     assert "Apply complete!" in loaded_text
 
 
+def test_load_cells_strips_ansi_from_realistic_apply_output(tmp_path):
+    # Finding scenario, reproduced verbatim: `tofu init`/`apply` stdout+stderr
+    # teed raw (no -no-color) carries SGR colour codes that must not survive
+    # into the rendered comment as literal garbage inside the fence.
+    d = tmp_path / "apply-summary.dev-eu.stacks-auth"
+    d.mkdir()
+    (d / "cell.json").write_text(json.dumps(_cell(result="applied")))
+    text = (
+        "/stacks/auth (script:1 job:0.0)> tofu init -input=false\n"
+        "\x1b[0m\x1b[1m\n"
+        "\x1b[36;1mInitializing the backend...\x1b[0m\n"
+        "\x1b[31mError: something\x1b[0m\n"
+        "\x1b[1mApply complete! Resources: 1 added, 0 changed, 0 destroyed.\x1b[0m\n"
+    )
+    (d / "apply.txt").write_text(text, encoding="utf-8", newline="\n")
+    cells = ac.load_cells(str(tmp_path))
+    _, loaded_text = cells[0]
+    assert "\x1b" not in loaded_text
+    assert "Initializing the backend..." in loaded_text
+    row = _row(status="applied", apply_text=loaded_text)
+    section = ac.render_apply_section(row, loaded_text, RUN_URL, 10_000)
+    assert "\x1b" not in section
+
+
+def test_load_cells_ansi_strip_happens_before_fence_is_computed(tmp_path):
+    # A backtick run split by a colour escape (backtick, ESC[0m, backtick) is
+    # two separate 1-backtick runs in the raw bytes, but becomes a single
+    # 2-backtick run once the escape between them is stripped. If the fence
+    # were computed on the UNstripped text (only 1-backtick runs -> a
+    # 3-backtick fence), the stripped body's now-2-backtick run would still
+    # fit safely under a 3-backtick fence -- so this alone proves too little.
+    # Push it further: pad the raw text with backtick runs of length 3 (fence
+    # would need to be 4 backticks against the raw view) positioned so that,
+    # once stripped, they multiply out. Simplest robust proof: use 50
+    # backticks either side of the escape sequence, so unstripped the longest
+    # run is 50 (fence = 51) while stripped it is exactly 100 (fence must be
+    # 101) -- if the fence were computed pre-strip (51 backticks) it would be
+    # STRICTLY SHORTER than the post-strip 100-backtick run, i.e. the fence
+    # would fail to be a real delimiter (the body would contain a run at
+    # least as long as the fence itself).
+    d = tmp_path / "apply-summary.dev-eu.stacks-auth"
+    d.mkdir()
+    (d / "cell.json").write_text(json.dumps(_cell(result="applied")))
+    # The trailing "x" keeps the merged run's line from being a PURE-backtick
+    # line itself (which would otherwise masquerade as a third "delimiter"
+    # line to _fence_delimiter_lines, same caveat as the existing fence-escape
+    # tests below).
+    text = (
+        "`" * 50
+        + "\x1b[0m"
+        + "`" * 50
+        + "x\nApply complete! Resources: 1 added, 0 changed, 0 destroyed.\n"
+    )
+    (d / "apply.txt").write_text(text, encoding="utf-8", newline="\n")
+    cells = ac.load_cells(str(tmp_path))
+    _, loaded_text = cells[0]
+    assert "\x1b" not in loaded_text
+    longest_run = max(len(m) for m in re.findall(r"`+", loaded_text))
+    assert longest_run == 100  # the merge actually happened
+    row = _row(status="applied", apply_text=loaded_text)
+    section = ac.render_apply_section(row, loaded_text, RUN_URL, 10_000)
+    fence_lines = _fence_delimiter_lines(section)
+    assert len(fence_lines) == 2
+    assert fence_lines[0] == fence_lines[1]
+    assert len(fence_lines[0]) > longest_run
+
+
+def test_resources_parses_colour_wrapped_apply_complete_line():
+    # tofu commonly wraps the whole "Apply complete!" line in an SGR pair
+    # (bold on ... bold off) -- an escape at either end of the line must not
+    # defeat the line-anchored (^...$, re.MULTILINE) regex. _resources is
+    # exercised directly on already-stripped text (as load_cells produces),
+    # proving the anchor itself is robust once the colour codes are gone.
+    text = ac._strip_ansi(
+        "\x1b[1mApply complete! Resources: 3 added, 1 changed, 2 destroyed.\x1b[0m\n"
+    )
+    assert ac._resources(text) == "+3 ~1 -2"
+
+
+def test_strip_ansi_covers_csi_two_char_and_osc_forms():
+    # CSI (SGR), a bare two-character escape (ESC + byte in @-_), and an
+    # OSC sequence terminated by BEL, then the same OSC form terminated by
+    # ST (ESC \) instead -- all three forms named in the finding.
+    csi = "before\x1b[36;1mcolour\x1b[0mafter"
+    two_char = "before\x1bMreset-ish\x1bDafter"
+    osc_bel = "before\x1b]0;window title\x07after"
+    osc_st = "before\x1b]0;window title\x1b\\after"
+    for sample in (csi, two_char, osc_bel, osc_st):
+        stripped = ac._strip_ansi(sample)
+        assert "\x1b" not in stripped
+        assert "before" in stripped
+        assert "after" in stripped
+
+
+def test_strip_ansi_leaves_ordinary_text_and_newlines_and_carriage_returns_alone():
+    text = "plain line one\nplain line two\r\nno escapes here at all"
+    assert ac._strip_ansi(text) == text
+
+
 def test_load_cells_reads_apply_text_only_when_present(tmp_path):
     attempted = tmp_path / "apply-summary.dev-eu.stacks-app"
     attempted.mkdir()
