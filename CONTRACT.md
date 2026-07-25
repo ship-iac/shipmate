@@ -414,9 +414,9 @@ pending and `shipmate apply` can be re-run to retry them. There is no separate
 `apply-detect` / `apply-all-detect` already compute, and a cell counts as
 attempted only when its artifact actually downloaded — the render can never
 claim nothing is pending while holding evidence that an apply ran. The
-footer carries a gate-completion sentence (complete or still-pending, from
-the gate verdict), the bare-apply form's excluded/skipped-environment
-sentences, and the run link.
+footer carries the bare-apply form's excluded/skipped-environment sentences,
+a gate-completion sentence (complete or still-pending, from the gate
+verdict), and the run link.
 
 Size degradation and the 65,536-character comment cap behave exactly as the
 plan comment's, above: each attempted cell's section degrades full output →
