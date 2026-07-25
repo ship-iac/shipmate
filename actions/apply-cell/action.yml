@@ -170,13 +170,26 @@ runs:
       # was generated -> non-zero exit -> apply check stays pending (fail-safe).
       # Tee combined stdout+stderr to RUNNER_TEMP (never the repo tree -- the
       # live git-untracked safeguard runs on this path) for the cell-summary
-      # artifact. `set -o pipefail` (already on) makes the step's exit code
-      # tofu's, not tee's, so the fail-safe above still fires on a real error.
+      # artifact. errexit is turned off for just this one pipeline and the
+      # step exits explicitly on tofu's own status, captured via
+      # PIPESTATUS[0]: with errexit (and pipefail) live across the pipeline, a
+      # `tee` failure alone -- a full $RUNNER_TEMP, a disk hiccup mid-write --
+      # fails the *pipeline*, which fails this step even though every
+      # resource in the apply succeeded. That would strand the apply check
+      # pending after `Save state` below has already persisted the advanced
+      # state, so a re-run would hit the exact-plan stale-plan fail-safe with
+      # no way back on an otherwise-successful apply. Exiting explicitly on
+      # tofu's own captured status keeps a cosmetic `tee` failure from
+      # masking a success -- or manufacturing one.
       run: |
         set -euo pipefail
         echo "::group::terramate apply: $STACK"
+        set +e
         terramate script run --disable-safeguards=git-out-of-sync --no-recursive -C "$STACK" apply 2>&1 | tee "$RUNNER_TEMP/apply.txt"
+        status="${PIPESTATUS[0]}"
+        set -e
         echo "::endgroup::"
+        exit "$status"
 
     - name: Save state
       # Persist state whenever the apply was attempted (restore succeeded), not
