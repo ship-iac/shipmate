@@ -54,7 +54,7 @@ _EMOJI = {"applied": "✅", "failed": "❌", "blocked": "🚫", "not_attempted":
 
 def _not_attempted_note(env_name):
     """The 'apply check stays pending' note, parameterized on the targeted
-    environment (I2): a targeted `shipmate apply <env>` run must tell the
+    environment: a targeted `shipmate apply <env>` run must tell the
     reader to retry with that same targeted form, not the bare `shipmate
     apply` -- the bare form excludes explicit envs
     (`global.shipmate.explicit_envs`) from its work set and therefore cannot
@@ -309,16 +309,16 @@ def _footer(gate, run_url, excluded, skipped, env_name):
 def _results_failed(results_csv):
     """Tokenize SHIPMATE_RESULTS (`join(needs.*.result, ',')`) and report
     whether any job-level outcome signals failure. The one tokenizer shared
-    by the short form and the table path's failure line (I1) -- so the two
+    by the short form and the table path's failure line -- so the two
     can never disagree about what 'failed' means for the same results
-    string (ledger item T3d)."""
+    string."""
     tokens = [t for t in results_csv.split(",") if t]
     return any(t not in ("success", "skipped") for t in tokens)
 
 
 def _apply_head(env_name, emoji, word):
     """The `:x:`/`:white_check_mark:` lead sentence, byte-identical to the
-    pre-change inline shell. Shared so the table path's failure line (I1)
+    pre-change inline shell. Shared so the table path's failure line
     reuses the exact failed-form wording instead of a reworded duplicate."""
     if env_name:
         return f"{emoji} shipmate: `shipmate apply {sc._md_escape(env_name)}` {word}."
@@ -348,7 +348,7 @@ def _short_form(results_csv, env_name, gate, run_url, excluded, skipped):
 
 
 def _failure_line(results_csv, rows, env_name):
-    """I1: SHIPMATE_RESULTS is the job-level failure signal (the old inline
+    """SHIPMATE_RESULTS is the job-level failure signal (the old inline
     shell's only source of a 'failed' word). Once the expected cell set is
     non-empty, the table becomes the comment's status source and this signal
     was previously dropped -- so an apply run that dies before any cell
@@ -368,7 +368,7 @@ def _failure_line(results_csv, rows, env_name):
 
 
 def _top_section(env_name, results_csv, rows, jobs, run_url):
-    """Header, the I1 failure line (if any) directly beneath it, then the
+    """Header, the failure line (if any) directly beneath it, then the
     table, then the not-attempted note. Split out of build_comment so the
     latter's complexity budget (C901 ceiling 8) isn't spent on this
     concatenation."""
@@ -446,8 +446,8 @@ def main():
     )
     # Hoisted out of the branch below: the short form needs these too (an
     # excluded explicit env can be the *entire* reason nothing else is
-    # pending), not just the full table render. SHIPMATE_RESULTS likewise --
-    # I1 threads it into the table path too, not just the short form.
+    # pending), not just the full table render. SHIPMATE_RESULTS likewise
+    # threads into the table path too, not just the short form.
     excluded = json.loads(os.environ.get("SHIPMATE_EXCLUDED_ENVS") or "[]")
     skipped = json.loads(os.environ.get("SHIPMATE_SKIPPED_ENVS") or "[]")
     results_csv = os.environ.get("SHIPMATE_RESULTS", "") or ""

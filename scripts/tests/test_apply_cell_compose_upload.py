@@ -1,4 +1,4 @@
-"""I3 / M2 -- Compose cell summary and Upload apply summary must not be able
+"""Compose cell summary and Upload apply summary must not be able
 to strand an otherwise-successful apply's check pending.
 
 Both steps are new `if: always()` steps sitting between `Apply the stored
@@ -12,7 +12,7 @@ without a re-plan. `continue-on-error: true` on both steps fixes this without
 weakening the failed-apply case: the apply step's own failure still makes
 `success()` false for the completion steps regardless of these two.
 
-M2, same file: `cell.json` / `apply.txt` were written into the repo tree,
+Same file: `cell.json` / `apply.txt` were written into the repo tree,
 which the sibling fail-safe steps explicitly avoid (a stray untracked file at
 repo root fails the apply once git-untracked runs). Writing under
 `$RUNNER_TEMP` instead removes the ordering dependency on "nothing after this

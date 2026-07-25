@@ -277,7 +277,7 @@ runs:
                 result = "blocked"
                 reason = "an earlier step failed before the apply ran — see the job log"
 
-        # Written to $RUNNER_TEMP (M2), never the repo tree -- see the step
+        # Written to $RUNNER_TEMP, never the repo tree -- see the step
         # comment above. apply.txt itself needs no copy here: the apply step
         # above already tee'd it straight to $RUNNER_TEMP/apply.txt, so a
         # blocked cell that never reached the apply step simply never wrote

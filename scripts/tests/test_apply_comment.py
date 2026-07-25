@@ -435,7 +435,7 @@ def test_short_form_nothing_pending_all_environments():
 
 
 def test_short_form_includes_excluded_and_skipped_lines_all_environments():
-    # I3 regression: today's live apply-all.yml one-liner appends these
+    # Regression guard: today's live apply-all.yml one-liner appends these
     # sentences unconditionally, including in the nothing-pending branch --
     # this is the actionable case where the ONLY reason nothing is pending is
     # an excluded explicit env (apply-all-detect derives `excluded` from
@@ -557,7 +557,7 @@ def test_footer_excluded_and_skipped_only_for_all_environments_form():
     assert "Skipped (ordered after an unapplied explicit environment): `staging`." in footer_all
 
 
-# --- I2: not-attempted note names the targeted env -------------------------------
+# --- not-attempted note names the targeted env -------------------------------
 
 
 def test_not_attempted_note_targeted_form_names_the_env():
@@ -581,7 +581,7 @@ def test_not_attempted_note_escapes_evil_env_name():
 
 
 def test_build_comment_not_attempted_note_in_targeted_run_names_the_env():
-    # I2 reproduced end to end: a targeted `shipmate apply prod` run with a
+    # Reproduced end to end: a targeted `shipmate apply prod` run with a
     # not-attempted cell must not tell the reader to retry with the bare
     # form, which cannot retry an explicit env.
     rows = [_row(status="not_attempted", environment="prod", apply_text=None)]
@@ -596,7 +596,7 @@ def test_build_comment_not_attempted_note_in_bare_run_stays_bare():
     assert "retry with `shipmate apply`._" in comment
 
 
-# --- I1: job-level SHIPMATE_RESULTS failure surfaces on the table path too -------
+# --- job-level SHIPMATE_RESULTS failure surfaces on the table path too -------
 
 
 def test_failure_line_present_when_results_failed_and_no_row_shows_it():
@@ -627,11 +627,12 @@ def test_failure_line_absent_when_a_row_already_shows_failed_or_blocked():
     assert ac._failure_line("success,failure", blocked_rows, "prod") == ""
 
 
-def test_build_comment_reproduces_i1_red_run_with_no_cell_reports():
-    # Reproduces the review's failure scenario verbatim: SHIPMATE_ENVIRONMENT
-    # set, a non-empty expected cell set, no artifacts downloaded (the apply
-    # job died before any cell reported), SHIPMATE_RESULTS carries a failure
-    # token. Pre-fix this rendered with no ❌ and no "failed" anywhere.
+def test_build_comment_surfaces_results_failure_with_no_cell_reports():
+    # Reproduces an apply run that dies before any cell reports:
+    # SHIPMATE_ENVIRONMENT set, a non-empty expected cell set, no artifacts
+    # downloaded (the apply job died before any cell reported), SHIPMATE_RESULTS
+    # carries a failure token. Pre-fix this rendered with no ❌ and no "failed"
+    # anywhere.
     rows = ac.build_rows({("prod", "stacks/app"), ("prod", "stacks/db")}, [])
     body = ac.build_comment(rows, [], RUN_URL, "pending", [], [], "prod", "success,failure")
     assert ":x: shipmate: `shipmate apply prod` failed." in body
@@ -657,7 +658,7 @@ def test_build_comment_failure_line_sits_between_header_and_table():
     "results_csv", ["", "success", "success,skipped", "success,failure", "failure", "cancelled"]
 )
 def test_results_failed_tokenizer_shared_by_short_form_and_failure_line(results_csv):
-    # Anti-divergence guard (ledger item T3d): the table path's failure line
+    # Anti-divergence guard: the table path's failure line
     # and the short form must use ONE shared tokenizer, so a given
     # SHIPMATE_RESULTS string can never read as "failed" on one path and
     # "not failed" on the other.
