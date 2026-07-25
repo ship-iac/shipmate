@@ -171,3 +171,105 @@ def test_download_step_does_not_fail_on_zero_matches():
     with_ = download_step.get("with") or {}
     assert "pattern" in with_
     assert "name" not in with_
+
+
+WORKFLOWS = ENGINE / ".github" / "workflows"
+
+
+def _steps():
+    return _load_action()["runs"]["steps"]
+
+
+def test_head_sha_is_a_required_input():
+    inputs = _load_action()["inputs"]
+    assert "head-sha" in inputs, "apply-summary needs the head SHA to read the apply checks"
+    assert inputs["head-sha"]["required"] is True
+    assert "${{" not in inputs["head-sha"]["description"]  # GHA evaluates descriptions
+
+
+def test_token_mint_also_grants_checks_read():
+    mint = _find_step(_steps(), uses_contains="create-github-app-token")
+    with_ = mint.get("with") or {}
+    assert with_.get("permission-checks") == "read"
+    # The comment POST still needs its original grant -- one mint, both uses.
+    assert with_.get("permission-pull-requests") == "write"
+
+
+def test_token_mint_precedes_the_scan_render_and_post_steps():
+    # Ordering is load-bearing: the scan step needs the token, the render step
+    # reads the file the scan step writes, and the POST step's GH_TOKEN below
+    # is the same mint -- a reorder that pushed the mint below the POST would
+    # yield an empty token and a 401 rather than a workflow error.
+    steps = _steps()
+    mint = _find_step(steps, uses_contains="create-github-app-token")
+    scan = _find_step(steps, run_contains="check-runs")
+    render = _find_step(steps, run_contains="scripts/apply-comment")
+    post = _find_step(steps, run_contains="issues/$PR_NUMBER/comments")
+    assert steps.index(mint) < steps.index(scan) < steps.index(render) < steps.index(post)
+    assert (post.get("env") or {}).get("GH_TOKEN") == (
+        "${{ steps." + mint["id"] + ".outputs.token }}"
+    )
+
+
+def test_scan_step_validates_head_sha():
+    scan = _find_step(_steps(), run_contains="check-runs")
+    assert "^[0-9a-f]{40}$" in scan["run"]
+
+
+def test_scan_step_uses_filter_all_like_the_gate():
+    # A re-created check name keeps its historical runs; apply-gate judges the
+    # newest run per name, which only works if every run is fetched.
+    scan = _find_step(_steps(), run_contains="check-runs")
+    assert "filter=all" in scan["run"]
+
+
+def test_scan_step_degrades_to_an_empty_file_with_a_warning():
+    # For comment-ops the comment IS the feedback channel: a checks-API blip
+    # must cost the check-state axis only, never the comment.
+    scan = _find_step(_steps(), run_contains="check-runs")
+    assert ": > checks.jsonl" in scan["run"]
+    assert "::warning::" in scan["run"]
+
+
+def test_scan_step_writes_the_file_the_render_step_reads():
+    # The coupling between the filename the scan step redirects to and the
+    # path the renderer reads (SHIPMATE_CHECKS) is otherwise untested -- a
+    # rename of either side would silently blank the whole check-state axis
+    # with no local test failing. Derive the expected filename from the
+    # render step's env: block (never hardcode it here) so a rename on that
+    # side reds this test too.
+    steps = _steps()
+    scan = _find_step(steps, run_contains="check-runs")
+    render = _find_step(steps, run_contains="scripts/apply-comment")
+    checks_file = (render.get("env") or {}).get("SHIPMATE_CHECKS")
+    assert checks_file, "render step's env: block has no SHIPMATE_CHECKS key"
+    assert f"> {checks_file}" in scan["run"]
+    assert f": > {checks_file}" in scan["run"]
+
+
+def test_scan_step_never_interpolates_expr_directly():
+    scan = _find_step(_steps(), run_contains="check-runs")
+    assert "${{" not in scan["run"]
+
+
+def test_scan_step_uses_the_app_token_not_the_workflow_token():
+    # App permissions come from the installation, so no consumer's calling job
+    # has to grant checks: read (a called workflow's job permissions cannot
+    # exceed its caller's -- the workflow-token route would be a breaking
+    # change for every consumer wrapper).
+    scan = _find_step(_steps(), run_contains="check-runs")
+    mint = _find_step(_steps(), uses_contains="create-github-app-token")
+    assert (scan.get("env") or {}).get("GH_TOKEN") == (
+        "${{ steps." + mint["id"] + ".outputs.token }}"
+    )
+
+
+def test_engine_callers_pass_head_sha_to_apply_summary():
+    for wf in ("apply.yml", "apply-all.yml"):
+        spec = yaml.safe_load((WORKFLOWS / wf).read_text(encoding="utf-8"))
+        steps = spec["jobs"]["summary"]["steps"]
+        step = _find_step(steps, uses_contains="actions/apply-summary")
+        assert step is not None, f"{wf} has no apply-summary step"
+        assert (step.get("with") or {}).get("head-sha") == "${{ inputs.ref }}", (
+            f"{wf} must thread the head SHA into apply-summary"
+        )

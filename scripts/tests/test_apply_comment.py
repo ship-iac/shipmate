@@ -208,6 +208,20 @@ def test_render_apply_section_link_only_when_apply_text_missing():
     assert RUN_URL in s
 
 
+def test_link_only_distinguishes_missing_output_from_output_too_large():
+    # Two different reasons reach _link_only and they must not share a
+    # sentence. Output that exists but does not fit is "too large"; output that
+    # never arrived (a promoted not_attempted row, or a cell.json with no
+    # apply.txt) is unavailable, and calling that "too large" is simply false.
+    missing = ac._link_only(_row(apply_text=None), RUN_URL)
+    assert "Apply output unavailable for this cell" in missing
+    assert "too large" not in missing
+
+    too_large = ac._link_only(_row(apply_text="x" * 100_000), RUN_URL)
+    assert "Output too large for this comment" in too_large
+    assert "unavailable" not in too_large
+
+
 def test_build_comment_reserves_link_only_space_for_every_cell():
     # An early giant apply.txt must not starve a later cell of its link. The
     # giant body MUST contain newlines: a single unbroken line (no "\n")
@@ -952,3 +966,519 @@ def test_apply_summary_artifact_name_matches_contract():
     # loud failure), so pin the exact artifact-name grammar.
     src = (_ENGINE / "actions" / "apply-cell" / "action.yml").read_text(encoding="utf-8")
     assert "apply-summary.${{ inputs.env }}.${{ steps.ids.outputs.slug }}" in src
+
+
+# --- apply-check state: three-way lookup, absence is unknown -----------------
+
+APP_ID = "12345"
+
+
+def _check(name, *, status="completed", conclusion="success", run_id=1, app_id=int(APP_ID)):
+    # `run_id`, not `id`: shadowing the builtin in a parameter name is a lint
+    # finding, and the JSON key stays `id` either way.
+    return {
+        "name": name,
+        "status": status,
+        "conclusion": conclusion,
+        "id": run_id,
+        "app": {"id": app_id},
+    }
+
+
+def _jsonl(*checks):
+    return [json.dumps(c) for c in checks]
+
+
+def test_check_state_maps_splits_present_and_done():
+    lines = _jsonl(
+        _check("apply / dev-eu / stacks/app", run_id=1),
+        _check("apply / dev-eu / stacks/db", status="in_progress", conclusion=None, run_id=2),
+    )
+    present, done = ac.check_state_maps(lines, APP_ID)
+    assert present == {"apply / dev-eu / stacks/app", "apply / dev-eu / stacks/db"}
+    assert done == {"apply / dev-eu / stacks/app"}
+
+
+def test_check_state_maps_ignores_checks_from_another_app_identity():
+    # Security-relevant: a same-name check created by any other identity must
+    # not be able to paint an applied cell as stranded (nor green a pending
+    # one). Same posture as the gate's own from_app filter.
+    lines = _jsonl(
+        _check("apply / dev-eu / stacks/app", status="in_progress", conclusion=None, app_id=15368)
+    )
+    present, done = ac.check_state_maps(lines, APP_ID)
+    assert present == set()
+    assert done == set()
+
+
+def test_check_state_maps_judges_the_newest_run_per_name():
+    # A duplicate apply check created mid-apply is deliberately left pending by
+    # apply-cell; the newest run per name (highest id) must win, so the cell
+    # reads pending even though an older completed run exists.
+    lines = _jsonl(
+        _check("apply / dev-eu / stacks/app", run_id=1),
+        _check("apply / dev-eu / stacks/app", status="queued", conclusion=None, run_id=2),
+    )
+    present, done = ac.check_state_maps(lines, APP_ID)
+    assert present == {"apply / dev-eu / stacks/app"}
+    assert done == set()
+
+
+def test_check_state_maps_empty_app_id_warns_and_returns_no_data(capsys):
+    # Must NOT fail loud the way from_app does: a missing SHIPMATE_APP_ID is
+    # only allowed to cost this one display axis, never the whole comment.
+    lines = _jsonl(_check("apply / dev-eu / stacks/app"))
+    present, done = ac.check_state_maps(lines, "")
+    assert (present, done) == (set(), set())
+    assert "::warning::" in capsys.readouterr().out
+
+
+def test_check_state_three_way_lookup():
+    present = {"apply / dev-eu / stacks/app", "apply / dev-eu / stacks/db"}
+    done = {"apply / dev-eu / stacks/app"}
+    assert ac._check_state(_row(stack_path="stacks/app"), present, done) == ac.CHECK_DONE
+    assert ac._check_state(_row(stack_path="stacks/db"), present, done) == ac.CHECK_PENDING
+    assert ac._check_state(_row(stack_path="stacks/gone"), present, done) == ac.CHECK_UNKNOWN
+
+
+def test_apply_check_state_applied_with_pending_check_becomes_unrecorded():
+    # The finding: tofu apply succeeded, but Save state / the completion token
+    # mint / Complete the apply check failed (or the job was cancelled) after
+    # the cell summary was already composed and uploaded.
+    rows = [_row(status="applied", stack_path="stacks/app")]
+    ac.apply_check_state(rows, {"apply / dev-eu / stacks/app"}, set())
+    assert rows[0]["status"] == "unrecorded"
+
+
+def test_apply_check_state_not_attempted_with_done_check_becomes_applied():
+    # The mirror image: the apply landed and completed its check, but the
+    # cosmetic (continue-on-error) artifact upload dropped, so no cell.json
+    # arrived and the row would otherwise claim the check stays pending.
+    rows = [_row(status="not_attempted", stack_path="stacks/app", apply_text=None)]
+    ac.apply_check_state(rows, {"apply / dev-eu / stacks/app"}, {"apply / dev-eu / stacks/app"})
+    assert rows[0]["status"] == "applied"
+    assert rows[0]["apply_text"] is None  # no output to show; renders link-only
+
+
+def test_apply_check_state_leaves_rows_alone_when_check_state_is_unknown():
+    # Degradation contract: no data (scan failed, empty file, pin skew) must
+    # render byte-identically to the artifact-only behaviour.
+    rows = [
+        _row(status="applied", stack_path="stacks/app"),
+        _row(status="not_attempted", stack_path="stacks/db", apply_text=None),
+    ]
+    ac.apply_check_state(rows, set(), set())
+    assert [r["status"] for r in rows] == ["applied", "not_attempted"]
+
+
+def test_apply_check_state_never_downgrades_failed_or_blocked():
+    # A red row against a green check means another run applied that cell:
+    # over-reporting, nothing stranded, and the gate remains the truth.
+    # Downgrading here would let an unrelated run's green check hide a real
+    # failure in this one.
+    done = {"apply / dev-eu / stacks/app", "apply / dev-eu / stacks/db"}
+    rows = [
+        _row(status="failed", stack_path="stacks/app"),
+        _row(status="blocked", stack_path="stacks/db", reason="state restore failed"),
+    ]
+    ac.apply_check_state(rows, done, done)
+    assert [r["status"] for r in rows] == ["failed", "blocked"]
+
+
+def test_load_check_maps_missing_file_is_no_data(tmp_path):
+    # The pinned-action skew window: an older apply-summary never writes
+    # checks.jsonl. Silent no-data, not a crash.
+    present, done = ac.load_check_maps(str(tmp_path / "nope.jsonl"), APP_ID)
+    assert (present, done) == (set(), set())
+
+
+def test_load_check_maps_empty_file_is_no_data(tmp_path):
+    p = tmp_path / "checks.jsonl"
+    p.write_text("", encoding="utf-8")
+    assert ac.load_check_maps(str(p), APP_ID) == (set(), set())
+
+
+def test_load_check_maps_reads_jsonl(tmp_path):
+    p = tmp_path / "checks.jsonl"
+    p.write_text("\n".join(_jsonl(_check("apply / dev-eu / stacks/app"))), encoding="utf-8")
+    present, done = ac.load_check_maps(str(p), APP_ID)
+    assert present == done == {"apply / dev-eu / stacks/app"}
+
+
+def test_load_check_maps_malformed_line_degrades_with_a_warning(tmp_path, capsys):
+    # A malformed checks.jsonl (parse_jsonl's SystemExit) must cost only the
+    # check-state axis, never the whole render step -- degrade to no data with
+    # a warning, exactly like the missing-file case, rather than propagate.
+    p = tmp_path / "checks.jsonl"
+    p.write_text("not json\n", encoding="utf-8")
+    assert ac.load_check_maps(str(p), APP_ID) == (set(), set())
+    assert "::warning::" in capsys.readouterr().out
+
+
+def test_load_check_maps_missing_file_stays_silent(tmp_path, capsys):
+    # Pins the deliberate asymmetry: the pinned-action skew window (an older
+    # apply-summary that never writes checks.jsonl) is expected, not an error,
+    # so it must NOT warn -- unlike a malformed or otherwise unreadable file.
+    ac.load_check_maps(str(tmp_path / "nope.jsonl"), APP_ID)
+    assert "::warning::" not in capsys.readouterr().out
+
+
+def test_load_check_maps_non_numeric_app_id_degrades_with_a_warning(tmp_path, capsys):
+    # A non-numeric SHIPMATE_APP_ID (e.g. the App's client id pasted in place
+    # of its numeric app id) makes ag.from_app's int(app_id) raise ValueError.
+    # That must cost only the check-state display axis, never the whole
+    # render step -- same degradation as a malformed checks.jsonl.
+    p = tmp_path / "checks.jsonl"
+    p.write_text("\n".join(_jsonl(_check("apply / dev-eu / stacks/app"))), encoding="utf-8")
+    assert ac.load_check_maps(str(p), "Iv1.notanumericid") == (set(), set())
+    assert "::warning::" in capsys.readouterr().out
+
+
+def test_unrecorded_has_its_own_emoji():
+    assert ac._EMOJI["unrecorded"] == "⚠️"
+
+
+def test_cell_json_result_enum_is_unchanged():
+    # Display statuses are a superset of the artifact enum. The normative
+    # cell.json grammar in CONTRACT.md must not drift because the comment grew
+    # a display state.
+    assert ac._RESULTS == frozenset({"applied", "failed", "blocked"})
+
+
+# --- unrecorded rendering ----------------------------------------------------
+
+
+def test_unrecorded_note_names_the_cell_and_the_recovery():
+    rows = [_row(status="unrecorded", stack_display="db", environment="prod")]
+    note = ac._unrecorded_note(rows)
+    assert "**db / prod**" in note
+    assert "applied but not recorded" in note
+    # The cause is not "could not be completed" (implying only one possible
+    # cause) -- a duplicate apply check re-created by a later plan run on the
+    # same head SHA reads pending even though its OWN run completed, so the
+    # note must name all three reachable causes.
+    assert (
+        "not recorded as complete (it failed, was cancelled, or a newer plan re-created it)" in note
+    )
+    assert "`shipmate / gate` stays pending" in note
+    assert "Re-plan and re-apply" in note
+
+
+def test_unrecorded_note_empty_when_no_unrecorded_row():
+    assert ac._unrecorded_note([_row(status="applied"), _row(status="failed")]) == ""
+
+
+def test_unrecorded_note_lists_every_affected_cell():
+    rows = [
+        _row(status="unrecorded", stack_display="db", environment="prod"),
+        _row(status="unrecorded", stack_display="auth", environment="prod"),
+    ]
+    note = ac._unrecorded_note(rows)
+    assert "**db / prod**" in note and "**auth / prod**" in note
+
+
+def test_unrecorded_note_escapes_evil_stack_and_env_names():
+    # stack_display and environment are author-controlled (a Terramate tag /
+    # GitHub Environment name / apply-cell's stack-name input). Bold, not a
+    # backtick code span: _md_escape does not escape a backtick, so a code
+    # span would be the one place the escape could be broken out of.
+    rows = [
+        _row(
+            status="unrecorded",
+            stack_display="x</summary><b>evil",
+            environment="e</summary>vil",
+        )
+    ]
+    note = ac._unrecorded_note(rows)
+    assert "</summary>" not in note
+    assert "<b>" not in note
+    assert "&lt;/summary&gt;&lt;b&gt;evil" in note
+    assert "`" not in note.split("`shipmate / gate`")[0]
+
+
+def test_build_table_renders_unrecorded_with_the_warning_emoji():
+    rows = [_row(status="unrecorded", stack_display="db", environment="prod")]
+    table = ac.build_table(rows, [], RUN_URL)
+    assert "| ⚠️ | db | prod |" in table
+
+
+def test_build_table_unrecorded_still_shows_its_resources_count():
+    # The apply genuinely ran and its output is real -- the resources column
+    # must not go blank just because the check was never completed.
+    rows = [_row(status="unrecorded", stack_display="db", environment="prod")]
+    table = ac.build_table(rows, [], RUN_URL)
+    assert "+1 ~0 -0" in table
+
+
+def test_build_comment_unrecorded_keeps_its_details_section_and_carries_the_note():
+    rows = [_row(status="unrecorded", stack_display="db", environment="prod")]
+    comment = ac.build_comment(rows, [], RUN_URL, "pending", [], [], "prod")
+    # The section header carries the human phrase, never the internal enum
+    # token -- "unrecorded" appears nowhere else in the comment, so leaking it
+    # here would make the reader guess what it means.
+    assert "<details><summary>⚠️ db / prod — applied but not recorded</summary>" in comment
+    assert "— unrecorded</summary>" not in comment
+    assert "```\nApply complete! Resources: 1 added, 0 changed, 0 destroyed.\n```" in comment
+    assert ac._unrecorded_note(rows) in comment
+
+
+def test_build_comment_no_unrecorded_note_when_nothing_is_unrecorded():
+    rows = [_row(status="applied")]
+    comment = ac.build_comment(rows, [], RUN_URL, "pending", [], [], "dev-eu")
+    assert "applied but not recorded" not in comment
+
+
+def test_failure_line_present_even_when_an_unrecorded_row_already_explains_it():
+    # A ⚠️ row plus its note explains ONE cell in ONE environment; it says
+    # nothing about a different environment whose job died before any cell
+    # reported. Suppressing the generic ❌ on `unrecorded` would let that ⚠️
+    # silently swallow the only failure signal a dead-before-any-cell
+    # environment ever gets (see the mixed-environments test below), so the
+    # line must still render even in this single-row, same-environment case:
+    # the redundancy beside the ⚠️ never loses a signal.
+    rows = [_row(status="unrecorded", stack_display="db", environment="prod")]
+    assert ac._failure_line("success,failure", rows, "prod") == (
+        ":x: shipmate: `shipmate apply prod` failed."
+    )
+
+
+def test_failure_line_present_for_mixed_unrecorded_and_not_attempted_across_envs():
+    # The finding: an all-environments run where env A reports one
+    # `unrecorded` cell (its apply ran but the check never completed) while
+    # env B's job died before any cell reported at all (a denied
+    # `<env>-apply` environment, a job-level cancel) -- env B has only
+    # `not_attempted` rows, never `failed`. Pre-fix, the `unrecorded` row in
+    # env A suppressed the job-level failure line, leaving the whole bare-form
+    # comment with a ⚠️, an ⏭️ note, and no ❌ anywhere despite the run
+    # genuinely having failed.
+    rows = [
+        _row(status="unrecorded", stack_display="db", environment="dev-eu"),
+        _row(
+            status="not_attempted",
+            stack_display="app",
+            stack_path="stacks/app",
+            environment="dev-us",
+            apply_text=None,
+        ),
+    ]
+    line = ac._failure_line("success,failure", rows, "")
+    assert line == ":x: shipmate: `shipmate apply` (all environments) failed."
+
+
+def test_build_comment_promoted_row_carries_no_stays_pending_note():
+    # not_attempted + done check -> applied: the comment must stop telling the
+    # reader to retry a cell that actually applied.
+    rows = [_row(status="not_attempted", stack_path="stacks/app", apply_text=None)]
+    ac.apply_check_state(rows, {"apply / dev-eu / stacks/app"}, {"apply / dev-eu / stacks/app"})
+    comment = ac.build_comment(rows, [], RUN_URL, "pending", [], [], "dev-eu")
+    assert "| ✅ |" in comment
+    assert ac._not_attempted_note("dev-eu") not in comment
+    # A link-only section, no fence -- and it must NOT claim the output was too
+    # large: nothing was ever captured for this cell, and the linked run may not
+    # even be the run that applied it (a different run may have completed the
+    # check, in which case _job_url falls back to this run's URL).
+    assert "Apply output unavailable for this cell" in comment
+    assert "too large" not in comment
+    assert "```" not in comment
+
+
+def test_build_comment_genuinely_pending_row_keeps_the_stays_pending_note():
+    rows = [_row(status="not_attempted", stack_path="stacks/app", apply_text=None)]
+    ac.apply_check_state(rows, {"apply / dev-eu / stacks/app"}, set())
+    comment = ac.build_comment(rows, [], RUN_URL, "pending", [], [], "dev-eu")
+    assert "| ⏭️ |" in comment
+    assert ac._not_attempted_note("dev-eu") in comment
+
+
+def test_build_comment_unrecorded_note_precedes_the_not_attempted_note():
+    # A stranded applied cell needs a re-plan; a not-attempted one just needs a
+    # retry. The more urgent statement reads first.
+    rows = [
+        _row(status="unrecorded", stack_display="db", environment="prod"),
+        _row(status="not_attempted", stack_display="stacks/x", environment="prod", apply_text=None),
+    ]
+    comment = ac.build_comment(rows, [], RUN_URL, "pending", [], [], "prod")
+    assert comment.index("applied but not recorded") < comment.index("not attempted —")
+
+
+# --- review findings: note cap, shape degradation, coupling, end-to-end ------
+
+
+def test_unrecorded_note_is_capped_and_summarizes_the_rest():
+    # The note rides in `top`, the one string the HARD_CAP table-only fallback
+    # re-emits verbatim, so an uncapped note could only push the render into
+    # the fail-loud SystemExit -- costing the whole comment on exactly the run
+    # that needed it, since the usual cause of `unrecorded` rows (an expired
+    # App key, a checks-API outage) strands a whole wide matrix at once.
+    rows = [
+        _row(status="unrecorded", stack_display=f"s{i:03}", stack_path=f"stacks/s{i:03}")
+        for i in range(60)
+    ]
+    note = ac._unrecorded_note(rows)
+    assert "**s000 / dev-eu**" in note
+    assert f"and {60 - ac._UNRECORDED_NAMED} more" in note
+    assert "**s059 / dev-eu**" not in note  # beyond the cap, summarized instead
+    assert len(note) < 1_000
+
+
+def test_unrecorded_note_names_every_cell_when_under_the_cap():
+    rows = [
+        _row(status="unrecorded", stack_display=f"s{i}", stack_path=f"stacks/s{i}")
+        for i in range(ac._UNRECORDED_NAMED)
+    ]
+    note = ac._unrecorded_note(rows)
+    assert "more" not in note
+    for i in range(ac._UNRECORDED_NAMED):
+        assert f"**s{i} / dev-eu**" in note
+
+
+def test_build_comment_wide_unrecorded_run_still_produces_a_comment():
+    # End of the same finding: a whole matrix stranded at once, with long
+    # author-controlled display names, must still render rather than raise.
+    long_name = "s" * 180
+    rows = [
+        _row(
+            status="unrecorded",
+            stack_display=f"{long_name}{i:03}",
+            stack_path=f"stacks/{long_name}{i:03}",
+            apply_text="x" * 400,
+        )
+        for i in range(200)
+    ]
+    body = ac.build_comment(rows, [], RUN_URL, "pending", [], [], "prod")
+    assert len(body) <= ac.sc.HARD_CAP
+    assert "applied but not recorded" in body
+
+
+def test_load_check_maps_malformed_shape_degrades_with_a_warning(tmp_path, capsys):
+    # Valid JSON per line, but not the check-run shape the helpers expect. Two
+    # sub-cases, and only the second one can raise:
+    #
+    #   - a scalar element inside .check_runs raises inside from_app's own
+    #     `(r.get("app") or {})`;
+    #   - a dict that survives from_app (its app id matches) but carries no
+    #     usable `name` reaches latest_by_name's `run["name"].startswith(...)`.
+    #
+    # Either way it must cost the check-state axis only, never the comment.
+    reaching = [
+        '"just a string"',
+        "42",
+        "null",
+        json.dumps({"app": {"id": int(APP_ID)}, "status": "completed"}),
+        json.dumps({"app": {"id": int(APP_ID)}, "name": None, "status": "completed"}),
+    ]
+    for payload in reaching:
+        p = tmp_path / "checks.jsonl"
+        p.write_text(payload, encoding="utf-8")
+        assert ac.load_check_maps(str(p), APP_ID) == (set(), set()), payload
+        assert "::warning::" in capsys.readouterr().out, payload
+
+
+def test_load_check_maps_drops_records_with_no_app_silently(tmp_path, capsys):
+    # A well-formed dict with no (or a foreign) `app` is not corruption: it is
+    # from_app's deliberate fail-closed filter doing its job, so it degrades to
+    # no data for that name WITHOUT a warning. Pinned so a future widening of
+    # the except clause cannot start shouting about the normal filtered case.
+    for payload in ({"status": "completed"}, {"name": "apply / dev-eu / stacks/app"}):
+        p = tmp_path / "checks.jsonl"
+        p.write_text(json.dumps(payload), encoding="utf-8")
+        assert ac.load_check_maps(str(p), APP_ID) == (set(), set()), payload
+        assert "::warning::" not in capsys.readouterr().out, payload
+
+
+def test_check_name_grammar_matches_apply_cells_construction():
+    # Coupling: apply-cell builds the apply check's NAME, apply-comment
+    # forward-builds the same string to look that check up. A divergence is
+    # silent by design -- every lookup would miss, _check_state would return
+    # CHECK_UNKNOWN for every row, and the comment would quietly revert to the
+    # artifact-only rendering this feature exists to correct. Same posture as
+    # test_cell_schema_guard_apply_cell_writes_every_required_key above.
+    src = (_ENGINE / "actions" / "apply-cell" / "action.yml").read_text(encoding="utf-8")
+    expected = "f\"apply / {os.environ['ENV']} / {os.environ['STACK']}\""
+    assert expected in src, (
+        "apply-cell no longer builds the apply check name as "
+        "'apply / <env> / <stack path>' -- scripts/apply-comment's _check_state "
+        "and _job_url forward-build that exact grammar to look the check up, "
+        "and a mismatch makes every lookup miss silently"
+    )
+    # And the reader's half, exercised rather than restated: the name
+    # _check_state builds for a known row must be that same string.
+    row = _row(environment="dev-eu", stack_path="stacks/app")
+    assert ac._check_state(row, {"apply / dev-eu / stacks/app"}, set()) == ac.CHECK_PENDING
+
+
+def _write_cell(cells_dir, env, slug, cell):
+    d = cells_dir / f"apply-summary.{env}.{slug}"
+    d.mkdir(parents=True)
+    (d / "cell.json").write_text(json.dumps(cell), encoding="utf-8")
+    return d
+
+
+def _main_env(monkeypatch, tmp_path, cells_dir, waves_json, checks_path):
+    monkeypatch.setenv("CELLS", str(cells_dir))
+    monkeypatch.setenv("SHIPMATE_ENVIRONMENT", "dev-eu")
+    monkeypatch.setenv("SHIPMATE_WAVES_JSON", waves_json)
+    for i in range(4):
+        monkeypatch.setenv(f"SHIPMATE_ENVLEVEL{i}_WAVES", "")
+    monkeypatch.setenv("SHIPMATE_RESULTS", "success")
+    monkeypatch.setenv("SHIPMATE_GATE", "pending")
+    monkeypatch.setenv("SHIPMATE_CHECKS", checks_path)
+    monkeypatch.setenv("SHIPMATE_APP_ID", APP_ID)
+    monkeypatch.setenv("GITHUB_SERVER_URL", "https://github.com")
+    monkeypatch.setenv("GITHUB_REPOSITORY", "acme/repo")
+    monkeypatch.setenv("GITHUB_RUN_ID", "42")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("sys.stdin", io.StringIO(""))
+
+
+def test_main_folds_checks_jsonl_into_the_rendered_comment(monkeypatch, tmp_path):
+    # The seam the action actually depends on, end to end: the file the scan
+    # step writes must be read, filtered to the App, and folded into
+    # comment.md. Every other check-state test calls the helpers directly, so
+    # without this a refactor that dropped apply_check_state's result (or moved
+    # the call below the `if not rows` branch) would ship a comment with no
+    # promotions and no unrecorded rows while the whole suite stayed green --
+    # and GitHub Actions cannot be run locally to catch it.
+    cells = tmp_path / "cells"
+    _write_cell(cells, "dev-eu", "stacks-app", _cell(stack="app", stack_path="stacks/app"))
+    checks = tmp_path / "checks.jsonl"
+    checks.write_text(
+        "\n".join(
+            _jsonl(_check("apply / dev-eu / stacks/app", status="in_progress", conclusion=None))
+        ),
+        encoding="utf-8",
+    )
+    waves = json.dumps({"wave0": [{"stack": "stacks/app", "environment": "dev-eu"}]})
+    _main_env(monkeypatch, tmp_path, cells, waves, str(checks))
+    ac.main()
+    body = (tmp_path / "comment.md").read_text(encoding="utf-8")
+    assert "| ⚠️ | app | dev-eu |" in body
+    assert "applied but not recorded" in body
+
+
+def test_main_promotes_a_missing_artifact_whose_check_is_done(monkeypatch, tmp_path):
+    # The mirror direction through main(): no artifact at all, check done.
+    cells = tmp_path / "cells"
+    cells.mkdir()
+    checks = tmp_path / "checks.jsonl"
+    checks.write_text("\n".join(_jsonl(_check("apply / dev-eu / stacks/app"))), encoding="utf-8")
+    waves = json.dumps({"wave0": [{"stack": "stacks/app", "environment": "dev-eu"}]})
+    _main_env(monkeypatch, tmp_path, cells, waves, str(checks))
+    ac.main()
+    body = (tmp_path / "comment.md").read_text(encoding="utf-8")
+    assert "| ✅ | stacks/app | dev-eu |" in body
+    assert ac._not_attempted_note("dev-eu") not in body
+
+
+def test_main_without_checks_file_renders_the_artifact_only_comment(monkeypatch, tmp_path):
+    # The pinned-action skew window and every scan failure land here: no
+    # checks.jsonl means no data means unknown, and the comment must read
+    # exactly as it did before this feature existed.
+    cells = tmp_path / "cells"
+    _write_cell(cells, "dev-eu", "stacks-app", _cell(stack="app", stack_path="stacks/app"))
+    waves = json.dumps({"wave0": [{"stack": "stacks/app", "environment": "dev-eu"}]})
+    _main_env(monkeypatch, tmp_path, cells, waves, str(tmp_path / "absent.jsonl"))
+    ac.main()
+    body = (tmp_path / "comment.md").read_text(encoding="utf-8")
+    assert "| ✅ | app | dev-eu |" in body
+    assert "applied but not recorded" not in body

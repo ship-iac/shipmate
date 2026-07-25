@@ -47,16 +47,57 @@ def _load(fname):
 
 
 sc = _load("summary-comment")
-# Reused for its stdin JSONL parser only (same contract this script's own
-# jobs-listing input follows: newline-delimited JSON, blank lines skipped,
-# a malformed line fails loud naming the offending line) -- not the
-# check-run-specific helpers (`latest_by_name`, `done_names`) that live
-# alongside it.
+# Reused for BOTH its stdin JSONL parser (same contract this script's own
+# jobs-listing input follows: newline-delimited JSON, blank lines skipped, a
+# malformed line fails loud naming the offending line) AND its check-run
+# helpers -- `from_app`, `latest_by_name`, `done_names` -- which
+# `check_state_maps` below calls to decide which apply checks are done. That
+# reuse is load-bearing, not incidental: "what counts as a done apply check"
+# must stay written once in apply-gate, shared with the `shipmate / gate`
+# status and both detect paths, so this comment's row states can never
+# disagree with the work queue they report on. Changing `DONE_CONCLUSIONS` or
+# `latest_by_name` in apply-gate therefore changes what this comment claims
+# about a cell -- see apply_check_state.
 ag = _load("apply-gate")
 
 CELL_KEYS = ("stack", "stack_path", "environment", "result", "reason")
 _RESULTS = frozenset({"applied", "failed", "blocked"})
-_EMOJI = {"applied": "✅", "failed": "❌", "blocked": "🚫", "not_attempted": "⏭️"}
+# Display statuses are a SUPERSET of cell.json's `result` enum above:
+# `unrecorded` is derived at render time from the real apply-check state (see
+# apply_check_state), never written by apply-cell, so the artifact grammar in
+# CONTRACT.md is unchanged and _validate_cell keeps rejecting an out-of-enum
+# artifact value as pin skew.
+_EMOJI = {
+    "applied": "✅",
+    "failed": "❌",
+    "blocked": "🚫",
+    "not_attempted": "⏭️",
+    "unrecorded": "⚠️",
+}
+
+# Statuses that get a <details> section with the cell's apply output.
+# `unrecorded` is here because its apply genuinely ran: the output is the
+# evidence a reader needs to confirm what landed before re-planning.
+_SECTION_STATUSES = ("applied", "failed", "unrecorded")
+
+# Human phrase per display status, for the <details> summary line. `unrecorded`
+# is an internal enum token: leaking it into the comment would make a section
+# header read "— unrecorded" where the table legend, the note below and
+# CONTRACT.md all say "applied but not recorded", leaving the reader to guess
+# whether it means "not applied" or "applied but the check is pending" -- the
+# exact ambiguity the note exists to remove.
+_STATUS_PHRASE = {
+    "applied": "applied",
+    "failed": "failed",
+    "blocked": "blocked",
+    "not_attempted": "not attempted",
+    "unrecorded": "applied but not recorded",
+}
+
+# How many cells the unrecorded note names before it summarizes the rest. The
+# cap exists because this note rides in `top`, the one string the HARD_CAP
+# table-only fallback re-emits verbatim -- see _unrecorded_note.
+_UNRECORDED_NAMED = 5
 
 
 def _not_attempted_note(env_name):
@@ -70,6 +111,58 @@ def _not_attempted_note(env_name):
     display value in this file is."""
     cmd = f"shipmate apply {sc._md_escape(env_name)}" if env_name else "shipmate apply"
     return f"_⏭️ not attempted — the apply check stays pending; retry with `{cmd}`._"
+
+
+def _unrecorded_note(rows):
+    """The 'applied but not recorded' note, naming every affected cell.
+
+    One comment-wide note rather than a per-cell line (the shape `blocked`
+    cells get) on purpose: a per-cell line needs a third branch in
+    build_comment's render loop plus its own entry in the up-front size
+    reserve, and build_comment is at 7 of the C901 ceiling of 8. This lives in
+    its own function, called from _top_section, so build_comment's budget is
+    untouched -- and an unrecorded cell still gets a full <details> section
+    (see _SECTION_STATUSES), because its apply output is real and is exactly
+    what the reader needs.
+
+    Cell names are author-controlled (Terramate tags, GitHub Environment
+    names, apply-cell's stack-name input) so both go through _md_escape, in
+    the same **bold** form _blocked_line uses -- deliberately not a backtick
+    code span, since _md_escape does not escape a backtick.
+
+    Capped at _UNRECORDED_NAMED cells, with the rest summarized as a count.
+    The cap is not cosmetic. This note rides in `top` (built by _top_section),
+    not in the per-row section/blocked-line loop, so it is counted in
+    build_comment's `used` before that loop the same way the header and table
+    are -- and `top` is exactly what the HARD_CAP table-only fallback re-emits
+    verbatim (`top + fallback + footer`) when even every link-only section and
+    blocked one-liner still overflows. Unlike unbounded blocked lines, which
+    that fallback sheds along with every other per-row line, this note can
+    never be shed: uncapped it could only push the render past HARD_CAP into
+    the final `SystemExit`, which skips the POST step and costs the whole
+    comment -- on precisely the run that needed it most, since the usual cause
+    of `unrecorded` rows is correlated across cells (an expired App key, a
+    checks-API outage) and so strands a whole wide matrix at once. Capping
+    bounds the note to a few hundred characters regardless of fan-out; the
+    table above still lists every affected cell with its own ⚠️."""
+    cells = [
+        f"**{sc._md_escape(r['stack_display'])} / {sc._md_escape(r['environment'])}**"
+        for r in rows
+        if r["status"] == "unrecorded"
+    ]
+    if not cells:
+        return ""
+    named, rest = cells[:_UNRECORDED_NAMED], len(cells) - _UNRECORDED_NAMED
+    listed = ", ".join(named)
+    if rest > 0:
+        listed += f", and {rest} more (see the ⚠️ rows above)"
+    return (
+        "⚠️ applied but not recorded: "
+        + listed
+        + " — the apply succeeded but the apply check is not recorded as "
+        "complete (it failed, was cancelled, or a newer plan re-created it), "
+        "so `shipmate / gate` stays pending. Re-plan and re-apply."
+    )
 
 
 # `Apply complete! Resources: <int> added, <int> changed, <int> destroyed` --
@@ -286,6 +379,127 @@ def build_rows(expected, downloaded):
     return rows
 
 
+CHECK_UNKNOWN, CHECK_DONE, CHECK_PENDING = "unknown", "done", "pending"
+
+
+def check_state_maps(check_run_lines, app_id):
+    """(present, done) apply-check name sets from check-runs JSONL.
+
+    `present` is every App-authored `apply / ...` check name on the head SHA
+    (newest run per name); `done` is the subset whose newest run completed with
+    a good conclusion. Both come from `apply-gate`'s public helpers, so the
+    "what counts as done" predicate stays written once and shared with the gate
+    and both detects -- a second predicate here could disagree with the work
+    queue it is supposed to be reporting on.
+
+    An empty app id warns and reports no data rather than raising the way
+    `from_app` does on its own: a missing SHIPMATE_APP_ID must cost this one
+    display axis, never the whole comment (for comment-ops the comment IS the
+    feedback channel). Nothing else is printed to stdout -- comment.md is
+    written to a file -- so a workflow command here is safe."""
+    if not app_id:
+        print(
+            "::warning::SHIPMATE_APP_ID is empty — the apply result comment falls back "
+            "to artifact-only status (see docs/github-app.md)."
+        )
+        return set(), set()
+    runs = ag.from_app(ag.parse_jsonl(check_run_lines), app_id)
+    return set(ag.latest_by_name(runs)), ag.done_names(runs)
+
+
+def load_check_maps(path, app_id):
+    """check_state_maps over the scan step's output file, tolerating absence
+    or corruption.
+
+    The scan step already degrades a failed fetch to an empty file, so a
+    MISSING file means the caller is an older pinned apply-summary that has no
+    scan step at all (the two-step internal-pin window in docs/releasing.md) --
+    silent no-data, no warning: that skew window is expected, not an error.
+
+    A malformed line (parse_jsonl's SystemExit) or an unreadable file (a
+    generic OSError, e.g. a permissions error) must cost this one display axis
+    only, never the whole comment -- for comment-ops the comment IS the
+    feedback channel, so a bad checks.jsonl must degrade to no data with a
+    warning rather than propagate and kill the render step entirely. Both
+    cases are simply no data -- see apply_check_state for why no data is the
+    safe state.
+
+    A non-numeric SHIPMATE_APP_ID (e.g. the App's *client id* pasted in place
+    of its numeric app id) makes `ag.from_app`'s `int(app_id)` raise
+    ValueError -- also just this one display axis, same degradation. The
+    token-mint step in actions/apply-summary's action.yml runs before the
+    render step and would itself fail first on the same bad id (it needs the
+    numeric app id too), so in practice this ValueError guard is defence in
+    depth for a misconfiguration that should already have failed loud
+    upstream, not the primary place a bad app id is expected to be caught.
+
+    KeyError/TypeError/AttributeError are caught for the same reason: a line
+    that is valid JSON but not the expected check-run shape (a null or scalar
+    element inside `.check_runs`, or a payload change that projects `.name` to
+    null) reaches `latest_by_name`'s `run["name"].startswith(...)` and raises
+    from there. The scan step's `--jq` projection makes that unlikely, but the
+    cost of being wrong is the whole comment, so the net is closed by shape
+    rather than left to trust in the projection."""
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return check_state_maps(fh, app_id)
+    except FileNotFoundError:
+        return set(), set()
+    except (OSError, SystemExit, ValueError, KeyError, TypeError, AttributeError) as exc:
+        print(
+            f"::warning::{path} could not be read as apply checks ({exc}) -- "
+            "the apply result comment falls back to artifact-only status"
+        )
+        return set(), set()
+
+
+def _check_state(row, present, done):
+    """This row's apply check: CHECK_DONE, CHECK_PENDING, or CHECK_UNKNOWN.
+
+    The name is the forward-built CONTRACT grammar `_job_url` also constructs.
+    Absence means UNKNOWN, never pending: a failed scan, an empty file, an
+    app-id mismatch and from_app dropping a forged same-name check all land
+    here, and every one of them must fall back to the artifact-only rendering
+    rather than invent a stranded cell."""
+    name = f"apply / {row['environment']} / {row['stack_path']}"
+    if name in done:
+        return CHECK_DONE
+    if name in present:
+        return CHECK_PENDING
+    return CHECK_UNKNOWN
+
+
+def apply_check_state(rows, present, done):
+    """Re-derive display status from the real apply-check state (in place).
+
+    The pending apply checks ARE the work queue, so they -- not the per-cell
+    artifact -- are the authority on whether a unit is done. `Compose cell
+    summary` derives its verdict from the apply step alone and uploads it
+    BEFORE `Save state`, the completion-token mint and `Complete the apply
+    check` can fail (or be skipped on cancellation), so an `applied` artifact
+    can coexist with a still-pending check; and the cosmetic
+    continue-on-error upload can drop, leaving a genuinely applied cell with no
+    artifact at all. Two directions, therefore:
+
+    - applied + pending check -> `unrecorded`: the apply succeeded but was not
+      recorded, the gate stays pending, and the stack needs a re-plan (state
+      has advanced past the reviewed .otplan).
+    - not_attempted + done check -> `applied`: the check proves the apply
+      landed; apply_text stays None so the section degrades to link-only.
+
+    `failed`/`blocked` are never re-derived. A red row against a done check
+    means some other run applied that cell -- over-reporting, nothing
+    stranded -- and downgrading on check state would let an unrelated run's
+    green check hide a real failure in this one."""
+    for row in rows:
+        state = _check_state(row, present, done)
+        if row["status"] == "applied" and state == CHECK_PENDING:
+            row["status"] = "unrecorded"
+        elif row["status"] == "not_attempted" and state == CHECK_DONE:
+            row["status"] = "applied"
+    return rows
+
+
 def _resources(text):
     if not text:
         return ""
@@ -328,16 +542,30 @@ def build_table(rows, jobs, run_url):
 def _summary_line(row):
     return (
         f"<summary>{_EMOJI[row['status']]} {sc._md_escape(row['stack_display'])} / "
-        f"{sc._md_escape(row['environment'])} — {row['status']}</summary>"
+        f"{sc._md_escape(row['environment'])} — {_STATUS_PHRASE[row['status']]}</summary>"
     )
 
 
 def _link_only(row, url):
-    return (
-        f"<details>{_summary_line(row)}\n\n"
-        f"_Output too large for this comment — [full output in the job log]({url})._\n"
-        f"</details>"
-    )
+    """The smallest possible section for a row: no output, just a link.
+
+    Two distinct reasons land here and they must not share one sentence. Output
+    that exists but does not fit is "too large"; output that never arrived is
+    unavailable, and saying "too large" about it is simply false -- a row
+    promoted from not_attempted (its check is done, only the cosmetic
+    continue-on-error artifact upload dropped) has no apply.txt at all. The
+    linked run may not even contain that cell's apply: when another run
+    completed the check, `_job_url` finds no matching job name in this run's
+    jobs listing and falls back to this run's URL, so the missing-output
+    wording deliberately does not promise the output is at the other end.
+    The branch lives here rather than at the call sites so build_comment's
+    up-front size reserve -- which calls this same function per row -- reserves
+    exactly what will be rendered, and so its C901 budget is untouched."""
+    if row["apply_text"] is None:
+        body = f"_Apply output unavailable for this cell — [run log]({url})._"
+    else:
+        body = f"_Output too large for this comment — [full output in the job log]({url})._"
+    return f"<details>{_summary_line(row)}\n\n{body}\n</details>"
 
 
 def render_apply_section(row, text, url, limit):
@@ -488,7 +716,18 @@ def _failure_line(results_csv, rows, env_name):
     rows and needs no extra line), surface the short form's own failure
     sentence -- reusing _apply_head via the shared _results_failed tokenizer
     -- so the old one-liner's failure signal survives verbatim even though
-    the table now carries the per-cell detail."""
+    the table now carries the per-cell detail.
+
+    `unrecorded` is deliberately NOT in the suppression set, even though it
+    gets its own ⚠️ row and its own note: those describe ONE cell in ONE
+    environment, and say nothing about a different environment whose job
+    died before any cell reported at all (a denied `<env>-apply` environment,
+    a job-level cancel) -- exactly the all-environments mixed case this
+    function exists to catch. Suppressing on `unrecorded` would let a ⚠️ in
+    env A silently swallow the only ❌ that env B's dead-before-any-cell
+    failure is ever going to get. A ⚠️ row is allowed to sit beside the
+    generic ❌ in the common single-environment case too: the run genuinely
+    did fail, and the redundancy never loses a signal."""
     if not _results_failed(results_csv):
         return ""
     if any(r["status"] in ("failed", "blocked") for r in rows):
@@ -498,13 +737,18 @@ def _failure_line(results_csv, rows, env_name):
 
 def _top_section(env_name, results_csv, rows, jobs, run_url):
     """Header, the failure line (if any) directly beneath it, then the
-    table, then the not-attempted note. Split out of build_comment so the
-    latter's complexity budget (C901 ceiling 8) isn't spent on this
-    concatenation."""
+    table, then the unrecorded note (if any), then the not-attempted note.
+    Split out of build_comment so the latter's complexity budget (C901
+    ceiling 8) isn't spent on this concatenation."""
     header = _header(env_name)
     table = build_table(rows, jobs, run_url)
     fail_line = _failure_line(results_csv, rows, env_name)
     top = "\n\n".join(s for s in (header, fail_line, table) if s)
+    unrecorded = _unrecorded_note(rows)
+    if unrecorded:
+        # Before the not-attempted note: a stranded applied cell needs a
+        # re-plan, a not-attempted one only a retry.
+        top += "\n\n" + unrecorded
     if any(r["status"] == "not_attempted" for r in rows):
         top += "\n\n" + _not_attempted_note(env_name)
     return top
@@ -512,8 +756,8 @@ def _top_section(env_name, results_csv, rows, jobs, run_url):
 
 def build_comment(rows, jobs, run_url, gate, excluded, skipped, env_name, results_csv=""):
     """Assemble the comment under SIZE_BUDGET. Sections render in table order
-    (not grouped by status): attempted cells (applied/failed) get a details
-    section with the same degradation as summary-comment; blocked cells get a
+    (not grouped by status): attempted cells (applied/failed/unrecorded) get a
+    details section with the same degradation as summary-comment; blocked cells get a
     single no-fence line; not-attempted cells get no section. Every attempted
     cell is guaranteed at least a link-only section, and every blocked cell
     its one-line reason: the space ALL remaining attempted cells' link-only
@@ -528,7 +772,7 @@ def build_comment(rows, jobs, run_url, gate, excluded, skipped, env_name, result
 
     urls = {id(r): _job_url(r, jobs, run_url) for r in rows}
     link_onlys = {
-        id(r): _link_only(r, urls[id(r)]) for r in rows if r["status"] in ("applied", "failed")
+        id(r): _link_only(r, urls[id(r)]) for r in rows if r["status"] in _SECTION_STATUSES
     }
     blocked_lines = {id(r): _blocked_line(r, urls[id(r)]) for r in rows if r["status"] == "blocked"}
     reserve = sum(len(lo) + 2 for lo in link_onlys.values())
@@ -537,7 +781,7 @@ def build_comment(rows, jobs, run_url, gate, excluded, skipped, env_name, result
     parts = [top]
     for r in rows:
         url = urls[id(r)]
-        if r["status"] in ("applied", "failed"):
+        if r["status"] in _SECTION_STATUSES:
             reserve -= len(link_onlys[id(r)]) + 2
             limit = sc.SIZE_BUDGET - used - reserve - 2
             section = render_apply_section(r, r["apply_text"], url, limit)
@@ -573,7 +817,15 @@ def main():
     jobs = ag.parse_jsonl(sys.stdin)
     downloaded = load_cells(os.environ.get("CELLS", "cells"))
     expected = _expected_cells()
-    rows = build_rows(expected, downloaded)
+    # The apply checks are the work queue and therefore the authority on what
+    # is done; the artifacts only say what each cell's own job believed. See
+    # apply_check_state. Absent/unreadable check data degrades to artifact-only
+    # rendering rather than inventing a state.
+    present, done = load_check_maps(
+        os.environ.get("SHIPMATE_CHECKS", "checks.jsonl"),
+        os.environ.get("SHIPMATE_APP_ID", ""),
+    )
+    rows = apply_check_state(build_rows(expected, downloaded), present, done)
     env_name = os.environ.get("SHIPMATE_ENVIRONMENT", "") or ""
     gate = os.environ.get("SHIPMATE_GATE", "")
     run_url = (

@@ -1,5 +1,5 @@
 name: shipmate apply-summary
-description: Download per-cell apply-summary.* artifacts, list the run's jobs for per-cell log links, render the apply result comment, mint a shipmate App installation token, and post a fresh PR comment.
+description: Download per-cell apply-summary.* artifacts, mint a shipmate App installation token, scan the head SHA's apply checks, list the run's jobs for per-cell log links, render the apply result comment, and post a fresh PR comment.
 inputs:
   pr-number:
     description: Pull request number to comment on.
@@ -43,6 +43,9 @@ inputs:
     description: Gate verdict from gate-refresh — 'complete' or anything else. Empty until the gate has run.
     required: false
     default: ""
+  head-sha:
+    description: PR head SHA carrying the apply checks; their state tells an applied cell from a recorded one.
+    required: true
   cells-dir:
     description: Directory to download apply-summary.*/cell.json trees into.
     required: false
@@ -81,6 +84,48 @@ runs:
       run: |
         echo "::warning::apply cell summaries download failed; the comment renders without per-cell detail"
 
+    - name: Mint App installation token
+      # Minted before the render step, not just before the POST: the apply-check
+      # scan below needs it too. One token covers both uses for this job (the
+      # same shape actions/summary uses for its three writes). checks:read comes
+      # from the App installation, so no consumer's calling job has to grant it
+      # -- a called workflow's job permissions cannot exceed its caller's, so
+      # taking this off GITHUB_TOKEN would break every consumer wrapper.
+      id: token
+      uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+      with:
+        app-id: ${{ inputs.app-id }}
+        private-key: ${{ inputs.private-key }}
+        owner: ${{ github.repository_owner }}
+        repositories: ${{ github.event.repository.name }}
+        permission-checks: read
+        permission-pull-requests: write
+
+    - name: Scan apply checks (degrade to no data on failure)
+      shell: bash
+      env:
+        GH_TOKEN: ${{ steps.token.outputs.token }}
+        HEAD_SHA: ${{ inputs.head-sha }}
+      # The pending apply checks are the work queue, so the comment reads them
+      # rather than trusting the per-cell artifact alone: apply-cell composes
+      # its verdict from the apply step and uploads it before Save state, the
+      # completion-token mint and Complete the apply check can fail, so an
+      # `applied` artifact can sit against a still-pending check.
+      # filter=all for the same reason gate-refresh uses it: a re-created check
+      # name keeps its historical runs and apply-gate judges the newest run per
+      # name. Degrade, never fail: the renderer treats an absent name as
+      # unknown and falls back to artifact-only status, and for comment-ops the
+      # comment IS the feedback channel.
+      run: |
+        set -euo pipefail
+        [[ "$HEAD_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::head-sha must be a 40-char lowercase hex SHA (got: $HEAD_SHA)"; exit 1; }
+        if ! gh api --paginate \
+          "repos/$GITHUB_REPOSITORY/commits/$HEAD_SHA/check-runs?filter=all&per_page=100" \
+          --jq '.check_runs[] | {name, status, conclusion, id, app: {id: .app.id}}' > checks.jsonl; then
+          echo "::warning::apply-check scan failed; the comment falls back to artifact-only status"
+          : > checks.jsonl
+        fi
+
     - name: List run jobs (log links; degrade to none on failure)
       shell: bash
       env:
@@ -110,19 +155,11 @@ runs:
         SHIPMATE_GATE: ${{ inputs.gate-verdict }}
         SHIPMATE_EXCLUDED_ENVS: ${{ inputs.excluded-envs }}
         SHIPMATE_SKIPPED_ENVS: ${{ inputs.skipped-envs }}
+        SHIPMATE_CHECKS: checks.jsonl
+        SHIPMATE_APP_ID: ${{ inputs.app-id }}
       run: |
         set -euo pipefail
         python3 "$GITHUB_ACTION_PATH/../../scripts/apply-comment" < jobs.jsonl
-
-    - name: Mint App installation token
-      id: token
-      uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
-      with:
-        app-id: ${{ inputs.app-id }}
-        private-key: ${{ inputs.private-key }}
-        owner: ${{ github.repository_owner }}
-        repositories: ${{ github.event.repository.name }}
-        permission-pull-requests: write
 
     - name: Post apply result comment
       shell: bash
