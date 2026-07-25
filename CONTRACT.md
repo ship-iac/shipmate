@@ -436,8 +436,11 @@ line boundary, noting that earlier output was elided, with a link to the job
 log) → link-only. `apply.txt` itself is read from the end of the file
 (bounded — a fixed-size read near the tail, never the whole file) and
 decoded permissively: a non-UTF-8 byte anywhere in it becomes a replacement
-character instead of aborting the render. Every remaining attempted cell's
-link-only space, and every blocked cell's one-line reason, are reserved up
+character instead of aborting the render. Terminal escape sequences (colour
+codes and similar) are stripped from that text as it is read, since a
+consumer's own `apply` script is not required to disable them. Every
+remaining attempted cell's link-only space, and every blocked cell's
+one-line reason, are reserved up
 front, and the render fails loud rather than post a comment that would
 exceed GitHub's cap.
 

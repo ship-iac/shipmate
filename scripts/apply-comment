@@ -155,11 +155,66 @@ def _read_tail(path, budget):
     return text
 
 
+# Terminal escape sequences that show up in real `tofu apply` stdout+stderr:
+#   - CSI: ESC `[` ... a final byte in `@`-`~` -- SGR colour codes
+#     (`ESC[0m`, `ESC[1m`, `ESC[36;1m`, ...) are the vast majority of these.
+#   - two-character escapes: ESC followed by a single byte in `@`-`_`.
+#   - OSC: ESC `]` ... terminated by BEL or `ESC \` (e.g. terminal title-set
+#     sequences some TF_LOG/local-exec wrappers emit).
+# The CSI branch is listed first so a well-formed CSI run is matched whole
+# (including its final byte) rather than falling through to the shorter
+# two-character branch, which would otherwise also match a bare `ESC[`.
+_ANSI_RE = re.compile(
+    r"\x1b\[[0-?]*[ -/]*[@-~]"  # CSI
+    r"|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)"  # OSC
+    r"|\x1b[@-_]"  # two-character escape
+)
+
+
+def _strip_ansi(text):
+    """Strip terminal escape sequences (ANSI colour codes and friends) from
+    `text`. Ordinary printable text and `\\n` are left untouched; `\\r` is
+    also left alone -- it is not an escape sequence and is not part of this
+    finding."""
+    return _ANSI_RE.sub("", text)
+
+
 def load_cells(cells_dir):
     """(cell, apply_text) per downloaded apply-summary artifact. A cell.json
     missing schema keys, or carrying the right keys with the wrong types/an
     out-of-enum result, fails loud -- that is apply-cell/apply-comment pin
-    skew, not a state to render around."""
+    skew, not a state to render around.
+
+    ANSI escape sequences are stripped here, at read time, before the text is
+    handed to anything else -- this placement is load-bearing for two
+    reasons. First, `_fence_of` (below, via `render_apply_section`) computes
+    the fence length from the longest backtick run in the text it is given;
+    stripping afterwards could merge two separate backtick runs that an
+    escape sequence had been sitting between (a backtick, then `ESC[0m`, then
+    another backtick, is two 1-backtick runs in the raw bytes but becomes one
+    2-backtick run once the escape in between is gone) into a longer run than
+    the already-computed fence accounted for, reopening the fence-escape hole
+    the computed fence exists to close. Stripping first means `_fence_of`
+    always sees the final bytes that will actually be emitted. Second,
+    `_resources` matches a line-anchored regex (`^Apply complete! ...$`,
+    `re.MULTILINE`); a colour sequence at the start or end of that line (tofu
+    commonly wraps it, e.g. `ESC[1mApply complete! ...ESC[0m`) would defeat
+    the anchor and blank the resources column. Stripping first makes the
+    anchor robust regardless of what the underlying `tofu apply` invocation
+    did or didn't do with color output.
+
+    Stripping happens on the text `_read_tail` returns (after its tail slice
+    and leading-fragment drop), not inside `_read_tail` on the wider window
+    it reads before slicing. The only place a truncation can split an escape
+    sequence in half is at the FRONT of that window -- the tail (the end of
+    the file, where the diagnostic that matters lives) is never cut -- and
+    `_read_tail` already discards everything up to and including the first
+    newline of a truncated read as an unusable leading fragment. Any split-
+    sequence debris from either of `_read_tail`'s two cut points (the initial
+    byte-window seek, and the later char-budget slice) can therefore only
+    ever land inside that already-discarded fragment, so stripping after
+    `_read_tail` returns sees only whole sequences and needs no extra
+    boundary handling of its own."""
     out = []
     for p in sorted(glob.glob(os.path.join(cells_dir, "**", "cell.json"), recursive=True)):
         with open(p, encoding="utf-8") as fh:
@@ -174,7 +229,7 @@ def load_cells(cells_dir):
         txt = pathlib.Path(p).with_name("apply.txt")
         text = None
         if txt.exists():
-            text = _read_tail(txt, sc.SIZE_BUDGET)
+            text = _strip_ansi(_read_tail(txt, sc.SIZE_BUDGET))
         out.append((cell, text))
     return out
 
