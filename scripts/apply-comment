@@ -643,9 +643,9 @@ def _failure_line(results_csv, rows, env_name):
 
 def _top_section(env_name, results_csv, rows, jobs, run_url):
     """Header, the failure line (if any) directly beneath it, then the
-    table, then the not-attempted note. Split out of build_comment so the
-    latter's complexity budget (C901 ceiling 8) isn't spent on this
-    concatenation."""
+    table, then the unrecorded note (if any), then the not-attempted note.
+    Split out of build_comment so the latter's complexity budget (C901
+    ceiling 8) isn't spent on this concatenation."""
     header = _header(env_name)
     table = build_table(rows, jobs, run_url)
     fail_line = _failure_line(results_csv, rows, env_name)
@@ -662,8 +662,8 @@ def _top_section(env_name, results_csv, rows, jobs, run_url):
 
 def build_comment(rows, jobs, run_url, gate, excluded, skipped, env_name, results_csv=""):
     """Assemble the comment under SIZE_BUDGET. Sections render in table order
-    (not grouped by status): attempted cells (applied/failed) get a details
-    section with the same degradation as summary-comment; blocked cells get a
+    (not grouped by status): attempted cells (applied/failed/unrecorded) get a
+    details section with the same degradation as summary-comment; blocked cells get a
     single no-fence line; not-attempted cells get no section. Every attempted
     cell is guaranteed at least a link-only section, and every blocked cell
     its one-line reason: the space ALL remaining attempted cells' link-only
