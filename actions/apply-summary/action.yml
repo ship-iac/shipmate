@@ -60,12 +60,26 @@ runs:
   using: composite
   steps:
     - name: Download apply cell summaries
+      id: download
+      # continue-on-error: for comment-ops, the comment IS the feedback
+      # channel -- a transient artifact-API 5xx or a 403 here must not skip
+      # the token mint and the POST below and leave a developer whose apply
+      # fully succeeded with no PR comment at all. The renderer already
+      # handles an empty (or partial) cells directory: missing cells render
+      # as not-attempted rows, or the whole run degrades to the short form.
+      continue-on-error: true
       uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
       with:
         pattern: apply-summary.*
         path: ${{ inputs.cells-dir }}
         github-token: ${{ inputs.github-token }}
         merge-multiple: false
+
+    - name: Warn on apply cell summaries download failure
+      if: ${{ steps.download.outcome == 'failure' }}
+      shell: bash
+      run: |
+        echo "::warning::apply cell summaries download failed; the comment renders without per-cell detail"
 
     - name: List run jobs (log links; degrade to none on failure)
       shell: bash

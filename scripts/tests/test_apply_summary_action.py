@@ -133,6 +133,33 @@ def test_download_pattern_matches_apply_cell_upload_prefix():
     )
 
 
+def test_download_step_tolerates_failure():
+    # For comment-ops the comment IS the feedback channel: a transient
+    # artifact-API 5xx/403 must not skip the token mint and the POST,
+    # leaving a developer whose apply fully succeeded with no PR comment.
+    download_step = _find_step(_load_action()["runs"]["steps"], uses_contains="download-artifact")
+    assert download_step.get("continue-on-error") is True
+
+
+def test_download_step_failure_is_warned_not_silently_swallowed():
+    steps = _load_action()["runs"]["steps"]
+    download_step = _find_step(steps, uses_contains="download-artifact")
+    step_id = download_step.get("id")
+    assert step_id, "download step needs an id so a later step can check its outcome"
+    warn_step = next(
+        (
+            s
+            for s in steps
+            if f"steps.{step_id}.outcome" in str(s.get("if", ""))
+            and "failure" in str(s.get("if", ""))
+        ),
+        None,
+    )
+    assert warn_step is not None, (
+        "expected a step gated on the download step's failure outcome to warn about it"
+    )
+
+
 def test_download_step_does_not_fail_on_zero_matches():
     """`pattern:`-mode download-artifact does not fail when zero artifacts
     match (verified against v7.0.0 source: the pattern branch never throws on
