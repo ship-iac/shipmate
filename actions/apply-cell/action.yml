@@ -209,7 +209,19 @@ runs:
       # author-controlled (Terramate tags, workflow inputs) and must never be
       # shell-interpolated into the script or spliced into JSON by string
       # concat.
+      # continue-on-error: comment feedback must never outrank the work
+      # queue. This step is purely cosmetic (it only composes the apply
+      # result comment's data); Save state above has already advanced past
+      # the reviewed .otplan, so if this step failed the job and stranded
+      # 'Complete the apply check' below, a re-run would hit the exact-plan
+      # stale-plan fail-safe with no way back on an otherwise-successful
+      # apply. Writes cell.json to $RUNNER_TEMP, not the repo tree -- the
+      # sibling steps above avoid a stray untracked file at repo root
+      # failing the apply (git-untracked runs on this path); this step was
+      # previously safe only because no terramate/tofu step follows it,
+      # which writing to RUNNER_TEMP no longer depends on.
       if: always()
+      continue-on-error: true
       shell: bash
       env:
         STACK: ${{ inputs.stack }}
@@ -223,7 +235,7 @@ runs:
       run: |
         set -euo pipefail
         python3 - <<'PY'
-        import json, os, shutil
+        import json, os
 
         # Checked in pipeline order and matched on 'failure' specifically
         # (not "!= success"): a composite-action step failure halts every
@@ -265,7 +277,14 @@ runs:
                 result = "blocked"
                 reason = "an earlier step failed before the apply ran — see the job log"
 
-        with open("cell.json", "w") as fh:
+        # Written to $RUNNER_TEMP (M2), never the repo tree -- see the step
+        # comment above. apply.txt itself needs no copy here: the apply step
+        # above already tee'd it straight to $RUNNER_TEMP/apply.txt, so a
+        # blocked cell that never reached the apply step simply never wrote
+        # it, and an attempted cell's copy is already at the path the upload
+        # step below reads from.
+        cell_path = os.path.join(os.environ["RUNNER_TEMP"], "cell.json")
+        with open(cell_path, "w") as fh:
             json.dump(
                 {
                     "stack": os.environ["STACK_NAME"],
@@ -276,21 +295,25 @@ runs:
                 },
                 fh,
             )
-
-        # A blocked cell never reached the apply step -- no apply.txt to copy.
-        apply_log = os.path.join(os.environ["RUNNER_TEMP"], "apply.txt")
-        if os.path.exists(apply_log):
-            shutil.copyfile(apply_log, "apply.txt")
         PY
 
     - name: Upload apply summary
+      # continue-on-error: comment feedback must never outrank the work
+      # queue -- see the note on Compose cell summary above. If this
+      # purely-cosmetic upload fails, we'd rather under-report in the PR
+      # comment (an applied cell renders as not-attempted) than strand an
+      # already-applied cell's check pending. overwrite: true so a job
+      # re-run in the same workflow run (the documented "re-run the deploy"
+      # recovery path) cannot 409 on the pre-existing artifact name.
       if: always()
+      continue-on-error: true
       uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
       with:
         name: apply-summary.${{ inputs.env }}.${{ steps.ids.outputs.slug }}
         path: |
-          cell.json
-          apply.txt
+          ${{ runner.temp }}/cell.json
+          ${{ runner.temp }}/apply.txt
+        overwrite: true
 
     - name: Mint App installation token for completion
       # Re-mint: a long (>1h) apply can outlive the job-start token; completion needs a fresh one.
