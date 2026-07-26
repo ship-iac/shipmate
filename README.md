@@ -41,8 +41,8 @@ protection rules stay simple even as the number of underlying units grows.
 
 ## Comment-ops
 
-Humans drive apply behavior for a pull request through PR comments —
-`shipmate apply <env>` — rather than through bespoke UI or external tooling.
+Humans drive shipmate for a pull request through PR comments — `shipmate
+apply <env>` and friends — rather than through bespoke UI or external tooling.
 A private GitHub App mints the short-lived token needed to dispatch the apply
 workflow from a comment (events created with the default `GITHUB_TOKEN` never
 trigger other workflows); the same App also authors the apply checks, the
@@ -61,6 +61,22 @@ Comment-ops keeps the entire interaction surface inside the pull request
 that is already the unit of review, with an auditable history of who asked
 for what and when. See `CONTRACT.md` for the full grammar and authorization
 contract, and `docs/github-app.md` for one-time App setup.
+
+### PR comment commands
+
+Three verbs are active (`plan` and `destroy` are reserved for later):
+
+- `shipmate apply [env]` — apply the reviewed plan for one environment, or
+  every non-explicit environment when the environment is omitted.
+- `shipmate doctor` — report setup problems: repository settings,
+  environments, App permissions, and warnings from this commit's shipmate
+  runs.
+- `shipmate help` — show this command list.
+
+`help` and `doctor` are read-only and answer any commenter with no
+authorization check; `apply` is the one verb that requires it (approvers-team
+membership, a mergeable and reviewed PR, and a reviewed plan for the current
+head — see Comment-ops above).
 
 ## Dynamic environments
 

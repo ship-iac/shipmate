@@ -55,8 +55,9 @@ select = [
 
 [tool.ruff.lint.mccabe]
 # Complexity is the budgeted resource in this codebase: helper scripts must
-# stay individually reviewable. Current worst offender is 7; do not raise
-# this without splitting the function first.
+# stay individually reviewable. Current worst offender is comment-parse's
+# parse() at exactly 8, the ceiling itself; do not raise this without
+# splitting the function first.
 max-complexity = 8
 
 [tool.ruff.lint.per-file-ignores]

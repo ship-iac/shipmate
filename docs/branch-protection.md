@@ -60,17 +60,32 @@ stays blocked. Without this pin, the ruleset only matches on `context` and
 any identity that can post a commit status with that exact context string
 can satisfy the required check.
 
-## Doctor: settings-drift warnings in the sticky comment
+## Doctor: settings-drift warnings and the `shipmate doctor` report
 
-`actions/summary` runs `scripts/doctor` on every plan run and appends its
-findings to the sticky comment under a `### doctor` heading — read-only,
-never blocking. It flags a missing or mis-pinned `shipmate / gate` rule on
-the default branch (no active ruleset requiring it, or one that doesn't pin
-`integration_id` to the shipmate App, or that isn't strict) and any missing
-GitHub Environment (`<env>` / `<env>-apply`) for a tagged-in environment.
-Doctor degrades to a `could not verify` note on an API error and always
-exits 0, so a probe failure (for example, the App token lacking read access
-to `rules/branches` or `environments`) never fails the plan run itself.
+`actions/summary` runs `scripts/doctor` on every plan run and emits its
+findings as workflow annotations titled `shipmate doctor`
+(`::warning title=shipmate doctor::<text>` / `::notice title=shipmate
+doctor::<text>`) — read-only, never blocking. Comment `shipmate doctor` on a
+pull request for a consolidated report: a sticky comment (marker `<!--
+shipmate:doctor -->`, upserted in place like the plan comment) combining six
+live probes — a missing or mis-pinned `shipmate / gate` rule on the default
+branch (no active ruleset requiring it, or one that doesn't pin
+`integration_id` to the shipmate App, or that isn't strict), a missing GitHub
+Environment (`<env>` / `<env>-apply`) for a tagged-in environment, the
+plan/apply environment protection shape (a plan environment must have no
+required reviewers and no deployment branch policy; an apply environment with
+no protection at all is only a note), engine action-pin freshness in the
+consumer's own workflow files, whether the configured approvers team resolves
+in the org, and whether the shipmate App installation still grants the
+manifest's full permission set — with the warnings GitHub already recorded on
+that commit's shipmate check runs. `doctor` degrades to a "could not verify"
+note on a probe's API error and always exits 0, so a probe failure (for
+example, the App token lacking read access to `rules/branches` or
+`environments`) never fails the plan run, and the report states plainly when
+the warnings harvest itself could not complete (or may be truncated by
+GitHub's per-step annotation cap) rather than claiming a false all-clear.
+`shipmate doctor` never blocks the gate and is open to any commenter — it
+needs no team membership or review, unlike `shipmate apply`.
 
 ## Review policy for `shipmate apply`
 

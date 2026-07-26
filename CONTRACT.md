@@ -141,12 +141,57 @@ when the same stack participates in more than one environment.
 
 ## Comment-ops
 
-`shipmate <verb> [env] [tag-filter]` in a PR comment drives a manual, pre-merge
-apply. The grammar is strict and anchored — the whole comment line must match
-one regex, and the parsed values are never interpolated into a shell. `apply`
-is the only active verb; `plan` and `destroy` are reserved (recognized and
-rejected with a "reserved" message) so the grammar does not need to change
-shape when those verbs are implemented.
+`shipmate <verb> [env] [tag-filter]` in a PR comment drives shipmate's
+comment-based commands. The grammar is strict and anchored — the whole
+comment line must match one regex, and the parsed values are never
+interpolated into a shell. A comment authored by a bot account (any login
+ending `[bot]`) is ignored outright before parsing — a loop guard, since
+shipmate's own comments (help output, apply results, the doctor report) can
+themselves contain text that matches the command grammar.
+
+| verb | status | args | authorization |
+|---|---|---|---|
+| `shipmate apply [env]` | active | optional env | apply requirements, below |
+| `shipmate doctor` | active | none | none — read-only, open to any commenter |
+| `shipmate help` | active | none | none — read-only, open to any commenter |
+| `shipmate plan` | reserved | — | — |
+| `shipmate destroy` | reserved | — | — |
+
+`plan` and `destroy` are recognized and rejected with a "reserved" message, so
+the grammar does not need to change shape when those verbs are implemented. A
+verb documented as taking no arguments (`doctor`, `help`) rejects an env or
+tag-filter given alongside it with an explicit "takes no arguments" error
+rather than silently ignoring the extra token; a tag-filter given to any verb
+is likewise rejected as not yet supported rather than silently applied to the
+whole environment. An unknown verb's error points the commenter at
+`shipmate help`. `scripts/comment-parse`'s `VERBS` registry is the single
+source of truth this table is derived from: it drives the parser, the
+`--help-markdown` rendering that `shipmate help` posts verbatim (marked with
+the HTML comment `<!-- shipmate:help -->`), and the reject-hint text, so the
+three cannot drift from each other.
+
+`shipmate doctor` posts a consolidated, sticky report — one comment per pull
+request, identified by the HTML marker `<!-- shipmate:doctor -->` (distinct
+from the plan comment's `<!-- shipmate:summary -->`) and upserted in place the
+same way. It combines six live settings probes (gate ruleset, environment
+pair existence, environment protection shape, engine action-pin freshness,
+approvers-team resolvability, and App installation permission drift — see
+`docs/branch-protection.md`) with a harvest of the warnings already recorded
+against this commit's shipmate workflow runs. Those warnings are not read
+from the sticky plan comment — a plan run no longer appends anything there.
+Instead, `actions/summary` runs `scripts/doctor` on every plan run and emits
+its findings as workflow-command annotations, verbatim:
+
+- `::warning title=shipmate doctor::<text>` for a misconfiguration,
+- `::notice title=shipmate doctor::<text>` for an informational finding.
+
+The `title=shipmate doctor` string is exactly what `shipmate doctor`'s harvest
+step filters check-run annotations on, so it never re-reports a finding the
+live probes already re-state fresh against current settings — this is
+machine-read, not a formatting choice, and a mismatch between the annotate
+call and the harvest filter is a regression. `shipmate doctor` is entirely
+read-only: it authorizes nothing, writes nothing but its own sticky comment,
+and never affects `shipmate / gate`.
 
 The env is optional for `apply`. A targeted `shipmate apply <env>` applies one
 environment; a bare `shipmate apply` applies **every** environment that has a
@@ -352,14 +397,6 @@ changes get a table row only. Check links are built **forward** from the
 cell's `(stack-path, environment)` pair using the check-name grammar above;
 when the check run cannot be resolved, the link degrades to the workflow-run
 URL.
-
-The comment may additionally carry a trailing `### doctor` section: `scripts/doctor`'s
-read-only settings-drift warnings (a missing/mis-pinned `shipmate / gate` rule,
-a missing GitHub Environment), appended by `actions/summary` after the
-overview table and cell details are built. The section is present only when
-doctor has findings; it never affects the gate verdict and doctor's own
-never-fail design means an appended-warnings failure cannot block the
-comment from posting.
 
 GitHub caps issue-comment bodies at 65,536 characters. The comment is built
 to a smaller budget: each changed cell's section degrades, in order, full
