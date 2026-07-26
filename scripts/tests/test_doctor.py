@@ -1,4 +1,5 @@
 import importlib.util
+import json
 import os
 import pathlib
 from importlib.machinery import SourceFileLoader
@@ -512,3 +513,101 @@ def test_app_permission_failure_warned():
     assert out[0][0] == doctor.WARNING
     assert "missing at least one permission" in out[0][1]
     assert "\n" not in out[0][1]
+
+
+def _ann(level="warning", title="t", message="m", check="shipmate · plan / detect"):
+    return {
+        "annotation_level": level,
+        "title": title,
+        "message": message,
+        "check_name": check,
+        "path": ".github/workflows/plan.yml",
+        "start_line": 1,
+    }
+
+
+def test_latest_check_ids_keeps_newest_shipmate_run_per_name():
+    ga = ', "app_slug": "github-actions", "app_id": 15368}'
+    lines = [
+        '{"id": 1, "name": "app / dev-eu", "started_at": "2026-07-26T10:00:00Z"' + ga,
+        '{"id": 2, "name": "app / dev-eu", "started_at": "2026-07-26T11:00:00Z"' + ga,
+        '{"id": 3, "name": "dns / dev-eu", "started_at": "2026-07-26T10:30:00Z"' + ga,
+        # the shipmate App's own check runs (apply checks) are kept via app_id
+        '{"id": 4, "name": "apply / dev-eu / app", "started_at": "2026-07-26T10:00:00Z", '
+        '"app_slug": "shipmate", "app_id": 999}',
+        # third-party apps are dropped (out of the harvest's scope)
+        '{"id": 5, "name": "codecov/project", "started_at": "2026-07-26T10:00:00Z", '
+        '"app_slug": "codecov", "app_id": 254}',
+    ]
+    assert doctor.latest_check_ids(lines, app_id="999") == [
+        (2, "app / dev-eu"),
+        (4, "apply / dev-eu / app"),
+        (3, "dns / dev-eu"),
+    ]
+
+
+def test_harvest_drops_notices_and_doctors_own_annotations():
+    anns = [
+        _ann(level="notice"),
+        _ann(title=doctor.DOCTOR_TITLE, message="gate ruleset missing"),
+        _ann(title="stale codegen"),
+        _ann(level="failure", title="plan failed"),
+    ]
+    sections = doctor.harvest_sections(anns)
+    kept = [a["title"] for rows in sections.values() for a in rows]
+    assert kept == ["stale codegen", "plan failed"]
+
+
+def test_report_renders_probe_and_harvest_sections():
+    body = doctor.render_report(
+        [(doctor.WARNING, "gate ruleset is missing")], [_ann(title="stale codegen")], _ctx()
+    )
+    assert body.startswith(doctor.DOCTOR_MARKER)
+    assert ":warning: gate ruleset is missing" in body
+    assert "stale codegen" in body
+    assert "shipmate · plan / detect" in body
+    assert _ctx()["head_sha"][:7] in body
+    assert "1281" in body
+
+
+def test_report_renders_notes_as_info_not_warning():
+    body = doctor.render_report([(doctor.NOTICE, "apply env has no protection")], [], _ctx())
+    assert ":information_source: apply env has no protection" in body
+    assert ":warning: apply env has no protection" not in body
+
+
+def test_report_all_clear():
+    body = doctor.render_report([], [], _ctx())
+    assert "no problems found" in body
+    assert "no warnings" in body
+
+
+def test_report_notes_possible_annotation_truncation():
+    anns = [_ann(title=f"w{i}") for i in range(doctor.ANNOTATION_CAP)]
+    body = doctor.render_report([], anns, _ctx())
+    assert "may be truncated" in body
+
+
+def test_report_escapes_hostile_annotation_text():
+    body = doctor.render_report(
+        [], [_ann(title="x</summary><b>evil", message="[go](http://e)")], _ctx()
+    )
+    assert "</summary>" not in body
+    assert "[go](http://e)" not in body
+
+
+def test_report_states_when_environment_probes_were_skipped():
+    body = doctor.render_report([], [], _ctx(envs_available=False, plan_run_id=""))
+    assert "no plan run" in body
+
+
+def test_load_annotations_joins_names_and_tolerates_missing_files(tmp_path):
+    (tmp_path / "ann").mkdir()
+    (tmp_path / "ann" / "2.json").write_text(json.dumps([_ann(check=None)]), encoding="utf-8")
+    (tmp_path / "check-ids.tsv").write_text("2\tapp / dev-eu\n7\tgone / dev-eu\n", encoding="utf-8")
+    ctx = _ctx(
+        annotations_dir=str(tmp_path / "ann"),
+        check_ids_path=str(tmp_path / "check-ids.tsv"),
+    )
+    anns = doctor.load_annotations(ctx)
+    assert [a["check_name"] for a in anns] == ["app / dev-eu"]

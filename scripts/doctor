@@ -7,10 +7,12 @@ Three modes, selected via SHIPMATE_DOCTOR_MODE:
   actions/summary right after a plan run. NEVER fails the run: a probe
   error becomes a 'could not verify' note — doctor guards onboarding, it
   must not take down the plan path.
-- report: render findings for the sticky PR comment on demand (not yet
-  implemented).
-- check-ids: reduce a check-runs listing to the ids worth fetching
-  annotations for (not yet implemented).
+- report: render the sticky PR comment on demand — the six live probes'
+  findings plus a harvest of the warnings GitHub already recorded as
+  annotations on this commit's workflow check runs.
+- check-ids: reduce a check-runs JSONL listing to the (id, name) pairs worth
+  fetching annotations for, one call ahead of `report`. Runs before the rest
+  of doctor's env contract is read.
 
 Probes:
 - gate ruleset on the default branch: a required_status_checks rule whose
@@ -50,6 +52,8 @@ def _load(fname):
 
 bm = _load("build-matrix")
 _gh_json = bm.gh_json
+sc = _load("summary-comment")
+_md_escape = sc._md_escape
 
 GATE = "shipmate / gate"
 
@@ -59,6 +63,19 @@ DOCTOR_TITLE = "shipmate doctor"
 # setting), WARNING is a misconfiguration. Rendered as ::notice::/::warning::
 # in annotate mode.
 WARNING, NOTICE = "warning", "notice"
+
+DOCTOR_MARKER = "<!-- shipmate:doctor -->"
+ANNOTATION_CAP = 10  # GitHub keeps at most 10 annotations per level per step
+HARVEST_LEVELS = ("warning", "failure")
+_LEVEL_EMOJI = {WARNING: ":warning:", NOTICE: ":information_source:"}
+# Check-run authors worth harvesting: the github-actions app authors the
+# plan/apply/drift jobs' auto check-runs -- the ones carrying shipmate's
+# ::warning:: emissions. The shipmate App itself is matched by id (org-dependent
+# slug). Third-party apps (codecov etc.) are dropped: harvest scope is shipmate
+# runs. Residual: the consumer's own non-shipmate Actions workflows remain
+# (indistinguishable at this level), hence the report heading says
+# "workflow runs", not "shipmate runs".
+_HARVEST_APP_SLUGS = ("github-actions",)
 
 
 def _gate_rule_warnings(ctx):
@@ -376,21 +393,130 @@ def ctx_from_env():
     }
 
 
+def latest_check_ids(lines, app_id=""):
+    """[(id, name)] -- newest run per check name among shipmate-relevant
+    authors, the same read discipline the gate and the detects use
+    (apply-gate.latest_by_name)."""
+    newest = {}
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        run = json.loads(line)
+        if run.get("app_slug") not in _HARVEST_APP_SLUGS and not (
+            app_id and str(run.get("app_id")) == str(app_id)
+        ):
+            continue
+        name = run.get("name") or ""
+        prev = newest.get(name)
+        if prev is None or (run.get("started_at") or "") >= (prev.get("started_at") or ""):
+            newest[name] = run
+    return [(int(newest[n]["id"]), n) for n in sorted(newest)]
+
+
+def load_annotations(ctx):
+    """Join `ann/<id>.json` payloads onto the check names in check-ids.tsv.
+    A missing or unreadable payload is skipped, never fatal."""
+    ids_path = pathlib.Path(ctx["check_ids_path"])
+    if not ids_path.exists():
+        return []
+    out = []
+    for line in ids_path.read_text(encoding="utf-8").splitlines():
+        if "\t" not in line:
+            continue
+        cid, name = line.split("\t", 1)
+        payload = pathlib.Path(ctx["annotations_dir"]) / f"{cid.strip()}.json"
+        try:
+            rows = json.loads(payload.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        for row in rows if isinstance(rows, list) else []:
+            row["check_name"] = name.strip()
+            out.append(row)
+    return out
+
+
+def harvest_sections(annotations):
+    """Group harvested annotations by check name.
+
+    Drops notice level, and drops the plan path's own doctor annotations
+    (title == DOCTOR_TITLE): the live probes in this same report re-state those
+    findings against current settings, so keeping both double-reports every
+    settings problem.
+    """
+    by_check = {}
+    for a in annotations:
+        if a.get("annotation_level") not in HARVEST_LEVELS:
+            continue
+        if a.get("title") == DOCTOR_TITLE:
+            continue
+        by_check.setdefault(a.get("check_name") or "(unnamed check)", []).append(a)
+    return by_check
+
+
+def _provenance(ctx):
+    head = ctx["head_sha"][:7] or "(unknown commit)"
+    if ctx["plan_run_id"]:
+        return f"_Commit `{head}`; declared environments from plan run {ctx['plan_run_id']}._"
+    return (
+        f"_Commit `{head}`; no plan run with cell summaries for this commit, so the "
+        "environment probes were skipped._"
+    )
+
+
+def _harvest_lines(sections):
+    lines = []
+    truncated = False
+    for name in sorted(sections):
+        rows = sections[name]
+        lines.append(f"- **{_md_escape(name)}**")
+        for a in rows:
+            emoji = ":x:" if a.get("annotation_level") == "failure" else ":warning:"
+            title = _md_escape(_one_line(a.get("title") or "", 120))
+            msg = _md_escape(_one_line(a.get("message") or "", 300))
+            lines.append(f"  - {emoji} {title} — {msg}" if title else f"  - {emoji} {msg}")
+        if len(rows) >= ANNOTATION_CAP:
+            truncated = True
+    if truncated:
+        lines.append(
+            "- _GitHub keeps at most 10 annotations per level per step, so this list "
+            "may be truncated — see the run logs for the full set._"
+        )
+    return lines
+
+
+def render_report(findings, annotations, ctx):
+    out = [DOCTOR_MARKER, "### shipmate doctor", "", _provenance(ctx), ""]
+    out += ["#### repository settings", ""]
+    if findings:
+        out += [f"- {_LEVEL_EMOJI[lvl]} {text}" for lvl, text in findings]
+    else:
+        out.append("- :white_check_mark: no problems found by the settings probes.")
+    out += ["", "#### warnings from this commit's workflow runs", ""]
+    sections = harvest_sections(annotations)
+    if sections:
+        out += _harvest_lines(sections)
+    else:
+        out.append(":white_check_mark: no warnings on this commit's workflow runs.")
+    return "\n".join(out)
+
+
 def main():
     mode = os.environ.get("SHIPMATE_DOCTOR_MODE", "")
     if mode not in MODES:
         raise SystemExit(f"SHIPMATE_DOCTOR_MODE must be one of {', '.join(MODES)} (got: {mode!r})")
     if mode == "check-ids":
-        # Report path only: reduce a check-runs listing to the ids worth
-        # fetching annotations for.
-        raise SystemExit("check-ids mode not implemented yet")
+        app_id = os.environ.get("SHIPMATE_APP_ID", "")
+        for cid, name in latest_check_ids(sys.stdin.read().splitlines(), app_id):
+            print(f"{cid}\t{name}")
+        return
     ctx = ctx_from_env()
     found = warnings(ctx)
     if mode == "annotate":
         for line in render_annotations(found):
             print(line)
         return
-    raise SystemExit("report mode not implemented yet")
+    print(render_report(found, load_annotations(ctx), ctx))
 
 
 if __name__ == "__main__":
