@@ -101,7 +101,10 @@ def test_read_only_routes_are_acknowledged_with_a_reaction():
     block = _step("content=eyes")
     assert "steps.parse.outputs.route == 'doctor'" in block
     assert "steps.parse.outputs.route == 'help'" in block
-    assert "|| true" in block
+    # On the invocation itself, not just somewhere in the block: the step's own
+    # comment explains the `|| true`, so a bare substring check for it stays
+    # green when the operator is deleted from the `gh api` line.
+    assert "-f content=eyes >/dev/null || true" in block
 
 
 def test_the_rocket_reaction_stays_on_an_authorized_apply():

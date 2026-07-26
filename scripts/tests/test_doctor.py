@@ -884,6 +884,22 @@ def test_findings_only_fallback_escapes_a_hostile_settings_finding():
     assert "<!-- shipmate:summary -->" not in body
 
 
+def test_provenance_run_id_branch_states_the_run_without_a_coverage_claim():
+    """The run-id branch must name the run that was read and claim nothing about
+    what the probes did with it. `envs_available` and `plan_run_id` can disagree
+    (a `gh run download` that extracts files and still exits non-zero clears the
+    run id while the cells directory is populated), so any probe-coverage claim
+    keyed on the run id can contradict the findings rendered below it -- that
+    claim belongs only to `_environment_warnings`' NOTICE, keyed on
+    `envs_available`. Pinned on the current stem, so restoring wording that
+    implies the declared environment set came from this run fails here."""
+    text = doctor._provenance(_ctx(plan_run_id="1281"))
+    assert "1281" in text
+    assert "cell summaries from plan run" in text
+    assert "declared environments" not in text
+    assert "probe" not in text
+
+
 def test_provenance_one_lines_an_overlong_plan_run_id():
     # plan_run_id is interpolated verbatim otherwise -- an unbounded value
     # there would make the preamble itself unbounded, defeating the whole
