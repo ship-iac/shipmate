@@ -627,6 +627,21 @@ def test_report_all_clear():
     assert "no warnings" in body
 
 
+def test_harvest_incomplete_note_says_the_harvest_is_incomplete():
+    """The other harvest tests assert `HARVEST_INCOMPLETE in body`, which pins
+    the flag -> note wiring but not the note's meaning: swap the constant for
+    an all-clear and they all stay green, shipping the exact false all-clear
+    the flag exists to prevent. So the text's meaning is pinned here,
+    separately, on a stable stem -- a reword has to update this stem
+    deliberately instead of silently inverting the claim.
+
+    Stem, not the whole sentence, so ordinary rewording stays cheap: the
+    warning level, and a phrase that cannot be read as "everything is fine"."""
+    assert doctor.HARVEST_INCOMPLETE.startswith("- :warning:")
+    assert "could not read all" in doctor.HARVEST_INCOMPLETE
+    assert ":white_check_mark:" not in doctor.HARVEST_INCOMPLETE
+
+
 def test_report_states_when_the_whole_harvest_failed():
     # An empty harvest from a failed check-runs listing must not read the
     # same as an empty harvest from a genuinely clean commit -- the report
