@@ -484,7 +484,8 @@ def harvest_sections(annotations):
 def _provenance(ctx):
     head = ctx["head_sha"][:7] or "(unknown commit)"
     if ctx["plan_run_id"]:
-        return f"_Commit `{head}`; declared environments from plan run {ctx['plan_run_id']}._"
+        run_id = _one_line(ctx["plan_run_id"], 40)
+        return f"_Commit `{head}`; declared environments from plan run {run_id}._"
     return (
         f"_Commit `{head}`; no plan run with cell summaries for this commit, so the "
         "environment probes were skipped._"
@@ -520,6 +521,11 @@ def _emit_section(lines, name, rows, used, budget):
     remaining budget. The header is emitted only when at least its first row
     also fits -- otherwise it would be left dangling with no children.
     Returns (new_used, rows_added, rows_dropped)."""
+    if not rows:
+        # harvest_sections never produces an empty group (setdefault+append),
+        # but this guard keeps the function safe against any future caller
+        # that does -- rendered[0] below would otherwise raise IndexError.
+        return used, 0, 0
     header = f"- **{_md_escape(_one_line(name, 120))}**"
     rendered = [_render_annotation_row(a) for a in rows]
     if used + len(header) + 1 + len(rendered[0]) + 1 > budget:

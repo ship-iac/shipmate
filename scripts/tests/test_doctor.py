@@ -601,6 +601,16 @@ def test_report_states_when_environment_probes_were_skipped():
     assert "no plan run" in body
 
 
+def test_provenance_one_lines_an_overlong_plan_run_id():
+    # plan_run_id is interpolated verbatim otherwise -- an unbounded value
+    # there would make the preamble itself unbounded, defeating the whole
+    # report's size budget regardless of the harvest/findings truncation.
+    ctx = _ctx(plan_run_id="9" * 100)
+    text = doctor._provenance(ctx)
+    assert ("9" * 39 + "…") in text
+    assert ("9" * 40) not in text
+
+
 def test_load_annotations_joins_names_and_tolerates_missing_files(tmp_path):
     (tmp_path / "ann").mkdir()
     (tmp_path / "ann" / "2.json").write_text(json.dumps([_ann(check=None)]), encoding="utf-8")
@@ -715,9 +725,29 @@ def test_harvest_never_emits_a_dangling_section_header():
     toolong = _ann(check="zzz-toolong", title="t", message="m")
     header_fits = f"- **{doctor._md_escape('aaa-fits')}**"
     row_fits = doctor._render_annotation_row(fits)
-    budget = len(header_fits) + 1 + len(row_fits) + 1  # room for "aaa-fits" only
+    # Room for "aaa-fits"'s header + row, plus "zzz-toolong"'s header alone --
+    # so the header-only check the old code used would pass for zzz-toolong,
+    # while the new combined header+first-row check correctly refuses it.
+    budget = (
+        len(header_fits)
+        + 1
+        + len(row_fits)
+        + 1
+        + len(f"- **{doctor._md_escape('zzz-toolong')}**")
+        + 1
+    )
     sections = doctor.harvest_sections([fits, toolong])
     lines, dropped = doctor._harvest_lines(sections, [fits, toolong], budget)
     assert lines == [header_fits, row_fits]
     assert dropped == 1
     assert not any("zzz-toolong" in line for line in lines)
+
+
+def test_emit_section_guards_against_an_empty_row_list():
+    # harvest_sections never produces an empty group (setdefault+append), but
+    # _emit_section indexes rendered[0] -- a latent IndexError for any future
+    # caller that does pass one. Never raises; adds nothing, drops nothing.
+    lines = []
+    used, added, dropped = doctor._emit_section(lines, "empty-check", [], 0, 1000)
+    assert (used, added, dropped) == (0, 0, 0)
+    assert lines == []
