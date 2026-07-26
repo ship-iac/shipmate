@@ -92,9 +92,15 @@ def _environments(*names):
 
 
 def _env(name, rules=(), branch_policy=None):
+    # The real "Get an environment" response includes a {"type":
+    # "branch_policy"} protection_rules entry whenever deployment_branch_policy
+    # is non-null -- mirror that so fixtures match the shape the API returns.
+    protection_rules = [{"type": t} for t in rules]
+    if branch_policy is not None:
+        protection_rules.append({"type": "branch_policy"})
     return {
         "name": name,
-        "protection_rules": [{"type": t} for t in rules],
+        "protection_rules": protection_rules,
         "deployment_branch_policy": branch_policy,
     }
 
@@ -388,3 +394,21 @@ def test_release_lookup_prefers_the_public_token(monkeypatch):
     assert doctor._latest_release_sha("acme/engine") == ("v1.4.0", _SHA)
     assert seen and all(tok == "workflow-token" for _, tok in seen)
     assert os.environ["GH_TOKEN"] == "app-token"  # noqa: S105 - fixture value, not a real token
+
+
+def test_release_lookup_restores_gh_token_unset(monkeypatch):
+    """The safety-critical restore path: when GH_TOKEN was never set, it must
+    stay unset afterwards, not end up set to some stale value -- a leaked
+    token left in GH_TOKEN would silently re-auth every later probe in the
+    same process."""
+
+    def gh(path):
+        if path == "repos/acme/engine/releases/latest":
+            return {"tag_name": "v1.4.0"}
+        return {"sha": _SHA}
+
+    monkeypatch.setattr(doctor, "_gh_json", gh)
+    monkeypatch.delenv("GH_TOKEN", raising=False)
+    monkeypatch.setenv("SHIPMATE_PUBLIC_TOKEN", "workflow-token")
+    assert doctor._latest_release_sha("acme/engine") == ("v1.4.0", _SHA)
+    assert "GH_TOKEN" not in os.environ

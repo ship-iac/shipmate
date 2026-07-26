@@ -50,8 +50,9 @@ GATE = "shipmate / gate"
 
 MODES = ("annotate", "report", "check-ids")
 DOCTOR_TITLE = "shipmate doctor"
-# Finding levels. NOTICE is the spec's "note, not warning": rendered as
-# ::notice:: in annotate mode and an info row (not :warning:) in the report.
+# Finding levels: NOTICE is informational (a legitimate-but-worth-knowing
+# setting), WARNING is a misconfiguration. Rendered as ::notice::/::warning::
+# in annotate mode.
 WARNING, NOTICE = "warning", "notice"
 
 
@@ -130,20 +131,27 @@ def _env_protection_warnings(ctx):
     out = []
     for env in sorted(ctx["envs"]):
         for name, is_apply in ((env, False), (f"{env}-apply", True)):
+            # existence is _environment_warnings' job, not this probe's -- a
+            # missing env (any exception here) is silently skipped.
             try:
                 data = _gh_json(f"repos/{ctx['repo']}/environments/{name}")
-            except (Exception, SystemExit):  # noqa: BLE001, S112 - existence isn't this probe's job
+            except (Exception, SystemExit):  # noqa: BLE001, S112 - see above
                 continue
             rules = sorted(
                 {r.get("type") for r in data.get("protection_rules", []) if r.get("type")}
             )
+            # GitHub reports a "branch_policy" protection rule whenever
+            # deployment_branch_policy is set -- that alone doesn't make plan
+            # jobs hang (they get refused outright, handled below), so it's
+            # excluded from the "will hang waiting for approval" diagnosis.
+            approval = [r for r in rules if r != "branch_policy"]
             policy = data.get("deployment_branch_policy")
-            if not is_apply and rules:
+            if not is_apply and approval:
                 out.append(
                     (
                         WARNING,
                         f"GitHub Environment `{name}` is a plan environment but has "
-                        f"protection rules ({', '.join(rules)}) — plan jobs will hang "
+                        f"protection rules ({', '.join(approval)}) — plan jobs will hang "
                         f"waiting for approval; put reviewers on `{env}-apply` instead.",
                     )
                 )
@@ -169,9 +177,9 @@ def _env_protection_warnings(ctx):
 
 
 _PIN = re.compile(
-    r"(?P<owner>[\w.-]+)/(?P<repo>[\w.-]+)/(?:actions|\.github)/[\w./-]+@(?P<ref>[\w.-]+)"
+    r"uses:\s*(?P<owner>[\w.-]+)/(?P<repo>[\w.-]+)/(?:actions|\.github)/[\w./-]+@(?P<ref>[\w./-]+)"
 )
-_SHA40 = re.compile(r"[0-9a-f]{40}")
+_SHA40 = re.compile(r"[0-9a-fA-F]{40}")
 
 
 def _pins_in_workflows(ctx):
@@ -181,7 +189,7 @@ def _pins_in_workflows(ctx):
     out, seen = [], {}
     listing = _gh_json(f"repos/{ctx['repo']}/contents/.github/workflows")
     for entry in listing:
-        if not entry["name"].endswith((".yml", ".yaml")):
+        if entry.get("type") != "file" or not entry["name"].endswith((".yml", ".yaml")):
             continue
         blob = _gh_json(f"repos/{ctx['repo']}/contents/.github/workflows/{entry['name']}")
         text = base64.b64decode(blob.get("content", "")).decode("utf-8", "replace")
@@ -199,7 +207,7 @@ def _pins_in_workflows(ctx):
                     )
                 )
                 continue
-            seen.setdefault(slug, set()).add((entry["name"], ref))
+            seen.setdefault(slug, set()).add((entry["name"], ref.lower()))
     return out, seen
 
 
@@ -243,13 +251,13 @@ def _pin_warnings(ctx):
                 )
             )
             continue
-        stale = sorted({(f, ref) for f, ref in pins if ref != sha})
-        for fname, ref in stale:
+        differing = sorted({(f, ref) for f, ref in pins if ref != sha})
+        for fname, ref in differing:
             out.append(
                 (
                     WARNING,
-                    f"`{fname}` pins `{slug}@{ref[:7]}` but the latest release {tag} is "
-                    f"`{sha[:7]}` — re-pin to pick up fixes.",
+                    f"`{fname}` pins `{slug}@{ref[:7]}`, which differs from the latest "
+                    f"release {tag} (`{sha[:7]}`) — re-pin to pick up fixes.",
                 )
             )
     return out
