@@ -37,6 +37,7 @@ runs:
         permission-checks: write
         permission-statuses: write
         permission-pull-requests: write
+        permission-contents: read
 
     - name: Create apply checks (pending / no-changes)
       shell: bash
@@ -79,21 +80,29 @@ runs:
         fi
         python3 "$GITHUB_ACTION_PATH/../../scripts/summary-comment" < check-runs.jsonl
 
-    - name: Doctor — settings-drift warnings (never blocks)
+    - name: Doctor — settings-drift warnings (annotations only, never blocks)
       shell: bash
       env:
         GH_TOKEN: ${{ steps.token.outputs.token }}
+        SHIPMATE_DOCTOR_MODE: annotate
         SHIPMATE_APP_ID: ${{ inputs.app-id }}
         SHIPMATE_CELLS_DIR: ${{ inputs.cells-dir }}
         SHIPMATE_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        # For the pin probe's cross-repo release read (spec risk 4): the App
+        # installation token is scoped to the consumer repo and may not read
+        # the engine repo; the workflow token can (public repo). `github.token`
+        # is available inside a composite action — no new consumer input.
+        SHIPMATE_PUBLIC_TOKEN: ${{ github.token }}
       run: |
         set -euo pipefail
-        if python3 "$GITHUB_ACTION_PATH/../../scripts/doctor" > doctor.md; then
-          if [ -s doctor.md ]; then
-            { echo ""; echo "### doctor"; cat doctor.md; } >> comment.md
-          fi
+        # Findings surface as workflow annotations on this run, not in the
+        # sticky comment: `shipmate doctor` harvests them back onto the PR on
+        # demand. doctor writes fully-formed ::warning::/::notice:: lines; cat
+        # them through unmodified so no shell reconstruction can mangle them.
+        if python3 "$GITHUB_ACTION_PATH/../../scripts/doctor" > doctor.txt; then
+          cat doctor.txt
         else
-          echo "::warning::doctor probes errored; skipping settings-drift section"
+          echo "::warning::doctor probes errored; settings-drift check skipped"
         fi
 
     - name: Upsert sticky comment

@@ -1,9 +1,15 @@
 #!/usr/bin/env python3
 """shipmate doctor: read-only GitHub-settings drift probes.
 
-Emits markdown warning lines (stdout) for the sticky comment; prints nothing
-when healthy. NEVER fails the run: a probe error becomes a 'could not verify'
-note — doctor guards onboarding, it must not take down the plan path.
+Three modes, selected via SHIPMATE_DOCTOR_MODE:
+- annotate: run the probes and emit GitHub workflow-command annotations
+  (::warning::/::notice::) on stdout, one line per finding. Used by
+  actions/summary right after a plan run. NEVER fails the run: a probe
+  error becomes a 'could not verify' note — doctor guards onboarding, it
+  must not take down the plan path.
+- report: render findings for the sticky PR comment on demand (Task 5).
+- check-ids: reduce a check-runs listing to the ids worth fetching
+  annotations for (Task 5).
 
 Probes:
 - gate ruleset on the default branch: a required_status_checks rule whose
@@ -35,8 +41,15 @@ _gh_json = bm.gh_json
 
 GATE = "shipmate / gate"
 
+MODES = ("annotate", "report", "check-ids")
+DOCTOR_TITLE = "shipmate doctor"
+# Finding levels. NOTICE is the spec's "note, not warning": rendered as
+# ::notice:: in annotate mode and an info row (not :warning:) in the report.
+WARNING, NOTICE = "warning", "notice"
 
-def _gate_rule_warnings(repo, app_id, default_branch):
+
+def _gate_rule_warnings(ctx):
+    repo, default_branch = ctx["repo"], ctx["default_branch"]
     rules = _gh_json(f"repos/{repo}/rules/branches/{default_branch}?per_page=100")
     for rule in rules:
         if rule.get("type") != "required_status_checks":
@@ -46,70 +59,135 @@ def _gate_rule_warnings(repo, app_id, default_branch):
             if chk.get("context") != GATE:
                 continue
             out = []
-            if chk.get("integration_id") != int(app_id):
+            if chk.get("integration_id") != int(ctx["app_id"]):
                 out.append(
-                    f"gate ruleset does not pin `integration_id` to the shipmate App "
-                    f"(found {chk.get('integration_id')!r}) — a forged `{GATE}` status "
-                    "from another identity would satisfy the required check."
+                    (
+                        WARNING,
+                        f"gate ruleset does not pin `integration_id` to the shipmate App "
+                        f"(found {chk.get('integration_id')!r}) — a forged `{GATE}` status "
+                        "from another identity would satisfy the required check.",
+                    )
                 )
             if not params.get("strict_required_status_checks_policy"):
                 out.append(
-                    "gate ruleset does not require branches to be up to date "
-                    "(strict) — plans can go stale against the base before merge."
+                    (
+                        WARNING,
+                        "gate ruleset does not require branches to be up to date "
+                        "(strict) — plans can go stale against the base before merge.",
+                    )
                 )
             return out
     return [
-        f"no active ruleset requires `{GATE}` on `{default_branch}` — "
-        "merges are not gated (see docs/branch-protection.md)."
+        (
+            WARNING,
+            f"no active ruleset requires `{GATE}` on `{default_branch}` — "
+            "merges are not gated (see docs/branch-protection.md).",
+        )
     ]
 
 
-def _environment_warnings(repo, envs):
+def _environment_warnings(ctx):
+    if not ctx["envs_available"]:
+        return [
+            (
+                NOTICE,
+                "no plan run with cell summaries for this commit — the declared "
+                "environment set is unknown, so the environment probes were skipped.",
+            )
+        ]
     # per_page=100: one page covers >=50 logical env pairs; bm.gh_json does not multi-page merge.
     names = {
         e["name"]
-        for e in _gh_json(f"repos/{repo}/environments?per_page=100").get("environments", [])
+        for e in _gh_json(f"repos/{ctx['repo']}/environments?per_page=100").get("environments", [])
     }
     out = []
-    for env in sorted(envs):
+    for env in sorted(ctx["envs"]):
         for needed in (env, f"{env}-apply"):
             if needed not in names:
                 out.append(
-                    f"GitHub Environment `{needed}` does not exist — stacks tagged "
-                    f"`env:{env}` cannot plan/apply (create it and set TF_VAR_* vars)."
+                    (
+                        WARNING,
+                        f"GitHub Environment `{needed}` does not exist — stacks tagged "
+                        f"`env:{env}` cannot plan/apply (create it and set TF_VAR_* vars).",
+                    )
                 )
     return out
 
 
-def warnings(repo, app_id, envs, default_branch):
+PROBES = (
+    _gate_rule_warnings,
+    _environment_warnings,
+)
+
+
+def warnings(ctx):
     out = []
-    for probe in (
-        lambda: _gate_rule_warnings(repo, app_id, default_branch),
-        lambda: _environment_warnings(repo, envs),
-    ):
+    for probe in PROBES:
         try:
-            out.extend(probe())
+            out.extend(probe(ctx))
         # noqa: BLE001 - doctor must never fail the run. `bm.gh_json` (via
         # `_run`) hard-fails a nonzero `gh api` exit with `raise SystemExit`,
         # not a plain Exception -- that must degrade to a note here too, so
         # both types are caught explicitly (never bare BaseException, so
         # KeyboardInterrupt still propagates).
         except (Exception, SystemExit) as e:  # noqa: BLE001
-            out.append(f"doctor could not verify a setting ({e}) — probe skipped.")
+            out.append((WARNING, f"doctor could not verify a setting ({e}) — probe skipped."))
     return out
 
 
-def main():
-    repo = os.environ["GITHUB_REPOSITORY"]
-    app_id = os.environ["SHIPMATE_APP_ID"]
-    default_branch = os.environ["SHIPMATE_DEFAULT_BRANCH"]
-    cells = pathlib.Path(os.environ.get("SHIPMATE_CELLS_DIR", "cells"))
+def _gha_escape(s):
+    """GHA workflow-command data escaping (percent first, or it double-escapes)."""
+    return s.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+
+
+def render_annotations(findings):
+    return [f"::{lvl} title={DOCTOR_TITLE}::{_gha_escape(text)}" for lvl, text in findings]
+
+
+def _declared_envs(cells_dir):
     envs = {
         json.loads(cj.read_text(encoding="utf-8"))["environment"]
-        for cj in cells.glob("cell-summary.*/cell.json")
+        for cj in cells_dir.glob("cell-summary.*/cell.json")
     }
-    for line in warnings(repo, app_id, envs, default_branch):
-        print(f"- :warning: {line}")
+    return envs
+
+
+def ctx_from_env():
+    repo = os.environ["GITHUB_REPOSITORY"]
+    cells = pathlib.Path(os.environ.get("SHIPMATE_CELLS_DIR", "cells"))
+    envs = _declared_envs(cells)
+    return {
+        "repo": repo,
+        "owner": repo.split("/")[0],
+        "app_id": os.environ["SHIPMATE_APP_ID"],
+        "default_branch": os.environ["SHIPMATE_DEFAULT_BRANCH"],
+        "envs": envs,
+        "envs_available": bool(envs),
+        "team": os.environ.get("SHIPMATE_TEAM") or None,
+        "app_permissions_checked": os.environ.get("SHIPMATE_APP_PERMISSIONS_CHECKED") == "true",
+        "app_permission_error": os.environ.get("SHIPMATE_APP_PERMISSION_ERROR", ""),
+        "head_sha": os.environ.get("SHIPMATE_HEAD_SHA", ""),
+        "plan_run_id": os.environ.get("SHIPMATE_PLAN_RUN_ID", ""),
+        "annotations_dir": os.environ.get("SHIPMATE_ANNOTATIONS_DIR", "ann"),
+        "check_ids_path": os.environ.get("SHIPMATE_CHECK_IDS", "check-ids.tsv"),
+    }
+
+
+def main():
+    mode = os.environ.get("SHIPMATE_DOCTOR_MODE", "")
+    if mode not in MODES:
+        raise SystemExit(f"SHIPMATE_DOCTOR_MODE must be one of {', '.join(MODES)} (got: {mode!r})")
+    if mode == "check-ids":
+        # Report path only: reduce a check-runs listing to the ids worth
+        # fetching annotations for. Filled in by Task 5.
+        raise SystemExit("check-ids mode not implemented yet")
+    ctx = ctx_from_env()
+    found = warnings(ctx)
+    if mode == "annotate":
+        for line in render_annotations(found):
+            print(line)
+        return
+    raise SystemExit("report mode not implemented yet")  # Task 5
 
 
 if __name__ == "__main__":
