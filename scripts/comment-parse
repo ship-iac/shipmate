@@ -49,7 +49,7 @@ VERBS = {
         "route": "doctor",
         "desc": (
             "Report setup problems: repository settings, environments, App "
-            "permissions, and warnings from this commit's shipmate runs."
+            "permissions, and warnings from this commit's workflow runs."
         ),
     },
     "help": {

@@ -73,15 +73,18 @@ branch (no active ruleset requiring it, or one that doesn't pin
 `integration_id` to the shipmate App, or that isn't strict), a missing GitHub
 Environment (`<env>` / `<env>-apply`) for a tagged-in environment, the
 plan/apply environment protection shape (a plan environment must have no
-required reviewers and no deployment branch policy; an apply environment with
-no protection at all is only a note), engine action-pin freshness in the
-consumer's own workflow files, whether the configured approvers team resolves
-in the org, and whether the shipmate App installation still grants the
-manifest's full permission set — with the warnings GitHub already recorded on
-that commit's shipmate check runs. `doctor` degrades to a "could not verify"
-note on a probe's API error and always exits 0, so a probe failure (for
-example, the App token lacking read access to `rules/branches` or
-`environments`) never fails the plan run, and the report states plainly when
+approval-type protection rules — required reviewers or wait timers — and no
+deployment branch policy; an apply environment with no protection at all is
+only a note), engine action-pin freshness in the consumer's own workflow
+files, whether the configured approvers team resolves in the org, and
+whether the shipmate App installation still grants the manifest's full
+permission set — with the warnings GitHub already recorded on this commit's
+workflow runs (shipmate's own and any other Actions workflow run on that
+commit; third-party-app-authored check runs are excluded). `doctor` degrades
+to a "could not verify" **warning** on a probe's API error and always exits
+0, so a probe failure (for example, the App token lacking read access to
+`rules/branches` or `environments`) never fails the plan run, and the report
+states plainly when
 the warnings harvest itself could not complete (or may be truncated by
 GitHub's per-step annotation cap) rather than claiming a false all-clear.
 `shipmate doctor` never blocks the gate and is open to any commenter — it

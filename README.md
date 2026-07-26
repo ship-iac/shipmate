@@ -46,9 +46,9 @@ apply <env>` and friends — rather than through bespoke UI or external tooling.
 A private GitHub App mints the short-lived token needed to dispatch the apply
 workflow from a comment (events created with the default `GITHUB_TOKEN` never
 trigger other workflows); the same App also authors the apply checks, the
-`shipmate / gate` status, the sticky plan comment, a fresh apply result
-comment on every apply run, and drift issues, each via a freshly minted
-installation token. Unlike the sticky plan comment, the apply result
+`shipmate / gate` status, the sticky plan comment, the `shipmate doctor`
+sticky report, a fresh apply result comment on every apply run, and drift
+issues, each via a freshly minted installation token. Unlike the sticky plan comment, the apply result
 comment is never upserted: each run posts a new comment with a per-cell
 status table and the collapsed full apply output for every attempted cell,
 so a failure-then-retry sequence stays visible as an audit trail. The plan
@@ -69,7 +69,7 @@ Three verbs are active (`plan` and `destroy` are reserved for later):
 - `shipmate apply [env]` — apply the reviewed plan for one environment, or
   every non-explicit environment when the environment is omitted.
 - `shipmate doctor` — report setup problems: repository settings,
-  environments, App permissions, and warnings from this commit's shipmate
+  environments, App permissions, and warnings from this commit's workflow
   runs.
 - `shipmate help` — show this command list.
 

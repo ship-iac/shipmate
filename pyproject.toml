@@ -55,9 +55,11 @@ select = [
 
 [tool.ruff.lint.mccabe]
 # Complexity is the budgeted resource in this codebase: helper scripts must
-# stay individually reviewable. Current worst offender is comment-parse's
-# parse() at exactly 8, the ceiling itself; do not raise this without
-# splitting the function first.
+# stay individually reviewable. comment-parse's parse() sits at exactly 8,
+# the ceiling itself (tied with test_gate_name_consistency.py's
+# test_inline_gate_write_job_mints_app_statuses_token -- C901 applies to
+# tests too, per-file-ignores only covers S101/S603/S607); do not raise this
+# without splitting the function first.
 max-complexity = 8
 
 [tool.ruff.lint.per-file-ignores]

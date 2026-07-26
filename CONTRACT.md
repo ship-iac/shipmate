@@ -168,7 +168,10 @@ whole environment. An unknown verb's error points the commenter at
 source of truth this table is derived from: it drives the parser, the
 `--help-markdown` rendering that `shipmate help` posts verbatim (marked with
 the HTML comment `<!-- shipmate:help -->`), and the reject-hint text, so the
-three cannot drift from each other.
+three cannot drift from each other. Unlike the `:summary` and `:doctor`
+markers below, `<!-- shipmate:help -->` is not an upsert key — nothing reads
+it back: `shipmate help` posts a fresh comment every time, and the marker
+only labels the output as shipmate's own.
 
 `shipmate doctor` posts a consolidated, sticky report — one comment per pull
 request, identified by the HTML marker `<!-- shipmate:doctor -->` (distinct
@@ -176,11 +179,14 @@ from the plan comment's `<!-- shipmate:summary -->`) and upserted in place the
 same way. It combines six live settings probes (gate ruleset, environment
 pair existence, environment protection shape, engine action-pin freshness,
 approvers-team resolvability, and App installation permission drift — see
-`docs/branch-protection.md`) with a harvest of the warnings already recorded
-against this commit's shipmate workflow runs. Those warnings are not read
-from the sticky plan comment — a plan run no longer appends anything there.
-Instead, `actions/summary` runs `scripts/doctor` on every plan run and emits
-its findings as workflow-command annotations, verbatim:
+`docs/branch-protection.md`) with a harvest of the warnings GitHub already
+recorded on this commit's workflow runs (shipmate's own and any other Actions
+workflow run on that commit; third-party-app-authored check runs are
+excluded). Those warnings are not read from the sticky plan comment — a plan
+run still writes the full plan comment (overview table, per-changed-cell
+details) but no longer appends doctor findings to it. Instead,
+`actions/summary` runs `scripts/doctor` on every plan run and emits its
+findings as workflow-command annotations, verbatim:
 
 - `::warning title=shipmate doctor::<text>` for a misconfiguration,
 - `::notice title=shipmate doctor::<text>` for an informational finding.
@@ -190,8 +196,9 @@ step filters check-run annotations on, so it never re-reports a finding the
 live probes already re-state fresh against current settings — this is
 machine-read, not a formatting choice, and a mismatch between the annotate
 call and the harvest filter is a regression. `shipmate doctor` is entirely
-read-only: it authorizes nothing, writes nothing but its own sticky comment,
-and never affects `shipmate / gate`.
+read-only: it authorizes nothing, writes nothing but its own sticky comment
+(plus a one-line error comment when it cannot mint an App token), and never
+affects `shipmate / gate`.
 
 The env is optional for `apply`. A targeted `shipmate apply <env>` applies one
 environment; a bare `shipmate apply` applies **every** environment that has a

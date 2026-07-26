@@ -13,6 +13,7 @@ from importlib.machinery import SourceFileLoader
 
 _D = pathlib.Path(__file__).resolve().parents[1]
 _ACTION = (_D.parent / "actions" / "comment-ops" / "action.yml").read_text(encoding="utf-8")
+_SUMMARY_ACTION = (_D.parent / "actions" / "summary" / "action.yml").read_text(encoding="utf-8")
 
 
 def _load(fname):
@@ -42,10 +43,28 @@ def test_bot_authored_comments_are_ignored():
 
 
 def test_doctor_step_supplies_every_env_var_doctor_reads():
+    """comment-ops' doctor steps must supply every SHIPMATE_* name `doctor`
+    reads at all (subscript or .get), report mode's full env contract."""
     src = (_D / "doctor").read_text(encoding="utf-8")
     read = set(re.findall(r"os\.environ(?:\.get)?[\[(]['\"](SHIPMATE_[A-Z_]+)['\"]", src))
     for name in read:
         assert name in _ACTION, name
+
+
+def test_summary_action_supplies_every_env_var_doctor_requires_in_annotate_mode():
+    """`ctx_from_env()` runs in both `annotate` and `report` mode; a name read
+    via subscript (`os.environ["SHIPMATE_..."]`, as opposed to `.get(...)`) is
+    one annotate mode cannot run without. `actions/summary` only ever drives
+    `annotate` mode -- it has no doctor `report`/`check-ids` steps of its
+    own -- so its `env:` block must cover this required subset. This does not
+    fold into the assertion above: that one is checked against
+    `actions/comment-ops/action.yml`'s full (subscript + .get) read-set, which
+    would pass even if `actions/summary` silently dropped a required name."""
+    src = (_D / "doctor").read_text(encoding="utf-8")
+    required = set(re.findall(r"os\.environ\[['\"](SHIPMATE_[A-Z_]+)['\"]\]", src))
+    assert required, "expected at least one required SHIPMATE_* read in doctor"
+    for name in required:
+        assert name in _SUMMARY_ACTION, name
 
 
 def test_doctor_runs_in_report_mode_with_the_app_token():
