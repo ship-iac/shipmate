@@ -69,12 +69,33 @@ def test_unreadable_head_sha_marks_the_harvest_failed_before_exiting():
     """The read-only degrade path for an unreadable PR head SHA must record
     harvest_failed=true (and head_sha/run_id) to GITHUB_OUTPUT before it
     exits -- otherwise the render step reads an empty SHIPMATE_HARVEST_FAILED
-    and the sticky comment falsely claims the warning harvest ran clean."""
+    and the sticky comment falsely claims the warning harvest ran clean.
+
+    Sliced from the `if [[ ! "$head"` condition itself (not from the step's
+    start) and pinned to a single `exit 0` in the step: deleting the whole
+    degrade branch must fail this test, not vacuously pass it (the earlier
+    version sliced from the step's start, so the three substrings -- present
+    elsewhere in the step for other paths -- kept it green even with the
+    branch removed)."""
     block = _ACTION.split("id: gatherdoc", 1)[1].split("- name:", 1)[0]
-    degrade = block.split("exit 0", 1)[0]
+    assert block.count("exit 0") == 1
+    degrade = block.split('if [[ ! "$head"', 1)[1].split("exit 0", 1)[0]
     assert "head_sha=" in degrade
     assert "run_id=" in degrade
     assert "harvest_failed=true" in degrade
+
+
+def test_harvest_failed_env_falls_back_to_true_when_gatherdoc_did_not_run():
+    """The render step's `if:` keys only on `route` and `doctortoken.outcome`,
+    not on `gatherdoc.outcome` -- if gatherdoc ever reds or is skipped, its
+    `harvest_failed` output is unset. An empty string is falsy in a GHA
+    expression and a literal 'false' is truthy (non-empty), so `|| 'true'`
+    treats "gatherdoc didn't run" as a failed harvest while passing a real
+    `false` through unchanged."""
+    assert (
+        "SHIPMATE_HARVEST_FAILED: ${{ steps.gatherdoc.outputs.harvest_failed || 'true' }}"
+        in _ACTION
+    )
 
 
 def test_fullmint_requests_the_manifests_exact_permission_set():

@@ -75,6 +75,37 @@ def test_ctx_from_env_missing_cells_dir_yields_empty_envs(monkeypatch, tmp_path)
     assert ctx["envs_available"] is False
 
 
+def test_declared_envs_skips_malformed_cell_json(tmp_path):
+    # Plausible after a partial `gh run download` (one of gatherdoc's degrade
+    # paths) -- must be skipped, not raise and red the render step.
+    bad = tmp_path / "cell-summary.dev-eu.app"
+    bad.mkdir()
+    (bad / "cell.json").write_text("{not valid json", encoding="utf-8")
+    assert doctor._declared_envs(tmp_path) == set()
+
+
+def test_declared_envs_skips_cell_json_missing_environment_key(tmp_path):
+    # Well-formed JSON that isn't the expected shape (e.g. a truncated
+    # download that still parses) must degrade the same way -- KeyError, not
+    # just JSONDecodeError, is one of the guarded exceptions.
+    bad = tmp_path / "cell-summary.dev-eu.app"
+    bad.mkdir()
+    (bad / "cell.json").write_text(json.dumps({"stack": "app"}), encoding="utf-8")
+    assert doctor._declared_envs(tmp_path) == set()
+
+
+def test_declared_envs_keeps_well_formed_entries_alongside_malformed_ones(tmp_path):
+    # One bad cell.json must not take down the whole declared-env set --
+    # every other well-formed cell still contributes its environment.
+    good = tmp_path / "cell-summary.dev-eu.app"
+    good.mkdir()
+    (good / "cell.json").write_text(json.dumps({"environment": "dev-eu"}), encoding="utf-8")
+    bad = tmp_path / "cell-summary.dev-us.app"
+    bad.mkdir()
+    (bad / "cell.json").write_text("not json", encoding="utf-8")
+    assert doctor._declared_envs(tmp_path) == {"dev-eu"}
+
+
 def _gate_rule(integration_id=999, strict=True):
     return [
         {

@@ -185,31 +185,40 @@ runs:
         fi
         # Harvest: latest shipmate-authored check-run per name (check-ids mode
         # filters on app slug/id), then its annotations. Degrades to an empty
-        # harvest rather than failing the command.
+        # harvest rather than failing the command. harvest_failed is written
+        # exactly once, after every fallible step below has had a chance to
+        # flip it -- a per-id annotations-fetch failure is just as much a
+        # partial harvest as the listing or reduction failing, and an empty
+        # "ann/<id>.json" fallback is byte-identical to "no annotations", so
+        # it must not silently look like a clean, complete harvest.
         mkdir -p ann
         : > check-ids.tsv
+        harvest_failed=false
         if GH_TOKEN="$APP_TOKEN" gh api --paginate \
              "repos/$GITHUB_REPOSITORY/commits/$head/check-runs?filter=all&per_page=100" \
              --jq '.check_runs[] | {id, name, started_at, app_slug: .app.slug, app_id: .app.id}' > check-runs.jsonl; then
-          if python3 "$GITHUB_ACTION_PATH/../../scripts/doctor" < check-runs.jsonl > check-ids.tsv; then
-            echo "harvest_failed=false" >> "$GITHUB_OUTPUT"
-          else
+          if ! python3 "$GITHUB_ACTION_PATH/../../scripts/doctor" < check-runs.jsonl > check-ids.tsv; then
             echo "::warning::doctor check-ids reduction failed; doctor reports settings probes only"
             : > check-ids.tsv
-            echo "harvest_failed=true" >> "$GITHUB_OUTPUT"
+            harvest_failed=true
           fi
         else
           echo "::warning::check-runs listing failed; doctor reports settings probes only"
-          echo "harvest_failed=true" >> "$GITHUB_OUTPUT"
+          harvest_failed=true
         fi
         # per_page=100, no --paginate: --paginate concatenates the pages' JSON
         # arrays, which json.loads rejects; 100 comfortably covers GHA's
         # 10-per-level-per-step annotation caps.
         while IFS=$'\t' read -r id _name; do
           [ -z "$id" ] && continue
-          GH_TOKEN="$APP_TOKEN" gh api "repos/$GITHUB_REPOSITORY/check-runs/$id/annotations?per_page=100" \
-            > "ann/$id.json" || echo '[]' > "ann/$id.json"
+          if ! GH_TOKEN="$APP_TOKEN" gh api "repos/$GITHUB_REPOSITORY/check-runs/$id/annotations?per_page=100" \
+               > "ann/$id.json"; then
+            echo '[]' > "ann/$id.json"
+            echo "::warning::annotations fetch failed for check run $id; doctor reports a partial harvest"
+            harvest_failed=true
+          fi
         done < check-ids.tsv
+        echo "harvest_failed=$harvest_failed" >> "$GITHUB_OUTPUT"
 
     - name: Doctor — render and upsert the sticky comment
       if: ${{ steps.parse.outputs.route == 'doctor' && steps.doctortoken.outcome == 'success' }}
@@ -226,7 +235,13 @@ runs:
         SHIPMATE_PLAN_RUN_ID: ${{ steps.gatherdoc.outputs.run_id }}
         SHIPMATE_ANNOTATIONS_DIR: ann
         SHIPMATE_CHECK_IDS: check-ids.tsv
-        SHIPMATE_HARVEST_FAILED: ${{ steps.gatherdoc.outputs.harvest_failed }}
+        # `|| 'true'`: this render step's `if:` doesn't key on gatherdoc's
+        # outcome, so if that step ever reds or is skipped, its output is
+        # unset -- an empty string is falsy in this expression, so the
+        # fallback fires and the harvest is (correctly) treated as failed
+        # rather than silently reading as SHIPMATE_HARVEST_FAILED=false. A
+        # real 'false' is a non-empty string, hence truthy, and passes through.
+        SHIPMATE_HARVEST_FAILED: ${{ steps.gatherdoc.outputs.harvest_failed || 'true' }}
         SHIPMATE_APP_PERMISSIONS_CHECKED: 'true'
         # Workflow token for the pin probe's cross-repo release read — the
         # App token is scoped to the consumer repo.

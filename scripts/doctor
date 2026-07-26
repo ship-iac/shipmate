@@ -369,10 +369,16 @@ def render_annotations(findings):
 
 
 def _declared_envs(cells_dir):
-    envs = {
-        json.loads(cj.read_text(encoding="utf-8"))["environment"]
-        for cj in cells_dir.glob("cell-summary.*/cell.json")
-    }
+    """Skip a cell.json that can't be read/parsed or lacks "environment"
+    rather than raising: a truncated or malformed file is plausible after a
+    partial `gh run download` (one of the degrade paths feeding this
+    directory), and doctor must never fail a run over a single bad file."""
+    envs = set()
+    for cj in cells_dir.glob("cell-summary.*/cell.json"):
+        try:
+            envs.add(json.loads(cj.read_text(encoding="utf-8"))["environment"])
+        except (OSError, ValueError, KeyError, TypeError):
+            continue
     return envs
 
 
