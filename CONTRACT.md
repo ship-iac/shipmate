@@ -508,6 +508,47 @@ reviewed plan. plan-cell and apply-cell use a byte-identical algorithm
 (`scripts/plan-classify`). On mismatch, apply fails safe and reports differing
 variable **names** only — never values.
 
+## Secrets in published output
+
+Both text surfaces shipmate publishes — the rendered plan `plan.txt` in the
+sticky plan comment and the job step summary, and `apply.txt` in the apply
+result comment — carry whatever the tool wrote: **shipmate never redacts
+either**, and neither is covered by GitHub's log secret masking. (The published
+text is not byte-identical — escape sequences are stripped, undecodable bytes
+become replacement characters, and over-cap sections are truncated, per Plan
+comment and Apply result comment above — but none of that removes a secret.)
+
+Masking applies to the log stream the runner consumes. Both files are written
+out of the tool's own stdout (`tofu show > plan.txt`,
+`… apply 2>&1 | tee apply.txt`), and the runner never sees the bytes on the
+file side of that write, so a value that appears as `***` in the job log is
+written unmasked into the artifact and into the comment. **Do not rely on
+masking for anything shipmate publishes**, including the step summary — the
+comment and the artifact are the file bytes, and nothing redacts them on the
+way out. On a public repository the comments are world-readable.
+
+**Redaction is the consumer's job, and OpenTofu's `sensitive` marking is the
+mechanism.** A variable declared `sensitive = true`, or a provider attribute
+marked sensitive in its schema, is redacted in `tofu show` output, so it does
+not reach either comment through the rendered plan or a normal apply. Consumers
+must mark every secret-bearing variable and output accordingly. Marking is
+best-effort, not a guarantee: it suppresses the value where OpenTofu knows to,
+and error paths can still surface one. GitHub masking is not a substitute even
+where it does apply — it only covers values registered as GitHub secrets, not a
+credential a provider fetches at runtime.
+
+Two residual paths OpenTofu cannot redact, and shipmate does not attempt to:
+
+- a provider or `local-exec` provisioner that writes a secret into its own
+  stdout/stderr (only `apply.txt` carries stderr; this is the one exposure the
+  apply surface has that the plan surface does not),
+- a secret-bearing variable or output the consumer left unmarked.
+
+Both are defects in the consuming configuration or its provider, not in the
+engine, and both are equally visible in the plan artifact — the machine plan
+`stack.otplan` stores values in the clear regardless of `sensitive` marking
+(see Plan artifact encryption, below).
+
 ## Plan artifact encryption
 
 The reviewed machine plan file (`stack.otplan`) can be encrypted at rest in the
@@ -534,12 +575,11 @@ workflows.
   the exact-plan invariant catches it — `tofu apply` rejects the garbage plan and
   the apply check stays pending.
 - **Scope: the machine plan file only.** `fingerprint.txt` is a hash and stays
-  plain. The rendered plan `plan.txt` — in the `cell-summary` artifact and in the
-  PR sticky comment / check-run text — **stays plaintext**: it is the
-  deliberately-public reviewer view. A consumer with secret-bearing plans must
-  use provider-level `sensitive` marking so those values are redacted in the
-  rendered output; encryption alone does not hide them from anyone who can read
-  the PR or download the `cell-summary` artifact.
+  plain. The rendered plan `plan.txt` — in the `cell-summary` artifact, the PR
+  sticky comment, and the job step summary — **stays plaintext**: it is the
+  deliberately-public reviewer view, as is `apply.txt`. Encryption protects the
+  machine plan at rest and nothing else; redaction in the published text comes
+  from `sensitive` marking (see Secrets in published output, above).
 - **Both sides must agree.** `plan-cell` (encrypt) and `apply-cell` (decrypt) are
   pinned independently (`plan.yml` vs `apply.yml`); the passphrase and the
   engine SHA must match on both. A mismatch surfaces as the fail-safe above, not
