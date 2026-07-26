@@ -475,6 +475,24 @@ def test_resolvable_team_silent(monkeypatch):
     assert doctor._team_warnings(_ctx(team="ops")) == []
 
 
+def test_team_response_without_slug_warned(monkeypatch):
+    """A 200 response that isn't actually the team resource (e.g. the team-slug
+    input carrying a path segment that happens to hit some other list endpoint)
+    must not be mistaken for a resolved team."""
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: {"id": 1})
+    out = doctor._team_warnings(_ctx(team="ops"))
+    assert len(out) == 1
+    assert out[0][0] == doctor.WARNING
+
+
+def test_one_line_flattens_and_pins_the_truncation_boundary():
+    assert doctor._one_line(" a\nb\tc ") == "a b c"
+    assert doctor._one_line("x" * 10, limit=10) == "x" * 10  # at the limit: untouched
+    out = doctor._one_line("x" * 11, limit=10)
+    assert len(out) == 10 and out.endswith("…")  # never longer than `limit`
+    assert len(doctor._one_line("é" * 300, limit=120)) == 120  # code points, not bytes
+
+
 def test_app_permission_probe_skipped_when_not_attempted():
     assert doctor._app_permission_warnings(_ctx(app_permissions_checked=False)) == []
 

@@ -22,7 +22,7 @@ Probes:
 - engine action-pin freshness in the consumer's workflow files: a tag/branch
   pin is a warning, a SHA pin behind the engine's latest release is a warning.
 - approvers team resolvability: the configured SHIPMATE_APPROVERS_TEAM must
-  resolve in the repo's org, or every apply is silently rejected.
+  resolve in the repo's org, or every apply is rejected as "not a team member".
 - GitHub App installation permission drift: a failed installation-token mint
   against the App's declared manifest permissions means one was never
   re-accepted after a manifest change.
@@ -280,17 +280,20 @@ def _team_warnings(ctx):
     if not ctx["team"]:
         return []
     try:
-        _gh_json(f"orgs/{ctx['owner']}/teams/{ctx['team']}")
+        team = _gh_json(f"orgs/{ctx['owner']}/teams/{ctx['team']}")
+        resolved = isinstance(team, dict) and bool(team.get("slug"))
     except (Exception, SystemExit):  # noqa: BLE001 - a failed lookup IS the finding
-        return [
-            (
-                WARNING,
-                f"approvers team `{ctx['team']}` does not resolve in org `{ctx['owner']}` — "
-                'every `shipmate apply` will be rejected as "not a team member". Check the '
-                "SHIPMATE_APPROVERS_TEAM variable and that the App has members:read.",
-            )
-        ]
-    return []
+        resolved = False
+    if resolved:
+        return []
+    return [
+        (
+            WARNING,
+            f"approvers team `{ctx['team']}` does not resolve in org `{ctx['owner']}` — "
+            'every `shipmate apply` will be rejected as "not a team member". Check the '
+            "SHIPMATE_APPROVERS_TEAM variable and that the App has members:read.",
+        )
+    ]
 
 
 def _app_permission_warnings(ctx):
