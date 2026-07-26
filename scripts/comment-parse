@@ -3,7 +3,7 @@
 
 Grammar: `shipmate <verb> [env] [tag-filter]`. Injection-safe: the whole
 command line must match one anchored regex; nothing is ever passed to a
-shell. `apply` is active from day one; `plan`/`destroy` are reserved
+shell. `apply`, `doctor` and `help` are active; `plan`/`destroy` are reserved
 (recognized, rejected with a "reserved" message so the grammar is stable as
 verbs are added).
 env is optional: a bare `shipmate apply` targets every non-explicit
@@ -13,6 +13,7 @@ because ':' is outside the env charset.
 
 import os
 import re
+import sys
 
 # `shipmate` as a whole word, then verb, optional env, optional tag-filter.
 # env is lower kebab (matches GitHub env naming); tag-filter allows the
@@ -23,8 +24,53 @@ _CMD = re.compile(
     r"(?: (?P<tag>[A-Za-z0-9][A-Za-z0-9/_:.-]*))?$"
 )
 _SHIPMATE_LINE = re.compile(r"^shipmate\b")
-VERBS_ACTIVE = {"apply"}
-VERBS_RESERVED = {"plan", "destroy"}
+
+ACTIVE = "active"
+RESERVED = "reserved"
+HELP_MARKER = "<!-- shipmate:help -->"
+
+# Single source of truth for the grammar, the help comment and the reject hint:
+# adding a verb is a one-line change here. `args` is the documented arg shape
+# ("" = the verb takes none, and supplying one is an error rather than being
+# silently ignored). `route` is the value actions/comment-ops branches on.
+VERBS = {
+    "apply": {
+        "status": ACTIVE,
+        "args": "[env]",
+        "route": "apply",
+        "desc": (
+            "Apply the reviewed plan for one environment, or every non-explicit "
+            "environment when the environment is omitted."
+        ),
+    },
+    "doctor": {
+        "status": ACTIVE,
+        "args": "",
+        "route": "doctor",
+        "desc": (
+            "Report setup problems: repository settings, environments, App "
+            "permissions, and warnings from this commit's shipmate runs."
+        ),
+    },
+    "help": {
+        "status": ACTIVE,
+        "args": "",
+        "route": "help",
+        "desc": "Show this command list.",
+    },
+    "plan": {
+        "status": RESERVED,
+        "args": "[env]",
+        "route": None,
+        "desc": "Re-plan on demand — not yet implemented.",
+    },
+    "destroy": {
+        "status": RESERVED,
+        "args": "[env]",
+        "route": None,
+        "desc": "Destroy an environment's stacks — not yet implemented.",
+    },
+}
 
 
 def _is_recognized_command(line):
@@ -32,7 +78,7 @@ def _is_recognized_command(line):
     shipmate knows about (active or reserved) -- as opposed to merely fitting
     the generic `shipmate <word> <word>` shape (e.g. `shipmate is great`)."""
     m = _CMD.match(line)
-    return m is not None and m.group("verb") in (VERBS_ACTIVE | VERBS_RESERVED)
+    return m is not None and m.group("verb") in VERBS
 
 
 def parse(body):
@@ -43,6 +89,7 @@ def parse(body):
         "verb": None,
         "env": None,
         "tag_filter": None,
+        "route": None,
         "error": None,
     }
     lines = [ln.strip() for ln in body.splitlines()]
@@ -62,22 +109,64 @@ def parse(body):
         return result
     verb, env, tag = m.group("verb"), m.group("env"), m.group("tag")
     result.update(verb=verb, env=env, tag_filter=tag)
-    if verb in VERBS_RESERVED:
+    spec = VERBS.get(verb)
+    if spec is None:
+        result["error"] = f"unknown verb `{verb}` (try `shipmate help`)"
+        return result
+    if spec["status"] == RESERVED:
         result["error"] = f"verb `{verb}` is reserved and not yet implemented"
         return result
-    if verb not in VERBS_ACTIVE:
-        result["error"] = f"unknown verb `{verb}` (supported: {', '.join(sorted(VERBS_ACTIVE))})"
+    if spec["args"] == "" and (env is not None or tag is not None):
+        result["error"] = f"`{verb}` takes no arguments (use `shipmate {verb}`)"
         return result
     if tag is not None:
         # Parsed for forward-compat, but no component honors it yet — reject
         # rather than silently apply the whole env (matches reserved-verb handling).
         result["error"] = "tag-filter is not yet supported (omit it: `shipmate <verb> [env]`)"
         return result
+    result["route"] = spec["route"]
     result["valid"] = True
     return result
 
 
+def help_markdown():
+    """The command list, rendered from VERBS so it cannot drift from the parser.
+
+    Every usage string is inside backticks or a table cell on purpose: a bare
+    line matching `_CMD` would make this very comment a shipmate command and
+    retrigger comment-ops on the bot's own comment
+    (test_help_has_no_bare_command_line guards it).
+    """
+    lines = [
+        HELP_MARKER,
+        "### shipmate commands",
+        "",
+        "Comment one of these on a pull request:",
+        "",
+        "| command | status | what it does |",
+        "| --- | --- | --- |",
+    ]
+    for verb in sorted(VERBS):
+        spec = VERBS[verb]
+        usage = f"shipmate {verb}" + (f" {spec['args']}" if spec["args"] else "")
+        status = "" if spec["status"] == ACTIVE else "reserved"
+        lines.append(f"| `{usage}` | {status} | {spec['desc']} |")
+    lines += [
+        "",
+        (
+            "The environment is a GitHub Environment name such as `dev-eu`. "
+            "Applying requires approvers-team membership, an approving review "
+            "where the branch ruleset asks for one, and a plan for the current "
+            "head commit; `doctor` and `help` are read-only and open to anyone."
+        ),
+    ]
+    return "\n".join(lines)
+
+
 def main():
+    if "--help-markdown" in sys.argv:
+        print(help_markdown())
+        return
     r = parse(os.environ.get("COMMENT_BODY", ""))
     with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
         fh.write(f"is_command={'true' if r['is_command'] else 'false'}\n")
@@ -85,6 +174,7 @@ def main():
         fh.write(f"verb={r['verb'] or ''}\n")
         fh.write(f"env={r['env'] or ''}\n")
         fh.write(f"tag_filter={r['tag_filter'] or ''}\n")
+        fh.write(f"route={r['route'] or ''}\n")
         fh.write(f"error={r['error'] or ''}\n")
 
 

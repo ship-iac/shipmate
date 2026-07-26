@@ -2,6 +2,8 @@ import importlib.util
 import pathlib
 from importlib.machinery import SourceFileLoader
 
+import pytest
+
 _D = pathlib.Path(__file__).resolve().parents[1]
 
 
@@ -24,6 +26,7 @@ def test_valid_apply():
         "verb": "apply",
         "env": "dev-eu",
         "tag_filter": None,
+        "route": "apply",
         "error": None,
     }
 
@@ -71,6 +74,7 @@ def test_bare_apply_targets_all_envs():
         "verb": "apply",
         "env": None,
         "tag_filter": None,
+        "route": "apply",
         "error": None,
     }
 
@@ -141,6 +145,7 @@ def test_earlier_shipmate_prefixed_chatter_does_not_block_later_valid_command():
         "verb": "apply",
         "env": "dev-eu",
         "tag_filter": None,
+        "route": "apply",
         "error": None,
     }
 
@@ -148,3 +153,56 @@ def test_earlier_shipmate_prefixed_chatter_does_not_block_later_valid_command():
 def test_pure_garbage_shipmate_line_still_errors():
     r = cp.parse("shipmate is great")
     assert r["is_command"] and not r["valid"] and r["error"]
+
+
+def test_registry_shape():
+    for verb, spec in cp.VERBS.items():
+        assert spec["status"] in (cp.ACTIVE, cp.RESERVED), verb
+        assert spec["args"] in ("", "[env]"), verb
+        assert spec["desc"].strip(), verb
+        if spec["status"] == cp.ACTIVE:
+            assert spec["route"], verb
+        else:
+            assert spec["route"] is None, verb
+
+
+def test_route_per_verb():
+    assert cp.parse("shipmate apply dev-eu")["route"] == "apply"
+    assert cp.parse("shipmate doctor")["route"] == "doctor"
+    assert cp.parse("shipmate help")["route"] == "help"
+    assert cp.parse("shipmate plan")["route"] is None
+    assert cp.parse("nothing to see here")["route"] is None
+
+
+@pytest.mark.parametrize(
+    "verb",
+    sorted(v for v, s in cp.VERBS.items() if s["status"] == cp.ACTIVE and s["args"] == ""),
+)
+def test_no_arg_verb_rejects_arguments(verb):
+    r = cp.parse(f"shipmate {verb} dev-eu")
+    assert r["is_command"] is True
+    assert r["valid"] is False
+    assert "takes no arguments" in r["error"]
+    assert r["route"] is None
+
+
+def test_unknown_verb_points_at_help():
+    r = cp.parse("shipmate frobnicate")
+    assert r["valid"] is False
+    assert "shipmate help" in r["error"]
+
+
+def test_help_markdown_lists_every_verb():
+    md = cp.help_markdown()
+    assert md.startswith(cp.HELP_MARKER)
+    for verb, spec in cp.VERBS.items():
+        assert f"shipmate {verb}" in md
+        assert spec["desc"].split(".")[0] in md
+    assert "reserved" in md  # reserved verbs are shown as such, not hidden
+
+
+def test_help_has_no_bare_command_line():
+    """A bare line matching the grammar would make the help comment itself a
+    command and retrigger comment-ops on the bot's own comment."""
+    for line in cp.help_markdown().splitlines():
+        assert cp._CMD.match(line.strip()) is None, line
