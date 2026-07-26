@@ -17,12 +17,18 @@ Probes:
   contexts include 'shipmate / gate' pinned to integration_id == the shipmate
   App id, with strict (up-to-date) policy on.
 - GitHub Environment pair (<env>, <env>-apply) exists for every planned env.
+- protection shape of that pair: a plan env must have no reviewers and no
+  branch policy; an apply env with no protection is worth a note.
+- engine action-pin freshness in the consumer's workflow files: a tag/branch
+  pin is a warning, a SHA pin behind the engine's latest release is a warning.
 """
 
+import base64
 import importlib.util
 import json
 import os
 import pathlib
+import re
 import sys
 from importlib.machinery import SourceFileLoader
 
@@ -115,9 +121,145 @@ def _environment_warnings(ctx):
     return out
 
 
+def _env_protection_warnings(ctx):
+    """Plan/apply env split, checked live. A required reviewer or branch policy
+    on a PLAN env makes plan jobs hang pending approval — no error, just a
+    stalled matrix, which is the hardest shipmate misconfiguration to diagnose.
+    An APPLY env with no protection at all is the mirror problem: pre-merge
+    applies to it are unreviewed."""
+    out = []
+    for env in sorted(ctx["envs"]):
+        for name, is_apply in ((env, False), (f"{env}-apply", True)):
+            try:
+                data = _gh_json(f"repos/{ctx['repo']}/environments/{name}")
+            except (Exception, SystemExit):  # noqa: BLE001, S112 - existence isn't this probe's job
+                continue
+            rules = sorted(
+                {r.get("type") for r in data.get("protection_rules", []) if r.get("type")}
+            )
+            policy = data.get("deployment_branch_policy")
+            if not is_apply and rules:
+                out.append(
+                    (
+                        WARNING,
+                        f"GitHub Environment `{name}` is a plan environment but has "
+                        f"protection rules ({', '.join(rules)}) — plan jobs will hang "
+                        f"waiting for approval; put reviewers on `{env}-apply` instead.",
+                    )
+                )
+            if not is_apply and policy:
+                out.append(
+                    (
+                        WARNING,
+                        f"GitHub Environment `{name}` is a plan environment but has a "
+                        "deployment branch policy — plans from feature branches will be "
+                        "refused; plan environments must allow all branches.",
+                    )
+                )
+            if is_apply and not rules:
+                # NOTICE, not WARNING: legitimate for dev-tier envs.
+                out.append(
+                    (
+                        NOTICE,
+                        f"GitHub Environment `{name}` has no protection rules — "
+                        "pre-merge applies to it are unreviewed.",
+                    )
+                )
+    return out
+
+
+_PIN = re.compile(
+    r"(?P<owner>[\w.-]+)/(?P<repo>[\w.-]+)/(?:actions|\.github)/[\w./-]+@(?P<ref>[\w.-]+)"
+)
+_SHA40 = re.compile(r"[0-9a-f]{40}")
+
+
+def _pins_in_workflows(ctx):
+    """(warnings, {slug: {(file, sha)}}) for every cross-repo action pin found
+    in the consumer's workflow files. The engine's owner/repo comes from the
+    pin itself — shipmate never hardcodes an org."""
+    out, seen = [], {}
+    listing = _gh_json(f"repos/{ctx['repo']}/contents/.github/workflows")
+    for entry in listing:
+        if not entry["name"].endswith((".yml", ".yaml")):
+            continue
+        blob = _gh_json(f"repos/{ctx['repo']}/contents/.github/workflows/{entry['name']}")
+        text = base64.b64decode(blob.get("content", "")).decode("utf-8", "replace")
+        for m in _PIN.finditer(text):
+            slug, ref = f"{m.group('owner')}/{m.group('repo')}", m.group("ref")
+            if slug == ctx["repo"]:
+                continue  # a repo pinning its own actions is not an engine pin
+            if not _SHA40.fullmatch(ref):
+                out.append(
+                    (
+                        WARNING,
+                        f"`{entry['name']}` pins `{slug}@{ref}` by tag or branch — pin a "
+                        "commit SHA (a moving ref lets the engine change under your "
+                        "deploy credentials).",
+                    )
+                )
+                continue
+            seen.setdefault(slug, set()).add((entry["name"], ref))
+    return out, seen
+
+
+def _latest_release_sha(slug):
+    """(tag, sha) of `slug`'s latest release; (None, None) when unreadable.
+
+    Cross-repo read: the ambient GH_TOKEN is an App installation token scoped
+    to the consumer repo and may not read the engine repo. Prefer
+    SHIPMATE_PUBLIC_TOKEN (the workflow token — enough for a public-repo read)
+    for these two calls only, restoring GH_TOKEN afterwards.
+    """
+    saved, public = os.environ.get("GH_TOKEN"), os.environ.get("SHIPMATE_PUBLIC_TOKEN")
+    if public:
+        os.environ["GH_TOKEN"] = public
+    try:
+        tag = _gh_json(f"repos/{slug}/releases/latest").get("tag_name")
+        if not tag:
+            return None, None
+        return tag, _gh_json(f"repos/{slug}/commits/{tag}").get("sha")
+    except (Exception, SystemExit):  # noqa: BLE001 - unreadable release is a NOTICE upstream
+        return None, None
+    finally:
+        if public:
+            if saved is None:
+                os.environ.pop("GH_TOKEN", None)
+            else:
+                os.environ["GH_TOKEN"] = saved
+
+
+def _pin_warnings(ctx):
+    out, seen = _pins_in_workflows(ctx)
+    for slug, pins in sorted(seen.items()):
+        tag, sha = _latest_release_sha(slug)
+        if not sha:
+            # NOTICE, not WARNING: degrade, don't alarm.
+            out.append(
+                (
+                    NOTICE,
+                    f"could not read `{slug}`'s latest release — engine pin freshness "
+                    "not verified.",
+                )
+            )
+            continue
+        stale = sorted({(f, ref) for f, ref in pins if ref != sha})
+        for fname, ref in stale:
+            out.append(
+                (
+                    WARNING,
+                    f"`{fname}` pins `{slug}@{ref[:7]}` but the latest release {tag} is "
+                    f"`{sha[:7]}` — re-pin to pick up fixes.",
+                )
+            )
+    return out
+
+
 PROBES = (
     _gate_rule_warnings,
     _environment_warnings,
+    _env_protection_warnings,
+    _pin_warnings,
 )
 
 
