@@ -21,6 +21,11 @@ Probes:
   branch policy; an apply env with no protection is worth a note.
 - engine action-pin freshness in the consumer's workflow files: a tag/branch
   pin is a warning, a SHA pin behind the engine's latest release is a warning.
+- approvers team resolvability: the configured SHIPMATE_APPROVERS_TEAM must
+  resolve in the repo's org, or every apply is silently rejected.
+- GitHub App installation permission drift: a failed installation-token mint
+  against the App's declared manifest permissions means one was never
+  re-accepted after a manifest change.
 """
 
 import base64
@@ -264,11 +269,54 @@ def _pin_warnings(ctx):
     return out
 
 
+def _one_line(s, limit=200):
+    flat = " ".join(s.split())
+    return flat if len(flat) <= limit else flat[: limit - 1] + "…"
+
+
+def _team_warnings(ctx):
+    """A typo'd or cross-org SHIPMATE_APPROVERS_TEAM surfaces today only as
+    every apply being rejected "not a team member" — one API call names it."""
+    if not ctx["team"]:
+        return []
+    try:
+        _gh_json(f"orgs/{ctx['owner']}/teams/{ctx['team']}")
+    except (Exception, SystemExit):  # noqa: BLE001 - a failed lookup IS the finding
+        return [
+            (
+                WARNING,
+                f"approvers team `{ctx['team']}` does not resolve in org `{ctx['owner']}` — "
+                'every `shipmate apply` will be rejected as "not a team member". Check the '
+                "SHIPMATE_APPROVERS_TEAM variable and that the App has members:read.",
+            )
+        ]
+    return []
+
+
+def _app_permission_warnings(ctx):
+    """The comment path attempts an installation-token mint requesting every
+    permission app/manifest.json declares; a failed mint means the installation
+    is missing one — typical after a manifest bump nobody re-approved. Skipped
+    where no such attempt was made."""
+    if not ctx["app_permissions_checked"] or not ctx["app_permission_error"]:
+        return []
+    return [
+        (
+            WARNING,
+            "the shipmate App installation is missing at least one permission the manifest "
+            f"declares ({_one_line(ctx['app_permission_error'])}) — re-accept the App's "
+            "permission request in the installation settings.",
+        )
+    ]
+
+
 PROBES = (
     _gate_rule_warnings,
     _environment_warnings,
     _env_protection_warnings,
     _pin_warnings,
+    _team_warnings,
+    _app_permission_warnings,
 )
 
 

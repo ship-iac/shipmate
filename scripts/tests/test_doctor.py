@@ -450,3 +450,47 @@ def test_release_lookup_restores_gh_token_unset(monkeypatch):
     monkeypatch.setenv("SHIPMATE_PUBLIC_TOKEN", "workflow-token")
     assert doctor._latest_release_sha("acme/engine") == ("v1.4.0", _SHA)
     assert "GH_TOKEN" not in os.environ
+
+
+def test_team_probe_skipped_without_team(monkeypatch):
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: (_ for _ in ()).throw(AssertionError))
+    assert doctor._team_warnings(_ctx(team=None)) == []
+
+
+def test_unresolvable_team_warned(monkeypatch):
+    def boom(path):
+        assert path == "orgs/o/teams/ops-tem"
+        raise SystemExit("404 Not Found")
+
+    monkeypatch.setattr(doctor, "_gh_json", boom)
+    out = doctor._team_warnings(_ctx(team="ops-tem"))
+    assert len(out) == 1
+    assert out[0][0] == doctor.WARNING
+    assert "ops-tem" in out[0][1]
+    assert "SHIPMATE_APPROVERS_TEAM" in out[0][1]
+
+
+def test_resolvable_team_silent(monkeypatch):
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: {"slug": "ops"})
+    assert doctor._team_warnings(_ctx(team="ops")) == []
+
+
+def test_app_permission_probe_skipped_when_not_attempted():
+    assert doctor._app_permission_warnings(_ctx(app_permissions_checked=False)) == []
+
+
+def test_app_permission_ok_silent():
+    ctx = _ctx(app_permissions_checked=True, app_permission_error="")
+    assert doctor._app_permission_warnings(ctx) == []
+
+
+def test_app_permission_failure_warned():
+    ctx = _ctx(
+        app_permissions_checked=True,
+        app_permission_error="422 permissions requested are not granted\nsecond line",
+    )
+    out = doctor._app_permission_warnings(ctx)
+    assert len(out) == 1
+    assert out[0][0] == doctor.WARNING
+    assert "missing at least one permission" in out[0][1]
+    assert "\n" not in out[0][1]
