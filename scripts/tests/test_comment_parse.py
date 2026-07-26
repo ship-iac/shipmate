@@ -2,6 +2,8 @@ import importlib.util
 import pathlib
 from importlib.machinery import SourceFileLoader
 
+import pytest
+
 _D = pathlib.Path(__file__).resolve().parents[1]
 
 
@@ -24,6 +26,7 @@ def test_valid_apply():
         "verb": "apply",
         "env": "dev-eu",
         "tag_filter": None,
+        "route": "apply",
         "error": None,
     }
 
@@ -71,6 +74,7 @@ def test_bare_apply_targets_all_envs():
         "verb": "apply",
         "env": None,
         "tag_filter": None,
+        "route": "apply",
         "error": None,
     }
 
@@ -141,6 +145,7 @@ def test_earlier_shipmate_prefixed_chatter_does_not_block_later_valid_command():
         "verb": "apply",
         "env": "dev-eu",
         "tag_filter": None,
+        "route": "apply",
         "error": None,
     }
 
@@ -148,3 +153,106 @@ def test_earlier_shipmate_prefixed_chatter_does_not_block_later_valid_command():
 def test_pure_garbage_shipmate_line_still_errors():
     r = cp.parse("shipmate is great")
     assert r["is_command"] and not r["valid"] and r["error"]
+
+
+def test_registry_shape():
+    for verb, spec in cp.VERBS.items():
+        assert spec["status"] in (cp.ACTIVE, cp.RESERVED), verb
+        assert spec["args"] in ("", "[env]"), verb
+        assert spec["desc"].strip(), verb
+        if spec["status"] == cp.ACTIVE:
+            assert spec["route"], verb
+        else:
+            assert spec["route"] is None, verb
+
+
+def test_route_per_verb():
+    assert cp.parse("shipmate apply dev-eu")["route"] == "apply"
+    assert cp.parse("shipmate doctor")["route"] == "doctor"
+    assert cp.parse("shipmate help")["route"] == "help"
+    assert cp.parse("shipmate plan")["route"] is None
+    assert cp.parse("nothing to see here")["route"] is None
+
+
+@pytest.mark.parametrize(
+    "verb",
+    sorted(v for v, s in cp.VERBS.items() if s["status"] == cp.ACTIVE and s["args"] == ""),
+)
+def test_no_arg_verb_rejects_arguments(verb):
+    r = cp.parse(f"shipmate {verb} dev-eu")
+    assert r["is_command"] is True
+    assert r["valid"] is False
+    assert "takes no arguments" in r["error"]
+    assert r["route"] is None
+
+
+def test_unknown_verb_points_at_help():
+    r = cp.parse("shipmate frobnicate")
+    assert r["valid"] is False
+    assert "shipmate help" in r["error"]
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "shipmate Doctor",  # verb charset is lowercase-only
+        "shipmate  apply",  # double space
+        "shipmate apply dev-eu --auto",  # a token outside both optional charsets
+        "shipmate apply dev-eu; rm -rf /",
+    ],
+)
+def test_malformed_command_points_at_help(body):
+    # Everything that fails _CMD outright lands on the malformed message, and
+    # every one of these is a typo the verb list resolves -- so it carries the
+    # same `shipmate help` hint the unknown-verb path does. (`shipmate apply
+    # dev_eu` is NOT one of them: '_' is in the tag charset, so it parses as a
+    # tag-filter and gets the "not yet supported" error, pinned above.)
+    r = cp.parse(body)
+    assert r["is_command"] is True
+    assert r["valid"] is False
+    assert "malformed" in r["error"]
+    assert "shipmate help" in r["error"]
+
+
+def test_help_markdown_lists_every_verb():
+    md = cp.help_markdown()
+    assert md.startswith(cp.HELP_MARKER)
+    for verb, spec in cp.VERBS.items():
+        assert f"shipmate {verb}" in md
+        assert spec["desc"].split(".")[0] in md
+    assert "reserved" in md  # reserved verbs are shown as such, not hidden
+
+
+def test_help_has_no_bare_command_line():
+    """A bare line matching the grammar would make the help comment itself a
+    command and retrigger comment-ops on the bot's own comment."""
+    for line in cp.help_markdown().splitlines():
+        assert cp._CMD.match(line.strip()) is None, line
+    # is_command is set by _CMD OR _SHIPMATE_LINE (^shipmate\b) -- the
+    # per-line check above only covers _CMD, so also assert the property
+    # that actually matters: parsing the whole rendered comment must not
+    # be recognized as a command at all.
+    assert cp.parse(cp.help_markdown())["is_command"] is False
+
+
+def test_main_writes_route_output(tmp_path, monkeypatch):
+    # Pins main()'s route= output line: `actions/comment-ops` branches on
+    # steps.parse.outputs.route, so a rename on either side must fail here,
+    # not fail silently green.
+    out = tmp_path / "out.txt"
+    out.touch()
+    monkeypatch.setenv("COMMENT_BODY", "shipmate apply dev-eu")
+    monkeypatch.setenv("GITHUB_OUTPUT", str(out))
+    cp.main()
+    lines = out.read_text(encoding="utf-8").splitlines()
+    assert "route=apply" in lines
+
+
+def test_main_help_markdown_flag(monkeypatch, capsys):
+    # Pins the --help-markdown CLI surface: it must print help_markdown() to
+    # stdout and return WITHOUT ever needing GITHUB_OUTPUT -- unset it to
+    # prove that path isn't touched (main() would raise KeyError otherwise).
+    monkeypatch.setattr("sys.argv", ["comment-parse", "--help-markdown"])
+    monkeypatch.delenv("GITHUB_OUTPUT", raising=False)
+    cp.main()
+    assert capsys.readouterr().out.startswith(cp.HELP_MARKER)

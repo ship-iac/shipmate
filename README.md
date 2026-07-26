@@ -41,17 +41,18 @@ protection rules stay simple even as the number of underlying units grows.
 
 ## Comment-ops
 
-Humans drive apply behavior for a pull request through PR comments —
-`shipmate apply <env>` — rather than through bespoke UI or external tooling.
+Humans drive shipmate for a pull request through PR comments — `shipmate
+apply <env>` and friends — rather than through bespoke UI or external tooling.
 A private GitHub App mints the short-lived token needed to dispatch the apply
 workflow from a comment (events created with the default `GITHUB_TOKEN` never
 trigger other workflows); the same App also authors the apply checks, the
-`shipmate / gate` status, the sticky plan comment, a fresh apply result
-comment on every apply run, and drift issues, each via a freshly minted
-installation token. Unlike the sticky plan comment, the apply result
-comment is never upserted: each run posts a new comment with a per-cell
-status table and the collapsed full apply output for every attempted cell,
-so a failure-then-retry sequence stays visible as an audit trail. The plan
+`shipmate / gate` status, the sticky plan comment, the `shipmate doctor`
+sticky report, a fresh apply result comment on every apply run, and drift
+issues, each via a freshly minted installation token. Unlike the sticky
+plan comment, the apply result comment is never upserted: each run posts a
+new comment with a per-cell status table and the collapsed full apply
+output for every attempted cell, so a failure-then-retry sequence stays
+visible as an audit trail. The plan
 matrix job's own `<stack> / <env>` check-run stays on the shared
 `github-actions` identity — it's the job's own auto check-run, not something
 the App creates separately.
@@ -61,6 +62,52 @@ Comment-ops keeps the entire interaction surface inside the pull request
 that is already the unit of review, with an auditable history of who asked
 for what and when. See `CONTRACT.md` for the full grammar and authorization
 contract, and `docs/github-app.md` for one-time App setup.
+
+### PR comment commands
+
+Three verbs are active (`plan` and `destroy` are reserved for later):
+
+- `shipmate apply [env]` — apply the reviewed plan for one environment, or
+  every non-explicit environment when the environment is omitted.
+- `shipmate doctor` — report setup problems: repository settings,
+  environments, App permissions, and warnings from this commit's workflow
+  runs.
+- `shipmate help` — show this command list.
+
+The sticky plan comment's footer points at `shipmate help`, so the commands are
+discoverable from the pull request itself. `doctor`'s environment checks cover
+the environments of the stacks a given pull request changed, and its report says
+which ones those were — it is a check on the settings that pull request touches,
+not a repository-wide audit.
+
+`help` and `doctor` are read-only; `apply` is the one verb with a full
+authorization check (approvers-team membership, a mergeable and reviewed PR, and
+a reviewed plan for the current head — see Comment-ops above). `help` answers
+any commenter. `doctor` does not: it names the guardrails this repository is
+missing — that `shipmate / gate` is not required on the default branch, that an
+apply environment has no approval rule, which approvers team is configured
+and whether it resolves — so the engine runs it only for a commenter GitHub
+classifies as `OWNER`, `MEMBER` or `COLLABORATOR`: organization members and
+repository collaborators. Anyone else gets a one-line refusal; no App token is
+minted and no probe runs. Adopting the gate takes only a re-pin of the engine
+SHA — no new input, no new workflow permission.
+
+Three limits worth knowing. `author_association` is GitHub's own classification
+of the author, **not a check for write access**, and it errs both ways: a
+collaborator invited with only the **Read** role and an organization member whose
+base repository permission is **None** are still admitted to the report, while an
+organization member whose membership is **private** is reported as `NONE` and is
+refused unless they are also a direct collaborator. What the gate does buy is
+that an account with no declared relationship to the repository is refused.
+`shipmate help` is not gated at all. And the report is an ordinary comment, so
+once someone with access asks for it, everyone who can read the pull request can
+read it. On a **public** repository you can add a second layer by restricting
+who can trigger the
+comment-ops workflow — a `github.event.comment.author_association` condition on
+the `issue_comment` job, or keeping the repository private — belt and braces over
+the engine's gate rather than a substitute for it. The App manifest is
+`"public": false`: the shipmate App is meant for repositories the installing
+organization controls.
 
 ## Dynamic environments
 

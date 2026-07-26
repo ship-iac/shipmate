@@ -1,21 +1,45 @@
 #!/usr/bin/env python3
 """shipmate doctor: read-only GitHub-settings drift probes.
 
-Emits markdown warning lines (stdout) for the sticky comment; prints nothing
-when healthy. NEVER fails the run: a probe error becomes a 'could not verify'
-note — doctor guards onboarding, it must not take down the plan path.
+Three modes, selected via SHIPMATE_DOCTOR_MODE:
+- annotate: run the probes and emit GitHub workflow-command annotations
+  (::warning::/::notice::) on stdout, one line per finding. Used by
+  actions/summary right after a plan run. NEVER fails the run: a probe
+  error becomes a 'could not verify' note — doctor guards onboarding, it
+  must not take down the plan path.
+- report: render the sticky PR comment on demand — the six live probes'
+  findings plus a harvest of the warnings GitHub already recorded as
+  annotations on this commit's workflow check runs.
+- check-ids: reduce a check-runs JSONL listing to the (id, name) pairs worth
+  fetching annotations for, one call ahead of `report`. Runs before the rest
+  of doctor's env contract is read.
 
 Probes:
 - gate ruleset on the default branch: a required_status_checks rule whose
   contexts include 'shipmate / gate' pinned to integration_id == the shipmate
   App id, with strict (up-to-date) policy on.
 - GitHub Environment pair (<env>, <env>-apply) exists for every planned env.
+- protection shape of that pair: a plan env must have no reviewers and no
+  branch policy; an apply env with no protection is worth a note.
+- engine action-pin freshness in the consumer's workflow files, read at the
+  commit under examination: a tag/branch pin is a warning, a SHA pin behind
+  the engine's latest release is a warning. Restricted to pins of the engine's
+  own repository, which arrives at runtime as SHIPMATE_ENGINE_REPO (the
+  action's `github.action_repository`) and is never hardcoded; a third party's
+  shared action is out of scope and no commit to read means no report.
+- approvers team resolvability: the configured SHIPMATE_APPROVERS_TEAM must
+  resolve in the repo's org, or every apply is rejected as "not a team member".
+- GitHub App installation permission drift: a failed installation-token mint
+  against the App's declared manifest permissions means one was never
+  re-accepted after a manifest change.
 """
 
+import base64
 import importlib.util
 import json
 import os
 import pathlib
+import re
 import sys
 from importlib.machinery import SourceFileLoader
 
@@ -32,11 +56,54 @@ def _load(fname):
 
 bm = _load("build-matrix")
 _gh_json = bm.gh_json
+sc = _load("summary-comment")
+_md_escape = sc._md_escape
 
 GATE = "shipmate / gate"
 
+MODES = ("annotate", "report", "check-ids")
+DOCTOR_TITLE = "shipmate doctor"
+# Finding levels: NOTICE is informational (a legitimate-but-worth-knowing
+# setting), WARNING is a misconfiguration. Rendered as ::notice::/::warning::
+# in annotate mode.
+WARNING, NOTICE = "warning", "notice"
 
-def _gate_rule_warnings(repo, app_id, default_branch):
+DOCTOR_MARKER = "<!-- shipmate:doctor -->"
+ANNOTATION_CAP = 10  # GitHub keeps at most 10 annotations per level per step
+HARVEST_LEVELS = ("warning", "failure")
+_LEVEL_EMOJI = {WARNING: ":warning:", NOTICE: ":information_source:"}
+# Check-run authors worth harvesting: the github-actions app authors the
+# plan/apply/drift jobs' auto check-runs -- the ones carrying shipmate's
+# ::warning:: emissions. The shipmate App itself is matched by id (org-dependent
+# slug). Third-party apps (codecov etc.) are dropped: harvest scope is shipmate
+# runs. Residual: the consumer's own non-shipmate Actions workflows remain
+# (indistinguishable at this level), hence the report heading says
+# "workflow runs", not "shipmate runs".
+_HARVEST_APP_SLUGS = ("github-actions",)
+# Emitted whenever the gather step reports the harvest did not complete --
+# worded to hold for both shapes it can take: nothing read at all (the
+# check-runs listing or its reduction failed) and some read but not all (one
+# check run's annotations fetch failed). Rendered as a list item so it reads
+# as a peer of the harvest rows it is appended after.
+HARVEST_INCOMPLETE = (
+    "- :warning: could not read all of this commit's check runs — any warnings recorded on "
+    "the ones that could not be read are missing from this list."
+)
+# Emitted whenever the gather step reports that a check run on this commit had
+# not finished. Distinct from HARVEST_INCOMPLETE, which means the harvest itself
+# errored: here every read succeeded, there is simply nothing recorded yet. An
+# empty payload is byte-identical to "this run had no warnings", so without this
+# the report answers a `shipmate doctor` typed while the plan run is still
+# queued with an all-clear that is never refreshed.
+HARVEST_PENDING = (
+    "- :hourglass: some of this commit's workflow runs had not finished when this report was "
+    "rendered — warnings they record later are not in this list; comment `shipmate doctor` "
+    "again once they have finished."
+)
+
+
+def _gate_rule_warnings(ctx):
+    repo, default_branch = ctx["repo"], ctx["default_branch"]
     rules = _gh_json(f"repos/{repo}/rules/branches/{default_branch}?per_page=100")
     for rule in rules:
         if rule.get("type") != "required_status_checks":
@@ -46,70 +113,875 @@ def _gate_rule_warnings(repo, app_id, default_branch):
             if chk.get("context") != GATE:
                 continue
             out = []
-            if chk.get("integration_id") != int(app_id):
+            if chk.get("integration_id") != int(ctx["app_id"]):
                 out.append(
-                    f"gate ruleset does not pin `integration_id` to the shipmate App "
-                    f"(found {chk.get('integration_id')!r}) — a forged `{GATE}` status "
-                    "from another identity would satisfy the required check."
+                    (
+                        WARNING,
+                        f"gate ruleset does not pin `integration_id` to the shipmate App "
+                        f"(found {chk.get('integration_id')!r}) — a forged `{GATE}` status "
+                        "from another identity would satisfy the required check.",
+                    )
                 )
             if not params.get("strict_required_status_checks_policy"):
                 out.append(
-                    "gate ruleset does not require branches to be up to date "
-                    "(strict) — plans can go stale against the base before merge."
+                    (
+                        WARNING,
+                        "gate ruleset does not require branches to be up to date "
+                        "(strict) — plans can go stale against the base before merge.",
+                    )
                 )
             return out
     return [
-        f"no active ruleset requires `{GATE}` on `{default_branch}` — "
-        "merges are not gated (see docs/branch-protection.md)."
+        (
+            WARNING,
+            f"no active ruleset requires `{GATE}` on `{default_branch}` — "
+            "merges are not gated (see docs/branch-protection.md).",
+        )
     ]
 
 
-def _environment_warnings(repo, envs):
-    # per_page=100: one page covers >=50 logical env pairs; bm.gh_json does not multi-page merge.
-    names = {
-        e["name"]
-        for e in _gh_json(f"repos/{repo}/environments?per_page=100").get("environments", [])
-    }
+def _existing_env_names(ctx):
+    """The repository's GitHub Environment names.
+
+    per_page=100: one page covers >=50 logical env pairs; bm.gh_json does not
+    multi-page merge. Read separately by each of the two environment probes on
+    purpose — sharing it through `ctx` would make one probe's failure silence
+    the other, and `warnings()` degrades per probe."""
+    listing = _gh_json(f"repos/{ctx['repo']}/environments?per_page=100")
+    return {e["name"] for e in listing.get("environments", [])}
+
+
+def _environment_warnings(ctx):
+    if not ctx["envs_available"]:
+        return [
+            (
+                NOTICE,
+                "no plan run with cell summaries for this commit — the declared "
+                "environment set is unknown, so the environment probes were skipped.",
+            )
+        ]
+    names = _existing_env_names(ctx)
     out = []
-    for env in sorted(envs):
+    for env in sorted(ctx["envs"]):
         for needed in (env, f"{env}-apply"):
             if needed not in names:
                 out.append(
-                    f"GitHub Environment `{needed}` does not exist — stacks tagged "
-                    f"`env:{env}` cannot plan/apply (create it and set TF_VAR_* vars)."
+                    (
+                        WARNING,
+                        f"GitHub Environment `{needed}` does not exist — stacks tagged "
+                        f"`env:{env}` cannot plan/apply (create it and set TF_VAR_* vars).",
+                    )
                 )
     return out
 
 
-def warnings(repo, app_id, envs, default_branch):
+def _env_shape_findings(name, env, data, is_apply):
+    """One environment's protection-shape findings, from its already-read
+    "Get an environment" payload."""
     out = []
-    for probe in (
-        lambda: _gate_rule_warnings(repo, app_id, default_branch),
-        lambda: _environment_warnings(repo, envs),
-    ):
+    rules = sorted({r.get("type") for r in data.get("protection_rules", []) if r.get("type")})
+    # GitHub reports a "branch_policy" protection rule whenever
+    # deployment_branch_policy is set -- that alone doesn't delay a plan job (it
+    # refuses it outright, handled below), so it's excluded from the "will not
+    # start immediately" diagnosis. It is excluded from the apply-env note for
+    # the mirror reason: a branch policy is not a review, so an apply env
+    # carrying nothing else is still entirely unreviewed.
+    approval = [r for r in rules if r != "branch_policy"]
+    policy = data.get("deployment_branch_policy")
+    if not is_apply and approval:
+        out.append(
+            (
+                WARNING,
+                f"GitHub Environment `{name}` is a plan environment but has "
+                f"protection rules ({', '.join(approval)}) — plan jobs will not "
+                f"start immediately; put reviewers on `{env}-apply` instead.",
+            )
+        )
+    if not is_apply and policy:
+        out.append(
+            (
+                WARNING,
+                f"GitHub Environment `{name}` is a plan environment but has a "
+                "deployment branch policy — plans from feature branches will be "
+                "refused; plan environments must allow all branches.",
+            )
+        )
+    if is_apply and not approval:
+        # NOTICE, not WARNING: legitimate for dev-tier envs. Worded on
+        # `approval`, not on the raw rule list: a deployment branch policy may
+        # be present, so claiming "no protection rules" would be false.
+        out.append(
+            (
+                NOTICE,
+                f"GitHub Environment `{name}` has no approval rules (required reviewers "
+                "or a wait timer) — pre-merge applies to it are unreviewed.",
+            )
+        )
+    return out
+
+
+def _env_protection_warnings(ctx):
+    """Plan/apply env split, checked live. An approval-type protection rule on
+    a PLAN env — a required reviewer, or a wait timer — stops plan jobs from
+    starting when they should: no error, just a stalled matrix, which is the
+    hardest shipmate misconfiguration to diagnose. An APPLY env with no approval
+    rule is the mirror problem: pre-merge applies to it are unreviewed.
+
+    The environments are listed once first so a name's absence and a failed read
+    of a name that exists stay distinguishable: `bm.gh_json`'s exception carries
+    no status code, so catching per-environment errors could not tell a 404
+    (which is `_environment_warnings`' finding, not this probe's) from a 403 or
+    a 5xx — and swallowing the latter left the report claiming the settings
+    probes found no problems. A failure of the listing itself propagates: it is
+    this probe's precondition, so `warnings()` turns it into the degrade note."""
+    out = []
+    if not ctx["envs"]:
+        # Nothing to probe, so nothing to read: listing the environments anyway
+        # would let a repository whose token cannot list them collect a
+        # "could not verify" degrade for a probe that had no work to do. The
+        # skipped-probe statement itself lives in `_environment_warnings`.
+        return out
+    existing = _existing_env_names(ctx)
+    for env in sorted(ctx["envs"]):
+        for name, is_apply in ((env, False), (f"{env}-apply", True)):
+            if name not in existing:
+                continue  # existence is _environment_warnings' finding
+            try:
+                data = _gh_json(f"repos/{ctx['repo']}/environments/{name}")
+            except (Exception, SystemExit) as e:  # noqa: BLE001 - degrade, see docstring
+                out.append(
+                    (
+                        NOTICE,
+                        f"GitHub Environment `{name}` exists but its settings could not be "
+                        f"read ({_degrade_reason(e)}) — its plan/apply protection shape was "
+                        "not checked.",
+                    )
+                )
+                continue
+            out.extend(_env_shape_findings(name, env, data, is_apply))
+    return out
+
+
+_PIN = re.compile(
+    r"uses:\s*['\"]?(?P<owner>[\w.-]+)/(?P<repo>[\w.-]+)/(?:actions|\.github)/"
+    r"[\w./-]+@(?P<ref>[\w./-]+)"
+)
+_SHA40 = re.compile(r"[0-9a-fA-F]{40}")
+
+
+_WORKFLOWS_DIR = ".github/workflows"
+# Degrade for any unreadable contents call in this probe family, at NOTICE like
+# the unreadable-release degrade below: a repo can legitimately fail this read
+# (the directory does not exist on the ref being read -- the first shipmate PR
+# is the one that adds it -- or the token cannot see it, or the API is
+# transiently failing), and none of those are a misconfiguration to warn about.
+# It must never fall through to the generic WARNING degrade in warnings().
+PIN_UNREADABLE = (
+    NOTICE,
+    f"could not read `{_WORKFLOWS_DIR}` — engine pin freshness not verified.",
+)
+# The two preconditions this probe cannot work without. Both are NOTICE, like
+# the unreadable-contents degrade above: neither is a repository
+# misconfiguration, and neither may be silently substituted with a weaker read.
+PIN_NO_COMMIT = (
+    NOTICE,
+    "engine pin freshness not verified — the commit under examination could not be determined.",
+)
+PIN_NO_ENGINE = (
+    NOTICE,
+    "engine pin freshness not verified — the engine repository could not be determined.",
+)
+
+
+def _contents_ref(ctx):
+    """`?ref=` suffix for the workflow-file reads — the commit under
+    examination — or None when there is no usable one.
+
+    Reading the default branch instead would break the remediation loop this
+    probe exists to drive: a stale pin is fixed by a PR that bumps the SHA, and
+    that new SHA lives only on the PR's head until it merges, so a
+    default-branch read reports the pin stale on the very PR that fixes it. That
+    makes "no commit" a reason to skip the probe, not a reason to read something
+    else. `head_sha` is the comment path's PR head and the plan path's
+    `head-sha` input; it is empty only on the comment path's degrade branch,
+    where the PR head could not be read at all. Anything that is not a 40-char
+    hex SHA counts as absent rather than being interpolated into the request
+    path (same guard as apply-detect's on SHIPMATE_HEAD_SHA) — a probe must not
+    be able to retarget a `gh api` URL, however it was configured."""
+    sha = ctx.get("head_sha") or ""
+    return f"?ref={sha}" if _SHA40.fullmatch(sha) else None
+
+
+def _workflow_names(base):
+    """([file names], readable): the `.yml`/`.yaml` entries of the workflow
+    directory listing. Non-file entries (a directory or symlink whose name ends
+    in `.yml`) are dropped — their "contents" read returns a list, not a blob."""
+    try:
+        listing = _gh_json(base)
+    except (Exception, SystemExit):  # noqa: BLE001 - degrade, see PIN_UNREADABLE
+        return [], False
+    names = []
+    for entry in listing:
+        if entry.get("type") == "file" and entry["name"].endswith((".yml", ".yaml")):
+            names.append(entry["name"])
+    return names, True
+
+
+def _workflow_text(path):
+    """One workflow file's decoded text, or None when it cannot be read."""
+    try:
+        blob = _gh_json(path)
+    except (Exception, SystemExit):  # noqa: BLE001 - degrade, see PIN_UNREADABLE
+        return None
+    return base64.b64decode(blob.get("content", "")).decode("utf-8", "replace")
+
+
+def _pins_in_text(text, fname, ctx, seen):
+    """Tag/branch-pin warnings for one workflow file, recording its SHA pins in
+    `seen` ({slug: {(file, sha)}}) for the freshness comparison.
+
+    Only pins of the engine's own repository are considered. Every finding here
+    is worded about the engine — a moving ref letting the engine change under
+    the consumer's deploy credentials, re-pinning to pick up engine fixes — and
+    none of that is true of, say, another org's shared lint action, which holds
+    no deploy credentials and has its own release cadence."""
+    out = []
+    repo, engine = ctx["repo"], ctx["engine_repo"]
+    for m in _PIN.finditer(text):
+        slug, ref = f"{m.group('owner')}/{m.group('repo')}", m.group("ref")
+        if slug == repo:
+            continue  # a repo pinning its own actions is not an engine pin
+        if slug != engine:
+            continue  # a third party's action is not shipmate's to report on
+        if not _SHA40.fullmatch(ref):
+            out.append(
+                (
+                    WARNING,
+                    f"`{fname}` pins `{slug}@{ref}` by tag or branch — pin a "
+                    "commit SHA (a moving ref lets the engine change under your "
+                    "deploy credentials).",
+                )
+            )
+            continue
+        seen.setdefault(slug, set()).add((fname, ref.lower()))
+    return out
+
+
+def _pins_in_workflows(ctx):
+    """(warnings, {slug: {(file, sha)}}) for every engine action pin found in
+    the consumer's workflow files at the commit under examination. The engine's
+    owner/repo comes from `ctx["engine_repo"]`, discovered at runtime from
+    `github.action_repository` — shipmate never hardcodes an org. Either
+    precondition missing, or an unreadable listing or file, degrades to a NOTICE
+    rather than an error; the preconditions are checked before any API call,
+    since without them no read could be interpreted anyway."""
+    out, seen = [], {}
+    if not ctx["engine_repo"]:
+        return [PIN_NO_ENGINE], seen
+    ref = _contents_ref(ctx)
+    if ref is None:
+        return [PIN_NO_COMMIT], seen
+    base = f"repos/{ctx['repo']}/contents/{_WORKFLOWS_DIR}"
+    names, readable = _workflow_names(f"{base}{ref}")
+    if not readable:
+        return [PIN_UNREADABLE], seen
+    for name in names:
+        text = _workflow_text(f"{base}/{name}{ref}")
+        if text is None:
+            # Stop at the first unreadable file: the same cause (permissions,
+            # a bad ref, an API outage) applies to the rest of the directory.
+            out.append(PIN_UNREADABLE)
+            return out, seen
+        out.extend(_pins_in_text(text, name, ctx, seen))
+    return out, seen
+
+
+def _latest_release_sha(slug):
+    """(tag, sha) of `slug`'s latest release; (None, None) when unreadable.
+
+    Cross-repo read: the ambient GH_TOKEN is an App installation token scoped
+    to the consumer repo and may not read the engine repo. Prefer
+    SHIPMATE_PUBLIC_TOKEN (the workflow token — enough for a public-repo read)
+    for these two calls only, restoring GH_TOKEN afterwards.
+    """
+    saved, public = os.environ.get("GH_TOKEN"), os.environ.get("SHIPMATE_PUBLIC_TOKEN")
+    if public:
+        os.environ["GH_TOKEN"] = public
+    try:
+        tag = _gh_json(f"repos/{slug}/releases/latest").get("tag_name")
+        if not tag:
+            return None, None
+        return tag, _gh_json(f"repos/{slug}/commits/{tag}").get("sha")
+    except (Exception, SystemExit):  # noqa: BLE001 - unreadable release is a NOTICE upstream
+        return None, None
+    finally:
+        if public:
+            if saved is None:
+                os.environ.pop("GH_TOKEN", None)
+            else:
+                os.environ["GH_TOKEN"] = saved
+
+
+def _pin_warnings(ctx):
+    out, seen = _pins_in_workflows(ctx)
+    for slug, pins in sorted(seen.items()):
+        tag, sha = _latest_release_sha(slug)
+        if not sha:
+            # NOTICE, not WARNING: degrade, don't alarm.
+            out.append(
+                (
+                    NOTICE,
+                    f"could not read `{slug}`'s latest release — engine pin freshness "
+                    "not verified.",
+                )
+            )
+            continue
+        differing = sorted({(f, ref) for f, ref in pins if ref != sha})
+        for fname, ref in differing:
+            out.append(
+                (
+                    WARNING,
+                    f"`{fname}` pins `{slug}@{ref[:7]}`, which differs from the latest "
+                    f"release {tag} (`{sha[:7]}`) — re-pin to pick up fixes.",
+                )
+            )
+    return out
+
+
+def _one_line(s, limit=200):
+    flat = " ".join(s.split())
+    return flat if len(flat) <= limit else flat[: limit - 1] + "…"
+
+
+def _team_warnings(ctx):
+    """A typo'd or cross-org SHIPMATE_APPROVERS_TEAM surfaces today only as
+    every apply being rejected "not a team member" — one API call names it."""
+    if not ctx["team"]:
+        return []
+    try:
+        team = _gh_json(f"orgs/{ctx['owner']}/teams/{ctx['team']}")
+        resolved = isinstance(team, dict) and bool(team.get("slug"))
+    except (Exception, SystemExit):  # noqa: BLE001 - a failed lookup IS the finding
+        resolved = False
+    if resolved:
+        return []
+    return [
+        (
+            WARNING,
+            f"approvers team `{ctx['team']}` does not resolve in org `{ctx['owner']}` — "
+            'every `shipmate apply` will be rejected as "not a team member". Check the '
+            "SHIPMATE_APPROVERS_TEAM variable and that the App has members:read.",
+        )
+    ]
+
+
+def _app_permission_warnings(ctx):
+    """The comment path attempts an installation-token mint requesting every
+    permission app/manifest.json declares. A failed mint is not a definitive
+    signal -- it usually means the installation is missing a permission
+    (typical after a manifest bump nobody re-approved), but a transient API
+    error or rate limit produces the exact same failed-mint outcome, so the
+    finding is worded as a hedge rather than a claim. Skipped where no such
+    attempt was made."""
+    if not ctx["app_permissions_checked"] or not ctx["app_permission_error"]:
+        return []
+    return [
+        (
+            WARNING,
+            f"{_one_line(ctx['app_permission_error'])}, which usually means the shipmate App "
+            "installation is missing a permission the manifest declares — re-accept the App's "
+            "permission request in the installation settings (or retry if the API was "
+            "transiently failing).",
+        )
+    ]
+
+
+PROBES = (
+    _gate_rule_warnings,
+    _environment_warnings,
+    _env_protection_warnings,
+    _pin_warnings,
+    _team_warnings,
+    _app_permission_warnings,
+)
+
+
+def _probe_label(probe):
+    """Reader-facing name of a probe, from its function name: `_pin_warnings`
+    -> "pin". Used by the degrade note below so a reader learns which probe was
+    skipped instead of being shown the `gh api` call that failed."""
+    return probe.__name__.strip("_").removesuffix("_warnings").replace("_", " ")
+
+
+def _degrade_reason(e):
+    """The failure reason, safe to put in a comment body or an annotation's
+    data. `bm.gh_json` raises `::error::command failed (N): gh api <path>`:
+    the workflow-command prefix would render literally in the sticky comment
+    and nest inside `::warning ...::` in annotate mode, and the endpoint is an
+    internal detail no reader of the report can act on. Keep the reason, drop
+    the invocation."""
+    return _one_line(str(e).removeprefix("::error::").split(": gh api ")[0], 120)
+
+
+def warnings(ctx):
+    out = []
+    for probe in PROBES:
         try:
-            out.extend(probe())
+            out.extend(probe(ctx))
         # noqa: BLE001 - doctor must never fail the run. `bm.gh_json` (via
         # `_run`) hard-fails a nonzero `gh api` exit with `raise SystemExit`,
         # not a plain Exception -- that must degrade to a note here too, so
         # both types are caught explicitly (never bare BaseException, so
         # KeyboardInterrupt still propagates).
         except (Exception, SystemExit) as e:  # noqa: BLE001
-            out.append(f"doctor could not verify a setting ({e}) — probe skipped.")
+            out.append(
+                (
+                    WARNING,
+                    f"doctor could not verify the {_probe_label(probe)} settings "
+                    f"({_degrade_reason(e)}) — probe skipped.",
+                )
+            )
     return out
 
 
-def main():
+def _gha_escape(s):
+    """GHA workflow-command data escaping (percent first, or it double-escapes)."""
+    return s.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+
+
+def render_annotations(findings):
+    return [f"::{lvl} title={DOCTOR_TITLE}::{_gha_escape(text)}" for lvl, text in findings]
+
+
+def _declared_envs(cells_dir):
+    """Skip a cell.json that can't be read/parsed, lacks "environment", or
+    carries an unusable value for it rather than raising: a truncated or
+    malformed file is plausible after a partial `gh run download` (one of the
+    degrade paths feeding this directory), and doctor must never fail a run
+    over a single bad file. A non-string or empty "environment" (e.g. null)
+    is dropped too -- it would otherwise land in the declared-env set and run
+    every environment probe against a name that cannot exist, producing
+    findings about an environment nobody declared."""
+    envs = set()
+    for cj in cells_dir.glob("cell-summary.*/cell.json"):
+        try:
+            env = json.loads(cj.read_text(encoding="utf-8"))["environment"]
+        except (OSError, ValueError, KeyError, TypeError):
+            continue
+        if isinstance(env, str) and env:
+            envs.add(env)
+    return envs
+
+
+def ctx_from_env():
     repo = os.environ["GITHUB_REPOSITORY"]
-    app_id = os.environ["SHIPMATE_APP_ID"]
-    default_branch = os.environ["SHIPMATE_DEFAULT_BRANCH"]
     cells = pathlib.Path(os.environ.get("SHIPMATE_CELLS_DIR", "cells"))
-    envs = {
-        json.loads(cj.read_text(encoding="utf-8"))["environment"]
-        for cj in cells.glob("cell-summary.*/cell.json")
+    envs = _declared_envs(cells)
+    return {
+        "repo": repo,
+        "owner": repo.split("/")[0],
+        "app_id": os.environ["SHIPMATE_APP_ID"],
+        "default_branch": os.environ["SHIPMATE_DEFAULT_BRANCH"],
+        "envs": envs,
+        "envs_available": bool(envs),
+        "team": os.environ.get("SHIPMATE_TEAM") or None,
+        "app_permissions_checked": os.environ.get("SHIPMATE_APP_PERMISSIONS_CHECKED") == "true",
+        "app_permission_error": os.environ.get("SHIPMATE_APP_PERMISSION_ERROR", ""),
+        "head_sha": os.environ.get("SHIPMATE_HEAD_SHA", ""),
+        # github.action_repository: the owner/repo of the running action, i.e.
+        # the engine's own slug, resolved by GitHub at runtime. Empty when the
+        # action runs from a local path instead of a pinned slug.
+        "engine_repo": os.environ.get("SHIPMATE_ENGINE_REPO", ""),
+        "plan_run_id": os.environ.get("SHIPMATE_PLAN_RUN_ID", ""),
+        "annotations_dir": os.environ.get("SHIPMATE_ANNOTATIONS_DIR", "ann"),
+        "check_ids_path": os.environ.get("SHIPMATE_CHECK_IDS", "check-ids.tsv"),
+        "harvest_failed": os.environ.get("SHIPMATE_HARVEST_FAILED") == "true",
+        "harvest_pending": os.environ.get("SHIPMATE_HARVEST_PENDING") == "true",
     }
-    for line in warnings(repo, app_id, envs, default_branch):
-        print(f"- :warning: {line}")
+
+
+def _parse_check_run(line, app_id):
+    """A single check-runs JSONL line -> its run dict, or None when the line
+    is blank, unparseable, not a JSON object, or not authored by a
+    shipmate-relevant app -- never raises, so one bad line can't take down
+    the whole report."""
+    line = line.strip()
+    if not line:
+        return None
+    try:
+        run = json.loads(line)
+    except ValueError:
+        return None
+    if not isinstance(run, dict):
+        return None
+    if run.get("app_slug") not in _HARVEST_APP_SLUGS and not (
+        app_id and str(run.get("app_id")) == str(app_id)
+    ):
+        return None
+    return run
+
+
+def latest_check_ids(lines, app_id=""):
+    """[(id, name)] -- newest run per check name among shipmate-relevant
+    authors. Ranks by `started_at`, not check-run `id` (unlike
+    apply-gate.latest_by_name): a queued run has no `started_at` and no
+    annotations to harvest yet, so ranking it below an already-completed run
+    -- the one whose annotations are actually worth harvesting -- is the
+    outcome wanted here."""
+    newest = {}
+    for line in lines:
+        run = _parse_check_run(line, app_id)
+        if run is None:
+            continue
+        name = run.get("name") or ""
+        prev = newest.get(name)
+        if prev is None or (run.get("started_at") or "") >= (prev.get("started_at") or ""):
+            newest[name] = run
+    out = []
+    for name in sorted(newest):
+        try:
+            out.append((int(newest[name]["id"]), name))
+        except (KeyError, TypeError, ValueError):
+            continue
+    return out
+
+
+def harvest_pending(lines, app_id=""):
+    """True when any shipmate-relevant check run on this commit has not
+    completed.
+
+    Keyed on the whole relevant set rather than on the subset
+    `latest_check_ids` selects: a queued run has no `started_at` and so ranks
+    *below* an already-completed run of the same name, which is the ranking
+    wanted for choosing whose annotations to fetch but would hide exactly the
+    still-running case this flag exists to report."""
+    for line in lines:
+        run = _parse_check_run(line, app_id)
+        if run is not None and run.get("status") != "completed":
+            return True
+    return False
+
+
+def _write_step_output(name, value):
+    """Append `name=<bool>` to the calling action step's GITHUB_OUTPUT. Silently
+    skipped when GITHUB_OUTPUT is unset, so every mode stays runnable outside a
+    runner."""
+    path = os.environ.get("GITHUB_OUTPUT")
+    if not path:
+        return
+    with open(path, "a", encoding="utf-8") as fh:
+        fh.write(f"{name}={'true' if value else 'false'}\n")
+
+
+def load_annotations(ctx):
+    """Join `ann/<id>.json` payloads onto the check names in check-ids.tsv.
+    A missing or unreadable payload is skipped, never fatal."""
+    ids_path = pathlib.Path(ctx["check_ids_path"])
+    if not ids_path.exists():
+        return []
+    out = []
+    for line in ids_path.read_text(encoding="utf-8").splitlines():
+        if "\t" not in line:
+            continue
+        cid, name = line.split("\t", 1)
+        payload = pathlib.Path(ctx["annotations_dir"]) / f"{cid.strip()}.json"
+        try:
+            # A `[]` payload is indistinguishable from the gather step's
+            # `echo '[]'` fallback for a failed fetch: "this check run had no
+            # annotations" and "this check run's annotations could not be
+            # read" arrive here byte-identical. That is why the incomplete
+            # harvest has to be signalled out of band, via
+            # ctx["harvest_failed"], and cannot be inferred from the payloads.
+            rows = json.loads(payload.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        for row in rows if isinstance(rows, list) else []:
+            if not isinstance(row, dict):
+                continue
+            row["check_name"] = name.strip()
+            out.append(row)
+    return out
+
+
+def harvest_sections(annotations):
+    """Group harvested annotations by check name.
+
+    Drops notice level, and drops the plan path's own doctor annotations
+    (title == DOCTOR_TITLE): the live probes in this same report re-state those
+    findings against current settings, so keeping both double-reports every
+    settings problem.
+    """
+    by_check = {}
+    for a in annotations:
+        if a.get("annotation_level") not in HARVEST_LEVELS:
+            continue
+        if a.get("title") == DOCTOR_TITLE:
+            continue
+        by_check.setdefault(a.get("check_name") or "(unnamed check)", []).append(a)
+    return by_check
+
+
+def _provenance(ctx):
+    """The report's preamble: what was examined, and nothing about what the
+    probes did with it.
+
+    Coverage of the environment probes is stated in exactly one place --
+    `_environment_warnings`' NOTICE, keyed on `envs_available` -- because the
+    two signals can disagree. `gh run download` can extract cell summaries and
+    still exit non-zero, and comment-ops then clears `run_id` while the cells
+    directory is populated: `envs_available` is true with no `plan_run_id`, so a
+    preamble keyed on the run id would claim the environment probes were skipped
+    while they actually ran and produced findings."""
+    head = ctx["head_sha"][:7] or "(unknown commit)"
+    if ctx["plan_run_id"]:
+        run_id = _one_line(ctx["plan_run_id"], 40)
+        return f"_Commit `{head}`; cell summaries from plan run {run_id}._"
+    return f"_Commit `{head}`; no plan run identified for this commit._"
+
+
+def _all_clear_line(ctx):
+    """The settings-probe all-clear, stating what it actually covers.
+
+    The two environment probes see only the environments of the stacks this pull
+    request changed -- the declared set comes from the plan matrix's cell
+    summaries -- so a categorical "no problems found by the settings probes"
+    overclaims: a broken `prod-eu` environment pair is invisible to a report run
+    on a pull request that touches only dev stacks. Name the set instead.
+
+    Environment names are repository data (read from cell.json), so they are
+    escaped like every other interpolated value and the joined list is bounded:
+    this line renders in both report paths and neither truncates it."""
+    envs = sorted(ctx.get("envs") or ())
+    if not envs:
+        return (
+            "- :white_check_mark: no problems found by the settings probes — and no "
+            "environments were probed, since no declared environment set was available "
+            "for this commit."
+        )
+    named = _one_line(", ".join(f"`{_md_escape(e)}`" for e in envs), 400)
+    return (
+        "- :white_check_mark: no problems found by the settings probes. The environment "
+        "probes covered only the environments of the stacks changed in this pull request: "
+        f"{named}."
+    )
+
+
+def _truncated_checks(annotations):
+    """Check names whose warning/failure annotations hit GitHub's per-level
+    cap (10 per level per step) on the raw, pre-filter listing -- computed
+    here rather than on the already-filtered harvest_sections output, since
+    dropping notices and DOCTOR_TITLE rows first would both under- and
+    over-count the real GitHub-side truncation."""
+    counts = {}
+    for a in annotations:
+        level = a.get("annotation_level")
+        if level not in HARVEST_LEVELS:
+            continue
+        key = (a.get("check_name") or "(unnamed check)", level)
+        counts[key] = counts.get(key, 0) + 1
+    return {name for (name, _level), n in counts.items() if n >= ANNOTATION_CAP}
+
+
+def _render_annotation_row(a):
+    emoji = ":x:" if a.get("annotation_level") == "failure" else ":warning:"
+    title = _md_escape(_one_line(a.get("title") or "", 120))
+    msg = _md_escape(_one_line(a.get("message") or "", 300))
+    return f"  - {emoji} {title} — {msg}" if title else f"  - {emoji} {msg}"
+
+
+def _emit_section(lines, name, rows, used, budget):
+    """Append one check's header + as many of its rows as fit in the
+    remaining budget. The header is emitted only when at least its first row
+    also fits -- otherwise it would be left dangling with no children.
+    Returns (new_used, rows_added, rows_dropped)."""
+    if not rows:
+        # harvest_sections never produces an empty group (setdefault+append),
+        # but this guard keeps the function safe against any future caller
+        # that does -- rendered[0] below would otherwise raise IndexError.
+        return used, 0, 0
+    header = f"- **{_md_escape(_one_line(name, 120))}**"
+    rendered = [_render_annotation_row(a) for a in rows]
+    if used + len(header) + 1 + len(rendered[0]) + 1 > budget:
+        return used, 0, len(rows)
+    lines.append(header)
+    used += len(header) + 1
+    added, dropped = 0, 0
+    for row in rendered:
+        if used + len(row) + 1 <= budget:
+            lines.append(row)
+            used += len(row) + 1
+            added += 1
+        else:
+            dropped += 1
+    return used, added, dropped
+
+
+def _harvest_lines(sections, annotations, budget):
+    """Render harvest rows, stopping once the accumulated text would exceed
+    `budget` chars -- the harvest can see hundreds of rows (every
+    github-actions check run on the commit, not just shipmate's), and unlike
+    the settings-probe section above it, dropped rows stay recoverable from
+    the run logs. Returns (lines, dropped_count)."""
+    truncated_checks = _truncated_checks(annotations)
+    lines, used, dropped, over = [], 0, 0, False
+    any_truncated = False
+    for name in sorted(sections):
+        rows = sections[name]
+        if name in truncated_checks:
+            any_truncated = True
+        if over:
+            dropped += len(rows)
+            continue
+        used, added, section_dropped = _emit_section(lines, name, rows, used, budget)
+        if added == 0 or section_dropped:
+            over = True
+        dropped += section_dropped
+    if any_truncated:
+        lines.append(
+            "- _GitHub keeps at most 10 annotations per level per step, so this list "
+            "may be truncated — see the run logs for the full set._"
+        )
+    return lines, dropped
+
+
+def _findings_lines(findings, budget):
+    """Render settings-probe finding rows within `budget` chars. Returns
+    (lines, dropped_count) -- the last-ditch fallback path (render_report,
+    when even the harvest-less body still exceeds sc.HARD_CAP)."""
+    lines, used, dropped = [], 0, 0
+    for lvl, text in findings:
+        # Escaped for the same reason the harvest rows are: a finding
+        # interpolates repository data (a workflow file name, a team slug, an
+        # API error string), and an unescaped `<!-- shipmate:summary -->` in one
+        # of those would make actions/summary's marker+Bot upsert PATCH this
+        # doctor comment with the plan comment's body.
+        line = f"- {_LEVEL_EMOJI[lvl]} {_md_escape(text)}"
+        if used + len(line) + 1 <= budget:
+            lines.append(line)
+            used += len(line) + 1
+        else:
+            dropped += 1
+    return lines, dropped
+
+
+def _findings_only_report(findings, ctx):
+    """Last-ditch fallback: the harvest is already excluded by the time this
+    is called, so a body still over sc.HARD_CAP means the settings-probe
+    findings themselves are unexpectedly large (e.g. one warning per stale
+    pin across hundreds of workflow files). Drops the harvest section
+    entirely and hard-truncates the findings list, so the comment still
+    posts with a count rather than the whole POST failing with a 422."""
+    head = [
+        DOCTOR_MARKER,
+        "### shipmate doctor",
+        "",
+        _provenance(ctx),
+        "",
+        "#### repository settings",
+        "",
+    ]
+    # 200 chars of headroom for the omitted-count line appended below.
+    budget = max(0, sc.HARD_CAP - len("\n".join(head)) - 200)
+    if findings:
+        lines, dropped = _findings_lines(findings, budget)
+    else:
+        lines, dropped = [_all_clear_line(ctx)], 0
+    if dropped:
+        lines.append(
+            f"- _{dropped} more finding(s) omitted to keep this comment within the size "
+            "limit — see the workflow run for the full list._"
+        )
+    return "\n".join(head + lines)
+
+
+def _harvest_body(sections, annotations, budget, harvest_failed, harvest_pending):
+    """The harvest's rendered rows, plus a note for each of the two ways the
+    harvest can fall short of "these are the warnings on this commit".
+
+    Both notes are additive rather than alternatives to the rows. The gather
+    step flags an incomplete harvest for a failed check-runs listing (nothing
+    read at all) but also for a single check run's annotations fetch failing
+    while the rest succeeded -- so an incomplete harvest can still have
+    warnings to show. Emitting the note only when there is nothing to show
+    would let that partial harvest read as the complete set of warnings for
+    the commit, which is the same false-all-clear in a subtler form: the
+    unread check run's warnings are simply absent, with no hint in the report
+    that anything is missing. A pending harvest is the same hazard one step
+    earlier -- the annotations exist nowhere yet -- so it suppresses the
+    all-clear too, while staying a separate statement from the failure note."""
+    lines = []
+    if sections:
+        lines, dropped = _harvest_lines(sections, annotations, budget)
+        if dropped:
+            lines.append(
+                f"- _{dropped} more warning(s) omitted to keep this comment within the "
+                "size limit — see the run logs for the full set._"
+            )
+    elif not harvest_failed and not harvest_pending:
+        lines = [":white_check_mark: no warnings on this commit's workflow runs."]
+    if harvest_pending:
+        lines.append(HARVEST_PENDING)
+    if harvest_failed:
+        lines.append(HARVEST_INCOMPLETE)
+    return lines
+
+
+def render_report(findings, annotations, ctx):
+    out = [DOCTOR_MARKER, "### shipmate doctor", "", _provenance(ctx), ""]
+    out += ["#### repository settings", ""]
+    if findings:
+        # _md_escape for the same reason as the harvest rows and the fallback
+        # path's _findings_lines: findings carry repository data, and a marker
+        # smuggled through one of them would hijack this comment's identity.
+        out += [f"- {_LEVEL_EMOJI[lvl]} {_md_escape(text)}" for lvl, text in findings]
+    else:
+        out.append(_all_clear_line(ctx))
+    heading = ["", "#### warnings from this commit's workflow runs", ""]
+    sections = harvest_sections(annotations)
+    # The settings-probe section above is never truncated -- it is the part a
+    # stale comment can't recover from the run logs -- so the harvest gets
+    # whatever's left of sc.SIZE_BUDGET, not a fixed share.
+    budget = max(0, sc.SIZE_BUDGET - len("\n".join(out)) - len("\n".join(heading)))
+    lines = _harvest_body(
+        sections,
+        annotations,
+        budget,
+        bool(ctx.get("harvest_failed")),
+        bool(ctx.get("harvest_pending")),
+    )
+    body = "\n".join(out + heading + lines)
+    if len(body) > sc.HARD_CAP:
+        # The harvest section is already budgeted against sc.SIZE_BUDGET
+        # above, so overflow this large can only come from the
+        # settings-probe findings themselves -- degrade those too rather than
+        # let the comment-ops render step's `gh api ... -F body=@doctor.md` 422.
+        body = _findings_only_report(findings, ctx)
+    return body
+
+
+def main():
+    mode = os.environ.get("SHIPMATE_DOCTOR_MODE", "")
+    if mode not in MODES:
+        raise SystemExit(f"SHIPMATE_DOCTOR_MODE must be one of {', '.join(MODES)} (got: {mode!r})")
+    if mode == "check-ids":
+        app_id = os.environ.get("SHIPMATE_APP_ID", "")
+        lines = sys.stdin.read().splitlines()
+        for cid, name in latest_check_ids(lines, app_id):
+            print(f"{cid}\t{name}")
+        # Decided here because this is the one place that already reads every
+        # check run on the commit. It travels to `report` mode as a step output
+        # of the gather step, NOT on stdout: stdout is the (id, name) TSV
+        # load_annotations parses, and an extra field there would land in a
+        # check name.
+        _write_step_output("harvest_pending", harvest_pending(lines, app_id))
+        return
+    ctx = ctx_from_env()
+    found = warnings(ctx)
+    if mode == "annotate":
+        for line in render_annotations(found):
+            print(line)
+        return
+    print(render_report(found, load_annotations(ctx), ctx))
 
 
 if __name__ == "__main__":

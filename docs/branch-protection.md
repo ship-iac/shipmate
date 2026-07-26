@@ -60,17 +60,114 @@ stays blocked. Without this pin, the ruleset only matches on `context` and
 any identity that can post a commit status with that exact context string
 can satisfy the required check.
 
-## Doctor: settings-drift warnings in the sticky comment
+## Doctor: settings-drift warnings and the `shipmate doctor` report
 
-`actions/summary` runs `scripts/doctor` on every plan run and appends its
-findings to the sticky comment under a `### doctor` heading — read-only,
-never blocking. It flags a missing or mis-pinned `shipmate / gate` rule on
-the default branch (no active ruleset requiring it, or one that doesn't pin
-`integration_id` to the shipmate App, or that isn't strict) and any missing
-GitHub Environment (`<env>` / `<env>-apply`) for a tagged-in environment.
-Doctor degrades to a `could not verify` note on an API error and always
-exits 0, so a probe failure (for example, the App token lacking read access
-to `rules/branches` or `environments`) never fails the plan run itself.
+`actions/summary` runs `scripts/doctor` on every plan run and emits its
+findings as workflow annotations titled `shipmate doctor`
+(`::warning title=shipmate doctor::<text>` / `::notice title=shipmate
+doctor::<text>`) — read-only, never blocking. Comment `shipmate doctor` on a
+pull request for a consolidated report: a sticky comment (marker `<!--
+shipmate:doctor -->`, upserted in place like the plan comment) combining six
+live probes — a missing or mis-pinned `shipmate / gate` rule on the default
+branch (no active ruleset requiring it, or one that doesn't pin
+`integration_id` to the shipmate App, or that isn't strict), a missing GitHub
+Environment (`<env>` / `<env>-apply`) for a tagged-in environment, the
+plan/apply environment protection shape (a plan environment must have no
+approval-type protection rules — required reviewers or wait timers — and no
+deployment branch policy; an apply environment with no approval rule is only a
+note, and "no approval rule" is deliberately not "no protection rules": GitHub
+synthesizes a `branch_policy` protection rule for any environment with a
+deployment branch policy, and a branch policy is not a review), engine
+action-pin freshness in the consumer's own workflow files (read at the commit
+under examination, so the pull request that bumps a stale pin is not itself
+reported stale, and restricted to pins of the engine's own repository, which
+the probe learns at runtime from the running action rather than from any
+hardcoded slug — another org's shared action is not shipmate's to report on),
+whether the configured approvers team resolves in the org, and
+whether the shipmate App installation still grants the manifest's full
+permission set — with the warning and failure annotations GitHub already
+recorded on this commit's workflow runs (shipmate's own and any other
+Actions workflow run on that commit; third-party-app-authored check runs are
+excluded). Only four of the six probes can produce a finding from the plan
+path's own `annotate`-mode run (`actions/summary`): the approvers-team probe
+needs the `SHIPMATE_TEAM` environment variable, which the plan path does
+not supply, and
+the App-permission-drift probe only has something to report when a
+full-manifest permission-set mint was actually attempted, which only
+`shipmate doctor` does — both are effectively comment-path-only. `doctor`
+degrades to a "could not verify" **warning** naming the probe that was skipped
+on an API error, and always exits 0, so a probe failure (for example, the App
+token lacking read access to `rules/branches` or `environments` — both token
+mints that drive doctor also request Actions read, which the environment reads
+need on some configurations) never fails the plan run. The engine-pin probe
+degrades to a **note** instead: its `.github/workflows` read legitimately fails
+on the pull request that first adds that directory, which is the first
+`shipmate doctor` any consumer runs, and it also declines rather than guessing
+when it cannot tell which repository the engine is or which commit to read.
+An environment that exists but whose settings cannot be read is likewise a
+note naming it, rather than the silence a nonexistent environment gets (that
+one is the environment-existence probe's finding).
+
+The environment probes cover only the environments of the stacks a given pull
+request changed — the declared set comes from that commit's plan matrix — so
+the report's all-clear line names the environments it actually probed instead
+of implying the repository's environments are all sound. Separately, the report
+states plainly when some of the commit's workflow runs had not finished yet,
+and when the warnings harvest itself could not complete (or may be truncated by
+GitHub's per-step annotation cap), rather than claiming a false all-clear.
+`shipmate doctor` never blocks the gate, and it needs no team membership,
+review or reviewed plan, unlike `shipmate apply` — but because it reports this
+repository's own settings, the engine limits it to organization members and
+repository collaborators (below).
+
+### Who can ask for the report, and who can see it
+
+The report is an inventory of what is *not* configured: that no ruleset
+requires `shipmate / gate` on the default branch, that `<env>-apply` has no
+approval rule so pre-merge applies to it are unreviewed, which approvers
+team is configured and whether it resolves, and whether the App installation is
+missing permissions the manifest declares.
+
+**What the engine enforces.** `shipmate doctor` runs only for a commenter
+GitHub classifies as `OWNER`, `MEMBER` or `COLLABORATOR` in
+`github.event.comment.author_association` — organization members and repository
+collaborators. Any other commenter gets a single-line refusal saying exactly
+that; no App token is minted and no probe runs. `CONTRIBUTOR` is deliberately
+excluded — its only signal is one merged pull request, not a standing
+relationship to the repository. The gate fails closed: an association the engine
+does not recognize, or an event carrying no comment context at all, counts as no
+access. Nothing is required of you to adopt it beyond re-pinning the engine
+SHA — it adds no action input and no workflow `permissions:` entry.
+
+**What the engine does not enforce.** It does **not** check write access.
+`author_association` is GitHub's own classification of the author's relationship
+to the repository, not a permission lookup, and it is wrong in both directions:
+
+- a collaborator invited with only the **Read** role is classified
+  `COLLABORATOR`, and an organization member whose base repository permission is
+  **None** is classified `MEMBER` — both are admitted to the report despite
+  having no write access. If that matters for your repository, add the
+  workflow-level layer below, or do not grant read-only collaborator access to
+  people who should not see the settings inventory;
+- conversely, an organization member whose membership is **private** is reported
+  as `NONE` and will be refused unless they are also a direct collaborator; make
+  the membership public or add the person as a collaborator.
+
+What the gate does buy is that an account with no declared relationship to the
+repository — a drive-by fork author on a public repository — cannot obtain the
+report. Beyond that: `shipmate help` stays open to every commenter (it lists the
+verbs and discloses nothing about the repository, and a newcomer whose setup is
+broken still needs it), and the report is an ordinary pull request comment, so
+once someone with access asks for it, everyone who can read the pull request can
+read it.
+
+On a repository whose pull requests are **public** you can add a second layer
+by gating the `issue_comment` job itself on the same
+`github.event.comment.author_association` values, or by keeping the repository
+private. That is belt and braces over the engine's own gate, not the primary
+mitigation. Note also that `app/manifest.json` declares
+`"public": false`: the shipmate App is registered per organization and intended
+for repositories the installing organization controls.
 
 ## Review policy for `shipmate apply`
 

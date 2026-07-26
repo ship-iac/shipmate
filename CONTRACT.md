@@ -141,12 +141,156 @@ when the same stack participates in more than one environment.
 
 ## Comment-ops
 
-`shipmate <verb> [env] [tag-filter]` in a PR comment drives a manual, pre-merge
-apply. The grammar is strict and anchored — the whole comment line must match
-one regex, and the parsed values are never interpolated into a shell. `apply`
-is the only active verb; `plan` and `destroy` are reserved (recognized and
-rejected with a "reserved" message) so the grammar does not need to change
-shape when those verbs are implemented.
+`shipmate <verb> [env] [tag-filter]` in a PR comment drives shipmate's
+comment-based commands. The grammar is strict and anchored — the whole
+comment line must match one regex, and the parsed values are never
+interpolated into a shell. A comment authored by a bot account (any login
+ending `[bot]`) is ignored outright before parsing — a loop guard, since
+shipmate's own comments (help output, apply results, the doctor report) can
+themselves contain text that matches the command grammar.
+
+| verb | status | args | authorization |
+|---|---|---|---|
+| `shipmate apply [env]` | active | optional env | apply requirements, below |
+| `shipmate doctor` | active | none | read-only, but the commenter's `author_association` must be `OWNER`, `MEMBER` or `COLLABORATOR` (a classification, not a permission check) |
+| `shipmate help` | active | none | none — read-only, open to any commenter |
+| `shipmate plan` | reserved | — | — |
+| `shipmate destroy` | reserved | — | — |
+
+`plan` and `destroy` are recognized and rejected with a "reserved" message, so
+the grammar does not need to change shape when those verbs are implemented. A
+verb documented as taking no arguments (`doctor`, `help`) rejects an env or
+tag-filter given alongside it with an explicit "takes no arguments" error
+rather than silently ignoring the extra token; a tag-filter given to any verb
+is likewise rejected as not yet supported rather than silently applied to the
+whole environment. An unknown verb's error points the commenter at
+`shipmate help`, and so does the "malformed" error for a line that does not
+match the grammar at all (a capitalized verb, a stray token, a double space). `scripts/comment-parse`'s `VERBS` registry is the single
+source of truth this table is derived from: it drives the parser, the
+`--help-markdown` rendering that `shipmate help` posts verbatim (marked with
+the HTML comment `<!-- shipmate:help -->`), and the reject-hint text, so the
+three cannot drift from each other. Unlike the `:summary` and `:doctor`
+markers below, `<!-- shipmate:help -->` is not an upsert key — nothing reads
+it back: `shipmate help` posts a fresh comment every time, and the marker
+only labels the output as shipmate's own.
+
+`shipmate doctor` posts a consolidated, sticky report — one comment per pull
+request, identified by the HTML marker `<!-- shipmate:doctor -->` (distinct
+from the plan comment's `<!-- shipmate:summary -->`) and upserted in place the
+same way. It combines six live settings probes (gate ruleset, environment
+pair existence, environment protection shape, engine action-pin freshness,
+approvers-team resolvability, and App installation permission drift — see
+`docs/branch-protection.md`) with a harvest of the warning and failure
+annotations GitHub already recorded on this commit's workflow runs
+(shipmate's own and any other Actions workflow run on that commit;
+third-party-app-authored check runs are excluded). An empty harvest is
+reported as an all-clear only when the harvest both completed and had nothing
+left to wait for: if any of the commit's relevant check runs had not finished
+when the report was rendered, it says so and asks for the command again once
+they have, and if the harvest itself could not be read in full it says that
+too — the two are separate statements, since a run that has not finished has
+recorded nothing yet while a run that could not be read may have recorded
+plenty. Only four of the six
+probes can produce a finding from the plan path's own `annotate`-mode
+invocation: the approvers-team probe needs the `SHIPMATE_TEAM` environment
+variable, which the plan path does not supply, so it silently returns
+nothing; the
+App-permission-drift probe only has something to report when a
+full-manifest permission-set mint was actually attempted, which only
+`shipmate doctor` does. Both probes are effectively comment-path-only —
+they surface findings only via `shipmate doctor`, never on the plan path's
+own annotations.
+
+Two of the probes are narrower than the repository. The **environment** probes
+(pair existence and protection shape) see only the environments of the stacks
+this pull request changed — the declared set comes from the plan matrix's cell
+summaries — so the report's all-clear line names the environments it actually
+covered instead of claiming the repository's environments are all sound, and
+says plainly when the set was empty. An environment that is in the repository's
+environments listing but whose own settings cannot be read becomes a note
+naming it, rather than being silently skipped the way a nonexistent
+environment is. The **engine-pin** probe reports only on pins of the engine's
+own repository, which it learns at runtime from the running action's
+`github.action_repository` (threaded in as `SHIPMATE_ENGINE_REPO`, never
+hardcoded — a consumer's other shared actions belong to whoever ships them);
+when either that or the commit under examination is unavailable it says pin
+freshness was not verified rather than falling back to a weaker read.
+
+Those warnings are not read from the sticky plan comment — a plan run still
+writes the full plan comment (overview table, per-changed-cell details, and a
+one-line footer pointing at `shipmate help`, the only thing in that comment
+that mentions the comment commands at all) but
+no longer appends doctor findings to it. Instead, `actions/summary` runs
+`scripts/doctor` on every plan run and emits its findings as
+workflow-command annotations, verbatim:
+
+- `::warning title=shipmate doctor::<text>` for a misconfiguration,
+- `::notice title=shipmate doctor::<text>` for an informational finding.
+
+The `title=shipmate doctor` string is exactly what `shipmate doctor`'s harvest
+step filters check-run annotations on, so it never re-reports a finding the
+live probes already re-state fresh against current settings — this is
+machine-read, not a formatting choice, and a mismatch between the annotate
+call and the harvest filter is a regression. `shipmate doctor` is entirely
+read-only: it dispatches nothing and changes no setting, and writes nothing
+but its own sticky comment
+and an `eyes` reaction on the triggering comment (both read-only verbs get
+that acknowledgement as soon as the command is accepted — `rocket` stays
+reserved for an authorized `apply`; a reaction that cannot be posted is
+ignored), a one-line error comment when it cannot mint an App token, a
+one-line refusal when the commenter may not have the report (below), and a
+handful of untitled `::warning::` annotations on its own degrade paths — an
+unreadable PR head SHA, no plan-run cell summaries for this commit, a failed
+check-runs listing or reduction, a failed per-check annotations fetch, and a
+failed listing of the pull request's comments, on which the report is skipped
+for that run rather than posted as a second sticky comment. Those annotations
+land on the
+`issue_comment` workflow run that is executing `shipmate doctor` itself, at
+`github.sha` (this job does no checkout at all — it reads entirely through
+`gh api`/`gh run download -R` — so `github.sha` is simply the default
+branch's tip, not a checked-out commit), not on the PR head SHA whose check
+runs the harvest reads — so there is no self-harvest loop. `shipmate doctor`
+never affects `shipmate / gate`.
+
+Because the report enumerates the guardrails a repository is *missing* — an
+ungated default branch, an apply environment with no approval rule, the
+configured approvers team and whether it resolves, an App installation short of
+the manifest's permissions — the `doctor` route is gated on the commenter's
+GitHub `author_association`. **What the engine enforces:** `doctor` runs only
+when `github.event.comment.author_association` is `OWNER`, `MEMBER` or
+`COLLABORATOR` — that is, only for organization members and repository
+collaborators. Any other commenter gets a single-line refusal saying so, and
+nothing else happens — no App token is minted, no probe runs, no report is
+composed. `CONTRIBUTOR` is deliberately excluded: its only signal is one merged
+pull request, which is no standing relationship to the repository.
+The allowlist is evaluated once, in the same step as the bot loop guard, and
+every step on the route keys off that one boolean; it fails closed, so an
+association the engine does not recognize — or an event carrying no comment
+context at all — counts as no access. Consumers adopt this by re-pinning the
+engine SHA: it adds no action input and needs no additional workflow
+`permissions:` entry, since the association arrives on the event payload.
+
+**What the engine does not enforce:** it does not check write access, and must
+not be described as doing so. `author_association` is GitHub's own
+classification of the author's relationship to the repository, not a permission
+lookup, and it is wrong in both directions: a collaborator invited with only the
+**Read** role, and an organization member whose base repository permission is
+**None**, are both classified `COLLABORATOR`/`MEMBER` and are therefore admitted
+to the report even though neither can write to the repository; conversely an
+organization member whose membership is **private** is reported as `NONE` and
+will be refused unless they are also a direct collaborator. What the gate does
+buy is that an account with no declared relationship to the repository is
+refused. Nor is `shipmate help` gated — it renders the verb list and discloses
+nothing about the repository. And the report is an ordinary pull
+request comment, so once someone with access asks for it, everyone who can read
+the pull request can read it. On a repository with **public** pull requests you
+may additionally restrict who can trigger the comment-ops workflow (for example
+the same `github.event.comment.author_association` condition on the
+`issue_comment` job, or keeping the repository private) — belt and braces over
+the engine's own gate, not the only thing standing between an arbitrary account
+and the report. `app/manifest.json` declares
+`"public": false` for a related reason: the App is registered per organization
+and intended for repositories the installing organization controls.
 
 The env is optional for `apply`. A targeted `shipmate apply <env>` applies one
 environment; a bare `shipmate apply` applies **every** environment that has a
@@ -209,6 +353,9 @@ crosses a workflow-run boundary:
 - **The sticky plan comment** — App-authored (marker + any Bot author for the
   lookup, since a consumer org's App bot login may differ from
   `shipmate[bot]`), upserted in place by `actions/summary`.
+- **The `shipmate doctor` sticky report** — App-authored (its own marker +
+  Bot-author lookup, same posture as the plan comment), upserted in place by
+  `actions/comment-ops`.
 - **The apply result comment** — posted fresh by `actions/apply-summary` on
   every comment-ops apply run (targeted and bare); unlike the sticky plan
   comment it is never upserted against a marker, so a failure-then-retry
@@ -352,14 +499,6 @@ changes get a table row only. Check links are built **forward** from the
 cell's `(stack-path, environment)` pair using the check-name grammar above;
 when the check run cannot be resolved, the link degrades to the workflow-run
 URL.
-
-The comment may additionally carry a trailing `### doctor` section: `scripts/doctor`'s
-read-only settings-drift warnings (a missing/mis-pinned `shipmate / gate` rule,
-a missing GitHub Environment), appended by `actions/summary` after the
-overview table and cell details are built. The section is present only when
-doctor has findings; it never affects the gate verdict and doctor's own
-never-fail design means an appended-warnings failure cannot block the
-comment from posting.
 
 GitHub caps issue-comment bodies at 65,536 characters. The comment is built
 to a smaller budget: each changed cell's section degrades, in order, full
