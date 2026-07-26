@@ -7,9 +7,10 @@ Three modes, selected via SHIPMATE_DOCTOR_MODE:
   actions/summary right after a plan run. NEVER fails the run: a probe
   error becomes a 'could not verify' note — doctor guards onboarding, it
   must not take down the plan path.
-- report: render findings for the sticky PR comment on demand (Task 5).
+- report: render findings for the sticky PR comment on demand (not yet
+  implemented).
 - check-ids: reduce a check-runs listing to the ids worth fetching
-  annotations for (Task 5).
+  annotations for (not yet implemented).
 
 Probes:
 - gate ruleset on the default branch: a required_status_checks rule whose
@@ -179,7 +180,7 @@ def main():
         raise SystemExit(f"SHIPMATE_DOCTOR_MODE must be one of {', '.join(MODES)} (got: {mode!r})")
     if mode == "check-ids":
         # Report path only: reduce a check-runs listing to the ids worth
-        # fetching annotations for. Filled in by Task 5.
+        # fetching annotations for.
         raise SystemExit("check-ids mode not implemented yet")
     ctx = ctx_from_env()
     found = warnings(ctx)
@@ -187,7 +188,7 @@ def main():
         for line in render_annotations(found):
             print(line)
         return
-    raise SystemExit("report mode not implemented yet")  # Task 5
+    raise SystemExit("report mode not implemented yet")
 
 
 if __name__ == "__main__":

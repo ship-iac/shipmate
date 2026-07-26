@@ -53,14 +53,23 @@ def test_render_annotations_one_line_per_level_and_escapes():
 
 
 def test_envs_unavailable_skips_environment_probes(monkeypatch):
-    responses = {
-        f"repos/{_REPO}/rules/branches/{_BRANCH}?per_page=100": _gate_rule(),
-    }
-    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    monkeypatch.setattr(
+        doctor, "_gh_json", lambda path: pytest.fail(f"env probe hit the API: {path}")
+    )
     out = doctor._environment_warnings(_ctx(envs=set(), envs_available=False))
     assert len(out) == 1
     assert out[0][0] == doctor.NOTICE
     assert "no plan run" in out[0][1]
+
+
+def test_ctx_from_env_missing_cells_dir_yields_empty_envs(monkeypatch, tmp_path):
+    monkeypatch.setenv("GITHUB_REPOSITORY", _REPO)
+    monkeypatch.setenv("SHIPMATE_APP_ID", _APP_ID)
+    monkeypatch.setenv("SHIPMATE_DEFAULT_BRANCH", _BRANCH)
+    monkeypatch.setenv("SHIPMATE_CELLS_DIR", str(tmp_path / "missing"))
+    ctx = doctor.ctx_from_env()
+    assert ctx["envs"] == set()
+    assert ctx["envs_available"] is False
 
 
 def _gate_rule(integration_id=999, strict=True):

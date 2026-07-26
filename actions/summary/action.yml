@@ -88,7 +88,7 @@ runs:
         SHIPMATE_APP_ID: ${{ inputs.app-id }}
         SHIPMATE_CELLS_DIR: ${{ inputs.cells-dir }}
         SHIPMATE_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
-        # For the pin probe's cross-repo release read (spec risk 4): the App
+        # For the engine-pin probe's cross-repo release read: the App
         # installation token is scoped to the consumer repo and may not read
         # the engine repo; the workflow token can (public repo). `github.token`
         # is available inside a composite action — no new consumer input.
