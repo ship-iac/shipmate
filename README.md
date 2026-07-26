@@ -74,12 +74,18 @@ Three verbs are active (`plan` and `destroy` are reserved for later):
   runs.
 - `shipmate help` — show this command list.
 
+The sticky plan comment's footer points at `shipmate help`, so the commands are
+discoverable from the pull request itself. `doctor`'s environment checks cover
+the environments of the stacks a given pull request changed, and its report says
+which ones those were — it is a check on the settings that pull request touches,
+not a repository-wide audit.
+
 `help` and `doctor` are read-only; `apply` is the one verb with a full
 authorization check (approvers-team membership, a mergeable and reviewed PR, and
 a reviewed plan for the current head — see Comment-ops above). `help` answers
 any commenter. `doctor` does not: it names the guardrails this repository is
 missing — that `shipmate / gate` is not required on the default branch, that an
-apply environment has no protection rules, which approvers team is configured
+apply environment has no approval rule, which approvers team is configured
 and whether it resolves — so the engine runs it only for a commenter GitHub
 classifies as `OWNER`, `MEMBER` or `COLLABORATOR`: organization members and
 repository collaborators. Anyone else gets a one-line refusal; no App token is

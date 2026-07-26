@@ -74,11 +74,16 @@ branch (no active ruleset requiring it, or one that doesn't pin
 Environment (`<env>` / `<env>-apply`) for a tagged-in environment, the
 plan/apply environment protection shape (a plan environment must have no
 approval-type protection rules — required reviewers or wait timers — and no
-deployment branch policy; an apply environment with no protection at all is
-only a note), engine action-pin freshness in the consumer's own workflow
-files (read at the commit under examination, so the pull request that bumps a
-stale pin is not itself reported stale), whether the configured approvers team
-resolves in the org, and
+deployment branch policy; an apply environment with no approval rule is only a
+note, and "no approval rule" is deliberately not "no protection rules": GitHub
+synthesizes a `branch_policy` protection rule for any environment with a
+deployment branch policy, and a branch policy is not a review), engine
+action-pin freshness in the consumer's own workflow files (read at the commit
+under examination, so the pull request that bumps a stale pin is not itself
+reported stale, and restricted to pins of the engine's own repository, which
+the probe learns at runtime from the running action rather than from any
+hardcoded slug — another org's shared action is not shipmate's to report on),
+whether the configured approvers team resolves in the org, and
 whether the shipmate App installation still grants the manifest's full
 permission set — with the warning and failure annotations GitHub already
 recorded on this commit's workflow runs (shipmate's own and any other
@@ -92,13 +97,24 @@ full-manifest permission-set mint was actually attempted, which only
 `shipmate doctor` does — both are effectively comment-path-only. `doctor`
 degrades to a "could not verify" **warning** naming the probe that was skipped
 on an API error, and always exits 0, so a probe failure (for example, the App
-token lacking read access to `rules/branches` or `environments`) never fails
-the plan run. The engine-pin probe degrades to a **note** instead: its
-`.github/workflows` read legitimately fails on the pull request that first adds
-that directory, which is the first `shipmate doctor` any consumer runs.
-Separately, the report states plainly when the warnings harvest itself could not
-complete (or may be truncated by GitHub's per-step annotation cap) rather
-than claiming a false all-clear.
+token lacking read access to `rules/branches` or `environments` — both token
+mints that drive doctor also request Actions read, which the environment reads
+need on some configurations) never fails the plan run. The engine-pin probe
+degrades to a **note** instead: its `.github/workflows` read legitimately fails
+on the pull request that first adds that directory, which is the first
+`shipmate doctor` any consumer runs, and it also declines rather than guessing
+when it cannot tell which repository the engine is or which commit to read.
+An environment that exists but whose settings cannot be read is likewise a
+note naming it, rather than the silence a nonexistent environment gets (that
+one is the environment-existence probe's finding).
+
+The environment probes cover only the environments of the stacks a given pull
+request changed — the declared set comes from that commit's plan matrix — so
+the report's all-clear line names the environments it actually probed instead
+of implying the repository's environments are all sound. Separately, the report
+states plainly when some of the commit's workflow runs had not finished yet,
+and when the warnings harvest itself could not complete (or may be truncated by
+GitHub's per-step annotation cap), rather than claiming a false all-clear.
 `shipmate doctor` never blocks the gate, and it needs no team membership,
 review or reviewed plan, unlike `shipmate apply` — but because it reports this
 repository's own settings, the engine limits it to organization members and
@@ -108,7 +124,7 @@ repository collaborators (below).
 
 The report is an inventory of what is *not* configured: that no ruleset
 requires `shipmate / gate` on the default branch, that `<env>-apply` has no
-protection rules so pre-merge applies to it are unreviewed, which approvers
+approval rule so pre-merge applies to it are unreviewed, which approvers
 team is configured and whether it resolves, and whether the App installation is
 missing permissions the manifest declares.
 

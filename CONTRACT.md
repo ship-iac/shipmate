@@ -183,7 +183,14 @@ approvers-team resolvability, and App installation permission drift — see
 `docs/branch-protection.md`) with a harvest of the warning and failure
 annotations GitHub already recorded on this commit's workflow runs
 (shipmate's own and any other Actions workflow run on that commit;
-third-party-app-authored check runs are excluded). Only four of the six
+third-party-app-authored check runs are excluded). An empty harvest is
+reported as an all-clear only when the harvest both completed and had nothing
+left to wait for: if any of the commit's relevant check runs had not finished
+when the report was rendered, it says so and asks for the command again once
+they have, and if the harvest itself could not be read in full it says that
+too — the two are separate statements, since a run that has not finished has
+recorded nothing yet while a run that could not be read may have recorded
+plenty. Only four of the six
 probes can produce a finding from the plan path's own `annotate`-mode
 invocation: the approvers-team probe needs the `SHIPMATE_TEAM` environment
 variable, which the plan path does not supply, so it silently returns
@@ -194,8 +201,25 @@ full-manifest permission-set mint was actually attempted, which only
 they surface findings only via `shipmate doctor`, never on the plan path's
 own annotations.
 
+Two of the probes are narrower than the repository. The **environment** probes
+(pair existence and protection shape) see only the environments of the stacks
+this pull request changed — the declared set comes from the plan matrix's cell
+summaries — so the report's all-clear line names the environments it actually
+covered instead of claiming the repository's environments are all sound, and
+says plainly when the set was empty. An environment that is in the repository's
+environments listing but whose own settings cannot be read becomes a note
+naming it, rather than being silently skipped the way a nonexistent
+environment is. The **engine-pin** probe reports only on pins of the engine's
+own repository, which it learns at runtime from the running action's
+`github.action_repository` (threaded in as `SHIPMATE_ENGINE_REPO`, never
+hardcoded — a consumer's other shared actions belong to whoever ships them);
+when either that or the commit under examination is unavailable it says pin
+freshness was not verified rather than falling back to a weaker read.
+
 Those warnings are not read from the sticky plan comment — a plan run still
-writes the full plan comment (overview table, per-changed-cell details) but
+writes the full plan comment (overview table, per-changed-cell details, and a
+one-line footer pointing at `shipmate help`, the only thing in that comment
+that mentions the comment commands at all) but
 no longer appends doctor findings to it. Instead, `actions/summary` runs
 `scripts/doctor` on every plan run and emits its findings as
 workflow-command annotations, verbatim:
@@ -215,10 +239,12 @@ that acknowledgement as soon as the command is accepted — `rocket` stays
 reserved for an authorized `apply`; a reaction that cannot be posted is
 ignored), a one-line error comment when it cannot mint an App token, a
 one-line refusal when the commenter may not have the report (below), and a
-handful of untitled `::warning::` annotations on the gather step's own
-degrade paths — an unreadable PR head SHA, no plan-run cell summaries for
-this commit, a failed check-runs listing or reduction, a failed per-check
-annotations fetch. Those gather-step annotations land on the
+handful of untitled `::warning::` annotations on its own degrade paths — an
+unreadable PR head SHA, no plan-run cell summaries for this commit, a failed
+check-runs listing or reduction, a failed per-check annotations fetch, and a
+failed listing of the pull request's comments, on which the report is skipped
+for that run rather than posted as a second sticky comment. Those annotations
+land on the
 `issue_comment` workflow run that is executing `shipmate doctor` itself, at
 `github.sha` (this job does no checkout at all — it reads entirely through
 `gh api`/`gh run download -R` — so `github.sha` is simply the default
@@ -227,7 +253,7 @@ runs the harvest reads — so there is no self-harvest loop. `shipmate doctor`
 never affects `shipmate / gate`.
 
 Because the report enumerates the guardrails a repository is *missing* — an
-ungated default branch, an apply environment with no protection rules, the
+ungated default branch, an apply environment with no approval rule, the
 configured approvers team and whether it resolves, an App installation short of
 the manifest's permissions — the `doctor` route is gated on the commenter's
 GitHub `author_association`. **What the engine enforces:** `doctor` runs only
