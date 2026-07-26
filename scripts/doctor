@@ -515,6 +515,28 @@ def _render_annotation_row(a):
     return f"  - {emoji} {title} — {msg}" if title else f"  - {emoji} {msg}"
 
 
+def _emit_section(lines, name, rows, used, budget):
+    """Append one check's header + as many of its rows as fit in the
+    remaining budget. The header is emitted only when at least its first row
+    also fits -- otherwise it would be left dangling with no children.
+    Returns (new_used, rows_added, rows_dropped)."""
+    header = f"- **{_md_escape(_one_line(name, 120))}**"
+    rendered = [_render_annotation_row(a) for a in rows]
+    if used + len(header) + 1 + len(rendered[0]) + 1 > budget:
+        return used, 0, len(rows)
+    lines.append(header)
+    used += len(header) + 1
+    added, dropped = 0, 0
+    for row in rendered:
+        if used + len(row) + 1 <= budget:
+            lines.append(row)
+            used += len(row) + 1
+            added += 1
+        else:
+            dropped += 1
+    return used, added, dropped
+
+
 def _harvest_lines(sections, annotations, budget):
     """Render harvest rows, stopping once the accumulated text would exceed
     `budget` chars -- the harvest can see hundreds of rows (every
@@ -528,26 +550,64 @@ def _harvest_lines(sections, annotations, budget):
         rows = sections[name]
         if name in truncated_checks:
             any_truncated = True
-        header = f"- **{_md_escape(name)}**"
-        if not over and used + len(header) + 1 <= budget:
-            lines.append(header)
-            used += len(header) + 1
-        else:
+        if over:
+            dropped += len(rows)
+            continue
+        used, added, section_dropped = _emit_section(lines, name, rows, used, budget)
+        if added == 0 or section_dropped:
             over = True
-        for a in rows:
-            row = _render_annotation_row(a)
-            if not over and used + len(row) + 1 <= budget:
-                lines.append(row)
-                used += len(row) + 1
-            else:
-                over = True
-                dropped += 1
+        dropped += section_dropped
     if any_truncated:
         lines.append(
             "- _GitHub keeps at most 10 annotations per level per step, so this list "
             "may be truncated — see the run logs for the full set._"
         )
     return lines, dropped
+
+
+def _findings_lines(findings, budget):
+    """Render settings-probe finding rows within `budget` chars. Returns
+    (lines, dropped_count) -- the last-ditch fallback path (render_report,
+    when even the harvest-less body still exceeds sc.HARD_CAP)."""
+    lines, used, dropped = [], 0, 0
+    for lvl, text in findings:
+        line = f"- {_LEVEL_EMOJI[lvl]} {text}"
+        if used + len(line) + 1 <= budget:
+            lines.append(line)
+            used += len(line) + 1
+        else:
+            dropped += 1
+    return lines, dropped
+
+
+def _findings_only_report(findings, ctx):
+    """Last-ditch fallback: the harvest is already excluded by the time this
+    is called, so a body still over sc.HARD_CAP means the settings-probe
+    findings themselves are unexpectedly large (e.g. one warning per stale
+    pin across hundreds of workflow files). Drops the harvest section
+    entirely and hard-truncates the findings list, so the comment still
+    posts with a count rather than the whole POST failing with a 422."""
+    head = [
+        DOCTOR_MARKER,
+        "### shipmate doctor",
+        "",
+        _provenance(ctx),
+        "",
+        "#### repository settings",
+        "",
+    ]
+    # 200 chars of headroom for the omitted-count line appended below.
+    budget = max(0, sc.HARD_CAP - len("\n".join(head)) - 200)
+    if findings:
+        lines, dropped = _findings_lines(findings, budget)
+    else:
+        lines, dropped = ["- :white_check_mark: no problems found by the settings probes."], 0
+    if dropped:
+        lines.append(
+            f"- _{dropped} more finding(s) omitted to keep this comment within the size "
+            "limit — see the workflow run for the full list._"
+        )
+    return "\n".join(head + lines)
 
 
 def render_report(findings, annotations, ctx):
@@ -572,7 +632,14 @@ def render_report(findings, annotations, ctx):
             )
     else:
         lines = [":white_check_mark: no warnings on this commit's workflow runs."]
-    return "\n".join(out + heading + lines)
+    body = "\n".join(out + heading + lines)
+    if len(body) > sc.HARD_CAP:
+        # The harvest section is already budgeted against sc.SIZE_BUDGET
+        # above, so overflow this large can only come from the
+        # settings-probe findings themselves -- degrade those too rather
+        # than let the next task's `gh api ... -F body=@doctor.md` 422.
+        body = _findings_only_report(findings, ctx)
+    return body
 
 
 def main():

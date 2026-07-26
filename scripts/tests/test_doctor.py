@@ -678,3 +678,46 @@ def test_report_harvest_truncates_to_stay_under_hard_cap_and_notes_dropped_count
     body = doctor.render_report([], anns, _ctx())
     assert len(body) <= doctor.sc.HARD_CAP
     assert "omitted" in body
+
+
+def test_report_findings_alone_stay_under_hard_cap_when_harvest_is_empty():
+    # The harvest is budgeted against sc.SIZE_BUDGET, but nothing budgets the
+    # settings-probe findings themselves -- hundreds of long findings (e.g.
+    # one warning per stale pin across many workflow files) can alone exceed
+    # sc.HARD_CAP, which is exactly the 422 the size budget was meant to
+    # prevent. render_report must fall back to a truncated findings list.
+    findings = [(doctor.WARNING, "x" * 200) for _ in range(400)]
+    body = doctor.render_report(findings, [], _ctx())
+    assert len(body) <= doctor.sc.HARD_CAP
+    assert "omitted" in body
+    # the fallback drops the harvest section entirely
+    assert "warnings from this commit's workflow runs" not in body
+
+
+def test_harvest_header_one_lines_a_pathological_check_name():
+    # An unbounded check name (author-controlled, forwarded verbatim from a
+    # check run) must not be able to consume most of the harvest budget by
+    # itself before per-row truncation even gets a chance to kick in.
+    long_name = "x" * 5000
+    anns = [_ann(check=long_name)]
+    sections = doctor.harvest_sections(anns)
+    lines, dropped = doctor._harvest_lines(sections, anns, budget=10_000)
+    assert dropped == 0
+    header = next(line for line in lines if line.startswith("- **"))
+    assert len(header) < 130  # _one_line(name, 120) + '- **' + '**' wrapping, not 5000
+
+
+def test_harvest_never_emits_a_dangling_section_header():
+    # A section whose header fits but whose only row doesn't must not leave
+    # a bullet with no children -- both the header and the row are dropped
+    # together.
+    fits = _ann(check="aaa-fits", title="t", message="m")
+    toolong = _ann(check="zzz-toolong", title="t", message="m")
+    header_fits = f"- **{doctor._md_escape('aaa-fits')}**"
+    row_fits = doctor._render_annotation_row(fits)
+    budget = len(header_fits) + 1 + len(row_fits) + 1  # room for "aaa-fits" only
+    sections = doctor.harvest_sections([fits, toolong])
+    lines, dropped = doctor._harvest_lines(sections, [fits, toolong], budget)
+    assert lines == [header_fits, row_fits]
+    assert dropped == 1
+    assert not any("zzz-toolong" in line for line in lines)
