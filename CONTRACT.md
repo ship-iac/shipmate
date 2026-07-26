@@ -184,8 +184,9 @@ annotations GitHub already recorded on this commit's workflow runs
 (shipmate's own and any other Actions workflow run on that commit;
 third-party-app-authored check runs are excluded). Only four of the six
 probes can produce a finding from the plan path's own `annotate`-mode
-invocation: the approvers-team probe needs the `SHIPMATE_TEAM` input, which
-the plan path does not supply, so it silently returns nothing; the
+invocation: the approvers-team probe needs the `SHIPMATE_TEAM` environment
+variable, which the plan path does not supply, so it silently returns
+nothing; the
 App-permission-drift probe only has something to report when a
 full-manifest permission-set mint was actually attempted, which only
 `shipmate doctor` does. Both probes are effectively comment-path-only —
@@ -209,12 +210,15 @@ call and the harvest filter is a regression. `shipmate doctor` is entirely
 read-only: it authorizes nothing, writes nothing but its own sticky comment
 (plus a one-line error comment when it cannot mint an App token, and a
 handful of untitled `::warning::` annotations on the gather step's own
-degrade paths — an unreadable PR head SHA, a failed check-runs listing or
-reduction, a failed per-check annotations fetch). Those gather-step
-annotations land on the `issue_comment` workflow run that is executing
-`shipmate doctor` itself, on the default-branch SHA that run checks out —
-not on the PR head SHA whose check runs the harvest reads — so there is no
-self-harvest loop. `shipmate doctor` never affects `shipmate / gate`.
+degrade paths — an unreadable PR head SHA, no plan-run cell summaries for
+this commit, a failed check-runs listing or reduction, a failed per-check
+annotations fetch). Those gather-step annotations land on the
+`issue_comment` workflow run that is executing `shipmate doctor` itself, at
+`github.sha` (this job does no checkout at all — it reads entirely through
+`gh api`/`gh run download -R` — so `github.sha` is simply the default
+branch's tip, not a checked-out commit), not on the PR head SHA whose check
+runs the harvest reads — so there is no self-harvest loop. `shipmate doctor`
+never affects `shipmate / gate`.
 
 The env is optional for `apply`. A targeted `shipmate apply <env>` applies one
 environment; a bare `shipmate apply` applies **every** environment that has a

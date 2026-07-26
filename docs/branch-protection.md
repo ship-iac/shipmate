@@ -83,7 +83,8 @@ recorded on this commit's workflow runs (shipmate's own and any other
 Actions workflow run on that commit; third-party-app-authored check runs are
 excluded). Only four of the six probes can produce a finding from the plan
 path's own `annotate`-mode run (`actions/summary`): the approvers-team probe
-needs the `SHIPMATE_TEAM` input, which the plan path does not supply, and
+needs the `SHIPMATE_TEAM` environment variable, which the plan path does
+not supply, and
 the App-permission-drift probe only has something to report when a
 full-manifest permission-set mint was actually attempted, which only
 `shipmate doctor` does — both are effectively comment-path-only. `doctor`
