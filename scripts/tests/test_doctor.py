@@ -16,6 +16,11 @@ _REPO = "o/r"
 _APP_ID = "999"
 _BRANCH = "main"
 _ENVS = {"dev-eu"}
+_HEAD = "f" * 40
+_WF_DIR = f"repos/{_REPO}/contents/.github/workflows"
+# The pin probe reads the workflow files at the commit under examination, so
+# every contents path it asks for carries _ctx()'s head_sha as ?ref=.
+_REF = f"?ref={_HEAD}"
 
 
 def _ctx(**over):
@@ -29,7 +34,7 @@ def _ctx(**over):
         "team": None,
         "app_permissions_checked": False,
         "app_permission_error": "",
-        "head_sha": "f" * 40,
+        "head_sha": _HEAD,
         "plan_run_id": "1281",
         "annotations_dir": "ann",
         "check_ids_path": "check-ids.tsv",
@@ -156,7 +161,7 @@ def _quiet_new_probes():
         f"repos/{_REPO}/environments/dev-eu-apply": _env(
             "dev-eu-apply", rules=("required_reviewers",)
         ),
-        f"repos/{_REPO}/contents/.github/workflows": [],
+        f"{_WF_DIR}{_REF}": [],
     }
 
 
@@ -279,6 +284,33 @@ def test_probe_generic_exception_degrades_to_note(monkeypatch):
     assert "could not verify" in text and "probe skipped" in text
 
 
+def test_degrade_note_names_the_probe_and_drops_the_workflow_command_prefix(monkeypatch):
+    """The degrade text is rendered verbatim into the sticky comment and into
+    `::warning ...::` annotation data. `bm.gh_json` raises
+    `::error::command failed (N): gh api <path>`, so echoing the exception puts
+    a literal workflow-command prefix in the comment body (and nests one
+    workflow command inside another in annotate mode) and leaks the internal
+    endpoint. Name the probe that was skipped; keep the reason."""
+    quiet = _quiet_new_probes()
+
+    def gh(path):
+        if "rules/branches" in path:
+            raise SystemExit(f"::error::command failed (1): gh api {path}")
+        if path in quiet:
+            return quiet[path]
+        return _environments("dev-eu", "dev-eu-apply")
+
+    monkeypatch.setattr(doctor, "_gh_json", gh)
+    out = doctor.warnings(_ctx())
+    assert len(out) == 1
+    level, text = out[0]
+    assert level == doctor.WARNING
+    assert "gate rule" in text  # which probe was skipped
+    assert "command failed (1)" in text  # the reason survives
+    assert "::error::" not in text
+    assert "gh api" not in text and "rules/branches" not in text
+
+
 def test_plan_env_with_reviewers_warned(monkeypatch):
     responses = {
         f"repos/{_REPO}/environments/dev-eu": _env("dev-eu", rules=("required_reviewers",)),
@@ -290,7 +322,28 @@ def test_plan_env_with_reviewers_warned(monkeypatch):
     out = doctor._env_protection_warnings(_ctx())
     assert len(out) == 1
     assert out[0][0] == doctor.WARNING
-    assert "dev-eu" in out[0][1] and "hang" in out[0][1]
+    # Not "will hang waiting for approval": `approval` is every rule that isn't
+    # a branch policy, so a wait timer lands here too and is not an approval.
+    assert "dev-eu" in out[0][1] and "will not start immediately" in out[0][1]
+    assert "approval" not in out[0][1]
+
+
+def test_plan_env_wait_timer_is_not_diagnosed_as_an_approval_hang(monkeypatch):
+    # docs/branch-protection.md deliberately lumps wait timers in with
+    # reviewers (both stop a plan job from starting when it should), so the
+    # finding must fire -- but its wording must fit the rule it names.
+    responses = {
+        f"repos/{_REPO}/environments/dev-eu": _env("dev-eu", rules=("wait_timer",)),
+        f"repos/{_REPO}/environments/dev-eu-apply": _env(
+            "dev-eu-apply", rules=("required_reviewers",)
+        ),
+    }
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    out = doctor._env_protection_warnings(_ctx())
+    assert len(out) == 1
+    assert "wait_timer" in out[0][1]
+    assert "will not start immediately" in out[0][1]
+    assert "approval" not in out[0][1]
 
 
 def test_apply_env_without_protection_noted(monkeypatch):
@@ -345,10 +398,8 @@ _OTHER_SHA = "b" * 40
 
 def test_tag_pin_warned(monkeypatch):
     responses = {
-        f"repos/{_REPO}/contents/.github/workflows": _wf_listing("plan.yml"),
-        f"repos/{_REPO}/contents/.github/workflows/plan.yml": _wf_file(
-            "uses: acme/engine/actions/setup@v2\n"
-        ),
+        f"{_WF_DIR}{_REF}": _wf_listing("plan.yml"),
+        f"{_WF_DIR}/plan.yml{_REF}": _wf_file("uses: acme/engine/actions/setup@v2\n"),
     }
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
     out = doctor._pin_warnings(_ctx())
@@ -361,10 +412,8 @@ def test_quoted_tag_pin_warned(monkeypatch):
     # Some YAML formatters quote the `uses:` value -- the anchor must not
     # make those pins invisible to the probe.
     responses = {
-        f"repos/{_REPO}/contents/.github/workflows": _wf_listing("plan.yml"),
-        f"repos/{_REPO}/contents/.github/workflows/plan.yml": _wf_file(
-            'uses: "acme/engine/actions/setup@v2"\n'
-        ),
+        f"{_WF_DIR}{_REF}": _wf_listing("plan.yml"),
+        f"{_WF_DIR}/plan.yml{_REF}": _wf_file('uses: "acme/engine/actions/setup@v2"\n'),
     }
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
     out = doctor._pin_warnings(_ctx())
@@ -380,13 +429,11 @@ def test_non_file_workflow_entry_skipped(monkeypatch):
     # No response is registered for sub.yml's contents call, so a regression
     # of the type check fails this test with a KeyError, not a silent pass.
     responses = {
-        f"repos/{_REPO}/contents/.github/workflows": [
+        f"{_WF_DIR}{_REF}": [
             {"name": "sub.yml", "type": "dir"},
             {"name": "plan.yml", "type": "file"},
         ],
-        f"repos/{_REPO}/contents/.github/workflows/plan.yml": _wf_file(
-            "uses: acme/engine/actions/setup@v2\n"
-        ),
+        f"{_WF_DIR}/plan.yml{_REF}": _wf_file("uses: acme/engine/actions/setup@v2\n"),
     }
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
     out = doctor._pin_warnings(_ctx())
@@ -397,10 +444,8 @@ def test_non_file_workflow_entry_skipped(monkeypatch):
 
 def test_stale_sha_pin_warned(monkeypatch):
     responses = {
-        f"repos/{_REPO}/contents/.github/workflows": _wf_listing("plan.yml"),
-        f"repos/{_REPO}/contents/.github/workflows/plan.yml": _wf_file(
-            f"uses: acme/engine/actions/setup@{_SHA}\n"
-        ),
+        f"{_WF_DIR}{_REF}": _wf_listing("plan.yml"),
+        f"{_WF_DIR}/plan.yml{_REF}": _wf_file(f"uses: acme/engine/actions/setup@{_SHA}\n"),
         "repos/acme/engine/releases/latest": {"tag_name": "v1.4.0"},
         "repos/acme/engine/commits/v1.4.0": {"sha": _OTHER_SHA},
     }
@@ -413,8 +458,8 @@ def test_stale_sha_pin_warned(monkeypatch):
 
 def test_current_sha_pin_silent(monkeypatch):
     responses = {
-        f"repos/{_REPO}/contents/.github/workflows": _wf_listing("plan.yml", "notes.md"),
-        f"repos/{_REPO}/contents/.github/workflows/plan.yml": _wf_file(
+        f"{_WF_DIR}{_REF}": _wf_listing("plan.yml", "notes.md"),
+        f"{_WF_DIR}/plan.yml{_REF}": _wf_file(
             f"uses: acme/engine/actions/setup@{_SHA}\nuses: acme/engine/actions/summary@{_SHA}\n"
         ),
         "repos/acme/engine/releases/latest": {"tag_name": "v1.4.0"},
@@ -426,10 +471,8 @@ def test_current_sha_pin_silent(monkeypatch):
 
 def test_self_referencing_pin_ignored(monkeypatch):
     responses = {
-        f"repos/{_REPO}/contents/.github/workflows": _wf_listing("plan.yml"),
-        f"repos/{_REPO}/contents/.github/workflows/plan.yml": _wf_file(
-            f"uses: {_REPO}/actions/setup@{_SHA}\n"
-        ),
+        f"{_WF_DIR}{_REF}": _wf_listing("plan.yml"),
+        f"{_WF_DIR}/plan.yml{_REF}": _wf_file(f"uses: {_REPO}/actions/setup@{_SHA}\n"),
     }
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
     assert doctor._pin_warnings(_ctx()) == []
@@ -437,10 +480,8 @@ def test_self_referencing_pin_ignored(monkeypatch):
 
 def test_unreadable_release_degrades_to_note(monkeypatch):
     responses = {
-        f"repos/{_REPO}/contents/.github/workflows": _wf_listing("plan.yml"),
-        f"repos/{_REPO}/contents/.github/workflows/plan.yml": _wf_file(
-            f"uses: acme/engine/actions/setup@{_SHA}\n"
-        ),
+        f"{_WF_DIR}{_REF}": _wf_listing("plan.yml"),
+        f"{_WF_DIR}/plan.yml{_REF}": _wf_file(f"uses: acme/engine/actions/setup@{_SHA}\n"),
     }
 
     def gh(path):
@@ -453,6 +494,109 @@ def test_unreadable_release_degrades_to_note(monkeypatch):
     assert len(out) == 1
     assert out[0][0] == doctor.NOTICE  # degrade to a note
     assert "not verified" in out[0][1]
+
+
+def test_missing_workflows_directory_degrades_to_a_note(monkeypatch):
+    """A brand-new consumer's first shipmate PR is the one that ADDS
+    `.github/workflows`, so this listing legitimately fails (and it is also how
+    a 403 or a transient 5xx arrives). That is the default outcome of the
+    first-ever `shipmate doctor`, so it must degrade at NOTICE like the
+    unreadable-release path above -- not fall through to warnings()' generic
+    WARNING, which renders a literal `::error::` prefix and the internal
+    `gh api` invocation into the comment body."""
+
+    def gh(path):
+        assert path == f"{_WF_DIR}{_REF}"
+        raise SystemExit(f"::error::command failed (1): gh api {path}")
+
+    monkeypatch.setattr(doctor, "_gh_json", gh)
+    out = doctor._pin_warnings(_ctx())
+    assert out == [doctor.PIN_UNREADABLE]
+    assert out[0][0] == doctor.NOTICE
+    assert "not verified" in out[0][1]
+    assert "::error::" not in out[0][1] and "gh api" not in out[0][1]
+
+
+def test_workflow_file_read_failure_keeps_the_pins_found_so_far(monkeypatch):
+    # A per-file read can fail after the listing succeeded (a file deleted
+    # between the two calls, a 403, a transient 5xx). The findings already
+    # collected must survive, with the note appended -- not be discarded, and
+    # not escalate to the generic degrade.
+    responses = {
+        f"{_WF_DIR}{_REF}": _wf_listing("a.yml", "b.yml"),
+        f"{_WF_DIR}/a.yml{_REF}": _wf_file("uses: acme/engine/actions/setup@v2\n"),
+    }
+
+    def gh(path):
+        if path not in responses:
+            raise SystemExit(f"::error::command failed (1): gh api {path}")
+        return responses[path]
+
+    monkeypatch.setattr(doctor, "_gh_json", gh)
+    out = doctor._pin_warnings(_ctx())
+    assert len(out) == 2
+    assert out[0][0] == doctor.WARNING and "acme/engine@v2" in out[0][1]
+    assert out[1] == doctor.PIN_UNREADABLE
+
+
+def test_pin_probe_ignores_a_head_sha_that_is_not_a_sha(monkeypatch):
+    # A value that isn't a 40-char hex SHA must never reach the request path --
+    # the same guard apply-detect puts on SHIPMATE_HEAD_SHA. Falls back to the
+    # default branch instead of retargeting the gh api URL.
+    seen = []
+
+    def gh(path):
+        seen.append(path)
+        if path.endswith("plan.yml"):
+            return _wf_file("uses: acme/engine/actions/setup@v2\n")
+        return _wf_listing("plan.yml")
+
+    monkeypatch.setattr(doctor, "_gh_json", gh)
+    assert doctor._pin_warnings(_ctx(head_sha="main?per_page=1&x=/../"))
+    assert seen == [_WF_DIR, f"{_WF_DIR}/plan.yml"]
+
+
+def test_pin_probe_reads_the_commit_under_examination(monkeypatch):
+    """The remediation loop the pin warning drives: doctor says "re-pin", the
+    consumer opens a PR bumping the SHA, and this probe must read THAT commit's
+    workflow files. Reading the default branch (the contents API default) would
+    report the pin stale on the very PR that fixes it, once per workflow file."""
+    seen = []
+
+    def gh(path):
+        seen.append(path)
+        if path.endswith(f"plan.yml{_REF}"):
+            return _wf_file(f"uses: acme/engine/actions/setup@{_SHA}\n")
+        if path == "repos/acme/engine/releases/latest":
+            return {"tag_name": "v1.4.0"}
+        if path == "repos/acme/engine/commits/v1.4.0":
+            return {"sha": _SHA}
+        return _wf_listing("plan.yml")
+
+    monkeypatch.setattr(doctor, "_gh_json", gh)
+    # Pin == latest release: silent only if the file was read at the head SHA.
+    assert doctor._pin_warnings(_ctx()) == []
+    contents = [p for p in seen if "/contents/" in p]
+    assert contents, "the pin probe made no contents call"
+    assert all(p.endswith(_REF) for p in contents), contents
+
+
+def test_pin_probe_falls_back_to_the_default_branch_without_a_head_sha(monkeypatch):
+    # head_sha is empty when neither the comment path nor the plan path
+    # supplied one; the contents API's own default (the default branch) is then
+    # the only ref left to read, so no ?ref= is sent at all.
+    seen = []
+
+    def gh(path):
+        seen.append(path)
+        if path.endswith("plan.yml"):
+            return _wf_file("uses: acme/engine/actions/setup@v2\n")
+        return _wf_listing("plan.yml")
+
+    monkeypatch.setattr(doctor, "_gh_json", gh)
+    out = doctor._pin_warnings(_ctx(head_sha=""))
+    assert len(out) == 1 and "acme/engine@v2" in out[0][1]
+    assert seen == [_WF_DIR, f"{_WF_DIR}/plan.yml"]
 
 
 def test_release_lookup_prefers_the_public_token(monkeypatch):
@@ -693,9 +837,51 @@ def test_report_escapes_hostile_annotation_text():
     assert "[go](http://e)" not in body
 
 
-def test_report_states_when_environment_probes_were_skipped():
-    body = doctor.render_report([], [], _ctx(envs_available=False, plan_run_id=""))
-    assert "no plan run" in body
+def test_skipped_environment_probes_are_stated_exactly_once():
+    """The "skipped" wording comes from one place -- `_environment_warnings`,
+    keyed on `envs_available` -- so the preamble and the finding can neither
+    repeat it nor disagree about it."""
+    findings = doctor._environment_warnings(_ctx(envs=set(), envs_available=False))
+    body = doctor.render_report(findings, [], _ctx(envs_available=False, plan_run_id=""))
+    assert "environment probes were skipped" in body
+    assert body.count("environment probes were skipped") == 1
+
+
+def test_provenance_claims_nothing_about_probes_when_the_run_id_was_cleared():
+    """`gh run download` can extract the cell summaries and still exit non-zero;
+    comment-ops then clears `run_id` while doctor-cells stays populated, so
+    `envs_available` is True with an empty `plan_run_id`. A preamble keyed on the
+    run id would claim the environment probes were skipped while they ran and
+    produced the finding rendered right below it."""
+    findings = [(doctor.WARNING, "GitHub Environment `dev-eu-apply` does not exist")]
+    body = doctor.render_report(findings, [], _ctx(envs_available=True, plan_run_id=""))
+    assert "probes were skipped" not in body
+    assert "dev-eu-apply" in body
+    assert _HEAD[:7] in body  # the preamble still says what was examined
+
+
+def test_report_escapes_a_hostile_settings_finding():
+    """Settings findings interpolate repository data (a workflow file name
+    reaches the pin warning verbatim). A file named `<!-- shipmate:summary
+    -->.yml` would otherwise put the PLAN comment's upsert marker inside the
+    doctor comment, and actions/summary's marker+Bot upsert would then PATCH
+    this comment with the plan body -- destroying the report and orphaning the
+    plan comment."""
+    finding = (doctor.WARNING, "`<!-- shipmate:summary -->.yml` pins `acme/engine@v2` by tag")
+    body = doctor.render_report([finding], [], _ctx())
+    assert "<!-- shipmate:summary -->" not in body
+    assert "&lt;!-- shipmate:summary --&gt;" in body
+    assert body.count(doctor.DOCTOR_MARKER) == 1
+
+
+def test_findings_only_fallback_escapes_a_hostile_settings_finding():
+    # Same escaping on the HARD_CAP fallback path: it renders the findings
+    # through _findings_lines, a second renderer that must not bypass it.
+    findings = [(doctor.WARNING, "<!-- shipmate:summary -->" + "x" * 200) for _ in range(400)]
+    body = doctor.render_report(findings, [], _ctx())
+    assert len(body) <= doctor.sc.HARD_CAP
+    assert "warnings from this commit's workflow runs" not in body  # the fallback fired
+    assert "<!-- shipmate:summary -->" not in body
 
 
 def test_provenance_one_lines_an_overlong_plan_run_id():
@@ -823,8 +1009,8 @@ def test_harvest_never_emits_a_dangling_section_header():
     header_fits = f"- **{doctor._md_escape('aaa-fits')}**"
     row_fits = doctor._render_annotation_row(fits)
     # Room for "aaa-fits"'s header + row, plus "zzz-toolong"'s header alone --
-    # so the header-only check the old code used would pass for zzz-toolong,
-    # while the new combined header+first-row check correctly refuses it.
+    # so a budget check that measured only the header would admit zzz-toolong,
+    # while the combined header+first-row check refuses it.
     budget = (
         len(header_fits)
         + 1

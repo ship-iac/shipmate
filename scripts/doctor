@@ -21,8 +21,9 @@ Probes:
 - GitHub Environment pair (<env>, <env>-apply) exists for every planned env.
 - protection shape of that pair: a plan env must have no reviewers and no
   branch policy; an apply env with no protection is worth a note.
-- engine action-pin freshness in the consumer's workflow files: a tag/branch
-  pin is a warning, a SHA pin behind the engine's latest release is a warning.
+- engine action-pin freshness in the consumer's workflow files, read at the
+  commit under examination: a tag/branch pin is a warning, a SHA pin behind
+  the engine's latest release is a warning.
 - approvers team resolvability: the configured SHIPMATE_APPROVERS_TEAM must
   resolve in the repo's org, or every apply is rejected as "not a team member".
 - GitHub App installation permission drift: a failed installation-token mint
@@ -154,11 +155,12 @@ def _environment_warnings(ctx):
 
 
 def _env_protection_warnings(ctx):
-    """Plan/apply env split, checked live. A required reviewer or branch policy
-    on a PLAN env makes plan jobs hang pending approval — no error, just a
-    stalled matrix, which is the hardest shipmate misconfiguration to diagnose.
-    An APPLY env with no protection at all is the mirror problem: pre-merge
-    applies to it are unreviewed."""
+    """Plan/apply env split, checked live. An approval-type protection rule on
+    a PLAN env — a required reviewer, or a wait timer — stops plan jobs from
+    starting when they should: no error, just a stalled matrix, which is the
+    hardest shipmate misconfiguration to diagnose. An APPLY env with no
+    protection at all is the mirror problem: pre-merge applies to it are
+    unreviewed."""
     out = []
     for env in sorted(ctx["envs"]):
         for name, is_apply in ((env, False), (f"{env}-apply", True)):
@@ -172,9 +174,9 @@ def _env_protection_warnings(ctx):
                 {r.get("type") for r in data.get("protection_rules", []) if r.get("type")}
             )
             # GitHub reports a "branch_policy" protection rule whenever
-            # deployment_branch_policy is set -- that alone doesn't make plan
-            # jobs hang (they get refused outright, handled below), so it's
-            # excluded from the "will hang waiting for approval" diagnosis.
+            # deployment_branch_policy is set -- that alone doesn't delay a
+            # plan job (it refuses it outright, handled below), so it's
+            # excluded from the "will not start immediately" diagnosis.
             approval = [r for r in rules if r != "branch_policy"]
             policy = data.get("deployment_branch_policy")
             if not is_apply and approval:
@@ -182,8 +184,8 @@ def _env_protection_warnings(ctx):
                     (
                         WARNING,
                         f"GitHub Environment `{name}` is a plan environment but has "
-                        f"protection rules ({', '.join(approval)}) — plan jobs will hang "
-                        f"waiting for approval; put reviewers on `{env}-apply` instead.",
+                        f"protection rules ({', '.join(approval)}) — plan jobs will not "
+                        f"start immediately; put reviewers on `{env}-apply` instead.",
                     )
                 )
             if not is_apply and policy:
@@ -214,32 +216,104 @@ _PIN = re.compile(
 _SHA40 = re.compile(r"[0-9a-fA-F]{40}")
 
 
+_WORKFLOWS_DIR = ".github/workflows"
+# Degrade for any unreadable contents call in this probe family, at NOTICE like
+# the unreadable-release degrade below: a repo can legitimately fail this read
+# (the directory does not exist on the ref being read -- the first shipmate PR
+# is the one that adds it -- or the token cannot see it, or the API is
+# transiently failing), and none of those are a misconfiguration to warn about.
+# It must never fall through to the generic WARNING degrade in warnings().
+PIN_UNREADABLE = (
+    NOTICE,
+    f"could not read `{_WORKFLOWS_DIR}` — engine pin freshness not verified.",
+)
+
+
+def _contents_ref(ctx):
+    """`?ref=` suffix for the workflow-file reads: the commit under examination
+    when one is known, otherwise nothing (the API then reads the default
+    branch).
+
+    Reading the default branch would break the remediation loop this probe
+    exists to drive: a stale pin is fixed by a PR that bumps the SHA, and that
+    new SHA lives only on the PR's head until it merges — so a default-branch
+    read reports the pin stale on the very PR that fixes it. `head_sha` is the
+    comment path's PR head and the plan path's `head-sha` input; it is empty
+    only when neither supplied one, and then the default branch is all there
+    is to read. Anything that is not a 40-char hex SHA is treated as absent
+    rather than interpolated into the request path (same guard as
+    apply-detect's on SHIPMATE_HEAD_SHA) — a probe must not be able to retarget
+    a `gh api` URL, however it was configured."""
+    sha = ctx.get("head_sha") or ""
+    return f"?ref={sha}" if _SHA40.fullmatch(sha) else ""
+
+
+def _workflow_names(base):
+    """([file names], readable): the `.yml`/`.yaml` entries of the workflow
+    directory listing. Non-file entries (a directory or symlink whose name ends
+    in `.yml`) are dropped — their "contents" read returns a list, not a blob."""
+    try:
+        listing = _gh_json(base)
+    except (Exception, SystemExit):  # noqa: BLE001 - degrade, see PIN_UNREADABLE
+        return [], False
+    names = []
+    for entry in listing:
+        if entry.get("type") == "file" and entry["name"].endswith((".yml", ".yaml")):
+            names.append(entry["name"])
+    return names, True
+
+
+def _workflow_text(path):
+    """One workflow file's decoded text, or None when it cannot be read."""
+    try:
+        blob = _gh_json(path)
+    except (Exception, SystemExit):  # noqa: BLE001 - degrade, see PIN_UNREADABLE
+        return None
+    return base64.b64decode(blob.get("content", "")).decode("utf-8", "replace")
+
+
+def _pins_in_text(text, fname, repo, seen):
+    """Tag/branch-pin warnings for one workflow file, recording its SHA pins in
+    `seen` ({slug: {(file, sha)}}) for the freshness comparison."""
+    out = []
+    for m in _PIN.finditer(text):
+        slug, ref = f"{m.group('owner')}/{m.group('repo')}", m.group("ref")
+        if slug == repo:
+            continue  # a repo pinning its own actions is not an engine pin
+        if not _SHA40.fullmatch(ref):
+            out.append(
+                (
+                    WARNING,
+                    f"`{fname}` pins `{slug}@{ref}` by tag or branch — pin a "
+                    "commit SHA (a moving ref lets the engine change under your "
+                    "deploy credentials).",
+                )
+            )
+            continue
+        seen.setdefault(slug, set()).add((fname, ref.lower()))
+    return out
+
+
 def _pins_in_workflows(ctx):
     """(warnings, {slug: {(file, sha)}}) for every cross-repo action pin found
-    in the consumer's workflow files. The engine's owner/repo comes from the
-    pin itself — shipmate never hardcodes an org."""
+    in the consumer's workflow files at the commit under examination. The
+    engine's owner/repo comes from the pin itself — shipmate never hardcodes an
+    org. An unreadable listing or file degrades to PIN_UNREADABLE alongside the
+    pins already found, never to an error."""
     out, seen = [], {}
-    listing = _gh_json(f"repos/{ctx['repo']}/contents/.github/workflows")
-    for entry in listing:
-        if entry.get("type") != "file" or not entry["name"].endswith((".yml", ".yaml")):
-            continue
-        blob = _gh_json(f"repos/{ctx['repo']}/contents/.github/workflows/{entry['name']}")
-        text = base64.b64decode(blob.get("content", "")).decode("utf-8", "replace")
-        for m in _PIN.finditer(text):
-            slug, ref = f"{m.group('owner')}/{m.group('repo')}", m.group("ref")
-            if slug == ctx["repo"]:
-                continue  # a repo pinning its own actions is not an engine pin
-            if not _SHA40.fullmatch(ref):
-                out.append(
-                    (
-                        WARNING,
-                        f"`{entry['name']}` pins `{slug}@{ref}` by tag or branch — pin a "
-                        "commit SHA (a moving ref lets the engine change under your "
-                        "deploy credentials).",
-                    )
-                )
-                continue
-            seen.setdefault(slug, set()).add((entry["name"], ref.lower()))
+    ref = _contents_ref(ctx)
+    base = f"repos/{ctx['repo']}/contents/{_WORKFLOWS_DIR}"
+    names, readable = _workflow_names(f"{base}{ref}")
+    if not readable:
+        return [PIN_UNREADABLE], seen
+    for name in names:
+        text = _workflow_text(f"{base}/{name}{ref}")
+        if text is None:
+            # Stop at the first unreadable file: the same cause (permissions,
+            # a bad ref, an API outage) applies to the rest of the directory.
+            out.append(PIN_UNREADABLE)
+            return out, seen
+        out.extend(_pins_in_text(text, name, ctx["repo"], seen))
     return out, seen
 
 
@@ -353,6 +427,23 @@ PROBES = (
 )
 
 
+def _probe_label(probe):
+    """Reader-facing name of a probe, from its function name: `_pin_warnings`
+    -> "pin". Used by the degrade note below so a reader learns which probe was
+    skipped instead of being shown the `gh api` call that failed."""
+    return probe.__name__.strip("_").removesuffix("_warnings").replace("_", " ")
+
+
+def _degrade_reason(e):
+    """The failure reason, safe to put in a comment body or an annotation's
+    data. `bm.gh_json` raises `::error::command failed (N): gh api <path>`:
+    the workflow-command prefix would render literally in the sticky comment
+    and nest inside `::warning ...::` in annotate mode, and the endpoint is an
+    internal detail no reader of the report can act on. Keep the reason, drop
+    the invocation."""
+    return _one_line(str(e).removeprefix("::error::").split(": gh api ")[0], 120)
+
+
 def warnings(ctx):
     out = []
     for probe in PROBES:
@@ -364,7 +455,13 @@ def warnings(ctx):
         # both types are caught explicitly (never bare BaseException, so
         # KeyboardInterrupt still propagates).
         except (Exception, SystemExit) as e:  # noqa: BLE001
-            out.append((WARNING, f"doctor could not verify a setting ({e}) — probe skipped."))
+            out.append(
+                (
+                    WARNING,
+                    f"doctor could not verify the {_probe_label(probe)} settings "
+                    f"({_degrade_reason(e)}) — probe skipped.",
+                )
+            )
     return out
 
 
@@ -514,14 +611,21 @@ def harvest_sections(annotations):
 
 
 def _provenance(ctx):
+    """The report's preamble: what was examined, and nothing about what the
+    probes did with it.
+
+    Coverage of the environment probes is stated in exactly one place --
+    `_environment_warnings`' NOTICE, keyed on `envs_available` -- because the
+    two signals can disagree. `gh run download` can extract cell summaries and
+    still exit non-zero, and comment-ops then clears `run_id` while the cells
+    directory is populated: `envs_available` is true with no `plan_run_id`, so a
+    preamble keyed on the run id would claim the environment probes were skipped
+    while they actually ran and produced findings."""
     head = ctx["head_sha"][:7] or "(unknown commit)"
     if ctx["plan_run_id"]:
         run_id = _one_line(ctx["plan_run_id"], 40)
-        return f"_Commit `{head}`; declared environments from plan run {run_id}._"
-    return (
-        f"_Commit `{head}`; no plan run with cell summaries for this commit, so the "
-        "environment probes were skipped._"
-    )
+        return f"_Commit `{head}`; cell summaries from plan run {run_id}._"
+    return f"_Commit `{head}`; no plan run identified for this commit._"
 
 
 def _truncated_checks(annotations):
@@ -529,8 +633,7 @@ def _truncated_checks(annotations):
     cap (10 per level per step) on the raw, pre-filter listing -- computed
     here rather than on the already-filtered harvest_sections output, since
     dropping notices and DOCTOR_TITLE rows first would both under- and
-    over-count the real GitHub-side truncation (see the fix note this
-    replaced)."""
+    over-count the real GitHub-side truncation."""
     counts = {}
     for a in annotations:
         level = a.get("annotation_level")
@@ -609,7 +712,12 @@ def _findings_lines(findings, budget):
     when even the harvest-less body still exceeds sc.HARD_CAP)."""
     lines, used, dropped = [], 0, 0
     for lvl, text in findings:
-        line = f"- {_LEVEL_EMOJI[lvl]} {text}"
+        # Escaped for the same reason the harvest rows are: a finding
+        # interpolates repository data (a workflow file name, a team slug, an
+        # API error string), and an unescaped `<!-- shipmate:summary -->` in one
+        # of those would make actions/summary's marker+Bot upsert PATCH this
+        # doctor comment with the plan comment's body.
+        line = f"- {_LEVEL_EMOJI[lvl]} {_md_escape(text)}"
         if used + len(line) + 1 <= budget:
             lines.append(line)
             used += len(line) + 1
@@ -680,7 +788,10 @@ def render_report(findings, annotations, ctx):
     out = [DOCTOR_MARKER, "### shipmate doctor", "", _provenance(ctx), ""]
     out += ["#### repository settings", ""]
     if findings:
-        out += [f"- {_LEVEL_EMOJI[lvl]} {text}" for lvl, text in findings]
+        # _md_escape for the same reason as the harvest rows and the fallback
+        # path's _findings_lines: findings carry repository data, and a marker
+        # smuggled through one of them would hijack this comment's identity.
+        out += [f"- {_LEVEL_EMOJI[lvl]} {_md_escape(text)}" for lvl, text in findings]
     else:
         out.append("- :white_check_mark: no problems found by the settings probes.")
     heading = ["", "#### warnings from this commit's workflow runs", ""]
@@ -694,8 +805,8 @@ def render_report(findings, annotations, ctx):
     if len(body) > sc.HARD_CAP:
         # The harvest section is already budgeted against sc.SIZE_BUDGET
         # above, so overflow this large can only come from the
-        # settings-probe findings themselves -- degrade those too rather
-        # than let the next task's `gh api ... -F body=@doctor.md` 422.
+        # settings-probe findings themselves -- degrade those too rather than
+        # let the comment-ops render step's `gh api ... -F body=@doctor.md` 422.
         body = _findings_only_report(findings, ctx)
     return body
 
