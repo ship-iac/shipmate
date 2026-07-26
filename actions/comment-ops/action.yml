@@ -160,7 +160,7 @@ runs:
       run: |
         set -euo pipefail
         head=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" --jq '.head.sha')
-        [[ "$head" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::could not read the PR head SHA"; exit 1; }
+        [[ "$head" =~ ^[0-9a-f]{40}$ ]] || { echo "::warning::could not read the PR head SHA; doctor reports settings probes only"; exit 0; }
         echo "head_sha=$head" >> "$GITHUB_OUTPUT"
         # Declared environment set: the cell summaries of the latest successful
         # plan run for this head. Absent -> doctor says so and skips those probes.
@@ -168,7 +168,7 @@ runs:
         # repo from a git remote and `gh run download` would fail every time.
         mkdir -p doctor-cells
         run_id=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/plan.yml/runs?head_sha=$head&status=success" \
-                   --jq '.workflow_runs[0].id // ""')
+                   --jq '.workflow_runs[0].id // ""' || echo "")
         if [ -n "$run_id" ] && gh run download "$run_id" -R "$GITHUB_REPOSITORY" -p 'cell-summary.*' -D doctor-cells; then
           echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
         else
@@ -184,8 +184,10 @@ runs:
              "repos/$GITHUB_REPOSITORY/commits/$head/check-runs?filter=all&per_page=100" \
              --jq '.check_runs[] | {id, name, started_at, app_slug: .app.slug, app_id: .app.id}' > check-runs.jsonl; then
           python3 "$GITHUB_ACTION_PATH/../../scripts/doctor" < check-runs.jsonl > check-ids.tsv
+          echo "harvest_failed=false" >> "$GITHUB_OUTPUT"
         else
           echo "::warning::check-runs listing failed; doctor reports settings probes only"
+          echo "harvest_failed=true" >> "$GITHUB_OUTPUT"
         fi
         # per_page=100, no --paginate: --paginate concatenates the pages' JSON
         # arrays, which json.loads rejects; 100 comfortably covers GHA's
@@ -211,6 +213,7 @@ runs:
         SHIPMATE_PLAN_RUN_ID: ${{ steps.gatherdoc.outputs.run_id }}
         SHIPMATE_ANNOTATIONS_DIR: ann
         SHIPMATE_CHECK_IDS: check-ids.tsv
+        SHIPMATE_HARVEST_FAILED: ${{ steps.gatherdoc.outputs.harvest_failed }}
         SHIPMATE_APP_PERMISSIONS_CHECKED: 'true'
         # Workflow token for the pin probe's cross-repo release read — the
         # App token is scoped to the consumer repo.
@@ -228,7 +231,7 @@ runs:
         # Same upsert discipline as the sticky plan comment: marker + Bot
         # author (the App's bot login is org-dependent), single id.
         id=$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" --paginate \
-               --jq "map(select((.body | contains(\"$marker\")) and .user.type == \"Bot\")) | .[0].id // empty" | head -n1)
+               --jq "map(select((.body | contains(\"$marker\")) and .user.type == \"Bot\")) | .[0].id // empty" | head -n1 || true)
         if [ -n "$id" ]; then
           gh api -X PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$id" -F body=@doctor.md >/dev/null
         else

@@ -35,6 +35,10 @@ def test_every_active_route_has_a_branch():
 
 def test_bot_authored_comments_are_ignored():
     assert '== *"[bot]"' in _ACTION
+    # The literal match above is inert on its own -- Parse command must
+    # actually be skipped when the guard trips, or the loop guard is
+    # decorative and every later step still keys off an empty parse output.
+    assert "steps.guard.outputs.skip != 'true'" in _ACTION
 
 
 def test_doctor_step_supplies_every_env_var_doctor_reads():

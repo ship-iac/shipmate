@@ -119,7 +119,7 @@ runs:
         # App's bot login is derived from the registered App name, which a
         # consumer org may have had to slug differently than "shipmate[bot]".
         id=$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR/comments" --paginate \
-               --jq "map(select((.body | contains(\"$marker\")) and .user.type == \"Bot\")) | .[0].id // empty" | head -n1)
+               --jq "map(select((.body | contains(\"$marker\")) and .user.type == \"Bot\")) | .[0].id // empty" | head -n1 || true)
         if [ -n "$id" ]; then
           gh api -X PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$id" -F body=@comment.md >/dev/null
         else

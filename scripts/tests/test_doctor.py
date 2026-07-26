@@ -33,6 +33,7 @@ def _ctx(**over):
         "plan_run_id": "1281",
         "annotations_dir": "ann",
         "check_ids_path": "check-ids.tsv",
+        "harvest_failed": False,
     }
     ctx.update(over)
     return ctx
@@ -511,7 +512,11 @@ def test_app_permission_failure_warned():
     out = doctor._app_permission_warnings(ctx)
     assert len(out) == 1
     assert out[0][0] == doctor.WARNING
-    assert "missing at least one permission" in out[0][1]
+    # Hedged wording: a failed mint usually but not definitively means a
+    # missing permission (it also degrades identically on a transient error).
+    assert "which usually means" in out[0][1]
+    assert "missing a permission" in out[0][1]
+    assert "422 permissions requested are not granted second line" in out[0][1]
     assert "\n" not in out[0][1]
 
 
@@ -580,6 +585,24 @@ def test_report_all_clear():
     body = doctor.render_report([], [], _ctx())
     assert "no problems found" in body
     assert "no warnings" in body
+
+
+def test_report_states_when_the_harvest_failed():
+    # An empty harvest from a failed check-runs listing must not read the
+    # same as an empty harvest from a genuinely clean commit -- the report
+    # must say the harvest itself could not be read, not claim all-clear.
+    body = doctor.render_report([], [], _ctx(harvest_failed=True))
+    assert "could not read this commit's check runs" in body
+    assert "no warnings on this commit's workflow runs" not in body
+
+
+def test_report_all_clear_when_harvest_did_not_fail():
+    # The other branch of the same conditional: harvest_failed False (the
+    # default) with an empty harvest still renders the ordinary all-clear
+    # line, not the failure line.
+    body = doctor.render_report([], [], _ctx(harvest_failed=False))
+    assert "no warnings on this commit's workflow runs" in body
+    assert "could not read this commit's check runs" not in body
 
 
 def test_report_notes_possible_annotation_truncation():

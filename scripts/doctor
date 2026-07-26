@@ -315,17 +315,21 @@ def _team_warnings(ctx):
 
 def _app_permission_warnings(ctx):
     """The comment path attempts an installation-token mint requesting every
-    permission app/manifest.json declares; a failed mint means the installation
-    is missing one — typical after a manifest bump nobody re-approved. Skipped
-    where no such attempt was made."""
+    permission app/manifest.json declares. A failed mint is not a definitive
+    signal -- it usually means the installation is missing a permission
+    (typical after a manifest bump nobody re-approved), but a transient API
+    error or rate limit produces the exact same failed-mint outcome, so the
+    finding is worded as a hedge rather than a claim. Skipped where no such
+    attempt was made."""
     if not ctx["app_permissions_checked"] or not ctx["app_permission_error"]:
         return []
     return [
         (
             WARNING,
-            "the shipmate App installation is missing at least one permission the manifest "
-            f"declares ({_one_line(ctx['app_permission_error'])}) — re-accept the App's "
-            "permission request in the installation settings.",
+            f"{_one_line(ctx['app_permission_error'])}, which usually means the shipmate App "
+            "installation is missing a permission the manifest declares — re-accept the App's "
+            "permission request in the installation settings (or retry if the API was "
+            "transiently failing).",
         )
     ]
 
@@ -390,6 +394,7 @@ def ctx_from_env():
         "plan_run_id": os.environ.get("SHIPMATE_PLAN_RUN_ID", ""),
         "annotations_dir": os.environ.get("SHIPMATE_ANNOTATIONS_DIR", "ann"),
         "check_ids_path": os.environ.get("SHIPMATE_CHECK_IDS", "check-ids.tsv"),
+        "harvest_failed": os.environ.get("SHIPMATE_HARVEST_FAILED") == "true",
     }
 
 
@@ -636,6 +641,15 @@ def render_report(findings, annotations, ctx):
                 f"- _{dropped} more warning(s) omitted to keep this comment within the "
                 "size limit — see the run logs for the full set._"
             )
+    elif ctx.get("harvest_failed"):
+        # A failed check-runs listing leaves the harvest empty in exactly the
+        # same shape as a genuinely clean commit -- report the failure
+        # explicitly rather than let a diagnostic tool claim all-clear when
+        # it never actually looked.
+        lines = [
+            ":warning: could not read this commit's check runs — the warning harvest is "
+            "unavailable."
+        ]
     else:
         lines = [":white_check_mark: no warnings on this commit's workflow runs."]
     body = "\n".join(out + heading + lines)
