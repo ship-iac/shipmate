@@ -99,28 +99,59 @@ that directory, which is the first `shipmate doctor` any consumer runs.
 Separately, the report states plainly when the warnings harvest itself could not
 complete (or may be truncated by GitHub's per-step annotation cap) rather
 than claiming a false all-clear.
-`shipmate doctor` never blocks the gate and is open to any commenter — it
-needs no team membership or review, unlike `shipmate apply`.
+`shipmate doctor` never blocks the gate, and it needs no team membership,
+review or reviewed plan, unlike `shipmate apply` — but because it reports this
+repository's own settings, the engine limits it to organization members and
+repository collaborators (below).
 
-### Who can see the report
+### Who can ask for the report, and who can see it
 
 The report is an inventory of what is *not* configured: that no ruleset
 requires `shipmate / gate` on the default branch, that `<env>-apply` has no
 protection rules so pre-merge applies to it are unreviewed, which approvers
 team is configured and whether it resolves, and whether the App installation is
-missing permissions the manifest declares. It is posted as an ordinary pull
-request comment, so everyone who can read the pull request can read it, and
-`doctor` takes no authorization — anyone who can comment can ask for it.
+missing permissions the manifest declares.
 
-On a repository whose pull requests are **public**, restrict who can trigger
-the comment-ops workflow rather than relying on the command being harmless:
-gate the `issue_comment` job on
-`github.event.comment.author_association` (`OWNER`, `MEMBER`, `COLLABORATOR`),
-or keep the repository private. shipmate enforces nothing here — `doctor` is
-deliberately unauthorized so that a newcomer whose setup is broken can still
-find out why. Note also that `app/manifest.json` declares `"public": false`:
-the shipmate App is registered per organization and intended for repositories
-the installing organization controls.
+**What the engine enforces.** `shipmate doctor` runs only for a commenter
+GitHub classifies as `OWNER`, `MEMBER` or `COLLABORATOR` in
+`github.event.comment.author_association` — organization members and repository
+collaborators. Any other commenter gets a single-line refusal saying exactly
+that; no App token is minted and no probe runs. `CONTRIBUTOR` is deliberately
+excluded — its only signal is one merged pull request, not a standing
+relationship to the repository. The gate fails closed: an association the engine
+does not recognize, or an event carrying no comment context at all, counts as no
+access. Nothing is required of you to adopt it beyond re-pinning the engine
+SHA — it adds no action input and no workflow `permissions:` entry.
+
+**What the engine does not enforce.** It does **not** check write access.
+`author_association` is GitHub's own classification of the author's relationship
+to the repository, not a permission lookup, and it is wrong in both directions:
+
+- a collaborator invited with only the **Read** role is classified
+  `COLLABORATOR`, and an organization member whose base repository permission is
+  **None** is classified `MEMBER` — both are admitted to the report despite
+  having no write access. If that matters for your repository, add the
+  workflow-level layer below, or do not grant read-only collaborator access to
+  people who should not see the settings inventory;
+- conversely, an organization member whose membership is **private** is reported
+  as `NONE` and will be refused unless they are also a direct collaborator; make
+  the membership public or add the person as a collaborator.
+
+What the gate does buy is that an account with no declared relationship to the
+repository — a drive-by fork author on a public repository — cannot obtain the
+report. Beyond that: `shipmate help` stays open to every commenter (it lists the
+verbs and discloses nothing about the repository, and a newcomer whose setup is
+broken still needs it), and the report is an ordinary pull request comment, so
+once someone with access asks for it, everyone who can read the pull request can
+read it.
+
+On a repository whose pull requests are **public** you can add a second layer
+by gating the `issue_comment` job itself on the same
+`github.event.comment.author_association` values, or by keeping the repository
+private. That is belt and braces over the engine's own gate, not the primary
+mitigation. Note also that `app/manifest.json` declares
+`"public": false`: the shipmate App is registered per organization and intended
+for repositories the installing organization controls.
 
 ## Review policy for `shipmate apply`
 

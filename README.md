@@ -74,21 +74,34 @@ Three verbs are active (`plan` and `destroy` are reserved for later):
   runs.
 - `shipmate help` — show this command list.
 
-`help` and `doctor` are read-only and answer any commenter with no
-authorization check; `apply` is the one verb that requires it (approvers-team
-membership, a mergeable and reviewed PR, and a reviewed plan for the current
-head — see Comment-ops above).
+`help` and `doctor` are read-only; `apply` is the one verb with a full
+authorization check (approvers-team membership, a mergeable and reviewed PR, and
+a reviewed plan for the current head — see Comment-ops above). `help` answers
+any commenter. `doctor` does not: it names the guardrails this repository is
+missing — that `shipmate / gate` is not required on the default branch, that an
+apply environment has no protection rules, which approvers team is configured
+and whether it resolves — so the engine runs it only for a commenter GitHub
+classifies as `OWNER`, `MEMBER` or `COLLABORATOR`: organization members and
+repository collaborators. Anyone else gets a one-line refusal; no App token is
+minted and no probe runs. Adopting the gate takes only a re-pin of the engine
+SHA — no new input, no new workflow permission.
 
-`shipmate doctor` names the guardrails this repository is missing — that
-`shipmate / gate` is not required on the default branch, that an apply
-environment has no protection rules, which approvers team is configured and
-whether it resolves — in a comment anyone reading the pull request can see. On
-a **public** repository, anyone who can comment can therefore ask for that
-list, so restrict who can trigger the comment-ops workflow — for example with
-a `github.event.comment.author_association` condition on the `issue_comment`
-job, or by keeping the repository private. shipmate does not restrict it for
-you. The App manifest is `"public": false`: the shipmate App is meant for
-repositories the installing organization controls.
+Three limits worth knowing. `author_association` is GitHub's own classification
+of the author, **not a check for write access**, and it errs both ways: a
+collaborator invited with only the **Read** role and an organization member whose
+base repository permission is **None** are still admitted to the report, while an
+organization member whose membership is **private** is reported as `NONE` and is
+refused unless they are also a direct collaborator. What the gate does buy is
+that an account with no declared relationship to the repository is refused.
+`shipmate help` is not gated at all. And the report is an ordinary comment, so
+once someone with access asks for it, everyone who can read the pull request can
+read it. On a **public** repository you can add a second layer by restricting
+who can trigger the
+comment-ops workflow — a `github.event.comment.author_association` condition on
+the `issue_comment` job, or keeping the repository private — belt and braces over
+the engine's gate rather than a substitute for it. The App manifest is
+`"public": false`: the shipmate App is meant for repositories the installing
+organization controls.
 
 ## Dynamic environments
 

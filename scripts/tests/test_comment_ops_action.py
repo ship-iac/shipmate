@@ -11,9 +11,33 @@ import pathlib
 import re
 from importlib.machinery import SourceFileLoader
 
+import yaml
+
 _D = pathlib.Path(__file__).resolve().parents[1]
-_ACTION = (_D.parent / "actions" / "comment-ops" / "action.yml").read_text(encoding="utf-8")
+_ACTION_FILE = _D.parent / "actions" / "comment-ops" / "action.yml"
+_ACTION = _ACTION_FILE.read_text(encoding="utf-8")
 _SUMMARY_ACTION = (_D.parent / "actions" / "summary" / "action.yml").read_text(encoding="utf-8")
+
+# The `doctor` route's access gate. The allowlist literal lives in exactly one
+# place in the action (the `guard` step's `case`); every doctor step keys off
+# the boolean output it writes. The output is named for what GitHub actually
+# tells us -- an association -- not for write access, which it does not verify.
+_ALLOWLIST = "OWNER|MEMBER|COLLABORATOR"
+_GATE = "steps.guard.outputs.privileged_association"
+# The one phrase the refused commenter, the shipped help footer and the docs all
+# use for what the gate checks. Deliberately not "write access": a Read-role
+# collaborator and an org member with no repository access both pass this gate.
+_CLAIM = "organization members and repository collaborators"
+# Markers of a step that handles doctor's machinery or performs one of its
+# disclosure-bearing settings reads, regardless of how the step is conditioned.
+_DOCTOR_TOUCHES = (
+    "steps.doctortoken.outputs.token",
+    "steps.gatherdoc.outputs",
+    "SHIPMATE_DOCTOR_MODE",
+    "scripts/doctor",
+    "rules/branches",
+    "/environments",
+)
 
 
 def _load(fname):
@@ -172,6 +196,156 @@ def test_harvest_flag_is_set_inside_the_loop_and_written_once_after_it():
     loop_body = block.split("while IFS=", 1)[1].split("done <", 1)[0]
     assert "harvest_failed=true" in loop_body
     assert '>> "$GITHUB_OUTPUT"' not in loop_body
+
+
+def _steps_conditioned_on(route):
+    """(name, if-expression) for every step whose `if:` names exactly this
+    route -- derived from the file, so a doctor step added later is covered
+    without anyone remembering to extend a hardcoded list here. Steps shared
+    with another route (the `eyes` acknowledgement) are excluded: they are not
+    on "the doctor route" in the sense the access gate applies to."""
+    other = {"doctor", "help", "apply"} - {route}
+    spec = yaml.safe_load(_ACTION_FILE.read_text(encoding="utf-8"))
+    out = []
+    for step in spec["runs"]["steps"]:
+        cond = step.get("if") or ""
+        if f"outputs.route == '{route}'" not in cond:
+            continue
+        if any(f"outputs.route == '{o}'" in cond for o in other):
+            continue
+        out.append((step.get("name"), cond))
+    return out
+
+
+def _guard_case_block():
+    """The body of the `guard` step's `case "$COMMENT_ASSOCIATION" in … esac`.
+
+    Sliced out rather than pattern-matched over the whole file: a shell `case`
+    pattern may contain glob metacharacters, so a *widening* branch such as
+    `[A-Z]*OR)` (which admits CONTRIBUTOR and FIRST_TIME_CONTRIBUTOR) is
+    invisible to any regex enumerating `[A-Z_|]+` tokens. Counting `;;` and the
+    gate-opening assignment inside the sliced block sees it regardless of how
+    the pattern is spelled or laid out."""
+    guard = _step("privileged_association=false")
+    assert guard.count('case "$COMMENT_ASSOCIATION" in') == 1, guard
+    return guard.split('case "$COMMENT_ASSOCIATION" in', 1)[1].split("esac", 1)[0]
+
+
+def test_the_doctor_access_allowlist_is_written_exactly_once():
+    """`doctor`'s report enumerates the guardrails a repository is missing, so
+    the route is gated on the commenter's association. Five copies of the
+    allowlist in five `if:` conditions is how such a gate drifts open, so it is
+    computed once in the `guard` step and every doctor step keys off its
+    boolean output.
+
+    Two layers of counting, because either alone leaves a hole:
+
+    * File-wide, the gate-opening assignment `privileged_association=true` occurs
+      exactly once. Nothing anywhere in the action -- a second `case`, an `if`
+      after `esac`, an alias variable -- can set the gate true for another
+      association without breaking this count. (Duplicate `GITHUB_OUTPUT` keys
+      are last-write-wins, so a later write really would decide the gate.)
+    * Within the one `case`, the shape: exactly two branches, exactly one of
+      which opens the gate, the allowlist first and the fail-closed default
+      last -- so a widening branch is caught whether it is spelled literally
+      (`CONTRIBUTOR)`), with glob metacharacters (`[A-Z]*OR)`, `!(NONE)`), or
+      appended to an existing line.
+
+    The block assertions alone would miss a widening written outside the slice;
+    the file-wide count alone would miss a reordering inside it (deny branch
+    first, allowlist unreachable)."""
+    assert _ACTION.count(_ALLOWLIST) == 1, _ACTION.count(_ALLOWLIST)
+    assert _ACTION.count("privileged_association=true") == 1, _ACTION.count(
+        "privileged_association=true"
+    )
+    block = _guard_case_block()
+    assert block.count(";;") == 2, block
+    assert block.count("privileged_association=true") == 1, block
+    assert block.count("privileged_association=false") == 1, block
+    branches = [ln.strip() for ln in block.strip().splitlines() if ln.strip()]
+    assert len(branches) == 2, branches
+    assert branches[0].startswith(f'{_ALLOWLIST}) echo "privileged_association=true"'), branches
+    # Fails closed on an absent `comment` context (empty string) and on every
+    # association not named above -- the default must be the deny branch.
+    assert branches[-1].startswith('*) echo "privileged_association=false"'), branches
+    # The association reaches bash through env:, like every other author-derived
+    # value (test_no_template_expr_in_run enforces the second half globally).
+    assert "COMMENT_ASSOCIATION: ${{ github.event.comment.author_association }}" in _step(
+        "privileged_association=false"
+    )
+
+
+def test_every_doctor_route_step_is_gated_on_the_association():
+    """Derived from the action, not from a list of step names: a new step gated
+    on the doctor route that forgets the gate fails here. The count is asserted
+    too, so a derivation that silently stops matching cannot read as coverage.
+
+    This covers only steps conditioned on the route; a step that touches
+    doctor's machinery under some other condition (or none) is caught by
+    test_every_step_that_touches_doctor_machinery_is_gated instead."""
+    steps = _steps_conditioned_on("doctor")
+    assert len(steps) == 6, [n for n, _ in steps]
+    for name, cond in steps:
+        assert _GATE in cond, name
+    # Exactly one step runs when the gate is closed (the rejection); every
+    # other doctor step demands it open. An inverted condition on a probe step
+    # would satisfy a bare "references the gate" assertion.
+    rejects = [n for n, c in steps if f"{_GATE} != 'true'" in c]
+    assert len(rejects) == 1, rejects
+    for name, cond in steps:
+        if name not in rejects:
+            assert f"{_GATE} == 'true'" in cond, name
+
+
+def test_every_step_that_touches_doctor_machinery_is_gated():
+    """Keyed on what a step *does*, not on how it is conditioned -- the
+    complement to the route-derived guard above, which by construction cannot
+    see a step with no `if:` at all, or one gated only on
+    `steps.doctortoken.outcome`. Either shape would still mint/use the App
+    token, run `scripts/doctor`, or read the settings the report discloses."""
+    steps = _ACTION.split("\n    - name:")
+    hits = [s for s in steps if any(m in s for m in _DOCTOR_TOUCHES)]
+    # Sanity floor: gatherdoc and the render step both qualify today, so an
+    # empty or single hit means the marker list has gone stale and this guard
+    # is inspecting nothing.
+    assert len(hits) >= 2, len(hits)
+    for s in hits:
+        assert _GATE in s, s.splitlines()[0]
+
+
+def test_a_rejected_doctor_commenter_is_told_with_the_workflow_token():
+    """Silence is indistinguishable from a broken engine. The rejection must
+    also not depend on the App (which may not be installed) and must disclose
+    no probe results."""
+    block = _step(_CLAIM)
+    assert "inputs.github-token" in block
+    assert f"{_GATE} != 'true'" in block
+    assert "app-id" not in block
+    # The malformed/reserved rejection is a different step with a different
+    # condition -- this one must not have absorbed it.
+    assert "is_command" not in block
+
+
+def test_the_shipped_help_text_matches_the_gate_it_describes():
+    """`help_markdown()`'s footer ships inside the help comment every commenter
+    can request, and it asserts that `doctor` is restricted. Nothing else
+    couples that shipped claim to the action, so a later relaxation of the gate
+    would leave the engine telling commenters something untrue. Pin the three
+    user-visible statements of the rule together: the help footer, the refusal
+    comment, and the allowlist that actually enforces it."""
+    footer = cp.help_markdown().rsplit("\n", 1)[-1]
+    assert _CLAIM in footer, footer
+    assert _CLAIM in _ACTION
+    assert _ALLOWLIST in _ACTION
+
+
+def test_help_is_not_gated_on_the_association():
+    """`help` discloses nothing about the repository, and is most needed by
+    someone whose setup is broken -- gating it would be a regression."""
+    steps = _steps_conditioned_on("help")
+    assert steps, "no help-only step found"
+    for name, cond in steps:
+        assert _GATE not in cond, name
 
 
 def test_fullmint_requests_the_manifests_exact_permission_set():

@@ -152,7 +152,7 @@ themselves contain text that matches the command grammar.
 | verb | status | args | authorization |
 |---|---|---|---|
 | `shipmate apply [env]` | active | optional env | apply requirements, below |
-| `shipmate doctor` | active | none | none — read-only, open to any commenter |
+| `shipmate doctor` | active | none | read-only, but the commenter's `author_association` must be `OWNER`, `MEMBER` or `COLLABORATOR` (a classification, not a permission check) |
 | `shipmate help` | active | none | none — read-only, open to any commenter |
 | `shipmate plan` | reserved | — | — |
 | `shipmate destroy` | reserved | — | — |
@@ -208,11 +208,13 @@ step filters check-run annotations on, so it never re-reports a finding the
 live probes already re-state fresh against current settings — this is
 machine-read, not a formatting choice, and a mismatch between the annotate
 call and the harvest filter is a regression. `shipmate doctor` is entirely
-read-only: it authorizes nothing, writes nothing but its own sticky comment
+read-only: it dispatches nothing and changes no setting, and writes nothing
+but its own sticky comment
 and an `eyes` reaction on the triggering comment (both read-only verbs get
 that acknowledgement as soon as the command is accepted — `rocket` stays
 reserved for an authorized `apply`; a reaction that cannot be posted is
-ignored), a one-line error comment when it cannot mint an App token, and a
+ignored), a one-line error comment when it cannot mint an App token, a
+one-line refusal when the commenter may not have the report (below), and a
 handful of untitled `::warning::` annotations on the gather step's own
 degrade paths — an unreadable PR head SHA, no plan-run cell summaries for
 this commit, a failed check-runs listing or reduction, a failed per-check
@@ -227,14 +229,41 @@ never affects `shipmate / gate`.
 Because the report enumerates the guardrails a repository is *missing* — an
 ungated default branch, an apply environment with no protection rules, the
 configured approvers team and whether it resolves, an App installation short of
-the manifest's permissions — and because the verb takes no authorization, any
-account that can comment on a pull request can obtain that list, and everyone
-who can read the pull request can read it. That is intended for a repository
-whose readers are the team that owns it; on a repository with **public** pull
-requests, restrict who can trigger the comment-ops workflow (for example a
-`github.event.comment.author_association` condition on the `issue_comment`
-job). shipmate imposes no such restriction itself. `app/manifest.json` declares
-`"public": false` for the same reason: the App is registered per organization
+the manifest's permissions — the `doctor` route is gated on the commenter's
+GitHub `author_association`. **What the engine enforces:** `doctor` runs only
+when `github.event.comment.author_association` is `OWNER`, `MEMBER` or
+`COLLABORATOR` — that is, only for organization members and repository
+collaborators. Any other commenter gets a single-line refusal saying so, and
+nothing else happens — no App token is minted, no probe runs, no report is
+composed. `CONTRIBUTOR` is deliberately excluded: its only signal is one merged
+pull request, which is no standing relationship to the repository.
+The allowlist is evaluated once, in the same step as the bot loop guard, and
+every step on the route keys off that one boolean; it fails closed, so an
+association the engine does not recognize — or an event carrying no comment
+context at all — counts as no access. Consumers adopt this by re-pinning the
+engine SHA: it adds no action input and needs no additional workflow
+`permissions:` entry, since the association arrives on the event payload.
+
+**What the engine does not enforce:** it does not check write access, and must
+not be described as doing so. `author_association` is GitHub's own
+classification of the author's relationship to the repository, not a permission
+lookup, and it is wrong in both directions: a collaborator invited with only the
+**Read** role, and an organization member whose base repository permission is
+**None**, are both classified `COLLABORATOR`/`MEMBER` and are therefore admitted
+to the report even though neither can write to the repository; conversely an
+organization member whose membership is **private** is reported as `NONE` and
+will be refused unless they are also a direct collaborator. What the gate does
+buy is that an account with no declared relationship to the repository is
+refused. Nor is `shipmate help` gated — it renders the verb list and discloses
+nothing about the repository. And the report is an ordinary pull
+request comment, so once someone with access asks for it, everyone who can read
+the pull request can read it. On a repository with **public** pull requests you
+may additionally restrict who can trigger the comment-ops workflow (for example
+the same `github.event.comment.author_association` condition on the
+`issue_comment` job, or keeping the repository private) — belt and braces over
+the engine's own gate, not the only thing standing between an arbitrary account
+and the report. `app/manifest.json` declares
+`"public": false` for a related reason: the App is registered per organization
 and intended for repositories the installing organization controls.
 
 The env is optional for `apply`. A targeted `shipmate apply <env>` applies one
