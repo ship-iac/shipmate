@@ -153,10 +153,10 @@ gh secret set SHIPMATE_APP_PRIVATE_KEY --org <org> --visibility selected \
   `apply / <env> / <stack>` check (create pending, complete on apply), the
   aggregate `shipmate / gate` commit status, the sticky plan comment, the
   `shipmate doctor` sticky report, the apply result comments, and drift
-  issues. The plan matrix job's own `<stack> / <env>` auto
-  check-run stays on the `github-actions` identity — it's the job's own
-  check-run, not something a separate API call creates, so there's nothing
-  for the App to author there.
+  issues. The plan matrix job's own `<stack> / <env>` auto check-run stays
+  on the `github-actions` identity — it's the job's own check-run, not
+  something a separate API call creates, so there's nothing for the App to
+  author there.
 - No webhook events (`default_events: []`, `hook_attributes.active: false`) —
   comment-ops is triggered by `on: issue_comment` in the consumer repo's own
   workflow, not by the App receiving a webhook.

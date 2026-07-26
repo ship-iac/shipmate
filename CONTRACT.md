@@ -179,14 +179,24 @@ from the plan comment's `<!-- shipmate:summary -->`) and upserted in place the
 same way. It combines six live settings probes (gate ruleset, environment
 pair existence, environment protection shape, engine action-pin freshness,
 approvers-team resolvability, and App installation permission drift — see
-`docs/branch-protection.md`) with a harvest of the warnings GitHub already
-recorded on this commit's workflow runs (shipmate's own and any other Actions
-workflow run on that commit; third-party-app-authored check runs are
-excluded). Those warnings are not read from the sticky plan comment — a plan
-run still writes the full plan comment (overview table, per-changed-cell
-details) but no longer appends doctor findings to it. Instead,
-`actions/summary` runs `scripts/doctor` on every plan run and emits its
-findings as workflow-command annotations, verbatim:
+`docs/branch-protection.md`) with a harvest of the warning and failure
+annotations GitHub already recorded on this commit's workflow runs
+(shipmate's own and any other Actions workflow run on that commit;
+third-party-app-authored check runs are excluded). Only four of the six
+probes can produce a finding from the plan path's own `annotate`-mode
+invocation: the approvers-team probe needs the `SHIPMATE_TEAM` input, which
+the plan path does not supply, so it silently returns nothing; the
+App-permission-drift probe only has something to report when a
+full-manifest permission-set mint was actually attempted, which only
+`shipmate doctor` does. Both probes are effectively comment-path-only —
+they surface findings only via `shipmate doctor`, never on the plan path's
+own annotations.
+
+Those warnings are not read from the sticky plan comment — a plan run still
+writes the full plan comment (overview table, per-changed-cell details) but
+no longer appends doctor findings to it. Instead, `actions/summary` runs
+`scripts/doctor` on every plan run and emits its findings as
+workflow-command annotations, verbatim:
 
 - `::warning title=shipmate doctor::<text>` for a misconfiguration,
 - `::notice title=shipmate doctor::<text>` for an informational finding.
@@ -197,8 +207,14 @@ live probes already re-state fresh against current settings — this is
 machine-read, not a formatting choice, and a mismatch between the annotate
 call and the harvest filter is a regression. `shipmate doctor` is entirely
 read-only: it authorizes nothing, writes nothing but its own sticky comment
-(plus a one-line error comment when it cannot mint an App token), and never
-affects `shipmate / gate`.
+(plus a one-line error comment when it cannot mint an App token, and a
+handful of untitled `::warning::` annotations on the gather step's own
+degrade paths — an unreadable PR head SHA, a failed check-runs listing or
+reduction, a failed per-check annotations fetch). Those gather-step
+annotations land on the `issue_comment` workflow run that is executing
+`shipmate doctor` itself, on the default-branch SHA that run checks out —
+not on the PR head SHA whose check runs the harvest reads — so there is no
+self-harvest loop. `shipmate doctor` never affects `shipmate / gate`.
 
 The env is optional for `apply`. A targeted `shipmate apply <env>` applies one
 environment; a bare `shipmate apply` applies **every** environment that has a
@@ -261,6 +277,9 @@ crosses a workflow-run boundary:
 - **The sticky plan comment** — App-authored (marker + any Bot author for the
   lookup, since a consumer org's App bot login may differ from
   `shipmate[bot]`), upserted in place by `actions/summary`.
+- **The `shipmate doctor` sticky report** — App-authored (its own marker +
+  Bot-author lookup, same posture as the plan comment), upserted in place by
+  `actions/comment-ops`.
 - **The apply result comment** — posted fresh by `actions/apply-summary` on
   every comment-ops apply run (targeted and bare); unlike the sticky plan
   comment it is never upserted against a marker, so a failure-then-retry
