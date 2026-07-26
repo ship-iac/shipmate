@@ -311,13 +311,21 @@ def test_degrade_note_names_the_probe_and_drops_the_workflow_command_prefix(monk
     assert "gh api" not in text and "rules/branches" not in text
 
 
+def _protection(*envs, listed=None):
+    """Responses for `_env_protection_warnings`: the environments listing the
+    probe reads first (by default naming exactly the fixtures given), plus each
+    fixture's per-environment protection read."""
+    out = {f"repos/{_REPO}/environments/{e['name']}": e for e in envs}
+    names = [e["name"] for e in envs] if listed is None else listed
+    out[f"repos/{_REPO}/environments?per_page=100"] = _environments(*names)
+    return out
+
+
 def test_plan_env_with_reviewers_warned(monkeypatch):
-    responses = {
-        f"repos/{_REPO}/environments/dev-eu": _env("dev-eu", rules=("required_reviewers",)),
-        f"repos/{_REPO}/environments/dev-eu-apply": _env(
-            "dev-eu-apply", rules=("required_reviewers",)
-        ),
-    }
+    responses = _protection(
+        _env("dev-eu", rules=("required_reviewers",)),
+        _env("dev-eu-apply", rules=("required_reviewers",)),
+    )
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
     out = doctor._env_protection_warnings(_ctx())
     assert len(out) == 1
@@ -332,12 +340,10 @@ def test_plan_env_wait_timer_is_not_diagnosed_as_an_approval_hang(monkeypatch):
     # docs/branch-protection.md deliberately lumps wait timers in with
     # reviewers (both stop a plan job from starting when it should), so the
     # finding must fire -- but its wording must fit the rule it names.
-    responses = {
-        f"repos/{_REPO}/environments/dev-eu": _env("dev-eu", rules=("wait_timer",)),
-        f"repos/{_REPO}/environments/dev-eu-apply": _env(
-            "dev-eu-apply", rules=("required_reviewers",)
-        ),
-    }
+    responses = _protection(
+        _env("dev-eu", rules=("wait_timer",)),
+        _env("dev-eu-apply", rules=("required_reviewers",)),
+    )
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
     out = doctor._env_protection_warnings(_ctx())
     assert len(out) == 1
@@ -346,27 +352,58 @@ def test_plan_env_wait_timer_is_not_diagnosed_as_an_approval_hang(monkeypatch):
     assert "approval" not in out[0][1]
 
 
-def test_apply_env_without_protection_noted(monkeypatch):
-    responses = {
-        f"repos/{_REPO}/environments/dev-eu": _env("dev-eu"),
-        f"repos/{_REPO}/environments/dev-eu-apply": _env("dev-eu-apply"),
-    }
+def test_apply_env_without_approval_rules_noted(monkeypatch):
+    responses = _protection(_env("dev-eu"), _env("dev-eu-apply"))
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
     out = doctor._env_protection_warnings(_ctx())
     assert len(out) == 1
     assert out[0][0] == doctor.NOTICE  # note, not warning
-    assert "dev-eu-apply" in out[0][1] and "no protection" in out[0][1]
+    assert "dev-eu-apply" in out[0][1]
+    # "no approval rules", never "no protection rules": the finding keys on
+    # `approval`, which excludes the branch_policy rule GitHub synthesizes, so
+    # a branch policy may well be present on the environment it names.
+    assert "no approval rules" in out[0][1]
+    assert "required reviewers" in out[0][1] and "wait timer" in out[0][1]
+
+
+def test_apply_env_with_only_a_branch_policy_is_still_noted(monkeypatch):
+    """GitHub synthesizes a `branch_policy` protection rule whenever
+    `deployment_branch_policy` is set, so an apply environment carrying nothing
+    but a branch policy has a truthy `protection_rules` list while being
+    entirely unreviewed. Keying the note on the raw rule list therefore reported
+    an unreviewed apply environment as protected — the exact inverse of the
+    finding's purpose."""
+    responses = _protection(
+        _env("dev-eu"),
+        _env("dev-eu-apply", branch_policy={"protected_branches": True}),
+    )
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    out = doctor._env_protection_warnings(_ctx())
+    assert len(out) == 1
+    assert out[0][0] == doctor.NOTICE
+    assert "dev-eu-apply" in out[0][1] and "no approval rules" in out[0][1]
+
+
+def test_apply_env_with_an_approval_rule_and_a_branch_policy_is_silent(monkeypatch):
+    # The other shape of the same pair: a genuinely reviewed apply environment
+    # that also restricts branches must produce nothing.
+    responses = _protection(
+        _env("dev-eu"),
+        _env(
+            "dev-eu-apply",
+            rules=("required_reviewers",),
+            branch_policy={"protected_branches": True},
+        ),
+    )
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    assert doctor._env_protection_warnings(_ctx()) == []
 
 
 def test_plan_env_branch_policy_warned(monkeypatch):
-    responses = {
-        f"repos/{_REPO}/environments/dev-eu": _env(
-            "dev-eu", branch_policy={"protected_branches": True}
-        ),
-        f"repos/{_REPO}/environments/dev-eu-apply": _env(
-            "dev-eu-apply", rules=("required_reviewers",)
-        ),
-    }
+    responses = _protection(
+        _env("dev-eu", branch_policy={"protected_branches": True}),
+        _env("dev-eu-apply", rules=("required_reviewers",)),
+    )
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
     out = doctor._env_protection_warnings(_ctx())
     assert len(out) == 1
@@ -375,11 +412,60 @@ def test_plan_env_branch_policy_warned(monkeypatch):
 
 
 def test_env_protection_missing_env_is_not_this_probes_problem(monkeypatch):
+    """An environment that does not exist is `_environment_warnings`' finding,
+    not this probe's — so a name absent from the environments listing is skipped
+    without a per-environment read and without a finding. That used to be
+    achieved by catching every per-environment exception and continuing, which
+    silenced 403s and 5xx on environments that DO exist."""
+    responses = _protection(_env("dev-eu"), listed=["dev-eu"])
+    seen = []
+
+    def gh(path):
+        seen.append(path)
+        return responses[path]
+
+    monkeypatch.setattr(doctor, "_gh_json", gh)
+    assert doctor._env_protection_warnings(_ctx()) == []
+    assert f"repos/{_REPO}/environments/dev-eu-apply" not in seen
+
+
+def test_env_protection_unreadable_existing_env_is_a_notice_naming_it(monkeypatch):
+    """A 403 or 5xx on an environment that IS in the listing was
+    indistinguishable from a 404 (`bm.gh_json`'s exception carries no status
+    code) and got swallowed, so the report went on to say the settings probes
+    found no problems. Listing first makes the two distinguishable:
+    present-but-unreadable is a note that names the environment."""
+    responses = _protection(_env("dev-eu"), listed=["dev-eu", "dev-eu-apply"])
+
+    def gh(path):
+        if path.endswith("dev-eu-apply"):
+            raise SystemExit(f"::error::command failed (1): gh api {path}")
+        return responses[path]
+
+    monkeypatch.setattr(doctor, "_gh_json", gh)
+    out = doctor._env_protection_warnings(_ctx())
+    assert len(out) == 1
+    assert out[0][0] == doctor.NOTICE
+    assert "dev-eu-apply" in out[0][1]
+    assert "not checked" in out[0][1]
+    # The text lands in a comment body and in annotation data.
+    assert "::error::" not in out[0][1] and "gh api" not in out[0][1]
+
+
+def test_env_protection_listing_failure_propagates_to_the_degrade_note(monkeypatch):
+    """The listing is this probe's precondition: without it no name can be
+    classified present-or-absent, so the failure must reach `warnings()`' outer
+    handler and become the "could not verify the env protection settings"
+    degrade instead of a silent empty result."""
+
     def boom(path):
-        raise SystemExit("404")
+        raise SystemExit(f"::error::command failed (1): gh api {path}")
 
     monkeypatch.setattr(doctor, "_gh_json", boom)
-    assert doctor._env_protection_warnings(_ctx()) == []
+    with pytest.raises(SystemExit):
+        doctor._env_protection_warnings(_ctx())
+    out = doctor.warnings(_ctx())
+    assert any("env protection" in t and "probe skipped" in t for _, t in out)
 
 
 def _wf_listing(*names):

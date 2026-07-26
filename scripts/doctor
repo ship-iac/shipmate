@@ -126,6 +126,17 @@ def _gate_rule_warnings(ctx):
     ]
 
 
+def _existing_env_names(ctx):
+    """The repository's GitHub Environment names.
+
+    per_page=100: one page covers >=50 logical env pairs; bm.gh_json does not
+    multi-page merge. Read separately by each of the two environment probes on
+    purpose — sharing it through `ctx` would make one probe's failure silence
+    the other, and `warnings()` degrades per probe."""
+    listing = _gh_json(f"repos/{ctx['repo']}/environments?per_page=100")
+    return {e["name"] for e in listing.get("environments", [])}
+
+
 def _environment_warnings(ctx):
     if not ctx["envs_available"]:
         return [
@@ -135,11 +146,7 @@ def _environment_warnings(ctx):
                 "environment set is unknown, so the environment probes were skipped.",
             )
         ]
-    # per_page=100: one page covers >=50 logical env pairs; bm.gh_json does not multi-page merge.
-    names = {
-        e["name"]
-        for e in _gh_json(f"repos/{ctx['repo']}/environments?per_page=100").get("environments", [])
-    }
+    names = _existing_env_names(ctx)
     out = []
     for env in sorted(ctx["envs"]):
         for needed in (env, f"{env}-apply"):
@@ -154,58 +161,84 @@ def _environment_warnings(ctx):
     return out
 
 
+def _env_shape_findings(name, env, data, is_apply):
+    """One environment's protection-shape findings, from its already-read
+    "Get an environment" payload."""
+    out = []
+    rules = sorted({r.get("type") for r in data.get("protection_rules", []) if r.get("type")})
+    # GitHub reports a "branch_policy" protection rule whenever
+    # deployment_branch_policy is set -- that alone doesn't delay a plan job (it
+    # refuses it outright, handled below), so it's excluded from the "will not
+    # start immediately" diagnosis. It is excluded from the apply-env note for
+    # the mirror reason: a branch policy is not a review, so an apply env
+    # carrying nothing else is still entirely unreviewed.
+    approval = [r for r in rules if r != "branch_policy"]
+    policy = data.get("deployment_branch_policy")
+    if not is_apply and approval:
+        out.append(
+            (
+                WARNING,
+                f"GitHub Environment `{name}` is a plan environment but has "
+                f"protection rules ({', '.join(approval)}) — plan jobs will not "
+                f"start immediately; put reviewers on `{env}-apply` instead.",
+            )
+        )
+    if not is_apply and policy:
+        out.append(
+            (
+                WARNING,
+                f"GitHub Environment `{name}` is a plan environment but has a "
+                "deployment branch policy — plans from feature branches will be "
+                "refused; plan environments must allow all branches.",
+            )
+        )
+    if is_apply and not approval:
+        # NOTICE, not WARNING: legitimate for dev-tier envs. Worded on
+        # `approval`, not on the raw rule list: a deployment branch policy may
+        # be present, so claiming "no protection rules" would be false.
+        out.append(
+            (
+                NOTICE,
+                f"GitHub Environment `{name}` has no approval rules (required reviewers "
+                "or a wait timer) — pre-merge applies to it are unreviewed.",
+            )
+        )
+    return out
+
+
 def _env_protection_warnings(ctx):
     """Plan/apply env split, checked live. An approval-type protection rule on
     a PLAN env — a required reviewer, or a wait timer — stops plan jobs from
     starting when they should: no error, just a stalled matrix, which is the
-    hardest shipmate misconfiguration to diagnose. An APPLY env with no
-    protection at all is the mirror problem: pre-merge applies to it are
-    unreviewed."""
+    hardest shipmate misconfiguration to diagnose. An APPLY env with no approval
+    rule is the mirror problem: pre-merge applies to it are unreviewed.
+
+    The environments are listed once first so a name's absence and a failed read
+    of a name that exists stay distinguishable: `bm.gh_json`'s exception carries
+    no status code, so catching per-environment errors could not tell a 404
+    (which is `_environment_warnings`' finding, not this probe's) from a 403 or
+    a 5xx — and swallowing the latter left the report claiming the settings
+    probes found no problems. A failure of the listing itself propagates: it is
+    this probe's precondition, so `warnings()` turns it into the degrade note."""
     out = []
+    existing = _existing_env_names(ctx)
     for env in sorted(ctx["envs"]):
         for name, is_apply in ((env, False), (f"{env}-apply", True)):
-            # existence is _environment_warnings' job, not this probe's -- a
-            # missing env (any exception here) is silently skipped.
+            if name not in existing:
+                continue  # existence is _environment_warnings' finding
             try:
                 data = _gh_json(f"repos/{ctx['repo']}/environments/{name}")
-            except (Exception, SystemExit):  # noqa: BLE001, S112 - see above
-                continue
-            rules = sorted(
-                {r.get("type") for r in data.get("protection_rules", []) if r.get("type")}
-            )
-            # GitHub reports a "branch_policy" protection rule whenever
-            # deployment_branch_policy is set -- that alone doesn't delay a
-            # plan job (it refuses it outright, handled below), so it's
-            # excluded from the "will not start immediately" diagnosis.
-            approval = [r for r in rules if r != "branch_policy"]
-            policy = data.get("deployment_branch_policy")
-            if not is_apply and approval:
-                out.append(
-                    (
-                        WARNING,
-                        f"GitHub Environment `{name}` is a plan environment but has "
-                        f"protection rules ({', '.join(approval)}) — plan jobs will not "
-                        f"start immediately; put reviewers on `{env}-apply` instead.",
-                    )
-                )
-            if not is_apply and policy:
-                out.append(
-                    (
-                        WARNING,
-                        f"GitHub Environment `{name}` is a plan environment but has a "
-                        "deployment branch policy — plans from feature branches will be "
-                        "refused; plan environments must allow all branches.",
-                    )
-                )
-            if is_apply and not rules:
-                # NOTICE, not WARNING: legitimate for dev-tier envs.
+            except (Exception, SystemExit) as e:  # noqa: BLE001 - degrade, see docstring
                 out.append(
                     (
                         NOTICE,
-                        f"GitHub Environment `{name}` has no protection rules — "
-                        "pre-merge applies to it are unreviewed.",
+                        f"GitHub Environment `{name}` exists but its settings could not be "
+                        f"read ({_degrade_reason(e)}) — its plan/apply protection shape was "
+                        "not checked.",
                     )
                 )
+                continue
+            out.extend(_env_shape_findings(name, env, data, is_apply))
     return out
 
 
