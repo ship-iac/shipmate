@@ -44,8 +44,26 @@ outputs:
 runs:
   using: composite
   steps:
+    - name: Ignore bot-authored comments
+      id: guard
+      shell: bash
+      env:
+        COMMENT_USER: ${{ inputs.comment-user }}
+      run: |
+        set -euo pipefail
+        # Loop guard: shipmate's own comments (help output, apply results) can
+        # contain text that matches the command grammar. GitHub reserves
+        # brackets in logins, so the [bot] suffix cannot collide with a human.
+        if [[ "$COMMENT_USER" == *"[bot]" ]]; then
+          echo "skip=true" >> "$GITHUB_OUTPUT"
+          echo "::notice title=comment-ops::ignoring a bot-authored comment (loop guard)"
+        else
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+        fi
+
     - name: Parse command
       id: parse
+      if: ${{ steps.guard.outputs.skip != 'true' }}
       shell: bash
       env:
         COMMENT_BODY: ${{ inputs.comment-body }}
@@ -70,9 +88,156 @@ runs:
         set -euo pipefail
         gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -f body=":x: shipmate: $ERROR" >/dev/null
 
+    - name: Post help
+      if: ${{ steps.parse.outputs.route == 'help' }}
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        PR_NUMBER: ${{ inputs.pr-number }}
+      run: |
+        set -euo pipefail
+        # GITHUB_TOKEN, not the App: help must answer even when the App is not
+        # installed, which is exactly when someone needs to be told what to run.
+        python3 "$GITHUB_ACTION_PATH/../../scripts/comment-parse" --help-markdown > help.md
+        gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -F body=@help.md >/dev/null
+
+    - name: Mint App token for doctor
+      id: doctortoken
+      if: ${{ steps.parse.outputs.route == 'doctor' }}
+      continue-on-error: true
+      uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+      with:
+        app-id: ${{ inputs.app-id }}
+        private-key: ${{ inputs.private-key }}
+        owner: ${{ github.repository_owner }}
+        repositories: ${{ github.event.repository.name }}
+        permission-checks: read
+        permission-contents: read
+        permission-members: read
+        permission-issues: write
+
+    - name: Doctor — App token unavailable
+      if: ${{ steps.parse.outputs.route == 'doctor' && steps.doctortoken.outcome != 'success' }}
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        PR_NUMBER: ${{ inputs.pr-number }}
+      run: |
+        set -euo pipefail
+        gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -f body=":x: shipmate: could not mint a GitHub App token — is the shipmate App installed on this repository? Ask an org admin to install it, then re-run \`shipmate doctor\`." >/dev/null
+
+    - name: Doctor — probe the manifest's full permission set
+      id: fullmint
+      if: ${{ steps.parse.outputs.route == 'doctor' && steps.doctortoken.outcome == 'success' }}
+      # A mint requesting every permission app/manifest.json declares fails
+      # when the installation is missing one (typical after a manifest bump
+      # nobody re-approved). The failure IS the probe result — never fatal.
+      continue-on-error: true
+      uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+      with:
+        app-id: ${{ inputs.app-id }}
+        private-key: ${{ inputs.private-key }}
+        owner: ${{ github.repository_owner }}
+        repositories: ${{ github.event.repository.name }}
+        permission-actions: write
+        permission-pull-requests: write
+        permission-contents: read
+        permission-members: read
+        permission-checks: write
+        permission-statuses: write
+        permission-issues: write
+
+    - name: Doctor — gather head SHA, declared environments, annotations
+      id: gatherdoc
+      if: ${{ steps.parse.outputs.route == 'doctor' && steps.doctortoken.outcome == 'success' }}
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        APP_TOKEN: ${{ steps.doctortoken.outputs.token }}
+        PR_NUMBER: ${{ inputs.pr-number }}
+        SHIPMATE_DOCTOR_MODE: check-ids
+        SHIPMATE_APP_ID: ${{ inputs.app-id }}
+      run: |
+        set -euo pipefail
+        head=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" --jq '.head.sha')
+        [[ "$head" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::could not read the PR head SHA"; exit 1; }
+        echo "head_sha=$head" >> "$GITHUB_OUTPUT"
+        # Declared environment set: the cell summaries of the latest successful
+        # plan run for this head. Absent -> doctor says so and skips those probes.
+        # -R is required: this job has no checkout, so gh cannot infer the
+        # repo from a git remote and `gh run download` would fail every time.
+        mkdir -p doctor-cells
+        run_id=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/plan.yml/runs?head_sha=$head&status=success" \
+                   --jq '.workflow_runs[0].id // ""')
+        if [ -n "$run_id" ] && gh run download "$run_id" -R "$GITHUB_REPOSITORY" -p 'cell-summary.*' -D doctor-cells; then
+          echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
+        else
+          echo "run_id=" >> "$GITHUB_OUTPUT"
+          echo "::warning::no plan-run cell summaries for $head; doctor skips the environment probes"
+        fi
+        # Harvest: latest shipmate-authored check-run per name (check-ids mode
+        # filters on app slug/id), then its annotations. Degrades to an empty
+        # harvest rather than failing the command.
+        mkdir -p ann
+        : > check-ids.tsv
+        if GH_TOKEN="$APP_TOKEN" gh api --paginate \
+             "repos/$GITHUB_REPOSITORY/commits/$head/check-runs?filter=all&per_page=100" \
+             --jq '.check_runs[] | {id, name, started_at, app_slug: .app.slug, app_id: .app.id}' > check-runs.jsonl; then
+          python3 "$GITHUB_ACTION_PATH/../../scripts/doctor" < check-runs.jsonl > check-ids.tsv
+        else
+          echo "::warning::check-runs listing failed; doctor reports settings probes only"
+        fi
+        # per_page=100, no --paginate: --paginate concatenates the pages' JSON
+        # arrays, which json.loads rejects; 100 comfortably covers GHA's
+        # 10-per-level-per-step annotation caps.
+        while IFS=$'\t' read -r id _name; do
+          [ -z "$id" ] && continue
+          GH_TOKEN="$APP_TOKEN" gh api "repos/$GITHUB_REPOSITORY/check-runs/$id/annotations?per_page=100" \
+            > "ann/$id.json" || echo '[]' > "ann/$id.json"
+        done < check-ids.tsv
+
+    - name: Doctor — render and upsert the sticky comment
+      if: ${{ steps.parse.outputs.route == 'doctor' && steps.doctortoken.outcome == 'success' }}
+      shell: bash
+      env:
+        GH_TOKEN: ${{ steps.doctortoken.outputs.token }}
+        PR_NUMBER: ${{ inputs.pr-number }}
+        SHIPMATE_DOCTOR_MODE: report
+        SHIPMATE_APP_ID: ${{ inputs.app-id }}
+        SHIPMATE_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        SHIPMATE_CELLS_DIR: doctor-cells
+        SHIPMATE_TEAM: ${{ inputs.approvers-team }}
+        SHIPMATE_HEAD_SHA: ${{ steps.gatherdoc.outputs.head_sha }}
+        SHIPMATE_PLAN_RUN_ID: ${{ steps.gatherdoc.outputs.run_id }}
+        SHIPMATE_ANNOTATIONS_DIR: ann
+        SHIPMATE_CHECK_IDS: check-ids.tsv
+        SHIPMATE_APP_PERMISSIONS_CHECKED: 'true'
+        # Workflow token for the pin probe's cross-repo release read — the
+        # App token is scoped to the consumer repo.
+        SHIPMATE_PUBLIC_TOKEN: ${{ inputs.github-token }}
+        FULLMINT_OUTCOME: ${{ steps.fullmint.outcome }}
+      run: |
+        set -euo pipefail
+        if [ "$FULLMINT_OUTCOME" != "success" ]; then
+          export SHIPMATE_APP_PERMISSION_ERROR="a token mint requesting the manifest's full permission set failed"
+        else
+          export SHIPMATE_APP_PERMISSION_ERROR=""
+        fi
+        python3 "$GITHUB_ACTION_PATH/../../scripts/doctor" > doctor.md
+        marker='<!-- shipmate:doctor -->'
+        # Same upsert discipline as the sticky plan comment: marker + Bot
+        # author (the App's bot login is org-dependent), single id.
+        id=$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" --paginate \
+               --jq "map(select((.body | contains(\"$marker\")) and .user.type == \"Bot\")) | .[0].id // empty" | head -n1)
+        if [ -n "$id" ]; then
+          gh api -X PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$id" -F body=@doctor.md >/dev/null
+        else
+          gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -F body=@doctor.md >/dev/null
+        fi
+
     - name: Mint App token (members:read)
       id: apptoken
-      if: ${{ steps.parse.outputs.valid == 'true' }}
+      if: ${{ steps.parse.outputs.route == 'apply' }}
       # Don't hard-fail the job if the token can't be minted (e.g. the App isn't
       # installed on this repo) — the next step reports it to the commenter.
       continue-on-error: true
@@ -85,7 +250,7 @@ runs:
         permission-members: read
 
     - name: App token unavailable (App not installed?)
-      if: ${{ steps.parse.outputs.valid == 'true' && steps.apptoken.outcome != 'success' }}
+      if: ${{ steps.parse.outputs.route == 'apply' && steps.apptoken.outcome != 'success' }}
       shell: bash
       env:
         GH_TOKEN: ${{ inputs.github-token }}
@@ -96,7 +261,7 @@ runs:
 
     - name: Gather authorization inputs
       id: gather
-      if: ${{ steps.parse.outputs.valid == 'true' && steps.apptoken.outcome == 'success' }}
+      if: ${{ steps.parse.outputs.route == 'apply' && steps.apptoken.outcome == 'success' }}
       shell: bash
       env:
         GH_TOKEN: ${{ inputs.github-token }}
@@ -142,7 +307,7 @@ runs:
 
     - name: Authorize
       id: authz
-      if: ${{ steps.parse.outputs.valid == 'true' && steps.apptoken.outcome == 'success' }}
+      if: ${{ steps.parse.outputs.route == 'apply' && steps.apptoken.outcome == 'success' }}
       shell: bash
       env:
         IS_MEMBER: ${{ steps.gather.outputs.is_member }}
@@ -166,7 +331,7 @@ runs:
         echo "::notice title=comment-ops::command authorized (apply is dispatched by the caller's next step)"
 
     - name: Reject with reason
-      if: ${{ steps.parse.outputs.valid == 'true' && steps.apptoken.outcome == 'success' && steps.authz.outputs.authorized != 'true' }}
+      if: ${{ steps.parse.outputs.route == 'apply' && steps.apptoken.outcome == 'success' && steps.authz.outputs.authorized != 'true' }}
       shell: bash
       env:
         GH_TOKEN: ${{ inputs.github-token }}

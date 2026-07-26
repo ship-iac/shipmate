@@ -751,3 +751,14 @@ def test_emit_section_guards_against_an_empty_row_list():
     used, added, dropped = doctor._emit_section(lines, "empty-check", [], 0, 1000)
     assert (used, added, dropped) == (0, 0, 0)
     assert lines == []
+
+
+def test_doctor_marker_matches_action_upsert():
+    # Coupling: the marker doctor embeds <-> the marker the comment-ops
+    # action's doctor upsert step greps for. Drift = a new comment every run
+    # instead of an edit-in-place. Assert the action site carries the
+    # script's marker and that its doctor step actually invokes the script.
+    engine = pathlib.Path(__file__).resolve().parents[2]
+    src = (engine / "actions" / "comment-ops" / "action.yml").read_text(encoding="utf-8")
+    assert src.count(doctor.DOCTOR_MARKER) >= 1, "upsert step no longer greps the script's marker"
+    assert "scripts/doctor" in src, "comment-ops action no longer calls scripts/doctor"
