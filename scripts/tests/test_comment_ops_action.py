@@ -65,6 +65,18 @@ def test_help_does_not_require_the_app():
     assert "inputs.github-token" in block
 
 
+def test_unreadable_head_sha_marks_the_harvest_failed_before_exiting():
+    """The read-only degrade path for an unreadable PR head SHA must record
+    harvest_failed=true (and head_sha/run_id) to GITHUB_OUTPUT before it
+    exits -- otherwise the render step reads an empty SHIPMATE_HARVEST_FAILED
+    and the sticky comment falsely claims the warning harvest ran clean."""
+    block = _ACTION.split("id: gatherdoc", 1)[1].split("- name:", 1)[0]
+    degrade = block.split("exit 0", 1)[0]
+    assert "head_sha=" in degrade
+    assert "run_id=" in degrade
+    assert "harvest_failed=true" in degrade
+
+
 def test_fullmint_requests_the_manifests_exact_permission_set():
     """The full-set probe mint must mirror app/manifest.json: a manifest bump
     that skips this step makes the permission-drift probe test the stale set —

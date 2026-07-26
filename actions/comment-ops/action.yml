@@ -159,8 +159,16 @@ runs:
         SHIPMATE_APP_ID: ${{ inputs.app-id }}
       run: |
         set -euo pipefail
-        head=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" --jq '.head.sha')
-        [[ "$head" =~ ^[0-9a-f]{40}$ ]] || { echo "::warning::could not read the PR head SHA; doctor reports settings probes only"; exit 0; }
+        head=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" --jq '.head.sha' || echo "")
+        if [[ ! "$head" =~ ^[0-9a-f]{40}$ ]]; then
+          echo "::warning::could not read the PR head SHA; doctor reports settings probes only"
+          {
+            echo "head_sha="
+            echo "run_id="
+            echo "harvest_failed=true"
+          } >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
         echo "head_sha=$head" >> "$GITHUB_OUTPUT"
         # Declared environment set: the cell summaries of the latest successful
         # plan run for this head. Absent -> doctor says so and skips those probes.
@@ -183,8 +191,13 @@ runs:
         if GH_TOKEN="$APP_TOKEN" gh api --paginate \
              "repos/$GITHUB_REPOSITORY/commits/$head/check-runs?filter=all&per_page=100" \
              --jq '.check_runs[] | {id, name, started_at, app_slug: .app.slug, app_id: .app.id}' > check-runs.jsonl; then
-          python3 "$GITHUB_ACTION_PATH/../../scripts/doctor" < check-runs.jsonl > check-ids.tsv
-          echo "harvest_failed=false" >> "$GITHUB_OUTPUT"
+          if python3 "$GITHUB_ACTION_PATH/../../scripts/doctor" < check-runs.jsonl > check-ids.tsv; then
+            echo "harvest_failed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::doctor check-ids reduction failed; doctor reports settings probes only"
+            : > check-ids.tsv
+            echo "harvest_failed=true" >> "$GITHUB_OUTPUT"
+          fi
         else
           echo "::warning::check-runs listing failed; doctor reports settings probes only"
           echo "harvest_failed=true" >> "$GITHUB_OUTPUT"
