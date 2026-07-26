@@ -1,4 +1,5 @@
 import importlib.util
+import io
 import json
 import os
 import pathlib
@@ -17,6 +18,7 @@ _APP_ID = "999"
 _BRANCH = "main"
 _ENVS = {"dev-eu"}
 _HEAD = "f" * 40
+_ENGINE_REPO = "acme/engine"
 _WF_DIR = f"repos/{_REPO}/contents/.github/workflows"
 # The pin probe reads the workflow files at the commit under examination, so
 # every contents path it asks for carries _ctx()'s head_sha as ?ref=.
@@ -39,6 +41,11 @@ def _ctx(**over):
         "annotations_dir": "ann",
         "check_ids_path": "check-ids.tsv",
         "harvest_failed": False,
+        "harvest_pending": False,
+        # The engine's own owner/repo, discovered at runtime from
+        # github.action_repository -- never hardcoded, so the probe stays
+        # org-agnostic while only ever reporting on shipmate's own pins.
+        "engine_repo": _ENGINE_REPO,
     }
     ctx.update(over)
     return ctx
@@ -556,12 +563,76 @@ def test_current_sha_pin_silent(monkeypatch):
 
 
 def test_self_referencing_pin_ignored(monkeypatch):
+    # The engine repository is also a consumer of its own actions (its E2E
+    # workflows call them by local path or by slug). Exercised with
+    # engine_repo == repo, the one arrangement in which the self-pin exclusion
+    # is load-bearing rather than shadowed by the engine-slug filter.
     responses = {
         f"{_WF_DIR}{_REF}": _wf_listing("plan.yml"),
         f"{_WF_DIR}/plan.yml{_REF}": _wf_file(f"uses: {_REPO}/actions/setup@{_SHA}\n"),
     }
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
-    assert doctor._pin_warnings(_ctx()) == []
+    assert doctor._pin_warnings(_ctx(engine_repo=_REPO)) == []
+
+
+def test_pin_probe_ignores_another_orgs_shared_action(monkeypatch):
+    """The probe's findings are worded about the engine — "a moving ref lets the
+    engine change under your deploy credentials", "re-pin to pick up fixes" —
+    and are only true of shipmate's own repository. A consumer that also uses
+    some other org's shared composite action would otherwise be told its
+    unrelated action is a stale engine pin, once per workflow file, which can
+    also exhaust GitHub's 10-warning-per-step annotation budget and push the
+    real findings off the run page."""
+    responses = {
+        f"{_WF_DIR}{_REF}": _wf_listing("plan.yml"),
+        f"{_WF_DIR}/plan.yml{_REF}": _wf_file(
+            "uses: other/shared/actions/lint@v1\n"
+            "uses: other/shared/.github/actions/scan@main\n"
+            f"uses: {_ENGINE_REPO}/actions/setup@{_SHA}\n"
+        ),
+        f"repos/{_ENGINE_REPO}/releases/latest": {"tag_name": "v1.4.0"},
+        f"repos/{_ENGINE_REPO}/commits/v1.4.0": {"sha": _OTHER_SHA},
+    }
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    out = doctor._pin_warnings(_ctx())
+    # Only the engine's own stale pin — not the two tag-pinned third-party
+    # references, and no release lookup against `other/shared` (whose absence
+    # from `responses` would surface as an extra "could not read" note).
+    assert len(out) == 1, out
+    assert _ENGINE_REPO in out[0][1]
+    assert "other/shared" not in out[0][1]
+
+
+def test_pin_probe_without_the_engine_repo_degrades_to_a_note(monkeypatch):
+    """`github.action_repository` is empty when the action runs from a local
+    path rather than a pinned slug. Without it the probe cannot tell shipmate's
+    pins from anyone else's, so it says pin freshness was not verified instead
+    of falling back to warning about every cross-repo pin it can see."""
+
+    def gh(path):
+        pytest.fail(f"the pin probe hit the API with no engine repo: {path}")
+
+    monkeypatch.setattr(doctor, "_gh_json", gh)
+    assert doctor._pin_warnings(_ctx(engine_repo="")) == [doctor.PIN_NO_ENGINE]
+    assert doctor.PIN_NO_ENGINE[0] == doctor.NOTICE
+    assert "not verified" in doctor.PIN_NO_ENGINE[1]
+
+
+def test_ctx_from_env_reads_the_engine_repo_and_the_harvest_flags(monkeypatch, tmp_path):
+    monkeypatch.setenv("GITHUB_REPOSITORY", _REPO)
+    monkeypatch.setenv("SHIPMATE_APP_ID", _APP_ID)
+    monkeypatch.setenv("SHIPMATE_DEFAULT_BRANCH", _BRANCH)
+    monkeypatch.setenv("SHIPMATE_CELLS_DIR", str(tmp_path))
+    monkeypatch.setenv("SHIPMATE_ENGINE_REPO", _ENGINE_REPO)
+    monkeypatch.setenv("SHIPMATE_HARVEST_PENDING", "true")
+    ctx = doctor.ctx_from_env()
+    assert ctx["engine_repo"] == _ENGINE_REPO
+    assert ctx["harvest_pending"] is True
+    monkeypatch.delenv("SHIPMATE_ENGINE_REPO")
+    monkeypatch.delenv("SHIPMATE_HARVEST_PENDING")
+    ctx = doctor.ctx_from_env()
+    assert ctx["engine_repo"] == ""
+    assert ctx["harvest_pending"] is False
 
 
 def test_unreadable_release_degrades_to_note(monkeypatch):
@@ -627,19 +698,16 @@ def test_workflow_file_read_failure_keeps_the_pins_found_so_far(monkeypatch):
 
 def test_pin_probe_ignores_a_head_sha_that_is_not_a_sha(monkeypatch):
     # A value that isn't a 40-char hex SHA must never reach the request path --
-    # the same guard apply-detect puts on SHIPMATE_HEAD_SHA. Falls back to the
-    # default branch instead of retargeting the gh api URL.
-    seen = []
-
+    # the same guard apply-detect puts on SHIPMATE_HEAD_SHA. It now reaches no
+    # request path at all: with no usable commit there is nothing to compare a
+    # pin against (see the test below), so the probe declines rather than
+    # retargeting the gh api URL or silently reading the default branch.
     def gh(path):
-        seen.append(path)
-        if path.endswith("plan.yml"):
-            return _wf_file("uses: acme/engine/actions/setup@v2\n")
-        return _wf_listing("plan.yml")
+        pytest.fail(f"the pin probe hit the API with an unusable head SHA: {path}")
 
     monkeypatch.setattr(doctor, "_gh_json", gh)
-    assert doctor._pin_warnings(_ctx(head_sha="main?per_page=1&x=/../"))
-    assert seen == [_WF_DIR, f"{_WF_DIR}/plan.yml"]
+    ctx = _ctx(head_sha="main?per_page=1&x=/../")
+    assert doctor._pin_warnings(ctx) == [doctor.PIN_NO_COMMIT]
 
 
 def test_pin_probe_reads_the_commit_under_examination(monkeypatch):
@@ -667,22 +735,24 @@ def test_pin_probe_reads_the_commit_under_examination(monkeypatch):
     assert all(p.endswith(_REF) for p in contents), contents
 
 
-def test_pin_probe_falls_back_to_the_default_branch_without_a_head_sha(monkeypatch):
-    # head_sha is empty when neither the comment path nor the plan path
-    # supplied one; the contents API's own default (the default branch) is then
-    # the only ref left to read, so no ?ref= is sent at all.
-    seen = []
+def test_pin_probe_does_not_read_at_all_without_a_commit_under_examination(monkeypatch):
+    """`head_sha` is empty on the comment path's degrade branch (the PR head
+    could not be read). Reading the default branch there is worse than not
+    reading: the pull request that bumps a stale pin carries the new SHA only on
+    its own head, so a default-branch read reports the pin stale on the very
+    change that fixes it — precisely the failure the `?ref=` was added to
+    prevent. Say freshness was not verified instead.
+
+    The annotate path always supplies a validated 40-hex head SHA, so only the
+    degrade path reaches this."""
 
     def gh(path):
-        seen.append(path)
-        if path.endswith("plan.yml"):
-            return _wf_file("uses: acme/engine/actions/setup@v2\n")
-        return _wf_listing("plan.yml")
+        pytest.fail(f"the pin probe hit the API with no commit to read: {path}")
 
     monkeypatch.setattr(doctor, "_gh_json", gh)
-    out = doctor._pin_warnings(_ctx(head_sha=""))
-    assert len(out) == 1 and "acme/engine@v2" in out[0][1]
-    assert seen == [_WF_DIR, f"{_WF_DIR}/plan.yml"]
+    assert doctor._pin_warnings(_ctx(head_sha="")) == [doctor.PIN_NO_COMMIT]
+    assert doctor.PIN_NO_COMMIT[0] == doctor.NOTICE
+    assert "not verified" in doctor.PIN_NO_COMMIT[1]
 
 
 def test_release_lookup_prefers_the_public_token(monkeypatch):
@@ -907,6 +977,105 @@ def test_report_omits_the_incompleteness_note_when_the_harvest_completed():
     body = doctor.render_report([], [_ann(title="real warning")], _ctx(harvest_failed=False))
     assert "real warning" in body
     assert doctor.HARVEST_INCOMPLETE not in body
+
+
+_COMPLETED = '"app_slug": "github-actions", "status": "completed"}'
+
+
+def test_harvest_pending_is_true_while_a_relevant_run_is_unfinished():
+    """An empty harvest cannot distinguish "annotations not recorded yet" from
+    "no warnings", so commenting `shipmate doctor` while the plan run is queued
+    or in flight printed an all-clear that was never refreshed.
+
+    Keyed on every shipmate-relevant check run, not on the subset
+    `latest_check_ids` selects: a queued run has no `started_at` and therefore
+    ranks *below* an already-completed run of the same name — the right ranking
+    for choosing whose annotations to fetch, but it would hide exactly the
+    still-running case this flag exists to report."""
+    lines = [
+        '{"id": 1, "name": "app / dev-eu", "started_at": "t", ' + _COMPLETED,
+        '{"id": 2, "name": "db / dev-eu", "app_slug": "github-actions", "status": "queued"}',
+    ]
+    assert doctor.harvest_pending(lines) is True
+    assert doctor.harvest_pending(lines[:1]) is False
+
+
+def test_harvest_pending_ignores_third_party_check_runs():
+    # Harvest scope is shipmate's own runs plus the consumer's other Actions
+    # workflows; a third-party app's perpetually-queued check must not make
+    # every report claim the commit's runs had not finished.
+    lines = [
+        '{"id": 1, "name": "app / dev-eu", "started_at": "t", ' + _COMPLETED,
+        '{"id": 5, "name": "codecov/project", "app_slug": "codecov", "app_id": 254, '
+        '"status": "in_progress"}',
+    ]
+    assert doctor.harvest_pending(lines, app_id=_APP_ID) is False
+
+
+def test_check_ids_mode_writes_the_harvest_pending_step_output(monkeypatch, tmp_path, capsys):
+    """The reduction already reads every check run on the commit, so it is also
+    where the pending flag is decided; it reaches the render step as a step
+    output of the gather step (the reader side is guarded in
+    test_comment_ops_action.py). The TSV on stdout must stay exactly (id, name)
+    pairs — `load_annotations` splits each line on the first tab and would
+    otherwise fold the flag into a check name."""
+    out_file = tmp_path / "gh-output"
+    out_file.write_text("", encoding="utf-8")
+    monkeypatch.setenv("SHIPMATE_DOCTOR_MODE", "check-ids")
+    monkeypatch.setenv("SHIPMATE_APP_ID", _APP_ID)
+    monkeypatch.setenv("GITHUB_OUTPUT", str(out_file))
+    monkeypatch.setattr(
+        "sys.stdin",
+        io.StringIO(
+            '{"id": 1, "name": "app / dev-eu", "started_at": "t", ' + _COMPLETED + "\n"
+            '{"id": 2, "name": "db / dev-eu", "app_slug": "github-actions", "status": "queued"}\n'
+        ),
+    )
+    doctor.main()
+    assert capsys.readouterr().out.splitlines() == ["1\tapp / dev-eu", "2\tdb / dev-eu"]
+    assert "harvest_pending=true" in out_file.read_text(encoding="utf-8")
+
+
+def test_check_ids_mode_runs_without_a_github_output(monkeypatch, capsys):
+    # The modes stay runnable outside a runner: no GITHUB_OUTPUT, no crash.
+    monkeypatch.setenv("SHIPMATE_DOCTOR_MODE", "check-ids")
+    monkeypatch.delenv("GITHUB_OUTPUT", raising=False)
+    monkeypatch.setattr("sys.stdin", io.StringIO(""))
+    doctor.main()
+    assert capsys.readouterr().out == ""
+
+
+def test_harvest_pending_note_says_runs_had_not_finished():
+    # Same posture as the HARVEST_INCOMPLETE stem test: the wiring tests below
+    # would all stay green if the constant were swapped for an all-clear, which
+    # is the exact false all-clear it exists to prevent.
+    assert "had not finished" in doctor.HARVEST_PENDING
+    assert "shipmate doctor" in doctor.HARVEST_PENDING  # tells the reader what to do
+    assert ":white_check_mark:" not in doctor.HARVEST_PENDING
+    assert doctor.HARVEST_PENDING != doctor.HARVEST_INCOMPLETE
+
+
+def test_report_replaces_the_all_clear_when_runs_had_not_finished():
+    body = doctor.render_report([], [], _ctx(harvest_pending=True))
+    assert doctor.HARVEST_PENDING in body
+    assert "no warnings on this commit's workflow runs" not in body
+    # Distinct from harvest_failed, which means the harvest itself errored.
+    assert doctor.HARVEST_INCOMPLETE not in body
+
+
+def test_report_pending_note_is_additive_when_the_harvest_has_rows():
+    body = doctor.render_report([], [_ann(title="real warning")], _ctx(harvest_pending=True))
+    assert doctor.HARVEST_PENDING in body
+    assert "real warning" in body
+
+
+def test_report_states_pending_and_failed_separately():
+    # Two different facts: one run has not finished yet, and some other run's
+    # annotations could not be read at all. Neither may absorb the other.
+    body = doctor.render_report([], [], _ctx(harvest_pending=True, harvest_failed=True))
+    assert doctor.HARVEST_PENDING in body
+    assert doctor.HARVEST_INCOMPLETE in body
+    assert "no warnings on this commit's workflow runs" not in body
 
 
 def test_report_notes_possible_annotation_truncation():

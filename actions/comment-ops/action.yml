@@ -258,7 +258,12 @@ runs:
         harvest_failed=false
         if GH_TOKEN="$APP_TOKEN" gh api --paginate \
              "repos/$GITHUB_REPOSITORY/commits/$head/check-runs?filter=all&per_page=100" \
-             --jq '.check_runs[] | {id, name, started_at, app_slug: .app.slug, app_id: .app.id}' > check-runs.jsonl; then
+             --jq '.check_runs[] | {id, name, status, started_at, app_slug: .app.slug, app_id: .app.id}' > check-runs.jsonl; then
+          # check-ids mode also writes the `harvest_pending` step output (true
+          # when any shipmate-relevant check run on this commit has not
+          # completed) -- it is the one step that already reads every check run,
+          # and the render step needs it so a report requested mid-run says so
+          # instead of printing an all-clear no later run ever refreshes.
           if ! python3 "$GITHUB_ACTION_PATH/../../scripts/doctor" < check-runs.jsonl > check-ids.tsv; then
             echo "::warning::doctor check-ids reduction failed; doctor reports settings probes only"
             : > check-ids.tsv
@@ -295,6 +300,13 @@ runs:
         SHIPMATE_TEAM: ${{ inputs.approvers-team }}
         SHIPMATE_HEAD_SHA: ${{ steps.gatherdoc.outputs.head_sha }}
         SHIPMATE_PLAN_RUN_ID: ${{ steps.gatherdoc.outputs.run_id }}
+        # The engine's own owner/repo, so the pin probe reports on shipmate's
+        # pins and not on some other org's shared action the consumer also uses.
+        # `github.action_repository` is the slug of the running action, resolved
+        # by GitHub at runtime — org-agnostic, never hardcoded. Empty when the
+        # action runs from a local path, and doctor then says pin freshness was
+        # not verified rather than guessing.
+        SHIPMATE_ENGINE_REPO: ${{ github.action_repository }}
         SHIPMATE_ANNOTATIONS_DIR: ann
         SHIPMATE_CHECK_IDS: check-ids.tsv
         # `|| 'true'`: this render step's `if:` doesn't key on gatherdoc's
@@ -304,6 +316,11 @@ runs:
         # rather than silently reading as SHIPMATE_HARVEST_FAILED=false. A
         # real 'false' is a non-empty string, hence truthy, and passes through.
         SHIPMATE_HARVEST_FAILED: ${{ steps.gatherdoc.outputs.harvest_failed || 'true' }}
+        # Written by check-ids mode, above. No `|| 'true'` fallback: if
+        # gatherdoc never ran there is no harvest at all and
+        # SHIPMATE_HARVEST_FAILED already says so — adding "and some runs may
+        # still be going" on top of that would be noise, not honesty.
+        SHIPMATE_HARVEST_PENDING: ${{ steps.gatherdoc.outputs.harvest_pending }}
         SHIPMATE_APP_PERMISSIONS_CHECKED: 'true'
         # Workflow token for the pin probe's cross-repo release read — the
         # App token is scoped to the consumer repo.

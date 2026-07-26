@@ -91,6 +91,24 @@ def test_summary_action_supplies_every_env_var_doctor_requires_in_annotate_mode(
         assert name in _SUMMARY_ACTION, name
 
 
+def test_both_doctor_steps_supply_the_engine_repo_from_the_action_context():
+    """The pin probe reports only on the engine's own pins, and learns which
+    repository that is at runtime — `github.action_repository` is the owner/repo
+    of the running action, so the value stays org-agnostic and is never
+    hardcoded. Both doctor call sites must supply it: `actions/summary` drives
+    `annotate` mode on every plan run and `actions/comment-ops` drives `report`
+    mode on demand, and a site that omits it degrades that path's pin probe to
+    "not verified".
+
+    `test_doctor_step_supplies_every_env_var_doctor_reads` covers the
+    comment-ops side by derivation, but it reads nothing about
+    `actions/summary`, and the summary-side guard only demands doctor's
+    subscript reads — this one is read with `.get`."""
+    expected = "SHIPMATE_ENGINE_REPO: ${{ github.action_repository }}"
+    assert expected in _ACTION
+    assert expected in _SUMMARY_ACTION
+
+
 def test_doctor_runs_in_report_mode_with_the_app_token():
     assert "SHIPMATE_DOCTOR_MODE: report" in _ACTION
     assert "SHIPMATE_DOCTOR_MODE: check-ids" in _ACTION
@@ -176,6 +194,32 @@ def test_harvest_failed_env_falls_back_to_true_when_gatherdoc_did_not_run():
         "SHIPMATE_HARVEST_FAILED: ${{ steps.gatherdoc.outputs.harvest_failed || 'true' }}"
         in _ACTION
     )
+
+
+def test_the_check_runs_projection_carries_the_status_the_pending_flag_needs():
+    """`check-ids` mode decides the harvest-pending flag from this projection,
+    so `status` must be in it — without the field every run reads as unfinished
+    (`.get("status") != "completed"`), and the report would tell every commenter
+    to come back later, forever."""
+    block = _ACTION.split("id: gatherdoc", 1)[1].split("- name:", 1)[0]
+    projection = block.split("--jq '.check_runs[]", 1)[1].split("\n", 1)[0]
+    assert "status" in projection
+    assert "started_at" in projection  # still ranked by start time, not id
+
+
+def test_the_render_step_reads_the_harvest_pending_flag_the_reduction_wrote():
+    """`check-ids` mode writes `harvest_pending` as a step output of the gather
+    step; the render step must read it into `SHIPMATE_HARVEST_PENDING`, or the
+    flag is computed and thrown away and the false all-clear comes back.
+
+    No `|| 'true'` fallback here, unlike SHIPMATE_HARVEST_FAILED: if gatherdoc
+    never ran there is no harvest at all, and `harvest_failed` already says so —
+    a second "and some runs may still be going" would be noise, not honesty.
+
+    The writer half — that `check-ids` mode actually emits that step output — is
+    covered behaviourally by
+    test_doctor.py::test_check_ids_mode_writes_the_harvest_pending_step_output."""
+    assert "SHIPMATE_HARVEST_PENDING: ${{ steps.gatherdoc.outputs.harvest_pending }}" in _ACTION
 
 
 def test_harvest_flag_is_set_inside_the_loop_and_written_once_after_it():

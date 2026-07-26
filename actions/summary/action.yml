@@ -100,6 +100,13 @@ runs:
         # pin bump on this PR is not visible yet — doctor would report the pin
         # stale on the very run that fixes it.
         SHIPMATE_HEAD_SHA: ${{ inputs.head-sha }}
+        # The engine's own owner/repo, so the pin probe reports on shipmate's
+        # pins and not on some other org's shared action the consumer also uses.
+        # `github.action_repository` is the slug of the running action, resolved
+        # by GitHub at runtime — org-agnostic, never hardcoded. Empty when the
+        # action runs from a local path, and doctor then says pin freshness was
+        # not verified rather than guessing.
+        SHIPMATE_ENGINE_REPO: ${{ github.action_repository }}
         # For the engine-pin probe's cross-repo release read: the App
         # installation token is scoped to the consumer repo and may not read
         # the engine repo; the workflow token can (public repo). `github.token`

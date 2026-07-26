@@ -23,7 +23,10 @@ Probes:
   branch policy; an apply env with no protection is worth a note.
 - engine action-pin freshness in the consumer's workflow files, read at the
   commit under examination: a tag/branch pin is a warning, a SHA pin behind
-  the engine's latest release is a warning.
+  the engine's latest release is a warning. Restricted to pins of the engine's
+  own repository, which arrives at runtime as SHIPMATE_ENGINE_REPO (the
+  action's `github.action_repository`) and is never hardcoded; a third party's
+  shared action is out of scope and no commit to read means no report.
 - approvers team resolvability: the configured SHIPMATE_APPROVERS_TEAM must
   resolve in the repo's org, or every apply is rejected as "not a team member".
 - GitHub App installation permission drift: a failed installation-token mint
@@ -85,6 +88,17 @@ _HARVEST_APP_SLUGS = ("github-actions",)
 HARVEST_INCOMPLETE = (
     "- :warning: could not read all of this commit's check runs — any warnings recorded on "
     "the ones that could not be read are missing from this list."
+)
+# Emitted whenever the gather step reports that a check run on this commit had
+# not finished. Distinct from HARVEST_INCOMPLETE, which means the harvest itself
+# errored: here every read succeeded, there is simply nothing recorded yet. An
+# empty payload is byte-identical to "this run had no warnings", so without this
+# the report answers a `shipmate doctor` typed while the plan run is still
+# queued with an all-clear that is never refreshed.
+HARVEST_PENDING = (
+    "- :hourglass: some of this commit's workflow runs had not finished when this report was "
+    "rendered — warnings they record later are not in this list; comment `shipmate doctor` "
+    "again once they have finished."
 )
 
 
@@ -260,25 +274,36 @@ PIN_UNREADABLE = (
     NOTICE,
     f"could not read `{_WORKFLOWS_DIR}` — engine pin freshness not verified.",
 )
+# The two preconditions this probe cannot work without. Both are NOTICE, like
+# the unreadable-contents degrade above: neither is a repository
+# misconfiguration, and neither may be silently substituted with a weaker read.
+PIN_NO_COMMIT = (
+    NOTICE,
+    "engine pin freshness not verified — the commit under examination could not be determined.",
+)
+PIN_NO_ENGINE = (
+    NOTICE,
+    "engine pin freshness not verified — the engine repository could not be determined.",
+)
 
 
 def _contents_ref(ctx):
-    """`?ref=` suffix for the workflow-file reads: the commit under examination
-    when one is known, otherwise nothing (the API then reads the default
-    branch).
+    """`?ref=` suffix for the workflow-file reads — the commit under
+    examination — or None when there is no usable one.
 
-    Reading the default branch would break the remediation loop this probe
-    exists to drive: a stale pin is fixed by a PR that bumps the SHA, and that
-    new SHA lives only on the PR's head until it merges — so a default-branch
-    read reports the pin stale on the very PR that fixes it. `head_sha` is the
-    comment path's PR head and the plan path's `head-sha` input; it is empty
-    only when neither supplied one, and then the default branch is all there
-    is to read. Anything that is not a 40-char hex SHA is treated as absent
-    rather than interpolated into the request path (same guard as
-    apply-detect's on SHIPMATE_HEAD_SHA) — a probe must not be able to retarget
-    a `gh api` URL, however it was configured."""
+    Reading the default branch instead would break the remediation loop this
+    probe exists to drive: a stale pin is fixed by a PR that bumps the SHA, and
+    that new SHA lives only on the PR's head until it merges, so a
+    default-branch read reports the pin stale on the very PR that fixes it. That
+    makes "no commit" a reason to skip the probe, not a reason to read something
+    else. `head_sha` is the comment path's PR head and the plan path's
+    `head-sha` input; it is empty only on the comment path's degrade branch,
+    where the PR head could not be read at all. Anything that is not a 40-char
+    hex SHA counts as absent rather than being interpolated into the request
+    path (same guard as apply-detect's on SHIPMATE_HEAD_SHA) — a probe must not
+    be able to retarget a `gh api` URL, however it was configured."""
     sha = ctx.get("head_sha") or ""
-    return f"?ref={sha}" if _SHA40.fullmatch(sha) else ""
+    return f"?ref={sha}" if _SHA40.fullmatch(sha) else None
 
 
 def _workflow_names(base):
@@ -305,14 +330,23 @@ def _workflow_text(path):
     return base64.b64decode(blob.get("content", "")).decode("utf-8", "replace")
 
 
-def _pins_in_text(text, fname, repo, seen):
+def _pins_in_text(text, fname, ctx, seen):
     """Tag/branch-pin warnings for one workflow file, recording its SHA pins in
-    `seen` ({slug: {(file, sha)}}) for the freshness comparison."""
+    `seen` ({slug: {(file, sha)}}) for the freshness comparison.
+
+    Only pins of the engine's own repository are considered. Every finding here
+    is worded about the engine — a moving ref letting the engine change under
+    the consumer's deploy credentials, re-pinning to pick up engine fixes — and
+    none of that is true of, say, another org's shared lint action, which holds
+    no deploy credentials and has its own release cadence."""
     out = []
+    repo, engine = ctx["repo"], ctx["engine_repo"]
     for m in _PIN.finditer(text):
         slug, ref = f"{m.group('owner')}/{m.group('repo')}", m.group("ref")
         if slug == repo:
             continue  # a repo pinning its own actions is not an engine pin
+        if slug != engine:
+            continue  # a third party's action is not shipmate's to report on
         if not _SHA40.fullmatch(ref):
             out.append(
                 (
@@ -328,13 +362,19 @@ def _pins_in_text(text, fname, repo, seen):
 
 
 def _pins_in_workflows(ctx):
-    """(warnings, {slug: {(file, sha)}}) for every cross-repo action pin found
-    in the consumer's workflow files at the commit under examination. The
-    engine's owner/repo comes from the pin itself — shipmate never hardcodes an
-    org. An unreadable listing or file degrades to PIN_UNREADABLE alongside the
-    pins already found, never to an error."""
+    """(warnings, {slug: {(file, sha)}}) for every engine action pin found in
+    the consumer's workflow files at the commit under examination. The engine's
+    owner/repo comes from `ctx["engine_repo"]`, discovered at runtime from
+    `github.action_repository` — shipmate never hardcodes an org. Either
+    precondition missing, or an unreadable listing or file, degrades to a NOTICE
+    rather than an error; the preconditions are checked before any API call,
+    since without them no read could be interpreted anyway."""
     out, seen = [], {}
+    if not ctx["engine_repo"]:
+        return [PIN_NO_ENGINE], seen
     ref = _contents_ref(ctx)
+    if ref is None:
+        return [PIN_NO_COMMIT], seen
     base = f"repos/{ctx['repo']}/contents/{_WORKFLOWS_DIR}"
     names, readable = _workflow_names(f"{base}{ref}")
     if not readable:
@@ -346,7 +386,7 @@ def _pins_in_workflows(ctx):
             # a bad ref, an API outage) applies to the rest of the directory.
             out.append(PIN_UNREADABLE)
             return out, seen
-        out.extend(_pins_in_text(text, name, ctx["repo"], seen))
+        out.extend(_pins_in_text(text, name, ctx, seen))
     return out, seen
 
 
@@ -542,10 +582,15 @@ def ctx_from_env():
         "app_permissions_checked": os.environ.get("SHIPMATE_APP_PERMISSIONS_CHECKED") == "true",
         "app_permission_error": os.environ.get("SHIPMATE_APP_PERMISSION_ERROR", ""),
         "head_sha": os.environ.get("SHIPMATE_HEAD_SHA", ""),
+        # github.action_repository: the owner/repo of the running action, i.e.
+        # the engine's own slug, resolved by GitHub at runtime. Empty when the
+        # action runs from a local path instead of a pinned slug.
+        "engine_repo": os.environ.get("SHIPMATE_ENGINE_REPO", ""),
         "plan_run_id": os.environ.get("SHIPMATE_PLAN_RUN_ID", ""),
         "annotations_dir": os.environ.get("SHIPMATE_ANNOTATIONS_DIR", "ann"),
         "check_ids_path": os.environ.get("SHIPMATE_CHECK_IDS", "check-ids.tsv"),
         "harvest_failed": os.environ.get("SHIPMATE_HARVEST_FAILED") == "true",
+        "harvest_pending": os.environ.get("SHIPMATE_HARVEST_PENDING") == "true",
     }
 
 
@@ -593,6 +638,33 @@ def latest_check_ids(lines, app_id=""):
         except (KeyError, TypeError, ValueError):
             continue
     return out
+
+
+def harvest_pending(lines, app_id=""):
+    """True when any shipmate-relevant check run on this commit has not
+    completed.
+
+    Keyed on the whole relevant set rather than on the subset
+    `latest_check_ids` selects: a queued run has no `started_at` and so ranks
+    *below* an already-completed run of the same name, which is the ranking
+    wanted for choosing whose annotations to fetch but would hide exactly the
+    still-running case this flag exists to report."""
+    for line in lines:
+        run = _parse_check_run(line, app_id)
+        if run is not None and run.get("status") != "completed":
+            return True
+    return False
+
+
+def _write_step_output(name, value):
+    """Append `name=<bool>` to the calling action step's GITHUB_OUTPUT. Silently
+    skipped when GITHUB_OUTPUT is unset, so every mode stays runnable outside a
+    runner."""
+    path = os.environ.get("GITHUB_OUTPUT")
+    if not path:
+        return
+    with open(path, "a", encoding="utf-8") as fh:
+        fh.write(f"{name}={'true' if value else 'false'}\n")
 
 
 def load_annotations(ctx):
@@ -789,11 +861,11 @@ def _findings_only_report(findings, ctx):
     return "\n".join(head + lines)
 
 
-def _harvest_body(sections, annotations, budget, harvest_failed):
-    """The harvest's rendered rows, plus a note when the harvest itself did
-    not complete.
+def _harvest_body(sections, annotations, budget, harvest_failed, harvest_pending):
+    """The harvest's rendered rows, plus a note for each of the two ways the
+    harvest can fall short of "these are the warnings on this commit".
 
-    The note is additive rather than an alternative to the rows. The gather
+    Both notes are additive rather than alternatives to the rows. The gather
     step flags an incomplete harvest for a failed check-runs listing (nothing
     read at all) but also for a single check run's annotations fetch failing
     while the rest succeeded -- so an incomplete harvest can still have
@@ -801,7 +873,9 @@ def _harvest_body(sections, annotations, budget, harvest_failed):
     would let that partial harvest read as the complete set of warnings for
     the commit, which is the same false-all-clear in a subtler form: the
     unread check run's warnings are simply absent, with no hint in the report
-    that anything is missing."""
+    that anything is missing. A pending harvest is the same hazard one step
+    earlier -- the annotations exist nowhere yet -- so it suppresses the
+    all-clear too, while staying a separate statement from the failure note."""
     lines = []
     if sections:
         lines, dropped = _harvest_lines(sections, annotations, budget)
@@ -810,8 +884,10 @@ def _harvest_body(sections, annotations, budget, harvest_failed):
                 f"- _{dropped} more warning(s) omitted to keep this comment within the "
                 "size limit — see the run logs for the full set._"
             )
-    elif not harvest_failed:
+    elif not harvest_failed and not harvest_pending:
         lines = [":white_check_mark: no warnings on this commit's workflow runs."]
+    if harvest_pending:
+        lines.append(HARVEST_PENDING)
     if harvest_failed:
         lines.append(HARVEST_INCOMPLETE)
     return lines
@@ -833,7 +909,13 @@ def render_report(findings, annotations, ctx):
     # stale comment can't recover from the run logs -- so the harvest gets
     # whatever's left of sc.SIZE_BUDGET, not a fixed share.
     budget = max(0, sc.SIZE_BUDGET - len("\n".join(out)) - len("\n".join(heading)))
-    lines = _harvest_body(sections, annotations, budget, bool(ctx.get("harvest_failed")))
+    lines = _harvest_body(
+        sections,
+        annotations,
+        budget,
+        bool(ctx.get("harvest_failed")),
+        bool(ctx.get("harvest_pending")),
+    )
     body = "\n".join(out + heading + lines)
     if len(body) > sc.HARD_CAP:
         # The harvest section is already budgeted against sc.SIZE_BUDGET
@@ -850,8 +932,15 @@ def main():
         raise SystemExit(f"SHIPMATE_DOCTOR_MODE must be one of {', '.join(MODES)} (got: {mode!r})")
     if mode == "check-ids":
         app_id = os.environ.get("SHIPMATE_APP_ID", "")
-        for cid, name in latest_check_ids(sys.stdin.read().splitlines(), app_id):
+        lines = sys.stdin.read().splitlines()
+        for cid, name in latest_check_ids(lines, app_id):
             print(f"{cid}\t{name}")
+        # Decided here because this is the one place that already reads every
+        # check run on the commit. It travels to `report` mode as a step output
+        # of the gather step, NOT on stdout: stdout is the (id, name) TSV
+        # load_annotations parses, and an extra field there would land in a
+        # check name.
+        _write_step_output("harvest_pending", harvest_pending(lines, app_id))
         return
     ctx = ctx_from_env()
     found = warnings(ctx)
