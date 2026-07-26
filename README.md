@@ -79,6 +79,17 @@ authorization check; `apply` is the one verb that requires it (approvers-team
 membership, a mergeable and reviewed PR, and a reviewed plan for the current
 head — see Comment-ops above).
 
+`shipmate doctor` names the guardrails this repository is missing — that
+`shipmate / gate` is not required on the default branch, that an apply
+environment has no protection rules, which approvers team is configured and
+whether it resolves — in a comment anyone reading the pull request can see. On
+a **public** repository, anyone who can comment can therefore ask for that
+list, so restrict who can trigger the comment-ops workflow — for example with
+a `github.event.comment.author_association` condition on the `issue_comment`
+job, or by keeping the repository private. shipmate does not restrict it for
+you. The App manifest is `"public": false`: the shipmate App is meant for
+repositories the installing organization controls.
+
 ## Dynamic environments
 
 Environments are not hardcoded into workflow YAML. An environment is

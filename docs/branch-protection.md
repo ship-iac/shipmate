@@ -76,7 +76,9 @@ plan/apply environment protection shape (a plan environment must have no
 approval-type protection rules — required reviewers or wait timers — and no
 deployment branch policy; an apply environment with no protection at all is
 only a note), engine action-pin freshness in the consumer's own workflow
-files, whether the configured approvers team resolves in the org, and
+files (read at the commit under examination, so the pull request that bumps a
+stale pin is not itself reported stale), whether the configured approvers team
+resolves in the org, and
 whether the shipmate App installation still grants the manifest's full
 permission set — with the warning and failure annotations GitHub already
 recorded on this commit's workflow runs (shipmate's own and any other
@@ -88,14 +90,37 @@ not supply, and
 the App-permission-drift probe only has something to report when a
 full-manifest permission-set mint was actually attempted, which only
 `shipmate doctor` does — both are effectively comment-path-only. `doctor`
-degrades to a "could not verify" **warning** on a probe's API error and
-always exits 0, so a probe failure (for example, the App token lacking read
-access to `rules/branches` or `environments`) never fails the plan run, and
-the report states plainly when the warnings harvest itself could not
+degrades to a "could not verify" **warning** naming the probe that was skipped
+on an API error, and always exits 0, so a probe failure (for example, the App
+token lacking read access to `rules/branches` or `environments`) never fails
+the plan run. The engine-pin probe degrades to a **note** instead: its
+`.github/workflows` read legitimately fails on the pull request that first adds
+that directory, which is the first `shipmate doctor` any consumer runs.
+Separately, the report states plainly when the warnings harvest itself could not
 complete (or may be truncated by GitHub's per-step annotation cap) rather
 than claiming a false all-clear.
 `shipmate doctor` never blocks the gate and is open to any commenter — it
 needs no team membership or review, unlike `shipmate apply`.
+
+### Who can see the report
+
+The report is an inventory of what is *not* configured: that no ruleset
+requires `shipmate / gate` on the default branch, that `<env>-apply` has no
+protection rules so pre-merge applies to it are unreviewed, which approvers
+team is configured and whether it resolves, and whether the App installation is
+missing permissions the manifest declares. It is posted as an ordinary pull
+request comment, so everyone who can read the pull request can read it, and
+`doctor` takes no authorization — anyone who can comment can ask for it.
+
+On a repository whose pull requests are **public**, restrict who can trigger
+the comment-ops workflow rather than relying on the command being harmless:
+gate the `issue_comment` job on
+`github.event.comment.author_association` (`OWNER`, `MEMBER`, `COLLABORATOR`),
+or keep the repository private. shipmate enforces nothing here — `doctor` is
+deliberately unauthorized so that a newcomer whose setup is broken can still
+find out why. Note also that `app/manifest.json` declares `"public": false`:
+the shipmate App is registered per organization and intended for repositories
+the installing organization controls.
 
 ## Review policy for `shipmate apply`
 

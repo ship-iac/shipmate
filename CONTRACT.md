@@ -164,7 +164,8 @@ tag-filter given alongside it with an explicit "takes no arguments" error
 rather than silently ignoring the extra token; a tag-filter given to any verb
 is likewise rejected as not yet supported rather than silently applied to the
 whole environment. An unknown verb's error points the commenter at
-`shipmate help`. `scripts/comment-parse`'s `VERBS` registry is the single
+`shipmate help`, and so does the "malformed" error for a line that does not
+match the grammar at all (a capitalized verb, a stray token, a double space). `scripts/comment-parse`'s `VERBS` registry is the single
 source of truth this table is derived from: it drives the parser, the
 `--help-markdown` rendering that `shipmate help` posts verbatim (marked with
 the HTML comment `<!-- shipmate:help -->`), and the reject-hint text, so the
@@ -208,17 +209,33 @@ live probes already re-state fresh against current settings — this is
 machine-read, not a formatting choice, and a mismatch between the annotate
 call and the harvest filter is a regression. `shipmate doctor` is entirely
 read-only: it authorizes nothing, writes nothing but its own sticky comment
-(plus a one-line error comment when it cannot mint an App token, and a
+and an `eyes` reaction on the triggering comment (both read-only verbs get
+that acknowledgement as soon as the command is accepted — `rocket` stays
+reserved for an authorized `apply`; a reaction that cannot be posted is
+ignored), a one-line error comment when it cannot mint an App token, and a
 handful of untitled `::warning::` annotations on the gather step's own
 degrade paths — an unreadable PR head SHA, no plan-run cell summaries for
 this commit, a failed check-runs listing or reduction, a failed per-check
-annotations fetch). Those gather-step annotations land on the
+annotations fetch. Those gather-step annotations land on the
 `issue_comment` workflow run that is executing `shipmate doctor` itself, at
 `github.sha` (this job does no checkout at all — it reads entirely through
 `gh api`/`gh run download -R` — so `github.sha` is simply the default
 branch's tip, not a checked-out commit), not on the PR head SHA whose check
 runs the harvest reads — so there is no self-harvest loop. `shipmate doctor`
 never affects `shipmate / gate`.
+
+Because the report enumerates the guardrails a repository is *missing* — an
+ungated default branch, an apply environment with no protection rules, the
+configured approvers team and whether it resolves, an App installation short of
+the manifest's permissions — and because the verb takes no authorization, any
+account that can comment on a pull request can obtain that list, and everyone
+who can read the pull request can read it. That is intended for a repository
+whose readers are the team that owns it; on a repository with **public** pull
+requests, restrict who can trigger the comment-ops workflow (for example a
+`github.event.comment.author_association` condition on the `issue_comment`
+job). shipmate imposes no such restriction itself. `app/manifest.json` declares
+`"public": false` for the same reason: the App is registered per organization
+and intended for repositories the installing organization controls.
 
 The env is optional for `apply`. A targeted `shipmate apply <env>` applies one
 environment; a bare `shipmate apply` applies **every** environment that has a
