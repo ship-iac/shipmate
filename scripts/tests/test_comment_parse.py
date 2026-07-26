@@ -192,6 +192,28 @@ def test_unknown_verb_points_at_help():
     assert "shipmate help" in r["error"]
 
 
+@pytest.mark.parametrize(
+    "body",
+    [
+        "shipmate Doctor",  # verb charset is lowercase-only
+        "shipmate  apply",  # double space
+        "shipmate apply dev-eu --auto",  # a token outside both optional charsets
+        "shipmate apply dev-eu; rm -rf /",
+    ],
+)
+def test_malformed_command_points_at_help(body):
+    # Everything that fails _CMD outright lands on the malformed message, and
+    # every one of these is a typo the verb list resolves -- so it carries the
+    # same `shipmate help` hint the unknown-verb path does. (`shipmate apply
+    # dev_eu` is NOT one of them: '_' is in the tag charset, so it parses as a
+    # tag-filter and gets the "not yet supported" error, pinned above.)
+    r = cp.parse(body)
+    assert r["is_command"] is True
+    assert r["valid"] is False
+    assert "malformed" in r["error"]
+    assert "shipmate help" in r["error"]
+
+
 def test_help_markdown_lists_every_verb():
     md = cp.help_markdown()
     assert md.startswith(cp.HELP_MARKER)
@@ -214,7 +236,7 @@ def test_help_has_no_bare_command_line():
 
 
 def test_main_writes_route_output(tmp_path, monkeypatch):
-    # Pins main()'s route= output line: Task 6's action.yml branches on
+    # Pins main()'s route= output line: `actions/comment-ops` branches on
     # steps.parse.outputs.route, so a rename on either side must fail here,
     # not fail silently green.
     out = tmp_path / "out.txt"

@@ -101,6 +101,24 @@ runs:
         python3 "$GITHUB_ACTION_PATH/../../scripts/comment-parse" --help-markdown > help.md
         gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -F body=@help.md >/dev/null
 
+    - name: Acknowledge a read-only command
+      # Ahead of every doctor step below, which spend 30-60s in API calls
+      # before the report comment appears; with no acknowledgement the
+      # commenter's next move is to comment again.
+      if: ${{ steps.parse.outputs.route == 'doctor' || steps.parse.outputs.route == 'help' }}
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        COMMENT_ID: ${{ inputs.comment-id }}
+      run: |
+        set -euo pipefail
+        # `eyes` is the conventional "working on it" for a read-only command —
+        # `rocket` stays reserved for an authorized apply. `|| true`: the
+        # reaction is cosmetic (the comment may already be deleted, or
+        # reactions disabled), and losing it must not fail the command.
+        gh api -X POST "repos/$GITHUB_REPOSITORY/issues/comments/$COMMENT_ID/reactions" \
+          -f content=eyes >/dev/null || true
+
     - name: Mint App token for doctor
       id: doctortoken
       if: ${{ steps.parse.outputs.route == 'doctor' }}

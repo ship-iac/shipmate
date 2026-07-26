@@ -84,18 +84,52 @@ def test_help_does_not_require_the_app():
     assert "inputs.github-token" in block
 
 
+def _step(marker):
+    """The action.yml step block containing `marker` -- so a guard on one step's
+    wiring cannot be satisfied by a coincidental match in another step."""
+    steps = _ACTION.split("\n    - name:")
+    matches = [s for s in steps if marker in s]
+    assert len(matches) == 1, f"{marker!r} appears in {len(matches)} steps"
+    return matches[0]
+
+
+def test_read_only_routes_are_acknowledged_with_a_reaction():
+    """`doctor` spends 30-60s in API calls before its comment appears. Without
+    an acknowledgement on the triggering comment the commenter's next move is to
+    comment again, so both read-only routes react -- and a failed reaction
+    (comment deleted, reactions disabled) must not fail the command."""
+    block = _step("content=eyes")
+    assert "steps.parse.outputs.route == 'doctor'" in block
+    assert "steps.parse.outputs.route == 'help'" in block
+    assert "|| true" in block
+
+
+def test_the_rocket_reaction_stays_on_an_authorized_apply():
+    # `eyes` = accepted a read-only command, `rocket` = an apply was authorized
+    # and is being dispatched. The two must not collapse into one signal.
+    block = _step("content=rocket")
+    assert "steps.authz.outputs.authorized == 'true'" in block
+
+
+def test_summary_doctor_step_reads_the_head_sha_it_was_given():
+    """annotate mode must probe the same commit the plan ran on: without
+    SHIPMATE_HEAD_SHA the pin probe's contents reads fall back to the default
+    branch, where a pin bump on this PR is not visible yet."""
+    steps = _SUMMARY_ACTION.split("\n    - name:")
+    block = next(s for s in steps if "SHIPMATE_DOCTOR_MODE: annotate" in s)
+    assert "SHIPMATE_HEAD_SHA: ${{ inputs.head-sha }}" in block
+
+
 def test_unreadable_head_sha_marks_the_harvest_failed_before_exiting():
     """The read-only degrade path for an unreadable PR head SHA must record
     harvest_failed=true (and head_sha/run_id) to GITHUB_OUTPUT before it
     exits -- otherwise the render step reads an empty SHIPMATE_HARVEST_FAILED
     and the sticky comment falsely claims the warning harvest ran clean.
 
-    Sliced from the `if [[ ! "$head"` condition itself (not from the step's
-    start) and pinned to a single `exit 0` in the step: deleting the whole
-    degrade branch must fail this test, not vacuously pass it (the earlier
-    version sliced from the step's start, so the three substrings -- present
-    elsewhere in the step for other paths -- kept it green even with the
-    branch removed)."""
+    Sliced from the `if [[ ! "$head"` condition itself, not from the step's
+    start, and pinned to a single `exit 0` in the step: all three substrings
+    also appear elsewhere in the step for other paths, so a slice from the
+    step's start would stay green even with the degrade branch deleted."""
     block = _ACTION.split("id: gatherdoc", 1)[1].split("- name:", 1)[0]
     assert block.count("exit 0") == 1
     degrade = block.split('if [[ ! "$head"', 1)[1].split("exit 0", 1)[0]

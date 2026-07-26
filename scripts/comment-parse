@@ -105,7 +105,12 @@ def parse(body):
     result["is_command"] = True
     m = _CMD.match(line)
     if not m:
-        result["error"] = "malformed: expected `shipmate <verb> [env] [tag-filter]`"
+        # Same `shipmate help` hint as the unknown-verb path: the shapes that
+        # land here (a capitalized verb, a double space, a token outside both
+        # optional charsets) are typos, and the verb list is what resolves them.
+        result["error"] = (
+            "malformed: expected `shipmate <verb> [env] [tag-filter]` (try `shipmate help`)"
+        )
         return result
     verb, env, tag = m.group("verb"), m.group("env"), m.group("tag")
     result.update(verb=verb, env=env, tag_filter=tag)
