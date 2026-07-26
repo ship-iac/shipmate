@@ -98,6 +98,26 @@ def test_harvest_failed_env_falls_back_to_true_when_gatherdoc_did_not_run():
     )
 
 
+def test_harvest_flag_is_set_inside_the_loop_and_written_once_after_it():
+    """The annotations loop's per-id failure fallback (`echo '[]'`) is
+    byte-identical to "this check run had no annotations", so the loop must
+    flip the shared `harvest_failed` shell variable -- and that variable must
+    be written to GITHUB_OUTPUT exactly once, *after* the loop, so a harvest
+    with zero check-run ids still writes it and a per-id failure isn't
+    overwritten by a later clean iteration.
+
+    Kills both mutations of that wiring: dropping the in-loop
+    `harvest_failed=true` (the loop-body assertion fails) and moving the
+    GITHUB_OUTPUT write inside the loop (both the ordering assertion and the
+    loop-body redirect assertion fail)."""
+    block = _ACTION.split("id: gatherdoc", 1)[1].split("- name:", 1)[0]
+    assert block.count("harvest_failed=$harvest_failed") == 1
+    assert block.index("harvest_failed=$harvest_failed") > block.index("done < check-ids.tsv")
+    loop_body = block.split("while IFS=", 1)[1].split("done <", 1)[0]
+    assert "harvest_failed=true" in loop_body
+    assert '>> "$GITHUB_OUTPUT"' not in loop_body
+
+
 def test_fullmint_requests_the_manifests_exact_permission_set():
     """The full-set probe mint must mirror app/manifest.json: a manifest bump
     that skips this step makes the permission-drift probe test the stale set —

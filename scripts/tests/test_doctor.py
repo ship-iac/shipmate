@@ -84,13 +84,19 @@ def test_declared_envs_skips_malformed_cell_json(tmp_path):
     assert doctor._declared_envs(tmp_path) == set()
 
 
-def test_declared_envs_skips_cell_json_missing_environment_key(tmp_path):
+def test_declared_envs_skips_cell_json_without_a_usable_environment(tmp_path):
     # Well-formed JSON that isn't the expected shape (e.g. a truncated
     # download that still parses) must degrade the same way -- KeyError, not
-    # just JSONDecodeError, is one of the guarded exceptions.
-    bad = tmp_path / "cell-summary.dev-eu.app"
-    bad.mkdir()
-    (bad / "cell.json").write_text(json.dumps({"stack": "app"}), encoding="utf-8")
+    # just JSONDecodeError, is one of the guarded exceptions. A present but
+    # unusable value (null, non-string, empty) must be dropped too: it would
+    # otherwise make envs_available true and run every environment probe
+    # against a name that cannot exist.
+    for i, payload in enumerate(
+        [{"stack": "app"}, {"environment": None}, {"environment": 7}, {"environment": ""}]
+    ):
+        cell = tmp_path / f"cell-summary.c{i}.app"
+        cell.mkdir()
+        (cell / "cell.json").write_text(json.dumps(payload), encoding="utf-8")
     assert doctor._declared_envs(tmp_path) == set()
 
 
@@ -103,6 +109,9 @@ def test_declared_envs_keeps_well_formed_entries_alongside_malformed_ones(tmp_pa
     bad = tmp_path / "cell-summary.dev-us.app"
     bad.mkdir()
     (bad / "cell.json").write_text("not json", encoding="utf-8")
+    null_env = tmp_path / "cell-summary.dev-ap.app"
+    null_env.mkdir()
+    (null_env / "cell.json").write_text(json.dumps({"environment": None}), encoding="utf-8")
     assert doctor._declared_envs(tmp_path) == {"dev-eu"}
 
 
@@ -618,13 +627,24 @@ def test_report_all_clear():
     assert "no warnings" in body
 
 
-def test_report_states_when_the_harvest_failed():
+def test_report_states_when_the_whole_harvest_failed():
     # An empty harvest from a failed check-runs listing must not read the
     # same as an empty harvest from a genuinely clean commit -- the report
     # must say the harvest itself could not be read, not claim all-clear.
     body = doctor.render_report([], [], _ctx(harvest_failed=True))
-    assert "could not read this commit's check runs" in body
+    assert doctor.HARVEST_INCOMPLETE in body
     assert "no warnings on this commit's workflow runs" not in body
+
+
+def test_report_states_when_a_partial_harvest_still_found_warnings():
+    # The incompleteness note must be additive, not an alternative to the
+    # rows: one check run's annotations fetch can fail while the others
+    # return warnings, and then a note emitted only for an empty harvest
+    # would let the rows read as the complete set for the commit.
+    body = doctor.render_report([], [_ann(title="real warning")], _ctx(harvest_failed=True))
+    assert doctor.HARVEST_INCOMPLETE in body
+    assert "real warning" in body
+    assert "shipmate · plan / detect" in body
 
 
 def test_report_all_clear_when_harvest_did_not_fail():
@@ -633,7 +653,15 @@ def test_report_all_clear_when_harvest_did_not_fail():
     # line, not the failure line.
     body = doctor.render_report([], [], _ctx(harvest_failed=False))
     assert "no warnings on this commit's workflow runs" in body
-    assert "could not read this commit's check runs" not in body
+    assert doctor.HARVEST_INCOMPLETE not in body
+
+
+def test_report_omits_the_incompleteness_note_when_the_harvest_completed():
+    # A complete harvest with rows must not carry the note either -- the
+    # additive note is keyed on the flag, not on there being rows.
+    body = doctor.render_report([], [_ann(title="real warning")], _ctx(harvest_failed=False))
+    assert "real warning" in body
+    assert doctor.HARVEST_INCOMPLETE not in body
 
 
 def test_report_notes_possible_annotation_truncation():

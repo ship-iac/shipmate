@@ -76,6 +76,15 @@ _LEVEL_EMOJI = {WARNING: ":warning:", NOTICE: ":information_source:"}
 # (indistinguishable at this level), hence the report heading says
 # "workflow runs", not "shipmate runs".
 _HARVEST_APP_SLUGS = ("github-actions",)
+# Emitted whenever the gather step reports the harvest did not complete --
+# worded to hold for both shapes it can take: nothing read at all (the
+# check-runs listing or its reduction failed) and some read but not all (one
+# check run's annotations fetch failed). Rendered as a list item so it reads
+# as a peer of the harvest rows it is appended after.
+HARVEST_INCOMPLETE = (
+    "- :warning: could not read all of this commit's check runs — any warnings recorded on "
+    "the ones that could not be read are missing from this list."
+)
 
 
 def _gate_rule_warnings(ctx):
@@ -369,16 +378,22 @@ def render_annotations(findings):
 
 
 def _declared_envs(cells_dir):
-    """Skip a cell.json that can't be read/parsed or lacks "environment"
-    rather than raising: a truncated or malformed file is plausible after a
-    partial `gh run download` (one of the degrade paths feeding this
-    directory), and doctor must never fail a run over a single bad file."""
+    """Skip a cell.json that can't be read/parsed, lacks "environment", or
+    carries an unusable value for it rather than raising: a truncated or
+    malformed file is plausible after a partial `gh run download` (one of the
+    degrade paths feeding this directory), and doctor must never fail a run
+    over a single bad file. A non-string or empty "environment" (e.g. null)
+    is dropped too -- it would otherwise land in the declared-env set and run
+    every environment probe against a name that cannot exist, producing
+    findings about an environment nobody declared."""
     envs = set()
     for cj in cells_dir.glob("cell-summary.*/cell.json"):
         try:
-            envs.add(json.loads(cj.read_text(encoding="utf-8"))["environment"])
+            env = json.loads(cj.read_text(encoding="utf-8"))["environment"]
         except (OSError, ValueError, KeyError, TypeError):
             continue
+        if isinstance(env, str) and env:
+            envs.add(env)
     return envs
 
 
@@ -463,6 +478,12 @@ def load_annotations(ctx):
         cid, name = line.split("\t", 1)
         payload = pathlib.Path(ctx["annotations_dir"]) / f"{cid.strip()}.json"
         try:
+            # A `[]` payload is indistinguishable from the gather step's
+            # `echo '[]'` fallback for a failed fetch: "this check run had no
+            # annotations" and "this check run's annotations could not be
+            # read" arrive here byte-identical. That is why the incomplete
+            # harvest has to be signalled out of band, via
+            # ctx["harvest_failed"], and cannot be inferred from the payloads.
             rows = json.loads(payload.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             continue
@@ -627,6 +648,34 @@ def _findings_only_report(findings, ctx):
     return "\n".join(head + lines)
 
 
+def _harvest_body(sections, annotations, budget, harvest_failed):
+    """The harvest's rendered rows, plus a note when the harvest itself did
+    not complete.
+
+    The note is additive rather than an alternative to the rows. The gather
+    step flags an incomplete harvest for a failed check-runs listing (nothing
+    read at all) but also for a single check run's annotations fetch failing
+    while the rest succeeded -- so an incomplete harvest can still have
+    warnings to show. Emitting the note only when there is nothing to show
+    would let that partial harvest read as the complete set of warnings for
+    the commit, which is the same false-all-clear in a subtler form: the
+    unread check run's warnings are simply absent, with no hint in the report
+    that anything is missing."""
+    lines = []
+    if sections:
+        lines, dropped = _harvest_lines(sections, annotations, budget)
+        if dropped:
+            lines.append(
+                f"- _{dropped} more warning(s) omitted to keep this comment within the "
+                "size limit — see the run logs for the full set._"
+            )
+    elif not harvest_failed:
+        lines = [":white_check_mark: no warnings on this commit's workflow runs."]
+    if harvest_failed:
+        lines.append(HARVEST_INCOMPLETE)
+    return lines
+
+
 def render_report(findings, annotations, ctx):
     out = [DOCTOR_MARKER, "### shipmate doctor", "", _provenance(ctx), ""]
     out += ["#### repository settings", ""]
@@ -636,28 +685,11 @@ def render_report(findings, annotations, ctx):
         out.append("- :white_check_mark: no problems found by the settings probes.")
     heading = ["", "#### warnings from this commit's workflow runs", ""]
     sections = harvest_sections(annotations)
-    if sections:
-        # The settings-probe section above is never truncated -- it is the
-        # part a stale comment can't recover from the run logs -- so the
-        # harvest gets whatever's left of sc.SIZE_BUDGET, not a fixed share.
-        budget = max(0, sc.SIZE_BUDGET - len("\n".join(out)) - len("\n".join(heading)))
-        lines, dropped = _harvest_lines(sections, annotations, budget)
-        if dropped:
-            lines.append(
-                f"- _{dropped} more warning(s) omitted to keep this comment within the "
-                "size limit — see the run logs for the full set._"
-            )
-    elif ctx.get("harvest_failed"):
-        # A failed check-runs listing leaves the harvest empty in exactly the
-        # same shape as a genuinely clean commit -- report the failure
-        # explicitly rather than let a diagnostic tool claim all-clear when
-        # it never actually looked.
-        lines = [
-            ":warning: could not read this commit's check runs — the warning harvest is "
-            "unavailable."
-        ]
-    else:
-        lines = [":white_check_mark: no warnings on this commit's workflow runs."]
+    # The settings-probe section above is never truncated -- it is the part a
+    # stale comment can't recover from the run logs -- so the harvest gets
+    # whatever's left of sc.SIZE_BUDGET, not a fixed share.
+    budget = max(0, sc.SIZE_BUDGET - len("\n".join(out)) - len("\n".join(heading)))
+    lines = _harvest_body(sections, annotations, budget, bool(ctx.get("harvest_failed")))
     body = "\n".join(out + heading + lines)
     if len(body) > sc.HARD_CAP:
         # The harvest section is already budgeted against sc.SIZE_BUDGET
