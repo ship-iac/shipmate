@@ -338,6 +338,61 @@ def test_cell_summary_artifact_uploads_plan_text():
     assert "plan.txt" in upload
 
 
+def _upsert_step():
+    """The summary action's `Upsert sticky comment` step, shell comment lines
+    dropped: these assertions are about what the step *runs*, and the prose
+    explaining why an operator was removed would otherwise keep tripping a
+    substring check for that operator."""
+    src = (_ENGINE / "actions" / "summary" / "action.yml").read_text(encoding="utf-8")
+    steps = src.split("\n    - name:")
+    matches = [s for s in steps if "body=@comment.md" in s]
+    assert len(matches) == 1, f"expected one upsert step, found {len(matches)}"
+    return "\n".join(ln for ln in matches[0].splitlines() if not ln.strip().startswith("#"))
+
+
+def test_the_sticky_upsert_anchors_the_marker_at_the_body_start():
+    """`build_comment` emits MARKER as the body's first line, so the lookup
+    must anchor there. A `contains` match also selects a comment that merely
+    quotes the marker — doctor's report renders findings that interpolate
+    repository data such as workflow file names — and this step would then
+    PATCH that comment with the plan body."""
+    block = _upsert_step()
+    assert "startswith" in block
+    assert "contains" not in block
+    assert sc.build_comment([], {}, "u").splitlines()[0] == sc.MARKER
+
+
+def test_the_sticky_upsert_does_not_swallow_a_comment_listing_failure():
+    """`|| true` on the id lookup turned a failed listing into an empty id and
+    fell through to the create branch, leaving the PR with two marker-bearing
+    Bot comments — and every later run PATCHing the older one, so a permanently
+    stale plan comment sat below the live one. The `|| true` only existed to
+    dodge EPIPE from `head` under `pipefail`, so the pipe goes rather than the
+    error check, and a listing failure skips the post so the next run
+    recovers. The gate status is written by a separate later step, so skipping
+    here must not fail this one."""
+    block = _upsert_step()
+    assert "|| true" not in block
+    assert "| head -n1" not in block  # no pipe, so no EPIPE to swallow
+    assert "if ! gh api" in block
+    degrade = block.split("if ! gh api", 1)[1].split("fi", 1)[0]
+    assert "::warning::" in degrade
+    assert "exit 0" in degrade
+    assert block.index("exit 0") < block.index("-X PATCH")
+    assert block.index("exit 0") < block.index('issues/$PR/comments" -F body=@comment.md')
+
+
+def test_the_gate_step_runs_after_the_upsert_step_that_may_skip():
+    """The upsert's listing-failure path `exit 0`s the step; `Create/refresh
+    gate` must be a *later step*, not code below that exit, or a comment
+    listing failure would silently stop writing the gate status."""
+    src = (_ENGINE / "actions" / "summary" / "action.yml").read_text(encoding="utf-8")
+    names = [ln.strip() for ln in src.splitlines() if ln.strip().startswith("- name:")]
+    upsert = next(i for i, n in enumerate(names) if "Upsert sticky comment" in n)
+    gate = next(i for i, n in enumerate(names) if "Create/refresh gate" in n)
+    assert gate > upsert
+
+
 def test_marker_round_trip_guard_summary_action_matches_script():
     # Coupling: the marker summary-comment embeds <-> the marker the summary
     # action's upsert step greps for. Drift = a new comment every run instead

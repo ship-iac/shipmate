@@ -348,6 +348,77 @@ def test_help_is_not_gated_on_the_association():
         assert _GATE not in cond, name
 
 
+def _code(block):
+    """`block` with its shell comment lines dropped. These assertions are about
+    what the step *runs*; the prose explaining why an operator was removed would
+    otherwise keep tripping a substring check for that operator."""
+    return "\n".join(ln for ln in block.splitlines() if not ln.strip().startswith("#"))
+
+
+def _report_ctx():
+    return {
+        "head_sha": "f" * 40,
+        "plan_run_id": "1",
+        "envs": {"dev-eu"},
+        "harvest_failed": False,
+        "harvest_pending": False,
+    }
+
+
+def test_the_doctor_upsert_anchors_the_marker_at_the_body_start():
+    """`render_report` emits `DOCTOR_MARKER` as the body's first line, so the
+    sticky lookup must anchor there. A `contains` match also hits any comment
+    that merely *quotes* the marker — the sticky plan comment embeds `tofu
+    plan` output verbatim, so a plan that happens to contain
+    `<!-- shipmate:doctor -->` would be selected and PATCHed with the doctor
+    report: the plan comment destroyed, and the summary marker orphaned onto a
+    comment that no longer carries it."""
+    code = _code(_step("body=@doctor.md"))
+    assert "startswith" in code
+    assert "contains" not in code
+    assert doctor.render_report([], [], _report_ctx()).splitlines()[0] == doctor.DOCTOR_MARKER
+
+
+def test_the_doctor_upsert_does_not_swallow_a_comment_listing_failure():
+    """`|| true` on the id lookup turned a failed listing into an empty id,
+    which fell through to the create branch: a second marker-bearing Bot
+    comment, and every later run PATCHing whichever one the listing happened to
+    return first. The `|| true` was only there to dodge EPIPE from `head` under
+    `pipefail`, so the pipe goes, not the error check — and a listing failure
+    skips the post entirely so the next run recovers."""
+    code = _code(_step("body=@doctor.md"))
+    assert "|| true" not in code
+    assert "| head -n1" not in code  # no pipe, so no EPIPE to swallow
+    assert "if ! gh api" in code
+    degrade = code.split("if ! gh api", 1)[1].split("fi", 1)[0]
+    assert "::warning::" in degrade
+    assert "exit 0" in degrade
+    # The skip must precede both writes, or it is not a skip.
+    assert code.index("exit 0") < code.index("-X PATCH")
+    assert code.index("exit 0") < code.index('issues/$PR_NUMBER/comments" -F body=@doctor.md')
+
+
+def test_both_doctor_token_mints_request_actions_read():
+    """The environment probes read `repos/{repo}/environments` and, per
+    environment, `.../environments/{name}`. The environments *list* has been
+    observed working under a token without Actions read, but the
+    per-environment read needs it on some configurations — and a degraded
+    environment probe is invisible in the report except as a "could not
+    verify" note. `app/manifest.json` already declares `actions: write`, so
+    `actions: read` is a subset of the installation's granted set and needs no
+    re-approval; both mints that drive doctor request it.
+
+    Both sites, because they are separate mints: `actions/summary`'s token
+    drives `annotate` mode on every plan run, `comment-ops`' `doctortoken`
+    drives `report` mode on demand, and a fix applied to only one leaves half
+    the environment probes degraded."""
+    doctor_mint = _ACTION.split("id: doctortoken", 1)[1].split("- name:", 1)[0]
+    assert "permission-actions: read" in doctor_mint
+    summary_steps = _SUMMARY_ACTION.split("\n    - name:")
+    summary_mint = next(s for s in summary_steps if "uses: actions/create-github-app-token" in s)
+    assert "permission-actions: read" in summary_mint
+
+
 def test_fullmint_requests_the_manifests_exact_permission_set():
     """The full-set probe mint must mirror app/manifest.json: a manifest bump
     that skips this step makes the permission-drift probe test the stale set —

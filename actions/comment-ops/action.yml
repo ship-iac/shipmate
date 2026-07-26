@@ -170,6 +170,13 @@ runs:
         permission-contents: read
         permission-members: read
         permission-issues: write
+        # For the environment probes' reads (`/environments` and, per
+        # environment, `/environments/{name}`): on some configurations a
+        # fine-grained installation token needs Actions read to see them, and a
+        # degraded environment probe shows up only as a "could not verify" note.
+        # A subset of the `actions: write` app/manifest.json already declares,
+        # so it needs no re-approval of the installation.
+        permission-actions: read
 
     - name: Doctor — App token unavailable
       if: ${{ steps.parse.outputs.route == 'doctor' && steps.guard.outputs.privileged_association == 'true' && steps.doctortoken.outcome != 'success' }}
@@ -313,8 +320,27 @@ runs:
         marker='<!-- shipmate:doctor -->'
         # Same upsert discipline as the sticky plan comment: marker + Bot
         # author (the App's bot login is org-dependent), single id.
-        id=$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" --paginate \
-               --jq "map(select((.body | contains(\"$marker\")) and .user.type == \"Bot\")) | .[0].id // empty" | head -n1 || true)
+        # `startswith`, not `contains`: render_report emits the marker as the
+        # body's FIRST line. A `contains` match also selects a comment that
+        # merely quotes the marker — the sticky plan comment embeds `tofu plan`
+        # output verbatim — and this step would then PATCH the plan comment
+        # with the doctor report, destroying it and orphaning the summary marker.
+        # The lookup writes to a file instead of piping into `head`: `head`
+        # closing the pipe early raises EPIPE under `pipefail`, which is what
+        # the `|| true` here used to swallow — together with a genuine listing
+        # failure, whose empty id fell through to the create branch and left the
+        # pull request with two marker-bearing Bot comments. Removing the pipe
+        # removes the reason for the `|| true`, so a failed listing can skip the
+        # post and let the next run recover instead.
+        if ! gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" --paginate \
+               --jq "map(select(((.body // \"\") | startswith(\"$marker\")) and .user.type == \"Bot\")) | .[0].id // empty" \
+               > doctor-comment-ids.txt; then
+          echo "::warning::could not list this pull request's comments; the doctor report was not posted this run — comment shipmate doctor again to retry"
+          exit 0
+        fi
+        # --paginate evaluates --jq per page, so a marker match on >1 page emits
+        # one id per matching page; the first line is the single id PATCH needs.
+        id=$(head -n1 doctor-comment-ids.txt)
         if [ -n "$id" ]; then
           gh api -X PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$id" -F body=@doctor.md >/dev/null
         else

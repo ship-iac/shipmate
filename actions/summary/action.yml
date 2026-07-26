@@ -38,6 +38,13 @@ runs:
         permission-statuses: write
         permission-pull-requests: write
         permission-contents: read
+        # For doctor's environment probes below (`/environments` and, per
+        # environment, `/environments/{name}`): on some configurations a
+        # fine-grained installation token needs Actions read to see them, and a
+        # degraded environment probe shows up only as a "could not verify"
+        # annotation. A subset of the `actions: write` app/manifest.json already
+        # declares, so it needs no re-approval of the installation.
+        permission-actions: read
 
     - name: Create apply checks (pending / no-changes)
       shell: bash
@@ -118,13 +125,31 @@ runs:
       run: |
         set -euo pipefail
         marker='<!-- shipmate:summary -->'
-        # --paginate evaluates --jq per page, so a marker match on >1 page emits
-        # multiple ids; head -n1 keeps the single id the PATCH URL needs.
         # Match the marker plus any Bot author, not a hardcoded login: the
         # App's bot login is derived from the registered App name, which a
         # consumer org may have had to slug differently than "shipmate[bot]".
-        id=$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR/comments" --paginate \
-               --jq "map(select((.body | contains(\"$marker\")) and .user.type == \"Bot\")) | .[0].id // empty" | head -n1 || true)
+        # `startswith`, not `contains`: build_comment emits the marker as the
+        # body's FIRST line, and a `contains` match also selects a comment that
+        # merely quotes it — doctor's report renders findings interpolating
+        # repository data such as workflow file names — which this step would
+        # then PATCH with the plan body.
+        # The lookup writes to a file instead of piping into `head`: `head`
+        # closing the pipe early raises EPIPE under `pipefail`, which is what
+        # the `|| true` here used to swallow — together with a genuine listing
+        # failure, whose empty id fell through to the create branch and left the
+        # pull request with two marker-bearing Bot comments, the older of which
+        # every later run then PATCHed. Removing the pipe removes the reason for
+        # the `|| true`, so a failed listing skips the post and the next run
+        # recovers. `Create/refresh gate` is a later step, so it still runs.
+        if ! gh api "repos/$GITHUB_REPOSITORY/issues/$PR/comments" --paginate \
+               --jq "map(select(((.body // \"\") | startswith(\"$marker\")) and .user.type == \"Bot\")) | .[0].id // empty" \
+               > summary-comment-ids.txt; then
+          echo "::warning::could not list this pull request's comments; the sticky plan comment was not updated this run"
+          exit 0
+        fi
+        # --paginate evaluates --jq per page, so a marker match on >1 page emits
+        # one id per matching page; the first line is the single id PATCH needs.
+        id=$(head -n1 summary-comment-ids.txt)
         if [ -n "$id" ]; then
           gh api -X PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$id" -F body=@comment.md >/dev/null
         else
