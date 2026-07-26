@@ -927,6 +927,45 @@ def test_report_all_clear():
     assert "no warnings" in body
 
 
+def test_all_clear_names_the_environments_the_probes_actually_covered():
+    """The two environment probes see only the environments of the stacks this
+    pull request changed — the declared set comes from the plan matrix's cell
+    summaries — so a categorical "no problems found by the settings probes"
+    overclaims: a broken `prod-eu` pair on a PR that touches only dev stacks was
+    never looked at. Name the set instead of implying the repository is sound."""
+    body = doctor.render_report([], [], _ctx(envs={"dev-eu", "dev-us"}))
+    assert "no problems found by the settings probes" in body
+    assert "`dev-eu`" in body and "`dev-us`" in body
+    assert "changed in this pull request" in body
+
+
+def test_all_clear_says_when_no_environments_were_probed():
+    body = doctor.render_report([], [], _ctx(envs=set(), envs_available=False))
+    assert "no environments were probed" in body
+
+
+def test_all_clear_escapes_and_bounds_the_environment_names():
+    # `environment` is read from cell.json, so it is repository data: a name
+    # carrying the plan comment's marker must not hijack this comment's
+    # identity, and a large fan-out's env list must not blow the size budget in
+    # a line no truncation path covers.
+    body = doctor.render_report([], [], _ctx(envs={"<!-- shipmate:summary -->"}))
+    assert "<!-- shipmate:summary -->" not in body
+    assert body.count(doctor.DOCTOR_MARKER) == 1
+    wide = doctor.render_report([], [], _ctx(envs={f"env-{i:04}" for i in range(500)}))
+    assert len(wide) <= doctor.sc.HARD_CAP
+    line = next(ln for ln in wide.splitlines() if "no problems found" in ln)
+    assert len(line) < 600
+
+
+def test_findings_only_fallback_uses_the_same_all_clear_line():
+    # Two renderers emit the all-clear; the scope statement must not live in
+    # only one of them.
+    body = doctor._findings_only_report([], _ctx(envs={"dev-eu"}))
+    assert "`dev-eu`" in body
+    assert "changed in this pull request" in body
+
+
 def test_harvest_incomplete_note_says_the_harvest_is_incomplete():
     """The other harvest tests assert `HARVEST_INCOMPLETE in body`, which pins
     the flag -> note wiring but not the note's meaning: swap the constant for

@@ -38,6 +38,14 @@ def _load(fname):
 ag = _load("apply-gate")
 
 MARKER = "<!-- shipmate:summary -->"
+# Discoverability, and nothing more. doctor's findings surface as workflow
+# annotations on the plan run; those carry no `file=`/`line=`, so they render
+# only on the run page and the comment commands would otherwise have no
+# pull-request-visible surface at all. This line points at the command list --
+# it deliberately says nothing about doctor's output, so the plan comment gains
+# no coupling to doctor. Phrased so the line does not itself match the comment
+# grammar (`^shipmate <verb>`), which would make this comment a command.
+FOOTER_HINT = "Comment `shipmate help` for the available commands."
 SIZE_BUDGET = 60_000
 HARD_CAP = 65_536
 MIN_PLAN_CHARS = 500
@@ -208,7 +216,7 @@ def build_comment(cells, checks, run_url):
     cannot starve later cells of their links."""
     meta = [c for c, _ in cells]
     header = f"{MARKER}\n### shipmate plan\n\n{build_table(meta, checks, run_url)}"
-    footer = f"\n\n[Logs & artifacts]({run_url})"
+    footer = f"\n\n[Logs & artifacts]({run_url})\n\n{FOOTER_HINT}"
     changed = [(c, t) for c, t in cells if c["changed"]]
     parts = [header]
     used = len(header) + len(footer)

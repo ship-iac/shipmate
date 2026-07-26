@@ -221,6 +221,35 @@ def test_build_comment_footer_links_run():
     assert RUN_URL in body
 
 
+def test_build_comment_footer_points_at_the_comment_commands():
+    """Doctor's findings live on the run page as workflow annotations now, and
+    those carry no `file=`/`line=` so they never render on the Files tab. That
+    leaves the commands themselves undiscoverable from the pull request, which
+    the sticky comment fixes with one line pointing at `shipmate help` — a
+    pointer to the command list, not a report of doctor's output: the plan
+    comment stays free of any coupling to doctor."""
+    body = sc.build_comment([], {}, RUN_URL)
+    assert sc.FOOTER_HINT in body
+    assert "shipmate help" in sc.FOOTER_HINT
+    # No coupling back to doctor: this line names the command list and nothing
+    # about findings, probes or the report.
+    assert "doctor" not in sc.FOOTER_HINT
+
+
+def test_the_footer_hint_is_not_itself_a_shipmate_command():
+    """The hint ships inside a bot comment on every plan run. A line that
+    matched the command grammar would make the plan comment a shipmate command;
+    the `[bot]` loop guard would ignore it, but relying on that alone is one
+    deletion away from a retrigger loop."""
+    cp_path = pathlib.Path(__file__).resolve().parents[1] / "comment-parse"
+    loader = SourceFileLoader("comment_parse", str(cp_path))
+    spec = importlib.util.spec_from_loader("comment_parse", loader)
+    cp = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(cp)
+    for line in sc.build_comment([], {}, RUN_URL).splitlines():
+        assert not cp._SHIPMATE_LINE.match(line.strip()), line
+
+
 def test_build_comment_fails_loud_when_even_the_table_overflows():
     long_name = "s" * 400
     cells = [

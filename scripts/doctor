@@ -733,6 +733,33 @@ def _provenance(ctx):
     return f"_Commit `{head}`; no plan run identified for this commit._"
 
 
+def _all_clear_line(ctx):
+    """The settings-probe all-clear, stating what it actually covers.
+
+    The two environment probes see only the environments of the stacks this pull
+    request changed -- the declared set comes from the plan matrix's cell
+    summaries -- so a categorical "no problems found by the settings probes"
+    overclaims: a broken `prod-eu` environment pair is invisible to a report run
+    on a pull request that touches only dev stacks. Name the set instead.
+
+    Environment names are repository data (read from cell.json), so they are
+    escaped like every other interpolated value and the joined list is bounded:
+    this line renders in both report paths and neither truncates it."""
+    envs = sorted(ctx.get("envs") or ())
+    if not envs:
+        return (
+            "- :white_check_mark: no problems found by the settings probes — and no "
+            "environments were probed, since no declared environment set was available "
+            "for this commit."
+        )
+    named = _one_line(", ".join(f"`{_md_escape(e)}`" for e in envs), 400)
+    return (
+        "- :white_check_mark: no problems found by the settings probes. The environment "
+        "probes covered only the environments of the stacks changed in this pull request: "
+        f"{named}."
+    )
+
+
 def _truncated_checks(annotations):
     """Check names whose warning/failure annotations hit GitHub's per-level
     cap (10 per level per step) on the raw, pre-filter listing -- computed
@@ -852,7 +879,7 @@ def _findings_only_report(findings, ctx):
     if findings:
         lines, dropped = _findings_lines(findings, budget)
     else:
-        lines, dropped = ["- :white_check_mark: no problems found by the settings probes."], 0
+        lines, dropped = [_all_clear_line(ctx)], 0
     if dropped:
         lines.append(
             f"- _{dropped} more finding(s) omitted to keep this comment within the size "
@@ -902,7 +929,7 @@ def render_report(findings, annotations, ctx):
         # smuggled through one of them would hijack this comment's identity.
         out += [f"- {_LEVEL_EMOJI[lvl]} {_md_escape(text)}" for lvl, text in findings]
     else:
-        out.append("- :white_check_mark: no problems found by the settings probes.")
+        out.append(_all_clear_line(ctx))
     heading = ["", "#### warnings from this commit's workflow runs", ""]
     sections = harvest_sections(annotations)
     # The settings-probe section above is never truncated -- it is the part a
