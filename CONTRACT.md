@@ -511,23 +511,31 @@ variable **names** only — never values.
 ## Secrets in published output
 
 Both text surfaces shipmate publishes — the rendered plan `plan.txt` in the
-sticky plan comment, and `apply.txt` in the apply result comment — are
-published **verbatim**, and neither is covered by GitHub's log secret masking.
-Masking applies to the log stream the runner consumes; both files are written
-by a redirect out of the tool's own stdout (`tofu show > plan.txt`,
-`… apply 2>&1 | tee apply.txt`), so the runner never sees those bytes. A value
-that appears as `***` in the job log is written unmasked into the artifact and
-into the comment. Step summaries are not masked either. On a public repository
-these comments are world-readable.
+sticky plan comment and the job step summary, and `apply.txt` in the apply
+result comment — carry whatever the tool wrote: **shipmate never redacts
+either**, and neither is covered by GitHub's log secret masking. (The published
+text is not byte-identical — escape sequences are stripped, undecodable bytes
+become replacement characters, and over-cap sections are truncated, per Plan
+comment and Apply result comment above — but none of that removes a secret.)
+
+Masking applies to the log stream the runner consumes. Both files are written
+out of the tool's own stdout (`tofu show > plan.txt`,
+`… apply 2>&1 | tee apply.txt`), and the runner never sees the bytes on the
+file side of that write, so a value that appears as `***` in the job log is
+written unmasked into the artifact and into the comment. **Do not rely on
+masking for anything shipmate publishes**, including the step summary — the
+comment and the artifact are the file bytes, and nothing redacts them on the
+way out. On a public repository the comments are world-readable.
 
 **Redaction is the consumer's job, and OpenTofu's `sensitive` marking is the
 mechanism.** A variable declared `sensitive = true`, or a provider attribute
-marked sensitive in its schema, is redacted in `tofu show` output and is not
-echoed by OpenTofu's own diagnostics — so it does not reach either comment.
-Consumers must mark every secret-bearing variable and output accordingly.
-GitHub masking is not a substitute even where it does apply: it only covers
-values registered as GitHub secrets, not a credential a provider fetches at
-runtime.
+marked sensitive in its schema, is redacted in `tofu show` output, so it does
+not reach either comment through the rendered plan or a normal apply. Consumers
+must mark every secret-bearing variable and output accordingly. Marking is
+best-effort, not a guarantee: it suppresses the value where OpenTofu knows to,
+and error paths can still surface one. GitHub masking is not a substitute even
+where it does apply — it only covers values registered as GitHub secrets, not a
+credential a provider fetches at runtime.
 
 Two residual paths OpenTofu cannot redact, and shipmate does not attempt to:
 
@@ -567,8 +575,8 @@ workflows.
   the exact-plan invariant catches it — `tofu apply` rejects the garbage plan and
   the apply check stays pending.
 - **Scope: the machine plan file only.** `fingerprint.txt` is a hash and stays
-  plain. The rendered plan `plan.txt` — in the `cell-summary` artifact and in the
-  PR sticky comment / check-run text — **stays plaintext**: it is the
+  plain. The rendered plan `plan.txt` — in the `cell-summary` artifact, the PR
+  sticky comment, and the job step summary — **stays plaintext**: it is the
   deliberately-public reviewer view, as is `apply.txt`. Encryption protects the
   machine plan at rest and nothing else; redaction in the published text comes
   from `sensitive` marking (see Secrets in published output, above).
