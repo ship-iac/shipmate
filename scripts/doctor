@@ -393,25 +393,50 @@ def ctx_from_env():
     }
 
 
+def _parse_check_run(line, app_id):
+    """A single check-runs JSONL line -> its run dict, or None when the line
+    is blank, unparseable, not a JSON object, or not authored by a
+    shipmate-relevant app -- never raises, so one bad line can't take down
+    the whole report."""
+    line = line.strip()
+    if not line:
+        return None
+    try:
+        run = json.loads(line)
+    except ValueError:
+        return None
+    if not isinstance(run, dict):
+        return None
+    if run.get("app_slug") not in _HARVEST_APP_SLUGS and not (
+        app_id and str(run.get("app_id")) == str(app_id)
+    ):
+        return None
+    return run
+
+
 def latest_check_ids(lines, app_id=""):
     """[(id, name)] -- newest run per check name among shipmate-relevant
-    authors, the same read discipline the gate and the detects use
-    (apply-gate.latest_by_name)."""
+    authors. Ranks by `started_at`, not check-run `id` (unlike
+    apply-gate.latest_by_name): a queued run has no `started_at` and no
+    annotations to harvest yet, so ranking it below an already-completed run
+    -- the one whose annotations are actually worth harvesting -- is the
+    outcome wanted here."""
     newest = {}
     for line in lines:
-        line = line.strip()
-        if not line:
-            continue
-        run = json.loads(line)
-        if run.get("app_slug") not in _HARVEST_APP_SLUGS and not (
-            app_id and str(run.get("app_id")) == str(app_id)
-        ):
+        run = _parse_check_run(line, app_id)
+        if run is None:
             continue
         name = run.get("name") or ""
         prev = newest.get(name)
         if prev is None or (run.get("started_at") or "") >= (prev.get("started_at") or ""):
             newest[name] = run
-    return [(int(newest[n]["id"]), n) for n in sorted(newest)]
+    out = []
+    for name in sorted(newest):
+        try:
+            out.append((int(newest[name]["id"]), name))
+        except (KeyError, TypeError, ValueError):
+            continue
+    return out
 
 
 def load_annotations(ctx):
@@ -431,6 +456,8 @@ def load_annotations(ctx):
         except (OSError, ValueError):
             continue
         for row in rows if isinstance(rows, list) else []:
+            if not isinstance(row, dict):
+                continue
             row["check_name"] = name.strip()
             out.append(row)
     return out
@@ -464,25 +491,63 @@ def _provenance(ctx):
     )
 
 
-def _harvest_lines(sections):
-    lines = []
-    truncated = False
+def _truncated_checks(annotations):
+    """Check names whose warning/failure annotations hit GitHub's per-level
+    cap (10 per level per step) on the raw, pre-filter listing -- computed
+    here rather than on the already-filtered harvest_sections output, since
+    dropping notices and DOCTOR_TITLE rows first would both under- and
+    over-count the real GitHub-side truncation (see the fix note this
+    replaced)."""
+    counts = {}
+    for a in annotations:
+        level = a.get("annotation_level")
+        if level not in HARVEST_LEVELS:
+            continue
+        key = (a.get("check_name") or "(unnamed check)", level)
+        counts[key] = counts.get(key, 0) + 1
+    return {name for (name, _level), n in counts.items() if n >= ANNOTATION_CAP}
+
+
+def _render_annotation_row(a):
+    emoji = ":x:" if a.get("annotation_level") == "failure" else ":warning:"
+    title = _md_escape(_one_line(a.get("title") or "", 120))
+    msg = _md_escape(_one_line(a.get("message") or "", 300))
+    return f"  - {emoji} {title} — {msg}" if title else f"  - {emoji} {msg}"
+
+
+def _harvest_lines(sections, annotations, budget):
+    """Render harvest rows, stopping once the accumulated text would exceed
+    `budget` chars -- the harvest can see hundreds of rows (every
+    github-actions check run on the commit, not just shipmate's), and unlike
+    the settings-probe section above it, dropped rows stay recoverable from
+    the run logs. Returns (lines, dropped_count)."""
+    truncated_checks = _truncated_checks(annotations)
+    lines, used, dropped, over = [], 0, 0, False
+    any_truncated = False
     for name in sorted(sections):
         rows = sections[name]
-        lines.append(f"- **{_md_escape(name)}**")
+        if name in truncated_checks:
+            any_truncated = True
+        header = f"- **{_md_escape(name)}**"
+        if not over and used + len(header) + 1 <= budget:
+            lines.append(header)
+            used += len(header) + 1
+        else:
+            over = True
         for a in rows:
-            emoji = ":x:" if a.get("annotation_level") == "failure" else ":warning:"
-            title = _md_escape(_one_line(a.get("title") or "", 120))
-            msg = _md_escape(_one_line(a.get("message") or "", 300))
-            lines.append(f"  - {emoji} {title} — {msg}" if title else f"  - {emoji} {msg}")
-        if len(rows) >= ANNOTATION_CAP:
-            truncated = True
-    if truncated:
+            row = _render_annotation_row(a)
+            if not over and used + len(row) + 1 <= budget:
+                lines.append(row)
+                used += len(row) + 1
+            else:
+                over = True
+                dropped += 1
+    if any_truncated:
         lines.append(
             "- _GitHub keeps at most 10 annotations per level per step, so this list "
             "may be truncated — see the run logs for the full set._"
         )
-    return lines
+    return lines, dropped
 
 
 def render_report(findings, annotations, ctx):
@@ -492,13 +557,22 @@ def render_report(findings, annotations, ctx):
         out += [f"- {_LEVEL_EMOJI[lvl]} {text}" for lvl, text in findings]
     else:
         out.append("- :white_check_mark: no problems found by the settings probes.")
-    out += ["", "#### warnings from this commit's workflow runs", ""]
+    heading = ["", "#### warnings from this commit's workflow runs", ""]
     sections = harvest_sections(annotations)
     if sections:
-        out += _harvest_lines(sections)
+        # The settings-probe section above is never truncated -- it is the
+        # part a stale comment can't recover from the run logs -- so the
+        # harvest gets whatever's left of sc.SIZE_BUDGET, not a fixed share.
+        budget = max(0, sc.SIZE_BUDGET - len("\n".join(out)) - len("\n".join(heading)))
+        lines, dropped = _harvest_lines(sections, annotations, budget)
+        if dropped:
+            lines.append(
+                f"- _{dropped} more warning(s) omitted to keep this comment within the "
+                "size limit — see the run logs for the full set._"
+            )
     else:
-        out.append(":white_check_mark: no warnings on this commit's workflow runs.")
-    return "\n".join(out)
+        lines = [":white_check_mark: no warnings on this commit's workflow runs."]
+    return "\n".join(out + heading + lines)
 
 
 def main():

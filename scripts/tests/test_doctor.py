@@ -611,3 +611,70 @@ def test_load_annotations_joins_names_and_tolerates_missing_files(tmp_path):
     )
     anns = doctor.load_annotations(ctx)
     assert [a["check_name"] for a in anns] == ["app / dev-eu"]
+
+
+def test_load_annotations_skips_non_dict_rows(tmp_path):
+    # A payload that parses to a list of non-dict values (e.g. a check run
+    # whose annotations endpoint returned something unexpected) must be
+    # skipped row-by-row, never raise -- load_annotations's contract is
+    # "never fatal".
+    (tmp_path / "ann").mkdir()
+    (tmp_path / "ann" / "3.json").write_text(json.dumps(["oops", 5, None]), encoding="utf-8")
+    (tmp_path / "check-ids.tsv").write_text("3\tapp / dev-eu\n", encoding="utf-8")
+    ctx = _ctx(
+        annotations_dir=str(tmp_path / "ann"),
+        check_ids_path=str(tmp_path / "check-ids.tsv"),
+    )
+    assert doctor.load_annotations(ctx) == []
+
+
+def test_latest_check_ids_tolerates_malformed_and_non_object_lines():
+    lines = [
+        "not json at all",
+        "null",
+        "5",
+        '{"id": 9, "name": "ok / dev-eu", "started_at": "2026-07-26T10:00:00Z", '
+        '"app_slug": "github-actions"}',
+    ]
+    assert doctor.latest_check_ids(lines) == [(9, "ok / dev-eu")]
+
+
+def test_latest_check_ids_skips_runs_with_unusable_id():
+    lines = [
+        '{"name": "no-id / dev-eu", "started_at": "t", "app_slug": "github-actions"}',
+        '{"id": "abc", "name": "bad-id / dev-eu", "started_at": "t", "app_slug": "github-actions"}',
+        '{"id": 7, "name": "good / dev-eu", "started_at": "t", "app_slug": "github-actions"}',
+    ]
+    assert doctor.latest_check_ids(lines) == [(7, "good / dev-eu")]
+
+
+def test_report_no_truncation_note_when_neither_level_hits_the_cap():
+    # 6 warnings + 4 failures on one check = 10 rows shown, but GitHub's cap
+    # is per level (10 warnings, 10 notices) -- neither level here is
+    # anywhere near truncated, so the note must not fire on the combined count.
+    anns = [_ann(level="warning", title=f"w{i}") for i in range(6)]
+    anns += [_ann(level="failure", title=f"f{i}") for i in range(4)]
+    body = doctor.render_report([], anns, _ctx())
+    assert "may be truncated" not in body
+
+
+def test_report_truncation_note_fires_on_raw_count_including_doctors_own():
+    # 10 raw warnings on one check, 2 of them doctor's own (dropped by
+    # harvest_sections, leaving only 8 rows shown) -- GitHub's cap already
+    # hit on the raw listing, so the note must still fire even though the
+    # rendered row count is under ANNOTATION_CAP.
+    anns = [_ann(level="warning", title=doctor.DOCTOR_TITLE) for _ in range(2)]
+    anns += [_ann(level="warning", title=f"w{i}") for i in range(8)]
+    body = doctor.render_report([], anns, _ctx())
+    assert "may be truncated" in body
+
+
+def test_report_harvest_truncates_to_stay_under_hard_cap_and_notes_dropped_count():
+    # The harvest keeps every github-actions check run on the commit, not
+    # just shipmate's -- a repo with broad lint/test annotations (or a large
+    # fan-out plan with one failure per cell) can produce far more content
+    # than a single PR comment can hold.
+    anns = [_ann(title=f"warning {i}", message="m" * 300, check=f"check-{i}") for i in range(400)]
+    body = doctor.render_report([], anns, _ctx())
+    assert len(body) <= doctor.sc.HARD_CAP
+    assert "omitted" in body
