@@ -169,7 +169,12 @@ runs:
         permission-checks: read
         permission-contents: read
         permission-members: read
-        permission-issues: write
+        # `pull-requests`, not `issues`: the report is posted to
+        # `/issues/{pr}/comments`, but a pull request comment is governed by the
+        # pull-requests permission -- an installation token holding only
+        # `issues: write` gets 403 "Resource not accessible by integration"
+        # there. Same permission the plan and apply comment mints use.
+        permission-pull-requests: write
         # For the environment probes' reads (`/environments` and, per
         # environment, `/environments/{name}`): on some configurations a
         # fine-grained installation token needs Actions read to see them, and a

@@ -463,6 +463,19 @@ def test_both_doctor_token_mints_request_actions_read():
     assert "permission-actions: read" in summary_mint
 
 
+def test_the_doctor_token_can_comment_on_a_pull_request():
+    """The report is posted to `/issues/{pr}/comments`, but a pull request
+    comment is governed by the pull-requests permission, not issues: a token
+    holding only `issues: write` gets 403 "Resource not accessible by
+    integration" there, which is how this first shipped. Both other mints that
+    post a comment (`actions/summary`, `actions/apply-summary`) request
+    pull-requests, so pin the doctor mint to the same permission and pin the
+    absence of the one that does not work."""
+    block = _ACTION.split("id: doctortoken", 1)[1].split("- name:", 1)[0]
+    assert "permission-pull-requests: write" in block
+    assert "permission-issues:" not in block
+
+
 def test_fullmint_requests_the_manifests_exact_permission_set():
     """The full-set probe mint must mirror app/manifest.json: a manifest bump
     that skips this step makes the permission-drift probe test the stale set —
