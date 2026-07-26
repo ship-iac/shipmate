@@ -436,6 +436,20 @@ def test_env_protection_missing_env_is_not_this_probes_problem(monkeypatch):
     assert f"repos/{_REPO}/environments/dev-eu-apply" not in seen
 
 
+def test_env_protection_reads_nothing_when_no_environment_was_declared(monkeypatch):
+    """With no declared environment set there is nothing to probe, so the
+    listing must not be read either — otherwise a repository whose token cannot
+    list environments collects a "could not verify the env protection settings"
+    degrade for a probe that had no work to do, alongside
+    `_environment_warnings`' (correct) skipped statement."""
+
+    def gh(path):
+        pytest.fail(f"the env protection probe hit the API with no envs: {path}")
+
+    monkeypatch.setattr(doctor, "_gh_json", gh)
+    assert doctor._env_protection_warnings(_ctx(envs=set(), envs_available=False)) == []
+
+
 def test_env_protection_unreadable_existing_env_is_a_notice_naming_it(monkeypatch):
     """A 403 or 5xx on an environment that IS in the listing was
     indistinguishable from a 404 (`bm.gh_json`'s exception carries no status

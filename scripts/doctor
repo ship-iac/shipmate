@@ -235,6 +235,12 @@ def _env_protection_warnings(ctx):
     probes found no problems. A failure of the listing itself propagates: it is
     this probe's precondition, so `warnings()` turns it into the degrade note."""
     out = []
+    if not ctx["envs"]:
+        # Nothing to probe, so nothing to read: listing the environments anyway
+        # would let a repository whose token cannot list them collect a
+        # "could not verify" degrade for a probe that had no work to do. The
+        # skipped-probe statement itself lives in `_environment_warnings`.
+        return out
     existing = _existing_env_names(ctx)
     for env in sorted(ctx["envs"]):
         for name, is_apply in ((env, False), (f"{env}-apply", True)):
