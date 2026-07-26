@@ -206,3 +206,31 @@ def test_help_has_no_bare_command_line():
     command and retrigger comment-ops on the bot's own comment."""
     for line in cp.help_markdown().splitlines():
         assert cp._CMD.match(line.strip()) is None, line
+    # is_command is set by _CMD OR _SHIPMATE_LINE (^shipmate\b) -- the
+    # per-line check above only covers _CMD, so also assert the property
+    # that actually matters: parsing the whole rendered comment must not
+    # be recognized as a command at all.
+    assert cp.parse(cp.help_markdown())["is_command"] is False
+
+
+def test_main_writes_route_output(tmp_path, monkeypatch):
+    # Pins main()'s route= output line: Task 6's action.yml branches on
+    # steps.parse.outputs.route, so a rename on either side must fail here,
+    # not fail silently green.
+    out = tmp_path / "out.txt"
+    out.touch()
+    monkeypatch.setenv("COMMENT_BODY", "shipmate apply dev-eu")
+    monkeypatch.setenv("GITHUB_OUTPUT", str(out))
+    cp.main()
+    lines = out.read_text(encoding="utf-8").splitlines()
+    assert "route=apply" in lines
+
+
+def test_main_help_markdown_flag(monkeypatch, capsys):
+    # Pins the --help-markdown CLI surface: it must print help_markdown() to
+    # stdout and return WITHOUT ever needing GITHUB_OUTPUT -- unset it to
+    # prove that path isn't touched (main() would raise KeyError otherwise).
+    monkeypatch.setattr("sys.argv", ["comment-parse", "--help-markdown"])
+    monkeypatch.delenv("GITHUB_OUTPUT", raising=False)
+    cp.main()
+    assert capsys.readouterr().out.startswith(cp.HELP_MARKER)
