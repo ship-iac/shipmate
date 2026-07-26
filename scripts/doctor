@@ -177,7 +177,8 @@ def _env_protection_warnings(ctx):
 
 
 _PIN = re.compile(
-    r"uses:\s*(?P<owner>[\w.-]+)/(?P<repo>[\w.-]+)/(?:actions|\.github)/[\w./-]+@(?P<ref>[\w./-]+)"
+    r"uses:\s*['\"]?(?P<owner>[\w.-]+)/(?P<repo>[\w.-]+)/(?:actions|\.github)/"
+    r"[\w./-]+@(?P<ref>[\w./-]+)"
 )
 _SHA40 = re.compile(r"[0-9a-fA-F]{40}")
 

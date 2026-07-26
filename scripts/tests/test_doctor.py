@@ -315,6 +315,44 @@ def test_tag_pin_warned(monkeypatch):
     assert "tag or branch" in out[0][1] and "acme/engine@v2" in out[0][1]
 
 
+def test_quoted_tag_pin_warned(monkeypatch):
+    # Some YAML formatters quote the `uses:` value -- the anchor must not
+    # make those pins invisible to the probe.
+    responses = {
+        f"repos/{_REPO}/contents/.github/workflows": _wf_listing("plan.yml"),
+        f"repos/{_REPO}/contents/.github/workflows/plan.yml": _wf_file(
+            'uses: "acme/engine/actions/setup@v2"\n'
+        ),
+    }
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    out = doctor._pin_warnings(_ctx())
+    assert len(out) == 1
+    assert out[0][0] == doctor.WARNING
+    assert "tag or branch" in out[0][1] and "acme/engine@v2" in out[0][1]
+
+
+def test_non_file_workflow_entry_skipped(monkeypatch):
+    # A directory (or symlink/submodule) entry whose name happens to end in
+    # .yml must not be treated as a workflow file -- fetching its "contents"
+    # would return a list, and .get("content") would raise AttributeError.
+    # No response is registered for sub.yml's contents call, so a regression
+    # of the type check fails this test with a KeyError, not a silent pass.
+    responses = {
+        f"repos/{_REPO}/contents/.github/workflows": [
+            {"name": "sub.yml", "type": "dir"},
+            {"name": "plan.yml", "type": "file"},
+        ],
+        f"repos/{_REPO}/contents/.github/workflows/plan.yml": _wf_file(
+            "uses: acme/engine/actions/setup@v2\n"
+        ),
+    }
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    out = doctor._pin_warnings(_ctx())
+    assert len(out) == 1
+    assert out[0][0] == doctor.WARNING
+    assert "acme/engine@v2" in out[0][1]
+
+
 def test_stale_sha_pin_warned(monkeypatch):
     responses = {
         f"repos/{_REPO}/contents/.github/workflows": _wf_listing("plan.yml"),
