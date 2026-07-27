@@ -84,7 +84,10 @@ Three constraints, each with a specific failure mode:
   only the newest non-draft, non-prerelease release, so a "prerelease" tag leaves
   the probe reporting "could not read latest release" with no visible difference
   in its output.
-- **Releases are cut from `main` only.**
+- **Releases are cut from `main` only.** A tag on a side branch names a commit
+  that no consumer can reach by reading `main`, and one that `internal-pins`
+  never ran against — the guard runs on push to `main`, so a side-branch commit
+  has never had its self-pins verified.
 
 The version line is `v0.x` while the action inputs, check names, and tag grammar
 are still declared unstable in `README.md`. `--generate-notes` diffs against the
