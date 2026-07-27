@@ -11,8 +11,8 @@ package = false
 
 [dependency-groups]
 dev = [
-    "ruff>=0.14",
-    "ty>=0.0.62",  # Astral type checker — still beta; kept non-blocking in CI
+    "ruff>=0.16.0",
+    "ty>=0.0.63",  # Astral type checker — still beta; kept non-blocking in CI
     "pytest>=8",
     "pyyaml>=6",         # parse composite action.yml in the shellcheck test
     "shellcheck-py>=0.10",  # pip-packaged shellcheck binary (cross-platform)
