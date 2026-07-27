@@ -115,6 +115,16 @@ of implying the repository's environments are all sound. Separately, the report
 states plainly when some of the commit's workflow runs had not finished yet,
 and when the warnings harvest itself could not complete (or may be truncated by
 GitHub's per-step annotation cap), rather than claiming a false all-clear.
+
+The harvest is deliberately uncurated: it reports the annotations as GitHub
+recorded them, including ones from the third-party actions the engine pins. In
+particular `actions/create-github-app-token` logs `Input 'app-id' has been
+deprecated with message: Use 'client-id' instead.` on every token mint, so most
+reports carry that line once per mint on the commit. It is upstream deprecation
+noise, not a setting to fix: the input is deprecated, not removed, and the
+numeric App id is the value the gate ruleset's `integration_id` pin and the
+apply-check author filter need, so the engine keeps supplying it.
+
 `shipmate doctor` never blocks the gate, and it needs no team membership,
 review or reviewed plan, unlike `shipmate apply` — but because it reports this
 repository's own settings, the engine limits it to organization members and
