@@ -247,7 +247,7 @@ def test_build_comment_reserves_link_only_space_for_every_cell():
         # Distinct, zero-padded (no prefix collisions between e.g. job/s01 and
         # job/s10) per-cell job URLs, so "the URL appears" can only be
         # satisfied by that cell's OWN section, not a neighbor's.
-        jobs.append(_job(f"apply / dev-eu / stacks/s{i:02}", f"https://gh/job/s{i:02}"))
+        jobs.append(_job(f"apply / stacks/s{i:02} / dev-eu", f"https://gh/job/s{i:02}"))
     body = ac.build_comment(rows, jobs, RUN_URL, "pending", [], [], "dev-eu")
     assert len(body) <= ac.sc.SIZE_BUDGET
     for i in range(20):
@@ -783,22 +783,22 @@ def test_build_comment_fails_loud_when_even_table_overflows():
 
 def test_job_url_suffix_match_against_caller_prefixed_job_name():
     row = _row(environment="dev-eu", stack_path="stacks/app")
-    jobs = [_job("wave0 (matrix) / apply / dev-eu / stacks/app", "https://gh/job/1")]
+    jobs = [_job("wave0 (matrix) / apply / stacks/app / dev-eu", "https://gh/job/1")]
     assert ac._job_url(row, jobs, RUN_URL) == "https://gh/job/1"
 
 
 def test_job_url_falls_back_to_run_url_when_no_job_matches():
     row = _row(environment="dev-eu", stack_path="stacks/app")
-    jobs = [_job("wave0 / apply / dev-us / stacks/db", "https://gh/job/1")]
+    jobs = [_job("wave0 / apply / stacks/db / dev-us", "https://gh/job/1")]
     assert ac._job_url(row, jobs, RUN_URL) == RUN_URL
 
 
 def test_job_url_does_not_false_match_on_bare_endswith():
-    # A job named "...reapply / dev-eu / stacks/app" must NOT match the target
-    # "apply / dev-eu / stacks/app" via a naive str.endswith — only a
+    # A job named "...reapply / stacks/app / dev-eu" must NOT match the target
+    # "apply / stacks/app / dev-eu" via a naive str.endswith — only a
     # `/`-boundary-respecting suffix counts.
     row = _row(environment="dev-eu", stack_path="stacks/app")
-    jobs = [_job("reapply / dev-eu / stacks/app", "https://gh/job/should-not-match")]
+    jobs = [_job("reapply / stacks/app / dev-eu", "https://gh/job/should-not-match")]
     assert ac._job_url(row, jobs, RUN_URL) == RUN_URL
 
 
@@ -991,12 +991,12 @@ def _jsonl(*checks):
 
 def test_check_state_maps_splits_present_and_done():
     lines = _jsonl(
-        _check("apply / dev-eu / stacks/app", run_id=1),
-        _check("apply / dev-eu / stacks/db", status="in_progress", conclusion=None, run_id=2),
+        _check("apply / stacks/app / dev-eu", run_id=1),
+        _check("apply / stacks/db / dev-eu", status="in_progress", conclusion=None, run_id=2),
     )
     present, done = ac.check_state_maps(lines, APP_ID)
-    assert present == {"apply / dev-eu / stacks/app", "apply / dev-eu / stacks/db"}
-    assert done == {"apply / dev-eu / stacks/app"}
+    assert present == {"apply / stacks/app / dev-eu", "apply / stacks/db / dev-eu"}
+    assert done == {"apply / stacks/app / dev-eu"}
 
 
 def test_check_state_maps_ignores_checks_from_another_app_identity():
@@ -1004,7 +1004,7 @@ def test_check_state_maps_ignores_checks_from_another_app_identity():
     # not be able to paint an applied cell as stranded (nor green a pending
     # one). Same posture as the gate's own from_app filter.
     lines = _jsonl(
-        _check("apply / dev-eu / stacks/app", status="in_progress", conclusion=None, app_id=15368)
+        _check("apply / stacks/app / dev-eu", status="in_progress", conclusion=None, app_id=15368)
     )
     present, done = ac.check_state_maps(lines, APP_ID)
     assert present == set()
@@ -1016,26 +1016,26 @@ def test_check_state_maps_judges_the_newest_run_per_name():
     # apply-cell; the newest run per name (highest id) must win, so the cell
     # reads pending even though an older completed run exists.
     lines = _jsonl(
-        _check("apply / dev-eu / stacks/app", run_id=1),
-        _check("apply / dev-eu / stacks/app", status="queued", conclusion=None, run_id=2),
+        _check("apply / stacks/app / dev-eu", run_id=1),
+        _check("apply / stacks/app / dev-eu", status="queued", conclusion=None, run_id=2),
     )
     present, done = ac.check_state_maps(lines, APP_ID)
-    assert present == {"apply / dev-eu / stacks/app"}
+    assert present == {"apply / stacks/app / dev-eu"}
     assert done == set()
 
 
 def test_check_state_maps_empty_app_id_warns_and_returns_no_data(capsys):
     # Must NOT fail loud the way from_app does: a missing SHIPMATE_APP_ID is
     # only allowed to cost this one display axis, never the whole comment.
-    lines = _jsonl(_check("apply / dev-eu / stacks/app"))
+    lines = _jsonl(_check("apply / stacks/app / dev-eu"))
     present, done = ac.check_state_maps(lines, "")
     assert (present, done) == (set(), set())
     assert "::warning::" in capsys.readouterr().out
 
 
 def test_check_state_three_way_lookup():
-    present = {"apply / dev-eu / stacks/app", "apply / dev-eu / stacks/db"}
-    done = {"apply / dev-eu / stacks/app"}
+    present = {"apply / stacks/app / dev-eu", "apply / stacks/db / dev-eu"}
+    done = {"apply / stacks/app / dev-eu"}
     assert ac._check_state(_row(stack_path="stacks/app"), present, done) == ac.CHECK_DONE
     assert ac._check_state(_row(stack_path="stacks/db"), present, done) == ac.CHECK_PENDING
     assert ac._check_state(_row(stack_path="stacks/gone"), present, done) == ac.CHECK_UNKNOWN
@@ -1046,7 +1046,7 @@ def test_apply_check_state_applied_with_pending_check_becomes_unrecorded():
     # mint / Complete the apply check failed (or the job was cancelled) after
     # the cell summary was already composed and uploaded.
     rows = [_row(status="applied", stack_path="stacks/app")]
-    ac.apply_check_state(rows, {"apply / dev-eu / stacks/app"}, set())
+    ac.apply_check_state(rows, {"apply / stacks/app / dev-eu"}, set())
     assert rows[0]["status"] == "unrecorded"
 
 
@@ -1055,7 +1055,7 @@ def test_apply_check_state_not_attempted_with_done_check_becomes_applied():
     # cosmetic (continue-on-error) artifact upload dropped, so no cell.json
     # arrived and the row would otherwise claim the check stays pending.
     rows = [_row(status="not_attempted", stack_path="stacks/app", apply_text=None)]
-    ac.apply_check_state(rows, {"apply / dev-eu / stacks/app"}, {"apply / dev-eu / stacks/app"})
+    ac.apply_check_state(rows, {"apply / stacks/app / dev-eu"}, {"apply / stacks/app / dev-eu"})
     assert rows[0]["status"] == "applied"
     assert rows[0]["apply_text"] is None  # no output to show; renders link-only
 
@@ -1076,7 +1076,7 @@ def test_apply_check_state_never_downgrades_failed_or_blocked():
     # over-reporting, nothing stranded, and the gate remains the truth.
     # Downgrading here would let an unrelated run's green check hide a real
     # failure in this one.
-    done = {"apply / dev-eu / stacks/app", "apply / dev-eu / stacks/db"}
+    done = {"apply / stacks/app / dev-eu", "apply / stacks/db / dev-eu"}
     rows = [
         _row(status="failed", stack_path="stacks/app"),
         _row(status="blocked", stack_path="stacks/db", reason="state restore failed"),
@@ -1100,9 +1100,9 @@ def test_load_check_maps_empty_file_is_no_data(tmp_path):
 
 def test_load_check_maps_reads_jsonl(tmp_path):
     p = tmp_path / "checks.jsonl"
-    p.write_text("\n".join(_jsonl(_check("apply / dev-eu / stacks/app"))), encoding="utf-8")
+    p.write_text("\n".join(_jsonl(_check("apply / stacks/app / dev-eu"))), encoding="utf-8")
     present, done = ac.load_check_maps(str(p), APP_ID)
-    assert present == done == {"apply / dev-eu / stacks/app"}
+    assert present == done == {"apply / stacks/app / dev-eu"}
 
 
 def test_load_check_maps_malformed_line_degrades_with_a_warning(tmp_path, capsys):
@@ -1129,7 +1129,7 @@ def test_load_check_maps_non_numeric_app_id_degrades_with_a_warning(tmp_path, ca
     # That must cost only the check-state display axis, never the whole
     # render step -- same degradation as a malformed checks.jsonl.
     p = tmp_path / "checks.jsonl"
-    p.write_text("\n".join(_jsonl(_check("apply / dev-eu / stacks/app"))), encoding="utf-8")
+    p.write_text("\n".join(_jsonl(_check("apply / stacks/app / dev-eu"))), encoding="utf-8")
     assert ac.load_check_maps(str(p), "Iv1.notanumericid") == (set(), set())
     assert "::warning::" in capsys.readouterr().out
 
@@ -1269,7 +1269,7 @@ def test_build_comment_promoted_row_carries_no_stays_pending_note():
     # not_attempted + done check -> applied: the comment must stop telling the
     # reader to retry a cell that actually applied.
     rows = [_row(status="not_attempted", stack_path="stacks/app", apply_text=None)]
-    ac.apply_check_state(rows, {"apply / dev-eu / stacks/app"}, {"apply / dev-eu / stacks/app"})
+    ac.apply_check_state(rows, {"apply / stacks/app / dev-eu"}, {"apply / stacks/app / dev-eu"})
     comment = ac.build_comment(rows, [], RUN_URL, "pending", [], [], "dev-eu")
     assert "| ✅ |" in comment
     assert ac._not_attempted_note("dev-eu") not in comment
@@ -1284,7 +1284,7 @@ def test_build_comment_promoted_row_carries_no_stays_pending_note():
 
 def test_build_comment_genuinely_pending_row_keeps_the_stays_pending_note():
     rows = [_row(status="not_attempted", stack_path="stacks/app", apply_text=None)]
-    ac.apply_check_state(rows, {"apply / dev-eu / stacks/app"}, set())
+    ac.apply_check_state(rows, {"apply / stacks/app / dev-eu"}, set())
     comment = ac.build_comment(rows, [], RUN_URL, "pending", [], [], "dev-eu")
     assert "| ⏭️ |" in comment
     assert ac._not_attempted_note("dev-eu") in comment
@@ -1379,7 +1379,7 @@ def test_load_check_maps_drops_records_with_no_app_silently(tmp_path, capsys):
     # from_app's deliberate fail-closed filter doing its job, so it degrades to
     # no data for that name WITHOUT a warning. Pinned so a future widening of
     # the except clause cannot start shouting about the normal filtered case.
-    for payload in ({"status": "completed"}, {"name": "apply / dev-eu / stacks/app"}):
+    for payload in ({"status": "completed"}, {"name": "apply / stacks/app / dev-eu"}):
         p = tmp_path / "checks.jsonl"
         p.write_text(json.dumps(payload), encoding="utf-8")
         assert ac.load_check_maps(str(p), APP_ID) == (set(), set()), payload
@@ -1394,17 +1394,58 @@ def test_check_name_grammar_matches_apply_cells_construction():
     # artifact-only rendering this feature exists to correct. Same posture as
     # test_cell_schema_guard_apply_cell_writes_every_required_key above.
     src = (_ENGINE / "actions" / "apply-cell" / "action.yml").read_text(encoding="utf-8")
-    expected = "f\"apply / {os.environ['ENV']} / {os.environ['STACK']}\""
+    expected = "f\"apply / {os.environ['STACK']} / {os.environ['ENV']}\""
     assert expected in src, (
         "apply-cell no longer builds the apply check name as "
-        "'apply / <env> / <stack path>' -- scripts/apply-comment's _check_state "
+        "'apply / <stack path> / <env>' -- scripts/apply-comment's _check_state "
         "and _job_url forward-build that exact grammar to look the check up, "
         "and a mismatch makes every lookup miss silently"
     )
     # And the reader's half, exercised rather than restated: the name
     # _check_state builds for a known row must be that same string.
     row = _row(environment="dev-eu", stack_path="stacks/app")
-    assert ac._check_state(row, {"apply / dev-eu / stacks/app"}, set()) == ac.CHECK_PENDING
+    assert ac._check_state(row, {"apply / stacks/app / dev-eu"}, set()) == ac.CHECK_PENDING
+
+
+def test_wave_job_name_matches_the_apply_check_grammar():
+    # Coupling: _job_url resolves a row's per-cell log link by matching the
+    # apply check name as a `/ `-boundary suffix of the run's JOB names, which
+    # only works because every apply-env-level wave job's `name:` is byte-
+    # identical to the check name apply-cell/pending-checks build. Nothing else
+    # enforces that; a rename of either side would silently downgrade every
+    # link in the apply result comment to the workflow-run URL, which is also
+    # the documented degradation, so no test would fail on the observable.
+    src = (_ENGINE / ".github" / "workflows" / "apply-env-level.yml").read_text(encoding="utf-8")
+    names = [ln.strip() for ln in src.splitlines() if ln.strip().startswith("name: apply / ")]
+    expected = "name: apply / ${{ matrix.stack }} / ${{ matrix.environment }}"
+    assert names == [expected] * 8, (
+        "each wave0..wave7 job's display name must stay byte-identical to the "
+        "'apply / <stack path> / <env>' check-name grammar -- scripts/apply-comment's "
+        f"_job_url matches it as a job-name suffix (got: {sorted(set(names))})"
+    )
+    # Pinning the two name literals is not enough: they only agree if the wave
+    # job hands apply-cell the SAME matrix keys it renders itself from. The job
+    # already feeds two inputs off one key (`stack:` and `stack-name:`), so a
+    # later change that routed a display name through `matrix.stack` would keep
+    # both literals intact while the rendered name stopped equalling the check
+    # name apply-cell builds from these inputs.
+    # `env:` alone is the job-level env mapping, not the apply-cell input.
+    wired = [
+        ln.strip()
+        for ln in src.splitlines()
+        if ln.strip().startswith(("stack: ", "env: ")) and ln.strip() != "env:"
+    ]
+    assert wired == ["stack: ${{ matrix.stack }}", "env: ${{ matrix.environment }}"] * 8, (
+        "every wave job must pass apply-cell the same matrix keys its display name "
+        "renders (`stack: ${{ matrix.stack }}`, `env: ${{ matrix.environment }}`) -- "
+        "apply-cell builds the check name from those two inputs, so a different "
+        f"source for either silently breaks the name/job-name equality (got: {sorted(set(wired))})"
+    )
+    # The reader's half, exercised: a nested-display job name built from that
+    # same grammar must resolve, for the same row _check_state agrees on.
+    row = _row(environment="dev-eu", stack_path="stacks/app")
+    jobs = [_job("post-merge / L0 / apply / stacks/app / dev-eu", "https://gh/job/1")]
+    assert ac._job_url(row, jobs, RUN_URL) == "https://gh/job/1"
 
 
 def _write_cell(cells_dir, env, slug, cell):
@@ -1444,7 +1485,7 @@ def test_main_folds_checks_jsonl_into_the_rendered_comment(monkeypatch, tmp_path
     checks = tmp_path / "checks.jsonl"
     checks.write_text(
         "\n".join(
-            _jsonl(_check("apply / dev-eu / stacks/app", status="in_progress", conclusion=None))
+            _jsonl(_check("apply / stacks/app / dev-eu", status="in_progress", conclusion=None))
         ),
         encoding="utf-8",
     )
@@ -1461,7 +1502,7 @@ def test_main_promotes_a_missing_artifact_whose_check_is_done(monkeypatch, tmp_p
     cells = tmp_path / "cells"
     cells.mkdir()
     checks = tmp_path / "checks.jsonl"
-    checks.write_text("\n".join(_jsonl(_check("apply / dev-eu / stacks/app"))), encoding="utf-8")
+    checks.write_text("\n".join(_jsonl(_check("apply / stacks/app / dev-eu"))), encoding="utf-8")
     waves = json.dumps({"wave0": [{"stack": "stacks/app", "environment": "dev-eu"}]})
     _main_env(monkeypatch, tmp_path, cells, waves, str(checks))
     ac.main()

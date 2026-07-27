@@ -39,7 +39,7 @@ def build_matrix(envs, stacks_by_env, tags_by_stack):
         raise SystemExit(
             "::error::a stack path may not be exactly 'apply': its plan check "
             "'apply / <env>' collides with the apply-check namespace "
-            "('apply / <env> / <stack>'). Rename or nest the stack."
+            "('apply / <stack> / <env>'). Rename or nest the stack."
         )
     if len(cells) > MATRIX_LIMIT:
         raise MatrixTooLarge(

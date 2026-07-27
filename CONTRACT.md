@@ -12,38 +12,54 @@ Every plan and apply unit of work reports as its own GitHub check, using
 these names verbatim:
 
 - plan job check-run: `<stack> / <env>`
-- apply check-run: `apply / <env> / <stack>`
+- apply check-run: `apply / <stack> / <env>`
 
 `<env>` and `<stack>` are placeholders substituted with the actual
 environment name and the Terramate **stack path** (as emitted by
 `terramate list` / `experimental run-graph`, e.g. `stacks/network`) for that
 unit of work (for example, `stacks/network / staging` and
-`apply / staging / stacks/network`). The check name uses the stack **path**,
-never a display name — so the code that *creates* the apply check
-(`plan-cell`), *completes* it (`apply-cell`), and *filters the still-pending
-queue* (`deploy-detect`, which only ever has the path) all reconstruct the
-identical name from the one value they share.
+`apply / stacks/network / staging`). Both grammars put the stack first, so a
+reader scans one column; the apply name is the plan name with the verb in
+front. The check name uses the stack **path**, never a display name — so the
+code that *creates* the apply check (`pending-checks`, run by `actions/summary`),
+*completes* it (`apply-cell`), *filters the still-pending queue*
+(`deploy-detect` / `apply-detect` / `apply-all-detect`, which only ever have the
+path), and *reports it* (`apply-comment`) all reconstruct the identical name
+from the one value they share.
 
 The plan check has **no verb prefix**: it is the plan matrix job's own
 auto-generated check-run, whose name is the job's `name:` (`<stack> / <env>`).
 The consuming workflow is named `shipmate · plan`, so GitHub's UI already
 shows the verb — `shipmate · plan / <stack> / <env>`. The apply check
-**keeps** its `apply / ` verb prefix: `plan-cell` creates it pending on the
-**same** head SHA that carries the plan job's check, so that prefix is the
-disambiguator that keeps the two apart — and keeps `apply-gate` /
-`gate-refresh`, which select the pending-apply queue by the `apply / ` prefix,
-from ever picking up a plan check. For the same reason `build-matrix` rejects
-a stack whose path is exactly `apply` — its plan check `apply / <env>` would
-fall inside the apply-check namespace.
+**keeps** its `apply / ` verb prefix: it is created pending (by
+`actions/summary`) on the **same** head SHA that carries the plan job's check,
+so with both names now stack-first that prefix is the *only* disambiguator
+keeping the two apart — and it is what keeps `apply-gate` / `gate-refresh`,
+which select the pending-apply queue by the `apply / ` prefix, from ever
+picking up a plan check. For the same reason `build-matrix` rejects a stack
+whose path is exactly `apply` — its plan check `apply / <env>` would fall
+inside the apply-check namespace.
 
 This same forward-built string is also the apply-env-level job's own `name:`
 (so the job's display name and the apply check-run name coincide), which
 gives the apply check-run grammar a second consumer: `scripts/apply-comment`
 (see Apply result comment, below) resolves each row's per-cell log link by
-matching this name as a **suffix** of the run's job-name listing — a called
-reusable workflow's jobs display as `<caller-job> / apply / <env> /
-<stack>` — never by reverse-parsing it. No match falls back to the
-workflow-run URL.
+matching this name as a **suffix** of the run's job-name listing — never by
+reverse-parsing it. No match falls back to the workflow-run URL. The two sides
+are locked together by a source-derived test, because a rename of either would
+degrade every link to the run URL silently — that fallback being the designed
+behaviour, no observable would fail.
+
+Job display names in the apply/deploy path nest: a called reusable workflow's
+job displays as `<caller job> / <callee job>`, applied at every level, and GHA
+cannot suppress a level. The apply leaf is therefore three deep, e.g.
+`post-merge / L0 / apply / <stack> / <env>`. The intermediate names are kept
+short and non-redundant (`L0`..`L3` for env-levels in `apply-all.yml` /
+`deploy.yml`, `waves` for the single-env `apply.yml`) rather than repeating the
+verb the leaf already carries; consumer workflows supply the outermost segment
+and are named `shipmate · apply` / `shipmate · deploy`. Only the leaf is
+load-bearing — the intermediate names are display-only, and the job **ids**
+they belong to are what `needs:` refers to.
 
 In addition to the per-unit checks, one aggregate **commit status** rolls up
 the full fan-out into a single required status, named verbatim:
@@ -68,13 +84,13 @@ they are not required, so a stale-suite copy is only cosmetic.)
 first:
 
 - the pre-merge apply path (`gate-refresh`, called from the apply
-  workflow's summary job) once **every** `apply / <env> / <stack>` check on
+  workflow's summary job) once **every** `apply / <stack> / <env>` check on
   the PR head is complete — a targeted `shipmate apply <env>` of only some
   environments leaves the gate pending;
 - the post-merge deploy, which completes the gate on the merged PR's head
   SHA after its env-level applies finish.
 
-When apply-cell completes an `apply / <env> / <stack>` check, it completes only
+When apply-cell completes an `apply / <stack> / <env>` check, it completes only
 the check-run ids that already existed for that name **before its apply began**.
 A plan re-run can create a fresh duplicate apply check; a duplicate created
 *mid-apply* is therefore left pending (its plan was not applied by this run),
@@ -297,7 +313,7 @@ environment; a bare `shipmate apply` applies **every** environment that has a
 reviewed plan for the current PR head, in `env_order` env-levels (see Env
 apply order, below), **except** environments listed in the Terramate global
 `global.shipmate.explicit_envs`. Explicit environments (typically production)
-must always be named: their `apply / <env> / <stack>` checks simply stay
+must always be named: their `apply / <stack> / <env>` checks simply stay
 pending under a bare apply — so `shipmate / gate` keeps gating the
 merge — until someone runs `shipmate apply <env>` for them. An absent global
 (or `[]`) means a bare apply targets everything. Malformed `explicit_envs`
@@ -341,7 +357,7 @@ apply workflow from a comment) and reading team membership for
 authorization, the App now authors every check/status/comment/issue that
 crosses a workflow-run boundary:
 
-- **Apply checks** (`apply / <env> / <stack>`) — created pending by
+- **Apply checks** (`apply / <stack> / <env>`) — created pending by
   `actions/summary`, completed by `actions/apply-cell` — both mint an App
   installation token, so completion works across the create/complete
   workflow-run boundary (check runs are only updatable by the app that
@@ -582,7 +598,7 @@ excluded/skipped-environment sentences, a gate-completion sentence (complete
 or still-pending, from the gate verdict), and the run link.
 
 Row status is derived from **both** the per-cell artifact and the real state of
-that cell's `apply / <env> / <stack>` check on the head SHA, which
+that cell's `apply / <stack> / <env>` check on the head SHA, which
 `actions/apply-summary` reads with its own App installation token (only checks
 authored by the shipmate App count, judged by the newest run per name — the
 same predicate the gate and both detects use). The pending apply checks are the
@@ -642,7 +658,7 @@ exceed GitHub's cap.
 The data feeding the comment ships in the per-cell artifact
 `apply-summary.<env>.<slug>` (see Apply summary artifacts, above); per-cell
 log links resolve against the run's job-name listing using the
-`apply / <env> / <stack>` check-name grammar (see Check names, above), and
+`apply / <stack> / <env>` check-name grammar (see Check names, above), and
 degrade to the workflow-run URL on no match.
 
 ## Apply-match fingerprint

@@ -68,7 +68,7 @@ def test_filter_pending_drops_completed():
         {"stack": "stacks/app", "environment": "dev-eu"},
         {"stack": "stacks/dns", "environment": "dev-eu"},
     ]
-    completed = {"apply / dev-eu / stacks/dns"}
+    completed = {"apply / stacks/dns / dev-eu"}
     kept = ad.filter_pending(cells, completed)
     assert [c["stack"] for c in kept] == ["stacks/app"]
 
@@ -79,7 +79,7 @@ def test_completed_failure_apply_stays_pending():
     cells = [{"stack": "stacks/app", "environment": "dev-eu"}]
     checks = [
         {
-            "name": "apply / dev-eu / stacks/app",
+            "name": "apply / stacks/app / dev-eu",
             "status": "completed",
             "conclusion": "failure",
             "started_at": "2026-07-18T10:00:00Z",
@@ -99,7 +99,7 @@ def test_foreign_app_completed_check_stays_pending():
     cells = [{"stack": "stacks/app", "environment": "dev-eu"}]
     line = json.dumps(
         {
-            "name": "apply / dev-eu / stacks/app",
+            "name": "apply / stacks/app / dev-eu",
             "status": "completed",
             "conclusion": "success",
             "started_at": "2026-07-18T10:00:00Z",
@@ -248,14 +248,14 @@ def test_duplicate_run_newer_queued_stays_pending():
     cells = [{"stack": "stacks/app", "environment": "dev-eu"}]
     checks = [
         {
-            "name": "apply / dev-eu / stacks/app",
+            "name": "apply / stacks/app / dev-eu",
             "status": "completed",
             "conclusion": "success",
             "started_at": "2026-07-18T10:00:00Z",
             "id": 1,
         },
         {
-            "name": "apply / dev-eu / stacks/app",
+            "name": "apply / stacks/app / dev-eu",
             "status": "queued",
             "conclusion": None,
             "started_at": "2026-07-18T11:00:00Z",

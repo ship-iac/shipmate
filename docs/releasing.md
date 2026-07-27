@@ -30,6 +30,23 @@ sequence:
      | xargs sed -i 's/@<old-sha>/@abc1234.../g'
    ```
 
+### Consumers must bump every engine ref in one change
+
+A consumer's own `uses:` pins are outside the guard's reach, and two of them are
+**coupled by the apply check-run name**: `actions/summary` creates the pending
+check (it runs `scripts/pending-checks` out of its own pinned checkout) and
+`actions/apply-cell` — pinned indirectly, inside `apply-env-level.yml` — completes
+it. Both sides build the name independently, so a consumer sitting on a pin pair
+that straddles a change to that grammar creates one name and looks for another:
+apply-cell then fails with `no apply check named ... nothing to complete` and
+every wave job dies before restoring state.
+
+So re-pin **all** engine references in a single commit (as the sample repos do),
+and never merge a Dependabot PR that bumps one engine `uses:` line in isolation.
+The same applies while a cascade is in flight in this repo: an intermediate
+commit of the two-step sequence is not a release SHA, and nothing should ever be
+pinned to one.
+
 ## The guard
 
 `scripts/tests/test_internal_pins.py` fails if any internal

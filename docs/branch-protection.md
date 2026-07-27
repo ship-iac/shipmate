@@ -4,7 +4,7 @@ shipmate does **no gating in workflow logic**. The apply-before-merge guarantee
 is enforced entirely by GitHub branch protection requiring one aggregate check:
 
 - **Require the status check `shipmate / gate`** (verbatim) — and *only*
-  that check. The per-unit `<stack> / <env>` (plan) and `apply / <env> / <stack>`
+  that check. The per-unit `<stack> / <env>` (plan) and `apply / <stack> / <env>`
   checks come and go as stacks and environments change; requiring the single
   `shipmate / gate` roll-up means the required-checks list never needs
   editing when a stack or environment is added or removed.
@@ -273,13 +273,44 @@ once the repo is public or on a paid plan.
   non-satisfying, blocking all merges until both land together.
 - **Open PRs need a fresh commit or re-plan after the flip.** A PR opened
   before the upgrade may be carrying: (a) `github-actions`-authored pending
-  `apply / <env> / <stack>` checks that the App-authored `apply-cell` cannot
+  `apply / <stack> / <env>` checks that the App-authored `apply-cell` cannot
   complete (different identity — check-run completion is scoped to the
   creating app), and (b) an existing `shipmate / gate` status authored by the
   old identity, which no longer satisfies the newly-pinned
   `integration_id`. Push a commit (or re-run `plan.yml`) on each open PR after
   upgrading so a fresh, App-authored set of checks and gate status is
   produced.
+- **Apply check-name field order flipped — every PR planned before the bump
+  needs a new commit, and a re-plan is not enough.** The apply check is now
+  `apply / <stack> / <env>` (was `apply / <env> / <stack>`). Nothing in branch
+  protection references it (only `shipmate / gate` is required), so no ruleset
+  edit is needed — but old-order checks left on a head SHA break **both**
+  directions, and a re-plan fixes neither, because it adds the new names
+  *alongside* the old ones on the same commit:
+
+  - **Old-order checks still pending → the gate never greens.** `apply-gate`
+    treats every `apply / `-prefixed check on the SHA as part of the work queue,
+    and the new engine only ever completes the new-order names, so the old
+    pending ones stay pending forever.
+  - **Old-order checks already complete → the post-merge deploy re-queues work
+    that is already applied.** This one has no pre-merge signal at all: the gate
+    is green and the PR looks finished. On merge, `deploy-detect` reconstructs
+    the new-order name for each reviewed cell, finds none of them among the
+    completed checks, and treats every applied cell as pending. Each re-apply
+    then trips the stale-plan fail-safe (state has moved), so the deploy on
+    `main` goes red per stack instead of no-opping. Nothing is applied twice —
+    the fail-safe holds — but the deploy needs recovery.
+
+  **Do this:** on every open PR that already has apply checks, push a commit
+  (any commit) so the fan-out lands on a fresh head SHA, then re-plan and, if it
+  was applied pre-merge, re-apply under the new engine. Note that a check run
+  **cannot be deleted or dismissed** — the Checks API offers only create, update,
+  get, list and rerequest — so the only alternative to a fresh commit is
+  completing the stale check-run ids yourself with a shipmate-App installation
+  token (a check run is updatable only by the app that created it, and these were
+  App-authored). If a deploy already went red this way, the stacks are in fact
+  applied: re-plan on a follow-up PR, get "no changes" checks, and the next
+  deploy no-ops green. New PRs are unaffected.
 - **Gate-writer jobs no longer need `statuses: write` / `checks: write` on
   `GITHUB_TOKEN`.** The App manifest now carries both scopes, so
   `actions/summary` / `actions/gate-refresh` mint their own installation

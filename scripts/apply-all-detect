@@ -3,7 +3,7 @@
 
 The pre-merge equivalent of deploy-detect, sourced like apply-detect: cells
 come from the reviewed plan artifacts of ONE verified plan run (never a
-re-plan), the pending `apply / <env> / <stack>` checks are the work queue, and
+re-plan), the pending `apply / <stack> / <env>` checks are the work queue, and
 `global.shipmate.env_order` buckets pending cells into env-levels exactly as
 on the merge-deploy path. Env membership comes from stack tags
 (build-matrix.env_membership) so artifact and check names are only ever

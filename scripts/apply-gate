@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Decide whether every `apply / <env> / <stack>` check on a commit is done.
+"""Decide whether every `apply / <stack> / <env>` check on a commit is done.
 
 Reads check-runs as JSON Lines on stdin (one check-run object per line, as
 emitted by `gh api --paginate ... --jq '.check_runs[]'`) and writes a single
