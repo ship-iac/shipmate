@@ -21,7 +21,7 @@ otherwise the deploy/apply path silently keeps running the old action.
 Because a commit cannot pin its own not-yet-existing SHA, this is a two-step
 sequence:
 
-1. Merge the action change (creates the release SHA, e.g. `abc1234`).
+1. Merge the action change (creates the **action commit**, e.g. `abc1234`).
 2. In a follow-up commit, bump the internal pins to that SHA:
 
    ```bash
@@ -70,30 +70,52 @@ staleness comparison work for consumers, and what lets a consumer's Dependabot
 propose a pin bump — Dependabot resolves a SHA-pinned action through this
 repository's tag namespace.
 
+Releases on this repository are immutable, so a published tag cannot later be
+re-pointed at a different commit. It is a repository setting, not a property of
+the release, toggled with `PUT` / `DELETE` on that same API path rather than a
+field on the repository object — confirm it is still on before cutting:
+
+```bash
+gh api repos/ship-iac/shipmate/immutable-releases   # {"enabled":true,...}
+```
+
+Then cut the release:
+
 ```bash
 gh release create v0.2.0 --target <release-sha> --title v0.2.0 --generate-notes
 ```
 
 Three constraints, each with a specific failure mode:
 
-- **Tag the commit consumers pin** — the release SHA, the same commit the sample
-  repos are re-pinned to — not the feature merge. `doctor` resolves the tag with
-  `repos/{slug}/commits/{tag}` and compares that SHA against each consumer pin;
-  tagging the feature merge instead reports correctly-pinned consumers as stale.
+- **Tag the commit consumers pin** — the release SHA, meaning `main`'s tip once
+  the cascade above has converged, which is also the commit the sample repos are
+  re-pinned to — not the action commit that started the cascade. `doctor`
+  resolves the tag with `repos/{slug}/commits/{tag}` and compares that SHA
+  against each consumer pin; tagging the feature merge instead reports
+  correctly-pinned consumers as stale.
 - **Never mark a release as prerelease.** `repos/{slug}/releases/latest` returns
-  only the newest non-draft, non-prerelease release, so a "prerelease" tag leaves
-  the probe reporting "could not read latest release" with no visible difference
-  in its output.
+  only the newest non-draft, non-prerelease release. While the repository had no
+  releases at all this failed quietly; now it fails loudly in the wrong
+  direction. A prerelease `v0.2.0` leaves `latest` pointing at `v0.1.0`, so every
+  consumer correctly pinned to `v0.2.0`'s SHA is told its pin differs from the
+  latest release and is instructed to re-pin backwards.
 - **Releases are cut from `main` only.** A tag on a side branch names a commit
   that no consumer can reach by reading `main`, and one that `internal-pins`
   never ran against — the guard runs on push to `main`, so a side-branch commit
   has never had its self-pins verified.
+
+The order matters. Cut the release first, then re-pin the sample repos to that
+same SHA, annotating each pin `# vX.Y.Z`. Re-pinning first would leave the
+samples on a commit with no release, which is exactly the state the probe reads
+as staleness.
 
 The version line is `v0.x` while the action inputs, check names, and tag grammar
 are still declared unstable in `README.md`. `--generate-notes` diffs against the
 previous tag; the first release used hand-written notes because it had no
 predecessor.
 
-If a release is skipped, the probe itself is the alarm: once the samples are
-re-pinned past the latest release, every sample plan run's annotations warn that
-the pin differs from the latest release.
+If a release is skipped, the probe is the alarm — but only once the samples move
+past it: every sample plan run's annotations then warn that the pin differs from
+the latest release. The state in between — engine merged, samples not yet
+re-pinned, no release cut — is silent, so do not rely on the alarm to remember
+this step for you.

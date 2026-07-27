@@ -395,7 +395,9 @@ triggered by a pre-merge comment or a post-merge push.
   Dependabot proposes, the `CODEOWNERS` review disposes, and the ref committed to
   the consuming repository remains a full commit SHA. `shipmate doctor` reports a
   pin that differs from the latest release, so the upgrade is visible whether or
-  not Dependabot is enabled.
+  not Dependabot is enabled. This works from a pin that is itself a released
+  commit; a pin at an untagged commit gives Dependabot nothing to compare
+  against, and `shipmate doctor`'s warning is the only signal.
 
 ## Runner prerequisites
 
