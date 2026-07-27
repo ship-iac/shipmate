@@ -91,7 +91,7 @@ Three constraints, each with a specific failure mode:
   the cascade above has converged, which is also the commit the sample repos are
   re-pinned to — not the action commit that started the cascade. `doctor`
   resolves the tag with `repos/{slug}/commits/{tag}` and compares that SHA
-  against each consumer pin; tagging the feature merge instead reports
+  against each consumer pin; tagging the action commit instead reports
   correctly-pinned consumers as stale.
 - **Never mark a release as prerelease.** `repos/{slug}/releases/latest` returns
   only the newest non-draft, non-prerelease release. While the repository had no
