@@ -25,7 +25,8 @@ Dependabot's `github-actions` ecosystem gets a pull request bumping its pins —
 to the release's commit SHA, still reviewed under the consumer's own
 `CODEOWNERS` rules. `shipmate doctor` names any pin that differs from the
 latest release, and the same finding appears as an annotation on every plan
-run.
+run. Dependabot needs the current pin to be a released commit to propose a
+bump; from an untagged pin, doctor's warning is the signal.
 
 ## Fan-out (stack x environment)
 
