@@ -381,9 +381,21 @@ triggered by a pre-merge comment or a post-merge push.
   `@main`). This guarantees that a workflow's behavior cannot change
   without an explicit, reviewed bump of the pinned SHA in the consuming
   repository.
+- A pinned SHA **may** carry a trailing `# vX.Y.Z` comment naming the release
+  that SHA belongs to (`uses: <owner>/shipmate/actions/state@<sha> # v0.1.0`).
+  The comment is for human readers and for Dependabot's own bookkeeping; the ref
+  that resolves is always the SHA. shipmate applies the same convention to the
+  third-party actions it pins internally.
 - `.github/workflows/` is protected by a `CODEOWNERS` entry, so changes to
   workflow files (including pin bumps) require review from the designated
   owners before merge.
+- **Upgrade path.** shipmate publishes a GitHub Release per release SHA. A
+  consumer with Dependabot's `github-actions` ecosystem enabled therefore
+  receives a pull request bumping its shipmate pins to the new release's SHA —
+  Dependabot proposes, the `CODEOWNERS` review disposes, and the ref committed to
+  the consuming repository remains a full commit SHA. `shipmate doctor` reports a
+  pin that differs from the latest release, so the upgrade is visible whether or
+  not Dependabot is enabled.
 
 ## Runner prerequisites
 

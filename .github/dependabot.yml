@@ -9,6 +9,14 @@ updates:
       actions:
         # Group minor + patch into one PR; majors open individually for review.
         update-types: [minor, patch]
+    ignore:
+      # This repo's own action pins are managed by hand by the two-step cascade in
+      # docs/releasing.md, and are deliberately heterogeneous — each points at the
+      # commit whose action content it needs. Dependabot would flatten them all to
+      # the latest release SHA; mid-cascade that is a content downgrade of exactly
+      # the pin just bumped. internal-pins.yml runs on push-to-main only, so such a
+      # PR would merge unguarded and only go red afterwards.
+      - dependency-name: "ship-iac/shipmate*"
 
   # Dev toolchain pinned in pyproject.toml / uv.lock (ruff, ty, pytest, ...).
   - package-ecosystem: uv

@@ -61,3 +61,36 @@ can read the pinned commit objects.)
 Because this workflow reports **no status on PR heads**, it must **never** be
 added to this repo's required status checks — a required check that never
 reports deadlocks every PR.
+
+## Publishing the release
+
+After the internal-pin cascade converges and `internal-pins` is green on `main`,
+cut a GitHub Release. This is what makes `shipmate doctor`'s pin-freshness
+staleness comparison work for consumers, and what lets a consumer's Dependabot
+propose a pin bump — Dependabot resolves a SHA-pinned action through this
+repository's tag namespace.
+
+```bash
+gh release create v0.2.0 --target <release-sha> --title v0.2.0 --generate-notes
+```
+
+Three constraints, each with a specific failure mode:
+
+- **Tag the commit consumers pin** — the release SHA, the same commit the sample
+  repos are re-pinned to — not the feature merge. `doctor` resolves the tag with
+  `repos/{slug}/commits/{tag}` and compares that SHA against each consumer pin;
+  tagging the feature merge instead reports correctly-pinned consumers as stale.
+- **Never mark a release as prerelease.** `repos/{slug}/releases/latest` returns
+  only the newest non-draft, non-prerelease release, so a "prerelease" tag leaves
+  the probe reporting "could not read latest release" with no visible difference
+  in its output.
+- **Releases are cut from `main` only.**
+
+The version line is `v0.x` while the action inputs, check names, and tag grammar
+are still declared unstable in `README.md`. `--generate-notes` diffs against the
+previous tag; the first release used hand-written notes because it had no
+predecessor.
+
+If a release is skipped, the probe itself is the alarm: once the samples are
+re-pinned past the latest release, every sample plan run's annotations warn that
+the pin differs from the latest release.

@@ -19,6 +19,14 @@ without an explicit, reviewed bump of the pinned SHA. See `CONTRACT.md` for
 the full contract this project follows, including check names, the
 environment model, tag grammar, and pinning rules.
 
+Staying current does not require watching this repository's commit log.
+shipmate publishes a GitHub Release per release SHA, so a consumer running
+Dependabot's `github-actions` ecosystem gets a pull request bumping its pins —
+to the release's commit SHA, still reviewed under the consumer's own
+`CODEOWNERS` rules. `shipmate doctor` names any pin that differs from the
+latest release, and the same finding appears as an annotation on every plan
+run.
+
 ## Fan-out (stack x environment)
 
 shipmate treats each Terramate stack and each target environment as
