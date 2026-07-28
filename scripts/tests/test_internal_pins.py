@@ -85,9 +85,13 @@ def test_internal_action_pins_are_current():
             "current action (run `python dev/repin-internal.py`):\n" + "\n".join(lines)
         )
     if unverifiable:
-        pytest.skip(
-            "internal pins could not be verified (need full history -- set "
-            "fetch-depth: 0 on the CI checkout):\n" + "\n".join(unverifiable)
+        # A pin commit absent while the mainline baseline DID resolve means the
+        # clone has full history and the commit itself is gone (force-push, GC).
+        # That is a ref GitHub cannot resolve at runtime, so it must fail --
+        # pytest.skip would pass branch protection and ship the broken pin.
+        pytest.fail(
+            "internal pin(s) reference a commit that does not exist -- the ref "
+            "cannot resolve at runtime:\n" + "\n".join(unverifiable)
         )
 
 
@@ -199,3 +203,32 @@ def test_every_script_invocation_in_an_action_is_visible_to_the_derivation():
             f"$GITHUB_ACTION_PATH mention(s) but SCRIPT_REF matched {matched} -- "
             "the script-dependency derivation cannot see the difference"
         )
+
+
+def test_unverifiable_pin_fails_when_history_is_present(monkeypatch):
+    """A pin whose commit is absent while mainline history IS present is a
+    dangling ref, not a shallow clone: GitHub cannot resolve it at runtime and
+    every apply job dies. It must fail, because pytest.skip passes branch
+    protection -- the hole this closes.
+    """
+    monkeypatch.setattr(pinrefs, "refs_at", lambda *a, **k: [("actions/setup", "0" * 40, "x.yml")])
+    monkeypatch.setattr(pinrefs, "release_baseline", lambda: "1" * 40)
+    monkeypatch.setattr(
+        pinrefs,
+        "pin_issues",
+        lambda *a: [pinrefs.PinIssue("actions/setup", "0" * 40, "x.yml", "missing")],
+    )
+
+    # Both outcomes are caught explicitly rather than with pytest.raises: the
+    # pre-fix behavior is pytest.skip, whose exception would propagate out of
+    # pytest.raises and mark THIS test skipped -- a green run, which is exactly
+    # the failure mode under test. pytest.fail.Exception / pytest.skip.Exception
+    # are the public handles; _pytest.outcomes is private API.
+    try:
+        test_internal_action_pins_are_current()
+    except pytest.fail.Exception as exc:
+        assert "does not exist" in str(exc)
+    except pytest.skip.Exception as exc:
+        pytest.fail(f"guard skipped instead of failing: {exc}")
+    else:
+        pytest.fail("guard returned cleanly; expected a failure")
