@@ -110,3 +110,37 @@ def test_non_ancestor_is_flagged_unreachable(monkeypatch):
 
     monkeypatch.setattr(pinrefs, "git", lambda *a: _R())
     assert ps.unreachable_from_main("0" * 40) is True
+
+
+def test_git_error_on_origin_main_falls_through_to_main(monkeypatch):
+    # Regression: a git error against the first base ("origin/main") must not be
+    # misread as "not an ancestor" -- it must fall through and consult "main".
+    # A mock that ignores which base it was called with (e.g. always returncode=1)
+    # would pass even if the implementation collapsed to `if returncode != 0`,
+    # which is exactly the bug this test exists to catch.
+    class _R:
+        def __init__(self, returncode):
+            self.returncode = returncode
+
+    def fake_git(*args):
+        base = args[-1]
+        if base == "origin/main":
+            return _R(128)  # git error (ref missing/unresolvable), not "no"
+        if base == "main":
+            return _R(1)  # real "no" from merge-base --is-ancestor
+        raise AssertionError(f"unexpected base {base!r}")
+
+    monkeypatch.setattr(pinrefs, "git", fake_git)
+    assert ps.unreachable_from_main("0" * 40) is True
+
+
+def test_git_error_on_every_base_is_not_reported_unreachable(monkeypatch):
+    # Regression: if every base ref errors out (no mainline ref resolves at all),
+    # that is "we cannot judge", not "unreachable" -- must return False, never
+    # misreport a git failure as a positive "not an ancestor" finding.
+    class _R:
+        def __init__(self, returncode):
+            self.returncode = returncode
+
+    monkeypatch.setattr(pinrefs, "git", lambda *a: _R(128))
+    assert ps.unreachable_from_main("0" * 40) is False
