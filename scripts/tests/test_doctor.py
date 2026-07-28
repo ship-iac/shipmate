@@ -893,10 +893,10 @@ def test_latest_check_ids_keeps_newest_shipmate_run_per_name():
         '{"id": 3, "name": "dns / dev-eu", "started_at": "2026-07-26T10:30:00Z"' + ga,
         # the shipmate App's own check runs (apply checks) are kept via app_id
         '{"id": 4, "name": "apply / app / dev-eu", "started_at": "2026-07-26T10:00:00Z", '
-        '"app_slug": "shipmate", "app_id": 999}',
+        + '"app_slug": "shipmate", "app_id": 999}',
         # third-party apps are dropped (out of the harvest's scope)
         '{"id": 5, "name": "codecov/project", "started_at": "2026-07-26T10:00:00Z", '
-        '"app_slug": "codecov", "app_id": 254}',
+        + '"app_slug": "codecov", "app_id": 254}',
     ]
     assert doctor.latest_check_ids(lines, app_id="999") == [
         (2, "app / dev-eu"),
@@ -1060,7 +1060,7 @@ def test_harvest_pending_ignores_third_party_check_runs():
     lines = [
         '{"id": 1, "name": "app / dev-eu", "started_at": "t", ' + _COMPLETED,
         '{"id": 5, "name": "codecov/project", "app_slug": "codecov", "app_id": 254, '
-        '"status": "in_progress"}',
+        + '"status": "in_progress"}',
     ]
     assert doctor.harvest_pending(lines, app_id=_APP_ID) is False
 
@@ -1251,7 +1251,7 @@ def test_latest_check_ids_tolerates_malformed_and_non_object_lines():
         "null",
         "5",
         '{"id": 9, "name": "ok / dev-eu", "started_at": "2026-07-26T10:00:00Z", '
-        '"app_slug": "github-actions"}',
+        + '"app_slug": "github-actions"}',
     ]
     assert doctor.latest_check_ids(lines) == [(9, "ok / dev-eu")]
 
