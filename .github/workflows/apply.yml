@@ -33,7 +33,7 @@ jobs:
           terramate-version: ${{ vars.TERRAMATE_VERSION }}
           tofu-version: ${{ vars.TOFU_VERSION }}
       - id: d
-        uses: ship-iac/shipmate/actions/apply-detect@6e5b150b4220b59273215b4570ef16f93a30ae66
+        uses: ship-iac/shipmate/actions/apply-detect@93b6a7eaa96d65c98fe444cccc6da6a35350fc42
         with:
           environment: ${{ inputs.environment }}
           plan-run-id: ${{ inputs.plan_run_id }}
@@ -81,13 +81,13 @@ jobs:
     steps:
       - name: Complete gate if every apply check is done
         id: gate
-        uses: ship-iac/shipmate/actions/gate-refresh@6e5b150b4220b59273215b4570ef16f93a30ae66
+        uses: ship-iac/shipmate/actions/gate-refresh@93b6a7eaa96d65c98fe444cccc6da6a35350fc42
         with:
           head-sha: ${{ inputs.ref }}
           app-id: ${{ vars.SHIPMATE_APP_ID }}
           private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
       - name: Post apply result comment
-        uses: ship-iac/shipmate/actions/apply-summary@59940f49f7119c13ffd4b0f0c2789d21efe36235
+        uses: ship-iac/shipmate/actions/apply-summary@93b6a7eaa96d65c98fe444cccc6da6a35350fc42
         with:
           pr-number: ${{ inputs.pr_number }}
           head-sha: ${{ inputs.ref }}
