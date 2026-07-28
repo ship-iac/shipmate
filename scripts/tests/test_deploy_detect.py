@@ -17,7 +17,7 @@ def test_filter_pending_drops_completed_applies():
         {"stack": "stacks/dns", "environment": "dev-eu", "workload": ""},
         {"stack": "stacks/app", "environment": "dev-eu", "workload": ""},
     ]
-    completed = {"apply / dev-eu / stacks/dns"}  # applied pre-merge -> skip
+    completed = {"apply / stacks/dns / dev-eu"}  # applied pre-merge -> skip
     assert dd.filter_pending(cells, completed) == [
         {"stack": "stacks/app", "environment": "dev-eu", "workload": ""},
     ]
@@ -35,7 +35,7 @@ def test_completed_failure_apply_stays_pending():
     cells = [{"stack": "stacks/app", "environment": "dev-eu", "workload": ""}]
     checks = [
         {
-            "name": "apply / dev-eu / stacks/app",
+            "name": "apply / stacks/app / dev-eu",
             "status": "completed",
             "conclusion": "failure",
             "started_at": "2026-07-18T10:00:00Z",
@@ -52,14 +52,14 @@ def test_duplicate_run_newer_queued_stays_pending():
     cells = [{"stack": "stacks/app", "environment": "dev-eu", "workload": ""}]
     checks = [
         {
-            "name": "apply / dev-eu / stacks/app",
+            "name": "apply / stacks/app / dev-eu",
             "status": "completed",
             "conclusion": "success",
             "started_at": "2026-07-18T10:00:00Z",
             "id": 1,
         },
         {
-            "name": "apply / dev-eu / stacks/app",
+            "name": "apply / stacks/app / dev-eu",
             "status": "queued",
             "conclusion": None,
             "started_at": "2026-07-18T11:00:00Z",
@@ -172,7 +172,7 @@ def test_foreign_app_completed_check_stays_pending():
     cells = [{"stack": "stacks/app", "environment": "dev-eu", "workload": ""}]
     line = json.dumps(
         {
-            "name": "apply / dev-eu / stacks/app",
+            "name": "apply / stacks/app / dev-eu",
             "status": "completed",
             "conclusion": "success",
             "started_at": "2026-07-18T10:00:00Z",

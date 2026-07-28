@@ -92,7 +92,7 @@ def test_foreign_app_completed_check_stays_pending():
     cells = [{"stack": "stacks/app", "environment": "dev-eu"}]
     line = json.dumps(
         {
-            "name": "apply / dev-eu / stacks/app",
+            "name": "apply / stacks/app / dev-eu",
             "status": "completed",
             "conclusion": "success",
             "started_at": "2026-07-18T10:00:00Z",

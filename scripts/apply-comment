@@ -461,7 +461,7 @@ def _check_state(row, present, done):
     app-id mismatch and from_app dropping a forged same-name check all land
     here, and every one of them must fall back to the artifact-only rendering
     rather than invent a stranded cell."""
-    name = f"apply / {row['environment']} / {row['stack_path']}"
+    name = f"apply / {row['stack_path']} / {row['environment']}"
     if name in done:
         return CHECK_DONE
     if name in present:
@@ -513,13 +513,16 @@ def _resources(text):
 
 
 def _job_url(row, jobs, run_url):
-    """Per-cell log link: jobs display FORWARD-built `apply / <env> /
-    <stack_path>` (the CONTRACT grammar), matched as a suffix of the listed job
-    name (a called workflow's jobs display as `<caller-job> / apply / <env> /
-    <stack>`). Matches on a ` / `-separated boundary (not a bare `endswith`) so
-    a job named e.g. `reapply / ...` cannot false-positive on the `apply / ...`
-    suffix. No match -> fall back to the workflow-run URL."""
-    target = f"apply / {row['environment']} / {row['stack_path']}"
+    """Per-cell log link: jobs display FORWARD-built `apply / <stack_path> /
+    <env>` (the CONTRACT grammar), matched as a suffix of the listed job name.
+    Every caller level prepends its own job name, and the prefix differs per
+    route -- `<consumer job> / L<n> / apply / ...` on the env-level paths
+    (deploy, bare apply), `<consumer job> / waves / apply / ...` on the
+    single-env dispatch -- so only the suffix is matched, on a ` / `-separated
+    boundary (not a bare `endswith`) so a job named e.g. `reapply / ...` cannot
+    false-positive on the `apply / ...` suffix. No match -> fall back to the
+    workflow-run URL."""
+    target = f"apply / {row['stack_path']} / {row['environment']}"
     url = None
     for job in jobs:
         name = job.get("name", "")

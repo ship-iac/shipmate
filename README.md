@@ -143,8 +143,9 @@ The `plan.yml` workflow (thin and identical across repo layouts; see the
   `shipmate · plan / <stack> / <env>` in the UI); `actions/plan-cell`
   writes the **full plan text to the job's step summary** (reachable one click
   from the check), uploads the `.otplan` + a TF_VAR fingerprint as an
-  artifact, and creates the `apply / <env> / <stack>` check **pending** (or
-  completed "no changes").
+  artifact. The matching `apply / <stack> / <env>` check is created **pending**
+  (or completed "no changes") by the `summary` job below — one App token for the
+  whole fan-out, so the App private key never enters a plan cell.
 - **`summary`** — `actions/summary` upserts one sticky PR comment (a stack ×
   env table) and creates/refreshes the aggregate **`shipmate / gate`**
   commit status, which stays non-green while any apply is pending or any
@@ -173,7 +174,7 @@ workflow over shipmate actions.
 - **`deploy.yml`** (`on: push main`, engine reusable
   `.github/workflows/deploy.yml`) is the **exact-plan apply** path.
   `actions/deploy-detect` maps the merge commit → its PR head SHA, takes the
-  stacks whose `apply / <env> / <stack>` check is still **pending**, and orders
+  stacks whose `apply / <stack> / <env>` check is still **pending**, and orders
   them into **waves** (`scripts/waves` = topological levels of the Terramate
   `after` DAG). Pre-declared `wave0..wave7` jobs each `needs` the previous; the
   skip-propagation guard (`if: !failure() && !cancelled() && waveN != '[]'`)

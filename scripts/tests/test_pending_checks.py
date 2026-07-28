@@ -42,7 +42,7 @@ def test_changed_cell_yields_queued_body(tmp_path):
     )
     (body,) = pc.bodies(str(tmp_path), HEAD)
     assert body == {
-        "name": "apply / dev-eu / stacks/app",
+        "name": "apply / stacks/app / dev-eu",
         "head_sha": HEAD,
         "status": "queued",
         "external_id": "f" * 64,
@@ -108,4 +108,4 @@ def test_cells_sorted_and_multiple(tmp_path):
         fingerprint="2" * 64,
     )
     names = [b["name"] for b in pc.bodies(str(tmp_path), HEAD)]
-    assert names == ["apply / dev-eu / stacks/app", "apply / dev-us / stacks/app"]
+    assert names == ["apply / stacks/app / dev-eu", "apply / stacks/app / dev-us"]

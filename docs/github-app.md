@@ -150,7 +150,7 @@ gh secret set SHIPMATE_APP_PRIVATE_KEY --org <org> --visibility selected \
 - Permissions: `actions: write`, `pull_requests: write`, `contents: read`,
   `members: read`, `checks: write`, `statuses: write`, `issues: write`. The
   App mints a fresh installation token per job and authors: every
-  `apply / <env> / <stack>` check (create pending, complete on apply), the
+  `apply / <stack> / <env>` check (create pending, complete on apply), the
   aggregate `shipmate / gate` commit status, the sticky plan comment, the
   `shipmate doctor` sticky report, the apply result comments, and drift
   issues. The plan matrix job's own `<stack> / <env>` auto check-run stays

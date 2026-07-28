@@ -892,7 +892,7 @@ def test_latest_check_ids_keeps_newest_shipmate_run_per_name():
         '{"id": 2, "name": "app / dev-eu", "started_at": "2026-07-26T11:00:00Z"' + ga,
         '{"id": 3, "name": "dns / dev-eu", "started_at": "2026-07-26T10:30:00Z"' + ga,
         # the shipmate App's own check runs (apply checks) are kept via app_id
-        '{"id": 4, "name": "apply / dev-eu / app", "started_at": "2026-07-26T10:00:00Z", '
+        '{"id": 4, "name": "apply / app / dev-eu", "started_at": "2026-07-26T10:00:00Z", '
         '"app_slug": "shipmate", "app_id": 999}',
         # third-party apps are dropped (out of the harvest's scope)
         '{"id": 5, "name": "codecov/project", "started_at": "2026-07-26T10:00:00Z", '
@@ -900,7 +900,7 @@ def test_latest_check_ids_keeps_newest_shipmate_run_per_name():
     ]
     assert doctor.latest_check_ids(lines, app_id="999") == [
         (2, "app / dev-eu"),
-        (4, "apply / dev-eu / app"),
+        (4, "apply / app / dev-eu"),
         (3, "dns / dev-eu"),
     ]
 

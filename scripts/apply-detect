@@ -67,7 +67,7 @@ def workset_from_artifacts(artifact_names, env, graph_paths):
 
 
 def filter_pending(cells, completed_names):
-    return [c for c in cells if f"apply / {c['environment']} / {c['stack']}" not in completed_names]
+    return [c for c in cells if f"apply / {c['stack']} / {c['environment']}" not in completed_names]
 
 
 # Single-sourced in build-matrix (next to _run); aliased here so error handling

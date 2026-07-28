@@ -31,24 +31,24 @@ def _run(name, status, conclusion, started_at="2026-07-18T10:00:00Z", run_id=1):
 
 def test_all_applies_succeeded():
     runs = [
-        _run("apply / dev-eu / stacks/app", "completed", "success"),
-        _run("apply / dev-us / stacks/app", "completed", "success"),
+        _run("apply / stacks/app / dev-eu", "completed", "success"),
+        _run("apply / stacks/app / dev-us", "completed", "success"),
     ]
     assert ag.verdict(runs) == "complete"
 
 
 def test_one_apply_still_queued():
     runs = [
-        _run("apply / dev-eu / stacks/app", "completed", "success"),
-        _run("apply / dev-us / stacks/app", "queued", None),
+        _run("apply / stacks/app / dev-eu", "completed", "success"),
+        _run("apply / stacks/app / dev-us", "queued", None),
     ]
     assert ag.verdict(runs) == "pending"
 
 
 def test_failed_apply_does_not_complete_gate():
     runs = [
-        _run("apply / dev-eu / stacks/app", "completed", "failure"),
-        _run("apply / dev-us / stacks/app", "completed", "success"),
+        _run("apply / stacks/app / dev-eu", "completed", "failure"),
+        _run("apply / stacks/app / dev-us", "completed", "success"),
     ]
     assert ag.verdict(runs) == "pending"
 
@@ -56,8 +56,8 @@ def test_failed_apply_does_not_complete_gate():
 def test_neutral_no_change_apply_counts_as_done():
     # plan-cell completes a no-changes cell's apply check with conclusion=neutral.
     runs = [
-        _run("apply / dev-eu / stacks/app", "completed", "neutral"),
-        _run("apply / dev-us / stacks/app", "completed", "success"),
+        _run("apply / stacks/app / dev-eu", "completed", "neutral"),
+        _run("apply / stacks/app / dev-us", "completed", "success"),
     ]
     assert ag.verdict(runs) == "complete"
 
@@ -67,14 +67,14 @@ def test_latest_run_per_name_wins():
     # must be judged by its newest run, picked by check-run id (creation order).
     runs = [
         _run(
-            "apply / dev-eu / stacks/app",
+            "apply / stacks/app / dev-eu",
             "queued",
             None,
             started_at="2026-07-18T10:00:00Z",
             run_id=1,
         ),
         _run(
-            "apply / dev-eu / stacks/app",
+            "apply / stacks/app / dev-eu",
             "completed",
             "success",
             started_at="2026-07-18T11:00:00Z",
@@ -87,14 +87,14 @@ def test_latest_run_per_name_wins():
 def test_stale_completed_run_does_not_mask_newer_pending():
     runs = [
         _run(
-            "apply / dev-eu / stacks/app",
+            "apply / stacks/app / dev-eu",
             "completed",
             "success",
             started_at="2026-07-18T10:00:00Z",
             run_id=1,
         ),
         _run(
-            "apply / dev-eu / stacks/app",
+            "apply / stacks/app / dev-eu",
             "queued",
             None,
             started_at="2026-07-18T11:00:00Z",
@@ -108,7 +108,7 @@ def test_non_apply_checks_ignored():
     runs = [
         _run("stacks/app / dev-eu", "completed", "success"),
         _run("shipmate / gate", "queued", None),
-        _run("apply / dev-eu / stacks/app", "completed", "success"),
+        _run("apply / stacks/app / dev-eu", "completed", "success"),
     ]
     assert ag.verdict(runs) == "complete"
 
@@ -119,34 +119,34 @@ def test_no_apply_checks_at_all():
 
 
 def test_cancelled_apply_stays_pending():
-    runs = [_run("apply / dev-eu / stacks/app", "completed", "cancelled")]
+    runs = [_run("apply / stacks/app / dev-eu", "completed", "cancelled")]
     assert ag.verdict(runs) == "pending"
 
 
 def test_done_names_excludes_completed_failure():
-    runs = [_run("apply / dev-eu / stacks/app", "completed", "failure")]
+    runs = [_run("apply / stacks/app / dev-eu", "completed", "failure")]
     assert ag.done_names(runs) == set()
 
 
 def test_done_names_includes_completed_success_and_neutral():
     runs = [
-        _run("apply / dev-eu / stacks/app", "completed", "success"),
-        _run("apply / dev-us / stacks/app", "completed", "neutral"),
+        _run("apply / stacks/app / dev-eu", "completed", "success"),
+        _run("apply / stacks/app / dev-us", "completed", "neutral"),
     ]
-    assert ag.done_names(runs) == {"apply / dev-eu / stacks/app", "apply / dev-us / stacks/app"}
+    assert ag.done_names(runs) == {"apply / stacks/app / dev-eu", "apply / stacks/app / dev-us"}
 
 
 def test_done_names_uses_latest_run_per_name():
     runs = [
         _run(
-            "apply / dev-eu / stacks/app",
+            "apply / stacks/app / dev-eu",
             "completed",
             "success",
             started_at="2026-07-18T10:00:00Z",
             run_id=1,
         ),
         _run(
-            "apply / dev-eu / stacks/app",
+            "apply / stacks/app / dev-eu",
             "queued",
             None,
             started_at="2026-07-18T11:00:00Z",
@@ -179,14 +179,14 @@ def test_latest_by_name_handles_missing_started_at_key():
     # arrive without it, so latest_by_name must tolerate its absence.
     runs = [
         {
-            "name": "apply / dev-eu / stacks/app",
+            "name": "apply / stacks/app / dev-eu",
             "status": "completed",
             "conclusion": "success",
             "id": 1,
         },
     ]
     latest = ag.latest_by_name(runs)
-    assert latest["apply / dev-eu / stacks/app"]["id"] == 1
+    assert latest["apply / stacks/app / dev-eu"]["id"] == 1
 
 
 def test_latest_by_name_handles_missing_id_key():
@@ -194,14 +194,14 @@ def test_latest_by_name_handles_missing_id_key():
     # `run.get("id") or 0` to plain `run["id"]` must fail this test.
     runs = [
         {
-            "name": "apply / dev-eu / stacks/app",
+            "name": "apply / stacks/app / dev-eu",
             "status": "completed",
             "conclusion": "success",
             "started_at": "2026-07-18T10:00:00Z",
         },
     ]
     latest = ag.latest_by_name(runs)
-    assert latest["apply / dev-eu / stacks/app"]["started_at"] == "2026-07-18T10:00:00Z"
+    assert latest["apply / stacks/app / dev-eu"]["started_at"] == "2026-07-18T10:00:00Z"
 
 
 def test_latest_by_name_newer_queued_null_started_at_beats_older_completed():
@@ -212,26 +212,26 @@ def test_latest_by_name_newer_queued_null_started_at_beats_older_completed():
     # null started_at ('') sorted below the completed run's real timestamp and
     # the completed run wrongly won -- silently marking unapplied work done.
     older_completed = {
-        "name": "apply / dev-eu / stacks/app",
+        "name": "apply / stacks/app / dev-eu",
         "status": "completed",
         "conclusion": "success",
         "started_at": "2026-07-18T10:00:00Z",
         "id": 1,
     }
     newer_queued_null = {
-        "name": "apply / dev-eu / stacks/app",
+        "name": "apply / stacks/app / dev-eu",
         "status": "queued",
         "conclusion": None,
         "started_at": None,
         "id": 2,
     }
     latest = ag.latest_by_name([older_completed, newer_queued_null])
-    assert latest["apply / dev-eu / stacks/app"]["id"] == 2
+    assert latest["apply / stacks/app / dev-eu"]["id"] == 2
     assert ag.done_names([older_completed, newer_queued_null]) == set()
 
 
 def test_verdict_does_not_crash_on_runs_missing_started_at_and_id():
-    runs = [{"name": "apply / dev-eu / stacks/app", "status": "completed", "conclusion": "success"}]
+    runs = [{"name": "apply / stacks/app / dev-eu", "status": "completed", "conclusion": "success"}]
     assert ag.verdict(runs) == "complete"
 
 
@@ -252,10 +252,10 @@ def test_latest_by_name_empty_prefix_gathers_all_latest_per_name():
     runs = [
         {"name": "stacks/app / dev-eu", "id": 1, "html_url": "u1"},
         {"name": "stacks/app / dev-eu", "id": 3, "html_url": "u3"},
-        {"name": "apply / dev-eu / stacks/app", "id": 2, "html_url": "u2"},
+        {"name": "apply / stacks/app / dev-eu", "id": 2, "html_url": "u2"},
     ]
     latest = ag.latest_by_name(runs, prefix="")
-    assert set(latest) == {"stacks/app / dev-eu", "apply / dev-eu / stacks/app"}
+    assert set(latest) == {"stacks/app / dev-eu", "apply / stacks/app / dev-eu"}
     assert latest["stacks/app / dev-eu"]["html_url"] == "u3"
 
 
@@ -263,13 +263,13 @@ def test_latest_by_name_default_prefix_unchanged():
     runs = [
         {"name": "stacks/app / dev-eu", "id": 1},
         {
-            "name": "apply / dev-eu / stacks/app",
+            "name": "apply / stacks/app / dev-eu",
             "id": 2,
             "status": "completed",
             "conclusion": "success",
         },
     ]
-    assert set(ag.latest_by_name(runs)) == {"apply / dev-eu / stacks/app"}
+    assert set(ag.latest_by_name(runs)) == {"apply / stacks/app / dev-eu"}
 
 
 def _run_obj(name, status="completed", conclusion="success", id=1, app_id=999):
@@ -283,10 +283,10 @@ def _run_obj(name, status="completed", conclusion="success", id=1, app_id=999):
 
 
 def test_from_app_filters_foreign_and_missing_app():
-    ours = _run_obj("apply / dev-eu / stacks/app", app_id=999)
-    foreign = _run_obj("apply / dev-eu / stacks/app", id=2, app_id=15368)
+    ours = _run_obj("apply / stacks/app / dev-eu", app_id=999)
+    foreign = _run_obj("apply / stacks/app / dev-eu", id=2, app_id=15368)
     no_app = {
-        "name": "apply / dev-eu / stacks/app",
+        "name": "apply / stacks/app / dev-eu",
         "status": "completed",
         "conclusion": "success",
         "id": 3,
@@ -296,9 +296,9 @@ def test_from_app_filters_foreign_and_missing_app():
 
 def test_forged_newer_completed_duplicate_cannot_green_a_pending_name():
     pending = _run_obj(
-        "apply / dev-eu / stacks/app", status="queued", conclusion=None, id=10, app_id=999
+        "apply / stacks/app / dev-eu", status="queued", conclusion=None, id=10, app_id=999
     )
-    forged = _run_obj("apply / dev-eu / stacks/app", id=11, app_id=15368)
+    forged = _run_obj("apply / stacks/app / dev-eu", id=11, app_id=15368)
     runs = ag.from_app([pending, forged], "999")
     assert ag.verdict(runs) == "pending"
 
@@ -307,7 +307,7 @@ def test_from_app_empty_app_id_fails_loud():
     # An unset SHIPMATE_APP_ID renders as '' -- int('') must not raw-traceback
     # (ValueError) and take down the whole detect/gate/apply run; fail loud
     # with a message naming the variable instead.
-    runs = [_run_obj("apply / dev-eu / stacks/app")]
+    runs = [_run_obj("apply / stacks/app / dev-eu")]
     with pytest.raises(SystemExit, match="SHIPMATE_APP_ID"):
         ag.from_app(runs, "")
 
@@ -317,8 +317,8 @@ def test_app_done_names_excludes_foreign_app_completed():
     # calling from_app internally, this must go red. A foreign-App (15368,
     # github-actions) completed check must never appear in the result, even
     # though an App-authored (999) completed check for a different name does.
-    ours = json.dumps(_run_obj("apply / dev-eu / stacks/app", id=1, app_id=999))
-    foreign = json.dumps(_run_obj("apply / dev-us / stacks/app", id=2, app_id=15368))
+    ours = json.dumps(_run_obj("apply / stacks/app / dev-eu", id=1, app_id=999))
+    foreign = json.dumps(_run_obj("apply / stacks/app / dev-us", id=2, app_id=15368))
     names = ag.app_done_names([ours, foreign], "999")
-    assert names == {"apply / dev-eu / stacks/app"}
-    assert "apply / dev-us / stacks/app" not in names
+    assert names == {"apply / stacks/app / dev-eu"}
+    assert "apply / stacks/app / dev-us" not in names

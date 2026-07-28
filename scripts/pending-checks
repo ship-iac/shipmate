@@ -26,7 +26,7 @@ def bodies(cells_dir, head_sha):
                 "are from mismatched engine revisions; re-run the plan."
             )
         body = {
-            "name": f"apply / {cell['environment']} / {cell['stack_path']}",
+            "name": f"apply / {cell['stack_path']} / {cell['environment']}",
             "head_sha": head_sha,
             "status": "queued",
             "external_id": cell["fingerprint"],

@@ -24,7 +24,7 @@ jobs:
     concurrency:
       group: apply-${{ matrix.environment }}-${{ matrix.stack }}
       cancel-in-progress: false
-    name: apply / ${{ matrix.environment }} / ${{ matrix.stack }}
+    name: apply / ${{ matrix.stack }} / ${{ matrix.environment }}
     env:
       # Flavor-agnostic: unset vars resolve to "" and are excluded from the
       # fingerprint (empty TF_VAR_* aren't hashed), so folders (no vars) still match their plan.
@@ -63,7 +63,7 @@ jobs:
     concurrency:
       group: apply-${{ matrix.environment }}-${{ matrix.stack }}
       cancel-in-progress: false
-    name: apply / ${{ matrix.environment }} / ${{ matrix.stack }}
+    name: apply / ${{ matrix.stack }} / ${{ matrix.environment }}
     env:
       # Flavor-agnostic: unset vars resolve to "" and are excluded from the
       # fingerprint (empty TF_VAR_* aren't hashed), so folders (no vars) still match their plan.
@@ -102,7 +102,7 @@ jobs:
     concurrency:
       group: apply-${{ matrix.environment }}-${{ matrix.stack }}
       cancel-in-progress: false
-    name: apply / ${{ matrix.environment }} / ${{ matrix.stack }}
+    name: apply / ${{ matrix.stack }} / ${{ matrix.environment }}
     env:
       # Flavor-agnostic: unset vars resolve to "" and are excluded from the
       # fingerprint (empty TF_VAR_* aren't hashed), so folders (no vars) still match their plan.
@@ -141,7 +141,7 @@ jobs:
     concurrency:
       group: apply-${{ matrix.environment }}-${{ matrix.stack }}
       cancel-in-progress: false
-    name: apply / ${{ matrix.environment }} / ${{ matrix.stack }}
+    name: apply / ${{ matrix.stack }} / ${{ matrix.environment }}
     env:
       # Flavor-agnostic: unset vars resolve to "" and are excluded from the
       # fingerprint (empty TF_VAR_* aren't hashed), so folders (no vars) still match their plan.
@@ -180,7 +180,7 @@ jobs:
     concurrency:
       group: apply-${{ matrix.environment }}-${{ matrix.stack }}
       cancel-in-progress: false
-    name: apply / ${{ matrix.environment }} / ${{ matrix.stack }}
+    name: apply / ${{ matrix.stack }} / ${{ matrix.environment }}
     env:
       # Flavor-agnostic: unset vars resolve to "" and are excluded from the
       # fingerprint (empty TF_VAR_* aren't hashed), so folders (no vars) still match their plan.
@@ -219,7 +219,7 @@ jobs:
     concurrency:
       group: apply-${{ matrix.environment }}-${{ matrix.stack }}
       cancel-in-progress: false
-    name: apply / ${{ matrix.environment }} / ${{ matrix.stack }}
+    name: apply / ${{ matrix.stack }} / ${{ matrix.environment }}
     env:
       # Flavor-agnostic: unset vars resolve to "" and are excluded from the
       # fingerprint (empty TF_VAR_* aren't hashed), so folders (no vars) still match their plan.
@@ -258,7 +258,7 @@ jobs:
     concurrency:
       group: apply-${{ matrix.environment }}-${{ matrix.stack }}
       cancel-in-progress: false
-    name: apply / ${{ matrix.environment }} / ${{ matrix.stack }}
+    name: apply / ${{ matrix.stack }} / ${{ matrix.environment }}
     env:
       # Flavor-agnostic: unset vars resolve to "" and are excluded from the
       # fingerprint (empty TF_VAR_* aren't hashed), so folders (no vars) still match their plan.
@@ -297,7 +297,7 @@ jobs:
     concurrency:
       group: apply-${{ matrix.environment }}-${{ matrix.stack }}
       cancel-in-progress: false
-    name: apply / ${{ matrix.environment }} / ${{ matrix.stack }}
+    name: apply / ${{ matrix.stack }} / ${{ matrix.environment }}
     env:
       # Flavor-agnostic: unset vars resolve to "" and are excluded from the
       # fingerprint (empty TF_VAR_* aren't hashed), so folders (no vars) still match their plan.

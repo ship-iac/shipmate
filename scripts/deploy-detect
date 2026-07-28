@@ -28,10 +28,14 @@ bm = _load("build-matrix")
 wv = _load("waves")
 eo = _load("env-order")
 ag = _load("apply-gate")
+ad = _load("apply-detect")
 
-
-def filter_pending(cells, completed_names):
-    return [c for c in cells if f"apply / {c['environment']} / {c['stack']}" not in completed_names]
+# The dispatched and merge-driven queues must agree on which cells are already
+# applied, so the check-name reconstruction lives in ONE place (apply-detect);
+# apply-all-detect already calls it the same way. A private copy here would have
+# to be found and edited on every grammar change, and editing only one copy
+# leaves the two paths disagreeing with nothing surfacing it.
+filter_pending = ad.filter_pending
 
 
 # Single-sourced in build-matrix (next to _run); aliased here so error handling

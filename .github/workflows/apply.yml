@@ -45,6 +45,11 @@ jobs:
   # one env-level's wave matrix — run it through the same engine the deploy and
   # bare-apply paths use instead of duplicating wave0..wave7 here.
   apply:
+    # Display name only (the job id stays `apply`): a called workflow's jobs
+    # display as `<caller job> / <this name> / <wave job>`, and GHA cannot
+    # suppress a level — so this level is named for what it fans out instead of
+    # repeating the verb the wave job already carries.
+    name: waves
     needs: [detect]
     if: ${{ !failure() && !cancelled() && needs.detect.outputs.empty != 'true' }}
     uses: ship-iac/shipmate/.github/workflows/apply-env-level.yml@7eecc96403d2598ac3dcc2c477d731413fa61ffb

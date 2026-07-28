@@ -47,6 +47,8 @@ jobs:
           app-id: ${{ vars.SHIPMATE_APP_ID }}
 
   envlevel0:
+    # Display name only (job id unchanged) — see apply.yml's `waves` job.
+    name: L0
     needs: [detect]
     if: ${{ !failure() && !cancelled() && needs.detect.outputs.envlevel0_empty != 'true' && !contains(join(needs.*.result, ','), 'cancelled') }}
     uses: ship-iac/shipmate/.github/workflows/apply-env-level.yml@7eecc96403d2598ac3dcc2c477d731413fa61ffb
@@ -65,6 +67,8 @@ jobs:
     secrets: inherit
 
   envlevel1:
+    # Display name only (job id unchanged) — see apply.yml's `waves` job.
+    name: L1
     needs: [detect, envlevel0]
     if: ${{ !failure() && !cancelled() && needs.detect.outputs.envlevel1_empty != 'true' && !contains(join(needs.*.result, ','), 'cancelled') }}
     uses: ship-iac/shipmate/.github/workflows/apply-env-level.yml@7eecc96403d2598ac3dcc2c477d731413fa61ffb
@@ -77,6 +81,8 @@ jobs:
     secrets: inherit
 
   envlevel2:
+    # Display name only (job id unchanged) — see apply.yml's `waves` job.
+    name: L2
     needs: [detect, envlevel0, envlevel1]
     if: ${{ !failure() && !cancelled() && needs.detect.outputs.envlevel2_empty != 'true' && !contains(join(needs.*.result, ','), 'cancelled') }}
     uses: ship-iac/shipmate/.github/workflows/apply-env-level.yml@7eecc96403d2598ac3dcc2c477d731413fa61ffb
@@ -89,6 +95,8 @@ jobs:
     secrets: inherit
 
   envlevel3:
+    # Display name only (job id unchanged) — see apply.yml's `waves` job.
+    name: L3
     needs: [detect, envlevel0, envlevel1, envlevel2]
     if: ${{ !failure() && !cancelled() && needs.detect.outputs.envlevel3_empty != 'true' && !contains(join(needs.*.result, ','), 'cancelled') }}
     uses: ship-iac/shipmate/.github/workflows/apply-env-level.yml@7eecc96403d2598ac3dcc2c477d731413fa61ffb
