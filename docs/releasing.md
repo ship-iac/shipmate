@@ -19,16 +19,25 @@ that reference them by SHA must be updated to a commit that contains your change
 otherwise the deploy/apply path silently keeps running the old action.
 
 Because a commit cannot pin its own not-yet-existing SHA, this is a two-step
-sequence:
+sequence — and a three-step one whenever the change touches an action that
+`.github/workflows/apply-env-level.yml` pins, since bumping that file's action
+pins changes the file and in turn invalidates the pins *to* it:
 
-1. Merge the action change (creates the **action commit**, e.g. `abc1234`).
+1. Merge the action change (creates the **action commit**).
 2. In a follow-up commit, bump the internal pins to that SHA:
 
    ```bash
-   grep -rlE 'ship-iac/shipmate/actions/(apply-cell|setup|state)@[0-9a-f]{40}' \
-     .github/workflows actions \
-     | xargs sed -i 's/@<old-sha>/@abc1234.../g'
+   python dev/repin-internal.py --to <action-sha>
    ```
+
+3. If step 2 changed `apply-env-level.yml`, repeat: the workflows pinning it are
+   now stale, so bump again to step 2's commit.
+
+`dev/repin-internal.py` selects what to bump using the same code the guard
+asserts on, so the two cannot disagree. `--check` reports without writing;
+`--all` flattens every internal pin to a single SHA instead of bumping only the
+stale subset — a bigger diff, no correctness difference, and it makes "which
+tree is running" one grep.
 
 ### Consumers must bump every engine ref in one change
 
@@ -75,6 +84,13 @@ The push-to-main run still catches a bad pin, one step later, exactly where and
 when the bump is done. (The workflow checks out with `fetch-depth: 0` so the test
 can read the pinned commit objects.)
 
+One case does **not** degrade to a skip: a pin whose commit is absent while the
+mainline baseline *did* resolve. Full history is present, so the commit itself is
+gone (force-push, GC) and the ref cannot resolve at runtime — the guard fails.
+Only an unreachable mainline (shallow clone, truncated history) skips, and it
+skips before inspecting any pin. A skipped test satisfies branch protection, so
+this distinction is what keeps a broken pin from shipping green.
+
 Because this workflow reports **no status on PR heads**, it must **never** be
 added to this repo's required status checks — a required check that never
 reports deadlocks every PR.
@@ -97,6 +113,15 @@ gh api repos/ship-iac/shipmate/immutable-releases   # {"enabled":true,...}
 ```
 
 Then cut the release:
+
+First confirm the target is safe to pin. An intermediate commit of the cascade
+above carries stale internal pins; tagging one publishes a release whose tree
+runs its own old code, and the constraint below about tagging the action commit
+is only the most obvious case of it:
+
+```bash
+python dev/pin-status.py <release-sha>   # exit 0 == safe to pin
+```
 
 ```bash
 gh release create v0.2.0 --target <release-sha> --title v0.2.0 --generate-notes
@@ -125,6 +150,17 @@ The order matters. Cut the release first, then re-pin the sample repos to that
 same SHA, annotating each pin `# vX.Y.Z`. Re-pinning first would leave the
 samples on a commit with no release, which is exactly the state the probe reads
 as staleness.
+
+```bash
+for d in repo-example-stacks repo-example-folders repo-example-workspaces; do
+  python dev/repin-consumer.py --repo "../$d" --sha <release-sha> --label vX.Y.Z
+done
+```
+
+`dev/repin-consumer.py` moves **every** engine reference in one pass (see
+§ Consumers must bump every engine ref in one change) and refuses a target whose
+own internal pins are stale, so it cannot re-pin a sample to an intermediate
+cascade commit. `--force` overrides, loudly.
 
 The version line is `v0.x` while the action inputs, check names, and tag grammar
 are still declared unstable in `README.md`. `--generate-notes` diffs against the
