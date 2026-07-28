@@ -162,7 +162,7 @@ runs:
       continue-on-error: true
       uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
       with:
-        app-id: ${{ inputs.app-id }}
+        client-id: ${{ inputs.app-id }}
         private-key: ${{ inputs.private-key }}
         owner: ${{ github.repository_owner }}
         repositories: ${{ github.event.repository.name }}
@@ -202,7 +202,7 @@ runs:
       continue-on-error: true
       uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
       with:
-        app-id: ${{ inputs.app-id }}
+        client-id: ${{ inputs.app-id }}
         private-key: ${{ inputs.private-key }}
         owner: ${{ github.repository_owner }}
         repositories: ${{ github.event.repository.name }}
@@ -339,6 +339,32 @@ runs:
           export SHIPMATE_APP_PERMISSION_ERROR=""
         fi
         python3 "$GITHUB_ACTION_PATH/../../scripts/doctor" > doctor.md
+        # The report is 30-60s of probes, and every path below can lose it: a
+        # failed comment listing exits 0 by design (leaving a green run with no
+        # report at all — indistinguishable, to the commenter, from the engine
+        # ignoring them), and a failed PATCH/POST reds the step after the render.
+        # So publish to the job summary before any of them: the run page then
+        # carries the report even when the pull request does not, and a retry is
+        # a convenience rather than the only way to see it.
+        #
+        # Degrading, never fatal, and deliberately not `|| true` (which a guard
+        # on the listing below forbids in this step): the summary is the *added*
+        # surface, so losing it must not cost the comment that posted fine
+        # before — which a bare `cat` under `set -e` would do. `:-` in the
+        # emptiness test keeps `set -u` from killing the step on a runner that
+        # never exports the variable; the write itself can still fail on a full
+        # or read-only runner volume.
+        #
+        # `retry_hint` resolves here, where whether the summary actually carries
+        # the report is known, so the listing-failure branch stays a single
+        # `echo` — it sits inside an `if ! gh api ... fi` whose degrade block is
+        # asserted on, and a nested `if` there would hide the warning.
+        retry_hint="comment shipmate doctor again to retry"
+        if [ -z "${GITHUB_STEP_SUMMARY:-}" ] || ! cat doctor.md >> "$GITHUB_STEP_SUMMARY"; then
+          echo "::warning::could not publish the doctor report to this job's summary; it survives only as the pull request comment"
+        else
+          retry_hint="read it in this job's summary, or $retry_hint"
+        fi
         marker='<!-- shipmate:doctor -->'
         # Same upsert discipline as the sticky plan comment: marker + Bot
         # author (the App's bot login is org-dependent), single id.
@@ -357,7 +383,12 @@ runs:
         if ! gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" --paginate \
                --jq "map(select(((.body // \"\") | startswith(\"$marker\")) and .user.type == \"Bot\")) | .[0].id // empty" \
                > doctor-comment-ids.txt; then
-          echo "::warning::could not list this pull request's comments; the doctor report was not posted this run — comment shipmate doctor again to retry"
+          # `retry_hint` names the surface that did survive. Without it the only
+          # signal is this annotation, which the commenter cannot see from the
+          # pull request, so their next move is another `shipmate doctor` — a
+          # second mint and another 30-60s of probes for a report already
+          # rendered on this run.
+          echo "::warning::could not list this pull request's comments; the doctor report was not posted to the pull request this run — $retry_hint"
           exit 0
         fi
         # --paginate evaluates --jq per page, so a marker match on >1 page emits
@@ -377,7 +408,7 @@ runs:
       continue-on-error: true
       uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
       with:
-        app-id: ${{ inputs.app-id }}
+        client-id: ${{ inputs.app-id }}
         private-key: ${{ inputs.private-key }}
         owner: ${{ github.repository_owner }}
         repositories: ${{ github.event.repository.name }}

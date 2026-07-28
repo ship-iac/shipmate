@@ -117,13 +117,33 @@ and when the warnings harvest itself could not complete (or may be truncated by
 GitHub's per-step annotation cap), rather than claiming a false all-clear.
 
 The harvest is deliberately uncurated: it reports the annotations as GitHub
-recorded them, including ones from the third-party actions the engine pins. In
-particular `actions/create-github-app-token` logs `Input 'app-id' has been
-deprecated with message: Use 'client-id' instead.` on every token mint, so most
-reports carry that line once per mint on the commit. It is upstream deprecation
-noise, not a setting to fix: the input is deprecated, not removed, and the
-numeric App id is the value the gate ruleset's `integration_id` pin and the
-apply-check author filter need, so the engine keeps supplying it.
+recorded them, including ones from the third-party actions the engine pins, so a
+deprecation warning from a pinned action reads the same as a shipmate warning.
+That is intended — a known-noise denylist would eventually swallow a real
+warning — so treat an unfamiliar line as upstream's until you have checked.
+
+The line you are most likely to meet is
+`Input 'app-id' has been deprecated with message: Use 'client-id' instead.`,
+once per token mint on the commit, from `actions/create-github-app-token`. **It
+is upstream deprecation noise, not a setting to fix** — nothing in your
+repository causes it and nothing you can configure removes it. Do not go looking
+for a second App credential or change `SHIPMATE_APP_ID`; that is a dead end.
+
+Engine releases from the one that introduced this note onward do not emit it:
+their mints identify the App with `client-id` rather than the deprecated
+`app-id` input. Only the input's *name* changed — the value threaded is still
+the one numeric App id you set as `SHIPMATE_APP_ID`, because upstream passes
+either input through unaltered as the JWT `iss` claim, which GitHub accepts as
+the App id or the Client id. No second credential, and that same numeric id
+keeps satisfying the gate ruleset's `integration_id` pin and the apply-check
+author filter.
+
+Expect the warnings to persist for a while regardless. Adoption is re-pin-only
+and staggered, so a repository pinned to an earlier engine SHA keeps emitting
+them until it re-pins; and the engine's own reusable workflows pin the composite
+actions they call by SHA too, so the deploy and apply paths keep emitting them
+until those internal pins are bumped. Seeing the line is not evidence that your
+wiring is wrong.
 
 `shipmate doctor` never blocks the gate, and it needs no team membership,
 review or reviewed plan, unlike `shipmate apply` — but because it reports this
@@ -169,7 +189,16 @@ report. Beyond that: `shipmate help` stays open to every commenter (it lists the
 verbs and discloses nothing about the repository, and a newcomer whose setup is
 broken still needs it), and the report is an ordinary pull request comment, so
 once someone with access asks for it, everyone who can read the pull request can
-read it.
+read it. The same rendered report is also written to the run's job summary, so
+that a GitHub API outage which loses the comment does not discard the probes.
+That surface needs repository read access too, so it admits no one the comment
+did not — but it is **not** as retractable. The comment is a single sticky one
+you can edit or delete, and the next `shipmate doctor` overwrites it; a job
+summary cannot be edited or redacted at all, and every past run keeps its own
+copy for the repository's Actions retention window (90 days by default). So if a
+report disclosed something you did not want recorded, deleting the comment is not
+enough — delete the workflow runs that produced it, or shorten the retention
+window.
 
 On a repository whose pull requests are **public** you can add a second layer
 by gating the `issue_comment` job itself on the same
