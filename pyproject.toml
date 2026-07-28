@@ -9,6 +9,13 @@ requires-python = ">=3.11"
 [tool.uv]
 package = false
 
+[tool.pytest.ini_options]
+# dev/ holds dev-time tooling (the internal-pin model and its CLIs), not shipped
+# runtime surface, so it is not importable from scripts/. Tests of that tooling
+# import it by name; this is what makes `import pinrefs` resolve without a
+# sys.path hack in every test module.
+pythonpath = ["dev"]
+
 [dependency-groups]
 dev = [
     "ruff>=0.16.0",
@@ -66,3 +73,5 @@ max-complexity = 8
 # Tests: assert is the point (S101); they invoke trusted dev tools by name
 # (shellcheck) via subprocess (S603/S607).
 "scripts/tests/*" = ["S101", "S603", "S607"]
+# dev/ tooling drives git by name via subprocess, same as the tests do.
+"dev/*" = ["S603", "S607"]

@@ -52,219 +52,39 @@ covers it, and the action pins it contains are separate top-level ref-list
 entries, each checked (including their own script dependencies) on their own
 -- adding the workflow's pinned actions' scripts to *its* set as well would
 double-count them under two different (referencing-file, sha) pairs.
+
+The derivation itself now lives in ``dev/pinrefs.py`` so the ``dev/`` re-pin
+CLIs run exactly the same logic this guard asserts on; a divergence between
+"what CI calls stale" and "what the fixer rewrites" would be worse than the
+duplication it replaces. This module keeps the rationale and the assertions.
 """
 
-import pathlib
-import re
-import subprocess
-
+import pinrefs
 import pytest
-
-_ROOT = pathlib.Path(__file__).resolve().parents[2]
-_REF = re.compile(r"ship-iac/shipmate/([^@\s]+)@([0-9a-f]{40})")
-_SCRIPT_REF = re.compile(r"\$GITHUB_ACTION_PATH/\.\./\.\./scripts/([A-Za-z0-9_-]+)")
-_LOAD_REF = re.compile(r"""_load\(\s*["']([^"']+)["']\s*\)""")
-
-
-def _self_refs():
-    """(referenced-path, sha, source-file) for every internal self-reference."""
-    sources = sorted((_ROOT / ".github" / "workflows").glob("*.yml")) + sorted(
-        (_ROOT / "actions").glob("*/action.yml")
-    )
-    refs = set()
-    for f in sources:
-        for path, sha in _REF.findall(f.read_text(encoding="utf-8")):
-            refs.add((path, sha, f.relative_to(_ROOT).as_posix()))
-    return sorted(refs)
-
-
-def _git(*args):
-    # encoding="utf-8": scripts/ source files carry non-ASCII (e.g. emoji status
-    # markers); Windows' default locale codec (cp1252) can't decode `git show`
-    # output for them, so pin the encoding rather than relying on text=True's
-    # locale default.
-    return subprocess.run(
-        ["git", "-C", str(_ROOT), *args], capture_output=True, text=True, encoding="utf-8"
-    )
-
-
-def _commit_present(sha):
-    return _git("cat-file", "-e", f"{sha}^{{commit}}").returncode == 0
-
-
-def _release_baseline():
-    """The commit the pins must be current against: the merge-base with the
-    mainline, NOT HEAD.
-
-    A pin is a *self*-reference, so the commit that edits a pinned action can
-    never also pin that action's SHA (a commit cannot pin its own unborn SHA) --
-    the bump is a documented follow-up (docs/releasing.md). Comparing against
-    HEAD therefore reds every branch that edits a pinned action from the first
-    keystroke, which is in-flight work, not staleness. Comparing against the
-    fork point (merge-base with main) instead means: the pin was current on the
-    release line this branch derives from. That keeps the real guard -- once an
-    action change merges to main without a pin bump, merge-base == main and the
-    stale pin fails, exactly where the bump can be done -- while an in-flight
-    branch that has only *its own* unmerged edits stays green. Returns None when
-    no mainline ref is reachable (shallow clone / detached HEAD with truncated
-    history); the caller then skips rather than comparing against HEAD, which
-    would re-introduce the self-edit false-positive this reframe removes.
-    """
-    for base in ("origin/main", "main"):
-        r = _git("merge-base", "HEAD", base)
-        if r.returncode == 0 and r.stdout.strip():
-            return r.stdout.strip()
-    return None
-
-
-def _direct_script_refs(action_yaml_text):
-    """Script names an action.yml invokes via ``$GITHUB_ACTION_PATH/../../scripts/<name>``."""
-    return set(_SCRIPT_REF.findall(action_yaml_text))
-
-
-def _load_refs(script_text):
-    """Script names a helper script cross-loads via the repo's ``_load("<name>")`` pattern."""
-    return set(_LOAD_REF.findall(script_text))
-
-
-def _script_closure(direct, source_lookup):
-    """Transitive closure of ``direct`` script names through ``_load(...)`` edges.
-
-    ``source_lookup(name)`` returns that script's source text, or ``None`` when
-    it doesn't exist on this side (a dependency added or removed between the
-    pin and the comparison side) -- the name still ends up in the result so the
-    caller diffs it and reports the missing side, rather than silently
-    dropping it. A ``seen`` set makes this cycle-safe: two scripts that load
-    each other still terminate.
-    """
-    seen = set()
-    frontier = list(direct)
-    while frontier:
-        name = frontier.pop()
-        if name in seen:
-            continue
-        seen.add(name)
-        src = source_lookup(name)
-        if src is not None:
-            frontier.extend(_load_refs(src) - seen)
-    return seen
-
-
-def _composite_action_name(path):
-    """The action name if ``path`` is exactly ``actions/<name>``, else ``None``.
-
-    Excludes the pinned reusable workflow path and any nested/action.yml-shaped
-    ref -- only a bare ``actions/<name>`` directory pin runs scripts this way.
-    """
-    parts = path.split("/")
-    return parts[1] if len(parts) == 2 and parts[0] == "actions" else None
-
-
-def _git_show(ref, path):
-    """``<path>``'s content at ``<ref>``, or ``None`` if it doesn't exist there."""
-    r = _git("show", f"{ref}:{path}")
-    return r.stdout if r.returncode == 0 else None
-
-
-def _dependent_script_paths(path, sha, baseline):
-    """``scripts/<name>`` paths a pinned ``actions/<name>`` directory actually
-    executes, transitively, at either the pin or the baseline.
-
-    Not a composite action (``_composite_action_name`` returns ``None``, e.g.
-    the pinned reusable workflow path): returns the empty set -- see the
-    module docstring on why that path isn't double-counted here.
-
-    Derived from *both* sides and unioned, not just the pin: action.yml itself
-    changing is already caught by the whole-directory diff the caller does on
-    ``path``, so which side supplies a reference that's identical on both
-    never changes the outcome -- but a script named on only one side (a
-    dependency added or dropped between the pin and the baseline) must still
-    reach the comparison set, which deriving from a single side would miss.
-    """
-    name = _composite_action_name(path)
-    if name is None:
-        return set()
-
-    dependent = set()
-    for ref in (sha, baseline):
-        action_yaml = _git_show(ref, f"actions/{name}/action.yml")
-        if action_yaml is None:
-            continue
-        direct = _direct_script_refs(action_yaml)
-        dependent |= _script_closure(direct, lambda n, ref=ref: _git_show(ref, f"scripts/{n}"))
-    return {f"scripts/{n}" for n in dependent}
-
-
-def _diff_status(path, sha, baseline):
-    """git diff --quiet result for ``<path>`` between ``sha`` and ``baseline``.
-
-    0 == identical, 1 == differs (including one side missing the path
-    entirely), anything else is an unexpected git failure.
-    """
-    return _git("diff", "--quiet", sha, baseline, "--", path)
-
-
-def _check_direct(path, sha, baseline, src):
-    """Stale/failure message for the pinned path itself, or ``None``."""
-    r = _diff_status(path, sha, baseline)
-    if r.returncode == 1:
-        return f"{src} pins {path}@{sha[:12]} but {path} changed on the mainline since"
-    if r.returncode != 0:
-        return f"{src}: git diff failed for {path}@{sha[:12]}: {r.stderr.strip()}"
-    return None
-
-
-def _check_dependencies(path, sha, baseline, src):
-    """Stale/failure messages for the pinned action's script dependencies."""
-    msgs = []
-    for dep in sorted(_dependent_script_paths(path, sha, baseline)):
-        r = _diff_status(dep, sha, baseline)
-        if r.returncode == 1:
-            msgs.append(
-                f"{src} pins {path}@{sha[:12]}, which runs {dep} -- "
-                f"{dep} changed on the mainline since"
-            )
-        elif r.returncode != 0:
-            msgs.append(
-                f"{src}: git diff failed for {dep} (run by {path}@{sha[:12]}): {r.stderr.strip()}"
-            )
-    return msgs
 
 
 def test_internal_action_pins_are_current():
-    refs = _self_refs()
+    refs = pinrefs.refs_at()
     assert refs, "no internal shipmate self-references found -- regex or repo layout changed?"
 
-    baseline = _release_baseline()
+    baseline = pinrefs.release_baseline()
     if baseline is None:
         # No mainline ref reachable (shallow clone / detached HEAD with truncated
-        # history). Falling back to HEAD here would re-introduce the very
-        # self-edit false-positive the mainline comparison exists to remove, so
-        # skip rather than assert against the wrong baseline. CI checks out with
-        # fetch-depth: 0, where merge-base always resolves.
+        # history). Falling back to HEAD would re-introduce the self-edit false
+        # positive the mainline comparison exists to remove, so skip rather than
+        # assert against the wrong baseline. CI checks out with fetch-depth: 0.
         pytest.skip("no mainline ref reachable (need main/origin/main with full history)")
 
-    stale, unverifiable = [], []
-    for path, sha, src in refs:
-        if not _commit_present(sha):
-            unverifiable.append(f"{src}: {path}@{sha[:12]} (commit not in this clone)")
-            continue
-        # --quiet: exit 0 == identical, 1 == the path differs between the pin and
-        # the release baseline (merge-base with main), i.e. the pin is stale on
-        # the mainline. A branch's own unmerged edits don't count -- they aren't
-        # on the baseline yet.
-        direct_msg = _check_direct(path, sha, baseline, src)
-        if direct_msg:
-            stale.append(direct_msg)
-        stale.extend(_check_dependencies(path, sha, baseline, src))
+    issues = pinrefs.pin_issues(refs, baseline)
+    lines = [pinrefs.format_issue(i) for i in issues if i.kind != "missing"]
+    unverifiable = [pinrefs.format_issue(i) for i in issues if i.kind == "missing"]
 
-    if stale:
+    if lines:
         pytest.fail(
             "stale internal action pin(s) -- bump each to a commit containing the "
-            "current action (typically the release SHA):\n" + "\n".join(stale)
+            "current action (run `python dev/repin-internal.py`):\n" + "\n".join(lines)
         )
     if unverifiable:
-        # A shallow clone lacks the pinned commit objects; don't pass as green.
         pytest.skip(
             "internal pins could not be verified (need full history -- set "
             "fetch-depth: 0 on the CI checkout):\n" + "\n".join(unverifiable)
@@ -279,78 +99,103 @@ def test_direct_script_refs_extracts_names_from_action_yaml():
         'run: python3 "$GITHUB_ACTION_PATH/../../scripts/plan-classify" --fingerprint-only\n'
         'run: python3 "$GITHUB_ACTION_PATH/../../scripts/plan-crypt" decrypt "$STACK"\n'
     )
-    assert _direct_script_refs(text) == {"plan-classify", "plan-crypt"}
+    assert pinrefs.direct_script_refs(text) == {"plan-classify", "plan-crypt"}
 
 
 def test_direct_script_refs_empty_when_action_runs_no_scripts():
-    assert _direct_script_refs("runs:\n  using: composite\n  steps: []\n") == set()
+    assert pinrefs.direct_script_refs("runs:\n  using: composite\n  steps: []\n") == set()
 
 
 def test_load_refs_extracts_names_from_load_calls():
     text = 'sc = _load("summary-comment")\nag = _load("apply-gate")\n'
-    assert _load_refs(text) == {"summary-comment", "apply-gate"}
+    assert pinrefs.load_refs(text) == {"summary-comment", "apply-gate"}
 
 
 def test_load_refs_empty_when_script_loads_nothing():
-    assert _load_refs("import json\nimport sys\n") == set()
+    assert pinrefs.load_refs("import json\nimport sys\n") == set()
 
 
 def test_script_closure_walks_transitively():
     sources = {"a": '_load("b")', "b": '_load("c")', "c": ""}
-    assert _script_closure({"a"}, sources.get) == {"a", "b", "c"}
+    assert pinrefs.script_closure({"a"}, sources.get) == {"a", "b", "c"}
 
 
 def test_script_closure_terminates_on_cycle():
     sources = {"a": '_load("b")', "b": '_load("a")'}
-    assert _script_closure({"a"}, sources.get) == {"a", "b"}
+    assert pinrefs.script_closure({"a"}, sources.get) == {"a", "b"}
 
 
 def test_script_closure_handles_missing_script():
-    # A dependency name with no source on this side (e.g. added/removed
-    # between the pin and the baseline) must not raise -- it's still part of
-    # the derived set so the caller can diff it (git reports the missing side).
-    assert _script_closure({"ghost"}, lambda _n: None) == {"ghost"}
+    # A dependency name with no source on this side (added/removed between the
+    # pin and the baseline) must not raise -- it stays in the derived set so the
+    # caller diffs it and git reports the missing side.
+    assert pinrefs.script_closure({"ghost"}, lambda _n: None) == {"ghost"}
 
 
 def test_composite_action_name_matches_bare_actions_dir():
-    assert _composite_action_name("actions/apply-summary") == "apply-summary"
+    assert pinrefs.composite_action_name("actions/apply-summary") == "apply-summary"
 
 
 def test_composite_action_name_none_for_reusable_workflow():
-    assert _composite_action_name(".github/workflows/apply-env-level.yml") is None
+    assert pinrefs.composite_action_name(".github/workflows/apply-env-level.yml") is None
 
 
 def test_composite_action_name_none_for_nested_path():
-    assert _composite_action_name("actions/apply-cell/action.yml") is None
+    assert pinrefs.composite_action_name("actions/apply-cell/action.yml") is None
 
 
 def test_apply_summary_dependent_scripts_include_apply_comment_chain():
     """Regression: actions/apply-summary/action.yml only names scripts/apply-comment
     directly, but apply-comment cross-loads summary-comment and apply-gate. All
-    three must land in the derived set -- this is the exact shape of the gap
-    that let a scripts/apply-comment-only change ship without a pin bump while
-    the guard stayed green (see the module docstring)."""
-    scripts_dir = _ROOT / "scripts"
+    three must land in the derived set -- the exact shape of the gap that let a
+    scripts/apply-comment-only change ship without a pin bump while the guard
+    stayed green (see the module docstring)."""
+    scripts_dir = pinrefs.ROOT / "scripts"
 
     def source_lookup(name):
         f = scripts_dir / name
         return f.read_text(encoding="utf-8") if f.is_file() else None
 
-    action_yaml = (_ROOT / "actions" / "apply-summary" / "action.yml").read_text(encoding="utf-8")
-    closure = _script_closure(_direct_script_refs(action_yaml), source_lookup)
+    action_yaml = (pinrefs.ROOT / "actions" / "apply-summary" / "action.yml").read_text(
+        encoding="utf-8"
+    )
+    closure = pinrefs.script_closure(pinrefs.direct_script_refs(action_yaml), source_lookup)
 
     assert {"apply-comment", "summary-comment", "apply-gate"} <= closure
 
 
 def test_dependent_script_paths_empty_for_reusable_workflow():
-    # Comparing the reusable workflow file itself remains correct on its own;
-    # it must not also pull in unrelated scripts just because it happens to
-    # contain action pins (those are separate entries in the ref list).
-    head = _git("rev-parse", "HEAD").stdout.strip()
-    assert _dependent_script_paths(".github/workflows/apply-env-level.yml", head, head) == set()
+    # Comparing the reusable workflow file itself remains correct on its own; it
+    # must not also pull in unrelated scripts because it contains action pins
+    # (those are separate entries in the ref list).
+    head = pinrefs.git("rev-parse", "HEAD").stdout.strip()
+    assert (
+        pinrefs.dependent_script_paths(".github/workflows/apply-env-level.yml", head, head) == set()
+    )
 
 
 def test_dependent_script_paths_for_apply_summary_contains_apply_comment():
-    head = _git("rev-parse", "HEAD").stdout.strip()
-    dependent = _dependent_script_paths("actions/apply-summary", head, head)
+    head = pinrefs.git("rev-parse", "HEAD").stdout.strip()
+    dependent = pinrefs.dependent_script_paths("actions/apply-summary", head, head)
     assert {"scripts/apply-comment", "scripts/summary-comment", "scripts/apply-gate"} <= dependent
+
+
+def test_every_script_invocation_in_an_action_is_visible_to_the_derivation():
+    """The premise the whole guard rests on, machine-checked.
+
+    Every claim about pin currency assumes the derivation sees each script a
+    pinned action actually runs. That was verified by hand once; an action.yml
+    invoking a script by any other spelling -- a variable, a different relative
+    path, a `cd` first -- would be invisible to SCRIPT_REF and would silently
+    shrink the checked surface. This asserts every $GITHUB_ACTION_PATH mention
+    in every action.yml is one the regex claims.
+    """
+    for action_yaml in sorted((pinrefs.ROOT / "actions").glob("*/action.yml")):
+        text = action_yaml.read_text(encoding="utf-8")
+        mentions = text.count("$GITHUB_ACTION_PATH")
+        matched = len(pinrefs.SCRIPT_REF.findall(text))
+        assert mentions == matched, (
+            f"{action_yaml.relative_to(pinrefs.ROOT).as_posix()}: {mentions} "
+            f"$GITHUB_ACTION_PATH mention(s) but SCRIPT_REF matched {matched} -- "
+            "the script-dependency derivation cannot see the difference"
+        )
