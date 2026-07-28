@@ -19,6 +19,12 @@ OLD = "a" * 40
 NEW = "b" * 40
 OTHER = "c" * 40
 
+# A real commit in this repo: the main tip this branch forked from. The two
+# main()-level tests need a SHA that survives `rev-parse --verify <sha>^{commit}`,
+# because refusing an unresolvable SHA is the point of that check -- a placeholder
+# would exit 3 before reaching the pin_status gate under test.
+REAL = "4914d074df71f8c3d0b4ccb73a22c153cacaca7c"
+
 
 def _load_cli(fname):
     loader = SourceFileLoader(fname.replace("-", "_").removesuffix(".py"), str(_DEV / fname))
@@ -256,7 +262,7 @@ def test_main_refuses_a_commit_that_is_not_safe_to_pin(tmp_path, capsys, monkeyp
         ],
     )
 
-    rc_code = rc.main(["--repo", str(root), "--sha", NEW])
+    rc_code = rc.main(["--repo", str(root), "--sha", REAL])
 
     out = capsys.readouterr().out
     assert rc_code == 1
@@ -279,8 +285,23 @@ def test_main_force_overrides_the_refusal(tmp_path, capsys, monkeypatch):
         ],
     )
 
-    rc_code = rc.main(["--repo", str(root), "--sha", NEW, "--force"])
+    rc_code = rc.main(["--repo", str(root), "--sha", REAL, "--force"])
 
     assert rc_code == 0
     assert "overriding" in capsys.readouterr().out
-    assert NEW in (root / ".github/workflows/plan.yml").read_text(encoding="utf-8")
+    assert REAL in (root / ".github/workflows/plan.yml").read_text(encoding="utf-8")
+
+
+def test_main_rejects_a_nonexistent_full_length_sha(tmp_path, capsys):
+    # `git rev-parse --verify <40-hex>` exits 0 for a SHA that does not exist --
+    # only the ^{commit} peel rejects it. Without that peel a typo'd SHA resolves,
+    # refs_at() on it yields nothing, pin_status() finds no issues, and the tool
+    # cheerfully writes a pin that cannot resolve at runtime.
+    root = _repo(
+        tmp_path,
+        {".github/workflows/plan.yml": f"      - uses: ship-iac/shipmate/actions/setup@{OLD}\n"},
+    )
+
+    assert rc.main(["--repo", str(root), "--sha", NEW]) == 3
+    assert "does not resolve" in capsys.readouterr().out
+    assert OLD in (root / ".github/workflows/plan.yml").read_text(encoding="utf-8")

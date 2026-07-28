@@ -81,7 +81,7 @@ def rewrite_consumer(root, new_sha, label):
 
 def _resolve_sha(sha):
     """Full 40-hex sha for ``sha``, or None if it does not resolve here."""
-    r = pinrefs.git("rev-parse", "--verify", sha)
+    r = pinrefs.git("rev-parse", "--verify", f"{sha}^{{commit}}")
     if r.returncode != 0:
         print(f"{sha} does not resolve to a commit in this engine clone")
         return None
