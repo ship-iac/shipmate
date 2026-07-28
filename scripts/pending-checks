@@ -33,7 +33,7 @@ def bodies(cells_dir, head_sha):
             "output": {
                 "title": "apply pending",
                 "summary": "Waiting to be applied. Merge after apply completes "
-                "for this stack x environment.",
+                + "for this stack x environment.",
             },
         }
         if not cell["changed"]:
