@@ -119,6 +119,51 @@ def test_doctor_sticky_marker_matches_the_script():
     assert doctor.DOCTOR_MARKER in _ACTION
 
 
+def test_the_rendered_report_reaches_the_job_summary_before_the_comment_post():
+    """The report costs 30-60s of probes, and both post paths can lose it: a
+    failed comment listing `exit 0`s by design (so the run stays green with no
+    report anywhere), and a failed PATCH/POST reds the step after the render.
+    Writing `doctor.md` to the job summary first means the run page always
+    carries the report even when the pull request comment does not.
+
+    Reads the step through `_code`, so the rationale comment above the write --
+    which names both `doctor.md` and the variable -- cannot satisfy any of these
+    assertions on prose alone. Without that, deleting the write itself would
+    leave the comment as the sole match and every assertion below would still
+    pass while nothing reached the summary.
+
+    Kills the mutations that matter: dropping the write, writing something other
+    than the report, truncating instead of appending, and moving the write below
+    the listing (where the early `exit 0` skips it)."""
+    code = _code(_step("SHIPMATE_DOCTOR_MODE: report"))
+    writes = [ln for ln in code.splitlines() if "$GITHUB_STEP_SUMMARY" in ln]
+    assert len(writes) == 1, f"expected exactly one job-summary write, got {writes}"
+    assert "doctor.md" in writes[0], writes[0]
+    # Appending, not truncating. The runner hands each step its own summary file,
+    # so this is not about other steps -- it is about not clobbering anything
+    # written earlier in this same step, and never truncating a runner-owned file.
+    assert ">>" in writes[0], writes[0]
+    assert code.index(writes[0]) < code.index("issues/$PR_NUMBER/comments")
+    assert code.index(writes[0]) < code.index("exit 0")
+
+
+def test_a_lost_job_summary_write_does_not_cost_the_comment():
+    """The summary write is the surface this change *added*, so it must degrade
+    rather than abort: a bare `cat` under the step's `set -euo pipefail` would
+    turn an unwritable summary into a red step with no comment either -- strictly
+    worse than before the write existed. `|| true` is not available here (see
+    test_the_doctor_upsert_does_not_swallow_a_comment_listing_failure), so the
+    degrade is an `if`-guard that warns, and the variable is read with `:-` so
+    `set -u` cannot kill the step on a runner that never exports it."""
+    code = _code(_step("SHIPMATE_DOCTOR_MODE: report"))
+    write = next(ln for ln in code.splitlines() if "$GITHUB_STEP_SUMMARY" in ln)
+    assert write.lstrip().startswith("if "), write
+    assert "${GITHUB_STEP_SUMMARY:-}" in write, write
+    # The report still has to be posted after a failed summary write, so the
+    # guard must warn and carry on rather than exit.
+    assert "::warning::" in code.split(write, 1)[1].split("fi", 1)[0]
+
+
 def test_help_does_not_require_the_app():
     """help must answer even when the App is not installed — the state where a
     newcomer most needs it — so it posts with the workflow token."""
