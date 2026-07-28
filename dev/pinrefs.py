@@ -32,8 +32,24 @@ def git_show(ref, path):
     return r.stdout if r.returncode == 0 else None
 
 
+def write_text(path, text):
+    """Write ``text`` to ``path`` as UTF-8 with LF endings.
+
+    pathlib's default ``newline=None`` translates every "\\n" to ``os.linesep``,
+    so on Windows rewriting a workflow file would flip the whole file to CRLF --
+    burying a one-line pin bump in a whole-file diff for any consumer repo
+    without a .gitattributes eol rule.
+    """
+    path.write_text(text, encoding="utf-8", newline="\n")
+
+
 def commit_present(sha):
     return git("cat-file", "-e", f"{sha}^{{commit}}").returncode == 0
+
+
+def is_shallow():
+    """True when this clone lacks history (``--depth``), so absent objects prove nothing."""
+    return git("rev-parse", "--is-shallow-repository").stdout.strip() == "true"
 
 
 def release_baseline():

@@ -25,6 +25,15 @@ OTHER = "c" * 40
 # would exit 3 before reaching the pin_status gate under test.
 REAL = "4914d074df71f8c3d0b4ccb73a22c153cacaca7c"
 
+# In a shallow clone REAL is absent -- the main()-level tests above would then
+# fail on an unrelated "does not resolve" exit 3 instead of exercising the
+# pin_status gate. Fail collection loudly instead. CI checks out with
+# fetch-depth: 0.
+assert pinrefs.commit_present(REAL), (
+    f"{REAL[:12]} is not in this clone -- these tests read real history; "
+    "check out with fetch-depth: 0"
+)
+
 
 def _load_cli(fname):
     loader = SourceFileLoader(fname.replace("-", "_").removesuffix(".py"), str(_DEV / fname))
@@ -108,6 +117,23 @@ def test_rewrite_reports_no_change_when_nothing_matches(tmp_path):
     assert ri.rewrite(root, {("actions/setup", OLD)}, NEW) == []
 
 
+def test_rewrite_writes_lf_not_crlf(tmp_path):
+    # pathlib's default write_text(newline=None) translates every "\n" to
+    # os.linesep, so on Windows a one-line pin bump would flip the whole file
+    # to CRLF. A read_text-based assertion cannot catch this -- read_text
+    # re-normalizes CRLF back to "\n" on the way in -- so assert on raw bytes.
+    root = _repo(
+        tmp_path,
+        {".github/workflows/apply.yml": f"  - uses: ship-iac/shipmate/actions/setup@{OLD}\n"},
+    )
+    p = root / ".github/workflows/apply.yml"
+    p.write_bytes(f"  - uses: ship-iac/shipmate/actions/setup@{OLD}\n".encode())
+
+    ri.rewrite(root, {("actions/setup", OLD)}, NEW)
+
+    assert b"\r\n" not in p.read_bytes()
+
+
 def test_targets_excludes_pins_whose_diff_could_not_be_verified(monkeypatch):
     # "error" (git failed) and "missing" (pin commit absent) mean we do not know
     # whether the pin is stale. Rewriting one would be a guess presented as a
@@ -126,11 +152,43 @@ def test_targets_excludes_pins_whose_diff_could_not_be_verified(monkeypatch):
         ],
     )
 
-    targets, notes = ri._targets(refs, NEW, bump_all=False)
+    targets, notes, staleness_unknown = ri._targets(refs, NEW, bump_all=False)
 
     assert targets == {("actions/setup", OLD)}
     assert len(notes) == 1
     assert "boom" in notes[0]
+    assert staleness_unknown is False
+
+
+def test_targets_reports_staleness_unknown_when_no_mainline_resolves(monkeypatch):
+    # release_baseline() returning None means no mainline ref resolved at all
+    # (shallow clone, detached HEAD) -- not the same as "checked, and nothing
+    # is stale". staleness_unknown is what lets main() tell those apart
+    # instead of printing a verified "none stale" it never actually checked.
+    monkeypatch.setattr(pinrefs, "release_baseline", lambda: None)
+
+    targets, notes, staleness_unknown = ri._targets(
+        [("actions/setup", OLD, "a.yml")], NEW, bump_all=False
+    )
+
+    assert targets == set()
+    assert staleness_unknown is True
+    assert "cannot tell which pins are stale" in notes[0]
+
+
+def test_main_reports_staleness_unknown_rather_than_none_stale(capsys, monkeypatch):
+    # Regression on the message main() prints, not just on _targets: when
+    # staleness could not be determined, main() must not claim "none stale
+    # against the mainline" one line under a note saying the opposite.
+    monkeypatch.setattr(pinrefs, "release_baseline", lambda: None)
+    monkeypatch.setattr(pinrefs, "refs_at", lambda *a, **k: [("actions/setup", OLD, "a.yml")])
+
+    code = ri.main(["--to", REAL])
+
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "staleness could not be determined" in out
+    assert "none stale against the mainline" not in out
 
 
 def test_rewrite_ignores_files_outside_the_two_source_shapes(tmp_path):
@@ -247,6 +305,23 @@ def test_rewrite_consumer_leaves_third_party_pins_alone(tmp_path):
 
     text = (root / ".github/workflows/plan.yml").read_text(encoding="utf-8")
     assert f"actions/checkout@{OTHER} # v7.0.1" in text
+
+
+def test_rewrite_consumer_writes_lf_not_crlf(tmp_path):
+    # Same hazard as test_rewrite_writes_lf_not_crlf, but higher stakes here:
+    # this rewriter targets arbitrary consumer repos holding deploy
+    # credentials, and one without a .gitattributes eol rule would get a
+    # whole-file CRLF diff burying the one-line pin change.
+    root = _repo(
+        tmp_path,
+        {".github/workflows/plan.yml": f"      - uses: ship-iac/shipmate/actions/setup@{OLD}\n"},
+    )
+    p = root / ".github/workflows/plan.yml"
+    p.write_bytes(f"      - uses: ship-iac/shipmate/actions/setup@{OLD}\n".encode())
+
+    rc.rewrite_consumer(root, NEW, None)
+
+    assert b"\r\n" not in p.read_bytes()
 
 
 def test_main_refuses_a_commit_that_is_not_safe_to_pin(tmp_path, capsys, monkeypatch):

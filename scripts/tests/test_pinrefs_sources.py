@@ -8,6 +8,16 @@ historical commit, not as they are on disk now.
 import pinrefs
 import pytest
 
+# Real history fixture used by test_refs_at_commit_reads_that_commits_tree_not_disk
+# below. In a shallow clone this commit is absent, refs_at() on it returns [],
+# and that test would pass vacuously ({} != now instead of a real diff) -- so
+# fail collection loudly instead. CI checks out with fetch-depth: 0.
+CONVERGED = "83b37bb5e0baa9256b1ea49f4725cf7f55157c8a"
+assert pinrefs.commit_present(CONVERGED), (
+    f"{CONVERGED[:12]} is not in this clone -- these tests read real history; "
+    "check out with fetch-depth: 0"
+)
+
 
 def test_source_paths_finds_workflows_and_action_yamls():
     paths = pinrefs.source_paths()
@@ -57,9 +67,6 @@ def test_refs_at_working_tree_finds_the_apply_env_level_pin():
 def test_refs_at_commit_reads_that_commits_tree_not_disk():
     # 83b37bb is a convergence commit whose apply-env-level.yml pin differs from
     # today's. Reading it must yield that commit's SHA, not the working tree's.
-    at_pin = {
-        (path, sha)
-        for path, sha, _src in pinrefs.refs_at("83b37bb5e0baa9256b1ea49f4725cf7f55157c8a")
-    }
+    at_pin = {(path, sha) for path, sha, _src in pinrefs.refs_at(CONVERGED)}
     now = {(path, sha) for path, sha, _src in pinrefs.refs_at()}
     assert at_pin != now

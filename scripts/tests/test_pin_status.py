@@ -32,6 +32,16 @@ CONVERGED = "83b37bb5e0baa9256b1ea49f4725cf7f55157c8a"
 INTERMEDIATE_ACTION_COMMIT = "abca731ea8d35a5c6d02345e5eb77446b7f14ccf"
 INTERMEDIATE_BUMP_COMMIT = "273ec9656ee5cad55a538e44c5f57e726543313c"
 
+# These tests are fixtured on real history. In a shallow clone the commits are
+# absent, refs_at() returns nothing, and the "safe to pin" assertions would pass
+# for the wrong reason -- so fail collection loudly instead. CI checks out with
+# fetch-depth: 0.
+for _fixture in (CONVERGED, INTERMEDIATE_ACTION_COMMIT, INTERMEDIATE_BUMP_COMMIT):
+    assert pinrefs.commit_present(_fixture), (
+        f"{_fixture[:12]} is not in this clone -- these tests read real history; "
+        "check out with fetch-depth: 0"
+    )
+
 
 def _stale_pins(commit):
     """Distinct (path, sha) pins with a staleness issue at ``commit``.
@@ -113,11 +123,15 @@ def test_non_ancestor_is_flagged_unreachable(monkeypatch):
 
 
 def test_git_error_on_origin_main_falls_through_to_main(monkeypatch):
-    # Regression: a git error against the first base ("origin/main") must not be
-    # misread as "not an ancestor" -- it must fall through and consult "main".
-    # A mock that ignores which base it was called with (e.g. always returncode=1)
-    # would pass even if the implementation collapsed to `if returncode != 0`,
-    # which is exactly the bug this test exists to catch.
+    # Proves the loop structurally reaches the second base: this would fail if
+    # "main" were dropped from the tuple, since fake_git raises on any base
+    # other than "origin/main"/"main". It does NOT catch the `== 1` -> `!= 0`
+    # collapse -- under that mutation returncode 128 on the first base is
+    # itself misread as "not an ancestor" and the function still returns True,
+    # so this test would still pass for the wrong reason. Its sibling
+    # test_git_error_on_every_base_is_not_reported_unreachable is what
+    # discriminates that mutation (every base errors, so the collapsed version
+    # returns True on the first base instead of the correct False).
     class _R:
         def __init__(self, returncode):
             self.returncode = returncode

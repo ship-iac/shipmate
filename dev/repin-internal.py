@@ -42,24 +42,29 @@ def rewrite(root, targets, new_sha):
             out, n = re.subn(rf"(ship-iac/shipmate/{re.escape(path)})@{old}", rf"\1@{new_sha}", out)
             total += n
         if total:
-            f.write_text(out, encoding="utf-8")
+            pinrefs.write_text(f, out)
             changed.append((rel, total))
     return changed
 
 
 def _targets(refs, new_sha, bump_all):
-    """((path, old_sha) pairs to rewrite, notes to print).
+    """((path, old_sha) pairs to rewrite, notes to print, staleness_unknown).
 
     Selection comes off PinIssue.kind, never off a formatted message. Two kinds
     are deliberately excluded: "missing" (the pin's commit is absent, so we
     cannot tell whether it is stale) and "error" (git itself failed). Rewriting
     either would be a guess dressed as a fix.
+
+    ``staleness_unknown`` is True only when no mainline ref resolved at all, so
+    the caller can tell "verified nothing is stale" apart from "could not
+    check" -- both leave ``targets`` empty, but they are not the same thing to
+    report.
     """
     baseline = pinrefs.release_baseline()
     if bump_all:
-        return {(path, sha) for path, sha, _src in refs if sha != new_sha}, []
+        return {(path, sha) for path, sha, _src in refs if sha != new_sha}, [], False
     if baseline is None:
-        return set(), ["no mainline ref reachable -- cannot tell which pins are stale"]
+        return set(), ["no mainline ref reachable -- cannot tell which pins are stale"], True
 
     issues = pinrefs.pin_issues(refs, baseline)
     targets = {(i.path, i.sha) for i in issues if i.kind in pinrefs.ACTIONABLE and i.sha != new_sha}
@@ -68,7 +73,7 @@ def _targets(refs, new_sha, bump_all):
         for i in issues
         if i.kind not in pinrefs.ACTIONABLE
     ]
-    return targets, notes
+    return targets, notes, False
 
 
 def main(argv=None):
@@ -87,12 +92,16 @@ def main(argv=None):
     new_sha = r.stdout.strip()
 
     refs = pinrefs.refs_at()
-    targets, notes = _targets(refs, new_sha, args.all)
+    targets, notes, staleness_unknown = _targets(refs, new_sha, args.all)
     for n in notes:
         print(f"note: {n}")
 
     if not targets:
-        print(f"nothing to bump ({len(refs)} internal pins, none stale against the mainline)")
+        ref_note = f"{len(refs)} internal references"
+        if staleness_unknown:
+            print(f"nothing to bump ({ref_note}; staleness could not be determined)")
+        else:
+            print(f"nothing to bump ({ref_note}, none stale against the mainline)")
         return 0
 
     if args.check:

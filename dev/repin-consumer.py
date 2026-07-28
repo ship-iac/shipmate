@@ -74,7 +74,7 @@ def rewrite_consumer(root, new_sha, label):
         text = f.read_text(encoding="utf-8")
         out, n = _CONSUMER_REF.subn(sub, text)
         if n and out != text:
-            f.write_text(out, encoding="utf-8")
+            pinrefs.write_text(f, out)
             changed.append((f.relative_to(root).as_posix(), n))
     return changed
 

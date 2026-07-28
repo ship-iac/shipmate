@@ -13,6 +13,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        # Full history: scripts/tests/test_pin_status.py and test_repin.py are
+        # fixtured on real historical commits. A shallow clone makes those
+        # commits absent, which fails the tests -- or worse, passes some of
+        # them vacuously (refs_at() on an absent commit returns [], so the
+        # "safe to pin" assertion holds for the wrong reason).
+        with: { fetch-depth: 0 }
       - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
 
       # Lint the workflow files (and shellcheck their run: blocks). actionlint

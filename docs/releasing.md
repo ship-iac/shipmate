@@ -53,7 +53,7 @@ every wave job dies before restoring state.
 So re-pin **all** engine references in a single commit (as the sample repos do),
 and never merge a Dependabot PR that bumps one engine `uses:` line in isolation.
 The same applies while a cascade is in flight in this repo: an intermediate
-commit of the two-step sequence is not a release SHA, and nothing should ever be
+commit of the cascade above is not a release SHA, and nothing should ever be
 pinned to one.
 
 ## The guard
@@ -84,12 +84,16 @@ The push-to-main run still catches a bad pin, one step later, exactly where and
 when the bump is done. (The workflow checks out with `fetch-depth: 0` so the test
 can read the pinned commit objects.)
 
-One case does **not** degrade to a skip: a pin whose commit is absent while the
-mainline baseline *did* resolve. Full history is present, so the commit itself is
-gone (force-push, GC) and the ref cannot resolve at runtime — the guard fails.
-Only an unreachable mainline (shallow clone, truncated history) skips, and it
-skips before inspecting any pin. A skipped test satisfies branch protection, so
-this distinction is what keeps a broken pin from shipping green.
+One case does **not** degrade to a skip: a pin whose commit is absent in a
+**non-shallow** clone. The mainline baseline resolving is not by itself proof of
+full history — a depth-1 clone of `main` resolves `merge-base HEAD origin/main`
+trivially at the tip while every older pinned commit object is absent — so the
+guard checks `git rev-parse --is-shallow-repository` directly. Shallow: skip,
+because truncated history cannot tell a genuinely gone commit from one merely
+outside the fetched range. Not shallow: fail, because the commit itself is gone
+(force-push, GC) and the ref cannot resolve at runtime. A skipped test satisfies
+branch protection, so this distinction is what keeps a broken pin from shipping
+green.
 
 Because this workflow reports **no status on PR heads**, it must **never** be
 added to this repo's required status checks — a required check that never

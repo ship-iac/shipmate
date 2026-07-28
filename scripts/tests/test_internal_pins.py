@@ -85,10 +85,20 @@ def test_internal_action_pins_are_current():
             "current action (run `python dev/repin-internal.py`):\n" + "\n".join(lines)
         )
     if unverifiable:
-        # A pin commit absent while the mainline baseline DID resolve means the
-        # clone has full history and the commit itself is gone (force-push, GC).
-        # That is a ref GitHub cannot resolve at runtime, so it must fail --
-        # pytest.skip would pass branch protection and ship the broken pin.
+        if pinrefs.is_shallow():
+            # merge-base resolving at the tip proves nothing about older
+            # history: a depth-1 clone of main resolves "merge-base HEAD
+            # origin/main" trivially while every older pinned commit object is
+            # absent. That is truncated history, not a dangling ref -- skip
+            # rather than misdiagnose it as a force-pushed/GC'd commit.
+            pytest.skip(
+                "clone is shallow -- cannot tell whether the missing pin "
+                "commit(s) are truncated history or genuinely gone:\n" + "\n".join(unverifiable)
+            )
+        # A pin commit absent from a non-shallow clone means the commit itself
+        # is gone (force-push, GC), not truncated history. That is a ref
+        # GitHub cannot resolve at runtime, so it must fail -- pytest.skip
+        # would pass branch protection and ship the broken pin.
         pytest.fail(
             "internal pin(s) reference a commit that does not exist -- the ref "
             "cannot resolve at runtime:\n" + "\n".join(unverifiable)
@@ -218,6 +228,7 @@ def test_unverifiable_pin_fails_when_history_is_present(monkeypatch):
         "pin_issues",
         lambda *a: [pinrefs.PinIssue("actions/setup", "0" * 40, "x.yml", "missing")],
     )
+    monkeypatch.setattr(pinrefs, "is_shallow", lambda: False)
 
     # Both outcomes are caught explicitly rather than with pytest.raises: the
     # pre-fix behavior is pytest.skip, whose exception would propagate out of
@@ -232,3 +243,24 @@ def test_unverifiable_pin_fails_when_history_is_present(monkeypatch):
         pytest.fail(f"guard skipped instead of failing: {exc}")
     else:
         pytest.fail("guard returned cleanly; expected a failure")
+
+
+def test_unverifiable_pin_skips_when_clone_is_shallow(monkeypatch):
+    """A depth-1 clone resolves `merge-base HEAD origin/main` trivially at the
+    tip even though every older pinned commit object is absent -- so a
+    resolved baseline does not prove full history the way it does in a full
+    clone. is_shallow() is what tells the two apart; without it this case
+    would be misdiagnosed as a force-pushed/GC'd commit and hard-fail every
+    shallow checkout instead of just reporting "cannot tell".
+    """
+    monkeypatch.setattr(pinrefs, "refs_at", lambda *a, **k: [("actions/setup", "0" * 40, "x.yml")])
+    monkeypatch.setattr(pinrefs, "release_baseline", lambda: "1" * 40)
+    monkeypatch.setattr(
+        pinrefs,
+        "pin_issues",
+        lambda *a: [pinrefs.PinIssue("actions/setup", "0" * 40, "x.yml", "missing")],
+    )
+    monkeypatch.setattr(pinrefs, "is_shallow", lambda: True)
+
+    with pytest.raises(pytest.skip.Exception, match="shallow"):
+        test_internal_action_pins_are_current()

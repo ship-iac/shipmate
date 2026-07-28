@@ -15,7 +15,8 @@ consumer repo.
     python dev/pin-status.py            # HEAD
     python dev/pin-status.py <commit>
 
-Exit: 0 safe, 1 stale pins, 2 unverifiable, 3 commit-ish does not resolve.
+Exit: 0 safe, 1 stale pins, 2 unverifiable, 3 commit-ish does not resolve (or
+resolves but yields no internal references).
 """
 
 import argparse
@@ -63,11 +64,12 @@ def _report(issues, sha, ref_count):
             print(f"  {pinrefs.format_issue(i)}")
         return 1
     if missing:
-        print(f"{sha[:12]}: unverifiable -- {len(missing)} pin commit(s) missing:")
+        missing_shas = {i.sha for i in missing}
+        print(f"{sha[:12]}: unverifiable -- {len(missing_shas)} pin commit(s) missing:")
         for i in missing:
             print(f"  {pinrefs.format_issue(i)}")
         return 2
-    print(f"{sha[:12]}: safe to pin ({ref_count} internal pins, all current at this commit)")
+    print(f"{sha[:12]}: safe to pin ({ref_count} internal references, all current at this commit)")
     return 0
 
 
