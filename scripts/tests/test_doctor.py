@@ -1,17 +1,12 @@
-import importlib.util
 import io
 import json
 import os
 import pathlib
-from importlib.machinery import SourceFileLoader
 
 import pytest
+from _loader import load_script
 
-_p = pathlib.Path(__file__).resolve().parents[1] / "doctor"
-_loader = SourceFileLoader("doctor", str(_p))
-_spec = importlib.util.spec_from_loader("doctor", _loader)
-doctor = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(doctor)
+doctor = load_script("doctor")
 
 _REPO = "o/r"
 _APP_ID = "999"

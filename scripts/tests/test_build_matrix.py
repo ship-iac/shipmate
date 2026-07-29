@@ -1,17 +1,7 @@
-import importlib.util
-import pathlib
-from importlib.machinery import SourceFileLoader
-
 import pytest
+from _loader import load_script
 
-# build-matrix has no file extension, so spec_from_file_location can't infer a
-# loader from the suffix (it returns None on every platform, not just Windows).
-# Passing SourceFileLoader explicitly sidesteps the suffix guess entirely.
-_script_path = pathlib.Path(__file__).resolve().parents[1] / "build-matrix"
-_loader = SourceFileLoader("build_matrix", str(_script_path))
-_spec = importlib.util.spec_from_loader("build_matrix", _loader)
-bm = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(bm)
+bm = load_script("build-matrix")
 
 
 def test_multi_env_stack_yields_one_cell_per_env():

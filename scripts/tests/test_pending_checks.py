@@ -1,24 +1,11 @@
 """pending-checks: check-run POST bodies from downloaded cell summaries."""
 
-import importlib.util
 import json
-import pathlib
-from importlib.machinery import SourceFileLoader
 
 import pytest
+from _loader import load_script
 
-_SCRIPTS = pathlib.Path(__file__).resolve().parents[1]
-
-
-def _load(fname):
-    loader = SourceFileLoader(fname.replace("-", "_"), str(_SCRIPTS / fname))
-    spec = importlib.util.spec_from_loader(loader.name, loader)
-    mod = importlib.util.module_from_spec(spec)
-    loader.exec_module(mod)
-    return mod
-
-
-pc = _load("pending-checks")
+pc = load_script("pending-checks")
 
 HEAD = "a" * 40
 

@@ -1,15 +1,9 @@
-import importlib.util
 import json
-import pathlib
-from importlib.machinery import SourceFileLoader
 
 import pytest
+from _loader import load_script
 
-_p = pathlib.Path(__file__).resolve().parents[1] / "deploy-detect"
-_loader = SourceFileLoader("deploy_detect", str(_p))
-_spec = importlib.util.spec_from_loader("deploy_detect", _loader)
-dd = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(dd)
+dd = load_script("deploy-detect")
 
 
 def test_filter_pending_drops_completed_applies():

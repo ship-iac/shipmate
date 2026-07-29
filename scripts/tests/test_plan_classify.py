@@ -1,13 +1,7 @@
 # scripts/tests/test_plan_classify.py
-import importlib.util
-import pathlib
-from importlib.machinery import SourceFileLoader
+from _loader import load_script
 
-_p = pathlib.Path(__file__).resolve().parents[1] / "plan-classify"
-_loader = SourceFileLoader("plan_classify", str(_p))
-_spec = importlib.util.spec_from_loader("plan_classify", _loader)
-pc = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(pc)
+pc = load_script("plan-classify")
 
 
 def _rc(*actions):

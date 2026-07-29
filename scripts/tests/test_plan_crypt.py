@@ -1,15 +1,8 @@
 # scripts/tests/test_plan_crypt.py
-import importlib.util
-import pathlib
-from importlib.machinery import SourceFileLoader
-
 import pytest
+from _loader import load_script
 
-_p = pathlib.Path(__file__).resolve().parents[1] / "plan-crypt"
-_loader = SourceFileLoader("plan_crypt", str(_p))
-_spec = importlib.util.spec_from_loader("plan_crypt", _loader)
-pcx = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(pcx)
+pcx = load_script("plan-crypt")
 
 PLAIN = b"SECRET_PLAN_BODY\nresource null_resource.x {}\n"
 

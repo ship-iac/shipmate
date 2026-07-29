@@ -1,16 +1,12 @@
-import importlib.util
 import io
 import json
 import pathlib
-from importlib.machinery import SourceFileLoader
 
 import pytest
+from _loader import load_script
 
 _dir = pathlib.Path(__file__).resolve().parents[1]
-_loader = SourceFileLoader("waves", str(_dir / "waves"))
-_spec = importlib.util.spec_from_loader("waves", _loader)
-w = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(w)
+w = load_script("waves")
 
 FIXTURE = (_dir / "tests" / "fixtures" / "run-graph-stacks.dot").read_text()
 

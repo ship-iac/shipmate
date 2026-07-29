@@ -1,20 +1,12 @@
-import importlib.util
 import json
 import pathlib
-from importlib.machinery import SourceFileLoader
+
+from _loader import load_script
 
 _D = pathlib.Path(__file__).resolve().parents[1]
 
 
-def _load(fname):
-    loader = SourceFileLoader(fname.replace("-", "_"), str(_D / fname))
-    spec = importlib.util.spec_from_loader(loader.name, loader)
-    mod = importlib.util.module_from_spec(spec)
-    loader.exec_module(mod)
-    return mod
-
-
-az = _load("authorize")
+az = load_script("authorize")
 
 PR_OK = {"mergeable": True, "mergeable_state": "clean", "head": {"sha": "abc123"}}
 RUN_OK = {"id": 555, "head_sha": "abc123"}
