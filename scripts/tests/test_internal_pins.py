@@ -215,6 +215,31 @@ def test_every_script_invocation_in_an_action_is_visible_to_the_derivation():
         )
 
 
+def test_every_internal_ref_in_a_pin_bearing_source_is_visible_to_ref():
+    """The premise the whole guard rests on, machine-checked, one level up from
+    ``test_every_script_invocation_in_an_action_is_visible_to_the_derivation``.
+
+    Every claim this guard makes about pin currency assumes REF sees every
+    internal self-reference a pin-bearing source actually carries. REF only
+    matches a 40-lowercase-hex SHA, by design (CONTRACT.md requires internal
+    pins to be full SHAs) -- but that means a non-SHA internal pin (a tag, a
+    short SHA, an uppercase SHA) is invisible to REF, and so invisible to this
+    guard, to ``dev/pin-status.py``, and to ``dev/repin-internal.py --all``,
+    whose whole job is not being silent about a stale or malformed internal
+    pin. This asserts every ``ship-iac/shipmate/`` mention in every
+    pin-bearing source is one REF actually matched.
+    """
+    for src in pinrefs.source_paths():
+        text = (pinrefs.ROOT / src).read_text(encoding="utf-8")
+        mentions = text.count("ship-iac/shipmate/")
+        matched = len(pinrefs.REF.findall(text))
+        assert mentions == matched, (
+            f"{src}: {mentions} ship-iac/shipmate/ mention(s) but REF matched only "
+            f"{matched} -- a non-SHA internal pin here would be invisible to this "
+            "guard, to pin-status, and to repin-internal --all"
+        )
+
+
 def test_unverifiable_pin_fails_when_history_is_present(monkeypatch):
     """A pin whose commit is absent while mainline history IS present is a
     dangling ref, not a shallow clone: GitHub cannot resolve it at runtime and

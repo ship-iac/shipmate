@@ -201,6 +201,45 @@ def test_git_error_on_origin_main_falls_through_to_main(monkeypatch):
     assert ps.unreachable_from_main("0" * 40) is True
 
 
+def test_main_exits_two_when_refs_at_hits_a_git_failure(monkeypatch, capsys):
+    # F(2): a GitFailure out of pinrefs.refs_at() means "could not check", not
+    # "no internal self-references" (exit 3) and not "stale" (exit 1) -- it
+    # must land in the same unverifiable bucket as a missing pin commit.
+    monkeypatch.setattr(ps, "resolve", lambda _c: "1" * 40)
+    monkeypatch.setattr(
+        pinrefs,
+        "refs_at",
+        lambda *a, **k: (_ for _ in ()).throw(pinrefs.GitFailure("1" * 40, "fatal: bad object")),
+    )
+
+    code = ps.main(["HEAD"])
+
+    out = capsys.readouterr().out
+    assert code == 2
+    assert "git failed" in out
+    assert "no internal self-references" not in out
+
+
+def test_main_exits_two_when_pin_status_hits_a_git_failure(monkeypatch, capsys):
+    # Mirror of the test above for the second call site: refs_at(sha) succeeds
+    # (so main() gets past the "no refs" check) but the pin_status() call --
+    # which re-derives refs internally -- is the one that hits the git failure.
+    monkeypatch.setattr(ps, "resolve", lambda _c: "1" * 40)
+    monkeypatch.setattr(pinrefs, "refs_at", lambda *a, **k: [("actions/setup", "0" * 40, "x.yml")])
+    monkeypatch.setattr(
+        ps,
+        "pin_status",
+        lambda _sha: (_ for _ in ()).throw(pinrefs.GitFailure("1" * 40, "fatal: bad object")),
+    )
+
+    code = ps.main(["HEAD"])
+
+    out = capsys.readouterr().out
+    assert code == 2
+    assert "git failed" in out
+    assert "no internal self-references" not in out
+
+
 def test_git_error_on_every_base_is_not_reported_unreachable(monkeypatch):
     # Regression: if every base ref errors out (no mainline ref resolves at all),
     # that is "we cannot judge", not "unreachable" -- must return False, never

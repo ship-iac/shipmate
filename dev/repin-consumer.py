@@ -157,6 +157,16 @@ def _safe_to_pin(new_sha, force):
     return True
 
 
+def _refuse_git_failure(new_sha, exc):
+    # A git failure means we do not know the target's pins at all -- refuse,
+    # same as an unsafe-to-pin verdict (exit 1), and distinct from both "no
+    # self-references" (exit 3, a bad-target shape) and a known stale pin
+    # --force is meant to override. --force must not bypass this: it overrides
+    # "your pins are stale", never "your pins cannot be judged."
+    print(f"{new_sha[:12]}: its pins could not be verified -- git failed: {exc.stderr}")
+    return 1
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description="Re-pin a consumer repo to one engine commit.")
     ap.add_argument("--repo", required=True, help="path to the consumer repo checkout")
@@ -179,10 +189,16 @@ def main(argv=None):
     # A bad-target check, not a staleness call: --force overrides "your pins
     # are stale", never "your pins cannot be judged at all". refs_at([]) means
     # this commit's tree has no shipmate self-references (an old commit
-    # predating today's actions/ layout, an orphan commit, or a git failure
-    # pinrefs swallows into []) -- pin_status would then vacuously report zero
-    # issues and this tool would write a pin no one can evaluate.
-    if not pinrefs.refs_at(new_sha):
+    # predating today's actions/ layout, or an orphan commit) -- pin_status
+    # would then vacuously report zero issues and this tool would write a pin
+    # no one can evaluate. A git failure (GitFailure) is a different animal --
+    # not "no refs", but "could not check" -- so it is refused separately
+    # below, never folded into this message.
+    try:
+        has_refs = bool(pinrefs.refs_at(new_sha))
+    except pinrefs.GitFailure as exc:
+        return _refuse_git_failure(new_sha, exc)
+    if not has_refs:
         print(
             f"{new_sha[:12]} has no shipmate self-references in this clone -- its pins "
             "cannot be judged, so it is not a valid re-pin target"
@@ -192,7 +208,11 @@ def main(argv=None):
     if unreachable_from_main(new_sha):
         print(f"warning: {new_sha[:12]} is not an ancestor of main -- this pin can stop resolving")
 
-    if not _safe_to_pin(new_sha, args.force):
+    try:
+        safe = _safe_to_pin(new_sha, args.force)
+    except pinrefs.GitFailure as exc:
+        return _refuse_git_failure(new_sha, exc)
+    if not safe:
         return 1
 
     return _rewrite_and_report(root, new_sha, args.label)

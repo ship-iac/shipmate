@@ -78,6 +78,15 @@ def _report(issues, sha, ref_count):
     return 0
 
 
+def _unverifiable(sha, exc):
+    # A git failure means we do not know whether the pins are current -- that
+    # is exit 2 (unverifiable), the same bucket "missing"/"error" PinIssues
+    # land in, never exit 1 (stale, implying a fix is known) or exit 3 (bad
+    # target, implying the commit or repo layout is at fault).
+    print(f"{sha[:12]}: could not verify pins -- git failed: {exc.stderr}")
+    return 2
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description="Report whether a commit is safe to pin.")
     ap.add_argument("commit", nargs="?", default="HEAD", help="commit-ish (default: HEAD)")
@@ -88,7 +97,11 @@ def main(argv=None):
         print(f"{args.commit} does not resolve to a commit in this clone")
         return 3
 
-    refs = pinrefs.refs_at(sha)
+    try:
+        refs = pinrefs.refs_at(sha)
+    except pinrefs.GitFailure as exc:
+        return _unverifiable(sha, exc)
+
     if not refs:
         print(f"{sha[:12]}: no internal self-references found -- repo layout changed?")
         return 3
@@ -96,7 +109,12 @@ def main(argv=None):
     if unreachable_from_main(sha):
         print(f"warning: {sha[:12]} is not an ancestor of main -- a pin to it can stop resolving")
 
-    return _report(pin_status(sha), sha, len(refs))
+    try:
+        issues = pin_status(sha)
+    except pinrefs.GitFailure as exc:
+        return _unverifiable(sha, exc)
+
+    return _report(issues, sha, len(refs))
 
 
 if __name__ == "__main__":

@@ -13,6 +13,24 @@ from typing import NamedTuple
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 
+
+class GitFailure(RuntimeError):
+    """A git invocation this model depends on failed, so its answer is
+    unknown -- not empty.
+
+    Without this, a failed ``git ls-tree`` and a commit that genuinely has no
+    pin-bearing files are indistinguishable: both leave ``source_paths``
+    reporting nothing found, and every caller downstream (the CI guard,
+    ``pin-status``, ``repin-consumer``) would read that as "no problems" or
+    "not a valid target" when the true answer is "we could not check."
+    """
+
+    def __init__(self, commit, stderr):
+        self.commit = commit
+        self.stderr = stderr
+        super().__init__(f"git ls-tree failed for {commit!r}: {stderr}")
+
+
 REF = re.compile(r"ship-iac/shipmate/([^@\s]+)@([0-9a-f]{40})")
 SCRIPT_REF = re.compile(r"\$GITHUB_ACTION_PATH/\.\./\.\./scripts/([A-Za-z0-9_-]+)")
 LOAD_REF = re.compile(r"""_load\(\s*["']([^"']+)["']\s*\)""")
@@ -121,7 +139,9 @@ def source_paths(commit=None, root=None):
         ] + [p.relative_to(base).as_posix() for p in (base / "actions").glob("*/*") if p.is_file()]
     else:
         r = git("ls-tree", "-r", "--name-only", commit)
-        found = r.stdout.splitlines() if r.returncode == 0 else []
+        if r.returncode != 0:
+            raise GitFailure(commit, r.stderr.strip())
+        found = r.stdout.splitlines()
     return sorted(p for p in found if _is_source(p))
 
 

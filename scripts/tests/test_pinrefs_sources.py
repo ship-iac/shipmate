@@ -76,3 +76,33 @@ def test_refs_at_commit_reads_that_commits_tree_not_disk():
     at_pin = {(path, sha) for path, sha, _src in pinrefs.refs_at(CONVERGED)}
     now = {(path, sha) for path, sha, _src in pinrefs.refs_at()}
     assert at_pin != now
+
+
+def test_source_paths_raises_git_failure_when_ls_tree_fails(monkeypatch):
+    # A failed `git ls-tree` and a commit with genuinely no pin-bearing files
+    # both used to yield [] here -- indistinguishable to every caller. This
+    # asserts ls-tree failing raises GitFailure rather than being swallowed
+    # into an empty list.
+    class _R:
+        returncode = 128
+        stdout = ""
+        stderr = "fatal: bad object deadbeef\n"
+
+    monkeypatch.setattr(pinrefs, "git", lambda *a: _R())
+
+    with pytest.raises(pinrefs.GitFailure) as exc_info:
+        pinrefs.source_paths("deadbeef")
+
+    assert exc_info.value.commit == "deadbeef"
+    assert "bad object deadbeef" in exc_info.value.stderr
+
+
+def test_source_paths_working_tree_read_does_not_call_git(monkeypatch):
+    # Only the commit-tree branch calls ls-tree; a working-tree read
+    # (commit=None) must not touch git at all, so the GitFailure guard cannot
+    # change its behavior.
+    def fail(*_a):
+        raise AssertionError("working-tree read must not invoke git")
+
+    monkeypatch.setattr(pinrefs, "git", fail)
+    assert pinrefs.source_paths()  # no raise

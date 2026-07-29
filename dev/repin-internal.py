@@ -24,6 +24,14 @@ import sys
 
 import pinrefs
 
+# Any internal engine ref regardless of shape -- SHA, tag, short SHA, upper- or
+# lower-case -- used only by the --all survivor scan below to find refs REF
+# cannot see (REF matches nothing but a 40-lowercase-hex SHA) and would
+# otherwise leave behind silently. Mirrors dev/repin-consumer.py's
+# _ANY_ENGINE_REF; kept separate because that one also tolerates a wrapping
+# quote, a shape this tool's sources do not need to.
+_ANY_ENGINE_REF = re.compile(r"ship-iac/shipmate/([^@\s]+)@([^\s#]+)")
+
 
 def rewrite(root, targets, new_sha):
     """Substitute each ``(path, old_sha)`` in ``targets`` with ``new_sha``.
@@ -45,6 +53,49 @@ def rewrite(root, targets, new_sha):
             pinrefs.write_text(f, out, newline)
             changed.append((rel, total))
     return changed
+
+
+def _survivors(root, new_sha):
+    """Internal engine refs under ``root``'s pin-bearing sources still not
+    pinned to ``new_sha`` after an ``--all`` rewrite.
+
+    ``--all``'s whole promise is flattening *every* internal pin to one SHA;
+    a ref REF cannot see (a tag, a short SHA, an uppercase SHA) survives the
+    SHA-targeted substitution in ``rewrite`` untouched and must be named, not
+    swallowed into a reported success. Only meaningful after ``--all``: the
+    default stale-only mode legitimately leaves every non-target pin alone, so
+    this scan would fire on every one of those.
+    """
+    out = []
+    for rel in pinrefs.source_paths(root=root):
+        text = (root / rel).read_text(encoding="utf-8")
+        for path, ref in _ANY_ENGINE_REF.findall(text):
+            if ref != new_sha:
+                out.append(f"{rel}: {path}@{ref}")
+    return out
+
+
+def _survivor_exit(root, new_sha):
+    """Print and return 1 if an ``--all`` rewrite left a ref behind; else None.
+
+    A ref REF cannot see is exactly the shape this exists to catch -- the
+    guard's own coverage test (scripts/tests/test_internal_pins.py) proves REF
+    matches every internal ref today, but --all promising to flatten
+    everything is a stronger claim than "matches what REF can see", so it gets
+    its own check.
+    """
+    survivors = _survivors(root, new_sha)
+    if not survivors:
+        return None
+    print(
+        f"partial flatten -- {len(survivors)} internal reference(s) were not moved to "
+        f"{new_sha[:12]}: --all promises to flatten every internal pin, but these "
+        "are refs REF cannot see (a tag, a short SHA, an uppercase SHA) and so "
+        "could not be judged stale or rewritten:"
+    )
+    for line in survivors:
+        print(f"  {line}")
+    return 1
 
 
 def _targets(refs, new_sha, bump_all):
@@ -126,11 +177,23 @@ def main(argv=None):
             print(f"  {path}@{old[:12]} -> {new_sha[:12]}")
         return 1
 
+    return _write_and_report(targets, new_sha, args.all)
+
+
+def _write_and_report(targets, new_sha, bump_all):
+    """Rewrite the targeted pins, then -- for ``--all`` only -- check nothing
+    survived the flatten before reporting success."""
     changed = rewrite(pinrefs.ROOT, targets, new_sha)
     total = sum(n for _rel, n in changed)
     print(f"bumped {total} reference(s) across {len(changed)} file(s) to {new_sha[:12]}:")
     for rel, n in changed:
         print(f"  {rel} ({n})")
+
+    if bump_all:
+        survivor_code = _survivor_exit(pinrefs.ROOT, new_sha)
+        if survivor_code is not None:
+            return survivor_code
+
     print(
         "commit this, then run `python dev/pin-status.py HEAD` to check convergence at the "
         "current commit before re-running this tool (it compares against the mainline, so "

@@ -245,6 +245,110 @@ def test_main_reports_staleness_unknown_rather_than_none_stale(capsys, monkeypat
     assert "none stale against the mainline" not in out
 
 
+def test_all_survivor_scan_flags_a_tag_pinned_ref_left_behind(tmp_path):
+    # --all promises to flatten every internal pin to one SHA; a tag-pinned
+    # ref is invisible to REF (only matches 40-lowercase-hex) and so survives
+    # rewrite() untouched -- _survivors is what must notice.
+    root = _repo(
+        tmp_path,
+        {
+            ".github/workflows/apply.yml": (
+                "      - uses: ship-iac/shipmate/actions/setup@v0.1.0\n"
+                f"      - uses: ship-iac/shipmate/actions/state@{NEW}\n"
+            )
+        },
+    )
+
+    survivors = ri._survivors(root, NEW)
+
+    assert len(survivors) == 1
+    assert "actions/setup@v0.1.0" in survivors[0]
+
+
+def test_all_survivor_scan_is_clean_when_every_ref_is_the_new_sha(tmp_path):
+    root = _repo(
+        tmp_path,
+        {".github/workflows/apply.yml": f"      - uses: ship-iac/shipmate/actions/setup@{NEW}\n"},
+    )
+
+    assert ri._survivors(root, NEW) == []
+
+
+def test_survivor_exit_returns_one_and_prints_the_survivor(tmp_path, capsys):
+    root = _repo(
+        tmp_path,
+        {".github/workflows/apply.yml": "      - uses: ship-iac/shipmate/actions/setup@v0.1.0\n"},
+    )
+
+    code = ri._survivor_exit(root, NEW)
+
+    out = capsys.readouterr().out
+    assert code == 1
+    assert "actions/setup@v0.1.0" in out
+    assert "partial flatten" in out
+
+
+def test_survivor_exit_returns_none_when_nothing_survives(tmp_path):
+    root = _repo(
+        tmp_path,
+        {".github/workflows/apply.yml": f"      - uses: ship-iac/shipmate/actions/setup@{NEW}\n"},
+    )
+
+    assert ri._survivor_exit(root, NEW) is None
+
+
+def test_main_all_exits_one_when_a_tag_ref_survives_the_flatten(tmp_path, capsys, monkeypatch):
+    # End-to-end: --all rewrites the SHA-shaped ref but must report failure
+    # because the tag-shaped ref could not be flattened alongside it.
+    root = tmp_path
+    (root / ".github" / "workflows").mkdir(parents=True)
+    (root / ".github" / "workflows" / "apply.yml").write_text(
+        "      - uses: ship-iac/shipmate/actions/setup@v0.1.0\n"
+        f"      - uses: ship-iac/shipmate/actions/state@{OLD}\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(pinrefs, "ROOT", root)
+
+    class _R:
+        returncode = 0
+        stdout = NEW + "\n"
+
+    monkeypatch.setattr(pinrefs, "git", lambda *a: _R())
+
+    code = ri.main(["--all", "--to", NEW])
+
+    out = capsys.readouterr().out
+    assert code == 1
+    assert "partial flatten" in out
+    assert "actions/setup@v0.1.0" in out
+    # The SHA-shaped ref was still moved -- the rewrite itself is unaffected.
+    text = (root / ".github" / "workflows" / "apply.yml").read_text(encoding="utf-8")
+    assert f"actions/state@{NEW}" in text
+
+
+def test_main_all_exits_zero_when_nothing_survives_the_flatten(tmp_path, capsys, monkeypatch):
+    root = tmp_path
+    (root / ".github" / "workflows").mkdir(parents=True)
+    (root / ".github" / "workflows" / "apply.yml").write_text(
+        f"      - uses: ship-iac/shipmate/actions/setup@{OLD}\n", encoding="utf-8"
+    )
+    monkeypatch.setattr(pinrefs, "ROOT", root)
+
+    class _R:
+        returncode = 0
+        stdout = NEW + "\n"
+
+    monkeypatch.setattr(pinrefs, "git", lambda *a: _R())
+
+    code = ri.main(["--all", "--to", NEW])
+
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "partial flatten" not in out
+    text = (root / ".github" / "workflows" / "apply.yml").read_text(encoding="utf-8")
+    assert f"actions/setup@{NEW}" in text
+
+
 def test_rewrite_ignores_files_outside_the_two_source_shapes(tmp_path):
     # docs/ carries a grep example with a pin-shaped string; rewriting it would
     # corrupt documentation. Only workflows and action.yml files are sources.
@@ -667,3 +771,69 @@ def test_refusal_names_unverifiable_for_missing_and_error_problems(capsys, monke
     out = capsys.readouterr().out
     assert "could not be verified in this clone" in out
     assert "intermediate commit of the internal-pin cascade" not in out
+
+
+def test_main_refuses_when_the_initial_refs_at_hits_a_git_failure(tmp_path, capsys, monkeypatch):
+    # F(2): a GitFailure out of pinrefs.refs_at(new_sha) means "we cannot
+    # judge this target," not "no shipmate self-references" (exit 3) -- it
+    # must be refused (exit 1) and named as a git failure, and nothing may be
+    # written.
+    root = _repo(
+        tmp_path,
+        {".github/workflows/plan.yml": f"      - uses: ship-iac/shipmate/actions/setup@{OLD}\n"},
+    )
+    monkeypatch.setattr(
+        pinrefs,
+        "refs_at",
+        lambda *a, **k: (_ for _ in ()).throw(pinrefs.GitFailure(REAL, "fatal: bad object")),
+    )
+
+    code = rc.main(["--repo", str(root), "--sha", REAL])
+
+    out = capsys.readouterr().out
+    assert code == 1
+    assert "git failed" in out
+    assert "no shipmate self-references" not in out
+    assert OLD in (root / ".github/workflows/plan.yml").read_text(encoding="utf-8")
+
+
+def test_main_force_does_not_bypass_initial_git_failure(tmp_path, capsys, monkeypatch):
+    # --force overrides a *known* unsafe verdict, never "we could not check."
+    root = _repo(
+        tmp_path,
+        {".github/workflows/plan.yml": f"      - uses: ship-iac/shipmate/actions/setup@{OLD}\n"},
+    )
+    monkeypatch.setattr(
+        pinrefs,
+        "refs_at",
+        lambda *a, **k: (_ for _ in ()).throw(pinrefs.GitFailure(REAL, "fatal: bad object")),
+    )
+
+    code = rc.main(["--repo", str(root), "--sha", REAL, "--force"])
+
+    assert code == 1
+    assert OLD in (root / ".github/workflows/plan.yml").read_text(encoding="utf-8")
+
+
+def test_main_refuses_when_safe_to_pin_hits_a_git_failure(tmp_path, capsys, monkeypatch):
+    # Mirror of the test above for the second call site: refs_at(new_sha)
+    # succeeds (so main() gets past the "no refs" check) but _safe_to_pin --
+    # which calls pin_status(), which re-derives refs internally -- is the one
+    # that hits the git failure.
+    root = _repo(
+        tmp_path,
+        {".github/workflows/plan.yml": f"      - uses: ship-iac/shipmate/actions/setup@{OLD}\n"},
+    )
+    monkeypatch.setattr(
+        rc,
+        "pin_status",
+        lambda _sha: (_ for _ in ()).throw(pinrefs.GitFailure(REAL, "fatal: bad object")),
+    )
+
+    code = rc.main(["--repo", str(root), "--sha", REAL])
+
+    out = capsys.readouterr().out
+    assert code == 1
+    assert "git failed" in out
+    assert "no shipmate self-references" not in out
+    assert OLD in (root / ".github/workflows/plan.yml").read_text(encoding="utf-8")
