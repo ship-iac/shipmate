@@ -18,23 +18,17 @@ invariant: a failed apply must still leave its check pending).
 """
 
 import os
-import pathlib
 import shutil
 import subprocess
 
 import pytest
-import yaml
-
-_ACTIONS_DIR = pathlib.Path(__file__).resolve().parents[2] / "actions"
-_ACTION_PATH = _ACTIONS_DIR / "apply-cell" / "action.yml"
+from _loader import action_steps
 
 _BASH = shutil.which("bash")
 
 
 def _apply_step():
-    spec = yaml.safe_load(_ACTION_PATH.read_text(encoding="utf-8"))
-    steps = (spec.get("runs") or {}).get("steps") or []
-    matches = [s for s in steps if s.get("id") == "apply"]
+    matches = [s for s in action_steps("apply-cell") if s.get("id") == "apply"]
     assert len(matches) == 1, f"expected exactly one apply step (id: apply), got {len(matches)}"
     return matches[0]
 

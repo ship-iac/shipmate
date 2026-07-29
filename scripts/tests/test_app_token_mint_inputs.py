@@ -38,12 +38,10 @@ bump, re-read the new version's input resolution and confirm the value still
 reaches the JWT `iss` claim unvalidated before merging.
 """
 
-import pathlib
-
 import yaml
+from _loader import ACTIONS as _ACTIONS
+from _loader import ENGINE as _ROOT
 
-_ROOT = pathlib.Path(__file__).resolve().parents[2]
-_ACTIONS = _ROOT / "actions"
 _GITHUB = _ROOT / ".github"
 
 _MINT = "actions/create-github-app-token"

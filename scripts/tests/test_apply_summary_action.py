@@ -14,15 +14,13 @@ Also asserts the artifact-download `pattern` lines up with the
 `apply-summary.<env>.<slug>` name `actions/apply-cell` uploads under.
 """
 
-import pathlib
 import re
 
 import yaml
+from _loader import ENGINE, WORKFLOWS, action_steps, action_yaml, load_script
 
-ENGINE = pathlib.Path(__file__).resolve().parents[2]
 SCRIPT = ENGINE / "scripts" / "apply-comment"
-ACTION = ENGINE / "actions" / "apply-summary" / "action.yml"
-APPLY_CELL_ACTION = ENGINE / "actions" / "apply-cell" / "action.yml"
+_APPLY_COMMENT = load_script("apply-comment")
 
 # GHA sets these three for every step of every job (composite or plain) --
 # there is nothing for a caller to thread and no `env:` key to typo. The rest
@@ -36,15 +34,25 @@ _AMBIENT_GHA_VARS = frozenset({"GITHUB_SERVER_URL", "GITHUB_REPOSITORY", "GITHUB
 
 _SUBSCRIPT_RE = re.compile(r'os\.environ\[\s*f?([\'"])([A-Za-z0-9_{}]+)\1\s*\]')
 _GET_RE = re.compile(r'os\.environ\.get\(\s*f?([\'"])([A-Za-z0-9_{}]+)\1')
-_RANGE_RE = re.compile(r"range\((\d+)\)")
+_RANGE_RE = re.compile(r"range\((\d+|[A-Z][A-Z0-9_]*)\)")
 _PLACEHOLDER_RE = re.compile(r"\{[^}]*\}")
+
+
+def _range_width(token):
+    """The N in a `range(N)` bound: a literal, or a module constant of
+    `scripts/apply-comment` read off the loaded module."""
+    if token.isdigit():
+        return int(token)
+    width = getattr(_APPLY_COMMENT, token, None)
+    assert isinstance(width, int), f"range({token}) is not an int constant of apply-comment"
+    return width
 
 
 def _read_names():
     """Every environment variable name `scripts/apply-comment` reads, derived
     from its source. A literal name is captured as-is; a name carrying an
-    f-string placeholder (only `SHIPMATE_ENVLEVEL{i}_WAVES`, expanded over
-    `range(4)` on the same source line) is expanded to its concrete instances
+    f-string placeholder (only `SHIPMATE_ENVLEVEL{i}_WAVES`, expanded over the
+    `range(...)` on the same source line) is expanded to its concrete instances
     so the derived set is genuinely comparable to a `env:` block's keys."""
     names = set()
     for line in SCRIPT.read_text(encoding="utf-8").splitlines():
@@ -59,13 +67,13 @@ def _read_names():
                 f"env var pattern {raw!r} carries an f-string placeholder but "
                 f"no range(N) on the same line to expand it against: {line!r}"
             )
-            for i in range(int(rm.group(1))):
+            for i in range(_range_width(rm.group(1))):
                 names.add(_PLACEHOLDER_RE.sub(str(i), raw, count=1))
     return names
 
 
 def _load_action():
-    return yaml.safe_load(ACTION.read_text(encoding="utf-8"))
+    return action_yaml("apply-summary")
 
 
 def _find_step(steps, *, uses_contains=None, run_contains=None):
@@ -117,10 +125,7 @@ def test_download_pattern_matches_apply_cell_upload_prefix():
     assert upload_step is not None, "no download-artifact step found"
     pattern = (upload_step.get("with") or {}).get("pattern")
 
-    apply_cell_steps = yaml.safe_load(APPLY_CELL_ACTION.read_text(encoding="utf-8"))["runs"][
-        "steps"
-    ]
-    upload_apply_cell_step = _find_step(apply_cell_steps, uses_contains="upload-artifact")
+    upload_apply_cell_step = _find_step(action_steps("apply-cell"), uses_contains="upload-artifact")
     assert upload_apply_cell_step is not None, "apply-cell has no upload-artifact step"
     name = (upload_apply_cell_step.get("with") or {}).get("name", "")
     # `apply-summary.${{ inputs.env }}.${{ steps.ids.outputs.slug }}` -> the
@@ -171,9 +176,6 @@ def test_download_step_does_not_fail_on_zero_matches():
     with_ = download_step.get("with") or {}
     assert "pattern" in with_
     assert "name" not in with_
-
-
-WORKFLOWS = ENGINE / ".github" / "workflows"
 
 
 def _steps():

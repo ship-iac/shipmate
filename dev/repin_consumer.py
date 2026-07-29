@@ -35,30 +35,20 @@ format_issue = pinrefs.format_issue
 # wrapped in a quote (quoted `uses:` scalars are legal YAML), optionally
 # carrying a trailing comment this tool owns (the release annotation).
 #
-# The quote group is captured so the sub can re-emit it before any comment --
-# without this, a closing quote matches neither the SHA nor the comment
-# pattern, so it gets pushed past the new SHA into the middle of the string:
-# `"...@<old>"` becomes `"...@<new> # label"`, one YAML string Actions cannot
-# resolve. `(?(quote)(?P=quote))` requires the *same* quote character to follow
-# the SHA -- an opening quote only counts as this ref's closing quote, not any
-# unrelated quote elsewhere on the line.
-#
-# [^\S\n]* not \s*: \s matches newlines, so a pin line followed by a standalone
-# comment line would capture that comment as the trailing one, and a --label
-# rewrite would delete it and join the two lines. No sample workflow carries
-# that shape today, which is exactly why it has to be closed here rather than
-# noticed later.
+# Three clauses are load-bearing and non-obvious. The quote group is captured so
+# the sub can re-emit it BEFORE any comment (otherwise `"...@<old>"` becomes
+# `"...@<new> # label"`, a string Actions cannot resolve). `[^\S\n]*` excludes
+# newlines so a following standalone comment line is not captured as this ref's
+# trailing comment and deleted by a --label rewrite. And `(?(quote)(?P=quote))`
+# requires the SAME quote character to close the ref -- the equivalent-looking
+# `["']?` would let an opening `"` be closed by an unrelated `'` later on the
+# line, producing exactly the unresolvable string the first clause avoids.
 _CONSUMER_REF = re.compile(
     r"""(?P<quote>["'])?(?P<ref>ship-iac/shipmate/[^@\s]+)@[0-9a-f]{40}
         (?(quote)(?P=quote))
         (?P<comment>[^\S\n]*\#[^\n]*)?""",
     re.VERBOSE,
 )
-
-# Any engine ref regardless of shape -- SHA, tag, short SHA, quoted or not --
-# used only to find refs _CONSUMER_REF's SHA-only rewrite cannot touch and
-# would otherwise leave behind silently (see F3 in the module docstring).
-_ANY_ENGINE_REF = re.compile(r"ship-iac/shipmate/([^@\s'\"]+)@([^\s'\"#]+)")
 
 
 class _PlannedFile(NamedTuple):
@@ -112,10 +102,7 @@ def _commit_consumer(root, planned):
     nothing" (wrong --repo) apart from "matched N, all already current"
     (a safe re-run).
 
-    This is the only place this rewriter touches disk, and it does nothing
-    but write -- no git calls, no regex -- so an interrupt here can only ever
-    leave "some files replaced, some not", never a torn file. Not a
-    cross-file transaction: recover with `git status` / `git checkout --`.
+    Only-writes and per-file atomic, same shape as ``repin_internal._commit``.
     """
     changed = []
     matched = 0
@@ -137,42 +124,23 @@ def rewrite_consumer(root, new_sha, label):
     return _commit_consumer(root, _plan_consumer(root, new_sha, label))
 
 
-def _scan_survivors(path_text_pairs, new_sha):
-    """Engine refs across ``(path, text)`` pairs still not pinned to
-    ``new_sha`` -- a tag, short SHA, or uppercase SHA that ``_CONSUMER_REF``
-    cannot match (it only recognizes 40-hex lowercase) and so silently leaves
-    behind. All-or-nothing is the whole point of this tool (see the module
-    docstring); a straddling pin pair must be named, not swallowed into a
-    reported success.
-
-    Takes ``(path, text)`` rather than a root to read from disk, so the same
-    scan serves both the pre-write validation (against planned text, before
-    anything is committed) and ``_survivors`` below (against the working
-    tree, for standalone use/testing).
-    """
-    out = []
-    for rel, text in path_text_pairs:
-        for path, ref in _ANY_ENGINE_REF.findall(text):
-            if ref != new_sha:
-                out.append(f"{rel}: {path}@{ref}")
-    return out
-
-
 def _survivors(root, new_sha):
-    """``_scan_survivors`` read fresh off ``root``'s workflows on disk."""
+    """``pinrefs.scan_survivors`` read fresh off ``root``'s workflows on disk.
+
+    Catches what ``_CONSUMER_REF``'s 40-hex-only rewrite cannot -- a tag, a
+    short SHA, an uppercase one (test_repin's F3 cases)."""
     wf = root / ".github" / "workflows"
     files = sorted(wf.glob("*.yml")) + sorted(wf.glob("*.yaml"))
     pairs = [(f.relative_to(root).as_posix(), f.read_text(encoding="utf-8")) for f in files]
-    return _scan_survivors(pairs, new_sha)
+    return pinrefs.scan_survivors(pairs, new_sha)
 
 
 def _resolve_sha(sha):
     """Full 40-hex sha for ``sha``, or None if it does not resolve here."""
-    r = pinrefs.git("rev-parse", "--verify", f"{sha}^{{commit}}")
-    if r.returncode != 0:
+    resolved = pinrefs.resolve(sha)
+    if resolved is None:
         print(f"{sha} does not resolve to a commit in this engine clone")
-        return None
-    return r.stdout.strip()
+    return resolved
 
 
 def _safe_to_pin(new_sha, force):
@@ -259,18 +227,12 @@ def main(argv=None):
 
 def _rewrite_and_report(root, new_sha, label):
     """Plan every workflow file in memory, validate the all-or-nothing rule
-    against that plan, and only then commit to disk.
-
-    This makes the *decision* atomic: either every planned file is written,
-    or -- when a survivor is found -- none is, and the refusal is reported
-    before any write happens. It is not a cross-file transaction: nothing
-    here stops an interrupt between two of ``_commit_consumer``'s individual
-    writes from leaving some files rewritten and others not; recover with
-    `git status` / `git checkout --`, as always.
+    against that plan, and only then commit to disk -- same plan/validate/commit
+    contract as ``repin_internal._write_and_report``.
     """
     planned = _plan_consumer(root, new_sha, label)
 
-    survivors = _scan_survivors([(p.path, p.text) for p in planned], new_sha)
+    survivors = pinrefs.scan_survivors([(p.path, p.text) for p in planned], new_sha)
     if survivors:
         print(
             f"partial rewrite -- {len(survivors)} engine reference(s) were not moved to "

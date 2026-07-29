@@ -1,10 +1,9 @@
 import io
 import json
 import os
-import pathlib
 
 import pytest
-from _loader import load_script
+from _loader import ACTIONS, load_script
 
 doctor = load_script("doctor")
 
@@ -1360,7 +1359,6 @@ def test_doctor_marker_matches_action_upsert():
     # action's doctor upsert step greps for. Drift = a new comment every run
     # instead of an edit-in-place. Assert the action site carries the
     # script's marker and that its doctor step actually invokes the script.
-    engine = pathlib.Path(__file__).resolve().parents[2]
-    src = (engine / "actions" / "comment-ops" / "action.yml").read_text(encoding="utf-8")
+    src = (ACTIONS / "comment-ops" / "action.yml").read_text(encoding="utf-8")
     assert src.count(doctor.DOCTOR_MARKER) >= 1, "upsert step no longer greps the script's marker"
     assert "scripts/doctor" in src, "comment-ops action no longer calls scripts/doctor"

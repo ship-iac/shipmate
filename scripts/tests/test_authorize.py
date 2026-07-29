@@ -1,10 +1,7 @@
 import json
-import pathlib
 
+from _loader import SCRIPTS as _D
 from _loader import load_script
-
-_D = pathlib.Path(__file__).resolve().parents[1]
-
 
 az = load_script("authorize")
 

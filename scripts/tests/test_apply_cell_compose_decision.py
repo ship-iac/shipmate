@@ -20,22 +20,13 @@ in fact never ran.
 """
 
 import json
-import pathlib
 
 import pytest
-import yaml
-
-_ACTIONS_DIR = pathlib.Path(__file__).resolve().parents[2] / "actions"
-_ACTION_PATH = _ACTIONS_DIR / "apply-cell" / "action.yml"
-
-
-def _steps():
-    spec = yaml.safe_load(_ACTION_PATH.read_text(encoding="utf-8"))
-    return (spec.get("runs") or {}).get("steps") or []
+from _loader import action_steps
 
 
 def _compose_step():
-    matches = [s for s in _steps() if s.get("name") == "Compose cell summary"]
+    matches = [s for s in action_steps("apply-cell") if s.get("name") == "Compose cell summary"]
     assert len(matches) == 1, f"expected exactly one Compose cell summary step, got {len(matches)}"
     return matches[0]
 

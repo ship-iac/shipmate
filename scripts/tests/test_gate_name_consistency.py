@@ -7,11 +7,9 @@ on one path and sticks on another. This guards that invariant the same way
 test_check_runs_filter_aligned guards the check-runs read discipline.
 """
 
-import pathlib
-
 import yaml
+from _loader import ENGINE, WORKFLOWS
 
-ENGINE = pathlib.Path(__file__).resolve().parents[2]
 # Generated / third-party / VCS dirs: never shipmate source, and their contents
 # (compiled .pyc constant pools, vendored packages) can carry the retired token
 # for reasons unrelated to this repo -- scanning them would false-fail the guard.
@@ -98,7 +96,6 @@ def test_gate_written_as_commit_status_not_check_run():
                 )
 
 
-WORKFLOWS = ENGINE / ".github" / "workflows"
 GATE_WRITER_ACTIONS = ("actions/gate-refresh", "actions/summary")
 CREDENTIALED_ACTIONS = (
     "actions/gate-refresh",

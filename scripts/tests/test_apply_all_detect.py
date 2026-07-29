@@ -1,6 +1,5 @@
-import json
-
 import pytest
+from _detect_fixtures import check_run, completed_names
 from _loader import load_script
 
 aad = load_script("apply-all-detect")
@@ -70,36 +69,24 @@ def test_partition_applied_explicit_env_blocks_nothing():
     assert excluded == [] and skipped == []
 
 
-def test_foreign_app_completed_check_stays_pending():
-    # A completed+success check created by a foreign identity (github-actions,
-    # app id 15368) must not count as done once SHIPMATE_APP_ID scopes the
-    # detect to the shipmate App (999) -- main() calls ag.app_done_names on the
-    # raw JSONL lines; reproduce that exact call here so this test would go
-    # red if main() ever stopped routing through app_done_names.
+def test_foreign_app_completed_check_stays_pending(monkeypatch):
+    # A completed+success check authored by another identity (github-actions,
+    # app id 15368) must not count as done for the bare-apply queue.
     cells = [{"stack": "stacks/app", "environment": "dev-eu"}]
-    line = json.dumps(
-        {
-            "name": "apply / stacks/app / dev-eu",
-            "status": "completed",
-            "conclusion": "success",
-            "started_at": "2026-07-18T10:00:00Z",
-            "id": 1,
-            "app": {"id": 15368},
-        }
-    )
-    done = aad.ag.app_done_names([line], "999")
+    done = completed_names(aad.ad, monkeypatch, [check_run(app={"id": 15368})])
     assert aad.ad.filter_pending(cells, done) == cells
 
 
 def test_reuses_single_sourced_helpers():
     # Workset matching, pending filter, env-level bucketing and the done
-    # predicate must come from the existing single-sourced implementations,
-    # not private copies (complexity-budget rows 6 and 9). env-level bucketing
-    # and the GITHUB_OUTPUT writer live in env-order (shared with deploy-detect),
-    # so this script no longer loads the deploy-detect entry-point module at all.
+    # predicate must come from the shared implementations, not private copies.
+    # env-level bucketing and the GITHUB_OUTPUT writer live in env-order (shared
+    # with deploy-detect), so this script no longer loads deploy-detect at all.
     assert aad.ad.workset_from_artifacts is not None
     assert aad.eo.waves_by_env_level is not None
     assert aad.eo.write_env_level_waves is not None
-    assert aad.ag.done_names is not None
+    # No local apply-gate alias -- test_detect_app_scoping pins which route
+    # main() actually takes; this only asserts the second one does not exist.
+    assert not hasattr(aad, "ag")
     assert not hasattr(aad, "dd")
     assert not hasattr(aad, "workset_from_artifacts_impl")

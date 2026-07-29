@@ -60,6 +60,11 @@ sc = _load("summary-comment")
 # about a cell -- see apply_check_state.
 ag = _load("apply-gate")
 
+# COUPLED to env-order.MAX_ENV_LEVELS (which lists the GHA slots that move with
+# it); pinned equal by test_apply_comment. Kept as a local constant rather than
+# an `_load("env-order")`, which would widen this renderer's pin closure.
+MAX_ENV_LEVELS = 4
+
 CELL_KEYS = ("stack", "stack_path", "environment", "result", "reason")
 _RESULTS = frozenset({"applied", "failed", "blocked"})
 # Display statuses are a SUPERSET of cell.json's `result` enum above:
@@ -328,12 +333,14 @@ def load_cells(cells_dir):
 
 
 def _expected_cells():
-    """Union of every wave array in SHIPMATE_WAVES_JSON (targeted) or the four
-    SHIPMATE_ENVLEVEL{0..3}_WAVES (all-environments); '' contributes nothing.
-    Cell identity is (environment, stack_path) -- a wave element is
+    """Union of every wave array in SHIPMATE_WAVES_JSON (targeted) or the
+    SHIPMATE_ENVLEVEL{0..N}_WAVES inputs (all-environments); '' contributes
+    nothing. Cell identity is (environment, stack_path) -- a wave element is
     `{"stack": "<stack path>", "environment": "<env>"}`."""
     raw_values = [os.environ.get("SHIPMATE_WAVES_JSON", "") or ""]
-    raw_values += [os.environ.get(f"SHIPMATE_ENVLEVEL{i}_WAVES", "") or "" for i in range(4)]
+    raw_values += [
+        os.environ.get(f"SHIPMATE_ENVLEVEL{i}_WAVES", "") or "" for i in range(MAX_ENV_LEVELS)
+    ]
     expected = set()
     for raw in raw_values:
         if not raw:
@@ -453,15 +460,20 @@ def load_check_maps(path, app_id):
         return set(), set()
 
 
+def _check_name(row):
+    """This row's apply check name, forward-built per the CONTRACT grammar
+    `apply / <stack> / <env>` -- never reverse-parsed."""
+    return f"apply / {row['stack_path']} / {row['environment']}"
+
+
 def _check_state(row, present, done):
     """This row's apply check: CHECK_DONE, CHECK_PENDING, or CHECK_UNKNOWN.
 
-    The name is the forward-built CONTRACT grammar `_job_url` also constructs.
     Absence means UNKNOWN, never pending: a failed scan, an empty file, an
     app-id mismatch and from_app dropping a forged same-name check all land
     here, and every one of them must fall back to the artifact-only rendering
     rather than invent a stranded cell."""
-    name = f"apply / {row['stack_path']} / {row['environment']}"
+    name = _check_name(row)
     if name in done:
         return CHECK_DONE
     if name in present:
@@ -522,7 +534,7 @@ def _job_url(row, jobs, run_url):
     boundary (not a bare `endswith`) so a job named e.g. `reapply / ...` cannot
     false-positive on the `apply / ...` suffix. No match -> fall back to the
     workflow-run URL."""
-    target = f"apply / {row['stack_path']} / {row['environment']}"
+    target = _check_name(row)
     url = None
     for job in jobs:
         name = job.get("name", "")

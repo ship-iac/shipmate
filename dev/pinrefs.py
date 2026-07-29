@@ -43,6 +43,37 @@ SCRIPT_REF = re.compile(r"\$GITHUB_ACTION_PATH/\.\./\.\./scripts/([A-Za-z0-9_-]+
 # phantom dependency `scripts/x` into script_closure and make the premise check
 # in scripts/tests/test_pin_derivation_premises.py red with the wrong diagnosis.
 LOAD_REF = re.compile(r"""(?<![A-Za-z0-9_])_load\(\s*["']([^"']+)["']\s*\)""")
+# Any engine ref regardless of shape -- what the SHA-only REF and
+# repin_consumer._CONSUMER_REF cannot see, and would leave behind silently.
+# A quoted `uses:` scalar is legal YAML, so a quote around the whole scalar is
+# not part of the ref: excluding quotes from the ref group is what stops a
+# trailing one making a correctly rewritten ref look like a survivor. A quote
+# directly after the `@` is a different animal -- it is never canonical, and
+# neither REF nor _CONSUMER_REF can rewrite it -- so `quote` is captured and
+# scan_survivors reports the ref even when the value inside already reads as
+# the new SHA.
+ANY_ENGINE_REF = re.compile(r"ship-iac/shipmate/([^@\s'\"]+)@(?P<quote>['\"])?([^\s'\"#]+)")
+
+
+def scan_survivors(path_text_pairs, new_sha):
+    """Engine refs across ``(path, text)`` pairs not left pinned to ``new_sha``.
+
+    A ref the SHA-targeted substitution could not touch must be named, not
+    swallowed into a reported success -- that is the all-or-nothing promise of
+    ``repin_consumer`` (every engine ref moves together) and of
+    ``repin_internal --all``. NOT of repin_internal's default stale-only mode,
+    which legitimately leaves every non-target pin alone: run this over that and
+    it fires on all of them, which is why the caller guards it.
+
+    Takes ``(path, text)`` rather than a root, so the same scan serves pre-write
+    plan validation and a working-tree read.
+    """
+    out = []
+    for rel, text in path_text_pairs:
+        for path, quote, ref in ANY_ENGINE_REF.findall(text):
+            if ref != new_sha or quote:
+                out.append(f"{rel}: {path}@{quote}{ref}")
+    return out
 
 
 def git(*args):
@@ -119,6 +150,13 @@ def atomic_write_text(path, text, newline="\n"):
         with contextlib.suppress(FileNotFoundError):
             os.remove(tmp_name)
         raise
+
+
+def resolve(commitish):
+    """Full 40-hex SHA for ``commitish`` peeled to a commit, or None if it does
+    not resolve here. Without the peel a tag or tree-ish resolves too."""
+    r = git("rev-parse", "--verify", f"{commitish}^{{commit}}")
+    return r.stdout.strip() if r.returncode == 0 else None
 
 
 def commit_present(sha):

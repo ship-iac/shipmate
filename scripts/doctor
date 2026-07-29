@@ -850,18 +850,38 @@ def _findings_lines(findings, budget):
     when even the harvest-less body still exceeds sc.HARD_CAP)."""
     lines, used, dropped = [], 0, 0
     for lvl, text in findings:
-        # Escaped for the same reason the harvest rows are: a finding
-        # interpolates repository data (a workflow file name, a team slug, an
-        # API error string), and an unescaped `<!-- shipmate:summary -->` in one
-        # of those would make actions/summary's marker+Bot upsert PATCH this
-        # doctor comment with the plan comment's body.
-        line = f"- {_LEVEL_EMOJI[lvl]} {_md_escape(text)}"
+        line = _finding_row(lvl, text)
         if used + len(line) + 1 <= budget:
             lines.append(line)
             used += len(line) + 1
         else:
             dropped += 1
     return lines, dropped
+
+
+def _report_head(ctx):
+    """Shared by both render paths -- the marker is this comment's identity (the
+    upsert PATCHes by it), so neither path can drift out of marker compliance."""
+    return [
+        DOCTOR_MARKER,
+        "### shipmate doctor",
+        "",
+        _provenance(ctx),
+        "",
+        "#### repository settings",
+        "",
+    ]
+
+
+def _finding_row(lvl, text):
+    """One settings-probe finding as a list row.
+
+    Escaped for the same reason the harvest rows are: a finding interpolates
+    repository data (a workflow file name, a team slug, an API error string),
+    and an unescaped `<!-- shipmate:summary -->` in one of those would make
+    actions/summary's marker+Bot upsert PATCH this doctor comment with the plan
+    comment's body."""
+    return f"- {_LEVEL_EMOJI[lvl]} {_md_escape(text)}"
 
 
 def _findings_only_report(findings, ctx):
@@ -871,15 +891,7 @@ def _findings_only_report(findings, ctx):
     pin across hundreds of workflow files). Drops the harvest section
     entirely and hard-truncates the findings list, so the comment still
     posts with a count rather than the whole POST failing with a 422."""
-    head = [
-        DOCTOR_MARKER,
-        "### shipmate doctor",
-        "",
-        _provenance(ctx),
-        "",
-        "#### repository settings",
-        "",
-    ]
+    head = _report_head(ctx)
     # 200 chars of headroom for the omitted-count line appended below.
     budget = max(0, sc.HARD_CAP - len("\n".join(head)) - 200)
     if findings:
@@ -927,13 +939,9 @@ def _harvest_body(sections, annotations, budget, harvest_failed, harvest_pending
 
 
 def render_report(findings, annotations, ctx):
-    out = [DOCTOR_MARKER, "### shipmate doctor", "", _provenance(ctx), ""]
-    out += ["#### repository settings", ""]
+    out = _report_head(ctx)
     if findings:
-        # _md_escape for the same reason as the harvest rows and the fallback
-        # path's _findings_lines: findings carry repository data, and a marker
-        # smuggled through one of them would hijack this comment's identity.
-        out += [f"- {_LEVEL_EMOJI[lvl]} {_md_escape(text)}" for lvl, text in findings]
+        out += [_finding_row(lvl, text) for lvl, text in findings]
     else:
         out.append(_all_clear_line(ctx))
     heading = ["", "#### warnings from this commit's workflow runs", ""]
