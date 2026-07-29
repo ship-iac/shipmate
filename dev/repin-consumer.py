@@ -22,6 +22,7 @@ import argparse
 import pathlib
 import re
 import sys
+from typing import NamedTuple
 
 import pinrefs
 
@@ -74,13 +75,48 @@ _CONSUMER_REF = re.compile(
 _ANY_ENGINE_REF = re.compile(r"ship-iac/shipmate/([^@\s'\"]+)@([^\s'\"#]+)")
 
 
-def rewrite_consumer(root, new_sha, label):
-    """Point every engine ref in ``root``'s workflows at ``new_sha``.
+class _PlannedFile(NamedTuple):
+    """One workflow file's computed post-rewrite state, before anything is
+    written. Carries an entry for every workflow under ``root``, including
+    ones with no engine ref at all -- the survivor validation needs the
+    planned text of the whole set to judge the rewrite without reading disk
+    again."""
+
+    path: str  # repo-relative posix path
+    text: str  # full new content ("\n"-delimited)
+    newline: str  # newline style read_text reported for this file
+    matched: int  # engine refs found, regardless of whether the sub was a no-op
+    changed: bool  # whether the substitution actually altered the text
+
+
+def _plan_consumer(root, new_sha, label):
+    """Compute the post-rewrite content of every workflow under ``root``, in
+    memory. Touches nothing on disk but the reads.
 
     With ``label``, the trailing comment becomes ``# <label>`` (docs/releasing.md
     annotates each consumer pin ``# vX.Y.Z``). Without, an existing comment is
-    left untouched. Third-party pins are unaffected -- the pattern is anchored on
-    the engine slug.
+    left untouched. Third-party pins are unaffected -- the pattern is anchored
+    on the engine slug.
+    """
+
+    def sub(m):
+        quote = m.group("quote") or ""
+        comment = f" # {label}" if label else (m.group("comment") or "")
+        return f"{quote}{m.group('ref')}@{new_sha}{quote}{comment}"
+
+    planned = []
+    wf = root / ".github" / "workflows"
+    for f in sorted(wf.glob("*.yml")) + sorted(wf.glob("*.yaml")):
+        text, newline = pinrefs.read_text(f)
+        out, n = _CONSUMER_REF.subn(sub, text)
+        rel = f.relative_to(root).as_posix()
+        planned.append(_PlannedFile(rel, out, newline, n, out != text))
+    return planned
+
+
+def _commit_consumer(root, planned):
+    """Write every planned file whose substitution actually altered the text
+    to disk, atomically per file (see pinrefs.atomic_write_text).
 
     Returns ``(changed, matched)``: ``changed`` is ``[(path, n)]`` for files
     whose substitution actually altered the text; ``matched`` is the total
@@ -89,42 +125,59 @@ def rewrite_consumer(root, new_sha, label):
     already at ``new_sha``/``label`` -- the caller needs that to tell "matched
     nothing" (wrong --repo) apart from "matched N, all already current"
     (a safe re-run).
+
+    This is the only place this rewriter touches disk, and it does nothing
+    but write -- no git calls, no regex -- so an interrupt here can only ever
+    leave "some files replaced, some not", never a torn file. Not a
+    cross-file transaction: recover with `git status` / `git checkout --`.
     """
-
-    def sub(m):
-        quote = m.group("quote") or ""
-        comment = f" # {label}" if label else (m.group("comment") or "")
-        return f"{quote}{m.group('ref')}@{new_sha}{quote}{comment}"
-
     changed = []
     matched = 0
-    wf = root / ".github" / "workflows"
-    for f in sorted(wf.glob("*.yml")) + sorted(wf.glob("*.yaml")):
-        text, newline = pinrefs.read_text(f)
-        out, n = _CONSUMER_REF.subn(sub, text)
-        matched += n
-        if n and out != text:
-            pinrefs.write_text(f, out, newline)
-            changed.append((f.relative_to(root).as_posix(), n))
+    for p in planned:
+        matched += p.matched
+        if p.matched and p.changed:
+            pinrefs.atomic_write_text(root / p.path, p.text, p.newline)
+            changed.append((p.path, p.matched))
     return changed, matched
 
 
-def _survivors(root, new_sha):
-    """Engine refs under ``root``'s workflows still not pinned to ``new_sha``
-    after a rewrite pass -- a tag, short SHA, or uppercase SHA that
-    ``_CONSUMER_REF`` cannot match (it only recognizes 40-hex lowercase) and so
-    silently leaves behind. All-or-nothing is the whole point of this tool
-    (see the module docstring); a straddling pin pair must be named, not
-    swallowed into a reported success.
+def rewrite_consumer(root, new_sha, label):
+    """Point every engine ref in ``root``'s workflows at ``new_sha``.
+
+    Returns ``(changed, matched)`` -- see ``_commit_consumer``. Plans every
+    workflow in memory first, then commits -- see ``_plan_consumer``/
+    ``_commit_consumer``.
+    """
+    return _commit_consumer(root, _plan_consumer(root, new_sha, label))
+
+
+def _scan_survivors(path_text_pairs, new_sha):
+    """Engine refs across ``(path, text)`` pairs still not pinned to
+    ``new_sha`` -- a tag, short SHA, or uppercase SHA that ``_CONSUMER_REF``
+    cannot match (it only recognizes 40-hex lowercase) and so silently leaves
+    behind. All-or-nothing is the whole point of this tool (see the module
+    docstring); a straddling pin pair must be named, not swallowed into a
+    reported success.
+
+    Takes ``(path, text)`` rather than a root to read from disk, so the same
+    scan serves both the pre-write validation (against planned text, before
+    anything is committed) and ``_survivors`` below (against the working
+    tree, for standalone use/testing).
     """
     out = []
-    wf = root / ".github" / "workflows"
-    for f in sorted(wf.glob("*.yml")) + sorted(wf.glob("*.yaml")):
-        text = f.read_text(encoding="utf-8")
+    for rel, text in path_text_pairs:
         for path, ref in _ANY_ENGINE_REF.findall(text):
             if ref != new_sha:
-                out.append(f"{f.relative_to(root).as_posix()}: {path}@{ref}")
+                out.append(f"{rel}: {path}@{ref}")
     return out
+
+
+def _survivors(root, new_sha):
+    """``_scan_survivors`` read fresh off ``root``'s workflows on disk."""
+    wf = root / ".github" / "workflows"
+    files = sorted(wf.glob("*.yml")) + sorted(wf.glob("*.yaml"))
+    pairs = [(f.relative_to(root).as_posix(), f.read_text(encoding="utf-8")) for f in files]
+    return _scan_survivors(pairs, new_sha)
 
 
 def _resolve_sha(sha):
@@ -219,10 +272,19 @@ def main(argv=None):
 
 
 def _rewrite_and_report(root, new_sha, label):
-    """Rewrite, then check the all-or-nothing rule held before reporting."""
-    changed, matched = rewrite_consumer(root, new_sha, label)
+    """Plan every workflow file in memory, validate the all-or-nothing rule
+    against that plan, and only then commit to disk.
 
-    survivors = _survivors(root, new_sha)
+    This makes the *decision* atomic: either every planned file is written,
+    or -- when a survivor is found -- none is, and the refusal is reported
+    before any write happens. It is not a cross-file transaction: nothing
+    here stops an interrupt between two of ``_commit_consumer``'s individual
+    writes from leaving some files rewritten and others not; recover with
+    `git status` / `git checkout --`, as always.
+    """
+    planned = _plan_consumer(root, new_sha, label)
+
+    survivors = _scan_survivors([(p.path, p.text) for p in planned], new_sha)
     if survivors:
         print(
             f"partial rewrite -- {len(survivors)} engine reference(s) were not moved to "
@@ -231,6 +293,8 @@ def _rewrite_and_report(root, new_sha, label):
         for line in survivors:
             print(f"  {line}")
         return 1
+
+    changed, matched = _commit_consumer(root, planned)
 
     if not matched:
         print(f"no engine references found under {root / '.github' / 'workflows'}")

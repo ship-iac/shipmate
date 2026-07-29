@@ -6,9 +6,12 @@ the full rationale for the shape of this) and the ``dev/`` re-pin CLIs. Pure
 library: no argparse, no printing, no process exits.
 """
 
+import contextlib
+import os
 import pathlib
 import re
 import subprocess
+import tempfile
 from typing import NamedTuple
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -86,6 +89,30 @@ def write_text(path, text, newline="\n"):
     reported.
     """
     path.write_bytes(text.replace("\n", newline).encode("utf-8"))
+
+
+def atomic_write_text(path, text, newline="\n"):
+    """Write ``text`` to ``path`` like ``write_text``, but so the write is
+    atomic per file: the new content lands in a temporary file in ``path``'s
+    own directory first, then ``os.replace`` swaps it into place. ``os.replace``
+    is atomic on both Windows and POSIX, so nothing ever observes ``path``
+    half-written -- a reader always sees either the old content or the new,
+    never a partial write.
+
+    This is per-file atomicity only, not a cross-file transaction: a caller
+    writing several files this way in a loop can still be interrupted between
+    two calls, leaving whichever files were already replaced changed and the
+    rest untouched. Recover with ``git status`` / ``git checkout --``.
+    """
+    fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(text.replace("\n", newline).encode("utf-8"))
+        os.replace(tmp_name, path)
+    except BaseException:
+        with contextlib.suppress(FileNotFoundError):
+            os.remove(tmp_name)
+        raise
 
 
 def commit_present(sha):

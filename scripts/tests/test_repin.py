@@ -298,8 +298,13 @@ def test_survivor_exit_returns_none_when_nothing_survives(tmp_path):
 
 
 def test_main_all_exits_one_when_a_tag_ref_survives_the_flatten(tmp_path, capsys, monkeypatch):
-    # End-to-end: --all rewrites the SHA-shaped ref but must report failure
-    # because the tag-shaped ref could not be flattened alongside it.
+    # End-to-end: --all must report failure because the tag-shaped ref cannot
+    # be flattened alongside the SHA-shaped one -- and, since the survivor
+    # check now runs against the plan before anything is committed, it must
+    # write nothing at all, not even the SHA-shaped ref it could have moved.
+    # (Revert the plan/validate/commit split -- e.g. move the survivor scan
+    # back to reading the working tree after rewrite() runs -- and this test
+    # goes red: the file comes back with actions/state@{NEW} already written.)
     root = tmp_path
     (root / ".github" / "workflows").mkdir(parents=True)
     (root / ".github" / "workflows" / "apply.yml").write_text(
@@ -321,9 +326,10 @@ def test_main_all_exits_one_when_a_tag_ref_survives_the_flatten(tmp_path, capsys
     assert code == 1
     assert "partial flatten" in out
     assert "actions/setup@v0.1.0" in out
-    # The SHA-shaped ref was still moved -- the rewrite itself is unaffected.
+    # Nothing was written -- the refusal happened before any commit.
     text = (root / ".github" / "workflows" / "apply.yml").read_text(encoding="utf-8")
-    assert f"actions/state@{NEW}" in text
+    assert f"actions/state@{OLD}" in text
+    assert f"actions/state@{NEW}" not in text
 
 
 def test_main_all_exits_zero_when_nothing_survives_the_flatten(tmp_path, capsys, monkeypatch):
@@ -347,6 +353,41 @@ def test_main_all_exits_zero_when_nothing_survives_the_flatten(tmp_path, capsys,
     assert "partial flatten" not in out
     text = (root / ".github" / "workflows" / "apply.yml").read_text(encoding="utf-8")
     assert f"actions/setup@{NEW}" in text
+
+
+def test_plan_touches_nothing_on_disk(tmp_path):
+    # The whole point of the plan/validate/commit split: computing the edit
+    # must not write anything, so a failed validation afterward has nothing
+    # to undo.
+    root = _repo(
+        tmp_path,
+        {".github/workflows/apply.yml": f"  - uses: ship-iac/shipmate/actions/setup@{OLD}\n"},
+    )
+    p = root / ".github/workflows/apply.yml"
+    before = p.read_bytes()
+
+    planned = ri._plan(root, {("actions/setup", OLD)}, NEW)
+
+    assert p.read_bytes() == before
+    entry = next(e for e in planned if e.path == ".github/workflows/apply.yml")
+    assert entry.count == 1
+    assert f"actions/setup@{NEW}" in entry.text
+
+
+def test_commit_writes_the_planned_edit_and_leaves_no_temp_file_behind(tmp_path):
+    root = _repo(
+        tmp_path,
+        {".github/workflows/apply.yml": f"  - uses: ship-iac/shipmate/actions/setup@{OLD}\n"},
+    )
+    planned = ri._plan(root, {("actions/setup", OLD)}, NEW)
+
+    changed = ri._commit(root, planned)
+
+    assert changed == [(".github/workflows/apply.yml", 1)]
+    text = (root / ".github/workflows/apply.yml").read_text(encoding="utf-8")
+    assert f"actions/setup@{NEW}" in text
+    # atomic_write_text's temp file must not survive a successful replace.
+    assert list((root / ".github/workflows").glob("*.tmp")) == []
 
 
 def test_rewrite_ignores_files_outside_the_two_source_shapes(tmp_path):
@@ -546,6 +587,39 @@ def test_rewrite_consumer_preserves_a_single_quoted_ref_with_label(tmp_path):
     assert text.rstrip("\n").endswith(f"'ship-iac/shipmate/actions/setup@{NEW}' # v0.2.0")
 
 
+def test_plan_consumer_touches_nothing_on_disk(tmp_path):
+    root = _repo(
+        tmp_path,
+        {".github/workflows/plan.yml": f"      - uses: ship-iac/shipmate/actions/setup@{OLD}\n"},
+    )
+    p = root / ".github/workflows/plan.yml"
+    before = p.read_bytes()
+
+    planned = rc._plan_consumer(root, NEW, None)
+
+    assert p.read_bytes() == before
+    entry = next(e for e in planned if e.path == ".github/workflows/plan.yml")
+    assert entry.matched == 1
+    assert entry.changed is True
+    assert f"actions/setup@{NEW}" in entry.text
+
+
+def test_commit_consumer_writes_the_planned_edit_and_leaves_no_temp_file_behind(tmp_path):
+    root = _repo(
+        tmp_path,
+        {".github/workflows/plan.yml": f"      - uses: ship-iac/shipmate/actions/setup@{OLD}\n"},
+    )
+    planned = rc._plan_consumer(root, NEW, None)
+
+    changed, matched = rc._commit_consumer(root, planned)
+
+    assert matched == 1
+    assert changed == [(".github/workflows/plan.yml", 1)]
+    text = (root / ".github/workflows/plan.yml").read_text(encoding="utf-8")
+    assert f"actions/setup@{NEW}" in text
+    assert list((root / ".github/workflows").glob("*.tmp")) == []
+
+
 def test_main_refuses_a_target_commit_with_no_internal_refs(tmp_path, capsys):
     # F1: repin-consumer's own safety check must not be bypassable by pointing
     # it at a commit whose tree has no shipmate self-references at all (the
@@ -621,7 +695,12 @@ def test_survivors_does_not_flag_a_correctly_rewritten_quoted_ref(tmp_path):
 
 def test_main_reports_partial_rewrite_when_a_ref_survives(tmp_path, capsys):
     # F3 end to end: a tag-pinned ref alongside a SHA-pinned one must not be
-    # silently dropped while the tool prints a clean success.
+    # silently dropped while the tool prints a clean success. Since the
+    # survivor check now runs against the plan before anything is committed,
+    # nothing may be written at all -- not even the SHA-pinned ref that could
+    # have been moved. (Revert the plan/validate/commit split and this test
+    # goes red: the file comes back with actions/state@{REAL} already
+    # written.)
     root = _repo(
         tmp_path,
         {
@@ -638,9 +717,10 @@ def test_main_reports_partial_rewrite_when_a_ref_survives(tmp_path, capsys):
     assert code == 1
     assert "partial rewrite" in out
     assert "actions/setup@v0.1.0" in out
-    # The SHA-pinned ref was still moved -- the rewrite itself is unaffected.
+    # Nothing was written -- the refusal happened before any commit.
     text = (root / ".github/workflows/plan.yml").read_text(encoding="utf-8")
-    assert f"actions/state@{REAL}" in text
+    assert f"actions/state@{OLD}" in text
+    assert f"actions/state@{REAL}" not in text
 
 
 def test_main_reports_already_current_on_a_repeat_run(tmp_path, capsys):

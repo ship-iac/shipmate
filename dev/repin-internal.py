@@ -21,6 +21,7 @@ Exit: 0 wrote or already current, 1 --check found work, 3 bad target.
 import argparse
 import re
 import sys
+from typing import NamedTuple
 
 import pinrefs
 
@@ -33,50 +34,101 @@ import pinrefs
 _ANY_ENGINE_REF = re.compile(r"ship-iac/shipmate/([^@\s]+)@([^\s#]+)")
 
 
-def rewrite(root, targets, new_sha):
-    """Substitute each ``(path, old_sha)`` in ``targets`` with ``new_sha``.
+class _PlannedEdit(NamedTuple):
+    """One source file's computed post-rewrite state, before anything is
+    written. Carries an entry for every candidate file, including ones the
+    targets did not touch (``count == 0``) -- the ``--all`` survivor
+    validation needs the planned text of the whole set, not just the files
+    that changed, to judge the flatten without reading disk again."""
 
-    Only the two source shapes are touched (pinrefs.source_paths on the working
-    tree of ``root``): docs and other files may legitimately carry pin-shaped
-    text -- docs/releasing.md itself quotes one. Returns (source_path,
-    replacements) for files that changed.
+    path: str  # repo-relative posix path
+    text: str  # full new content ("\n"-delimited)
+    newline: str  # newline style read_text reported for this file
+    count: int  # substitutions made; 0 means this file needs no write
+
+
+def _plan(root, targets, new_sha):
+    """Compute the post-rewrite content of every pin-bearing source file
+    under ``root``, in memory. Touches nothing on disk but the reads.
+
+    Only the two source shapes are considered (pinrefs.source_paths on the
+    working tree of ``root``): docs and other files may legitimately carry
+    pin-shaped text -- docs/releasing.md itself quotes one.
     """
-    changed = []
+    planned = []
     for rel in pinrefs.source_paths(root=root):
-        f = root / rel
-        text, newline = pinrefs.read_text(f)
+        text, newline = pinrefs.read_text(root / rel)
         out, total = text, 0
         for path, old in sorted(targets):
             out, n = re.subn(rf"(ship-iac/shipmate/{re.escape(path)})@{old}", rf"\1@{new_sha}", out)
             total += n
-        if total:
-            pinrefs.write_text(f, out, newline)
-            changed.append((rel, total))
+        planned.append(_PlannedEdit(rel, out, newline, total))
+    return planned
+
+
+def _commit(root, planned):
+    """Write every planned edit with a nonzero count to disk, atomically per
+    file (see pinrefs.atomic_write_text), and return (source_path,
+    replacements) for the files that changed.
+
+    This is the only place either rewriter touches disk, and it does nothing
+    but write -- no git calls, no regex, so an interrupt here can only ever
+    be "some files replaced, some not", never a torn file. It is not a
+    cross-file transaction: an interrupt between two of these writes leaves
+    exactly that -- recover with `git status` / `git checkout --`.
+    """
+    changed = []
+    for p in planned:
+        if not p.count:
+            continue
+        pinrefs.atomic_write_text(root / p.path, p.text, p.newline)
+        changed.append((p.path, p.count))
     return changed
 
 
-def _survivors(root, new_sha):
-    """Internal engine refs under ``root``'s pin-bearing sources still not
-    pinned to ``new_sha`` after an ``--all`` rewrite.
+def rewrite(root, targets, new_sha):
+    """Substitute each ``(path, old_sha)`` in ``targets`` with ``new_sha``.
+
+    Returns (source_path, replacements) for files that changed. Plans every
+    candidate file in memory first, then commits -- see ``_plan``/``_commit``.
+    """
+    return _commit(root, _plan(root, targets, new_sha))
+
+
+def _scan_survivors(path_text_pairs, new_sha):
+    """Internal engine refs across ``(path, text)`` pairs still not pinned to
+    ``new_sha``.
 
     ``--all``'s whole promise is flattening *every* internal pin to one SHA;
     a ref REF cannot see (a tag, a short SHA, an uppercase SHA) survives the
-    SHA-targeted substitution in ``rewrite`` untouched and must be named, not
+    SHA-targeted substitution in ``_plan`` untouched and must be named, not
     swallowed into a reported success. Only meaningful after ``--all``: the
     default stale-only mode legitimately leaves every non-target pin alone, so
     this scan would fire on every one of those.
+
+    Takes ``(path, text)`` rather than a root to read from disk, so the same
+    scan serves both the pre-write validation (against planned text, before
+    anything is committed) and ``_survivors`` below (against the working
+    tree, for standalone use/testing).
     """
     out = []
-    for rel in pinrefs.source_paths(root=root):
-        text = (root / rel).read_text(encoding="utf-8")
+    for rel, text in path_text_pairs:
         for path, ref in _ANY_ENGINE_REF.findall(text):
             if ref != new_sha:
                 out.append(f"{rel}: {path}@{ref}")
     return out
 
 
-def _survivor_exit(root, new_sha):
-    """Print and return 1 if an ``--all`` rewrite left a ref behind; else None.
+def _survivors(root, new_sha):
+    """``_scan_survivors`` read fresh off ``root``'s working tree."""
+    pairs = [
+        (rel, (root / rel).read_text(encoding="utf-8")) for rel in pinrefs.source_paths(root=root)
+    ]
+    return _scan_survivors(pairs, new_sha)
+
+
+def _survivor_report(survivors, new_sha):
+    """Print and return 1 if ``survivors`` is non-empty; else None.
 
     A ref REF cannot see is exactly the shape this exists to catch -- the
     guard's own coverage test (scripts/tests/test_internal_pins.py) proves REF
@@ -84,7 +136,6 @@ def _survivor_exit(root, new_sha):
     everything is a stronger claim than "matches what REF can see", so it gets
     its own check.
     """
-    survivors = _survivors(root, new_sha)
     if not survivors:
         return None
     print(
@@ -96,6 +147,14 @@ def _survivor_exit(root, new_sha):
     for line in survivors:
         print(f"  {line}")
     return 1
+
+
+def _survivor_exit(root, new_sha):
+    """Print and return 1 if an ``--all`` rewrite of ``root``'s working tree
+    left a ref behind; else None. Standalone convenience over
+    ``_survivor_report`` -- the production path validates the plan instead
+    (see ``_write_and_report``), never the post-write tree."""
+    return _survivor_report(_survivors(root, new_sha), new_sha)
 
 
 def _targets(refs, new_sha, bump_all):
@@ -181,18 +240,30 @@ def main(argv=None):
 
 
 def _write_and_report(targets, new_sha, bump_all):
-    """Rewrite the targeted pins, then -- for ``--all`` only -- check nothing
-    survived the flatten before reporting success."""
-    changed = rewrite(pinrefs.ROOT, targets, new_sha)
+    """Plan every candidate file in memory, validate the ``--all``
+    all-or-nothing rule against that plan, and only then commit to disk.
+
+    This makes the *decision* atomic: either every planned file is written, or
+    -- when ``--all`` finds a survivor -- none is, and the refusal is reported
+    before any write happens. It is not a cross-file transaction: nothing here
+    stops an interrupt between two of ``_commit``'s individual writes from
+    leaving some files rewritten and others not; recover with `git status` /
+    `git checkout --`, as always.
+    """
+    root = pinrefs.ROOT
+    planned = _plan(root, targets, new_sha)
+
+    if bump_all:
+        survivors = _scan_survivors([(p.path, p.text) for p in planned], new_sha)
+        code = _survivor_report(survivors, new_sha)
+        if code is not None:
+            return code
+
+    changed = _commit(root, planned)
     total = sum(n for _rel, n in changed)
     print(f"bumped {total} reference(s) across {len(changed)} file(s) to {new_sha[:12]}:")
     for rel, n in changed:
         print(f"  {rel} ({n})")
-
-    if bump_all:
-        survivor_code = _survivor_exit(pinrefs.ROOT, new_sha)
-        if survivor_code is not None:
-            return survivor_code
 
     print(
         "commit this, then run `python dev/pin-status.py HEAD` to check convergence at the "
