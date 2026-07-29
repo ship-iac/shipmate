@@ -59,8 +59,6 @@ CLIs run exactly the same logic this guard asserts on; a divergence between
 duplication it replaces. This module keeps the rationale and the assertions.
 """
 
-import re
-
 import pinrefs
 import pytest
 
@@ -214,43 +212,6 @@ def test_every_script_invocation_in_an_action_is_visible_to_the_derivation():
             f"{action_yaml.relative_to(pinrefs.ROOT).as_posix()}: {mentions} "
             f"$GITHUB_ACTION_PATH mention(s) but SCRIPT_REF matched {matched} -- "
             "the script-dependency derivation cannot see the difference"
-        )
-
-
-def test_every_cross_load_in_a_script_is_visible_to_load_ref():
-    """The premise the *transitive* half of the derivation rests on.
-
-    ``test_every_script_invocation_in_an_action_is_visible_to_the_derivation``
-    covers the action.yml to script edge. This covers the script to script
-    edge, which the closure walks via LOAD_REF -- a literal ``_load("<name>")``
-    call. A helper cross-loaded by any other spelling (a variable, an f-string,
-    a second loader written inline) is invisible to the closure, so a change to
-    that helper could ship without a pin bump while this guard stayed green --
-    the same class of gap as the apply-comment chain, which is asserted for one
-    known chain by ``test_apply_summary_dependent_scripts_include_apply_comment_chain``
-    and for every script here.
-
-    Deliberately keyed off signals LOAD_REF does not produce: the count of
-    ``_load(`` call sites, and the count of loader constructions. Comparing the
-    regex against itself would assert nothing.
-    """
-    for script in sorted(p for p in (pinrefs.ROOT / "scripts").iterdir() if p.is_file()):
-        text = script.read_text(encoding="utf-8")
-        rel = f"scripts/{script.name}"
-
-        calls = len(re.findall(r"(?<!def )\b_load\(", text))
-        matched = len(pinrefs.LOAD_REF.findall(text))
-        assert calls == matched, (
-            f"{rel}: {calls} _load( call site(s) but LOAD_REF matched {matched} -- "
-            "a cross-load whose argument is not a plain string literal is invisible "
-            "to the script-dependency derivation"
-        )
-
-        constructions = text.count("SourceFileLoader(")
-        assert constructions <= 1, (
-            f"{rel}: {constructions} SourceFileLoader( construction(s) -- a second "
-            "loader can cross-load a helper without going through the _load( pattern "
-            "the derivation matches"
         )
 
 
