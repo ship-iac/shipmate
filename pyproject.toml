@@ -73,5 +73,3 @@ max-complexity = 8
 # Tests: assert is the point (S101); they invoke trusted dev tools by name
 # (shellcheck) via subprocess (S603/S607).
 "scripts/tests/*" = ["S101", "S603", "S607"]
-# dev/ tooling drives git by name via subprocess, same as the tests do.
-"dev/*" = ["S603", "S607"]

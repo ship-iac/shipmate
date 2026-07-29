@@ -39,8 +39,12 @@ LOAD_REF = re.compile(r"""_load\(\s*["']([^"']+)["']\s*\)""")
 def git(*args):
     # encoding="utf-8": scripts/ sources carry non-ASCII (emoji status markers);
     # Windows' cp1252 default cannot decode `git show` output for them.
-    return subprocess.run(
-        ["git", "-C", str(ROOT), *args], capture_output=True, text=True, encoding="utf-8"
+    # argv is a fixed literal list, no shell, no user-controlled executable name.
+    return subprocess.run(  # noqa: S603
+        ["git", "-C", str(ROOT), *args],  # noqa: S607
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
     )
 
 

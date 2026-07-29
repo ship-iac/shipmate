@@ -33,6 +33,12 @@ CONVERGED = "83b37bb5e0baa9256b1ea49f4725cf7f55157c8a"
 INTERMEDIATE_ACTION_COMMIT = "abca731ea8d35a5c6d02345e5eb77446b7f14ccf"
 INTERMEDIATE_BUMP_COMMIT = "273ec9656ee5cad55a538e44c5f57e726543313c"
 
+# The engine's own root commit. Its tree predates today's actions/ and
+# .github/workflows/ layout entirely, so refs_at() on it finds no shipmate
+# self-references -- a real fixture for the "resolves but has nothing to check"
+# exit-4 case, rather than a mock of it.
+NO_REFS_COMMIT = "52f6aad901fe634d6f99d9a499c3c6d25bb737f7"
+
 # These tests are fixtured on real history. In a shallow clone the commits are
 # absent, refs_at() returns nothing, and the "safe to pin" assertions would pass
 # for the wrong reason. A bare module-level `assert` would raise at import time
@@ -43,7 +49,7 @@ INTERMEDIATE_BUMP_COMMIT = "273ec9656ee5cad55a538e44c5f57e726543313c"
 # where this condition is always False.
 _MISSING_FIXTURES = [
     sha
-    for sha in (CONVERGED, INTERMEDIATE_ACTION_COMMIT, INTERMEDIATE_BUMP_COMMIT)
+    for sha in (CONVERGED, INTERMEDIATE_ACTION_COMMIT, INTERMEDIATE_BUMP_COMMIT, NO_REFS_COMMIT)
     if not pinrefs.commit_present(sha)
 ]
 pytestmark = pytest.mark.skipif(
@@ -145,6 +151,30 @@ def test_report_treats_error_kind_as_unverifiable_with_exit_2(capsys):
     assert "stale internal pin(s)" not in out
 
 
+def test_main_returns_two_for_a_resolvable_commit_with_an_unverifiable_pin(monkeypatch, capsys):
+    # Companion to test_report_treats_error_kind_as_unverifiable_with_exit_2 above,
+    # which calls _report directly: nothing else drives main() all the way to an
+    # exit 2, so the resolve -> refs_at -> pin_status -> _report wiring itself was
+    # untested. Monkeypatches the same surfaces main() actually reads (ps.resolve,
+    # pinrefs.refs_at, pinrefs.pin_issues) rather than short-circuiting pin_status
+    # or _report themselves, so this fails if that wiring is broken even when
+    # _report's own classification logic is correct in isolation.
+    monkeypatch.setattr(ps, "resolve", lambda _c: "1" * 40)
+    monkeypatch.setattr(pinrefs, "refs_at", lambda *a, **k: [("actions/setup", "0" * 40, "x.yml")])
+    monkeypatch.setattr(
+        pinrefs,
+        "pin_issues",
+        lambda refs, baseline: [pinrefs.PinIssue("actions/setup", "0" * 40, "x.yml", "missing")],
+    )
+
+    code = ps.main(["HEAD"])
+
+    out = capsys.readouterr().out
+    assert code == 2
+    assert "unverifiable" in out
+    assert "stale internal pin(s)" not in out
+
+
 def test_report_still_returns_one_when_a_real_stale_pin_is_present(capsys):
     # Regression guard alongside the test above: error/missing must not creep
     # into blocking either -- a genuine stale pin must still exit 1.
@@ -159,6 +189,14 @@ def test_report_still_returns_one_when_a_real_stale_pin_is_present(capsys):
 def test_main_returns_three_for_a_commitish_that_does_not_resolve(capsys):
     assert ps.main(["definitely-not-a-ref"]) == 3
     assert "does not resolve" in capsys.readouterr().out
+
+
+def test_main_returns_four_for_a_resolvable_commit_with_no_internal_references(capsys):
+    # Distinct from exit 3 (the commit-ish itself does not resolve): this SHA
+    # resolves fine, its tree just predates the actions/ and .github/workflows/
+    # layout, so there is nothing here for pin-status to check at all.
+    assert ps.main([NO_REFS_COMMIT]) == 4
+    assert "no internal self-references" in capsys.readouterr().out
 
 
 def test_ancestor_of_main_is_not_flagged_unreachable():

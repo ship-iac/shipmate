@@ -15,8 +15,8 @@ consumer repo.
     python dev/pin-status.py            # HEAD
     python dev/pin-status.py <commit>
 
-Exit: 0 safe, 1 stale pins, 2 unverifiable, 3 commit-ish does not resolve (or
-resolves but yields no internal references).
+Exit: 0 safe, 1 stale pins, 2 unverifiable, 3 commit-ish does not resolve,
+4 resolves but yields no internal references.
 """
 
 import argparse
@@ -81,8 +81,9 @@ def _report(issues, sha, ref_count):
 def _unverifiable(sha, exc):
     # A git failure means we do not know whether the pins are current -- that
     # is exit 2 (unverifiable), the same bucket "missing"/"error" PinIssues
-    # land in, never exit 1 (stale, implying a fix is known) or exit 3 (bad
-    # target, implying the commit or repo layout is at fault).
+    # land in, never exit 1 (stale, implying a fix is known), exit 3 (the
+    # commit-ish itself does not resolve), or exit 4 (it resolves, but its
+    # tree has no internal references to check).
     print(f"{sha[:12]}: could not verify pins -- git failed: {exc.stderr}")
     return 2
 
@@ -104,7 +105,7 @@ def main(argv=None):
 
     if not refs:
         print(f"{sha[:12]}: no internal self-references found -- repo layout changed?")
-        return 3
+        return 4
 
     if unreachable_from_main(sha):
         print(f"warning: {sha[:12]} is not an ancestor of main -- a pin to it can stop resolving")
