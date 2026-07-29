@@ -73,3 +73,9 @@ max-complexity = 8
 # Tests: assert is the point (S101); they invoke trusted dev tools by name
 # (shellcheck) via subprocess (S603/S607).
 "scripts/tests/*" = ["S101", "S603", "S607"]
+
+[tool.ty.environment]
+# dev/ is on the pytest pythonpath, not on ty's module path, so `import pinrefs`
+# / `import pin_status` read as unresolved without this. Same list, one consumer
+# each: pytest resolves them at runtime, ty at check time.
+extra-paths = ["dev"]
