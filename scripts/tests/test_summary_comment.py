@@ -402,6 +402,22 @@ def test_the_sticky_upsert_does_not_swallow_a_comment_listing_failure():
     assert block.index("exit 0") < block.index('issues/$PR/comments" -F body=@comment.md')
 
 
+def test_the_sticky_upsert_skips_creation_when_nothing_was_planned():
+    """A docs-only or pin-bump pull request should carry no shipmate comment at
+    all. The guard is create-only — conditioned on an *empty* id as well as a
+    zero cell count — because an existing comment must still be updated to the
+    no-planned-cells body, or a pull request that planned changes and then
+    pushed them away keeps displaying the stale plan table. Behaviour lives in
+    the action's shell, so the assertion is source-derived."""
+    block = _upsert_step()
+    assert "COUNT: ${{ steps.build.outputs.count }}" in block
+    guard = block.split("id=$(head -n1 summary-comment-ids.txt)", 1)[1]
+    assert '[ -z "$id" ] && [ "$COUNT" = "0" ]' in guard
+    # ...and it precedes both write branches, so neither runs on that path.
+    assert guard.index("exit 0") < guard.index("-X PATCH")
+    assert guard.index("exit 0") < guard.index('issues/$PR/comments" -F body=@comment.md')
+
+
 def test_the_gate_step_runs_after_the_upsert_step_that_may_skip():
     """The upsert's listing-failure path `exit 0`s the step; `Create/refresh
     gate` must be a *later step*, not code below that exit, or a comment

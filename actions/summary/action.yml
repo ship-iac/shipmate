@@ -129,6 +129,7 @@ runs:
       env:
         GH_TOKEN: ${{ steps.token.outputs.token }}
         PR: ${{ inputs.pr-number }}
+        COUNT: ${{ steps.build.outputs.count }}
       run: |
         set -euo pipefail
         marker='<!-- shipmate:summary -->'
@@ -157,6 +158,20 @@ runs:
         # --paginate evaluates --jq per page, so a marker match on >1 page emits
         # one id per matching page; the first line is the single id PATCH needs.
         id=$(head -n1 summary-comment-ids.txt)
+        # Nothing planned and no comment to keep current: post nothing. A
+        # docs-only or pin-bump pull request then carries no shipmate comment at
+        # all — `shipmate / gate` is written by a later step either way, and
+        # doctor's annotations have already run, so no signal is lost. An
+        # existing comment is still PATCHed with the empty-table body: a pull
+        # request that planned changes and then pushed them away must not keep
+        # displaying the stale plan table. COUNT is also 0 when the cell-summary
+        # artifacts failed to download — the gate step fails the gate for that
+        # case, and suppressing the comment is right there too, since its
+        # "(no stacks changed)" row would be a false claim about the plan.
+        if [ -z "$id" ] && [ "$COUNT" = "0" ]; then
+          echo "no planned cells and no existing plan comment — nothing to post"
+          exit 0
+        fi
         if [ -n "$id" ]; then
           gh api -X PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$id" -F body=@comment.md >/dev/null
         else

@@ -515,10 +515,22 @@ fails loud on a `cell.json` missing schema keys or carrying an out-of-enum
 
 ## Plan comment
 
-The `summary` action maintains exactly one sticky comment per pull request,
+The `summary` action maintains **at most** one sticky comment per pull request,
 identified by the HTML marker written verbatim as the comment's first line:
 
 - `<!-- shipmate:summary -->`
+
+A plan run that produced no cell summaries at all *and* finds no existing
+sticky comment posts nothing: a docs-only or engine-pin-bump pull request
+carries no shipmate comment. Nothing is lost by the silence — `shipmate / gate`
+is written by a later step regardless of the cell count, and doctor's
+settings-drift annotations run on that same run. The suppression is
+create-only: once the comment exists it is still updated to the
+no-planned-cells body, because a pull request that planned changes and then
+pushed them away must not keep displaying the stale plan table. The same zero
+count also arises when the `cell-summary.*` artifacts could not be downloaded;
+the gate fails for that case, and suppressing the comment is correct there too
+rather than asserting "no stacks changed" about a plan that was never read.
 
 The comment is edited in place on every plan run (comment lookup is marker +
 any Bot author — the shipmate App's bot login is derived from the registered
