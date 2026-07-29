@@ -215,8 +215,10 @@ workflows wired up:
 
 The engine's logic lives in a few small Python helper scripts under `scripts/`
 (they run as GitHub Actions steps, so they're executable and have no `.py`
-extension) plus their unit tests in `scripts/tests/`. The dev toolchain is
-[Astral](https://astral.sh)'s:
+extension) plus their unit tests in `scripts/tests/`. A separate `dev/` holds
+maintainer tooling for the engine's own SHA pins — run by hand, never from a
+workflow (see [CONTRIBUTING.md](CONTRIBUTING.md) and `docs/releasing.md`). The
+dev toolchain is [Astral](https://astral.sh)'s:
 
 - **[uv](https://docs.astral.sh/uv/)** — manages the dev environment and pinned
   tool versions (`pyproject.toml` + `uv.lock`). shipmate ships no importable
