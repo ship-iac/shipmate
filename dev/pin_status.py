@@ -12,8 +12,8 @@ An intermediate commit of the internal-pin cascade (docs/releasing.md) answers
 no. Run this before `gh release create --target <sha>` and before re-pinning any
 consumer repo.
 
-    python dev/pin-status.py            # HEAD
-    python dev/pin-status.py <commit>
+    python dev/pin_status.py            # HEAD
+    python dev/pin_status.py <commit>
 
 Exit: 0 safe, 1 stale pins, 2 unverifiable, 3 commit-ish does not resolve,
 4 resolves but yields no internal references.

@@ -24,7 +24,7 @@ class GitFailure(RuntimeError):
     Without this, a failed ``git ls-tree`` and a commit that genuinely has no
     pin-bearing files are indistinguishable: both leave ``source_paths``
     reporting nothing found, and every caller downstream (the CI guard,
-    ``pin-status``, ``repin-consumer``) would read that as "no problems" or
+    ``pin_status``, ``repin_consumer``) would read that as "no problems" or
     "not a valid target" when the true answer is "we could not check."
     """
 
@@ -181,7 +181,7 @@ def refs_at(commit=None):
 
     ``commit=None`` reads the working tree -- what the guard checks, since an
     in-flight edit to a pin must be seen before it is committed. A commit reads
-    that commit's tree, which is how pin-status answers questions about history.
+    that commit's tree, which is how pin_status answers questions about history.
     """
     refs = set()
     for src in source_paths(commit):
@@ -274,8 +274,8 @@ ACTIONABLE = ("stale", "dep_stale")
 
 
 #: format_issue's baseline_desc for a caller that baselines a commit on itself
-#: (dev/pin-status.py, dev/repin-consumer.py) rather than on the mainline the
-#: CI guard and dev/repin-internal.py compare against. Reusing the mainline
+#: (dev/pin_status.py, dev/repin_consumer.py) rather than on the mainline the
+#: CI guard and dev/repin_internal.py compare against. Reusing the mainline
 #: wording there would tell a release engineer the mainline moved past their
 #: target, when the real fact is that the target's own tree runs stale code.
 SELF_BASELINE_DESC = "is out of date against this commit's own tree"

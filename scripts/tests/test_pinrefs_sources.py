@@ -1,7 +1,7 @@
 """Source-location and tree-reading tests for the pin model.
 
 The working-tree reader is the behavior test_internal_pins.py already relied on;
-the commit reader is new and is what pin-status needs -- pins as they were at a
+the commit reader is new and is what pin_status needs -- pins as they were at a
 historical commit, not as they are on disk now.
 """
 

@@ -6,25 +6,9 @@ while convergence commits are safe, which is what docs/releasing.md asserts in
 prose and nothing checked.
 """
 
-import importlib.util
-from importlib.machinery import SourceFileLoader
-
+import pin_status as ps
 import pinrefs
 import pytest
-
-_DEV = pinrefs.ROOT / "dev"
-
-
-def _load_cli(fname):
-    """Load a hyphenated dev CLI by path (same pattern as scripts/env-order)."""
-    loader = SourceFileLoader(fname.replace("-", "_").removesuffix(".py"), str(_DEV / fname))
-    spec = importlib.util.spec_from_loader(loader.name, loader)
-    mod = importlib.util.module_from_spec(spec)
-    loader.exec_module(mod)
-    return mod
-
-
-ps = _load_cli("pin-status.py")
 
 # Measured on this repo's history. Convergence commits carry pins that are
 # current at themselves; the two intermediate commits of the cascade that
@@ -194,7 +178,7 @@ def test_main_returns_three_for_a_commitish_that_does_not_resolve(capsys):
 def test_main_returns_four_for_a_resolvable_commit_with_no_internal_references(capsys):
     # Distinct from exit 3 (the commit-ish itself does not resolve): this SHA
     # resolves fine, its tree just predates the actions/ and .github/workflows/
-    # layout, so there is nothing here for pin-status to check at all.
+    # layout, so there is nothing here for pin_status to check at all.
     assert ps.main([NO_REFS_COMMIT]) == 4
     assert "no internal self-references" in capsys.readouterr().out
 

@@ -3,7 +3,7 @@
 
 Run from an engine clone (it needs engine history to judge the target):
 
-    python dev/repin-consumer.py --repo ../repo-example-stacks --sha <sha> --label v0.2.0
+    python dev/repin_consumer.py --repo ../repo-example-stacks --sha <sha> --label v0.2.0
 
 Two rules from docs/releasing.md, previously prose-only, are enforced here:
 
@@ -13,7 +13,7 @@ Two rules from docs/releasing.md, previously prose-only, are enforced here:
   change to that grammar creates one name and looks for another, and every wave
   job dies before restoring state. There is deliberately no stale-only mode.
 * An intermediate commit of the internal-pin cascade is never a valid target.
-  dev/pin-status.py decides; --force overrides it deliberately and loudly.
+  dev/pin_status.py decides; --force overrides it deliberately and loudly.
 
 Exit: 0 wrote, 1 refused, 3 bad target or repo path.
 """
@@ -24,23 +24,9 @@ import re
 import sys
 from typing import NamedTuple
 
+import pin_status as _ps
 import pinrefs
 
-_DEV = pinrefs.ROOT / "dev"
-
-
-def _load(fname):
-    import importlib.util
-    from importlib.machinery import SourceFileLoader
-
-    loader = SourceFileLoader(fname.replace("-", "_").removesuffix(".py"), str(_DEV / fname))
-    spec = importlib.util.spec_from_loader(loader.name, loader)
-    mod = importlib.util.module_from_spec(spec)
-    loader.exec_module(mod)
-    return mod
-
-
-_ps = _load("pin-status.py")
 pin_status = _ps.pin_status
 unreachable_from_main = _ps.unreachable_from_main
 format_issue = pinrefs.format_issue
