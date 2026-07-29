@@ -10,6 +10,21 @@ composite actions under `actions/`. The dev toolchain is
 [Astral](https://astral.sh)'s **uv + ruff + ty**; see the **Development**
 section of the [README](README.md) for details.
 
+`dev/` holds tooling you run by hand, never from a workflow — nothing in
+`actions/` or `.github/workflows/` references it, and it adds no action input.
+It exists because the engine pins its own actions by commit SHA (see
+`CONTRACT.md`), so those pins need maintaining:
+
+- `pinrefs.py` — the shared model: finds the pins, works out what each one
+  actually runs, and diffs a pin against a baseline commit.
+- `pin-status.py` — is a given commit safe to pin?
+- `repin-internal.py` — bump the engine's own stale pins.
+- `repin-consumer.py` — re-pin a consuming repo, refusing an unsafe target.
+
+`docs/releasing.md` is the runbook that drives them. `pyproject.toml` puts
+`dev/` on the pytest `pythonpath`, which is how the tests under `scripts/tests/`
+import `pinrefs`.
+
 Get the gate green before opening a PR:
 
 ```bash

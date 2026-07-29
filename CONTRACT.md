@@ -405,6 +405,13 @@ triggered by a pre-merge comment or a post-merge push.
 - `.github/workflows/` is protected by a `CODEOWNERS` entry, so changes to
   workflow files (including pin bumps) require review from the designated
   owners before merge.
+- The engine applies this same rule to itself: it references its own actions
+  internally by full commit SHA, because GitHub resolves a local `./actions/...`
+  reference against the *consuming* repo once it crosses the reusable-workflow
+  boundary. Maintaining those internal pins — and deciding which commits are
+  safe for a consumer to pin — is what the hand-run tooling in `dev/` is for;
+  `docs/releasing.md` is its runbook. None of it is referenced from `actions/`
+  or `.github/workflows/`, and it adds no action input.
 - **Upgrade path.** shipmate publishes a GitHub Release per release SHA. A
   consumer with Dependabot's `github-actions` ecosystem enabled therefore
   receives a pull request bumping its shipmate pins to the new release's SHA —
