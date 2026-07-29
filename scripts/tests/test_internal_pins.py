@@ -59,6 +59,8 @@ CLIs run exactly the same logic this guard asserts on; a divergence between
 duplication it replaces. This module keeps the rationale and the assertions.
 """
 
+import re
+
 import pinrefs
 import pytest
 
@@ -82,7 +84,7 @@ def test_internal_action_pins_are_current():
     if lines:
         pytest.fail(
             "stale internal action pin(s) -- bump each to a commit containing the "
-            "current action (run `python dev/repin-internal.py`):\n" + "\n".join(lines)
+            "current action (run `python dev/repin_internal.py`):\n" + "\n".join(lines)
         )
     if unverifiable:
         if pinrefs.is_shallow():
@@ -215,6 +217,43 @@ def test_every_script_invocation_in_an_action_is_visible_to_the_derivation():
         )
 
 
+def test_every_cross_load_in_a_script_is_visible_to_load_ref():
+    """The premise the *transitive* half of the derivation rests on.
+
+    ``test_every_script_invocation_in_an_action_is_visible_to_the_derivation``
+    covers the action.yml to script edge. This covers the script to script
+    edge, which the closure walks via LOAD_REF -- a literal ``_load("<name>")``
+    call. A helper cross-loaded by any other spelling (a variable, an f-string,
+    a second loader written inline) is invisible to the closure, so a change to
+    that helper could ship without a pin bump while this guard stayed green --
+    the same class of gap as the apply-comment chain, which is asserted for one
+    known chain by ``test_apply_summary_dependent_scripts_include_apply_comment_chain``
+    and for every script here.
+
+    Deliberately keyed off signals LOAD_REF does not produce: the count of
+    ``_load(`` call sites, and the count of loader constructions. Comparing the
+    regex against itself would assert nothing.
+    """
+    for script in sorted(p for p in (pinrefs.ROOT / "scripts").iterdir() if p.is_file()):
+        text = script.read_text(encoding="utf-8")
+        rel = f"scripts/{script.name}"
+
+        calls = len(re.findall(r"(?<!def )\b_load\(", text))
+        matched = len(pinrefs.LOAD_REF.findall(text))
+        assert calls == matched, (
+            f"{rel}: {calls} _load( call site(s) but LOAD_REF matched {matched} -- "
+            "a cross-load whose argument is not a plain string literal is invisible "
+            "to the script-dependency derivation"
+        )
+
+        constructions = text.count("SourceFileLoader(")
+        assert constructions <= 1, (
+            f"{rel}: {constructions} SourceFileLoader( construction(s) -- a second "
+            "loader can cross-load a helper without going through the _load( pattern "
+            "the derivation matches"
+        )
+
+
 def test_every_internal_ref_in_a_pin_bearing_source_is_visible_to_ref():
     """The premise the whole guard rests on, machine-checked, one level up from
     ``test_every_script_invocation_in_an_action_is_visible_to_the_derivation``.
@@ -224,7 +263,7 @@ def test_every_internal_ref_in_a_pin_bearing_source_is_visible_to_ref():
     matches a 40-lowercase-hex SHA, by design (CONTRACT.md requires internal
     pins to be full SHAs) -- but that means a non-SHA internal pin (a tag, a
     short SHA, an uppercase SHA) is invisible to REF, and so invisible to this
-    guard, to ``dev/pin-status.py``, and to ``dev/repin-internal.py --all``,
+    guard, to ``dev/pin_status.py``, and to ``dev/repin_internal.py --all``,
     whose whole job is not being silent about a stale or malformed internal
     pin. This asserts every ``ship-iac/shipmate/`` mention in every
     pin-bearing source is one REF actually matched.
@@ -236,7 +275,7 @@ def test_every_internal_ref_in_a_pin_bearing_source_is_visible_to_ref():
         assert mentions == matched, (
             f"{src}: {mentions} ship-iac/shipmate/ mention(s) but REF matched only "
             f"{matched} -- a non-SHA internal pin here would be invisible to this "
-            "guard, to pin-status, and to repin-internal --all"
+            "guard, to pin_status, and to repin_internal --all"
         )
 
 
