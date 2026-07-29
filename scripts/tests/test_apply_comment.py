@@ -1,13 +1,15 @@
 # scripts/tests/test_apply_comment.py
 import io
 import json
-import pathlib
 import re
 
 import pytest
+from _loader import ENGINE as _ENGINE
 from _loader import load_script
 
 ac = load_script("apply-comment")
+eo = load_script("env-order")
+wv = load_script("waves")
 
 RUN_URL = "https://gh/run/1"
 
@@ -719,7 +721,7 @@ def test_build_comment_uses_short_form_when_no_rows_and_no_expected(monkeypatch,
     monkeypatch.setenv("CELLS", str(tmp_path / "empty"))
     monkeypatch.setenv("SHIPMATE_ENVIRONMENT", "dev-eu")
     monkeypatch.setenv("SHIPMATE_WAVES_JSON", "")
-    for i in range(4):
+    for i in range(ac.MAX_ENV_LEVELS):
         monkeypatch.setenv(f"SHIPMATE_ENVLEVEL{i}_WAVES", "")
     monkeypatch.setenv("SHIPMATE_RESULTS", "success,skipped")
     monkeypatch.setenv("SHIPMATE_GATE", "complete")
@@ -942,8 +944,6 @@ def test_short_form_and_failure_line_agree_blank_token_is_failure():
 
 
 # --- coupling guards ----------------------------------------------------------------
-
-_ENGINE = pathlib.Path(__file__).resolve().parents[2]
 
 
 def test_cell_schema_guard_apply_cell_writes_every_required_key():
@@ -1402,6 +1402,12 @@ def test_check_name_grammar_matches_apply_cells_construction():
     assert ac._check_state(row, {"apply / stacks/app / dev-eu"}, set()) == ac.CHECK_PENDING
 
 
+def test_env_level_count_matches_env_orders():
+    # apply-comment keeps its own copy of the constant (see the comment there),
+    # so the equality is pinned here rather than by construction.
+    assert ac.MAX_ENV_LEVELS == eo.MAX_ENV_LEVELS
+
+
 def test_wave_job_name_matches_the_apply_check_grammar():
     # Coupling: _job_url resolves a row's per-cell log link by matching the
     # apply check name as a `/ `-boundary suffix of the run's JOB names, which
@@ -1413,8 +1419,11 @@ def test_wave_job_name_matches_the_apply_check_grammar():
     src = (_ENGINE / ".github" / "workflows" / "apply-env-level.yml").read_text(encoding="utf-8")
     names = [ln.strip() for ln in src.splitlines() if ln.strip().startswith("name: apply / ")]
     expected = "name: apply / ${{ matrix.stack }} / ${{ matrix.environment }}"
-    assert names == [expected] * 8, (
-        "each wave0..wave7 job's display name must stay byte-identical to the "
+    # Width from waves.MAX_WAVES so a bump cannot leave this asserting the old
+    # count.
+    max_waves = wv.MAX_WAVES
+    assert names == [expected] * max_waves, (
+        f"all {max_waves} wave job display names must stay byte-identical to the "
         "'apply / <stack path> / <env>' check-name grammar -- scripts/apply-comment's "
         f"_job_url matches it as a job-name suffix (got: {sorted(set(names))})"
     )
@@ -1430,7 +1439,7 @@ def test_wave_job_name_matches_the_apply_check_grammar():
         for ln in src.splitlines()
         if ln.strip().startswith(("stack: ", "env: ")) and ln.strip() != "env:"
     ]
-    assert wired == ["stack: ${{ matrix.stack }}", "env: ${{ matrix.environment }}"] * 8, (
+    assert wired == ["stack: ${{ matrix.stack }}", "env: ${{ matrix.environment }}"] * max_waves, (
         "every wave job must pass apply-cell the same matrix keys its display name "
         "renders (`stack: ${{ matrix.stack }}`, `env: ${{ matrix.environment }}`) -- "
         "apply-cell builds the check name from those two inputs, so a different "
@@ -1454,7 +1463,7 @@ def _main_env(monkeypatch, tmp_path, cells_dir, waves_json, checks_path):
     monkeypatch.setenv("CELLS", str(cells_dir))
     monkeypatch.setenv("SHIPMATE_ENVIRONMENT", "dev-eu")
     monkeypatch.setenv("SHIPMATE_WAVES_JSON", waves_json)
-    for i in range(4):
+    for i in range(ac.MAX_ENV_LEVELS):
         monkeypatch.setenv(f"SHIPMATE_ENVLEVEL{i}_WAVES", "")
     monkeypatch.setenv("SHIPMATE_RESULTS", "success")
     monkeypatch.setenv("SHIPMATE_GATE", "pending")

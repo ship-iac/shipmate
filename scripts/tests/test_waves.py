@@ -1,11 +1,10 @@
 import io
 import json
-import pathlib
 
 import pytest
+from _loader import SCRIPTS as _dir
 from _loader import load_script
 
-_dir = pathlib.Path(__file__).resolve().parents[1]
 w = load_script("waves")
 
 FIXTURE = (_dir / "tests" / "fixtures" / "run-graph-stacks.dot").read_text()

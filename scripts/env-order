@@ -32,16 +32,11 @@ def _load(fname):
     return mod
 
 
-# Reuse build-matrix's _run (surfaces the tool's stderr, then raises
-# `::error::` on nonzero) rather than a private wrapper -- this module used to
-# define its own subprocess helper with capture_output=True, which swallowed
-# stderr on failure. Loading build-matrix only defines functions/constants
-# (no import-time side effects), which matters because this module is itself
-# loaded by deploy-detect the same way.
+# build-matrix's _run (surfaces the tool's stderr, then raises `::error::` on
+# nonzero) and waves' level helpers. Both are import-safe -- they only define
+# functions and constants -- which matters because deploy-detect loads this
+# module the same way.
 bm = _load("build-matrix")
-# waves_by_env_level / write_env_level_waves live here (env-level logic's home)
-# and use these; loading waves only defines functions/constants (no import-time
-# side effects), same as build-matrix above.
 wv = _load("waves")
 
 
@@ -74,19 +69,17 @@ def _validate_env_order(order):
     return order
 
 
+def _read_global(expr, validate, run=None):
+    """`expr` evaluated against the repo's Terramate globals, JSON-decoded and
+    validated -- every `global.shipmate.*` this module reads goes through here."""
+    run = run or bm._run
+    out = run(["terramate", "experimental", "eval", "--as-json", expr])
+    return validate(json.loads(out))
+
+
 def read_env_order(run=None):
     """env -> [predecessor envs], or {} when the global/config is absent."""
-    run = run or bm._run
-    out = run(
-        [
-            "terramate",
-            "experimental",
-            "eval",
-            "--as-json",
-            "tm_try(global.shipmate.env_order, {})",
-        ]
-    )
-    return _validate_env_order(json.loads(out))
+    return _read_global("tm_try(global.shipmate.env_order, {})", _validate_env_order, run)
 
 
 def _validate_explicit_envs(envs):
@@ -110,17 +103,7 @@ def _validate_explicit_envs(envs):
 def read_explicit_envs(run=None):
     """Envs excluded from a bare `shipmate apply` (they must be targeted by name:
     `shipmate apply <env>`), or [] when the global/config is absent."""
-    run = run or bm._run
-    out = run(
-        [
-            "terramate",
-            "experimental",
-            "eval",
-            "--as-json",
-            "tm_try(global.shipmate.explicit_envs, [])",
-        ]
-    )
-    return _validate_explicit_envs(json.loads(out))
+    return _read_global("tm_try(global.shipmate.explicit_envs, [])", _validate_explicit_envs, run)
 
 
 def blocked_envs(order, unavailable, envs):

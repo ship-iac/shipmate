@@ -9,12 +9,10 @@ three cells or silently widen to the meta `git`/`all` keywords (which would drop
 `outdated-code`/`git-untracked`/`git-uncommitted`).
 """
 
-import pathlib
 import re
 
-import yaml
+from _loader import action_steps
 
-_ACTIONS_DIR = pathlib.Path(__file__).resolve().parents[2] / "actions"
 _CELLS = ("plan-cell", "apply-cell", "drift-cell")
 _EXPECTED = frozenset({"git-out-of-sync"})
 
@@ -25,9 +23,7 @@ def _script_run_flags(cell):
     Returns the parsed frozenset of safeguard keywords, or None if the cell has
     no disable flag on its script-run line.
     """
-    spec = yaml.safe_load((_ACTIONS_DIR / cell / "action.yml").read_text(encoding="utf-8"))
-    steps = (spec.get("runs") or {}).get("steps") or []
-    runs = [s["run"] for s in steps if s.get("shell") == "bash" and "run" in s]
+    runs = [s["run"] for s in action_steps(cell) if s.get("shell") == "bash" and "run" in s]
     lines = [ln for text in runs for ln in text.splitlines() if "terramate script run" in ln]
     assert len(lines) == 1, (
         f"{cell}: expected exactly one `terramate script run` line, got {len(lines)}"

@@ -19,21 +19,11 @@ repo root fails the apply once git-untracked runs). Writing under
 touches terramate/tofu" entirely.
 """
 
-import pathlib
-
-import yaml
-
-_ACTIONS_DIR = pathlib.Path(__file__).resolve().parents[2] / "actions"
-_ACTION_PATH = _ACTIONS_DIR / "apply-cell" / "action.yml"
-
-
-def _steps():
-    spec = yaml.safe_load(_ACTION_PATH.read_text(encoding="utf-8"))
-    return (spec.get("runs") or {}).get("steps") or []
+from _loader import action_steps
 
 
 def _step(name):
-    matches = [s for s in _steps() if s.get("name") == name]
+    matches = [s for s in action_steps("apply-cell") if s.get("name") == name]
     assert len(matches) == 1, f"expected exactly one {name!r} step, got {len(matches)}"
     return matches[0]
 

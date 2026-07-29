@@ -1,6 +1,6 @@
-import json
-
 import pytest
+from _detect_fixtures import check_run as _check
+from _detect_fixtures import completed_names
 from _loader import load_script
 
 ad = load_script("apply-detect")
@@ -60,50 +60,33 @@ def test_filter_pending_drops_completed():
     assert [c["stack"] for c in kept] == ["stacks/app"]
 
 
-def test_completed_failure_apply_stays_pending():
+def _completed(monkeypatch, checks, **kw):
+    """The "already applied" set every detect queries, with only `gh` stubbed."""
+    return completed_names(ad, monkeypatch, checks, **kw)
+
+
+def test_completed_failure_apply_stays_pending(monkeypatch):
     # "completed" status with a failing conclusion must not count as done —
     # apply-detect must share apply-gate's success/neutral predicate.
     cells = [{"stack": "stacks/app", "environment": "dev-eu"}]
-    checks = [
-        {
-            "name": "apply / stacks/app / dev-eu",
-            "status": "completed",
-            "conclusion": "failure",
-            "started_at": "2026-07-18T10:00:00Z",
-            "id": 1,
-        },
-    ]
-    done = ad.ag.done_names(checks)
+    done = _completed(monkeypatch, [_check(conclusion="failure")])
     assert ad.filter_pending(cells, done) == cells
 
 
-def test_foreign_app_completed_check_stays_pending():
-    # A completed+success check created by a foreign identity (github-actions,
+def test_foreign_app_completed_check_stays_pending(monkeypatch):
+    # A completed+success check authored by another identity (github-actions,
     # app id 15368) must not count as done once SHIPMATE_APP_ID scopes the
-    # detect to the shipmate App (999) -- main() calls ag.app_done_names on the
-    # raw JSONL lines; reproduce that exact call here so this test would go
-    # red if main() ever stopped routing through app_done_names.
+    # query to the shipmate App (999).
     cells = [{"stack": "stacks/app", "environment": "dev-eu"}]
-    line = json.dumps(
-        {
-            "name": "apply / stacks/app / dev-eu",
-            "status": "completed",
-            "conclusion": "success",
-            "started_at": "2026-07-18T10:00:00Z",
-            "id": 1,
-            "app": {"id": 15368},
-        }
-    )
-    done = ad.ag.app_done_names([line], "999")
+    done = _completed(monkeypatch, [_check(app={"id": 15368})])
     assert ad.filter_pending(cells, done) == cells
 
 
-def test_check_runs_jsonl_parsing_reuses_apply_gates_parse_jsonl():
-    # apply-detect's check-runs JSONL parsing must not roll its own
-    # json.loads-per-line loop -- a malformed line should raise SystemExit
+def test_check_runs_jsonl_parsing_reuses_apply_gates_parse_jsonl(monkeypatch):
+    # No private json.loads-per-line loop: a malformed line raises SystemExit
     # naming the offending line, via the single shared implementation.
     with pytest.raises(SystemExit) as exc_info:
-        ad.ag.parse_jsonl(['{"a": 1}', "not-json-garbage-{{{"])
+        _completed(monkeypatch, ['{"a": 1}', "not-json-garbage-{{{"])
     assert "not-json-garbage" in str(exc_info.value)
 
 

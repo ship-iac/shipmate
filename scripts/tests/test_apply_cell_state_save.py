@@ -14,19 +14,16 @@ state that was never restored). This test pins that guard so it cannot silently
 regress to `!cancelled()`.
 """
 
-import pathlib
 import re
 
-import yaml
-
-_ACTIONS_DIR = pathlib.Path(__file__).resolve().parents[2] / "actions"
+from _loader import action_steps
 
 
 def _save_state_step():
-    spec = yaml.safe_load((_ACTIONS_DIR / "apply-cell" / "action.yml").read_text(encoding="utf-8"))
-    steps = (spec.get("runs") or {}).get("steps") or []
     saves = [
-        s for s in steps if s.get("name") == "Save state" and "state" in str(s.get("uses", ""))
+        s
+        for s in action_steps("apply-cell")
+        if s.get("name") == "Save state" and "state" in str(s.get("uses", ""))
     ]
     assert len(saves) == 1, f"expected exactly one 'Save state' step, got {len(saves)}"
     return saves[0]

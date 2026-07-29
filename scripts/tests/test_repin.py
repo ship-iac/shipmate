@@ -231,10 +231,18 @@ def test_main_reports_staleness_unknown_rather_than_none_stale(capsys, monkeypat
     assert "none stale against the mainline" not in out
 
 
+def _planned_survivors(root, new_sha, targets=frozenset()):
+    """The survivor scan as `_write_and_report` runs it: over the PLANNED text
+    of every candidate file, before anything is written. A working-tree read
+    would cover a path the CLI never takes."""
+    planned = ri._plan(root, set(targets), new_sha)
+    return pinrefs.scan_survivors([(p.path, p.text) for p in planned], new_sha)
+
+
 def test_all_survivor_scan_flags_a_tag_pinned_ref_left_behind(tmp_path):
     # --all promises to flatten every internal pin to one SHA; a tag-pinned
     # ref is invisible to REF (only matches 40-lowercase-hex) and so survives
-    # rewrite() untouched -- _survivors is what must notice.
+    # the rewrite untouched -- the plan-level survivor scan is what must notice.
     root = _repo(
         tmp_path,
         {
@@ -245,10 +253,46 @@ def test_all_survivor_scan_flags_a_tag_pinned_ref_left_behind(tmp_path):
         },
     )
 
-    survivors = ri._survivors(root, NEW)
+    survivors = _planned_survivors(root, NEW)
 
     assert len(survivors) == 1
     assert "actions/setup@v0.1.0" in survivors[0]
+
+
+def test_all_survivor_scan_sees_a_quoted_tag_ref(tmp_path):
+    # A quote directly after the `@` is never canonical and no rewriter can
+    # touch it, so the ref must be reported -- a regex that refuses to match
+    # past that quote reports a clean flatten while a mutable tag stays pinned
+    # in the released tree. Reported verbatim, quote included, because the shape
+    # is the defect.
+    root = _repo(
+        tmp_path,
+        {
+            ".github/workflows/apply.yml": (
+                "      - uses: \"ship-iac/shipmate/actions/setup@'v0.1.0'\"\n"
+            )
+        },
+    )
+
+    survivors = _planned_survivors(root, NEW)
+
+    assert len(survivors) == 1
+    assert "actions/setup@'v0.1.0" in survivors[0]
+
+
+def test_all_survivor_scan_flags_a_quoted_ref_even_at_the_new_sha(tmp_path):
+    # The inner value already reads as the target SHA, but `@'<sha>'` is a shape
+    # REF cannot rewrite: the pin stays malformed and GitHub cannot resolve the
+    # `uses:` ref. Comparing the value alone would report a clean flatten.
+    root = _repo(
+        tmp_path,
+        {".github/workflows/apply.yml": f"      - uses: ship-iac/shipmate/actions/setup@'{NEW}'\n"},
+    )
+
+    survivors = _planned_survivors(root, NEW)
+
+    assert len(survivors) == 1
+    assert "actions/setup@'" in survivors[0]
 
 
 def test_all_survivor_scan_is_clean_when_every_ref_is_the_new_sha(tmp_path):
@@ -257,40 +301,13 @@ def test_all_survivor_scan_is_clean_when_every_ref_is_the_new_sha(tmp_path):
         {".github/workflows/apply.yml": f"      - uses: ship-iac/shipmate/actions/setup@{NEW}\n"},
     )
 
-    assert ri._survivors(root, NEW) == []
-
-
-def test_survivor_exit_returns_one_and_prints_the_survivor(tmp_path, capsys):
-    root = _repo(
-        tmp_path,
-        {".github/workflows/apply.yml": "      - uses: ship-iac/shipmate/actions/setup@v0.1.0\n"},
-    )
-
-    code = ri._survivor_exit(root, NEW)
-
-    out = capsys.readouterr().out
-    assert code == 1
-    assert "actions/setup@v0.1.0" in out
-    assert "partial flatten" in out
-
-
-def test_survivor_exit_returns_none_when_nothing_survives(tmp_path):
-    root = _repo(
-        tmp_path,
-        {".github/workflows/apply.yml": f"      - uses: ship-iac/shipmate/actions/setup@{NEW}\n"},
-    )
-
-    assert ri._survivor_exit(root, NEW) is None
+    assert _planned_survivors(root, NEW) == []
 
 
 def test_main_all_exits_one_when_a_tag_ref_survives_the_flatten(tmp_path, capsys, monkeypatch):
-    # End-to-end: --all must report failure because the tag-shaped ref cannot
-    # be flattened alongside the SHA-shaped one -- and, since the survivor
-    # check now runs against the plan before anything is committed, it must
-    # write nothing at all, not even the SHA-shaped ref it could have moved.
-    # (Revert the plan/validate/commit split -- e.g. move the survivor scan
-    # back to reading the working tree after rewrite() runs -- and this test
-    # goes red: the file comes back with actions/state@{NEW} already written.)
+    # End-to-end: --all must report failure because the tag-shaped ref cannot be
+    # flattened alongside the SHA-shaped one, and must write nothing at all --
+    # not even the SHA-shaped ref it could have moved.
     root = tmp_path
     (root / ".github" / "workflows").mkdir(parents=True)
     (root / ".github" / "workflows" / "apply.yml").write_text(
@@ -554,6 +571,21 @@ def test_rewrite_consumer_preserves_a_double_quoted_ref(tmp_path):
     assert f'@{NEW}"' in text.rstrip("\n")  # quote is the last char, not after a stray comment
 
 
+def test_rewrite_consumer_requires_the_same_quote_to_close_the_ref(tmp_path):
+    # F2, the half `["']?` would not cover: an opening `"` must not be treated
+    # as closed by an unrelated `'` later on the line. If it were, `sub` would
+    # re-emit the opening quote on both sides and produce the same unresolvable
+    # YAML string F2 exists to prevent -- so the ref is left alone instead.
+    line = f"      - uses: \"ship-iac/shipmate/actions/setup@{OLD} # it's pinned\n"
+    root = _repo(tmp_path, {".github/workflows/plan.yml": line})
+
+    rc.rewrite_consumer(root, NEW, None)
+
+    text = (root / ".github/workflows/plan.yml").read_text(encoding="utf-8")
+    assert f"@{NEW}" in text
+    assert f'"ship-iac/shipmate/actions/setup@{NEW}"' not in text  # no invented closing quote
+
+
 def test_rewrite_consumer_preserves_a_single_quoted_ref_with_label(tmp_path):
     root = _repo(
         tmp_path,
@@ -678,12 +710,8 @@ def test_survivors_does_not_flag_a_correctly_rewritten_quoted_ref(tmp_path):
 
 def test_main_reports_partial_rewrite_when_a_ref_survives(tmp_path, capsys):
     # F3 end to end: a tag-pinned ref alongside a SHA-pinned one must not be
-    # silently dropped while the tool prints a clean success. Since the
-    # survivor check now runs against the plan before anything is committed,
-    # nothing may be written at all -- not even the SHA-pinned ref that could
-    # have been moved. (Revert the plan/validate/commit split and this test
-    # goes red: the file comes back with actions/state@{REAL} already
-    # written.)
+    # silently dropped while the tool prints a clean success, and nothing may be
+    # written at all -- not even the SHA-pinned ref that could have been moved.
     root = _repo(
         tmp_path,
         {

@@ -1,9 +1,9 @@
 # scripts/tests/test_summary_comment.py
 import io
 import json
-import pathlib
 
 import pytest
+from _loader import ENGINE as _ENGINE
 from _loader import load_script
 
 sc = load_script("summary-comment")
@@ -329,8 +329,6 @@ def test_load_cells_caps_plan_text_read_at_size_budget(tmp_path):
 
 
 # --- coupling guards ---------------------------------------------------------
-
-_ENGINE = pathlib.Path(__file__).resolve().parents[2]
 
 
 def test_cell_schema_guard_plan_cell_writes_every_required_key():

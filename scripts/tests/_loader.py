@@ -1,4 +1,12 @@
-"""Load one of the extension-less helper scripts under ``scripts/`` as a module.
+"""Shared test-side helpers: load a ``scripts/`` helper, or read an action.yml.
+
+Two jobs: ``load_script`` for the extension-less helpers, and
+``ENGINE``/``ACTIONS``/``WORKFLOWS`` + ``action_steps`` for the YAML-shape
+guards. The step parser is load-bearing -- a guard that silently parses to
+``[]`` asserts nothing -- so it has one definition.
+
+Loading a helper script
+-----------------------
 
 ``scripts/*`` run as GHA steps rather than as an importable package, so they
 carry no ``.py`` suffix and cannot be imported by name. ``spec_from_file_location``
@@ -31,11 +39,21 @@ a shared module imported rather than named in an ``action.yml`` would be a
 dependency no part of that derivation can see.
 """
 
+import copy
+import functools
 import importlib.util
 import pathlib
 from importlib.machinery import SourceFileLoader
 
+import yaml
+
 _SCRIPTS = pathlib.Path(__file__).resolve().parents[1]
+
+#: The engine repo root, and the trees the source-derived guards read.
+ENGINE = _SCRIPTS.parent
+SCRIPTS = _SCRIPTS
+ACTIONS = ENGINE / "actions"
+WORKFLOWS = ENGINE / ".github" / "workflows"
 
 
 def load_script(fname):
@@ -45,3 +63,37 @@ def load_script(fname):
     mod = importlib.util.module_from_spec(spec)
     loader.exec_module(mod)
     return mod
+
+
+@functools.cache
+def _parse_action(path):
+    """Parsed ``action.yml``, cached: nothing in the suite rewrites these files."""
+    spec = yaml.safe_load(path.read_text(encoding="utf-8"))
+    # Never fall back to ``{}``: a file that parses to None (emptied by a bad
+    # merge, fully commented out) would hand every guard zero steps, and a guard
+    # over zero steps passes while asserting nothing.
+    assert isinstance(spec, dict), (
+        f"{path} did not parse to a mapping ({spec!r}) -- guards derived from it "
+        "would assert nothing"
+    )
+    return spec
+
+
+def action_yaml(action):
+    """Parsed ``action.yml`` for ``action`` -- a composite action's name under
+    ``actions/``, or a path to the file itself (what a parametrized guard
+    iterating ``ACTIONS.glob("*/action.yml")`` already holds).
+
+    A deep copy per call: the parse is cached, so handing out the cached object
+    would let the first guard that normalizes what it was given (dedenting a
+    `run:`, sorting steps) silently rewrite what every later module asserts
+    against -- a false green that only reproduces in a full-suite run.
+    """
+    path = action if isinstance(action, pathlib.Path) else ACTIONS / action / "action.yml"
+    return copy.deepcopy(_parse_action(path))
+
+
+def action_steps(action):
+    """``runs.steps`` for ``action``, or ``[]`` for one that declares none
+    (a non-composite action is legal, and has no bash for a guard to read)."""
+    return (action_yaml(action).get("runs") or {}).get("steps") or []

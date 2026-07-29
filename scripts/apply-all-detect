@@ -41,7 +41,7 @@ ad = _load("apply-detect")
 bm = _load("build-matrix")
 wv = _load("waves")
 eo = _load("env-order")
-ag = _load("apply-gate")
+# No apply-gate alias -- see deploy-detect and test_detect_app_scoping.
 
 
 def cells_from_artifacts(artifact_names, stacks_by_env):
@@ -77,19 +77,7 @@ def main():
     names = ad._artifact_names(repo, plan_run_id)
     cells = cells_from_artifacts(names, stacks_by_env)
 
-    checks_jsonl = bm._run(
-        [
-            "gh",
-            "api",
-            "--paginate",
-            "--jq",
-            ".check_runs[]",
-            f"repos/{repo}/commits/{head}/check-runs?filter=all&per_page=100",
-        ]
-    )
-    # Only App-authored apply checks count: a forged same-name check from any
-    # other identity must not mark work done (see apply-gate.app_done_names).
-    completed = ag.app_done_names(checks_jsonl.splitlines(), os.environ["SHIPMATE_APP_ID"])
+    completed = ad.completed_apply_names(repo, head)
     pending = ad.filter_pending(cells, completed)
 
     order = eo.read_env_order()
@@ -99,8 +87,7 @@ def main():
     dropped = set(excluded) | set(skipped)
     runnable = [c for c in pending if c["environment"] not in dropped]
 
-    graph = bm._run(["terramate", "experimental", "run-graph", "--label", "stack.dir"])
-    deps = wv.parse_dot(graph)
+    deps = ad.run_graph_deps()
     levels = eo.env_levels(order, {c["environment"] for c in runnable})
     eo.guard_max_env_levels(levels)
     per_level = eo.waves_by_env_level(runnable, deps, levels)

@@ -14,6 +14,24 @@ import sys
 
 MATRIX_LIMIT = 256
 
+#: Stack paths whose plan check name (grammar `<stack> / <env>`, verb-less)
+#: would land inside a namespace the engine selects on, mapped to the rejection
+#: raised. The `shipmate` case is the one that fails silently: summary-comment
+#: resolves each row's plan link by exact `<stack> / <env>` lookup, so the link
+#: points at the wrong check rather than erroring.
+RESERVED_STACK_PATHS = {
+    "apply": (
+        "::error::a stack path may not be exactly 'apply': its plan check "
+        "'apply / <env>' collides with the apply-check namespace "
+        "('apply / <stack> / <env>'). Rename or nest the stack."
+    ),
+    "shipmate": (
+        "::error::a stack path may not be exactly 'shipmate': its plan check "
+        "'shipmate / <env>' falls inside the reserved 'shipmate / ' namespace "
+        "(e.g. 'shipmate / gate'). Rename or nest the stack."
+    ),
+}
+
 
 class MatrixTooLarge(Exception):
     pass
@@ -30,30 +48,9 @@ def build_matrix(envs, stacks_by_env, tags_by_stack):
                     break
             cells.append({"stack": stack, "environment": env, "workload": workload})
     cells.sort(key=lambda c: (c["environment"], c["stack"]))
-    # A stack whose path is exactly `apply` renders a plan check named
-    # `apply / <env>` (plan check grammar is `<stack> / <env>`, verb-less),
-    # which falls inside the `apply / ` namespace that apply-gate / gate-refresh
-    # select the pending-apply queue by — a phantom entry there corrupts the
-    # gate. Reject it loud; nest or rename the stack.
-    if any(c["stack"] == "apply" for c in cells):
-        raise SystemExit(
-            "::error::a stack path may not be exactly 'apply': its plan check "
-            "'apply / <env>' collides with the apply-check namespace "
-            "('apply / <stack> / <env>'). Rename or nest the stack."
-        )
-    # Same collision one namespace over: a stack path of exactly `shipmate`
-    # renders a plan check `shipmate / <env>`, inside the `shipmate / ` namespace
-    # the engine reserves for its aggregate surfaces (the gate) and a consumer
-    # may use for its own non-fan-out job names. summary-comment resolves each
-    # row's plan link by an exact `<stack> / <env>` name lookup over every check
-    # run on the head SHA, so for an env named after one of those the cell's link
-    # silently resolves to the wrong check.
-    if any(c["stack"] == "shipmate" for c in cells):
-        raise SystemExit(
-            "::error::a stack path may not be exactly 'shipmate': its plan check "
-            "'shipmate / <env>' falls inside the reserved 'shipmate / ' namespace "
-            "(e.g. 'shipmate / gate'). Rename or nest the stack."
-        )
+    for reserved, message in RESERVED_STACK_PATHS.items():
+        if any(c["stack"] == reserved for c in cells):
+            raise SystemExit(message)
     if len(cells) > MATRIX_LIMIT:
         raise MatrixTooLarge(
             f"{len(cells)} plan cells exceeds the GitHub Actions matrix limit of {MATRIX_LIMIT}. "

@@ -81,6 +81,25 @@ def _is_recognized_command(line):
     return m is not None and m.group("verb") in VERBS
 
 
+def _verb_error(verb, env, tag):
+    """The rejection message for `verb` carrying `env`/`tag`, or None if the
+    command is accepted. Lives next to the VERBS registry that defines these
+    rules, so adding a verb does not first require splitting parse().
+    """
+    spec = VERBS.get(verb)
+    if spec is None:
+        return f"unknown verb `{verb}` (try `shipmate help`)"
+    if spec["status"] == RESERVED:
+        return f"verb `{verb}` is reserved and not yet implemented"
+    if spec["args"] == "" and (env is not None or tag is not None):
+        return f"`{verb}` takes no arguments (use `shipmate {verb}`)"
+    if tag is not None:
+        # Parsed for forward-compat, but no component honors it yet — reject
+        # rather than silently apply the whole env (matches reserved-verb handling).
+        return "tag-filter is not yet supported (omit it: `shipmate <verb> [env]`)"
+    return None
+
+
 def parse(body):
     """Return the parse result dict. Never raises."""
     result = {
@@ -114,22 +133,11 @@ def parse(body):
         return result
     verb, env, tag = m.group("verb"), m.group("env"), m.group("tag")
     result.update(verb=verb, env=env, tag_filter=tag)
-    spec = VERBS.get(verb)
-    if spec is None:
-        result["error"] = f"unknown verb `{verb}` (try `shipmate help`)"
+    error = _verb_error(verb, env, tag)
+    if error is not None:
+        result["error"] = error
         return result
-    if spec["status"] == RESERVED:
-        result["error"] = f"verb `{verb}` is reserved and not yet implemented"
-        return result
-    if spec["args"] == "" and (env is not None or tag is not None):
-        result["error"] = f"`{verb}` takes no arguments (use `shipmate {verb}`)"
-        return result
-    if tag is not None:
-        # Parsed for forward-compat, but no component honors it yet — reject
-        # rather than silently apply the whole env (matches reserved-verb handling).
-        result["error"] = "tag-filter is not yet supported (omit it: `shipmate <verb> [env]`)"
-        return result
-    result["route"] = spec["route"]
+    result["route"] = VERBS[verb]["route"]
     result["valid"] = True
     return result
 

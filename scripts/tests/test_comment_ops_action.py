@@ -6,16 +6,13 @@ the action would parse, authorize, and then silently do nothing.
 """
 
 import json
-import pathlib
 import re
 
-import yaml
-from _loader import load_script
+from _loader import ACTIONS, ENGINE, SCRIPTS, action_steps, load_script
 
-_D = pathlib.Path(__file__).resolve().parents[1]
-_ACTION_FILE = _D.parent / "actions" / "comment-ops" / "action.yml"
+_ACTION_FILE = ACTIONS / "comment-ops" / "action.yml"
 _ACTION = _ACTION_FILE.read_text(encoding="utf-8")
-_SUMMARY_ACTION = (_D.parent / "actions" / "summary" / "action.yml").read_text(encoding="utf-8")
+_SUMMARY_ACTION = (ACTIONS / "summary" / "action.yml").read_text(encoding="utf-8")
 
 # The `doctor` route's access gate. The allowlist literal lives in exactly one
 # place in the action (the `guard` step's `case`); every doctor step keys off
@@ -60,7 +57,7 @@ def test_bot_authored_comments_are_ignored():
 def test_doctor_step_supplies_every_env_var_doctor_reads():
     """comment-ops' doctor steps must supply every SHIPMATE_* name `doctor`
     reads at all (subscript or .get), report mode's full env contract."""
-    src = (_D / "doctor").read_text(encoding="utf-8")
+    src = (SCRIPTS / "doctor").read_text(encoding="utf-8")
     read = set(re.findall(r"os\.environ(?:\.get)?[\[(]['\"](SHIPMATE_[A-Z_]+)['\"]", src))
     for name in read:
         assert name in _ACTION, name
@@ -75,7 +72,7 @@ def test_summary_action_supplies_every_env_var_doctor_requires_in_annotate_mode(
     fold into the assertion above: that one is checked against
     `actions/comment-ops/action.yml`'s full (subscript + .get) read-set, which
     would pass even if `actions/summary` silently dropped a required name."""
-    src = (_D / "doctor").read_text(encoding="utf-8")
+    src = (SCRIPTS / "doctor").read_text(encoding="utf-8")
     required = set(re.findall(r"os\.environ\[['\"](SHIPMATE_[A-Z_]+)['\"]\]", src))
     assert required, "expected at least one required SHIPMATE_* read in doctor"
     for name in required:
@@ -285,9 +282,8 @@ def _steps_conditioned_on(route):
     with another route (the `eyes` acknowledgement) are excluded: they are not
     on "the doctor route" in the sense the access gate applies to."""
     other = {"doctor", "help", "apply"} - {route}
-    spec = yaml.safe_load(_ACTION_FILE.read_text(encoding="utf-8"))
     out = []
-    for step in spec["runs"]["steps"]:
+    for step in action_steps("comment-ops"):
         cond = step.get("if") or ""
         if f"outputs.route == '{route}'" not in cond:
             continue
@@ -518,6 +514,6 @@ def test_fullmint_requests_the_manifests_exact_permission_set():
     exactly the drift the probe exists to catch."""
     block = _ACTION.split("id: fullmint", 1)[1].split("- name:", 1)[0]
     requested = dict(re.findall(r"permission-([a-z-]+): (read|write)", block))
-    manifest = json.loads((_D.parent / "app" / "manifest.json").read_text(encoding="utf-8"))
+    manifest = json.loads((ENGINE / "app" / "manifest.json").read_text(encoding="utf-8"))
     declared = {k.replace("_", "-"): v for k, v in manifest["default_permissions"].items()}
     assert requested == declared

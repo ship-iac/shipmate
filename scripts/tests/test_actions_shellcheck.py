@@ -7,15 +7,13 @@ invariant that no run block interpolates a `${{ ... }}` expression (author- and
 attacker-controlled values must reach the script through `env:`).
 """
 
-import pathlib
 import shutil
 import subprocess
 
 import pytest
-import yaml
+from _loader import ACTIONS, action_steps
 
-_ACTIONS_DIR = pathlib.Path(__file__).resolve().parents[2] / "actions"
-_ACTION_FILES = sorted(_ACTIONS_DIR.glob("*/action.yml"))
+_ACTION_FILES = sorted(ACTIONS.glob("*/action.yml"))
 # env: vars are injected by the GitHub runner, so shellcheck can't see their
 # assignment — SC2154 (referenced but not assigned) is expected, not a defect.
 _IGNORE = "SC2154"
@@ -23,8 +21,7 @@ _IGNORE = "SC2154"
 
 def _bash_runs(action_file):
     """(index, run-text) for every bash `run:` step in a composite action."""
-    spec = yaml.safe_load(action_file.read_text(encoding="utf-8"))
-    steps = (spec.get("runs") or {}).get("steps") or []
+    steps = action_steps(action_file)
     return [(i, s["run"]) for i, s in enumerate(steps) if s.get("shell") == "bash" and "run" in s]
 
 

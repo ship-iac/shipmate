@@ -1,9 +1,16 @@
-import json
-
-import pytest
+from _detect_fixtures import check_run as _check
+from _detect_fixtures import completed_names
 from _loader import load_script
 
 dd = load_script("deploy-detect")
+
+
+def _completed(monkeypatch, checks, **kw):
+    """deploy-detect's "already applied" set, through the query main() calls.
+
+    That main() *does* call it is a separate, structural claim -- pinned by
+    test_detect_app_scoping, not by this helper."""
+    return completed_names(dd.ad, monkeypatch, checks, **kw)
 
 
 def test_filter_pending_drops_completed_applies():
@@ -22,45 +29,26 @@ def test_filter_pending_keeps_all_when_none_completed():
     assert dd.filter_pending(cells, set()) == cells
 
 
-def test_completed_failure_apply_stays_pending():
+def test_completed_failure_apply_stays_pending(monkeypatch):
     # A "completed" status with a failing conclusion must not count as done —
     # deploy-detect must share apply-gate's success/neutral predicate, not just
     # check status=="completed".
     cells = [{"stack": "stacks/app", "environment": "dev-eu", "workload": ""}]
-    checks = [
-        {
-            "name": "apply / stacks/app / dev-eu",
-            "status": "completed",
-            "conclusion": "failure",
-            "started_at": "2026-07-18T10:00:00Z",
-            "id": 1,
-        },
-    ]
-    done = dd.ag.done_names(checks)
+    done = _completed(monkeypatch, [_check(conclusion="failure")])
     assert dd.filter_pending(cells, done) == cells
 
 
-def test_duplicate_run_newer_queued_stays_pending():
+def test_duplicate_run_newer_queued_stays_pending(monkeypatch):
     # An old completed+success run must not mask a newer queued run of the same
     # check name (re-created check) — the latest run per name governs.
     cells = [{"stack": "stacks/app", "environment": "dev-eu", "workload": ""}]
-    checks = [
-        {
-            "name": "apply / stacks/app / dev-eu",
-            "status": "completed",
-            "conclusion": "success",
-            "started_at": "2026-07-18T10:00:00Z",
-            "id": 1,
-        },
-        {
-            "name": "apply / stacks/app / dev-eu",
-            "status": "queued",
-            "conclusion": None,
-            "started_at": "2026-07-18T11:00:00Z",
-            "id": 2,
-        },
-    ]
-    done = dd.ag.done_names(checks)
+    done = _completed(
+        monkeypatch,
+        [
+            _check(),
+            _check(status="queued", conclusion=None, started_at="2026-07-18T11:00:00Z", id=2),
+        ],
+    )
     assert dd.filter_pending(cells, done) == cells
 
 
@@ -157,31 +145,9 @@ def test_merged_head_gives_up_after_attempts_exhausted_all_empty(monkeypatch):
     assert calls["n"] == 3
 
 
-def test_foreign_app_completed_check_stays_pending():
-    # A completed+success check created by a foreign identity (github-actions,
-    # app id 15368) must not count as done once SHIPMATE_APP_ID scopes the
-    # detect to the shipmate App (999) -- main() calls ag.app_done_names on the
-    # raw JSONL lines; reproduce that exact call here so this test would go
-    # red if main() ever stopped routing through app_done_names.
+def test_foreign_app_completed_check_stays_pending(monkeypatch):
+    # A completed+success check authored by another identity (github-actions,
+    # app id 15368) must not count as done for the merge-deploy queue.
     cells = [{"stack": "stacks/app", "environment": "dev-eu", "workload": ""}]
-    line = json.dumps(
-        {
-            "name": "apply / stacks/app / dev-eu",
-            "status": "completed",
-            "conclusion": "success",
-            "started_at": "2026-07-18T10:00:00Z",
-            "id": 1,
-            "app": {"id": 15368},
-        }
-    )
-    done = dd.ag.app_done_names([line], "999")
+    done = _completed(monkeypatch, [_check(app={"id": 15368})])
     assert dd.filter_pending(cells, done) == cells
-
-
-def test_check_runs_jsonl_parsing_reuses_apply_gates_parse_jsonl():
-    # deploy-detect's check-runs JSONL parsing must not roll its own
-    # json.loads-per-line loop -- a malformed line should raise SystemExit
-    # naming the offending line, via the single shared implementation.
-    with pytest.raises(SystemExit) as exc_info:
-        dd.ag.parse_jsonl(['{"a": 1}', "not-json-garbage-{{{"])
-    assert "not-json-garbage" in str(exc_info.value)

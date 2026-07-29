@@ -12,13 +12,9 @@ be the kind of thing that silently goes stale.
 """
 
 import ast
-import pathlib
 import re
 
-import yaml
-
-_ACTIONS_DIR = pathlib.Path(__file__).resolve().parents[2] / "actions"
-_ACTION_PATH = _ACTIONS_DIR / "apply-cell" / "action.yml"
+from _loader import action_steps
 
 # Ids in the guarded range that are deliberately NOT fail-safes wired into the
 # Compose step's decision -- e.g. a step added only to expose an output, with
@@ -32,8 +28,7 @@ NOT_A_FAILSAFE: set[str] = set()
 
 
 def _steps():
-    spec = yaml.safe_load(_ACTION_PATH.read_text(encoding="utf-8"))
-    return (spec.get("runs") or {}).get("steps") or []
+    return action_steps("apply-cell")
 
 
 def _step_by_id(step_id):

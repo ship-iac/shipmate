@@ -30,10 +30,7 @@ def pin_status(commit):
     return pinrefs.pin_issues(pinrefs.refs_at(commit), commit)
 
 
-def resolve(commitish):
-    """Full SHA for ``commitish``, or None if it does not resolve here."""
-    r = pinrefs.git("rev-parse", "--verify", f"{commitish}^{{commit}}")
-    return r.stdout.strip() if r.returncode == 0 else None
+resolve = pinrefs.resolve  # re-exported: this module's CLI contract names it
 
 
 def unreachable_from_main(sha):
