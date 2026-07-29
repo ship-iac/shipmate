@@ -38,7 +38,7 @@ jobs:
           terramate-version: ${{ vars.TERRAMATE_VERSION }}
           tofu-version: ${{ vars.TOFU_VERSION }}
       - id: d
-        uses: ship-iac/shipmate/actions/deploy-detect@93b6a7eaa96d65c98fe444cccc6da6a35350fc42
+        uses: ship-iac/shipmate/actions/deploy-detect@f3712cbd4be5ab61ca26850e009b365f958ffdd6
         with:
           # The caller is `on: push` to the default branch; its event payload
           # (and so the previous main tip) is visible here.
