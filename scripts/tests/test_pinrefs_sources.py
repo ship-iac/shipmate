@@ -10,12 +10,18 @@ import pytest
 
 # Real history fixture used by test_refs_at_commit_reads_that_commits_tree_not_disk
 # below. In a shallow clone this commit is absent, refs_at() on it returns [],
-# and that test would pass vacuously ({} != now instead of a real diff) -- so
-# fail collection loudly instead. CI checks out with fetch-depth: 0.
+# and that test would pass vacuously ({} != now instead of a real diff). A bare
+# module-level `assert` would raise at import time and abort collection of this
+# whole module -- skip loudly instead so a shallow checkout doesn't turn an
+# unrelated scripts/ edit's test run red. CI checks out with fetch-depth: 0,
+# where this condition is always False.
 CONVERGED = "83b37bb5e0baa9256b1ea49f4725cf7f55157c8a"
-assert pinrefs.commit_present(CONVERGED), (
-    f"{CONVERGED[:12]} is not in this clone -- these tests read real history; "
-    "check out with fetch-depth: 0"
+pytestmark = pytest.mark.skipif(
+    not pinrefs.commit_present(CONVERGED),
+    reason=(
+        f"{CONVERGED[:12]} is not in this clone -- these tests read real history; "
+        "check out with fetch-depth: 0"
+    ),
 )
 
 

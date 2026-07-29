@@ -10,6 +10,7 @@ import importlib.util
 from importlib.machinery import SourceFileLoader
 
 import pinrefs
+import pytest
 
 _DEV = pinrefs.ROOT / "dev"
 
@@ -34,13 +35,25 @@ INTERMEDIATE_BUMP_COMMIT = "273ec9656ee5cad55a538e44c5f57e726543313c"
 
 # These tests are fixtured on real history. In a shallow clone the commits are
 # absent, refs_at() returns nothing, and the "safe to pin" assertions would pass
-# for the wrong reason -- so fail collection loudly instead. CI checks out with
-# fetch-depth: 0.
-for _fixture in (CONVERGED, INTERMEDIATE_ACTION_COMMIT, INTERMEDIATE_BUMP_COMMIT):
-    assert pinrefs.commit_present(_fixture), (
-        f"{_fixture[:12]} is not in this clone -- these tests read real history; "
-        "check out with fetch-depth: 0"
-    )
+# for the wrong reason. A bare module-level `assert` would raise at import time
+# and abort collection of this whole module (and, worse, everything collected
+# after it), turning an unrelated `scripts/` edit's test run red on a shallow
+# checkout with no way to tell "genuinely broken" from "just shallow" -- so
+# skip loudly instead of failing collection. CI checks out with fetch-depth: 0,
+# where this condition is always False.
+_MISSING_FIXTURES = [
+    sha
+    for sha in (CONVERGED, INTERMEDIATE_ACTION_COMMIT, INTERMEDIATE_BUMP_COMMIT)
+    if not pinrefs.commit_present(sha)
+]
+pytestmark = pytest.mark.skipif(
+    bool(_MISSING_FIXTURES),
+    reason=(
+        "history fixture commit(s) not in this clone: "
+        + ", ".join(sha[:12] for sha in _MISSING_FIXTURES)
+        + " -- these tests read real history; check out with fetch-depth: 0"
+    ),
+)
 
 
 def _stale_pins(commit):
@@ -101,6 +114,46 @@ def test_main_returns_one_and_lists_stale_pins(capsys):
     # The headline counts distinct pins, not issue records -- "5 stale pins"
     # when three actions are wrong would send a reader looking for two more.
     assert "3 stale internal pin(s)" in out
+
+
+def test_main_names_this_commits_own_tree_not_the_mainline(capsys):
+    # F10: pin_status() baselines on the commit itself, never the mainline --
+    # reusing the guard's "changed on the mainline since" wording here would
+    # tell a release engineer the mainline moved past their target, when the
+    # real fact is that this commit's own tree runs stale code. Reverting the
+    # fix (format_issue(i) with no baseline_desc override) puts "mainline"
+    # back in this output.
+    ps.main([INTERMEDIATE_ACTION_COMMIT])
+    out = capsys.readouterr().out
+    assert "mainline" not in out
+    assert "this commit's own tree" in out
+
+
+def test_report_treats_error_kind_as_unverifiable_with_exit_2(capsys):
+    # F6: an "error" record (git itself failed) means the same thing "missing"
+    # does -- staleness is unknown -- so it must land in the exit-2 bucket,
+    # not be folded into the exit-1 "stale" bucket the pre-fix code used. A
+    # caller branching on the documented contract (1 = stale -> re-pin;
+    # 2 = unverifiable -> investigate) needs the right one.
+    issues = [pinrefs.PinIssue("actions/setup", "0" * 40, "x.yml", "error", error="boom")]
+
+    code = ps._report(issues, "1" * 40, 5)
+
+    out = capsys.readouterr().out
+    assert code == 2
+    assert "boom" in out
+    assert "stale internal pin(s)" not in out
+
+
+def test_report_still_returns_one_when_a_real_stale_pin_is_present(capsys):
+    # Regression guard alongside the test above: error/missing must not creep
+    # into blocking either -- a genuine stale pin must still exit 1.
+    issues = [pinrefs.PinIssue("actions/setup", "0" * 40, "x.yml", "stale")]
+
+    code = ps._report(issues, "1" * 40, 5)
+
+    assert code == 1
+    assert "1 stale internal pin(s)" in capsys.readouterr().out
 
 
 def test_main_returns_three_for_a_commitish_that_does_not_resolve(capsys):

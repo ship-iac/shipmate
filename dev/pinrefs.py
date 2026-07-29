@@ -32,15 +32,38 @@ def git_show(ref, path):
     return r.stdout if r.returncode == 0 else None
 
 
-def write_text(path, text):
-    """Write ``text`` to ``path`` as UTF-8 with LF endings.
+def read_text(path):
+    """UTF-8 text of ``path`` (universal newlines -- callers regex against
+    ``\\n`` only) plus its dominant line ending, detected from the raw bytes
+    before that normalization collapses CRLF to LF.
+
+    Pair with ``write_text(path, text, newline)`` to round-trip a file's
+    existing convention. Without this, a rewriter that reads with
+    ``read_text(encoding="utf-8")`` (which silently normalizes CRLF to ``\\n``)
+    and writes LF-only flips a CRLF-committed workflow to LF over a one-line
+    pin bump -- the same whole-file-diff harm ``write_text`` already guards
+    against, just in the other direction.
+    """
+    raw = path.read_bytes()
+    crlf = raw.count(b"\r\n")
+    lf_only = raw.count(b"\n") - crlf
+    newline = "\r\n" if crlf > lf_only else "\n"
+    return raw.decode("utf-8").replace("\r\n", "\n"), newline
+
+
+def write_text(path, text, newline="\n"):
+    """Write ``text`` (``\\n``-delimited) to ``path`` as UTF-8 using ``newline``
+    as the line ending.
 
     pathlib's default ``newline=None`` translates every "\\n" to ``os.linesep``,
     so on Windows rewriting a workflow file would flip the whole file to CRLF --
     burying a one-line pin bump in a whole-file diff for any consumer repo
-    without a .gitattributes eol rule.
+    without a .gitattributes eol rule. ``newline`` defaults to ``"\\n"`` for
+    callers with no established convention to preserve (fresh files, fixtures);
+    a rewriter reading an existing file should pass through what ``read_text``
+    reported.
     """
-    path.write_text(text, encoding="utf-8", newline="\n")
+    path.write_bytes(text.replace("\n", newline).encode("utf-8"))
 
 
 def commit_present(sha):
@@ -199,15 +222,26 @@ class PinIssue(NamedTuple):
 ACTIONABLE = ("stale", "dep_stale")
 
 
-def format_issue(i):
-    """The reader-facing line for an issue."""
+#: format_issue's baseline_desc for a caller that baselines a commit on itself
+#: (dev/pin-status.py, dev/repin-consumer.py) rather than on the mainline the
+#: CI guard and dev/repin-internal.py compare against. Reusing the mainline
+#: wording there would tell a release engineer the mainline moved past their
+#: target, when the real fact is that the target's own tree runs stale code.
+SELF_BASELINE_DESC = "is out of date against this commit's own tree"
+
+
+def format_issue(i, baseline_desc="changed on the mainline since"):
+    """The reader-facing line for an issue.
+
+    ``baseline_desc`` completes "but <path> ..." / "-- <dep> ..." and names
+    what the comparison was actually made against; pass ``SELF_BASELINE_DESC``
+    when the issue came from a commit-baselined ``pin_issues`` call rather
+    than a mainline-baselined one.
+    """
     if i.kind == "stale":
-        return f"{i.src} pins {i.path}@{i.sha[:12]} but {i.path} changed on the mainline since"
+        return f"{i.src} pins {i.path}@{i.sha[:12]} but {i.path} {baseline_desc}"
     if i.kind == "dep_stale":
-        return (
-            f"{i.src} pins {i.path}@{i.sha[:12]}, which runs {i.dep} -- "
-            f"{i.dep} changed on the mainline since"
-        )
+        return f"{i.src} pins {i.path}@{i.sha[:12]}, which runs {i.dep} -- {i.dep} {baseline_desc}"
     if i.kind == "missing":
         return f"{i.src}: {i.path}@{i.sha[:12]} (commit not in this clone)"
     return f"{i.src}: git diff failed for {i.dep or i.path} (pin {i.path}@{i.sha[:12]}): {i.error}"

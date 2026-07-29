@@ -12,6 +12,7 @@ import importlib.util
 from importlib.machinery import SourceFileLoader
 
 import pinrefs
+import pytest
 
 _DEV = pinrefs.ROOT / "dev"
 
@@ -25,13 +26,26 @@ OTHER = "c" * 40
 # would exit 3 before reaching the pin_status gate under test.
 REAL = "4914d074df71f8c3d0b4ccb73a22c153cacaca7c"
 
-# In a shallow clone REAL is absent -- the main()-level tests above would then
-# fail on an unrelated "does not resolve" exit 3 instead of exercising the
-# pin_status gate. Fail collection loudly instead. CI checks out with
-# fetch-depth: 0.
-assert pinrefs.commit_present(REAL), (
-    f"{REAL[:12]} is not in this clone -- these tests read real history; "
-    "check out with fetch-depth: 0"
+# F1 fixture: the engine's own root commit. Its tree predates today's
+# actions/ and .github/workflows/ layout entirely, so refs_at() on it finds no
+# shipmate self-references -- exactly the "commit whose pins cannot be judged"
+# shape that must be refused rather than silently treated as clean.
+NO_REFS_COMMIT = "52f6aad901fe634d6f99d9a499c3c6d25bb737f7"
+
+# In a shallow clone these commits are absent -- the main()-level tests above
+# would then fail on an unrelated "does not resolve" exit 3 instead of
+# exercising the gate under test. A bare module-level `assert` would raise at
+# import time and abort collection of this whole module; skip loudly instead
+# so a shallow checkout doesn't turn an unrelated scripts/ edit's test run
+# red. CI checks out with fetch-depth: 0, where this condition is always False.
+_MISSING_FIXTURES = [sha for sha in (REAL, NO_REFS_COMMIT) if not pinrefs.commit_present(sha)]
+pytestmark = pytest.mark.skipif(
+    bool(_MISSING_FIXTURES),
+    reason=(
+        "history fixture commit(s) not in this clone: "
+        + ", ".join(sha[:12] for sha in _MISSING_FIXTURES)
+        + " -- these tests read real history; check out with fetch-depth: 0"
+    ),
 )
 
 
@@ -134,6 +148,30 @@ def test_rewrite_writes_lf_not_crlf(tmp_path):
     assert b"\r\n" not in p.read_bytes()
 
 
+def test_rewrite_preserves_existing_crlf(tmp_path):
+    # F4 mirror-image regression: read_text(encoding="utf-8") normalizes CRLF
+    # to "\n" on the way in, and the old write_text emitted LF-only on the way
+    # out -- so a CRLF-committed workflow got flipped whole-file to LF by a
+    # one-line pin bump, the same harm the LF-preservation test above guards
+    # against, inverted. Before the fix (write_text hardcoded newline="\n"),
+    # this file's 2 CRLFs become 0.
+    root = _repo(
+        tmp_path,
+        {".github/workflows/apply.yml": f"  - uses: ship-iac/shipmate/actions/setup@{OLD}\n"},
+    )
+    p = root / ".github/workflows/apply.yml"
+    crlf_body = f"  - uses: ship-iac/shipmate/actions/setup@{OLD}\r\n  - uses: x/y@{OTHER}\r\n"
+    p.write_bytes(crlf_body.encode())
+    before = p.read_bytes().count(b"\r\n")
+
+    changed = ri.rewrite(root, {("actions/setup", OLD)}, NEW)
+
+    after = p.read_bytes()
+    assert changed == [(".github/workflows/apply.yml", 1)]
+    assert after.count(b"\r\n") == before
+    assert f"actions/setup@{NEW}".encode() in after
+
+
 def test_targets_excludes_pins_whose_diff_could_not_be_verified(monkeypatch):
     # "error" (git failed) and "missing" (pin commit absent) mean we do not know
     # whether the pin is stale. Rewriting one would be a guess presented as a
@@ -174,6 +212,22 @@ def test_targets_reports_staleness_unknown_when_no_mainline_resolves(monkeypatch
     assert targets == set()
     assert staleness_unknown is True
     assert "cannot tell which pins are stale" in notes[0]
+
+
+def test_main_exits_three_when_no_internal_refs_are_found(capsys, monkeypatch):
+    # F8: the old guard was `assert refs, "no internal shipmate self-references
+    # found -- regex or repo layout changed?"`. Without it, refs_at() returning
+    # [] (detection surface broke: workflows moved, action.yml shape changed,
+    # the slug drifted) makes _targets() report "nothing to bump" and main()
+    # exit 0 -- read by a release owner as convergence, when the real state is
+    # that the tool cannot see any pins at all.
+    monkeypatch.setattr(pinrefs, "refs_at", lambda *a, **k: [])
+
+    code = ri.main(["--to", REAL])
+
+    out = capsys.readouterr().out
+    assert code == 3
+    assert "regex or repo layout" in out
 
 
 def test_main_reports_staleness_unknown_rather_than_none_stale(capsys, monkeypatch):
@@ -228,11 +282,15 @@ def test_rewrite_consumer_bumps_every_engine_ref_regardless_of_path(tmp_path):
         },
     )
 
-    changed = rc.rewrite_consumer(root, NEW, None)
+    # rewrite_consumer's return became (changed, matched) for F9 (main() needs
+    # the total-matched count to tell "matched nothing" apart from "matched N,
+    # all already current"); updated this unpack deliberately.
+    changed, matched = rc.rewrite_consumer(root, NEW, None)
 
     plan = (root / ".github/workflows/plan.yml").read_text(encoding="utf-8")
     apply_ = (root / ".github/workflows/apply.yml").read_text(encoding="utf-8")
     assert dict(changed) == {".github/workflows/plan.yml": 2, ".github/workflows/apply.yml": 1}
+    assert matched == 3
     assert plan.count(f"@{NEW}") == 2
     assert f"apply.yml@{NEW}" in apply_
 
@@ -324,6 +382,197 @@ def test_rewrite_consumer_writes_lf_not_crlf(tmp_path):
     assert b"\r\n" not in p.read_bytes()
 
 
+def test_rewrite_consumer_preserves_existing_crlf(tmp_path):
+    # Same F4 mirror-image regression as test_rewrite_preserves_existing_crlf,
+    # higher stakes here since this rewriter targets arbitrary consumer repos.
+    # Before the fix, this file's 2 CRLFs become 0.
+    root = _repo(
+        tmp_path,
+        {".github/workflows/plan.yml": f"      - uses: ship-iac/shipmate/actions/setup@{OLD}\n"},
+    )
+    p = root / ".github/workflows/plan.yml"
+    crlf_body = (
+        f"      - uses: ship-iac/shipmate/actions/setup@{OLD}\r\n"
+        f"      - uses: actions/checkout@{OTHER}\r\n"
+    )
+    p.write_bytes(crlf_body.encode())
+    before = p.read_bytes().count(b"\r\n")
+
+    rc.rewrite_consumer(root, NEW, None)
+
+    after = p.read_bytes()
+    assert after.count(b"\r\n") == before
+    assert f"actions/setup@{NEW}".encode() in after
+
+
+def test_rewrite_consumer_preserves_a_double_quoted_ref(tmp_path):
+    # F2: a closing quote matches neither the SHA nor the trailing-comment
+    # pattern, so the pre-fix substitution pushed it past the new SHA:
+    # `"...@<old>"` -> `"...@<new> # label"`, one YAML string Actions cannot
+    # resolve as an action reference.
+    root = _repo(
+        tmp_path,
+        {
+            ".github/workflows/plan.yml": (
+                f'      - uses: "ship-iac/shipmate/actions/setup@{OLD}"\n'
+            )
+        },
+    )
+
+    rc.rewrite_consumer(root, NEW, None)
+
+    text = (root / ".github/workflows/plan.yml").read_text(encoding="utf-8")
+    assert f'"ship-iac/shipmate/actions/setup@{NEW}"' in text
+    assert f'@{NEW}"' in text.rstrip("\n")  # quote is the last char, not after a stray comment
+
+
+def test_rewrite_consumer_preserves_a_single_quoted_ref_with_label(tmp_path):
+    root = _repo(
+        tmp_path,
+        {
+            ".github/workflows/plan.yml": (
+                f"      - uses: 'ship-iac/shipmate/actions/setup@{OLD}'\n"
+            )
+        },
+    )
+
+    rc.rewrite_consumer(root, NEW, "v0.2.0")
+
+    text = (root / ".github/workflows/plan.yml").read_text(encoding="utf-8")
+    assert text.rstrip("\n").endswith(f"'ship-iac/shipmate/actions/setup@{NEW}' # v0.2.0")
+
+
+def test_main_refuses_a_target_commit_with_no_internal_refs(tmp_path, capsys):
+    # F1: repin-consumer's own safety check must not be bypassable by pointing
+    # it at a commit whose tree has no shipmate self-references at all (the
+    # engine's own root commit, here) -- pin_status() on such a commit
+    # vacuously reports zero issues, so without this check the tool would
+    # accept it as "safe" and write an unresolvable pin.
+    root = _repo(
+        tmp_path,
+        {".github/workflows/plan.yml": f"      - uses: ship-iac/shipmate/actions/setup@{OLD}\n"},
+    )
+
+    code = rc.main(["--repo", str(root), "--sha", NO_REFS_COMMIT])
+
+    out = capsys.readouterr().out
+    assert code == 3
+    assert "no shipmate self-references" in out
+    # Nothing written.
+    assert OLD in (root / ".github/workflows/plan.yml").read_text(encoding="utf-8")
+
+
+def test_main_force_does_not_bypass_the_no_refs_refusal(tmp_path, capsys):
+    # This is a bad-target check, not a staleness override -- --force exists
+    # to say "pin it anyway despite known staleness", never "judge a commit
+    # whose pins cannot be judged at all".
+    root = _repo(
+        tmp_path,
+        {".github/workflows/plan.yml": f"      - uses: ship-iac/shipmate/actions/setup@{OLD}\n"},
+    )
+
+    code = rc.main(["--repo", str(root), "--sha", NO_REFS_COMMIT, "--force"])
+
+    assert code == 3
+    assert OLD in (root / ".github/workflows/plan.yml").read_text(encoding="utf-8")
+
+
+def test_survivors_finds_a_tag_pinned_ref_the_sha_only_rewrite_cannot_touch(tmp_path):
+    # F3: _CONSUMER_REF only matches 40-hex SHAs, so a tag-pinned engine ref
+    # (or a short/uppercase SHA) is invisible to the rewrite and would
+    # otherwise be left behind silently while the tool reports success.
+    root = _repo(
+        tmp_path,
+        {
+            ".github/workflows/plan.yml": (
+                f"      - uses: ship-iac/shipmate/actions/setup@v0.1.0\n"
+                f"      - uses: ship-iac/shipmate/actions/state@{NEW}\n"
+            )
+        },
+    )
+
+    survivors = rc._survivors(root, NEW)
+
+    assert len(survivors) == 1
+    assert "actions/setup@v0.1.0" in survivors[0]
+
+
+def test_survivors_does_not_flag_a_correctly_rewritten_quoted_ref(tmp_path):
+    # Interaction check: the F3 survivor scan must not misread a quote that
+    # F2's rewrite correctly re-emitted around the new SHA as a leftover.
+    root = _repo(
+        tmp_path,
+        {
+            ".github/workflows/plan.yml": (
+                f'      - uses: "ship-iac/shipmate/actions/setup@{OLD}"\n'
+            )
+        },
+    )
+
+    rc.rewrite_consumer(root, NEW, None)
+    survivors = rc._survivors(root, NEW)
+
+    assert survivors == []
+
+
+def test_main_reports_partial_rewrite_when_a_ref_survives(tmp_path, capsys):
+    # F3 end to end: a tag-pinned ref alongside a SHA-pinned one must not be
+    # silently dropped while the tool prints a clean success.
+    root = _repo(
+        tmp_path,
+        {
+            ".github/workflows/plan.yml": (
+                f"      - uses: ship-iac/shipmate/actions/setup@v0.1.0\n"
+                f"      - uses: ship-iac/shipmate/actions/state@{OLD}\n"
+            )
+        },
+    )
+
+    code = rc.main(["--repo", str(root), "--sha", REAL])
+
+    out = capsys.readouterr().out
+    assert code == 1
+    assert "partial rewrite" in out
+    assert "actions/setup@v0.1.0" in out
+    # The SHA-pinned ref was still moved -- the rewrite itself is unaffected.
+    text = (root / ".github/workflows/plan.yml").read_text(encoding="utf-8")
+    assert f"actions/state@{REAL}" in text
+
+
+def test_main_reports_already_current_on_a_repeat_run(tmp_path, capsys):
+    # F9: the runbook loop over the sample repos re-runs this tool with the
+    # same --sha/--label; before the fix, a no-op rewrite (out == text) meant
+    # `changed` stayed empty and main() printed "no engine references found",
+    # which reads as a wrong --repo path rather than "already done".
+    root = _repo(
+        tmp_path,
+        {
+            ".github/workflows/plan.yml": (
+                f"      - uses: ship-iac/shipmate/actions/setup@{REAL} # v0.1.1\n"
+            )
+        },
+    )
+
+    code = rc.main(["--repo", str(root), "--sha", REAL, "--label", "v0.1.1"])
+
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "already pinned" in out
+    assert "no engine references found" not in out
+
+
+def test_main_reports_no_references_when_truly_none_match(tmp_path, capsys):
+    # F9's other side: matched == 0 must keep reporting the original message,
+    # since that really is the "wrong --repo path" signal.
+    root = _repo(tmp_path, {".github/workflows/plan.yml": "      - uses: actions/checkout@v4\n"})
+
+    code = rc.main(["--repo", str(root), "--sha", REAL])
+
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "no engine references found" in out
+
+
 def test_main_refuses_a_commit_that_is_not_safe_to_pin(tmp_path, capsys, monkeypatch):
     root = _repo(
         tmp_path,
@@ -380,3 +629,41 @@ def test_main_rejects_a_nonexistent_full_length_sha(tmp_path, capsys):
     assert rc.main(["--repo", str(root), "--sha", NEW]) == 3
     assert "does not resolve" in capsys.readouterr().out
     assert OLD in (root / ".github/workflows/plan.yml").read_text(encoding="utf-8")
+
+
+def test_refusal_names_the_cascade_only_for_actionable_problems(capsys, monkeypatch):
+    # F6: the pre-fix refusal text asserted "this is an intermediate commit of
+    # the internal-pin cascade" for every problem kind. That is only true when
+    # the problems are stale/dep_stale -- reword_this branch is what's under test.
+    monkeypatch.setattr(
+        rc,
+        "pin_status",
+        lambda _sha: [pinrefs.PinIssue("actions/apply-cell", OTHER, "x.yml", "stale")],
+    )
+
+    assert rc._safe_to_pin(REAL, force=False) is False
+
+    out = capsys.readouterr().out
+    assert "intermediate commit of the internal-pin cascade" in out
+    assert "could not be verified" not in out
+
+
+def test_refusal_names_unverifiable_for_missing_and_error_problems(capsys, monkeypatch):
+    # F6: missing/error mean the target's pins could not be checked at all --
+    # calling that "an intermediate commit of the cascade" tells the operator
+    # to look for the wrong thing (a pending re-pin) instead of the right one
+    # (why the pin commit can't be verified in this clone).
+    monkeypatch.setattr(
+        rc,
+        "pin_status",
+        lambda _sha: [
+            pinrefs.PinIssue("actions/apply-cell", OTHER, "x.yml", "missing"),
+            pinrefs.PinIssue("actions/state", OTHER, "y.yml", "error", error="boom"),
+        ],
+    )
+
+    assert rc._safe_to_pin(REAL, force=False) is False
+
+    out = capsys.readouterr().out
+    assert "could not be verified in this clone" in out
+    assert "intermediate commit of the internal-pin cascade" not in out

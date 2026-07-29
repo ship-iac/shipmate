@@ -45,14 +45,33 @@ unreachable_from_main = _ps.unreachable_from_main
 format_issue = pinrefs.format_issue
 
 # A consumer ref is any path under the engine slug, pinned by SHA, optionally
+# wrapped in a quote (quoted `uses:` scalars are legal YAML), optionally
 # carrying a trailing comment this tool owns (the release annotation).
+#
+# The quote group is captured so the sub can re-emit it before any comment --
+# without this, a closing quote matches neither the SHA nor the comment
+# pattern, so it gets pushed past the new SHA into the middle of the string:
+# `"...@<old>"` becomes `"...@<new> # label"`, one YAML string Actions cannot
+# resolve. `(?(quote)(?P=quote))` requires the *same* quote character to follow
+# the SHA -- an opening quote only counts as this ref's closing quote, not any
+# unrelated quote elsewhere on the line.
 #
 # [^\S\n]* not \s*: \s matches newlines, so a pin line followed by a standalone
 # comment line would capture that comment as the trailing one, and a --label
 # rewrite would delete it and join the two lines. No sample workflow carries
 # that shape today, which is exactly why it has to be closed here rather than
 # noticed later.
-_CONSUMER_REF = re.compile(r"(ship-iac/shipmate/[^@\s]+)@[0-9a-f]{40}([^\S\n]*#[^\n]*)?")
+_CONSUMER_REF = re.compile(
+    r"""(?P<quote>["'])?(?P<ref>ship-iac/shipmate/[^@\s]+)@[0-9a-f]{40}
+        (?(quote)(?P=quote))
+        (?P<comment>[^\S\n]*\#[^\n]*)?""",
+    re.VERBOSE,
+)
+
+# Any engine ref regardless of shape -- SHA, tag, short SHA, quoted or not --
+# used only to find refs _CONSUMER_REF's SHA-only rewrite cannot touch and
+# would otherwise leave behind silently (see F3 in the module docstring).
+_ANY_ENGINE_REF = re.compile(r"ship-iac/shipmate/([^@\s'\"]+)@([^\s'\"#]+)")
 
 
 def rewrite_consumer(root, new_sha, label):
@@ -62,21 +81,50 @@ def rewrite_consumer(root, new_sha, label):
     annotates each consumer pin ``# vX.Y.Z``). Without, an existing comment is
     left untouched. Third-party pins are unaffected -- the pattern is anchored on
     the engine slug.
+
+    Returns ``(changed, matched)``: ``changed`` is ``[(path, n)]`` for files
+    whose substitution actually altered the text; ``matched`` is the total
+    count of engine refs found across all files, independent of whether the
+    substitution was a no-op. The two differ exactly when every match was
+    already at ``new_sha``/``label`` -- the caller needs that to tell "matched
+    nothing" (wrong --repo) apart from "matched N, all already current"
+    (a safe re-run).
     """
 
     def sub(m):
-        comment = f" # {label}" if label else (m.group(2) or "")
-        return f"{m.group(1)}@{new_sha}{comment}"
+        quote = m.group("quote") or ""
+        comment = f" # {label}" if label else (m.group("comment") or "")
+        return f"{quote}{m.group('ref')}@{new_sha}{quote}{comment}"
 
     changed = []
+    matched = 0
+    wf = root / ".github" / "workflows"
+    for f in sorted(wf.glob("*.yml")) + sorted(wf.glob("*.yaml")):
+        text, newline = pinrefs.read_text(f)
+        out, n = _CONSUMER_REF.subn(sub, text)
+        matched += n
+        if n and out != text:
+            pinrefs.write_text(f, out, newline)
+            changed.append((f.relative_to(root).as_posix(), n))
+    return changed, matched
+
+
+def _survivors(root, new_sha):
+    """Engine refs under ``root``'s workflows still not pinned to ``new_sha``
+    after a rewrite pass -- a tag, short SHA, or uppercase SHA that
+    ``_CONSUMER_REF`` cannot match (it only recognizes 40-hex lowercase) and so
+    silently leaves behind. All-or-nothing is the whole point of this tool
+    (see the module docstring); a straddling pin pair must be named, not
+    swallowed into a reported success.
+    """
+    out = []
     wf = root / ".github" / "workflows"
     for f in sorted(wf.glob("*.yml")) + sorted(wf.glob("*.yaml")):
         text = f.read_text(encoding="utf-8")
-        out, n = _CONSUMER_REF.subn(sub, text)
-        if n and out != text:
-            pinrefs.write_text(f, out)
-            changed.append((f.relative_to(root).as_posix(), n))
-    return changed
+        for path, ref in _ANY_ENGINE_REF.findall(text):
+            if ref != new_sha:
+                out.append(f"{f.relative_to(root).as_posix()}: {path}@{ref}")
+    return out
 
 
 def _resolve_sha(sha):
@@ -90,16 +138,22 @@ def _resolve_sha(sha):
 
 def _safe_to_pin(new_sha, force):
     """True if ``new_sha`` may be pinned, printing a refusal or override notice."""
-    problems = [format_issue(i) for i in pin_status(new_sha)]
-    if problems and not force:
+    issues = pin_status(new_sha)
+    if not issues:
+        return True
+    problems = [format_issue(i, pinrefs.SELF_BASELINE_DESC) for i in issues]
+    if not force:
         print(f"refusing to pin {new_sha[:12]}: its own internal pins are not current --")
         for m in problems:
             print(f"  {m}")
-        print("this is an intermediate commit of the internal-pin cascade; pin the")
-        print("converged commit instead (docs/releasing.md), or pass --force.")
+        if any(i.kind in pinrefs.ACTIONABLE for i in issues):
+            print("this is an intermediate commit of the internal-pin cascade; pin the")
+            print("converged commit instead (docs/releasing.md), or pass --force.")
+        else:
+            print("the target's pins could not be verified in this clone -- investigate")
+            print("before pinning, or pass --force.")
         return False
-    if problems:
-        print(f"overriding: {new_sha[:12]} has {len(problems)} internal pin problem(s)")
+    print(f"overriding: {new_sha[:12]} has {len(problems)} internal pin problem(s)")
     return True
 
 
@@ -122,16 +176,49 @@ def main(argv=None):
     if new_sha is None:
         return 3
 
+    # A bad-target check, not a staleness call: --force overrides "your pins
+    # are stale", never "your pins cannot be judged at all". refs_at([]) means
+    # this commit's tree has no shipmate self-references (an old commit
+    # predating today's actions/ layout, an orphan commit, or a git failure
+    # pinrefs swallows into []) -- pin_status would then vacuously report zero
+    # issues and this tool would write a pin no one can evaluate.
+    if not pinrefs.refs_at(new_sha):
+        print(
+            f"{new_sha[:12]} has no shipmate self-references in this clone -- its pins "
+            "cannot be judged, so it is not a valid re-pin target"
+        )
+        return 3
+
     if unreachable_from_main(new_sha):
         print(f"warning: {new_sha[:12]} is not an ancestor of main -- this pin can stop resolving")
 
     if not _safe_to_pin(new_sha, args.force):
         return 1
 
-    changed = rewrite_consumer(root, new_sha, args.label)
-    if not changed:
+    return _rewrite_and_report(root, new_sha, args.label)
+
+
+def _rewrite_and_report(root, new_sha, label):
+    """Rewrite, then check the all-or-nothing rule held before reporting."""
+    changed, matched = rewrite_consumer(root, new_sha, label)
+
+    survivors = _survivors(root, new_sha)
+    if survivors:
+        print(
+            f"partial rewrite -- {len(survivors)} engine reference(s) were not moved to "
+            f"{new_sha[:12]}: the all-or-nothing rule was violated; these need attention:"
+        )
+        for line in survivors:
+            print(f"  {line}")
+        return 1
+
+    if not matched:
         print(f"no engine references found under {root / '.github' / 'workflows'}")
         return 0
+    if not changed:
+        print(f"{matched} engine reference(s) already pinned to {new_sha[:12]}; nothing to rewrite")
+        return 0
+
     total = sum(n for _rel, n in changed)
     print(f"re-pinned {total} reference(s) across {len(changed)} file(s) to {new_sha[:12]}:")
     for rel, n in changed:

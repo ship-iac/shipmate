@@ -55,19 +55,24 @@ def unreachable_from_main(sha):
 
 
 def _report(issues, sha, ref_count):
-    blocking = [i for i in issues if i.kind != "missing"]
-    missing = [i for i in issues if i.kind == "missing"]
+    # "error" (git itself failed) means the same thing "missing" does for this
+    # purpose -- we do not know whether the pin is stale -- so both are
+    # unverifiable (exit 2), never folded into the stale/dep_stale bucket
+    # (exit 1): a caller branching on the documented contract (1 = stale, go
+    # re-pin; 2 = unverifiable, go investigate) must land on the right one.
+    blocking = [i for i in issues if i.kind in pinrefs.ACTIONABLE]
+    unverifiable = [i for i in issues if i.kind in ("missing", "error")]
     if blocking:
         pins = {(i.path, i.sha) for i in blocking}
         print(f"{sha[:12]}: NOT safe to pin -- {len(pins)} stale internal pin(s):")
         for i in blocking:
-            print(f"  {pinrefs.format_issue(i)}")
+            print(f"  {pinrefs.format_issue(i, pinrefs.SELF_BASELINE_DESC)}")
         return 1
-    if missing:
-        missing_shas = {i.sha for i in missing}
-        print(f"{sha[:12]}: unverifiable -- {len(missing_shas)} pin commit(s) missing:")
-        for i in missing:
-            print(f"  {pinrefs.format_issue(i)}")
+    if unverifiable:
+        pins = {(i.path, i.sha) for i in unverifiable}
+        print(f"{sha[:12]}: unverifiable -- {len(pins)} pin(s) could not be checked:")
+        for i in unverifiable:
+            print(f"  {pinrefs.format_issue(i, pinrefs.SELF_BASELINE_DESC)}")
         return 2
     print(f"{sha[:12]}: safe to pin ({ref_count} internal references, all current at this commit)")
     return 0

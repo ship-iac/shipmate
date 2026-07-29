@@ -33,6 +33,15 @@ pins changes the file and in turn invalidates the pins *to* it:
 3. If step 2 changed `apply-env-level.yml`, repeat: the workflows pinning it are
    now stale, so bump again to step 2's commit.
 
+   After each bump commit, run `python dev/pin-status.py HEAD` to check
+   convergence at the commit you just made. `repin-internal.py` itself compares
+   the working tree against the *mainline* merge-base, so it cannot see a bump
+   you have only committed locally — re-running it right after committing step
+   2 prints "nothing to bump" whether or not the cascade has actually
+   converged, because from the mainline's perspective nothing changed either
+   way. `pin-status.py HEAD` is the only one of the two that answers "is HEAD
+   itself safe to pin right now."
+
 `dev/repin-internal.py` selects what to bump using the same code the guard
 asserts on, so the two cannot disagree. `--check` reports without writing;
 `--all` flattens every internal pin to a single SHA instead of bumping only the

@@ -36,13 +36,13 @@ def rewrite(root, targets, new_sha):
     changed = []
     for rel in pinrefs.source_paths(root=root):
         f = root / rel
-        text = f.read_text(encoding="utf-8")
+        text, newline = pinrefs.read_text(f)
         out, total = text, 0
         for path, old in sorted(targets):
             out, n = re.subn(rf"(ship-iac/shipmate/{re.escape(path)})@{old}", rf"\1@{new_sha}", out)
             total += n
         if total:
-            pinrefs.write_text(f, out)
+            pinrefs.write_text(f, out, newline)
             changed.append((rel, total))
     return changed
 
@@ -76,6 +76,19 @@ def _targets(refs, new_sha, bump_all):
     return targets, notes, False
 
 
+def _report_nothing_to_bump(refs, staleness_unknown):
+    ref_note = f"{len(refs)} internal references"
+    if staleness_unknown:
+        print(f"nothing to bump ({ref_note}; staleness could not be determined)")
+        return
+    print(
+        f"nothing to bump against the mainline baseline ({ref_note}, none stale "
+        "there). This baseline is the mainline merge-base, so it cannot see a bump "
+        "you have only committed locally -- to check convergence at the current "
+        "commit, run: python dev/pin-status.py HEAD"
+    )
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description="Bump the engine's stale internal pins.")
     ap.add_argument("--to", default="HEAD", help="commit-ish to pin to (default: HEAD)")
@@ -92,16 +105,19 @@ def main(argv=None):
     new_sha = r.stdout.strip()
 
     refs = pinrefs.refs_at()
+    if not refs:
+        print(
+            "no internal shipmate self-references found -- the regex or repo layout has "
+            "likely changed"
+        )
+        return 3
+
     targets, notes, staleness_unknown = _targets(refs, new_sha, args.all)
     for n in notes:
         print(f"note: {n}")
 
     if not targets:
-        ref_note = f"{len(refs)} internal references"
-        if staleness_unknown:
-            print(f"nothing to bump ({ref_note}; staleness could not be determined)")
-        else:
-            print(f"nothing to bump ({ref_note}, none stale against the mainline)")
+        _report_nothing_to_bump(refs, staleness_unknown)
         return 0
 
     if args.check:
@@ -115,7 +131,11 @@ def main(argv=None):
     print(f"bumped {total} reference(s) across {len(changed)} file(s) to {new_sha[:12]}:")
     for rel, n in changed:
         print(f"  {rel} ({n})")
-    print("commit this, then re-run to converge the next level of the cascade.")
+    print(
+        "commit this, then run `python dev/pin-status.py HEAD` to check convergence at the "
+        "current commit before re-running this tool (it compares against the mainline, so "
+        "it cannot see this commit until it reaches main)."
+    )
     return 0
 
 
