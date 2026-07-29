@@ -3,15 +3,23 @@
 Separate module from ``test_internal_pins.py`` on purpose. That module reads git
 history and is red by design on a pin-bump PR, so PR CI ``--ignore``s it and it
 runs only on push to main (``.github/workflows/ci.yml``,
-``.github/workflows/internal-pins.yml``). The check here reads nothing but the
-working tree, so it is safe to gate a PR -- and a guard that can only go red
-after the offending change has already landed on main is not blocking anything.
+``.github/workflows/internal-pins.yml``). Every check here reads nothing but the
+working tree, so all of them are safe to gate a PR -- and a guard that can only
+go red after the offending change has already landed on main is not blocking
+anything. That is the whole reason this module exists.
 
-What it covers: the derivation walks two edge kinds. ``SCRIPT_REF`` finds the
-action.yml to script edge; ``LOAD_REF`` finds the script to script edge, as a
-literal ``_load("<name>")`` call. A helper cross-loaded by any other spelling is
-invisible to the closure, so a change to it can ship without a pin bump while
-the guard reports pins current -- the same class of gap that once let a
+What it covers -- one premise per regex the guard derives from, since a claim
+about pin currency is only as good as the regex's coverage of the thing it
+counts:
+
+* ``REF`` sees every internal ``ship-iac/shipmate/<path>@<sha>`` self-reference.
+* ``SCRIPT_REF`` sees every action.yml to script invocation.
+* ``LOAD_REF`` sees every script to script cross-load, as a literal
+  ``_load("<name>")`` call.
+
+A reference of any kind that its regex cannot see silently shrinks the checked
+surface: the change ships, the guard reports pins current, and consumers pinned
+to that SHA run the old code -- the same class of gap that once let a
 ``scripts/apply-comment``-only change ship green.
 
 The asserts below deliberately key off the Python token stream rather than the
@@ -105,6 +113,61 @@ def test_the_helper_script_set_is_not_empty_and_holds_the_known_cross_loaders():
         f"cross-loading helper(s) no longer enumerated by the walk: {sorted(missing)} -- "
         "if they moved, the premise checks below stopped covering them"
     )
+
+
+def test_every_script_invocation_in_an_action_is_visible_to_the_derivation():
+    """The action.yml to script edge: SCRIPT_REF sees every invocation.
+
+    Every claim about pin currency assumes the derivation sees each script a
+    pinned action actually runs. That was verified by hand once; an action.yml
+    invoking a script by any other spelling -- a variable, a different relative
+    path, a `cd` first -- would be invisible to SCRIPT_REF and would silently
+    shrink the checked surface. This asserts every $GITHUB_ACTION_PATH mention
+    in every action.yml is one the regex claims.
+    """
+    actions = sorted((pinrefs.ROOT / "actions").glob("*/action.yml"))
+    assert actions, (
+        f"no composite action.yml found under {pinrefs.ROOT / 'actions'} -- "
+        "this check would pass without examining anything"
+    )
+    for action_yaml in actions:
+        text = action_yaml.read_text(encoding="utf-8")
+        mentions = text.count("$GITHUB_ACTION_PATH")
+        matched = len(pinrefs.SCRIPT_REF.findall(text))
+        assert mentions == matched, (
+            f"{action_yaml.relative_to(pinrefs.ROOT).as_posix()}: {mentions} "
+            f"$GITHUB_ACTION_PATH mention(s) but SCRIPT_REF matched {matched} -- "
+            "the script-dependency derivation cannot see the difference"
+        )
+
+
+def test_every_internal_ref_in_a_pin_bearing_source_is_visible_to_ref():
+    """The pin itself: REF sees every internal self-reference.
+
+    One level up from
+    ``test_every_script_invocation_in_an_action_is_visible_to_the_derivation``.
+    REF only matches a 40-lowercase-hex SHA, by design (CONTRACT.md requires
+    internal pins to be full SHAs) -- but that means a non-SHA internal pin (a
+    tag, a short SHA, an uppercase SHA) is invisible to REF, and so invisible to
+    the guard, to ``dev/pin_status.py``, and to ``dev/repin_internal.py --all``,
+    whose whole job is not being silent about a stale or malformed internal pin.
+    This asserts every ``ship-iac/shipmate/`` mention in every pin-bearing source
+    is one REF actually matched.
+    """
+    sources = pinrefs.source_paths()
+    assert sources, (
+        "source_paths() found no pin-bearing files -- this check would pass "
+        "without examining anything"
+    )
+    for src in sources:
+        text = (pinrefs.ROOT / src).read_text(encoding="utf-8")
+        mentions = text.count("ship-iac/shipmate/")
+        matched = len(pinrefs.REF.findall(text))
+        assert mentions == matched, (
+            f"{src}: {mentions} ship-iac/shipmate/ mention(s) but REF matched only "
+            f"{matched} -- a non-SHA internal pin here would be invisible to the "
+            "guard, to pin_status, and to repin_internal --all"
+        )
 
 
 def test_every_cross_load_in_a_script_is_visible_to_load_ref():
