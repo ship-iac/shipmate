@@ -1,18 +1,13 @@
 # scripts/tests/test_apply_comment.py
-import importlib.util
 import io
 import json
 import pathlib
 import re
-from importlib.machinery import SourceFileLoader
 
 import pytest
+from _loader import load_script
 
-_p = pathlib.Path(__file__).resolve().parents[1] / "apply-comment"
-_loader = SourceFileLoader("apply_comment", str(_p))
-_spec = importlib.util.spec_from_loader("apply_comment", _loader)
-ac = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(ac)
+ac = load_script("apply-comment")
 
 RUN_URL = "https://gh/run/1"
 

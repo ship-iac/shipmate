@@ -1,16 +1,11 @@
 # scripts/tests/test_summary_comment.py
-import importlib.util
 import json
 import pathlib
-from importlib.machinery import SourceFileLoader
 
 import pytest
+from _loader import load_script
 
-_p = pathlib.Path(__file__).resolve().parents[1] / "summary-comment"
-_loader = SourceFileLoader("summary_comment", str(_p))
-_spec = importlib.util.spec_from_loader("summary_comment", _loader)
-sc = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(sc)
+sc = load_script("summary-comment")
 
 
 def _cell(**kw):
@@ -241,11 +236,7 @@ def test_the_footer_hint_is_not_itself_a_shipmate_command():
     matched the command grammar would make the plan comment a shipmate command;
     the `[bot]` loop guard would ignore it, but relying on that alone is one
     deletion away from a retrigger loop."""
-    cp_path = pathlib.Path(__file__).resolve().parents[1] / "comment-parse"
-    loader = SourceFileLoader("comment_parse", str(cp_path))
-    spec = importlib.util.spec_from_loader("comment_parse", loader)
-    cp = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(cp)
+    cp = load_script("comment-parse")
     for line in sc.build_comment([], {}, RUN_URL).splitlines():
         assert not cp._SHIPMATE_LINE.match(line.strip()), line
 

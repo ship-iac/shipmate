@@ -5,13 +5,12 @@ comment-parse's VERBS registry. A verb added to the registry with no branch in
 the action would parse, authorize, and then silently do nothing.
 """
 
-import importlib.util
 import json
 import pathlib
 import re
-from importlib.machinery import SourceFileLoader
 
 import yaml
+from _loader import load_script
 
 _D = pathlib.Path(__file__).resolve().parents[1]
 _ACTION_FILE = _D.parent / "actions" / "comment-ops" / "action.yml"
@@ -40,16 +39,8 @@ _DOCTOR_TOUCHES = (
 )
 
 
-def _load(fname):
-    loader = SourceFileLoader(fname.replace("-", "_"), str(_D / fname))
-    spec = importlib.util.spec_from_loader(loader.name, loader)
-    mod = importlib.util.module_from_spec(spec)
-    loader.exec_module(mod)
-    return mod
-
-
-cp = _load("comment-parse")
-doctor = _load("doctor")
+cp = load_script("comment-parse")
+doctor = load_script("doctor")
 
 
 def test_every_active_route_has_a_branch():

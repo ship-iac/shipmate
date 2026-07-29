@@ -1,21 +1,7 @@
-import importlib.util
-import pathlib
-from importlib.machinery import SourceFileLoader
-
 import pytest
+from _loader import load_script
 
-_D = pathlib.Path(__file__).resolve().parents[1]
-
-
-def _load(fname):
-    loader = SourceFileLoader(fname.replace("-", "_"), str(_D / fname))
-    spec = importlib.util.spec_from_loader(loader.name, loader)
-    mod = importlib.util.module_from_spec(spec)
-    loader.exec_module(mod)
-    return mod
-
-
-cp = _load("comment-parse")
+cp = load_script("comment-parse")
 
 
 def test_valid_apply():

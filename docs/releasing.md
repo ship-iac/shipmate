@@ -27,22 +27,22 @@ pins changes the file and in turn invalidates the pins *to* it:
 2. In a follow-up commit, bump the internal pins to that SHA:
 
    ```bash
-   python dev/repin-internal.py --to <action-sha>
+   python dev/repin_internal.py --to <action-sha>
    ```
 
 3. If step 2 changed `apply-env-level.yml`, repeat: the workflows pinning it are
    now stale, so bump again to step 2's commit.
 
-   After each bump commit, run `python dev/pin-status.py HEAD` to check
-   convergence at the commit you just made. `repin-internal.py` itself compares
+   After each bump commit, run `python dev/pin_status.py HEAD` to check
+   convergence at the commit you just made. `repin_internal.py` itself compares
    the working tree against the *mainline* merge-base, so it cannot see a bump
    you have only committed locally — re-running it right after committing step
    2 prints "nothing to bump" whether or not the cascade has actually
    converged, because from the mainline's perspective nothing changed either
-   way. `pin-status.py HEAD` is the only one of the two that answers "is HEAD
+   way. `pin_status.py HEAD` is the only one of the two that answers "is HEAD
    itself safe to pin right now."
 
-`dev/repin-internal.py` selects what to bump using the same code the guard
+`dev/repin_internal.py` selects what to bump using the same code the guard
 asserts on, so the two cannot disagree. `--check` reports without writing;
 `--all` flattens every internal pin to a single SHA instead of bumping only the
 stale subset — a bigger diff, no correctness difference, and it makes "which
@@ -133,7 +133,7 @@ runs its own old code, and the constraint below about tagging the action commit
 is only the most obvious case of it:
 
 ```bash
-python dev/pin-status.py <release-sha>   # exit 0 == safe to pin
+python dev/pin_status.py <release-sha>   # exit 0 == safe to pin
 ```
 
 ```bash
@@ -166,11 +166,11 @@ as staleness.
 
 ```bash
 for d in repo-example-stacks repo-example-folders repo-example-workspaces; do
-  python dev/repin-consumer.py --repo "../$d" --sha <release-sha> --label vX.Y.Z
+  python dev/repin_consumer.py --repo "../$d" --sha <release-sha> --label vX.Y.Z
 done
 ```
 
-`dev/repin-consumer.py` moves **every** engine reference in one pass (see
+`dev/repin_consumer.py` moves **every** engine reference in one pass (see
 § Consumers must bump every engine ref in one change) and refuses a target whose
 own internal pins are stale, so it cannot re-pin a sample to an intermediate
 cascade commit. `--force` overrides, loudly.

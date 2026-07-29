@@ -82,7 +82,7 @@ def test_internal_action_pins_are_current():
     if lines:
         pytest.fail(
             "stale internal action pin(s) -- bump each to a commit containing the "
-            "current action (run `python dev/repin-internal.py`):\n" + "\n".join(lines)
+            "current action (run `python dev/repin_internal.py`):\n" + "\n".join(lines)
         )
     if unverifiable:
         if pinrefs.is_shallow():
@@ -194,50 +194,11 @@ def test_dependent_script_paths_for_apply_summary_contains_apply_comment():
     assert {"scripts/apply-comment", "scripts/summary-comment", "scripts/apply-gate"} <= dependent
 
 
-def test_every_script_invocation_in_an_action_is_visible_to_the_derivation():
-    """The premise the whole guard rests on, machine-checked.
-
-    Every claim about pin currency assumes the derivation sees each script a
-    pinned action actually runs. That was verified by hand once; an action.yml
-    invoking a script by any other spelling -- a variable, a different relative
-    path, a `cd` first -- would be invisible to SCRIPT_REF and would silently
-    shrink the checked surface. This asserts every $GITHUB_ACTION_PATH mention
-    in every action.yml is one the regex claims.
-    """
-    for action_yaml in sorted((pinrefs.ROOT / "actions").glob("*/action.yml")):
-        text = action_yaml.read_text(encoding="utf-8")
-        mentions = text.count("$GITHUB_ACTION_PATH")
-        matched = len(pinrefs.SCRIPT_REF.findall(text))
-        assert mentions == matched, (
-            f"{action_yaml.relative_to(pinrefs.ROOT).as_posix()}: {mentions} "
-            f"$GITHUB_ACTION_PATH mention(s) but SCRIPT_REF matched {matched} -- "
-            "the script-dependency derivation cannot see the difference"
-        )
-
-
-def test_every_internal_ref_in_a_pin_bearing_source_is_visible_to_ref():
-    """The premise the whole guard rests on, machine-checked, one level up from
-    ``test_every_script_invocation_in_an_action_is_visible_to_the_derivation``.
-
-    Every claim this guard makes about pin currency assumes REF sees every
-    internal self-reference a pin-bearing source actually carries. REF only
-    matches a 40-lowercase-hex SHA, by design (CONTRACT.md requires internal
-    pins to be full SHAs) -- but that means a non-SHA internal pin (a tag, a
-    short SHA, an uppercase SHA) is invisible to REF, and so invisible to this
-    guard, to ``dev/pin-status.py``, and to ``dev/repin-internal.py --all``,
-    whose whole job is not being silent about a stale or malformed internal
-    pin. This asserts every ``ship-iac/shipmate/`` mention in every
-    pin-bearing source is one REF actually matched.
-    """
-    for src in pinrefs.source_paths():
-        text = (pinrefs.ROOT / src).read_text(encoding="utf-8")
-        mentions = text.count("ship-iac/shipmate/")
-        matched = len(pinrefs.REF.findall(text))
-        assert mentions == matched, (
-            f"{src}: {mentions} ship-iac/shipmate/ mention(s) but REF matched only "
-            f"{matched} -- a non-SHA internal pin here would be invisible to this "
-            "guard, to pin-status, and to repin-internal --all"
-        )
+# The three premise checks that once lived here -- SCRIPT_REF, REF and LOAD_REF
+# each seeing every reference of its kind -- are in
+# scripts/tests/test_pin_derivation_premises.py. They read only the working tree,
+# so they belong in a module PR CI runs; this one is --ignore'd there because the
+# tests below read git history and are red by design on a pin-bump PR.
 
 
 def test_unverifiable_pin_fails_when_history_is_present(monkeypatch):

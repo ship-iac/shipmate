@@ -1,22 +1,9 @@
-import importlib.util
 import json
-import pathlib
-from importlib.machinery import SourceFileLoader
 
 import pytest
+from _loader import load_script
 
-_D = pathlib.Path(__file__).resolve().parents[1]
-
-
-def _load(fname):
-    loader = SourceFileLoader(fname.replace("-", "_"), str(_D / fname))
-    spec = importlib.util.spec_from_loader(loader.name, loader)
-    mod = importlib.util.module_from_spec(spec)
-    loader.exec_module(mod)
-    return mod
-
-
-ag = _load("apply-gate")
+ag = load_script("apply-gate")
 
 
 def _run(name, status, conclusion, started_at="2026-07-18T10:00:00Z", run_id=1):

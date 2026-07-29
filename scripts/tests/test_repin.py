@@ -8,13 +8,10 @@ trailing comments especially, since three engine refs carry one and a
 consumer's pins carry the release annotation.
 """
 
-import importlib.util
-from importlib.machinery import SourceFileLoader
-
 import pinrefs
 import pytest
-
-_DEV = pinrefs.ROOT / "dev"
+import repin_consumer as rc
+import repin_internal as ri
 
 OLD = "a" * 40
 NEW = "b" * 40
@@ -47,17 +44,6 @@ pytestmark = pytest.mark.skipif(
         + " -- these tests read real history; check out with fetch-depth: 0"
     ),
 )
-
-
-def _load_cli(fname):
-    loader = SourceFileLoader(fname.replace("-", "_").removesuffix(".py"), str(_DEV / fname))
-    spec = importlib.util.spec_from_loader(loader.name, loader)
-    mod = importlib.util.module_from_spec(spec)
-    loader.exec_module(mod)
-    return mod
-
-
-ri = _load_cli("repin-internal.py")
 
 
 def _repo(tmp_path, files):
@@ -407,9 +393,6 @@ def test_rewrite_ignores_files_outside_the_two_source_shapes(tmp_path):
     assert OLD in (root / "docs/releasing.md").read_text(encoding="utf-8")
 
 
-rc = _load_cli("repin-consumer.py")
-
-
 def test_rewrite_consumer_bumps_every_engine_ref_regardless_of_path(tmp_path):
     # All-or-nothing by design: actions/summary creates the pending apply check
     # and actions/apply-cell (pinned inside apply-env-level.yml) completes it,
@@ -621,7 +604,7 @@ def test_commit_consumer_writes_the_planned_edit_and_leaves_no_temp_file_behind(
 
 
 def test_main_refuses_a_target_commit_with_no_internal_refs(tmp_path, capsys):
-    # F1: repin-consumer's own safety check must not be bypassable by pointing
+    # F1: repin_consumer's own safety check must not be bypassable by pointing
     # it at a commit whose tree has no shipmate self-references at all (the
     # engine's own root commit, here) -- pin_status() on such a commit
     # vacuously reports zero issues, so without this check the tool would

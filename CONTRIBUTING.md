@@ -17,9 +17,9 @@ It exists because the engine pins its own actions by commit SHA (see
 
 - `pinrefs.py` — the shared model: finds the pins, works out what each one
   actually runs, and diffs a pin against a baseline commit.
-- `pin-status.py` — is a given commit safe to pin?
-- `repin-internal.py` — bump the engine's own stale pins.
-- `repin-consumer.py` — re-pin a consuming repo, refusing an unsafe target.
+- `pin_status.py` — is a given commit safe to pin?
+- `repin_internal.py` — bump the engine's own stale pins.
+- `repin_consumer.py` — re-pin a consuming repo, refusing an unsafe target.
 
 `docs/releasing.md` is the runbook that drives them. `pyproject.toml` puts
 `dev/` on the pytest `pythonpath`, which is how the tests under `scripts/tests/`

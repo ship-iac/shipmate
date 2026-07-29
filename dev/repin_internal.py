@@ -10,10 +10,10 @@ actions, so bumping an action changes that file and invalidates the pins to it -
 an inherent 2-cycle needing fix -> bump-actions -> converge-workflow. Run this
 once per step; it removes the hand-editing, not the steps.
 
-    python dev/repin-internal.py                  # bump stale pins to HEAD
-    python dev/repin-internal.py --to <sha>
-    python dev/repin-internal.py --all --to <sha> # flatten every pin to one SHA
-    python dev/repin-internal.py --check          # report, write nothing
+    python dev/repin_internal.py                  # bump stale pins to HEAD
+    python dev/repin_internal.py --to <sha>
+    python dev/repin_internal.py --all --to <sha> # flatten every pin to one SHA
+    python dev/repin_internal.py --check          # report, write nothing
 
 Exit: 0 wrote or already current, 1 --check found work, 3 bad target.
 """
@@ -28,7 +28,7 @@ import pinrefs
 # Any internal engine ref regardless of shape -- SHA, tag, short SHA, upper- or
 # lower-case -- used only by the --all survivor scan below to find refs REF
 # cannot see (REF matches nothing but a 40-lowercase-hex SHA) and would
-# otherwise leave behind silently. Mirrors dev/repin-consumer.py's
+# otherwise leave behind silently. Mirrors dev/repin_consumer.py's
 # _ANY_ENGINE_REF; kept separate because that one also tolerates a wrapping
 # quote, a shape this tool's sources do not need to.
 _ANY_ENGINE_REF = re.compile(r"ship-iac/shipmate/([^@\s]+)@([^\s#]+)")
@@ -195,7 +195,7 @@ def _report_nothing_to_bump(refs, staleness_unknown):
         f"nothing to bump against the mainline baseline ({ref_note}, none stale "
         "there). This baseline is the mainline merge-base, so it cannot see a bump "
         "you have only committed locally -- to check convergence at the current "
-        "commit, run: python dev/pin-status.py HEAD"
+        "commit, run: python dev/pin_status.py HEAD"
     )
 
 
@@ -266,7 +266,7 @@ def _write_and_report(targets, new_sha, bump_all):
         print(f"  {rel} ({n})")
 
     print(
-        "commit this, then run `python dev/pin-status.py HEAD` to check convergence at the "
+        "commit this, then run `python dev/pin_status.py HEAD` to check convergence at the "
         "current commit before re-running this tool (it compares against the mainline, so "
         "it cannot see this commit until it reaches main)."
     )
