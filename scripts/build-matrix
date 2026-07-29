@@ -41,6 +41,19 @@ def build_matrix(envs, stacks_by_env, tags_by_stack):
             "'apply / <env>' collides with the apply-check namespace "
             "('apply / <stack> / <env>'). Rename or nest the stack."
         )
+    # Same collision one namespace over: a stack path of exactly `shipmate`
+    # renders a plan check `shipmate / <env>`, inside the `shipmate / ` namespace
+    # the engine reserves for its aggregate surfaces (the gate) and a consumer
+    # may use for its own non-fan-out job names. summary-comment resolves each
+    # row's plan link by an exact `<stack> / <env>` name lookup over every check
+    # run on the head SHA, so for an env named after one of those the cell's link
+    # silently resolves to the wrong check.
+    if any(c["stack"] == "shipmate" for c in cells):
+        raise SystemExit(
+            "::error::a stack path may not be exactly 'shipmate': its plan check "
+            "'shipmate / <env>' falls inside the reserved 'shipmate / ' namespace "
+            "(e.g. 'shipmate / gate'). Rename or nest the stack."
+        )
     if len(cells) > MATRIX_LIMIT:
         raise MatrixTooLarge(
             f"{len(cells)} plan cells exceeds the GitHub Actions matrix limit of {MATRIX_LIMIT}. "

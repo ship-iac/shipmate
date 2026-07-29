@@ -46,6 +46,23 @@ def test_nested_apply_stack_is_allowed():
     assert cells == [{"stack": "infra/apply", "environment": "dev-eu", "workload": ""}]
 
 
+def test_rejects_stack_path_exactly_shipmate():
+    # `shipmate` renders a plan check `shipmate / <env>`, inside the reserved
+    # `shipmate / ` namespace (`shipmate / gate`, and a consumer's own
+    # non-fan-out job names). summary-comment resolves plan links by an exact
+    # `<stack> / <env>` lookup over every check run on the head SHA, so for an
+    # env named after one of those the row's link resolves to the wrong check.
+    with pytest.raises(SystemExit, match="may not be exactly 'shipmate'"):
+        bm.build_matrix(["dev-eu"], {"dev-eu": ["shipmate"]}, {"shipmate": ["env/dev-eu"]})
+
+
+def test_nested_shipmate_stack_is_allowed():
+    cells = bm.build_matrix(
+        ["dev-eu"], {"dev-eu": ["infra/shipmate"]}, {"infra/shipmate": ["env/dev-eu"]}
+    )
+    assert cells == [{"stack": "infra/shipmate", "environment": "dev-eu", "workload": ""}]
+
+
 def test_list_stacks_changed_uses_changed_flag(monkeypatch):
     captured = {}
     monkeypatch.setattr(bm, "_run", lambda args: captured.update(args=args) or "stacks/a\n")

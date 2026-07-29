@@ -130,7 +130,12 @@ of its CI configuration.
 ## Plan
 
 The `plan.yml` workflow (thin and identical across repo layouts; see the
-`repo-example-*` samples) runs on every pull request:
+`repo-example-*` samples) runs on every pull request. Job ids are below; give the
+two non-fan-out jobs the display names `shipmate / detect` and
+`shipmate / summary`, since their check runs are created by GitHub Actions (a
+job's check run always is) and a bare `detect` in the checks list says nothing
+about which tool produced it. See [`CONTRACT.md`](CONTRACT.md) §Check names for
+the `shipmate / ` namespace:
 
 - **`detect`** — `terramate fmt --check`, a stale-codegen check
   (`terramate generate --detailed-exit-code`), and `actions/build-matrix`,
@@ -149,7 +154,15 @@ The `plan.yml` workflow (thin and identical across repo layouts; see the
 - **`summary`** — `actions/summary` upserts one sticky PR comment (a stack ×
   env table) and creates/refreshes the aggregate **`shipmate / gate`**
   commit status, which stays non-green while any apply is pending or any
-  plan cell failed.
+  plan cell failed. A pull request that changed no stacks gets no plan comment
+  at all — nothing is posted when there are no cells, no comment already on the
+  pull request, and no `doctor` warning to point at — so docs-only and
+  pin-bump changes stay quiet apart from their three checks. An existing comment
+  is still updated, so a plan that was pushed away never leaves a stale table
+  behind; and a run whose cell count is zero for any *other* reason (failed
+  detect, all cells failed, cell artifacts undownloadable) writes nothing and
+  leaves the previous plan standing rather than claiming "no stacks changed" —
+  the gate fails those runs.
 
 Note on plan output: plan text lives in each `<stack> / <env>` plan job's
 **Summary**, not in a separate Checks-API check-run — the matrix job already

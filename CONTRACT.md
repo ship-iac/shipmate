@@ -70,6 +70,40 @@ Branch protection rules should require `shipmate / gate`, not the
 individual per-unit checks, so that the set of required checks does not
 need to be edited every time a stack or environment is added or removed.
 
+`shipmate / ` is the namespace for shipmate's aggregate, non-fan-out surfaces.
+`shipmate / gate` is the only **verbatim** member — it is the required context,
+matched by exact string in a repository ruleset. A consuming repository may
+name its own non-fan-out plan jobs into the same namespace so the checks list
+identifies the tool — `shipmate / detect` and `shipmate / summary` are the
+recommended names, and the reference `plan.yml` in the samples uses them,
+because a job's check run is always created by the GitHub Actions app and its
+name is the only part that can say which tool produced it. Those names are not
+required checks and a consumer may pick others; nothing in the engine
+reconstructs them.
+
+Everything in the check/status namespace is **ASCII and slash-delimited**, which
+is GitHub's own convention for status contexts (`ci/circleci`), and — for
+`shipmate / gate` specifically — the property that matters most: the one
+shipmate string an operator types by hand into a ruleset must be typeable and
+free of lookalike characters. A required context that differs from the posted
+one by an invisible character is never satisfied, so every pull request is
+unmergeable while the status itself renders green.
+
+The middot is reserved for **workflow names** (`shipmate · plan`,
+`shipmate · apply`, `shipmate · deploy`) — the one place a shipmate label is
+concatenated onto a check name by GitHub rather than matched by anything, where
+it keeps the seam legible: `shipmate · plan / <stack> / <env>`.
+
+`build-matrix` rejects a stack path of exactly `shipmate`, for the same reason
+it rejects `apply`: that stack's plan check is `shipmate / <env>`, inside this
+namespace. Nothing *prefix*-parses `shipmate / ` — the gate is a commit status,
+a separate namespace from check runs, so no phantom entry can reach a gate
+verdict or an apply queue the way an `apply / ` collision would — but
+`summary-comment` resolves each comment row's plan link by an exact
+`<stack> / <env>` lookup across **every** check run on the head SHA, so in a
+repository with an environment named after one of these surfaces that cell's
+link would silently resolve to the wrong check. Nest or rename the stack.
+
 The gate is a commit status rather than a check-run deliberately: a check-run
 is bound to a check-suite, and an imperatively-created one attaches to an
 arbitrary suite when a commit carries more than one plan run (a draft→ready
@@ -232,11 +266,13 @@ hardcoded — a consumer's other shared actions belong to whoever ships them);
 when either that or the commit under examination is unavailable it says pin
 freshness was not verified rather than falling back to a weaker read.
 
-Those warnings are not read from the sticky plan comment — a plan run still
-writes the full plan comment (overview table, per-changed-cell details, and a
-one-line footer pointing at `shipmate help`, the only thing in that comment
-that mentions the comment commands at all) but
-no longer appends doctor findings to it. Instead, `actions/summary` runs
+Those warnings are not read from the sticky plan comment — a plan run writes the
+full plan comment (overview table, per-changed-cell details, and a one-line
+footer pointing at `shipmate help`, the only thing in that comment that mentions
+the comment commands at all) but no longer appends doctor findings to it. A run
+with nothing planned writes no comment at all *unless* doctor emitted a warning,
+precisely so that footer never goes missing on a run that has something to point
+at (see §Plan comment). Instead, `actions/summary` runs
 `scripts/doctor` on every plan run and emits its findings as
 workflow-command annotations, verbatim:
 
@@ -515,12 +551,32 @@ fails loud on a `cell.json` missing schema keys or carrying an out-of-enum
 
 ## Plan comment
 
-The `summary` action maintains exactly one sticky comment per pull request,
+The `summary` action maintains **at most** one sticky comment per pull request,
 identified by the HTML marker written verbatim as the comment's first line:
 
 - `<!-- shipmate:summary -->`
 
-The comment is edited in place on every plan run (comment lookup is marker +
+A run whose cell count is zero writes the empty-table body **only** when that
+zero means "no stacks changed" — `detect` succeeded and the plan matrix came
+back empty. Every other zero (a failed `detect`, plan cells that all failed
+before uploading a cell summary, a failed `cell-summary.*` download) leaves the
+plan unknown, so the run writes nothing at all and any existing comment — the
+reviewed plan for the previous push — is left standing rather than PATCHed down
+to a claim about a plan nobody read. Those runs all fail `shipmate / gate`, so
+the pull request still shows that something is wrong.
+
+Where the zero *does* mean no stacks changed, the suppression is **create-only**:
+an existing comment is always updated to the empty-table body, because a pull
+request that planned changes and then pushed them away must not keep displaying
+applies that no longer exist. With no comment yet, none is posted — a docs-only
+or engine-pin-bump pull request carries no shipmate comment — with one
+exception: a run where `doctor` emitted a **warning** still posts. Doctor's
+findings are annotations with no file/line, so they render only on the run page
+(see §Comment-ops/doctor), and this comment's footer is their only
+pull-request-visible pointer. `::notice::` findings do not trigger the
+exception: they are informational, and would put a comment on every quiet run.
+
+An existing comment is edited in place on every plan run (comment lookup is marker +
 any Bot author — the shipmate App's bot login is derived from the registered
 App name, which a consumer org may have had to slug differently than
 `shipmate[bot]`), so GitHub's comment revision history doubles as the audit

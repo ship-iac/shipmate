@@ -129,6 +129,9 @@ runs:
       env:
         GH_TOKEN: ${{ steps.token.outputs.token }}
         PR: ${{ inputs.pr-number }}
+        COUNT: ${{ steps.build.outputs.count }}
+        PLAN_RESULT: ${{ inputs.plan-result }}
+        DETECT_RESULT: ${{ inputs.detect-result }}
       run: |
         set -euo pipefail
         marker='<!-- shipmate:summary -->'
@@ -157,6 +160,45 @@ runs:
         # --paginate evaluates --jq per page, so a marker match on >1 page emits
         # one id per matching page; the first line is the single id PATCH needs.
         id=$(head -n1 summary-comment-ids.txt)
+        # A zero cell count is not one situation, and only one of them licenses
+        # writing the "(no stacks changed)" body: `detect` succeeded and the plan
+        # matrix came back empty. Every other zero — a failed detect, plan cells
+        # that all died before uploading a cell summary (plan-cell's upload step
+        # has no `if: always()`), or a cell-summary download failure in this job
+        # — means the plan is simply unknown, and that body would assert
+        # something about a plan nobody read. Post nothing at all in those cases,
+        # and leave any existing comment (the reviewed plan from the previous
+        # push) untouched rather than overwriting the review surface. Each of
+        # those cases also fails the gate in `Create/refresh gate` below, so the
+        # pull request still shows that something is wrong.
+        nothing_changed=false
+        if [ "$DETECT_RESULT" = "success" ] && [ "$PLAN_RESULT" = "skipped" ]; then
+          nothing_changed=true
+        fi
+        if [ "$COUNT" = "0" ] && [ "$nothing_changed" = "false" ]; then
+          echo "::warning::the plan produced no cell summaries (detect=$DETECT_RESULT, plan=$PLAN_RESULT); the sticky plan comment was left as it is"
+          exit 0
+        fi
+        # Nothing changed and no comment to keep current: post nothing, so a
+        # docs-only or engine-pin-bump pull request carries no plan comment at
+        # all. Two things keep that silence from hiding anything: the gate is
+        # written by a later step regardless, and a run where doctor reported
+        # settings drift still posts, because doctor's annotations carry no
+        # file/line and so render only on the run page — the comment's footer is
+        # the only pull-request-visible pointer at `shipmate doctor`. Warnings
+        # (actionable misconfiguration) only, not `::notice::` findings, which
+        # are informational and would put a comment on every quiet run.
+        # An existing comment is always kept current instead of suppressed, or a
+        # pull request that planned changes and then pushed them away would keep
+        # displaying applies that no longer exist.
+        doctor_warned=false
+        if [ -s doctor.txt ] && grep -q '^::warning' doctor.txt; then
+          doctor_warned=true
+        fi
+        if [ "$COUNT" = "0" ] && [ -z "$id" ] && [ "$doctor_warned" = "false" ]; then
+          echo "nothing changed, no existing plan comment, no doctor findings — nothing to post"
+          exit 0
+        fi
         if [ -n "$id" ]; then
           gh api -X PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$id" -F body=@comment.md >/dev/null
         else
