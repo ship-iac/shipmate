@@ -70,6 +70,34 @@ Branch protection rules should require `shipmate / gate`, not the
 individual per-unit checks, so that the set of required checks does not
 need to be edited every time a stack or environment is added or removed.
 
+`shipmate / ` is the namespace for shipmate's aggregate, non-fan-out surfaces.
+`shipmate / gate` is the only **verbatim** member — it is the required context,
+matched by exact string in a repository ruleset. A consuming repository may
+name its own non-fan-out plan jobs into the same namespace so the checks list
+identifies the tool (the samples use `shipmate / detect` and
+`shipmate / summary`; a job's check run is always created by the GitHub Actions
+app, so its name is the only part that can). Those names are display-only:
+nothing reads them, they are not required checks, and a consumer may pick
+others.
+
+Everything in the check/status namespace is **ASCII and slash-delimited**, which
+is GitHub's own convention for status contexts (`ci/circleci`), and — for
+`shipmate / gate` specifically — the property that matters most: the one
+shipmate string an operator types by hand into a ruleset must be typeable and
+free of lookalike characters. A required context that differs from the posted
+one by an invisible character is never satisfied, so every pull request is
+unmergeable while the status itself renders green.
+
+The middot is reserved for **workflow names** (`shipmate · plan`,
+`shipmate · apply`, `shipmate · deploy`) — the one place a shipmate label is
+concatenated onto a check name by GitHub rather than matched by anything, where
+it keeps the seam legible: `shipmate · plan / <stack> / <env>`.
+
+Unlike `apply / `, the `shipmate / ` prefix needs no stack-name guard in
+`build-matrix`: nothing prefix-parses it (the gate is a commit *status*, a
+separate namespace from check runs), so a stack path of `shipmate` could at
+worst duplicate a display name, never feed a gate verdict or an apply queue.
+
 The gate is a commit status rather than a check-run deliberately: a check-run
 is bound to a check-suite, and an imperatively-created one attaches to an
 arbitrary suite when a commit carries more than one plan run (a draft→ready

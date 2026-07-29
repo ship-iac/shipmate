@@ -131,10 +131,11 @@ of its CI configuration.
 
 The `plan.yml` workflow (thin and identical across repo layouts; see the
 `repo-example-*` samples) runs on every pull request. Job ids are below; the
-samples give the two non-fan-out jobs the display names `shipmate · detect` and
-`shipmate · summary`, since their check runs are created by GitHub Actions (a
+samples give the two non-fan-out jobs the display names `shipmate / detect` and
+`shipmate / summary`, since their check runs are created by GitHub Actions (a
 job's check run always is) and a bare `detect` in the checks list says nothing
-about which tool produced it:
+about which tool produced it. See [`CONTRACT.md`](CONTRACT.md) §Check names for
+the `shipmate / ` namespace:
 
 - **`detect`** — `terramate fmt --check`, a stale-codegen check
   (`terramate generate --detailed-exit-code`), and `actions/build-matrix`,
