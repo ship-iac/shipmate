@@ -74,11 +74,12 @@ need to be edited every time a stack or environment is added or removed.
 `shipmate / gate` is the only **verbatim** member — it is the required context,
 matched by exact string in a repository ruleset. A consuming repository may
 name its own non-fan-out plan jobs into the same namespace so the checks list
-identifies the tool (the samples use `shipmate / detect` and
-`shipmate / summary`; a job's check run is always created by the GitHub Actions
-app, so its name is the only part that can). Those names are display-only:
-nothing reads them, they are not required checks, and a consumer may pick
-others.
+identifies the tool — `shipmate / detect` and `shipmate / summary` are the
+recommended names, and the reference `plan.yml` in the samples uses them,
+because a job's check run is always created by the GitHub Actions app and its
+name is the only part that can say which tool produced it. Those names are not
+required checks and a consumer may pick others; nothing in the engine
+reconstructs them.
 
 Everything in the check/status namespace is **ASCII and slash-delimited**, which
 is GitHub's own convention for status contexts (`ci/circleci`), and — for
@@ -93,10 +94,15 @@ The middot is reserved for **workflow names** (`shipmate · plan`,
 concatenated onto a check name by GitHub rather than matched by anything, where
 it keeps the seam legible: `shipmate · plan / <stack> / <env>`.
 
-Unlike `apply / `, the `shipmate / ` prefix needs no stack-name guard in
-`build-matrix`: nothing prefix-parses it (the gate is a commit *status*, a
-separate namespace from check runs), so a stack path of `shipmate` could at
-worst duplicate a display name, never feed a gate verdict or an apply queue.
+`build-matrix` rejects a stack path of exactly `shipmate`, for the same reason
+it rejects `apply`: that stack's plan check is `shipmate / <env>`, inside this
+namespace. Nothing *prefix*-parses `shipmate / ` — the gate is a commit status,
+a separate namespace from check runs, so no phantom entry can reach a gate
+verdict or an apply queue the way an `apply / ` collision would — but
+`summary-comment` resolves each comment row's plan link by an exact
+`<stack> / <env>` lookup across **every** check run on the head SHA, so in a
+repository with an environment named after one of these surfaces that cell's
+link would silently resolve to the wrong check. Nest or rename the stack.
 
 The gate is a commit status rather than a check-run deliberately: a check-run
 is bound to a check-suite, and an imperatively-created one attaches to an
@@ -260,11 +266,13 @@ hardcoded — a consumer's other shared actions belong to whoever ships them);
 when either that or the commit under examination is unavailable it says pin
 freshness was not verified rather than falling back to a weaker read.
 
-Those warnings are not read from the sticky plan comment — a plan run still
-writes the full plan comment (overview table, per-changed-cell details, and a
-one-line footer pointing at `shipmate help`, the only thing in that comment
-that mentions the comment commands at all) but
-no longer appends doctor findings to it. Instead, `actions/summary` runs
+Those warnings are not read from the sticky plan comment — a plan run writes the
+full plan comment (overview table, per-changed-cell details, and a one-line
+footer pointing at `shipmate help`, the only thing in that comment that mentions
+the comment commands at all) but no longer appends doctor findings to it. A run
+with nothing planned writes no comment at all *unless* doctor emitted a warning,
+precisely so that footer never goes missing on a run that has something to point
+at (see §Plan comment). Instead, `actions/summary` runs
 `scripts/doctor` on every plan run and emits its findings as
 workflow-command annotations, verbatim:
 
@@ -548,19 +556,27 @@ identified by the HTML marker written verbatim as the comment's first line:
 
 - `<!-- shipmate:summary -->`
 
-A plan run that produced no cell summaries at all *and* finds no existing
-sticky comment posts nothing: a docs-only or engine-pin-bump pull request
-carries no shipmate comment. Nothing is lost by the silence — `shipmate / gate`
-is written by a later step regardless of the cell count, and doctor's
-settings-drift annotations run on that same run. The suppression is
-create-only: once the comment exists it is still updated to the
-no-planned-cells body, because a pull request that planned changes and then
-pushed them away must not keep displaying the stale plan table. The same zero
-count also arises when the `cell-summary.*` artifacts could not be downloaded;
-the gate fails for that case, and suppressing the comment is correct there too
-rather than asserting "no stacks changed" about a plan that was never read.
+A run whose cell count is zero writes the empty-table body **only** when that
+zero means "no stacks changed" — `detect` succeeded and the plan matrix came
+back empty. Every other zero (a failed `detect`, plan cells that all failed
+before uploading a cell summary, a failed `cell-summary.*` download) leaves the
+plan unknown, so the run writes nothing at all and any existing comment — the
+reviewed plan for the previous push — is left standing rather than PATCHed down
+to a claim about a plan nobody read. Those runs all fail `shipmate / gate`, so
+the pull request still shows that something is wrong.
 
-The comment is edited in place on every plan run (comment lookup is marker +
+Where the zero *does* mean no stacks changed, the suppression is **create-only**:
+an existing comment is always updated to the empty-table body, because a pull
+request that planned changes and then pushed them away must not keep displaying
+applies that no longer exist. With no comment yet, none is posted — a docs-only
+or engine-pin-bump pull request carries no shipmate comment — with one
+exception: a run where `doctor` emitted a **warning** still posts. Doctor's
+findings are annotations with no file/line, so they render only on the run page
+(see §Comment-ops/doctor), and this comment's footer is their only
+pull-request-visible pointer. `::notice::` findings do not trigger the
+exception: they are informational, and would put a comment on every quiet run.
+
+An existing comment is edited in place on every plan run (comment lookup is marker +
 any Bot author — the shipmate App's bot login is derived from the registered
 App name, which a consumer org may have had to slug differently than
 `shipmate[bot]`), so GitHub's comment revision history doubles as the audit

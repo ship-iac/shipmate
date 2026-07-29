@@ -1,4 +1,5 @@
 # scripts/tests/test_summary_comment.py
+import io
 import json
 import pathlib
 
@@ -402,20 +403,123 @@ def test_the_sticky_upsert_does_not_swallow_a_comment_listing_failure():
     assert block.index("exit 0") < block.index('issues/$PR/comments" -F body=@comment.md')
 
 
+def _guard_bodies():
+    """The `if ... ; then` bodies of the upsert step's zero-count guards, keyed
+    by their condition line. Assertions bind `exit 0` to a body, never to the
+    step as a whole: an unconditional `exit 0` anywhere below the id lookup
+    satisfies every positional check while silently stopping the sticky comment
+    from ever being written."""
+    guard = _upsert_step().split("id=$(head -n1 summary-comment-ids.txt)", 1)[1]
+    bodies, cond = {}, None
+    for line in guard.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("if ") and stripped.endswith("then"):
+            cond = stripped[len("if ") : -len("; then")]
+            bodies[cond] = []
+        elif stripped == "fi":
+            cond = None
+        elif cond is not None:
+            bodies[cond].append(stripped)
+    return bodies
+
+
+def test_an_unknown_plan_never_overwrites_the_sticky_comment():
+    """A zero cell count means "nothing changed" only when detect succeeded and
+    the plan matrix was empty. A failed detect, plan cells that all died before
+    uploading a cell summary, or a failed cell-summary download also produce
+    zero — and the body would then claim "no stacks changed" about a plan nobody
+    read. Those runs must write nothing at all, so an existing comment (the
+    reviewed plan for the previous push) survives instead of being PATCHed down
+    to an empty table."""
+    bodies = _guard_bodies()
+    nothing_changed = next(
+        c for c in bodies if 'DETECT_RESULT" = "success"' in c and 'PLAN_RESULT" = "skipped"' in c
+    )
+    assert bodies[nothing_changed] == ["nothing_changed=true"]
+    unknown = next(c for c in bodies if '"$COUNT" = "0"' in c and 'nothing_changed" = "false"' in c)
+    assert "exit 0" in bodies[unknown]
+    # No write of any kind on that path — not the PATCH, not the create.
+    assert not any("gh api" in line for line in bodies[unknown])
+
+
 def test_the_sticky_upsert_skips_creation_when_nothing_was_planned():
     """A docs-only or pin-bump pull request should carry no shipmate comment at
     all. The guard is create-only — conditioned on an *empty* id as well as a
     zero cell count — because an existing comment must still be updated to the
     no-planned-cells body, or a pull request that planned changes and then
-    pushed them away keeps displaying the stale plan table. Behaviour lives in
-    the action's shell, so the assertion is source-derived."""
+    pushed them away keeps displaying the stale plan table. It also yields to
+    doctor: findings render only as run-page annotations, so the comment footer
+    is their one pull-request-visible pointer and a run with findings still
+    posts. Behaviour lives in the action's shell, so this is source-derived."""
     block = _upsert_step()
     assert "COUNT: ${{ steps.build.outputs.count }}" in block
-    guard = block.split("id=$(head -n1 summary-comment-ids.txt)", 1)[1]
-    assert '[ -z "$id" ] && [ "$COUNT" = "0" ]' in guard
-    # ...and it precedes both write branches, so neither runs on that path.
-    assert guard.index("exit 0") < guard.index("-X PATCH")
-    assert guard.index("exit 0") < guard.index('issues/$PR/comments" -F body=@comment.md')
+    bodies = _guard_bodies()
+    warned = next(c for c in bodies if "doctor.txt" in c)
+    assert "grep -q '^::warning' doctor.txt" in warned  # warnings, not notices
+    assert bodies[warned] == ["doctor_warned=true"]
+    quiet = next(
+        c
+        for c in bodies
+        if '"$COUNT" = "0"' in c and '-z "$id"' in c and 'doctor_warned" = "false"' in c
+    )
+    assert "exit 0" in bodies[quiet]
+    assert not any("gh api" in line for line in bodies[quiet])
+    # The step it yields to must still run before this one, or doctor.txt is
+    # either absent or a leftover from nothing.
+    src = (_ENGINE / "actions" / "summary" / "action.yml").read_text(encoding="utf-8")
+    names = [ln.strip() for ln in src.splitlines()]
+    doctor = next(i for i, n in enumerate(names) if n.startswith("- name: Doctor"))
+    upsert = next(i for i, n in enumerate(names) if n == "- name: Upsert sticky comment")
+    assert doctor < upsert
+    assert "> doctor.txt" in src
+
+
+def _run_main(tmp_path, monkeypatch, cells, stdin=""):
+    """Drive `summary-comment`'s `main()` end to end in tmp_path and return the
+    GITHUB_OUTPUT text it appended."""
+    for i, cell in enumerate(cells):
+        d = tmp_path / f"cell-summary.{cell['environment']}.s{i}"
+        d.mkdir()
+        (d / "cell.json").write_text(json.dumps(cell), encoding="utf-8")
+        (d / "plan.txt").write_text("  + resource added", encoding="utf-8")
+    out = tmp_path / "out.txt"
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("CELLS", str(tmp_path))
+    monkeypatch.setenv("GITHUB_OUTPUT", str(out))
+    monkeypatch.setenv("GITHUB_SERVER_URL", "https://gh")
+    monkeypatch.setenv("GITHUB_REPOSITORY", "o/r")
+    monkeypatch.setenv("GITHUB_RUN_ID", "1")
+    monkeypatch.setattr(sc.sys, "stdin", io.StringIO(stdin))
+    sc.main()
+    return out.read_text(encoding="utf-8")
+
+
+def test_main_writes_the_count_and_pending_outputs_the_action_reads(tmp_path, monkeypatch):
+    """Coupling: `count=` / `pending=` here <-> `steps.build.outputs.count` and
+    `.pending` in the summary action. A rename on this side expands to the empty
+    string on the other, where `set -u` cannot see it: the zero-count comment
+    suppression silently stops firing AND the gate's "plan jobs ran but produced
+    no cell summaries" branch stops firing, greening the gate on an
+    artifact-download failure. Assert both names from both sides."""
+    text = _run_main(tmp_path, monkeypatch, [_cell()])
+    assert "count=1\n" in text
+    assert "pending=true\n" in text
+
+    src = (_ENGINE / "actions" / "summary" / "action.yml").read_text(encoding="utf-8")
+    assert "${{ steps.build.outputs.count }}" in src
+    assert "${{ steps.build.outputs.pending }}" in src
+    # ...and the step producing them is the one those expressions name.
+    build = src.split("- name: Build comment + gate state", 1)[1].split("\n    - name:", 1)[0]
+    assert "id: build" in build
+    assert "scripts/summary-comment" in build
+
+
+def test_main_reports_zero_count_when_no_cell_summaries_arrived(tmp_path, monkeypatch):
+    """The zero the comment suppression and the gate's artifact-download branch
+    both key on. An empty cells directory must produce `count=0`, not a crash."""
+    text = _run_main(tmp_path, monkeypatch, [])
+    assert "count=0\n" in text
+    assert "pending=false\n" in text
 
 
 def test_the_gate_step_runs_after_the_upsert_step_that_may_skip():
