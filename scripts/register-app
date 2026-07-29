@@ -11,24 +11,52 @@ repo secret via `gh`.
 import json
 import os
 import subprocess
+import sys
+
+REDACTED = "***"
 
 
-def _run(args, **kw):
+def _scrub(text, secrets):
+    for secret in secrets:
+        if secret:
+            text = text.replace(secret, REDACTED)
+    return text
+
+
+def _run(args, secrets=(), **kw):
+    """Run a `gh` invocation, returning stdout; raise on a nonzero exit.
+
+    `secrets` are the live credential values this call carries, scrubbed from
+    everything the failure path prints. Both are unrotatable at the moment they
+    would leak: the manifest `code` is one-time and sits in the conversions URL,
+    and the private key fails exactly when it has been minted but not yet
+    stored. Neither shipmate's own message (which names the subcommand only) nor
+    gh's stderr (which quotes the URL it called) may carry them into shell
+    scrollback or a CI log.
+    """
     # args is a fixed, code-controlled `gh` invocation (never user input) and
     # shell=False -- safe.
-    return subprocess.run(args, check=True, capture_output=True, text=True, **kw).stdout  # noqa: S603
+    p = subprocess.run(args, capture_output=True, text=True, **kw)  # noqa: S603
+    if p.returncode != 0:
+        # gh's stderr is the only diagnosis a hand-run bootstrap gets.
+        sys.stderr.write(_scrub(p.stderr, secrets))
+        raise SystemExit(f"command failed ({p.returncode}): {' '.join(args[:2])}")
+    return p.stdout
 
 
 def main():
     code = os.environ["MANIFEST_CODE"]
     repo = os.environ["GITHUB_REPOSITORY"]
-    out = _run(["gh", "api", "-X", "POST", f"app-manifests/{code}/conversions"])
+    out = _run(["gh", "api", "-X", "POST", f"app-manifests/{code}/conversions"], secrets=(code,))
     app = json.loads(out)
     app_id = str(app["id"])
     pem = app["pem"]
     print(f"App created: id={app_id} slug={app.get('slug')}")
     _run(["gh", "variable", "set", "SHIPMATE_APP_ID", "--repo", repo, "--body", app_id])
-    _run(["gh", "secret", "set", "SHIPMATE_APP_PRIVATE_KEY", "--repo", repo, "--body", pem])
+    _run(
+        ["gh", "secret", "set", "SHIPMATE_APP_PRIVATE_KEY", "--repo", repo, "--body", pem],
+        secrets=(pem,),
+    )
     print("Stored SHIPMATE_APP_ID (variable) and SHIPMATE_APP_PRIVATE_KEY (secret).")
     print("Next: install the App on the sample repos (see docs/github-app.md).")
 
