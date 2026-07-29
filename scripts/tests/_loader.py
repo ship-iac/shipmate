@@ -6,9 +6,11 @@ is no help either: it infers the loader from the suffix and returns None for
 these on every platform, not just Windows. Passing ``SourceFileLoader``
 explicitly sidesteps the suffix guess.
 
-Importable from every test module with no ``pythonpath`` entry: ``scripts/tests``
-has no ``__init__.py``, so pytest's default prepend import mode puts this
-directory on ``sys.path`` itself.
+Importable from every test module because ``scripts/tests`` is on the pytest
+``pythonpath`` (``pyproject.toml``). Prepend import mode would put this directory
+on ``sys.path`` anyway, since there is no ``__init__.py`` here -- but that is
+pytest's default behaviour rather than a declared invariant, and 20 modules
+failing collection is a poor way to discover someone changed the import mode.
 
 The ``-`` to ``_`` name mapping is load-bearing rather than cosmetic --
 ``test_env_order.py`` asserts ``eo.bm._run.__module__ == "build_matrix"``.
