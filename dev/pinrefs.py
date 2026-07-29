@@ -7,11 +7,13 @@ library: no argparse, no printing, no process exits.
 """
 
 import contextlib
+import io
 import os
 import pathlib
 import re
 import subprocess
 import tempfile
+import tokenize
 from typing import NamedTuple
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -36,7 +38,11 @@ class GitFailure(RuntimeError):
 
 REF = re.compile(r"ship-iac/shipmate/([^@\s]+)@([0-9a-f]{40})")
 SCRIPT_REF = re.compile(r"\$GITHUB_ACTION_PATH/\.\./\.\./scripts/([A-Za-z0-9_-]+)")
-LOAD_REF = re.compile(r"""_load\(\s*["']([^"']+)["']\s*\)""")
+# The lookbehind matters: without it this matches the tail of any identifier
+# ending in _load, so a `yaml.safe_load("x")` anywhere in a helper would feed the
+# phantom dependency `scripts/x` into script_closure and make the premise check
+# in scripts/tests/test_pin_derivation_premises.py red with the wrong diagnosis.
+LOAD_REF = re.compile(r"""(?<![A-Za-z0-9_])_load\(\s*["']([^"']+)["']\s*\)""")
 
 
 def git(*args):
@@ -198,9 +204,37 @@ def direct_script_refs(action_yaml_text):
     return set(SCRIPT_REF.findall(action_yaml_text))
 
 
+def strip_comments(script_text):
+    """``script_text`` with comment text blanked, positions otherwise preserved.
+
+    Falls back to the input unchanged when it does not tokenize. This reads
+    arbitrary historical commits, and a derivation that raises is worse than one
+    that occasionally over-reports: over-reporting diffs an extra path, raising
+    means no pin verdict at all.
+    """
+    try:
+        spans = [
+            tok.start
+            for tok in tokenize.generate_tokens(io.StringIO(script_text).readline)
+            if tok.type == tokenize.COMMENT
+        ]
+    except (tokenize.TokenError, IndentationError, SyntaxError):
+        return script_text
+    lines = script_text.splitlines(keepends=True)
+    for row, col in spans:
+        lines[row - 1] = lines[row - 1][:col] + "\n"
+    return "".join(lines)
+
+
 def load_refs(script_text):
-    """Script names a helper cross-loads via the repo's ``_load("<name>")`` pattern."""
-    return set(LOAD_REF.findall(script_text))
+    """Script names a helper cross-loads via the repo's ``_load("<name>")`` pattern.
+
+    Comments are stripped first. A commented-out or merely documented
+    ``_load("waves")`` is not an edge, and treating it as one puts a path into
+    the closure that the guard then diffs on every pin check -- a phantom
+    dependency reported against an action that never runs it.
+    """
+    return set(LOAD_REF.findall(strip_comments(script_text)))
 
 
 def script_closure(direct, source_lookup):
