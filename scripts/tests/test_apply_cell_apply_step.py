@@ -18,13 +18,12 @@ invariant: a failed apply must still leave its check pending).
 """
 
 import os
-import shutil
 import subprocess
 
 import pytest
-from _loader import action_steps
+from _loader import action_steps, usable_bash
 
-_BASH = shutil.which("bash")
+_BASH = usable_bash()
 
 
 def _apply_step():

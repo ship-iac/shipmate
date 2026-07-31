@@ -43,6 +43,8 @@ import copy
 import functools
 import importlib.util
 import pathlib
+import shutil
+import subprocess
 from importlib.machinery import SourceFileLoader
 
 import yaml
@@ -97,3 +99,28 @@ def action_steps(action):
     """``runs.steps`` for ``action``, or ``[]`` for one that declares none
     (a non-composite action is legal, and has no bash for a guard to read)."""
     return (action_yaml(action).get("runs") or {}).get("steps") or []
+
+
+@functools.cache
+def usable_bash():
+    """Path to a bash that actually runs, or None -- what the tests that execute
+    an action's shell body skip on.
+
+    ``which("bash")`` alone is not enough on Windows: the Store/WSL ``bash.exe``
+    execution alias sits on PATH by default and answers every invocation with a
+    UTF-16 error on stdout and a non-zero exit. A test trusting it reads that as
+    the shell body misbehaving, so each candidate is probed before it is used.
+    Linux CI takes the first candidate and never reaches the fallback.
+    """
+    for cand in (shutil.which("bash"), r"C:\Program Files\Git\bin\bash.exe"):
+        if not cand or not pathlib.Path(cand).exists():
+            continue
+        try:
+            probe = subprocess.run(
+                [cand, "-c", "printf ok"], capture_output=True, text=True, timeout=30
+            )
+        except OSError:
+            continue
+        if probe.returncode == 0 and probe.stdout.strip() == "ok":
+            return cand
+    return None
