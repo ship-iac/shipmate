@@ -1,0 +1,106 @@
+# Changelog
+
+All notable changes to this project are documented here. The format follows
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
+
+Consumers pin this engine's actions and reusable workflows by **commit SHA**, not
+by tag (see `CONTRACT.md`), so a release only reaches a repository when that
+repository re-pins — and every engine reference must move in one change. Each
+section below names the SHA the release tags.
+
+The version line stays `v0.x` while action inputs, check names, and the comment
+grammar are declared unstable in `README.md`.
+
+## [0.2.1] — 2026-07-31
+
+Tags this file's own merge commit — a commit cannot name its own SHA, so the
+value is filled in by the first commit after the tag (the normal steady state:
+`main` sits a docs commit or two past the tag it published).
+
+### Fixed
+
+- **The post-merge gate could green a failed deploy.** `deploy.yml` decided its
+  verdict with `echo "$RESULTS" | tr | grep -qvE`: `grep -q` exits at its first
+  match, the writer ahead of it takes SIGPIPE, and `pipefail` hands the `if` a
+  141 that reads as *no bad result found*. Unreachable at real input sizes (tens
+  of bytes against a 64 KiB pipe buffer) and never observed, but wrong in the
+  dangerous direction. The scan is now in-process, and an empty result string
+  keeps meaning incomplete rather than all-clean.
+- Drift issues link the run that found the drift. The body is rewritten on every
+  drift run, so an issue that stays open points at the newest evidence.
+
+### Internal
+
+- Dependabot scans `actions/*` for third-party pins; `directory: /` had covered
+  `.github/workflows/` and a root manifest only, so the pins inside each
+  composite action had never been offered an update.
+- The detect queries, `dev/` pin helpers and test loaders are single-sourced.
+- Test guards that execute an action's shell body probe for a working `bash`
+  first, instead of trusting a `bash.exe` that may be the Windows Store alias.
+
+## [0.2.0] — 2026-07-29
+
+Tags `c77e2cd`.
+
+### Changed — BREAKING
+
+- **The apply check name flips field order**: `apply / <env> / <stack>` becomes
+  `apply / <stack> / <env>`. The check is load-bearing — it is the work queue the
+  post-merge deploy reads — so old-order checks left on a head SHA break both
+  ways: while **pending** they hold `shipmate / gate` open, and once **complete**
+  the gate greens and the deploy re-queues already-applied cells into the
+  stale-plan fail-safe. A re-plan clears neither. **Migration: after re-pinning,
+  every PR planned before the bump needs a fresh commit.** Runbook in
+  `docs/branch-protection.md` § Upgrading.
+- Workflow and job display names read as shipmate (`shipmate · plan`,
+  `shipmate / detect`, `shipmate / summary`). The check *icon* cannot follow: a
+  job's check run is always authored by the `github-actions` app, so only the
+  App-authored surfaces (apply checks, gate, comments, drift issues) carry
+  shipmate's. `CONTRACT.md` § Check names now fixes the naming rule — ASCII and
+  slash-delimited for anything matched by machine, the middot reserved for
+  workflow names.
+
+### Added
+
+- A pull request that changed no stacks no longer gets a plan comment. The
+  suppression is create-only and applies **only** when a zero cell count means
+  no stacks changed (detect succeeded, empty matrix); every other zero leaves the
+  plan unknown, so nothing is written and an existing comment stands rather than
+  being overwritten with a claim about a plan nobody read. A run where `doctor`
+  warned still posts — that comment's footer is doctor's only PR-visible pointer.
+
+### Fixed
+
+- App installation tokens are minted with `client-id` (the `app-id` input is
+  deprecated upstream), and a `doctor` report survives losing its comment.
+- `build-matrix` reserves a stack path of exactly `shipmate`, whose plan check
+  would otherwise land in the namespace the summary comment's exact-name lookup
+  reads.
+
+### Internal
+
+- The engine's own SHA pins are maintained by `dev/` tooling rather than a
+  documented `sed`, `dev/pin_status.py` answers "is this commit safe to pin?",
+  and two silent-failure paths in the pins guard are closed (a dangling pin in a
+  non-shallow clone now fails instead of skipping; a failed `git ls-tree` raises
+  instead of reading as "no references").
+
+## [0.1.0] — 2026-07-27
+
+Tags `aa4d8b7`. First tagged release — the baseline every section above is
+relative to, and what made `shipmate doctor`'s pin-freshness comparison and a
+consumer's Dependabot able to resolve a pin at all.
+
+What it carries: per stack × environment plan fan-out with a check each and the
+plan published as a sticky PR comment; wave-ordered applies over the Terramate
+`after` DAG with environment-level ordering on top; exact-plan applies from the
+reviewed, encrypted plan artifact, with a stale-plan fail-safe; the pre-merge
+comment grammar (`shipmate apply [env]`, plus read-only `help` and `doctor`);
+the aggregate `shipmate / gate` commit status, authored by the shipmate GitHub
+App and pinned by `integration_id` in the consumer's ruleset; post-merge deploy
+driven by the pending apply checks as its work queue; per-run apply result
+comments; and nightly drift detection as auto-closing issues.
+
+[0.2.1]: https://github.com/ship-iac/shipmate/compare/v0.2.0...v0.2.1
+[0.2.0]: https://github.com/ship-iac/shipmate/compare/v0.1.0...v0.2.0
+[0.1.0]: https://github.com/ship-iac/shipmate/releases/tag/v0.1.0

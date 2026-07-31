@@ -125,6 +125,12 @@ field on the repository object — confirm it is still on before cutting:
 gh api repos/ship-iac/shipmate/immutable-releases   # {"enabled":true,...}
 ```
 
+Write the release's `CHANGELOG.md` section first, in its own PR, and cut the tag
+at **that** merge commit: the section describes what consumers get when they
+re-pin, so it belongs in the tree they pin, not in a commit that arrives after
+it. A commit cannot name its own SHA, so the section's SHA line is backfilled by
+the first commit after the tag.
+
 Then cut the release:
 
 First confirm the target is safe to pin. An intermediate commit of the cascade
