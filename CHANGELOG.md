@@ -13,7 +13,7 @@ grammar are declared unstable in `README.md`.
 
 ## [0.2.2] — 2026-07-31
 
-Tag SHA backfilled by the first commit after the tag.
+Tags `28d28f7`.
 
 ### Fixed
 
