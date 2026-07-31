@@ -1,8 +1,11 @@
 version: 2
 updates:
-  # Composite-action + workflow `uses:` SHA pins.
+  # Composite-action + workflow `uses:` SHA pins. `/` covers .github/workflows
+  # only; each composite action carries its own third-party pins (e.g.
+  # create-github-app-token in actions/dispatch), so the glob is what puts them
+  # in scope.
   - package-ecosystem: github-actions
-    directory: /
+    directories: ["/", "/actions/*"]
     schedule:
       interval: weekly
     groups:
