@@ -13,9 +13,7 @@ grammar are declared unstable in `README.md`.
 
 ## [0.2.1] — 2026-07-31
 
-Tags this file's own merge commit — a commit cannot name its own SHA, so the
-value is filled in by the first commit after the tag (the normal steady state:
-`main` sits a docs commit or two past the tag it published).
+Tags `8beba59`.
 
 ### Fixed
 
