@@ -11,6 +11,24 @@ section below names the SHA the release tags.
 The version line stays `v0.x` while action inputs, check names, and the comment
 grammar are declared unstable in `README.md`.
 
+## [0.2.3] — 2026-07-31
+
+Tag SHA backfilled by the first commit after the tag.
+
+### Changed
+
+- `terramate-io/terramate-action` **v2.0.0 → v3.3.0**, which carries a
+  template-injection patch. v3's breaking change is the removal of the
+  fallback-to-latest when no version is given; shipmate always passes an explicit
+  `terramate-version`, so behaviour is unchanged — but a consumer wiring an empty
+  value now fails instead of silently installing latest.
+- `actions/download-artifact` **v7.0.0 → v8.0.1** in `actions/apply-summary` (ESM
+  migration upstream, no interface change).
+
+Both had been invisible to Dependabot until 0.2.1 widened its scan to
+`actions/*` — the Terramate installer, which runs in every plan, apply and drift
+job, was two majors behind.
+
 ## [0.2.2] — 2026-07-31
 
 Tags `28d28f7`.
@@ -114,6 +132,7 @@ App and pinned by `integration_id` in the consumer's ruleset; post-merge deploy
 driven by the pending apply checks as its work queue; per-run apply result
 comments; and nightly drift detection as auto-closing issues.
 
+[0.2.3]: https://github.com/ship-iac/shipmate/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/ship-iac/shipmate/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/ship-iac/shipmate/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/ship-iac/shipmate/compare/v0.1.0...v0.2.0
