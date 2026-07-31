@@ -33,7 +33,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { fetch-depth: 0 }
-      - uses: ship-iac/shipmate/actions/setup@cc54ebf89eb763a243a0dc2fc2504ba7dbed5b92
+      - uses: ship-iac/shipmate/actions/setup@21d05c37ca0199767059abfecd28242460b86a0c
         with:
           terramate-version: ${{ vars.TERRAMATE_VERSION }}
           tofu-version: ${{ vars.TOFU_VERSION }}
