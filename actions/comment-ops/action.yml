@@ -458,7 +458,11 @@ runs:
           --jq '.data.repository.pullRequest.reviewDecision // "NONE"')
         echo "review_decision=$rd" >> "$GITHUB_OUTPUT"
         # Team membership via the App token (members:read). 200 + active = member.
-        if GH_TOKEN="$APP_TOKEN" gh api "orgs/$OWNER/teams/$TEAM/memberships/$USER" --jq '.state' 2>/dev/null | grep -q active; then
+        # Read into a variable, never a pipe: `grep -q` exits first, `gh` takes
+        # SIGPIPE, and pipefail turns a member into a non-member. `|| true`
+        # because a non-member is a 404 and errexit is live outside an `if`.
+        state=$(GH_TOKEN="$APP_TOKEN" gh api "orgs/$OWNER/teams/$TEAM/memberships/$USER" --jq '.state' 2>/dev/null || true)
+        if [ "$state" = "active" ]; then
           echo "is_member=true" >> "$GITHUB_OUTPUT"
         else
           echo "is_member=false" >> "$GITHUB_OUTPUT"

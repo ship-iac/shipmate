@@ -11,6 +11,21 @@ section below names the SHA the release tags.
 The version line stays `v0.x` while action inputs, check names, and the comment
 grammar are declared unstable in `README.md`.
 
+## [0.2.2] — 2026-07-31
+
+Tag SHA backfilled by the first commit after the tag.
+
+### Fixed
+
+- **An approvers-team member could be refused their own apply.** comment-ops
+  decided team membership with `gh api … | grep -q active`: `grep -q` exits at
+  its first match, `gh` upstream can take SIGPIPE, and `pipefail` hands the `if`
+  a 141 that reads as *not a member*. Same shape as the gate verdict fixed in
+  0.2.1, failing closed rather than open. The state is now read into a variable
+  and compared for equality, so `inactive` no longer matches as a substring
+  either. Covered by `test_comment_ops_membership.py`, which runs the block
+  against a stubbed API.
+
 ## [0.2.1] — 2026-07-31
 
 Tags `8beba59`.
@@ -99,6 +114,7 @@ App and pinned by `integration_id` in the consumer's ruleset; post-merge deploy
 driven by the pending apply checks as its work queue; per-run apply result
 comments; and nightly drift detection as auto-closing issues.
 
+[0.2.2]: https://github.com/ship-iac/shipmate/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/ship-iac/shipmate/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/ship-iac/shipmate/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/ship-iac/shipmate/releases/tag/v0.1.0
