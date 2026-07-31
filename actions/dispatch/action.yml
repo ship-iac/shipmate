@@ -21,7 +21,7 @@ inputs:
     description: Plan run id holding the reviewed plan artifacts.
     required: true
   workflow:
-    description: Workflow file to dispatch. Default apply.yml (the merged wrapper); set explicitly for a split apply.yml/apply-all.yml consumer layout.
+    description: Workflow file to dispatch. Default apply.yml (the merged wrapper). A split apply.yml/apply-all.yml layout needs the file picked per comment — targeted vs bare — which this static input cannot do, so whichever file it names, the other verb is dispatched at the wrong workflow and rejected (422) over the `environment` input one declares and the other does not. Merge the wrappers instead; the split layout is the escape hatch, not the path.
     required: false
     default: ''
   dispatch-ref:

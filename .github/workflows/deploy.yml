@@ -137,9 +137,19 @@ jobs:
           fi
           # Any env-level result other than success/skipped (failure, cancelled,
           # timed_out, ...) blocks the gate. grep -q failure alone missed cancels.
-          if echo "$RESULTS" | tr ',' '\n' | grep -qvE '^(success|skipped)$'; then
-            concl=failure; title="deploy incomplete";
-          else concl=success; title="all env-levels applied"; fi
+          # Scanned in-process: a pipeline whose reader exits early inverts the
+          # verdict under `pipefail` (SIGPIPE 141 reads as "all clean").
+          concl=success; title="all env-levels applied"
+          IFS=',' read -ra results <<< "$RESULTS"
+          # An empty result string means no env-level job reported at all —
+          # nothing was applied, so it must read as incomplete, not as all-clean.
+          [ ${#results[@]} -gt 0 ] || results=("")
+          for r in "${results[@]}"; do
+            case "$r" in
+              success|skipped) ;;
+              *) concl=failure; title="deploy incomplete"; break ;;
+            esac
+          done
           python3 - "$concl" "$title" > body.json <<'PY'
           import json, os, sys
           # Commit status, not a check-run (see actions/summary for why).

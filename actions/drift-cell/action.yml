@@ -86,6 +86,7 @@ runs:
       run: |
         set -euo pipefail
         title="drift: $ENV / $STACK_NAME"
+        run_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
         # gh filters natively via --jq (same idiom as actions/summary) — no extra process.
         # --limit caps how many open drift issues we scan for the match; keep it
         # well above the realistic count of simultaneously-drifting stack x envs
@@ -93,7 +94,7 @@ runs:
         existing=$(TITLE="$title" gh issue list --label drift --state open --limit 1000 \
           --json number,title --jq 'map(select(.title == env.TITLE)) | .[0].number // empty')
         if [ "$DRIFTED" = "true" ]; then
-          body="Drift detected in \`$STACK_NAME\` @ \`$ENV\`: +$ADD ~$CHANGE -$DESTROY. Auto-closed on the next clean drift run."
+          body="Drift detected in \`$STACK_NAME\` @ \`$ENV\`: +$ADD ~$CHANGE -$DESTROY. [Drift run]($run_url) — plan output is in that run's log. Auto-closed on the next clean drift run."
           if [ -n "$existing" ]; then
             gh issue edit "$existing" --body "$body" >/dev/null
           else
