@@ -189,13 +189,32 @@ untrusted PR content (the plan text, cell metadata). The
 `integration_id`-pinned gate ruleset (see `docs/branch-protection.md`)
 defends against two specific threats: a supply-chain compromise reached
 *through* that job (a malicious dependency or action stealing the minted
-token to forge a `shipmate / gate` status), and a stray/forked workflow
-minting its own App token outside the reviewed path. It does **not** defend
-against a trusted, write-access insider who already has `secrets: write` on
-the repo — that person can read the PEM directly regardless of any ruleset
-pin. If your threat model includes malicious insiders with write access,
-the App's key does not solve for that; branch protection's pinned
-`integration_id` only closes the *external* forgery path.
+token to forge a `shipmate / gate` status), and any *other* identity posting a
+status under the same context — `GITHUB_TOKEN`'s `github-actions` identity, or
+a different GitHub App — which without the pin would satisfy the required check
+outright.
+
+What the pin does **not** defend against is anyone with **push access to the
+repository itself** — not just an admin with `secrets: write`.
+`SHIPMATE_APP_PRIVATE_KEY` is a repository (or org) secret, and GitHub hands
+repository secrets to *every* workflow run from a branch of that same
+repository, including a workflow file the branch itself introduces. A branch
+carrying its own `.github/workflows/*.yml` with `on: push` runs before any pull
+request exists and before any review, reads the PEM, and mints a token with the
+App's full permissions. With that token it can post a `shipmate / gate`
+`success` status that satisfies the pinned `integration_id` (the forgery *is*
+the App), submit an approving review as the App so `reviewDecision` clears,
+complete the pending `apply / <stack> / <env>` checks without applying
+anything, and `workflow_dispatch` the apply workflow directly — bypassing the
+comment-ops authorization in `actions/comment-ops` entirely.
+
+A `CODEOWNERS` entry on `.github/workflows/` does not close this: it is
+enforced at **merge** time, and the workflow above executes at **push** time.
+
+So: **push access to a consumer repository is authority over the engine.**
+Grant it accordingly, and see `docs/hardening.md` for the settings that limit
+what remains reachable (environment reviewers on `<env>-apply` are the one
+gate an App token cannot forge).
 
 ---
 

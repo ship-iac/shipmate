@@ -440,7 +440,12 @@ triggered by a pre-merge comment or a post-merge push.
   third-party actions it pins internally.
 - `.github/workflows/` is protected by a `CODEOWNERS` entry, so changes to
   workflow files (including pin bumps) require review from the designated
-  owners before merge.
+  owners **before merge**. This is review hygiene, not a security boundary: a
+  workflow file added or modified on a feature branch runs — with the
+  repository's secrets — as soon as it is pushed, long before `CODEOWNERS`
+  applies. Restricting who can push, and restricting pushes that touch
+  `.github/workflows/**`, are the controls that act at push time; see
+  `docs/hardening.md`.
 - The engine applies this same rule to itself: it references its own actions
   internally by full commit SHA, because GitHub resolves a local `./actions/...`
   reference against the *consuming* repo once it crosses the reusable-workflow

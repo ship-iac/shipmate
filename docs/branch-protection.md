@@ -1,5 +1,9 @@
 # Recommended branch protection
 
+This page is the settings shipmate needs to enforce apply-before-merge.
+`docs/hardening.md` is its companion: who can make the engine act at all, and
+the settings that bound that.
+
 shipmate does **no gating in workflow logic**. The apply-before-merge guarantee
 is enforced entirely by GitHub branch protection requiring one aggregate check:
 

@@ -175,6 +175,8 @@ rapid re-push) — a check-run can, silently blocking the merge forever.
 
 To make the gate enforce apply-before-merge, configure branch protection to
 require `shipmate / gate`; see [`docs/branch-protection.md`](docs/branch-protection.md).
+For who can make the engine act — push access is authority over it — and the
+settings that bound that, see [`docs/hardening.md`](docs/hardening.md).
 
 ## Deploy + drift
 
