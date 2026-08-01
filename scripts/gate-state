@@ -5,9 +5,10 @@ Runs in the trusted post-plan job (`workflow_run`), which has no `needs`, so the
 plan run's own conclusion replaces the per-job results this logic used to read.
 
 `artifact_count` is how many `cell-summary.*` artifacts the API reports for the
-plan run; `cell_count` is how many of them this job actually parsed. The two
-differ only when the download failed — the one case a bare cell count cannot
-tell apart from "nothing changed", and the one that must never green the gate.
+plan run; `cell_count` is how many of them this job actually parsed. Any
+shortfall between the two — whole or partial — means the evidence for this
+run is incomplete (a failed download, or one that dropped some but not all
+cell summaries), and incomplete evidence must never green the gate.
 """
 
 import json
@@ -30,18 +31,16 @@ def decide(*, run_conclusion, artifact_count, cell_count, pending):
         return (
             "failure",
             f"plan incomplete (plan run: {run_conclusion}) — fix the failing "
-            "<stack> / <env> plan check before merging"[:140],
+            "<stack> / <env> plan check before merging",
             _HOLD,
         )
-    if artifact_count > 0 and cell_count == 0:
+    if cell_count < artifact_count:
         return (
             "failure",
             "no cell summaries could be read from the plan run's artifacts "
             "(download issue) — re-run before merging",
             _HOLD,
         )
-    if artifact_count == 0:
-        return "success", "no pending applies for this PR", _NOTHING
     if pending:
         return (
             "pending",
@@ -49,6 +48,8 @@ def decide(*, run_conclusion, artifact_count, cell_count, pending):
             "until applies complete",
             _POST,
         )
+    if artifact_count == 0:
+        return "success", "no pending applies for this PR", _NOTHING
     return "success", "no pending applies for this PR", _POST
 
 

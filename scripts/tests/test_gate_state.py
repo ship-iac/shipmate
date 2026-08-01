@@ -55,6 +55,14 @@ def test_artifacts_exist_but_none_parsed_is_a_download_failure():
     assert mode == "hold"
 
 
+def test_partial_cell_loss_fails_the_gate_and_holds_the_comment():
+    # 2 of 3 cell summaries missing must not be mistaken for "nothing changed"
+    # or, worse, green the gate while a stack still awaits apply.
+    state, _, mode = d(artifact_count=3, cell_count=1)
+    assert state == "failure"
+    assert mode == "hold"
+
+
 def test_no_artifacts_at_all_means_nothing_changed():
     # plan-cell's upload has no `if: always()`, so a dying cell fails the run.
     # A successful run with zero cell-summary artifacts therefore means the
