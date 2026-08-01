@@ -47,23 +47,14 @@ jobs:
           THIS_RUN: ${{ github.event.workflow_run.id }}
         run: |
           set -euo pipefail
-          # `--slurp` wraps every page into one array before the filter runs.
-          # `gh api` REJECTS `--slurp` together with `--jq` outright -- exit 1,
-          # before any network call ("the `--slurp` option is not supported
-          # with `--jq` or `--template`"), so this pipes into a standalone
-          # `jq` instead (a documented runner prerequisite, CONTRACT.md §
-          # Runner prerequisites -- nothing new needed). Without --slurp,
-          # `--paginate` alone evaluates a `--jq` filter once PER PAGE, and
-          # picking a "latest" record independently per page can silently
-          # pick the wrong run once a head_sha's history spans more than one
-          # page.
-          # `status == "completed"`, not `conclusion == "success"`: a FAILING
-          # run's own record has conclusion "failure", so filtering to
-          # "success" excluded a failing run from ever seeing itself as the
-          # newest -- it always deferred to an older green run, and a stale
-          # green gate outlived a newer red one. `sort_by(..., .id) | last`
-          # breaks a same-second tie on `run_started_at` (draft->ready can
-          # produce two runs within the same second) by highest run id.
+          # `gh api` rejects `--slurp` together with `--jq` on the same
+          # invocation, so this pipes into a standalone `jq` instead.
+          # Filters on `status == "completed"`, not `conclusion == "success"`:
+          # a failing run's own conclusion is "failure", so a success-only
+          # filter never lets a failing run see itself as the newest, and a
+          # stale green gate outlives a newer red one.
+          # `sort_by(..., .id) | last` tiebreaks a same-second run_started_at
+          # tie (draft->ready) on the higher run id.
           newest=$(gh api --paginate --slurp \
             "repos/$GITHUB_REPOSITORY/actions/workflows/$WORKFLOW_ID/runs?head_sha=$SHA&per_page=100" \
             | jq -r '[.[].workflow_runs[] | select(.status == "completed")] | sort_by(.run_started_at, .id) | last | .id // empty')
@@ -117,38 +108,15 @@ jobs:
           RUN_ID: ${{ github.event.workflow_run.id }}
         run: |
           set -uo pipefail
-          # `scripts/gate-state` does int(os.environ.get("SHIPMATE_ARTIFACT_COUNT",
-          # "0")) -- an unset/empty count reaches int("") and raises, which kills
-          # the whole action and writes NO gate. A bare `set -e` here would let a
-          # transient `gh api` failure abort this step, and every later step's
-          # plain `if:` is implicitly `success() && ...`, so the summary action
-          # step would then be skipped outright -- same "no gate at all" outcome,
-          # one step earlier. Catch the failure instead and still emit a count.
-          # `--slurp` wraps every page into one array before the filter runs.
-          # `gh api` REJECTS `--slurp` together with `--jq` outright -- exit 1,
-          # before any network call ("the `--slurp` option is not supported
-          # with `--jq` or `--template`"), so this pipes into a standalone
-          # `jq` instead (a documented runner prerequisite, CONTRACT.md §
-          # Runner prerequisites -- nothing new needed). Without --slurp,
-          # `--paginate` alone evaluates a `--jq` filter once PER PAGE, and the
-          # matrix cap is 256 cells -- comfortably more than one 100-artifact
-          # page. A bare per-page filter would then emit one count PER PAGE
-          # ("100\n56"), and writing that multi-line value to $GITHUB_OUTPUT
-          # corrupts the output file and fails the step.
-          #
-          # `pipefail` (still set, just above) still carries a `gh api`
-          # failure through the pipe into this command substitution's exit
-          # status, so the `if` below still catches it with the pipeline now
-          # two stages long.
+          # `gh api` rejects `--slurp` together with `--jq` on the same
+          # invocation, so this pipes into a standalone `jq` instead.
           if count=$(gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID/artifacts?per_page=100" \
             | jq '[.[].artifacts[] | select(.name | startswith("cell-summary."))] | length'); then
             echo "count=$count" >> "$GITHUB_OUTPUT"
           else
-            # Report 1 (at least one, unverified), never 0: gate-state's
-            # cell_count < artifact_count shortfall check only fires on a nonzero
-            # count, and the download step below will find nothing to parse, so a
-            # reported 0 here would read as "nothing changed" and green the gate
-            # over evidence we never actually saw.
+            # Report 1, never 0: gate-state's shortfall check only fires on a
+            # nonzero count, so 0 here would read as "nothing changed" and
+            # green the gate over evidence we never actually saw.
             echo "::warning::could not list this plan run's artifacts; treating its evidence as incomplete"
             echo "count=1" >> "$GITHUB_OUTPUT"
           fi

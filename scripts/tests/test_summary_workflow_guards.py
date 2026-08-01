@@ -10,6 +10,24 @@ def text():
     return WF.read_text(encoding="utf-8")
 
 
+def _logical_command(body, marker):
+    """Join a backslash-continued shell command starting at the line
+    containing `marker` into one string.
+
+    A flag on a continuation line (as `--jq` was, in the exact bug this
+    guards against) is invisible to a single-physical-line check -- joining
+    first is what makes "is --jq present anywhere in this command" a claim
+    the test can actually back up.
+    """
+    lines = body.splitlines()
+    start = next(i for i, line in enumerate(lines) if marker in line)
+    parts = [lines[start]]
+    while parts[-1].rstrip().endswith("\\"):
+        start += 1
+        parts.append(lines[start])
+    return " ".join(p.strip().rstrip("\\").strip() for p in parts)
+
+
 def test_guards_on_the_triggering_workflow_file_path():
     # `workflow_run.workflows:` matches by workflow NAME, so a branch file named
     # "shipmate · plan" with `on: push` would otherwise fire this workflow.
@@ -80,11 +98,14 @@ def test_artifact_count_gh_call_uses_slurp_and_never_jq_together():
     # with `--jq` or `--template`"), verified empirically against gh v2.93.0.
     # `--slurp` must be present (to aggregate every page into one array) and
     # `--jq` must be ABSENT from that same `gh api` call -- the filter runs as
-    # a separate, standalone `jq` piped afterwards instead.
+    # a separate, standalone `jq` piped afterwards instead. The broken form
+    # this guards against put `--jq` on a backslash-continuation line, so the
+    # whole logical command must be joined before checking, not just the one
+    # physical line the invocation starts on.
     body = text().split("id: artifacts", 1)[1].split("- uses:", 1)[0]
-    gh_line = next(line for line in body.splitlines() if "gh api --paginate --slurp" in line)
-    assert "--slurp" in gh_line
-    assert "--jq" not in gh_line
+    gh_call = _logical_command(body, "gh api --paginate --slurp")
+    assert "--slurp" in gh_call
+    assert "--jq" not in gh_call
 
 
 def test_artifact_count_aggregates_every_page_in_one_jq_pass():
@@ -100,11 +121,12 @@ def test_artifact_count_aggregates_every_page_in_one_jq_pass():
 
 def test_supersede_check_gh_call_uses_slurp_and_never_jq_together():
     # Same `gh api` constraint as the artifact count: `--slurp` and `--jq`
-    # cannot appear on the same invocation.
+    # cannot appear on the same invocation. Joined across the (three-line)
+    # backslash continuation for the same reason as the sibling test above.
     body = text().split("id: newest", 1)[1].split("- name:", 1)[0]
-    gh_line = next(line for line in body.splitlines() if "gh api --paginate --slurp" in line)
-    assert "--slurp" in gh_line
-    assert "--jq" not in gh_line
+    gh_call = _logical_command(body, "gh api --paginate --slurp")
+    assert "--slurp" in gh_call
+    assert "--jq" not in gh_call
 
 
 def test_supersede_check_considers_every_completed_run_not_only_successful():
