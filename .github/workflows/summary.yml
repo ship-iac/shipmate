@@ -12,12 +12,15 @@ jobs:
     concurrency:
       group: shipmate-summary-${{ github.event.workflow_run.head_sha }}
       cancel-in-progress: true
-    # Four guards, each closing a specific path:
-    #  - `workflows:` in the caller matches by workflow NAME, so a branch file
-    #    named like the plan workflow with `on: push` would fire this one;
-    #    match the file path and require a pull_request-triggered run instead.
-    #  - a fork's plan run must not author checks, comments or a gate under the
-    #    App identity now that this job — not the plan job — holds the key.
+    # Three guards, each closing a specific path:
+    #  - `path`: `workflow_run.workflows:` in the caller matches by workflow
+    #    NAME, so a branch file merely named like the plan workflow could fire
+    #    this one; matching the file path instead pins it to the real file.
+    #  - `event == 'pull_request'`: excludes a push-triggered run of that same
+    #    file.
+    #  - `head_repository.full_name`: a fork's plan run must not author
+    #    checks, comments or a gate under the App identity now that this job
+    #    — not the plan job — holds the key.
     if: >-
       github.event.workflow_run.path == '.github/workflows/plan.yml' &&
       github.event.workflow_run.event == 'pull_request' &&
@@ -44,9 +47,20 @@ jobs:
           THIS_RUN: ${{ github.event.workflow_run.id }}
         run: |
           set -euo pipefail
-          newest=$(gh api --paginate \
+          # --slurp wraps every page into one array before `--jq` runs:
+          # `--paginate` alone evaluates `--jq` once PER PAGE, and picking a
+          # "latest" record independently per page can silently pick the
+          # wrong run once a head_sha's history spans more than one page.
+          # `status == "completed"`, not `conclusion == "success"`: a FAILING
+          # run's own record has conclusion "failure", so filtering to
+          # "success" excluded a failing run from ever seeing itself as the
+          # newest -- it always deferred to an older green run, and a stale
+          # green gate outlived a newer red one. `sort_by(..., .id) | last`
+          # breaks a same-second tie on `run_started_at` (draft->ready can
+          # produce two runs within the same second) by highest run id.
+          newest=$(gh api --paginate --slurp \
             "repos/$GITHUB_REPOSITORY/actions/workflows/$WORKFLOW_ID/runs?head_sha=$SHA&per_page=100" \
-            --jq '[.workflow_runs[] | select(.conclusion == "success")] | max_by(.run_started_at) | .id // empty')
+            --jq '[.[].workflow_runs[] | select(.status == "completed")] | sort_by(.run_started_at, .id) | last | .id // empty')
           if [ -n "$newest" ] && [ "$newest" != "$THIS_RUN" ]; then
             echo "superseded by run $newest"
             echo "proceed=false" >> "$GITHUB_OUTPUT"
@@ -74,9 +88,17 @@ jobs:
           # The deleted plan.yml summary job carried `github.event.pull_request.draft
           # == false`. Restore it here: a draft skips every plan job, and a run
           # that planned nothing must never write a gate.
-          if [ -n "$n" ] && [ "$(gh api "repos/$GITHUB_REPOSITORY/pulls/$n" --jq .draft)" = "true" ]; then
-            echo "pull request $n is a draft; nothing to summarise"
-            n=""
+          if [ -n "$n" ]; then
+            # Captured separately, not inlined in `[ "$(...)" = ... ]`: a
+            # failing `gh api` call there is only an argument to `[`, not the
+            # executed command, so it is exempt from `set -e` and its empty
+            # output would read as "not a draft" -- failing OPEN. Fail closed
+            # instead: treat "can't tell" the same as "is a draft".
+            draft=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$n" --jq .draft) || draft=""
+            if [ -z "$draft" ] || [ "$draft" = "true" ]; then
+              echo "pull request $n is a draft, or its draft status could not be verified; nothing to summarise"
+              n=""
+            fi
           fi
           echo "number=$n" >> "$GITHUB_OUTPUT"
 
@@ -96,8 +118,14 @@ jobs:
           # plain `if:` is implicitly `success() && ...`, so the summary action
           # step would then be skipped outright -- same "no gate at all" outcome,
           # one step earlier. Catch the failure instead and still emit a count.
-          if count=$(gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID/artifacts?per_page=100" \
-            --jq '[.artifacts[] | select(.name | startswith("cell-summary."))] | length'); then
+          # --slurp wraps every page into one array before `--jq` runs:
+          # `--paginate` alone evaluates `--jq` once PER PAGE, and the matrix
+          # cap is 256 cells -- comfortably more than one 100-artifact page. A
+          # bare `[.artifacts[] | ...] | length` would then emit one count PER
+          # PAGE ("100\n56"), and writing that multi-line value to
+          # $GITHUB_OUTPUT corrupts the output file and fails the step.
+          if count=$(gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID/artifacts?per_page=100" \
+            --jq '[.[].artifacts[] | select(.name | startswith("cell-summary."))] | length'); then
             echo "count=$count" >> "$GITHUB_OUTPUT"
           else
             # Report 1 (at least one, unverified), never 0: gate-state's
@@ -118,12 +146,18 @@ jobs:
           run-id: ${{ github.event.workflow_run.id }}
           github-token: ${{ github.token }}
 
-      - uses: ship-iac/shipmate/actions/summary@ce0512bebe53d0330e2928378fb8f366fc3b1ff9 # pinned to a commit on main
+      - uses: ship-iac/shipmate/actions/summary@ce0512bebe53d0330e2928378fb8f366fc3b1ff9 # provisional pin: branch-local commit, not yet on main -- repin with dev/repin_internal.py once this merges
         if: steps.pr.outputs.number != ''
         with:
           pr-number: ${{ steps.pr.outputs.number }}
           head-sha: ${{ github.event.workflow_run.head_sha }}
           run-conclusion: ${{ github.event.workflow_run.conclusion }}
-          artifact-count: ${{ steps.artifacts.outputs.count || '0' }}
+          # `|| '1'`, never `'0'`: the failure branch above deliberately
+          # reports 1 (evidence unknown, never "nothing changed") so a
+          # shortfall against the parsed cell_count trips gate-state's hold
+          # path instead of greening the gate. Falling back to '0' here would
+          # contradict that and green exactly the case the sentinel exists to
+          # catch.
+          artifact-count: ${{ steps.artifacts.outputs.count || '1' }}
           app-id: ${{ vars.SHIPMATE_APP_ID }}
           private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}

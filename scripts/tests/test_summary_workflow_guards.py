@@ -48,13 +48,17 @@ def test_privileged_job_does_not_check_out_the_pull_request_head():
     assert "actions/checkout" not in text()
 
 
-def test_artifact_count_input_falls_back_to_a_valid_integer():
+def test_artifact_count_input_falls_back_to_a_sentinel_never_zero():
     # `scripts/gate-state` does int(os.environ.get("SHIPMATE_ARTIFACT_COUNT",
     # "0")); an empty string reaches int("") and raises, which kills the
     # action and writes NO gate at all. The `with:` value must never be able
-    # to resolve to an empty string.
+    # to resolve to an empty string -- and the fallback must be '1', not '0':
+    # the counting step's own failure branch reports 1 (evidence unknown,
+    # never "nothing changed") precisely so a shortfall against cell_count
+    # trips gate-state's hold path instead of greening the gate. A '0'
+    # fallback here would contradict that sentinel design.
     assert re.search(
-        r"artifact-count:\s*\$\{\{\s*steps\.artifacts\.outputs\.count\s*\|\|\s*'0'\s*\}\}",
+        r"artifact-count:\s*\$\{\{\s*steps\.artifacts\.outputs\.count\s*\|\|\s*'1'\s*\}\}",
         text(),
     )
 
@@ -68,3 +72,50 @@ def test_artifact_count_step_cannot_abort_without_emitting_a_count():
     body = text().split("id: artifacts", 1)[1].split("- uses:", 1)[0]
     assert "set -euo pipefail" not in body
     assert body.count('echo "count=') >= 2
+
+
+def test_artifact_count_aggregates_every_page_before_counting():
+    # `gh api --paginate` evaluates `--jq` once PER PAGE. The matrix cap is
+    # 256 cells, comfortably more than one 100-artifact page, so a bare
+    # `[.artifacts[] | ...] | length` filter emits one count PER PAGE (e.g.
+    # "100\n56"): a multi-line value that corrupts $GITHUB_OUTPUT and fails
+    # the step. `--slurp` must wrap every page into one array first, and the
+    # `--jq` filter must walk `.[]` (the pages) before `.artifacts[]`.
+    body = text().split("id: artifacts", 1)[1].split("- uses:", 1)[0]
+    assert "--paginate --slurp" in body
+    assert "[.[].artifacts[]" in body
+
+
+def test_supersede_check_considers_every_completed_run_not_only_successful():
+    # A FAILING run's own record has conclusion "failure". Filtering the
+    # candidate list to conclusion == "success" excludes a failing run from
+    # ever seeing itself as the newest run for its head SHA, so it always
+    # defers to an older successful run and a stale green gate outlives a
+    # newer red one. The candidate filter must be status-based, not
+    # conclusion-based.
+    body = text().split("id: newest", 1)[1].split("- name:", 1)[0]
+    jq_line = next(line for line in body.splitlines() if "--jq '" in line)
+    assert 'select(.status == "completed")' in jq_line
+    assert "conclusion" not in jq_line
+
+
+def test_supersede_check_aggregates_pages_and_tiebreaks_on_run_id():
+    # Same per-page evaluation hazard as the artifact count, plus: two runs
+    # for the same head SHA (draft->ready) can share a run_started_at second,
+    # and a plain max_by(.run_started_at) tie can make BOTH runs consider
+    # themselves superseded, leaving no gate written at all. Break the tie on
+    # run id.
+    body = text().split("id: newest", 1)[1].split("- name:", 1)[0]
+    assert "--paginate --slurp" in body
+    assert re.search(r"sort_by\(\.run_started_at,\s*\.id\)", body)
+
+
+def test_draft_probe_fails_closed_on_an_unreadable_response():
+    # `[ "$(gh api ...)" = "true" ]` is exempt from `set -e` (the failing
+    # command is only an argument to `[`, not the executed command), so a
+    # failed lookup reads as an empty string -- "not a draft" -- and fails
+    # OPEN. The draft value must be captured on its own line first, so its
+    # failure can be handled explicitly and read as "treat as a draft."
+    body = text().split("id: pr", 1)[1].split("- name:", 1)[0]
+    assert re.search(r'draft=\$\(gh api .*--jq \.draft\)\s*\|\|\s*draft=""', body)
+    assert '[ -z "$draft" ]' in body
