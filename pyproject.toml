@@ -49,6 +49,7 @@ extend-include = [
     "scripts/deploy-detect",
     "scripts/doctor",
     "scripts/env-order",
+    "scripts/gate-state",
     "scripts/pending-checks",
     "scripts/plan-classify",
     "scripts/plan-crypt",
