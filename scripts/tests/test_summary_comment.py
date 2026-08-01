@@ -421,23 +421,21 @@ def _guard_bodies():
     return bodies
 
 
-def test_an_unknown_plan_never_overwrites_the_sticky_comment():
-    """A zero cell count means "nothing changed" only when detect succeeded and
-    the plan matrix was empty. A failed detect, plan cells that all died before
-    uploading a cell summary, or a failed cell-summary download also produce
-    zero — and the body would then claim "no stacks changed" about a plan nobody
-    read. Those runs must write nothing at all, so an existing comment (the
-    reviewed plan for the previous push) survives instead of being PATCHed down
-    to an empty table."""
+def test_a_hold_mode_never_overwrites_the_sticky_comment():
+    """`gate-state` collapses every "the plan can't be trusted" case (a
+    non-success plan run, or a cell/artifact-count shortfall) into
+    `comment_mode=hold` — a single signal the upsert step reacts to before it
+    ever inspects COUNT. Those runs must write nothing at all, so an existing
+    comment (the reviewed plan for the previous push) survives instead of
+    being PATCHed down to an empty table."""
     bodies = _guard_bodies()
-    nothing_changed = next(
-        c for c in bodies if 'DETECT_RESULT" = "success"' in c and 'PLAN_RESULT" = "skipped"' in c
-    )
-    assert bodies[nothing_changed] == ["nothing_changed=true"]
-    unknown = next(c for c in bodies if '"$COUNT" = "0"' in c and 'nothing_changed" = "false"' in c)
-    assert "exit 0" in bodies[unknown]
+    hold = next(c for c in bodies if '"$MODE" = "hold"' in c)
+    assert "exit 0" in bodies[hold]
     # No write of any kind on that path — not the PATCH, not the create.
-    assert not any("gh api" in line for line in bodies[unknown])
+    assert not any("gh api" in line for line in bodies[hold])
+
+    nothing_changed = next(c for c in bodies if '"$MODE" = "nothing-changed"' in c)
+    assert bodies[nothing_changed] == ["nothing_changed=true"]
 
 
 def test_the_sticky_upsert_skips_creation_when_nothing_was_planned():
@@ -458,7 +456,9 @@ def test_the_sticky_upsert_skips_creation_when_nothing_was_planned():
     quiet = next(
         c
         for c in bodies
-        if '"$COUNT" = "0"' in c and '-z "$id"' in c and 'doctor_warned" = "false"' in c
+        if '"$nothing_changed" = "true"' in c
+        and '-z "$id"' in c
+        and 'doctor_warned" = "false"' in c
     )
     assert "exit 0" in bodies[quiet]
     assert not any("gh api" in line for line in bodies[quiet])

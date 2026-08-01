@@ -23,8 +23,12 @@ SKIP_DIRS = {
     "node_modules",
 }
 GATE = "shipmate / gate"
+# The literal's home in `actions/summary` moved to `scripts/gate-state` (the
+# trusted post-plan `workflow_run` job has no `needs`, so a shared script
+# decides gate state instead of an inline heredoc in the action); the
+# composite action itself now only POSTs the body gate-state already built.
 WRITERS = [
-    "actions/summary/action.yml",
+    "scripts/gate-state",
     "actions/gate-refresh/action.yml",
     ".github/workflows/deploy.yml",
 ]
@@ -68,6 +72,23 @@ def _gate_writing_run_blocks(text):
     return [b for b in blocks if GATE in b and "--input" in b]
 
 
+def _writer_gate_segments(rel, text):
+    """The text segment(s) of one WRITERS entry to check for the
+    commit-status invariant.
+
+    A `.yml` writer (a composite action or workflow) keeps the existing
+    `run:`-block extraction: a step may hold other unrelated `run:` blocks
+    that must not be conflated with the gate-writing one. `scripts/gate-state`
+    is not YAML and has no `run:` blocks at all -- it is a plain script whose
+    only job is building the gate body (the POST itself now lives in
+    `actions/summary`'s `Create/refresh gate` step, over a body it did not
+    build), so the whole file is the one segment to check.
+    """
+    if not rel.endswith((".yml", ".yaml")):
+        return [text] if GATE in text else []
+    return _gate_writing_run_blocks(text)
+
+
 def test_gate_written_as_commit_status_not_check_run():
     """The gate must be a commit STATUS, not a check-run.
 
@@ -81,16 +102,27 @@ def test_gate_written_as_commit_status_not_check_run():
     `shipmate / gate` context and POSTs it) -- NOT every line in the writer
     file. `actions/summary` also legitimately creates apply check-runs in a
     separate step; that step must not be flagged by this guard.
+
+    `scripts/gate-state` never calls `gh api` at all -- it only builds the
+    body JSON that `actions/summary` later POSTs -- so it cannot itself target
+    the wrong endpoint; the guard there narrows to the weaker but still
+    meaningful claim that it never even names the check-runs endpoint.
     """
     for rel in WRITERS:
         text = (ENGINE / rel).read_text(encoding="utf-8")
-        gate_blocks = _gate_writing_run_blocks(text)
-        assert gate_blocks, f"{rel}: no gate-writing run block found (context+POST)"
-        for block in gate_blocks:
-            assert "statuses/" in block, (
-                f"{rel}: gate-writing step must POST to the commit statuses API: {block!r}"
+        gate_segments = _writer_gate_segments(rel, text)
+        assert gate_segments, f"{rel}: no gate-writing segment found (context+POST)"
+        for segment in gate_segments:
+            if "gh api" not in segment:
+                # A body-only writer: no POST of its own to mistarget.
+                assert "check-runs" not in segment, (
+                    f"{rel}: gate body construction references the check-runs API"
+                )
+                continue
+            assert "statuses/" in segment, (
+                f"{rel}: gate-writing step must POST to the commit statuses API: {segment!r}"
             )
-            for line in block.splitlines():
+            for line in segment.splitlines():
                 assert not ("check-runs" in line and "--input" in line), (
                     f"{rel}: gate POST still targets the check-runs API: {line.strip()}"
                 )
