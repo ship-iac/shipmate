@@ -141,8 +141,8 @@ runs:
       env:
         GH_TOKEN: ${{ steps.token.outputs.token }}
         PR: ${{ inputs.pr-number }}
-        COUNT: ${{ steps.build.outputs.count }}
         MODE: ${{ steps.gate.outputs.comment_mode }}
+        RUN_CONCLUSION: ${{ inputs.run-conclusion }}
       run: |
         set -euo pipefail
         marker='<!-- shipmate:summary -->'
@@ -179,7 +179,7 @@ runs:
         # gate on the same cases, so the pull request still shows that
         # something is wrong.
         if [ "$MODE" = "hold" ]; then
-          echo "::warning::the plan run produced no readable cell summaries; the sticky plan comment was left as it is"
+          echo "::warning::the plan run ($RUN_CONCLUSION) did not produce a trustworthy set of cell summaries; the sticky plan comment was left as it is"
           exit 0
         fi
         nothing_changed=false

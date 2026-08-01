@@ -33,6 +33,13 @@ WRITERS = [
     ".github/workflows/deploy.yml",
 ]
 
+# The files whose gate-writing step must target the commit-statuses API, never
+# check-runs. Same idea as WRITERS but a different set: `actions/summary`
+# carries no `shipmate / gate` literal any more (it only POSTs a body
+# `scripts/gate-state` built), so it is absent from WRITERS above -- but it
+# still performs the actual write, so it still needs this guard.
+STATUS_WRITERS = [*WRITERS, "actions/summary/action.yml"]
+
 
 def test_gate_literal_present_in_every_writer():
     for rel in WRITERS:
@@ -41,11 +48,14 @@ def test_gate_literal_present_in_every_writer():
 
 
 def _gate_writing_run_blocks(text):
-    """Yield each `run:` block (as a single string) that references the gate
-    context AND posts (contains `--input`, a `gh api ... --input` call). A step
-    that merely names the gate in a comment/echo does not count; the writer
-    files each have exactly one such block, but this scans generically instead
-    of assuming a fixed line layout."""
+    """Yield each `run:` block (as a single string) that writes the gate: it
+    either references the gate context literal AND posts (contains
+    `--input`, a `gh api ... --input` call), or -- `actions/summary`'s shape,
+    which carries no context literal of its own -- POSTs the specific body
+    `scripts/gate-state` produced (`--input gate.json`). A step that merely
+    names the gate in a comment/echo does not count; the writer files each
+    have exactly one such block, but this scans generically instead of
+    assuming a fixed line layout."""
     blocks = []
     current = []
     in_run = False
@@ -69,11 +79,11 @@ def _gate_writing_run_blocks(text):
                 current.append(line)
     if current:
         blocks.append("\n".join(current))
-    return [b for b in blocks if GATE in b and "--input" in b]
+    return [b for b in blocks if (GATE in b and "--input" in b) or "--input gate.json" in b]
 
 
 def _writer_gate_segments(rel, text):
-    """The text segment(s) of one WRITERS entry to check for the
+    """The text segment(s) of one STATUS_WRITERS entry to check for the
     commit-status invariant.
 
     A `.yml` writer (a composite action or workflow) keeps the existing
@@ -99,16 +109,23 @@ def test_gate_written_as_commit_status_not_check_run():
     status is commit-scoped and immune. Lock every writer onto the statuses API.
 
     Scoped to the GATE-writing step(s) only (the block that references the
-    `shipmate / gate` context and POSTs it) -- NOT every line in the writer
-    file. `actions/summary` also legitimately creates apply check-runs in a
-    separate step; that step must not be flagged by this guard.
+    `shipmate / gate` context and POSTs it, or -- `actions/summary` -- POSTs
+    the specific body `scripts/gate-state` produced) -- NOT every line in the
+    writer file. `actions/summary` also legitimately creates apply check-runs
+    in a separate step; that step must not be flagged by this guard.
+
+    Checks STATUS_WRITERS, not WRITERS: `actions/summary` carries no
+    `shipmate / gate` literal of its own any more (moved to
+    `scripts/gate-state`, which it calls), but it still performs the actual
+    POST, so it still needs this guard even though it is exempt from
+    test_gate_literal_present_in_every_writer above.
 
     `scripts/gate-state` never calls `gh api` at all -- it only builds the
     body JSON that `actions/summary` later POSTs -- so it cannot itself target
     the wrong endpoint; the guard there narrows to the weaker but still
     meaningful claim that it never even names the check-runs endpoint.
     """
-    for rel in WRITERS:
+    for rel in STATUS_WRITERS:
         text = (ENGINE / rel).read_text(encoding="utf-8")
         gate_segments = _writer_gate_segments(rel, text)
         assert gate_segments, f"{rel}: no gate-writing segment found (context+POST)"

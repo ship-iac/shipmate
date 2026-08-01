@@ -425,9 +425,9 @@ def test_a_hold_mode_never_overwrites_the_sticky_comment():
     """`gate-state` collapses every "the plan can't be trusted" case (a
     non-success plan run, or a cell/artifact-count shortfall) into
     `comment_mode=hold` — a single signal the upsert step reacts to before it
-    ever inspects COUNT. Those runs must write nothing at all, so an existing
-    comment (the reviewed plan for the previous push) survives instead of
-    being PATCHed down to an empty table."""
+    inspects anything else. Those runs must write nothing at all, so an
+    existing comment (the reviewed plan for the previous push) survives
+    instead of being PATCHed down to an empty table."""
     bodies = _guard_bodies()
     hold = next(c for c in bodies if '"$MODE" = "hold"' in c)
     assert "exit 0" in bodies[hold]
@@ -440,15 +440,15 @@ def test_a_hold_mode_never_overwrites_the_sticky_comment():
 
 def test_the_sticky_upsert_skips_creation_when_nothing_was_planned():
     """A docs-only or pin-bump pull request should carry no shipmate comment at
-    all. The guard is create-only — conditioned on an *empty* id as well as a
-    zero cell count — because an existing comment must still be updated to the
-    no-planned-cells body, or a pull request that planned changes and then
-    pushed them away keeps displaying the stale plan table. It also yields to
-    doctor: findings render only as run-page annotations, so the comment footer
-    is their one pull-request-visible pointer and a run with findings still
-    posts. Behaviour lives in the action's shell, so this is source-derived."""
-    block = _upsert_step()
-    assert "COUNT: ${{ steps.build.outputs.count }}" in block
+    all. The guard is create-only — conditioned on an *empty* id as well as
+    `comment_mode=nothing-changed` (gate-state's `nothing_changed` derivation,
+    not a raw cell count) — because an existing comment must still be updated
+    to the no-planned-cells body, or a pull request that planned changes and
+    then pushed them away keeps displaying the stale plan table. It also
+    yields to doctor: findings render only as run-page annotations, so the
+    comment footer is their one pull-request-visible pointer and a run with
+    findings still posts. Behaviour lives in the action's shell, so this is
+    source-derived."""
     bodies = _guard_bodies()
     warned = next(c for c in bodies if "doctor.txt" in c)
     assert "grep -q '^::warning' doctor.txt" in warned  # warnings, not notices
