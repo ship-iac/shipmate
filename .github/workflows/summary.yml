@@ -47,10 +47,16 @@ jobs:
           THIS_RUN: ${{ github.event.workflow_run.id }}
         run: |
           set -euo pipefail
-          # --slurp wraps every page into one array before `--jq` runs:
-          # `--paginate` alone evaluates `--jq` once PER PAGE, and picking a
-          # "latest" record independently per page can silently pick the
-          # wrong run once a head_sha's history spans more than one page.
+          # `--slurp` wraps every page into one array before the filter runs.
+          # `gh api` REJECTS `--slurp` together with `--jq` outright -- exit 1,
+          # before any network call ("the `--slurp` option is not supported
+          # with `--jq` or `--template`"), so this pipes into a standalone
+          # `jq` instead (a documented runner prerequisite, CONTRACT.md §
+          # Runner prerequisites -- nothing new needed). Without --slurp,
+          # `--paginate` alone evaluates a `--jq` filter once PER PAGE, and
+          # picking a "latest" record independently per page can silently
+          # pick the wrong run once a head_sha's history spans more than one
+          # page.
           # `status == "completed"`, not `conclusion == "success"`: a FAILING
           # run's own record has conclusion "failure", so filtering to
           # "success" excluded a failing run from ever seeing itself as the
@@ -60,7 +66,7 @@ jobs:
           # produce two runs within the same second) by highest run id.
           newest=$(gh api --paginate --slurp \
             "repos/$GITHUB_REPOSITORY/actions/workflows/$WORKFLOW_ID/runs?head_sha=$SHA&per_page=100" \
-            --jq '[.[].workflow_runs[] | select(.status == "completed")] | sort_by(.run_started_at, .id) | last | .id // empty')
+            | jq -r '[.[].workflow_runs[] | select(.status == "completed")] | sort_by(.run_started_at, .id) | last | .id // empty')
           if [ -n "$newest" ] && [ "$newest" != "$THIS_RUN" ]; then
             echo "superseded by run $newest"
             echo "proceed=false" >> "$GITHUB_OUTPUT"
@@ -118,14 +124,24 @@ jobs:
           # plain `if:` is implicitly `success() && ...`, so the summary action
           # step would then be skipped outright -- same "no gate at all" outcome,
           # one step earlier. Catch the failure instead and still emit a count.
-          # --slurp wraps every page into one array before `--jq` runs:
-          # `--paginate` alone evaluates `--jq` once PER PAGE, and the matrix
-          # cap is 256 cells -- comfortably more than one 100-artifact page. A
-          # bare `[.artifacts[] | ...] | length` would then emit one count PER
-          # PAGE ("100\n56"), and writing that multi-line value to
-          # $GITHUB_OUTPUT corrupts the output file and fails the step.
+          # `--slurp` wraps every page into one array before the filter runs.
+          # `gh api` REJECTS `--slurp` together with `--jq` outright -- exit 1,
+          # before any network call ("the `--slurp` option is not supported
+          # with `--jq` or `--template`"), so this pipes into a standalone
+          # `jq` instead (a documented runner prerequisite, CONTRACT.md §
+          # Runner prerequisites -- nothing new needed). Without --slurp,
+          # `--paginate` alone evaluates a `--jq` filter once PER PAGE, and the
+          # matrix cap is 256 cells -- comfortably more than one 100-artifact
+          # page. A bare per-page filter would then emit one count PER PAGE
+          # ("100\n56"), and writing that multi-line value to $GITHUB_OUTPUT
+          # corrupts the output file and fails the step.
+          #
+          # `pipefail` (still set, just above) still carries a `gh api`
+          # failure through the pipe into this command substitution's exit
+          # status, so the `if` below still catches it with the pipeline now
+          # two stages long.
           if count=$(gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID/artifacts?per_page=100" \
-            --jq '[.[].artifacts[] | select(.name | startswith("cell-summary."))] | length'); then
+            | jq '[.[].artifacts[] | select(.name | startswith("cell-summary."))] | length'); then
             echo "count=$count" >> "$GITHUB_OUTPUT"
           else
             # Report 1 (at least one, unverified), never 0: gate-state's

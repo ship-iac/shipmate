@@ -74,16 +74,37 @@ def test_artifact_count_step_cannot_abort_without_emitting_a_count():
     assert body.count('echo "count=') >= 2
 
 
-def test_artifact_count_aggregates_every_page_before_counting():
-    # `gh api --paginate` evaluates `--jq` once PER PAGE. The matrix cap is
-    # 256 cells, comfortably more than one 100-artifact page, so a bare
-    # `[.artifacts[] | ...] | length` filter emits one count PER PAGE (e.g.
-    # "100\n56"): a multi-line value that corrupts $GITHUB_OUTPUT and fails
-    # the step. `--slurp` must wrap every page into one array first, and the
-    # `--jq` filter must walk `.[]` (the pages) before `.artifacts[]`.
+def test_artifact_count_gh_call_uses_slurp_and_never_jq_together():
+    # `gh api` REJECTS `--slurp` together with `--jq` on the same invocation --
+    # exit 1, before any network call ("the `--slurp` option is not supported
+    # with `--jq` or `--template`"), verified empirically against gh v2.93.0.
+    # `--slurp` must be present (to aggregate every page into one array) and
+    # `--jq` must be ABSENT from that same `gh api` call -- the filter runs as
+    # a separate, standalone `jq` piped afterwards instead.
     body = text().split("id: artifacts", 1)[1].split("- uses:", 1)[0]
-    assert "--paginate --slurp" in body
-    assert "[.[].artifacts[]" in body
+    gh_line = next(line for line in body.splitlines() if "gh api --paginate --slurp" in line)
+    assert "--slurp" in gh_line
+    assert "--jq" not in gh_line
+
+
+def test_artifact_count_aggregates_every_page_in_one_jq_pass():
+    # `--paginate` alone (without --slurp) evaluates a jq filter once PER
+    # PAGE. The matrix cap is 256 cells, comfortably more than one
+    # 100-artifact page, so a per-page count would emit one line PER PAGE
+    # (e.g. "100\n56"): a multi-line value that corrupts $GITHUB_OUTPUT and
+    # fails the step. The piped `jq` must walk `.[]` (the slurped pages)
+    # before `.artifacts[]`, aggregating every page in the one pass.
+    body = text().split("id: artifacts", 1)[1].split("- uses:", 1)[0]
+    assert re.search(r"\|\s*jq\s+'\[\.\[\]\.artifacts\[\]", body)
+
+
+def test_supersede_check_gh_call_uses_slurp_and_never_jq_together():
+    # Same `gh api` constraint as the artifact count: `--slurp` and `--jq`
+    # cannot appear on the same invocation.
+    body = text().split("id: newest", 1)[1].split("- name:", 1)[0]
+    gh_line = next(line for line in body.splitlines() if "gh api --paginate --slurp" in line)
+    assert "--slurp" in gh_line
+    assert "--jq" not in gh_line
 
 
 def test_supersede_check_considers_every_completed_run_not_only_successful():
@@ -94,19 +115,19 @@ def test_supersede_check_considers_every_completed_run_not_only_successful():
     # newer red one. The candidate filter must be status-based, not
     # conclusion-based.
     body = text().split("id: newest", 1)[1].split("- name:", 1)[0]
-    jq_line = next(line for line in body.splitlines() if "--jq '" in line)
+    jq_line = next(line for line in body.splitlines() if line.strip().startswith("| jq"))
     assert 'select(.status == "completed")' in jq_line
     assert "conclusion" not in jq_line
 
 
 def test_supersede_check_aggregates_pages_and_tiebreaks_on_run_id():
-    # Same per-page evaluation hazard as the artifact count, plus: two runs
-    # for the same head SHA (draft->ready) can share a run_started_at second,
-    # and a plain max_by(.run_started_at) tie can make BOTH runs consider
-    # themselves superseded, leaving no gate written at all. Break the tie on
-    # run id.
+    # Same per-page evaluation hazard as the artifact count (aggregated via
+    # the piped `jq`'s `.[].workflow_runs[]`), plus: two runs for the same
+    # head SHA (draft->ready) can share a run_started_at second, and a plain
+    # max_by(.run_started_at) tie can make BOTH runs consider themselves
+    # superseded, leaving no gate written at all. Break the tie on run id.
     body = text().split("id: newest", 1)[1].split("- name:", 1)[0]
-    assert "--paginate --slurp" in body
+    assert re.search(r"\|\s*jq\s+-r\s+'\[\.\[\]\.workflow_runs\[\]", body)
     assert re.search(r"sort_by\(\.run_started_at,\s*\.id\)", body)
 
 
