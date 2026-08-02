@@ -150,9 +150,33 @@ CREDENTIALED_ACTIONS = (
     "actions/gate-refresh",
     "actions/summary",
     "actions/apply-complete",
-    "actions/drift-issues",
     "actions/apply-summary",
 )
+# Actions that will need the same credential-threading guard once they exist,
+# but don't yet -- kept out of CREDENTIALED_ACTIONS itself (a bare substring
+# allowlist with no existence check) so a not-yet-created action can't sit in
+# there silently. Each entry here is an explicit, reviewed choice to exempt it
+# for now, not an accident: see test_credentialed_actions_exist_or_are_pending.
+PENDING_CREDENTIALED_ACTIONS = (
+    "actions/drift-issues",  # Task 9: replaces actions/drift-cell
+)
+
+
+def test_credentialed_actions_exist_or_are_pending():
+    # A bare substring allowlist has no existence check of its own -- a typo in
+    # an entry here (or in PENDING_CREDENTIALED_ACTIONS) would silently disable
+    # the credential-threading guard for every step that calls the real action,
+    # with nothing failing anywhere. Every live entry must resolve to a real
+    # action.yml; every pending entry must NOT (once it exists, move it up).
+    for action in CREDENTIALED_ACTIONS:
+        path = ENGINE / action / "action.yml"
+        assert path.is_file(), f"CREDENTIALED_ACTIONS entry {action!r} has no {path}"
+    for action in PENDING_CREDENTIALED_ACTIONS:
+        path = ENGINE / action / "action.yml"
+        assert not path.is_file(), (
+            f"PENDING_CREDENTIALED_ACTIONS entry {action!r} now has a real {path} "
+            "-- move it into CREDENTIALED_ACTIONS"
+        )
 
 
 def _job_writes_gate(job):
@@ -337,9 +361,10 @@ def _credentialed_step_offenses(wf_name, job_name, job):
 
 
 def test_credentialed_action_steps_thread_app_credentials():
-    """Every step calling gate-refresh/summary/apply-cell/drift-cell passes
-    both `app-id` and `private-key` in its `with:` -- these actions each mint
-    their own App installation token and 403 (or silently no-op) without both.
+    """Every step calling an action in CREDENTIALED_ACTIONS (gate-refresh,
+    summary, apply-complete, apply-summary) passes both `app-id` and
+    `private-key` in its `with:` -- these actions each mint their own App
+    installation token and 403 (or silently no-op) without both.
 
     For a job that is itself a reusable-workflow CALLER (`uses:` points at
     another `.github/workflows/*.yml` and relies on `secrets: inherit` to

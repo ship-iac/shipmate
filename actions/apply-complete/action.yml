@@ -16,16 +16,6 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: Mint App installation token
-      id: token
-      uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
-      with:
-        client-id: ${{ inputs.app-id }}
-        private-key: ${{ inputs.private-key }}
-        owner: ${{ github.repository_owner }}
-        repositories: ${{ github.event.repository.name }}
-        permission-checks: write
-
     - name: List run jobs
       shell: bash
       env:
@@ -54,6 +44,19 @@ runs:
         set -euo pipefail
         python3 "$GITHUB_ACTION_PATH/../../scripts/apply-complete" \
           < "$RUNNER_TEMP/jobs.jsonl" > "$RUNNER_TEMP/complete-ids.txt"
+
+    - name: Mint App installation token
+      # Minted after the jobs listing (which can fail/abort) rather than
+      # before it, so the token's lifetime never spans a step that may not
+      # need it at all -- only the completion PATCH below actually uses it.
+      id: token
+      uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+      with:
+        client-id: ${{ inputs.app-id }}
+        private-key: ${{ inputs.private-key }}
+        owner: ${{ github.repository_owner }}
+        repositories: ${{ github.event.repository.name }}
+        permission-checks: write
 
     - name: Complete the apply checks
       shell: bash

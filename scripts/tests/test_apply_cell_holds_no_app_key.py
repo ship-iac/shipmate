@@ -30,5 +30,12 @@ def test_only_the_completer_job_reads_the_app_key():
 
 
 def test_the_completer_is_the_only_job_naming_the_engine_environment():
-    text = LEVEL.read_text(encoding="utf-8")
-    assert text.count("environment: shipmate-engine") == 1
+    # Parsed, not a `text.count(...) == 1` textual check: that form is
+    # satisfied by ANY single job naming the environment, so moving it onto
+    # e.g. wave0 (which runs the branch-authored apply script) would keep the
+    # count at 1 and the test green while releasing the key to consumer code
+    # -- the exact thing this task exists to prevent. Assert the specific
+    # job, not just the count.
+    doc = yaml.safe_load(LEVEL.read_text(encoding="utf-8"))
+    named = {n for n, j in doc["jobs"].items() if j.get("environment") == "shipmate-engine"}
+    assert named == {"complete"}
