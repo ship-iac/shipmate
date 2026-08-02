@@ -29,22 +29,23 @@ The arbitrary-code-execution residual is upstream of any workflow shipmate
 ships — nothing in the engine can prevent it. The settings below close the
 apply-environment path and limit who can reach even the residual one.
 
-Fork pull requests are outside this. The App key lives only in the
-`shipmate-engine` GitHub Environment (`docs/github-app.md` §Key-exposure
-boundary), reachable only by the trusted `summary`/apply workflows running at
-the default-branch ref — never inside a `pull_request`-triggered job, fork or
-not, since `plan.yml` itself never sees the key. Those trusted workflows also
-refuse to act on a fork head (the `head_repository` guard on the `summary`
-workflow), so a fork pull request never gets a `shipmate / gate` status at
-all. Adding a `pull_request_target` workflow — the usual way to label or
-comment on fork pull requests — reverses that: unlike `pull_request`, it runs
-at the **base** ref, which is exactly what would satisfy `shipmate-engine`'s
-default-branch-only policy if such a job declared that environment — while
-still checking out and acting on content the fork author controls. That
-combination (a ref the policy trusts, executing input it doesn't) is the
-no-push-access version of the attack this page opens with. Don't add one to
-a repository that holds the App key. See "Contributors without push access"
-for the trade-off that follows.
+Fork pull requests are outside this, and are refused outright — the engine will
+not plan a pull request whose head repository is not this repository (see
+"Contributors without push access"). The App key is out of their reach twice
+over: it lives only in the `shipmate-engine` GitHub Environment
+(`docs/github-app.md` §Key-exposure boundary), reachable only by the trusted
+`summary`/apply workflows running at the default-branch ref, and never inside a
+`pull_request`-triggered job, fork or not. Adding a `pull_request_target`
+workflow — the usual way to label or comment on fork pull requests — reverses
+that: unlike `pull_request`, it runs at the **base** ref, which is exactly what
+would satisfy `shipmate-engine`'s default-branch-only policy if such a job
+declared that environment — while still checking out and acting on content the
+fork author controls. That combination (a ref the policy trusts, executing
+input it doesn't) is the no-push-access version of the attack this page opens
+with, and it is reachable regardless of the fork refusal above, which only
+governs the plan path. Don't add one to a repository that holds the App key —
+`shipmate doctor` warns for any workflow file that declares the trigger. See
+"Contributors without push access" for the trade-off that follows.
 
 ## Checklist
 
@@ -261,7 +262,7 @@ Settings → Actions → General:
   the base ref (which would satisfy `shipmate-engine`'s branch policy if the
   job declared that environment) while still acting on fork-author-controlled
   content, which is the no-push-access version of the attack this page opens
-  with.
+  with. `shipmate doctor` reports any workflow file that declares it, by name.
 - **Allowed actions**: allow the engine (`<owner>/shipmate/*`) plus the pinned
   third-party actions the workflows use. This is supply-chain hygiene; it does
   not constrain `run:` steps.
@@ -315,22 +316,35 @@ exactly what the probe exists to catch.
 
 ## Contributors without push access
 
-Fork pull requests cannot complete a shipmate run. A fork's `plan.yml` run
-holds no App key at all — nothing in `plan.yml` ever does now that the key
-lives only in `shipmate-engine` — so there is nothing there to protect. What
-actually stops a fork's plan from producing a gate is downstream: the trusted
-`summary` workflow (run at the default-branch ref, bound to `shipmate-engine`)
+**Fork pull requests are refused outright.** `actions/build-matrix` fails the
+step when the triggering `pull_request` event's head repository is not this
+repository, and there is no input, variable or setting that turns that off — it
+is a rule of the engine, not a configurable. A fork's plan is refused before any
+stack is enumerated, so no `terramate`/`tofu` process ever runs over
+fork-authored HCL on your runners.
+
+That refusal is about **code execution**, not secrets. A fork's `pull_request`
+run receives no repository secrets, and `plan.yml` holds no App key in any case
+— nothing in `plan.yml` ever does, since the key lives only in
+`shipmate-engine` — but a plan cell still executes the pull request's own
+Terramate/OpenTofu code and reads whatever the plan environment exposes as
+*variables*, which are not secrets and are not withheld from a fork. For an
+infrastructure repository that is arbitrary code execution offered to anyone who
+can open a pull request.
+
+The refusal is loud (a red step) rather than a quiet empty matrix, because a
+fork pull request could not merge either way: the trusted `summary` workflow
 refuses to act on a `workflow_run` whose `head_repository` differs from
-`github.repository` (see `docs/github-app.md` §Key-exposure boundary). A
-fork's plan run completes normally; the summary workflow that would mint a
-token, author checks, and create the `shipmate / gate` status declines
-instead, so no gate is ever created and the pull request stays blocked.
-Comment-ops has nothing to dispatch either — no gate, no reviewed plan to
-point `shipmate apply` at.
+`github.repository` (see `docs/github-app.md` §Key-exposure boundary), so no
+`shipmate / gate` status is ever written and the required check never appears.
+A green "nothing to plan" would leave an outside contributor waiting on a gate
+that structurally cannot arrive. Comment-ops has nothing to dispatch either —
+no gate, no reviewed plan to point `shipmate apply` at.
 
 So the fork model is safe but not self-service: a maintainer must bring the
 branch into the repository (`gh pr checkout` then push to a branch) for it to
-plan and apply. Plan that in, rather than granting push access to make the
+plan and apply — which is exactly what the refusal message tells the
+contributor to ask for. Plan that in, rather than granting push access to make the
 inconvenience go away — and resist the other shortcut, a `pull_request_target`
 workflow to do something useful on fork pull requests. That trades the property
 this section rests on for exactly the exposure control 1 exists to limit.

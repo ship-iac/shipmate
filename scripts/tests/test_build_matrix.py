@@ -153,3 +153,157 @@ def test_env_membership_require_env_tag_false_ignores_untagged(monkeypatch):
     stacks_by_env, tags_by_stack = bm.env_membership(all_stacks=True, require_env_tag=False)
     assert stacks_by_env == {"dev-eu": ["stacks/app"]}
     assert tags_by_stack == tags  # orphan still reported in tags, just not bucketed
+
+
+def _payload(head_repo):
+    """A `pull_request` event payload whose head repo is `head_repo`; None
+    models the shape GitHub sends once the fork has been deleted."""
+    repo = {"full_name": head_repo} if head_repo is not None else None
+    return {"pull_request": {"head": {"repo": repo}}}
+
+
+def test_fork_pull_request_is_rejected():
+    err = bm.fork_pr_error("pull_request", "acme/iac", _payload("outsider/iac"))
+    assert err.startswith("::error::")
+    assert "outsider/iac" in err
+
+
+def test_same_repository_pull_request_is_planned():
+    assert bm.fork_pr_error("pull_request", "acme/iac", _payload("acme/iac")) == ""
+
+
+def test_non_pull_request_events_are_never_rejected():
+    # The drift path calls build-matrix with all-stacks on `schedule` /
+    # `workflow_dispatch` and no pull request context, so `head.repo` is absent
+    # exactly as it is for a deleted fork. Keying the guard on that field
+    # instead of on the event would kill nightly drift silently.
+    for event in ("schedule", "workflow_dispatch", "push", ""):
+        assert bm.fork_pr_error(event, "acme/iac", {}) == ""
+        assert bm.fork_pr_error(event, "acme/iac", _payload(None)) == ""
+
+
+def test_undeterminable_head_repository_is_rejected():
+    # Within a pull request event: `head.repo` is null once the fork was
+    # deleted, and the payload is {} when GITHUB_EVENT_PATH could not be read.
+    # Neither is evidence of a same-repository pull request.
+    assert bm.fork_pr_error("pull_request", "acme/iac", _payload(None)).startswith("::error::")
+    assert bm.fork_pr_error("pull_request", "acme/iac", {}).startswith("::error::")
+
+
+def test_event_payload_degrades_to_empty_dict(tmp_path):
+    # Each of these reaches fork_pr_error as {}, which is rejected above.
+    assert bm._event_payload("") == {}
+    assert bm._event_payload(str(tmp_path / "absent.json")) == {}
+    bad = tmp_path / "bad.json"
+    bad.write_text("{not json", encoding="utf-8")
+    assert bm._event_payload(str(bad)) == {}
+    listy = tmp_path / "list.json"
+    listy.write_text("[1, 2]", encoding="utf-8")
+    assert bm._event_payload(str(listy)) == {}
+
+
+def _run_main(monkeypatch, tmp_path, env, cells=(("stacks/app", "dev-eu"),)):
+    """main() with GITHUB_OUTPUT redirected, returning (parsed outputs, calls)
+    where calls records compute_cells' arguments -- so a rejection is
+    observable as the stack enumeration never having run."""
+    out = tmp_path / "out.txt"
+    out.write_text("", encoding="utf-8")
+    monkeypatch.setenv("GITHUB_OUTPUT", str(out))
+    for k in (
+        "SHIPMATE_ALL_STACKS",
+        "GITHUB_EVENT_NAME",
+        "GITHUB_REPOSITORY",
+        "GITHUB_EVENT_PATH",
+    ):
+        monkeypatch.delenv(k, raising=False)
+    for k, v in env.items():
+        monkeypatch.setenv(k, v)
+    called = []
+
+    def fake_compute(all_stacks=False, base=""):
+        called.append((all_stacks, base))
+        return [{"stack": s, "environment": e, "workload": ""} for s, e in cells]
+
+    monkeypatch.setattr(bm, "compute_cells", fake_compute)
+    bm.main()
+    parsed = dict(line.split("=", 1) for line in out.read_text(encoding="utf-8").splitlines())
+    return parsed, called
+
+
+def _event_file(tmp_path, head_repo):
+    import json
+
+    path = tmp_path / "event.json"
+    path.write_text(json.dumps(_payload(head_repo)), encoding="utf-8")
+    return str(path)
+
+
+def test_main_fails_the_step_for_a_fork_and_does_not_enumerate(monkeypatch, tmp_path):
+    # SystemExit, not an empty matrix: no gate is ever written for a fork head,
+    # so a green "nothing to plan" would leave the contributor waiting on a
+    # required check that structurally cannot arrive.
+    with pytest.raises(SystemExit) as excinfo:
+        _run_main(
+            monkeypatch,
+            tmp_path,
+            {
+                "GITHUB_EVENT_NAME": "pull_request",
+                "GITHUB_REPOSITORY": "acme/iac",
+                "GITHUB_EVENT_PATH": _event_file(tmp_path, "outsider/iac"),
+            },
+        )
+    assert str(excinfo.value).startswith("::error::")
+    assert "fork pull requests are not supported" in str(excinfo.value)
+
+
+def test_main_does_not_enumerate_stacks_for_a_fork(monkeypatch, tmp_path):
+    # The rejection must precede the terramate calls, not merely discard them.
+    def boom(*a, **k):
+        pytest.fail("compute_cells ran for a fork pull request")
+
+    monkeypatch.setattr(bm, "compute_cells", boom)
+    monkeypatch.setenv("GITHUB_EVENT_NAME", "pull_request")
+    monkeypatch.setenv("GITHUB_REPOSITORY", "acme/iac")
+    monkeypatch.setenv("GITHUB_EVENT_PATH", _event_file(tmp_path, "outsider/iac"))
+    monkeypatch.setenv("GITHUB_OUTPUT", str(tmp_path / "out.txt"))
+    with pytest.raises(SystemExit):
+        bm.main()
+
+
+def test_main_plans_a_same_repository_pull_request(monkeypatch, tmp_path):
+    outputs, called = _run_main(
+        monkeypatch,
+        tmp_path,
+        {
+            "GITHUB_EVENT_NAME": "pull_request",
+            "GITHUB_REPOSITORY": "acme/iac",
+            "GITHUB_EVENT_PATH": _event_file(tmp_path, "acme/iac"),
+        },
+    )
+    assert outputs["empty"] == "false"
+    assert called == [(False, "")]
+
+
+def test_main_drift_run_is_unaffected(monkeypatch, tmp_path):
+    # all-stacks, no pull request context: every stack must still be enumerated.
+    outputs, called = _run_main(
+        monkeypatch,
+        tmp_path,
+        {
+            "SHIPMATE_ALL_STACKS": "true",
+            "GITHUB_EVENT_NAME": "schedule",
+            "GITHUB_REPOSITORY": "acme/iac",
+        },
+    )
+    assert outputs["empty"] == "false"
+    assert called == [(True, "")]
+
+
+def test_build_matrix_action_declares_no_fork_input():
+    # The refusal is a business rule, not a configurable: an input here would
+    # be a way to turn it off.
+    import yaml
+    from _loader import ACTIONS
+
+    doc = yaml.safe_load((ACTIONS / "build-matrix/action.yml").read_text(encoding="utf-8"))
+    assert set(doc["inputs"]) == {"base-sha", "all-stacks"}

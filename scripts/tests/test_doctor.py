@@ -1579,3 +1579,137 @@ def test_doctor_marker_matches_action_upsert():
     src = (ACTIONS / "comment-ops" / "action.yml").read_text(encoding="utf-8")
     assert src.count(doctor.DOCTOR_MARKER) >= 1, "upsert step no longer greps the script's marker"
     assert "scripts/doctor" in src, "comment-ops action no longer calls scripts/doctor"
+
+
+def _fork_responses(files):
+    """Listing + contents for the fork-trigger probe: {filename: text}."""
+    responses = {f"{_WF_DIR}{_REF}": _wf_listing(*files)}
+    for name, text in files.items():
+        responses[f"{_WF_DIR}/{name}{_REF}"] = _wf_file(text)
+    return responses
+
+
+def test_pull_request_target_trigger_warned(monkeypatch):
+    responses = _fork_responses({"label.yml": "on:\n  pull_request_target:\n    types: [opened]\n"})
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    out = doctor._fork_trigger_warnings(_ctx())
+    assert len(out) == 1
+    assert out[0][0] == doctor.WARNING
+    assert "label.yml" in out[0][1]
+    assert "pull_request_target" in out[0][1]
+
+
+def test_pull_request_target_in_a_flow_sequence_warned(monkeypatch):
+    # `on: [push, pull_request_target]` is the same trigger written inline; a
+    # probe that only recognised the block form would miss it entirely.
+    responses = _fork_responses({"label.yml": "on: [push, pull_request_target]\n"})
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    out = doctor._fork_trigger_warnings(_ctx())
+    assert len(out) == 1
+    assert "label.yml" in out[0][1]
+
+
+def test_pull_request_target_as_a_sequence_item_warned(monkeypatch):
+    responses = _fork_responses({"label.yml": "on:\n  - push\n  - pull_request_target\n"})
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    assert len(doctor._fork_trigger_warnings(_ctx())) == 1
+
+
+def test_plain_pull_request_trigger_is_silent(monkeypatch):
+    # The prefix must not match: `pull_request:` is the ordinary plan trigger
+    # and every consumer has one. A probe that fired on it would fire always.
+    responses = _fork_responses({"plan.yml": "on:\n  pull_request:\n    branches: [main]\n"})
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    assert doctor._fork_trigger_warnings(_ctx()) == []
+
+
+def test_commented_out_pull_request_target_is_silent(monkeypatch):
+    # The lines a careful repository writes *because* it has no such trigger.
+    # Reporting them would train readers to ignore the finding. Both shapes the
+    # pattern would otherwise match are here: a trailing comment carrying the
+    # flow-sequence form, and a commented-out key at the head of a line.
+    responses = _fork_responses(
+        {
+            "plan.yml": "on: [pull_request]  # never [pull_request_target]\n",
+            "drift.yml": "on:\n  # pull_request_target:  <- deliberately absent\n  schedule:\n",
+        }
+    )
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    assert doctor._fork_trigger_warnings(_ctx()) == []
+
+
+def test_quoted_event_name_comparison_is_silent(monkeypatch):
+    # `github.event_name == 'pull_request_target'` compares against the
+    # trigger; it does not declare one.
+    responses = _fork_responses(
+        {
+            "plan.yml": "on:\n  pull_request:\njobs:\n  a:\n"
+            "    if: github.event_name == 'pull_request_target'\n"
+        }
+    )
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    assert doctor._fork_trigger_warnings(_ctx()) == []
+
+
+def test_every_offending_workflow_is_named(monkeypatch):
+    responses = _fork_responses(
+        {
+            "label.yml": "on:\n  pull_request_target:\n",
+            "plan.yml": "on:\n  pull_request:\n",
+            "triage.yml": "on: [pull_request_target]\n",
+        }
+    )
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    out = doctor._fork_trigger_warnings(_ctx())
+    assert sorted(t.split("`")[1] for _, t in out) == ["label.yml", "triage.yml"]
+
+
+def test_fork_trigger_without_a_commit_is_a_note_not_a_read(monkeypatch):
+    # Same reasoning as the pin probe: reading the default branch instead would
+    # report the trigger on the very pull request that removes it.
+    def gh(path):
+        pytest.fail(f"the fork-trigger probe read the API with no commit: {path}")
+
+    monkeypatch.setattr(doctor, "_gh_json", gh)
+    out = doctor._fork_trigger_warnings(_ctx(head_sha=""))
+    assert out == [doctor.FORK_TRIGGER_NO_COMMIT]
+    assert out[0][0] == doctor.NOTICE
+
+
+def test_fork_trigger_unreadable_directory_degrades_to_a_note(monkeypatch):
+    def gh(path):
+        raise SystemExit(f"::error::command failed (1): gh api {path}")
+
+    monkeypatch.setattr(doctor, "_gh_json", gh)
+    out = doctor._fork_trigger_warnings(_ctx())
+    assert out == [doctor.FORK_TRIGGER_UNREADABLE]
+    assert out[0][0] == doctor.NOTICE
+    assert "::error::" not in out[0][1] and "gh api" not in out[0][1]
+
+
+def test_fork_trigger_unreadable_file_degrades_to_a_note(monkeypatch):
+    listing = {f"{_WF_DIR}{_REF}": _wf_listing("label.yml")}
+
+    def gh(path):
+        if path in listing:
+            return listing[path]
+        raise SystemExit(f"::error::command failed (1): gh api {path}")
+
+    monkeypatch.setattr(doctor, "_gh_json", gh)
+    assert doctor._fork_trigger_warnings(_ctx()) == [doctor.FORK_TRIGGER_UNREADABLE]
+
+
+def test_fork_trigger_probe_is_registered(monkeypatch):
+    """An unregistered probe runs nowhere while its own unit tests stay green --
+    assert it actually executes as part of `warnings()`."""
+    assert doctor._fork_trigger_warnings in doctor.PROBES
+    responses = {
+        f"repos/{_REPO}/rules/branches/{_BRANCH}?per_page=100": _gate_rule(),
+        f"repos/{_REPO}/environments?per_page=100": _environments("dev-eu", "dev-eu-apply"),
+        **_quiet_new_probes(),
+        f"{_WF_DIR}{_REF}": _wf_listing("label.yml"),
+        f"{_WF_DIR}/label.yml{_REF}": _wf_file("on:\n  pull_request_target:\n"),
+    }
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    out = doctor.warnings(_ctx())
+    assert any("pull_request_target" in t for _, t in out)
