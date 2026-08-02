@@ -151,15 +151,14 @@ CREDENTIALED_ACTIONS = (
     "actions/summary",
     "actions/apply-complete",
     "actions/apply-summary",
+    "actions/drift-issues",
 )
 # Actions that will need the same credential-threading guard once they exist,
 # but don't yet -- kept out of CREDENTIALED_ACTIONS itself (a bare substring
 # allowlist with no existence check) so a not-yet-created action can't sit in
 # there silently. Each entry here is an explicit, reviewed choice to exempt it
 # for now, not an accident: see test_credentialed_actions_exist_or_are_pending.
-PENDING_CREDENTIALED_ACTIONS = (
-    "actions/drift-issues",  # Task 9: replaces actions/drift-cell
-)
+PENDING_CREDENTIALED_ACTIONS = ()
 
 
 def test_credentialed_actions_exist_or_are_pending():

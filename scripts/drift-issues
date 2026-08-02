@@ -1,0 +1,179 @@
+#!/usr/bin/env python3
+"""Author drift Issues from every drift-cell's uploaded cell.json, and notify
+Slack once per drifted cell -- the same per-run granularity drift-cell's own
+Slack step used to have, just relocated.
+
+Runs from the drift workflow's trusted trailing `issues` job -- the only place
+on the drift path that mints the App key. `drift-cell` no longer touches
+Issues (or Slack) at all: a plan environment must stay policy-free for
+planning to work at all, so a job naming one is reachable from a feature
+branch, and the credentialed work moved here so a compromised drift-cell run
+cannot open/close/comment on an Issue.
+
+A cell whose plan attempt itself did not succeed (`plan_ok` false -- state
+restore or `terramate plan` failed, or the composite action aborted before
+`Compose cell summary` could read a real classification) is skipped entirely:
+it says nothing reliable about drift, so an existing open Issue for that
+stack x env is left untouched rather than being auto-closed as if the
+environment were clean.
+"""
+
+import glob
+import json
+import os
+import subprocess
+import sys
+import urllib.error
+import urllib.request
+
+CELL_KEYS = (
+    "stack",
+    "stack_name",
+    "environment",
+    "plan_ok",
+    "drifted",
+    "add",
+    "change",
+    "destroy",
+)
+
+LABEL = "drift"
+
+
+def _run(args):
+    # args is a code-controlled `gh` invocation (never user input), shell=False -- safe.
+    p = subprocess.run(args, capture_output=True, text=True)  # noqa: S603
+    if p.returncode != 0:
+        sys.stderr.write(p.stderr)
+        raise SystemExit(f"::error::command failed ({p.returncode}): {' '.join(args)}")
+    return p.stdout
+
+
+def load_cells(cells_dir):
+    """[cell, ...] from every downloaded `drift-summary.*/cell.json`, sorted
+    for a deterministic run order. A cell.json missing a schema key is
+    drift-cell/this-script pin skew -- fail loud rather than silently drop a
+    stack x env's drift state."""
+    out = []
+    for p in sorted(glob.glob(os.path.join(cells_dir, "**", "cell.json"), recursive=True)):
+        with open(p, encoding="utf-8") as fh:
+            cell = json.load(fh)
+        missing = [k for k in CELL_KEYS if k not in cell]
+        if missing:
+            raise SystemExit(
+                f"::error::cell summary {p} missing keys {missing} -- drift-cell and "
+                "this script must be pinned at the same engine SHA"
+            )
+        out.append(cell)
+    return out
+
+
+def existing_issue_numbers():
+    """{title: number} for every OPEN issue labelled `drift` -- one list call
+    for the whole run, not one per cell. --limit caps how many are scanned,
+    kept well above the realistic count of simultaneously-drifting stack x
+    envs so an existing issue is never missed (which would open a duplicate)."""
+    rows = json.loads(
+        _run(
+            [
+                "gh",
+                "issue",
+                "list",
+                "--label",
+                LABEL,
+                "--state",
+                "open",
+                "--limit",
+                "1000",
+                "--json",
+                "number,title",
+            ]
+        )
+    )
+    return {row["title"]: row["number"] for row in rows}
+
+
+def _title(cell):
+    return f"drift: {cell['environment']} / {cell['stack_name']}"
+
+
+def _body(cell, run_url):
+    return (
+        f"Drift detected in `{cell['stack_name']}` @ `{cell['environment']}`: "
+        f"+{cell['add']} ~{cell['change']} -{cell['destroy']}. [Drift run]({run_url}) "
+        "-- plan output is in that run's log. Auto-closed on the next clean drift run."
+    )
+
+
+def _ensure_label(created):
+    if created[0]:
+        return
+    # Best-effort: the label may already exist. Not run through `_run` (which
+    # would fail the whole job on the common "already exists" case).
+    args = ["gh", "label", "create", LABEL, "--color", "FBCA04"]  # noqa: S607
+    args += ["--description", "shipmate drift", "--force"]
+    subprocess.run(args, capture_output=True, text=True)  # noqa: S603
+    created[0] = True
+
+
+def upsert_or_close(cell, existing, run_url, label_created):
+    """Create/update/close this cell's Issue. Returns True when this cell just
+    became (or still is) drifted with a fresh body -- the Slack-notify signal."""
+    if not cell["plan_ok"]:
+        return False
+    title = _title(cell)
+    number = existing.get(title)
+    if cell["drifted"]:
+        body = _body(cell, run_url)
+        if number is not None:
+            _run(["gh", "issue", "edit", str(number), "--body", body])
+        else:
+            _ensure_label(label_created)
+            _run(["gh", "issue", "create", "--title", title, "--label", LABEL, "--body", body])
+        return True
+    if number is not None:
+        resolved = f"Drift resolved -- clean plan for {cell['environment']} / {cell['stack_name']}."
+        _run(["gh", "issue", "close", str(number), "--comment", resolved])
+    return False
+
+
+def notify_slack(webhook, cell):
+    payload = json.dumps(
+        {"text": f":ocean: drift detected: {cell['environment']} / {cell['stack_name']}"}
+    ).encode()
+    # webhook is a fixed repo/org variable (a GitHub Environment var this
+    # action's caller supplies), never user input -- not an arbitrary scheme
+    # (create-github-app-token/gh already require https endpoints throughout
+    # this codebase).
+    req = urllib.request.Request(  # noqa: S310
+        webhook, data=payload, headers={"Content-Type": "application/json"}, method="POST"
+    )
+    with urllib.request.urlopen(req, timeout=10) as resp:  # noqa: S310
+        resp.read()
+
+
+def main():
+    cells = load_cells(os.environ.get("SHIPMATE_CELLS_DIR", "drift"))
+    if not cells:
+        return
+    run_url = (
+        f"{os.environ['GITHUB_SERVER_URL']}/{os.environ['GITHUB_REPOSITORY']}"
+        f"/actions/runs/{os.environ['GITHUB_RUN_ID']}"
+    )
+    existing = existing_issue_numbers()
+    webhook = os.environ.get("SHIPMATE_SLACK_WEBHOOK", "")
+    label_created = [False]
+    for cell in cells:
+        drifted_now = upsert_or_close(cell, existing, run_url, label_created)
+        if drifted_now and webhook:
+            try:
+                notify_slack(webhook, cell)
+            except (urllib.error.URLError, TimeoutError) as exc:
+                print(
+                    "::warning::slack notify failed for "
+                    f"{cell['environment']} / {cell['stack_name']}: {exc}"
+                )
+
+
+if __name__ == "__main__":
+    main()
