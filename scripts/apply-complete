@@ -1,0 +1,41 @@
+#!/usr/bin/env python3
+"""Select the apply-check ids to complete: the pre-flight snapshot intersected
+with the wave jobs that actually succeeded in THIS run.
+
+Evidence is `GET /actions/runs/{id}/jobs`, not the cells' own artifacts: a job
+conclusion is written by GitHub, so one cell cannot claim another applied. A
+cell lying about itself by exiting 0 is irreducible and is the trust level the
+per-cell completion already had.
+
+Job names are matched by suffix because a called workflow's jobs display as
+`<caller job> / <called job> / <matrix job>`, and CONTRACT.md pins the matrix
+job's own name to `apply / <stack> / <env>`.
+"""
+
+import json
+import os
+import sys
+
+SEP = "\x00"
+
+
+def to_complete(snapshot, jobs):
+    succeeded = {j.get("name", "") for j in jobs if j.get("conclusion") == "success"}
+    out = []
+    for key, ids in snapshot.items():
+        stack, env = key.split(SEP)
+        suffix = f"apply / {stack} / {env}"
+        if any(name == suffix or name.endswith(f"/ {suffix}") for name in succeeded):
+            out.extend(ids)
+    return sorted(out)
+
+
+def main():
+    snapshot = json.loads(os.environ["SHIPMATE_SNAPSHOT_JSON"])
+    jobs = [json.loads(line) for line in sys.stdin if line.strip()]
+    for cid in to_complete(snapshot, jobs):
+        print(cid)
+
+
+if __name__ == "__main__":
+    main()
