@@ -71,10 +71,17 @@ findings as workflow annotations titled `shipmate doctor`
 (`::warning title=shipmate doctor::<text>` / `::notice title=shipmate
 doctor::<text>`) — read-only, never blocking. Comment `shipmate doctor` on a
 pull request for a consolidated report: a sticky comment (marker `<!--
-shipmate:doctor -->`, upserted in place like the plan comment) combining eight
+shipmate:doctor -->`, upserted in place like the plan comment) combining nine
 live probes — a missing or mis-pinned `shipmate / gate` rule on the default
 branch (no active ruleset requiring it, or one that doesn't pin
-`integration_id` to the shipmate App, or that isn't strict), a missing GitHub
+`integration_id` to the shipmate App, or that isn't strict),
+whether the default branch's `pull_request` rule requires **code-owner** review
+(`docs/hardening.md` #3–5) — an approval count alone is not reported as
+sufficient, because the shipmate App can submit an approving review, so only a
+CODEOWNERS review is out of reach of a leaked App private key;
+`required_approving_review_count: 0` is the supported sole-maintainer mode and
+is reported as a note, not a warning,
+a missing GitHub
 Environment (`<env>` / `<env>-apply`) for a tagged-in environment, the
 plan/apply environment protection shape (a plan environment must have no
 approval-type protection rules — required reviewers or wait timers — and no
@@ -102,7 +109,7 @@ whether the shipmate App installation still grants the manifest's full
 permission set — with the warning and failure annotations GitHub already
 recorded on this commit's workflow runs (shipmate's own and any other
 Actions workflow run on that commit; third-party-app-authored check runs are
-excluded). Only six of the eight probes can produce a finding from the plan
+excluded). Only seven of the nine probes can produce a finding from the plan
 path's own `annotate`-mode run (`actions/summary`): the approvers-team probe
 needs the `SHIPMATE_TEAM` environment variable, which the plan path does
 not supply, and

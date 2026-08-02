@@ -121,7 +121,21 @@ def test_declared_envs_keeps_well_formed_entries_alongside_malformed_ones(tmp_pa
     assert doctor._declared_envs(tmp_path) == {"dev-eu"}
 
 
+def _pull_request_rule(code_owner=True, count=1):
+    return {
+        "type": "pull_request",
+        "parameters": {
+            "required_approving_review_count": count,
+            "require_code_owner_review": code_owner,
+        },
+    }
+
+
 def _gate_rule(integration_id=999, strict=True):
+    """The `rules/branches` payload both rule probes read. Carries a healthy
+    `pull_request` rule so tests aimed at the gate probe don't pick up the
+    review probe's finding as incidental noise -- the same reason
+    `_quiet_new_probes` exists."""
     return [
         {
             "type": "required_status_checks",
@@ -132,6 +146,7 @@ def _gate_rule(integration_id=999, strict=True):
                 ],
             },
         },
+        _pull_request_rule(),
     ]
 
 
@@ -223,7 +238,8 @@ def test_gate_rule_absent_warned(monkeypatch):
     responses = {
         # no required_status_checks rule at all
         f"repos/{_REPO}/rules/branches/{_BRANCH}?per_page=100": [
-            {"type": "deletion", "parameters": {}}
+            {"type": "deletion", "parameters": {}},
+            _pull_request_rule(),
         ],
         f"repos/{_REPO}/environments?per_page=100": _environments(
             "dev-eu", "dev-eu-apply", "shipmate-engine"
@@ -276,9 +292,15 @@ def test_probe_403_degrades_to_note_not_failure(monkeypatch):
 
     monkeypatch.setattr(doctor, "_gh_json", fake_gh_json)
     out = doctor.warnings(_ctx())
-    assert len(out) == 2
+    # Two probes read rules/branches and degrade independently -- that is the
+    # point of the per-probe read; one endpoint failing must not let either
+    # finding be silently attributed to the other.
+    assert len(out) == 3
     texts = [t for _, t in out]
-    assert any("could not verify" in t and "probe skipped" in t for t in texts)
+    degraded = [t for t in texts if "could not verify" in t and "probe skipped" in t]
+    assert len(degraded) == 2
+    assert any("gate rule" in t for t in degraded)
+    assert any("review rule" in t for t in degraded)
     assert any("dev-eu-apply" in t for t in texts)
 
 
@@ -296,10 +318,9 @@ def test_probe_generic_exception_degrades_to_note(monkeypatch):
 
     monkeypatch.setattr(doctor, "_gh_json", fake_gh_json)
     out = doctor.warnings(_ctx())
-    assert len(out) == 1
-    level, text = out[0]
-    assert level == doctor.WARNING
-    assert "could not verify" in text and "probe skipped" in text
+    assert len(out) == 2
+    assert all(level == doctor.WARNING for level, _ in out)
+    assert all("could not verify" in t and "probe skipped" in t for _, t in out)
 
 
 def test_degrade_note_names_the_probe_and_drops_the_workflow_command_prefix(monkeypatch):
@@ -320,10 +341,9 @@ def test_degrade_note_names_the_probe_and_drops_the_workflow_command_prefix(monk
 
     monkeypatch.setattr(doctor, "_gh_json", gh)
     out = doctor.warnings(_ctx())
-    assert len(out) == 1
-    level, text = out[0]
+    assert len(out) == 2
+    level, text = next((lv, t) for lv, t in out if "gate rule" in t)
     assert level == doctor.WARNING
-    assert "gate rule" in text  # which probe was skipped
     assert "command failed (1)" in text  # the reason survives
     assert "::error::" not in text
     assert "gh api" not in text and "rules/branches" not in text
@@ -1713,3 +1733,61 @@ def test_fork_trigger_probe_is_registered(monkeypatch):
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
     out = doctor.warnings(_ctx())
     assert any("pull_request_target" in t for _, t in out)
+
+
+def _rules_only(*rules):
+    return {f"repos/{_REPO}/rules/branches/{_BRANCH}?per_page=100": list(rules)}
+
+
+def test_review_rule_healthy_is_silent(monkeypatch):
+    responses = _rules_only(_pull_request_rule(code_owner=True, count=1))
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    assert doctor._review_rule_warnings(_ctx()) == []
+
+
+def test_review_rule_without_code_owner_review_warned(monkeypatch):
+    # An approval count is not a backstop: the App holds pull-requests:write
+    # and can submit a counting APPROVED review, which the exposure proof
+    # demonstrated. Only a CODEOWNERS review is App-proof.
+    responses = _rules_only(_pull_request_rule(code_owner=False, count=2))
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    out = doctor._review_rule_warnings(_ctx())
+    assert out == [(doctor.WARNING, doctor._CODE_OWNER_REVIEW_OFF.format(branch=_BRANCH))]
+
+
+def test_review_rule_sole_maintainer_mode_is_a_notice(monkeypatch):
+    # required_approving_review_count: 0 is a shipped, supported mode. A
+    # warning on every run for a setting the sole maintainer will not change
+    # trains readers to ignore doctor, so it is a notice.
+    responses = _rules_only(_pull_request_rule(code_owner=False, count=0))
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    out = doctor._review_rule_warnings(_ctx())
+    assert out == [(doctor.NOTICE, doctor._SOLE_MAINTAINER_REVIEW.format(branch=_BRANCH))]
+
+
+def test_review_rule_absent_warned(monkeypatch):
+    responses = _rules_only({"type": "required_status_checks", "parameters": {}})
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    out = doctor._review_rule_warnings(_ctx())
+    assert out == [(doctor.WARNING, doctor._REVIEW_RULE_ABSENT.format(branch=_BRANCH))]
+
+
+def test_review_rule_without_parameters_is_unverified_not_misconfigured(monkeypatch):
+    # A token that can list the rule but not read its parameters gets the rule
+    # with an empty body. Reporting that as "code-owner review is off" would be
+    # a false warning about a correctly configured repository.
+    responses = _rules_only({"type": "pull_request", "parameters": {}})
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    out = doctor._review_rule_warnings(_ctx())
+    assert out == [(doctor.NOTICE, doctor._REVIEW_RULE_UNREADABLE.format(branch=_BRANCH))]
+
+
+def test_review_rule_missing_parameters_key_is_unverified(monkeypatch):
+    responses = _rules_only({"type": "pull_request"})
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    out = doctor._review_rule_warnings(_ctx())
+    assert out == [(doctor.NOTICE, doctor._REVIEW_RULE_UNREADABLE.format(branch=_BRANCH))]
+
+
+def test_review_rule_probe_is_registered():
+    assert doctor._review_rule_warnings in doctor.PROBES

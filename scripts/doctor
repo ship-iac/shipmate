@@ -7,7 +7,7 @@ Three modes, selected via SHIPMATE_DOCTOR_MODE:
   actions/summary right after a plan run. NEVER fails the run: a probe
   error becomes a 'could not verify' note — doctor guards onboarding, it
   must not take down the plan path.
-- report: render the sticky PR comment on demand — the eight live probes'
+- report: render the sticky PR comment on demand — the nine live probes'
   findings plus a harvest of the warnings GitHub already recorded as
   annotations on this commit's workflow check runs.
 - check-ids: reduce a check-runs JSONL listing to the (id, name) pairs worth
@@ -18,6 +18,10 @@ Probes:
 - gate ruleset on the default branch: a required_status_checks rule whose
   contexts include 'shipmate / gate' pinned to integration_id == the shipmate
   App id, with strict (up-to-date) policy on.
+- `pull_request` rule on the default branch: code-owner review must be
+  required. An approval count is not a substitute — the App can submit an
+  approving review — and `required_approving_review_count: 0` is the supported
+  sole-maintainer mode, reported as a note rather than a warning.
 - GitHub Environment pair (<env>, <env>-apply) exists for every planned env.
 - protection shape of that pair: a plan env must have no reviewers and no
   branch policy; an apply env with no protection is worth a note.
@@ -73,6 +77,32 @@ DOCTOR_TITLE = "shipmate doctor"
 # setting), WARNING is a misconfiguration. Rendered as ::notice::/::warning::
 # in annotate mode.
 WARNING, NOTICE = "warning", "notice"
+
+# Findings of the review-rule probe. Format templates rather than finished
+# tuples: each names the default branch, which is per repository.
+_REVIEW_RULE_ABSENT = (
+    "no active ruleset puts a `pull_request` rule on `{branch}` — nothing there "
+    "requires the code-owner review that a leaked App private key cannot forge "
+    "(docs/hardening.md #3–5). Classic branch protection is not reported by this "
+    "endpoint, so check it if that is what this repository uses."
+)
+_CODE_OWNER_REVIEW_OFF = (
+    "the `pull_request` rule on `{branch}` requires approvals but not code-owner "
+    "review — the shipmate App can submit an approving review, so an approval "
+    "count alone is no defence against a leaked App private key. Set "
+    "`require_code_owner_review` (docs/hardening.md #3–5)."
+)
+_SOLE_MAINTAINER_REVIEW = (
+    "the `pull_request` rule on `{branch}` requires no approving review "
+    "(sole-maintainer mode, docs/hardening.md #3–5) — a supported mode, but it "
+    "leaves the `<env>-apply` required reviewer as the only control a leaked App "
+    "private key cannot satisfy (#6)."
+)
+# Same degrade posture as FORK_TRIGGER_UNREADABLE: unread is not misconfigured.
+_REVIEW_RULE_UNREADABLE = (
+    "the `pull_request` rule on `{branch}` carried no parameters — review "
+    "requirements not verified."
+)
 
 DOCTOR_MARKER = "<!-- shipmate:doctor -->"
 ANNOTATION_CAP = 10  # GitHub keeps at most 10 annotations per level per step
@@ -144,6 +174,45 @@ def _gate_rule_warnings(ctx):
             "merges are not gated (see docs/branch-protection.md).",
         )
     ]
+
+
+def _review_rule_warnings(ctx):
+    """`docs/hardening.md` #3–5 asks the default-branch ruleset for a
+    `pull_request` rule requiring code-owner review, and #6 for `<env>-apply`
+    required reviewers. Those two are the controls a holder of the App private
+    key structurally cannot satisfy — an App cannot be a CODEOWNER and cannot
+    approve a pending deployment — so they are what still holds if the key
+    leaks. Only the first is a ruleset setting; #6 is `_env_protection_warnings`.
+
+    An approval *count* is not one of them. The App holds `pull-requests: write`
+    and can submit a counting approving review, so `required_approving_review_count`
+    alone is forgeable by exactly the attacker in scope; the finding keys on
+    `require_code_owner_review`.
+
+    Re-reads `rules/branches` rather than sharing `_gate_rule_warnings`'
+    response: `warnings()` degrades per probe, so a shared read would let one
+    endpoint failure silence both findings — the trade `_existing_env_names`
+    and `_fork_trigger_warnings` also make.
+
+    Two limits it shares with the gate probe. It reports the first matching
+    rule, while GitHub enforces the union across layered rulesets, so a second
+    ruleset supplying code-owner review can still draw a warning. And the
+    endpoint returns rulesets only — a repository on classic branch protection
+    reads as having no rule, which the finding text says out loud."""
+    branch = ctx["default_branch"]
+    rules = _gh_json(f"repos/{ctx['repo']}/rules/branches/{branch}?per_page=100")
+    for rule in rules:
+        if rule.get("type") != "pull_request":
+            continue
+        params = rule.get("parameters") or {}
+        if not params:
+            return [(NOTICE, _REVIEW_RULE_UNREADABLE.format(branch=branch))]
+        if not params.get("required_approving_review_count"):
+            return [(NOTICE, _SOLE_MAINTAINER_REVIEW.format(branch=branch))]
+        if not params.get("require_code_owner_review"):
+            return [(WARNING, _CODE_OWNER_REVIEW_OFF.format(branch=branch))]
+        return []
+    return [(WARNING, _REVIEW_RULE_ABSENT.format(branch=branch))]
 
 
 def _existing_env_names(ctx):
@@ -693,6 +762,7 @@ def _app_permission_warnings(ctx):
 
 PROBES = (
     _gate_rule_warnings,
+    _review_rule_warnings,
     _environment_warnings,
     _env_protection_warnings,
     _engine_environment_warnings,

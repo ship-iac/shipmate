@@ -170,6 +170,14 @@ only on `NONE` or `APPROVED`; see `docs/branch-protection.md` §"Review policy")
 That is a deliberate mode, not an oversight, but do not run it with more than
 one person holding push access.
 
+`require_code_owner_review` is doing more work here than the approval count.
+A GitHub App cannot be listed in `CODEOWNERS`, so a code-owner review is one of
+only two controls on this page that a holder of the App private key cannot
+satisfy (the other is #6). An approval *count* is not: the App holds
+`pull-requests: write` and can submit an approving review that counts toward it.
+`shipmate doctor` warns when the rule requires approvals but not code-owner
+review — but doctor never fails a run, so that is a warning, not enforcement.
+
 ## 6. Environment reviewers — the one gate that holds
 
 Environment reviewers are **users and teams**. A GitHub App installation token
