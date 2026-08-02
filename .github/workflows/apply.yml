@@ -52,7 +52,7 @@ jobs:
     name: waves
     needs: [detect]
     if: ${{ !failure() && !cancelled() && needs.detect.outputs.empty != 'true' }}
-    uses: ship-iac/shipmate/.github/workflows/apply-env-level.yml@a5822b099661d7e12fd47b631ec609012efd9551
+    uses: ship-iac/shipmate/.github/workflows/apply-env-level.yml@4ae0a42575c955217aec3ee678d7608f62ffe7b4 # provisional pin: branch-local commit, not yet on main -- repin with dev/repin_internal.py once this merges
     permissions: { contents: read, actions: read }
     with:
       waves_json: ${{ needs.detect.outputs.waves }}
@@ -71,6 +71,11 @@ jobs:
     needs: [detect, apply]
     if: always()
     runs-on: ubuntu-latest
+    # Both steps below mint the App key (via secrets.SHIPMATE_APP_PRIVATE_KEY),
+    # same as apply-env-level.yml's complete job -- deployment branch policy
+    # restricts this environment to the default branch, so a branch-authored
+    # workflow naming it is denied and never sees the key.
+    environment: shipmate-engine
     # gate-refresh mints its own App token (checks:read scan + statuses:write
     # gate write); apply-summary mints its own App token too, also
     # checks:read now -- it scans the head SHA's apply checks to fold their
