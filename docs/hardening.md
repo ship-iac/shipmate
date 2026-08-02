@@ -287,6 +287,29 @@ trust to all of them.
   `docs/github-app.md` §7. Anyone who had push access could have copied the
   PEM out of a workflow run, and revoking their access does not invalidate it.
 
+**The multi-repo cost, stated plainly.** GitHub has no org-level environment
+secrets — environments are per repository — so an organisation whose IaC is
+split across N repositories places the key N times and rotates it N times. That
+is a genuine operational cost, and it is worth being clear about what it is and
+is not:
+
+- It is **not** a cost this scoping introduced. The alternative, an org secret
+  with `--visibility selected`, is readable by any workflow on any branch in
+  every selected repository — the same exposure replicated N times, each
+  independently reachable by that repository's own developers. Per-repository
+  scoping is unavoidable once the key lives in the repositories at all.
+- It **is** work that should be automated rather than clicked: place and rotate
+  across every repository in one scripted pass, not one at a time.
+- The only way to remove it is to stop putting the key in the repositories,
+  which requires something outside GitHub Actions to hold it. That is a
+  different architecture, not a setting.
+
+**A dead end, so it is not re-proposed:** a single "control repository" holding
+the key on behalf of the others does not work without a server. Triggering a
+workflow in another repository requires a credential in the calling repository —
+a `GITHUB_TOKEN` cannot trigger another repository's workflow — so every IaC
+repository would need a secret in order to avoid having a secret.
+
 ## 15. Retention and disclosure
 
 The `shipmate doctor` report is written to the job summary as well as to a
