@@ -18,10 +18,6 @@ on:
 jobs:
   detect:
     runs-on: ubuntu-latest
-    # `gh workflow run apply-all.yml` by a human with write access would
-    # otherwise skip every requirement in scripts/authorize. A human cannot
-    # make github.actor a bot login; the App's dispatch always is one.
-    if: ${{ endsWith(github.actor, '[bot]') }}
     permissions: { contents: read, checks: read, actions: read }
     outputs:
       envlevel0_waves: ${{ steps.d.outputs.envlevel0_waves }}
@@ -37,6 +33,19 @@ jobs:
       excluded_envs: ${{ steps.d.outputs.excluded_envs }}
       skipped_envs: ${{ steps.d.outputs.skipped_envs }}
     steps:
+      # `gh workflow run apply-all.yml` by a human with write access would
+      # otherwise skip every requirement in scripts/authorize. A human cannot
+      # make github.actor a bot login, so this rejects any human dispatch --
+      # though it admits any bot actor with actions:write, not only this App.
+      # A failing step (not a job-level `if:`) so `failure()` propagates and
+      # blocks every downstream job, including `summary` (`if: always()`),
+      # rather than leaving `detect` skipped with empty outputs that let later
+      # jobs run anyway.
+      - name: Reject dispatches that did not come from a bot actor
+        if: ${{ !endsWith(github.actor, '[bot]') }}
+        run: |
+          echo "::error::apply-all must be dispatched by the shipmate App via comment-ops, not by a direct workflow_dispatch"
+          exit 1
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { fetch-depth: 0, ref: "${{ inputs.ref }}" }
       - uses: ship-iac/shipmate/actions/setup@21d05c37ca0199767059abfecd28242460b86a0c
