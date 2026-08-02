@@ -28,6 +28,40 @@ latest release, and the same finding appears as an annotation on every plan
 run. Dependabot needs the current pin to be a released commit to propose a
 bump; from an untagged pin, doctor's warning is the signal.
 
+## Why setup is not two clicks
+
+Most GitHub Apps install in two clicks. They can, because they are
+**server-hosted**: their service holds the App's private key and performs the
+privileged writes. You never handle a key, create an environment, or copy a
+workflow file.
+
+shipmate has no server, so **the App's private key lives in your repository** —
+and a repository is a place your developers can push to. GitHub hands a
+*repository* secret to any workflow on any branch, including a workflow file a
+branch introduces. So a developer who may open pull requests but not merge them
+could read that key from a branch they pushed, and with it post the
+`shipmate / gate` status branch protection requires, approve their own pull
+request as the App, or mark applies complete that never ran.
+
+That is why the key is not a repository secret. It lives as an **environment**
+secret on `shipmate-engine`, whose deployment branch policy names only the
+default branch, and every step that mints an App token runs at the
+default-branch ref (`workflow_run`, `issue_comment`, `workflow_dispatch`,
+`push`). A branch-authored workflow naming that environment is denied the
+deployment and gets nothing; a `pull_request` job is denied too, because its ref
+(`refs/pull/<n>/merge`) matches no branch pattern. Environments are the only
+scoping GitHub offers here — there is no per-workflow secret scoping.
+
+**So the one extra environment is the price of not operating a service.** It is
+not optional, and it is the difference between "the key is in your repo" and
+"the key is in your repo and only the default branch can reach it". Everything
+else in setup — the workflow files, the environments per deploy target — is the
+same trade: work you do once, instead of a service you run forever.
+
+`docs/github-app.md` §Key-exposure boundary has the mechanism;
+`docs/hardening.md` has the full threat model and what it deliberately does not
+claim.
+
 ## Fan-out (stack x environment)
 
 shipmate treats each Terramate stack and each target environment as

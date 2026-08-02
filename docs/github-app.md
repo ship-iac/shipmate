@@ -210,6 +210,13 @@ un-approved request, not a code or config bug.
 
 ## Key-exposure boundary
 
+**Why this exists at all:** a server-hosted GitHub App keeps its private key on
+its own service, so the key is never in reach of the repository's contributors.
+shipmate has no service, so the key lives in your repository — which makes
+*where* it lives in the repository the entire security boundary. That is the
+trade the README's "Why setup is not two clicks" section describes, stated
+concretely below.
+
 `SHIPMATE_APP_PRIVATE_KEY` is a secret on the **`shipmate-engine` GitHub
 Environment**, not a repository or org secret — that environment's
 deployment branch policy is a custom policy naming the default branch only
