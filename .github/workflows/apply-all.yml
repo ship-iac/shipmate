@@ -79,7 +79,7 @@ jobs:
     # reads as "not empty" and fans out anyway.
     needs: [guard, detect]
     if: ${{ !failure() && !cancelled() && needs.detect.outputs.envlevel0_empty != 'true' && !contains(join(needs.*.result, ','), 'cancelled') }}
-    uses: ship-iac/shipmate/.github/workflows/apply-env-level.yml@4ae0a42575c955217aec3ee678d7608f62ffe7b4 # provisional pin: branch-local commit, not yet on main -- repin with dev/repin_internal.py once this merges
+    uses: ship-iac/shipmate/.github/workflows/apply-env-level.yml@17d5e93bda614568fda0c5686547364ec8f5662b # provisional pin: branch-local commit, not yet on main -- repin with dev/repin_internal.py once this merges
     permissions: { contents: read, checks: read, actions: read }
     with:
       waves_json: ${{ needs.detect.outputs.envlevel0_waves }}
@@ -99,7 +99,7 @@ jobs:
     name: L1
     needs: [guard, detect, envlevel0]
     if: ${{ !failure() && !cancelled() && needs.detect.outputs.envlevel1_empty != 'true' && !contains(join(needs.*.result, ','), 'cancelled') }}
-    uses: ship-iac/shipmate/.github/workflows/apply-env-level.yml@4ae0a42575c955217aec3ee678d7608f62ffe7b4 # provisional pin: branch-local commit, not yet on main -- repin with dev/repin_internal.py once this merges
+    uses: ship-iac/shipmate/.github/workflows/apply-env-level.yml@17d5e93bda614568fda0c5686547364ec8f5662b # provisional pin: branch-local commit, not yet on main -- repin with dev/repin_internal.py once this merges
     permissions: { contents: read, checks: read, actions: read }
     with:
       waves_json: ${{ needs.detect.outputs.envlevel1_waves }}
@@ -113,7 +113,7 @@ jobs:
     name: L2
     needs: [guard, detect, envlevel0, envlevel1]
     if: ${{ !failure() && !cancelled() && needs.detect.outputs.envlevel2_empty != 'true' && !contains(join(needs.*.result, ','), 'cancelled') }}
-    uses: ship-iac/shipmate/.github/workflows/apply-env-level.yml@4ae0a42575c955217aec3ee678d7608f62ffe7b4 # provisional pin: branch-local commit, not yet on main -- repin with dev/repin_internal.py once this merges
+    uses: ship-iac/shipmate/.github/workflows/apply-env-level.yml@17d5e93bda614568fda0c5686547364ec8f5662b # provisional pin: branch-local commit, not yet on main -- repin with dev/repin_internal.py once this merges
     permissions: { contents: read, checks: read, actions: read }
     with:
       waves_json: ${{ needs.detect.outputs.envlevel2_waves }}
@@ -127,7 +127,7 @@ jobs:
     name: L3
     needs: [guard, detect, envlevel0, envlevel1, envlevel2]
     if: ${{ !failure() && !cancelled() && needs.detect.outputs.envlevel3_empty != 'true' && !contains(join(needs.*.result, ','), 'cancelled') }}
-    uses: ship-iac/shipmate/.github/workflows/apply-env-level.yml@4ae0a42575c955217aec3ee678d7608f62ffe7b4 # provisional pin: branch-local commit, not yet on main -- repin with dev/repin_internal.py once this merges
+    uses: ship-iac/shipmate/.github/workflows/apply-env-level.yml@17d5e93bda614568fda0c5686547364ec8f5662b # provisional pin: branch-local commit, not yet on main -- repin with dev/repin_internal.py once this merges
     permissions: { contents: read, checks: read, actions: read }
     with:
       waves_json: ${{ needs.detect.outputs.envlevel3_waves }}
@@ -162,13 +162,13 @@ jobs:
     steps:
       - name: Complete gate if every apply check is done
         id: gate
-        uses: ship-iac/shipmate/actions/gate-refresh@abca731ea8d35a5c6d02345e5eb77446b7f14ccf
+        uses: ship-iac/shipmate/actions/gate-refresh@17d5e93bda614568fda0c5686547364ec8f5662b
         with:
           head-sha: ${{ inputs.ref }}
           app-id: ${{ vars.SHIPMATE_APP_ID }}
           private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
       - name: Post apply result comment
-        uses: ship-iac/shipmate/actions/apply-summary@21d05c37ca0199767059abfecd28242460b86a0c
+        uses: ship-iac/shipmate/actions/apply-summary@17d5e93bda614568fda0c5686547364ec8f5662b
         with:
           pr-number: ${{ inputs.pr_number }}
           head-sha: ${{ inputs.ref }}
