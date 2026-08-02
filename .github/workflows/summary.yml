@@ -77,25 +77,42 @@ jobs:
           set -euo pipefail
           # Identifiers come from the event or the API — never from artifacts,
           # which the untrusted plan run wrote.
-          n=$(printf '%s' "$FROM_EVENT" | jq -r '.[0].number // empty')
-          if [ -z "$n" ]; then
-            n=$(gh api "repos/$GITHUB_REPOSITORY/commits/$SHA/pulls" --jq '.[0].number // empty')
+          # `.[0]` of either source picked a pull request by arbitrary index.
+          # A head SHA that is the tip of two open pull requests (stacked
+          # branches) could resolve to the draft one, which blanks the number
+          # below and leaves the real pull request with no gate at all. Collect
+          # every candidate whose head is exactly this SHA instead, lowest
+          # number first, and take the first OPEN non-draft — deterministic,
+          # and it prefers a non-draft over a draft.
+          cands=$(printf '%s' "$FROM_EVENT" \
+            | jq -r --arg sha "$SHA" '[.[] | select((.head.sha // "") == $sha) | .number] | sort | .[]')
+          if [ -z "$cands" ]; then
+            cands=$(gh api "repos/$GITHUB_REPOSITORY/commits/$SHA/pulls" \
+              | jq -r --arg sha "$SHA" '[.[] | select(.state == "open" and (.head.sha // "") == $sha) | .number] | sort | .[]')
           fi
-          [ -n "$n" ] || { echo "::warning::no pull request found for $SHA; nothing to summarise"; }
           # The deleted plan.yml summary job carried `github.event.pull_request.draft
           # == false`. Restore it here: a draft skips every plan job, and a run
           # that planned nothing must never write a gate.
-          if [ -n "$n" ]; then
+          n=""
+          draft_seen=false
+          for c in $cands; do
             # Captured separately, not inlined in `[ "$(...)" = ... ]`: a
             # failing `gh api` call there is only an argument to `[`, not the
             # executed command, so it is exempt from `set -e` and its empty
             # output would read as "not a draft" -- failing OPEN. Fail closed
             # instead: treat "can't tell" the same as "is a draft".
-            draft=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$n" --jq .draft) || draft=""
-            if [ -z "$draft" ] || [ "$draft" = "true" ]; then
-              echo "pull request $n is a draft, or its draft status could not be verified; nothing to summarise"
-              n=""
+            info=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$c" --jq '.state + " " + (.draft | tostring)') || info=""
+            if [ "$info" = "open false" ]; then
+              n="$c"
+              break
             fi
+            draft_seen=true
+          done
+          if [ -z "$n" ] && [ "$draft_seen" = "true" ]; then
+            echo "every pull request for $SHA is a draft, or its state could not be verified; nothing to summarise"
+          fi
+          if [ -z "$n" ] && [ "$draft_seen" = "false" ]; then
+            echo "::warning::no open pull request found for $SHA; nothing to summarise"
           fi
           echo "number=$n" >> "$GITHUB_OUTPUT"
 
@@ -136,6 +153,10 @@ jobs:
           pr-number: ${{ steps.pr.outputs.number }}
           head-sha: ${{ github.event.workflow_run.head_sha }}
           run-conclusion: ${{ github.event.workflow_run.conclusion }}
+          # This run has neither the plan logs nor the plan artifacts; the
+          # comment footer, the per-cell fallback links and the gate's
+          # target_url must all point at the plan run.
+          plan-run-url: ${{ github.event.workflow_run.html_url }}
           # `|| '1'`, never `'0'`: the failure branch above deliberately
           # reports 1 (evidence unknown, never "nothing changed") so a
           # shortfall against the parsed cell_count trips gate-state's hold

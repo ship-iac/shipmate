@@ -16,7 +16,30 @@ on:
       SHIPMATE_APP_PRIVATE_KEY: { required: true }
       SHIPMATE_PLAN_PASSPHRASE: { required: false }
 jobs:
+  # `gh workflow run apply-all.yml` by a human with write access would
+  # otherwise skip every requirement in scripts/authorize. A human cannot make
+  # github.actor a bot login, so this rejects any human dispatch -- though it
+  # admits any bot actor with actions:write, not only this App.
+  #
+  # Its own job, not a first step of `detect`: `summary` must refuse a rejected
+  # dispatch (it mints the App key and comments on the dispatcher-supplied PR
+  # number) while still posting the failure comment and refreshing the gate
+  # when `detect` genuinely fails -- a matrix over the 256-cell cap, an
+  # env_order cycle, a bad plan run id. Keying `summary` on this job separates
+  # the two: `needs.guard.result == 'success'` is false only for an
+  # unauthorised dispatch. No secrets, no environment, no checkout.
+  guard:
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Reject dispatches that did not come from a bot actor
+        if: ${{ !endsWith(github.actor, '[bot]') }}
+        run: |
+          echo "::error::apply-all must be dispatched by the shipmate App via comment-ops, not by a direct workflow_dispatch"
+          exit 1
+
   detect:
+    needs: [guard]
     runs-on: ubuntu-latest
     permissions: { contents: read, checks: read, actions: read }
     outputs:
@@ -33,21 +56,6 @@ jobs:
       excluded_envs: ${{ steps.d.outputs.excluded_envs }}
       skipped_envs: ${{ steps.d.outputs.skipped_envs }}
     steps:
-      # `gh workflow run apply-all.yml` by a human with write access would
-      # otherwise skip every requirement in scripts/authorize. A human cannot
-      # make github.actor a bot login, so this rejects any human dispatch --
-      # though it admits any bot actor with actions:write, not only this App.
-      # A failing step (not a job-level `if:`) so `failure()` propagates and
-      # blocks envlevel0..3, rather than leaving `detect` skipped with empty
-      # outputs that their `!= 'true'` guards read as "not empty" and run
-      # anyway. `summary` is `if: always()` and does NOT stop on `failure()`
-      # alone -- it additionally requires `needs.detect.result == 'success'`,
-      # see the comment on that job.
-      - name: Reject dispatches that did not come from a bot actor
-        if: ${{ !endsWith(github.actor, '[bot]') }}
-        run: |
-          echo "::error::apply-all must be dispatched by the shipmate App via comment-ops, not by a direct workflow_dispatch"
-          exit 1
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { fetch-depth: 0, ref: "${{ inputs.ref }}" }
       - uses: ship-iac/shipmate/actions/setup@21d05c37ca0199767059abfecd28242460b86a0c
@@ -65,7 +73,11 @@ jobs:
   envlevel0:
     # Display name only (job id unchanged) — see apply.yml's `waves` job.
     name: L0
-    needs: [detect]
+    # `guard` is in `needs` as well, so its failure reaches `!failure()` here:
+    # without it a rejected dispatch skips `detect`, and a skipped `detect`
+    # reads its outputs as empty strings -- which the `!= 'true'` guard below
+    # reads as "not empty" and fans out anyway.
+    needs: [guard, detect]
     if: ${{ !failure() && !cancelled() && needs.detect.outputs.envlevel0_empty != 'true' && !contains(join(needs.*.result, ','), 'cancelled') }}
     uses: ship-iac/shipmate/.github/workflows/apply-env-level.yml@4ae0a42575c955217aec3ee678d7608f62ffe7b4 # provisional pin: branch-local commit, not yet on main -- repin with dev/repin_internal.py once this merges
     permissions: { contents: read, checks: read, actions: read }
@@ -85,7 +97,7 @@ jobs:
   envlevel1:
     # Display name only (job id unchanged) — see apply.yml's `waves` job.
     name: L1
-    needs: [detect, envlevel0]
+    needs: [guard, detect, envlevel0]
     if: ${{ !failure() && !cancelled() && needs.detect.outputs.envlevel1_empty != 'true' && !contains(join(needs.*.result, ','), 'cancelled') }}
     uses: ship-iac/shipmate/.github/workflows/apply-env-level.yml@4ae0a42575c955217aec3ee678d7608f62ffe7b4 # provisional pin: branch-local commit, not yet on main -- repin with dev/repin_internal.py once this merges
     permissions: { contents: read, checks: read, actions: read }
@@ -99,7 +111,7 @@ jobs:
   envlevel2:
     # Display name only (job id unchanged) — see apply.yml's `waves` job.
     name: L2
-    needs: [detect, envlevel0, envlevel1]
+    needs: [guard, detect, envlevel0, envlevel1]
     if: ${{ !failure() && !cancelled() && needs.detect.outputs.envlevel2_empty != 'true' && !contains(join(needs.*.result, ','), 'cancelled') }}
     uses: ship-iac/shipmate/.github/workflows/apply-env-level.yml@4ae0a42575c955217aec3ee678d7608f62ffe7b4 # provisional pin: branch-local commit, not yet on main -- repin with dev/repin_internal.py once this merges
     permissions: { contents: read, checks: read, actions: read }
@@ -113,7 +125,7 @@ jobs:
   envlevel3:
     # Display name only (job id unchanged) — see apply.yml's `waves` job.
     name: L3
-    needs: [detect, envlevel0, envlevel1, envlevel2]
+    needs: [guard, detect, envlevel0, envlevel1, envlevel2]
     if: ${{ !failure() && !cancelled() && needs.detect.outputs.envlevel3_empty != 'true' && !contains(join(needs.*.result, ','), 'cancelled') }}
     uses: ship-iac/shipmate/.github/workflows/apply-env-level.yml@4ae0a42575c955217aec3ee678d7608f62ffe7b4 # provisional pin: branch-local commit, not yet on main -- repin with dev/repin_internal.py once this merges
     permissions: { contents: read, checks: read, actions: read }
@@ -125,13 +137,15 @@ jobs:
     secrets: inherit
 
   summary:
-    needs: [detect, envlevel0, envlevel1, envlevel2, envlevel3]
+    needs: [guard, detect, envlevel0, envlevel1, envlevel2, envlevel3]
     # `always()` alone would still run this job -- and mint the App key -- when
-    # `detect`'s bot-actor rejection step failed it; `needs.detect.result ==
-    # 'success'` closes that. `always()` is still needed so results/gate-refresh
-    # post when an envlevel itself failed or was cancelled, not just when every
-    # envlevel succeeded.
-    if: ${{ always() && needs.detect.result == 'success' }}
+    # the bot-actor rejection failed; `needs.guard.result == 'success'` closes
+    # that. Keyed on `guard` and NOT on `detect`: `always()` is needed so
+    # results/gate-refresh post when an envlevel failed or was cancelled, and a
+    # genuine `detect` failure (a matrix over the 256-cell cap, an env_order
+    # cycle, a bad plan run id) must still get the developer a failure comment
+    # and a gate refresh.
+    if: ${{ always() && needs.guard.result == 'success' }}
     runs-on: ubuntu-latest
     # Both steps below mint the App key (via secrets.SHIPMATE_APP_PRIVATE_KEY),
     # same as apply-env-level.yml's complete job -- deployment branch policy

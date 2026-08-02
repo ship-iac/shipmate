@@ -53,8 +53,22 @@ def test_keeps_every_pre_existing_duplicate_for_a_cell():
     assert out["stacks/dns\x00dev-eu"] == [1, 5]
 
 
-def test_a_cell_with_no_apply_check_fails_loudly():
+def test_a_cell_with_no_apply_check_is_warned_about_and_excluded(capsys):
+    # This runs pre-flight, before wave0: failing here would skip every wave --
+    # and, on the deploy/apply-all paths, every successor env-level -- over one
+    # cell. The offending cell is left out of the snapshot instead, so it is
+    # never completed and its check stays pending: the safe direction.
     runs = [check("apply / stacks/dns / dev-eu", 1)]
+    out = apply_snapshot.snapshot(WAVES, runs, APP_ID)
+    assert out == {"stacks/dns\x00dev-eu": [1]}
+    err = capsys.readouterr().err
+    assert err.startswith("::warning::")
+    assert "apply / stacks/app / dev-eu" in err
+
+
+def test_a_run_where_no_cell_has_a_check_fails_loudly():
+    # A whole-run signal (wrong head SHA, no plan, a misconfigured App id), not
+    # one cell's problem -- nothing could be completed, so fail before applying.
     with pytest.raises(SystemExit) as exc:
-        apply_snapshot.snapshot(WAVES, runs, APP_ID)
-    assert "stacks/app" in str(exc.value)
+        apply_snapshot.snapshot(WAVES, [check("stacks/dns / dev-eu", 3)], APP_ID)
+    assert "any" in str(exc.value)

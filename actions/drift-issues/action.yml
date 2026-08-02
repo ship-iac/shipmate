@@ -50,6 +50,12 @@ runs:
       shell: bash
       env:
         GH_TOKEN: ${{ steps.token.outputs.token }}
+        # `gh issue list/create/edit/close` and `gh label` are repository-scoped
+        # and resolve their repository from the git remote of a checkout. The
+        # job that runs this holds the App key and so deliberately has no
+        # checkout at all -- without GH_REPO every one of those calls fails with
+        # "failed to determine base repository" on the first nightly run.
+        GH_REPO: ${{ github.repository }}
         SHIPMATE_CELLS_DIR: ${{ inputs.cells-dir }}
         SHIPMATE_SLACK_WEBHOOK: ${{ inputs.slack-webhook }}
       run: |

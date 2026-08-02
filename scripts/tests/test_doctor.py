@@ -530,7 +530,12 @@ def test_missing_engine_environment_warns(monkeypatch):
     assert len(out) == 1
     assert out[0][0] == doctor.WARNING
     assert "shipmate-engine" in out[0][1]
-    assert "repository secret" in out[0][1]
+    assert "does not exist" in out[0][1]
+    # The probe never checks where the key actually lives -- listing repository
+    # secrets needs an App permission app/manifest.json does not declare -- so
+    # the repository-secret consequence must stay conditional, not asserted.
+    assert "If the key is still a repository secret" in out[0][1]
+    assert "is still a repository secret and" not in out[0][1]
 
 
 def test_engine_environment_without_a_branch_policy_warns(monkeypatch):

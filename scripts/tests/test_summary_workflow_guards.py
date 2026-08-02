@@ -106,23 +106,54 @@ def test_serialises_gate_writes_per_head_sha_at_job_level():
     assert concurrency.get("cancel-in-progress") is True
 
 
-def test_skips_draft_pull_requests():
-    # The deleted plan.yml summary job carried `pull_request.draft == false`;
-    # restored here as a fail-closed probe. All four lines -- the draft read,
-    # the "unreadable or true" test, the actual `n=""` skip, and the `fi` that
-    # closes it -- must be present together and in order: a probe that reads
-    # `draft` but never clears `n` on a draft (or clears it, but the branch
-    # can't be reached because the guard was inverted) still summarises drafts.
+def _jq_program(run, marker):
+    """The `jq -r --arg sha "$SHA" '<program>'` of the candidate command that
+    starts at `marker`, with backslash continuations joined first."""
+    cmd = _logical_command(run, marker)
+    m = re.search(r"""jq -r --arg sha "\$SHA" '(.*?)'""", cmd)
+    assert m, f"no candidate jq program found in: {cmd}"
+    return _normalize(m.group(1))
+
+
+def test_pull_request_candidates_are_head_sha_matches_lowest_number_first():
+    # `.[0]` of either source picked a pull request by arbitrary index. When a
+    # head SHA is the tip of two open pull requests (stacked branches) that can
+    # select the draft one, which blanks the number and leaves the real pull
+    # request with no gate at all. Both jq programs must filter on the run's
+    # head SHA and `sort` ascending, and the API fallback must additionally
+    # filter to OPEN pull requests (the event payload's entries are already
+    # this run's, but `commits/{sha}/pulls` returns closed ones too).
     run = _step(_job(), "pr")["run"]
-    pattern = re.compile(
-        r'draft=\$\(gh api "repos/\$GITHUB_REPOSITORY/pulls/\$n" --jq \.draft\) \|\| draft=""'
-        r'\s*\n\s*if \[ -z "\$draft" \] \|\| \[ "\$draft" = "true" \]; then'
-        r'\s*\n\s*echo "pull request \$n is a draft, or its draft status could not be '
-        r'verified; nothing to summarise"'
-        r'\s*\n\s*n=""'
-        r"\s*\n\s*fi"
+    assert _jq_program(run, "cands=$(printf") == (
+        '[.[] | select((.head.sha // "") == $sha) | .number] | sort | .[]'
     )
-    assert pattern.search(run), f"draft skip logic not found intact in the pr step:\n{run}"
+    assert _jq_program(run, "cands=$(gh api") == (
+        '[.[] | select(.state == "open" and (.head.sha // "") == $sha) | .number] | sort | .[]'
+    )
+
+
+def test_skips_draft_pull_requests_and_prefers_a_non_draft_candidate():
+    # The deleted plan.yml summary job carried `pull_request.draft == false`;
+    # restored here as a fail-closed probe over every candidate. `n` starts
+    # empty and is assigned in exactly one place -- the branch that saw a
+    # literal "open false" -- so a draft, a closed pull request, and an
+    # unreadable response are all skipped, while the first non-draft in
+    # ascending number order wins and breaks the loop.
+    run = _step(_job(), "pr")["run"]
+    assert re.search(r'^\s*n=""\s*$', run, re.MULTILINE), "n is not initialised empty"
+    pattern = re.compile(
+        r"""info=\$\(gh api "repos/\$GITHUB_REPOSITORY/pulls/\$c" --jq '\.state \+ " " \+ """
+        r"""\(\.draft \| tostring\)'\) \|\| info=""\s*\n"""
+        r"""\s*if \[ "\$info" = "open false" \]; then\s*\n"""
+        r"""\s*n="\$c"\s*\n"""
+        r"""\s*break\s*\n"""
+        r"""\s*fi"""
+    )
+    assert pattern.search(run), f"candidate selection not found intact in the pr step:\n{run}"
+    assigns = [a.strip() for a in re.findall(r'^\s*n=(?!""$)\S+', run, re.MULTILINE)]
+    assert assigns == ['n="$c"'], (
+        f"n is assigned somewhere other than the open/non-draft branch: {assigns}"
+    )
 
 
 def test_privileged_job_names_the_engine_environment():
@@ -242,8 +273,21 @@ def test_draft_probe_fails_closed_on_an_unreadable_response():
     # `[ "$(gh api ...)" = "true" ]` is exempt from `set -e` (the failing
     # command is only an argument to `[`, not the executed command), so a
     # failed lookup reads as an empty string -- "not a draft" -- and fails
-    # OPEN. The draft value must be captured on its own line first, so its
-    # failure can be handled explicitly and read as "treat as a draft."
+    # OPEN. The state/draft pair must be captured on its own line first, with
+    # its failure handled explicitly, and the ONLY value that selects a
+    # candidate is the literal "open false" -- so an empty capture selects
+    # nothing.
     run = _step(_job(), "pr")["run"]
-    assert re.search(r'draft=\$\(gh api .*--jq \.draft\)\s*\|\|\s*draft=""', run)
-    assert '[ -z "$draft" ]' in run
+    assert re.search(r'info=\$\(gh api .*--jq .*\)\s*\|\|\s*info=""', run)
+    assert '[ "$info" = "open false" ]' in run
+
+
+def test_plan_run_url_is_passed_to_the_summary_action():
+    # GITHUB_RUN_ID inside the action is this trusted run, which holds neither
+    # the plan logs nor the plan artifacts -- the comment footer, the per-cell
+    # fallback links and the gate's target_url must all point at the plan run.
+    action_step = next(s for s in _job()["steps"] if "actions/summary" in str(s.get("uses", "")))
+    assert (
+        action_step.get("with", {}).get("plan-run-url")
+        == "${{ github.event.workflow_run.html_url }}"
+    )

@@ -3,7 +3,7 @@
 import json
 
 import pytest
-from _loader import load_script
+from _loader import action_steps, load_script
 
 di = load_script("drift-issues")
 
@@ -201,6 +201,37 @@ def test_main_notifies_slack_once_for_a_newly_drifted_cell(tmp_path, monkeypatch
     assert notified == ["stacks/app"]
 
 
+def test_one_cells_failure_does_not_abandon_the_rest(tmp_path, monkeypatch, capsys):
+    # A rate limit on one cell must not leave every later cell unprocessed --
+    # a stack that just went clean would keep an open Issue saying it drifts.
+    # The run still fails, naming every cell that failed.
+    for name in ("a", "b", "c"):
+        _write_cell(tmp_path, name, _cell(stack=f"stacks/{name}", stack_name=name, drifted=True))
+    monkeypatch.setenv("SHIPMATE_CELLS_DIR", str(tmp_path))
+    monkeypatch.setenv("GITHUB_SERVER_URL", "https://example.invalid")
+    monkeypatch.setenv("GITHUB_REPOSITORY", "acme/demo")
+    monkeypatch.setenv("GITHUB_RUN_ID", "1")
+    monkeypatch.delenv("SHIPMATE_SLACK_WEBHOOK", raising=False)
+    created = []
+
+    def fake_run(args):
+        if args[:3] == ["gh", "issue", "list"]:
+            return "[]"
+        title = args[args.index("--title") + 1]
+        if title.endswith("/ b"):
+            raise SystemExit("::error::command failed (1): gh issue create")
+        created.append(title)
+        return ""
+
+    monkeypatch.setattr(di, "_run", fake_run)
+    monkeypatch.setattr("subprocess.run", lambda *a, **k: type("R", (), {"returncode": 0})())
+    with pytest.raises(SystemExit) as exc:
+        di.main()
+    assert created == ["drift: dev-eu / a", "drift: dev-eu / c"]
+    assert "dev-eu / b" in str(exc.value)
+    assert "dev-eu / a" not in str(exc.value)
+
+
 def test_main_with_no_cells_never_lists_issues(tmp_path, monkeypatch):
     monkeypatch.setenv("SHIPMATE_CELLS_DIR", str(tmp_path))
     monkeypatch.setattr(di, "_run", lambda args: pytest.fail(f"unexpected gh call: {args}"))
@@ -250,3 +281,19 @@ def test_no_webhook_never_calls_notify_slack(tmp_path, monkeypatch):
         di, "notify_slack", lambda webhook, cell: pytest.fail("must not notify with no webhook")
     )
     di.main()
+
+
+# ---- action wiring ----------------------------------------------------------
+
+
+def test_action_names_the_repository_for_gh():
+    # `gh issue list/create/edit/close` and `gh label` are repository-scoped and
+    # otherwise resolve their repository from a checkout's git remote. The job
+    # running this holds the App key and so has no checkout at all -- without
+    # GH_REPO every one of those calls fails with "failed to determine base
+    # repository" and `_run` raises, killing the first nightly drift run.
+    steps = action_steps("drift-issues")
+    step = next(s for s in steps if "scripts/drift-issues" in str(s.get("run", "")))
+    assert step.get("env", {}).get("GH_REPO") == "${{ github.repository }}", (
+        f"drift-issues' script step must export GH_REPO, got {step.get('env')!r}"
+    )

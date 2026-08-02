@@ -17,6 +17,10 @@ inputs:
   artifact-count:
     description: Number of cell-summary.* artifacts the API reports for that plan run. Distinguishes "nothing changed" (0) from "the download failed" (>0 with no parsed cells).
     required: true
+  plan-run-url:
+    description: 'HTML URL of the plan workflow run (github.event.workflow_run.html_url). Used for the comment footer, the per-cell fallback link and the gate''s target_url; this run''s URL is used when empty.'
+    required: false
+    default: ""
   app-id:
     description: shipmate App id (a repo/org variable, not a secret).
     required: true
@@ -68,6 +72,7 @@ runs:
         GH_TOKEN: ${{ steps.token.outputs.token }}
         CELLS: ${{ inputs.cells-dir }}
         HEAD_SHA: ${{ inputs.head-sha }}
+        SHIPMATE_PLAN_RUN_URL: ${{ inputs.plan-run-url }}
       run: |
         set -euo pipefail
         [[ "$HEAD_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::head-sha must be a 40-char lowercase hex SHA (got: $HEAD_SHA)"; exit 1; }
@@ -95,6 +100,7 @@ runs:
         SHIPMATE_ARTIFACT_COUNT: ${{ inputs.artifact-count }}
         SHIPMATE_CELL_COUNT: ${{ steps.build.outputs.count }}
         SHIPMATE_PENDING: ${{ steps.build.outputs.pending }}
+        SHIPMATE_PLAN_RUN_URL: ${{ inputs.plan-run-url }}
       run: |
         set -euo pipefail
         python3 "$GITHUB_ACTION_PATH/../../scripts/gate-state" > gate.json

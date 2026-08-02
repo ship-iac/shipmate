@@ -66,10 +66,17 @@ def main():
     if state is None:
         return
     body = {"state": state, "context": "shipmate / gate", "description": desc[:140]}
+    # The plan run's URL when the caller supplied it. GITHUB_RUN_ID is this
+    # trusted summary run -- a five-step job with no plan output and no
+    # artifacts -- so clicking the gate would land nowhere useful; it stays as
+    # the fallback for a caller that passes nothing.
+    plan_run_url = os.environ.get("SHIPMATE_PLAN_RUN_URL", "")
     server, repo, run_id = (
         os.environ.get(k, "") for k in ("GITHUB_SERVER_URL", "GITHUB_REPOSITORY", "GITHUB_RUN_ID")
     )
-    if server and repo and run_id:
+    if plan_run_url:
+        body["target_url"] = plan_run_url
+    elif server and repo and run_id:
         body["target_url"] = f"{server}/{repo}/actions/runs/{run_id}"
     json.dump(body, sys.stdout)
 

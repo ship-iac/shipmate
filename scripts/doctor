@@ -274,9 +274,12 @@ def _engine_environment_warnings(ctx):
     default branch is the only thing that stops a branch workflow from
     reading it. A consumer that re-pins the engine but never creates this
     environment (or creates it with no branch policy, or one that does not
-    actually name the default branch) keeps a repository-level key that any
-    branch can read, while believing they are protected. This probe is the
-    only thing that would notice.
+    actually name the default branch) has nothing scoping the key, and
+    believes they are protected. What this probe observes is the
+    environment's shape, never where the key actually lives -- listing
+    repository secrets needs an App permission app/manifest.json does not
+    declare -- so its warnings say what was seen and leave the repository
+    secret conditional.
 
     Structured like `_env_protection_warnings`, and for the same reason:
     existence is decided from the environments **listing**
@@ -295,9 +298,10 @@ def _engine_environment_warnings(ctx):
         return [
             (
                 WARNING,
-                f"GitHub Environment `{_ENGINE_ENV}` does not exist — the shipmate App "
-                "private key is still a repository secret and every branch's workflow "
-                "can read it (see docs/github-app.md).",
+                f"GitHub Environment `{_ENGINE_ENV}` does not exist — nothing scopes "
+                "which branches may claim the shipmate App private key. If the key is "
+                "still a repository secret, every branch's workflow can read it (see "
+                "docs/github-app.md).",
             )
         ]
     try:

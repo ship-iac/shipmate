@@ -20,6 +20,17 @@ def _key(stack, env):
 
 
 def snapshot(waves, check_runs, app_id):
+    """{cell key: [check id, ...]} for every cell that has one.
+
+    A cell with no App-authored apply check is warned about and left OUT of the
+    snapshot rather than failing the run: this runs pre-flight, before wave0, so
+    a hard failure here skips every wave -- and, on the deploy/apply-all paths,
+    every successor env-level too -- over one bad cell. An excluded cell is
+    simply never completed, so its check stays pending, which is the safe
+    direction. Only a run in which NO cell has a check fails loudly: that is a
+    whole-run signal (wrong head SHA, no plan, the App id misconfigured), not
+    one cell's problem.
+    """
     wanted = [
         (cell["stack"], cell["environment"]) for name in sorted(waves) for cell in waves[name] or []
     ]
@@ -32,11 +43,21 @@ def snapshot(waves, check_runs, app_id):
             if c.get("name") == name and ((c.get("app") or {}).get("id")) == app_id
         ]
         if not ids:
-            raise SystemExit(
-                f"::error::no App-authored apply check named '{name}' on the head "
-                "SHA before apply; nothing to complete — re-plan."
+            # stderr, not stdout: this script's stdout IS the snapshot JSON the
+            # action captures into a step output.
+            print(
+                f"::warning::no App-authored apply check named '{name}' on the head "
+                "SHA before apply; this cell will apply but its check is left "
+                "pending -- re-plan to recover it.",
+                file=sys.stderr,
             )
+            continue
         out[_key(stack, env)] = ids
+    if wanted and not out:
+        raise SystemExit(
+            "::error::no App-authored apply check exists on the head SHA for any "
+            "cell in this run; nothing could be completed — re-plan."
+        )
     return out
 
 

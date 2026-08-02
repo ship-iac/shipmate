@@ -1,5 +1,7 @@
 """Unit tests for scripts/gate-state."""
 
+import json
+
 import pytest
 from _loader import load_script
 
@@ -76,3 +78,38 @@ def test_no_artifacts_at_all_means_nothing_changed():
 def test_description_is_capped_for_the_statuses_api():
     _, desc, _ = d(run_conclusion="failure")
     assert len(desc) <= 140
+
+
+def _main_body(tmp_path, monkeypatch, capsys, **env):
+    monkeypatch.setenv("GITHUB_OUTPUT", str(tmp_path / "out"))
+    monkeypatch.setenv("SHIPMATE_RUN_CONCLUSION", "success")
+    monkeypatch.setenv("SHIPMATE_ARTIFACT_COUNT", "3")
+    monkeypatch.setenv("SHIPMATE_CELL_COUNT", "3")
+    monkeypatch.setenv("SHIPMATE_PENDING", "true")
+    monkeypatch.setenv("GITHUB_SERVER_URL", "https://example.invalid")
+    monkeypatch.setenv("GITHUB_REPOSITORY", "acme/demo")
+    monkeypatch.setenv("GITHUB_RUN_ID", "999")
+    monkeypatch.delenv("SHIPMATE_PLAN_RUN_URL", raising=False)
+    for k, v in env.items():
+        monkeypatch.setenv(k, v)
+    gate_state.main()
+    return json.loads(capsys.readouterr().out)
+
+
+def test_gate_links_to_the_plan_run_when_one_is_supplied(tmp_path, monkeypatch, capsys):
+    # GITHUB_RUN_ID is the trusted summary run -- a short job with no plan
+    # output and no artifacts -- so the gate must link to the plan run instead.
+    body = _main_body(
+        tmp_path,
+        monkeypatch,
+        capsys,
+        SHIPMATE_PLAN_RUN_URL="https://example.invalid/acme/demo/actions/runs/42",
+    )
+    assert body["target_url"] == "https://example.invalid/acme/demo/actions/runs/42"
+
+
+def test_gate_falls_back_to_this_run_when_no_plan_run_url_is_supplied(
+    tmp_path, monkeypatch, capsys
+):
+    body = _main_body(tmp_path, monkeypatch, capsys)
+    assert body["target_url"] == "https://example.invalid/acme/demo/actions/runs/999"

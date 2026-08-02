@@ -174,16 +174,27 @@ def main():
     existing = existing_issue_numbers()
     webhook = os.environ.get("SHIPMATE_SLACK_WEBHOOK", "")
     label_created = [False]
+    # One cell's `gh` failure (a rate limit, a transient 5xx) must not abandon
+    # every later cell: the per-cell jobs this batch replaced isolated such a
+    # failure to one cell. A stack that just went clean would otherwise keep an
+    # open Issue claiming it drifts. Failures are collected and the run still
+    # exits nonzero at the end, naming every cell that failed.
+    failed = []
     for cell in cells:
-        drifted_now = upsert_or_close(cell, existing, run_url, label_created)
+        label = f"{cell['environment']} / {cell['stack_name']}"
+        try:
+            drifted_now = upsert_or_close(cell, existing, run_url, label_created)
+        except SystemExit as exc:
+            print(f"::error::drift issue update failed for {label}: {exc}")
+            failed.append(label)
+            continue
         if drifted_now and webhook:
             try:
                 notify_slack(webhook, cell)
             except (urllib.error.URLError, TimeoutError) as exc:
-                print(
-                    "::warning::slack notify failed for "
-                    f"{cell['environment']} / {cell['stack_name']}: {exc}"
-                )
+                print(f"::warning::slack notify failed for {label}: {exc}")
+    if failed:
+        raise SystemExit("::error::drift issue updates failed for: " + "; ".join(failed))
 
 
 if __name__ == "__main__":
