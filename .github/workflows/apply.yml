@@ -68,7 +68,7 @@ jobs:
     needs: [detect]
     if: ${{ !failure() && !cancelled() && needs.detect.outputs.empty != 'true' }}
     uses: ship-iac/shipmate/.github/workflows/apply-env-level.yml@4ae0a42575c955217aec3ee678d7608f62ffe7b4 # provisional pin: branch-local commit, not yet on main -- repin with dev/repin_internal.py once this merges
-    permissions: { contents: read, actions: read }
+    permissions: { contents: read, checks: read, actions: read }
     with:
       waves_json: ${{ needs.detect.outputs.waves }}
       head_sha: ${{ needs.detect.outputs.head_sha }}

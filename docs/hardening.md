@@ -13,8 +13,10 @@ request exists, before review, and before `CODEOWNERS` applies.
 `shipmate-engine` environment's deployment branch policy only ever satisfies
 a job running at the default-branch ref (row 16; `docs/github-app.md`
 §Key-exposure boundary), so a branch-pushed workflow cannot mint an App
-token, forge the `shipmate / gate` status, approve the pull request as the
-App, complete `apply / <stack> / <env>` checks, or dispatch an apply. What it
+token, and so cannot POST a `shipmate / gate` status, submit an approving
+review as the App, complete `apply / <stack> / <env>` checks, or dispatch an
+apply — but the gate's verdict is still computed from artifacts the
+branch's own plan run produced (see "What none of this fixes"). What it
 *can* still do, absent the rest of this checklist: declare
 `environment: <env>-apply` itself and claim that environment's cloud
 credentials directly, if that environment carries no deployment branch
@@ -50,7 +52,7 @@ for the trade-off that follows.
 |---|---------|-------|--------|
 | 1 | Write access only for people trusted to apply | Repo/team access | Everything below is downstream of this |
 | 2 | Push ruleset restricting `.github/workflows/**` *and every other path a workflow executes* | Repo/org ruleset (push target) | Branch-authored workflows |
-| 3 | Required check `shipmate / gate` with `integration_id`, strict | Branch ruleset | External gate forgery |
+| 3 | Required check `shipmate / gate` with `integration_id`, strict | Branch ruleset | A *third party* posting `shipmate / gate` under another identity |
 | 4 | ≥1 approving review, code-owner review, dismiss stale, require approval of most recent push | Branch ruleset | Self-merge |
 | 5 | Block force-push and deletion on the default branch | Branch ruleset | History rewrite after apply |
 | 6 | Required reviewers + "Prevent self-review" on **every** `<env>-apply` that holds a secret | Environment | **Unforgeable** — the last line of defense, and what makes row 7 hold |
@@ -345,3 +347,8 @@ this section rests on for exactly the exposure control 1 exists to limit.
 - **Branch-controlled configuration.** Stack tags, `global.shipmate.env_order`
   and `explicit_envs` all come from the pull request branch. They shape what the
   engine does; they do not constrain what it is allowed to do.
+- **The gate is an assertion, not a proof.** The App identity and pull request
+  approvals cannot be forged by a push-capable developer; the gate remains an
+  assertion produced by the author's own pipeline; the enforcing controls are
+  the code-owner-required pull request approval and the prod-apply environment
+  reviewer. Do not claim the gate is unforgeable.

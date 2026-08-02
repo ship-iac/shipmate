@@ -13,7 +13,9 @@ on:
         required: false
 jobs:
   # Capture the apply-check ids BEFORE any wave runs. No secret, no
-  # environment: GITHUB_TOKEN's checks:read is enough to list them.
+  # environment needed -- but permissions cap at each `uses:` boundary, so
+  # every caller job below must also grant checks:read or this job fails at
+  # workflow-resolution time.
   snapshot:
     runs-on: ubuntu-latest
     permissions: { checks: read }

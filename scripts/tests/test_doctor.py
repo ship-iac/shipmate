@@ -586,6 +586,28 @@ def test_engine_environment_branch_policy_missing_default_branch_warns(monkeypat
     assert "main" in out[0][1]
 
 
+def test_engine_environment_branch_policy_with_an_extra_entry_warns(monkeypatch):
+    # The probe must confirm the default branch is the ONLY policy entry, not
+    # merely one of them -- a policy naming `main` plus a leftover branch (the
+    # exact shape a one-off allow-list forgotten in place produces) still lets
+    # a workflow on that leftover branch read the App private key.
+    monkeypatch.setattr(
+        doctor,
+        "_gh_json",
+        _engine_env_responses(
+            env={
+                "name": "shipmate-engine",
+                "deployment_branch_policy": {"custom_branch_policies": True},
+            },
+            policies={"branch_policies": [{"name": "main"}, {"name": "probe/env-branch-policy"}]},
+        ),
+    )
+    out = doctor._engine_environment_warnings(_ctx(default_branch="main"))
+    assert len(out) == 1
+    assert out[0][0] == doctor.WARNING
+    assert "probe/env-branch-policy" in out[0][1]
+
+
 def test_correctly_scoped_engine_environment_is_silent(monkeypatch):
     monkeypatch.setattr(
         doctor,

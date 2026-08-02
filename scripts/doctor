@@ -343,13 +343,22 @@ def _engine_environment_warnings(ctx):
             )
         ]
     names = {p.get("name") for p in (policies or {}).get("branch_policies", [])}
-    if default_branch not in names:
+    if names != {default_branch}:
+        if default_branch not in names:
+            detail = (
+                f"does not name `{default_branch}` — a branch other than the "
+                "default can still claim the App private key."
+            )
+        else:
+            extra = ", ".join(sorted(f"`{n}`" for n in names - {default_branch}))
+            detail = (
+                f"also permits {extra} — a workflow on those branches can still "
+                "claim the App private key."
+            )
         return [
             (
                 WARNING,
-                f"GitHub Environment `{_ENGINE_ENV}`'s deployment branch policy does not "
-                f"name `{default_branch}` — a branch other than the default can still "
-                "claim the App private key.",
+                f"GitHub Environment `{_ENGINE_ENV}`'s deployment branch policy {detail}",
             )
         ]
     return []
