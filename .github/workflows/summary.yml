@@ -147,7 +147,7 @@ jobs:
           run-id: ${{ github.event.workflow_run.id }}
           github-token: ${{ github.token }}
 
-      - uses: ship-iac/shipmate/actions/summary@ce0512bebe53d0330e2928378fb8f366fc3b1ff9 # provisional pin: branch-local commit, not yet on main -- repin with dev/repin_internal.py once this merges
+      - uses: ship-iac/shipmate/actions/summary@17d5e93bda614568fda0c5686547364ec8f5662b # provisional pin: branch-local commit, not yet on main -- repin with dev/repin_internal.py once this merges
         if: steps.pr.outputs.number != ''
         with:
           pr-number: ${{ steps.pr.outputs.number }}

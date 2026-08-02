@@ -23,7 +23,7 @@ jobs:
       snapshot: ${{ steps.snap.outputs.snapshot }}
     steps:
       - id: snap
-        uses: ship-iac/shipmate/actions/apply-snapshot@f39fd4522881d15127b4ec691c3abcb445004cc7
+        uses: ship-iac/shipmate/actions/apply-snapshot@17d5e93bda614568fda0c5686547364ec8f5662b
         with:
           head-sha: ${{ inputs.head_sha }}
           waves-json: ${{ inputs.waves_json }}
@@ -57,7 +57,7 @@ jobs:
         with:
           terramate-version: ${{ vars.TERRAMATE_VERSION }}
           tofu-version: ${{ vars.TOFU_VERSION }}
-      - uses: ship-iac/shipmate/actions/apply-cell@f39fd4522881d15127b4ec691c3abcb445004cc7
+      - uses: ship-iac/shipmate/actions/apply-cell@17d5e93bda614568fda0c5686547364ec8f5662b
         with:
           stack: ${{ matrix.stack }}
           stack-name: ${{ matrix.stack }}
@@ -94,7 +94,7 @@ jobs:
         with:
           terramate-version: ${{ vars.TERRAMATE_VERSION }}
           tofu-version: ${{ vars.TOFU_VERSION }}
-      - uses: ship-iac/shipmate/actions/apply-cell@f39fd4522881d15127b4ec691c3abcb445004cc7
+      - uses: ship-iac/shipmate/actions/apply-cell@17d5e93bda614568fda0c5686547364ec8f5662b
         with:
           stack: ${{ matrix.stack }}
           stack-name: ${{ matrix.stack }}
@@ -131,7 +131,7 @@ jobs:
         with:
           terramate-version: ${{ vars.TERRAMATE_VERSION }}
           tofu-version: ${{ vars.TOFU_VERSION }}
-      - uses: ship-iac/shipmate/actions/apply-cell@f39fd4522881d15127b4ec691c3abcb445004cc7
+      - uses: ship-iac/shipmate/actions/apply-cell@17d5e93bda614568fda0c5686547364ec8f5662b
         with:
           stack: ${{ matrix.stack }}
           stack-name: ${{ matrix.stack }}
@@ -168,7 +168,7 @@ jobs:
         with:
           terramate-version: ${{ vars.TERRAMATE_VERSION }}
           tofu-version: ${{ vars.TOFU_VERSION }}
-      - uses: ship-iac/shipmate/actions/apply-cell@f39fd4522881d15127b4ec691c3abcb445004cc7
+      - uses: ship-iac/shipmate/actions/apply-cell@17d5e93bda614568fda0c5686547364ec8f5662b
         with:
           stack: ${{ matrix.stack }}
           stack-name: ${{ matrix.stack }}
@@ -205,7 +205,7 @@ jobs:
         with:
           terramate-version: ${{ vars.TERRAMATE_VERSION }}
           tofu-version: ${{ vars.TOFU_VERSION }}
-      - uses: ship-iac/shipmate/actions/apply-cell@f39fd4522881d15127b4ec691c3abcb445004cc7
+      - uses: ship-iac/shipmate/actions/apply-cell@17d5e93bda614568fda0c5686547364ec8f5662b
         with:
           stack: ${{ matrix.stack }}
           stack-name: ${{ matrix.stack }}
@@ -242,7 +242,7 @@ jobs:
         with:
           terramate-version: ${{ vars.TERRAMATE_VERSION }}
           tofu-version: ${{ vars.TOFU_VERSION }}
-      - uses: ship-iac/shipmate/actions/apply-cell@f39fd4522881d15127b4ec691c3abcb445004cc7
+      - uses: ship-iac/shipmate/actions/apply-cell@17d5e93bda614568fda0c5686547364ec8f5662b
         with:
           stack: ${{ matrix.stack }}
           stack-name: ${{ matrix.stack }}
@@ -279,7 +279,7 @@ jobs:
         with:
           terramate-version: ${{ vars.TERRAMATE_VERSION }}
           tofu-version: ${{ vars.TOFU_VERSION }}
-      - uses: ship-iac/shipmate/actions/apply-cell@f39fd4522881d15127b4ec691c3abcb445004cc7
+      - uses: ship-iac/shipmate/actions/apply-cell@17d5e93bda614568fda0c5686547364ec8f5662b
         with:
           stack: ${{ matrix.stack }}
           stack-name: ${{ matrix.stack }}
@@ -316,7 +316,7 @@ jobs:
         with:
           terramate-version: ${{ vars.TERRAMATE_VERSION }}
           tofu-version: ${{ vars.TOFU_VERSION }}
-      - uses: ship-iac/shipmate/actions/apply-cell@f39fd4522881d15127b4ec691c3abcb445004cc7
+      - uses: ship-iac/shipmate/actions/apply-cell@17d5e93bda614568fda0c5686547364ec8f5662b
         with:
           stack: ${{ matrix.stack }}
           stack-name: ${{ matrix.stack }}
@@ -339,7 +339,7 @@ jobs:
     permissions: { actions: read }
     environment: shipmate-engine
     steps:
-      - uses: ship-iac/shipmate/actions/apply-complete@f39fd4522881d15127b4ec691c3abcb445004cc7
+      - uses: ship-iac/shipmate/actions/apply-complete@17d5e93bda614568fda0c5686547364ec8f5662b
         with:
           snapshot: ${{ needs.snapshot.outputs.snapshot }}
           app-id: ${{ vars.SHIPMATE_APP_ID }}
