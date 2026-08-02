@@ -38,9 +38,11 @@ jobs:
       # make github.actor a bot login, so this rejects any human dispatch --
       # though it admits any bot actor with actions:write, not only this App.
       # A failing step (not a job-level `if:`) so `failure()` propagates and
-      # blocks every downstream job, including `summary` (`if: always()`),
-      # rather than leaving `detect` skipped with empty outputs that let later
-      # jobs run anyway.
+      # blocks envlevel0..3, rather than leaving `detect` skipped with empty
+      # outputs that their `!= 'true'` guards read as "not empty" and run
+      # anyway. `summary` is `if: always()` and does NOT stop on `failure()`
+      # alone -- it additionally requires `needs.detect.result == 'success'`,
+      # see the comment on that job.
       - name: Reject dispatches that did not come from a bot actor
         if: ${{ !endsWith(github.actor, '[bot]') }}
         run: |
@@ -124,7 +126,12 @@ jobs:
 
   summary:
     needs: [detect, envlevel0, envlevel1, envlevel2, envlevel3]
-    if: always()
+    # `always()` alone would still run this job -- and mint the App key -- when
+    # `detect`'s bot-actor rejection step failed it; `needs.detect.result ==
+    # 'success'` closes that. `always()` is still needed so results/gate-refresh
+    # post when an envlevel itself failed or was cancelled, not just when every
+    # envlevel succeeded.
+    if: ${{ always() && needs.detect.result == 'success' }}
     runs-on: ubuntu-latest
     # Both steps below mint the App key (via secrets.SHIPMATE_APP_PRIVATE_KEY),
     # same as apply-env-level.yml's complete job -- deployment branch policy
