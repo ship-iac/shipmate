@@ -1382,16 +1382,18 @@ def test_load_check_maps_drops_records_with_no_app_silently(tmp_path, capsys):
 
 
 def test_check_name_grammar_matches_apply_cells_construction():
-    # Coupling: apply-cell builds the apply check's NAME, apply-comment
-    # forward-builds the same string to look that check up. A divergence is
-    # silent by design -- every lookup would miss, _check_state would return
-    # CHECK_UNKNOWN for every row, and the comment would quietly revert to the
-    # artifact-only rendering this feature exists to correct. Same posture as
+    # Coupling: apply-snapshot builds the apply check's NAME (to look up the
+    # pre-existing check ids before any wave runs -- apply-cell itself holds no
+    # App key and builds no check name any more), apply-comment forward-builds
+    # the same string to look that check up. A divergence is silent by design
+    # -- every lookup would miss, _check_state would return CHECK_UNKNOWN for
+    # every row, and the comment would quietly revert to the artifact-only
+    # rendering this feature exists to correct. Same posture as
     # test_cell_schema_guard_apply_cell_writes_every_required_key above.
-    src = (_ENGINE / "actions" / "apply-cell" / "action.yml").read_text(encoding="utf-8")
-    expected = "f\"apply / {os.environ['STACK']} / {os.environ['ENV']}\""
+    src = (_ENGINE / "scripts" / "apply-snapshot").read_text(encoding="utf-8")
+    expected = 'f"apply / {stack} / {env}"'
     assert expected in src, (
-        "apply-cell no longer builds the apply check name as "
+        "apply-snapshot no longer builds the apply check name as "
         "'apply / <stack path> / <env>' -- scripts/apply-comment's _check_state "
         "and _job_url forward-build that exact grammar to look the check up, "
         "and a mismatch makes every lookup miss silently"

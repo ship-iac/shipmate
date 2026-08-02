@@ -149,8 +149,8 @@ GATE_WRITER_ACTIONS = ("actions/gate-refresh", "actions/summary")
 CREDENTIALED_ACTIONS = (
     "actions/gate-refresh",
     "actions/summary",
-    "actions/apply-cell",
-    "actions/drift-cell",
+    "actions/apply-complete",
+    "actions/drift-issues",
     "actions/apply-summary",
 )
 

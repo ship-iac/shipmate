@@ -1,5 +1,5 @@
 name: shipmate apply-cell
-description: Apply one stack x env from its reviewed .otplan artifact. Never re-plans. Holds no App key: a trusted trailing job completes the apply check afterwards.
+description: Apply one stack x env from its reviewed .otplan artifact. Never re-plans. Holds no App key — a trusted trailing job completes the apply check afterwards.
 inputs:
   stack:
     description: Stack path, e.g. stacks/app.
