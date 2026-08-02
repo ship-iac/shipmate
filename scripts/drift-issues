@@ -72,7 +72,13 @@ def existing_issue_numbers():
     """{title: number} for every OPEN issue labelled `drift` -- one list call
     for the whole run, not one per cell. --limit caps how many are scanned,
     kept well above the realistic count of simultaneously-drifting stack x
-    envs so an existing issue is never missed (which would open a duplicate)."""
+    envs so an existing issue is never missed (which would open a duplicate).
+
+    The LOWEST number wins when two open issues share a title (the code this
+    replaced took `.[0]` off a listing gh itself does not guarantee any
+    particular order for): picking arbitrarily (e.g. last-seen in whatever
+    order gh returned) would leave the other one permanently unreachable by
+    title lookup -- never edited, never auto-closed."""
     rows = json.loads(
         _run(
             [
@@ -90,7 +96,12 @@ def existing_issue_numbers():
             ]
         )
     )
-    return {row["title"]: row["number"] for row in rows}
+    out = {}
+    for row in rows:
+        title, number = row["title"], row["number"]
+        if title not in out or number < out[title]:
+            out[title] = number
+    return out
 
 
 def _title(cell):

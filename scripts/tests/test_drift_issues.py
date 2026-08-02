@@ -140,6 +140,22 @@ def test_existing_issue_numbers_parses_the_listing(monkeypatch):
     assert di.existing_issue_numbers() == {"drift: dev-eu / app": 5}
 
 
+def test_existing_issue_numbers_keeps_the_lowest_on_a_title_collision(monkeypatch):
+    # gh does not guarantee listing order; a duplicate-titled issue must not
+    # be resolved by whichever happened to come first/last in that order --
+    # the lower number wins regardless of listing order, deterministically.
+    rows = [
+        {"number": 9, "title": "drift: dev-eu / app"},
+        {"number": 3, "title": "drift: dev-eu / app"},
+        {"number": 7, "title": "drift: dev-eu / app"},
+    ]
+    monkeypatch.setattr(di, "_run", lambda args: json.dumps(rows))
+    assert di.existing_issue_numbers() == {"drift: dev-eu / app": 3}
+
+    monkeypatch.setattr(di, "_run", lambda args: json.dumps(list(reversed(rows))))
+    assert di.existing_issue_numbers() == {"drift: dev-eu / app": 3}
+
+
 # ---- main / Slack -----------------------------------------------------------
 
 
