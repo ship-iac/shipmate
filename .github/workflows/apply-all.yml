@@ -18,6 +18,10 @@ on:
 jobs:
   detect:
     runs-on: ubuntu-latest
+    # `gh workflow run apply-all.yml` by a human with write access would
+    # otherwise skip every requirement in scripts/authorize. A human cannot
+    # make github.actor a bot login; the App's dispatch always is one.
+    if: ${{ endsWith(github.actor, '[bot]') }}
     permissions: { contents: read, checks: read, actions: read }
     outputs:
       envlevel0_waves: ${{ steps.d.outputs.envlevel0_waves }}
