@@ -48,8 +48,27 @@ def test_never_completes_a_cell_that_was_not_snapshotted():
     assert apply_complete.to_complete(SNAP, jobs) == []
 
 
-def test_a_job_named_for_another_cell_cannot_complete_this_one():
-    # Evidence is the run's own job conclusions, so one cell cannot vouch for
-    # another the way a shared artifact would allow.
-    jobs = [job("waves / apply / stacks/app / dev-eu", "success")]
-    assert apply_complete.to_complete(SNAP, jobs) == [2, 3]
+def test_a_reapply_job_cannot_complete_the_cell_it_shadows():
+    # "reapply / stacks/dns / dev-eu" shares its trailing characters with the
+    # target "apply / stacks/dns / dev-eu" but is a different verb. Only a
+    # `/`-boundary-respecting suffix may count -- the same idiom
+    # scripts/apply-comment's _job_url pins in
+    # test_apply_comment.py::test_job_url_does_not_false_match_on_bare_endswith.
+    jobs = [job("reapply / stacks/dns / dev-eu", "success")]
+    assert apply_complete.to_complete(SNAP, jobs) == []
+
+
+def test_suffix_collisions_on_similar_stack_and_env_names_never_complete():
+    # Two real cells, "stacks/app" and a bare "app", plus two decoy jobs that
+    # share a trailing substring with each without actually naming them: a
+    # different stack ("stacks/my-app") and a different env ("prod-dev-eu").
+    # None of it may complete anything.
+    snap = {
+        "stacks/app\x00dev-eu": [2, 3],
+        "app\x00dev-eu": [99],
+    }
+    jobs = [
+        job("waves / apply / stacks/my-app / dev-eu", "success"),
+        job("waves / apply / stacks/app / prod-dev-eu", "success"),
+    ]
+    assert apply_complete.to_complete(snap, jobs) == []

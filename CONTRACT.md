@@ -50,6 +50,16 @@ are locked together by a source-derived test, because a rename of either would
 degrade every link to the run URL silently — that fallback being the designed
 behaviour, no observable would fail.
 
+`scripts/apply-complete` is a third consumer of the identical grammar: given
+the pre-flight snapshot of check ids a run may complete, it matches each
+snapshotted `<stack>`/`<env>` pair's `apply / <stack> / <env>` name against
+the same run's job-name listing (the same `/`-boundary suffix idiom as
+`scripts/apply-comment`'s log-link match, not a second invention) to decide
+which cells the run's own job conclusions actually earned. A rename of the
+apply-env-level job's `name:` would silently break this consumer too — not
+degrading to a fallback URL, but leaving already-snapshotted checks pending
+forever.
+
 Job display names in the apply/deploy path nest: a called reusable workflow's
 job displays as `<caller job> / <callee job>`, applied at every level, and GHA
 cannot suppress a level. The apply leaf is therefore three deep, e.g.

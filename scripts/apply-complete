@@ -9,7 +9,11 @@ per-cell completion already had.
 
 Job names are matched by suffix because a called workflow's jobs display as
 `<caller job> / <called job> / <matrix job>`, and CONTRACT.md pins the matrix
-job's own name to `apply / <stack> / <env>`.
+job's own name to `apply / <stack> / <env>`. The suffix match requires a
+`/ `-boundary immediately before `apply`, not a bare `str.endswith` -- a job
+named e.g. `reapply / <stack> / <env>` shares the trailing characters but is
+a different verb entirely, and a bare `endswith` would let it complete a
+check its own apply never earned.
 """
 
 import json
