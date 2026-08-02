@@ -21,9 +21,7 @@ def _key(stack, env):
 
 def snapshot(waves, check_runs, app_id):
     wanted = [
-        (cell["stack"], cell["environment"])
-        for name in sorted(waves)
-        for cell in waves[name] or []
+        (cell["stack"], cell["environment"]) for name in sorted(waves) for cell in waves[name] or []
     ]
     out = {}
     for stack, env in wanted:
