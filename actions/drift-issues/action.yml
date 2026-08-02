@@ -1,0 +1,63 @@
+name: shipmate drift-issues
+description: Open/update/close drift Issues from downloaded drift-summary cell artifacts, and Slack-notify each drifted cell. The only step on the drift path that mints the App key.
+inputs:
+  cells-dir:
+    description: Directory holding downloaded drift-summary.*/cell.json trees.
+    required: false
+    default: drift
+  app-id:
+    description: shipmate App id (a repo/org variable, not a secret).
+    required: true
+  private-key:
+    description: shipmate App private key (from the shipmate-engine environment secret).
+    required: true
+  slack-webhook:
+    description: Optional Slack webhook URL; a drifted cell is posted when set.
+    required: false
+    default: ""
+runs:
+  using: composite
+  steps:
+    - name: Mint App installation token
+      id: token
+      uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+      with:
+        client-id: ${{ inputs.app-id }}
+        private-key: ${{ inputs.private-key }}
+        # owner/repositories intentionally omitted so the token always
+        # scopes to the current repository, regardless of trigger type --
+        # create-github-app-token's own documented behavior when both
+        # inputs are empty. This action runs from the same
+        # `schedule`/`workflow_dispatch` triggers drift-cell's matrix does;
+        # the comment this replaced justified the omission by asserting
+        # `github.event.repository` is unpopulated on `schedule` (which
+        # would otherwise make `repositories: github.event.repository.name`
+        # evaluate to '' and, with `owner` still set, fall back to scoping
+        # the token to every repo in the installation). GitHub's Sept-2022
+        # changelog ("Additional information available in github.event
+        # payload for scheduled workflow runs") says schedule payloads now
+        # carry repository/org/enterprise info, which contradicts that
+        # claim -- not independently re-verified live in this session.
+        # Neither answer matters here: this omission defaults the token to
+        # the current repository unconditionally either way, so it is
+        # correct regardless of what `schedule` actually delivers. The
+        # default-branch ref guard in the consuming `drift.yml` also does
+        # not depend on this payload question -- it resolves the default
+        # branch via a `gh api` call instead.
+        permission-issues: write
+
+    - name: Upsert / close drift issues
+      shell: bash
+      env:
+        GH_TOKEN: ${{ steps.token.outputs.token }}
+        # `gh issue list/create/edit/close` and `gh label` are repository-scoped
+        # and resolve their repository from the git remote of a checkout. The
+        # job that runs this holds the App key and so deliberately has no
+        # checkout at all -- without GH_REPO every one of those calls fails with
+        # "failed to determine base repository" on the first nightly run.
+        GH_REPO: ${{ github.repository }}
+        SHIPMATE_CELLS_DIR: ${{ inputs.cells-dir }}
+        SHIPMATE_SLACK_WEBHOOK: ${{ inputs.slack-webhook }}
+      run: |
+        set -euo pipefail
+        python3 "$GITHUB_ACTION_PATH/../../scripts/drift-issues"

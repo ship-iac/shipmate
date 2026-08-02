@@ -23,11 +23,22 @@ SKIP_DIRS = {
     "node_modules",
 }
 GATE = "shipmate / gate"
+# The literal's home in `actions/summary` moved to `scripts/gate-state` (the
+# trusted post-plan `workflow_run` job has no `needs`, so a shared script
+# decides gate state instead of an inline heredoc in the action); the
+# composite action itself now only POSTs the body gate-state already built.
 WRITERS = [
-    "actions/summary/action.yml",
+    "scripts/gate-state",
     "actions/gate-refresh/action.yml",
     ".github/workflows/deploy.yml",
 ]
+
+# The files whose gate-writing step must target the commit-statuses API, never
+# check-runs. Same idea as WRITERS but a different set: `actions/summary`
+# carries no `shipmate / gate` literal any more (it only POSTs a body
+# `scripts/gate-state` built), so it is absent from WRITERS above -- but it
+# still performs the actual write, so it still needs this guard.
+STATUS_WRITERS = [*WRITERS, "actions/summary/action.yml"]
 
 
 def test_gate_literal_present_in_every_writer():
@@ -37,11 +48,14 @@ def test_gate_literal_present_in_every_writer():
 
 
 def _gate_writing_run_blocks(text):
-    """Yield each `run:` block (as a single string) that references the gate
-    context AND posts (contains `--input`, a `gh api ... --input` call). A step
-    that merely names the gate in a comment/echo does not count; the writer
-    files each have exactly one such block, but this scans generically instead
-    of assuming a fixed line layout."""
+    """Yield each `run:` block (as a single string) that writes the gate: it
+    either references the gate context literal AND posts (contains
+    `--input`, a `gh api ... --input` call), or -- `actions/summary`'s shape,
+    which carries no context literal of its own -- POSTs the specific body
+    `scripts/gate-state` produced (`--input gate.json`). A step that merely
+    names the gate in a comment/echo does not count; the writer files each
+    have exactly one such block, but this scans generically instead of
+    assuming a fixed line layout."""
     blocks = []
     current = []
     in_run = False
@@ -65,7 +79,24 @@ def _gate_writing_run_blocks(text):
                 current.append(line)
     if current:
         blocks.append("\n".join(current))
-    return [b for b in blocks if GATE in b and "--input" in b]
+    return [b for b in blocks if (GATE in b and "--input" in b) or "--input gate.json" in b]
+
+
+def _writer_gate_segments(rel, text):
+    """The text segment(s) of one STATUS_WRITERS entry to check for the
+    commit-status invariant.
+
+    A `.yml` writer (a composite action or workflow) keeps the existing
+    `run:`-block extraction: a step may hold other unrelated `run:` blocks
+    that must not be conflated with the gate-writing one. `scripts/gate-state`
+    is not YAML and has no `run:` blocks at all -- it is a plain script whose
+    only job is building the gate body (the POST itself now lives in
+    `actions/summary`'s `Create/refresh gate` step, over a body it did not
+    build), so the whole file is the one segment to check.
+    """
+    if not rel.endswith((".yml", ".yaml")):
+        return [text] if GATE in text else []
+    return _gate_writing_run_blocks(text)
 
 
 def test_gate_written_as_commit_status_not_check_run():
@@ -78,19 +109,37 @@ def test_gate_written_as_commit_status_not_check_run():
     status is commit-scoped and immune. Lock every writer onto the statuses API.
 
     Scoped to the GATE-writing step(s) only (the block that references the
-    `shipmate / gate` context and POSTs it) -- NOT every line in the writer
-    file. `actions/summary` also legitimately creates apply check-runs in a
-    separate step; that step must not be flagged by this guard.
+    `shipmate / gate` context and POSTs it, or -- `actions/summary` -- POSTs
+    the specific body `scripts/gate-state` produced) -- NOT every line in the
+    writer file. `actions/summary` also legitimately creates apply check-runs
+    in a separate step; that step must not be flagged by this guard.
+
+    Checks STATUS_WRITERS, not WRITERS: `actions/summary` carries no
+    `shipmate / gate` literal of its own any more (moved to
+    `scripts/gate-state`, which it calls), but it still performs the actual
+    POST, so it still needs this guard even though it is exempt from
+    test_gate_literal_present_in_every_writer above.
+
+    `scripts/gate-state` never calls `gh api` at all -- it only builds the
+    body JSON that `actions/summary` later POSTs -- so it cannot itself target
+    the wrong endpoint; the guard there narrows to the weaker but still
+    meaningful claim that it never even names the check-runs endpoint.
     """
-    for rel in WRITERS:
+    for rel in STATUS_WRITERS:
         text = (ENGINE / rel).read_text(encoding="utf-8")
-        gate_blocks = _gate_writing_run_blocks(text)
-        assert gate_blocks, f"{rel}: no gate-writing run block found (context+POST)"
-        for block in gate_blocks:
-            assert "statuses/" in block, (
-                f"{rel}: gate-writing step must POST to the commit statuses API: {block!r}"
+        gate_segments = _writer_gate_segments(rel, text)
+        assert gate_segments, f"{rel}: no gate-writing segment found (context+POST)"
+        for segment in gate_segments:
+            if "gh api" not in segment:
+                # A body-only writer: no POST of its own to mistarget.
+                assert "check-runs" not in segment, (
+                    f"{rel}: gate body construction references the check-runs API"
+                )
+                continue
+            assert "statuses/" in segment, (
+                f"{rel}: gate-writing step must POST to the commit statuses API: {segment!r}"
             )
-            for line in block.splitlines():
+            for line in segment.splitlines():
                 assert not ("check-runs" in line and "--input" in line), (
                     f"{rel}: gate POST still targets the check-runs API: {line.strip()}"
                 )
@@ -100,10 +149,33 @@ GATE_WRITER_ACTIONS = ("actions/gate-refresh", "actions/summary")
 CREDENTIALED_ACTIONS = (
     "actions/gate-refresh",
     "actions/summary",
-    "actions/apply-cell",
-    "actions/drift-cell",
+    "actions/apply-complete",
     "actions/apply-summary",
+    "actions/drift-issues",
 )
+# Actions that will need the same credential-threading guard once they exist,
+# but don't yet -- kept out of CREDENTIALED_ACTIONS itself (a bare substring
+# allowlist with no existence check) so a not-yet-created action can't sit in
+# there silently. Each entry here is an explicit, reviewed choice to exempt it
+# for now, not an accident: see test_credentialed_actions_exist_or_are_pending.
+PENDING_CREDENTIALED_ACTIONS = ()
+
+
+def test_credentialed_actions_exist_or_are_pending():
+    # A bare substring allowlist has no existence check of its own -- a typo in
+    # an entry here (or in PENDING_CREDENTIALED_ACTIONS) would silently disable
+    # the credential-threading guard for every step that calls the real action,
+    # with nothing failing anywhere. Every live entry must resolve to a real
+    # action.yml; every pending entry must NOT (once it exists, move it up).
+    for action in CREDENTIALED_ACTIONS:
+        path = ENGINE / action / "action.yml"
+        assert path.is_file(), f"CREDENTIALED_ACTIONS entry {action!r} has no {path}"
+    for action in PENDING_CREDENTIALED_ACTIONS:
+        path = ENGINE / action / "action.yml"
+        assert not path.is_file(), (
+            f"PENDING_CREDENTIALED_ACTIONS entry {action!r} now has a real {path} "
+            "-- move it into CREDENTIALED_ACTIONS"
+        )
 
 
 def _job_writes_gate(job):
@@ -288,9 +360,10 @@ def _credentialed_step_offenses(wf_name, job_name, job):
 
 
 def test_credentialed_action_steps_thread_app_credentials():
-    """Every step calling gate-refresh/summary/apply-cell/drift-cell passes
-    both `app-id` and `private-key` in its `with:` -- these actions each mint
-    their own App installation token and 403 (or silently no-op) without both.
+    """Every step calling an action in CREDENTIALED_ACTIONS (gate-refresh,
+    summary, apply-complete, apply-summary) passes both `app-id` and
+    `private-key` in its `with:` -- these actions each mint their own App
+    installation token and 403 (or silently no-op) without both.
 
     For a job that is itself a reusable-workflow CALLER (`uses:` points at
     another `.github/workflows/*.yml` and relies on `secrets: inherit` to

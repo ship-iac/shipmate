@@ -17,7 +17,30 @@ on:
       SHIPMATE_APP_PRIVATE_KEY: { required: true }
       SHIPMATE_PLAN_PASSPHRASE: { required: false }
 jobs:
+  # `gh workflow run apply.yml` by a human with write access would otherwise
+  # skip every requirement in scripts/authorize. A human cannot make
+  # github.actor a bot login, so this rejects any human dispatch -- though it
+  # admits any bot actor with actions:write, not only this App.
+  #
+  # Its own job, not a first step of `detect`: `summary` must refuse a rejected
+  # dispatch (it mints the App key and comments on the dispatcher-supplied PR
+  # number) while still posting the failure comment and refreshing the gate
+  # when `detect` genuinely fails -- a matrix over the 256-cell cap, an
+  # env_order cycle, a bad plan run id. Keying `summary` on this job separates
+  # the two: `needs.guard.result == 'success'` is false only for an
+  # unauthorised dispatch. No secrets, no environment, no checkout.
+  guard:
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Reject dispatches that did not come from a bot actor
+        if: ${{ !endsWith(github.actor, '[bot]') }}
+        run: |
+          echo "::error::apply must be dispatched by the shipmate App via comment-ops, not by a direct workflow_dispatch"
+          exit 1
+
   detect:
+    needs: [guard]
     runs-on: ubuntu-latest
     permissions: { contents: read, checks: read, actions: read }
     outputs:
@@ -50,10 +73,14 @@ jobs:
     # suppress a level — so this level is named for what it fans out instead of
     # repeating the verb the wave job already carries.
     name: waves
-    needs: [detect]
+    # `guard` is in `needs` as well as `detect`, so its failure reaches
+    # `!failure()` here: without it a rejected dispatch skips `detect`, and a
+    # skipped `detect` reads its outputs as empty strings -- which the
+    # `!= 'true'` guard below reads as "not empty" and fans out anyway.
+    needs: [guard, detect]
     if: ${{ !failure() && !cancelled() && needs.detect.outputs.empty != 'true' }}
-    uses: ship-iac/shipmate/.github/workflows/apply-env-level.yml@a5822b099661d7e12fd47b631ec609012efd9551
-    permissions: { contents: read, actions: read }
+    uses: ship-iac/shipmate/.github/workflows/apply-env-level.yml@4ae0a42575c955217aec3ee678d7608f62ffe7b4 # provisional pin: branch-local commit, not yet on main -- repin with dev/repin_internal.py once this merges
+    permissions: { contents: read, checks: read, actions: read }
     with:
       waves_json: ${{ needs.detect.outputs.waves }}
       head_sha: ${{ needs.detect.outputs.head_sha }}
@@ -68,9 +95,20 @@ jobs:
     secrets: inherit
 
   summary:
-    needs: [detect, apply]
-    if: always()
+    needs: [guard, detect, apply]
+    # `always()` alone would still run this job -- and mint the App key -- when
+    # the bot-actor rejection failed; `needs.guard.result == 'success'` closes
+    # that. Keyed on `guard` and NOT on `detect`: `always()` is needed so
+    # results/gate-refresh post when apply failed or was cancelled, and a
+    # genuine `detect` failure (matrix over the 256-cell cap, a bad plan run id)
+    # must still get the developer a failure comment and a gate refresh.
+    if: ${{ always() && needs.guard.result == 'success' }}
     runs-on: ubuntu-latest
+    # Both steps below mint the App key (via secrets.SHIPMATE_APP_PRIVATE_KEY),
+    # same as apply-env-level.yml's complete job -- deployment branch policy
+    # restricts this environment to the default branch, so a branch-authored
+    # workflow naming it is denied and never sees the key.
+    environment: shipmate-engine
     # gate-refresh mints its own App token (checks:read scan + statuses:write
     # gate write); apply-summary mints its own App token too, also
     # checks:read now -- it scans the head SHA's apply checks to fold their

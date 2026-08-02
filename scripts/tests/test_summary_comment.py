@@ -421,36 +421,34 @@ def _guard_bodies():
     return bodies
 
 
-def test_an_unknown_plan_never_overwrites_the_sticky_comment():
-    """A zero cell count means "nothing changed" only when detect succeeded and
-    the plan matrix was empty. A failed detect, plan cells that all died before
-    uploading a cell summary, or a failed cell-summary download also produce
-    zero — and the body would then claim "no stacks changed" about a plan nobody
-    read. Those runs must write nothing at all, so an existing comment (the
-    reviewed plan for the previous push) survives instead of being PATCHed down
-    to an empty table."""
+def test_a_hold_mode_never_overwrites_the_sticky_comment():
+    """`gate-state` collapses every "the plan can't be trusted" case (a
+    non-success plan run, or a cell/artifact-count shortfall) into
+    `comment_mode=hold` — a single signal the upsert step reacts to before it
+    inspects anything else. Those runs must write nothing at all, so an
+    existing comment (the reviewed plan for the previous push) survives
+    instead of being PATCHed down to an empty table."""
     bodies = _guard_bodies()
-    nothing_changed = next(
-        c for c in bodies if 'DETECT_RESULT" = "success"' in c and 'PLAN_RESULT" = "skipped"' in c
-    )
-    assert bodies[nothing_changed] == ["nothing_changed=true"]
-    unknown = next(c for c in bodies if '"$COUNT" = "0"' in c and 'nothing_changed" = "false"' in c)
-    assert "exit 0" in bodies[unknown]
+    hold = next(c for c in bodies if '"$MODE" = "hold"' in c)
+    assert "exit 0" in bodies[hold]
     # No write of any kind on that path — not the PATCH, not the create.
-    assert not any("gh api" in line for line in bodies[unknown])
+    assert not any("gh api" in line for line in bodies[hold])
+
+    nothing_changed = next(c for c in bodies if '"$MODE" = "nothing-changed"' in c)
+    assert bodies[nothing_changed] == ["nothing_changed=true"]
 
 
 def test_the_sticky_upsert_skips_creation_when_nothing_was_planned():
     """A docs-only or pin-bump pull request should carry no shipmate comment at
-    all. The guard is create-only — conditioned on an *empty* id as well as a
-    zero cell count — because an existing comment must still be updated to the
-    no-planned-cells body, or a pull request that planned changes and then
-    pushed them away keeps displaying the stale plan table. It also yields to
-    doctor: findings render only as run-page annotations, so the comment footer
-    is their one pull-request-visible pointer and a run with findings still
-    posts. Behaviour lives in the action's shell, so this is source-derived."""
-    block = _upsert_step()
-    assert "COUNT: ${{ steps.build.outputs.count }}" in block
+    all. The guard is create-only — conditioned on an *empty* id as well as
+    `comment_mode=nothing-changed` (gate-state's `nothing_changed` derivation,
+    not a raw cell count) — because an existing comment must still be updated
+    to the no-planned-cells body, or a pull request that planned changes and
+    then pushed them away keeps displaying the stale plan table. It also
+    yields to doctor: findings render only as run-page annotations, so the
+    comment footer is their one pull-request-visible pointer and a run with
+    findings still posts. Behaviour lives in the action's shell, so this is
+    source-derived."""
     bodies = _guard_bodies()
     warned = next(c for c in bodies if "doctor.txt" in c)
     assert "grep -q '^::warning' doctor.txt" in warned  # warnings, not notices
@@ -458,7 +456,9 @@ def test_the_sticky_upsert_skips_creation_when_nothing_was_planned():
     quiet = next(
         c
         for c in bodies
-        if '"$COUNT" = "0"' in c and '-z "$id"' in c and 'doctor_warned" = "false"' in c
+        if '"$nothing_changed" = "true"' in c
+        and '-z "$id"' in c
+        and 'doctor_warned" = "false"' in c
     )
     assert "exit 0" in bodies[quiet]
     assert not any("gh api" in line for line in bodies[quiet])
@@ -540,3 +540,20 @@ def test_marker_round_trip_guard_summary_action_matches_script():
     assert src.count(sc.MARKER) >= 1, "upsert step no longer greps the script's marker"
     assert "scripts/summary-comment" in src, "summary action no longer calls summary-comment"
     assert sc.build_comment([], {}, "u").startswith(sc.MARKER)
+
+
+def test_comment_links_to_the_plan_run_when_one_is_supplied(tmp_path, monkeypatch):
+    # GITHUB_RUN_ID is the trusted summary run, which holds neither the plan
+    # logs nor the artifacts the footer promises -- the plan run's URL wins.
+    monkeypatch.setenv("SHIPMATE_PLAN_RUN_URL", "https://gh/o/r/actions/runs/42")
+    _run_main(tmp_path, monkeypatch, [_cell()])
+    body = (tmp_path / "comment.md").read_text(encoding="utf-8")
+    assert "[Logs & artifacts](https://gh/o/r/actions/runs/42)" in body
+    assert "/actions/runs/1)" not in body
+
+
+def test_comment_falls_back_to_this_run_when_no_plan_run_url_is_supplied(tmp_path, monkeypatch):
+    monkeypatch.delenv("SHIPMATE_PLAN_RUN_URL", raising=False)
+    _run_main(tmp_path, monkeypatch, [_cell()])
+    body = (tmp_path / "comment.md").read_text(encoding="utf-8")
+    assert "[Logs & artifacts](https://gh/o/r/actions/runs/1)" in body

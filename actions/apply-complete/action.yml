@@ -1,0 +1,82 @@
+name: shipmate apply-complete
+description: Complete the apply checks for every wave cell whose job actually succeeded in this run. The only step in the apply path that mints the App key.
+inputs:
+  snapshot:
+    description: JSON object from apply-snapshot mapping each cell to its pre-existing apply-check ids.
+    required: true
+  app-id:
+    description: shipmate App id (a repo/org variable, not a secret).
+    required: true
+  private-key:
+    description: shipmate App private key (from the shipmate-engine environment secret).
+    required: true
+  github-token:
+    description: GITHUB_TOKEN with actions:read (this run's jobs listing).
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: List run jobs
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+      # A 256-cell level exceeds the 100-per-page cap, so --paginate --jq
+      # streams one job object per line for scripts/apply-complete to read on
+      # stdin. Unlike actions/apply-summary's cosmetic log-link listing, this
+      # one decides which checks get completed: an empty or failed listing
+      # must fail the step loudly rather than degrade to no data, or a
+      # successful apply would silently strand every check pending.
+      run: |
+        set -euo pipefail
+        gh api --paginate --jq '.jobs[]' \
+          "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs?per_page=100" \
+          > "$RUNNER_TEMP/jobs.jsonl"
+        if [ ! -s "$RUNNER_TEMP/jobs.jsonl" ]; then
+          echo "::error::run jobs listing came back empty — cannot tell which wave cells succeeded; refusing to silently complete nothing"
+          exit 1
+        fi
+
+    - name: Select the checks earned by this run
+      shell: bash
+      env:
+        SHIPMATE_SNAPSHOT_JSON: ${{ inputs.snapshot }}
+      run: |
+        set -euo pipefail
+        python3 "$GITHUB_ACTION_PATH/../../scripts/apply-complete" \
+          < "$RUNNER_TEMP/jobs.jsonl" > "$RUNNER_TEMP/complete-ids.txt"
+
+    - name: Mint App installation token
+      # Minted after the jobs listing (which can fail/abort) rather than
+      # before it, so the token's lifetime never spans a step that may not
+      # need it at all -- only the completion PATCH below actually uses it.
+      id: token
+      uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+      with:
+        client-id: ${{ inputs.app-id }}
+        private-key: ${{ inputs.private-key }}
+        owner: ${{ github.repository_owner }}
+        repositories: ${{ github.event.repository.name }}
+        permission-checks: write
+
+    - name: Complete the apply checks
+      shell: bash
+      env:
+        GH_TOKEN: ${{ steps.token.outputs.token }}
+      # The body is static (no author input) so it is a plain heredoc. Retry
+      # each completion so a transient API blip doesn't strand a check
+      # pending — re-running can't recover it (the applied state has already
+      # advanced past the reviewed plan).
+      run: |
+        set -euo pipefail
+        cat > body.json <<'JSON'
+        {"status": "completed", "conclusion": "success", "output": {"title": "applied", "summary": "Applied the reviewed plan for this stack x environment."}}
+        JSON
+        while read -r id; do
+          [ -z "$id" ] && continue
+          ok=""
+          for _ in 1 2 3 4 5; do
+            if gh api -X PATCH "repos/$GITHUB_REPOSITORY/check-runs/$id" --input body.json >/dev/null; then ok=1; break; fi
+            sleep 3
+          done
+          [ -n "$ok" ] || { echo "::error::failed to complete apply check $id after retries"; exit 1; }
+        done < "$RUNNER_TEMP/complete-ids.txt"

@@ -58,14 +58,19 @@ python3 scripts/register-app
 ```
 
 This calls `gh api -X POST app-manifests/$MANIFEST_CODE/conversions`, then
-stores:
+stores, on `GITHUB_REPOSITORY` (typically the App-owning repo itself, e.g.
+`<org>/shipmate`):
 
 - `SHIPMATE_APP_ID` — repo **variable** (app id; not secret).
-- `SHIPMATE_APP_PRIVATE_KEY` — repo **secret** (PEM private key).
+- `SHIPMATE_APP_PRIVATE_KEY` — repo **secret** (PEM private key) — kept here
+  only as the one place the PEM lives outside your local disk, alongside the
+  App settings page.
 
-on `GITHUB_REPOSITORY`. Re-run with a different `GITHUB_REPOSITORY` (or use the
-org secret/variable propagation in step 4) to make the credentials available to
-consumer repos too.
+**Do not re-run this against a consumer repo to "install" the key there.**
+That would store a plain repo secret, readable by any branch's workflow —
+exactly the shape steps 5–6 exist to replace. Copy the PEM from here (or
+re-download it from the App settings) into each consumer repo's
+`shipmate-engine` **environment** secret instead (steps 5–6, below).
 
 ## 3. Upload a logo (optional but recommended)
 
@@ -93,7 +98,30 @@ Click **Install**, choose **Only select repositories**, and pick:
 (and any other consumer repo that wires up comment-ops). Add repos to the
 installation later from the same page as new consumer repos come online.
 
-## 5. Set the approvers team + propagate credentials
+## 5. Create the `shipmate-engine` environment
+
+`SHIPMATE_APP_PRIVATE_KEY` is a secret **on this environment**, never a
+repository or org secret — see §Key-exposure boundary below for why that
+scoping is what keeps the key out of a branch-authored workflow. Create it
+once per consumer repo, with a deployment branch policy naming exactly the
+default branch:
+
+```bash
+REPO=<org>/repo-example-stacks   # repeat per consumer repo
+
+gh api -X PUT "repos/$REPO/environments/shipmate-engine" --input - <<'JSON'
+{ "deployment_branch_policy": { "protected_branches": false, "custom_branch_policies": true } }
+JSON
+gh api -X POST "repos/$REPO/environments/shipmate-engine/deployment-branch-policies" \
+  -f name='main'   # your default branch, if not `main`
+```
+
+No reviewers on this environment — it exists to scope a secret to a ref, not
+to gate a human decision (`docs/hardening.md` #16). `shipmate doctor` checks
+both that this environment exists and that its policy actually names the
+default branch.
+
+## 6. Set the approvers team + propagate credentials
 
 Each consumer repo needs `SHIPMATE_APPROVERS_TEAM` (the GitHub team slug whose
 members may run `shipmate apply`) plus the app id/key from step 2. `gh` cannot read
@@ -109,24 +137,27 @@ TEAM=<approvers-team-slug>
 
 gh variable set SHIPMATE_APPROVERS_TEAM --repo "$REPO" --body "$TEAM"
 gh variable set SHIPMATE_APP_ID --repo "$REPO" --body "<app-id-from-step-2-output>"
-gh secret set SHIPMATE_APP_PRIVATE_KEY --repo "$REPO" --body "$(cat shipmate-app.private-key.pem)"
+gh secret set SHIPMATE_APP_PRIVATE_KEY --repo "$REPO" --env shipmate-engine \
+  --body "$(cat shipmate-app.private-key.pem)"
 ```
 
-Or once at the **org** level with restricted visibility, so every consumer
-repo inherits `SHIPMATE_APP_ID` / `SHIPMATE_APP_PRIVATE_KEY` without a
-per-repo copy (`SHIPMATE_APPROVERS_TEAM` may still differ per repo, so set it
-per-repo as above):
+`SHIPMATE_APP_ID` (a variable, not a secret) **may** also be set once at the
+**org** level with restricted visibility, so every consumer repo inherits it
+without a per-repo copy (`SHIPMATE_APPROVERS_TEAM` may still differ per repo,
+so set it per-repo as above):
 
 ```bash
 gh variable set SHIPMATE_APP_ID --org <org> --visibility selected \
   --repos "repo-example-stacks,repo-example-folders,repo-example-workspaces" \
   --body "<app-id-from-step-2-output>"
-gh secret set SHIPMATE_APP_PRIVATE_KEY --org <org> --visibility selected \
-  --repos "repo-example-stacks,repo-example-folders,repo-example-workspaces" \
-  --body "$(cat shipmate-app.private-key.pem)"
 ```
 
-## 6. Rotate the private key (on suspicion of compromise)
+`SHIPMATE_APP_PRIVATE_KEY` cannot follow it there: environment secrets are
+scoped to one repository's environment, so it has to be set per-repo as
+above — one more reason step 5 (creating the environment) has to happen in
+every consumer repo, not just once for the org.
+
+## 7. Rotate the private key (on suspicion of compromise)
 
 1. In the App settings (`.../settings/apps/shipmate`), under **Private keys**,
    click **Generate a private key**. GitHub downloads a new PEM; the old key(s)
@@ -134,10 +165,7 @@ gh secret set SHIPMATE_APP_PRIVATE_KEY --org <org> --visibility selected \
 2. Store the new key everywhere it's used:
 
    ```bash
-   gh secret set SHIPMATE_APP_PRIVATE_KEY --repo "$REPO" --body "$(cat new-key.pem)"
-   # or, for org-level secrets:
-   gh secret set SHIPMATE_APP_PRIVATE_KEY --org <org> --visibility selected \
-     --repos "repo-example-stacks,repo-example-folders,repo-example-workspaces" \
+   gh secret set SHIPMATE_APP_PRIVATE_KEY --repo "$REPO" --env shipmate-engine \
      --body "$(cat new-key.pem)"
    ```
 3. Back in App settings, **delete** the old private key so it can no longer
@@ -182,20 +210,61 @@ un-approved request, not a code or config bug.
 
 ## Key-exposure boundary
 
-The private key is a secret in `SHIPMATE_APP_PRIVATE_KEY`, but the *token*
-minted from it is readable in plaintext by any step in the job that mints it
-— including the `pull_request`-triggered `summary` job, which runs against
-untrusted PR content (the plan text, cell metadata). The
-`integration_id`-pinned gate ruleset (see `docs/branch-protection.md`)
-defends against two specific threats: a supply-chain compromise reached
-*through* that job (a malicious dependency or action stealing the minted
-token to forge a `shipmate / gate` status), and a stray/forked workflow
-minting its own App token outside the reviewed path. It does **not** defend
-against a trusted, write-access insider who already has `secrets: write` on
-the repo — that person can read the PEM directly regardless of any ruleset
-pin. If your threat model includes malicious insiders with write access,
-the App's key does not solve for that; branch protection's pinned
-`integration_id` only closes the *external* forgery path.
+`SHIPMATE_APP_PRIVATE_KEY` is a secret on the **`shipmate-engine` GitHub
+Environment**, not a repository or org secret — that environment's
+deployment branch policy is a custom policy naming the default branch only
+(`docs/hardening.md` #16; `shipmate doctor` checks both that the environment
+exists and that its policy actually says so). GitHub evaluates a deployment
+branch policy against the ref the triggering job runs at, which is what does
+the actual work here:
+
+- **A `pull_request`-triggered job can never reach the key.** Its ref is
+  `refs/pull/<n>/merge` — the ephemeral merge ref GitHub builds for the pull
+  request — which matches no named-branch pattern a deployment branch policy
+  can express. This holds regardless of which repository opened the pull
+  request, so it is also why `plan.yml` (a `pull_request` workflow by
+  construction) carries no App key anywhere in it: putting one there would
+  satisfy no policy and only widen the blast radius for nothing.
+- **The jobs that can reach the key all run at the default-branch ref.** The
+  trusted `summary` workflow (`.github/workflows/summary.yml`) is triggered
+  by `workflow_run` against the just-completed plan run and is itself defined
+  on the default branch — a `workflow_run` job runs at the ref of the
+  workflow *file*, not the PR head, so it satisfies the policy. The apply and
+  deploy paths reach the key the same way: `workflow_dispatch` from
+  comment-ops, or `push` to the default branch. Nothing that starts from
+  arbitrary branch content ever does.
+- The *token* minted from the key is still readable in plaintext by any step
+  in the job that mints it, same as before the key moved — the environment
+  boundary controls **which jobs can mint one**, not what a job does with it
+  once minted. The `integration_id`-pinned gate ruleset
+  (`docs/branch-protection.md`) is what defends against a token minted inside
+  one of those trusted jobs being used to forge a `shipmate / gate` status
+  (via a supply-chain compromise reached through that job), and against any
+  *other* identity — `GITHUB_TOKEN`'s `github-actions` identity, or a
+  different GitHub App — posting a status under the same context, which
+  without the pin would satisfy the required check outright.
+- The `summary` workflow adds one more explicit guard: it refuses to act when
+  `github.event.workflow_run.head_repository.full_name` differs from
+  `github.repository` — a fork's plan run. A fork's plan run is still a
+  `pull_request` run, so the ref-mismatch argument above already keeps it
+  from the key; this guard exists so that fact doesn't have to be re-derived
+  every time the trigger or ref evaluation changes.
+
+What none of this defends against is a change to the trusted workflow files
+themselves (`summary.yml`, `apply.yml`, and the rest) landing on the default
+branch, where they *would* satisfy the environment's policy. That path runs
+through an ordinary pull request and merge — no `pull_request`-triggered job
+is ever in a position to skip review and reach the key directly, unlike the
+old repository-secret model. The backstop there is **`require_code_owner_review`**
+on the branch ruleset (`docs/hardening.md` #4): a GitHub App cannot be a
+CODEOWNER, so the App itself can never approve a change to its own trust
+boundary — a human owner has to.
+
+Push access to a consumer repository is still meaningful authority: it lets
+someone author the pull request that proposes such a change and, on a
+sole-maintainer repository with `required_approving_review_count: 0`, merge
+it too (see `docs/hardening.md` §1 and §3–5). It is no longer, by itself,
+enough to read the key outright the way an unreviewed branch push once was.
 
 ---
 

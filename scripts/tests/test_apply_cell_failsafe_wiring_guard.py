@@ -19,7 +19,7 @@ from _loader import action_steps
 # Ids in the guarded range that are deliberately NOT fail-safes wired into the
 # Compose step's decision -- e.g. a step added only to expose an output, with
 # no bearing on whether the apply can proceed. Empty today: every id'd step
-# between the token mint and the apply is in fact a fail-safe. Adding an id
+# between the stack slug and the apply is in fact a fail-safe. Adding an id
 # here must be a conscious, reviewed choice (spelled out with a reason),
 # because an unlisted id'd step in range fails the guard below instead of
 # being silently skipped -- silent skipping is exactly how a real fail-safe
@@ -37,15 +37,16 @@ def _step_by_id(step_id):
     return matches[0]
 
 
-def _ids_between_token_mint_and_apply():
-    """Every id'd step strictly between "Mint App installation token" (id:
-    token) and "Apply the stored plan" (id: apply) -- the range whose steps
-    can halt the apply and so must be attributable in the Compose decision."""
+def _ids_between_slug_and_apply():
+    """Every id'd step strictly between "Stack slug" (id: ids, the first step
+    -- apply-cell mints no App token of its own any more) and "Apply the
+    stored plan" (id: apply) -- the range whose steps can halt the apply and
+    so must be attributable in the Compose decision."""
     steps = _steps()
     ids = [s.get("id") for s in steps]
-    start = ids.index("token")
+    start = ids.index("ids")
     end = ids.index("apply")
-    assert start < end, "id 'token' must precede id 'apply' in actions/apply-cell/action.yml"
+    assert start < end, "id 'ids' must precede id 'apply' in actions/apply-cell/action.yml"
     return [s.get("id") for s in steps[start + 1 : end] if s.get("id")]
 
 
@@ -92,19 +93,21 @@ def test_not_a_failsafe_exemptions_are_not_stale():
     # Hygiene on the escape hatch itself: an exemption for an id that no
     # longer exists in the guarded range gives false confidence and must be
     # removed, not left to accumulate.
-    ids_in_range = set(_ids_between_token_mint_and_apply())
+    ids_in_range = set(_ids_between_slug_and_apply())
     stale = NOT_A_FAILSAFE - ids_in_range
-    assert not stale, f"NOT_A_FAILSAFE lists ids no longer between token mint and apply: {stale}"
+    assert not stale, (
+        f"NOT_A_FAILSAFE lists ids no longer between the stack slug and apply: {stale}"
+    )
 
 
 def test_every_idd_step_in_range_is_wired_into_compose_env_block():
-    ids_in_range = _ids_between_token_mint_and_apply()
+    ids_in_range = _ids_between_slug_and_apply()
     _, id_to_envvar = _compose_env_id_mapping()
     for step_id in ids_in_range:
         if step_id in NOT_A_FAILSAFE:
             continue
         assert step_id in id_to_envvar, (
-            f"id'd step {step_id!r} sits between the token mint and the apply step, "
+            f"id'd step {step_id!r} sits between the stack slug and the apply step, "
             "but Compose cell summary's env: block has no "
             f"steps.{step_id}.outcome mapping -- its failure would be misattributed "
             "to the generic reason (or a neighbouring fail-safe). Wire it in, or add "
@@ -113,7 +116,7 @@ def test_every_idd_step_in_range_is_wired_into_compose_env_block():
 
 
 def test_every_wired_env_var_is_also_in_failsafes():
-    ids_in_range = _ids_between_token_mint_and_apply()
+    ids_in_range = _ids_between_slug_and_apply()
     _, id_to_envvar = _compose_env_id_mapping()
     failsafe_envvars = {env_key for env_key, _ in _failsafes()}
     for step_id in ids_in_range:
@@ -133,7 +136,7 @@ def test_every_failsafes_entry_maps_back_to_a_current_idd_step_in_range():
     # The reverse direction: a FAILSAFES entry whose env var no longer
     # corresponds to any id in range is dead weight that can silently hide a
     # rename/removal upstream.
-    ids_in_range = set(_ids_between_token_mint_and_apply())
+    ids_in_range = set(_ids_between_slug_and_apply())
     envvar_to_id, _ = _compose_env_id_mapping()
     for env_key, _message in _failsafes():
         step_id = envvar_to_id.get(env_key)
@@ -143,7 +146,7 @@ def test_every_failsafes_entry_maps_back_to_a_current_idd_step_in_range():
         )
         assert step_id in ids_in_range, (
             f"FAILSAFES entry {env_key} maps to id {step_id!r}, which is no longer "
-            "between the token mint and the apply step"
+            "between the stack slug and the apply step"
         )
 
 
@@ -151,7 +154,7 @@ def test_current_failsafe_set_is_exactly_the_four_known_ids():
     # Not a substitute for the structural guards above (this one intentionally
     # would need updating the moment a fifth fail-safe is added) -- a tripwire
     # so that addition is noticed here too, not just in the structural checks.
-    assert set(_ids_between_token_mint_and_apply()) - NOT_A_FAILSAFE == {
+    assert set(_ids_between_slug_and_apply()) - NOT_A_FAILSAFE == {
         "download",
         "decrypt",
         "fingerprint",

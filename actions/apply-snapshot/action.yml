@@ -1,0 +1,40 @@
+name: shipmate apply-snapshot
+description: Map every cell in this run's wave matrices to its pre-existing App-authored apply-check ids, before any wave applies. Holds no App key — GITHUB_TOKEN's checks:read is enough to list check-runs.
+inputs:
+  head-sha:
+    description: PR head SHA carrying the pending apply checks.
+    required: true
+  waves-json:
+    description: This run's wave matrices (the apply-env-level.yml waves_json shape).
+    required: true
+  app-id:
+    description: shipmate App id (repo/org variable); only checks authored by this App count.
+    required: true
+  github-token:
+    description: GITHUB_TOKEN with checks:read (listing check-runs needs no App key).
+    required: true
+outputs:
+  snapshot:
+    description: JSON object mapping each cell's stack/env key (NUL-joined, matching scripts/apply-complete's SEP) to its list of pre-existing App-authored apply-check ids.
+    value: ${{ steps.snap.outputs.snapshot }}
+runs:
+  using: composite
+  steps:
+    - id: snap
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        HEAD_SHA: ${{ inputs.head-sha }}
+        SHIPMATE_WAVES_JSON: ${{ inputs.waves-json }}
+        SHIPMATE_APP_ID: ${{ inputs.app-id }}
+      # Check-runs are paginated (a 256-cell level yields >100); stream them
+      # all with --paginate --jq so scripts/apply-snapshot reads one JSON
+      # object per line on stdin, not one aggregate per page.
+      run: |
+        set -euo pipefail
+        [[ "$HEAD_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::head-sha must be a 40-char lowercase hex SHA (got: $HEAD_SHA)"; exit 1; }
+        gh api --paginate --jq '.check_runs[]' \
+          "repos/$GITHUB_REPOSITORY/commits/$HEAD_SHA/check-runs?filter=all&per_page=100" \
+          > "$RUNNER_TEMP/checks.jsonl"
+        snap=$(python3 "$GITHUB_ACTION_PATH/../../scripts/apply-snapshot" < "$RUNNER_TEMP/checks.jsonl")
+        echo "snapshot=$snap" >> "$GITHUB_OUTPUT"

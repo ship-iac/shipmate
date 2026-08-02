@@ -1,5 +1,9 @@
 # Recommended branch protection
 
+This page is the settings shipmate needs to enforce apply-before-merge.
+`docs/hardening.md` is its companion: who can make the engine act at all, and
+the settings that bound that.
+
 shipmate does **no gating in workflow logic**. The apply-before-merge guarantee
 is enforced entirely by GitHub branch protection requiring one aggregate check:
 
@@ -67,7 +71,7 @@ findings as workflow annotations titled `shipmate doctor`
 (`::warning title=shipmate doctor::<text>` / `::notice title=shipmate
 doctor::<text>`) — read-only, never blocking. Comment `shipmate doctor` on a
 pull request for a consolidated report: a sticky comment (marker `<!--
-shipmate:doctor -->`, upserted in place like the plan comment) combining six
+shipmate:doctor -->`, upserted in place like the plan comment) combining seven
 live probes — a missing or mis-pinned `shipmate / gate` rule on the default
 branch (no active ruleset requiring it, or one that doesn't pin
 `integration_id` to the shipmate App, or that isn't strict), a missing GitHub
@@ -77,7 +81,12 @@ approval-type protection rules — required reviewers or wait timers — and no
 deployment branch policy; an apply environment with no approval rule is only a
 note, and "no approval rule" is deliberately not "no protection rules": GitHub
 synthesizes a `branch_policy` protection rule for any environment with a
-deployment branch policy, and a branch policy is not a review), engine
+deployment branch policy, and a branch policy is not a review), whether the
+`shipmate-engine` environment exists and its deployment branch policy actually
+names the default branch (see `docs/hardening.md` #16 and
+`docs/github-app.md` §Key-exposure boundary — this is the probe that catches
+a re-pin that never (re-)creates that environment, which would otherwise leave
+the App key a repository secret again with nothing else to notice), engine
 action-pin freshness in the consumer's own workflow files (read at the commit
 under examination, so the pull request that bumps a stale pin is not itself
 reported stale, and restricted to pins of the engine's own repository, which
@@ -88,7 +97,7 @@ whether the shipmate App installation still grants the manifest's full
 permission set — with the warning and failure annotations GitHub already
 recorded on this commit's workflow runs (shipmate's own and any other
 Actions workflow run on that commit; third-party-app-authored check runs are
-excluded). Only four of the six probes can produce a finding from the plan
+excluded). Only five of the seven probes can produce a finding from the plan
 path's own `annotate`-mode run (`actions/summary`): the approvers-team probe
 needs the `SHIPMATE_TEAM` environment variable, which the plan path does
 not supply, and
@@ -106,7 +115,8 @@ on the pull request that first adds that directory, which is the first
 when it cannot tell which repository the engine is or which commit to read.
 An environment that exists but whose settings cannot be read is likewise a
 note naming it, rather than the silence a nonexistent environment gets (that
-one is the environment-existence probe's finding).
+one is the environment-existence probe's finding) — the `shipmate-engine`
+probe degrades the same way.
 
 The environment probes cover only the environments of the stacks a given pull
 request changed — the declared set comes from that commit's plan matrix — so
@@ -207,6 +217,54 @@ private. That is belt and braces over the engine's own gate, not the primary
 mitigation. Note also that `app/manifest.json` declares
 `"public": false`: the shipmate App is registered per organization and intended
 for repositories the installing organization controls.
+
+## Environment setup
+
+Every logical environment needs a GitHub Environment pair (`<env>`,
+`<env>-apply`), plus the one fixed `shipmate-engine` environment that holds
+the App key (`docs/github-app.md`). `<env>`/`<env>-apply` are never named in
+workflow YAML at all — they're read from Terramate stack tags at runtime.
+`shipmate-engine` is different: it's the one *literal* environment name that
+does appear in workflow YAML (CONTRACT.md's one carve-out to "no env names in
+workflow YAML — ever"), because it names a single fixed thing rather than a
+per-repo logical environment. Most of its appearances are inside the
+engine's own reusable workflows, but two consumer-owned workflows declare it
+directly too — `comment-ops.yml`'s `ops` job and `drift.yml`'s `issues`
+job — because both mint the App token themselves rather than delegating to
+a called reusable workflow, and both run at the default-branch ref by
+construction (`issue_comment`, the nightly `schedule`), which is what lets
+them.
+
+Create each with `gh api -X PUT repos/<owner>/<repo>/environments/<name>`,
+then set protection rules from Settings → Environments → `<name>` (or the API):
+
+- **`shipmate-engine`** (create once, regardless of how many env tiers you
+  run): deployment branch policy **Selected branches**, naming exactly the
+  default branch. No reviewers — this environment's job is scoping the App
+  key to trusted workflow runs, not gating a human decision, and reviewers
+  here would stall every plan and apply run waiting for an approval nobody is
+  meant to give. `shipmate doctor` checks both that this environment exists
+  and that its policy actually names the default branch.
+- **`<env>`** (plan): no reviewers, no deployment branch policy at all — plan
+  runs against a pull request head ref, which any restriction here blocks
+  outright (`docs/hardening.md` §8; `shipmate doctor` warns on either).
+
+`<env>-apply` splits by tier, and this is the split `docs/hardening.md`
+describes at the credential level (§6–9) restated as environment settings:
+
+- **dev / staging — branch policy only, self-service.** Deployment branch
+  policy restricted to the default branch (closes the direct-branch-secret
+  path, `docs/hardening.md` #17); no required reviewers, so `shipmate apply`
+  proceeds without a human in the loop. Deliberate: these tiers exist so a
+  team can self-serve, and their blast radius doesn't warrant a reviewer.
+- **prod — branch policy *and* required reviewers *and* "Prevent
+  self-review".** Same branch policy, plus required reviewers (a team, not
+  one person) with self-review prevented (`docs/hardening.md` #6) — the one
+  gate an App token cannot forge, since a reviewer decision is a human
+  action a minted token cannot take. List `prod` in
+  `global.shipmate.explicit_envs` too, so a bare `shipmate apply` skips it and
+  it is only ever reached via the targeted `shipmate apply prod` (which then
+  pauses for the environment reviewer).
 
 ## Review policy for `shipmate apply`
 

@@ -1,5 +1,5 @@
 name: shipmate drift-cell
-description: Plan one stack x env; open/update a drift Issue on changes, auto-close it when clean. Drift Issues are authored by the shipmate App.
+description: Plan one stack x env; hand a drift-summary cell artifact to a trusted trailing job. Never re-plans an Issue itself and holds no App key — a plan environment must stay policy-free for planning to work, so a job naming one is reachable from a feature branch.
 inputs:
   stack:
     description: Stack path, e.g. stacks/app.
@@ -12,16 +12,6 @@ inputs:
     required: true
   state-path:
     description: Flavor state path, e.g. stacks/app/.state.
-    required: true
-  slack-webhook:
-    description: Optional Slack webhook URL; drift is posted when set.
-    required: false
-    default: ""
-  app-id:
-    description: shipmate App id (a repo/org variable, not a secret).
-    required: true
-  private-key:
-    description: shipmate App private key (from a repo/org secret).
     required: true
 runs:
   using: composite
@@ -36,21 +26,6 @@ runs:
         slug=$(printf '%s' "$STACK" | tr / -)
         [[ "$slug" =~ ^[A-Za-z0-9._-]+$ ]] || { echo "::error::stack path produced invalid slug"; exit 1; }
         echo "slug=$slug" >> "$GITHUB_OUTPUT"
-
-    - name: Mint App installation token
-      id: token
-      uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
-      with:
-        client-id: ${{ inputs.app-id }}
-        private-key: ${{ inputs.private-key }}
-        # owner/repositories intentionally omitted: drift-cell runs from a
-        # `schedule` trigger where `github.event.repository` is unpopulated,
-        # so `repositories: github.event.repository.name` would evaluate to
-        # '' -- with `owner` still set, create-github-app-token then falls
-        # back to scoping the token to ALL repos in the installation. Omitting
-        # both inputs makes it default to the current repository regardless
-        # of trigger type (its documented behavior when both are empty).
-        permission-issues: write
 
     - name: Restore state
       uses: ship-iac/shipmate/actions/state@cc54ebf89eb763a243a0dc2fc2504ba7dbed5b92 # pinned to a commit on main
@@ -73,49 +48,60 @@ runs:
         tofu -chdir="$STACK" show -json stack.otplan > plan.json
         python3 "$GITHUB_ACTION_PATH/../../scripts/plan-classify" plan.json
 
-    - name: Upsert / close drift issue
+    - name: Compose cell summary
+      # Runs even when a prior step failed (state restore, or the plan itself)
+      # -- the aggregator needs a result for every attempted-or-blocked cell,
+      # and drift-issues must never silently auto-close an existing Issue for
+      # a stack x env whose plan attempt itself did not succeed. plan_ok is
+      # false whenever `steps.plan` did not conclude with success (including
+      # 'skipped', when an earlier step failed); drift-issues treats a
+      # plan_ok=false cell as unknown and leaves its Issue state untouched,
+      # rather than reading a missing/blank DRIFTED output as "clean".
+      # continue-on-error: comment/issue feedback must never outrank the
+      # drift matrix's own job result. Writes cell.json to $RUNNER_TEMP, not
+      # the repo tree, mirroring apply-cell's Compose cell summary.
+      if: always()
+      continue-on-error: true
       shell: bash
       env:
-        GH_TOKEN: ${{ steps.token.outputs.token }}
-        ENV: ${{ inputs.env }}
+        STACK: ${{ inputs.stack }}
         STACK_NAME: ${{ inputs.stack-name }}
+        ENV: ${{ inputs.env }}
+        PLAN_OUTCOME: ${{ steps.plan.outcome }}
         DRIFTED: ${{ steps.plan.outputs.changed }}
         ADD: ${{ steps.plan.outputs.add }}
         CHANGE: ${{ steps.plan.outputs.change }}
         DESTROY: ${{ steps.plan.outputs.destroy }}
       run: |
         set -euo pipefail
-        title="drift: $ENV / $STACK_NAME"
-        run_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
-        # gh filters natively via --jq (same idiom as actions/summary) — no extra process.
-        # --limit caps how many open drift issues we scan for the match; keep it
-        # well above the realistic count of simultaneously-drifting stack x envs
-        # so an existing issue is never missed (which would open a duplicate).
-        existing=$(TITLE="$title" gh issue list --label drift --state open --limit 1000 \
-          --json number,title --jq 'map(select(.title == env.TITLE)) | .[0].number // empty')
-        if [ "$DRIFTED" = "true" ]; then
-          body="Drift detected in \`$STACK_NAME\` @ \`$ENV\`: +$ADD ~$CHANGE -$DESTROY. [Drift run]($run_url) — plan output is in that run's log. Auto-closed on the next clean drift run."
-          if [ -n "$existing" ]; then
-            gh issue edit "$existing" --body "$body" >/dev/null
-          else
-            gh label create drift --color FBCA04 --description "shipmate drift" --force >/dev/null 2>&1 || true
-            gh issue create --title "$title" --label drift --body "$body" >/dev/null
-          fi
-        elif [ -n "$existing" ]; then
-          gh issue close "$existing" --comment "Drift resolved — clean plan for $ENV / $STACK_NAME." >/dev/null
-        fi
-
-    - name: Slack notify on drift (optional)
-      if: ${{ inputs.slack-webhook != '' && steps.plan.outputs.changed == 'true' }}
-      shell: bash
-      env:
-        SLACK: ${{ inputs.slack-webhook }}
-        ENV: ${{ inputs.env }}
-        STACK_NAME: ${{ inputs.stack-name }}
-      run: |
-        set -euo pipefail
-        python3 - > payload.json <<'PY'
+        python3 - <<'PY'
         import json, os
-        print(json.dumps({"text": f":ocean: drift detected: {os.environ['ENV']} / {os.environ['STACK_NAME']}"}))
+
+        plan_ok = os.environ["PLAN_OUTCOME"] == "success"
+        cell = {
+            "stack": os.environ["STACK"],
+            "stack_name": os.environ["STACK_NAME"],
+            "environment": os.environ["ENV"],
+            "plan_ok": plan_ok,
+            "drifted": plan_ok and os.environ["DRIFTED"] == "true",
+            "add": int(os.environ["ADD"]) if plan_ok else 0,
+            "change": int(os.environ["CHANGE"]) if plan_ok else 0,
+            "destroy": int(os.environ["DESTROY"]) if plan_ok else 0,
+        }
+        cell_path = os.path.join(os.environ["RUNNER_TEMP"], "cell.json")
+        with open(cell_path, "w") as fh:
+            json.dump(cell, fh)
         PY
-        curl -sS --fail-with-body -X POST -H 'Content-Type: application/json' --data @payload.json "$SLACK" >/dev/null
+
+    - name: Upload drift summary
+      # continue-on-error: same reasoning as apply-cell's Upload apply summary
+      # -- a cosmetic upload failure must not fail the whole drift job.
+      # overwrite: true so a job re-run in the same workflow run cannot 409 on
+      # the pre-existing artifact name.
+      if: always()
+      continue-on-error: true
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      with:
+        name: drift-summary.${{ inputs.env }}.${{ steps.ids.outputs.slug }}
+        path: ${{ runner.temp }}/cell.json
+        overwrite: true

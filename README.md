@@ -130,12 +130,19 @@ of its CI configuration.
 ## Plan
 
 The `plan.yml` workflow (thin and identical across repo layouts; see the
-`repo-example-*` samples) runs on every pull request. Job ids are below; give the
-two non-fan-out jobs the display names `shipmate / detect` and
-`shipmate / summary`, since their check runs are created by GitHub Actions (a
-job's check run always is) and a bare `detect` in the checks list says nothing
-about which tool produced it. See [`CONTRACT.md`](CONTRACT.md) §Check names for
-the `shipmate / ` namespace:
+`repo-example-*` samples) runs on every pull request and **must keep both its
+file path and its `name:`** — `.github/workflows/plan.yml`, named
+`shipmate · plan` — because the `summary.yml` workflow below is chained onto
+it by both: a `workflow_run` trigger that matches by **name**, and (inside
+the trusted workflow that trigger calls) an explicit check of the exact
+**file path**. Renaming either one, independently, gets a plan that runs but
+never gates, silently — see `CONTRACT.md` §Post-plan topology for both
+halves. Give its one non-fan-out job the
+display name `shipmate / detect`, since its check run is created by GitHub
+Actions (a job's check run always is) and a bare `detect` in the checks list
+says nothing about which tool produced it. See [`CONTRACT.md`](CONTRACT.md)
+§Check names for the `shipmate / ` namespace and §Post-plan topology for the
+full picture below:
 
 - **`detect`** — `terramate fmt --check`, a stale-codegen check
   (`terramate generate --detailed-exit-code`), and `actions/build-matrix`,
@@ -148,21 +155,28 @@ the `shipmate / ` namespace:
   `shipmate · plan / <stack> / <env>` in the UI); `actions/plan-cell`
   writes the **full plan text to the job's step summary** (reachable one click
   from the check), uploads the `.otplan` + a TF_VAR fingerprint as an
-  artifact. The matching `apply / <stack> / <env>` check is created **pending**
-  (or completed "no changes") by the `summary` job below — one App token for the
-  whole fan-out, so the App private key never enters a plan cell.
-- **`summary`** — `actions/summary` upserts one sticky PR comment (a stack ×
-  env table) and creates/refreshes the aggregate **`shipmate / gate`**
-  commit status, which stays non-green while any apply is pending or any
-  plan cell failed. A pull request that changed no stacks gets no plan comment
-  at all — nothing is posted when there are no cells, no comment already on the
-  pull request, and no `doctor` warning to point at — so docs-only and
-  pin-bump changes stay quiet apart from their three checks. An existing comment
-  is still updated, so a plan that was pushed away never leaves a stale table
-  behind; and a run whose cell count is zero for any *other* reason (failed
-  detect, all cells failed, cell artifacts undownloadable) writes nothing and
-  leaves the previous plan standing rather than claiming "no stacks changed" —
-  the gate fails those runs.
+  artifact. `plan.yml` holds no App credential at all — the App private key
+  never enters a `pull_request`-triggered job, full stop.
+
+A separate `summary.yml` workflow — triggered by `workflow_run` once
+`plan.yml` completes, and bound to the fixed `shipmate-engine` GitHub
+Environment (`docs/github-app.md`) — does the credentialed work: it resolves
+the pull request, then calls `actions/summary`, which creates the matching
+`apply / <stack> / <env>` check **pending** (or completed "no changes") and
+upserts one sticky PR comment (a stack × env table) and the aggregate
+**`shipmate / gate`** commit status, which stays non-green while any apply is
+pending or any plan cell failed. Because it runs at the default-branch ref,
+this job never sees a fork's key either way — it additionally declines
+outright when the plan run's `head_repository` isn't this repository, so a
+fork's plan run completes but produces no gate. A pull request that changed
+no stacks gets no plan comment at all — nothing is posted when there are no
+cells, no comment already on the pull request, and no `doctor` warning to
+point at — so docs-only and pin-bump changes stay quiet apart from their
+checks. An existing comment is still updated, so a plan that was pushed away
+never leaves a stale table behind; and a run whose cell count is zero for any
+*other* reason (failed detect, all cells failed, cell artifacts
+undownloadable) writes nothing and leaves the previous plan standing rather
+than claiming "no stacks changed" — the gate fails those runs.
 
 Note on plan output: plan text lives in each `<stack> / <env>` plan job's
 **Summary**, not in a separate Checks-API check-run — the matrix job already
@@ -175,6 +189,8 @@ rapid re-push) — a check-run can, silently blocking the merge forever.
 
 To make the gate enforce apply-before-merge, configure branch protection to
 require `shipmate / gate`; see [`docs/branch-protection.md`](docs/branch-protection.md).
+For who can make the engine act — push access is authority over it — and the
+settings that bound that, see [`docs/hardening.md`](docs/hardening.md).
 
 ## Deploy + drift
 
@@ -197,9 +213,12 @@ workflow over shipmate actions.
   state → fail-safe), and completes the apply check. A stack already applied
   (pre-merge, or a no-change re-plan) has a completed check → deploy
   **no-ops** it.
-- **`drift.yml`** (nightly cron) fans out over **all** stacks × envs, plans
-  each with `actions/drift-cell`, and opens one labeled GitHub Issue per
-  drifted stack × env — auto-closed on the next clean run. Optional Slack.
+- **`drift.yml`** (nightly cron) fans out over **all** stacks × envs and
+  plans each with `actions/drift-cell`, which holds no App credential and
+  only uploads a drift-summary artifact. A separate `issues` job, bound to
+  `shipmate-engine`, downloads those artifacts and opens one labeled GitHub
+  Issue per drifted stack × env via `actions/drift-issues` — auto-closed on
+  the next clean run. Optional Slack.
 - **Generalization:** deploy + drift run unchanged across all three layouts
   (`repo-example-{stacks,folders,workspaces}`) — same pinned shipmate SHA, only
   the per-flavor state path (deploy wrapper's `state_suffix`) and, for drift,

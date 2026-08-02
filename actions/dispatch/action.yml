@@ -5,7 +5,7 @@ inputs:
     description: GitHub App id (a repo/org variable, not a secret).
     required: true
   private-key:
-    description: GitHub App private key (from a repo/org secret).
+    description: GitHub App private key (from the shipmate-engine environment secret).
     required: true
   environment:
     description: Target environment, e.g. dev-eu. Empty = bare `shipmate apply` (all non-explicit environments).
