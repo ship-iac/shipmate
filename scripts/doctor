@@ -7,7 +7,7 @@ Three modes, selected via SHIPMATE_DOCTOR_MODE:
   actions/summary right after a plan run. NEVER fails the run: a probe
   error becomes a 'could not verify' note — doctor guards onboarding, it
   must not take down the plan path.
-- report: render the sticky PR comment on demand — the six live probes'
+- report: render the sticky PR comment on demand — the seven live probes'
   findings plus a harvest of the warnings GitHub already recorded as
   annotations on this commit's workflow check runs.
 - check-ids: reduce a check-runs JSONL listing to the (id, name) pairs worth
@@ -278,27 +278,36 @@ def _engine_environment_warnings(ctx):
     branch can read, while believing they are protected. This probe is the
     only thing that would notice.
 
-    Structured like `_env_protection_warnings`: read first, warn loudly on a
-    missing environment, degrade to a NOTICE rather than a false all-clear
-    when the token cannot read environments at all."""
+    Structured like `_env_protection_warnings`, and for the same reason:
+    existence is decided from the environments **listing**
+    (`_existing_env_names`), never from `bm.gh_json`'s exception on the
+    per-environment read. That read 404s on a missing environment exactly
+    the same way it fails on a 403 or a 5xx -- `bm.gh_json`'s exception
+    carries no status code -- so treating "read failed" as "does not exist"
+    would let a token that merely lacks `environments` read access produce
+    the loud "repository secret" warning on a `shipmate-engine` that is
+    actually fine, while a genuine 403 on a *present* environment would
+    silently pass as healthy. Listing first keeps the two cases apart: the
+    listing's own failure is this probe's precondition and propagates to
+    `warnings()`'s degrade note, the same as `_env_protection_warnings`."""
     repo, default_branch = ctx["repo"], ctx["default_branch"]
-    try:
-        env = _gh_json(f"repos/{repo}/environments/{_ENGINE_ENV}")
-    except (Exception, SystemExit) as e:  # noqa: BLE001 - degrade, see warnings()
-        return [
-            (
-                NOTICE,
-                f"could not read the `{_ENGINE_ENV}` environment "
-                f"({_degrade_reason(e)}) — its branch-policy scoping was not checked.",
-            )
-        ]
-    if not env:
+    if _ENGINE_ENV not in _existing_env_names(ctx):
         return [
             (
                 WARNING,
                 f"GitHub Environment `{_ENGINE_ENV}` does not exist — the shipmate App "
                 "private key is still a repository secret and every branch's workflow "
                 "can read it (see docs/github-app.md).",
+            )
+        ]
+    try:
+        env = _gh_json(f"repos/{repo}/environments/{_ENGINE_ENV}")
+    except (Exception, SystemExit) as e:  # noqa: BLE001 - degrade, see warnings()
+        return [
+            (
+                NOTICE,
+                f"GitHub Environment `{_ENGINE_ENV}` exists but its settings could not be "
+                f"read ({_degrade_reason(e)}) — its branch-policy scoping was not checked.",
             )
         ]
     policy = env.get("deployment_branch_policy")

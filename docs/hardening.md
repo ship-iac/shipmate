@@ -35,11 +35,14 @@ not, since `plan.yml` itself never sees the key. Those trusted workflows also
 refuse to act on a fork head (the `head_repository` guard on the `summary`
 workflow), so a fork pull request never gets a `shipmate / gate` status at
 all. Adding a `pull_request_target` workflow — the usual way to label or
-comment on fork pull requests — reverses that: it runs with the full
-repository secret set against content the fork author controls, and the
-attack above becomes reachable without any push access. Don't add one to a
-repository that holds the App key. See "Contributors without push access" for
-the trade-off that follows.
+comment on fork pull requests — reverses that: unlike `pull_request`, it runs
+at the **base** ref, which is exactly what would satisfy `shipmate-engine`'s
+default-branch-only policy if such a job declared that environment — while
+still checking out and acting on content the fork author controls. That
+combination (a ref the policy trusts, executing input it doesn't) is the
+no-push-access version of the attack this page opens with. Don't add one to
+a repository that holds the App key. See "Contributors without push access"
+for the trade-off that follows.
 
 ## Checklist
 
@@ -252,9 +255,11 @@ Settings → Actions → General:
 - **Fork pull request workflows**: require approval for **all outside
   collaborators** (the strictest option), and never enable "Send secrets to
   workflows from fork pull requests". The same rule applies in workflow code:
-  no `pull_request_target` in a repository holding the App key — it hands the
-  full secret set to a run whose content a fork author controls, which is the
-  no-push-access version of the attack this page opens with.
+  no `pull_request_target` in a repository holding the App key — it runs at
+  the base ref (which would satisfy `shipmate-engine`'s branch policy if the
+  job declared that environment) while still acting on fork-author-controlled
+  content, which is the no-push-access version of the attack this page opens
+  with.
 - **Allowed actions**: allow the engine (`<owner>/shipmate/*`) plus the pinned
   third-party actions the workflows use. This is supply-chain hygiene; it does
   not constrain `run:` steps.

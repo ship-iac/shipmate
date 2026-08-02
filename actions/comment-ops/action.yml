@@ -5,7 +5,7 @@ inputs:
     description: GitHub App id (a repo/org variable).
     required: true
   private-key:
-    description: GitHub App private key (from a repo/org secret).
+    description: GitHub App private key (from the shipmate-engine environment secret).
     required: true
   approvers-team:
     description: GitHub team slug whose members may apply.

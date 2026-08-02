@@ -222,11 +222,18 @@ for repositories the installing organization controls.
 
 Every logical environment needs a GitHub Environment pair (`<env>`,
 `<env>-apply`), plus the one fixed `shipmate-engine` environment that holds
-the App key (`docs/github-app.md`). None of the three is ever named in
-workflow YAML: `<env>`/`<env>-apply` are read from Terramate stack tags at
-runtime, and `shipmate-engine` is referenced only inside shipmate's own
-reusable workflows, never a consumer's (CONTRACT.md's one carve-out to "no
-env names in workflow YAML — ever").
+the App key (`docs/github-app.md`). `<env>`/`<env>-apply` are never named in
+workflow YAML at all — they're read from Terramate stack tags at runtime.
+`shipmate-engine` is different: it's the one *literal* environment name that
+does appear in workflow YAML (CONTRACT.md's one carve-out to "no env names in
+workflow YAML — ever"), because it names a single fixed thing rather than a
+per-repo logical environment. Most of its appearances are inside the
+engine's own reusable workflows, but two consumer-owned workflows declare it
+directly too — `comment-ops.yml`'s `ops` job and `drift.yml`'s `issues`
+job — because both mint the App token themselves rather than delegating to
+a called reusable workflow, and both run at the default-branch ref by
+construction (`issue_comment`, the nightly `schedule`), which is what lets
+them.
 
 Create each with `gh api -X PUT repos/<owner>/<repo>/environments/<name>`,
 then set protection rules from Settings → Environments → `<name>` (or the API):

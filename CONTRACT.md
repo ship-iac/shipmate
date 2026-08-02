@@ -180,12 +180,21 @@ never used.
   purely a data change: create the GitHub Environment, then tag the stacks
   that belong to it. No workflow YAML is edited to add or remove an
   environment. The one carve-out is `shipmate-engine` — a single fixed
-  environment, not a logical environment a consumer defines, that exists
-  purely to scope the App private key to the default-branch ref (see
-  `docs/github-app.md` §Key-exposure boundary). It is named only inside
-  shipmate's own reusable workflows (`summary.yml`, `apply.yml`,
-  `apply-all.yml`, `apply-env-level.yml`, `deploy.yml`); a consumer never
-  writes `environment: shipmate-engine` in a workflow of its own.
+  environment name, not a logical environment a consumer defines or names
+  itself, that exists purely to scope the App private key to the
+  default-branch ref (see `docs/github-app.md` §Key-exposure boundary). It
+  appears both inside the engine's reusable workflows (`summary.yml`,
+  `apply.yml`, `apply-all.yml`, `apply-env-level.yml`, `deploy.yml`) and in
+  two consumer-owned workflows that mint the App token directly rather than
+  delegating to a called reusable workflow — `comment-ops.yml`'s `ops` job
+  (comment-ops authorization + dispatch) and `drift.yml`'s `issues` job
+  (drift issue authoring). Both run at the default-branch ref by
+  construction (`issue_comment` and the nightly `schedule` trigger, neither
+  a pull-request head), which is exactly what lets them declare the
+  environment at all. What never happens is a *logical* environment name
+  (`staging`, `dev-eu`) hardcoded anywhere — `shipmate-engine` is the one
+  literal exception, spelled identically everywhere it appears because it
+  names one fixed thing, not a per-repo variable.
 
 ## Tag grammar
 
@@ -453,33 +462,58 @@ The App private key never enters a `pull_request`-triggered job. The
 consumer's `plan.yml` — checked out at the PR head, running arbitrary pull
 request content — holds no App credential anywhere in it. Every
 App-authored surface listed above (apply checks, the gate, the sticky
-comments, drift issues) is created by a job that runs downstream of
-`plan.yml`, at the default-branch ref, bound to the fixed `shipmate-engine`
-GitHub Environment (`docs/github-app.md` §Key-exposure boundary):
+comments, drift issues) is created by a job bound to the fixed
+`shipmate-engine` GitHub Environment (`docs/github-app.md` §Key-exposure
+boundary), each running at a ref that satisfies its default-branch-only
+policy for a different reason:
 
 - **`plan.yml`** (consumer, `pull_request`) — `detect` + the plan matrix job
-  only. Uploads plan artifacts and cell summaries; authors nothing.
+  only. Uploads plan artifacts and cell summaries; authors nothing, binds to
+  no environment.
 - **`summary.yml`** (consumer, `workflow_run` on `plan.yml`'s completion) — a
   thin wrapper (`uses:` the engine's reusable `.github/workflows/summary.yml`,
   `secrets: inherit`) that resolves the pull request, downloads the plan
   run's cell summaries, and calls `actions/summary` under an App token
   minted inside `shipmate-engine`. This is what creates the pending
   `apply / <stack> / <env>` checks, the sticky plan comment, and the
-  `shipmate / gate` status.
+  `shipmate / gate` status. A `workflow_run` job runs at the ref of the
+  workflow *file*, which is the default branch here.
 - **`apply.yml` / `apply-all.yml` / `apply-env-level.yml` / `deploy.yml`**
   (consumer, `workflow_dispatch` via comment-ops, or `push` to the default
   branch) — the jobs that mint an App token (completing apply checks,
   refreshing the gate, posting the apply result comment) are likewise bound
   to `shipmate-engine`.
+- **`comment-ops.yml`** (consumer, `issue_comment`) — its `ops` job binds to
+  `shipmate-engine` directly (it mints the App token itself, for comment
+  authorization and for the `workflow_dispatch` that kicks off an apply,
+  rather than delegating to a called reusable workflow). `issue_comment`
+  evaluates at the default branch's tip, never a PR head, so it satisfies
+  the policy the same way `push` does.
+- **`drift.yml`**'s **`issues`** job (consumer, nightly `schedule` /
+  `workflow_dispatch`) — also binds to `shipmate-engine` directly, for the
+  same reason: it authors the drift Issues under an App token, and a
+  scheduled or manually dispatched run evaluates at the default branch.
 
-**Requirement, verbatim: the consumer's plan workflow must live at
-`.github/workflows/plan.yml`.** `summary.yml`'s trigger matches
-`github.event.workflow_run.path == '.github/workflows/plan.yml'` exactly. A
-consumer that renames the file — or runs its plan matrix from a
-differently-named `pull_request` workflow — gets a plan that runs to
-completion, produces no summary, no `apply` checks, and no `shipmate / gate`
-status, and raises no error anywhere: the rename is silent and permanent
-until someone notices that merges never gate.
+**Requirement, verbatim, in two halves that must both hold: the consumer's
+plan workflow must live at `.github/workflows/plan.yml`, and its top-level
+`name:` must be `shipmate · plan`.** Two independent checks gate whether
+`summary.yml` ever runs, and either one failing is equally silent and
+equally permanent:
+
+- the consumer's `summary.yml` triggers on
+  `workflow_run: { workflows: ["shipmate · plan"] }` — GitHub matches this by
+  the completed workflow's **name**, not its file path, so renaming
+  `plan.yml`'s `name:` field means this trigger simply never fires;
+  nothing downstream of it ever runs;
+- the trusted, engine-defined `summary.yml` it calls additionally checks
+  `github.event.workflow_run.path == '.github/workflows/plan.yml'` exactly —
+  so even if the *name* still matches, moving the plan matrix to a
+  differently-named **file** fails this guard instead.
+
+A consumer that renames either one gets a plan that runs to completion,
+produces no summary, no `apply` checks, and no `shipmate / gate` status, and
+raises no error anywhere: the rename is silent and permanent until someone
+notices that merges never gate.
 
 Binding these jobs to the `shipmate-engine` environment rather than trusting
 the trigger alone closes two paths a trigger check alone would not:

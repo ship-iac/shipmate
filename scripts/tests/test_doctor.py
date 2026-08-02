@@ -177,7 +177,9 @@ def _quiet_new_probes():
 def test_healthy_repo_emits_nothing(monkeypatch):
     responses = {
         f"repos/{_REPO}/rules/branches/{_BRANCH}?per_page=100": _gate_rule(),
-        f"repos/{_REPO}/environments?per_page=100": _environments("dev-eu", "dev-eu-apply"),
+        f"repos/{_REPO}/environments?per_page=100": _environments(
+            "dev-eu", "dev-eu-apply", "shipmate-engine"
+        ),
         **_quiet_new_probes(),
     }
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
@@ -187,8 +189,9 @@ def test_healthy_repo_emits_nothing(monkeypatch):
 def test_missing_environment_pair_warned(monkeypatch):
     responses = {
         f"repos/{_REPO}/rules/branches/{_BRANCH}?per_page=100": _gate_rule(),
-        # dev-eu-apply is missing
-        f"repos/{_REPO}/environments?per_page=100": _environments("dev-eu"),
+        # dev-eu-apply is missing; shipmate-engine present so only the pair
+        # probe's own finding surfaces
+        f"repos/{_REPO}/environments?per_page=100": _environments("dev-eu", "shipmate-engine"),
         **_quiet_new_probes(),
     }
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
@@ -202,7 +205,9 @@ def test_missing_environment_pair_warned(monkeypatch):
 def test_gate_rule_wrong_integration_id_warned(monkeypatch):
     responses = {
         f"repos/{_REPO}/rules/branches/{_BRANCH}?per_page=100": _gate_rule(integration_id=15368),
-        f"repos/{_REPO}/environments?per_page=100": _environments("dev-eu", "dev-eu-apply"),
+        f"repos/{_REPO}/environments?per_page=100": _environments(
+            "dev-eu", "dev-eu-apply", "shipmate-engine"
+        ),
         **_quiet_new_probes(),
     }
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
@@ -220,7 +225,9 @@ def test_gate_rule_absent_warned(monkeypatch):
         f"repos/{_REPO}/rules/branches/{_BRANCH}?per_page=100": [
             {"type": "deletion", "parameters": {}}
         ],
-        f"repos/{_REPO}/environments?per_page=100": _environments("dev-eu", "dev-eu-apply"),
+        f"repos/{_REPO}/environments?per_page=100": _environments(
+            "dev-eu", "dev-eu-apply", "shipmate-engine"
+        ),
         **_quiet_new_probes(),
     }
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
@@ -234,7 +241,9 @@ def test_gate_rule_absent_warned(monkeypatch):
 def test_strict_policy_off_warned(monkeypatch):
     responses = {
         f"repos/{_REPO}/rules/branches/{_BRANCH}?per_page=100": _gate_rule(strict=False),
-        f"repos/{_REPO}/environments?per_page=100": _environments("dev-eu", "dev-eu-apply"),
+        f"repos/{_REPO}/environments?per_page=100": _environments(
+            "dev-eu", "dev-eu-apply", "shipmate-engine"
+        ),
         **_quiet_new_probes(),
     }
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
@@ -263,7 +272,7 @@ def test_probe_403_degrades_to_note_not_failure(monkeypatch):
             raise SystemExit("::error::command failed (1): gh api ...")
         if path in quiet:
             return quiet[path]
-        return _environments("dev-eu")  # dev-eu-apply missing -> its own warning
+        return _environments("dev-eu", "shipmate-engine")  # dev-eu-apply missing -> its own warning
 
     monkeypatch.setattr(doctor, "_gh_json", fake_gh_json)
     out = doctor.warnings(_ctx())
@@ -283,7 +292,7 @@ def test_probe_generic_exception_degrades_to_note(monkeypatch):
             raise RuntimeError("connection reset")
         if path in quiet:
             return quiet[path]
-        return _environments("dev-eu", "dev-eu-apply")
+        return _environments("dev-eu", "dev-eu-apply", "shipmate-engine")
 
     monkeypatch.setattr(doctor, "_gh_json", fake_gh_json)
     out = doctor.warnings(_ctx())
@@ -307,7 +316,7 @@ def test_degrade_note_names_the_probe_and_drops_the_workflow_command_prefix(monk
             raise SystemExit(f"::error::command failed (1): gh api {path}")
         if path in quiet:
             return quiet[path]
-        return _environments("dev-eu", "dev-eu-apply")
+        return _environments("dev-eu", "dev-eu-apply", "shipmate-engine")
 
     monkeypatch.setattr(doctor, "_gh_json", gh)
     out = doctor.warnings(_ctx())
@@ -491,8 +500,16 @@ def test_env_protection_listing_failure_propagates_to_the_degrade_note(monkeypat
     assert any("env protection" in t and "probe skipped" in t for _, t in out)
 
 
-def _engine_env_responses(env=None, policies=None):
+def _engine_env_responses(env=None, policies=None, listed=True):
+    """Responses for `_engine_environment_warnings`. `listed` controls whether
+    `shipmate-engine` appears in the environments **listing** -- the only
+    thing existence is decided from -- independently of `env`/`policies`,
+    which answer the per-environment reads that only ever run once existence
+    is already established."""
+
     def fake(path):
+        if path == f"repos/{_REPO}/environments?per_page=100":
+            return _environments("shipmate-engine") if listed else _environments()
         if path.endswith(f"repos/{_REPO}/environments/shipmate-engine"):
             return env
         if path.endswith(f"repos/{_REPO}/environments/shipmate-engine/deployment-branch-policies"):
@@ -503,7 +520,12 @@ def _engine_env_responses(env=None, policies=None):
 
 
 def test_missing_engine_environment_warns(monkeypatch):
-    monkeypatch.setattr(doctor, "_gh_json", _engine_env_responses(env=None))
+    """The headline case: `shipmate-engine` absent from the environments
+    **listing** -- never a per-environment-read failure standing in for
+    absence, which `bm.gh_json` cannot tell apart from a 403 or a 5xx on an
+    environment that does exist (see `_engine_environment_warnings`'
+    docstring)."""
+    monkeypatch.setattr(doctor, "_gh_json", _engine_env_responses(listed=False))
     out = doctor._engine_environment_warnings(_ctx())
     assert len(out) == 1
     assert out[0][0] == doctor.WARNING
@@ -579,11 +601,36 @@ def test_correctly_scoped_engine_environment_is_silent(monkeypatch):
     assert doctor._engine_environment_warnings(_ctx(default_branch="main")) == []
 
 
-def test_engine_environment_unreadable_degrades_to_a_note(monkeypatch):
+def test_engine_environment_listing_failure_propagates_to_the_degrade_note(monkeypatch):
+    """The listing is this probe's precondition, exactly like
+    `_env_protection_warnings`': without it no existence verdict can be
+    reached, so the failure must reach `warnings()`'s outer handler and
+    become the "could not verify" degrade instead of a silent empty result."""
+
     def boom(path):
         raise SystemExit(f"::error::command failed (1): gh api {path}")
 
     monkeypatch.setattr(doctor, "_gh_json", boom)
+    with pytest.raises(SystemExit):
+        doctor._engine_environment_warnings(_ctx())
+    out = doctor.warnings(_ctx())
+    assert any("engine environment" in t and "probe skipped" in t for _, t in out)
+
+
+def test_engine_environment_unreadable_degrades_to_a_note(monkeypatch):
+    """The environment exists (per the listing), but the per-environment
+    settings read itself fails -- a NOTICE naming it, not a propagated
+    exception and not the "does not exist" warning, mirroring
+    `_env_protection_warnings`'s unreadable-existing-environment note."""
+
+    def gh(path):
+        if path == f"repos/{_REPO}/environments?per_page=100":
+            return _environments("shipmate-engine")
+        if path.endswith("environments/shipmate-engine"):
+            raise SystemExit(f"::error::command failed (1): gh api {path}")
+        raise AssertionError(f"unexpected path: {path}")
+
+    monkeypatch.setattr(doctor, "_gh_json", gh)
     out = doctor._engine_environment_warnings(_ctx())
     assert len(out) == 1
     assert out[0][0] == doctor.NOTICE
@@ -593,12 +640,16 @@ def test_engine_environment_unreadable_degrades_to_a_note(monkeypatch):
 
 def test_engine_environment_policies_unreadable_degrades_to_a_note(monkeypatch):
     def gh(path):
+        if path == f"repos/{_REPO}/environments?per_page=100":
+            return _environments("shipmate-engine")
         if path.endswith("deployment-branch-policies"):
             raise SystemExit(f"::error::command failed (1): gh api {path}")
-        return {
-            "name": "shipmate-engine",
-            "deployment_branch_policy": {"custom_branch_policies": True},
-        }
+        if path.endswith("environments/shipmate-engine"):
+            return {
+                "name": "shipmate-engine",
+                "deployment_branch_policy": {"custom_branch_policies": True},
+            }
+        raise AssertionError(f"unexpected path: {path}")
 
     monkeypatch.setattr(doctor, "_gh_json", gh)
     out = doctor._engine_environment_warnings(_ctx())
@@ -613,9 +664,9 @@ def test_engine_environment_probe_is_registered(monkeypatch):
     assert doctor._engine_environment_warnings in doctor.PROBES
     responses = {
         f"repos/{_REPO}/rules/branches/{_BRANCH}?per_page=100": _gate_rule(),
+        # shipmate-engine deliberately absent from the listing
         f"repos/{_REPO}/environments?per_page=100": _environments("dev-eu", "dev-eu-apply"),
         **_quiet_new_probes(),
-        f"repos/{_REPO}/environments/shipmate-engine": None,
     }
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
     out = doctor.warnings(_ctx())

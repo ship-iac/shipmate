@@ -130,10 +130,14 @@ of its CI configuration.
 ## Plan
 
 The `plan.yml` workflow (thin and identical across repo layouts; see the
-`repo-example-*` samples) runs on every pull request and **must live at
-exactly that path** — `.github/workflows/plan.yml` — because the trusted
-`summary.yml` workflow below matches on it verbatim; a renamed file gets a
-plan that runs but never gates, silently. Give its one non-fan-out job the
+`repo-example-*` samples) runs on every pull request and **must keep both its
+file path and its `name:`** — `.github/workflows/plan.yml`, named
+`shipmate · plan` — because the `summary.yml` workflow below is chained onto
+it by both: a `workflow_run` trigger that matches by **name**, and (inside
+the trusted workflow that trigger calls) an explicit check of the exact
+**file path**. Renaming either one, independently, gets a plan that runs but
+never gates, silently — see `CONTRACT.md` §Post-plan topology for both
+halves. Give its one non-fan-out job the
 display name `shipmate / detect`, since its check run is created by GitHub
 Actions (a job's check run always is) and a bare `detect` in the checks list
 says nothing about which tool produced it. See [`CONTRACT.md`](CONTRACT.md)

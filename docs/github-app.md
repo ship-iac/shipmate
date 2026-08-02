@@ -58,14 +58,19 @@ python3 scripts/register-app
 ```
 
 This calls `gh api -X POST app-manifests/$MANIFEST_CODE/conversions`, then
-stores:
+stores, on `GITHUB_REPOSITORY` (typically the App-owning repo itself, e.g.
+`<org>/shipmate`):
 
 - `SHIPMATE_APP_ID` — repo **variable** (app id; not secret).
-- `SHIPMATE_APP_PRIVATE_KEY` — repo **secret** (PEM private key).
+- `SHIPMATE_APP_PRIVATE_KEY` — repo **secret** (PEM private key) — kept here
+  only as the one place the PEM lives outside your local disk, alongside the
+  App settings page.
 
-on `GITHUB_REPOSITORY`. Re-run with a different `GITHUB_REPOSITORY` (or use the
-org secret/variable propagation in step 4) to make the credentials available to
-consumer repos too.
+**Do not re-run this against a consumer repo to "install" the key there.**
+That would store a plain repo secret, readable by any branch's workflow —
+exactly the shape steps 5–6 exist to replace. Copy the PEM from here (or
+re-download it from the App settings) into each consumer repo's
+`shipmate-engine` **environment** secret instead (steps 5–6, below).
 
 ## 3. Upload a logo (optional but recommended)
 

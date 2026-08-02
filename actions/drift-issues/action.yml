@@ -9,7 +9,7 @@ inputs:
     description: shipmate App id (a repo/org variable, not a secret).
     required: true
   private-key:
-    description: shipmate App private key (from a repo/org secret).
+    description: shipmate App private key (from the shipmate-engine environment secret).
     required: true
   slack-webhook:
     description: Optional Slack webhook URL; a drifted cell is posted when set.
