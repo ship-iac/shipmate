@@ -6,27 +6,40 @@ and it starts from one fact:
 
 > **Push access to a consumer repository is authority over the engine.**
 
-A branch may carry its own workflow files. GitHub runs them, with the
-repository's secrets, on push — before a pull request exists, before review,
-and before `CODEOWNERS` applies. Such a workflow can read
-`SHIPMATE_APP_PRIVATE_KEY`, mint an App installation token, and then forge the
-`shipmate / gate` status (the pinned `integration_id` is satisfied, because the
-forgery *is* the App), approve the pull request as the App, complete
-`apply / <stack> / <env>` checks without applying anything, and dispatch
-applies without going through comment-ops authorization.
+A branch may carry its own workflow files. GitHub runs them, with whatever
+secrets that job's own environment bindings grant, on push — before a pull
+request exists, before review, and before `CODEOWNERS` applies.
+`SHIPMATE_APP_PRIVATE_KEY` itself is out of reach this way: the
+`shipmate-engine` environment's deployment branch policy only ever satisfies
+a job running at the default-branch ref (row 16; `docs/github-app.md`
+§Key-exposure boundary), so a branch-pushed workflow cannot mint an App
+token, forge the `shipmate / gate` status, approve the pull request as the
+App, complete `apply / <stack> / <env>` checks, or dispatch an apply. What it
+*can* still do, absent the rest of this checklist: declare
+`environment: <env>-apply` itself and claim that environment's cloud
+credentials directly, if that environment carries no deployment branch
+policy of its own (row 17 closes this); and run arbitrary code inside
+whatever a *plan* environment holds, since a plan job executes branch
+content by design regardless of anything below (§7–9, "What none of this
+fixes").
 
-Nothing in the engine can prevent that — it is upstream of any workflow
-shipmate ships. The settings below limit who reaches that position, and keep
-one gate standing that a minted token cannot pass.
+The arbitrary-code-execution residual is upstream of any workflow shipmate
+ships — nothing in the engine can prevent it. The settings below close the
+apply-environment path and limit who can reach even the residual one.
 
-Fork pull requests are outside this **as long as every workflow that can see a
-secret is triggered by `pull_request`**, as the sample repos' are: a fork's
-`pull_request` run receives no secrets, so the key is unreachable. Adding a
-`pull_request_target` workflow — the usual way to label or comment on fork pull
-requests — reverses that: it runs with the full repository secret set against
-content the fork author controls, and the attack above becomes reachable
-without any push access. Don't add one to a repository that holds the App key.
-See "Contributors without push access" for the trade-off that follows.
+Fork pull requests are outside this. The App key lives only in the
+`shipmate-engine` GitHub Environment (`docs/github-app.md` §Key-exposure
+boundary), reachable only by the trusted `summary`/apply workflows running at
+the default-branch ref — never inside a `pull_request`-triggered job, fork or
+not, since `plan.yml` itself never sees the key. Those trusted workflows also
+refuse to act on a fork head (the `head_repository` guard on the `summary`
+workflow), so a fork pull request never gets a `shipmate / gate` status at
+all. Adding a `pull_request_target` workflow — the usual way to label or
+comment on fork pull requests — reverses that: it runs with the full
+repository secret set against content the fork author controls, and the
+attack above becomes reachable without any push access. Don't add one to a
+repository that holds the App key. See "Contributors without push access" for
+the trade-off that follows.
 
 ## Checklist
 
@@ -47,6 +60,8 @@ See "Contributors without push access" for the trade-off that follows.
 | 13 | One App per trust domain; org secret `--visibility selected` | App registration | Cross-repo blast radius |
 | 14 | Rotate the App key when push access is revoked | Runbook | Ex-member with a copied PEM |
 | 15 | Shorten Actions retention | Settings → Actions | `shipmate doctor` report disclosure |
+| 16 | `shipmate-engine` Environment exists, deployment branch policy restricted to the default branch | Environment | Repository-secret App key readable by any branch |
+| 17 | Deployment branch policy restricted to the default branch on every `<env>-apply` | Environment | Branch-authored workflow claiming apply-environment secrets directly |
 
 ## 1. Write access
 
@@ -182,10 +197,16 @@ What the reviewer sees is a deployment-approval prompt naming the environment �
 not a diff. Approving it means "I have read this pull request's plans", so the
 approval is only as good as that habit.
 
-A **deployment branch policy** on `<env>-apply` does not restrict which code is
-applied: the pre-merge apply is dispatched on the default branch and applies the
-pull request head passed as an input, by design. Set one if you like, but do not
-count it as a control.
+A **deployment branch policy** on `<env>-apply`, scoped to the default branch,
+does not change *which code the engine applies* — the pre-merge apply is
+always dispatched on the default branch and applies the pull request head
+passed as an input, policy or not. But it is very much a control on **secret
+release**: without one, a branch-authored workflow that simply declares
+`environment: dev-eu-apply` in its own YAML is handed that environment's
+secrets directly on push, bypassing comment-ops, the gate, and everything
+else in this list — the same path row 16 closes for the App key. Set it on
+every `<env>-apply`, restricted to the default branch, and do count it as a
+control.
 
 ## 7–9. Credentials
 
@@ -248,12 +269,15 @@ trust to all of them.
 
 - Register **one App per trust domain**. Repositories with wide push access get
   their own App and their own key.
-- Distribute the key as an org secret with `--visibility selected`, listing only
-  the repositories that use it (`docs/github-app.md` step 5), or as a repository
-  secret.
+- Set the key as a **`shipmate-engine` environment secret, per repository**
+  (`docs/github-app.md` steps 5–6) — never at repository or org level, and
+  never shared org-wide the way `SHIPMATE_APP_ID` (a variable, not a secret)
+  may be: environment secrets are scoped to one repository's environment, so
+  each consumer repo needs its own `shipmate-engine` environment and its own
+  copy of the key.
 - **Rotate the key whenever push access is revoked** — the runbook is
-  `docs/github-app.md` §6. Anyone who had push access could have copied the PEM
-  out of a workflow run, and revoking their access does not invalidate it.
+  `docs/github-app.md` §7. Anyone who had push access could have copied the
+  PEM out of a workflow run, and revoking their access does not invalidate it.
 
 ## 15. Retention and disclosure
 
@@ -262,12 +286,40 @@ comment, and a job summary cannot be edited or redacted. Shorten the Actions
 retention window if that inventory is sensitive
 (`docs/branch-protection.md` §"Who can ask for the report").
 
+## 16. The `shipmate-engine` environment
+
+`SHIPMATE_APP_PRIVATE_KEY` lives as a secret on the `shipmate-engine` GitHub
+Environment, not as a repository (or org) secret — see `docs/github-app.md`
+§Key-exposure boundary for why that specific environment is what makes the
+key unreachable from a branch-authored workflow. Two things must both be true
+for that to hold, and `shipmate doctor` checks both on every plan run and on
+demand:
+
+- the `shipmate-engine` environment exists;
+- its deployment branch policy is a **custom** policy naming the default
+  branch — not merely present, and not the "protected branches" mode, which
+  restricts to whatever branch protection covers rather than the default
+  branch specifically.
+
+A re-pin of the engine that never creates this environment — the ordinary way
+to regress this — leaves the key a repository secret again, readable by any
+branch's workflow, with nothing else in this design left to notice. That is
+exactly what the probe exists to catch.
+
 ## Contributors without push access
 
-Fork pull requests cannot reach the App key — and cannot complete a shipmate
-run either. A fork's run gets no `SHIPMATE_APP_PRIVATE_KEY`, so the `summary`
-job cannot mint a token, so no `shipmate / gate` status is created and the pull
-request stays blocked. Comment-ops has nothing to dispatch.
+Fork pull requests cannot complete a shipmate run. A fork's `plan.yml` run
+holds no App key at all — nothing in `plan.yml` ever does now that the key
+lives only in `shipmate-engine` — so there is nothing there to protect. What
+actually stops a fork's plan from producing a gate is downstream: the trusted
+`summary` workflow (run at the default-branch ref, bound to `shipmate-engine`)
+refuses to act on a `workflow_run` whose `head_repository` differs from
+`github.repository` (see `docs/github-app.md` §Key-exposure boundary). A
+fork's plan run completes normally; the summary workflow that would mint a
+token, author checks, and create the `shipmate / gate` status declines
+instead, so no gate is ever created and the pull request stays blocked.
+Comment-ops has nothing to dispatch either — no gate, no reviewed plan to
+point `shipmate apply` at.
 
 So the fork model is safe but not self-service: a maintainer must bring the
 branch into the repository (`gh pr checkout` then push to a branch) for it to

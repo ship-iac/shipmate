@@ -83,13 +83,15 @@ need to be edited every time a stack or environment is added or removed.
 `shipmate / ` is the namespace for shipmate's aggregate, non-fan-out surfaces.
 `shipmate / gate` is the only **verbatim** member — it is the required context,
 matched by exact string in a repository ruleset. A consuming repository may
-name its own non-fan-out plan jobs into the same namespace so the checks list
-identifies the tool — `shipmate / detect` and `shipmate / summary` are the
-recommended names, and the reference `plan.yml` in the samples uses them,
-because a job's check run is always created by the GitHub Actions app and its
-name is the only part that can say which tool produced it. Those names are not
-required checks and a consumer may pick others; nothing in the engine
-reconstructs them.
+name its own non-fan-out plan job into the same namespace so the checks list
+identifies the tool — `shipmate / detect` is the recommended name, and the
+reference `plan.yml` in the samples uses it, because a job's check run is
+always created by the GitHub Actions app and its name is the only part that
+can say which tool produced it. (There is no `summary` job inside `plan.yml`
+to name this way: the trusted summary step now runs from a separate,
+engine-defined `summary.yml` workflow at the default-branch ref — see §Post-plan
+topology.) These names are not required checks and a consumer may pick
+others; nothing in the engine reconstructs them.
 
 Everything in the check/status namespace is **ASCII and slash-delimited**, which
 is GitHub's own convention for status contexts (`ci/circleci`), and — for
@@ -177,7 +179,13 @@ never used.
   below) and GitHub Environment configuration. Adding a new environment is
   purely a data change: create the GitHub Environment, then tag the stacks
   that belong to it. No workflow YAML is edited to add or remove an
-  environment.
+  environment. The one carve-out is `shipmate-engine` — a single fixed
+  environment, not a logical environment a consumer defines, that exists
+  purely to scope the App private key to the default-branch ref (see
+  `docs/github-app.md` §Key-exposure boundary). It is named only inside
+  shipmate's own reusable workflows (`summary.yml`, `apply.yml`,
+  `apply-all.yml`, `apply-env-level.yml`, `deploy.yml`); a consumer never
+  writes `environment: shipmate-engine` in a workflow of its own.
 
 ## Tag grammar
 
@@ -237,10 +245,11 @@ only labels the output as shipmate's own.
 `shipmate doctor` posts a consolidated, sticky report — one comment per pull
 request, identified by the HTML marker `<!-- shipmate:doctor -->` (distinct
 from the plan comment's `<!-- shipmate:summary -->`) and upserted in place the
-same way. It combines six live settings probes (gate ruleset, environment
-pair existence, environment protection shape, engine action-pin freshness,
-approvers-team resolvability, and App installation permission drift — see
-`docs/branch-protection.md`) with a harvest of the warning and failure
+same way. It combines seven live settings probes (gate ruleset, environment
+pair existence, environment protection shape, the `shipmate-engine`
+environment's own existence and default-branch scoping, engine action-pin
+freshness, approvers-team resolvability, and App installation permission
+drift — see `docs/branch-protection.md`) with a harvest of the warning and failure
 annotations GitHub already recorded on this commit's workflow runs
 (shipmate's own and any other Actions workflow run on that commit;
 third-party-app-authored check runs are excluded). An empty harvest is
@@ -250,7 +259,7 @@ when the report was rendered, it says so and asks for the command again once
 they have, and if the harvest itself could not be read in full it says that
 too — the two are separate statements, since a run that has not finished has
 recorded nothing yet while a run that could not be read may have recorded
-plenty. Only four of the six
+plenty. Only five of the seven
 probes can produce a finding from the plan path's own `annotate`-mode
 invocation: the approvers-team probe needs the `SHIPMATE_TEAM` environment
 variable, which the plan path does not supply, so it silently returns
@@ -422,8 +431,11 @@ crosses a workflow-run boundary:
   every comment-ops apply run (targeted and bare); unlike the sticky plan
   comment it is never upserted against a marker, so a failure-then-retry
   sequence stays visible across separate comments — an audit trail.
-- **Drift issues** — opened/updated/closed by `actions/drift-cell` via App
-  token.
+- **Drift issues** — `actions/drift-cell` holds no App token and authors
+  nothing; it only plans each stack × env and uploads a drift-summary
+  artifact. A separate `issues` job, bound to `shipmate-engine`, downloads
+  those artifacts and opens/updates/closes the drift Issues via
+  `actions/drift-issues` under an App token.
 
 The plan matrix job's own `<stack> / <env>` auto check-run is the one
 exception: it's the job's own check-run (GitHub creates it for the job
@@ -434,6 +446,54 @@ on the `github-actions` identity regardless of App permissions.
 `apply-<env>-<stack>` concurrency group, so exactly one apply ever runs
 against a given stack × environment at a time, regardless of whether it was
 triggered by a pre-merge comment or a post-merge push.
+
+## Post-plan topology
+
+The App private key never enters a `pull_request`-triggered job. The
+consumer's `plan.yml` — checked out at the PR head, running arbitrary pull
+request content — holds no App credential anywhere in it. Every
+App-authored surface listed above (apply checks, the gate, the sticky
+comments, drift issues) is created by a job that runs downstream of
+`plan.yml`, at the default-branch ref, bound to the fixed `shipmate-engine`
+GitHub Environment (`docs/github-app.md` §Key-exposure boundary):
+
+- **`plan.yml`** (consumer, `pull_request`) — `detect` + the plan matrix job
+  only. Uploads plan artifacts and cell summaries; authors nothing.
+- **`summary.yml`** (consumer, `workflow_run` on `plan.yml`'s completion) — a
+  thin wrapper (`uses:` the engine's reusable `.github/workflows/summary.yml`,
+  `secrets: inherit`) that resolves the pull request, downloads the plan
+  run's cell summaries, and calls `actions/summary` under an App token
+  minted inside `shipmate-engine`. This is what creates the pending
+  `apply / <stack> / <env>` checks, the sticky plan comment, and the
+  `shipmate / gate` status.
+- **`apply.yml` / `apply-all.yml` / `apply-env-level.yml` / `deploy.yml`**
+  (consumer, `workflow_dispatch` via comment-ops, or `push` to the default
+  branch) — the jobs that mint an App token (completing apply checks,
+  refreshing the gate, posting the apply result comment) are likewise bound
+  to `shipmate-engine`.
+
+**Requirement, verbatim: the consumer's plan workflow must live at
+`.github/workflows/plan.yml`.** `summary.yml`'s trigger matches
+`github.event.workflow_run.path == '.github/workflows/plan.yml'` exactly. A
+consumer that renames the file — or runs its plan matrix from a
+differently-named `pull_request` workflow — gets a plan that runs to
+completion, produces no summary, no `apply` checks, and no `shipmate / gate`
+status, and raises no error anywhere: the rename is silent and permanent
+until someone notices that merges never gate.
+
+Binding these jobs to the `shipmate-engine` environment rather than trusting
+the trigger alone closes two paths a trigger check alone would not:
+
+- A fork's `plan.yml` run completes normally but produces nothing further —
+  the `summary.yml` job additionally checks
+  `head_repository.full_name == github.repository` and declines otherwise
+  (`docs/hardening.md` §"Contributors without push access").
+- A branch-authored workflow cannot reach the key by simply declaring
+  `environment: shipmate-engine` itself: that environment's deployment
+  branch policy is scoped to the default branch, and a job triggered by
+  `pull_request` (or by a `push` to any other branch) never satisfies it,
+  regardless of what the workflow file says (`docs/github-app.md`
+  §Key-exposure boundary).
 
 ## Consumption
 

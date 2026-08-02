@@ -21,6 +21,9 @@ Probes:
 - GitHub Environment pair (<env>, <env>-apply) exists for every planned env.
 - protection shape of that pair: a plan env must have no reviewers and no
   branch policy; an apply env with no protection is worth a note.
+- the `shipmate-engine` environment holding the App private key: it must
+  exist and its deployment branch policy must name the default branch —
+  otherwise the key is still a repository secret every branch can read.
 - engine action-pin freshness in the consumer's workflow files, read at the
   commit under examination: a tag/branch pin is a warning, a SHA pin behind
   the engine's latest release is a warning. Restricted to pins of the engine's
@@ -262,6 +265,87 @@ def _env_protection_warnings(ctx):
     return out
 
 
+_ENGINE_ENV = "shipmate-engine"
+
+
+def _engine_environment_warnings(ctx):
+    """The App private key lives in the `shipmate-engine` GitHub Environment,
+    not a repository secret — a deployment branch policy scoped to the
+    default branch is the only thing that stops a branch workflow from
+    reading it. A consumer that re-pins the engine but never creates this
+    environment (or creates it with no branch policy, or one that does not
+    actually name the default branch) keeps a repository-level key that any
+    branch can read, while believing they are protected. This probe is the
+    only thing that would notice.
+
+    Structured like `_env_protection_warnings`: read first, warn loudly on a
+    missing environment, degrade to a NOTICE rather than a false all-clear
+    when the token cannot read environments at all."""
+    repo, default_branch = ctx["repo"], ctx["default_branch"]
+    try:
+        env = _gh_json(f"repos/{repo}/environments/{_ENGINE_ENV}")
+    except (Exception, SystemExit) as e:  # noqa: BLE001 - degrade, see warnings()
+        return [
+            (
+                NOTICE,
+                f"could not read the `{_ENGINE_ENV}` environment "
+                f"({_degrade_reason(e)}) — its branch-policy scoping was not checked.",
+            )
+        ]
+    if not env:
+        return [
+            (
+                WARNING,
+                f"GitHub Environment `{_ENGINE_ENV}` does not exist — the shipmate App "
+                "private key is still a repository secret and every branch's workflow "
+                "can read it (see docs/github-app.md).",
+            )
+        ]
+    policy = env.get("deployment_branch_policy")
+    if not policy:
+        return [
+            (
+                WARNING,
+                f"GitHub Environment `{_ENGINE_ENV}` has no deployment branch policy — "
+                "a workflow on any branch can still claim the App private key it "
+                f"holds. Restrict it to `{default_branch}`.",
+            )
+        ]
+    if not policy.get("custom_branch_policies"):
+        # protected_branches-only restricts deploys to whatever branch
+        # protection covers, which is not necessarily the default branch alone
+        # -- not the specific guarantee this probe exists to confirm.
+        return [
+            (
+                WARNING,
+                f"GitHub Environment `{_ENGINE_ENV}`'s deployment branch policy does not "
+                f"use a custom policy naming `{default_branch}` — its actual scope could "
+                "not be confirmed as default-branch-only.",
+            )
+        ]
+    try:
+        policies = _gh_json(f"repos/{repo}/environments/{_ENGINE_ENV}/deployment-branch-policies")
+    except (Exception, SystemExit) as e:  # noqa: BLE001 - degrade, see warnings()
+        return [
+            (
+                NOTICE,
+                f"could not read `{_ENGINE_ENV}`'s deployment branch policies "
+                f"({_degrade_reason(e)}) — its scope was not checked.",
+            )
+        ]
+    names = {p.get("name") for p in (policies or {}).get("branch_policies", [])}
+    if default_branch not in names:
+        return [
+            (
+                WARNING,
+                f"GitHub Environment `{_ENGINE_ENV}`'s deployment branch policy does not "
+                f"name `{default_branch}` — a branch other than the default can still "
+                "claim the App private key.",
+            )
+        ]
+    return []
+
+
 _PIN = re.compile(
     r"uses:\s*['\"]?(?P<owner>[\w.-]+)/(?P<repo>[\w.-]+)/(?:actions|\.github)/"
     r"[\w./-]+@(?P<ref>[\w./-]+)"
@@ -500,6 +584,7 @@ PROBES = (
     _gate_rule_warnings,
     _environment_warnings,
     _env_protection_warnings,
+    _engine_environment_warnings,
     _pin_warnings,
     _team_warnings,
     _app_permission_warnings,

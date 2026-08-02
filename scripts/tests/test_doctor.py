@@ -154,14 +154,22 @@ def _env(name, rules=(), branch_policy=None):
 
 
 def _quiet_new_probes():
-    """Healthy responses for the env-protection and pin-freshness probes, so
-    tests exercising the older gate/environment probes via the top-level
-    `warnings()` don't pick up incidental noise from these two."""
+    """Healthy responses for the env-protection, engine-environment, and
+    pin-freshness probes, so tests exercising the older gate/environment
+    probes via the top-level `warnings()` don't pick up incidental noise
+    from these three."""
     return {
         f"repos/{_REPO}/environments/dev-eu": _env("dev-eu"),
         f"repos/{_REPO}/environments/dev-eu-apply": _env(
             "dev-eu-apply", rules=("required_reviewers",)
         ),
+        f"repos/{_REPO}/environments/shipmate-engine": {
+            "name": "shipmate-engine",
+            "deployment_branch_policy": {"custom_branch_policies": True},
+        },
+        f"repos/{_REPO}/environments/shipmate-engine/deployment-branch-policies": {
+            "branch_policies": [{"name": _BRANCH}]
+        },
         f"{_WF_DIR}{_REF}": [],
     }
 
@@ -481,6 +489,137 @@ def test_env_protection_listing_failure_propagates_to_the_degrade_note(monkeypat
         doctor._env_protection_warnings(_ctx())
     out = doctor.warnings(_ctx())
     assert any("env protection" in t and "probe skipped" in t for _, t in out)
+
+
+def _engine_env_responses(env=None, policies=None):
+    def fake(path):
+        if path.endswith(f"repos/{_REPO}/environments/shipmate-engine"):
+            return env
+        if path.endswith(f"repos/{_REPO}/environments/shipmate-engine/deployment-branch-policies"):
+            return policies
+        raise AssertionError(f"unexpected path: {path}")
+
+    return fake
+
+
+def test_missing_engine_environment_warns(monkeypatch):
+    monkeypatch.setattr(doctor, "_gh_json", _engine_env_responses(env=None))
+    out = doctor._engine_environment_warnings(_ctx())
+    assert len(out) == 1
+    assert out[0][0] == doctor.WARNING
+    assert "shipmate-engine" in out[0][1]
+    assert "repository secret" in out[0][1]
+
+
+def test_engine_environment_without_a_branch_policy_warns(monkeypatch):
+    monkeypatch.setattr(
+        doctor,
+        "_gh_json",
+        _engine_env_responses(
+            env={"name": "shipmate-engine", "deployment_branch_policy": None},
+            policies={"branch_policies": []},
+        ),
+    )
+    out = doctor._engine_environment_warnings(_ctx())
+    assert len(out) == 1
+    assert out[0][0] == doctor.WARNING
+    assert "branch policy" in out[0][1]
+
+
+def test_engine_environment_with_a_non_custom_policy_warns(monkeypatch):
+    # protected_branches-only restricts to whatever branch protection covers --
+    # not necessarily just the default branch -- so it can't be confirmed as
+    # the specific guarantee this probe exists to check.
+    monkeypatch.setattr(
+        doctor,
+        "_gh_json",
+        _engine_env_responses(
+            env={
+                "name": "shipmate-engine",
+                "deployment_branch_policy": {"protected_branches": True},
+            },
+        ),
+    )
+    out = doctor._engine_environment_warnings(_ctx())
+    assert len(out) == 1
+    assert out[0][0] == doctor.WARNING
+    assert "custom policy" in out[0][1]
+
+
+def test_engine_environment_branch_policy_missing_default_branch_warns(monkeypatch):
+    monkeypatch.setattr(
+        doctor,
+        "_gh_json",
+        _engine_env_responses(
+            env={
+                "name": "shipmate-engine",
+                "deployment_branch_policy": {"custom_branch_policies": True},
+            },
+            policies={"branch_policies": [{"name": "release"}]},
+        ),
+    )
+    out = doctor._engine_environment_warnings(_ctx(default_branch="main"))
+    assert len(out) == 1
+    assert out[0][0] == doctor.WARNING
+    assert "main" in out[0][1]
+
+
+def test_correctly_scoped_engine_environment_is_silent(monkeypatch):
+    monkeypatch.setattr(
+        doctor,
+        "_gh_json",
+        _engine_env_responses(
+            env={
+                "name": "shipmate-engine",
+                "deployment_branch_policy": {"custom_branch_policies": True},
+            },
+            policies={"branch_policies": [{"name": "main"}]},
+        ),
+    )
+    assert doctor._engine_environment_warnings(_ctx(default_branch="main")) == []
+
+
+def test_engine_environment_unreadable_degrades_to_a_note(monkeypatch):
+    def boom(path):
+        raise SystemExit(f"::error::command failed (1): gh api {path}")
+
+    monkeypatch.setattr(doctor, "_gh_json", boom)
+    out = doctor._engine_environment_warnings(_ctx())
+    assert len(out) == 1
+    assert out[0][0] == doctor.NOTICE
+    assert "shipmate-engine" in out[0][1]
+    assert "::error::" not in out[0][1] and "gh api" not in out[0][1]
+
+
+def test_engine_environment_policies_unreadable_degrades_to_a_note(monkeypatch):
+    def gh(path):
+        if path.endswith("deployment-branch-policies"):
+            raise SystemExit(f"::error::command failed (1): gh api {path}")
+        return {
+            "name": "shipmate-engine",
+            "deployment_branch_policy": {"custom_branch_policies": True},
+        }
+
+    monkeypatch.setattr(doctor, "_gh_json", gh)
+    out = doctor._engine_environment_warnings(_ctx())
+    assert len(out) == 1
+    assert out[0][0] == doctor.NOTICE
+    assert "::error::" not in out[0][1] and "gh api" not in out[0][1]
+
+
+def test_engine_environment_probe_is_registered(monkeypatch):
+    """An unregistered probe function runs nowhere while its own unit tests
+    stay green -- assert it actually executes as part of `warnings()`."""
+    assert doctor._engine_environment_warnings in doctor.PROBES
+    responses = {
+        f"repos/{_REPO}/rules/branches/{_BRANCH}?per_page=100": _gate_rule(),
+        f"repos/{_REPO}/environments?per_page=100": _environments("dev-eu", "dev-eu-apply"),
+        **_quiet_new_probes(),
+        f"repos/{_REPO}/environments/shipmate-engine": None,
+    }
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    out = doctor.warnings(_ctx())
+    assert any("shipmate-engine" in t for _, t in out)
 
 
 def _wf_listing(*names):
