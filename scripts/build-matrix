@@ -167,13 +167,18 @@ def fork_pr_error(event_name, repository, payload):
     the drift path calls this script with all-stacks and no pull request context
     (`schedule` / `workflow_dispatch`), where `head.repo` is absent by
     construction. Keying on the field instead would kill nightly drift silently.
+    Both pull-request events count -- `pull_request` and `pull_request_target`,
+    which carries the same `pull_request.head.repo.full_name`. The latter
+    especially: it is the one pull-request event that runs at the base ref with
+    the repository's secrets, so refusing nothing there is the worst place to
+    fail open.
 
     Within a pull request event, an undeterminable head repository is rejected
     -- a payload missing, unreadable, or without
     `pull_request.head.repo.full_name` (the shape GitHub sends once the fork has
     been deleted). A same-repository pull request always carries it, so
     "unknown" only ever means a run this script cannot vouch for."""
-    if event_name != "pull_request":
+    if event_name not in ("pull_request", "pull_request_target"):
         return ""
     head = ((payload.get("pull_request") or {}).get("head") or {}).get("repo") or {}
     full_name = head.get("full_name") or ""

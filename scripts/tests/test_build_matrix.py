@@ -168,6 +168,15 @@ def test_fork_pull_request_is_rejected():
     assert "outsider/iac" in err
 
 
+def test_fork_pull_request_target_is_rejected():
+    # `pull_request_target` runs at the base ref *with* the repository's secrets
+    # while acting on pull-request-author-controlled content, so it is the one
+    # pull-request event where failing open is worst. Same payload shape.
+    err = bm.fork_pr_error("pull_request_target", "acme/iac", _payload("outsider/iac"))
+    assert err.startswith("::error::")
+    assert "outsider/iac" in err
+
+
 def test_same_repository_pull_request_is_planned():
     assert bm.fork_pr_error("pull_request", "acme/iac", _payload("acme/iac")) == ""
 
