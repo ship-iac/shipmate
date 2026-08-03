@@ -364,6 +364,17 @@ to regress this — leaves the key a repository secret again, readable by any
 branch's workflow, with nothing else in this design left to notice. That is
 exactly what the probe exists to catch.
 
+**Tag pushes are covered, and there is one way to uncover them.** A deployment
+branch policy is typed: the entry naming your default branch is a **branch**
+policy, and it matches no tag, so a workflow run at `refs/tags/…` that declares
+this environment is refused before a runner starts and is handed nothing —
+measured, not assumed. Someone who can push tags but not branches therefore
+cannot reach the key either. What breaks that is adding a **tag** policy to
+`shipmate-engine` — for release automation, say. Do not: a tag is a ref anyone
+with tag-push access can create at any commit, including one carrying a workflow
+of their choosing. `shipmate doctor` warns about any extra policy here, tag ones
+included, because it compares the policy names against the default branch alone.
+
 ## Contributors without push access
 
 **Fork pull requests are refused outright.** `actions/build-matrix` fails the
