@@ -23,7 +23,7 @@ jobs:
       snapshot: ${{ steps.snap.outputs.snapshot }}
     steps:
       - id: snap
-        uses: ship-iac/shipmate/actions/apply-snapshot@17d5e93bda614568fda0c5686547364ec8f5662b
+        uses: ship-iac/shipmate/actions/apply-snapshot@83960876131bf43583026d39948184079c807e33
         with:
           head-sha: ${{ inputs.head_sha }}
           waves-json: ${{ inputs.waves_json }}
