@@ -119,7 +119,7 @@ jobs:
     steps:
       - name: Complete gate if every apply check is done
         id: gate
-        uses: ship-iac/shipmate/actions/gate-refresh@17d5e93bda614568fda0c5686547364ec8f5662b
+        uses: ship-iac/shipmate/actions/gate-refresh@83960876131bf43583026d39948184079c807e33
         with:
           head-sha: ${{ inputs.ref }}
           app-id: ${{ vars.SHIPMATE_APP_ID }}
