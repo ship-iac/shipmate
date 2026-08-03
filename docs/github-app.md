@@ -171,14 +171,41 @@ REPOS="repo-example-stacks repo-example-folders repo-example-workspaces"
 TEAM=<approvers-team-slug>          # may differ per repo; set it per repo either way
 APP_ID=<app-id-from-step-2-output>
 
+KEY=$(cat shipmate-app.private-key.pem)
+if [ -z "$KEY" ]; then
+  echo "shipmate-app.private-key.pem is missing or empty — not touching any repository" >&2
+  exit 1
+fi
+
 for NAME in $REPOS; do
   REPO="$ORG/$NAME"
   gh variable set SHIPMATE_APPROVERS_TEAM --repo "$REPO" --body "$TEAM"
   gh variable set SHIPMATE_APP_ID --repo "$REPO" --body "$APP_ID"
   gh secret set SHIPMATE_APP_PRIVATE_KEY --repo "$REPO" --env shipmate-engine \
-    --body "$(cat shipmate-app.private-key.pem)"
+    --body "$KEY"
+  # The environment secret is only scoping if no repository secret of the same
+  # name survives it: an environment secret is withheld from jobs that do not
+  # name the environment, but a repository secret is readable by any workflow on
+  # any branch without naming anything. Ignore the error when there was none.
+  gh secret delete SHIPMATE_APP_PRIVATE_KEY --repo "$REPO" 2>/dev/null || true
 done
 ```
+
+**Confirm the repository secret is gone**, because nothing else will tell you —
+listing a repository's secrets needs a permission the App manifest does not
+declare, so `shipmate doctor` cannot see this and reports all clear on a
+repository whose environment is shaped correctly while the key is still
+branch-readable (`docs/hardening.md` #16):
+
+```bash
+for NAME in $REPOS; do
+  echo "== $NAME"
+  gh secret list --repo "$ORG/$NAME"
+done
+```
+
+`SHIPMATE_APP_PRIVATE_KEY` must not appear in that output; it should appear only
+under the environment (`gh secret list --repo "$ORG/$NAME" --env shipmate-engine`).
 
 `SHIPMATE_APP_ID` (a variable, not a secret) **may** also be set once at the
 **org** level with restricted visibility, so every consumer repo inherits it

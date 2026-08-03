@@ -349,20 +349,34 @@ retention window if that inventory is sensitive
 `SHIPMATE_APP_PRIVATE_KEY` lives as a secret on the `shipmate-engine` GitHub
 Environment, not as a repository (or org) secret — see `docs/github-app.md`
 §Key-exposure boundary for why that specific environment is what makes the
-key unreachable from a branch-authored workflow. Two things must both be true
-for that to hold, and `shipmate doctor` checks both on every plan run and on
-demand:
+key unreachable from a branch-authored workflow. **Three** things must all be
+true for that to hold. `shipmate doctor` checks the first two on every plan run
+and on demand; it cannot check the third:
 
 - the `shipmate-engine` environment exists;
 - its deployment branch policy is a **custom** policy naming the default
   branch — not merely present, and not the "protected branches" mode, which
   restricts to whatever branch protection covers rather than the default
-  branch specifically.
+  branch specifically;
+- **no repository (or organization) secret named `SHIPMATE_APP_PRIVATE_KEY`
+  remains.** An environment secret is only withheld from jobs that *name* the
+  environment. A repository secret of the same name is readable by any workflow
+  on any branch without naming anything, so leaving one in place defeats this
+  control completely — the environment becomes decoration.
 
-A re-pin of the engine that never creates this environment — the ordinary way
-to regress this — leaves the key a repository secret again, readable by any
-branch's workflow, with nothing else in this design left to notice. That is
-exactly what the probe exists to catch.
+That third condition is the one to be careful about, because it is invisible.
+Listing a repository's secrets needs a `secrets` permission `app/manifest.json`
+does not declare, so the probe can only observe the environment's *shape*. A
+repository that had the key as a repository secret first — the ordinary
+migration path — and then created the environment without deleting it ends up
+with the key still branch-readable and `shipmate doctor` reporting all clear.
+Delete it as the last step of `docs/github-app.md` §6, and confirm with
+`gh secret list --repo <owner>/<repo>`: `SHIPMATE_APP_PRIVATE_KEY` must not
+appear there.
+
+A re-pin of the engine that never creates this environment — the other ordinary
+way to regress this — leaves the key a repository secret again, readable by any
+branch's workflow. That one the probe does catch.
 
 **Tag pushes are covered, and there is one way to uncover them.** A deployment
 branch policy is typed: the entry naming your default branch is a **branch**
