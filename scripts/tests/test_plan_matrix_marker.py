@@ -236,7 +236,6 @@ def test_two_disagreeing_markers_are_not_a_number():
     # run's evidence is not describable by one number, and gate-state holds on
     # any non-integer.
     run = _wf_step("artifacts")["run"]
-    assert "unique" in run
     assert 'if length == 1 then .[0] else "unknown" end' in run
 
 
@@ -246,9 +245,13 @@ def test_the_counting_step_does_not_stop_at_the_first_attempt():
     # the gate, so the quiet pull request this feature protects would go red on
     # a transient. The retry narrows that window (it cannot close it).
     run = _wf_step("artifacts")["run"]
-    assert "while" in run
-    assert re.search(r'attempt" -lt 3', run)
-    assert "sleep" in run
+    # Both bounds compared as whole numbers, not by prefix: `-lt 30` prefix-
+    # matches `-lt 3`, and 30 attempts five seconds apart is a two-and-a-half
+    # minute job holding a merge queue. Two occurrences, both 3 -- the loop's
+    # own bound, and the guard that stops the last attempt from waiting for a
+    # retry that never comes.
+    assert re.findall(r'\[ "\$attempt" -lt ([0-9]+) \]', run) == ["3", "3"]
+    assert re.findall(r"\bsleep ([0-9]+)\b", run) == ["5"]
 
 
 def test_the_workflow_passes_the_marker_count_to_the_summary_action():
@@ -279,16 +282,51 @@ def test_gate_state_reads_the_env_var_the_action_supplies():
     assert 'os.environ.get("SHIPMATE_MATRIX_COUNT"' in source
 
 
+#: Answers every call with `$FAKE_LISTING`, exit `$GH_STATUS`, and counts calls.
 GH_STUB = """
-gh() { printf '%s' "$FAKE_LISTING" ; }
+gh() {
+  n=$(cat "$CALLS" 2>/dev/null || printf 0)
+  printf '%s' "$((n + 1))" > "$CALLS"
+  printf '%s' "$FAKE_LISTING"
+  return "$GH_STATUS"
+}
 sleep() { : ; }
 """
 
+#: Answers `$EARLY` (exit `$EARLY_STATUS`) on the first two calls and
+#: `$FAKE_LISTING` on every later one -- the convergence cases.
+TWO_PHASE_GH_STUB = """
+gh() {
+  n=$(cat "$CALLS" 2>/dev/null || printf 0)
+  n=$((n + 1))
+  printf '%s' "$n" > "$CALLS"
+  if [ "$n" -lt 3 ]; then
+    printf '%s' "$EARLY"
+    return "$EARLY_STATUS"
+  fi
+  printf '%s' "$FAKE_LISTING"
+}
+sleep() { : ; }
+"""
 
-def _run_reader(tmp_path, listing):
+#: The run page's three mutually exclusive hold diagnostics, each keyed by the
+#: cause it names -- an unreadable listing must not send a maintainer at the
+#: engine pin, and a pin skew must not read as an API failure.
+UNREADABLE_WARNING = "could not read this plan run's artifact list"
+NO_MARKER_WARNING = "published no readable plan-matrix marker"
+SHORTFALL_WARNING = "but its artifact list shows"
+
+
+def _run_step(tmp_path, stub, **env_overrides):
+    """Execute the workflow's real `artifacts` step body under `stub`.
+
+    Only `gh` and `sleep` are replaced, so what runs is the step's own text and
+    its real jq programs; the call counter lets a test assert how many attempts
+    the loop actually made.
+    """
     assert _BASH is not None
     script = tmp_path / "step.sh"
-    script.write_text(GH_STUB + _wf_step("artifacts")["run"], encoding="utf-8", newline="\n")
+    script.write_text(stub + _wf_step("artifacts")["run"], encoding="utf-8", newline="\n")
     out = tmp_path / "out"
     out.write_text("", encoding="utf-8")
     env = dict(os.environ)
@@ -298,7 +336,9 @@ def _run_reader(tmp_path, listing):
             "RUN_ID": "42",
             "GITHUB_REPOSITORY": "acme/demo",
             "GITHUB_OUTPUT": str(out),
-            "FAKE_LISTING": json.dumps(listing),
+            "CALLS": str(tmp_path / "calls"),
+            "GH_STATUS": "0",
+            **env_overrides,
         }
     )
     proc = subprocess.run(
@@ -308,6 +348,14 @@ def _run_reader(tmp_path, listing):
         line.split("=", 1) for line in out.read_text(encoding="utf-8").splitlines() if "=" in line
     )
     return proc, written
+
+
+def _run_reader(tmp_path, listing, **env_overrides):
+    return _run_step(tmp_path, GH_STUB, FAKE_LISTING=json.dumps(listing), **env_overrides)
+
+
+def _calls(tmp_path):
+    return (tmp_path / "calls").read_text(encoding="utf-8").strip()
 
 
 def _page(*names):
@@ -341,6 +389,10 @@ def test_a_listing_with_no_marker_reports_unknown(tmp_path):
     # `success() && ...`, so a non-zero exit here writes no gate at all, and a
     # pull request with no gate cannot merge and cannot be told why.
     assert proc.returncode == 0, proc.stderr
+    # A readable listing that simply has no marker is an engine-pin skew, and
+    # the run page must say so rather than blame the API.
+    assert NO_MARKER_WARNING in proc.stdout
+    assert UNREADABLE_WARNING not in proc.stdout
 
 
 @pytest.mark.skipif(_BASH is None or _JQ is None, reason="bash and jq required")
@@ -349,84 +401,108 @@ def test_a_short_listing_is_reported_as_it_is(tmp_path):
     assert written["count"] == "1"
     assert written["matrix_count"] == "5"
     assert proc.returncode == 0, proc.stderr
+    assert SHORTFALL_WARNING in proc.stdout
+    assert UNREADABLE_WARNING not in proc.stdout
+    assert NO_MARKER_WARNING not in proc.stdout
+
+
+@pytest.mark.skipif(_BASH is None or _JQ is None, reason="bash and jq required")
+@pytest.mark.parametrize(
+    "body,status",
+    [
+        ("", "1"),
+        ('{"message":"Server Error"}', "1"),
+        ("<html>502 Bad Gateway</html>", "0"),
+        ("", "0"),
+    ],
+    ids=["api-failed", "api-failed-with-body", "unparseable-body", "empty-body"],
+)
+def test_a_listing_that_could_not_be_read_reports_unknown_for_both_counts(tmp_path, body, status):
+    # The fail-open shape this whole task exists to close, and the one the
+    # step's `count=`/`matrix_count=` literals cannot pin: every path that did
+    # not actually read a listing must report a NON-NUMERIC count for both
+    # facts. A `0` here reaches gate-state as "the matrix was empty" and greens
+    # the gate over a plan run whose cells nobody ever saw.
+    proc, written = _run_step(tmp_path, GH_STUB, FAKE_LISTING=body, GH_STATUS=status)
+    assert written["count"] == "unknown"
+    assert written["matrix_count"] == "unknown"
+    # And it must not abort: a step that exits non-zero skips every later step,
+    # so no gate is written at all.
+    assert proc.returncode == 0, proc.stderr
+    assert UNREADABLE_WARNING in proc.stdout
+    assert NO_MARKER_WARNING not in proc.stdout
+    # Unreadable is never self-consistent, so it costs the full retry budget.
+    assert _calls(tmp_path) == "3"
 
 
 @pytest.mark.skipif(_BASH is None or _JQ is None, reason="bash and jq required")
 def test_the_reader_retries_an_inconsistent_listing_and_stops_when_it_converges(tmp_path):
     # Behavioural, so the retry is pinned by what the step DOES rather than by
-    # the word "while" appearing in it. The stub answers with a short listing
-    # twice and a complete one on the third call.
-    script = tmp_path / "step.sh"
-    stub = """
-gh() {
-  n=$(cat "$CALLS" 2>/dev/null || printf 0)
-  n=$((n + 1))
-  printf '%s' "$n" > "$CALLS"
-  if [ "$n" -lt 3 ]; then printf '%s' "$SHORT_LISTING"; else printf '%s' "$FULL_LISTING"; fi
-}
-sleep() { : ; }
-"""
-    script.write_text(stub + _wf_step("artifacts")["run"], encoding="utf-8", newline="\n")
-    out = tmp_path / "out"
-    out.write_text("", encoding="utf-8")
-    calls = tmp_path / "calls"
-    env = dict(os.environ)
-    env.update(
-        {
-            "GH_TOKEN": "x",
-            "RUN_ID": "42",
-            "GITHUB_REPOSITORY": "acme/demo",
-            "GITHUB_OUTPUT": str(out),
-            "CALLS": str(calls),
-            "SHORT_LISTING": json.dumps(_page("plan-matrix.2", "cell-summary.dev-eu.a")),
-            "FULL_LISTING": json.dumps(
-                _page("plan-matrix.2", "cell-summary.dev-eu.a", "cell-summary.dev-eu.b")
-            ),
-        }
+    # a word appearing in it. The stub answers with a short listing twice and a
+    # complete one on the third call.
+    proc, written = _run_step(
+        tmp_path,
+        TWO_PHASE_GH_STUB,
+        EARLY=json.dumps(_page("plan-matrix.2", "cell-summary.dev-eu.a")),
+        EARLY_STATUS="0",
+        FAKE_LISTING=json.dumps(
+            _page("plan-matrix.2", "cell-summary.dev-eu.a", "cell-summary.dev-eu.b")
+        ),
     )
-    proc = subprocess.run(
-        [_BASH, str(script)], cwd=tmp_path, env=env, capture_output=True, text=True, timeout=60
-    )
-    written = dict(
-        line.split("=", 1) for line in out.read_text(encoding="utf-8").splitlines() if "=" in line
-    )
-    assert calls.read_text(encoding="utf-8").strip() == "3"
+    assert _calls(tmp_path) == "3"
     assert written["count"] == "2"
     assert written["matrix_count"] == "2"
     assert proc.returncode == 0, proc.stderr
+    assert SHORTFALL_WARNING not in proc.stdout
+
+
+@pytest.mark.skipif(_BASH is None or _JQ is None, reason="bash and jq required")
+def test_the_reader_retries_until_a_late_marker_appears(tmp_path):
+    # The marker is written by a different job than the cell summaries, so it
+    # can be the LAST thing the listing shows -- the case the retry exists for
+    # and the one a strict-equality reader would have turned into a red gate on
+    # a quiet pull request.
+    proc, written = _run_step(
+        tmp_path,
+        TWO_PHASE_GH_STUB,
+        EARLY=json.dumps(_page("cell-summary.dev-eu.a", "cell-summary.dev-eu.b")),
+        EARLY_STATUS="0",
+        FAKE_LISTING=json.dumps(
+            _page("plan-matrix.2", "cell-summary.dev-eu.a", "cell-summary.dev-eu.b")
+        ),
+    )
+    assert _calls(tmp_path) == "3"
+    assert written["count"] == "2"
+    assert written["matrix_count"] == "2"
+    assert proc.returncode == 0, proc.stderr
+    assert NO_MARKER_WARNING not in proc.stdout
+
+
+@pytest.mark.skipif(_BASH is None or _JQ is None, reason="bash and jq required")
+def test_the_reader_retries_a_listing_it_could_not_read(tmp_path):
+    # A 502 on the first attempts must not end the loop. Both counts are
+    # `unknown` then, and "unknown equals unknown" is the one way an unreadable
+    # listing could pass for self-consistent evidence -- so the break has to
+    # require a real marker count, not just agreement.
+    proc, written = _run_step(
+        tmp_path,
+        TWO_PHASE_GH_STUB,
+        EARLY="",
+        EARLY_STATUS="1",
+        FAKE_LISTING=json.dumps(_page("plan-matrix.1", "cell-summary.dev-eu.a")),
+    )
+    assert _calls(tmp_path) == "3"
+    assert written["count"] == "1"
+    assert written["matrix_count"] == "1"
+    assert proc.returncode == 0, proc.stderr
+    assert UNREADABLE_WARNING not in proc.stdout
 
 
 @pytest.mark.skipif(_BASH is None or _JQ is None, reason="bash and jq required")
 def test_the_reader_stops_at_one_attempt_on_a_consistent_listing(tmp_path):
     # The quiet path must not pay the retry cost.
-    calls = tmp_path / "calls"
-    script = tmp_path / "step.sh"
-    stub = """
-gh() {
-  n=$(cat "$CALLS" 2>/dev/null || printf 0)
-  printf '%s' "$((n + 1))" > "$CALLS"
-  printf '%s' "$FAKE_LISTING"
-}
-sleep() { : ; }
-"""
-    script.write_text(stub + _wf_step("artifacts")["run"], encoding="utf-8", newline="\n")
-    out = tmp_path / "out"
-    out.write_text("", encoding="utf-8")
-    env = dict(os.environ)
-    env.update(
-        {
-            "GH_TOKEN": "x",
-            "RUN_ID": "42",
-            "GITHUB_REPOSITORY": "acme/demo",
-            "GITHUB_OUTPUT": str(out),
-            "CALLS": str(calls),
-            "FAKE_LISTING": json.dumps(_page("plan-matrix.0")),
-        }
-    )
-    subprocess.run(
-        [_BASH, str(script)], cwd=tmp_path, env=env, capture_output=True, text=True, timeout=60
-    )
-    assert calls.read_text(encoding="utf-8").strip() == "1"
+    _run_reader(tmp_path, _page("plan-matrix.0"))
+    assert _calls(tmp_path) == "1"
 
 
 @pytest.mark.skipif(_BASH is None or _JQ is None, reason="bash and jq required")
@@ -453,8 +529,11 @@ def test_a_marker_name_with_a_suffix_is_not_a_count(tmp_path):
 @pytest.mark.skipif(_BASH is None or _JQ is None, reason="bash and jq required")
 def test_the_reader_paginates(tmp_path):
     # `--slurp` yields one object per page; a jq program reading only `.[0]`
-    # would undercount a >100-artifact run and hold every large plan.
-    listing = _page("plan-matrix.2", "cell-summary.dev-eu.a") + _page("cell-summary.dev-eu.b")
+    # would undercount a >100-artifact run and hold every large plan. The
+    # marker sits on the SECOND page and one cell summary on the first, so
+    # neither program is carried by the other -- with the marker on page one,
+    # this passed with a first-page-only marker program.
+    listing = _page("cell-summary.dev-eu.a") + _page("plan-matrix.2", "cell-summary.dev-eu.b")
     _, written = _run_reader(tmp_path, listing)
     assert written["count"] == "2"
     assert written["matrix_count"] == "2"

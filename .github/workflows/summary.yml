@@ -147,7 +147,7 @@ jobs:
           RUN_ID: ${{ github.event.workflow_run.id }}
         run: |
           set -uo pipefail
-          # Three facts about one plan run, all from the same listing so they
+          # Two facts about one plan run, read from a single listing so they
           # cannot describe different moments: how many cells `detect` planned
           # (the `plan-matrix.<N>` marker artifact -- a `workflow_run` event
           # carries no job outputs, so the count can only arrive as a name), and
@@ -159,34 +159,46 @@ jobs:
           # a standalone `jq`.
           cells=unknown
           planned=unknown
+          readable=false
           attempt=0
           while [ "$attempt" -lt 3 ]; do
             attempt=$((attempt + 1))
+            # Reset every attempt: an attempt that reads nothing must never
+            # report the previous one's numbers as if it had just seen them.
+            cells=unknown
+            planned=unknown
+            readable=false
             if listing=$(gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID/artifacts?per_page=100"); then
-              cells=$(printf '%s' "$listing" | jq '[.[].artifacts[] | select(.name | startswith("cell-summary."))] | length') || cells=unknown
+              readable=true
+              cells=$(printf '%s' "$listing" | jq '[.[].artifacts[] | select(.name | startswith("cell-summary."))] | length') || cells=""
               # `unique | if length == 1`, not `first`: two markers disagreeing
               # means this run is not describable by one number.
               # No backslash anywhere in the match: an escaped `\.` would have to
               # survive this block scalar, the single quotes and jq's own string
               # parsing, and one lost backslash silently widens the match or
-              # fails to compile (which reads as an unreadable listing).
-              planned=$(printf '%s' "$listing" | jq -r '[.[].artifacts[].name | select(startswith("plan-matrix.")) | ltrimstr("plan-matrix.") | select(test("^[0-9]+$"))] | unique | if length == 1 then .[0] else "unknown" end') || planned=unknown
-            else
-              cells=unknown
-              planned=unknown
+              # fails to compile.
+              planned=$(printf '%s' "$listing" | jq -r '[.[].artifacts[].name | select(startswith("plan-matrix.")) | ltrimstr("plan-matrix.") | select(test("^[0-9]+$"))] | unique | if length == 1 then .[0] else "unknown" end') || planned=""
             fi
-            # The artifacts listing is read-after-write eventually consistent
-            # and this runs seconds after the plan run finished, so a marker-less
-            # or short listing is routinely just early. Retry only while the
-            # evidence is inconsistent -- a consistent listing leaves on the
-            # first attempt, so the quiet path costs nothing -- and let
-            # gate-state hold on whatever is still inconsistent at the end.
+            # Anything that is not a run of digits is `unknown`. An empty answer
+            # (an empty response body, or a program that failed) must never read
+            # as two counts agreeing below, and a cell count that could not be
+            # derived is a listing this job did not manage to read.
+            case "$cells" in "" | *[!0-9]*) cells=unknown; readable=false ;; esac
+            case "$planned" in "" | *[!0-9]*) planned=unknown ;; esac
             if [ "$planned" != "unknown" ] && [ "$cells" = "$planned" ]; then
               break
             fi
+            # The artifacts listing is read-after-write eventually consistent and
+            # this runs seconds after the plan run finished, so an unreadable,
+            # marker-less or short listing is routinely just early.
             [ "$attempt" -lt 3 ] && sleep 5
           done
-          if [ "$planned" = "unknown" ]; then
+          # One warning per cause, and each names the fix for that cause: the
+          # gate description is capped at 140 characters, so the run page is
+          # where the reason has to be legible.
+          if [ "$readable" = "false" ]; then
+            echo "::warning::could not read this plan run's artifact list; its evidence count is unknown and the gate will hold — re-run this plan"
+          elif [ "$planned" = "unknown" ]; then
             echo "::warning::this plan run published no readable plan-matrix marker; the gate will hold — check that actions/build-matrix is pinned to the same engine revision as this workflow"
           elif [ "$cells" != "$planned" ]; then
             echo "::warning::the plan run planned $planned cell(s) but its artifact list shows $cells; the gate will hold"
