@@ -53,6 +53,24 @@ runs:
         HEAD_SHA: ${{ inputs.head-sha }}
       run: |
         set -euo pipefail
+        # A hold must not be cleared by the very applies it exists to prevent.
+        # `shipmate apply` never consults the gate (scripts/authorize reads
+        # reviewDecision), so the cells that WERE parsed can apply and land
+        # here with verdict=complete while the stacks whose summaries were
+        # never read still have no apply check at all.
+        # Matched on the STATE alone, not on the description: gate-state writes
+        # `failure` for exactly its hold cases (non-success plan run,
+        # unreadable artifact list, cell/artifact shortfall) and only
+        # `pending`/`success` otherwise -- so this is narrow enough that a
+        # legitimate pending -> success refresh is untouched, and it needs no
+        # wording to stay in sync. The only exit from a hold is a fresh plan
+        # run, which rewrites the gate itself.
+        held=$(gh api "repos/$GITHUB_REPOSITORY/commits/$HEAD_SHA/status" \
+          --jq '[.statuses[] | select(.context == "shipmate / gate")] | .[0].state // empty')
+        if [ "$held" = "failure" ]; then
+          echo "::error::shipmate / gate is held for $HEAD_SHA because the plan run's evidence was incomplete — some planned stacks may carry no apply check. Re-plan this pull request; the gate cannot be greened from apply checks alone."
+          exit 1
+        fi
         python3 - > gate.json <<'PY'
         import json, os
         # Commit status, not a check-run — see actions/summary for the rationale
