@@ -238,28 +238,42 @@ def test_main_with_no_cells_never_lists_issues(tmp_path, monkeypatch):
     di.main()  # must return early, no env/gh access needed at all
 
 
-def test_slack_failure_warns_but_does_not_raise(tmp_path, monkeypatch, capsys):
-    _write_cell(tmp_path, "app", _cell(drifted=True))
+def test_slack_failure_fails_the_run_but_still_processes_later_cells(tmp_path, monkeypatch, capsys):
+    # The deleted per-cell Slack step ran `curl --fail-with-body` with no
+    # continue-on-error, so a rejected webhook failed the drift job. A revoked
+    # or rotated URL must not leave every nightly run green while no drift
+    # notification reaches anyone -- so Slack failures join the same collected
+    # `failed` list the `gh` failures use, naming the cell and exiting nonzero
+    # only after every remaining cell has been processed.
+    for name in ("a", "b"):
+        _write_cell(tmp_path, name, _cell(stack=f"stacks/{name}", stack_name=name, drifted=True))
     monkeypatch.setenv("SHIPMATE_CELLS_DIR", str(tmp_path))
     monkeypatch.setenv("GITHUB_SERVER_URL", "https://example.invalid")
     monkeypatch.setenv("GITHUB_REPOSITORY", "acme/demo")
     monkeypatch.setenv("GITHUB_RUN_ID", "1")
     monkeypatch.setenv("SHIPMATE_SLACK_WEBHOOK", "https://hooks.example.invalid/x")
+    created = []
 
     def fake_run(args):
         if args[:3] == ["gh", "issue", "list"]:
             return "[]"
+        created.append(args[args.index("--title") + 1])
         return ""
 
     monkeypatch.setattr(di, "_run", fake_run)
     monkeypatch.setattr("subprocess.run", lambda *a, **k: type("R", (), {"returncode": 0})())
 
     def boom(webhook, cell):
-        raise di.urllib.error.URLError("nope")
+        if cell["stack_name"] == "a":
+            raise di.urllib.error.URLError("nope")
 
     monkeypatch.setattr(di, "notify_slack", boom)
-    di.main()
-    assert "slack notify failed" in capsys.readouterr().out
+    with pytest.raises(SystemExit) as exc:
+        di.main()
+    assert created == ["drift: dev-eu / a", "drift: dev-eu / b"]
+    assert "dev-eu / a" in str(exc.value)
+    assert "dev-eu / b" not in str(exc.value)
+    assert "::error::slack notify failed" in capsys.readouterr().out
 
 
 def test_no_webhook_never_calls_notify_slack(tmp_path, monkeypatch):

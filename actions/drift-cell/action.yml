@@ -57,11 +57,12 @@ runs:
       # 'skipped', when an earlier step failed); drift-issues treats a
       # plan_ok=false cell as unknown and leaves its Issue state untouched,
       # rather than reading a missing/blank DRIFTED output as "clean".
-      # continue-on-error: comment/issue feedback must never outrank the
-      # drift matrix's own job result. Writes cell.json to $RUNNER_TEMP, not
-      # the repo tree, mirroring apply-cell's Compose cell summary.
+      # NOT continue-on-error, unlike apply-cell's namesake: this cell.json is
+      # the ONLY channel by which this cell's drift reaches the trailing
+      # `issues` job. Lose it and drift-issues' glob simply does not see the
+      # cell -- no Issue, no Slack, and a green nightly run over real drift.
+      # Writes cell.json to $RUNNER_TEMP, not the repo tree.
       if: always()
-      continue-on-error: true
       shell: bash
       env:
         STACK: ${{ inputs.stack }}
@@ -94,12 +95,13 @@ runs:
         PY
 
     - name: Upload drift summary
-      # continue-on-error: same reasoning as apply-cell's Upload apply summary
-      # -- a cosmetic upload failure must not fail the whole drift job.
+      # NOT continue-on-error, unlike apply-cell's namesake (whose artifact is
+      # only comment data): this upload is the sole path by which this cell's
+      # drift becomes visible at all, so losing it must fail the cell rather
+      # than leave a green run and an unreported drift.
       # overwrite: true so a job re-run in the same workflow run cannot 409 on
       # the pre-existing artifact name.
       if: always()
-      continue-on-error: true
       uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
       with:
         name: drift-summary.${{ inputs.env }}.${{ steps.ids.outputs.slug }}
