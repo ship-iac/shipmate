@@ -5,10 +5,11 @@ Runs in the trusted post-plan job (`workflow_run`), which has no `needs`, so the
 plan run's own conclusion replaces the per-job results this logic used to read.
 
 `artifact_count` is how many `cell-summary.*` artifacts the API reports for the
-plan run; `cell_count` is how many of them this job actually parsed. Any
-shortfall between the two — whole or partial — means the evidence for this
-run is incomplete (a failed download, or one that dropped some but not all
-cell summaries), and incomplete evidence must never green the gate.
+plan run, or `unknown` when that listing could not be read; `cell_count` is how
+many of them this job actually parsed. An unknown count, or any shortfall
+between the two — whole or partial — means the evidence for this run is
+incomplete (a failed download, or one that dropped some but not all cell
+summaries), and incomplete evidence must never green the gate.
 """
 
 import json
@@ -18,6 +19,19 @@ import sys
 _HOLD = "hold"
 _POST = "post"
 _NOTHING = "nothing-changed"
+
+
+def _as_int(value):
+    """The artifact count as an int, or None when the caller could not count it.
+
+    The workflow reports `unknown` when the plan run's artifact listing failed,
+    and the `with:` fallback reports it for a step that emitted no output at
+    all. Anything that is not a base-10 integer is that same state.
+    """
+    try:
+        return int(str(value), 10)
+    except ValueError:
+        return None
 
 
 def decide(*, run_conclusion, artifact_count, cell_count, pending):
@@ -34,6 +48,18 @@ def decide(*, run_conclusion, artifact_count, cell_count, pending):
             "<stack> / <env> plan check before merging",
             _HOLD,
         )
+    # Before the shortfall comparison, and never folded into it: an unknown
+    # count compared against any cell count could match (1 vs 1) and green the
+    # gate over the stacks whose summaries were never seen.
+    counted = _as_int(artifact_count)
+    if counted is None:
+        return (
+            "failure",
+            "the plan run's artifact list could not be read, so its evidence is "
+            "unknown — re-plan this run before merging",
+            _HOLD,
+        )
+    artifact_count = counted
     if cell_count < artifact_count:
         return (
             "failure",
@@ -56,7 +82,7 @@ def decide(*, run_conclusion, artifact_count, cell_count, pending):
 def main():
     state, desc, mode = decide(
         run_conclusion=os.environ["SHIPMATE_RUN_CONCLUSION"],
-        artifact_count=int(os.environ.get("SHIPMATE_ARTIFACT_COUNT", "0")),
+        artifact_count=os.environ.get("SHIPMATE_ARTIFACT_COUNT", "0"),
         cell_count=int(os.environ.get("SHIPMATE_CELL_COUNT", "0")),
         pending=os.environ.get("SHIPMATE_PENDING", "false") == "true",
     )

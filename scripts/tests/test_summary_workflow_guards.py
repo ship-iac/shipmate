@@ -12,12 +12,17 @@ substring as the real guard; it cannot produce the same *parsed value*, which
 is what every test here actually compares against.
 """
 
+import os
 import re
+import subprocess
 
+import pytest
 import yaml
-from _loader import WORKFLOWS
+from _loader import WORKFLOWS, usable_bash
 
 WF = WORKFLOWS / "summary.yml"
+
+_BASH = usable_bash()
 
 
 def _spec():
@@ -36,6 +41,19 @@ def _step(job, step_id):
 
 def _normalize(text):
     return " ".join(text.split())
+
+
+def _errexit_flags(run):
+    """Every `set` flag group in `run` that turns errexit ON.
+
+    The sign is part of the match: `set +e` turns it off, so only a `-` group
+    carrying `e` counts.
+    """
+    return [
+        group
+        for sign, group in re.findall(r"\bset\s+([+-])([a-zA-Z]+)\b", run)
+        if sign == "-" and "e" in group
+    ]
 
 
 def _logical_command(body, marker):
@@ -136,20 +154,13 @@ def test_skips_draft_pull_requests_and_prefers_a_non_draft_candidate():
     # The deleted plan.yml summary job carried `pull_request.draft == false`;
     # restored here as a fail-closed probe over every candidate. `n` starts
     # empty and is assigned in exactly one place -- the branch that saw a
-    # literal "open false" -- so a draft, a closed pull request, and an
-    # unreadable response are all skipped, while the first non-draft in
-    # ascending number order wins and breaks the loop.
+    # literal "open false" -- so a draft and a closed pull request are both
+    # skipped, while the first non-draft in ascending number order wins and
+    # breaks the loop. (An unreadable response is a separate outcome and fails
+    # the step; see the behavioural tests below.)
     run = _step(_job(), "pr")["run"]
     assert re.search(r'^\s*n=""\s*$', run, re.MULTILINE), "n is not initialised empty"
-    pattern = re.compile(
-        r"""info=\$\(gh api "repos/\$GITHUB_REPOSITORY/pulls/\$c" --jq '\.state \+ " " \+ """
-        r"""\(\.draft \| tostring\)'\) \|\| info=""\s*\n"""
-        r"""\s*if \[ "\$info" = "open false" \]; then\s*\n"""
-        r"""\s*n="\$c"\s*\n"""
-        r"""\s*break\s*\n"""
-        r"""\s*fi"""
-    )
-    assert pattern.search(run), f"candidate selection not found intact in the pr step:\n{run}"
+    assert '[ "$info" = "open false" ]' in run
     assigns = [a.strip() for a in re.findall(r'^\s*n=(?!""$)\S+', run, re.MULTILINE)]
     assert assigns == ['n="$c"'], (
         f"n is assigned somewhere other than the open/non-draft branch: {assigns}"
@@ -172,20 +183,24 @@ def test_privileged_job_does_not_check_out_the_pull_request_head():
         assert "git fetch" not in run, f"step run hand-rolls a fetch:\n{run}"
 
 
-def test_artifact_count_input_falls_back_to_a_sentinel_never_zero():
-    # `scripts/gate-state` does int(os.environ.get("SHIPMATE_ARTIFACT_COUNT",
-    # "0")); an empty string reaches int("") and raises, which kills the
-    # action and writes NO gate at all. The `with:` value must never be able
-    # to resolve to an empty string -- and the fallback must be '1', not '0':
-    # the counting step's own failure branch reports 1 (evidence unknown,
-    # never "nothing changed") precisely so a shortfall against cell_count
-    # trips gate-state's hold path instead of greening the gate. A '0'
-    # fallback here would contradict that sentinel design.
+def test_artifact_count_input_falls_back_to_an_uncountable_sentinel():
+    # The `with:` value must never resolve to an empty string (a step that
+    # emitted no output at all), and the fallback must not be a NUMBER: any
+    # number is comparable against the parsed cell count, and the one that
+    # matches ('1' reported, one cell downloaded) greens the gate over
+    # evidence never seen -- the other planned stacks then land on main with no
+    # apply check and are never applied. gate-state holds on any non-integer,
+    # so the fallback has to be exactly that.
     action_step = next(s for s in _job()["steps"] if "actions/summary" in str(s.get("uses", "")))
-    assert (
-        action_step.get("with", {}).get("artifact-count")
-        == "${{ steps.artifacts.outputs.count || '1' }}"
+    fallback = re.fullmatch(
+        r"\$\{\{ steps\.artifacts\.outputs\.count \|\| '(.*)' \}\}",
+        action_step.get("with", {}).get("artifact-count", ""),
     )
+    assert fallback, action_step.get("with", {}).get("artifact-count")
+    literal = fallback.group(1)
+    assert literal, "an empty fallback reaches gate-state as an empty count"
+    with pytest.raises(ValueError):
+        int(literal, 10)
 
 
 def test_artifact_count_step_cannot_abort_without_emitting_a_count():
@@ -197,12 +212,11 @@ def test_artifact_count_step_cannot_abort_without_emitting_a_count():
     # still emit a `count=` output, WITH the `$GITHUB_OUTPUT` redirect, on
     # every path.
     run = _step(_job(), "artifacts")["run"]
-    flag_groups = re.findall(r"\bset\s+[+-]?([a-zA-Z]+)\b", run)
-    assert not any("e" in flags for flags in flag_groups), (
-        f"an `e` flag reached some `set` invocation in the artifacts step: {flag_groups}"
+    assert not _errexit_flags(run), (
+        f"an `e` flag reached some `set` invocation in the artifacts step: {run}"
     )
     assert 'echo "count=$count" >> "$GITHUB_OUTPUT"' in run
-    assert 'echo "count=1" >> "$GITHUB_OUTPUT"' in run
+    assert 'echo "count=unknown" >> "$GITHUB_OUTPUT"' in run
 
 
 def test_artifact_count_gh_call_uses_slurp_and_never_jq_together():
@@ -232,6 +246,25 @@ def test_artifact_count_aggregates_every_page_in_one_jq_pass():
     assert _normalize(jq_filter.group(1)) == (
         '[.[].artifacts[] | select(.name | startswith("cell-summary."))] | length'
     )
+
+
+def test_supersede_check_cannot_abort_before_any_gate_is_written():
+    # Mirrors the artifacts-step guard for the same reason, one step earlier:
+    # this step's `gh api` can 502 or hit a secondary rate limit on a busy
+    # repository. Under `-e` that failure raises the step, so every later step
+    # -- `Create/refresh gate` included -- is skipped and NO gate status is ever
+    # written: the required check never appears and the pull request is blocked
+    # with only a red engine run to explain it. The step must catch the failure
+    # itself and still emit a `proceed=` output, WITH the `$GITHUB_OUTPUT`
+    # redirect, on every path. Proceeding is the recoverable direction: the job
+    # `concurrency` group already cancels in-progress duplicates and gate writes
+    # are last-write-wins, so a superseded write can be corrected.
+    run = _step(_job(), "newest")["run"]
+    assert not _errexit_flags(run), (
+        f"an `e` flag reached some `set` invocation in the newest step: {run}"
+    )
+    assert 'echo "proceed=true" >> "$GITHUB_OUTPUT"' in run
+    assert 'echo "proceed=false" >> "$GITHUB_OUTPUT"' in run
 
 
 def test_supersede_check_gh_call_uses_slurp_and_never_jq_together():
@@ -269,17 +302,65 @@ def test_supersede_check_considers_every_completed_run_and_tiebreaks_on_id():
     )
 
 
-def test_draft_probe_fails_closed_on_an_unreadable_response():
-    # `[ "$(gh api ...)" = "true" ]` is exempt from `set -e` (the failing
-    # command is only an argument to `[`, not the executed command), so a
-    # failed lookup reads as an empty string -- "not a draft" -- and fails
-    # OPEN. The state/draft pair must be captured on its own line first, with
-    # its failure handled explicitly, and the ONLY value that selects a
-    # candidate is the literal "open false" -- so an empty capture selects
-    # nothing.
+def _run_pr_step(tmp_path, *, gh_body, jq_body="printf '7\\n'"):
+    """Execute the real, unmodified `pr` step with `gh` and `jq` replaced by
+    bash functions -- bash resolves a function before searching PATH, so this
+    needs no fake executables (and no jq on the dev box).
+
+    The `jq` stub stands in for candidate extraction only; every assertion below
+    is about what the step does with the per-candidate `gh api` result.
+    """
+    assert _BASH is not None  # callers are skipif-gated on this; narrows the type too
     run = _step(_job(), "pr")["run"]
-    assert re.search(r'info=\$\(gh api .*--jq .*\)\s*\|\|\s*info=""', run)
-    assert '[ "$info" = "open false" ]' in run
+    harness = f"gh() {{ {gh_body} ; }}\njq() {{ {jq_body} ; }}\n" + run
+    script = tmp_path / "step.sh"
+    script.write_text(harness, encoding="utf-8", newline="\n")
+    out = tmp_path / "gh_output"
+    out.write_text("", encoding="utf-8")
+    env = dict(os.environ)
+    env.update(
+        {
+            "GITHUB_REPOSITORY": "acme/demo",
+            "GITHUB_OUTPUT": str(out),
+            "SHA": "a" * 40,
+            "FROM_EVENT": "[]",
+            "GH_TOKEN": "x",
+        }
+    )
+    proc = subprocess.run([_BASH, str(script)], env=env, capture_output=True, text=True, timeout=30)
+    return proc, out.read_text(encoding="utf-8")
+
+
+@pytest.mark.skipif(_BASH is None, reason="bash not installed")
+def test_an_unreadable_pull_request_fails_the_step_instead_of_reading_as_a_draft(tmp_path):
+    # This is the whole point of FIX 2's split: folding a failed read into the
+    # draft path blanks the number, which skips every later step by
+    # `if: steps.pr.outputs.number != ''` -- no apply checks, no comment, NO
+    # GATE -- while the run stays GREEN. A green run with no gate lets reviewed
+    # infrastructure changes merge and never apply. A red engine run blocks the
+    # merge instead, which is recoverable.
+    proc, written = _run_pr_step(tmp_path, gh_body="return 1")
+    assert proc.returncode != 0, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
+    assert "::error::" in proc.stdout
+    assert "#7" in proc.stdout
+    assert "number=" not in written
+
+
+@pytest.mark.skipif(_BASH is None, reason="bash not installed")
+def test_a_real_draft_still_skips_quietly(tmp_path):
+    # Intended behaviour, unchanged: a draft skips every plan job, so there is
+    # nothing to summarise and no gate to write. It must not become an error.
+    proc, written = _run_pr_step(tmp_path, gh_body="printf 'open true'")
+    assert proc.returncode == 0, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
+    assert "::error::" not in proc.stdout
+    assert "number=\n" in written
+
+
+@pytest.mark.skipif(_BASH is None, reason="bash not installed")
+def test_an_open_non_draft_candidate_is_selected(tmp_path):
+    proc, written = _run_pr_step(tmp_path, gh_body="printf 'open false'")
+    assert proc.returncode == 0, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
+    assert "number=7\n" in written
 
 
 def test_plan_run_url_is_passed_to_the_summary_action():

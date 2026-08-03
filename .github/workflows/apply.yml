@@ -79,7 +79,7 @@ jobs:
     # `!= 'true'` guard below reads as "not empty" and fans out anyway.
     needs: [guard, detect]
     if: ${{ !failure() && !cancelled() && needs.detect.outputs.empty != 'true' }}
-    uses: ship-iac/shipmate/.github/workflows/apply-env-level.yml@8d1aa1b82252710b89f78c00d5d3a6f97880c0a7 # provisional pin: branch-local commit, not yet on main -- repin with dev/repin_internal.py once this merges
+    uses: ship-iac/shipmate/.github/workflows/apply-env-level.yml@8d1aa1b82252710b89f78c00d5d3a6f97880c0a7 # pinned to a commit on main
     permissions: { contents: read, checks: read, actions: read }
     with:
       waves_json: ${{ needs.detect.outputs.waves }}

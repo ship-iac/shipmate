@@ -65,6 +65,33 @@ def test_partial_cell_loss_fails_the_gate_and_holds_the_comment():
     assert mode == "hold"
 
 
+@pytest.mark.parametrize("count", ["unknown", "", " ", "1.0", "0x1", "many", None])
+def test_an_uncountable_artifact_list_holds_the_gate(count):
+    # The workflow reports `unknown` when the plan run's artifact listing could
+    # not be read. Any *number* there is comparable against the parsed cell
+    # count and the one that matches (1 reported, 1 cell downloaded) would green
+    # the gate over stacks whose summaries were never seen -- they would then
+    # land on main with no apply check and never be applied at all.
+    state, desc, mode = d(artifact_count=count, cell_count=1, pending=False)
+    assert state == "failure"
+    assert "artifact list could not be read" in desc
+    assert mode == "hold"
+
+
+def test_the_uncountable_check_precedes_the_shortfall_comparison():
+    # A cell count that would satisfy `cell_count < artifact_count` on any
+    # numeric reading must not be able to defeat the hold.
+    for cells in (0, 1, 999):
+        assert d(artifact_count="unknown", cell_count=cells, pending=False)[0] == "failure"
+
+
+def test_a_countable_artifact_list_is_accepted_as_a_string():
+    # The value arrives from a step output, so it is a string on the real path.
+    state, _, mode = d(artifact_count="3", cell_count=3, pending=False)
+    assert state == "success"
+    assert mode == "post"
+
+
 def test_no_artifacts_at_all_means_nothing_changed():
     # plan-cell's upload has no `if: always()`, so a dying cell fails the run.
     # A successful run with zero cell-summary artifacts therefore means the
@@ -106,6 +133,15 @@ def test_gate_links_to_the_plan_run_when_one_is_supplied(tmp_path, monkeypatch, 
         SHIPMATE_PLAN_RUN_URL="https://example.invalid/acme/demo/actions/runs/42",
     )
     assert body["target_url"] == "https://example.invalid/acme/demo/actions/runs/42"
+
+
+def test_main_holds_the_gate_on_an_unknown_artifact_count(tmp_path, monkeypatch, capsys):
+    # The env value is parsed inside `decide`, not at the call site: an
+    # `int(...)` on the way in raised ValueError and killed the action, writing
+    # no gate at all -- the opposite of a hold.
+    body = _main_body(tmp_path, monkeypatch, capsys, SHIPMATE_ARTIFACT_COUNT="unknown")
+    assert body["state"] == "failure"
+    assert "artifact list could not be read" in body["description"]
 
 
 def test_gate_falls_back_to_this_run_when_no_plan_run_url_is_supplied(
