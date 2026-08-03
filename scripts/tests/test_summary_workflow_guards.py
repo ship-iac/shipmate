@@ -209,14 +209,16 @@ def test_artifact_count_step_cannot_abort_without_emitting_a_count():
     # `success() && ...`) to failure, which would skip the summary step
     # entirely and leave no gate written at all. The step must catch the
     # failure itself (no `-e` flag, on any `set` invocation, in any form) and
-    # still emit a `count=` output, WITH the `$GITHUB_OUTPUT` redirect, on
-    # every path.
+    # still emit both counts, WITH the `$GITHUB_OUTPUT` redirect, on every
+    # path. The marker count is on the same footing as the cell count: a step
+    # that emits one and not the other leaves `matrix-count` empty, which holds
+    # the gate -- recoverable, but for a reason the run page does not explain.
     run = _step(_job(), "artifacts")["run"]
     assert not _errexit_flags(run), (
         f"an `e` flag reached some `set` invocation in the artifacts step: {run}"
     )
-    assert 'echo "count=$count" >> "$GITHUB_OUTPUT"' in run
-    assert 'echo "count=unknown" >> "$GITHUB_OUTPUT"' in run
+    assert 'echo "count=$cells" >> "$GITHUB_OUTPUT"' in run
+    assert 'echo "matrix_count=$planned" >> "$GITHUB_OUTPUT"' in run
 
 
 def test_artifact_count_gh_call_uses_slurp_and_never_jq_together():
