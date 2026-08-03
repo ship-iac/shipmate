@@ -631,21 +631,16 @@ def _pin_warnings(ctx):
     return out
 
 
-# `pull_request_target` as a YAML *key* (`pull_request_target:`), the single-event
-# scalar value of `on` (`on: pull_request_target`), a sequence item
-# (`- pull_request_target`), a flow-sequence member
-# (`on: [push, pull_request_target]`) or a flow-mapping key
-# (`on: {pull_request_target: {types: [opened]}}`) — each also with the token or
-# the `on` key quoted — but never as a quoted occurrence inside an expression
-# (`github.event_name == 'pull_request_target'`), which is a comparison against
-# the trigger, not a declaration of it. doctor is stdlib-only and cannot
-# yaml.safe_load, so the shapes are enumerated rather than parsed.
-_PR_TARGET = re.compile(
-    r"""^[ \t]*(?:-[ \t]*)?["']?pull_request_target["']?[ \t]*(?::|$)
-      | ^[ \t]*["']?on["']?[ \t]*:[ \t]*["']?pull_request_target["']?[ \t]*$
-      | [\[{,][ \t]*["']?pull_request_target["']?[ \t]*[,:\]}]""",
-    re.VERBOSE,
-)
+# The search is scoped to the workflow's top-level `on:` value, at the level
+# where event names live: a `run:` body, an `if:` expression and a
+# `strategy.matrix` value are not in that block at all, and a
+# `workflow_dispatch` input's `options:` entry is nested below it. The token
+# match takes word-ish boundaries so `pull_request_target_foo` is a different
+# trigger. doctor is stdlib-only and cannot yaml.safe_load, so the block is
+# sliced by indentation. `on` at column 0 only, optionally quoted: a workflow's
+# `on:` is a top-level key, so an indented one belongs to something else.
+_ON_KEY = re.compile(r"""^["']?on["']?[ \t]*:(?P<rest>.*)$""")
+_PR_TARGET = re.compile(r"(?<![\w-])pull_request_target(?![\w-])")
 # Same degrade posture and reason as PIN_UNREADABLE: an unreadable workflow
 # directory is not a misconfiguration to warn about.
 FORK_TRIGGER_UNREADABLE = (
@@ -668,13 +663,52 @@ def _strip_comment(line):
     return line
 
 
+def _on_block(text):
+    """(inline remainder of the `on:` line, its following lines) with comments
+    stripped, or (None, []) for a file with no top-level `on:`. The block runs to
+    the first line starting at column 0; blank and comment-only lines do not end
+    it."""
+    lines = text.splitlines()
+    for i, line in enumerate(lines):
+        m = _ON_KEY.match(line)
+        if not m:
+            continue
+        block = []
+        for nxt in lines[i + 1 :]:
+            stripped = _strip_comment(nxt)
+            if stripped.strip() and not stripped[0].isspace():
+                break
+            block.append(stripped)
+        return _strip_comment(m.group("rest")), block
+    return None, []
+
+
+def _event_lines(inline, block):
+    """The lines of an `on:` value that can name an event: the inline remainder,
+    plus — for a block mapping or sequence — only its shallowest children.
+    Anything deeper is one event's own configuration (`types:`, a
+    `workflow_dispatch` input's `options:`). A flow collection is a single value
+    however it is wrapped across lines, so all of its lines count."""
+    content = [ln for ln in [inline, *block] if ln.strip()]
+    if content and content[0].lstrip()[:1] in ("[", "{"):
+        return content
+    indents = [len(ln) - len(ln.lstrip()) for ln in block if ln.strip()]
+    if not indents:
+        return [inline]
+    top = min(indents)
+    return [inline] + [ln for ln in block if ln.strip() and len(ln) - len(ln.lstrip()) == top]
+
+
 def declares_pull_request_target(text):
     """Whether a workflow file declares the `pull_request_target` trigger.
 
     Comments are stripped first: `# never add pull_request_target here` is
     exactly the line a repository writes *because* it does not have one, and
     reporting it would train readers to ignore the finding."""
-    return any(_PR_TARGET.search(_strip_comment(line)) for line in text.splitlines())
+    inline, block = _on_block(text)
+    if inline is None:
+        return False
+    return any(_PR_TARGET.search(ln) for ln in _event_lines(inline, block))
 
 
 def _fork_trigger_warnings(ctx):

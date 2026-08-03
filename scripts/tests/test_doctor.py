@@ -1645,13 +1645,86 @@ def test_pull_request_target_as_a_single_event_scalar_warned(monkeypatch):
 def test_pull_request_target_as_a_flow_mapping_key_warned(monkeypatch):
     responses = _fork_responses({"label.yml": "on: {pull_request_target: {types: [opened]}}\n"})
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
-    assert len(doctor._fork_trigger_warnings(_ctx())) == 1
+    out = doctor._fork_trigger_warnings(_ctx())
+    # Level and filename too: the unreadable-directory degrade also returns
+    # exactly one item, so a length-only assertion passes on a probe that
+    # recognised nothing at all.
+    assert len(out) == 1
+    assert out[0][0] == doctor.WARNING
+    assert "label.yml" in out[0][1]
 
 
 def test_pull_request_target_as_a_sequence_item_warned(monkeypatch):
     responses = _fork_responses({"label.yml": "on:\n  - push\n  - pull_request_target\n"})
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
-    assert len(doctor._fork_trigger_warnings(_ctx())) == 1
+    out = doctor._fork_trigger_warnings(_ctx())
+    assert len(out) == 1
+    assert out[0][0] == doctor.WARNING
+    assert "label.yml" in out[0][1]
+
+
+def test_pull_request_target_in_a_wrapped_flow_sequence_warned(monkeypatch):
+    # A flow sequence is one value however it is wrapped across lines.
+    responses = _fork_responses({"label.yml": "on: [push,\n     pull_request_target]\n"})
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    out = doctor._fork_trigger_warnings(_ctx())
+    assert len(out) == 1
+    assert out[0][0] == doctor.WARNING
+    assert "label.yml" in out[0][1]
+
+
+def test_pull_request_target_in_a_flow_sequence_with_brackets_on_own_lines_warned(monkeypatch):
+    responses = _fork_responses(
+        {"label.yml": "on: [\n  push,\n  pull_request_target,\n]\njobs: {}\n"}
+    )
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    out = doctor._fork_trigger_warnings(_ctx())
+    assert len(out) == 1
+    assert out[0][0] == doctor.WARNING
+    assert "label.yml" in out[0][1]
+
+
+def test_folded_event_name_comparison_is_silent(monkeypatch):
+    # The same comparison as the single-line case below, folded across lines by
+    # a block scalar -- outside the `on:` block either way.
+    responses = _fork_responses(
+        {
+            "plan.yml": "on:\n  pull_request:\njobs:\n  a:\n"
+            "    if: >-\n      github.event_name ==\n      'pull_request_target'\n"
+        }
+    )
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    assert doctor._fork_trigger_warnings(_ctx()) == []
+
+
+def test_the_word_in_a_run_body_is_silent(monkeypatch):
+    responses = _fork_responses(
+        {
+            "plan.yml": "on:\n  pull_request:\njobs:\n  a:\n    steps:\n"
+            "      - run: |\n          echo this repo has no pull_request_target trigger\n"
+        }
+    )
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    assert doctor._fork_trigger_warnings(_ctx()) == []
+
+
+def test_a_workflow_dispatch_choice_option_is_silent(monkeypatch):
+    # Inside the `on:` block, but nested below the event-name level: it is one
+    # input's allowed value, not a trigger.
+    responses = _fork_responses(
+        {
+            "ops.yml": "on:\n  workflow_dispatch:\n    inputs:\n      event:\n"
+            "        type: choice\n        options:\n          - pull_request_target\n"
+        }
+    )
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    assert doctor._fork_trigger_warnings(_ctx()) == []
+
+
+def test_a_longer_trigger_name_is_not_the_token(monkeypatch):
+    responses = _fork_responses({"label.yml": "on: pull_request_target_foo\n"})
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    assert doctor._fork_trigger_warnings(_ctx()) == []
 
 
 def test_plain_pull_request_trigger_is_silent(monkeypatch):
