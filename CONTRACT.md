@@ -254,9 +254,10 @@ only labels the output as shipmate's own.
 `shipmate doctor` posts a consolidated, sticky report — one comment per pull
 request, identified by the HTML marker `<!-- shipmate:doctor -->` (distinct
 from the plan comment's `<!-- shipmate:summary -->`) and upserted in place the
-same way. It combines seven live settings probes (gate ruleset, environment
+same way. It combines eight live settings probes (gate ruleset, environment
 pair existence, environment protection shape, the `shipmate-engine`
-environment's own existence and default-branch scoping, engine action-pin
+environment's own existence and default-branch scoping, `pull_request_target`
+triggers in the consumer's workflow files, engine action-pin
 freshness, approvers-team resolvability, and App installation permission
 drift — see `docs/branch-protection.md`) with a harvest of the warning and failure
 annotations GitHub already recorded on this commit's workflow runs
@@ -268,7 +269,7 @@ when the report was rendered, it says so and asks for the command again once
 they have, and if the harvest itself could not be read in full it says that
 too — the two are separate statements, since a run that has not finished has
 recorded nothing yet while a run that could not be read may have recorded
-plenty. Only five of the seven
+plenty. Only six of the eight
 probes can produce a finding from the plan path's own `annotate`-mode
 invocation: the approvers-team probe needs the `SHIPMATE_TEAM` environment
 variable, which the plan path does not supply, so it silently returns
@@ -469,7 +470,15 @@ policy for a different reason:
 
 - **`plan.yml`** (consumer, `pull_request`) — `detect` + the plan matrix job
   only. Uploads plan artifacts and cell summaries; authors nothing, binds to
-  no environment.
+  no environment and mints no App token. `actions/build-matrix` fails `detect`
+  outright when the event's head repository is not the running repository:
+  **fork pull requests are not planned**, with no input to permit them. A
+  fork's plan would execute the pull request's own Terramate/OpenTofu code with
+  the plan environment's variables (variables are not secrets and are not
+  withheld from a fork), and no `shipmate / gate` is ever written for a fork
+  head, so the refusal is loud rather than an empty matrix. The guard keys on
+  the event being a `pull_request`; the drift path (`all-stacks`, `schedule`)
+  is unaffected.
 - **`summary.yml`** (consumer, `workflow_run` on `plan.yml`'s completion) — a
   thin wrapper (`uses:` the engine's reusable `.github/workflows/summary.yml`,
   `secrets: inherit`) that resolves the pull request, downloads the plan

@@ -156,7 +156,11 @@ full picture below:
   writes the **full plan text to the job's step summary** (reachable one click
   from the check), uploads the `.otplan` + a TF_VAR fingerprint as an
   artifact. `plan.yml` holds no App credential at all — the App private key
-  never enters a `pull_request`-triggered job, full stop.
+  never enters a `pull_request`-triggered job, full stop. `detect` also
+  **refuses fork pull requests**: a plan would run the fork's own
+  Terramate/OpenTofu code on your runners with your plan environment's
+  variables, so the branch has to live in the repository. There is no input to
+  allow them.
 
 A separate `summary.yml` workflow — triggered by `workflow_run` once
 `plan.yml` completes, and bound to the fixed `shipmate-engine` GitHub
@@ -165,10 +169,12 @@ the pull request, then calls `actions/summary`, which creates the matching
 `apply / <stack> / <env>` check **pending** (or completed "no changes") and
 upserts one sticky PR comment (a stack × env table) and the aggregate
 **`shipmate / gate`** commit status, which stays non-green while any apply is
-pending or any plan cell failed. Because it runs at the default-branch ref,
-this job never sees a fork's key either way — it additionally declines
-outright when the plan run's `head_repository` isn't this repository, so a
-fork's plan run completes but produces no gate. A pull request that changed
+pending or any plan cell failed. Being a `workflow_run` job it runs at the
+default-branch ref, from the workflow file on that branch rather than from the
+pull request head — and it declines outright when the plan run's
+`head_repository` isn't this repository. Fork pull requests do not get that far:
+`detect` refuses them (see below), so a fork's plan fails fast rather than
+running fork-authored code on your runners. A pull request that changed
 no stacks gets no plan comment at all — nothing is posted when there are no
 cells, no comment already on the pull request, and no `doctor` warning to
 point at — so docs-only and pin-bump changes stay quiet apart from their

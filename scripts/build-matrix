@@ -132,9 +132,74 @@ def compute_cells(all_stacks=False, base=""):
     return build_matrix(sorted(stacks_by_env), stacks_by_env, tags_by_stack)
 
 
+def _event_payload(path):
+    """The triggering event's payload, or {} when it cannot be read.
+
+    Unreadable is not "same repository": `fork_pr_error` treats a payload it
+    cannot interpret as a fork, so a lost GITHUB_EVENT_PATH refuses the run
+    rather than planning fork code by accident."""
+    if not path:
+        return {}
+    try:
+        with open(path, encoding="utf-8") as fh:
+            payload = json.load(fh)
+    except (OSError, ValueError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def fork_pr_error(event_name, repository, payload):
+    """The `::error::` line rejecting a fork pull request, or "" when this run
+    may be planned.
+
+    A fork's `pull_request` run is handed no secrets, but the plan cell still
+    runs `terramate`/`tofu` over the fork's own HCL on the consumer's runners
+    and with whatever the plan environment exposes as *variables* -- variables
+    are not secrets and are not withheld. Fork pull requests are therefore not
+    supported at all; the branch has to live in the repository.
+
+    Loud rather than an empty matrix: `summary.yml` refuses a fork head, so no
+    `shipmate / gate` status is ever written and the required check never
+    appears. A green "nothing to plan" would leave an outside contributor
+    waiting on a gate that structurally cannot arrive.
+
+    Keyed on the event being a pull request, never on a missing head repository:
+    the drift path calls this script with all-stacks and no pull request context
+    (`schedule` / `workflow_dispatch`), where `head.repo` is absent by
+    construction. Keying on the field instead would kill nightly drift silently.
+
+    Within a pull request event, an undeterminable head repository is rejected
+    -- a payload missing, unreadable, or without
+    `pull_request.head.repo.full_name` (the shape GitHub sends once the fork has
+    been deleted). A same-repository pull request always carries it, so
+    "unknown" only ever means a run this script cannot vouch for."""
+    if event_name != "pull_request":
+        return ""
+    head = ((payload.get("pull_request") or {}).get("head") or {}).get("repo") or {}
+    full_name = head.get("full_name") or ""
+    if repository and full_name == repository:
+        return ""
+    origin = f"`{full_name}`" if full_name else "could not be determined"
+    return (
+        f"::error::fork pull requests are not supported — this run's head repository "
+        f"({origin}) is not `{repository or 'this repository'}`. Planning it would run "
+        "the pull request's own Terramate/OpenTofu code on your runners with your plan "
+        "environment's variables, and no `shipmate / gate` status is ever written for a "
+        "fork head, so the pull request could not merge either way. Push the branch to "
+        "this repository (`gh pr checkout` then push) and open the pull request there."
+    )
+
+
 def main():
     all_stacks = os.environ.get("SHIPMATE_ALL_STACKS", "") == "true"
     base = os.environ.get("SHIPMATE_BASE_SHA", "")
+    rejection = fork_pr_error(
+        os.environ.get("GITHUB_EVENT_NAME", ""),
+        os.environ.get("GITHUB_REPOSITORY", ""),
+        _event_payload(os.environ.get("GITHUB_EVENT_PATH", "")),
+    )
+    if rejection:
+        raise SystemExit(rejection)
     cells = compute_cells(all_stacks, base)
     with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
         fh.write(f"matrix={json.dumps({'include': cells})}\n")
