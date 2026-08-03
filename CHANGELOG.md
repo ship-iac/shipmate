@@ -11,6 +11,45 @@ section below names the SHA the release tags.
 The version line stays `v0.x` while action inputs, check names, and the comment
 grammar are declared unstable in `README.md`.
 
+## [0.4.0] — 2026-08-03
+
+Tags <SHA>.
+
+Two more green-gate-over-unapplied-infrastructure fixes, both rooted in the
+Actions artifact listing. No consumer YAML change: **re-pinning is the only
+action required** — but every engine reference must move in one change, because
+the marker's writer lives in `actions/build-matrix` and its reader in
+`.github/workflows/summary.yml`. A repository that re-pins the summary caller and
+not `actions/build-matrix` publishes no marker, and every pull request holds until
+both match.
+
+### Fixed
+
+- **A `cell-summary.*` count of zero was read as "the plan matrix was empty".**
+  That reading is right for a docs-only or pin-bump pull request, and the gate
+  greens quietly on it. But the artifacts listing is read-after-write eventually
+  consistent and the trusted job reads it seconds after the plan run ends, so zero
+  also arrived for a run that had planned stacks — indistinguishable from inside a
+  job that sees only the plan run's artifacts. The gate went green, no
+  `apply / <stack> / <env>` checks were created, and because `deploy.yml`'s work
+  queue *is* the pending apply checks, the reviewed changes merged and were never
+  applied. `detect` now publishes the planned cell count as the artifact **name**
+  `plan-matrix.<N>` — a `workflow_run` event carries no job outputs, so a name in
+  the listing the trusted job already reads is the only channel — and the gate
+  holds unless exactly one such marker is readable. Zero now means an empty matrix
+  only when the marker says so.
+- **A *partial* listing greened the gate just as quietly.** The same lag could
+  return some of the cell summaries: three of five listed, all three downloaded
+  and parsed, so the existing shortfall check (parsed < listed) saw nothing wrong.
+  One apply check per listed cell, and the two stacks missing from the listing
+  merged reviewed with no apply check at all. The gate now holds unless the listed
+  count equals the planned count. The counting step retries a disagreeing listing
+  up to three times, five seconds apart, which narrows the eventual-consistency
+  window without pretending to close it, and then warns once per cause —
+  unreadable listing, no readable marker, or a listed count that disagrees with
+  the marker — because the gate description is capped at 140 characters and the run
+  page is where the reason has to be legible.
+
 ## [0.3.1] — 2026-08-03
 
 Tags `1efbee8`.
@@ -63,10 +102,6 @@ the only action required.
 
 ### Known, and deliberately not changed here
 
-- An artifact count of zero is still read as "the plan matrix was empty".
-  Separating that from a listing that returned zero needs a positive empty-matrix
-  signal crossing the `workflow_run` boundary; holding on zero without one would
-  block every docs-only pull request.
 - `shipmate doctor` has no probe for the consumer `summary.yml`/`plan.yml` wiring
   the reusable workflow hard-codes. doctor runs inside the job that wiring gates,
   so a probe there cannot report its own absence. Until that is addressed, a

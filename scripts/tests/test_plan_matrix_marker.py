@@ -11,8 +11,11 @@ Every assertion is on a parsed value (`yaml.safe_load`, then a whole field) or
 on the real step body executed under bash -- with `gh` and `sleep` replaced by
 shell functions for the reader, so what runs is the step's own text and only its
 network call is faked. A substring assertion is satisfied by the same words
-appearing in a comment, and by an inverted operator that leaves the text intact;
-the few substring checks below are each backed by a behavioural twin.
+appearing in a comment, and by an inverted operator that leaves the text intact.
+The few substring checks below are backed by a behavioural twin wherever one can
+exist — the retry's `sleep 5` is the exception, and deliberately so: the stub
+replaces `sleep`, so no test here can observe a wait, and the number is asserted
+against the step text alone.
 """
 
 import json
