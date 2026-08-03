@@ -13,7 +13,7 @@ grammar are declared unstable in `README.md`.
 
 ## [0.3.1] — 2026-08-03
 
-Tags `<backfilled>`.
+Tags `1efbee8`.
 
 Fail-safe fixes to the paths 0.3.0 relocated. No interface change: re-pinning is
 the only action required.
