@@ -207,8 +207,8 @@ pending or any plan cell failed. Being a `workflow_run` job it runs at the
 default-branch ref, from the workflow file on that branch rather than from the
 pull request head — and it declines outright when the plan run's
 `head_repository` isn't this repository. Fork pull requests do not get that far:
-`detect` refuses them (see below), so a fork's plan fails fast rather than
-running fork-authored code on your runners. A pull request that changed
+`detect` refuses them (see above), so a fork's plan fails fast rather than
+fanning out plan cells over fork-authored code. A pull request that changed
 no stacks gets no plan comment at all — nothing is posted when there are no
 cells, no comment already on the pull request, and no `doctor` warning to
 point at — so docs-only and pin-bump changes stay quiet apart from their

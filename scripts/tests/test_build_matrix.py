@@ -202,10 +202,11 @@ def test_event_payload_degrades_to_empty_dict(tmp_path):
     assert bm._event_payload(str(listy)) == {}
 
 
-def _run_main(monkeypatch, tmp_path, env, cells=(("stacks/app", "dev-eu"),)):
+def _run_main(monkeypatch, tmp_path, env, cells=(("stacks/app", "dev-eu"),), called=None):
     """main() with GITHUB_OUTPUT redirected, returning (parsed outputs, calls)
     where calls records compute_cells' arguments -- so a rejection is
-    observable as the stack enumeration never having run."""
+    observable as the stack enumeration never having run. Pass `called` to keep
+    that record readable when main() raises and there is no return value."""
     out = tmp_path / "out.txt"
     out.write_text("", encoding="utf-8")
     monkeypatch.setenv("GITHUB_OUTPUT", str(out))
@@ -218,7 +219,7 @@ def _run_main(monkeypatch, tmp_path, env, cells=(("stacks/app", "dev-eu"),)):
         monkeypatch.delenv(k, raising=False)
     for k, v in env.items():
         monkeypatch.setenv(k, v)
-    called = []
+    called = [] if called is None else called
 
     def fake_compute(all_stacks=False, base=""):
         called.append((all_stacks, base))
@@ -242,6 +243,7 @@ def test_main_fails_the_step_for_a_fork_and_does_not_enumerate(monkeypatch, tmp_
     # SystemExit, not an empty matrix: no gate is ever written for a fork head,
     # so a green "nothing to plan" would leave the contributor waiting on a
     # required check that structurally cannot arrive.
+    called = []
     with pytest.raises(SystemExit) as excinfo:
         _run_main(
             monkeypatch,
@@ -251,9 +253,27 @@ def test_main_fails_the_step_for_a_fork_and_does_not_enumerate(monkeypatch, tmp_
                 "GITHUB_REPOSITORY": "acme/iac",
                 "GITHUB_EVENT_PATH": _event_file(tmp_path, "outsider/iac"),
             },
+            called=called,
         )
     assert str(excinfo.value).startswith("::error::")
     assert "fork pull requests are not supported" in str(excinfo.value)
+    assert called == []
+
+
+def test_main_refuses_a_pull_request_when_the_repository_is_unknown(monkeypatch, tmp_path):
+    # `if repository and full_name == repository` fails closed on purpose: with
+    # GITHUB_REPOSITORY empty, dropping that clause makes an undeterminable head
+    # repository compare equal to the empty string and the run gets planned.
+    called = []
+    with pytest.raises(SystemExit) as excinfo:
+        _run_main(
+            monkeypatch,
+            tmp_path,
+            {"GITHUB_EVENT_NAME": "pull_request", "GITHUB_REPOSITORY": ""},
+            called=called,
+        )
+    assert "fork pull requests are not supported" in str(excinfo.value)
+    assert called == []
 
 
 def test_main_does_not_enumerate_stacks_for_a_fork(monkeypatch, tmp_path):

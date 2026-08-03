@@ -54,7 +54,7 @@ governs the plan path. Don't add one to a repository that holds the App key —
 | 1 | Write access only for people trusted to apply | Repo/team access | Everything below is downstream of this |
 | 2 | Push ruleset restricting `.github/workflows/**` *and every other path a workflow executes* | Repo/org ruleset (push target) | Branch-authored workflows |
 | 3 | Required check `shipmate / gate` with `integration_id`, strict | Branch ruleset | A *third party* posting `shipmate / gate` under another identity |
-| 4 | ≥1 approving review, code-owner review, dismiss stale, require approval of most recent push | Branch ruleset | Self-merge; the code-owner review is **unforgeable** at merge time (an App cannot be a `CODEOWNERS` entry), the approval *count* is not |
+| 4 | ≥1 approving review, code-owner review, dismiss stale, require approval of most recent push | Branch ruleset | Self-merge; the code-owner review is **unforgeable** at merge time (an App cannot be a `CODEOWNERS` entry) *provided a `CODEOWNERS` entry actually covers the IaC paths* — the rule is a no-op for changed files with no owner — and the approval *count* never is |
 | 5 | Block force-push and deletion on the default branch | Branch ruleset | History rewrite after apply |
 | 6 | Required reviewers + "Prevent self-review" on **every** `<env>-apply` that holds a secret | Environment | **Unforgeable** at apply time — the last line of defense once a merge has happened, and what makes row 7 hold |
 | 7 | Cloud credentials only as `<env>-apply` environment secrets — never repo-level | Environment secrets | Repo-wide secret exposure (bounded *only* in combination with row 6) |
@@ -175,8 +175,16 @@ A GitHub App cannot be listed in `CODEOWNERS`, so a code-owner review is one of
 only two controls on this page that a holder of the App private key cannot
 satisfy (the other is #6). An approval *count* is not: the App holds
 `pull-requests: write` and can submit an approving review that counts toward it.
-`shipmate doctor` warns when the rule requires approvals but not code-owner
-review — but doctor never fails a run, so that is a warning, not enforcement.
+
+That unforgeability holds only where the rule actually bites. GitHub requires a
+code-owner review for a changed file **that has an owner**; with no `CODEOWNERS`
+file, an entry that does not parse, or IaC paths simply left unowned, the setting
+is a no-op and the App's own approving review satisfies the count on its own.
+Write a `CODEOWNERS` entry covering the paths the stacks and the Terramate
+configuration live in, and confirm on a real pull request that the reviewer
+requirement appears. `shipmate doctor` warns when the rule requires approvals but
+not code-owner review — it does not check `CODEOWNERS` coverage, and it never
+fails a run, so that is a warning, not enforcement.
 
 ## 6. Environment reviewers — the gate that holds after a merge
 
@@ -313,9 +321,11 @@ is not:
   scoping is unavoidable once the key lives in the repositories at all.
 - It **is** work that should be automated rather than clicked: place and rotate
   across every repository in one scripted pass, not one at a time. The
-  incremental cost over an org secret is two API calls per repository at
-  onboarding (create the environment, add its branch policy) and rotation as N
-  `gh secret set --env` writes rather than one org-secret write.
+  cost is three API calls per repository at onboarding (create the environment,
+  add its branch policy, write the environment secret) against one
+  repository-list edit per repository plus a single org-secret write for the
+  alternative, and rotation as N `gh secret set --env` writes rather than that
+  one org-secret write.
   `docs/github-app.md` §5–7 carries the loops.
 - The only way to remove it is to stop putting the key in the repositories,
   which requires something outside GitHub Actions to hold it. That is a
@@ -360,8 +370,12 @@ exactly what the probe exists to catch.
 step when the triggering `pull_request` event's head repository is not this
 repository, and there is no input, variable or setting that turns that off — it
 is a rule of the engine, not a configurable. A fork's plan is refused before any
-stack is enumerated, so no `terramate`/`tofu` process ever runs over
-fork-authored HCL on your runners.
+stack is enumerated and before any `tofu` process starts. It is not refused
+before `detect`'s own `terramate` steps: in the reference `plan.yml`,
+`terramate fmt --check` and `terramate generate --detailed-exit-code` precede
+`actions/build-matrix`, so they still evaluate the fork's Terramate HCL —
+globals, `tm_*` functions and generate blocks included. Moving the refusal ahead
+of them means reordering your own `plan.yml`.
 
 That refusal is about **code execution**, not secrets. A fork's `pull_request`
 run receives no repository secrets, and `plan.yml` holds no App key in any case
@@ -402,7 +416,9 @@ this section rests on for exactly the exposure control 1 exists to limit.
   and `explicit_envs` all come from the pull request branch. They shape what the
   engine does; they do not constrain what it is allowed to do.
 - **The gate is an assertion, not a proof.** The App identity and pull request
-  approvals cannot be forged by a push-capable developer; the gate remains an
-  assertion produced by the author's own pipeline; the enforcing controls are
-  the code-owner-required pull request approval and the prod-apply environment
-  reviewer. Do not claim the gate is unforgeable.
+  approvals are out of a push-capable developer's reach only because control 16
+  keeps the App private key on the `shipmate-engine` environment, unreadable
+  from a branch-authored workflow — a holder of that key can forge both; the
+  gate remains an assertion produced by the author's own pipeline; the enforcing
+  controls are the code-owner-required pull request approval and the
+  `<env>-apply` environment reviewer. Do not claim the gate is unforgeable.

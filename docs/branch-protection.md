@@ -76,11 +76,13 @@ live probes — a missing or mis-pinned `shipmate / gate` rule on the default
 branch (no active ruleset requiring it, or one that doesn't pin
 `integration_id` to the shipmate App, or that isn't strict),
 whether the default branch's `pull_request` rule requires **code-owner** review
-(`docs/hardening.md` #3–5) — an approval count alone is not reported as
+(`docs/hardening.md` #3–5 — an approval count alone is not reported as
 sufficient, because the shipmate App can submit an approving review, so only a
-CODEOWNERS review is out of reach of a leaked App private key;
-`required_approving_review_count: 0` is the supported sole-maintainer mode and
-is reported as a note, not a warning,
+CODEOWNERS review is out of reach of a leaked App private key, and only for
+changed files an entry actually owns — the rule is a no-op for unowned paths, and
+the probe reads ruleset booleans only, so it cannot see that;
+`required_approving_review_count: 0` is the supported sole-maintainer mode,
+reported as a note rather than a warning),
 a missing GitHub
 Environment (`<env>` / `<env>-apply`) for a tagged-in environment, the
 plan/apply environment protection shape (a plan environment must have no
@@ -116,15 +118,20 @@ not supply, and
 the App-permission-drift probe only has something to report when a
 full-manifest permission-set mint was actually attempted, which only
 `shipmate doctor` does — both are effectively comment-path-only. `doctor`
-degrades to a "could not verify" **warning** naming the probe that was skipped
+degrades to a "could not verify" **warning** naming each probe that was skipped
 on an API error, and always exits 0, so a probe failure (for example, the App
 token lacking read access to `rules/branches` or `environments` — both token
 mints that drive doctor also request Actions read, which the environment reads
-need on some configurations) never fails the plan run. The engine-pin probe
-degrades to a **note** instead: its `.github/workflows` read legitimately fails
-on the pull request that first adds that directory, which is the first
-`shipmate doctor` any consumer runs, and it also declines rather than guessing
-when it cannot tell which repository the engine is or which commit to read.
+need on some configurations) never fails the plan run. One endpoint failure can
+name more than one probe: a `rules/branches` failure degrades both the gate-rule
+and the review-rule probe, because the two read it independently on purpose, so
+neither is silenced by the other's failure. The engine-pin and fork-trigger
+probes degrade to a **note** instead — both read `.github/workflows`, and that
+read legitimately fails on the pull request that first adds that directory, which
+is the first `shipmate doctor` any consumer runs, so the first report a consumer
+sees carries two notes. Both also decline rather than guessing when they cannot
+tell which commit to read, and the pin probe when it cannot tell which
+repository the engine is.
 An environment that exists but whose settings cannot be read is likewise a
 note naming it, rather than the silence a nonexistent environment gets (that
 one is the environment-existence probe's finding) — the `shipmate-engine`

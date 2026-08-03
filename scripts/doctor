@@ -89,8 +89,10 @@ _REVIEW_RULE_ABSENT = (
 _CODE_OWNER_REVIEW_OFF = (
     "the `pull_request` rule on `{branch}` requires approvals but not code-owner "
     "review — the shipmate App can submit an approving review, so an approval "
-    "count alone is no defence against a leaked App private key. Set "
-    "`require_code_owner_review` (docs/hardening.md #3–5)."
+    "count alone is no defense against a leaked App private key. Set "
+    "`require_code_owner_review`, and a `CODEOWNERS` entry covering the paths the "
+    "IaC lives in: the rule is a no-op for changed files with no owner "
+    "(docs/hardening.md #3–5)."
 )
 _SOLE_MAINTAINER_REVIEW = (
     "the `pull_request` rule on `{branch}` requires no approving review "
@@ -194,11 +196,14 @@ def _review_rule_warnings(ctx):
     endpoint failure silence both findings — the trade `_existing_env_names`
     and `_fork_trigger_warnings` also make.
 
-    Two limits it shares with the gate probe. It reports the first matching
-    rule, while GitHub enforces the union across layered rulesets, so a second
-    ruleset supplying code-owner review can still draw a warning. And the
-    endpoint returns rulesets only — a repository on classic branch protection
-    reads as having no rule, which the finding text says out loud."""
+    Three limits. It reports the first matching rule, while GitHub enforces the
+    union across layered rulesets, so a second ruleset supplying code-owner
+    review can still draw a warning. The endpoint returns rulesets only — a
+    repository on classic branch protection reads as having no rule, which the
+    finding text says out loud. And `require_code_owner_review: true` is read as
+    the control being in place, while GitHub applies it only to changed files an
+    entry in `CODEOWNERS` owns: unowned IaC paths make it a no-op, which the
+    findings say out loud rather than probe for."""
     branch = ctx["default_branch"]
     rules = _gh_json(f"repos/{ctx['repo']}/rules/branches/{branch}?per_page=100")
     for rule in rules:
@@ -626,14 +631,20 @@ def _pin_warnings(ctx):
     return out
 
 
-# `pull_request_target` as a YAML *key* (`pull_request_target:`), a sequence
-# item (`- pull_request_target`) or a flow-sequence member
-# (`on: [push, pull_request_target]`) — never as a quoted occurrence inside an
-# expression (`github.event_name == 'pull_request_target'`), which is a
-# comparison against the trigger, not a declaration of it. doctor is stdlib-only
-# and cannot yaml.safe_load, so the shapes are enumerated rather than parsed.
+# `pull_request_target` as a YAML *key* (`pull_request_target:`), the single-event
+# scalar value of `on` (`on: pull_request_target`), a sequence item
+# (`- pull_request_target`), a flow-sequence member
+# (`on: [push, pull_request_target]`) or a flow-mapping key
+# (`on: {pull_request_target: {types: [opened]}}`) — each also with the token or
+# the `on` key quoted — but never as a quoted occurrence inside an expression
+# (`github.event_name == 'pull_request_target'`), which is a comparison against
+# the trigger, not a declaration of it. doctor is stdlib-only and cannot
+# yaml.safe_load, so the shapes are enumerated rather than parsed.
 _PR_TARGET = re.compile(
-    r"^[ \t]*(?:-[ \t]*)?pull_request_target[ \t]*(?::|$)|[\[,][ \t]*pull_request_target[ \t]*[,\]]"
+    r"""^[ \t]*(?:-[ \t]*)?["']?pull_request_target["']?[ \t]*(?::|$)
+      | ^[ \t]*["']?on["']?[ \t]*:[ \t]*["']?pull_request_target["']?[ \t]*$
+      | [\[{,][ \t]*["']?pull_request_target["']?[ \t]*[,:\]}]""",
+    re.VERBOSE,
 )
 # Same degrade posture and reason as PIN_UNREADABLE: an unreadable workflow
 # directory is not a misconfiguration to warn about.

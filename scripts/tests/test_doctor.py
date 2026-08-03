@@ -169,10 +169,11 @@ def _env(name, rules=(), branch_policy=None):
 
 
 def _quiet_new_probes():
-    """Healthy responses for the env-protection, engine-environment, and
-    pin-freshness probes, so tests exercising the older gate/environment
-    probes via the top-level `warnings()` don't pick up incidental noise
-    from these three."""
+    """Healthy responses for the env-protection, engine-environment,
+    pin-freshness and fork-trigger probes, so tests exercising the older
+    gate/environment probes via the top-level `warnings()` don't pick up
+    incidental noise from these four (the empty workflow listing quiets the last
+    two at once)."""
     return {
         f"repos/{_REPO}/environments/dev-eu": _env("dev-eu"),
         f"repos/{_REPO}/environments/dev-eu-apply": _env(
@@ -1629,6 +1630,24 @@ def test_pull_request_target_in_a_flow_sequence_warned(monkeypatch):
     assert "label.yml" in out[0][1]
 
 
+def test_pull_request_target_as_a_single_event_scalar_warned(monkeypatch):
+    # `on: pull_request_target` is the legal one-event scalar form -- no block,
+    # no sequence, no brackets. The shortest way to declare the trigger must not
+    # be the one shape the probe misses.
+    responses = _fork_responses({"label.yml": "on: pull_request_target\njobs: {}\n"})
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    out = doctor._fork_trigger_warnings(_ctx())
+    assert len(out) == 1
+    assert out[0][0] == doctor.WARNING
+    assert "label.yml" in out[0][1]
+
+
+def test_pull_request_target_as_a_flow_mapping_key_warned(monkeypatch):
+    responses = _fork_responses({"label.yml": "on: {pull_request_target: {types: [opened]}}\n"})
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    assert len(doctor._fork_trigger_warnings(_ctx())) == 1
+
+
 def test_pull_request_target_as_a_sequence_item_warned(monkeypatch):
     responses = _fork_responses({"label.yml": "on:\n  - push\n  - pull_request_target\n"})
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
@@ -1753,6 +1772,11 @@ def test_review_rule_without_code_owner_review_warned(monkeypatch):
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
     out = doctor._review_rule_warnings(_ctx())
     assert out == [(doctor.WARNING, doctor._CODE_OWNER_REVIEW_OFF.format(branch=_BRANCH))]
+    # Pin the text, not just the constant: comparing against the constant leaves
+    # the two review findings' bodies interchangeable, so swapping them would
+    # keep every review-rule test green while telling readers the wrong thing.
+    assert "requires approvals but not code-owner review" in out[0][1]
+    assert "Set `require_code_owner_review`" in out[0][1]
 
 
 def test_review_rule_sole_maintainer_mode_is_a_notice(monkeypatch):
@@ -1803,3 +1827,17 @@ def test_review_rule_missing_parameters_key_is_unverified(monkeypatch):
 
 def test_review_rule_probe_is_registered():
     assert doctor._review_rule_warnings in doctor.PROBES
+
+
+def test_probe_count_is_stated_correctly_in_the_docs():
+    """Adding or removing a probe means editing five pieces of prose that spell
+    the count out. Nothing else notices when they go stale, so this assertion is
+    the tripwire that points the next author at the list:
+
+    - `scripts/doctor`'s module docstring: "the nine live probes'" and the
+      `Probes:` bullet list below it (one bullet per probe);
+    - `CONTRACT.md`: "nine live settings probes" and "seven of the nine";
+    - `docs/branch-protection.md`: "combining nine" and "seven of the nine
+      probes".
+    """
+    assert len(doctor.PROBES) == 9

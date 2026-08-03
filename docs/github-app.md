@@ -135,10 +135,12 @@ default branch.
 repository — `docs/hardening.md` #13 asks for one App per trust domain, and one
 key serves every repository in it. Placement is per repository either way: the
 alternative, an org secret with `--visibility selected`, needs its repository
-list edited for each new repo. So the incremental cost of this scoping over an
-org secret is two API calls per repository at onboarding — the `PUT` and the
-`POST` above — and rotation becoming N `gh secret set --env` writes instead of
-one org-secret write. Both are loops, below.
+list edited for each new repo. So onboarding a repository under this scoping is
+three API calls — the `PUT` and the `POST` above plus the `gh secret set --env`
+in §6 — against one repository-list edit per repository for the org secret, whose
+value itself is written once for the whole org; and rotation becomes N
+`gh secret set --env` writes instead of that one org-secret write. Both are
+loops, below.
 
 ## 6. Set the approvers team + propagate credentials
 
