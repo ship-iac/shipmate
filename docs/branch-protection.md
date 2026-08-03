@@ -45,7 +45,17 @@ gh api -X POST repos/<owner>/<repo>/rulesets --input - <<'JSON'
       "parameters": {
         "required_status_checks": [ { "context": "shipmate / gate", "integration_id": <SHIPMATE_APP_ID> } ],
         "strict_required_status_checks_policy": true
-      } }
+      } },
+    { "type": "pull_request",
+      "parameters": {
+        "required_approving_review_count": 1,
+        "require_code_owner_review": true,
+        "dismiss_stale_reviews_on_push": true,
+        "require_last_push_approval": true,
+        "required_review_thread_resolution": false
+      } },
+    { "type": "non_fast_forward" },
+    { "type": "deletion" }
   ]
 }
 JSON
@@ -53,6 +63,15 @@ JSON
 
 `strict_required_status_checks_policy: true` is the "require branches up to date"
 setting above.
+
+The `pull_request` rule is what `shipmate doctor`'s review-rule probe checks, and
+`require_code_owner_review` is the half of it a leaked App private key cannot
+satisfy — an App cannot be a CODEOWNER. It only bites for changed files a
+`CODEOWNERS` entry actually covers, so keep an entry covering the paths the IaC
+and the workflows live in. A sole maintainer who wants
+`required_approving_review_count: 0` should read `docs/hardening.md` §3–5 before
+changing it — that page has the reasoning for each of these rules, and this block
+is just its recommendation made pasteable.
 
 `<SHIPMATE_APP_ID>` is the numeric GitHub App id — the same value stored in
 the `SHIPMATE_APP_ID` repo/org variable (see `docs/github-app.md` step 2).
