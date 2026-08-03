@@ -4,12 +4,20 @@
 Runs in the trusted post-plan job (`workflow_run`), which has no `needs`, so the
 plan run's own conclusion replaces the per-job results this logic used to read.
 
-`artifact_count` is how many `cell-summary.*` artifacts the API reports for the
-plan run, or `unknown` when that listing could not be read; `cell_count` is how
-many of them this job actually parsed. An unknown count, or any shortfall
-between the two — whole or partial — means the evidence for this run is
-incomplete (a failed download, or one that dropped some but not all cell
-summaries), and incomplete evidence must never green the gate.
+Three counts describe one plan run, and the gate greens only when all three
+agree. `matrix_count` is how many cells `detect` planned, published by
+`actions/build-matrix` as the artifact name `plan-matrix.<N>` because a
+`workflow_run` event carries no job outputs; `artifact_count` is how many
+`cell-summary.*` artifacts the API reports for that run; `cell_count` is how
+many of them this job actually parsed. Each is `unknown` when the workflow could
+not determine it. A missing marker, a listing that does not match it, or a
+shortfall between listed and parsed means the evidence for this run is
+incomplete -- a lagging artifact listing, a failed download, or an engine pin
+skew -- and incomplete evidence must never green the gate. A zero cell count
+means "nothing changed" only when the marker says the matrix was empty; without
+it, zero is indistinguishable from a listing that simply did not show the cells,
+and greening it merges reviewed stacks that have no apply check and so are never
+applied.
 """
 
 import json
@@ -22,11 +30,12 @@ _NOTHING = "nothing-changed"
 
 
 def _as_int(value):
-    """The artifact count as an int, or None when the caller could not count it.
+    """A reported count as an int, or None when the caller could not count it.
 
     The workflow reports `unknown` when the plan run's artifact listing failed,
-    and the `with:` fallback reports it for a step that emitted no output at
-    all. Anything that is not a base-10 integer is that same state.
+    when the run published no plan-matrix marker (or two that disagreed), and
+    the `with:` fallback reports it for a step that emitted no output at all.
+    Anything that is not a base-10 integer is that same state.
     """
     try:
         return int(str(value), 10)
@@ -34,7 +43,37 @@ def _as_int(value):
         return None
 
 
-def decide(*, run_conclusion, artifact_count, cell_count, pending):
+def _evidence_gap(*, counted, cell_count, planned):
+    """A hold description when this plan run's evidence is incomplete, else None.
+
+    `counted` and `planned` are None when the workflow could not report a
+    number. Ordered so that every check a plausible count could satisfy comes
+    after the two that no count can.
+    """
+    if counted is None:
+        return (
+            "the plan run's artifact list could not be read, so its evidence is "
+            "unknown — re-plan this run before merging"
+        )
+    if planned is None:
+        return (
+            "the plan run published no plan-matrix marker — re-pin "
+            "actions/build-matrix, then re-plan before merging"
+        )
+    if counted != planned:
+        return (
+            f"the plan run planned {planned} cell(s) but its artifact list shows "
+            f"{counted} — re-plan before merging"
+        )
+    if cell_count < counted:
+        return (
+            "no cell summaries could be read from the plan run's artifacts "
+            "(download issue) — re-run before merging"
+        )
+    return None
+
+
+def decide(*, run_conclusion, artifact_count, cell_count, matrix_count, pending):
     """Return (state, description, comment_mode).
 
     state is None when nothing should be written at all.
@@ -48,25 +87,10 @@ def decide(*, run_conclusion, artifact_count, cell_count, pending):
             "<stack> / <env> plan check before merging",
             _HOLD,
         )
-    # Before the shortfall comparison, and never folded into it: an unknown
-    # count compared against any cell count could match (1 vs 1) and green the
-    # gate over the stacks whose summaries were never seen.
-    counted = _as_int(artifact_count)
-    if counted is None:
-        return (
-            "failure",
-            "the plan run's artifact list could not be read, so its evidence is "
-            "unknown — re-plan this run before merging",
-            _HOLD,
-        )
-    artifact_count = counted
-    if cell_count < artifact_count:
-        return (
-            "failure",
-            "no cell summaries could be read from the plan run's artifacts "
-            "(download issue) — re-run before merging",
-            _HOLD,
-        )
+    planned = _as_int(matrix_count)
+    gap = _evidence_gap(counted=_as_int(artifact_count), cell_count=cell_count, planned=planned)
+    if gap:
+        return "failure", gap, _HOLD
     if pending:
         return (
             "pending",
@@ -74,7 +98,7 @@ def decide(*, run_conclusion, artifact_count, cell_count, pending):
             "until applies complete",
             _POST,
         )
-    if artifact_count == 0:
+    if planned == 0:
         return "success", "no pending applies for this PR", _NOTHING
     return "success", "no pending applies for this PR", _POST
 
@@ -82,8 +106,9 @@ def decide(*, run_conclusion, artifact_count, cell_count, pending):
 def main():
     state, desc, mode = decide(
         run_conclusion=os.environ["SHIPMATE_RUN_CONCLUSION"],
-        artifact_count=os.environ.get("SHIPMATE_ARTIFACT_COUNT", "0"),
+        artifact_count=os.environ.get("SHIPMATE_ARTIFACT_COUNT", ""),
         cell_count=int(os.environ.get("SHIPMATE_CELL_COUNT", "0")),
+        matrix_count=os.environ.get("SHIPMATE_MATRIX_COUNT", ""),
         pending=os.environ.get("SHIPMATE_PENDING", "false") == "true",
     )
     with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
