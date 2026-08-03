@@ -113,6 +113,10 @@ REPOS="repo-example-stacks repo-example-folders repo-example-workspaces"
 for NAME in $REPOS; do
   REPO="$ORG/$NAME"
   DEFAULT_BRANCH=$(gh repo view "$REPO" --json defaultBranchRef --jq .defaultBranchRef.name)
+  if [ -z "$DEFAULT_BRANCH" ]; then
+    echo "skipping $REPO: could not read its default branch" >&2
+    continue
+  fi
   gh api -X PUT "repos/$REPO/environments/shipmate-engine" --input - <<'JSON'
 { "deployment_branch_policy": { "protected_branches": false, "custom_branch_policies": true } }
 JSON
@@ -120,6 +124,15 @@ JSON
     -f name="$DEFAULT_BRANCH"
 done
 ```
+
+The per-repository guard matters: a typo'd name or a repository you cannot read
+leaves `DEFAULT_BRANCH` empty, and without it the `PUT` has already created the
+environment with `custom_branch_policies: true` while the `POST` writes a policy
+named `""` (or 422s) — exactly the fail-closed environment the next paragraph
+warns about, discovered only when that repository's first apply check never
+completes. Re-running the loop over an already-onboarded repository makes the
+`POST` fail with "name has already been taken", which is harmless — the policy is
+already there.
 
 Reading the default branch per repository rather than hardcoding `main` is the
 point: the policy must name **that repository's** default branch, and a policy
@@ -194,13 +207,25 @@ every consumer repo, not just once for the org.
    ORG=<org>
    REPOS="repo-example-stacks repo-example-folders repo-example-workspaces"
 
+   KEY=$(cat new-key.pem)
+   if [ -z "$KEY" ]; then
+     echo "new-key.pem is missing or empty — not touching any repository" >&2
+     exit 1
+   fi
+
    for NAME in $REPOS; do
      gh secret set SHIPMATE_APP_PRIVATE_KEY --repo "$ORG/$NAME" --env shipmate-engine \
-       --body "$(cat new-key.pem)"
+       --body "$KEY"
    done
    ```
 
    One new key, written N times — the key is not regenerated per repository.
+   Read it once, before the loop, and abort when it is empty: a `cat` of the
+   wrong filename inside the loop expands to the empty string, and
+   `gh secret set --body ""` then succeeds N times and destroys the working key
+   in every consumer repository. Step 3 deletes the old key next, so no App token
+   could be minted anywhere — no `shipmate / gate` status gets written and every
+   open pull request blocks on a required check that cannot arrive.
 3. Back in App settings, **delete** the old private key so it can no longer
    mint tokens.
 4. Shred the local PEM file (`shred -u new-key.pem` or equivalent) once it's
