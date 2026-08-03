@@ -11,6 +11,68 @@ section below names the SHA the release tags.
 The version line stays `v0.x` while action inputs, check names, and the comment
 grammar are declared unstable in `README.md`.
 
+## [0.3.0] — 2026-08-03
+
+Tags `<backfilled>`.
+
+**Adopting this release requires a consumer YAML change.** The post-plan summary
+moved out of `plan.yml` into a `workflow_run` workflow, so a repository that
+re-pins without adding `summary.yml` gets a plan that runs to completion and
+never writes `shipmate / gate` — silent and permanent, the failure mode
+`CONTRACT.md` warns about. Add `.github/workflows/summary.yml` calling this
+release's reusable `summary.yml`, drop `plan.yml`'s in-run `summary` job, and
+declare `environment: shipmate-engine` on `comment-ops.yml`'s `ops` job and
+`drift.yml`'s new `issues` job. Note a `workflow_run` workflow only fires once it
+is on the default branch, so land `summary.yml` before removing the in-run job —
+otherwise the pull request making the change cannot be gated by it.
+
+### Changed
+
+- **No `pull_request`-triggered job holds the App private key.** The summary that
+  authors the `apply / …` checks, the sticky comment and the `shipmate / gate`
+  status now runs in a trusted `workflow_run` workflow at the default-branch ref,
+  and the key is scoped to the `shipmate-engine` GitHub Environment whose
+  deployment branch policy names that branch only. A branch- *or* tag-authored
+  workflow naming that environment is refused before a runner starts. Apply and
+  drift cells hold no App credentials at all.
+- **`actions/summary` inputs are reshaped** — `run-conclusion` and
+  `artifact-count` replace `plan-result` and `detect-result`, and `plan-run-url`
+  is new. Breaking for anything invoking the action directly.
+
+### Added
+
+- **Fork pull requests are refused outright.** `actions/build-matrix` fails
+  `detect` when a `pull_request` or `pull_request_target` event's head repository
+  is not the running repository, with no input to permit it. A fork's plan would
+  otherwise execute its own Terramate/OpenTofu code on the consumer's runners
+  with the plan environment's variables. The refusal is loud rather than an empty
+  matrix, because no `shipmate / gate` is ever written for a fork head.
+- `actions/apply-complete`, `actions/apply-snapshot` and `actions/drift-issues` —
+  the trailing trusted jobs that complete apply checks and author drift issues,
+  split out of the cells that used to do it while holding the key.
+- **Two `shipmate doctor` probes.** One reports any workflow file declaring
+  `pull_request_target`, the fork-reachable form of the branch-authored-workflow
+  attack. One reports whether the default branch's ruleset requires **code-owner**
+  review: an approval count is no substitute, because the App can submit a review
+  that counts toward it, and only a `CODEOWNERS` review is beyond a leaked key.
+  Both state their limits rather than implying more than they check —
+  `require_code_owner_review` is not proof a `CODEOWNERS` entry covers the paths
+  the IaC lives in, and classic branch protection is not visible on the endpoint
+  the probe reads.
+
+### Fixed
+
+- The `shipmate-engine` environment must not keep a repository secret of the same
+  name beside it: an environment secret is only withheld from jobs that *name*
+  the environment, so a leftover repository secret defeats the scoping entirely.
+  `docs/github-app.md` §6 now deletes it and shows how to confirm, because no
+  probe can — listing repository secrets needs a permission the App manifest does
+  not declare.
+- `docs/hardening.md` claimed in four places that the `<env>-apply` reviewer was
+  the *only* control a leaked App key cannot satisfy. There are two, unforgeable
+  at different points: a `CODEOWNERS` review at the merge, the environment
+  reviewer at the apply.
+
 ## [0.2.3] — 2026-07-31
 
 Tags `07c2de1`.
@@ -132,6 +194,7 @@ App and pinned by `integration_id` in the consumer's ruleset; post-merge deploy
 driven by the pending apply checks as its work queue; per-run apply result
 comments; and nightly drift detection as auto-closing issues.
 
+[0.3.0]: https://github.com/ship-iac/shipmate/compare/v0.2.3...v0.3.0
 [0.2.3]: https://github.com/ship-iac/shipmate/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/ship-iac/shipmate/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/ship-iac/shipmate/compare/v0.2.0...v0.2.1
