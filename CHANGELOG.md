@@ -13,7 +13,7 @@ grammar are declared unstable in `README.md`.
 
 ## [0.3.0] — 2026-08-03
 
-Tags `<backfilled>`.
+Tags `e576103`.
 
 **Adopting this release requires a consumer YAML change.** The post-plan summary
 moved out of `plan.yml` into a `workflow_run` workflow, so a repository that
