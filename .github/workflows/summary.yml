@@ -201,7 +201,7 @@ jobs:
           elif [ "$planned" = "unknown" ]; then
             echo "::warning::this plan run published no readable plan-matrix marker; the gate will hold — check that actions/build-matrix is pinned to the same engine revision as this workflow"
           elif [ "$cells" != "$planned" ]; then
-            echo "::warning::the plan run planned $planned cell(s) but its artifact list shows $cells; the gate will hold"
+            echo "::warning::the plan run planned $planned cell(s) but its artifact list shows $cells; the gate will hold — re-plan"
           fi
           echo "count=$cells" >> "$GITHUB_OUTPUT"
           echo "matrix_count=$planned" >> "$GITHUB_OUTPUT"
@@ -225,15 +225,10 @@ jobs:
           # comment footer, the per-cell fallback links and the gate's
           # target_url must all point at the plan run.
           plan-run-url: ${{ github.event.workflow_run.html_url }}
-          # `|| 'unknown'`, never a number: the fallback covers a step that
-          # emitted no output at all, which is the same state the failure
-          # branch above reports. gate-state holds the gate on any
-          # non-integer count, so an unreadable listing can never present as
-          # a countable number that some cell count might match.
+          # Both count inputs use `|| 'unknown'`: covers missing script
+          # output, the state reported when no artifacts or markers are
+          # found. gate-state holds the gate on any non-integer count.
           artifact-count: ${{ steps.artifacts.outputs.count || 'unknown' }}
-          # `|| 'unknown'`, never a number: the fallback covers a step that
-          # emitted no output at all, which is the same state the loop above
-          # reports when no marker was found.
           matrix-count: ${{ steps.artifacts.outputs.matrix_count || 'unknown' }}
           app-id: ${{ vars.SHIPMATE_APP_ID }}
           private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
