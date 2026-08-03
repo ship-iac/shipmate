@@ -63,7 +63,7 @@ governs the plan path. Don't add one to a repository that holds the App key —
 | 10 | Default `GITHUB_TOKEN` = read-only; Actions may not approve PRs | Settings → Actions | Token privilege creep |
 | 11 | Require approval for all outside collaborators' workflow runs | Settings → Actions | Drive-by fork execution |
 | 12 | Allowed-actions list (this engine + pinned third parties) | Settings → Actions | Supply chain |
-| 13 | One App per trust domain; org secret `--visibility selected` | App registration | Cross-repo blast radius |
+| 13 | One App per trust domain; key as a per-repository `shipmate-engine` environment secret | App registration | Cross-repo blast radius |
 | 14 | Rotate the App key when push access is revoked | Runbook | Ex-member with a copied PEM |
 | 15 | Shorten Actions retention | Settings → Actions | `shipmate doctor` report disclosure |
 | 16 | `shipmate-engine` Environment exists, deployment branch policy restricted to the default branch | Environment | Repository-secret App key readable by any branch |
@@ -299,8 +299,10 @@ trust to all of them.
   PEM out of a workflow run, and revoking their access does not invalidate it.
 
 **The multi-repo cost, stated plainly.** GitHub has no org-level environment
-secrets — environments are per repository — so an organisation whose IaC is
-split across N repositories places the key N times and rotates it N times. That
+secrets — environments are per repository — so an organization whose IaC is
+split across N repositories places the key N times and rotates it N times. It
+does not *create* N keys: creation is per App, and #13 above already asks for
+one App per trust domain, so one key covers every repository in it. That
 is a genuine operational cost, and it is worth being clear about what it is and
 is not:
 
@@ -310,7 +312,11 @@ is not:
   independently reachable by that repository's own developers. Per-repository
   scoping is unavoidable once the key lives in the repositories at all.
 - It **is** work that should be automated rather than clicked: place and rotate
-  across every repository in one scripted pass, not one at a time.
+  across every repository in one scripted pass, not one at a time. The
+  incremental cost over an org secret is two API calls per repository at
+  onboarding (create the environment, add its branch policy) and rotation as N
+  `gh secret set --env` writes rather than one org-secret write.
+  `docs/github-app.md` §5–7 carries the loops.
 - The only way to remove it is to stop putting the key in the repositories,
   which requires something outside GitHub Actions to hold it. That is a
   different architecture, not a setting.

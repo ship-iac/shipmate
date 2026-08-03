@@ -107,19 +107,38 @@ once per consumer repo, with a deployment branch policy naming exactly the
 default branch:
 
 ```bash
-REPO=<org>/repo-example-stacks   # repeat per consumer repo
+ORG=<org>
+REPOS="repo-example-stacks repo-example-folders repo-example-workspaces"
 
-gh api -X PUT "repos/$REPO/environments/shipmate-engine" --input - <<'JSON'
+for NAME in $REPOS; do
+  REPO="$ORG/$NAME"
+  DEFAULT_BRANCH=$(gh repo view "$REPO" --json defaultBranchRef --jq .defaultBranchRef.name)
+  gh api -X PUT "repos/$REPO/environments/shipmate-engine" --input - <<'JSON'
 { "deployment_branch_policy": { "protected_branches": false, "custom_branch_policies": true } }
 JSON
-gh api -X POST "repos/$REPO/environments/shipmate-engine/deployment-branch-policies" \
-  -f name='main'   # your default branch, if not `main`
+  gh api -X POST "repos/$REPO/environments/shipmate-engine/deployment-branch-policies" \
+    -f name="$DEFAULT_BRANCH"
+done
 ```
+
+Reading the default branch per repository rather than hardcoding `main` is the
+point: the policy must name **that repository's** default branch, and a policy
+naming a branch that does not exist fails closed — the apply-completion job is
+denied the key and apply checks never complete.
 
 No reviewers on this environment — it exists to scope a secret to a ref, not
 to gate a human decision (`docs/hardening.md` #16). `shipmate doctor` checks
 both that this environment exists and that its policy actually names the
 default branch.
+
+**What this costs across N repositories.** Key *creation* is per App, not per
+repository — `docs/hardening.md` #13 asks for one App per trust domain, and one
+key serves every repository in it. Placement is per repository either way: the
+alternative, an org secret with `--visibility selected`, needs its repository
+list edited for each new repo. So the incremental cost of this scoping over an
+org secret is two API calls per repository at onboarding — the `PUT` and the
+`POST` above — and rotation becoming N `gh secret set --env` writes instead of
+one org-secret write. Both are loops, below.
 
 ## 6. Set the approvers team + propagate credentials
 
@@ -129,16 +148,21 @@ back a secret's value once set (GitHub never exposes it), so keep the PEM from
 `register-app`'s conversion around (or re-download it from App settings) until
 every consumer repo has it.
 
-Per-repo (repeat for each consumer repo):
+Per-repo, in one pass over the consumer list:
 
 ```bash
-REPO=<org>/repo-example-stacks   # repeat per consumer repo
-TEAM=<approvers-team-slug>
+ORG=<org>
+REPOS="repo-example-stacks repo-example-folders repo-example-workspaces"
+TEAM=<approvers-team-slug>          # may differ per repo; set it per repo either way
+APP_ID=<app-id-from-step-2-output>
 
-gh variable set SHIPMATE_APPROVERS_TEAM --repo "$REPO" --body "$TEAM"
-gh variable set SHIPMATE_APP_ID --repo "$REPO" --body "<app-id-from-step-2-output>"
-gh secret set SHIPMATE_APP_PRIVATE_KEY --repo "$REPO" --env shipmate-engine \
-  --body "$(cat shipmate-app.private-key.pem)"
+for NAME in $REPOS; do
+  REPO="$ORG/$NAME"
+  gh variable set SHIPMATE_APPROVERS_TEAM --repo "$REPO" --body "$TEAM"
+  gh variable set SHIPMATE_APP_ID --repo "$REPO" --body "$APP_ID"
+  gh secret set SHIPMATE_APP_PRIVATE_KEY --repo "$REPO" --env shipmate-engine \
+    --body "$(cat shipmate-app.private-key.pem)"
+done
 ```
 
 `SHIPMATE_APP_ID` (a variable, not a secret) **may** also be set once at the
@@ -165,9 +189,16 @@ every consumer repo, not just once for the org.
 2. Store the new key everywhere it's used:
 
    ```bash
-   gh secret set SHIPMATE_APP_PRIVATE_KEY --repo "$REPO" --env shipmate-engine \
-     --body "$(cat new-key.pem)"
+   ORG=<org>
+   REPOS="repo-example-stacks repo-example-folders repo-example-workspaces"
+
+   for NAME in $REPOS; do
+     gh secret set SHIPMATE_APP_PRIVATE_KEY --repo "$ORG/$NAME" --env shipmate-engine \
+       --body "$(cat new-key.pem)"
+   done
    ```
+
+   One new key, written N times — the key is not regenerated per repository.
 3. Back in App settings, **delete** the old private key so it can no longer
    mint tokens.
 4. Shred the local PEM file (`shred -u new-key.pem` or equivalent) once it's
