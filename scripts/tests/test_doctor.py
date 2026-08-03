@@ -3,7 +3,7 @@ import json
 import os
 
 import pytest
-from _loader import ACTIONS, load_script
+from _loader import ACTIONS, ENGINE, SCRIPTS, load_script
 
 doctor = load_script("doctor")
 
@@ -1926,15 +1926,57 @@ def test_review_rule_probe_is_registered():
     assert doctor._review_rule_warnings in doctor.PROBES
 
 
+_COUNT_WORDS = {
+    3: "three",
+    4: "four",
+    5: "five",
+    6: "six",
+    7: "seven",
+    8: "eight",
+    9: "nine",
+    10: "ten",
+    11: "eleven",
+    12: "twelve",
+    13: "thirteen",
+    14: "fourteen",
+    15: "fifteen",
+}
+
+
+def _count_word(n):
+    assert n in _COUNT_WORDS, f"the probe count reached {n} -- extend _COUNT_WORDS"
+    return _COUNT_WORDS[n]
+
+
 def test_probe_count_is_stated_correctly_in_the_docs():
     """Adding or removing a probe means editing five pieces of prose that spell
-    the count out. Nothing else notices when they go stale, so this assertion is
-    the tripwire that points the next author at the list:
+    the count out. Nothing else notices when they go stale, so this reads all
+    three files and pins each phrase against `len(PROBES)`:
 
-    - `scripts/doctor`'s module docstring: "the nine live probes'" and the
+    - `scripts/doctor`'s module docstring: "the <n> live probes'" and the
       `Probes:` bullet list below it (one bullet per probe);
-    - `CONTRACT.md`: "nine live settings probes" and "seven of the nine";
-    - `docs/branch-protection.md`: "combining nine" and "seven of the nine
+    - `CONTRACT.md`: "<n> live settings probes" and "<n-2> of the <n>";
+    - `docs/branch-protection.md`: "combining <n>" and "<n-2> of the <n>
       probes".
+
+    The number words come from the count rather than being hardcoded, so this
+    keeps biting when a further probe lands. `<n-2>` is the plan-path subset: the
+    approvers-team and App-permission probes cannot report from `annotate` mode.
     """
-    assert len(doctor.PROBES) == 9
+    total = len(doctor.PROBES)
+    word, plan_word = _count_word(total), _count_word(total - 2)
+
+    src = (SCRIPTS / "doctor").read_text(encoding="utf-8")
+    assert f"the {word} live probes" in src, f"scripts/doctor no longer says '{word} live probes'"
+    bullets = [
+        ln for ln in doctor.__doc__.split("Probes:\n", 1)[1].splitlines() if ln.startswith("- ")
+    ]
+    assert len(bullets) == total, f"the Probes: list names {len(bullets)} probes, not {total}"
+
+    contract = (ENGINE / "CONTRACT.md").read_text(encoding="utf-8")
+    assert f"{word} live settings probes" in contract
+    assert f"{plan_word} of the {word}" in contract
+
+    protection = (ENGINE / "docs" / "branch-protection.md").read_text(encoding="utf-8")
+    assert f"combining {word}" in protection
+    assert f"{plan_word} of the {word} probes" in protection
