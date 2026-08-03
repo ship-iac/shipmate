@@ -254,7 +254,8 @@ only labels the output as shipmate's own.
 `shipmate doctor` posts a consolidated, sticky report — one comment per pull
 request, identified by the HTML marker `<!-- shipmate:doctor -->` (distinct
 from the plan comment's `<!-- shipmate:summary -->`) and upserted in place the
-same way. It combines eight live settings probes (gate ruleset, environment
+same way. It combines nine live settings probes (gate ruleset, default-branch
+`pull_request` rule, environment
 pair existence, environment protection shape, the `shipmate-engine`
 environment's own existence and default-branch scoping, `pull_request_target`
 triggers in the consumer's workflow files, engine action-pin
@@ -269,7 +270,7 @@ when the report was rendered, it says so and asks for the command again once
 they have, and if the harvest itself could not be read in full it says that
 too — the two are separate statements, since a run that has not finished has
 recorded nothing yet while a run that could not be read may have recorded
-plenty. Only six of the eight
+plenty. Only seven of the nine
 probes can produce a finding from the plan path's own `annotate`-mode
 invocation: the approvers-team probe needs the `SHIPMATE_TEAM` environment
 variable, which the plan path does not supply, so it silently returns
@@ -910,10 +911,18 @@ decrypts it after download on **every** apply path: all three paths pass it
 as the optional `SHIPMATE_PLAN_PASSPHRASE` secret into the reusable
 `apply-env-level.yml` workflow — via the engine `deploy.yml` for the
 merge-deploy path, via the engine `apply-all.yml` for the bare form, and via
-the engine `apply.yml` for the targeted form. Consumers set the
-repo/environment secret `SHIPMATE_PLAN_PASSPHRASE` and forward it with
-`secrets: inherit` in their `deploy.yml` and `apply.yml` wrapper
-workflows.
+the engine `apply.yml` for the targeted form. Consumers set
+`SHIPMATE_PLAN_PASSPHRASE` as a **repository** secret and forward it with
+`secrets: inherit` in their `deploy.yml` and `apply.yml` wrapper workflows.
+
+Not an environment secret, and specifically **not** on `shipmate-engine`: plan
+cells run on a `pull_request` ref (`refs/pull/<n>/merge`), which satisfies no
+deployment branch policy, so a passphrase scoped that way resolves to empty at
+plan time and every later apply fails its plaintext-artifact check. Scoping it
+to a plan environment buys nothing either — those must have no branch policy at
+all (`docs/hardening.md` §6), so any branch's workflow can name one and read it.
+Unlike the App private key, this secret must be readable wherever plans are
+produced, which is any branch; `docs/hardening.md` #7–9 says to treat it so.
 
 - **Backward compatible.** An empty/unset `plan-passphrase` leaves the plan
   plaintext and the uploaded bytes byte-identical to a no-encryption run.

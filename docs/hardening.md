@@ -54,16 +54,16 @@ governs the plan path. Don't add one to a repository that holds the App key —
 | 1 | Write access only for people trusted to apply | Repo/team access | Everything below is downstream of this |
 | 2 | Push ruleset restricting `.github/workflows/**` *and every other path a workflow executes* | Repo/org ruleset (push target) | Branch-authored workflows |
 | 3 | Required check `shipmate / gate` with `integration_id`, strict | Branch ruleset | A *third party* posting `shipmate / gate` under another identity |
-| 4 | ≥1 approving review, code-owner review, dismiss stale, require approval of most recent push | Branch ruleset | Self-merge |
+| 4 | ≥1 approving review, code-owner review, dismiss stale, require approval of most recent push | Branch ruleset | Self-merge; the code-owner review is **unforgeable** at merge time (an App cannot be a `CODEOWNERS` entry) *provided a `CODEOWNERS` entry actually covers the IaC paths* — the rule is a no-op for changed files with no owner — and the approval *count* never is |
 | 5 | Block force-push and deletion on the default branch | Branch ruleset | History rewrite after apply |
-| 6 | Required reviewers + "Prevent self-review" on **every** `<env>-apply` that holds a secret | Environment | **Unforgeable** — the last line of defense, and what makes row 7 hold |
+| 6 | Required reviewers + "Prevent self-review" on **every** `<env>-apply` that holds a secret | Environment | **Unforgeable** at apply time — the last line of defense once a merge has happened, and what makes row 7 hold |
 | 7 | Cloud credentials only as `<env>-apply` environment secrets — never repo-level | Environment secrets | Repo-wide secret exposure (bounded *only* in combination with row 6) |
 | 8 | Plan environments hold read-only, blast-radius-free credentials, no approval rules, no branch policy | Environment | Plan-time code execution |
 | 9 | OIDC with an `environment:` claim condition instead of static keys | Cloud IdP | Long-lived credential theft (**not wired in the engine yet** — see §7–9) |
 | 10 | Default `GITHUB_TOKEN` = read-only; Actions may not approve PRs | Settings → Actions | Token privilege creep |
 | 11 | Require approval for all outside collaborators' workflow runs | Settings → Actions | Drive-by fork execution |
 | 12 | Allowed-actions list (this engine + pinned third parties) | Settings → Actions | Supply chain |
-| 13 | One App per trust domain; org secret `--visibility selected` | App registration | Cross-repo blast radius |
+| 13 | One App per trust domain; key as a per-repository `shipmate-engine` environment secret | App registration | Cross-repo blast radius |
 | 14 | Rotate the App key when push access is revoked | Runbook | Ex-member with a copied PEM |
 | 15 | Shorten Actions retention | Settings → Actions | `shipmate doctor` report disclosure |
 | 16 | `shipmate-engine` Environment exists, deployment branch policy restricted to the default branch | Environment | Repository-secret App key readable by any branch |
@@ -170,12 +170,31 @@ only on `NONE` or `APPROVED`; see `docs/branch-protection.md` §"Review policy")
 That is a deliberate mode, not an oversight, but do not run it with more than
 one person holding push access.
 
-## 6. Environment reviewers — the one gate that holds
+`require_code_owner_review` is doing more work here than the approval count.
+A GitHub App cannot be listed in `CODEOWNERS`, so a code-owner review is one of
+only two controls on this page that a holder of the App private key cannot
+satisfy (the other is #6). An approval *count* is not: the App holds
+`pull-requests: write` and can submit an approving review that counts toward it.
+
+That unforgeability holds only where the rule actually bites. GitHub requires a
+code-owner review for a changed file **that has an owner**; with no `CODEOWNERS`
+file, an entry that does not parse, or IaC paths simply left unowned, the setting
+is a no-op and the App's own approving review satisfies the count on its own.
+Write a `CODEOWNERS` entry covering the paths the stacks and the Terramate
+configuration live in, and confirm on a real pull request that the reviewer
+requirement appears. `shipmate doctor` warns when the rule requires approvals but
+not code-owner review — it does not check `CODEOWNERS` coverage, and it never
+fails a run, so that is a warning, not enforcement.
+
+## 6. Environment reviewers — the gate that holds after a merge
 
 Environment reviewers are **users and teams**. A GitHub App installation token
 cannot be a reviewer and cannot approve a pending deployment, so this is the
-only control in the list that an attacker holding the App private key cannot
-satisfy.
+**second** of the two controls in the list that an attacker holding the App
+private key cannot satisfy — the other is the code-owner review in #3–5, which
+an App cannot supply because it cannot be listed in `CODEOWNERS`. They are
+unforgeable at different points, which is why both matter: code-owner review
+guards the **merge**, the `<env>-apply` reviewer guards the **apply**.
 
 On every `<env>-apply` environment that holds a secret or touches real
 infrastructure — **including dev and staging**:
@@ -287,6 +306,37 @@ trust to all of them.
   `docs/github-app.md` §7. Anyone who had push access could have copied the
   PEM out of a workflow run, and revoking their access does not invalidate it.
 
+**The multi-repo cost, stated plainly.** GitHub has no org-level environment
+secrets — environments are per repository — so an organization whose IaC is
+split across N repositories places the key N times and rotates it N times. It
+does not *create* N keys: creation is per App, and #13 above already asks for
+one App per trust domain, so one key covers every repository in it. That
+is a genuine operational cost, and it is worth being clear about what it is and
+is not:
+
+- It is **not** a cost this scoping introduced. The alternative, an org secret
+  with `--visibility selected`, is readable by any workflow on any branch in
+  every selected repository — the same exposure replicated N times, each
+  independently reachable by that repository's own developers. Per-repository
+  scoping is unavoidable once the key lives in the repositories at all.
+- It **is** work that should be automated rather than clicked: place and rotate
+  across every repository in one scripted pass, not one at a time. The
+  cost is three API calls per repository at onboarding (create the environment,
+  add its branch policy, write the environment secret) against one
+  repository-list edit per repository plus a single org-secret write for the
+  alternative, and rotation as N `gh secret set --env` writes rather than that
+  one org-secret write.
+  `docs/github-app.md` §5–7 carries the loops.
+- The only way to remove it is to stop putting the key in the repositories,
+  which requires something outside GitHub Actions to hold it. That is a
+  different architecture, not a setting.
+
+**A dead end, so it is not re-proposed:** a single "control repository" holding
+the key on behalf of the others does not work without a server. Triggering a
+workflow in another repository requires a credential in the calling repository —
+a `GITHUB_TOKEN` cannot trigger another repository's workflow — so every IaC
+repository would need a secret in order to avoid having a secret.
+
 ## 15. Retention and disclosure
 
 The `shipmate doctor` report is written to the job summary as well as to a
@@ -299,20 +349,45 @@ retention window if that inventory is sensitive
 `SHIPMATE_APP_PRIVATE_KEY` lives as a secret on the `shipmate-engine` GitHub
 Environment, not as a repository (or org) secret — see `docs/github-app.md`
 §Key-exposure boundary for why that specific environment is what makes the
-key unreachable from a branch-authored workflow. Two things must both be true
-for that to hold, and `shipmate doctor` checks both on every plan run and on
-demand:
+key unreachable from a branch-authored workflow. **Three** things must all be
+true for that to hold. `shipmate doctor` checks the first two on every plan run
+and on demand; it cannot check the third:
 
 - the `shipmate-engine` environment exists;
 - its deployment branch policy is a **custom** policy naming the default
   branch — not merely present, and not the "protected branches" mode, which
   restricts to whatever branch protection covers rather than the default
-  branch specifically.
+  branch specifically;
+- **no repository (or organization) secret named `SHIPMATE_APP_PRIVATE_KEY`
+  remains.** An environment secret is only withheld from jobs that *name* the
+  environment. A repository secret of the same name is readable by any workflow
+  on any branch without naming anything, so leaving one in place defeats this
+  control completely — the environment becomes decoration.
 
-A re-pin of the engine that never creates this environment — the ordinary way
-to regress this — leaves the key a repository secret again, readable by any
-branch's workflow, with nothing else in this design left to notice. That is
-exactly what the probe exists to catch.
+That third condition is the one to be careful about, because it is invisible.
+Listing a repository's secrets needs a `secrets` permission `app/manifest.json`
+does not declare, so the probe can only observe the environment's *shape*. A
+repository that had the key as a repository secret first — the ordinary
+migration path — and then created the environment without deleting it ends up
+with the key still branch-readable and `shipmate doctor` reporting all clear.
+Delete it as the last step of `docs/github-app.md` §6, and confirm with
+`gh secret list --repo <owner>/<repo>`: `SHIPMATE_APP_PRIVATE_KEY` must not
+appear there.
+
+A re-pin of the engine that never creates this environment — the other ordinary
+way to regress this — leaves the key a repository secret again, readable by any
+branch's workflow. That one the probe does catch.
+
+**Tag pushes are covered, and there is one way to uncover them.** A deployment
+branch policy is typed: the entry naming your default branch is a **branch**
+policy, and it matches no tag, so a workflow run at `refs/tags/…` that declares
+this environment is refused before a runner starts and is handed nothing —
+measured, not assumed. Someone who can push tags but not branches therefore
+cannot reach the key either. What breaks that is adding a **tag** policy to
+`shipmate-engine` — for release automation, say. Do not: a tag is a ref anyone
+with tag-push access can create at any commit, including one carrying a workflow
+of their choosing. `shipmate doctor` warns about any extra policy here, tag ones
+included, because it compares the policy names against the default branch alone.
 
 ## Contributors without push access
 
@@ -320,8 +395,12 @@ exactly what the probe exists to catch.
 step when the triggering `pull_request` event's head repository is not this
 repository, and there is no input, variable or setting that turns that off — it
 is a rule of the engine, not a configurable. A fork's plan is refused before any
-stack is enumerated, so no `terramate`/`tofu` process ever runs over
-fork-authored HCL on your runners.
+stack is enumerated and before any `tofu` process starts. It is not refused
+before `detect`'s own `terramate` steps: in the reference `plan.yml`,
+`terramate fmt --check` and `terramate generate --detailed-exit-code` precede
+`actions/build-matrix`, so they still evaluate the fork's Terramate HCL —
+globals, `tm_*` functions and generate blocks included. Moving the refusal ahead
+of them means reordering your own `plan.yml`.
 
 That refusal is about **code execution**, not secrets. A fork's `pull_request`
 run receives no repository secrets, and `plan.yml` holds no App key in any case
@@ -362,7 +441,9 @@ this section rests on for exactly the exposure control 1 exists to limit.
   and `explicit_envs` all come from the pull request branch. They shape what the
   engine does; they do not constrain what it is allowed to do.
 - **The gate is an assertion, not a proof.** The App identity and pull request
-  approvals cannot be forged by a push-capable developer; the gate remains an
-  assertion produced by the author's own pipeline; the enforcing controls are
-  the code-owner-required pull request approval and the prod-apply environment
-  reviewer. Do not claim the gate is unforgeable.
+  approvals are out of a push-capable developer's reach only because control 16
+  keeps the App private key on the `shipmate-engine` environment, unreadable
+  from a branch-authored workflow — a holder of that key can forge both; the
+  gate remains an assertion produced by the author's own pipeline; the enforcing
+  controls are the code-owner-required pull request approval and the
+  `<env>-apply` environment reviewer. Do not claim the gate is unforgeable.

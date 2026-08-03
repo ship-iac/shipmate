@@ -45,7 +45,17 @@ gh api -X POST repos/<owner>/<repo>/rulesets --input - <<'JSON'
       "parameters": {
         "required_status_checks": [ { "context": "shipmate / gate", "integration_id": <SHIPMATE_APP_ID> } ],
         "strict_required_status_checks_policy": true
-      } }
+      } },
+    { "type": "pull_request",
+      "parameters": {
+        "required_approving_review_count": 1,
+        "require_code_owner_review": true,
+        "dismiss_stale_reviews_on_push": true,
+        "require_last_push_approval": true,
+        "required_review_thread_resolution": false
+      } },
+    { "type": "non_fast_forward" },
+    { "type": "deletion" }
   ]
 }
 JSON
@@ -53,6 +63,15 @@ JSON
 
 `strict_required_status_checks_policy: true` is the "require branches up to date"
 setting above.
+
+The `pull_request` rule is what `shipmate doctor`'s review-rule probe checks, and
+`require_code_owner_review` is the half of it a leaked App private key cannot
+satisfy — an App cannot be a CODEOWNER. It only bites for changed files a
+`CODEOWNERS` entry actually covers, so keep an entry covering the paths the IaC
+and the workflows live in. A sole maintainer who wants
+`required_approving_review_count: 0` should read `docs/hardening.md` §3–5 before
+changing it — that page has the reasoning for each of these rules, and this block
+is just its recommendation made pasteable.
 
 `<SHIPMATE_APP_ID>` is the numeric GitHub App id — the same value stored in
 the `SHIPMATE_APP_ID` repo/org variable (see `docs/github-app.md` step 2).
@@ -71,10 +90,22 @@ findings as workflow annotations titled `shipmate doctor`
 (`::warning title=shipmate doctor::<text>` / `::notice title=shipmate
 doctor::<text>`) — read-only, never blocking. Comment `shipmate doctor` on a
 pull request for a consolidated report: a sticky comment (marker `<!--
-shipmate:doctor -->`, upserted in place like the plan comment) combining eight
+shipmate:doctor -->`, upserted in place like the plan comment) combining nine
 live probes — a missing or mis-pinned `shipmate / gate` rule on the default
 branch (no active ruleset requiring it, or one that doesn't pin
-`integration_id` to the shipmate App, or that isn't strict), a missing GitHub
+`integration_id` to the shipmate App, or that isn't strict),
+whether the default branch's `pull_request` rule requires **code-owner** review
+(`docs/hardening.md` #3–5 — an approval count alone is not reported as
+sufficient, because the shipmate App can submit an approving review, so only a
+CODEOWNERS review is out of reach of a leaked App private key, and only for
+changed files an entry actually owns — the rule is a no-op for unowned paths, and
+the probe reads ruleset booleans only, so it cannot see that;
+`required_approving_review_count: 0` *with* code-owner review on is the supported
+sole-maintainer mode, reported as a note rather than a warning, while count 0 with
+code-owner review off leaves no unforgeable merge-time control at all and warns;
+the booleans are unioned across every `pull_request` rule on the branch, since
+GitHub enforces the union across layered rulesets),
+a missing GitHub
 Environment (`<env>` / `<env>-apply`) for a tagged-in environment, the
 plan/apply environment protection shape (a plan environment must have no
 approval-type protection rules — required reviewers or wait timers — and no
@@ -102,22 +133,27 @@ whether the shipmate App installation still grants the manifest's full
 permission set — with the warning and failure annotations GitHub already
 recorded on this commit's workflow runs (shipmate's own and any other
 Actions workflow run on that commit; third-party-app-authored check runs are
-excluded). Only six of the eight probes can produce a finding from the plan
+excluded). Only seven of the nine probes can produce a finding from the plan
 path's own `annotate`-mode run (`actions/summary`): the approvers-team probe
 needs the `SHIPMATE_TEAM` environment variable, which the plan path does
 not supply, and
 the App-permission-drift probe only has something to report when a
 full-manifest permission-set mint was actually attempted, which only
 `shipmate doctor` does — both are effectively comment-path-only. `doctor`
-degrades to a "could not verify" **warning** naming the probe that was skipped
+degrades to a "could not verify" **warning** naming each probe that was skipped
 on an API error, and always exits 0, so a probe failure (for example, the App
 token lacking read access to `rules/branches` or `environments` — both token
 mints that drive doctor also request Actions read, which the environment reads
-need on some configurations) never fails the plan run. The engine-pin probe
-degrades to a **note** instead: its `.github/workflows` read legitimately fails
-on the pull request that first adds that directory, which is the first
-`shipmate doctor` any consumer runs, and it also declines rather than guessing
-when it cannot tell which repository the engine is or which commit to read.
+need on some configurations) never fails the plan run. One endpoint failure can
+name more than one probe: a `rules/branches` failure degrades both the gate-rule
+and the review-rule probe, because the two read it independently on purpose, so
+neither is silenced by the other's failure. The engine-pin and fork-trigger
+probes degrade to a **note** instead — both read `.github/workflows`, and that
+read legitimately fails on the pull request that first adds that directory, which
+is the first `shipmate doctor` any consumer runs, so the first report a consumer
+sees carries two notes. Both also decline rather than guessing when they cannot
+tell which commit to read, and the pin probe when it cannot tell which
+repository the engine is.
 An environment that exists but whose settings cannot be read is likewise a
 note naming it, rather than the silence a nonexistent environment gets (that
 one is the environment-existence probe's finding) — the `shipmate-engine`

@@ -3,7 +3,7 @@ import json
 import os
 
 import pytest
-from _loader import ACTIONS, load_script
+from _loader import ACTIONS, ENGINE, SCRIPTS, load_script
 
 doctor = load_script("doctor")
 
@@ -121,7 +121,21 @@ def test_declared_envs_keeps_well_formed_entries_alongside_malformed_ones(tmp_pa
     assert doctor._declared_envs(tmp_path) == {"dev-eu"}
 
 
+def _pull_request_rule(code_owner=True, count=1):
+    return {
+        "type": "pull_request",
+        "parameters": {
+            "required_approving_review_count": count,
+            "require_code_owner_review": code_owner,
+        },
+    }
+
+
 def _gate_rule(integration_id=999, strict=True):
+    """The `rules/branches` payload both rule probes read. Carries a healthy
+    `pull_request` rule so tests aimed at the gate probe don't pick up the
+    review probe's finding as incidental noise -- the same reason
+    `_quiet_new_probes` exists."""
     return [
         {
             "type": "required_status_checks",
@@ -132,6 +146,7 @@ def _gate_rule(integration_id=999, strict=True):
                 ],
             },
         },
+        _pull_request_rule(),
     ]
 
 
@@ -154,10 +169,11 @@ def _env(name, rules=(), branch_policy=None):
 
 
 def _quiet_new_probes():
-    """Healthy responses for the env-protection, engine-environment, and
-    pin-freshness probes, so tests exercising the older gate/environment
-    probes via the top-level `warnings()` don't pick up incidental noise
-    from these three."""
+    """Healthy responses for the env-protection, engine-environment,
+    pin-freshness and fork-trigger probes, so tests exercising the older
+    gate/environment probes via the top-level `warnings()` don't pick up
+    incidental noise from these four (the empty workflow listing quiets the last
+    two at once)."""
     return {
         f"repos/{_REPO}/environments/dev-eu": _env("dev-eu"),
         f"repos/{_REPO}/environments/dev-eu-apply": _env(
@@ -223,7 +239,8 @@ def test_gate_rule_absent_warned(monkeypatch):
     responses = {
         # no required_status_checks rule at all
         f"repos/{_REPO}/rules/branches/{_BRANCH}?per_page=100": [
-            {"type": "deletion", "parameters": {}}
+            {"type": "deletion", "parameters": {}},
+            _pull_request_rule(),
         ],
         f"repos/{_REPO}/environments?per_page=100": _environments(
             "dev-eu", "dev-eu-apply", "shipmate-engine"
@@ -276,9 +293,15 @@ def test_probe_403_degrades_to_note_not_failure(monkeypatch):
 
     monkeypatch.setattr(doctor, "_gh_json", fake_gh_json)
     out = doctor.warnings(_ctx())
-    assert len(out) == 2
+    # Two probes read rules/branches and degrade independently -- that is the
+    # point of the per-probe read; one endpoint failing must not let either
+    # finding be silently attributed to the other.
+    assert len(out) == 3
     texts = [t for _, t in out]
-    assert any("could not verify" in t and "probe skipped" in t for t in texts)
+    degraded = [t for t in texts if "could not verify" in t and "probe skipped" in t]
+    assert len(degraded) == 2
+    assert any("gate rule" in t for t in degraded)
+    assert any("review rule" in t for t in degraded)
     assert any("dev-eu-apply" in t for t in texts)
 
 
@@ -296,10 +319,9 @@ def test_probe_generic_exception_degrades_to_note(monkeypatch):
 
     monkeypatch.setattr(doctor, "_gh_json", fake_gh_json)
     out = doctor.warnings(_ctx())
-    assert len(out) == 1
-    level, text = out[0]
-    assert level == doctor.WARNING
-    assert "could not verify" in text and "probe skipped" in text
+    assert len(out) == 2
+    assert all(level == doctor.WARNING for level, _ in out)
+    assert all("could not verify" in t and "probe skipped" in t for _, t in out)
 
 
 def test_degrade_note_names_the_probe_and_drops_the_workflow_command_prefix(monkeypatch):
@@ -320,10 +342,9 @@ def test_degrade_note_names_the_probe_and_drops_the_workflow_command_prefix(monk
 
     monkeypatch.setattr(doctor, "_gh_json", gh)
     out = doctor.warnings(_ctx())
-    assert len(out) == 1
-    level, text = out[0]
+    assert len(out) == 2
+    level, text = next((lv, t) for lv, t in out if "gate rule" in t)
     assert level == doctor.WARNING
-    assert "gate rule" in text  # which probe was skipped
     assert "command failed (1)" in text  # the reason survives
     assert "::error::" not in text
     assert "gh api" not in text and "rules/branches" not in text
@@ -1609,10 +1630,101 @@ def test_pull_request_target_in_a_flow_sequence_warned(monkeypatch):
     assert "label.yml" in out[0][1]
 
 
+def test_pull_request_target_as_a_single_event_scalar_warned(monkeypatch):
+    # `on: pull_request_target` is the legal one-event scalar form -- no block,
+    # no sequence, no brackets. The shortest way to declare the trigger must not
+    # be the one shape the probe misses.
+    responses = _fork_responses({"label.yml": "on: pull_request_target\njobs: {}\n"})
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    out = doctor._fork_trigger_warnings(_ctx())
+    assert len(out) == 1
+    assert out[0][0] == doctor.WARNING
+    assert "label.yml" in out[0][1]
+
+
+def test_pull_request_target_as_a_flow_mapping_key_warned(monkeypatch):
+    responses = _fork_responses({"label.yml": "on: {pull_request_target: {types: [opened]}}\n"})
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    out = doctor._fork_trigger_warnings(_ctx())
+    # Level and filename too: the unreadable-directory degrade also returns
+    # exactly one item, so a length-only assertion passes on a probe that
+    # recognised nothing at all.
+    assert len(out) == 1
+    assert out[0][0] == doctor.WARNING
+    assert "label.yml" in out[0][1]
+
+
 def test_pull_request_target_as_a_sequence_item_warned(monkeypatch):
     responses = _fork_responses({"label.yml": "on:\n  - push\n  - pull_request_target\n"})
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
-    assert len(doctor._fork_trigger_warnings(_ctx())) == 1
+    out = doctor._fork_trigger_warnings(_ctx())
+    assert len(out) == 1
+    assert out[0][0] == doctor.WARNING
+    assert "label.yml" in out[0][1]
+
+
+def test_pull_request_target_in_a_wrapped_flow_sequence_warned(monkeypatch):
+    # A flow sequence is one value however it is wrapped across lines.
+    responses = _fork_responses({"label.yml": "on: [push,\n     pull_request_target]\n"})
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    out = doctor._fork_trigger_warnings(_ctx())
+    assert len(out) == 1
+    assert out[0][0] == doctor.WARNING
+    assert "label.yml" in out[0][1]
+
+
+def test_pull_request_target_in_a_flow_sequence_with_brackets_on_own_lines_warned(monkeypatch):
+    responses = _fork_responses(
+        {"label.yml": "on: [\n  push,\n  pull_request_target,\n]\njobs: {}\n"}
+    )
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    out = doctor._fork_trigger_warnings(_ctx())
+    assert len(out) == 1
+    assert out[0][0] == doctor.WARNING
+    assert "label.yml" in out[0][1]
+
+
+def test_folded_event_name_comparison_is_silent(monkeypatch):
+    # The same comparison as the single-line case below, folded across lines by
+    # a block scalar -- outside the `on:` block either way.
+    responses = _fork_responses(
+        {
+            "plan.yml": "on:\n  pull_request:\njobs:\n  a:\n"
+            "    if: >-\n      github.event_name ==\n      'pull_request_target'\n"
+        }
+    )
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    assert doctor._fork_trigger_warnings(_ctx()) == []
+
+
+def test_the_word_in_a_run_body_is_silent(monkeypatch):
+    responses = _fork_responses(
+        {
+            "plan.yml": "on:\n  pull_request:\njobs:\n  a:\n    steps:\n"
+            "      - run: |\n          echo this repo has no pull_request_target trigger\n"
+        }
+    )
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    assert doctor._fork_trigger_warnings(_ctx()) == []
+
+
+def test_a_workflow_dispatch_choice_option_is_silent(monkeypatch):
+    # Inside the `on:` block, but nested below the event-name level: it is one
+    # input's allowed value, not a trigger.
+    responses = _fork_responses(
+        {
+            "ops.yml": "on:\n  workflow_dispatch:\n    inputs:\n      event:\n"
+            "        type: choice\n        options:\n          - pull_request_target\n"
+        }
+    )
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    assert doctor._fork_trigger_warnings(_ctx()) == []
+
+
+def test_a_longer_trigger_name_is_not_the_token(monkeypatch):
+    responses = _fork_responses({"label.yml": "on: pull_request_target_foo\n"})
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    assert doctor._fork_trigger_warnings(_ctx()) == []
 
 
 def test_plain_pull_request_trigger_is_silent(monkeypatch):
@@ -1713,3 +1825,158 @@ def test_fork_trigger_probe_is_registered(monkeypatch):
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
     out = doctor.warnings(_ctx())
     assert any("pull_request_target" in t for _, t in out)
+
+
+def _rules_only(*rules):
+    return {f"repos/{_REPO}/rules/branches/{_BRANCH}?per_page=100": list(rules)}
+
+
+def test_review_rule_healthy_is_silent(monkeypatch):
+    responses = _rules_only(_pull_request_rule(code_owner=True, count=1))
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    assert doctor._review_rule_warnings(_ctx()) == []
+
+
+def test_review_rule_without_code_owner_review_warned(monkeypatch):
+    # An approval count is not a backstop: the App holds `pull-requests: write`
+    # and can submit a counting APPROVED review (docs/hardening.md #3-5). Only a
+    # CODEOWNERS review is App-proof.
+    responses = _rules_only(_pull_request_rule(code_owner=False, count=2))
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    out = doctor._review_rule_warnings(_ctx())
+    assert out == [(doctor.WARNING, doctor._CODE_OWNER_REVIEW_OFF.format(branch=_BRANCH))]
+    # Pin the text, not just the constant: comparing against the constant leaves
+    # the two review findings' bodies interchangeable, so swapping them would
+    # keep every review-rule test green while telling readers the wrong thing.
+    assert "does not require code-owner review" in out[0][1]
+    assert "Set `require_code_owner_review`" in out[0][1]
+
+
+def test_review_rule_no_code_owner_review_at_a_high_count_still_warns(monkeypatch):
+    # An approval count of any size is forgeable by the attacker in scope, so
+    # the warning is keyed on the boolean, never softened by the count.
+    responses = _rules_only(_pull_request_rule(code_owner=False, count=5))
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    out = doctor._review_rule_warnings(_ctx())
+    assert out == [(doctor.WARNING, doctor._CODE_OWNER_REVIEW_OFF.format(branch=_BRANCH))]
+
+
+def test_review_rule_count_zero_without_code_owner_review_is_the_worst_case_warning(monkeypatch):
+    # count 0 *and* code-owner review off is the one configuration with no
+    # unforgeable merge-time control at all -- it must not be reported with the
+    # same information notice as the supported sole-maintainer mode below.
+    responses = _rules_only(_pull_request_rule(code_owner=False, count=0))
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    out = doctor._review_rule_warnings(_ctx())
+    assert out == [(doctor.WARNING, doctor._CODE_OWNER_REVIEW_OFF.format(branch=_BRANCH))]
+
+
+def test_review_rule_count_zero_with_code_owner_review_is_still_a_notice(monkeypatch):
+    # required_approving_review_count: 0 is a shipped, supported mode when
+    # code-owner review is on: the merge-side control a leaked App key cannot
+    # satisfy is still there. A warning on every run for a setting the sole
+    # maintainer will not change trains readers to ignore doctor.
+    responses = _rules_only(_pull_request_rule(code_owner=True, count=0))
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    out = doctor._review_rule_warnings(_ctx())
+    assert out == [(doctor.NOTICE, doctor._SOLE_MAINTAINER_REVIEW.format(branch=_BRANCH))]
+    # Pin this finding's text too, so swapping the two constants' bodies fails
+    # here as well as in the code-owner-off test above.
+    assert "requires no approving review" in out[0][1]
+    assert "`require_code_owner_review` is on" in out[0][1]
+
+
+def test_review_rule_findings_are_unioned_across_layered_rulesets(monkeypatch):
+    # GitHub enforces the union across layered rulesets. A repo-level count-only
+    # rule listed first must not mask an org ruleset that does require code-owner
+    # review -- reporting one there is a false "not required".
+    responses = _rules_only(
+        _pull_request_rule(code_owner=False, count=1),
+        _pull_request_rule(code_owner=True, count=0),
+    )
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    assert doctor._review_rule_warnings(_ctx()) == []
+
+
+def test_review_rule_absent_warned(monkeypatch):
+    responses = _rules_only({"type": "required_status_checks", "parameters": {}})
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    out = doctor._review_rule_warnings(_ctx())
+    assert out == [(doctor.WARNING, doctor._REVIEW_RULE_ABSENT.format(branch=_BRANCH))]
+
+
+def test_review_rule_without_parameters_is_unverified_not_misconfigured(monkeypatch):
+    # A token that can list the rule but not read its parameters gets the rule
+    # with an empty body. Reporting that as "code-owner review is off" would be
+    # a false warning about a correctly configured repository.
+    responses = _rules_only({"type": "pull_request", "parameters": {}})
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    out = doctor._review_rule_warnings(_ctx())
+    assert out == [(doctor.NOTICE, doctor._REVIEW_RULE_UNREADABLE.format(branch=_BRANCH))]
+
+
+def test_review_rule_missing_parameters_key_is_unverified(monkeypatch):
+    responses = _rules_only({"type": "pull_request"})
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    out = doctor._review_rule_warnings(_ctx())
+    assert out == [(doctor.NOTICE, doctor._REVIEW_RULE_UNREADABLE.format(branch=_BRANCH))]
+
+
+def test_review_rule_probe_is_registered():
+    assert doctor._review_rule_warnings in doctor.PROBES
+
+
+_COUNT_WORDS = {
+    3: "three",
+    4: "four",
+    5: "five",
+    6: "six",
+    7: "seven",
+    8: "eight",
+    9: "nine",
+    10: "ten",
+    11: "eleven",
+    12: "twelve",
+    13: "thirteen",
+    14: "fourteen",
+    15: "fifteen",
+}
+
+
+def _count_word(n):
+    assert n in _COUNT_WORDS, f"the probe count reached {n} -- extend _COUNT_WORDS"
+    return _COUNT_WORDS[n]
+
+
+def test_probe_count_is_stated_correctly_in_the_docs():
+    """Adding or removing a probe means editing five pieces of prose that spell
+    the count out. Nothing else notices when they go stale, so this reads all
+    three files and pins each phrase against `len(PROBES)`:
+
+    - `scripts/doctor`'s module docstring: "the <n> live probes'" and the
+      `Probes:` bullet list below it (one bullet per probe);
+    - `CONTRACT.md`: "<n> live settings probes" and "<n-2> of the <n>";
+    - `docs/branch-protection.md`: "combining <n>" and "<n-2> of the <n>
+      probes".
+
+    The number words come from the count rather than being hardcoded, so this
+    keeps biting when a further probe lands. `<n-2>` is the plan-path subset: the
+    approvers-team and App-permission probes cannot report from `annotate` mode.
+    """
+    total = len(doctor.PROBES)
+    word, plan_word = _count_word(total), _count_word(total - 2)
+
+    src = (SCRIPTS / "doctor").read_text(encoding="utf-8")
+    assert f"the {word} live probes" in src, f"scripts/doctor no longer says '{word} live probes'"
+    bullets = [
+        ln for ln in doctor.__doc__.split("Probes:\n", 1)[1].splitlines() if ln.startswith("- ")
+    ]
+    assert len(bullets) == total, f"the Probes: list names {len(bullets)} probes, not {total}"
+
+    contract = (ENGINE / "CONTRACT.md").read_text(encoding="utf-8")
+    assert f"{word} live settings probes" in contract
+    assert f"{plan_word} of the {word}" in contract
+
+    protection = (ENGINE / "docs" / "branch-protection.md").read_text(encoding="utf-8")
+    assert f"combining {word}" in protection
+    assert f"{plan_word} of the {word} probes" in protection

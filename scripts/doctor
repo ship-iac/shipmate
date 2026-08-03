@@ -7,7 +7,7 @@ Three modes, selected via SHIPMATE_DOCTOR_MODE:
   actions/summary right after a plan run. NEVER fails the run: a probe
   error becomes a 'could not verify' note — doctor guards onboarding, it
   must not take down the plan path.
-- report: render the sticky PR comment on demand — the eight live probes'
+- report: render the sticky PR comment on demand — the nine live probes'
   findings plus a harvest of the warnings GitHub already recorded as
   annotations on this commit's workflow check runs.
 - check-ids: reduce a check-runs JSONL listing to the (id, name) pairs worth
@@ -18,6 +18,11 @@ Probes:
 - gate ruleset on the default branch: a required_status_checks rule whose
   contexts include 'shipmate / gate' pinned to integration_id == the shipmate
   App id, with strict (up-to-date) policy on.
+- `pull_request` rule on the default branch: code-owner review must be
+  required, aggregated across every such rule. An approval count is not a
+  substitute — the App can submit an approving review — and
+  `required_approving_review_count: 0` *with* code-owner review on is the
+  supported sole-maintainer mode, reported as a note rather than a warning.
 - GitHub Environment pair (<env>, <env>-apply) exists for every planned env.
 - protection shape of that pair: a plan env must have no reviewers and no
   branch policy; an apply env with no protection is worth a note.
@@ -73,6 +78,34 @@ DOCTOR_TITLE = "shipmate doctor"
 # setting), WARNING is a misconfiguration. Rendered as ::notice::/::warning::
 # in annotate mode.
 WARNING, NOTICE = "warning", "notice"
+
+# Findings of the review-rule probe. Format templates rather than finished
+# tuples: each names the default branch, which is per repository.
+_REVIEW_RULE_ABSENT = (
+    "no active ruleset puts a `pull_request` rule on `{branch}` — nothing there "
+    "requires the code-owner review that a leaked App private key cannot forge "
+    "(docs/hardening.md #3–5). Classic branch protection is not reported by this "
+    "endpoint, so check it if that is what this repository uses."
+)
+_CODE_OWNER_REVIEW_OFF = (
+    "the `pull_request` rule on `{branch}` does not require code-owner review — "
+    "the shipmate App can submit a counting approving review, so an approval count "
+    "is no substitute against a leaked App private key. Set "
+    "`require_code_owner_review`, and a `CODEOWNERS` entry covering the paths the "
+    "IaC lives in: the rule is a no-op for changed files with no owner "
+    "(docs/hardening.md #3–5)."
+)
+_SOLE_MAINTAINER_REVIEW = (
+    "the `pull_request` rule on `{branch}` requires no approving review "
+    "(sole-maintainer mode, docs/hardening.md #3–5) — a supported mode. "
+    "`require_code_owner_review` is on, so the merge-side control a leaked App "
+    "private key cannot satisfy is still in place."
+)
+# Same degrade posture as FORK_TRIGGER_UNREADABLE: unread is not misconfigured.
+_REVIEW_RULE_UNREADABLE = (
+    "the `pull_request` rule on `{branch}` carried no parameters — review "
+    "requirements not verified."
+)
 
 DOCTOR_MARKER = "<!-- shipmate:doctor -->"
 ANNOTATION_CAP = 10  # GitHub keeps at most 10 annotations per level per step
@@ -144,6 +177,63 @@ def _gate_rule_warnings(ctx):
             "merges are not gated (see docs/branch-protection.md).",
         )
     ]
+
+
+def _review_rule_warnings(ctx):
+    """`docs/hardening.md` #3–5 asks the default-branch ruleset for a
+    `pull_request` rule requiring code-owner review, and #6 for `<env>-apply`
+    required reviewers. Those two are the controls a holder of the App private
+    key structurally cannot satisfy — an App cannot be a CODEOWNER and cannot
+    approve a pending deployment — so they are what still holds if the key
+    leaks. Only the first is a ruleset setting; #6 is `_env_protection_warnings`.
+
+    An approval *count* is not one of them. The App holds `pull-requests: write`
+    and can submit a counting approving review, so `required_approving_review_count`
+    alone is forgeable by exactly the attacker in scope; the finding keys on
+    `require_code_owner_review`.
+
+    Re-reads `rules/branches` rather than sharing `_gate_rule_warnings`'
+    response: `warnings()` degrades per probe, so a shared read would let one
+    endpoint failure silence both findings — the trade `_existing_env_names`
+    and `_fork_trigger_warnings` also make.
+
+    Aggregated across every `pull_request` rule on the branch rather than keyed
+    on the first one: GitHub enforces the union across layered rulesets, so an org
+    ruleset supplying code-owner review must not be masked by a repo-level
+    count-only rule that happens to be listed first. Code-owner review off is a
+    warning at any approval count — count 0 with it off is the one configuration
+    with no unforgeable merge-time control at all, so it must not read as the
+    sole-maintainer note.
+
+    Two limits. The endpoint returns rulesets only — a repository on classic
+    branch protection reads as having no rule, which the finding text says out
+    loud. And `require_code_owner_review: true` is read as the control being in
+    place, while GitHub applies it only to changed files an entry in `CODEOWNERS`
+    owns: unowned IaC paths make it a no-op, which the docs state rather than
+    anything here probing for — on that path there is no finding at all."""
+    branch = ctx["default_branch"]
+    rules = _gh_json(f"repos/{ctx['repo']}/rules/branches/{branch}?per_page=100")
+    found = readable = code_owner = False
+    count = 0
+    for rule in rules:
+        if rule.get("type") != "pull_request":
+            continue
+        found = True
+        params = rule.get("parameters") or {}
+        if not params:
+            continue
+        readable = True
+        code_owner = code_owner or bool(params.get("require_code_owner_review"))
+        count = max(count, params.get("required_approving_review_count") or 0)
+    if not found:
+        return [(WARNING, _REVIEW_RULE_ABSENT.format(branch=branch))]
+    if not readable:
+        return [(NOTICE, _REVIEW_RULE_UNREADABLE.format(branch=branch))]
+    if not code_owner:
+        return [(WARNING, _CODE_OWNER_REVIEW_OFF.format(branch=branch))]
+    if not count:
+        return [(NOTICE, _SOLE_MAINTAINER_REVIEW.format(branch=branch))]
+    return []
 
 
 def _existing_env_names(ctx):
@@ -557,15 +647,16 @@ def _pin_warnings(ctx):
     return out
 
 
-# `pull_request_target` as a YAML *key* (`pull_request_target:`), a sequence
-# item (`- pull_request_target`) or a flow-sequence member
-# (`on: [push, pull_request_target]`) — never as a quoted occurrence inside an
-# expression (`github.event_name == 'pull_request_target'`), which is a
-# comparison against the trigger, not a declaration of it. doctor is stdlib-only
-# and cannot yaml.safe_load, so the shapes are enumerated rather than parsed.
-_PR_TARGET = re.compile(
-    r"^[ \t]*(?:-[ \t]*)?pull_request_target[ \t]*(?::|$)|[\[,][ \t]*pull_request_target[ \t]*[,\]]"
-)
+# The search is scoped to the workflow's top-level `on:` value, at the level
+# where event names live: a `run:` body, an `if:` expression and a
+# `strategy.matrix` value are not in that block at all, and a
+# `workflow_dispatch` input's `options:` entry is nested below it. The token
+# match takes word-ish boundaries so `pull_request_target_foo` is a different
+# trigger. doctor is stdlib-only and cannot yaml.safe_load, so the block is
+# sliced by indentation. `on` at column 0 only, optionally quoted: a workflow's
+# `on:` is a top-level key, so an indented one belongs to something else.
+_ON_KEY = re.compile(r"""^["']?on["']?[ \t]*:(?P<rest>.*)$""")
+_PR_TARGET = re.compile(r"(?<![\w-])pull_request_target(?![\w-])")
 # Same degrade posture and reason as PIN_UNREADABLE: an unreadable workflow
 # directory is not a misconfiguration to warn about.
 FORK_TRIGGER_UNREADABLE = (
@@ -588,13 +679,52 @@ def _strip_comment(line):
     return line
 
 
+def _on_block(text):
+    """(inline remainder of the `on:` line, its following lines) with comments
+    stripped, or (None, []) for a file with no top-level `on:`. The block runs to
+    the first line starting at column 0; blank and comment-only lines do not end
+    it."""
+    lines = text.splitlines()
+    for i, line in enumerate(lines):
+        m = _ON_KEY.match(line)
+        if not m:
+            continue
+        block = []
+        for nxt in lines[i + 1 :]:
+            stripped = _strip_comment(nxt)
+            if stripped.strip() and not stripped[0].isspace():
+                break
+            block.append(stripped)
+        return _strip_comment(m.group("rest")), block
+    return None, []
+
+
+def _event_lines(inline, block):
+    """The lines of an `on:` value that can name an event: the inline remainder,
+    plus — for a block mapping or sequence — only its shallowest children.
+    Anything deeper is one event's own configuration (`types:`, a
+    `workflow_dispatch` input's `options:`). A flow collection is a single value
+    however it is wrapped across lines, so all of its lines count."""
+    content = [ln for ln in [inline, *block] if ln.strip()]
+    if content and content[0].lstrip()[:1] in ("[", "{"):
+        return content
+    indents = [len(ln) - len(ln.lstrip()) for ln in block if ln.strip()]
+    if not indents:
+        return [inline]
+    top = min(indents)
+    return [inline] + [ln for ln in block if ln.strip() and len(ln) - len(ln.lstrip()) == top]
+
+
 def declares_pull_request_target(text):
     """Whether a workflow file declares the `pull_request_target` trigger.
 
     Comments are stripped first: `# never add pull_request_target here` is
     exactly the line a repository writes *because* it does not have one, and
     reporting it would train readers to ignore the finding."""
-    return any(_PR_TARGET.search(_strip_comment(line)) for line in text.splitlines())
+    inline, block = _on_block(text)
+    if inline is None:
+        return False
+    return any(_PR_TARGET.search(ln) for ln in _event_lines(inline, block))
 
 
 def _fork_trigger_warnings(ctx):
@@ -693,6 +823,7 @@ def _app_permission_warnings(ctx):
 
 PROBES = (
     _gate_rule_warnings,
+    _review_rule_warnings,
     _environment_warnings,
     _env_protection_warnings,
     _engine_environment_warnings,

@@ -107,19 +107,53 @@ once per consumer repo, with a deployment branch policy naming exactly the
 default branch:
 
 ```bash
-REPO=<org>/repo-example-stacks   # repeat per consumer repo
+ORG=<org>
+REPOS="repo-example-stacks repo-example-folders repo-example-workspaces"
 
-gh api -X PUT "repos/$REPO/environments/shipmate-engine" --input - <<'JSON'
+for NAME in $REPOS; do
+  REPO="$ORG/$NAME"
+  DEFAULT_BRANCH=$(gh repo view "$REPO" --json defaultBranchRef --jq .defaultBranchRef.name)
+  if [ -z "$DEFAULT_BRANCH" ]; then
+    echo "skipping $REPO: could not read its default branch" >&2
+    continue
+  fi
+  gh api -X PUT "repos/$REPO/environments/shipmate-engine" --input - <<'JSON'
 { "deployment_branch_policy": { "protected_branches": false, "custom_branch_policies": true } }
 JSON
-gh api -X POST "repos/$REPO/environments/shipmate-engine/deployment-branch-policies" \
-  -f name='main'   # your default branch, if not `main`
+  gh api -X POST "repos/$REPO/environments/shipmate-engine/deployment-branch-policies" \
+    -f name="$DEFAULT_BRANCH"
+done
 ```
+
+The per-repository guard matters: a typo'd name or a repository you cannot read
+leaves `DEFAULT_BRANCH` empty, and without it the `PUT` has already created the
+environment with `custom_branch_policies: true` while the `POST` writes a policy
+named `""` (or 422s) — exactly the fail-closed environment the next paragraph
+warns about, discovered only when that repository's first apply check never
+completes. Re-running the loop over an already-onboarded repository makes the
+`POST` fail with "name has already been taken", which is harmless — the policy is
+already there.
+
+Reading the default branch per repository rather than hardcoding `main` is the
+point: the policy must name **that repository's** default branch, and a policy
+naming a branch that does not exist fails closed — the apply-completion job is
+denied the key and apply checks never complete.
 
 No reviewers on this environment — it exists to scope a secret to a ref, not
 to gate a human decision (`docs/hardening.md` #16). `shipmate doctor` checks
 both that this environment exists and that its policy actually names the
 default branch.
+
+**What this costs across N repositories.** Key *creation* is per App, not per
+repository — `docs/hardening.md` #13 asks for one App per trust domain, and one
+key serves every repository in it. Placement is per repository either way: the
+alternative, an org secret with `--visibility selected`, needs its repository
+list edited for each new repo. So onboarding a repository under this scoping is
+three API calls — the `PUT` and the `POST` above plus the `gh secret set --env`
+in §6 — against one repository-list edit per repository for the org secret, whose
+value itself is written once for the whole org; and rotation becomes N
+`gh secret set --env` writes instead of that one org-secret write. Both are
+loops, below.
 
 ## 6. Set the approvers team + propagate credentials
 
@@ -129,17 +163,49 @@ back a secret's value once set (GitHub never exposes it), so keep the PEM from
 `register-app`'s conversion around (or re-download it from App settings) until
 every consumer repo has it.
 
-Per-repo (repeat for each consumer repo):
+Per-repo, in one pass over the consumer list:
 
 ```bash
-REPO=<org>/repo-example-stacks   # repeat per consumer repo
-TEAM=<approvers-team-slug>
+ORG=<org>
+REPOS="repo-example-stacks repo-example-folders repo-example-workspaces"
+TEAM=<approvers-team-slug>          # may differ per repo; set it per repo either way
+APP_ID=<app-id-from-step-2-output>
 
-gh variable set SHIPMATE_APPROVERS_TEAM --repo "$REPO" --body "$TEAM"
-gh variable set SHIPMATE_APP_ID --repo "$REPO" --body "<app-id-from-step-2-output>"
-gh secret set SHIPMATE_APP_PRIVATE_KEY --repo "$REPO" --env shipmate-engine \
-  --body "$(cat shipmate-app.private-key.pem)"
+KEY=$(cat shipmate-app.private-key.pem)
+if [ -z "$KEY" ]; then
+  echo "shipmate-app.private-key.pem is missing or empty — not touching any repository" >&2
+  exit 1
+fi
+
+for NAME in $REPOS; do
+  REPO="$ORG/$NAME"
+  gh variable set SHIPMATE_APPROVERS_TEAM --repo "$REPO" --body "$TEAM"
+  gh variable set SHIPMATE_APP_ID --repo "$REPO" --body "$APP_ID"
+  gh secret set SHIPMATE_APP_PRIVATE_KEY --repo "$REPO" --env shipmate-engine \
+    --body "$KEY"
+  # The environment secret is only scoping if no repository secret of the same
+  # name survives it: an environment secret is withheld from jobs that do not
+  # name the environment, but a repository secret is readable by any workflow on
+  # any branch without naming anything. Ignore the error when there was none.
+  gh secret delete SHIPMATE_APP_PRIVATE_KEY --repo "$REPO" 2>/dev/null || true
+done
 ```
+
+**Confirm the repository secret is gone**, because nothing else will tell you —
+listing a repository's secrets needs a permission the App manifest does not
+declare, so `shipmate doctor` cannot see this and reports all clear on a
+repository whose environment is shaped correctly while the key is still
+branch-readable (`docs/hardening.md` #16):
+
+```bash
+for NAME in $REPOS; do
+  echo "== $NAME"
+  gh secret list --repo "$ORG/$NAME"
+done
+```
+
+`SHIPMATE_APP_PRIVATE_KEY` must not appear in that output; it should appear only
+under the environment (`gh secret list --repo "$ORG/$NAME" --env shipmate-engine`).
 
 `SHIPMATE_APP_ID` (a variable, not a secret) **may** also be set once at the
 **org** level with restricted visibility, so every consumer repo inherits it
@@ -165,9 +231,28 @@ every consumer repo, not just once for the org.
 2. Store the new key everywhere it's used:
 
    ```bash
-   gh secret set SHIPMATE_APP_PRIVATE_KEY --repo "$REPO" --env shipmate-engine \
-     --body "$(cat new-key.pem)"
+   ORG=<org>
+   REPOS="repo-example-stacks repo-example-folders repo-example-workspaces"
+
+   KEY=$(cat new-key.pem)
+   if [ -z "$KEY" ]; then
+     echo "new-key.pem is missing or empty — not touching any repository" >&2
+     exit 1
+   fi
+
+   for NAME in $REPOS; do
+     gh secret set SHIPMATE_APP_PRIVATE_KEY --repo "$ORG/$NAME" --env shipmate-engine \
+       --body "$KEY"
+   done
    ```
+
+   One new key, written N times — the key is not regenerated per repository.
+   Read it once, before the loop, and abort when it is empty: a `cat` of the
+   wrong filename inside the loop expands to the empty string, and
+   `gh secret set --body ""` then succeeds N times and destroys the working key
+   in every consumer repository. Step 3 deletes the old key next, so no App token
+   could be minted anywhere — no `shipmate / gate` status gets written and every
+   open pull request blocks on a required check that cannot arrive.
 3. Back in App settings, **delete** the old private key so it can no longer
    mint tokens.
 4. Shred the local PEM file (`shred -u new-key.pem` or equivalent) once it's
@@ -209,6 +294,13 @@ manifest and the installed App's token both look correct — the gap is the
 un-approved request, not a code or config bug.
 
 ## Key-exposure boundary
+
+**Why this exists at all:** a server-hosted GitHub App keeps its private key on
+its own service, so the key is never in reach of the repository's contributors.
+shipmate has no service, so the key lives in your repository — which makes
+*where* it lives in the repository the entire security boundary. That is the
+trade the README's "Why setup is not two clicks" section describes, stated
+concretely below.
 
 `SHIPMATE_APP_PRIVATE_KEY` is a secret on the **`shipmate-engine` GitHub
 Environment**, not a repository or org secret — that environment's
