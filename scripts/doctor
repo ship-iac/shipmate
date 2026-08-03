@@ -19,9 +19,10 @@ Probes:
   contexts include 'shipmate / gate' pinned to integration_id == the shipmate
   App id, with strict (up-to-date) policy on.
 - `pull_request` rule on the default branch: code-owner review must be
-  required. An approval count is not a substitute — the App can submit an
-  approving review — and `required_approving_review_count: 0` is the supported
-  sole-maintainer mode, reported as a note rather than a warning.
+  required, aggregated across every such rule. An approval count is not a
+  substitute — the App can submit an approving review — and
+  `required_approving_review_count: 0` *with* code-owner review on is the
+  supported sole-maintainer mode, reported as a note rather than a warning.
 - GitHub Environment pair (<env>, <env>-apply) exists for every planned env.
 - protection shape of that pair: a plan env must have no reviewers and no
   branch policy; an apply env with no protection is worth a note.
@@ -87,18 +88,18 @@ _REVIEW_RULE_ABSENT = (
     "endpoint, so check it if that is what this repository uses."
 )
 _CODE_OWNER_REVIEW_OFF = (
-    "the `pull_request` rule on `{branch}` requires approvals but not code-owner "
-    "review — the shipmate App can submit an approving review, so an approval "
-    "count alone is no defense against a leaked App private key. Set "
+    "the `pull_request` rule on `{branch}` does not require code-owner review — "
+    "the shipmate App can submit a counting approving review, so an approval count "
+    "is no substitute against a leaked App private key. Set "
     "`require_code_owner_review`, and a `CODEOWNERS` entry covering the paths the "
     "IaC lives in: the rule is a no-op for changed files with no owner "
     "(docs/hardening.md #3–5)."
 )
 _SOLE_MAINTAINER_REVIEW = (
     "the `pull_request` rule on `{branch}` requires no approving review "
-    "(sole-maintainer mode, docs/hardening.md #3–5) — a supported mode. If "
-    "`require_code_owner_review` is off too, the `<env>-apply` required reviewer "
-    "(#6) is the only control left that a leaked App private key cannot satisfy."
+    "(sole-maintainer mode, docs/hardening.md #3–5) — a supported mode. "
+    "`require_code_owner_review` is on, so the merge-side control a leaked App "
+    "private key cannot satisfy is still in place."
 )
 # Same degrade posture as FORK_TRIGGER_UNREADABLE: unread is not misconfigured.
 _REVIEW_RULE_UNREADABLE = (
@@ -196,28 +197,43 @@ def _review_rule_warnings(ctx):
     endpoint failure silence both findings — the trade `_existing_env_names`
     and `_fork_trigger_warnings` also make.
 
-    Three limits. It reports the first matching rule, while GitHub enforces the
-    union across layered rulesets, so a second ruleset supplying code-owner
-    review can still draw a warning. The endpoint returns rulesets only — a
-    repository on classic branch protection reads as having no rule, which the
-    finding text says out loud. And `require_code_owner_review: true` is read as
-    the control being in place, while GitHub applies it only to changed files an
-    entry in `CODEOWNERS` owns: unowned IaC paths make it a no-op, which the
-    findings say out loud rather than probe for."""
+    Aggregated across every `pull_request` rule on the branch rather than keyed
+    on the first one: GitHub enforces the union across layered rulesets, so an org
+    ruleset supplying code-owner review must not be masked by a repo-level
+    count-only rule that happens to be listed first. Code-owner review off is a
+    warning at any approval count — count 0 with it off is the one configuration
+    with no unforgeable merge-time control at all, so it must not read as the
+    sole-maintainer note.
+
+    Two limits. The endpoint returns rulesets only — a repository on classic
+    branch protection reads as having no rule, which the finding text says out
+    loud. And `require_code_owner_review: true` is read as the control being in
+    place, while GitHub applies it only to changed files an entry in `CODEOWNERS`
+    owns: unowned IaC paths make it a no-op, which the docs state rather than
+    anything here probing for — on that path there is no finding at all."""
     branch = ctx["default_branch"]
     rules = _gh_json(f"repos/{ctx['repo']}/rules/branches/{branch}?per_page=100")
+    found = readable = code_owner = False
+    count = 0
     for rule in rules:
         if rule.get("type") != "pull_request":
             continue
+        found = True
         params = rule.get("parameters") or {}
         if not params:
-            return [(NOTICE, _REVIEW_RULE_UNREADABLE.format(branch=branch))]
-        if not params.get("required_approving_review_count"):
-            return [(NOTICE, _SOLE_MAINTAINER_REVIEW.format(branch=branch))]
-        if not params.get("require_code_owner_review"):
-            return [(WARNING, _CODE_OWNER_REVIEW_OFF.format(branch=branch))]
-        return []
-    return [(WARNING, _REVIEW_RULE_ABSENT.format(branch=branch))]
+            continue
+        readable = True
+        code_owner = code_owner or bool(params.get("require_code_owner_review"))
+        count = max(count, params.get("required_approving_review_count") or 0)
+    if not found:
+        return [(WARNING, _REVIEW_RULE_ABSENT.format(branch=branch))]
+    if not readable:
+        return [(NOTICE, _REVIEW_RULE_UNREADABLE.format(branch=branch))]
+    if not code_owner:
+        return [(WARNING, _CODE_OWNER_REVIEW_OFF.format(branch=branch))]
+    if not count:
+        return [(NOTICE, _SOLE_MAINTAINER_REVIEW.format(branch=branch))]
+    return []
 
 
 def _existing_env_names(ctx):

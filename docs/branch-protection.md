@@ -100,8 +100,11 @@ sufficient, because the shipmate App can submit an approving review, so only a
 CODEOWNERS review is out of reach of a leaked App private key, and only for
 changed files an entry actually owns — the rule is a no-op for unowned paths, and
 the probe reads ruleset booleans only, so it cannot see that;
-`required_approving_review_count: 0` is the supported sole-maintainer mode,
-reported as a note rather than a warning),
+`required_approving_review_count: 0` *with* code-owner review on is the supported
+sole-maintainer mode, reported as a note rather than a warning, while count 0 with
+code-owner review off leaves no unforgeable merge-time control at all and warns;
+the booleans are unioned across every `pull_request` rule on the branch, since
+GitHub enforces the union across layered rulesets),
 a missing GitHub
 Environment (`<env>` / `<env>-apply`) for a tagged-in environment, the
 plan/apply environment protection shape (a plan environment must have no

@@ -1848,30 +1848,54 @@ def test_review_rule_without_code_owner_review_warned(monkeypatch):
     # Pin the text, not just the constant: comparing against the constant leaves
     # the two review findings' bodies interchangeable, so swapping them would
     # keep every review-rule test green while telling readers the wrong thing.
-    assert "requires approvals but not code-owner review" in out[0][1]
+    assert "does not require code-owner review" in out[0][1]
     assert "Set `require_code_owner_review`" in out[0][1]
 
 
-def test_review_rule_sole_maintainer_mode_is_a_notice(monkeypatch):
-    # required_approving_review_count: 0 is a shipped, supported mode. A
-    # warning on every run for a setting the sole maintainer will not change
-    # trains readers to ignore doctor, so it is a notice.
+def test_review_rule_no_code_owner_review_at_a_high_count_still_warns(monkeypatch):
+    # An approval count of any size is forgeable by the attacker in scope, so
+    # the warning is keyed on the boolean, never softened by the count.
+    responses = _rules_only(_pull_request_rule(code_owner=False, count=5))
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    out = doctor._review_rule_warnings(_ctx())
+    assert out == [(doctor.WARNING, doctor._CODE_OWNER_REVIEW_OFF.format(branch=_BRANCH))]
+
+
+def test_review_rule_count_zero_without_code_owner_review_is_the_worst_case_warning(monkeypatch):
+    # count 0 *and* code-owner review off is the one configuration with no
+    # unforgeable merge-time control at all -- it must not be reported with the
+    # same information notice as the supported sole-maintainer mode below.
     responses = _rules_only(_pull_request_rule(code_owner=False, count=0))
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
     out = doctor._review_rule_warnings(_ctx())
-    assert out == [(doctor.NOTICE, doctor._SOLE_MAINTAINER_REVIEW.format(branch=_BRANCH))]
+    assert out == [(doctor.WARNING, doctor._CODE_OWNER_REVIEW_OFF.format(branch=_BRANCH))]
 
 
-def test_review_rule_sole_maintainer_mode_reported_even_with_code_owner_review(monkeypatch):
-    # The two ruleset booleans are independent, so the count check running
-    # before the code-owner check is a deliberate ordering, not incidental: with
-    # no approving review required there is nothing for code-owner review to
-    # qualify, and the finding says so conditionally rather than asserting
-    # `require_code_owner_review` is off.
+def test_review_rule_count_zero_with_code_owner_review_is_still_a_notice(monkeypatch):
+    # required_approving_review_count: 0 is a shipped, supported mode when
+    # code-owner review is on: the merge-side control a leaked App key cannot
+    # satisfy is still there. A warning on every run for a setting the sole
+    # maintainer will not change trains readers to ignore doctor.
     responses = _rules_only(_pull_request_rule(code_owner=True, count=0))
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
     out = doctor._review_rule_warnings(_ctx())
     assert out == [(doctor.NOTICE, doctor._SOLE_MAINTAINER_REVIEW.format(branch=_BRANCH))]
+    # Pin this finding's text too, so swapping the two constants' bodies fails
+    # here as well as in the code-owner-off test above.
+    assert "requires no approving review" in out[0][1]
+    assert "`require_code_owner_review` is on" in out[0][1]
+
+
+def test_review_rule_findings_are_unioned_across_layered_rulesets(monkeypatch):
+    # GitHub enforces the union across layered rulesets. A repo-level count-only
+    # rule listed first must not mask an org ruleset that does require code-owner
+    # review -- reporting one there is a false "not required".
+    responses = _rules_only(
+        _pull_request_rule(code_owner=False, count=1),
+        _pull_request_rule(code_owner=True, count=0),
+    )
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    assert doctor._review_rule_warnings(_ctx()) == []
 
 
 def test_review_rule_absent_warned(monkeypatch):
