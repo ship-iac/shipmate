@@ -11,6 +11,68 @@ section below names the SHA the release tags.
 The version line stays `v0.x` while action inputs, check names, and the comment
 grammar are declared unstable in `README.md`.
 
+## [0.3.1] — 2026-08-03
+
+Tags `<backfilled>`.
+
+Fail-safe fixes to the paths 0.3.0 relocated. No interface change: re-pinning is
+the only action required.
+
+### Fixed
+
+- **The gate could be written green over plan evidence that was never read.** An
+  unreadable artifact listing reported a count of `1`, and the hold fires only on
+  a shortfall against the parsed cell count — so with one cell downloaded (that
+  download is best-effort) `1 < 1` was false, one apply check was created for a
+  five-stack plan, and the remaining four merged with no check at all. Because
+  `deploy.yml`'s work queue *is* the pending apply checks, those changes would
+  never have been applied. The sentinel is now non-numeric, and the hold fires on
+  it before any comparison a cell count could satisfy.
+- **A held gate was clearable by the apply it existed to prevent.** `gate-refresh`
+  wrote `success` from apply check-runs alone, and `scripts/authorize` consults
+  the review decision, never the gate — so `shipmate apply` on a held pull request
+  greened it. `gate-refresh` now refuses to overwrite a failing gate and says why;
+  the only exit from a hold is a fresh plan.
+- **Two steps could lose the gate write entirely.** The supersede check aborted
+  the whole job on a transient paginated API error, and the pull-request probe
+  folded an API failure into "is a draft" and skipped every later step behind a
+  plain `echo` — a green run with no gate, and a required check that never
+  arrives. The first now warns and proceeds; the second distinguishes unreadable
+  from draft and fails loudly.
+- **A cell with no queued apply check applied anyway.** The refusal that used to
+  run before `terramate apply` became a warning that fired only when *every* cell
+  was affected, so one cell could mutate infrastructure and advance state while
+  its check stayed pending forever — recoverable only by re-planning over
+  already-applied infrastructure. The per-cell refusal is restored.
+- **Drift could be lost silently.** Drift issues are now authored from an
+  artifact, but the compose and upload steps were best-effort, so a dropped cell
+  simply vanished from the glob: no issue, no Slack, green run. Both steps are
+  required again. Separately, a dead Slack webhook no longer leaves the nightly
+  run green — those failures are collected and re-raised like the API ones
+  already were.
+
+### Changed
+
+- `docs/hardening.md` stated the environment-secret release rule inverted,
+  contradicting `docs/github-app.md`. Both now read: an environment secret is
+  released only to a job that *names* the environment; a repository secret is
+  readable by any workflow on any branch without naming anything.
+- The apply-cell credentials guard asserted raw text substrings and would not
+  have caught a direct `secrets.SHIPMATE_APP_PRIVATE_KEY`; it is now a parsed
+  assertion over the action YAML, covering `drift-cell` as well, which had none.
+
+### Known, and deliberately not changed here
+
+- An artifact count of zero is still read as "the plan matrix was empty".
+  Separating that from a listing that returned zero needs a positive empty-matrix
+  signal crossing the `workflow_run` boundary; holding on zero without one would
+  block every docs-only pull request.
+- `shipmate doctor` has no probe for the consumer `summary.yml`/`plan.yml` wiring
+  the reusable workflow hard-codes. doctor runs inside the job that wiring gates,
+  so a probe there cannot report its own absence. Until that is addressed, a
+  consumer whose plan workflow is misnamed or missing its summary caller gets no
+  gate and no diagnostic — see `CONTRACT.md` for the exact required names.
+
 ## [0.3.0] — 2026-08-03
 
 Tags `e576103`.
@@ -194,6 +256,7 @@ App and pinned by `integration_id` in the consumer's ruleset; post-merge deploy
 driven by the pending apply checks as its work queue; per-run apply result
 comments; and nightly drift detection as auto-closing issues.
 
+[0.3.1]: https://github.com/ship-iac/shipmate/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/ship-iac/shipmate/compare/v0.2.3...v0.3.0
 [0.2.3]: https://github.com/ship-iac/shipmate/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/ship-iac/shipmate/compare/v0.2.1...v0.2.2
