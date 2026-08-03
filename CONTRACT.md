@@ -911,10 +911,18 @@ decrypts it after download on **every** apply path: all three paths pass it
 as the optional `SHIPMATE_PLAN_PASSPHRASE` secret into the reusable
 `apply-env-level.yml` workflow — via the engine `deploy.yml` for the
 merge-deploy path, via the engine `apply-all.yml` for the bare form, and via
-the engine `apply.yml` for the targeted form. Consumers set the
-repo/environment secret `SHIPMATE_PLAN_PASSPHRASE` and forward it with
-`secrets: inherit` in their `deploy.yml` and `apply.yml` wrapper
-workflows.
+the engine `apply.yml` for the targeted form. Consumers set
+`SHIPMATE_PLAN_PASSPHRASE` as a **repository** secret and forward it with
+`secrets: inherit` in their `deploy.yml` and `apply.yml` wrapper workflows.
+
+Not an environment secret, and specifically **not** on `shipmate-engine`: plan
+cells run on a `pull_request` ref (`refs/pull/<n>/merge`), which satisfies no
+deployment branch policy, so a passphrase scoped that way resolves to empty at
+plan time and every later apply fails its plaintext-artifact check. Scoping it
+to a plan environment buys nothing either — those must have no branch policy at
+all (`docs/hardening.md` §6), so any branch's workflow can name one and read it.
+Unlike the App private key, this secret must be readable wherever plans are
+produced, which is any branch; `docs/hardening.md` #7–9 says to treat it so.
 
 - **Backward compatible.** An empty/unset `plan-passphrase` leaves the plan
   plaintext and the uploaded bytes byte-identical to a no-encryption run.
