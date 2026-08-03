@@ -24,26 +24,10 @@ runs:
       with:
         client-id: ${{ inputs.app-id }}
         private-key: ${{ inputs.private-key }}
-        # owner/repositories intentionally omitted so the token always
-        # scopes to the current repository, regardless of trigger type --
-        # create-github-app-token's own documented behavior when both
-        # inputs are empty. This action runs from the same
-        # `schedule`/`workflow_dispatch` triggers drift-cell's matrix does;
-        # the comment this replaced justified the omission by asserting
-        # `github.event.repository` is unpopulated on `schedule` (which
-        # would otherwise make `repositories: github.event.repository.name`
-        # evaluate to '' and, with `owner` still set, fall back to scoping
-        # the token to every repo in the installation). GitHub's Sept-2022
-        # changelog ("Additional information available in github.event
-        # payload for scheduled workflow runs") says schedule payloads now
-        # carry repository/org/enterprise info, which contradicts that
-        # claim -- not independently re-verified live in this session.
-        # Neither answer matters here: this omission defaults the token to
-        # the current repository unconditionally either way, so it is
-        # correct regardless of what `schedule` actually delivers. The
-        # default-branch ref guard in the consuming `drift.yml` also does
-        # not depend on this payload question -- it resolves the default
-        # branch via a `gh api` call instead.
+        # owner/repositories intentionally omitted: with both empty,
+        # create-github-app-token scopes the token to the current repository
+        # regardless of trigger type, so this needs nothing out of the
+        # `schedule` event payload.
         permission-issues: write
 
     - name: Upsert / close drift issues

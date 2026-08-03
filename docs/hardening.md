@@ -359,7 +359,7 @@ and on demand; it cannot check the third:
   restricts to whatever branch protection covers rather than the default
   branch specifically;
 - **no repository (or organization) secret named `SHIPMATE_APP_PRIVATE_KEY`
-  remains.** An environment secret is only withheld from jobs that *name* the
+  remains.** An environment secret is released only to a job that *names* the
   environment. A repository secret of the same name is readable by any workflow
   on any branch without naming anything, so leaving one in place defeats this
   control completely — the environment becomes decoration.
