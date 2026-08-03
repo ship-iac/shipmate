@@ -94,9 +94,9 @@ _CODE_OWNER_REVIEW_OFF = (
 )
 _SOLE_MAINTAINER_REVIEW = (
     "the `pull_request` rule on `{branch}` requires no approving review "
-    "(sole-maintainer mode, docs/hardening.md #3–5) — a supported mode, but it "
-    "leaves the `<env>-apply` required reviewer as the only control a leaked App "
-    "private key cannot satisfy (#6)."
+    "(sole-maintainer mode, docs/hardening.md #3–5) — a supported mode. If "
+    "`require_code_owner_review` is off too, the `<env>-apply` required reviewer "
+    "(#6) is the only control left that a leaked App private key cannot satisfy."
 )
 # Same degrade posture as FORK_TRIGGER_UNREADABLE: unread is not misconfigured.
 _REVIEW_RULE_UNREADABLE = (

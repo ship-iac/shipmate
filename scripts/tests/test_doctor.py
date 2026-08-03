@@ -1746,9 +1746,9 @@ def test_review_rule_healthy_is_silent(monkeypatch):
 
 
 def test_review_rule_without_code_owner_review_warned(monkeypatch):
-    # An approval count is not a backstop: the App holds pull-requests:write
-    # and can submit a counting APPROVED review, which the exposure proof
-    # demonstrated. Only a CODEOWNERS review is App-proof.
+    # An approval count is not a backstop: the App holds `pull-requests: write`
+    # and can submit a counting APPROVED review (docs/hardening.md #3-5). Only a
+    # CODEOWNERS review is App-proof.
     responses = _rules_only(_pull_request_rule(code_owner=False, count=2))
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
     out = doctor._review_rule_warnings(_ctx())
@@ -1760,6 +1760,18 @@ def test_review_rule_sole_maintainer_mode_is_a_notice(monkeypatch):
     # warning on every run for a setting the sole maintainer will not change
     # trains readers to ignore doctor, so it is a notice.
     responses = _rules_only(_pull_request_rule(code_owner=False, count=0))
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    out = doctor._review_rule_warnings(_ctx())
+    assert out == [(doctor.NOTICE, doctor._SOLE_MAINTAINER_REVIEW.format(branch=_BRANCH))]
+
+
+def test_review_rule_sole_maintainer_mode_reported_even_with_code_owner_review(monkeypatch):
+    # The two ruleset booleans are independent, so the count check running
+    # before the code-owner check is a deliberate ordering, not incidental: with
+    # no approving review required there is nothing for code-owner review to
+    # qualify, and the finding says so conditionally rather than asserting
+    # `require_code_owner_review` is off.
+    responses = _rules_only(_pull_request_rule(code_owner=True, count=0))
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
     out = doctor._review_rule_warnings(_ctx())
     assert out == [(doctor.NOTICE, doctor._SOLE_MAINTAINER_REVIEW.format(branch=_BRANCH))]

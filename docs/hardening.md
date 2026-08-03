@@ -54,9 +54,9 @@ governs the plan path. Don't add one to a repository that holds the App key —
 | 1 | Write access only for people trusted to apply | Repo/team access | Everything below is downstream of this |
 | 2 | Push ruleset restricting `.github/workflows/**` *and every other path a workflow executes* | Repo/org ruleset (push target) | Branch-authored workflows |
 | 3 | Required check `shipmate / gate` with `integration_id`, strict | Branch ruleset | A *third party* posting `shipmate / gate` under another identity |
-| 4 | ≥1 approving review, code-owner review, dismiss stale, require approval of most recent push | Branch ruleset | Self-merge |
+| 4 | ≥1 approving review, code-owner review, dismiss stale, require approval of most recent push | Branch ruleset | Self-merge; the code-owner review is **unforgeable** at merge time (an App cannot be a `CODEOWNERS` entry), the approval *count* is not |
 | 5 | Block force-push and deletion on the default branch | Branch ruleset | History rewrite after apply |
-| 6 | Required reviewers + "Prevent self-review" on **every** `<env>-apply` that holds a secret | Environment | **Unforgeable** — the last line of defense, and what makes row 7 hold |
+| 6 | Required reviewers + "Prevent self-review" on **every** `<env>-apply` that holds a secret | Environment | **Unforgeable** at apply time — the last line of defense once a merge has happened, and what makes row 7 hold |
 | 7 | Cloud credentials only as `<env>-apply` environment secrets — never repo-level | Environment secrets | Repo-wide secret exposure (bounded *only* in combination with row 6) |
 | 8 | Plan environments hold read-only, blast-radius-free credentials, no approval rules, no branch policy | Environment | Plan-time code execution |
 | 9 | OIDC with an `environment:` claim condition instead of static keys | Cloud IdP | Long-lived credential theft (**not wired in the engine yet** — see §7–9) |
@@ -178,12 +178,15 @@ satisfy (the other is #6). An approval *count* is not: the App holds
 `shipmate doctor` warns when the rule requires approvals but not code-owner
 review — but doctor never fails a run, so that is a warning, not enforcement.
 
-## 6. Environment reviewers — the one gate that holds
+## 6. Environment reviewers — the gate that holds after a merge
 
 Environment reviewers are **users and teams**. A GitHub App installation token
 cannot be a reviewer and cannot approve a pending deployment, so this is the
-only control in the list that an attacker holding the App private key cannot
-satisfy.
+**second** of the two controls in the list that an attacker holding the App
+private key cannot satisfy — the other is the code-owner review in #3–5, which
+an App cannot supply because it cannot be listed in `CODEOWNERS`. They are
+unforgeable at different points, which is why both matter: code-owner review
+guards the **merge**, the `<env>-apply` reviewer guards the **apply**.
 
 On every `<env>-apply` environment that holds a secret or touches real
 infrastructure — **including dev and staging**:
