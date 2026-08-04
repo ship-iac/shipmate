@@ -2005,3 +2005,108 @@ def test_probe_count_is_stated_correctly_in_the_docs():
     protection = (ENGINE / "docs" / "branch-protection.md").read_text(encoding="utf-8")
     assert f"combining {word}" in protection
     assert f"{plan_word} of the {word} probes" in protection
+
+
+# A look-alike separator: U+2022 BULLET where the name carries U+00B7 MIDDLE
+# DOT. Renders close enough that nobody spots it in a diff, and GitHub's
+# `workflow_run` matcher never fires.
+_LOOKALIKE_PLAN = "name: shipmate • plan\non:\n  pull_request:\n"
+
+
+def _wiring_responses(plan=_QUIET_PLAN, summary=_QUIET_SUMMARY):
+    return {
+        f"{_WF_DIR}{_REF}": _wf_listing("plan.yml", "summary.yml"),
+        f"{_WF_DIR}/plan.yml{_REF}": _wf_file(plan),
+        f"{_WF_DIR}/summary.yml{_REF}": _wf_file(summary),
+    }
+
+
+def test_wiring_probe_is_registered():
+    assert doctor._wiring_warnings in doctor.PROBES
+
+
+def test_wiring_probe_reports_a_broken_name_as_a_warning(monkeypatch):
+    """A wiring break is a repository misconfiguration, not a degrade, so it
+    reads WARNING -- the loudest thing doctor may emit, since doctor never
+    fails a run."""
+    responses = _wiring_responses(plan=_LOOKALIKE_PLAN)
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    found = doctor._wiring_warnings(_ctx())
+    assert [lvl for lvl, _ in found] == [doctor.WARNING]
+    assert "U+00B7 MIDDLE DOT" in found[0][1]
+
+
+def test_wiring_probe_degrades_without_a_commit():
+    """Same precondition as the pin probe: with no commit under examination
+    there is nothing to read, and reading the default branch instead would
+    report the wiring broken on the very pull request that fixes it."""
+    ctx = _ctx(head_sha="")
+    found = doctor._wiring_warnings(ctx)
+    assert [lvl for lvl, _ in found] == [doctor.NOTICE]
+    assert found == [doctor.WIRING_NO_COMMIT]
+
+
+def test_wiring_probe_makes_no_api_call_without_a_commit(monkeypatch):
+    """A probe that read something anyway would be reading the wrong ref.
+
+    `pytest.fail`, not a plain exception: `_workflow_names` catches
+    `(Exception, SystemExit)` and degrades to a NOTICE, which is the same shape
+    the no-commit finding has -- the test would pass against the very mutation
+    it exists to catch. A failed assertion is a BaseException and propagates."""
+    monkeypatch.setattr(
+        doctor, "_gh_json", lambda path: pytest.fail(f"wiring probe hit the API: {path}")
+    )
+    assert doctor._wiring_warnings(_ctx(head_sha="")) == [doctor.WIRING_NO_COMMIT]
+
+
+def test_wiring_probe_reads_the_commit_under_examination(monkeypatch):
+    """Every contents call carries the head SHA, for the pin probe's reason: a
+    default-branch read reports the wiring broken on the pull request that
+    fixes it. Correct wiring at that commit is silent."""
+    responses = _wiring_responses()
+    asked = []
+
+    def gh(path):
+        asked.append(path)
+        return responses[path]
+
+    monkeypatch.setattr(doctor, "_gh_json", gh)
+    assert doctor._wiring_warnings(_ctx()) == []
+    assert asked[0] == f"{_WF_DIR}{_REF}"
+    assert asked and all(path.endswith(_REF) for path in asked)
+
+
+def test_wiring_probe_degrades_on_an_unreadable_listing(monkeypatch):
+    """An unreadable listing is "not verified", never "no plan workflow" --
+    the probe hands `wiring.findings` None rather than an empty mapping."""
+
+    def gh(path):
+        raise SystemExit(f"::error::command failed (1): gh api {path}")
+
+    monkeypatch.setattr(doctor, "_gh_json", gh)
+    found = doctor._wiring_warnings(_ctx())
+    assert [lvl for lvl, _ in found] == [doctor.NOTICE]
+    assert found == [(doctor.NOTICE, doctor.wi.LISTING_UNREADABLE[1])]
+
+
+def test_harvest_drops_the_wiring_annotation():
+    """`build-matrix` emits the same finding as a run annotation. The live
+    probe in this same report re-states it, so keeping both double-reports
+    every wiring problem -- the same reason DOCTOR_TITLE is filtered."""
+    anns = [
+        {
+            "annotation_level": "warning",
+            "title": doctor.wi.WIRING_TITLE,
+            "message": "x",
+            "check_name": "shipmate / detect",
+        },
+        {
+            "annotation_level": "warning",
+            "title": "something else",
+            "message": "y",
+            "check_name": "shipmate / detect",
+        },
+    ]
+    sections = doctor.harvest_sections(anns)
+    kept = [a["title"] for rows in sections.values() for a in rows]
+    assert kept == ["something else"]

@@ -7,7 +7,7 @@ Three modes, selected via SHIPMATE_DOCTOR_MODE:
   actions/summary right after a plan run. NEVER fails the run: a probe
   error becomes a 'could not verify' note — doctor guards onboarding, it
   must not take down the plan path.
-- report: render the sticky PR comment on demand — the nine live probes'
+- report: render the sticky PR comment on demand — the ten live probes'
   findings plus a harvest of the warnings GitHub already recorded as
   annotations on this commit's workflow check runs.
 - check-ids: reduce a check-runs JSONL listing to the (id, name) pairs worth
@@ -38,6 +38,10 @@ Probes:
 - `pull_request_target` triggers in the consumer's workflow files, read at the
   same commit as the pin probe: that trigger runs at the base ref with the
   repository's secrets while acting on pull-request-author-controlled content.
+- the consumer plan/summary wiring, read at the same commit as the pin probe:
+  the plan workflow's path, its exact `shipmate · plan` name, and a
+  `workflow_run` wrapper calling the engine's reusable summary workflow. Any
+  one broken means no apply checks and no gate status, on every pull request.
 - approvers team resolvability: the configured SHIPMATE_APPROVERS_TEAM must
   resolve in the repo's org, or every apply is rejected as "not a team member".
 - GitHub App installation permission drift: a failed installation-token mint
@@ -73,7 +77,6 @@ wi = _load("wiring")
 # One implementation, aliased rather than duplicated: the `pull_request_target`
 # probe and the wiring checks slice the same `on:` block, and two copies would
 # drift on exactly the edge cases that made this matcher wrong twice.
-_strip_comment = wi._strip_comment
 _on_block = wi._on_block
 
 GATE = "shipmate / gate"
@@ -759,6 +762,46 @@ def _fork_trigger_warnings(ctx):
     return out
 
 
+WIRING_NO_COMMIT = (
+    NOTICE,
+    "the plan/summary wiring was not verified — the commit under examination "
+    "could not be determined.",
+)
+
+
+def _wiring_warnings(ctx):
+    """The three conditions the `shipmate / gate` status silently depends on:
+    the plan workflow's path, its exact name, and a `workflow_run` wrapper
+    calling the engine's reusable summary workflow (`scripts/wiring`).
+
+    `actions/build-matrix` runs the same checks inside every plan run and FAILS
+    `detect` on a confident break -- this probe is the on-demand half, reachable
+    through `shipmate doctor` even when the wiring is broken, because
+    comment-ops is triggered by `issue_comment` and is not downstream of the
+    summary job. It also covers the one case `detect` structurally cannot: a
+    plan workflow deleted outright, or one whose `pull_request` trigger was
+    removed, never runs `detect` at all.
+
+    Read at the commit under examination for the pin probe's reason: a
+    default-branch read would report the wiring broken on the very pull request
+    that fixes it.
+    """
+    ref = _contents_ref(ctx)
+    if ref is None:
+        return [WIRING_NO_COMMIT]
+    base = f"repos/{ctx['repo']}/contents/{_WORKFLOWS_DIR}"
+    names, readable = _workflow_names(f"{base}{ref}")
+    # None, not {}: an unreadable listing is "not verified", while an empty
+    # directory really is a missing plan workflow.
+    files = None
+    if readable:
+        files = {name: _workflow_bytes(f"{base}/{name}{ref}") for name in names}
+    return [
+        (WARNING if state == wi.BROKEN else NOTICE, message)
+        for state, message in wi.findings(files, ctx["engine_repo"])
+    ]
+
+
 def _one_line(s, limit=200):
     flat = " ".join(s.split())
     return flat if len(flat) <= limit else flat[: limit - 1] + "…"
@@ -815,6 +858,7 @@ PROBES = (
     _engine_environment_warnings,
     _pin_warnings,
     _fork_trigger_warnings,
+    _wiring_warnings,
     _team_warnings,
     _app_permission_warnings,
 )
@@ -1024,12 +1068,16 @@ def harvest_sections(annotations):
     (title == DOCTOR_TITLE): the live probes in this same report re-state those
     findings against current settings, so keeping both double-reports every
     settings problem.
+
+    `wi.WIRING_TITLE` goes for the same reason: `build-matrix` emits the wiring
+    findings as run annotations from inside the plan run's `detect` job, and
+    `_wiring_warnings` re-states them live in this same report.
     """
     by_check = {}
     for a in annotations:
         if a.get("annotation_level") not in HARVEST_LEVELS:
             continue
-        if a.get("title") == DOCTOR_TITLE:
+        if a.get("title") in (DOCTOR_TITLE, wi.WIRING_TITLE):
             continue
         by_check.setdefault(a.get("check_name") or "(unnamed check)", []).append(a)
     return by_check
