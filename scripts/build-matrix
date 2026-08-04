@@ -36,7 +36,9 @@ def _load(fname):
 
 wi = _load("wiring")
 
-#: Pull-request events, the ones where a wiring break is still preventable.
+#: The two pull-request events. Both guards in this module key on them and must
+#: keep agreeing: `fork_pr_error` refuses a fork here, `wiring_report` fails a
+#: break here, and each is stated to behave exactly like the other.
 _PR_EVENTS = ("pull_request", "pull_request_target")
 
 MATRIX_LIMIT = 256
@@ -205,7 +207,7 @@ def fork_pr_error(event_name, repository, payload):
     `pull_request.head.repo.full_name` (the shape GitHub sends once the fork has
     been deleted). A same-repository pull request always carries it, so
     "unknown" only ever means a run this script cannot vouch for."""
-    if event_name not in ("pull_request", "pull_request_target"):
+    if event_name not in _PR_EVENTS:
         return ""
     head = ((payload.get("pull_request") or {}).get("head") or {}).get("repo") or {}
     full_name = head.get("full_name") or ""
@@ -229,10 +231,24 @@ def workflow_files(root):
     Read off the local checkout rather than the API: on a `pull_request` event
     that checkout is the MERGE commit, which is the state the gate will actually
     live under once this pull request lands.
+
+    That also means this reads whatever the checkout materialized. An absent or
+    relocated checkout degrades to None and so to UNKNOWN, but a SPARSE checkout
+    holding `plan.yml` without the consumer's summary wrapper produces a partial
+    listing indistinguishable from a real absence, and `findings` calls that
+    BROKEN. Unlikely -- `detect` needs the whole tree for terramate anyway -- but
+    it is the one input shape here that turns into a false failure.
+
+    Nothing is DROPPED for being unreadable: every `.yml`/`.yaml` name in the
+    listing appears, mapped to None when its bytes cannot be had. Deliberately no
+    `is_file()` filter, because `Path.is_file()` swallows its own OSError and
+    returns False -- an entry whose stat failed would vanish from the listing
+    instead, and a vanished `plan.yml` is reported BROKEN rather than unverified.
+    A directory ending in `.yml` fails its read and degrades the same way.
     """
     d = pathlib.Path(root) / ".github" / "workflows"
     try:
-        entries = sorted(p for p in d.iterdir() if p.is_file())
+        entries = sorted(d.iterdir())
     except OSError:
         return None
     files = {}

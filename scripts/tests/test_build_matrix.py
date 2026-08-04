@@ -1,3 +1,5 @@
+import pathlib
+
 import pytest
 from _loader import action_steps, load_script
 
@@ -301,8 +303,14 @@ def test_main_does_not_enumerate_stacks_for_a_fork(monkeypatch, tmp_path):
     monkeypatch.setenv("GITHUB_REPOSITORY", "acme/iac")
     monkeypatch.setenv("GITHUB_EVENT_PATH", _event_file(tmp_path, "outsider/iac"))
     monkeypatch.setenv("GITHUB_OUTPUT", str(tmp_path / "out.txt"))
-    with pytest.raises(SystemExit):
+    # Same reason as _run_main's: without this the wiring check reads the engine
+    # checkout, raises `shipmate wiring` first, and this guard passes on somebody
+    # else's SystemExit -- proving nothing about the fork rejection. The
+    # assertion below names the rejection for the same reason.
+    monkeypatch.chdir(tmp_path)
+    with pytest.raises(SystemExit) as excinfo:
         bm.main()
+    assert "fork pull requests are not supported" in str(excinfo.value)
 
 
 def test_main_plans_a_same_repository_pull_request(monkeypatch, tmp_path):
@@ -401,6 +409,47 @@ def test_workflow_files_reads_the_local_checkout(tmp_path):
 
 def test_workflow_files_returns_none_without_a_workflows_directory(tmp_path):
     assert bm.workflow_files(tmp_path) is None
+
+
+def test_workflow_files_maps_an_unreadable_file_to_none(tmp_path, monkeypatch):
+    """The per-file None is the only thing between an unreadable plan.yml and a
+    false BROKEN: `findings` degrades a None entry to UNKNOWN, but only if the
+    name reaches it at all. Dropping it would read as "no plan.yml"."""
+    d = tmp_path / ".github" / "workflows"
+    d.mkdir(parents=True)
+    (d / "plan.yml").write_bytes(b"name: x\n")
+    (d / "summary.yml").write_bytes(b"on: workflow_run\n")
+
+    real = pathlib.Path.read_bytes
+
+    def refuse(self):
+        # A chmod does not reliably deny a read on Windows, so the failure is
+        # injected at the one call that would raise on a real permission denial.
+        if self.name == "plan.yml":
+            raise OSError("permission denied")
+        return real(self)
+
+    monkeypatch.setattr(pathlib.Path, "read_bytes", refuse)
+    assert bm.workflow_files(tmp_path) == {
+        "plan.yml": None,
+        "summary.yml": b"on: workflow_run\n",
+    }
+
+
+def test_workflow_files_degrades_an_unstattable_entry_instead_of_dropping_it(tmp_path):
+    """`Path.is_file()` swallows OSError and answers False, so filtering on it
+    would DROP an entry whose stat failed -- and a dropped `plan.yml` is BROKEN,
+    not unverified. A directory named `plan.yml` stands in for that entry: it is
+    the portable way to make the listing hold a name whose bytes cannot be read.
+    """
+    d = tmp_path / ".github" / "workflows"
+    (d / "plan.yml").mkdir(parents=True)
+    assert bm.workflow_files(tmp_path) == {"plan.yml": None}
+    # And the finding that reaches the run is the degraded one, never BAD_PATH.
+    assert wi.findings(bm.workflow_files(tmp_path), "") == [
+        wi.PLAN_UNREADABLE,
+        wi.WIRING_UNREADABLE,
+    ]
 
 
 def test_the_action_supplies_the_engine_repo_to_the_matrix_step():
