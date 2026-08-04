@@ -24,6 +24,11 @@ runs:
       env:
         SHIPMATE_BASE_SHA: ${{ inputs.base-sha }}
         SHIPMATE_ALL_STACKS: ${{ inputs.all-stacks }}
+        # The engine's own owner/repo, resolved by GitHub at runtime -- the
+        # wiring check pins the consumer's reusable-summary `uses:` to it, and
+        # shipmate never hardcodes an org. Empty when this action runs from a
+        # local path, which the check treats as "any slug".
+        SHIPMATE_ENGINE_REPO: ${{ github.action_repository }}
       run: python3 "$GITHUB_ACTION_PATH/../../scripts/build-matrix"
 
     - name: Record the planned cell count

@@ -5,12 +5,39 @@ Pure core (build_matrix) is unit-tested; main() gathers inputs from terramate
 (the changed stack set + each stack's tags) and writes GitHub Actions job
 outputs. Environment membership comes purely from stack tags (CONTRACT tag
 grammar: env/<name>) -- no GitHub API or token required.
+
+main() also runs the consumer plan/summary wiring checks (scripts/wiring) and
+FAILS a pull-request run on a confident break. detect is the only job upstream
+of all three wiring failure modes, and two of the three otherwise merge green:
+GitHub resolves a workflow_run trigger against the workflow name recorded on
+the default branch, so breaking the plan workflow's name or the summary wrapper
+does not stop this pull request from getting its gate -- it stops every pull
+request afterwards, including the one opened to fix it.
 """
 
+import importlib.util
 import json
 import os
+import pathlib
 import subprocess
 import sys
+from importlib.machinery import SourceFileLoader
+
+_D = pathlib.Path(__file__).resolve().parent
+
+
+def _load(fname):
+    loader = SourceFileLoader(fname.replace("-", "_"), str(_D / fname))
+    spec = importlib.util.spec_from_loader(loader.name, loader)
+    mod = importlib.util.module_from_spec(spec)
+    loader.exec_module(mod)
+    return mod
+
+
+wi = _load("wiring")
+
+#: Pull-request events, the ones where a wiring break is still preventable.
+_PR_EVENTS = ("pull_request", "pull_request_target")
 
 MATRIX_LIMIT = 256
 
@@ -195,16 +222,80 @@ def fork_pr_error(event_name, repository, payload):
     )
 
 
+def workflow_files(root):
+    """{filename: bytes} for `.github/workflows` under `root`, or None when the
+    directory cannot be listed.
+
+    Read off the local checkout rather than the API: on a `pull_request` event
+    that checkout is the MERGE commit, which is the state the gate will actually
+    live under once this pull request lands.
+    """
+    d = pathlib.Path(root) / ".github" / "workflows"
+    try:
+        entries = sorted(p for p in d.iterdir() if p.is_file())
+    except OSError:
+        return None
+    files = {}
+    for p in entries:
+        if p.suffix not in (".yml", ".yaml"):
+            continue
+        try:
+            files[p.name] = p.read_bytes()
+        except OSError:
+            files[p.name] = None
+    return files
+
+
+def wiring_report(found, event_name):
+    """(annotation lines to print, the `::error::` line or "") for a set of
+    `wiring.findings`.
+
+    Fails only a pull-request event, exactly like `fork_pr_error`: the drift
+    path (`schedule` / `workflow_dispatch`, `all-stacks: true`) must keep
+    running against a repository whose wiring is already broken, or one merged
+    mistake takes nightly drift down in every consumer. Off that path the same
+    finding is a warning, which also makes drift a post-merge detector.
+
+    UNKNOWN never blocks and never warns. A false positive would red every pull
+    request in every consumer until an engine fix and a re-pin, so the only
+    findings allowed to reach `::error::` are the near-tautological ones
+    `scripts/wiring` classifies as BROKEN.
+
+    Deliberately no GHA data escaping, unlike doctor's `render_annotations`:
+    every message here is a module constant, and the one interpolation is
+    `ascii()` of a single line, which cannot contain a newline or a carriage
+    return. Only a literal `%` in a workflow name could render oddly, and it
+    still names the right file.
+    """
+    lines = [f"::notice title={wi.WIRING_TITLE}::{m}" for state, m in found if state == wi.UNKNOWN]
+    broken = [m for state, m in found if state == wi.BROKEN]
+    if not broken:
+        return lines, ""
+    if event_name in _PR_EVENTS:
+        return lines, "\n".join(f"::error title={wi.WIRING_TITLE}::{m}" for m in broken)
+    lines.extend(f"::warning title={wi.WIRING_TITLE}::{m}" for m in broken)
+    return lines, ""
+
+
 def main():
     all_stacks = os.environ.get("SHIPMATE_ALL_STACKS", "") == "true"
     base = os.environ.get("SHIPMATE_BASE_SHA", "")
+    event_name = os.environ.get("GITHUB_EVENT_NAME", "")
     rejection = fork_pr_error(
-        os.environ.get("GITHUB_EVENT_NAME", ""),
+        event_name,
         os.environ.get("GITHUB_REPOSITORY", ""),
         _event_payload(os.environ.get("GITHUB_EVENT_PATH", "")),
     )
     if rejection:
         raise SystemExit(rejection)
+    notes, wiring_error = wiring_report(
+        wi.findings(workflow_files("."), os.environ.get("SHIPMATE_ENGINE_REPO", "")),
+        event_name,
+    )
+    for note in notes:
+        print(note)
+    if wiring_error:
+        raise SystemExit(wiring_error)
     cells = compute_cells(all_stacks, base)
     with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
         fh.write(f"matrix={json.dumps({'include': cells})}\n")
