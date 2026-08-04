@@ -59,6 +59,7 @@ extend-include = [
     "scripts/register-app",
     "scripts/summary-comment",
     "scripts/waves",
+    "scripts/wiring",
 ]
 
 [tool.ruff.lint]

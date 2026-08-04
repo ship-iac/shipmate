@@ -170,10 +170,16 @@ def _env(name, rules=(), branch_policy=None):
 
 def _quiet_new_probes():
     """Healthy responses for the env-protection, engine-environment,
-    pin-freshness and fork-trigger probes, so tests exercising the older
+    pin-freshness, fork-trigger and wiring probes, so tests exercising the older
     gate/environment probes via the top-level `warnings()` don't pick up
-    incidental noise from these four (the empty workflow listing quiets the last
-    two at once)."""
+    incidental noise from these five.
+
+    The last three read the same workflow listing, and it has to be a correctly
+    wired one: an empty listing reads to the wiring probe as a repository with
+    no plan workflow and no `workflow_run` wrapper. The wiring fixture's `uses:`
+    line is an engine pin, so the pin probe now has something to read too and
+    needs the release endpoints to agree with it -- the pinned SHA and the SHA
+    the release lookup returns are the same `_SHA`, or it reports staleness."""
     return {
         f"repos/{_REPO}/environments/dev-eu": _env("dev-eu"),
         f"repos/{_REPO}/environments/dev-eu-apply": _env(
@@ -186,7 +192,11 @@ def _quiet_new_probes():
         f"repos/{_REPO}/environments/shipmate-engine/deployment-branch-policies": {
             "branch_policies": [{"name": _BRANCH}]
         },
-        f"{_WF_DIR}{_REF}": [],
+        f"{_WF_DIR}{_REF}": _wf_listing("plan.yml", "summary.yml"),
+        f"{_WF_DIR}/plan.yml{_REF}": _wf_file(_QUIET_PLAN),
+        f"{_WF_DIR}/summary.yml{_REF}": _wf_file(_QUIET_SUMMARY),
+        f"repos/{_ENGINE_REPO}/releases/latest": {"tag_name": "v9.9.9"},
+        f"repos/{_ENGINE_REPO}/commits/v9.9.9": {"sha": _SHA},
     }
 
 
@@ -728,11 +738,26 @@ def _wf_listing(*names):
 def _wf_file(text):
     import base64
 
-    return {"content": base64.b64encode(text.encode()).decode()}
+    return {"encoding": "base64", "content": base64.b64encode(text.encode()).decode()}
 
 
 _SHA = "a" * 40
 _OTHER_SHA = "b" * 40
+
+# The correctly wired pair `_quiet_new_probes()` serves. Defined here rather
+# than next to that fixture because interpolating `_SHA` happens at import time,
+# while the fixture's own body is only evaluated when a test calls it.
+_QUIET_PLAN = "name: shipmate · plan\non:\n  pull_request:\n"
+_QUIET_SUMMARY = (
+    "name: shipmate · summary\n"
+    "on:\n"
+    "  workflow_run:\n"
+    '    workflows: ["shipmate · plan"]\n'
+    "    types: [completed]\n"
+    "jobs:\n"
+    "  summary:\n"
+    f"    uses: {_ENGINE_REPO}/.github/workflows/summary.yml@{_SHA}\n"
+)
 
 
 def test_tag_pin_warned(monkeypatch):
@@ -762,11 +787,16 @@ def test_quoted_tag_pin_warned(monkeypatch):
 
 
 def test_non_file_workflow_entry_skipped(monkeypatch):
-    # A directory (or symlink/submodule) entry whose name happens to end in
-    # .yml must not be treated as a workflow file -- fetching its "contents"
-    # would return a list, and .get("content") would raise AttributeError.
-    # No response is registered for sub.yml's contents call, so a regression
-    # of the type check fails this test with a KeyError, not a silent pass.
+    """A directory (or symlink/submodule) whose name ends in `.yml` is not a
+    workflow file -- its "contents" read returns a list, not a blob. This probe
+    SKIPS it and keeps scanning: it stops at the first unreadable FILE, so
+    treating a non-file entry as unreadable would abort the whole directory and
+    silently drop every pin finding after it. The entry sorts FIRST here on
+    purpose, which is the arrangement that hid the tag pin below.
+
+    `_workflow_entries` keeps the entry and tags it, because the wiring probe
+    needs it -- dropping it there reads as a missing plan workflow, which is
+    BROKEN. Each probe picks; neither is served by the other's answer."""
     responses = {
         f"{_WF_DIR}{_REF}": [
             {"name": "sub.yml", "type": "dir"},
@@ -778,7 +808,7 @@ def test_non_file_workflow_entry_skipped(monkeypatch):
     out = doctor._pin_warnings(_ctx())
     assert len(out) == 1
     assert out[0][0] == doctor.WARNING
-    assert "acme/engine@v2" in out[0][1]
+    assert "tag or branch" in out[0][1] and "acme/engine@v2" in out[0][1]
 
 
 def test_stale_sha_pin_warned(monkeypatch):
@@ -1980,3 +2010,203 @@ def test_probe_count_is_stated_correctly_in_the_docs():
     protection = (ENGINE / "docs" / "branch-protection.md").read_text(encoding="utf-8")
     assert f"combining {word}" in protection
     assert f"{plan_word} of the {word} probes" in protection
+
+
+# A look-alike separator: U+2022 BULLET where the name carries U+00B7 MIDDLE
+# DOT. Renders close enough that nobody spots it in a diff, and GitHub's
+# `workflow_run` matcher never fires.
+_LOOKALIKE_PLAN = "name: shipmate • plan\non:\n  pull_request:\n"
+
+
+def _wiring_responses(plan=_QUIET_PLAN, summary=_QUIET_SUMMARY):
+    return {
+        f"{_WF_DIR}{_REF}": _wf_listing("plan.yml", "summary.yml"),
+        f"{_WF_DIR}/plan.yml{_REF}": _wf_file(plan),
+        f"{_WF_DIR}/summary.yml{_REF}": _wf_file(summary),
+    }
+
+
+def test_wiring_probe_is_registered():
+    assert doctor._wiring_warnings in doctor.PROBES
+
+
+def test_wiring_probe_reports_a_broken_name_as_a_warning(monkeypatch):
+    """A wiring break is a repository misconfiguration, not a degrade, so it
+    reads WARNING -- the loudest thing doctor may emit, since doctor never
+    fails a run."""
+    responses = _wiring_responses(plan=_LOOKALIKE_PLAN)
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    found = doctor._wiring_warnings(_ctx())
+    assert [lvl for lvl, _ in found] == [doctor.WARNING]
+    assert "U+00B7 MIDDLE DOT" in found[0][1]
+
+
+def test_wiring_probe_degrades_without_a_commit():
+    """Same precondition as the pin probe: with no commit under examination
+    there is nothing to read, and reading the default branch instead would
+    report the wiring broken on the very pull request that fixes it."""
+    ctx = _ctx(head_sha="")
+    found = doctor._wiring_warnings(ctx)
+    assert [lvl for lvl, _ in found] == [doctor.NOTICE]
+    assert found == [doctor.WIRING_NO_COMMIT]
+
+
+def test_wiring_probe_makes_no_api_call_without_a_commit(monkeypatch):
+    """A probe that read something anyway would be reading the wrong ref.
+
+    `pytest.fail`, not a plain exception: `_workflow_names` catches
+    `(Exception, SystemExit)` and degrades to a NOTICE, which is the same shape
+    the no-commit finding has -- the test would pass against the very mutation
+    it exists to catch. A failed assertion is a BaseException and propagates."""
+    monkeypatch.setattr(
+        doctor, "_gh_json", lambda path: pytest.fail(f"wiring probe hit the API: {path}")
+    )
+    assert doctor._wiring_warnings(_ctx(head_sha="")) == [doctor.WIRING_NO_COMMIT]
+
+
+def test_wiring_probe_reads_the_commit_under_examination(monkeypatch):
+    """Every contents call carries the head SHA, for the pin probe's reason: a
+    default-branch read reports the wiring broken on the pull request that
+    fixes it. Correct wiring at that commit is silent."""
+    responses = _wiring_responses()
+    asked = []
+
+    def gh(path):
+        asked.append(path)
+        return responses[path]
+
+    monkeypatch.setattr(doctor, "_gh_json", gh)
+    assert doctor._wiring_warnings(_ctx()) == []
+    assert asked[0] == f"{_WF_DIR}{_REF}"
+    assert asked and all(path.endswith(_REF) for path in asked)
+
+
+def test_wiring_probe_degrades_on_an_unreadable_listing(monkeypatch):
+    """An unreadable listing is "not verified", never "no plan workflow" --
+    the probe hands `wiring.findings` None rather than an empty mapping."""
+
+    def gh(path):
+        raise SystemExit(f"::error::command failed (1): gh api {path}")
+
+    monkeypatch.setattr(doctor, "_gh_json", gh)
+    found = doctor._wiring_warnings(_ctx())
+    assert [lvl for lvl, _ in found] == [doctor.NOTICE]
+    assert found == [(doctor.NOTICE, doctor.wi.LISTING_UNREADABLE[1])]
+
+
+def test_the_wiring_annotation_title_is_not_doctors():
+    """Two claims rest on these two titles differing, and prose is all that has
+    ever held them apart. `render_annotations` writes DOCTOR_TITLE and
+    `harvest_sections` filters it back out, so a wiring annotation sharing that
+    title would be dropped as doctor's own -- and `build-matrix`, which fails a
+    run, would be claiming doctor's never-fails identity while doing it."""
+    assert doctor.wi.WIRING_TITLE != doctor.DOCTOR_TITLE
+
+
+def test_a_non_file_workflow_entry_is_unreadable_not_absent(monkeypatch):
+    """`_workflow_names` drops nothing, matching `build-matrix.workflow_files`.
+    A `plan.yml` the contents API reports as a directory or a symlink used to
+    vanish from this listing, which reads as "no plan workflow" -- a WARNING for
+    a repository whose wiring was never examined."""
+    responses = {
+        f"{_WF_DIR}{_REF}": [{"name": "plan.yml", "type": "dir"}],
+        f"{_WF_DIR}/plan.yml{_REF}": [{"name": "nested.yml", "type": "file"}],
+    }
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    found = doctor._wiring_warnings(_ctx())
+    assert [lvl for lvl, _ in found] == [doctor.NOTICE, doctor.NOTICE]
+    assert found == [
+        (doctor.NOTICE, doctor.wi.PLAN_UNREADABLE[1]),
+        (doctor.NOTICE, doctor.wi.WIRING_UNREADABLE[1]),
+    ]
+
+
+def test_a_non_file_workflow_entry_does_not_blind_the_fork_trigger_probe(monkeypatch):
+    """The pin probe's twin. This probe exists to surface the one
+    misconfiguration on docs/hardening.md an outside contributor can reach, and
+    it also stops at the first unreadable file -- so a non-file entry sorting
+    ahead of the real workflows must be skipped, not treated as unreadable.
+    Treating it as unreadable reported "could not read" and hid the
+    `pull_request_target` trigger sitting in the very next file."""
+    responses = {
+        f"{_WF_DIR}{_REF}": [
+            {"name": "sub.yml", "type": "dir"},
+            {"name": "plan.yml", "type": "file"},
+        ],
+        f"{_WF_DIR}/plan.yml{_REF}": _wf_file("on:\n  pull_request_target:\n"),
+    }
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    out = doctor._fork_trigger_warnings(_ctx())
+    assert len(out) == 1
+    assert out[0][0] == doctor.WARNING
+    assert "pull_request_target" in out[0][1]
+
+
+def test_an_unencoded_blob_is_unreadable_not_empty(monkeypatch):
+    """A file over 1 MB comes back with `encoding: "none"` and an empty
+    `content`. Decoded anyway, that is a readable EMPTY `plan.yml` -- no
+    top-level `name:`, which the wiring check calls BROKEN."""
+    responses = _wiring_responses()
+    responses[f"{_WF_DIR}/plan.yml{_REF}"] = {"encoding": "none", "content": ""}
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    found = doctor._wiring_warnings(_ctx())
+    assert found == [(doctor.NOTICE, doctor.wi.PLAN_UNREADABLE[1])]
+
+
+def test_harvest_drops_the_warning_level_wiring_annotation():
+    """`build-matrix` emits a wiring finding as a WARNING when it is not failing
+    the run, and the live probe in this same report re-states it -- so keeping
+    both double-reports the problem, the same reason DOCTOR_TITLE is filtered."""
+    anns = [
+        {
+            "annotation_level": "warning",
+            "title": doctor.wi.WIRING_TITLE,
+            "message": "x",
+            "check_name": "shipmate / detect",
+        },
+        {
+            "annotation_level": "warning",
+            "title": "something else",
+            "message": "y",
+            "check_name": "shipmate / detect",
+        },
+    ]
+    sections = doctor.harvest_sections(anns)
+    kept = [a["title"] for rows in sections.values() for a in rows]
+    assert kept == ["something else"]
+
+
+def test_harvest_keeps_the_failure_level_wiring_annotation():
+    """The FAILURE-level one is the annotation that killed `detect`, and it must
+    survive: the two sides read different commits -- `detect` the merge commit,
+    the live probe the pull request head -- so a break living only on the base
+    branch reds the run while the probe reads clean. Dropping it there renders
+    an all-clear over a red, gate-blocking run with the reason stated nowhere,
+    which is the opposite of what the harvest is for."""
+    anns = [
+        {
+            "annotation_level": "failure",
+            "title": doctor.wi.WIRING_TITLE,
+            "message": "no plan.yml",
+            "check_name": "shipmate / detect",
+        },
+    ]
+    sections = doctor.harvest_sections(anns)
+    kept = [a["message"] for rows in sections.values() for a in rows]
+    assert kept == ["no plan.yml"]
+
+
+def test_harvest_drops_doctors_own_annotation_at_every_level():
+    """DOCTOR_TITLE is unconditional, unlike the wiring title: doctor's own
+    annotations are only ever notices and warnings, and the live probes restate
+    all of them against current settings."""
+    anns = [
+        {
+            "annotation_level": level,
+            "title": doctor.DOCTOR_TITLE,
+            "message": "x",
+            "check_name": "shipmate / detect",
+        }
+        for level in doctor.HARVEST_LEVELS
+    ]
+    assert doctor.harvest_sections(anns) == {}

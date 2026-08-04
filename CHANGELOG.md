@@ -11,6 +11,63 @@ section below names the SHA the release tags.
 The version line stays `v0.x` while action inputs, check names, and the comment
 grammar are declared unstable in `README.md`.
 
+## [Unreleased]
+
+No consumer YAML change: **re-pinning is the only action required** — and the
+re-pin pull request is itself where a repository with already-broken
+plan/summary wiring finds out. GitHub resolves a workflow file, and with it the
+`uses:` pins inside it, from the pull request's own branch, so that pull
+request's `detect` job already runs the new `actions/build-matrix` and goes red
+on the spot. Expect it, rather than reading it as a regression: the finding
+names the condition and the file to fix, and fixing it in the same pull request
+greens the run.
+
+### Added
+
+- **The consumer wiring the `shipmate / gate` status depends on is now
+  checked on every plan run.** Four conditions live in files the engine does
+  not own — the plan workflow at `.github/workflows/plan.yml`, its top-level
+  `name:` being exactly `shipmate · plan` (U+00B7 middle dot), that workflow
+  triggering on `pull_request` (`pull_request_target` is a different event and
+  does not satisfy the engine's guard), and some workflow triggering on
+  `workflow_run` for that name and calling the engine's reusable
+  `.github/workflows/summary.yml` — and until now nothing checked any
+  of them: a break produced a plan that ran to completion, no apply checks, no
+  sticky comment, no gate status, and no error anywhere. `actions/build-matrix`
+  now reads the workflow files out of the checkout it already has and **fails
+  `detect`** on a confident break for a `pull_request` or
+  `pull_request_target` event. On any other event — the drift schedule — the
+  same finding is a warning instead, so one merged mistake cannot take nightly
+  drift down in every consumer; anything uncertain is a notice and never
+  blocks.
+- **`shipmate doctor` gained a tenth probe** reporting those same three
+  conditions on demand, at the commit under examination. Comment-ops is
+  triggered by `issue_comment` and is not downstream of the summary wiring, so
+  the report still answers when the wiring is broken. Doctor never fails a run,
+  so the probe is `WARNING`/`NOTICE` only; `detect` is the half that blocks.
+
+### Fixed
+
+- **`CONTRACT.md` described the name-side failure wrongly, and the correction
+  is the reason `detect` is where the check lives.** It said a renamed `name:`
+  means the consumer's `workflow_run` trigger "simply never fires". GitHub in
+  fact resolves `workflow_run.workflows:` against the workflow entity's
+  **default-branch** name, so the renaming pull request still fires the
+  trigger, still gets its gate, and merges green; the breakage begins at merge
+  and applies to every pull request afterwards — including the one opened to
+  fix it, which is gateless and needs an administrator. The same holds for an
+  edit to the consumer's own `summary.yml`, for the neighbouring reason. Only
+  the **path** half fails closed before the merge, via the engine's
+  `workflow_run.path` guard. Two of the three breaks therefore merge green,
+  which is why the check runs in `detect` on the pull request that introduces
+  them rather than being left to doctor.
+- **Doctor's `pull_request_target` probe missed the trigger in a workflow file
+  written with a byte-order mark.** Doctor now decodes workflow bytes through
+  the shared wiring decoder, which strips one leading U+FEFF. A BOM'd file with
+  `on:` on line 1 previously failed the column-0 anchor, so the probe found no
+  `on:` block at all and reported nothing — a false negative on a hardening
+  probe. The pin probe was unaffected; its match is not column-anchored.
+
 ## [0.4.0] — 2026-08-03
 
 Tags <SHA>.

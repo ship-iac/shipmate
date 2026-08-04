@@ -254,12 +254,14 @@ only labels the output as shipmate's own.
 `shipmate doctor` posts a consolidated, sticky report — one comment per pull
 request, identified by the HTML marker `<!-- shipmate:doctor -->` (distinct
 from the plan comment's `<!-- shipmate:summary -->`) and upserted in place the
-same way. It combines nine live settings probes (gate ruleset, default-branch
+same way. It combines ten live settings probes (gate ruleset, default-branch
 `pull_request` rule, environment
 pair existence, environment protection shape, the `shipmate-engine`
 environment's own existence and default-branch scoping, `pull_request_target`
 triggers in the consumer's workflow files, engine action-pin
-freshness, approvers-team resolvability, and App installation permission
+freshness, the consumer plan/summary wiring the gate status silently
+depends on (§Post-plan topology),
+approvers-team resolvability, and App installation permission
 drift — see `docs/branch-protection.md`) with a harvest of the warning and failure
 annotations GitHub already recorded on this commit's workflow runs
 (shipmate's own and any other Actions workflow run on that commit;
@@ -270,7 +272,7 @@ when the report was rendered, it says so and asks for the command again once
 they have, and if the harvest itself could not be read in full it says that
 too — the two are separate statements, since a run that has not finished has
 recorded nothing yet while a run that could not be read may have recorded
-plenty. Only seven of the nine
+plenty. Only eight of the ten
 probes can produce a finding from the plan path's own `annotate`-mode
 invocation: the approvers-team probe needs the `SHIPMATE_TEAM` environment
 variable, which the plan path does not supply, so it silently returns
@@ -507,23 +509,57 @@ policy for a different reason:
 **Requirement, verbatim, in two halves that must both hold: the consumer's
 plan workflow must live at `.github/workflows/plan.yml`, and its top-level
 `name:` must be `shipmate · plan`.** Two independent checks gate whether
-`summary.yml` ever runs, and either one failing is equally silent and
-equally permanent:
+`summary.yml` ever runs, and either one failing is equally silent — but they
+break at different moments, and only one of them breaks the pull request that
+introduces it:
 
 - the consumer's `summary.yml` triggers on
   `workflow_run: { workflows: ["shipmate · plan"] }` — GitHub matches this by
-  the completed workflow's **name**, not its file path, so renaming
-  `plan.yml`'s `name:` field means this trigger simply never fires;
-  nothing downstream of it ever runs;
+  the completed workflow's **name**, not its file path, and it resolves that
+  name against the workflow entity as recorded on the **default branch**, not
+  against the name the completed run itself carried. A branch that renames
+  `plan.yml`'s `name:` therefore still fires the trigger for its own plan run:
+  the renaming pull request gets its gate and merges green. The breakage
+  begins at **merge**, and applies to every pull request afterwards —
+  including the one opened to fix it, which is itself gateless and needs an
+  administrator to merge. Editing the consumer's own `summary.yml` behaves the
+  same way, for the neighbouring reason: a `workflow_run` trigger is read from
+  the default branch, so breaking the wrapper takes effect only once it lands
+  there;
 - the trusted, engine-defined `summary.yml` it calls additionally checks
   `github.event.workflow_run.path == '.github/workflows/plan.yml'` exactly —
   so even if the *name* still matches, moving the plan matrix to a
-  differently-named **file** fails this guard instead.
+  differently-named **file** fails this guard instead. This is the half that
+  fails closed **before** the merge: the guard reads the completed run's own
+  path, so the pull request that moves the file loses its own gate.
 
-A consumer that renames either one gets a plan that runs to completion,
+A consumer that breaks either one gets a plan that runs to completion,
 produces no summary, no `apply` checks, and no `shipmate / gate` status, and
-raises no error anywhere: the rename is silent and permanent until someone
-notices that merges never gate.
+raises no error anywhere.
+
+`actions/build-matrix` runs all three checks — the path, the `name:`, and a
+`workflow_run` wrapper calling the engine's reusable `summary.yml` — inside
+`detect` on every plan run, off the checkout it already has, and **fails
+`detect`** on a confident break for a `pull_request` or `pull_request_target`
+event; that is what catches the two default-branch-resolved breaks on the pull
+request introducing them, rather than after the merge that makes them
+permanent. On any other event (the drift schedule) the same finding is a
+warning, so one merged mistake does not take nightly drift down everywhere.
+`shipmate doctor` reports the same three conditions on demand, read at the
+commit under examination — comment-ops is not downstream of the summary
+wiring, so that report still answers when the wiring is broken.
+
+Two limits of that check are worth stating, because both are deliberate. It
+recognises the wrapper by finding the `workflow_run` trigger naming
+`shipmate · plan` and the `uses:` of the engine's reusable `summary.yml` **in
+the same file**. A wrapper that instead delegates the `uses:` to a second
+workflow — local, or shared from another repository — is a valid GitHub
+Actions topology and gates correctly, but the check cannot follow the hop, so
+it reports the wiring as *unverified* rather than failing the run. And on a
+`pull_request_target` event the checkout is the base ref, so the check judges
+the wiring the pull request has not changed yet; that matters little, because a
+plan workflow on `pull_request_target` is itself reported broken — the engine's
+summary job requires `workflow_run.event == 'pull_request'` exactly.
 
 Binding these jobs to the `shipmate-engine` environment rather than trusting
 the trigger alone closes two paths a trigger check alone would not:

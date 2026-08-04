@@ -41,6 +41,7 @@ KNOWN_CROSS_LOADERS = {
     "apply-all-detect",
     "apply-comment",
     "apply-detect",
+    "build-matrix",
     "deploy-detect",
     "doctor",
     "env-order",
