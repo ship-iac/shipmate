@@ -13,10 +13,14 @@ grammar are declared unstable in `README.md`.
 
 ## [Unreleased]
 
-No consumer YAML change: **re-pinning is the only action required.** A
-repository whose plan/summary wiring is already broken will start failing
-`detect` on its next pull request after the re-pin — that is the intended
-signal, and the finding names the file to fix.
+No consumer YAML change: **re-pinning is the only action required** — and the
+re-pin pull request is itself where a repository with already-broken
+plan/summary wiring finds out. GitHub resolves a workflow file, and with it the
+`uses:` pins inside it, from the pull request's own branch, so that pull
+request's `detect` job already runs the new `actions/build-matrix` and goes red
+on the spot. Expect it, rather than reading it as a regression: the finding
+names the condition and the file to fix, and fixing it in the same pull request
+greens the run.
 
 ### Added
 
