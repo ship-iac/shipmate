@@ -53,6 +53,7 @@ WIRING_TITLE = "shipmate wiring"
 _NAME_KEY = re.compile(r"""^["']?name["']?[ \t]*:(?P<rest>.*)$""")
 _ON_KEY = re.compile(r"""^["']?on["']?[ \t]*:(?P<rest>.*)$""")
 _WORKFLOW_RUN = re.compile(r"(?<![\w-])workflow_run(?![\w-])")
+_WORKFLOWS_KEY = re.compile(r"""["']?workflows["']?[ \t]*:""")
 
 BAD_PATH = (
     BROKEN,
@@ -67,7 +68,10 @@ NO_WIRING = (
     "no workflow triggers on `workflow_run` for the plan workflow and calls the "
     f"engine's reusable `{SUMMARY_PATH}` — so nothing creates the apply checks, "
     "the plan comment or the `shipmate / gate` status, and every pull request "
-    "stays unmergeable. Add the wrapper from README.md.",
+    "stays unmergeable. Copy `.github/workflows/summary.yml` from any of the "
+    "`repo-example-{stacks,folders,workspaces}` sample repositories (README.md "
+    "§Example repositories) — the wrapper is identical across all three, and "
+    "CONTRACT.md §Post-plan topology states what it has to keep.",
 )
 LISTING_UNREADABLE = (
     UNKNOWN,
@@ -80,6 +84,12 @@ PLAN_UNREADABLE = (
 WIRING_UNREADABLE = (
     UNKNOWN,
     "could not read every workflow file — the `workflow_run` wiring was not verified.",
+)
+WIRING_ESCAPED = (
+    UNKNOWN,
+    f"a workflow triggers on `workflow_run` into the engine's `{SUMMARY_PATH}`, but its "
+    "`workflows:` value carries a backslash escape this check does not process — it was "
+    f"not compared against `{PLAN_NAME}`.",
 )
 NAME_UNREADABLE = (
     UNKNOWN,
@@ -97,8 +107,13 @@ def decode(data):
     U+FFFD cannot occur inside PLAN_NAME, and UTF-8 decoding is injective on
     valid input, so `decode(b) == PLAN_NAME` holds exactly when `b` was that
     literal's UTF-8.
+
+    One leading U+FEFF is dropped. A BOM'd `plan.yml` carries its byte-order
+    mark in front of the column-0 `name:` key, which reads as no top-level
+    `name:` at all and would be reported broken. U+FEFF cannot occur inside
+    PLAN_NAME either, so removing it leaves the equivalence above intact.
     """
-    return data.decode("utf-8", "replace")
+    return data.decode("utf-8", "replace").removeprefix("\ufeff")
 
 
 def _strip_comment(line):
@@ -177,28 +192,56 @@ def _engine_summary(engine_repo):
     same-named reusable workflow does not satisfy the check. It is empty when
     the action runs from a local path, and any slug then passes: erring toward a
     false PASS is the required direction for a check that can fail a run.
+
+    Only the SLUG is case-insensitive, and deliberately so: GitHub resolves an
+    owner/repo case-insensitively, so `Acme/Shipmate` is the engine, while the
+    workflow path after it is a file in that repository and `Summary.yml` is not
+    that file.
     """
     slug = re.escape(engine_repo) if engine_repo else r"[\w.-]+/[\w.-]+"
-    return re.compile(rf"""uses:\s*["']?{slug}/{re.escape(SUMMARY_PATH)}@""")
+    return re.compile(rf"""uses:\s*["']?(?i:{slug})/{re.escape(SUMMARY_PATH)}@""")
 
 
-def summary_wiring_present(text, engine_repo):
-    """Whether one workflow file wires the engine's summary to the plan run.
+def _escaped_workflows(on_text):
+    """Whether a backslash follows the `workflows:` key in an `on:` block. A
+    `workflows: ["shipmate \\u00b7 plan"]` is the plan name spelled the long way,
+    and this module does not process YAML escapes -- the same reason `_unquote`
+    degrades rather than comparing raw. Containment, not an escape processor:
+    the answer only ever downgrades a BROKEN to an UNKNOWN."""
+    m = _WORKFLOWS_KEY.search(on_text)
+    return bool(m) and "\\" in on_text[m.end() :]
 
-    Both halves must be in the same file: a `workflow_run` trigger naming the
-    plan workflow, and a call into the engine's reusable summary workflow.
-    Comments are stripped from both reads -- a repository that commented the
-    wiring out has no wiring, and a commented-out name is exactly the line
-    somebody leaves behind when they break it.
+
+def _wiring_state(text, engine_repo):
+    """ "present", "escaped" or "absent" for one workflow file.
+
+    Both halves of "present" must be in the same file: a `workflow_run` trigger
+    naming the plan workflow, and a call into the engine's reusable summary
+    workflow. Comments are stripped from both reads -- a repository that
+    commented the wiring out has no wiring, and a commented-out name is exactly
+    the line somebody leaves behind when they break it.
+
+    "escaped" is that same wiring with a `workflows:` value this module cannot
+    read faithfully. Reporting it broken would contradict the name half, which
+    already degrades on the identical spelling.
     """
     inline, block = _on_block(text)
     if inline is None:
-        return False
+        return "absent"
     on_text = "\n".join([inline, *block])
-    if not _WORKFLOW_RUN.search(on_text) or PLAN_NAME not in on_text:
-        return False
+    if not _WORKFLOW_RUN.search(on_text):
+        return "absent"
     body = "\n".join(_strip_comment(ln) for ln in text.splitlines())
-    return bool(_engine_summary(engine_repo).search(body))
+    if not _engine_summary(engine_repo).search(body):
+        return "absent"
+    if PLAN_NAME in on_text:
+        return "present"
+    return "escaped" if _escaped_workflows(on_text) else "absent"
+
+
+def summary_wiring_present(text, engine_repo):
+    """Whether one workflow file wires the engine's summary to the plan run."""
+    return _wiring_state(text, engine_repo) == "present"
 
 
 def _name_findings(blob):
@@ -235,12 +278,15 @@ def _name_findings(blob):
 
 def _wiring_findings(files, engine_repo):
     readable = [v for v in files.values() if v is not None]
-    if any(summary_wiring_present(decode(v), engine_repo) for v in readable):
+    states = [_wiring_state(decode(v), engine_repo) for v in readable]
+    if "present" in states:
         return []
     # An unreadable file might have been the one that wired it, so an
     # incomplete read can only ever say "not verified".
     if len(readable) != len(files):
         return [WIRING_UNREADABLE]
+    if "escaped" in states:
+        return [WIRING_ESCAPED]
     return [NO_WIRING]
 
 

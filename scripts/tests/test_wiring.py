@@ -125,6 +125,51 @@ def test_a_backslash_escape_in_a_quoted_name_degrades():
     assert states(found) == [wi.UNKNOWN]
 
 
+def test_a_backslash_escape_in_an_unquoted_name_degrades():
+    """A plain scalar carries no escapes, so this repository is probably broken --
+    but "probably" is not what BROKEN means here, and the sequence is still the
+    correct name spelled the long way."""
+    plan = (
+        GOOD_PLAN.decode().replace("name: shipmate · plan", "name: shipmate \\u00b7 plan").encode()
+    )
+    found = wi.findings(good_files(**{"plan.yml": plan}), ENGINE_REPO)
+    assert states(found) == [wi.UNKNOWN]
+
+
+def test_a_backslash_in_a_single_quoted_name_is_not_an_escape():
+    """Single quotes carry no escapes in YAML, so `'shipmate \\u00b7 plan'` really
+    is that literal text and really is the wrong name. The double-quoted spelling
+    degrades; this one must not, or the degrade swallows a genuine break."""
+    plan = (
+        GOOD_PLAN.decode()
+        .replace("name: shipmate · plan", "name: 'shipmate \\u00b7 plan'")
+        .encode()
+    )
+    found = wi.findings(good_files(**{"plan.yml": plan}), ENGINE_REPO)
+    assert states(found) == [wi.BROKEN]
+
+
+def test_a_name_continued_on_the_following_line_degrades():
+    """`plan_name`'s docstring counts "a value continued on following lines" as
+    block, not just a `|`/`>` header -- and that spelling folds to the correct
+    name just as legitimately."""
+    plan = GOOD_PLAN.decode().replace("name: shipmate · plan", "name:\n  shipmate · plan").encode()
+    found = wi.findings(good_files(**{"plan.yml": plan}), ENGINE_REPO)
+    assert states(found) == [wi.UNKNOWN]
+
+
+def test_a_byte_order_mark_does_not_hide_the_plan_name():
+    """A BOM'd `plan.yml` carries U+FEFF in front of its column-0 `name:`, which
+    reads as no top-level `name:` at all -- a BROKEN on a correctly-named
+    workflow. Only `plan.yml` is exposed: its `name:` is the first line."""
+    plan = b"\xef\xbb\xbf" + GOOD_PLAN
+    assert wi.findings(good_files(**{"plan.yml": plan}), ENGINE_REPO) == []
+
+
+def test_decode_drops_a_leading_byte_order_mark():
+    assert wi.decode(b"\xef\xbb\xbfname: x") == "name: x"
+
+
 def test_an_indented_name_is_not_the_top_level_one():
     """A job's `name:` is indented; only column 0 is the workflow's."""
     plan = ("on:\n  pull_request:\njobs:\n  detect:\n    name: shipmate · plan\n").encode()
@@ -218,6 +263,62 @@ def test_the_plan_name_inside_a_comment_does_not_qualify():
     )
     found = wi.findings(good_files(**{"summary.yml": summary}), ENGINE_REPO)
     assert wi.BROKEN in states(found)
+
+
+def test_a_blank_line_or_a_column_zero_comment_does_not_end_the_on_block():
+    """`_on_block` promises neither ends the block, and the sample wrappers put a
+    column-0 comment block immediately above `on:` -- the same author style one
+    line lower would otherwise read as an empty trigger block and warn."""
+    summary = (
+        GOOD_SUMMARY.decode()
+        .replace(
+            "on:\n  workflow_run:",
+            "on:\n\n# runs at the default-branch ref\n  workflow_run:",
+        )
+        .encode()
+    )
+    assert wi.findings(good_files(**{"summary.yml": summary}), ENGINE_REPO) == []
+
+
+def test_an_escaped_plan_name_in_the_wiring_degrades_rather_than_warns():
+    """The name half degrades on `"shipmate \\u00b7 plan"` because it is the plan
+    name spelled the long way; the wiring half compares the same literal against
+    the same spelling and must reach the same answer."""
+    summary = GOOD_SUMMARY.decode().replace('"shipmate · plan"', '"shipmate \\u00b7 plan"').encode()
+    found = wi.findings(good_files(**{"summary.yml": summary}), ENGINE_REPO)
+    assert states(found) == [wi.UNKNOWN]
+
+
+def test_a_mixed_case_engine_slug_is_accepted():
+    """GitHub resolves a `uses:` owner/repo case-insensitively, so `Acme/Shipmate`
+    is the engine and warning on it would fail every pull request in a repository
+    whose wiring works."""
+    summary = GOOD_SUMMARY.decode().replace("acme/shipmate/", "Acme/Shipmate/").encode()
+    assert wi.findings(good_files(**{"summary.yml": summary}), ENGINE_REPO) == []
+
+
+def test_a_mixed_case_workflow_path_is_not_accepted():
+    """Only the slug is case-insensitive. The path after it is a file in the
+    engine repository, and `Summary.yml` is not that file."""
+    summary = GOOD_SUMMARY.decode().replace("/summary.yml@", "/Summary.yml@").encode()
+    found = wi.findings(good_files(**{"summary.yml": summary}), ENGINE_REPO)
+    assert wi.BROKEN in states(found)
+
+
+def test_the_no_wiring_remediation_points_at_something_that_exists():
+    """This is the sentence a consumer reads when every one of their pull requests
+    has just started failing. README.md carries no `uses:` snippet to copy, so the
+    message points at the sample repositories and at the contract section that
+    states the wrapper's two halves -- both of which have to be there."""
+    _, message = wi.NO_WIRING
+    readme = (ENGINE / "README.md").read_text(encoding="utf-8")
+    contract = (ENGINE / "CONTRACT.md").read_text(encoding="utf-8")
+    samples = "repo-example-{stacks,folders,workspaces}"
+    assert samples in message and samples in readme
+    assert "README.md §Example repositories" in message
+    assert "\n## Example repositories\n" in readme
+    assert "CONTRACT.md §Post-plan topology" in message
+    assert "\n## Post-plan topology\n" in contract
 
 
 def test_an_unreadable_listing_degrades():
