@@ -521,18 +521,22 @@ def _contents_ref(ctx):
 
 
 def _workflow_names(base):
-    """([file names], readable): the `.yml`/`.yaml` entries of the workflow
-    directory listing. Non-file entries (a directory or symlink whose name ends
-    in `.yml`) are dropped — their "contents" read returns a list, not a blob."""
+    """([names], readable): the `.yml`/`.yaml` entries of the workflow
+    directory listing.
+
+    Nothing is dropped for not being a regular file, matching
+    `build-matrix.workflow_files` entry for entry — a non-file `plan.yml`
+    (directory or symlink) that vanished from this listing would reach the
+    wiring probe as "no plan workflow", which is BROKEN, where an entry that
+    cannot be read is only unverified. Such an entry's contents read returns a
+    list rather than a blob, and `_workflow_bytes` maps that to None like any
+    other unreadable entry, which the pin and fork-trigger probes already
+    degrade on."""
     try:
         listing = _gh_json(base)
     except (Exception, SystemExit):  # noqa: BLE001 - degrade, see PIN_UNREADABLE
         return [], False
-    names = []
-    for entry in listing:
-        if entry.get("type") == "file" and entry["name"].endswith((".yml", ".yaml")):
-            names.append(entry["name"])
-    return names, True
+    return [e["name"] for e in listing if e["name"].endswith((".yml", ".yaml"))], True
 
 
 def _workflow_bytes(path):
@@ -541,10 +545,18 @@ def _workflow_bytes(path):
     Bytes, not text: the wiring probe compares a workflow name whose whole
     failure mode is a lossy re-encoding, and `wiring.decode` owns the single
     decode policy both it and `build-matrix` read through.
+
+    Anything that is not a base64 blob is unreadable, not empty. A directory
+    entry answers with a list, and a file over 1 MB answers with
+    `encoding: "none"` and an empty `content` — which would otherwise decode to
+    a readable EMPTY `plan.yml`, reported BROKEN for having no top-level
+    `name:`.
     """
     try:
         blob = _gh_json(path)
     except (Exception, SystemExit):  # noqa: BLE001 - degrade, see PIN_UNREADABLE
+        return None
+    if not isinstance(blob, dict) or blob.get("encoding") != "base64":
         return None
     return base64.b64decode(blob.get("content", ""))
 
@@ -785,6 +797,12 @@ def _wiring_warnings(ctx):
     Read at the commit under examination for the pin probe's reason: a
     default-branch read would report the wiring broken on the very pull request
     that fixes it.
+
+    Deliberately no `engine_repo` precondition, unlike the pin probe's
+    PIN_NO_ENGINE: two of the three checks never look at it, so refusing to
+    report is a strictly worse all-clear than reporting them, and the value is
+    empty only for a local-path action -- which a consumer pinning by SHA
+    cannot be running.
     """
     ref = _contents_ref(ctx)
     if ref is None:

@@ -51,6 +51,11 @@ SUMMARY_PATH = ".github/workflows/summary.yml"
 WIRING_TITLE = "shipmate wiring"
 
 _NAME_KEY = re.compile(r"""^["']?name["']?[ \t]*:(?P<rest>.*)$""")
+#: `on` at column 0 only, optionally quoted: a workflow's `on:` is a top-level
+#: key, so an indented one belongs to something else. Unanchored, a
+#: `    python-version: 3.12` would match (`versi` + `on:`) and silently
+#: retarget the block both this module's wiring checks and doctor's
+#: `pull_request_target` probe read.
 _ON_KEY = re.compile(r"""^["']?on["']?[ \t]*:(?P<rest>.*)$""")
 _WORKFLOW_RUN = re.compile(r"(?<![\w-])workflow_run(?![\w-])")
 _WORKFLOWS_KEY = re.compile(r"""["']?workflows["']?[ \t]*:""")
@@ -71,7 +76,9 @@ NO_WIRING = (
     "stays unmergeable. Copy `.github/workflows/summary.yml` from any of the "
     "`repo-example-{stacks,folders,workspaces}` sample repositories (README.md "
     "§Example repositories) — the wrapper is identical across all three, and "
-    "CONTRACT.md §Post-plan topology states what it has to keep.",
+    "CONTRACT.md §Post-plan topology states what it has to keep. Both halves "
+    "have to be in the same file: a wrapper that delegates the `uses:` to a "
+    "second local workflow reads as no wiring here.",
 )
 LISTING_UNREADABLE = (
     UNKNOWN,
@@ -189,9 +196,13 @@ def _engine_summary(engine_repo):
 
     The slug is pinned to the engine when it is known -- `github.action_repository`,
     resolved by GitHub at runtime, never hardcoded -- so another org's
-    same-named reusable workflow does not satisfy the check. It is empty when
-    the action runs from a local path, and any slug then passes: erring toward a
-    false PASS is the required direction for a check that can fail a run.
+    same-named reusable workflow does not satisfy the check. It is empty only
+    when the action runs from a local path -- unsupported for a consumer, which
+    pins the engine by SHA -- and any slug then passes: erring toward a false
+    PASS is the required direction for a check that can fail a run. That
+    fallback does not make a vendored engine work, and is not meant to: such a
+    wrapper says `uses: ./.github/workflows/summary.yml`, which carries no slug
+    and no `@ref`, so this matcher misses it whatever the slug pattern is.
 
     Only the SLUG is case-insensitive, and deliberately so: GitHub resolves an
     owner/repo case-insensitively, so `Acme/Shipmate` is the engine, while the
@@ -213,7 +224,7 @@ def _escaped_workflows(on_text):
 
 
 def _wiring_state(text, engine_repo):
-    """ "present", "escaped" or "absent" for one workflow file.
+    """One workflow file's state: "present", "escaped" or "absent".
 
     Both halves of "present" must be in the same file: a `workflow_run` trigger
     naming the plan workflow, and a call into the engine's reusable summary

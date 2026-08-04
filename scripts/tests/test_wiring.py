@@ -177,6 +177,19 @@ def test_an_indented_name_is_not_the_top_level_one():
     assert wi.BROKEN in states(found)
 
 
+def test_an_indented_on_is_not_the_top_level_one():
+    """`_ON_KEY`'s column-0 anchor, the `_NAME_KEY` guard above's twin. Any key
+    ending in `on` is an unanchored match -- `python-version: 3.12` is `versi` +
+    `on:` -- and matching it retargets the block both the wiring checks and
+    doctor's `pull_request_target` probe read, on a repository that is wired
+    correctly."""
+    summary = GOOD_SUMMARY.decode().replace(
+        "on:\n  workflow_run:",
+        "env:\n  python-version: 3.12\non:\n  workflow_run:",
+    )
+    assert wi.findings(good_files(**{"summary.yml": summary.encode()}), ENGINE_REPO) == []
+
+
 def test_a_commented_name_does_not_count():
     plan = ("# name: shipmate · plan\n" + GOOD_PLAN.decode().split("\n", 1)[1]).encode()
     found = wi.findings(good_files(**{"plan.yml": plan}), ENGINE_REPO)
@@ -237,7 +250,11 @@ def test_a_wiring_file_that_calls_another_orgs_summary_does_not_qualify():
 
 def test_an_unknown_engine_repo_accepts_any_slug():
     """`github.action_repository` is empty when the action runs from a local
-    path; the check errs toward passing rather than warning."""
+    path; the check errs toward passing rather than warning. It does not follow
+    that such a repository passes overall -- a vendored engine's wrapper uses a
+    relative `./.github/workflows/summary.yml` with no `@ref`, which this
+    matcher misses whatever the slug pattern is. Vendoring is unsupported; this
+    fixture is a slug-bearing wrapper with the engine unknown."""
     summary = GOOD_SUMMARY.decode().replace("acme/shipmate/", "someone/else/").encode()
     assert wi.findings(good_files(**{"summary.yml": summary}), "") == []
 
@@ -319,6 +336,26 @@ def test_the_no_wiring_remediation_points_at_something_that_exists():
     assert "\n## Example repositories\n" in readme
     assert "CONTRACT.md §Post-plan topology" in message
     assert "\n## Post-plan topology\n" in contract
+
+
+def test_the_plan_name_literal_appears_in_every_document_that_states_it():
+    """The other half of row 33's coupling. `PLAN_PATH` is source-derived
+    against the engine workflow above; `PLAN_NAME` has no such counterpart in
+    engine code, so its only other sides are the three documents that tell a
+    consumer what to write. A look-alike separator renders identically, so a
+    document drifting from the constant is invisible on the page."""
+    for name in ("CONTRACT.md", "README.md", "docs/branch-protection.md"):
+        text = (ENGINE / name).read_text(encoding="utf-8")
+        assert wi.PLAN_NAME in text, f"{name} no longer spells wiring.PLAN_NAME"
+
+
+def test_an_empty_workflows_directory_is_broken_twice():
+    """A readable but empty `.github/workflows` is not a degrade: the listing
+    was read, and it really does hold no plan workflow and no wrapper. Both
+    findings must be reported -- a consumer told only about the missing
+    `plan.yml` would add it and get a second failing pull request."""
+    found = wi.findings({}, ENGINE_REPO)
+    assert found == [wi.BAD_PATH, wi.NO_WIRING]
 
 
 def test_an_unreadable_listing_degrades():

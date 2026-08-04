@@ -485,7 +485,7 @@ def test_main_fails_a_pull_request_on_a_broken_wiring(monkeypatch, tmp_path):
     assert str(excinfo.value).startswith(f"::error title={wi.WIRING_TITLE}::")
 
 
-def test_main_still_plans_a_drift_run_over_a_broken_wiring(monkeypatch, tmp_path):
+def test_main_still_plans_a_drift_run_over_a_broken_wiring(monkeypatch, tmp_path, capsys):
     _broken_checkout(tmp_path)
     outputs, called = _run_main(
         monkeypatch,
@@ -494,3 +494,41 @@ def test_main_still_plans_a_drift_run_over_a_broken_wiring(monkeypatch, tmp_path
     )
     assert outputs["empty"] == "false"
     assert called == [(True, "")]
+    # The warning is the whole of "drift becomes a second, post-merge detector":
+    # main() computing the report and never printing it plans the run just the
+    # same, and reports nothing to anybody.
+    printed = capsys.readouterr().out
+    assert f"::warning title={wi.WIRING_TITLE}::" in printed
+    assert wi.PLAN_NAME in printed
+
+
+def test_main_emits_an_unknown_wiring_notice(monkeypatch, tmp_path, capsys):
+    """The notice path out of main() is not covered by the case above, which
+    only has a BROKEN to print. tmp_path has no `.github/workflows` at all."""
+    _run_main(
+        monkeypatch,
+        tmp_path,
+        {"SHIPMATE_ALL_STACKS": "true", "GITHUB_EVENT_NAME": "schedule"},
+    )
+    assert f"::notice title={wi.WIRING_TITLE}::" in capsys.readouterr().out
+
+
+def test_main_checks_the_wiring_before_enumerating_stacks(monkeypatch, tmp_path):
+    """The fork guard's twin (`test_main_does_not_enumerate_stacks_for_a_fork`).
+    Placement, not merely the raise: a wiring check run after `compute_cells`
+    still fails the job, but only after `detect` has spent a terramate run on a
+    repository whose plan can never gate."""
+    _broken_checkout(tmp_path)
+
+    def boom(*a, **k):
+        pytest.fail("compute_cells ran over a broken wiring")
+
+    monkeypatch.setattr(bm, "compute_cells", boom)
+    monkeypatch.setenv("GITHUB_EVENT_NAME", "pull_request")
+    monkeypatch.setenv("GITHUB_REPOSITORY", "acme/iac")
+    monkeypatch.setenv("GITHUB_EVENT_PATH", _event_file(tmp_path, "acme/iac"))
+    monkeypatch.setenv("GITHUB_OUTPUT", str(tmp_path / "out.txt"))
+    monkeypatch.chdir(tmp_path)
+    with pytest.raises(SystemExit) as excinfo:
+        bm.main()
+    assert str(excinfo.value).startswith(f"::error title={wi.WIRING_TITLE}::")

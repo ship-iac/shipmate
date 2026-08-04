@@ -738,7 +738,7 @@ def _wf_listing(*names):
 def _wf_file(text):
     import base64
 
-    return {"content": base64.b64encode(text.encode()).decode()}
+    return {"encoding": "base64", "content": base64.b64encode(text.encode()).decode()}
 
 
 _SHA = "a" * 40
@@ -786,24 +786,23 @@ def test_quoted_tag_pin_warned(monkeypatch):
     assert "tag or branch" in out[0][1] and "acme/engine@v2" in out[0][1]
 
 
-def test_non_file_workflow_entry_skipped(monkeypatch):
+def test_non_file_workflow_entry_degrades_this_probe(monkeypatch):
     # A directory (or symlink/submodule) entry whose name happens to end in
-    # .yml must not be treated as a workflow file -- fetching its "contents"
-    # would return a list, and .get("content") would raise AttributeError.
-    # No response is registered for sub.yml's contents call, so a regression
-    # of the type check fails this test with a KeyError, not a silent pass.
+    # .yml is not a workflow file -- fetching its "contents" returns a list,
+    # not a blob. `_workflow_names` keeps it anyway, because DROPPING it reads
+    # to the wiring probe as a missing plan workflow; here it is simply one
+    # more unreadable entry, and this probe degrades on it the way it degrades
+    # on any other. It must not raise AttributeError on the list.
     responses = {
         f"{_WF_DIR}{_REF}": [
             {"name": "sub.yml", "type": "dir"},
             {"name": "plan.yml", "type": "file"},
         ],
+        f"{_WF_DIR}/sub.yml{_REF}": [{"name": "nested.yml", "type": "file"}],
         f"{_WF_DIR}/plan.yml{_REF}": _wf_file("uses: acme/engine/actions/setup@v2\n"),
     }
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
-    out = doctor._pin_warnings(_ctx())
-    assert len(out) == 1
-    assert out[0][0] == doctor.WARNING
-    assert "acme/engine@v2" in out[0][1]
+    assert doctor._pin_warnings(_ctx()) == [doctor.PIN_UNREADABLE]
 
 
 def test_stale_sha_pin_warned(monkeypatch):
@@ -2087,6 +2086,55 @@ def test_wiring_probe_degrades_on_an_unreadable_listing(monkeypatch):
     found = doctor._wiring_warnings(_ctx())
     assert [lvl for lvl, _ in found] == [doctor.NOTICE]
     assert found == [(doctor.NOTICE, doctor.wi.LISTING_UNREADABLE[1])]
+
+
+def test_the_wiring_annotation_title_is_not_doctors():
+    """Two claims rest on these two titles differing, and prose is all that has
+    ever held them apart. `render_annotations` writes DOCTOR_TITLE and
+    `harvest_sections` filters it back out, so a wiring annotation sharing that
+    title would be dropped as doctor's own -- and `build-matrix`, which fails a
+    run, would be claiming doctor's never-fails identity while doing it."""
+    assert doctor.wi.WIRING_TITLE != doctor.DOCTOR_TITLE
+
+
+def test_a_non_file_workflow_entry_is_unreadable_not_absent(monkeypatch):
+    """`_workflow_names` drops nothing, matching `build-matrix.workflow_files`.
+    A `plan.yml` the contents API reports as a directory or a symlink used to
+    vanish from this listing, which reads as "no plan workflow" -- a WARNING for
+    a repository whose wiring was never examined."""
+    responses = {
+        f"{_WF_DIR}{_REF}": [{"name": "plan.yml", "type": "dir"}],
+        f"{_WF_DIR}/plan.yml{_REF}": [{"name": "nested.yml", "type": "file"}],
+    }
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    found = doctor._wiring_warnings(_ctx())
+    assert [lvl for lvl, _ in found] == [doctor.NOTICE, doctor.NOTICE]
+    assert found == [
+        (doctor.NOTICE, doctor.wi.PLAN_UNREADABLE[1]),
+        (doctor.NOTICE, doctor.wi.WIRING_UNREADABLE[1]),
+    ]
+
+
+def test_a_non_file_workflow_entry_degrades_the_fork_trigger_probe(monkeypatch):
+    """The third probe over the same listing (the pin probe's twin above) must
+    degrade on that entry too, not crash on a response that is a list."""
+    responses = {
+        f"{_WF_DIR}{_REF}": [{"name": "plan.yml", "type": "dir"}],
+        f"{_WF_DIR}/plan.yml{_REF}": [{"name": "nested.yml", "type": "file"}],
+    }
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    assert doctor._fork_trigger_warnings(_ctx()) == [doctor.FORK_TRIGGER_UNREADABLE]
+
+
+def test_an_unencoded_blob_is_unreadable_not_empty(monkeypatch):
+    """A file over 1 MB comes back with `encoding: "none"` and an empty
+    `content`. Decoded anyway, that is a readable EMPTY `plan.yml` -- no
+    top-level `name:`, which the wiring check calls BROKEN."""
+    responses = _wiring_responses()
+    responses[f"{_WF_DIR}/plan.yml{_REF}"] = {"encoding": "none", "content": ""}
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    found = doctor._wiring_warnings(_ctx())
+    assert found == [(doctor.NOTICE, doctor.wi.PLAN_UNREADABLE[1])]
 
 
 def test_harvest_drops_the_wiring_annotation():
