@@ -1,0 +1,262 @@
+#!/usr/bin/env python3
+"""Check the consumer wiring the `shipmate / gate` status depends on.
+
+Three conditions, all in files the engine does not own, all silent when broken
+(CONTRACT.md §Post-plan topology):
+
+- the plan workflow lives at `.github/workflows/plan.yml`, which the engine's
+  reusable `summary.yml` byte-matches in its `workflow_run.path` guard;
+- its top-level `name:` is exactly `shipmate · plan`;
+- some workflow triggers on `workflow_run` for that name and calls the engine's
+  reusable `.github/workflows/summary.yml`.
+
+Two callers with different reads of the same directory: `build-matrix` from the
+local checkout inside the plan run's `detect` job, and `doctor`'s probe through
+the contents API at the commit under examination. Both hand this module BYTES —
+the decode lives here so the two cannot drift on decode policy, which is exactly
+the axis the middot trap runs along.
+
+Findings are three-valued. BROKEN is reserved for near-tautological facts (a
+filename absent from a listing, a scalar that is not the literal); everything
+else is UNKNOWN. `build-matrix` fails a pull request's `detect` job on BROKEN,
+so a false positive would block every pull request in every consumer until an
+engine fix and a re-pin — the checks below therefore err toward passing.
+
+Deliberately containment, not a descent into `on:` -> `workflow_run:` ->
+`workflows:`. `workflows:` can be a block sequence, a one-line flow sequence or
+a flow sequence spread over lines, and the indentation-descent shape is what
+made doctor's `pull_request_target` matcher wrong twice. Asking whether the
+`on:` block *contains* a `workflow_run` token and the literal name accepts every
+spelling and cannot manufacture a warning for a working repository.
+"""
+
+import re
+
+BROKEN, UNKNOWN = "broken", "unknown"
+
+#: The plan workflow's filename, and the path the engine's reusable
+#: `summary.yml` byte-matches in its `workflow_run.path` guard.
+PLAN_FILE = "plan.yml"
+PLAN_PATH = f".github/workflows/{PLAN_FILE}"
+#: The workflow name GitHub matches `workflow_run.workflows:` against. The
+#: separator is U+00B7 MIDDLE DOT. Never normalize, casefold or collapse
+#: whitespace when comparing against this: a look-alike separator is the whole
+#: failure mode.
+PLAN_NAME = "shipmate · plan"
+#: The engine's reusable workflow a consumer's wiring file must call.
+SUMMARY_PATH = ".github/workflows/summary.yml"
+#: Annotation title. Distinct from doctor's, because `build-matrix` cannot
+#: import doctor (doctor `_load`s build-matrix at module scope) and because an
+#: annotation that fails a run must not claim doctor's never-fails identity.
+WIRING_TITLE = "shipmate wiring"
+
+_NAME_KEY = re.compile(r"""^["']?name["']?[ \t]*:(?P<rest>.*)$""")
+_ON_KEY = re.compile(r"""^["']?on["']?[ \t]*:(?P<rest>.*)$""")
+_WORKFLOW_RUN = re.compile(r"(?<![\w-])workflow_run(?![\w-])")
+
+BAD_PATH = (
+    BROKEN,
+    f"no `{PLAN_PATH}` in this repository — the engine's reusable summary "
+    "workflow skips every job unless the completed plan run's path is exactly "
+    "that, so no apply checks and no `shipmate / gate` status are ever written "
+    "and every pull request stays unmergeable. Move the plan workflow back to "
+    f"`{PLAN_PATH}`.",
+)
+NO_WIRING = (
+    BROKEN,
+    "no workflow triggers on `workflow_run` for the plan workflow and calls the "
+    f"engine's reusable `{SUMMARY_PATH}` — so nothing creates the apply checks, "
+    "the plan comment or the `shipmate / gate` status, and every pull request "
+    "stays unmergeable. Add the wrapper from README.md.",
+)
+LISTING_UNREADABLE = (
+    UNKNOWN,
+    "could not read `.github/workflows` — the plan/summary wiring was not verified.",
+)
+PLAN_UNREADABLE = (
+    UNKNOWN,
+    f"could not read `{PLAN_PATH}` — its workflow name was not verified.",
+)
+WIRING_UNREADABLE = (
+    UNKNOWN,
+    "could not read every workflow file — the `workflow_run` wiring was not verified.",
+)
+NAME_UNREADABLE = (
+    UNKNOWN,
+    f"`{PLAN_PATH}`'s `name:` is not a plain scalar this check can read — its "
+    f"value was not compared against `{PLAN_NAME}`.",
+)
+
+
+def decode(data):
+    """Workflow-file bytes -> text. One decode policy for both callers.
+
+    `errors="replace"` is load-bearing rather than defensive: a middot written
+    through a lossy encoding is not valid UTF-8, and mapping it to U+FFFD is
+    what makes the string comparison below equivalent to a byte comparison.
+    U+FFFD cannot occur inside PLAN_NAME, and UTF-8 decoding is injective on
+    valid input, so `decode(b) == PLAN_NAME` holds exactly when `b` was that
+    literal's UTF-8.
+    """
+    return data.decode("utf-8", "replace")
+
+
+def _strip_comment(line):
+    """`line` up to its YAML comment marker: a `#` at the start of the line or
+    preceded by whitespace. A `#` inside a token (`branch#1`) is not a comment."""
+    for i, ch in enumerate(line):
+        if ch == "#" and (i == 0 or line[i - 1] in " \t"):
+            return line[:i]
+    return line
+
+
+def _on_block(text):
+    """(inline remainder of the `on:` line, its following lines) with comments
+    stripped, or (None, []) for a file with no top-level `on:`. The block runs to
+    the first line starting at column 0; blank and comment-only lines do not end
+    it."""
+    lines = text.splitlines()
+    for i, line in enumerate(lines):
+        m = _ON_KEY.match(line)
+        if not m:
+            continue
+        block = []
+        for nxt in lines[i + 1 :]:
+            stripped = _strip_comment(nxt)
+            if stripped.strip() and not stripped[0].isspace():
+                break
+            block.append(stripped)
+        return _strip_comment(m.group("rest")), block
+    return None, []
+
+
+def _unquote(value):
+    """A quoted YAML scalar's contents, or None when this module cannot read it
+    faithfully. A backslash inside a double-quoted scalar is an escape sequence
+    (`"shipmate \\u00b7 plan"` is the correct name spelled the long way), and
+    processing escapes is a YAML parser's job — so that degrades rather than
+    being compared raw and reported wrong."""
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+        inner = value[1:-1]
+        if value[0] == '"' and "\\" in inner:
+            return None
+        return inner
+    if "\\" in value:
+        return None
+    return value
+
+
+def plan_name(text):
+    """(kind, value) for a workflow's top-level `name:`.
+
+    kind is "scalar" (value is the name), "block" (a `|`/`>` block scalar or a
+    value continued on following lines — unreadable here, and never reported as
+    wrong), or "absent" (no top-level `name:` at all, which makes GitHub name
+    the workflow after its path).
+
+    Column 0 only: a job's `name:` is indented, and matching it would compare
+    the wrong string.
+    """
+    for line in text.splitlines():
+        m = _NAME_KEY.match(_strip_comment(line))
+        if not m:
+            continue
+        rest = m.group("rest").strip()
+        if not rest or rest[0] in "|>":
+            return "block", None
+        value = _unquote(rest)
+        return ("block", None) if value is None else ("scalar", value)
+    return "absent", None
+
+
+def _engine_summary(engine_repo):
+    """`uses:` matcher for the engine's reusable summary workflow.
+
+    The slug is pinned to the engine when it is known -- `github.action_repository`,
+    resolved by GitHub at runtime, never hardcoded -- so another org's
+    same-named reusable workflow does not satisfy the check. It is empty when
+    the action runs from a local path, and any slug then passes: erring toward a
+    false PASS is the required direction for a check that can fail a run.
+    """
+    slug = re.escape(engine_repo) if engine_repo else r"[\w.-]+/[\w.-]+"
+    return re.compile(rf"""uses:\s*["']?{slug}/{re.escape(SUMMARY_PATH)}@""")
+
+
+def summary_wiring_present(text, engine_repo):
+    """Whether one workflow file wires the engine's summary to the plan run.
+
+    Both halves must be in the same file: a `workflow_run` trigger naming the
+    plan workflow, and a call into the engine's reusable summary workflow.
+    Comments are stripped from both reads -- a repository that commented the
+    wiring out has no wiring, and a commented-out name is exactly the line
+    somebody leaves behind when they break it.
+    """
+    inline, block = _on_block(text)
+    if inline is None:
+        return False
+    on_text = "\n".join([inline, *block])
+    if not _WORKFLOW_RUN.search(on_text) or PLAN_NAME not in on_text:
+        return False
+    body = "\n".join(_strip_comment(ln) for ln in text.splitlines())
+    return bool(_engine_summary(engine_repo).search(body))
+
+
+def _name_findings(blob):
+    if blob is None:
+        return [PLAN_UNREADABLE]
+    kind, value = plan_name(decode(blob))
+    if kind == "block":
+        return [NAME_UNREADABLE]
+    if kind == "absent":
+        return [
+            (
+                BROKEN,
+                f"`{PLAN_PATH}` has no top-level `name:`, so GitHub names the "
+                f"workflow after its path — the consumer `workflow_run` trigger "
+                f"matches on the name `{PLAN_NAME}` and can never fire. Add "
+                f"`name: {PLAN_NAME}`.",
+            )
+        ]
+    if value == PLAN_NAME:
+        return []
+    return [
+        (
+            BROKEN,
+            f"`{PLAN_PATH}` is named {ascii(value)}, not `{PLAN_NAME}` "
+            f"({ascii(PLAN_NAME)}) — the separator is U+00B7 MIDDLE DOT and a "
+            "look-alike renders identically. GitHub matches the `workflow_run` "
+            "trigger against the workflow name recorded on the DEFAULT BRANCH, "
+            "so this pull request still gets its gate and the breakage begins at "
+            "merge; a pull request opened afterwards to fix it has no gate "
+            "either, and needs an administrator to merge it.",
+        )
+    ]
+
+
+def _wiring_findings(files, engine_repo):
+    readable = [v for v in files.values() if v is not None]
+    if any(summary_wiring_present(decode(v), engine_repo) for v in readable):
+        return []
+    # An unreadable file might have been the one that wired it, so an
+    # incomplete read can only ever say "not verified".
+    if len(readable) != len(files):
+        return [WIRING_UNREADABLE]
+    return [NO_WIRING]
+
+
+def findings(files, engine_repo):
+    """Wiring findings for a `.github/workflows` directory.
+
+    `files` maps each `.yml`/`.yaml` base filename to its bytes; `None` for one
+    entry means that file could not be read, and `None` for the whole argument
+    means the listing could not be read. An empty list means the wiring is good.
+    """
+    if files is None:
+        return [LISTING_UNREADABLE]
+    out = []
+    if PLAN_FILE not in files:
+        out.append(BAD_PATH)
+    else:
+        out.extend(_name_findings(files[PLAN_FILE]))
+    out.extend(_wiring_findings(files, engine_repo))
+    return out
