@@ -170,10 +170,16 @@ def _env(name, rules=(), branch_policy=None):
 
 def _quiet_new_probes():
     """Healthy responses for the env-protection, engine-environment,
-    pin-freshness and fork-trigger probes, so tests exercising the older
+    pin-freshness, fork-trigger and wiring probes, so tests exercising the older
     gate/environment probes via the top-level `warnings()` don't pick up
-    incidental noise from these four (the empty workflow listing quiets the last
-    two at once)."""
+    incidental noise from these five.
+
+    The last three read the same workflow listing, and it has to be a correctly
+    wired one: an empty listing reads to the wiring probe as a repository with
+    no plan workflow and no `workflow_run` wrapper. The wiring fixture's `uses:`
+    line is an engine pin, so the pin probe now has something to read too and
+    needs the release endpoints to agree with it -- the pinned SHA and the SHA
+    the release lookup returns are the same `_SHA`, or it reports staleness."""
     return {
         f"repos/{_REPO}/environments/dev-eu": _env("dev-eu"),
         f"repos/{_REPO}/environments/dev-eu-apply": _env(
@@ -186,7 +192,11 @@ def _quiet_new_probes():
         f"repos/{_REPO}/environments/shipmate-engine/deployment-branch-policies": {
             "branch_policies": [{"name": _BRANCH}]
         },
-        f"{_WF_DIR}{_REF}": [],
+        f"{_WF_DIR}{_REF}": _wf_listing("plan.yml", "summary.yml"),
+        f"{_WF_DIR}/plan.yml{_REF}": _wf_file(_QUIET_PLAN),
+        f"{_WF_DIR}/summary.yml{_REF}": _wf_file(_QUIET_SUMMARY),
+        f"repos/{_ENGINE_REPO}/releases/latest": {"tag_name": "v9.9.9"},
+        f"repos/{_ENGINE_REPO}/commits/v9.9.9": {"sha": _SHA},
     }
 
 
@@ -733,6 +743,21 @@ def _wf_file(text):
 
 _SHA = "a" * 40
 _OTHER_SHA = "b" * 40
+
+# The correctly wired pair `_quiet_new_probes()` serves. Defined here rather
+# than next to that fixture because interpolating `_SHA` happens at import time,
+# while the fixture's own body is only evaluated when a test calls it.
+_QUIET_PLAN = "name: shipmate · plan\non:\n  pull_request:\n"
+_QUIET_SUMMARY = (
+    "name: shipmate · summary\n"
+    "on:\n"
+    "  workflow_run:\n"
+    '    workflows: ["shipmate · plan"]\n'
+    "    types: [completed]\n"
+    "jobs:\n"
+    "  summary:\n"
+    f"    uses: {_ENGINE_REPO}/.github/workflows/summary.yml@{_SHA}\n"
+)
 
 
 def test_tag_pin_warned(monkeypatch):
