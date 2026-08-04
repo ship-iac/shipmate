@@ -25,11 +25,13 @@ greens the run.
 ### Added
 
 - **The consumer wiring the `shipmate / gate` status depends on is now
-  checked on every plan run.** Three conditions live in files the engine does
+  checked on every plan run.** Four conditions live in files the engine does
   not own — the plan workflow at `.github/workflows/plan.yml`, its top-level
-  `name:` being exactly `shipmate · plan` (U+00B7 middle dot), and some
-  workflow triggering on `workflow_run` for that name and calling the engine's
-  reusable `.github/workflows/summary.yml` — and until now nothing checked any
+  `name:` being exactly `shipmate · plan` (U+00B7 middle dot), that workflow
+  triggering on `pull_request` (`pull_request_target` is a different event and
+  does not satisfy the engine's guard), and some workflow triggering on
+  `workflow_run` for that name and calling the engine's reusable
+  `.github/workflows/summary.yml` — and until now nothing checked any
   of them: a break produced a plan that ran to completion, no apply checks, no
   sticky comment, no gate status, and no error anywhere. `actions/build-matrix`
   now reads the workflow files out of the checkout it already has and **fails

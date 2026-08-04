@@ -547,12 +547,19 @@ permanent. On any other event (the drift schedule) the same finding is a
 warning, so one merged mistake does not take nightly drift down everywhere.
 `shipmate doctor` reports the same three conditions on demand, read at the
 commit under examination — comment-ops is not downstream of the summary
-wiring, so that report still answers when the wiring is broken. The wrapper
-must carry both halves — the `workflow_run` trigger naming `shipmate · plan`
-and the `uses:` of the engine's reusable `summary.yml` — **in the same file**:
-a two-hop wrapper that delegates the `uses:` to a second local reusable
-workflow is a valid GitHub Actions topology that the wiring check cannot
-follow, and it reports it as no wiring at all.
+wiring, so that report still answers when the wiring is broken.
+
+Two limits of that check are worth stating, because both are deliberate. It
+recognises the wrapper by finding the `workflow_run` trigger naming
+`shipmate · plan` and the `uses:` of the engine's reusable `summary.yml` **in
+the same file**. A wrapper that instead delegates the `uses:` to a second
+workflow — local, or shared from another repository — is a valid GitHub
+Actions topology and gates correctly, but the check cannot follow the hop, so
+it reports the wiring as *unverified* rather than failing the run. And on a
+`pull_request_target` event the checkout is the base ref, so the check judges
+the wiring the pull request has not changed yet; that matters little, because a
+plan workflow on `pull_request_target` is itself reported broken — the engine's
+summary job requires `workflow_run.event == 'pull_request'` exactly.
 
 Binding these jobs to the `shipmate-engine` environment rather than trusting
 the trigger alone closes two paths a trigger check alone would not:

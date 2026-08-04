@@ -6,12 +6,26 @@ is exactly `shipmate · plan`, and some workflow triggers on `workflow_run` for
 that name and calls the engine's reusable `summary.yml`.
 """
 
+import re
+
 import pytest
 from _loader import ENGINE, load_script
 
 wi = load_script("wiring")
 
 ENGINE_REPO = "acme/shipmate"
+
+#: "shipmate <something> plan" with any single non-word separator -- which is
+#: what a document reads like once the middot has been replaced by a look-alike
+#: or mangled by an encoding. Matching the corrupted forms too is the point: a
+#: pattern that only matched the correct literal would select exactly the
+#: documents that are already right.
+_PLAN_WORKFLOW_PHRASE = re.compile(r"shipmate[ \t]*[^\w\s][ \t]*plan", re.IGNORECASE)
+
+
+def _engine_markdown():
+    return sorted(ENGINE.glob("*.md")) + sorted((ENGINE / "docs").glob("*.md"))
+
 
 GOOD_PLAN = """name: shipmate · plan
 on:
@@ -243,9 +257,13 @@ def test_the_plan_name_without_a_workflow_run_trigger_does_not_qualify():
 
 
 def test_a_wiring_file_that_calls_another_orgs_summary_does_not_qualify():
+    """Another org's `summary.yml` is not the engine's, so this file does not
+    satisfy the check on its own. It degrades rather than failing the run: a
+    shared wrapper in an org repository that chains onward to the engine is a
+    working topology this module cannot follow."""
     summary = GOOD_SUMMARY.decode().replace("acme/shipmate/", "someone/else/").encode()
     found = wi.findings(good_files(**{"summary.yml": summary}), ENGINE_REPO)
-    assert wi.BROKEN in states(found)
+    assert found == [wi.WIRING_INDIRECT]
 
 
 def test_an_unknown_engine_repo_accepts_any_slug():
@@ -260,13 +278,17 @@ def test_an_unknown_engine_repo_accepts_any_slug():
 
 
 def test_a_commented_out_uses_line_does_not_qualify():
+    """A commented-out engine call is not a call. The file still triggers on
+    `workflow_run` for this plan name, so the answer is the same "cannot follow
+    where this reaches the engine" degrade as any other indirection -- not a
+    pass."""
     summary = (
         GOOD_SUMMARY.decode()
         .replace("    uses: acme/shipmate", "    # uses: acme/shipmate")
         .encode()
     )
     found = wi.findings(good_files(**{"summary.yml": summary}), ENGINE_REPO)
-    assert wi.BROKEN in states(found)
+    assert found == [wi.WIRING_INDIRECT]
 
 
 def test_the_plan_name_inside_a_comment_does_not_qualify():
@@ -316,10 +338,69 @@ def test_a_mixed_case_engine_slug_is_accepted():
 
 def test_a_mixed_case_workflow_path_is_not_accepted():
     """Only the slug is case-insensitive. The path after it is a file in the
-    engine repository, and `Summary.yml` is not that file."""
+    engine repository, and `Summary.yml` is not that file -- so this wrapper is
+    not recognised as calling the engine, and the file does not satisfy the
+    wiring check."""
     summary = GOOD_SUMMARY.decode().replace("/summary.yml@", "/Summary.yml@").encode()
     found = wi.findings(good_files(**{"summary.yml": summary}), ENGINE_REPO)
-    assert wi.BROKEN in states(found)
+    assert found == [wi.WIRING_INDIRECT]
+
+
+def test_uses_with_a_space_before_the_colon_is_accepted():
+    """`uses : x` is valid YAML, and every other key matcher in the module
+    tolerates the spacing. This is the one matcher whose miss fails the run, so
+    an inconsistency here reds every pull request in a repository that gates
+    perfectly well."""
+    summary = GOOD_SUMMARY.decode().replace("    uses: acme", "    uses : acme").encode()
+    assert wi.findings(good_files(**{"summary.yml": summary}), ENGINE_REPO) == []
+
+
+def test_a_wrapper_that_reaches_the_engine_through_another_workflow_degrades():
+    """A wrapper triggering on `workflow_run` for this exact plan name, but
+    delegating the `uses:` to a second workflow that calls the engine, gates
+    correctly on GitHub -- nested reusable calls chain. This module cannot follow
+    the hop, and a trigger aimed at this precise name is far too specific to be a
+    coincidence, so it must degrade rather than fail the run."""
+    summary = (
+        GOOD_SUMMARY.decode()
+        .replace(
+            "    uses: acme/shipmate/.github/workflows/summary.yml@",
+            "    uses: ./.github/workflows/summary-inner.yml@",
+        )
+        .encode()
+    )
+    found = wi.findings(good_files(**{"summary.yml": summary}), ENGINE_REPO)
+    assert found == [wi.WIRING_INDIRECT]
+
+
+def test_a_plan_workflow_that_does_not_trigger_on_pull_request_is_broken():
+    """The fourth condition the engine's summary job gates on. Everything else
+    can be perfect and the gate still never runs."""
+    plan = GOOD_PLAN.decode().replace("  pull_request:", "  merge_group:").encode()
+    found = wi.findings(good_files(**{"plan.yml": plan}), ENGINE_REPO)
+    assert found == [wi.BAD_TRIGGER]
+
+
+def test_pull_request_target_does_not_count_as_a_pull_request_trigger():
+    """Different events. `workflow_run.event` carries the one that actually
+    fired, and only `pull_request` satisfies the engine's guard -- so a
+    substring match here would report a dead gate as healthy."""
+    plan = GOOD_PLAN.decode().replace("  pull_request:", "  pull_request_target:").encode()
+    found = wi.findings(good_files(**{"plan.yml": plan}), ENGINE_REPO)
+    assert found == [wi.BAD_TRIGGER]
+
+
+def test_a_plan_workflow_triggering_on_more_than_pull_request_is_accepted():
+    plan = GOOD_PLAN.decode().replace("on:\n", "on:\n  merge_group:\n").encode()
+    assert wi.findings(good_files(**{"plan.yml": plan}), ENGINE_REPO) == []
+
+
+def test_an_unreadable_plan_trigger_block_degrades():
+    """No top-level `on:` this module can slice is "not verified", not "wrong
+    trigger" -- the same posture as the name half's block-scalar degrade."""
+    plan = b"name: shipmate \xc2\xb7 plan\njobs:\n  detect:\n    runs-on: ubuntu-latest\n"
+    found = wi.findings(good_files(**{"plan.yml": plan}), ENGINE_REPO)
+    assert found == [wi.TRIGGER_UNREADABLE]
 
 
 def test_the_no_wiring_remediation_points_at_something_that_exists():
@@ -341,12 +422,27 @@ def test_the_no_wiring_remediation_points_at_something_that_exists():
 def test_the_plan_name_literal_appears_in_every_document_that_states_it():
     """The other half of row 33's coupling. `PLAN_PATH` is source-derived
     against the engine workflow above; `PLAN_NAME` has no such counterpart in
-    engine code, so its only other sides are the three documents that tell a
-    consumer what to write. A look-alike separator renders identically, so a
-    document drifting from the constant is invisible on the page."""
-    for name in ("CONTRACT.md", "README.md", "docs/branch-protection.md"):
-        text = (ENGINE / name).read_text(encoding="utf-8")
-        assert wi.PLAN_NAME in text, f"{name} no longer spells wiring.PLAN_NAME"
+    engine code, so its only other sides are the documents that tell a consumer
+    what to write. A look-alike separator renders identically, so a document
+    drifting from the constant is invisible on the page.
+
+    The file list is DERIVED, not enumerated: any markdown naming the plan
+    workflow has to spell the name correctly, and a hardcoded list covers
+    whatever it covered the day it was written. Three documents were named here
+    while `CLAUDE.md` and `CHANGELOG.md` also carried the literal and could be
+    corrupted with the suite green -- a guard narrower than its own name.
+    """
+    naming, stale = [], []
+    for path in _engine_markdown():
+        text = path.read_text(encoding="utf-8")
+        if not _PLAN_WORKFLOW_PHRASE.search(text):
+            continue
+        naming.append(path.name)
+        if wi.PLAN_NAME not in text:
+            stale.append(path.name)
+    assert not stale, f"{stale} name the plan workflow but no longer spell wiring.PLAN_NAME"
+    # A derivation that selected nothing would pass while asserting nothing.
+    assert len(naming) >= 4, f"only {naming} matched -- the derivation went blind"
 
 
 def test_an_empty_workflows_directory_is_broken_twice():

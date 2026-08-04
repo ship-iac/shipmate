@@ -520,23 +520,36 @@ def _contents_ref(ctx):
     return f"?ref={sha}" if _SHA40.fullmatch(sha) else None
 
 
-def _workflow_names(base):
-    """([names], readable): the `.yml`/`.yaml` entries of the workflow
-    directory listing.
+def _workflow_entries(base):
+    """([(name, is_file)], readable): the `.yml`/`.yaml` entries of the workflow
+    directory listing, each tagged with whether it is a regular file.
 
-    Nothing is dropped for not being a regular file, matching
-    `build-matrix.workflow_files` entry for entry — a non-file `plan.yml`
-    (directory or symlink) that vanished from this listing would reach the
-    wiring probe as "no plan workflow", which is BROKEN, where an entry that
-    cannot be read is only unverified. Such an entry's contents read returns a
-    list rather than a blob, and `_workflow_bytes` maps that to None like any
-    other unreadable entry, which the pin and fork-trigger probes already
-    degrade on."""
+    The tag exists because the three probes reading this listing want opposite
+    things from a non-file entry (a directory or symlink named `*.yml`, whose
+    contents read answers with a list rather than a blob). Dropping it outright
+    would hand the wiring probe "no plan workflow" — BROKEN — for an entry that
+    merely cannot be read; keeping it untagged made one such entry abort the pin
+    and fork-trigger scans for the whole directory, since both stop at the first
+    unreadable file. So the listing carries both facts and each probe picks."""
     try:
         listing = _gh_json(base)
     except (Exception, SystemExit):  # noqa: BLE001 - degrade, see PIN_UNREADABLE
         return [], False
-    return [e["name"] for e in listing if e["name"].endswith((".yml", ".yaml"))], True
+    return [
+        (e["name"], e.get("type") == "file")
+        for e in listing
+        if e["name"].endswith((".yml", ".yaml"))
+    ], True
+
+
+def _workflow_names(base):
+    """([names], readable) for the probes that scan file CONTENT — the pin and
+    fork-trigger probes. Non-file entries are skipped rather than degraded:
+    neither probe can read one, and treating it as an unreadable file would trip
+    their stop-at-the-first-failure branch and silently drop every finding in
+    the rest of the directory."""
+    entries, readable = _workflow_entries(base)
+    return [name for name, is_file in entries if is_file], readable
 
 
 def _workflow_bytes(path):
@@ -808,12 +821,17 @@ def _wiring_warnings(ctx):
     if ref is None:
         return [WIRING_NO_COMMIT]
     base = f"repos/{ctx['repo']}/contents/{_WORKFLOWS_DIR}"
-    names, readable = _workflow_names(f"{base}{ref}")
+    entries, readable = _workflow_entries(f"{base}{ref}")
     # None, not {}: an unreadable listing is "not verified", while an empty
-    # directory really is a missing plan workflow.
+    # directory really is a missing plan workflow. A non-file entry is carried
+    # as unreadable rather than skipped, so a directory named `plan.yml` reads
+    # as "could not read it" and not as "there is no plan workflow".
     files = None
     if readable:
-        files = {name: _workflow_bytes(f"{base}/{name}{ref}") for name in names}
+        files = {
+            name: _workflow_bytes(f"{base}/{name}{ref}") if is_file else None
+            for name, is_file in entries
+        }
     return [
         (WARNING if state == wi.BROKEN else NOTICE, message)
         for state, message in wi.findings(files, ctx["engine_repo"])
@@ -1087,15 +1105,24 @@ def harvest_sections(annotations):
     findings against current settings, so keeping both double-reports every
     settings problem.
 
-    `wi.WIRING_TITLE` goes for the same reason: `build-matrix` emits the wiring
-    findings as run annotations from inside the plan run's `detect` job, and
-    `_wiring_warnings` re-states them live in this same report.
+    `wi.WIRING_TITLE` goes for the same reason, but at WARNING level only.
+    `build-matrix` emits a wiring finding as a warning when it is not failing the
+    run, and `_wiring_warnings` re-states that live. Its FAILURE-level
+    annotation is the one that killed the `detect` job, and it is kept: the two
+    read different commits -- `detect` the merge commit, this probe the pull
+    request head -- so a break living only on the base branch reds `detect`
+    while the live probe reads clean. Dropping it there would render an
+    all-clear over a red, gate-blocking run with the reason stated nowhere,
+    which is the opposite of what a harvest is for.
     """
     by_check = {}
     for a in annotations:
-        if a.get("annotation_level") not in HARVEST_LEVELS:
+        level = a.get("annotation_level")
+        if level not in HARVEST_LEVELS:
             continue
-        if a.get("title") in (DOCTOR_TITLE, wi.WIRING_TITLE):
+        if a.get("title") == DOCTOR_TITLE:
+            continue
+        if a.get("title") == wi.WIRING_TITLE and level == "warning":
             continue
         by_check.setdefault(a.get("check_name") or "(unnamed check)", []).append(a)
     return by_check

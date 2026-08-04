@@ -59,6 +59,10 @@ _NAME_KEY = re.compile(r"""^["']?name["']?[ \t]*:(?P<rest>.*)$""")
 _ON_KEY = re.compile(r"""^["']?on["']?[ \t]*:(?P<rest>.*)$""")
 _WORKFLOW_RUN = re.compile(r"(?<![\w-])workflow_run(?![\w-])")
 _WORKFLOWS_KEY = re.compile(r"""["']?workflows["']?[ \t]*:""")
+#: The trailing `(?![\w-])` is what keeps `pull_request_target` from counting as
+#: a `pull_request` trigger -- they are different events, and only the first one
+#: satisfies the engine's `workflow_run.event` guard.
+_PULL_REQUEST = re.compile(r"(?<![\w-])pull_request(?![\w-])")
 
 BAD_PATH = (
     BROKEN,
@@ -76,9 +80,16 @@ NO_WIRING = (
     "stays unmergeable. Copy `.github/workflows/summary.yml` from any of the "
     "`repo-example-{stacks,folders,workspaces}` sample repositories (README.md "
     "§Example repositories) — the wrapper is identical across all three, and "
-    "CONTRACT.md §Post-plan topology states what it has to keep. Both halves "
-    "have to be in the same file: a wrapper that delegates the `uses:` to a "
-    "second local workflow reads as no wiring here.",
+    "CONTRACT.md §Post-plan topology states what it has to keep.",
+)
+BAD_TRIGGER = (
+    BROKEN,
+    f"`{PLAN_PATH}` does not trigger on `pull_request` — the engine's reusable "
+    "summary workflow skips every job unless the completed plan run's event was "
+    "exactly that, so no apply checks and no `shipmate / gate` status are ever "
+    "written. `pull_request_target` is a different event and does not satisfy "
+    "it (and is unsafe here besides — see docs/hardening.md). Add "
+    "`pull_request` to the plan workflow's `on:`.",
 )
 LISTING_UNREADABLE = (
     UNKNOWN,
@@ -102,6 +113,18 @@ NAME_UNREADABLE = (
     UNKNOWN,
     f"`{PLAN_PATH}`'s `name:` is not a plain scalar this check can read — its "
     f"value was not compared against `{PLAN_NAME}`.",
+)
+TRIGGER_UNREADABLE = (
+    UNKNOWN,
+    f"`{PLAN_PATH}` has no top-level `on:` this check can read — it was not "
+    "verified that the plan workflow triggers on `pull_request`.",
+)
+WIRING_INDIRECT = (
+    UNKNOWN,
+    "a workflow triggers on `workflow_run` for the plan workflow, but it does not "
+    f"itself call the engine's reusable `{SUMMARY_PATH}` — it may reach it through "
+    "another workflow, which this check cannot follow. Verify by hand that a "
+    "`shipmate / gate` status appears on this pull request.",
 )
 
 
@@ -210,7 +233,10 @@ def _engine_summary(engine_repo):
     that file.
     """
     slug = re.escape(engine_repo) if engine_repo else r"[\w.-]+/[\w.-]+"
-    return re.compile(rf"""uses:\s*["']?(?i:{slug})/{re.escape(SUMMARY_PATH)}@""")
+    # `uses[ \t]*:`, matching every other key matcher here: `uses : x` is valid
+    # YAML, and this is the one matcher whose miss is fatal rather than merely
+    # imprecise.
+    return re.compile(rf"""uses[ \t]*:\s*["']?(?i:{slug})/{re.escape(SUMMARY_PATH)}@""")
 
 
 def _escaped_workflows(on_text):
@@ -224,13 +250,20 @@ def _escaped_workflows(on_text):
 
 
 def _wiring_state(text, engine_repo):
-    """One workflow file's state: "present", "escaped" or "absent".
+    """One workflow file's state: "present", "indirect", "escaped" or "absent".
 
-    Both halves of "present" must be in the same file: a `workflow_run` trigger
-    naming the plan workflow, and a call into the engine's reusable summary
-    workflow. Comments are stripped from both reads -- a repository that
-    commented the wiring out has no wiring, and a commented-out name is exactly
-    the line somebody leaves behind when they break it.
+    "present" is both halves in the same file: a `workflow_run` trigger naming
+    the plan workflow, and a call into the engine's reusable summary workflow.
+    Comments are stripped from both reads -- a repository that commented the
+    wiring out has no wiring, and a commented-out name is exactly the line
+    somebody leaves behind when they break it.
+
+    "indirect" is the trigger naming the plan workflow WITHOUT that call. A
+    wrapper may reach the engine through another reusable workflow, local or in
+    a shared-workflows repository, and both chain correctly on GitHub. This
+    module cannot follow the hop, and a trigger aimed at this exact plan name is
+    far too specific to be a coincidence -- so it degrades rather than claiming
+    a repository that gates fine has no wiring at all.
 
     "escaped" is that same wiring with a `workflows:` value this module cannot
     read faithfully. Reporting it broken would contradict the name half, which
@@ -242,17 +275,31 @@ def _wiring_state(text, engine_repo):
     on_text = "\n".join([inline, *block])
     if not _WORKFLOW_RUN.search(on_text):
         return "absent"
+    if PLAN_NAME not in on_text:
+        return "escaped" if _escaped_workflows(on_text) else "absent"
     body = "\n".join(_strip_comment(ln) for ln in text.splitlines())
-    if not _engine_summary(engine_repo).search(body):
-        return "absent"
-    if PLAN_NAME in on_text:
-        return "present"
-    return "escaped" if _escaped_workflows(on_text) else "absent"
+    return "present" if _engine_summary(engine_repo).search(body) else "indirect"
 
 
-def summary_wiring_present(text, engine_repo):
-    """Whether one workflow file wires the engine's summary to the plan run."""
-    return _wiring_state(text, engine_repo) == "present"
+def _trigger_findings(blob):
+    """Whether the plan workflow triggers on `pull_request`.
+
+    The fourth condition the engine's reusable `summary.yml` gates on, alongside
+    the path and the two the wiring checks cover:
+    `github.event.workflow_run.event == 'pull_request'`. A plan workflow that
+    runs on `pull_request_target`, or only on `merge_group`, satisfies every
+    other check here and still never produces a gate -- which is the exact
+    silent failure this module exists to surface, so leaving it unchecked made
+    the probe assert the wiring was fine over a dead gate.
+    """
+    if blob is None:
+        return []  # PLAN_UNREADABLE already says the file could not be read
+    inline, block = _on_block(decode(blob))
+    if inline is None:
+        return [TRIGGER_UNREADABLE]
+    if _PULL_REQUEST.search("\n".join([inline, *block])):
+        return []
+    return [BAD_TRIGGER]
 
 
 def _name_findings(blob):
@@ -296,6 +343,8 @@ def _wiring_findings(files, engine_repo):
     # incomplete read can only ever say "not verified".
     if len(readable) != len(files):
         return [WIRING_UNREADABLE]
+    if "indirect" in states:
+        return [WIRING_INDIRECT]
     if "escaped" in states:
         return [WIRING_ESCAPED]
     return [NO_WIRING]
@@ -315,5 +364,6 @@ def findings(files, engine_repo):
         out.append(BAD_PATH)
     else:
         out.extend(_name_findings(files[PLAN_FILE]))
+        out.extend(_trigger_findings(files[PLAN_FILE]))
     out.extend(_wiring_findings(files, engine_repo))
     return out

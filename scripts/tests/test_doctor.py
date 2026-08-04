@@ -786,23 +786,29 @@ def test_quoted_tag_pin_warned(monkeypatch):
     assert "tag or branch" in out[0][1] and "acme/engine@v2" in out[0][1]
 
 
-def test_non_file_workflow_entry_degrades_this_probe(monkeypatch):
-    # A directory (or symlink/submodule) entry whose name happens to end in
-    # .yml is not a workflow file -- fetching its "contents" returns a list,
-    # not a blob. `_workflow_names` keeps it anyway, because DROPPING it reads
-    # to the wiring probe as a missing plan workflow; here it is simply one
-    # more unreadable entry, and this probe degrades on it the way it degrades
-    # on any other. It must not raise AttributeError on the list.
+def test_non_file_workflow_entry_skipped(monkeypatch):
+    """A directory (or symlink/submodule) whose name ends in `.yml` is not a
+    workflow file -- its "contents" read returns a list, not a blob. This probe
+    SKIPS it and keeps scanning: it stops at the first unreadable FILE, so
+    treating a non-file entry as unreadable would abort the whole directory and
+    silently drop every pin finding after it. The entry sorts FIRST here on
+    purpose, which is the arrangement that hid the tag pin below.
+
+    `_workflow_entries` keeps the entry and tags it, because the wiring probe
+    needs it -- dropping it there reads as a missing plan workflow, which is
+    BROKEN. Each probe picks; neither is served by the other's answer."""
     responses = {
         f"{_WF_DIR}{_REF}": [
             {"name": "sub.yml", "type": "dir"},
             {"name": "plan.yml", "type": "file"},
         ],
-        f"{_WF_DIR}/sub.yml{_REF}": [{"name": "nested.yml", "type": "file"}],
         f"{_WF_DIR}/plan.yml{_REF}": _wf_file("uses: acme/engine/actions/setup@v2\n"),
     }
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
-    assert doctor._pin_warnings(_ctx()) == [doctor.PIN_UNREADABLE]
+    out = doctor._pin_warnings(_ctx())
+    assert len(out) == 1
+    assert out[0][0] == doctor.WARNING
+    assert "tag or branch" in out[0][1] and "acme/engine@v2" in out[0][1]
 
 
 def test_stale_sha_pin_warned(monkeypatch):
@@ -2115,15 +2121,25 @@ def test_a_non_file_workflow_entry_is_unreadable_not_absent(monkeypatch):
     ]
 
 
-def test_a_non_file_workflow_entry_degrades_the_fork_trigger_probe(monkeypatch):
-    """The third probe over the same listing (the pin probe's twin above) must
-    degrade on that entry too, not crash on a response that is a list."""
+def test_a_non_file_workflow_entry_does_not_blind_the_fork_trigger_probe(monkeypatch):
+    """The pin probe's twin. This probe exists to surface the one
+    misconfiguration on docs/hardening.md an outside contributor can reach, and
+    it also stops at the first unreadable file -- so a non-file entry sorting
+    ahead of the real workflows must be skipped, not treated as unreadable.
+    Treating it as unreadable reported "could not read" and hid the
+    `pull_request_target` trigger sitting in the very next file."""
     responses = {
-        f"{_WF_DIR}{_REF}": [{"name": "plan.yml", "type": "dir"}],
-        f"{_WF_DIR}/plan.yml{_REF}": [{"name": "nested.yml", "type": "file"}],
+        f"{_WF_DIR}{_REF}": [
+            {"name": "sub.yml", "type": "dir"},
+            {"name": "plan.yml", "type": "file"},
+        ],
+        f"{_WF_DIR}/plan.yml{_REF}": _wf_file("on:\n  pull_request_target:\n"),
     }
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
-    assert doctor._fork_trigger_warnings(_ctx()) == [doctor.FORK_TRIGGER_UNREADABLE]
+    out = doctor._fork_trigger_warnings(_ctx())
+    assert len(out) == 1
+    assert out[0][0] == doctor.WARNING
+    assert "pull_request_target" in out[0][1]
 
 
 def test_an_unencoded_blob_is_unreadable_not_empty(monkeypatch):
@@ -2137,10 +2153,10 @@ def test_an_unencoded_blob_is_unreadable_not_empty(monkeypatch):
     assert found == [(doctor.NOTICE, doctor.wi.PLAN_UNREADABLE[1])]
 
 
-def test_harvest_drops_the_wiring_annotation():
-    """`build-matrix` emits the same finding as a run annotation. The live
-    probe in this same report re-states it, so keeping both double-reports
-    every wiring problem -- the same reason DOCTOR_TITLE is filtered."""
+def test_harvest_drops_the_warning_level_wiring_annotation():
+    """`build-matrix` emits a wiring finding as a WARNING when it is not failing
+    the run, and the live probe in this same report re-states it -- so keeping
+    both double-reports the problem, the same reason DOCTOR_TITLE is filtered."""
     anns = [
         {
             "annotation_level": "warning",
@@ -2158,3 +2174,39 @@ def test_harvest_drops_the_wiring_annotation():
     sections = doctor.harvest_sections(anns)
     kept = [a["title"] for rows in sections.values() for a in rows]
     assert kept == ["something else"]
+
+
+def test_harvest_keeps_the_failure_level_wiring_annotation():
+    """The FAILURE-level one is the annotation that killed `detect`, and it must
+    survive: the two sides read different commits -- `detect` the merge commit,
+    the live probe the pull request head -- so a break living only on the base
+    branch reds the run while the probe reads clean. Dropping it there renders
+    an all-clear over a red, gate-blocking run with the reason stated nowhere,
+    which is the opposite of what the harvest is for."""
+    anns = [
+        {
+            "annotation_level": "failure",
+            "title": doctor.wi.WIRING_TITLE,
+            "message": "no plan.yml",
+            "check_name": "shipmate / detect",
+        },
+    ]
+    sections = doctor.harvest_sections(anns)
+    kept = [a["message"] for rows in sections.values() for a in rows]
+    assert kept == ["no plan.yml"]
+
+
+def test_harvest_drops_doctors_own_annotation_at_every_level():
+    """DOCTOR_TITLE is unconditional, unlike the wiring title: doctor's own
+    annotations are only ever notices and warnings, and the live probes restate
+    all of them against current settings."""
+    anns = [
+        {
+            "annotation_level": level,
+            "title": doctor.DOCTOR_TITLE,
+            "message": "x",
+            "check_name": "shipmate / detect",
+        }
+        for level in doctor.HARVEST_LEVELS
+    ]
+    assert doctor.harvest_sections(anns) == {}

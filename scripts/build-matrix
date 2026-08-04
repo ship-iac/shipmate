@@ -232,6 +232,15 @@ def workflow_files(root):
     that checkout is the MERGE commit, which is the state the gate will actually
     live under once this pull request lands.
 
+    That guarantee covers `pull_request` only. `_PR_EVENTS` also carries
+    `pull_request_target`, where the default checkout is the BASE ref, so the
+    check there judges the wiring the pull request has not changed yet: a break
+    the pull request introduces passes, and once the base is broken the pull
+    request that FIXES it still fails. Not worked around here, because a plan
+    workflow on `pull_request_target` is a misconfiguration in its own right --
+    `findings` reports it (`wiring.BAD_TRIGGER`) and doctor's fork-trigger probe
+    warns about it separately.
+
     That also means this reads whatever the checkout materialized. An absent or
     relocated checkout degrades to None and so to UNKNOWN, but a SPARSE checkout
     holding `plan.yml` without the consumer's summary wrapper produces a partial
