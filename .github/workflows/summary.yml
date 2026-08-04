@@ -147,21 +147,69 @@ jobs:
           RUN_ID: ${{ github.event.workflow_run.id }}
         run: |
           set -uo pipefail
-          # `gh api` rejects `--slurp` together with `--jq` on the same
-          # invocation, so this pipes into a standalone `jq` instead.
-          if count=$(gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID/artifacts?per_page=100" \
-            | jq '[.[].artifacts[] | select(.name | startswith("cell-summary."))] | length'); then
-            echo "count=$count" >> "$GITHUB_OUTPUT"
-          else
-            # `unknown`, never a number: any number is comparable against the
-            # parsed cell count, and the one that happens to match (1 reported,
-            # 1 cell downloaded) greens the gate over evidence we never saw --
-            # the other planned stacks then land on main with no apply check
-            # and are never applied. gate-state holds unconditionally on a
-            # non-integer count.
-            echo "::warning::could not list this plan run's artifacts; its evidence count is unknown"
-            echo "count=unknown" >> "$GITHUB_OUTPUT"
+          # Two facts about one plan run, read from a single listing so they
+          # cannot describe different moments: how many cells `detect` planned
+          # (the `plan-matrix.<N>` marker artifact -- a `workflow_run` event
+          # carries no job outputs, so the count can only arrive as a name), and
+          # how many `cell-summary.*` artifacts the API reports. `unknown` for
+          # either, never a number: gate-state holds on any non-integer, and any
+          # number is comparable against a cell count -- the one that happens to
+          # match greens the gate over evidence nobody saw.
+          # `gh api` rejects `--slurp` together with `--jq`, so this pipes into
+          # a standalone `jq`.
+          cells=unknown
+          planned=unknown
+          readable=false
+          attempt=0
+          while [ "$attempt" -lt 3 ]; do
+            attempt=$((attempt + 1))
+            # Reset every attempt: an attempt that reads nothing must never
+            # report the previous one's numbers as if it had just seen them.
+            cells=unknown
+            planned=unknown
+            readable=false
+            if listing=$(gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID/artifacts?per_page=100"); then
+              readable=true
+              cells=$(printf '%s' "$listing" | jq '[.[].artifacts[] | select(.name | startswith("cell-summary."))] | length') || cells=""
+              # `unique | if length == 1`, not `first`: two markers disagreeing
+              # means this run is not describable by one number.
+              # No backslash anywhere in the match: an escaped `\.` would have to
+              # survive this block scalar, the single quotes and jq's own string
+              # parsing, and one lost backslash silently widens the match or
+              # fails to compile.
+              planned=$(printf '%s' "$listing" | jq -r '[.[].artifacts[].name | select(startswith("plan-matrix.")) | ltrimstr("plan-matrix.") | select(test("^[0-9]+$"))] | unique | if length == 1 then .[0] else "unknown" end') || planned=""
+            fi
+            # Anything that is not a run of digits is `unknown`. An empty answer
+            # (an empty response body, or a program that failed) must never read
+            # as two counts agreeing below, and a cell count that could not be
+            # derived is a listing this job did not manage to read.
+            case "$cells" in "" | *[!0-9]*) cells=unknown; readable=false ;; esac
+            case "$planned" in "" | *[!0-9]*) planned=unknown ;; esac
+            if [ "$planned" != "unknown" ] && [ "$cells" = "$planned" ]; then
+              break
+            fi
+            # The artifacts listing is read-after-write eventually consistent and
+            # this runs seconds after the plan run finished, so an unreadable,
+            # marker-less or short listing is routinely just early.
+            [ "$attempt" -lt 3 ] && sleep 5
+          done
+          # One warning per cause, each naming a recovery that actually works:
+          # the gate description is capped at 140 characters, so the run page is
+          # where the reason has to be legible. Every message points at re-running
+          # THIS run first, because every hold here is a read of the plan run's
+          # artifact list and this run is the only thing that re-reads it.
+          # Re-running the plan run is the wrong advice: its cells would 409 on
+          # the artifacts the first attempt already uploaded (plan-cell's uploads
+          # are not `overwrite:`), turning a recoverable hold into a red plan.
+          if [ "$readable" = "false" ]; then
+            echo "::warning::could not read this plan run's artifact list, so its evidence is unknown and the gate will hold — re-run this summary run to read the list again; do not re-run the plan run"
+          elif [ "$planned" = "unknown" ]; then
+            echo "::warning::this plan run published no readable plan-matrix marker; the gate will hold — the list is usually just lagging, so re-run this summary run first; if it persists, actions/build-matrix is pinned to an older engine revision than this workflow"
+          elif [ "$cells" != "$planned" ]; then
+            echo "::warning::the plan run planned $planned cell(s) but its artifact list shows $cells; the gate will hold — re-run this summary run; if it persists, push again to re-plan"
           fi
+          echo "count=$cells" >> "$GITHUB_OUTPUT"
+          echo "matrix_count=$planned" >> "$GITHUB_OUTPUT"
 
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         if: steps.pr.outputs.number != '' && steps.artifacts.outputs.count != '0'
@@ -182,11 +230,14 @@ jobs:
           # comment footer, the per-cell fallback links and the gate's
           # target_url must all point at the plan run.
           plan-run-url: ${{ github.event.workflow_run.html_url }}
-          # `|| 'unknown'`, never a number: the fallback covers a step that
-          # emitted no output at all, which is the same state the failure
-          # branch above reports. gate-state holds the gate on any
-          # non-integer count, so an unreadable listing can never present as
-          # a countable number that some cell count might match.
+          # `|| 'unknown'` on both counts, never a number: the fallback covers a
+          # step that emitted no output at all (skipped, or dead before its
+          # echoes), which the step itself cannot report. It is not the channel
+          # for a found-nothing listing -- the step writes `0` or `unknown`
+          # itself there. A numeric stand-in would be comparable against a cell
+          # count, and the one that happens to match greens the gate over
+          # evidence nobody saw; gate-state holds on any non-integer.
           artifact-count: ${{ steps.artifacts.outputs.count || 'unknown' }}
+          matrix-count: ${{ steps.artifacts.outputs.matrix_count || 'unknown' }}
           app-id: ${{ vars.SHIPMATE_APP_ID }}
           private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}

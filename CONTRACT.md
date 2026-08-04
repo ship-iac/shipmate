@@ -676,8 +676,9 @@ identified by the HTML marker written verbatim as the comment's first line:
 - `<!-- shipmate:summary -->`
 
 A run whose cell count is zero writes the empty-table body **only** when that
-zero means "no stacks changed" — `detect` succeeded and the plan matrix came
-back empty. Every other zero (a failed `detect`, plan cells that all failed
+zero means "no stacks changed" — the plan run's `plan-matrix.<N>` marker reports
+zero cells. Every other zero (a marker that could not be read, a listing that
+disagrees with the marker, a failed `detect`, plan cells that all failed
 before uploading a cell summary, a failed `cell-summary.*` download) leaves the
 plan unknown, so the run writes nothing at all and any existing comment — the
 reviewed plan for the previous push — is left standing rather than PATCHed down
@@ -738,6 +739,16 @@ with the glob pattern `cell-summary.*`. It contains verbatim:
 consumer's `plan.yml`, so the schema upgrades atomically; the summary
 fails loud on a `cell.json` missing schema keys rather than rendering around
 pin skew.
+
+One further artifact travels alongside them:
+
+- `plan-matrix.<N>` — published by `actions/build-matrix` on every plan run,
+  where `<N>` is the number of cells the plan matrix had. The name *is* the
+  payload: the trusted post-plan job reads `N` out of the artifact listing,
+  because a `workflow_run` event carries no job outputs. It holds a one-line
+  `count.txt` only because an artifact must have a file. Writer and reader are
+  pinned by the same SHA in a consumer's `plan.yml` and `summary.yml`; a partial
+  re-pin holds every gate rather than greening one.
 
 ## Apply result comment
 

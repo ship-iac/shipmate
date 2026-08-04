@@ -15,7 +15,10 @@ inputs:
     description: 'Conclusion of the plan workflow run (github.event.workflow_run.conclusion): success|failure|cancelled|skipped|…'
     required: true
   artifact-count:
-    description: Number of cell-summary.* artifacts the API reports for that plan run, or "unknown" when that listing could not be read. Distinguishes "nothing changed" (0) from "the download failed" (>0 with no parsed cells) and from "the list was never seen" (unknown, which holds the gate).
+    description: Number of cell-summary.* artifacts the API reports for that plan run, or "unknown" when that listing could not be read. Never decides "nothing changed" on its own — a zero here is quiet only when matrix-count agrees the plan matrix was empty, and a shortfall against either matrix-count or the parsed cells holds the gate, as does "unknown". Always supply matrix-count alongside it — the runner does not enforce `required` for a composite action, so omitting it silently holds every pull request.
+    required: true
+  matrix-count:
+    description: How many cells the plan matrix had, read from the plan run's `plan-matrix.<N>` marker artifact, or "unknown" when no single marker could be read. Distinguishes an empty matrix (0 — docs-only or pin-bump) from an artifact listing that did not show the cells, which holds the gate.
     required: true
   plan-run-url:
     description: 'HTML URL of the plan workflow run (github.event.workflow_run.html_url). Used for the comment footer, the per-cell fallback link and the gate''s target_url; this run''s URL is used when empty.'
@@ -98,6 +101,7 @@ runs:
       env:
         SHIPMATE_RUN_CONCLUSION: ${{ inputs.run-conclusion }}
         SHIPMATE_ARTIFACT_COUNT: ${{ inputs.artifact-count }}
+        SHIPMATE_MATRIX_COUNT: ${{ inputs.matrix-count }}
         SHIPMATE_CELL_COUNT: ${{ steps.build.outputs.count }}
         SHIPMATE_PENDING: ${{ steps.build.outputs.pending }}
         SHIPMATE_PLAN_RUN_URL: ${{ inputs.plan-run-url }}
@@ -178,8 +182,9 @@ runs:
         # one id per matching page; the first line is the single id PATCH needs.
         id=$(head -n1 summary-comment-ids.txt)
         # gate-state has already collapsed every "the plan can't be trusted"
-        # case (a non-success plan run, an unknown artifact count, or a
-        # cell/artifact-count shortfall)
+        # case (a non-success plan run, an unknown artifact count, a
+        # cell/artifact-count shortfall, no readable plan-matrix marker, or an
+        # artifact listing that disagrees with the marker's cell count)
         # into comment_mode=hold. Warn and leave any existing comment
         # untouched rather than overwriting the review surface with an
         # incomplete picture — `Create/refresh gate` below also fails the

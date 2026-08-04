@@ -209,14 +209,38 @@ def test_artifact_count_step_cannot_abort_without_emitting_a_count():
     # `success() && ...`) to failure, which would skip the summary step
     # entirely and leave no gate written at all. The step must catch the
     # failure itself (no `-e` flag, on any `set` invocation, in any form) and
-    # still emit a `count=` output, WITH the `$GITHUB_OUTPUT` redirect, on
-    # every path.
+    # still emit both counts, WITH the `$GITHUB_OUTPUT` redirect, on every
+    # path. The marker count is on the same footing as the cell count: a step
+    # that emits one and not the other leaves `matrix-count` empty, which holds
+    # the gate -- recoverable, but for a reason the run page does not explain.
     run = _step(_job(), "artifacts")["run"]
     assert not _errexit_flags(run), (
         f"an `e` flag reached some `set` invocation in the artifacts step: {run}"
     )
-    assert 'echo "count=$count" >> "$GITHUB_OUTPUT"' in run
-    assert 'echo "count=unknown" >> "$GITHUB_OUTPUT"' in run
+    assert 'echo "count=$cells" >> "$GITHUB_OUTPUT"' in run
+    assert 'echo "matrix_count=$planned" >> "$GITHUB_OUTPUT"' in run
+
+
+def test_every_count_the_step_assigns_by_hand_is_a_non_numeric_sentinel():
+    # The counts a path assigns as a LITERAL are the ones for evidence the step
+    # never saw, and every one of them must be non-numeric: a number there is
+    # comparable against the other count, and the pair that happens to agree
+    # greens the gate over stacks that were planned and got no apply check.
+    # Derived from the step's own text rather than from a list of names here, so
+    # a new hand-assigned count is covered the day it appears. This is the
+    # jq-free half of the property: the behavioural tests in
+    # test_plan_matrix_marker.py prove the paths, and they skip where jq is
+    # absent -- a swap of `unknown` for `0` must not need jq to be caught.
+    run = _step(_job(), "artifacts")["run"]
+    literals = {
+        value
+        for name, value in re.findall(r"\b(cells|planned)=([^\s;]*)", run)
+        if not value.startswith(("$", '"$', "'"))
+    }
+    assert literals, f"no literal count assignments found in the artifacts step:\n{run}"
+    for value in literals:
+        with pytest.raises(ValueError, match="invalid literal"):
+            int(value, 10)
 
 
 def test_artifact_count_gh_call_uses_slurp_and_never_jq_together():
@@ -240,12 +264,19 @@ def test_artifact_count_aggregates_every_page_in_one_jq_pass():
     # fails the step. The whole jq filter -- walking `.[]` (the slurped pages)
     # before `.artifacts[]`, selecting on the name prefix, and counting with
     # `length` -- must match exactly, aggregating every page in the one pass.
+    # BOTH programs, not just the first: the marker program is invoked as
+    # `jq -r '...'`, which a pattern expecting `jq '` cannot see -- it was, and
+    # `.[]` -> `.[0]` in the marker program alone stayed green. A >100-artifact
+    # run puts the marker (uploaded first, by `detect`) on the last page, so
+    # reading only page 0 loses it and holds every large plan for good.
     run = _step(_job(), "artifacts")["run"]
-    jq_filter = re.search(r"\|\s*jq\s+'(.*?)'", run, re.DOTALL)
-    assert jq_filter, f"no piped jq filter found in the artifacts step:\n{run}"
-    assert _normalize(jq_filter.group(1)) == (
-        '[.[].artifacts[] | select(.name | startswith("cell-summary."))] | length'
-    )
+    programs = [_normalize(p) for p in re.findall(r"\|\s*jq\s+(?:-r\s+)?'(.*?)'", run, re.DOTALL)]
+    assert programs == [
+        '[.[].artifacts[] | select(.name | startswith("cell-summary."))] | length',
+        '[.[].artifacts[].name | select(startswith("plan-matrix.")) '
+        '| ltrimstr("plan-matrix.") | select(test("^[0-9]+$"))] '
+        '| unique | if length == 1 then .[0] else "unknown" end',
+    ], f"the artifacts step's jq programs are not the two expected:\n{programs}"
 
 
 def test_supersede_check_cannot_abort_before_any_gate_is_written():

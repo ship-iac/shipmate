@@ -430,6 +430,17 @@ this section rests on for exactly the exposure control 1 exists to limit.
 
 ## What none of this fixes
 
+- **A fabricated `plan-matrix.<N>` marker.** The gate holds unless the plan run
+  published exactly one readable marker naming the cell count, and the listed
+  `cell-summary.*` count matches it (see `CONTRACT.md` §Plan comment). That
+  marker is published by the plan run, which executes the pull request's own
+  code *and its own workflow file*, so an author with **write access** can
+  publish any count they like — including a zero that greens a quiet gate over
+  stacks that were planned. The marker defends against an eventually-consistent
+  artifacts API, not against a privileged author, who can already fabricate the
+  whole artifact surface the summary reads: the cell summaries, the `cell.json`
+  verdicts, the `.otplan` files. Nothing here makes the gate unforgeable from
+  inside the repository; control 1 (who can push a branch) is what bounds that.
 - **Plan-time code execution.** Reviewing a plan means reading output produced
   by a pipeline running the author's code. A hostile provider, an `external`
   data source, or a `terramate` script block executes during plan. Control 8
