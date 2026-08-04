@@ -98,6 +98,18 @@ def test_the_marker_name_carries_the_planned_cell_count():
     assert _upload_step()["with"]["name"] == "plan-matrix.${{ steps.build.outputs.count }}"
 
 
+def test_the_validated_count_is_the_one_that_becomes_the_name():
+    # The record step's refusal only protects the name if both steps read the
+    # same expression. Feed the recorder a literal (or a different output) and
+    # the `^[0-9]+$` refusal goes vacuous: a `detect` that stopped emitting
+    # `count=` would publish an artifact named `plan-matrix.`, which the reader
+    # rejects -- every pull request in every consumer repo then holds, blaming a
+    # pin that is already correct, with a green plan run explaining nothing.
+    recorded = (_record_step().get("env") or {})["SHIPMATE_MATRIX_COUNT"]
+    assert _upload_step()["with"]["name"] == f"plan-matrix.{recorded}"
+    assert recorded == "${{ steps.build.outputs.count }}"
+
+
 def test_the_marker_upload_fails_when_there_is_nothing_to_upload():
     # upload-artifact's default is `warn`: it would publish NOTHING and hold
     # every gate in the consumer repo, with only a warning on the plan run.
@@ -257,6 +269,20 @@ def test_the_counting_step_does_not_stop_at_the_first_attempt():
     assert re.findall(r"\bsleep ([0-9]+)\b", run) == ["5"]
 
 
+def test_every_attempt_starts_from_the_sentinels_not_from_the_last_one_s_answer():
+    # The jq-free half of the per-attempt reset (its behavioural twin needs jq):
+    # each of the three names must be reset between `while` and the `gh api`
+    # call, so an attempt that reads nothing cannot inherit numbers from one
+    # that did. Hoisting the resets above the loop leaves the file looking
+    # almost identical, which is exactly why this is asserted positionally.
+    lines = [line.strip() for line in _wf_step("artifacts")["run"].splitlines()]
+    loop = next(i for i, line in enumerate(lines) if line.startswith("while "))
+    read = next(i for i, line in enumerate(lines) if "gh api --paginate --slurp" in line)
+    for reset in ("cells=unknown", "planned=unknown", "readable=false"):
+        inside = [i for i, line in enumerate(lines) if line == reset and loop < i < read]
+        assert inside, f"{reset} is not reset between the loop head and the listing read"
+
+
 def test_the_workflow_passes_the_marker_count_to_the_summary_action():
     call = [
         s
@@ -270,19 +296,43 @@ def test_the_workflow_passes_the_marker_count_to_the_summary_action():
     )
 
 
+def _summary_action_gate_step():
+    doc = yaml.safe_load((ACTIONS / "summary/action.yml").read_text(encoding="utf-8"))
+    gate = [s for s in doc["runs"]["steps"] if s.get("id") == "gate"]
+    assert len(gate) == 1, f"expected exactly one gate step, got {len(gate)}"
+    return gate[0]
+
+
 def test_the_summary_action_threads_the_marker_count_to_gate_state():
     doc = yaml.safe_load((ACTIONS / "summary/action.yml").read_text(encoding="utf-8"))
     assert "matrix-count" in doc["inputs"]
-    gate = [s for s in doc["runs"]["steps"] if s.get("id") == "gate"]
-    assert len(gate) == 1
-    assert gate[0]["env"]["SHIPMATE_MATRIX_COUNT"] == "${{ inputs.matrix-count }}"
+    assert _summary_action_gate_step()["env"]["SHIPMATE_MATRIX_COUNT"] == (
+        "${{ inputs.matrix-count }}"
+    )
 
 
-def test_gate_state_reads_the_env_var_the_action_supplies():
+def test_gate_state_reads_both_count_env_vars_the_action_supplies():
     # Source-derived: the reader side is the script's own text, so a rename on
-    # either side reds this immediately.
+    # either side reds this immediately. Both counts, not just the marker: they
+    # were hardened in the same change, and a `SHIPMATE_ARTIFACT_COUNT` dropped
+    # from the action's `env:` leaves the gate deciding from a default instead of
+    # from the listing the workflow actually read.
     source = (SCRIPTS / "gate-state").read_text(encoding="utf-8")
-    assert 'os.environ.get("SHIPMATE_MATRIX_COUNT"' in source
+    gate = _summary_action_gate_step()
+    for name in ("SHIPMATE_ARTIFACT_COUNT", "SHIPMATE_MATRIX_COUNT"):
+        assert f'os.environ.get("{name}"' in source
+        assert name in gate["env"]
+
+
+def test_neither_count_defaults_to_a_number_when_its_env_is_absent():
+    # `os.environ.get(..., "0")` would decide a quiet green gate from a count
+    # nobody reported. The default has to be a value `_as_int` rejects, for both.
+    source = (SCRIPTS / "gate-state").read_text(encoding="utf-8")
+    for name in ("SHIPMATE_ARTIFACT_COUNT", "SHIPMATE_MATRIX_COUNT"):
+        default = re.search(rf'os\.environ\.get\("{name}",\s*("[^"]*")\)', source)
+        assert default, f"{name} is not read with an explicit default:\n{source}"
+        with pytest.raises(ValueError, match="invalid literal"):
+            int(json.loads(default.group(1)), 10)
 
 
 #: Answers every call with `$FAKE_LISTING`, exit `$GH_STATUS`, and counts calls.
@@ -308,6 +358,22 @@ gh() {
     return "$EARLY_STATUS"
   fi
   printf '%s' "$FAKE_LISTING"
+}
+sleep() { : ; }
+"""
+
+#: Answers `$FAKE_LISTING` on the first call and fails every later one -- an
+#: attempt that reads nothing after one that read something.
+DEGRADING_GH_STUB = """
+gh() {
+  n=$(cat "$CALLS" 2>/dev/null || printf 0)
+  n=$((n + 1))
+  printf '%s' "$n" > "$CALLS"
+  if [ "$n" -eq 1 ]; then
+    printf '%s' "$FAKE_LISTING"
+    return 0
+  fi
+  return 1
 }
 sleep() { : ; }
 """
@@ -372,6 +438,28 @@ def test_the_reader_reports_a_consistent_listing(tmp_path):
     )
     assert written["count"] == "2"
     assert written["matrix_count"] == "2"
+
+
+@pytest.mark.skipif(_BASH is None or _JQ is None, reason="bash and jq required")
+def test_an_attempt_that_reads_nothing_never_reports_the_previous_one_s_numbers(tmp_path):
+    # The counts are reset at the top of every attempt, and hoisting those
+    # resets above the loop reads as equivalent -- it is not. Here the first
+    # attempt sees a short listing (5 planned, 1 summary) and the last two fail
+    # outright: without the per-attempt reset the step reports 1/5 from the
+    # attempt that saw them and the run page blames a shortfall, sending the
+    # author to push a commit over what was an API outage that re-running this
+    # run would have cleared.
+    proc, written = _run_step(
+        tmp_path,
+        DEGRADING_GH_STUB,
+        FAKE_LISTING=json.dumps(_page("plan-matrix.5", "cell-summary.dev-eu.a")),
+    )
+    assert _calls(tmp_path) == "3"
+    assert written["count"] == "unknown"
+    assert written["matrix_count"] == "unknown"
+    assert UNREADABLE_WARNING in proc.stderr + proc.stdout
+    assert SHORTFALL_WARNING not in proc.stderr + proc.stdout
+    assert proc.returncode == 0, proc.stderr
 
 
 @pytest.mark.skipif(_BASH is None or _JQ is None, reason="bash and jq required")

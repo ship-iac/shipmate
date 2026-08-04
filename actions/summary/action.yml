@@ -15,7 +15,7 @@ inputs:
     description: 'Conclusion of the plan workflow run (github.event.workflow_run.conclusion): success|failure|cancelled|skipped|…'
     required: true
   artifact-count:
-    description: Number of cell-summary.* artifacts the API reports for that plan run, or "unknown" when that listing could not be read. Distinguishes "nothing changed" (0) from "the download failed" (>0 with no parsed cells) and from "the list was never seen" (unknown, which holds the gate).
+    description: Number of cell-summary.* artifacts the API reports for that plan run, or "unknown" when that listing could not be read. Never decides "nothing changed" on its own — a zero here is quiet only when matrix-count agrees the plan matrix was empty, and a shortfall against either matrix-count or the parsed cells holds the gate, as does "unknown". Always supply matrix-count alongside it — the runner does not enforce `required` for a composite action, so omitting it silently holds every pull request.
     required: true
   matrix-count:
     description: How many cells the plan matrix had, read from the plan run's `plan-matrix.<N>` marker artifact, or "unknown" when no single marker could be read. Distinguishes an empty matrix (0 — docs-only or pin-bump) from an artifact listing that did not show the cells, which holds the gate.

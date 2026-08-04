@@ -66,9 +66,12 @@ def _evidence_gap(*, counted, cell_count, planned):
             f"{counted} — re-plan before merging"
         )
     if cell_count < counted:
+        # Reaching here means the listing agreed with the marker, so this is a
+        # download or parse shortfall -- usually partial, not total. Say how many
+        # of how many, or a maintainer hunts a failure that did not happen.
         return (
-            "no cell summaries could be read from the plan run's artifacts "
-            "(download issue) — re-run before merging"
+            f"only {cell_count} of {counted} cell summaries could be read from the plan "
+            "run's artifacts — re-run before merging"
         )
     return None
 

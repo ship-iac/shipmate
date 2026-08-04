@@ -193,15 +193,20 @@ jobs:
             # marker-less or short listing is routinely just early.
             [ "$attempt" -lt 3 ] && sleep 5
           done
-          # One warning per cause, and each names the fix for that cause: the
-          # gate description is capped at 140 characters, so the run page is
-          # where the reason has to be legible.
+          # One warning per cause, each naming a recovery that actually works:
+          # the gate description is capped at 140 characters, so the run page is
+          # where the reason has to be legible. Every message points at re-running
+          # THIS run first, because every hold here is a read of the plan run's
+          # artifact list and this run is the only thing that re-reads it.
+          # Re-running the plan run is the wrong advice: its cells would 409 on
+          # the artifacts the first attempt already uploaded (plan-cell's uploads
+          # are not `overwrite:`), turning a recoverable hold into a red plan.
           if [ "$readable" = "false" ]; then
-            echo "::warning::could not read this plan run's artifact list; its evidence count is unknown and the gate will hold — re-run this plan"
+            echo "::warning::could not read this plan run's artifact list, so its evidence is unknown and the gate will hold — re-run this summary run to read the list again; do not re-run the plan run"
           elif [ "$planned" = "unknown" ]; then
-            echo "::warning::this plan run published no readable plan-matrix marker; the gate will hold — check that actions/build-matrix is pinned to the same engine revision as this workflow"
+            echo "::warning::this plan run published no readable plan-matrix marker; the gate will hold — the list is usually just lagging, so re-run this summary run first; if it persists, actions/build-matrix is pinned to an older engine revision than this workflow"
           elif [ "$cells" != "$planned" ]; then
-            echo "::warning::the plan run planned $planned cell(s) but its artifact list shows $cells; the gate will hold — re-plan"
+            echo "::warning::the plan run planned $planned cell(s) but its artifact list shows $cells; the gate will hold — re-run this summary run; if it persists, push again to re-plan"
           fi
           echo "count=$cells" >> "$GITHUB_OUTPUT"
           echo "matrix_count=$planned" >> "$GITHUB_OUTPUT"
@@ -225,9 +230,13 @@ jobs:
           # comment footer, the per-cell fallback links and the gate's
           # target_url must all point at the plan run.
           plan-run-url: ${{ github.event.workflow_run.html_url }}
-          # Both count inputs use `|| 'unknown'`: covers missing script
-          # output, the state reported when no artifacts or markers are
-          # found. gate-state holds the gate on any non-integer count.
+          # `|| 'unknown'` on both counts, never a number: the fallback covers a
+          # step that emitted no output at all (skipped, or dead before its
+          # echoes), which the step itself cannot report. It is not the channel
+          # for a found-nothing listing -- the step writes `0` or `unknown`
+          # itself there. A numeric stand-in would be comparable against a cell
+          # count, and the one that happens to match greens the gate over
+          # evidence nobody saw; gate-state holds on any non-integer.
           artifact-count: ${{ steps.artifacts.outputs.count || 'unknown' }}
           matrix-count: ${{ steps.artifacts.outputs.matrix_count || 'unknown' }}
           app-id: ${{ vars.SHIPMATE_APP_ID }}

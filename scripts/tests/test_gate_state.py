@@ -54,7 +54,18 @@ def test_skipped_or_cancelled_run_writes_nothing(conclusion):
 def test_artifacts_exist_but_none_parsed_is_a_download_failure():
     state, desc, mode = d(artifact_count=3, cell_count=0)
     assert state == "failure"
-    assert "no cell summaries" in desc
+    # How many of how many: this branch fires on a PARTIAL loss too (the listing
+    # already agreed with the marker by here), and a description asserting that
+    # nothing could be read sends the maintainer hunting a total failure that
+    # did not happen.
+    assert "0 of 3 cell summaries" in desc
+    assert mode == "hold"
+
+
+def test_a_partial_download_says_how_much_of_the_evidence_was_read():
+    state, desc, mode = d(artifact_count=5, cell_count=3, matrix_count=5)
+    assert state == "failure"
+    assert "3 of 5 cell summaries" in desc
     assert mode == "hold"
 
 
