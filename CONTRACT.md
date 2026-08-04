@@ -259,7 +259,8 @@ same way. It combines ten live settings probes (gate ruleset, default-branch
 pair existence, environment protection shape, the `shipmate-engine`
 environment's own existence and default-branch scoping, `pull_request_target`
 triggers in the consumer's workflow files, engine action-pin
-freshness, the plan/summary wiring §Post-plan topology depends on,
+freshness, the consumer plan/summary wiring the gate status silently
+depends on (§Post-plan topology),
 approvers-team resolvability, and App installation permission
 drift — see `docs/branch-protection.md`) with a harvest of the warning and failure
 annotations GitHub already recorded on this commit's workflow runs
@@ -508,23 +509,45 @@ policy for a different reason:
 **Requirement, verbatim, in two halves that must both hold: the consumer's
 plan workflow must live at `.github/workflows/plan.yml`, and its top-level
 `name:` must be `shipmate · plan`.** Two independent checks gate whether
-`summary.yml` ever runs, and either one failing is equally silent and
-equally permanent:
+`summary.yml` ever runs, and either one failing is equally silent — but they
+break at different moments, and only one of them breaks the pull request that
+introduces it:
 
 - the consumer's `summary.yml` triggers on
   `workflow_run: { workflows: ["shipmate · plan"] }` — GitHub matches this by
-  the completed workflow's **name**, not its file path, so renaming
-  `plan.yml`'s `name:` field means this trigger simply never fires;
-  nothing downstream of it ever runs;
+  the completed workflow's **name**, not its file path, and it resolves that
+  name against the workflow entity as recorded on the **default branch**, not
+  against the name the completed run itself carried. A branch that renames
+  `plan.yml`'s `name:` therefore still fires the trigger for its own plan run:
+  the renaming pull request gets its gate and merges green. The breakage
+  begins at **merge**, and applies to every pull request afterwards —
+  including the one opened to fix it, which is itself gateless and needs an
+  administrator to merge. Editing the consumer's own `summary.yml` behaves the
+  same way, for the neighbouring reason: a `workflow_run` trigger is read from
+  the default branch, so breaking the wrapper takes effect only once it lands
+  there;
 - the trusted, engine-defined `summary.yml` it calls additionally checks
   `github.event.workflow_run.path == '.github/workflows/plan.yml'` exactly —
   so even if the *name* still matches, moving the plan matrix to a
-  differently-named **file** fails this guard instead.
+  differently-named **file** fails this guard instead. This is the half that
+  fails closed **before** the merge: the guard reads the completed run's own
+  path, so the pull request that moves the file loses its own gate.
 
-A consumer that renames either one gets a plan that runs to completion,
+A consumer that breaks either one gets a plan that runs to completion,
 produces no summary, no `apply` checks, and no `shipmate / gate` status, and
-raises no error anywhere: the rename is silent and permanent until someone
-notices that merges never gate.
+raises no error anywhere.
+
+`actions/build-matrix` runs all three checks — the path, the `name:`, and a
+`workflow_run` wrapper calling the engine's reusable `summary.yml` — inside
+`detect` on every plan run, off the checkout it already has, and **fails
+`detect`** on a confident break for a `pull_request` or `pull_request_target`
+event; that is what catches the two default-branch-resolved breaks on the pull
+request introducing them, rather than after the merge that makes them
+permanent. On any other event (the drift schedule) the same finding is a
+warning, so one merged mistake does not take nightly drift down everywhere.
+`shipmate doctor` reports the same three conditions on demand, read at the
+commit under examination — comment-ops is not downstream of the summary
+wiring, so that report still answers when the wiring is broken.
 
 Binding these jobs to the `shipmate-engine` environment rather than trusting
 the trigger alone closes two paths a trigger check alone would not:
