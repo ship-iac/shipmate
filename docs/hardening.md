@@ -58,7 +58,7 @@ governs the plan path. Don't add one to a repository that holds the App key —
 | 5 | Block force-push and deletion on the default branch | Branch ruleset | History rewrite after apply |
 | 6 | Required reviewers + "Prevent self-review" on **every** `<env>-apply` that holds a secret | Environment | **Unforgeable** at apply time — the last line of defense once a merge has happened, and what makes row 7 hold |
 | 7 | Cloud credentials only as `<env>-apply` environment secrets — never repo-level | Environment secrets | Repo-wide secret exposure (bounded *only* in combination with row 6) |
-| 8 | Plan environments hold read-only, blast-radius-free credentials, no approval rules, no branch policy | Environment | Plan-time code execution |
+| 8 | Plan environments hold read-only, blast-radius-free credentials, no approval rules, no branch policy — ideally no secret at all (`shipmate doctor` reports what it finds) | Environment | Plan-time code execution |
 | 9 | OIDC with an `environment:` claim condition instead of static keys | Cloud IdP | Long-lived credential theft (**not wired in the engine yet** — see §7–9) |
 | 10 | Default `GITHUB_TOKEN` = read-only; Actions may not approve PRs | Settings → Actions | Token privilege creep |
 | 11 | Require approval for all outside collaborators' workflow runs | Settings → Actions | Drive-by fork execution |
@@ -262,6 +262,21 @@ control.
   whatever that environment holds. Read-only, blast-radius-free credentials
   only. Assume `SHIPMATE_PLAN_PASSPHRASE` is readable by the same people for the
   same reason.
+  The strongest version of this control is a plan environment with **no secret
+  in it at all**. Two ways to get there, in order of preference: read the
+  provider's state through a path that needs no long-lived credential of its
+  own, and — when the engine's credential path exists — a **read-only** OIDC
+  role whose trust policy is conditioned on the plan environment's claim
+  (`repo:<owner>/<repo>:environment:<env>`, the plan environment, not
+  `<env>-apply`), so a token minted in a plan cell can never assume the apply
+  role. Until then the honest statement is the one above: whatever a plan
+  environment holds is readable by anyone who can push a branch.
+
+  `shipmate doctor` reports every secret it finds in a plan environment — names
+  only, since no GitHub API returns a secret's value — as a note, and warns if
+  `SHIPMATE_APP_PRIVATE_KEY` is one of them. The report says the check was not
+  performed, rather than reporting it clean, when the App installation has not
+  accepted the `environments: read` permission the manifest declares.
 - **Prefer OIDC** to static cloud keys when the path exists, and condition the
   trust policy on the environment claim
   (`repo:<owner>/<repo>:environment:<env>-apply`) so a token minted from a plan
@@ -445,6 +460,10 @@ this section rests on for exactly the exposure control 1 exists to limit.
   by a pipeline running the author's code. A hostile provider, an `external`
   data source, or a `terramate` script block executes during plan. Control 8
   bounds the damage; nothing eliminates it.
+  `shipmate doctor`'s plan-environment secret probe reports what such an
+  environment *stores*; it cannot observe what plan-time code does with it, and
+  a credential the consumer's own workflow maps in from a repository secret is
+  outside what it can see at all.
 - **Reviewer comprehension.** The exact-plan invariant guarantees the applied
   plan is the reviewed one. It guarantees nothing about the reviewer having
   understood it.

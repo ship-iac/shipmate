@@ -11,6 +11,37 @@ section below names the SHA the release tags.
 The version line stays `v0.x` while action inputs, check names, and the comment
 grammar are declared unstable in `README.md`.
 
+## [Unreleased]
+
+**One consumer action beyond re-pinning:** accept the shipmate App's pending
+permission request (`environments: read`). Until an org owner does, the new
+probe reports itself as not performed on every plan run and in every `shipmate
+doctor` report — that is the only consequence: the permission is minted in its
+own non-fatal step, so the gate status, the apply checks and the other ten
+probes are unaffected. Expect a second, less obvious symptom of the same one
+cause: the rejected mint fails the step, which lands a failure annotation on the
+plan run's `github-actions` check-run, and doctor harvests exactly those — so
+the report carries an `:x:` row for that step *beside* the "not performed" note.
+Both clear when the request is accepted; neither is a bug.
+
+### Added
+
+- **`shipmate doctor` gained an eleventh probe: the secrets a *plan*
+  environment holds.** A plan cell runs the pull request branch's own code, and
+  a plan environment cannot carry approval rules or a deployment branch policy
+  without stalling every cell — so whatever it holds is readable by anyone who
+  can push a branch, and until now nothing observed it. The probe lists each
+  declared plan environment's secrets (names only — no GitHub API returns a
+  secret's value) and reports them as a note pointing at `docs/hardening.md`
+  control 8, plus a warning if `SHIPMATE_APP_PRIVATE_KEY` is among them.
+  `<env>-apply` is deliberately not read: that is where credentials belong.
+  With no `environments: read` token the finding says the check was not
+  performed — never that the environment is clean.
+- **`docs/hardening.md` control 8 now states the credential-free plan
+  posture**: prefer a provider read path that needs no long-lived credential,
+  and, when the engine's credential path exists, a read-only OIDC role
+  conditioned on the *plan* environment's claim.
+
 ## [0.5.0] — 2026-08-04
 
 Tags <SHA>.

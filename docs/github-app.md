@@ -261,7 +261,12 @@ every consumer repo, not just once for the org.
 ## Reference: what the App can and can't do
 
 - Permissions: `actions: write`, `pull_requests: write`, `contents: read`,
-  `members: read`, `checks: write`, `statuses: write`, `issues: write`. The
+  `members: read`, `checks: write`, `statuses: write`, `issues: write`,
+  `environments: read` (doctor's plan-environment secret listing — names only;
+  no GitHub API returns a secret's value, and this permission cannot write one).
+  Minted in its own non-fatal step, so an installation that has not accepted
+  the request loses that one probe and nothing else — see §Re-approve after
+  permission changes. The
   App mints a fresh installation token per job and authors: every
   `apply / <stack> / <env>` check (create pending, complete on apply), the
   aggregate `shipmate / gate` commit status, the sticky plan comment, the
