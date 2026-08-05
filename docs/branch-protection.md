@@ -166,7 +166,11 @@ repository the engine is.
 An environment that exists but whose settings cannot be read is likewise a
 note naming it, rather than the silence a nonexistent environment gets (that
 one is the environment-existence probe's finding) — the `shipmate-engine`
-probe degrades the same way.
+probe degrades the same way. The plan-environment secret probe carries two
+degrade levels of its own: with no `environments: read` token it **warns** that
+the check was not performed — never that a plan environment is clean — and an
+environment whose secret listing fails is a **note** naming it, so one
+unreadable environment does not silence the ones that could be read.
 
 The environment probes cover only the environments of the stacks a given pull
 request changed — the declared set comes from that commit's plan matrix — so

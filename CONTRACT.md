@@ -417,7 +417,11 @@ App-minted `workflow_dispatch` mechanism and the same per-env
 
 The GitHub App carries this permission set: `actions: write`,
 `pull_requests: write`, `contents: read`, `members: read`, `checks: write`,
-`statuses: write`, `issues: write`. Beyond minting the `workflow_dispatch`
+`statuses: write`, `issues: write`, `environments: read` — the last for
+`shipmate doctor`'s plan-environment secret listing (names only; no GitHub REST
+path returns a secret's value, and this permission cannot write one), minted in
+its own non-fatal step so an installation that has not accepted the request
+loses that one probe and nothing else. Beyond minting the `workflow_dispatch`
 token for comment-ops (events created with the default `GITHUB_TOKEN` never
 trigger other workflows, so a private App is the only way to kick off the
 apply workflow from a comment) and reading team membership for

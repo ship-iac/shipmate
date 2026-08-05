@@ -512,9 +512,9 @@ def _env_secret_names(ctx, name):
     because `bm.gh_json` does not multi-page.
     """
     saved = os.environ.get("GH_TOKEN")
-    # `.get`, never a subscript: the summary action's env guard derives its
-    # "annotate mode cannot run without this" set from doctor's subscript reads,
-    # and doctor does run without this one -- see `_ENV_TOKEN_UNCHECKED`.
+    # `.get`, never a subscript: SHIPMATE_ENV_TOKEN is optional by contract --
+    # absent, the probe reports the check as not performed
+    # (`_ENV_TOKEN_UNCHECKED`) rather than killing the report.
     os.environ["GH_TOKEN"] = os.environ.get("SHIPMATE_ENV_TOKEN", "")
     try:
         data = _gh_json(f"repos/{ctx['repo']}/environments/{name}/secrets?per_page=100")

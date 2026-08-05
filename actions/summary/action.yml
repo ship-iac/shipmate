@@ -57,10 +57,10 @@ runs:
       id: envtoken
       # Its own mint so that a permission request no org owner has accepted yet
       # cannot reach the apply checks or the gate status — argued in
-      # scripts/tests/test_env_token_mint_scoping.py. Until it is accepted this
-      # step's rejection also lands a failure annotation on this run, which
-      # doctor harvests: expect an :x: row in the report beside the plan-env
-      # secret check's "not performed" note, from the same one cause.
+      # scripts/tests/test_env_token_mint_scoping.py. Until it is accepted, the
+      # probe's "not performed" finding is a warning, which trips `doctor_warned`
+      # below: a run that planned nothing posts a sticky plan comment instead of
+      # staying silent. That is the cost, and it clears on Accept.
       continue-on-error: true
       uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
       with:

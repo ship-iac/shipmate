@@ -284,7 +284,8 @@ every consumer repo, not just once for the org.
 ## Re-approve after permission changes
 
 Expanding `default_permissions` in `app/manifest.json` (as this project did
-to add `checks`/`statuses`/`issues`) does not take effect immediately for an
+to add `checks`/`statuses`/`issues`, and later `environments`) does not take
+effect immediately for an
 already-installed App. GitHub puts the wider grant in a **pending request**
 that an org owner must approve:
 

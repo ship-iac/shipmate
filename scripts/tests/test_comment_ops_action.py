@@ -13,6 +13,9 @@ from _loader import ACTIONS, ENGINE, SCRIPTS, action_steps, load_script
 _ACTION_FILE = ACTIONS / "comment-ops" / "action.yml"
 _ACTION = _ACTION_FILE.read_text(encoding="utf-8")
 _SUMMARY_ACTION = (ACTIONS / "summary" / "action.yml").read_text(encoding="utf-8")
+_MANIFEST_PERMISSIONS = json.loads((ENGINE / "app" / "manifest.json").read_text(encoding="utf-8"))[
+    "default_permissions"
+]
 
 # The `doctor` route's access gate. The allowlist literal lives in exactly one
 # place in the action (the `guard` step's `case`); every doctor step keys off
@@ -516,6 +519,31 @@ def test_fullmint_requests_the_manifests_exact_permission_set():
     exactly the drift the probe exists to catch."""
     block = _ACTION.split("id: fullmint", 1)[1].split("- name:", 1)[0]
     requested = dict(re.findall(r"permission-([a-z-]+): (read|write)", block))
-    manifest = json.loads((ENGINE / "app" / "manifest.json").read_text(encoding="utf-8"))
-    declared = {k.replace("_", "-"): v for k, v in manifest["default_permissions"].items()}
+    declared = {k.replace("_", "-"): v for k, v in _MANIFEST_PERMISSIONS.items()}
     assert requested == declared
+
+
+#: doc -> the (start, end) markers bounding its prose permission list. Bounded
+#: rather than searched whole-file: `docs/github-app.md` also mentions the App's
+#: "`statuses: write` gate POST" further down, so an unbounded substring
+#: assertion would stay green with `statuses` deleted from the list itself.
+_PROSE_PERMISSION_LISTS = {
+    "CONTRACT.md": ("carries this permission set:", "Beyond minting"),
+    "docs/github-app.md": ("- Permissions:", "\n- No webhook events"),
+}
+
+
+def test_both_prose_permission_lists_name_every_manifest_permission():
+    """`app/manifest.json` is what GitHub grants; two documents spell the same
+    set out in prose for readers, and `CLAUDE.md` names `CONTRACT.md` the single
+    source for the contract. The `fullmint` guard above pins only the action
+    YAML, so nothing noticed when a manifest bump left `CONTRACT.md` listing
+    seven permissions — this pins both lists against the manifest instead."""
+    for doc, (start, end) in _PROSE_PERMISSION_LISTS.items():
+        text = (ENGINE / doc).read_text(encoding="utf-8")
+        assert start in text, f"{doc} no longer contains {start!r}"
+        listing = text.split(start, 1)[1].split(end, 1)[0]
+        for name, level in _MANIFEST_PERMISSIONS.items():
+            assert f"`{name}: {level}`" in listing, (
+                f"{doc}'s permission list does not name `{name}: {level}`"
+            )

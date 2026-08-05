@@ -16,13 +16,15 @@ grammar are declared unstable in `README.md`.
 **One consumer action beyond re-pinning:** accept the shipmate App's pending
 permission request (`environments: read`). Until an org owner does, the new
 probe reports itself as not performed on every plan run and in every `shipmate
-doctor` report — that is the only consequence: the permission is minted in its
-own non-fatal step, so the gate status, the apply checks and the other ten
-probes are unaffected. Expect a second, less obvious symptom of the same one
-cause: the rejected mint fails the step, which lands a failure annotation on the
-plan run's `github-actions` check-run, and doctor harvests exactly those — so
-the report carries an `:x:` row for that step *beside* the "not performed" note.
-Both clear when the request is accepted; neither is a bug.
+doctor` report. The permission is minted in its own non-fatal step, so the gate
+status and the apply checks are unaffected — but expect two further symptoms of
+that same one cause, neither of them a bug. The App-permission-drift probe stops
+being silent: the full-manifest mint `shipmate doctor` attempts now asks for
+`environments: read` too, so it fails on an installation that has not accepted
+the request, and every report carries a second warning saying the installation
+is missing a permission the manifest declares. And because "not performed" is a
+warning, a plan run that planned nothing — where the sticky plan comment is
+otherwise suppressed entirely — posts one anyway. All three clear on Accept.
 
 ### Added
 

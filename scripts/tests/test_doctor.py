@@ -2338,6 +2338,32 @@ def test_no_declared_env_reads_nothing_and_says_nothing(monkeypatch):
     assert doctor._plan_env_secret_warnings(_ctx(envs=set(), envs_available=False)) == []
 
 
+def test_an_environment_that_does_not_exist_is_never_read(monkeypatch):
+    """Existence comes from the environments *listing*, never from the
+    per-environment read's exception. `bm.gh_json` raises without a status code,
+    so a 404 for a declared-but-absent environment would be indistinguishable
+    from the 403 that means this check saw nothing -- and the degrade note claims
+    the environment exists but could not be read, which for an absent one is
+    false and duplicates `_environment_warnings`' own finding.
+
+    Asserted on the paths requested, not just on the absence of a finding: a
+    probe that read the missing environment and swallowed the error would also
+    return []."""
+    responses = {
+        f"repos/{_REPO}/environments?per_page=100": _environments("dev-eu"),
+        f"repos/{_REPO}/environments/dev-eu/secrets?per_page=100": _secrets(),
+    }
+    asked = []
+
+    def fake(path):
+        asked.append(path)
+        return responses[path]
+
+    monkeypatch.setattr(doctor, "_gh_json", fake)
+    assert doctor._plan_env_secret_warnings(_ctx(envs={"dev-eu", "dev-nope"})) == []
+    assert not [p for p in asked if "dev-nope" in p], f"read an absent environment: {asked}"
+
+
 def test_a_long_secret_list_is_capped_so_it_cannot_eat_the_size_budget(monkeypatch):
     """The settings section is never truncated, so one environment with many
     secrets would otherwise spend the whole of `sc.SIZE_BUDGET` and push every
@@ -2413,8 +2439,8 @@ def test_truncated_secret_listing_reads_as_at_least(monkeypatch):
 
 def test_secret_listing_uses_the_env_token_and_restores_gh_token(monkeypatch):
     """The ambient GH_TOKEN is the App token minted without `environments:
-    read`; only the dedicated mint's token can list secrets. Every other probe
-    runs after this one and must still see the token it started with."""
+    read`; only the dedicated mint's token can list secrets. The five probes
+    after this one must still see the token it started with."""
     monkeypatch.setenv("GH_TOKEN", "apptok")
     monkeypatch.setenv("SHIPMATE_ENV_TOKEN", "envtok")
     seen = {}
