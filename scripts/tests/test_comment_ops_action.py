@@ -360,7 +360,7 @@ def test_every_doctor_route_step_is_gated_on_the_association():
     doctor's machinery under some other condition (or none) is caught by
     test_every_step_that_touches_doctor_machinery_is_gated instead."""
     steps = _steps_conditioned_on("doctor")
-    assert len(steps) == 6, [n for n, _ in steps]
+    assert len(steps) == 7, [n for n, _ in steps]
     for name, cond in steps:
         assert _GATE in cond, name
     # Exactly one step runs when the gate is closed (the rejection); every

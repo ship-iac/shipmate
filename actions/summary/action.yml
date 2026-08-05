@@ -53,6 +53,23 @@ runs:
         # declares, so it needs no re-approval of the installation.
         permission-actions: read
 
+    - name: Mint an environments-scoped token for doctor's plan-env secret probe
+      id: envtoken
+      # A second mint, deliberately: `environments: read` is a permission
+      # app/manifest.json declares but an already-installed App holds only as a
+      # pending request until an org owner accepts it, so a mint requesting it
+      # fails until then. Requesting it in the mint above would take the apply
+      # checks and the gate status down with it on every such repository —
+      # doctor reports the probe as unchecked instead, which is recoverable.
+      continue-on-error: true
+      uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+      with:
+        client-id: ${{ inputs.app-id }}
+        private-key: ${{ inputs.private-key }}
+        owner: ${{ github.repository_owner }}
+        repositories: ${{ github.event.repository.name }}
+        permission-environments: read
+
     - name: Create apply checks (pending / no-changes)
       shell: bash
       env:
@@ -113,6 +130,11 @@ runs:
       shell: bash
       env:
         GH_TOKEN: ${{ steps.token.outputs.token }}
+        # Listing an environment's secrets needs `environments: read`, which the
+        # mint above requests on its own so its failure cannot reach the gate
+        # path. Empty when that mint failed; doctor then says the plan-env
+        # secret check did not run rather than reporting it clean.
+        SHIPMATE_ENV_TOKEN: ${{ steps.envtoken.outputs.token }}
         SHIPMATE_DOCTOR_MODE: annotate
         SHIPMATE_APP_ID: ${{ inputs.app-id }}
         SHIPMATE_CELLS_DIR: ${{ inputs.cells-dir }}
