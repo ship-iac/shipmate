@@ -11,7 +11,13 @@ section below names the SHA the release tags.
 The version line stays `v0.x` while action inputs, check names, and the comment
 grammar are declared unstable in `README.md`.
 
-## [Unreleased]
+## [0.5.0] — 2026-08-04
+
+Tags <SHA>.
+
+**Carries the `0.4.0` section below as well**, which was written but never
+tagged — so a repository re-pinning from `v0.3.1` picks up both the artifact
+listing fixes described there and everything described here, in one move.
 
 No consumer YAML change: **re-pinning is the only action required** — and the
 re-pin pull request is itself where a repository with already-broken
@@ -70,7 +76,13 @@ greens the run.
 
 ## [0.4.0] — 2026-08-03
 
-Tags <SHA>.
+**Never tagged.** This section was written but no release was cut, so `v0.4.0`
+does not exist and no consumer ever pinned it — the changes below reached
+consumers as part of `v0.5.0` instead. It could not be cut retroactively either:
+the commit it described carries a stale `actions/summary` self-pin, so its tree
+runs its own old code, and `docs/releasing.md` forbids tagging such a commit.
+The section is kept rather than folded upward because the changes are real and
+this is where their reasoning lives.
 
 Two more green-gate-over-unapplied-infrastructure fixes, both rooted in the
 Actions artifact listing. No consumer YAML change: **re-pinning is the only
