@@ -272,10 +272,14 @@ control.
   role. Until then the honest statement is the one above: whatever a plan
   environment holds is readable by anyone who can push a branch.
 
-  `shipmate doctor` reports every secret it finds in a plan environment — names
-  only, since no GitHub API returns a secret's value — as a note, and warns if
-  `SHIPMATE_APP_PRIVATE_KEY` is one of them. The report says the check was not
-  performed, rather than reporting it clean, when the App installation has not
+  `shipmate doctor` notes the secrets a plan environment holds — the count is
+  exact, and the names it prints (names only, since no GitHub API returns a
+  secret's value) are capped, so a crowded environment's later names are not
+  printed; the cap keeps one finding from spending the whole report's size
+  budget. It warns if `SHIPMATE_APP_PRIVATE_KEY` is one of them, and says the
+  key check could not be completed rather than staying silent when the listing
+  was too long to read whole. The report says the check was not performed,
+  rather than reporting it clean, when the App installation has not
   accepted the `environments: read` permission the manifest declares.
 - **Prefer OIDC** to static cloud keys when the path exists, and condition the
   trust policy on the environment claim

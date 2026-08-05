@@ -112,10 +112,12 @@ approval-type protection rules — required reviewers or wait timers — and no
 deployment branch policy; an apply environment with no approval rule is only a
 note, and "no approval rule" is deliberately not "no protection rules": GitHub
 synthesizes a `branch_policy` protection rule for any environment with a
-deployment branch policy, and a branch policy is not a review), any secret a
+deployment branch policy, and a branch policy is not a review), the secrets a
 plan environment holds (names only — the API never returns a value; a plan
 cell runs branch code with whatever that environment releases and control 8
-forbids protecting it, so a note naming the secrets, and a warning if
+forbids protecting it, so a note giving the exact count and a capped list of
+the names — a crowded environment's later names are not printed, so that one
+finding cannot spend the whole report's size budget — and a warning if
 `SHIPMATE_APP_PRIVATE_KEY` is one of them), whether the `shipmate-engine`
 environment exists and its deployment branch policy actually names the default
 branch (see `docs/hardening.md` #16 and `docs/github-app.md` §Key-exposure
@@ -166,17 +168,22 @@ repository the engine is.
 An environment that exists but whose settings cannot be read is likewise a
 note naming it, rather than the silence a nonexistent environment gets (that
 one is the environment-existence probe's finding) — the `shipmate-engine`
-probe degrades the same way. The plan-environment secret probe carries two
+probe degrades the same way. The plan-environment secret probe carries three
 degrade levels of its own: with no `environments: read` token it **warns** that
-the check was not performed — never that a plan environment is clean — and an
+the check was not performed — never that a plan environment is clean; an
 environment whose secret listing fails is a **note** naming it, so one
-unreadable environment does not silence the ones that could be read.
+unreadable environment does not silence the ones that could be read; and a
+listing too long to read whole **warns** that whether the environment holds
+`SHIPMATE_APP_PRIVATE_KEY` could not be determined, rather than reading as a
+routine note about the names it did see.
 
-The environment probes cover only the environments of the stacks a given pull
-request changed — the declared set comes from that commit's plan matrix — so
-the report's all-clear line names the environments it actually probed instead
-of implying the repository's environments are all sound. Separately, the report
-states plainly when some of the commit's workflow runs had not finished yet,
+All three environment probes — pair existence, protection shape, and the
+secrets a plan environment holds — cover only the environments of the stacks a
+given pull request changed; the declared set comes from that commit's plan
+matrix. So the report's all-clear line names the environments it actually probed
+instead of implying the repository's environments are all sound, and a clean
+secret probe says nothing about an environment this pull request did not touch.
+Separately, the report states plainly when some of the commit's workflow runs had not finished yet,
 and when the warnings harvest itself could not complete (or may be truncated by
 GitHub's per-step annotation cap), rather than claiming a false all-clear.
 

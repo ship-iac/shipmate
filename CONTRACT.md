@@ -282,10 +282,10 @@ full-manifest permission-set mint was actually attempted, which only
 they surface findings only via `shipmate doctor`, never on the plan path's
 own annotations.
 
-Two of the probes are narrower than the repository. The **environment** probes
-(pair existence and protection shape) see only the environments of the stacks
-this pull request changed — the declared set comes from the plan matrix's cell
-summaries — so the report's all-clear line names the environments it actually
+Four of the probes are narrower than the repository. All three **environment**
+probes (pair existence, protection shape, and the secrets a plan environment
+holds) see only the environments of the stacks this pull request changed — the
+declared set comes from the plan matrix's cell summaries — so the report's all-clear line names the environments it actually
 covered instead of claiming the repository's environments are all sound, and
 says plainly when the set was empty. An environment that is in the repository's
 environments listing but whose own settings cannot be read becomes a note
@@ -421,7 +421,11 @@ The GitHub App carries this permission set: `actions: write`,
 `shipmate doctor`'s plan-environment secret listing (names only; no GitHub REST
 path returns a secret's value, and this permission cannot write one), minted in
 its own non-fatal step so an installation that has not accepted the request
-loses that one probe and nothing else. Beyond minting the `workflow_dispatch`
+leaves the `shipmate / gate` status and the apply checks untouched — it costs
+two warnings in the `shipmate doctor` report: that probe reporting itself as not
+performed, and the App-permission-drift probe, whose full-manifest mint asks for
+this permission too and so fails until Accept.
+Beyond minting the `workflow_dispatch`
 token for comment-ops (events created with the default `GITHUB_TOKEN` never
 trigger other workflows, so a private App is the only way to kick off the
 apply workflow from a comment) and reading team membership for

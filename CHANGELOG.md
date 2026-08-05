@@ -15,9 +15,11 @@ grammar are declared unstable in `README.md`.
 
 **One consumer action beyond re-pinning:** accept the shipmate App's pending
 permission request (`environments: read`). Until an org owner does, the new
-probe reports itself as not performed on every plan run and in every `shipmate
-doctor` report. The permission is minted in its own non-fatal step, so the gate
-status and the apply checks are unaffected — but expect one further symptom of
+probe reports itself as not performed — in every `shipmate doctor` report, and
+in the annotations the summary run writes for any pull request that planned at
+least one cell (a docs-only or pin-bump pull request declares no environment, so
+the probe has nothing to read and says nothing). The permission is minted in its
+own non-fatal step, so the gate status and the apply checks are unaffected — but expect one further symptom of
 that same one cause, and it is not a bug. The App-permission-drift probe stops
 being silent: the full-manifest mint `shipmate doctor` attempts now asks for
 `environments: read` too, so it fails on an installation that has not accepted
@@ -31,10 +33,14 @@ clear on Accept.
   environment holds.** A plan cell runs the pull request branch's own code, and
   a plan environment cannot carry approval rules or a deployment branch policy
   without stalling every cell — so whatever it holds is readable by anyone who
-  can push a branch, and until now nothing observed it. The probe lists each
-  declared plan environment's secrets (names only — no GitHub API returns a
-  secret's value) and reports them as a note pointing at `docs/hardening.md`
-  control 8, plus a warning if `SHIPMATE_APP_PRIVATE_KEY` is among them.
+  can push a branch, and until now nothing observed it. The probe counts each
+  declared plan environment's secrets and names them (names only — no GitHub API
+  returns a secret's value), as a note pointing at `docs/hardening.md` control 8:
+  the count is exact, while the printed name list is capped so one crowded
+  environment cannot spend the whole report's size budget — its later names are
+  not printed. A warning if `SHIPMATE_APP_PRIVATE_KEY` is among them, and — when
+  the listing was too long to read whole — a warning that whether the
+  environment holds it could not be determined, rather than silence.
   `<env>-apply` is deliberately not read: that is where credentials belong.
   With no `environments: read` token the finding says the check was not
   performed — never that the environment is clean.
