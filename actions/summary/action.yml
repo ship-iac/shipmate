@@ -58,9 +58,8 @@ runs:
       # Its own mint so that a permission request no org owner has accepted yet
       # cannot reach the apply checks or the gate status — argued in
       # scripts/tests/test_env_token_mint_scoping.py. Until it is accepted, the
-      # probe's "not performed" finding is a warning, which trips `doctor_warned`
-      # below: a run that planned nothing posts a sticky plan comment instead of
-      # staying silent. That is the cost, and it clears on Accept.
+      # probe reports its "not performed" finding as a warning; that is the
+      # cost, and it clears on Accept.
       continue-on-error: true
       uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
       with:

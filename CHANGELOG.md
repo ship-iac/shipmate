@@ -17,14 +17,13 @@ grammar are declared unstable in `README.md`.
 permission request (`environments: read`). Until an org owner does, the new
 probe reports itself as not performed on every plan run and in every `shipmate
 doctor` report. The permission is minted in its own non-fatal step, so the gate
-status and the apply checks are unaffected — but expect two further symptoms of
-that same one cause, neither of them a bug. The App-permission-drift probe stops
+status and the apply checks are unaffected — but expect one further symptom of
+that same one cause, and it is not a bug. The App-permission-drift probe stops
 being silent: the full-manifest mint `shipmate doctor` attempts now asks for
 `environments: read` too, so it fails on an installation that has not accepted
-the request, and every report carries a second warning saying the installation
-is missing a permission the manifest declares. And because "not performed" is a
-warning, a plan run that planned nothing — where the sticky plan comment is
-otherwise suppressed entirely — posts one anyway. All three clear on Accept.
+the request, and every `shipmate doctor` report carries a second warning
+saying the installation is missing a permission the manifest declares. Both
+clear on Accept.
 
 ### Added
 
