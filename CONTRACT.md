@@ -254,17 +254,15 @@ only labels the output as shipmate's own.
 `shipmate doctor` posts a consolidated, sticky report — one comment per pull
 request, identified by the HTML marker `<!-- shipmate:doctor -->` (distinct
 from the plan comment's `<!-- shipmate:summary -->`) and upserted in place the
-same way. It combines eleven live settings probes (gate ruleset, default-branch
-`pull_request` rule, environment
-pair existence, environment protection shape, plan-environment secrets,
-the `shipmate-engine`
+same way. It combines eleven live settings probes (gate ruleset,
+default-branch `pull_request` rule, environment pair existence, environment
+protection shape, plan-environment secrets, the `shipmate-engine`
 environment's own existence and default-branch scoping, `pull_request_target`
-triggers in the consumer's workflow files, engine action-pin
-freshness, the consumer plan/summary wiring the gate status silently
-depends on (§Post-plan topology),
-approvers-team resolvability, and App installation permission
-drift — see `docs/branch-protection.md`) with a harvest of the warning and failure
-annotations GitHub already recorded on this commit's workflow runs
+triggers in the consumer's workflow files, engine action-pin freshness, the
+consumer plan/summary wiring the gate status silently depends on (§Post-plan
+topology), approvers-team resolvability, and App installation permission
+drift — see `docs/branch-protection.md`) with a harvest of the warning and
+failure annotations GitHub already recorded on this commit's workflow runs
 (shipmate's own and any other Actions workflow run on that commit;
 third-party-app-authored check runs are excluded). An empty harvest is
 reported as an all-clear only when the harvest both completed and had nothing

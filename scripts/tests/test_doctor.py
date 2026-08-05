@@ -2001,14 +2001,15 @@ def _count_word(n):
 
 
 def test_probe_count_is_stated_correctly_in_the_docs():
-    """Adding or removing a probe means editing five pieces of prose that spell
-    the count out. Nothing else notices when they go stale, so this reads all
-    three files and pins each phrase against `len(PROBES)`:
+    """Adding or removing a probe means editing six pieces of prose that spell
+    the count out — two in each of three files. Nothing else notices when they
+    go stale, so this reads all three and pins each phrase against
+    `len(PROBES)`:
 
-    - `scripts/doctor`'s module docstring: "the <n> live probes'" and the
+    - `scripts/doctor`'s module docstring: (1) "the <n> live probes'" and (2) the
       `Probes:` bullet list below it (one bullet per probe);
-    - `CONTRACT.md`: "<n> live settings probes" and "<n-2> of the <n>";
-    - `docs/branch-protection.md`: "combining <n>" and "<n-2> of the <n>
+    - `CONTRACT.md`: (3) "<n> live settings probes" and (4) "<n-2> of the <n>";
+    - `docs/branch-protection.md`: (5) "combining <n>" and (6) "<n-2> of the <n>
       probes".
 
     The number words come from the count rather than being hardcoded, so this
@@ -2335,6 +2336,28 @@ def test_no_declared_env_reads_nothing_and_says_nothing(monkeypatch):
     monkeypatch.delenv("SHIPMATE_ENV_TOKEN", raising=False)
     monkeypatch.setattr(doctor, "_gh_json", lambda path: pytest.fail(f"read {path}"))
     assert doctor._plan_env_secret_warnings(_ctx(envs=set(), envs_available=False)) == []
+
+
+def test_a_long_secret_list_is_capped_so_it_cannot_eat_the_size_budget(monkeypatch):
+    """The settings section is never truncated, so one environment with many
+    secrets would otherwise spend the whole of `sc.SIZE_BUDGET` and push every
+    other finding into the omitted-findings fallback -- and in annotate mode
+    GitHub would cut the line off with no marker at all. Capped the same way the
+    all-clear line's environment list is. The count is asserted alongside: a cap
+    that also understated the total would hide secrets, not just their names."""
+    names = [f"CONSUMER_CREDENTIAL_NUMBER_{i:03d}" for i in range(60)]
+    responses = {
+        f"repos/{_REPO}/environments?per_page=100": _environments("dev-eu"),
+        f"repos/{_REPO}/environments/dev-eu/secrets?per_page=100": _secrets(*names),
+    }
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    found = doctor._plan_env_secret_warnings(_ctx())
+    assert [lvl for lvl, _ in found] == [doctor.NOTICE]
+    assert "…" in found[0][1], "a truncated name list must carry the ellipsis marker"
+    assert len(found[0][1]) < 1000
+    # The cap hides names, never the number of them.
+    assert "60 secret(s)" in found[0][1]
+    assert names[-1] not in found[0][1]
 
 
 def test_one_env_listing_failure_is_a_notice_and_the_others_still_report(monkeypatch):

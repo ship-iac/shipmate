@@ -512,7 +512,10 @@ def _env_secret_names(ctx, name):
     because `bm.gh_json` does not multi-page.
     """
     saved = os.environ.get("GH_TOKEN")
-    os.environ["GH_TOKEN"] = os.environ["SHIPMATE_ENV_TOKEN"]
+    # `.get`, never a subscript: the summary action's env guard derives its
+    # "annotate mode cannot run without this" set from doctor's subscript reads,
+    # and doctor does run without this one -- see `_ENV_TOKEN_UNCHECKED`.
+    os.environ["GH_TOKEN"] = os.environ.get("SHIPMATE_ENV_TOKEN", "")
     try:
         data = _gh_json(f"repos/{ctx['repo']}/environments/{name}/secrets?per_page=100")
     finally:
@@ -579,7 +582,11 @@ def _plan_env_secret_warnings(ctx):
             continue
         if not names:
             continue
-        shown = ", ".join(f"`{n}`" for n in sorted(names))
+        # Capped like the all-clear line's environment list: the settings section
+        # is never truncated, so one crowded environment would spend the whole of
+        # `sc.SIZE_BUDGET` and push the other findings into the omitted fallback.
+        # `count` still reports the true total, so the cap only hides names.
+        shown = _one_line(", ".join(f"`{n}`" for n in sorted(names)), 400)
         count = f"at least {total}" if total > len(names) else str(len(names))
         out.append(
             (
