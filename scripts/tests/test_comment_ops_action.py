@@ -526,7 +526,9 @@ def test_fullmint_requests_the_manifests_exact_permission_set():
 #: doc -> the (start, end) markers bounding its prose permission list. Bounded
 #: rather than searched whole-file: `docs/github-app.md` also mentions the App's
 #: "`statuses: write` gate POST" further down, so an unbounded substring
-#: assertion would stay green with `statuses` deleted from the list itself.
+#: assertion would stay green with `statuses` deleted from the list itself. Both
+#: markers are asserted present below — a vanished `end` would silently widen the
+#: slice to the rest of the file and restore exactly that fail-open behaviour.
 _PROSE_PERMISSION_LISTS = {
     "CONTRACT.md": ("carries this permission set:", "Beyond minting"),
     "docs/github-app.md": ("- Permissions:", "\n- No webhook events"),
@@ -538,11 +540,31 @@ def test_both_prose_permission_lists_name_every_manifest_permission():
     set out in prose for readers, and `CLAUDE.md` names `CONTRACT.md` the single
     source for the contract. The `fullmint` guard above pins only the action
     YAML, so nothing noticed when a manifest bump left `CONTRACT.md` listing
-    seven permissions — this pins both lists against the manifest instead."""
+    seven permissions — this pins both lists against the manifest instead.
+
+    Both bounding markers are asserted before the slice is taken. A missing
+    `start` would search from the top of the file and a missing `end` would
+    search to the bottom, and either widening makes the assertion satisfiable by
+    a mention outside the list — the guard would keep passing while pinning
+    nothing."""
     for doc, (start, end) in _PROSE_PERMISSION_LISTS.items():
         text = (ENGINE / doc).read_text(encoding="utf-8")
-        assert start in text, f"{doc} no longer contains {start!r}"
-        listing = text.split(start, 1)[1].split(end, 1)[0]
+        assert start in text, (
+            f"{doc}: the marker opening the permission list, {start!r}, is gone — "
+            "the prose moved or was reworded; re-point _PROSE_PERMISSION_LISTS at it. "
+            "This is not a permission going missing."
+        )
+        after = text.split(start, 1)[1]
+        # `after`, not `text`: an `end` that only occurs *before* the list would
+        # leave the slice running to the end of the file just as an absent one does.
+        assert end in after, (
+            f"{doc}: the marker closing the permission list, {end!r}, no longer follows "
+            f"{start!r} — the prose moved or was reworded; re-point "
+            "_PROSE_PERMISSION_LISTS at it. Left unfixed the slice would run to the end "
+            "of the file and this guard would pin nothing. This is not a permission "
+            "going missing."
+        )
+        listing = after.split(end, 1)[0]
         for name, level in _MANIFEST_PERMISSIONS.items():
             assert f"`{name}: {level}`" in listing, (
                 f"{doc}'s permission list does not name `{name}: {level}`"
