@@ -477,6 +477,38 @@ def test_the_doctor_upsert_does_not_swallow_a_comment_listing_failure():
     assert code.index("exit 0") < code.index('issues/$PR_NUMBER/comments" -F body=@doctor.md')
 
 
+def _mint_with(action, step_id):
+    """The parsed `with:` mapping of the mint step whose id is exactly
+    `step_id`.
+
+    Two things a text slice from `id: <step_id>` cannot do. It matches any id
+    that merely *starts* with the name, so a future `id: token-refresh` placed
+    above the real mint retargets the slice and every permission assertion then
+    passes against the wrong step while the real mint's grant can be deleted
+    unnoticed. And it reads raw file text, where a commented-out
+    `# permission-environments: read` satisfies the same assertion as the live
+    key. So: exact id, asserted to really be a mint, compared as parsed values.
+    """
+    steps = [s for s in action_steps(action) if s.get("id") == step_id]
+    assert len(steps) == 1, f"expected exactly one `id: {step_id}` step in {action}, got {steps}"
+    uses = steps[0].get("uses") or ""
+    assert "actions/create-github-app-token" in uses, (
+        f"{action}'s `{step_id}` step is not an App-token mint (uses: {uses!r}) — "
+        "the permission assertions against it would pin nothing"
+    )
+    return steps[0].get("with") or {}
+
+
+def _requested_permissions(mint_with):
+    """`{permission: level}` actually requested by a mint, from its parsed
+    inputs — so a commented-out request is absent, as it is at runtime."""
+    return {
+        k.removeprefix("permission-"): v
+        for k, v in mint_with.items()
+        if k.startswith("permission-")
+    }
+
+
 def test_both_doctor_token_mints_request_actions_read():
     """The environment probes read `repos/{repo}/environments` and, per
     environment, `.../environments/{name}`. The environments *list* has been
@@ -491,13 +523,11 @@ def test_both_doctor_token_mints_request_actions_read():
     drives `annotate` mode on every plan run, `comment-ops`' `doctortoken`
     drives `report` mode on demand, and a fix applied to only one leaves half
     the environment probes degraded."""
-    doctor_mint = _ACTION.split("id: doctortoken", 1)[1].split("- name:", 1)[0]
-    assert "permission-actions: read" in doctor_mint
-    # Selected by id, like the doctor mint above: `actions/summary` has a second
-    # create-github-app-token step (the environments-scoped one), so "the first
-    # mint in the file" would be positional rather than named.
-    summary_mint = _SUMMARY_ACTION.split("id: token", 1)[1].split("- name:", 1)[0]
-    assert "permission-actions: read" in summary_mint
+    assert _mint_with("comment-ops", "doctortoken").get("permission-actions") == "read"
+    # Selected by exact id, like the doctor mint above: `actions/summary` has a
+    # second create-github-app-token step (the environments-scoped one), so "the
+    # first mint in the file" would be positional rather than named.
+    assert _mint_with("summary", "token").get("permission-actions") == "read"
 
 
 def test_the_doctor_token_can_comment_on_a_pull_request():
@@ -508,17 +538,20 @@ def test_the_doctor_token_can_comment_on_a_pull_request():
     post a comment (`actions/summary`, `actions/apply-summary`) request
     pull-requests, so pin the doctor mint to the same permission and pin the
     absence of the one that does not work."""
-    block = _ACTION.split("id: doctortoken", 1)[1].split("- name:", 1)[0]
-    assert "permission-pull-requests: write" in block
-    assert "permission-issues:" not in block
+    mint = _mint_with("comment-ops", "doctortoken")
+    assert mint.get("permission-pull-requests") == "write"
+    assert "permission-issues" not in mint
 
 
 def test_fullmint_requests_the_manifests_exact_permission_set():
     """The full-set probe mint must mirror app/manifest.json: a manifest bump
     that skips this step makes the permission-drift probe test the stale set —
-    exactly the drift the probe exists to catch."""
-    block = _ACTION.split("id: fullmint", 1)[1].split("- name:", 1)[0]
-    requested = dict(re.findall(r"permission-([a-z-]+): (read|write)", block))
+    exactly the drift the probe exists to catch.
+
+    Parsed inputs, not a regex over the file text: `# permission-environments:
+    read` in a comment matched the live key exactly as well, so a commented-out
+    request kept this guard green while the mint asked for nothing."""
+    requested = _requested_permissions(_mint_with("comment-ops", "fullmint"))
     declared = {k.replace("_", "-"): v for k, v in _MANIFEST_PERMISSIONS.items()}
     assert requested == declared
 

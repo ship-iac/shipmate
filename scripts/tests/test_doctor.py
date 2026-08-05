@@ -1226,7 +1226,8 @@ def test_report_all_clear():
 
 
 def test_all_clear_names_the_environments_the_probes_actually_covered():
-    """The two environment probes see only the environments of the stacks this
+    """All three environment probes — pair existence, protection shape and
+    plan-environment secrets — see only the environments of the stacks this
     pull request changed — the declared set comes from the plan matrix's cell
     summaries — so a categorical "no problems found by the settings probes"
     overclaims: a broken `prod-eu` pair on a PR that touches only dev stacks was
@@ -2258,6 +2259,82 @@ def test_plan_env_holding_secrets_is_a_notice_naming_each(monkeypatch):
     assert "2 secret" in found[0][1]
 
 
+def test_the_notice_states_the_rule_and_never_that_this_env_is_unprotected(monkeypatch):
+    """The sibling `_env_protection_warnings` exists to report a plan
+    environment that *does* carry protection rules, so one report can hold both
+    findings: a NOTICE asserting that a plan environment cannot have approval
+    rules would contradict the warning printed beside it. State control 8's
+    requirement instead of a fact about this repository — and settle it without
+    reading protection data, which is the sibling's read, so that neither
+    probe's failure can silence the other."""
+    responses = {
+        f"repos/{_REPO}/environments?per_page=100": _environments("dev-eu"),
+        f"repos/{_REPO}/environments/dev-eu/secrets?per_page=100": _secrets("AWS_ACCESS_KEY_ID"),
+    }
+    asked = []
+
+    def fake(path):
+        asked.append(path)
+        return responses[path]
+
+    monkeypatch.setattr(doctor, "_gh_json", fake)
+    text = doctor._plan_env_secret_warnings(_ctx())[0][1]
+    assert "must have no approval rules and no deployment branch policy" in text
+    assert "control 8" in text
+    for claimed in ("cannot have approval", "has no approval", "is unprotected", "no protection"):
+        assert claimed not in text, f"the notice asserts this environment {claimed!r}"
+    assert not [p for p in asked if "deployment-branch-policies" in p], asked
+    assert asked == [
+        f"repos/{_REPO}/environments?per_page=100",
+        f"repos/{_REPO}/environments/dev-eu/secrets?per_page=100",
+    ]
+
+
+def test_a_truncated_listing_cannot_clear_the_app_key(monkeypatch):
+    """`_APP_KEY_NAME in names` is a membership test over the names actually
+    read, and `bm.gh_json` does not multi-page — so on a truncated listing the
+    key can sit outside the page and produce silence, which is the one
+    configuration no document blesses reading as a routine note. Absence is
+    reportable only when the read was complete."""
+    responses = {
+        f"repos/{_REPO}/environments?per_page=100": _environments("dev-eu"),
+        f"repos/{_REPO}/environments/dev-eu/secrets?per_page=100": _secrets("A", "B", total=150),
+    }
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    found = doctor._plan_env_secret_warnings(_ctx())
+    assert [lvl for lvl, _ in found] == [doctor.NOTICE, doctor.WARNING]
+    assert doctor._APP_KEY_NAME in found[1][1]
+    assert "was not determined" in found[1][1]
+
+
+def test_a_complete_listing_without_the_app_key_stays_a_single_notice(monkeypatch):
+    """The counterpart of the truncation warning above: a read that saw every
+    name really did clear the key, so the fail-closed branch must not fire on
+    every environment that holds secrets."""
+    responses = {
+        f"repos/{_REPO}/environments?per_page=100": _environments("dev-eu"),
+        f"repos/{_REPO}/environments/dev-eu/secrets?per_page=100": _secrets("A", "B"),
+    }
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    assert [lvl for lvl, _ in doctor._plan_env_secret_warnings(_ctx())] == [doctor.NOTICE]
+
+
+def test_a_truncated_listing_that_did_show_the_app_key_reports_holding_it(monkeypatch):
+    """Truncation must not downgrade a positive match to "could not determine":
+    the key was read, so the finding is that the environment holds it."""
+    responses = {
+        f"repos/{_REPO}/environments?per_page=100": _environments("dev-eu"),
+        f"repos/{_REPO}/environments/dev-eu/secrets?per_page=100": _secrets(
+            "SHIPMATE_APP_PRIVATE_KEY", "A", total=150
+        ),
+    }
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    found = doctor._plan_env_secret_warnings(_ctx())
+    assert [lvl for lvl, _ in found] == [doctor.NOTICE, doctor.WARNING]
+    assert "forge" in found[1][1]
+    assert "was not determined" not in found[1][1]
+
+
 def test_apply_env_secrets_are_never_read(monkeypatch):
     """Control 7 *requires* credentials on `<env>-apply`, so a finding there
     would fire on correct configuration. Asserted on the requested paths, not
@@ -2426,14 +2503,16 @@ def test_plan_env_secret_listing_failure_propagates_to_the_degrade_note(monkeypa
 def test_truncated_secret_listing_reads_as_at_least(monkeypatch):
     """`bm.gh_json` does not multi-page, so a repository with more than 100
     secrets in one environment returns a partial list. Reporting `len(names)`
-    would understate it as the whole set."""
+    would understate it as the whole set. The same partial read also warns that
+    the App-key check could not be completed
+    (`test_a_truncated_listing_cannot_clear_the_app_key`)."""
     responses = {
         f"repos/{_REPO}/environments?per_page=100": _environments("dev-eu"),
         f"repos/{_REPO}/environments/dev-eu/secrets?per_page=100": _secrets("A", "B", total=150),
     }
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
     found = doctor._plan_env_secret_warnings(_ctx())
-    assert [lvl for lvl, _ in found] == [doctor.NOTICE]
+    assert [lvl for lvl, _ in found] == [doctor.NOTICE, doctor.WARNING]
     assert "at least 150" in found[0][1]
 
 

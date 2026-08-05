@@ -500,10 +500,17 @@ _ENV_TOKEN_UNCHECKED = (
 def _env_secret_names(ctx, name):
     """(names, total) of one environment's secrets.
 
-    Names only: the endpoint is documented as listing an environment's secrets
-    without revealing their encrypted values, and no REST path returns a value
-    at all -- which is what makes it safe to print them in a report on a public
-    repository.
+    Names only, because that is all the API offers: the endpoint lists an
+    environment's secrets without revealing their encrypted values, and no REST
+    path returns a value at all.
+
+    Printing those names is a deliberate trade, not a safe default. The report
+    surface may be world-readable (a sticky comment on a public repository's
+    pull request), and a count plus a list of names is settings metadata that
+    GitHub itself gates behind `environments: read`. It is published anyway
+    because the names are what makes the finding actionable -- "holds 3
+    secret(s)" tells an operator nothing about which credential to move or
+    scope down.
 
     Read with SHIPMATE_ENV_TOKEN, restoring GH_TOKEN afterwards -- the same
     swap `_latest_release_sha` makes, and for the same reason: the ambient App
@@ -532,6 +539,44 @@ def _env_secret_names(ctx, name):
     return names, total if isinstance(total, int) and total > len(names) else len(names)
 
 
+def _app_key_findings(env, names, total):
+    """The App-key half of the plan-env secret finding, for one environment.
+
+    The name match is a membership test over the names actually read, and
+    `bm.gh_json` does not multi-page: on a truncated listing the key can sit
+    outside the page. So absence is only reportable as absence when the read was
+    complete -- a partial listing without the key says the check could not be
+    completed, rather than passing the environment's most dangerous
+    configuration off as a routine note about the names it did see. WARNING for
+    both, like `_ENV_TOKEN_UNCHECKED`: a check that went dark over this
+    configuration is not a note.
+    """
+    if _APP_KEY_NAME in names:
+        return [
+            (
+                WARNING,
+                f"plan environment `{env}` holds `{_APP_KEY_NAME}` — plan-time "
+                "code execution can mint an App token with it, forge the "
+                f"`{GATE}` status and approve its own pull request. The key belongs "
+                f"only in `{_ENGINE_ENV}` (docs/github-app.md §Key-exposure "
+                "boundary).",
+            )
+        ]
+    if total > len(names):
+        return [
+            (
+                WARNING,
+                f"plan environment `{env}` holds {total} secret(s) but only "
+                f"{len(names)} name(s) could be read, so whether `{_APP_KEY_NAME}` "
+                "is one of them was not determined — no document blesses that "
+                "configuration. List the environment's secrets in its settings and "
+                "remove the key if it is there (docs/github-app.md §Key-exposure "
+                "boundary).",
+            )
+        ]
+    return []
+
+
 def _plan_env_secret_warnings(ctx):
     """What a plan environment holds is the whole blast radius of plan-time code
     execution. `docs/hardening.md` control 8 pins plan environments open by
@@ -549,6 +594,14 @@ def _plan_env_secret_warnings(ctx):
     blast-radius-free credentials here, and doctor's WARNING means
     misconfiguration. `SHIPMATE_APP_PRIVATE_KEY` is the exception -- no document
     blesses that, and it is matched by exact name.
+
+    The finding states control 8's rule normatively ("must have no approval
+    rules"), never that this environment *is* unprotected: the sibling
+    `_env_protection_warnings` exists precisely to report a plan environment
+    that carries protection rules, and a report can hold both findings at once.
+    This probe deliberately does not read protection data to settle it -- that
+    read belongs to the sibling, and coupling them would let one probe's
+    failure silence the other.
 
     Order is load-bearing. The declared-env check comes first: a docs-only pull
     request reads nothing, so the dark-check WARNING would be a false alarm
@@ -593,23 +646,14 @@ def _plan_env_secret_warnings(ctx):
                 NOTICE,
                 f"plan environment `{env}` holds {count} secret(s) ({shown}) — a plan "
                 "cell runs the pull request branch's own code with whatever this "
-                "environment releases to it, and a plan environment cannot have "
-                "approval rules or a branch policy, so anyone who can push a branch "
-                "can read them. Keep them read-only and blast-radius-free, or move to "
+                "environment releases to it, and a plan environment must have no "
+                "approval rules and no deployment branch policy for its plan cells to "
+                "run at all, so treat anything it holds as readable by anyone who can "
+                "push a branch. Keep them read-only and blast-radius-free, or move to "
                 "OIDC (docs/hardening.md control 8).",
             )
         )
-        if _APP_KEY_NAME in names:
-            out.append(
-                (
-                    WARNING,
-                    f"plan environment `{env}` holds `{_APP_KEY_NAME}` — plan-time "
-                    "code execution can mint an App token with it, forge the "
-                    f"`{GATE}` status and approve its own pull request. The key belongs "
-                    f"only in `{_ENGINE_ENV}` (docs/github-app.md §Key-exposure "
-                    "boundary).",
-                )
-            )
+        out += _app_key_findings(env, names, total)
     return out
 
 
@@ -1293,11 +1337,13 @@ def _provenance(ctx):
 def _all_clear_line(ctx):
     """The settings-probe all-clear, stating what it actually covers.
 
-    The two environment probes see only the environments of the stacks this pull
-    request changed -- the declared set comes from the plan matrix's cell
-    summaries -- so a categorical "no problems found by the settings probes"
-    overclaims: a broken `prod-eu` environment pair is invisible to a report run
-    on a pull request that touches only dev stacks. Name the set instead.
+    All three environment probes -- pair existence, protection shape, and
+    plan-environment secrets -- see only the environments of the stacks this pull
+    request changed; the declared set comes from the plan matrix's cell
+    summaries. So a categorical "no problems found by the settings probes"
+    overclaims: a broken `prod-eu` environment pair, or a `prod-eu` holding the
+    App key, is invisible to a report run on a pull request that touches only
+    dev stacks. Name the set instead.
 
     Environment names are repository data (read from cell.json), so they are
     escaped like every other interpolated value and the joined list is bounded:
