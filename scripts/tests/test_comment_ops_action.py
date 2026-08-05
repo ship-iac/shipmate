@@ -490,8 +490,10 @@ def test_both_doctor_token_mints_request_actions_read():
     the environment probes degraded."""
     doctor_mint = _ACTION.split("id: doctortoken", 1)[1].split("- name:", 1)[0]
     assert "permission-actions: read" in doctor_mint
-    summary_steps = _SUMMARY_ACTION.split("\n    - name:")
-    summary_mint = next(s for s in summary_steps if "uses: actions/create-github-app-token" in s)
+    # Selected by id, like the doctor mint above: `actions/summary` has a second
+    # create-github-app-token step (the environments-scoped one), so "the first
+    # mint in the file" would be positional rather than named.
+    summary_mint = _SUMMARY_ACTION.split("id: token", 1)[1].split("- name:", 1)[0]
     assert "permission-actions: read" in summary_mint
 
 

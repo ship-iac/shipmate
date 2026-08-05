@@ -32,12 +32,12 @@ _PERM = "permission-environments"
 _MINT_OUTPUT_EXPR = "${{ steps.envtoken.outputs.token }}"
 _MINT = "actions/create-github-app-token"
 
-# action -> (id of the mint that must NOT request the permission,
-#            substring identifying the doctor step that consumes the token)
-_SITES = {
-    "summary": ("token", "SHIPMATE_DOCTOR_MODE"),
-    "comment-ops": ("doctortoken", "SHIPMATE_DOCTOR_MODE"),
-}
+#: action -> id of the load-bearing mint that must NOT request the permission.
+_GATE_MINTS = {"summary": "token", "comment-ops": "doctortoken"}
+
+#: The doctor modes that run the probes. `check-ids` only reduces a check-runs
+#: listing, so it is deliberately not here.
+_PROBE_MODES = frozenset({"annotate", "report"})
 
 
 def _steps(action):
@@ -52,7 +52,7 @@ def _by_id(steps, step_id):
 
 
 def test_each_action_mints_the_environments_permission_in_its_own_step():
-    for action in _SITES:
+    for action in _GATE_MINTS:
         step = _by_id(_steps(action), "envtoken")
         assert _MINT in step["uses"], f"{action}: envtoken must be a create-github-app-token step"
         assert step.get("continue-on-error") is True, (
@@ -65,14 +65,14 @@ def test_the_environments_mint_requests_nothing_else():
     """A second mint is only safe because it is narrow: anything else requested
     here is a permission the gate path already has under a token that works,
     and adding it widens what a failed Accept takes down."""
-    for action in _SITES:
+    for action in _GATE_MINTS:
         with_ = _by_id(_steps(action), "envtoken")["with"]
         perms = {k: v for k, v in with_.items() if k.startswith("permission-")}
         assert perms == {_PERM: "read"}, f"{action}: envtoken requests {perms}"
 
 
 def test_the_gate_path_mints_do_not_request_the_environments_permission():
-    for action, (mint_id, _) in _SITES.items():
+    for action, mint_id in _GATE_MINTS.items():
         with_ = _by_id(_steps(action), mint_id)["with"]
         assert _PERM not in with_, (
             f"{action}: `{mint_id}` must not request `{_PERM}` — an installation that "
@@ -82,18 +82,22 @@ def test_the_gate_path_mints_do_not_request_the_environments_permission():
 
 def test_each_doctor_step_receives_the_env_token():
     """The probe reads SHIPMATE_ENV_TOKEN from its own environment. A mint whose
-    output nobody threads is a check that is dark on every run."""
-    for action, (_, marker) in _SITES.items():
+    output nobody threads is a check that is dark on every run.
+
+    Selected by mode rather than by "the steps that already carry the token", so
+    that *every* probe-running step must thread it -- otherwise a third one added
+    later without it would satisfy this by the other two."""
+    for action in _GATE_MINTS:
         consumers = [
             s
             for s in _steps(action)
-            if marker in (s.get("env") or {}) and (s.get("env") or {}).get("SHIPMATE_ENV_TOKEN")
+            if (s.get("env") or {}).get("SHIPMATE_DOCTOR_MODE") in _PROBE_MODES
         ]
-        assert consumers, f"{action}: no doctor step receives SHIPMATE_ENV_TOKEN"
+        assert consumers, f"{action}: no doctor probe step to receive SHIPMATE_ENV_TOKEN"
         for step in consumers:
-            assert step["env"]["SHIPMATE_ENV_TOKEN"] == _MINT_OUTPUT_EXPR, (
-                f"{action}: SHIPMATE_ENV_TOKEN must come from the envtoken step, got "
-                f"{step['env']['SHIPMATE_ENV_TOKEN']!r}"
+            assert step["env"].get("SHIPMATE_ENV_TOKEN") == _MINT_OUTPUT_EXPR, (
+                f"{action}: {step.get('name')!r} must take SHIPMATE_ENV_TOKEN from the "
+                f"envtoken step, got {step['env'].get('SHIPMATE_ENV_TOKEN')!r}"
             )
 
 

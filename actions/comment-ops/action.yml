@@ -218,11 +218,9 @@ runs:
     - name: Doctor — mint an environments-scoped token for the plan-env secret probe
       id: envtoken
       if: ${{ steps.parse.outputs.route == 'doctor' && steps.guard.outputs.privileged_association == 'true' && steps.doctortoken.outcome == 'success' }}
-      # Its own mint, and never fatal: `environments: read` is held as a pending
-      # request until an org owner accepts it, and requesting it in
-      # `doctortoken` above would take the entire doctor report down — all
-      # eleven probes — on every installation that has not. Without this token
-      # the plan-env secret probe reports itself unchecked.
+      # Its own mint so that a permission request no org owner has accepted yet
+      # costs this one probe and not the whole report — argued in
+      # scripts/tests/test_env_token_mint_scoping.py.
       continue-on-error: true
       uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
       with:

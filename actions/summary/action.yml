@@ -55,12 +55,12 @@ runs:
 
     - name: Mint an environments-scoped token for doctor's plan-env secret probe
       id: envtoken
-      # A second mint, deliberately: `environments: read` is a permission
-      # app/manifest.json declares but an already-installed App holds only as a
-      # pending request until an org owner accepts it, so a mint requesting it
-      # fails until then. Requesting it in the mint above would take the apply
-      # checks and the gate status down with it on every such repository —
-      # doctor reports the probe as unchecked instead, which is recoverable.
+      # Its own mint so that a permission request no org owner has accepted yet
+      # cannot reach the apply checks or the gate status — argued in
+      # scripts/tests/test_env_token_mint_scoping.py. Until it is accepted this
+      # step's rejection also lands a failure annotation on this run, which
+      # doctor harvests: expect an :x: row in the report beside the plan-env
+      # secret check's "not performed" note, from the same one cause.
       continue-on-error: true
       uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
       with:
@@ -130,10 +130,8 @@ runs:
       shell: bash
       env:
         GH_TOKEN: ${{ steps.token.outputs.token }}
-        # Listing an environment's secrets needs `environments: read`, which the
-        # mint above requests on its own so its failure cannot reach the gate
-        # path. Empty when that mint failed; doctor then says the plan-env
-        # secret check did not run rather than reporting it clean.
+        # Empty when the mint above failed; doctor then says the plan-env secret
+        # check did not run rather than reporting it clean.
         SHIPMATE_ENV_TOKEN: ${{ steps.envtoken.outputs.token }}
         SHIPMATE_DOCTOR_MODE: annotate
         SHIPMATE_APP_ID: ${{ inputs.app-id }}
