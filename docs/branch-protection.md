@@ -90,7 +90,7 @@ findings as workflow annotations titled `shipmate doctor`
 (`::warning title=shipmate doctor::<text>` / `::notice title=shipmate
 doctor::<text>`) — read-only, never blocking. Comment `shipmate doctor` on a
 pull request for a consolidated report: a sticky comment (marker `<!--
-shipmate:doctor -->`, upserted in place like the plan comment) combining ten
+shipmate:doctor -->`, upserted in place like the plan comment) combining eleven
 live probes — a missing or mis-pinned `shipmate / gate` rule on the default
 branch (no active ruleset requiring it, or one that doesn't pin
 `integration_id` to the shipmate App, or that isn't strict),
@@ -112,7 +112,11 @@ approval-type protection rules — required reviewers or wait timers — and no
 deployment branch policy; an apply environment with no approval rule is only a
 note, and "no approval rule" is deliberately not "no protection rules": GitHub
 synthesizes a `branch_policy` protection rule for any environment with a
-deployment branch policy, and a branch policy is not a review), whether the
+deployment branch policy, and a branch policy is not a review),
+any secret a plan environment holds (names only — the API never returns a
+value; a plan cell runs branch code with whatever that environment releases
+and control 8 forbids protecting it, so a note naming the secrets, and a
+warning if `SHIPMATE_APP_PRIVATE_KEY` is one of them), whether the
 `shipmate-engine` environment exists and its deployment branch policy actually
 names the default branch (see `docs/hardening.md` #16 and
 `docs/github-app.md` §Key-exposure boundary — this is the probe that catches
@@ -138,7 +142,7 @@ whether the shipmate App installation still grants the manifest's full
 permission set — with the warning and failure annotations GitHub already
 recorded on this commit's workflow runs (shipmate's own and any other
 Actions workflow run on that commit; third-party-app-authored check runs are
-excluded). Only eight of the ten probes can produce a finding from the plan
+excluded). Only nine of the eleven probes can produce a finding from the plan
 path's own `annotate`-mode run (`actions/summary`): the approvers-team probe
 needs the `SHIPMATE_TEAM` environment variable, which the plan path does
 not supply, and

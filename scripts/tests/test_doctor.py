@@ -45,6 +45,15 @@ def _ctx(**over):
     return ctx
 
 
+@pytest.fixture(autouse=True)
+def _plan_env_secret_token(monkeypatch):
+    """The plan-env secret probe reads its own env-scoped token and reports the
+    check as not performed without one -- which would otherwise show up as an
+    extra WARNING in every test that goes through `warnings()`. The tests for
+    the absent-token behaviour delete it explicitly."""
+    monkeypatch.setenv("SHIPMATE_ENV_TOKEN", "envtok")
+
+
 def test_mode_must_be_set(monkeypatch):
     monkeypatch.setenv("SHIPMATE_DOCTOR_MODE", "")
     monkeypatch.setenv("GITHUB_REPOSITORY", _REPO)
@@ -154,6 +163,16 @@ def _environments(*names):
     return {"environments": [{"name": n} for n in names]}
 
 
+def _secrets(*names, total=None):
+    """An environment secrets listing. `total` defaults to the number of names
+    given; pass a larger value to model the truncated read `per_page=100`
+    without pagination can produce."""
+    return {
+        "total_count": len(names) if total is None else total,
+        "secrets": [{"name": n} for n in names],
+    }
+
+
 def _env(name, rules=(), branch_policy=None):
     # The real "Get an environment" response includes a {"type":
     # "branch_policy"} protection_rules entry whenever deployment_branch_policy
@@ -170,18 +189,21 @@ def _env(name, rules=(), branch_policy=None):
 
 def _quiet_new_probes():
     """Healthy responses for the env-protection, engine-environment,
-    pin-freshness, fork-trigger and wiring probes, so tests exercising the older
-    gate/environment probes via the top-level `warnings()` don't pick up
-    incidental noise from these five.
+    plan-env-secret, pin-freshness, fork-trigger and wiring probes, so tests
+    exercising the older gate/environment probes via the top-level `warnings()`
+    don't pick up incidental noise from these six.
 
     The last three read the same workflow listing, and it has to be a correctly
     wired one: an empty listing reads to the wiring probe as a repository with
     no plan workflow and no `workflow_run` wrapper. The wiring fixture's `uses:`
     line is an engine pin, so the pin probe now has something to read too and
     needs the release endpoints to agree with it -- the pinned SHA and the SHA
-    the release lookup returns are the same `_SHA`, or it reports staleness."""
+    the release lookup returns are the same `_SHA`, or it reports staleness. The
+    plan-env secret probe reads one listing per plan env; an empty one keeps the
+    healthy path quiet."""
     return {
         f"repos/{_REPO}/environments/dev-eu": _env("dev-eu"),
+        f"repos/{_REPO}/environments/dev-eu/secrets?per_page=100": _secrets(),
         f"repos/{_REPO}/environments/dev-eu-apply": _env(
             "dev-eu-apply", rules=("required_reviewers",)
         ),
@@ -2210,3 +2232,194 @@ def test_harvest_drops_doctors_own_annotation_at_every_level():
         for level in doctor.HARVEST_LEVELS
     ]
     assert doctor.harvest_sections(anns) == {}
+
+
+def test_plan_env_secret_probe_is_registered():
+    assert doctor._plan_env_secret_warnings in doctor.PROBES
+
+
+def test_plan_env_holding_secrets_is_a_notice_naming_each(monkeypatch):
+    """NOTICE, not WARNING: docs/hardening.md control 8 permits read-only,
+    blast-radius-free credentials in a plan environment, and doctor's WARNING
+    means misconfiguration. Same posture as the apply-env-without-reviewers
+    note."""
+    responses = {
+        f"repos/{_REPO}/environments?per_page=100": _environments("dev-eu", "dev-eu-apply"),
+        f"repos/{_REPO}/environments/dev-eu/secrets?per_page=100": _secrets(
+            "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"
+        ),
+    }
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    found = doctor._plan_env_secret_warnings(_ctx())
+    assert [lvl for lvl, _ in found] == [doctor.NOTICE]
+    assert "`AWS_ACCESS_KEY_ID`" in found[0][1]
+    assert "`AWS_SECRET_ACCESS_KEY`" in found[0][1]
+    assert "2 secret" in found[0][1]
+
+
+def test_apply_env_secrets_are_never_read(monkeypatch):
+    """Control 7 *requires* credentials on `<env>-apply`, so a finding there
+    would fire on correct configuration. Asserted on the requested paths, not
+    on the absence of a finding: a probe that read the apply environment and
+    then dropped the result would satisfy a findings-only assertion."""
+    seen = []
+    responses = {
+        f"repos/{_REPO}/environments?per_page=100": _environments("dev-eu", "dev-eu-apply"),
+        f"repos/{_REPO}/environments/dev-eu/secrets?per_page=100": _secrets(),
+    }
+
+    def fake(path):
+        seen.append(path)
+        return responses[path]
+
+    monkeypatch.setattr(doctor, "_gh_json", fake)
+    assert doctor._plan_env_secret_warnings(_ctx()) == []
+    assert not [p for p in seen if "dev-eu-apply" in p]
+
+
+def test_engine_environment_secrets_are_never_read(monkeypatch):
+    """`shipmate-engine` holds the App key by design (control 16). The probe
+    iterates the *declared* envs, never the environments listing, so an
+    environment nobody tagged into is not its business."""
+    seen = []
+    responses = {
+        f"repos/{_REPO}/environments?per_page=100": _environments("dev-eu", "shipmate-engine"),
+        f"repos/{_REPO}/environments/dev-eu/secrets?per_page=100": _secrets(),
+    }
+
+    def fake(path):
+        seen.append(path)
+        return responses[path]
+
+    monkeypatch.setattr(doctor, "_gh_json", fake)
+    assert doctor._plan_env_secret_warnings(_ctx()) == []
+    assert f"repos/{_REPO}/environments/shipmate-engine/secrets?per_page=100" not in seen
+
+
+def test_app_private_key_in_a_plan_env_is_a_warning(monkeypatch):
+    """The one configuration no document blesses: plan-time code execution
+    could mint an App token with it. A name match, not a pattern guess."""
+    responses = {
+        f"repos/{_REPO}/environments?per_page=100": _environments("dev-eu"),
+        f"repos/{_REPO}/environments/dev-eu/secrets?per_page=100": _secrets(
+            "SHIPMATE_APP_PRIVATE_KEY"
+        ),
+    }
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    found = doctor._plan_env_secret_warnings(_ctx())
+    assert [lvl for lvl, _ in found] == [doctor.NOTICE, doctor.WARNING]
+    assert "forge" in found[1][1]
+    assert doctor.GATE in found[1][1]
+    assert doctor._ENGINE_ENV in found[1][1]
+
+
+def test_no_env_token_is_a_warning_and_reads_nothing(monkeypatch):
+    """An unaccepted permission request must never read as an all-clear.
+
+    `pytest.fail`, not a raise: the probe catches `(Exception, SystemExit)` per
+    environment, so a plain exception would degrade to a NOTICE and this test
+    would pass against the very mutation it exists to catch."""
+    monkeypatch.delenv("SHIPMATE_ENV_TOKEN", raising=False)
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: pytest.fail(f"read {path}"))
+    found = doctor._plan_env_secret_warnings(_ctx())
+    assert [lvl for lvl, _ in found] == [doctor.WARNING]
+    assert found == [doctor._ENV_TOKEN_UNCHECKED]
+    assert "environments: read" in found[0][1]
+
+
+def test_no_declared_env_reads_nothing_and_says_nothing(monkeypatch):
+    """A docs-only or pin-bump pull request declares no environment, so there
+    was nothing to read and no check went dark. The declared-env check must
+    therefore come *before* the token check -- with neither, this returns the
+    dark-check WARNING instead of nothing."""
+    monkeypatch.delenv("SHIPMATE_ENV_TOKEN", raising=False)
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: pytest.fail(f"read {path}"))
+    assert doctor._plan_env_secret_warnings(_ctx(envs=set(), envs_available=False)) == []
+
+
+def test_one_env_listing_failure_is_a_notice_and_the_others_still_report(monkeypatch):
+    """Per-environment degrade, like `_env_protection_warnings`: one 403 must
+    not silence the environment that could be read."""
+    responses = {
+        f"repos/{_REPO}/environments?per_page=100": _environments("dev-eu", "dev-us"),
+        f"repos/{_REPO}/environments/dev-us/secrets?per_page=100": _secrets("GOOGLE_CREDENTIALS"),
+    }
+
+    def fake(path):
+        if path.endswith("dev-eu/secrets?per_page=100"):
+            raise SystemExit(f"::error::command failed (1): gh api {path}")
+        return responses[path]
+
+    monkeypatch.setattr(doctor, "_gh_json", fake)
+    found = doctor._plan_env_secret_warnings(_ctx(envs={"dev-eu", "dev-us"}))
+    assert [lvl for lvl, _ in found] == [doctor.NOTICE, doctor.NOTICE]
+    assert "`dev-eu`" in found[0][1]
+    assert "could not be listed" in found[0][1]
+    assert "`GOOGLE_CREDENTIALS`" in found[1][1]
+
+
+def test_plan_env_secret_listing_failure_propagates_to_the_degrade_note(monkeypatch):
+    """The environments listing is this probe's precondition -- without it no
+    name can be classified present-or-absent -- so its failure must reach
+    `warnings()`' outer handler and become a "could not verify" degrade rather
+    than a silent empty result that reads as "no secrets anywhere"."""
+
+    def boom(path):
+        raise SystemExit(f"::error::command failed (1): gh api {path}")
+
+    monkeypatch.setattr(doctor, "_gh_json", boom)
+    with pytest.raises(SystemExit):
+        doctor._plan_env_secret_warnings(_ctx())
+    out = doctor.warnings(_ctx())
+    assert any("plan env secret" in t and "probe skipped" in t for _, t in out)
+
+
+def test_truncated_secret_listing_reads_as_at_least(monkeypatch):
+    """`bm.gh_json` does not multi-page, so a repository with more than 100
+    secrets in one environment returns a partial list. Reporting `len(names)`
+    would understate it as the whole set."""
+    responses = {
+        f"repos/{_REPO}/environments?per_page=100": _environments("dev-eu"),
+        f"repos/{_REPO}/environments/dev-eu/secrets?per_page=100": _secrets("A", "B", total=150),
+    }
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    found = doctor._plan_env_secret_warnings(_ctx())
+    assert [lvl for lvl, _ in found] == [doctor.NOTICE]
+    assert "at least 150" in found[0][1]
+
+
+def test_secret_listing_uses_the_env_token_and_restores_gh_token(monkeypatch):
+    """The ambient GH_TOKEN is the App token minted without `environments:
+    read`; only the dedicated mint's token can list secrets. Every other probe
+    runs after this one and must still see the token it started with."""
+    monkeypatch.setenv("GH_TOKEN", "apptok")
+    monkeypatch.setenv("SHIPMATE_ENV_TOKEN", "envtok")
+    seen = {}
+
+    def fake(path):
+        if path.endswith("/secrets?per_page=100"):
+            seen["secrets_call"] = os.environ.get("GH_TOKEN")
+            return _secrets()
+        seen["listing_call"] = os.environ.get("GH_TOKEN")
+        return _environments("dev-eu")
+
+    monkeypatch.setattr(doctor, "_gh_json", fake)
+    assert doctor._plan_env_secret_warnings(_ctx()) == []
+    assert seen["secrets_call"] == "envtok"
+    assert seen["listing_call"] == "apptok"
+    assert os.environ["GH_TOKEN"] == "apptok"  # noqa: S105 - fixture value, not a real token
+
+
+def test_gh_token_stays_unset_when_it_was_unset_before(monkeypatch):
+    """The restore must reproduce absence, not write an empty string: a later
+    `gh api` call with GH_TOKEN="" authenticates as nobody instead of falling
+    back to the ambient credential."""
+    monkeypatch.delenv("GH_TOKEN", raising=False)
+    monkeypatch.setenv("SHIPMATE_ENV_TOKEN", "envtok")
+    responses = {
+        f"repos/{_REPO}/environments?per_page=100": _environments("dev-eu"),
+        f"repos/{_REPO}/environments/dev-eu/secrets?per_page=100": _secrets(),
+    }
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    assert doctor._plan_env_secret_warnings(_ctx()) == []
+    assert "GH_TOKEN" not in os.environ

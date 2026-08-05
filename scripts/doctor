@@ -7,7 +7,7 @@ Three modes, selected via SHIPMATE_DOCTOR_MODE:
   actions/summary right after a plan run. NEVER fails the run: a probe
   error becomes a 'could not verify' note — doctor guards onboarding, it
   must not take down the plan path.
-- report: render the sticky PR comment on demand — the ten live probes'
+- report: render the sticky PR comment on demand — the eleven live probes'
   findings plus a harvest of the warnings GitHub already recorded as
   annotations on this commit's workflow check runs.
 - check-ids: reduce a check-runs JSONL listing to the (id, name) pairs worth
@@ -29,6 +29,14 @@ Probes:
 - the `shipmate-engine` environment holding the App private key: it must
   exist and its deployment branch policy must name the default branch —
   otherwise the key is still a repository secret every branch can read.
+- secrets held by each declared plan environment (`<env>`, never `<env>-apply`,
+  where credentials belong): a plan cell executes branch code with whatever the
+  plan environment releases, and control 8 forbids protecting a plan
+  environment, so any secret there is readable by anyone who can push. Names
+  only — no API returns a value. A note, except `SHIPMATE_APP_PRIVATE_KEY`,
+  which no configuration blesses. Needs the `environments: read` permission; an
+  installation that has not accepted it yet is reported as unchecked, never as
+  clean.
 - engine action-pin freshness in the consumer's workflow files, read at the
   commit under examination: a tag/branch pin is a warning, a SHA pin behind
   the engine's latest release is a warning. Restricted to pins of the engine's
@@ -470,6 +478,134 @@ def _engine_environment_warnings(ctx):
     return []
 
 
+# Named `_APP_KEY_NAME`, not `..._SECRET`: ruff's S105 hardcoded-password rule
+# fires on a "SECRET" token in the binding name, and this is a secret's *name*.
+_APP_KEY_NAME = "SHIPMATE_APP_PRIVATE_KEY"
+
+# Emitted when the env-scoped token is absent: the listing needs the
+# `environments: read` permission app/manifest.json declares, and an
+# installation that has not accepted the request yet cannot mint it. A silent
+# skip here would be byte-identical to "no plan environment holds a secret",
+# which is the one thing this probe exists to be able to say.
+_ENV_TOKEN_UNCHECKED = (
+    WARNING,
+    "plan-environment secrets were not checked — minting a token with the "
+    "`environments: read` permission `app/manifest.json` declares did not succeed, "
+    "which usually means the shipmate App installation has not accepted the "
+    "permission request yet. Accept it in the installation settings, then comment "
+    "`shipmate doctor` again.",
+)
+
+
+def _env_secret_names(ctx, name):
+    """(names, total) of one environment's secrets.
+
+    Names only: the endpoint is documented as listing an environment's secrets
+    without revealing their encrypted values, and no REST path returns a value
+    at all -- which is what makes it safe to print them in a report on a public
+    repository.
+
+    Read with SHIPMATE_ENV_TOKEN, restoring GH_TOKEN afterwards -- the same
+    swap `_latest_release_sha` makes, and for the same reason: the ambient App
+    token is minted without `environments: read` and every other probe still
+    needs it. `total` comes from the payload rather than the list length
+    because `bm.gh_json` does not multi-page.
+    """
+    saved = os.environ.get("GH_TOKEN")
+    os.environ["GH_TOKEN"] = os.environ["SHIPMATE_ENV_TOKEN"]
+    try:
+        data = _gh_json(f"repos/{ctx['repo']}/environments/{name}/secrets?per_page=100")
+    finally:
+        if saved is None:
+            os.environ.pop("GH_TOKEN", None)
+        else:
+            os.environ["GH_TOKEN"] = saved
+    names = [
+        s.get("name")
+        for s in (data.get("secrets") or [])
+        if isinstance(s.get("name"), str) and s.get("name")
+    ]
+    total = data.get("total_count")
+    return names, total if isinstance(total, int) and total > len(names) else len(names)
+
+
+def _plan_env_secret_warnings(ctx):
+    """What a plan environment holds is the whole blast radius of plan-time code
+    execution. `docs/hardening.md` control 8 pins plan environments open by
+    construction -- no approval rules, no branch policy, or every plan cell
+    stalls -- so anything in one is readable by anyone who can push a branch.
+
+    A plan environment's baseline is zero secrets: `SHIPMATE_PLAN_PASSPHRASE` is
+    a repository secret and the App key lives only on `shipmate-engine`. So any
+    name this returns is a consumer credential, and the finding needs no
+    name-pattern matching -- a deny list of credential-looking names would be
+    incomplete by construction and would read "safe" for everything it forgot.
+
+    NOTICE, not WARNING, for the same reason the apply-env-without-reviewers
+    finding is a note: control 8 explicitly permits read-only,
+    blast-radius-free credentials here, and doctor's WARNING means
+    misconfiguration. `SHIPMATE_APP_PRIVATE_KEY` is the exception -- no document
+    blesses that, and it is matched by exact name.
+
+    Order is load-bearing. The declared-env check comes first: a docs-only pull
+    request reads nothing, so the dark-check WARNING would be a false alarm
+    there. Existence then comes from the environments **listing**, never from
+    the per-environment read's exception, because `bm.gh_json`'s exception
+    carries no status code -- a 404 (which is `_environment_warnings`' finding)
+    would otherwise be indistinguishable from the 403 that means this check saw
+    nothing. Scope is plan environments only: `<env>-apply` is where control 7
+    *requires* credentials, and `shipmate-engine` holds the App key by design.
+    """
+    if not ctx["envs"]:
+        return []
+    if not os.environ.get("SHIPMATE_ENV_TOKEN"):
+        return [_ENV_TOKEN_UNCHECKED]
+    existing = _existing_env_names(ctx)
+    out = []
+    for env in sorted(ctx["envs"]):
+        if env not in existing:
+            continue  # existence is _environment_warnings' finding
+        try:
+            names, total = _env_secret_names(ctx, env)
+        except (Exception, SystemExit) as e:  # noqa: BLE001 - degrade, see docstring
+            out.append(
+                (
+                    NOTICE,
+                    f"GitHub Environment `{env}`'s secrets could not be listed "
+                    f"({_degrade_reason(e)}) — whether this plan environment holds "
+                    "credentials reachable by plan-time code was not checked.",
+                )
+            )
+            continue
+        if not names:
+            continue
+        shown = ", ".join(f"`{n}`" for n in sorted(names))
+        count = f"at least {total}" if total > len(names) else str(len(names))
+        out.append(
+            (
+                NOTICE,
+                f"plan environment `{env}` holds {count} secret(s) ({shown}) — a plan "
+                "cell runs the pull request branch's own code with whatever this "
+                "environment releases to it, and a plan environment cannot have "
+                "approval rules or a branch policy, so anyone who can push a branch "
+                "can read them. Keep them read-only and blast-radius-free, or move to "
+                "OIDC (docs/hardening.md control 8).",
+            )
+        )
+        if _APP_KEY_NAME in names:
+            out.append(
+                (
+                    WARNING,
+                    f"plan environment `{env}` holds `{_APP_KEY_NAME}` — plan-time "
+                    "code execution can mint an App token with it, forge the "
+                    f"`{GATE}` status and approve its own pull request. The key belongs "
+                    f"only in `{_ENGINE_ENV}` (docs/github-app.md §Key-exposure "
+                    "boundary).",
+                )
+            )
+    return out
+
+
 _PIN = re.compile(
     r"uses:\s*['\"]?(?P<owner>[\w.-]+)/(?P<repo>[\w.-]+)/(?:actions|\.github)/"
     r"[\w./-]+@(?P<ref>[\w./-]+)"
@@ -892,6 +1028,7 @@ PROBES = (
     _environment_warnings,
     _env_protection_warnings,
     _engine_environment_warnings,
+    _plan_env_secret_warnings,
     _pin_warnings,
     _fork_trigger_warnings,
     _wiring_warnings,
