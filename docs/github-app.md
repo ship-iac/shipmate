@@ -261,7 +261,15 @@ every consumer repo, not just once for the org.
 ## Reference: what the App can and can't do
 
 - Permissions: `actions: write`, `pull_requests: write`, `contents: read`,
-  `members: read`, `checks: write`, `statuses: write`, `issues: write`. The
+  `members: read`, `checks: write`, `statuses: write`, `issues: write`,
+  `environments: read` (doctor's plan-environment secret listing — names only;
+  no GitHub API returns a secret's value, and this permission cannot write one).
+  Minted in its own non-fatal step, so an installation that has not accepted
+  the request leaves the `shipmate / gate` status and the apply checks
+  untouched; it costs two warnings in the `shipmate doctor` report — that probe
+  reporting itself as not performed, and the App-permission-drift probe, whose
+  full-manifest mint asks for this permission too and so fails until Accept.
+  Both clear on Accept — see §Re-approve after permission changes. The
   App mints a fresh installation token per job and authors: every
   `apply / <stack> / <env>` check (create pending, complete on apply), the
   aggregate `shipmate / gate` commit status, the sticky plan comment, the
@@ -279,7 +287,8 @@ every consumer repo, not just once for the org.
 ## Re-approve after permission changes
 
 Expanding `default_permissions` in `app/manifest.json` (as this project did
-to add `checks`/`statuses`/`issues`) does not take effect immediately for an
+to add `checks`/`statuses`/`issues`, and later `environments`) does not take
+effect immediately for an
 already-installed App. GitHub puts the wider grant in a **pending request**
 that an org owner must approve:
 

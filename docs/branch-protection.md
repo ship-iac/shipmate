@@ -90,7 +90,7 @@ findings as workflow annotations titled `shipmate doctor`
 (`::warning title=shipmate doctor::<text>` / `::notice title=shipmate
 doctor::<text>`) — read-only, never blocking. Comment `shipmate doctor` on a
 pull request for a consolidated report: a sticky comment (marker `<!--
-shipmate:doctor -->`, upserted in place like the plan comment) combining ten
+shipmate:doctor -->`, upserted in place like the plan comment) combining eleven
 live probes — a missing or mis-pinned `shipmate / gate` rule on the default
 branch (no active ruleset requiring it, or one that doesn't pin
 `integration_id` to the shipmate App, or that isn't strict),
@@ -112,17 +112,23 @@ approval-type protection rules — required reviewers or wait timers — and no
 deployment branch policy; an apply environment with no approval rule is only a
 note, and "no approval rule" is deliberately not "no protection rules": GitHub
 synthesizes a `branch_policy` protection rule for any environment with a
-deployment branch policy, and a branch policy is not a review), whether the
-`shipmate-engine` environment exists and its deployment branch policy actually
-names the default branch (see `docs/hardening.md` #16 and
-`docs/github-app.md` §Key-exposure boundary — this is the probe that catches
-a re-pin that never (re-)creates that environment, which would otherwise leave
-the App key a repository secret again with nothing else to notice), any
-workflow file declaring the `pull_request_target` trigger (it runs at the base
-ref with the repository's secrets while acting on content the pull request
-author controls — `docs/hardening.md` §10–12; the probe reads the same workflow
-files as the pin probe, at the same commit, so a pull request that removes the
-trigger is not still reported for it), engine
+deployment branch policy, and a branch policy is not a review), the secrets a
+plan environment holds (names only — the API never returns a value; a plan
+cell runs branch code with whatever that environment releases and control 8
+forbids protecting it, so a note giving the exact count and a capped list of
+the names — a crowded environment's later names are not printed, so that one
+finding cannot spend the whole report's size budget — and a warning if
+`SHIPMATE_APP_PRIVATE_KEY` is one of them), whether the `shipmate-engine`
+environment exists and its deployment branch policy actually names the default
+branch (see `docs/hardening.md` #16 and `docs/github-app.md` §Key-exposure
+boundary — this is the probe that catches a re-pin that never (re-)creates
+that environment, which would otherwise leave the App key a repository secret
+again with nothing else to notice), any workflow file declaring the
+`pull_request_target` trigger (it runs at the base ref with the repository's
+secrets while acting on content the pull request author controls —
+`docs/hardening.md` §10–12; the probe reads the same workflow files as the pin
+probe, at the same commit, so a pull request that removes the trigger is not
+still reported for it), engine
 action-pin freshness in the consumer's own workflow files (read at the commit
 under examination, so the pull request that bumps a stale pin is not itself
 reported stale, and restricted to pins of the engine's own repository, which
@@ -138,7 +144,7 @@ whether the shipmate App installation still grants the manifest's full
 permission set — with the warning and failure annotations GitHub already
 recorded on this commit's workflow runs (shipmate's own and any other
 Actions workflow run on that commit; third-party-app-authored check runs are
-excluded). Only eight of the ten probes can produce a finding from the plan
+excluded). Only nine of the eleven probes can produce a finding from the plan
 path's own `annotate`-mode run (`actions/summary`): the approvers-team probe
 needs the `SHIPMATE_TEAM` environment variable, which the plan path does
 not supply, and
@@ -162,13 +168,22 @@ repository the engine is.
 An environment that exists but whose settings cannot be read is likewise a
 note naming it, rather than the silence a nonexistent environment gets (that
 one is the environment-existence probe's finding) — the `shipmate-engine`
-probe degrades the same way.
+probe degrades the same way. The plan-environment secret probe carries three
+degrade levels of its own: with no `environments: read` token it **warns** that
+the check was not performed — never that a plan environment is clean; an
+environment whose secret listing fails is a **note** naming it, so one
+unreadable environment does not silence the ones that could be read; and a
+listing too long to read whole **warns** that whether the environment holds
+`SHIPMATE_APP_PRIVATE_KEY` could not be determined, rather than reading as a
+routine note about the names it did see.
 
-The environment probes cover only the environments of the stacks a given pull
-request changed — the declared set comes from that commit's plan matrix — so
-the report's all-clear line names the environments it actually probed instead
-of implying the repository's environments are all sound. Separately, the report
-states plainly when some of the commit's workflow runs had not finished yet,
+All three environment probes — pair existence, protection shape, and the
+secrets a plan environment holds — cover only the environments of the stacks a
+given pull request changed; the declared set comes from that commit's plan
+matrix. So the report's all-clear line names the environments it actually probed
+instead of implying the repository's environments are all sound, and a clean
+secret probe says nothing about an environment this pull request did not touch.
+Separately, the report states plainly when some of the commit's workflow runs had not finished yet,
 and when the warnings harvest itself could not complete (or may be truncated by
 GitHub's per-step annotation cap), rather than claiming a false all-clear.
 

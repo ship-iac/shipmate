@@ -13,6 +13,9 @@ from _loader import ACTIONS, ENGINE, SCRIPTS, action_steps, load_script
 _ACTION_FILE = ACTIONS / "comment-ops" / "action.yml"
 _ACTION = _ACTION_FILE.read_text(encoding="utf-8")
 _SUMMARY_ACTION = (ACTIONS / "summary" / "action.yml").read_text(encoding="utf-8")
+_MANIFEST_PERMISSIONS = json.loads((ENGINE / "app" / "manifest.json").read_text(encoding="utf-8"))[
+    "default_permissions"
+]
 
 # The `doctor` route's access gate. The allowlist literal lives in exactly one
 # place in the action (the `guard` step's `case`); every doctor step keys off
@@ -360,7 +363,7 @@ def test_every_doctor_route_step_is_gated_on_the_association():
     doctor's machinery under some other condition (or none) is caught by
     test_every_step_that_touches_doctor_machinery_is_gated instead."""
     steps = _steps_conditioned_on("doctor")
-    assert len(steps) == 6, [n for n, _ in steps]
+    assert len(steps) == 7, [n for n, _ in steps]
     for name, cond in steps:
         assert _GATE in cond, name
     # Exactly one step runs when the gate is closed (the rejection); every
@@ -474,6 +477,38 @@ def test_the_doctor_upsert_does_not_swallow_a_comment_listing_failure():
     assert code.index("exit 0") < code.index('issues/$PR_NUMBER/comments" -F body=@doctor.md')
 
 
+def _mint_with(action, step_id):
+    """The parsed `with:` mapping of the mint step whose id is exactly
+    `step_id`.
+
+    Two things a text slice from `id: <step_id>` cannot do. It matches any id
+    that merely *starts* with the name, so a future `id: token-refresh` placed
+    above the real mint retargets the slice and every permission assertion then
+    passes against the wrong step while the real mint's grant can be deleted
+    unnoticed. And it reads raw file text, where a commented-out
+    `# permission-environments: read` satisfies the same assertion as the live
+    key. So: exact id, asserted to really be a mint, compared as parsed values.
+    """
+    steps = [s for s in action_steps(action) if s.get("id") == step_id]
+    assert len(steps) == 1, f"expected exactly one `id: {step_id}` step in {action}, got {steps}"
+    uses = steps[0].get("uses") or ""
+    assert "actions/create-github-app-token" in uses, (
+        f"{action}'s `{step_id}` step is not an App-token mint (uses: {uses!r}) — "
+        "the permission assertions against it would pin nothing"
+    )
+    return steps[0].get("with") or {}
+
+
+def _requested_permissions(mint_with):
+    """`{permission: level}` actually requested by a mint, from its parsed
+    inputs — so a commented-out request is absent, as it is at runtime."""
+    return {
+        k.removeprefix("permission-"): v
+        for k, v in mint_with.items()
+        if k.startswith("permission-")
+    }
+
+
 def test_both_doctor_token_mints_request_actions_read():
     """The environment probes read `repos/{repo}/environments` and, per
     environment, `.../environments/{name}`. The environments *list* has been
@@ -488,11 +523,11 @@ def test_both_doctor_token_mints_request_actions_read():
     drives `annotate` mode on every plan run, `comment-ops`' `doctortoken`
     drives `report` mode on demand, and a fix applied to only one leaves half
     the environment probes degraded."""
-    doctor_mint = _ACTION.split("id: doctortoken", 1)[1].split("- name:", 1)[0]
-    assert "permission-actions: read" in doctor_mint
-    summary_steps = _SUMMARY_ACTION.split("\n    - name:")
-    summary_mint = next(s for s in summary_steps if "uses: actions/create-github-app-token" in s)
-    assert "permission-actions: read" in summary_mint
+    assert _mint_with("comment-ops", "doctortoken").get("permission-actions") == "read"
+    # Selected by exact id, like the doctor mint above: `actions/summary` has a
+    # second create-github-app-token step (the environments-scoped one), so "the
+    # first mint in the file" would be positional rather than named.
+    assert _mint_with("summary", "token").get("permission-actions") == "read"
 
 
 def test_the_doctor_token_can_comment_on_a_pull_request():
@@ -503,17 +538,67 @@ def test_the_doctor_token_can_comment_on_a_pull_request():
     post a comment (`actions/summary`, `actions/apply-summary`) request
     pull-requests, so pin the doctor mint to the same permission and pin the
     absence of the one that does not work."""
-    block = _ACTION.split("id: doctortoken", 1)[1].split("- name:", 1)[0]
-    assert "permission-pull-requests: write" in block
-    assert "permission-issues:" not in block
+    mint = _mint_with("comment-ops", "doctortoken")
+    assert mint.get("permission-pull-requests") == "write"
+    assert "permission-issues" not in mint
 
 
 def test_fullmint_requests_the_manifests_exact_permission_set():
     """The full-set probe mint must mirror app/manifest.json: a manifest bump
     that skips this step makes the permission-drift probe test the stale set —
-    exactly the drift the probe exists to catch."""
-    block = _ACTION.split("id: fullmint", 1)[1].split("- name:", 1)[0]
-    requested = dict(re.findall(r"permission-([a-z-]+): (read|write)", block))
-    manifest = json.loads((ENGINE / "app" / "manifest.json").read_text(encoding="utf-8"))
-    declared = {k.replace("_", "-"): v for k, v in manifest["default_permissions"].items()}
+    exactly the drift the probe exists to catch.
+
+    Parsed inputs, not a regex over the file text: `# permission-environments:
+    read` in a comment matched the live key exactly as well, so a commented-out
+    request kept this guard green while the mint asked for nothing."""
+    requested = _requested_permissions(_mint_with("comment-ops", "fullmint"))
+    declared = {k.replace("_", "-"): v for k, v in _MANIFEST_PERMISSIONS.items()}
     assert requested == declared
+
+
+#: doc -> the (start, end) markers bounding its prose permission list. Bounded
+#: rather than searched whole-file: `docs/github-app.md` also mentions the App's
+#: "`statuses: write` gate POST" further down, so an unbounded substring
+#: assertion would stay green with `statuses` deleted from the list itself. Both
+#: markers are asserted present below — a vanished `end` would silently widen the
+#: slice to the rest of the file and restore exactly that fail-open behaviour.
+_PROSE_PERMISSION_LISTS = {
+    "CONTRACT.md": ("carries this permission set:", "Beyond minting"),
+    "docs/github-app.md": ("- Permissions:", "\n- No webhook events"),
+}
+
+
+def test_both_prose_permission_lists_name_every_manifest_permission():
+    """`app/manifest.json` is what GitHub grants; two documents spell the same
+    set out in prose for readers, and `CLAUDE.md` names `CONTRACT.md` the single
+    source for the contract. The `fullmint` guard above pins only the action
+    YAML, so nothing noticed when a manifest bump left `CONTRACT.md` listing
+    seven permissions — this pins both lists against the manifest instead.
+
+    Both bounding markers are asserted before the slice is taken. A missing
+    `start` would search from the top of the file and a missing `end` would
+    search to the bottom, and either widening makes the assertion satisfiable by
+    a mention outside the list — the guard would keep passing while pinning
+    nothing."""
+    for doc, (start, end) in _PROSE_PERMISSION_LISTS.items():
+        text = (ENGINE / doc).read_text(encoding="utf-8")
+        assert start in text, (
+            f"{doc}: the marker opening the permission list, {start!r}, is gone — "
+            "the prose moved or was reworded; re-point _PROSE_PERMISSION_LISTS at it. "
+            "This is not a permission going missing."
+        )
+        after = text.split(start, 1)[1]
+        # `after`, not `text`: an `end` that only occurs *before* the list would
+        # leave the slice running to the end of the file just as an absent one does.
+        assert end in after, (
+            f"{doc}: the marker closing the permission list, {end!r}, no longer follows "
+            f"{start!r} — the prose moved or was reworded; re-point "
+            "_PROSE_PERMISSION_LISTS at it. Left unfixed the slice would run to the end "
+            "of the file and this guard would pin nothing. This is not a permission "
+            "going missing."
+        )
+        listing = after.split(end, 1)[0]
+        for name, level in _MANIFEST_PERMISSIONS.items():
+            assert f"`{name}: {level}`" in listing, (
+                f"{doc}'s permission list does not name `{name}: {level}`"
+            )

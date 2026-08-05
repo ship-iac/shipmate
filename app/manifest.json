@@ -10,7 +10,8 @@
     "members": "read",
     "checks": "write",
     "statuses": "write",
-    "issues": "write"
+    "issues": "write",
+    "environments": "read"
   },
   "default_events": []
 }

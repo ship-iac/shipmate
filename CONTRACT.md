@@ -254,16 +254,15 @@ only labels the output as shipmate's own.
 `shipmate doctor` posts a consolidated, sticky report — one comment per pull
 request, identified by the HTML marker `<!-- shipmate:doctor -->` (distinct
 from the plan comment's `<!-- shipmate:summary -->`) and upserted in place the
-same way. It combines ten live settings probes (gate ruleset, default-branch
-`pull_request` rule, environment
-pair existence, environment protection shape, the `shipmate-engine`
+same way. It combines eleven live settings probes (gate ruleset,
+default-branch `pull_request` rule, environment pair existence, environment
+protection shape, plan-environment secrets, the `shipmate-engine`
 environment's own existence and default-branch scoping, `pull_request_target`
-triggers in the consumer's workflow files, engine action-pin
-freshness, the consumer plan/summary wiring the gate status silently
-depends on (§Post-plan topology),
-approvers-team resolvability, and App installation permission
-drift — see `docs/branch-protection.md`) with a harvest of the warning and failure
-annotations GitHub already recorded on this commit's workflow runs
+triggers in the consumer's workflow files, engine action-pin freshness, the
+consumer plan/summary wiring the gate status silently depends on (§Post-plan
+topology), approvers-team resolvability, and App installation permission
+drift — see `docs/branch-protection.md`) with a harvest of the warning and
+failure annotations GitHub already recorded on this commit's workflow runs
 (shipmate's own and any other Actions workflow run on that commit;
 third-party-app-authored check runs are excluded). An empty harvest is
 reported as an all-clear only when the harvest both completed and had nothing
@@ -272,7 +271,7 @@ when the report was rendered, it says so and asks for the command again once
 they have, and if the harvest itself could not be read in full it says that
 too — the two are separate statements, since a run that has not finished has
 recorded nothing yet while a run that could not be read may have recorded
-plenty. Only eight of the ten
+plenty. Only nine of the eleven
 probes can produce a finding from the plan path's own `annotate`-mode
 invocation: the approvers-team probe needs the `SHIPMATE_TEAM` environment
 variable, which the plan path does not supply, so it silently returns
@@ -283,10 +282,10 @@ full-manifest permission-set mint was actually attempted, which only
 they surface findings only via `shipmate doctor`, never on the plan path's
 own annotations.
 
-Two of the probes are narrower than the repository. The **environment** probes
-(pair existence and protection shape) see only the environments of the stacks
-this pull request changed — the declared set comes from the plan matrix's cell
-summaries — so the report's all-clear line names the environments it actually
+Four of the probes are narrower than the repository. All three **environment**
+probes (pair existence, protection shape, and the secrets a plan environment
+holds) see only the environments of the stacks this pull request changed — the
+declared set comes from the plan matrix's cell summaries — so the report's all-clear line names the environments it actually
 covered instead of claiming the repository's environments are all sound, and
 says plainly when the set was empty. An environment that is in the repository's
 environments listing but whose own settings cannot be read becomes a note
@@ -418,7 +417,15 @@ App-minted `workflow_dispatch` mechanism and the same per-env
 
 The GitHub App carries this permission set: `actions: write`,
 `pull_requests: write`, `contents: read`, `members: read`, `checks: write`,
-`statuses: write`, `issues: write`. Beyond minting the `workflow_dispatch`
+`statuses: write`, `issues: write`, `environments: read` — the last for
+`shipmate doctor`'s plan-environment secret listing (names only; no GitHub REST
+path returns a secret's value, and this permission cannot write one), minted in
+its own non-fatal step so an installation that has not accepted the request
+leaves the `shipmate / gate` status and the apply checks untouched — it costs
+two warnings in the `shipmate doctor` report: that probe reporting itself as not
+performed, and the App-permission-drift probe, whose full-manifest mint asks for
+this permission too and so fails until Accept.
+Beyond minting the `workflow_dispatch`
 token for comment-ops (events created with the default `GITHUB_TOKEN` never
 trigger other workflows, so a private App is the only way to kick off the
 apply workflow from a comment) and reading team membership for
