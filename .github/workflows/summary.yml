@@ -220,7 +220,7 @@ jobs:
           run-id: ${{ github.event.workflow_run.id }}
           github-token: ${{ github.token }}
 
-      - uses: ship-iac/shipmate/actions/summary@2330cbef9a48e29ffd99df4624e19fbf4d2985a4 # pinned to a commit on main
+      - uses: ship-iac/shipmate/actions/summary@efa615b684f7e5cce70ff2fe8f4c5c4b5cec2d6a # pinned to a commit on main
         if: steps.pr.outputs.number != ''
         with:
           pr-number: ${{ steps.pr.outputs.number }}

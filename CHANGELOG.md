@@ -11,7 +11,9 @@ section below names the SHA the release tags.
 The version line stays `v0.x` while action inputs, check names, and the comment
 grammar are declared unstable in `README.md`.
 
-## [Unreleased]
+## [0.6.0] — 2026-08-06
+
+Tags <SHA>.
 
 **One consumer action beyond re-pinning:** accept the shipmate App's pending
 permission request (`environments: read`). Until an org owner does, the new
