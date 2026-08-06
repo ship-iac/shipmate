@@ -87,3 +87,31 @@ def test_apply_env_level_state_suffix_is_optional():
     inp = on["workflow_call"]["inputs"]["state_suffix"]
     assert inp.get("required") is False, "apply-env-level.yml: state_suffix must be required: false"
     assert inp.get("default", "") == "", "apply-env-level.yml: state_suffix default must be ''"
+
+
+def _jobs_calling(workflow, callee):
+    jobs = _load(workflow)["jobs"]
+    return {name: job for name, job in jobs.items() if callee in str(job.get("uses", ""))}
+
+
+def test_every_job_calling_apply_env_level_grants_id_token():
+    for wf in ("apply.yml", "apply-all.yml", "deploy.yml"):
+        callers = _jobs_calling(wf, "/apply-env-level.yml@")
+        assert callers, f"{wf}: expected at least one job calling apply-env-level.yml"
+        for name, job in callers.items():
+            perms = job.get("permissions") or {}
+            assert perms.get("id-token") == "write", (
+                f"{wf}:{name}: caller job must grant id-token: write -- a called "
+                "workflow requesting a permission its caller job didn't grant "
+                "fails at workflow-resolution time (same behavior apply-env-level.yml "
+                "already documents for checks:read), taking every wave job with it"
+            )
+
+
+def test_state_suffix_inputs_are_optional_everywhere():
+    for wf in ("apply.yml", "apply-all.yml", "deploy.yml"):
+        spec = _load(wf)
+        on = spec.get("on") or spec.get(True)  # pyyaml parses bare `on:` as boolean True
+        inp = on["workflow_call"]["inputs"]["state_suffix"]
+        assert inp.get("required") is False, f"{wf}: state_suffix must be required: false"
+        assert inp.get("default", "") == "", f"{wf}: state_suffix default must be ''"

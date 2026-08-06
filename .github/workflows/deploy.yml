@@ -3,8 +3,9 @@ on:
   workflow_call:
     inputs:
       # The flavor's state filename suffix under actions/state (e.g. `.state`,
-      # `terraform.tfstate`, `terraform.tfstate.d`).
-      state_suffix: { required: true, type: string }
+      # `terraform.tfstate`, `terraform.tfstate.d`). Empty = state lives in a
+      # remote backend, so actions/state is skipped entirely.
+      state_suffix: { required: false, type: string, default: "" }
     secrets:
       # Declared for documentation; consumers pass `secrets: inherit`. `vars`
       # (TERRAMATE_VERSION, TOFU_VERSION, SLACK_WEBHOOK) are inherited by a
