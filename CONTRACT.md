@@ -233,13 +233,21 @@ before its apply-cell step, reading the variables from the `<env>-apply`
 Environment it is bound to. The `snapshot` and `complete` jobs deliberately get
 no token. Plan cells have no credentials step.
 
-Because the variables are per-Environment, a consumer can give the plan
-Environment and the `<env>-apply` Environment different roles, and each
-environment's role may live in a different AWS account. That split is the
-consumer's to configure and to enforce in the roles' trust policies: the engine
-passes through whatever role an Environment names and verifies nothing about it
-— including whether the plan and apply roles differ. See
-`docs/hardening.md` §7–9 for the threat model this bounds.
+On the apply path the engine passes through whatever role the `<env>-apply`
+Environment names, and nothing more: which role that is — and whether two
+environments' roles live in different AWS accounts — is a property of *where the
+consumer sets the variable*, not something the engine resolves or validates.
+
+On the plan path, cloud credentials are entirely the consumer's own concern. The
+engine neither provides a credentials step nor requires one: a consumer that
+needs plan-time cloud access adds its own step to its own `plan.yml`, where the
+job's plan Environment supplies the role. Setting `AWS_ROLE_ARN` on a plan
+Environment does nothing by itself, because no engine job reads it there.
+
+It follows that the plan/apply role split is the consumer's to configure and to
+enforce in the roles' trust policies. The engine verifies nothing about either
+role, including whether the two differ. See `docs/hardening.md` §7–9 for the
+threat model this bounds.
 
 The engine reads no `AWS_*` environment variable itself. The credentials step
 exports the assumed role's short-lived session variables into the job, and
