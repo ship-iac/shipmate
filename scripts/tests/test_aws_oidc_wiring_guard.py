@@ -45,7 +45,11 @@ def test_every_wave_job_grants_id_token_write():
 
 def test_snapshot_job_does_not_get_id_token():
     snapshot = _load("apply-env-level.yml")["jobs"]["snapshot"]
-    assert (snapshot.get("permissions") or {}).get("id-token") != "write"
+    perms = snapshot.get("permissions") or {}
+    assert perms.get("id-token") is None, (
+        f"snapshot must request no id-token scope at all, got {perms.get('id-token')!r} "
+        "-- it never touches the cloud"
+    )
 
 
 def test_every_wave_has_exactly_one_gated_cred_step_before_apply_cell():

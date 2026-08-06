@@ -235,16 +235,25 @@ control.
 
 ## 7–9. Credentials
 
-> **The engine has no cloud-credential path yet.** The plan and apply cells
-> inject only `TF_VAR_env` / `TF_VAR_region` / `TF_WORKSPACE` from `vars`, plus
-> shipmate's own two secrets; no job interpolates a consumer credential and no
-> job requests `id-token: write`, so neither an environment secret nor OIDC
-> currently reaches `tofu`. The sample repos need none (null resources, local
-> state), which is why this has not surfaced. Do not move a working credential
+> **The credential path is AWS OIDC, opt-in per environment, and apply-side
+> only so far.** Every wave job in `apply-env-level.yml` requests
+> `id-token: write` and runs a credentials step gated on `vars.AWS_ROLE_ARN`; a
+> consumer opts in by setting `AWS_ROLE_ARN` and `AWS_REGION` as variables on
+> that job's `<env>-apply` environment. With them unset the step is skipped and
+> no cloud credential exists in the job, which is why the sample repos (null
+> resources, local state) still run credential-free. With them set, the assumed
+> role's session env vars do reach `tofu` — they are `AWS_*`, so the fingerprint
+> excludes them (CONTRACT.md §Apply-match fingerprint). The plan path is not
+> wired for this yet.
+>
+> No job interpolates a consumer *secret*: do not move a long-lived access key
 > into an environment secret expecting the engine to pick it up — it will not,
-> and every apply cell will fail at provider init. Controls 7 and 9 below state
-> where credentials must land **when that path is built**; until then, this is
-> an open gap, not a setting you can apply.
+> and that apply cell will fail at provider init. The role split controls 7 and
+> 9 describe is therefore the consumer's to configure, by giving the plan
+> environment and the `<env>-apply` environment different `AWS_ROLE_ARN` values
+> and scoping each role's trust policy and permissions accordingly. The engine
+> passes through whatever role each environment names; it enforces no split of
+> its own.
 
 - **Apply credentials belong in `<env>-apply` environment secrets, never at
   repository or organization level.** A repository secret is readable by any
