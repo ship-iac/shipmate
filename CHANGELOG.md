@@ -13,7 +13,7 @@ grammar are declared unstable in `README.md`.
 
 ## [0.6.0] — 2026-08-06
 
-Tags <SHA>.
+Tags `4fbb572`.
 
 **One consumer action beyond re-pinning:** accept the shipmate App's pending
 permission request (`environments: read`). Until an org owner does, the new
@@ -53,7 +53,7 @@ clear on Accept.
 
 ## [0.5.0] — 2026-08-04
 
-Tags <SHA>.
+Tags `a5a823f`.
 
 **Carries the `0.4.0` section below as well**, which was written but never
 tagged — so a repository re-pinning from `v0.3.1` picks up both the artifact
