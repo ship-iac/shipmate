@@ -196,6 +196,68 @@ never used.
   literal exception, spelled identically everywhere it appears because it
   names one fixed thing, not a per-repo variable.
 
+## State backend
+
+The apply-path reusable workflows (`deploy.yml`, `apply-all.yml`, `apply.yml`,
+and the `apply-env-level.yml` they call) take an **optional** `state_suffix`
+input, and the `apply-cell` / `drift-cell` actions an optional `state-path`:
+
+- **Non-empty** — the consumer's state is a local backend materialized in the
+  working tree. `apply-env-level.yml` passes `<stack>/<state_suffix>` as
+  `state-path`, and the cell restores that path via `actions/state` before the
+  run and saves it after (`drift-cell` restores only; it never writes state).
+- **Empty or omitted** — a **remote backend** (for example S3) owns the state.
+  Both `actions/state` steps are skipped entirely and shipmate never handles a
+  state file; the backend and its locking are the consumer's configuration.
+
+Nothing else differs between the two. The exact-plan `.otplan` artifact flow,
+the fingerprint verification, the wave ordering, and the apply checks are
+identical either way — a remote-backend cell simply has no state artifact, so
+it can never be blocked on one.
+
+## AWS OIDC (optional)
+
+The engine is cloud-agnostic by default and ships **no** credential of its own.
+A consumer opts into AWS OIDC **per GitHub Environment** by setting two
+variables on it:
+
+- `AWS_ROLE_ARN` — the IAM role the job assumes via GitHub's OIDC provider.
+- `AWS_REGION` — the region passed to the credentials step.
+
+With `AWS_ROLE_ARN` unset the credentials step is skipped and the job holds no
+cloud credential at all, which is how the sample repos run credential-free.
+This is wired on the **apply path only**: every wave job of
+`apply-env-level.yml` requests `id-token: write` and runs
+`aws-actions/configure-aws-credentials` gated on `vars.AWS_ROLE_ARN != ''`
+before its apply-cell step, reading the variables from the `<env>-apply`
+Environment it is bound to. The `snapshot` and `complete` jobs deliberately get
+no token. Plan cells have no credentials step.
+
+Because the variables are per-Environment, a consumer can give the plan
+Environment and the `<env>-apply` Environment different roles, and each
+environment's role may live in a different AWS account. That split is the
+consumer's to configure and to enforce in the roles' trust policies: the engine
+passes through whatever role an Environment names and verifies nothing about it
+— including whether the plan and apply roles differ. See
+`docs/hardening.md` §7–9 for the threat model this bounds.
+
+The engine reads no `AWS_*` environment variable itself. The credentials step
+exports the assumed role's short-lived session variables into the job, and
+OpenTofu's provider consumes them. They are `AWS_*`, so they are excluded from
+the apply-match fingerprint by construction — it hashes only non-empty
+`TF_VAR_*` plus `TF_WORKSPACE` (see Apply-match fingerprint, below).
+
+**This is a breaking change for existing consumers, cloud or not.** GitHub caps
+a called workflow's permissions at each `uses:` boundary, so a consumer wrapper
+that calls the engine's apply-path reusable workflows must grant
+`id-token: write` **on the call-site job** — and, if the wrapper declares a
+top-level `permissions:` block, there too. This applies to a consumer that uses
+no cloud credentials whatsoever: without the grant the run fails at
+workflow-resolution time, the same failure mode `apply-env-level.yml` already
+documents for its `checks: read` requirement. A consumer repinning to a commit
+at or past this change adds those grants in the same pull request as the pin
+bump.
+
 ## Tag grammar
 
 Two forms of the same concept exist, because Terramate does not permit `:`
@@ -1031,7 +1093,8 @@ fingerprint).
 `git-uncommitted` stay live, a consuming repository **must gitignore** the
 artifacts shipmate materializes in the working tree during a run — the reviewed
 plan (`*.otplan`), the fingerprint (`fingerprint.txt`), and the flavor's state
-path. An ungitignored artifact, or a genuinely dirty tree, then still fails
+path when it has one (a remote backend materializes none — see State backend,
+above). An ungitignored artifact, or a genuinely dirty tree, then still fails
 loud (by design) rather than producing a silent wrong apply.
 
 ## Env apply order
@@ -1082,9 +1145,11 @@ bare-apply path as `.github/workflows/apply-all.yml` (detect → env-levels
 targeted path as `.github/workflows/apply.yml` (single-env detect → one
 `apply-env-level.yml` call → gate refresh + result comment). A
 consuming repo carries two thin wrappers: `deploy.yml` (`on: push` to the
-default branch; passes only its flavor's `state_suffix`) and `apply.yml`
-(`workflow_dispatch`; its optional `environment` input routes to the targeted
-or bare engine workflow).
+default branch; passes only its flavor's `state_suffix`, which it omits
+entirely on a remote backend) and `apply.yml` (`workflow_dispatch`; its
+optional `environment` input routes to the targeted or bare engine workflow).
+Both wrappers grant `id-token: write` on the calling job (see AWS OIDC,
+above).
 
 ## OpenTofu note
 
