@@ -126,6 +126,24 @@ def test_apply_success_is_applied_with_empty_reason(monkeypatch, tmp_path):
     assert cell["reason"] == ""
 
 
+def test_remote_backend_skipped_restore_is_applied_with_empty_reason(monkeypatch, tmp_path):
+    # The remote-backend happy path: with an empty state-path both actions/state
+    # steps skip, so restore reads 'skipped' while everything else succeeded.
+    # 'skipped' matches no fail-safe (they match 'failure' exactly), which is
+    # what makes a remote-backend cell unblockable on artifact state.
+    cell = _run_compose(
+        monkeypatch,
+        tmp_path,
+        download="success",
+        decrypt="success",
+        fingerprint="success",
+        restore="skipped",
+        apply="success",
+    )
+    assert cell["result"] == "applied"
+    assert cell["reason"] == ""
+
+
 def test_apply_failure_is_failed_with_empty_reason(monkeypatch, tmp_path):
     cell = _run_compose(
         monkeypatch,
