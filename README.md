@@ -268,6 +268,21 @@ workflow over shipmate actions.
   the per-flavor `env:` block differ (folders inject nothing, workspaces
   inject `TF_WORKSPACE`).
 
+**Remote state and cloud credentials.** `state_suffix` is required, but may be
+the empty string: set it to `''` and a remote backend (for example S3) owns the
+state, and the engine's state restore/save steps are skipped. Omitting it
+altogether is a workflow-resolution error, on purpose — a forgotten state
+configuration must fail loud rather than apply with no state at all.
+Credentials are opt-in per GitHub Environment
+through two variables, `AWS_ROLE_ARN` and `AWS_REGION` — unset, and no cloud
+credential ever enters the job, which is how the sample repos run
+credential-free. Because the apply jobs now request `id-token: write`, and
+GitHub caps a called workflow's permissions at each `uses:` boundary, **every
+consumer wrapper that calls the apply-path workflows must grant
+`id-token: write` on the calling job — including consumers using no cloud
+credentials at all.** See [`CONTRACT.md`](CONTRACT.md) §State backend and
+§AWS OIDC for the semantics.
+
 One model note vs a hosted service: with no server-side queue, GHA can drop a
 **superseded** deploy run — its stacks stay pending + visible and are recovered
 by re-running that deploy. The manual **pre-merge** exact-plan apply

@@ -17,8 +17,9 @@ inputs:
     description: Plan run id holding the reviewed plan artifact.
     required: true
   state-path:
-    description: Flavor state path, e.g. stacks/app/.state.
-    required: true
+    description: Flavor state path, e.g. stacks/app/.state. Empty = remote backend owns state; both actions/state steps are skipped.
+    required: false
+    default: ""
   github-token:
     description: GITHUB_TOKEN with actions:read (reviewed-plan artifact download).
     required: true
@@ -97,6 +98,7 @@ runs:
 
     - name: Restore state
       id: restore-state
+      if: ${{ inputs.state-path != '' }}
       uses: ship-iac/shipmate/actions/state@cc54ebf89eb763a243a0dc2fc2504ba7dbed5b92 # pinned to a commit on main
       with:
         stack-slug: ${{ steps.ids.outputs.slug }}
@@ -151,8 +153,11 @@ runs:
       # itself failed). On cancellation this job's own conclusion reads
       # cancelled, so the trusted trailing job (which completes a check only
       # when the job that applied it succeeded) leaves the check pending and
-      # the work is re-detected.
-      if: ${{ always() && steps.restore-state.outcome == 'success' }}
+      # the work is re-detected. With an empty state-path (remote backend), both
+      # this and the restore skip: `skipped` never matches the Compose step's
+      # 'failure' checks, so a remote-backend cell can never be blocked on
+      # artifact state.
+      if: ${{ always() && inputs.state-path != '' && steps.restore-state.outcome == 'success' }}
       uses: ship-iac/shipmate/actions/state@cc54ebf89eb763a243a0dc2fc2504ba7dbed5b92 # pinned to a commit on main
       with:
         stack-slug: ${{ steps.ids.outputs.slug }}

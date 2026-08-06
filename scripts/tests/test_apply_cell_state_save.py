@@ -38,7 +38,11 @@ def _guard(step):
 
 def test_save_state_runs_on_cancellation():
     # always() (not !cancelled()) so a cancelled apply's partial state persists.
-    assert _guard(_save_state_step()) == "always() && steps.restore-state.outcome == 'success'"
+    # The state-path conjunct skips the save entirely when a remote backend owns
+    # state; it does not weaken always() for the artifact-state path.
+    assert _guard(_save_state_step()) == (
+        "always() && inputs.state-path != '' && steps.restore-state.outcome == 'success'"
+    )
 
 
 def test_save_state_not_gated_by_not_cancelled():

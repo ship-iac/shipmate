@@ -3,7 +3,11 @@ on:
   workflow_call:
     inputs:
       # The flavor's state filename suffix under actions/state (e.g. `.state`,
-      # `terraform.tfstate`, `terraform.tfstate.d`).
+      # `terraform.tfstate`, `terraform.tfstate.d`). A remote backend passes the
+      # empty string explicitly, which skips actions/state entirely; omitting the
+      # input fails at workflow-resolution time, deliberately — a missing state
+      # configuration must be loud, not silently indistinguishable from
+      # "a remote backend owns state".
       state_suffix: { required: true, type: string }
     secrets:
       # Declared for documentation; consumers pass `secrets: inherit`. `vars`
@@ -52,7 +56,7 @@ jobs:
     needs: [detect]
     if: ${{ !failure() && !cancelled() && needs.detect.outputs.envlevel0_empty != 'true' && !contains(join(needs.*.result, ','), 'cancelled') }}
     uses: ship-iac/shipmate/.github/workflows/apply-env-level.yml@3509c73dfb4a123254f7382d89a81c06cf220a9d # pinned to a commit on main
-    permissions: { contents: read, checks: read, actions: read }
+    permissions: { contents: read, checks: read, actions: read, id-token: write }
     with:
       waves_json: ${{ needs.detect.outputs.envlevel0_waves }}
       head_sha: ${{ needs.detect.outputs.head_sha }}
@@ -72,7 +76,7 @@ jobs:
     needs: [detect, envlevel0]
     if: ${{ !failure() && !cancelled() && needs.detect.outputs.envlevel1_empty != 'true' && !contains(join(needs.*.result, ','), 'cancelled') }}
     uses: ship-iac/shipmate/.github/workflows/apply-env-level.yml@3509c73dfb4a123254f7382d89a81c06cf220a9d # pinned to a commit on main
-    permissions: { contents: read, checks: read, actions: read }
+    permissions: { contents: read, checks: read, actions: read, id-token: write }
     with:
       waves_json: ${{ needs.detect.outputs.envlevel1_waves }}
       head_sha: ${{ needs.detect.outputs.head_sha }}
@@ -86,7 +90,7 @@ jobs:
     needs: [detect, envlevel0, envlevel1]
     if: ${{ !failure() && !cancelled() && needs.detect.outputs.envlevel2_empty != 'true' && !contains(join(needs.*.result, ','), 'cancelled') }}
     uses: ship-iac/shipmate/.github/workflows/apply-env-level.yml@3509c73dfb4a123254f7382d89a81c06cf220a9d # pinned to a commit on main
-    permissions: { contents: read, checks: read, actions: read }
+    permissions: { contents: read, checks: read, actions: read, id-token: write }
     with:
       waves_json: ${{ needs.detect.outputs.envlevel2_waves }}
       head_sha: ${{ needs.detect.outputs.head_sha }}
@@ -100,7 +104,7 @@ jobs:
     needs: [detect, envlevel0, envlevel1, envlevel2]
     if: ${{ !failure() && !cancelled() && needs.detect.outputs.envlevel3_empty != 'true' && !contains(join(needs.*.result, ','), 'cancelled') }}
     uses: ship-iac/shipmate/.github/workflows/apply-env-level.yml@3509c73dfb4a123254f7382d89a81c06cf220a9d # pinned to a commit on main
-    permissions: { contents: read, checks: read, actions: read }
+    permissions: { contents: read, checks: read, actions: read, id-token: write }
     with:
       waves_json: ${{ needs.detect.outputs.envlevel3_waves }}
       head_sha: ${{ needs.detect.outputs.head_sha }}

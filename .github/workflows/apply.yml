@@ -80,7 +80,7 @@ jobs:
     needs: [guard, detect]
     if: ${{ !failure() && !cancelled() && needs.detect.outputs.empty != 'true' }}
     uses: ship-iac/shipmate/.github/workflows/apply-env-level.yml@3509c73dfb4a123254f7382d89a81c06cf220a9d # pinned to a commit on main
-    permissions: { contents: read, checks: read, actions: read }
+    permissions: { contents: read, checks: read, actions: read, id-token: write }
     with:
       waves_json: ${{ needs.detect.outputs.waves }}
       head_sha: ${{ needs.detect.outputs.head_sha }}
