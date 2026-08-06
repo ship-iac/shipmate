@@ -5,12 +5,16 @@ on:
       waves_json: { required: true, type: string }
       head_sha: { required: true, type: string }
       plan_run_id: { required: true, type: string }
-      state_suffix: { required: false, type: string, default: "" }
+      state_suffix: { required: true, type: string }
     secrets:
       SHIPMATE_PLAN_PASSPHRASE:
         required: false
       SHIPMATE_APP_PRIVATE_KEY:
         required: false
+# Floor, not a default to inherit from: every job below declares its own block,
+# and this makes a job that loses its block get nothing rather than everything
+# the caller granted -- which now includes id-token: write.
+permissions: {}
 jobs:
   # Capture the apply-check ids BEFORE any wave runs. No secret, no
   # environment needed -- but permissions cap at each `uses:` boundary, so

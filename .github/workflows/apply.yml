@@ -6,7 +6,7 @@ on:
       ref: { required: true, type: string }
       pr_number: { required: true, type: string }
       plan_run_id: { required: true, type: string }
-      state_suffix: { required: false, type: string, default: "" }
+      state_suffix: { required: true, type: string }
     secrets:
       # Declared explicitly so the interface fails loud if a consumer wrapper
       # forgets it. `vars` (SHIPMATE_APP_ID, TERRAMATE_VERSION, TOFU_VERSION)
