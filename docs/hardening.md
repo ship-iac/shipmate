@@ -57,9 +57,9 @@ governs the plan path. Don't add one to a repository that holds the App key —
 | 4 | ≥1 approving review, code-owner review, dismiss stale, require approval of most recent push | Branch ruleset | Self-merge; the code-owner review is **unforgeable** at merge time (an App cannot be a `CODEOWNERS` entry) *provided a `CODEOWNERS` entry actually covers the IaC paths* — the rule is a no-op for changed files with no owner — and the approval *count* never is |
 | 5 | Block force-push and deletion on the default branch | Branch ruleset | History rewrite after apply |
 | 6 | Required reviewers + "Prevent self-review" on **every** `<env>-apply` that holds a secret | Environment | **Unforgeable** at apply time — the last line of defense once a merge has happened, and what makes row 7 hold |
-| 7 | Cloud credentials only as `<env>-apply` environment secrets — never repo-level | Environment secrets | Repo-wide secret exposure (bounded *only* in combination with row 6) |
+| 7 | Cloud credentials scoped to `<env>-apply` — the OIDC path's `AWS_ROLE_ARN`/`AWS_REGION` as environment **variables**, any residual static key as an environment **secret** — never repo- or org-level | Environment | Repo-wide exposure (bounded *only* in combination with row 6; and for a variable the scoping is advisory — see §7–9) |
 | 8 | Plan environments hold read-only, blast-radius-free credentials, no approval rules, no branch policy — ideally no secret at all (`shipmate doctor` reports what it finds) | Environment | Plan-time code execution |
-| 9 | OIDC with an `environment:` claim condition instead of static keys | Cloud IdP | Long-lived credential theft (**not wired in the engine yet** — see §7–9) |
+| 9 | OIDC with an `environment:` claim condition instead of static keys | Cloud IdP | Long-lived credential theft — and, since the engine's apply jobs mint OIDC tokens unconditionally, this claim condition is the **only** bound on which role an apply job can assume (see §7–9) |
 | 10 | Default `GITHUB_TOKEN` = read-only; Actions may not approve PRs | Settings → Actions | Token privilege creep |
 | 11 | Require approval for all outside collaborators' workflow runs | Settings → Actions | Drive-by fork execution |
 | 12 | Allowed-actions list (this engine + pinned third parties) | Settings → Actions | Supply chain |
@@ -68,6 +68,8 @@ governs the plan path. Don't add one to a repository that holds the App key —
 | 15 | Shorten Actions retention | Settings → Actions | `shipmate doctor` report disclosure |
 | 16 | `shipmate-engine` Environment exists, deployment branch policy restricted to the default branch | Environment | Repository-secret App key readable by any branch |
 | 17 | Deployment branch policy restricted to the default branch on every `<env>-apply` | Environment | Branch-authored workflow claiming apply-environment secrets directly |
+| 18 | `AWS_ROLE_ARN` + `AWS_REGION` as variables on **each** `<env>-apply` you want cloud access from — set nowhere else | Environment variables | Opting in per environment; set at repo/org level they apply to every apply environment at once (§7–9) |
+| 19 | `id-token: write` on the call-site job of every consumer wrapper that calls the engine's apply-path workflows | Consumer workflow YAML | Nothing — it is **required**: GitHub caps a called workflow's permissions at each `uses:` boundary, so without it every apply run fails at workflow-resolution time, cloud or not |
 
 ## 1. Write access
 
@@ -255,12 +257,25 @@ control.
 > passes through whatever role each environment names; it enforces no split of
 > its own.
 
-- **Apply credentials belong in `<env>-apply` environment secrets, never at
-  repository or organization level.** A repository secret is readable by any
-  workflow on any branch. An environment secret is released only to a job that
-  names that environment — but *only* after that environment's protection rules
-  pass, and an environment with no rules releases them to any branch on demand.
-  The scoping is worth nothing without control 6; treat the two as one setting.
+- **Apply credentials belong on the `<env>-apply` environment, never at
+  repository or organization level.** For a residual static key — a *secret* —
+  that scoping is real: a repository secret is readable by any workflow on any
+  branch, while an environment secret is released only to a job that names that
+  environment. But *only* after that environment's protection rules pass, and an
+  environment with no rules releases it to any branch on demand; the scoping is
+  worth nothing without control 6, so treat the two as one setting.
+
+  **For the OIDC path the scoping is advisory, and this is worth being blunt
+  about.** `AWS_ROLE_ARN` and `AWS_REGION` are `vars`, and `vars` resolve
+  organization → repository → environment. A repository- or organization-level
+  `AWS_ROLE_ARN` is therefore picked up identically by every wave job in every
+  apply environment, with no warning and nothing in the engine to guard it —
+  "opt in per environment" (CONTRACT.md §AWS OIDC) is where you *should* set it,
+  not something GitHub or shipmate enforces. Set it on each `<env>-apply` and
+  nowhere else, and understand that the enforcing control is not the variable's
+  location at all: it is the **role's trust policy**, whose `environment:` claim
+  condition is the only thing that decides which environments can actually
+  assume it.
 - **Plan environments must have no approval-type protection rules (required
   reviewers, wait timers) and no deployment branch policy** — the engine plans
   on a pull request head ref, so any of those blocks every plan cell and leaves
@@ -290,10 +305,12 @@ control.
   was too long to read whole. The report says the check was not performed,
   rather than reporting it clean, when the App installation has not
   accepted the `environments: read` permission the manifest declares.
-- **Prefer OIDC** to static cloud keys when the path exists, and condition the
-  trust policy on the environment claim
-  (`repo:<owner>/<repo>:environment:<env>-apply`) so a token minted from a plan
-  cell — or from a branch workflow — cannot assume the apply role.
+- **Prefer OIDC** to static cloud keys — on the apply path the engine wires it,
+  so this is available today — and condition the trust policy on the environment
+  claim (`repo:<owner>/<repo>:environment:<env>-apply`) so a token minted from a
+  plan cell — or from a branch workflow — cannot assume the apply role. Do this
+  on **every** role reachable from the repository, not only the apply role: see
+  "What none of this fixes" for why it is the only bound that holds.
 
 ## 10–12. Actions settings
 
@@ -311,8 +328,10 @@ Settings → Actions → General:
   content, which is the no-push-access version of the attack this page opens
   with. `shipmate doctor` reports any workflow file that declares it, by name.
 - **Allowed actions**: allow the engine (`<owner>/shipmate/*`) plus the pinned
-  third-party actions the workflows use. This is supply-chain hygiene; it does
-  not constrain `run:` steps.
+  third-party actions the workflows use — which now includes
+  `aws-actions/configure-aws-credentials`, on the apply path, even for a consumer
+  that never sets `AWS_ROLE_ARN` (the step is gated, the `uses:` is not). This is
+  supply-chain hygiene; it does not constrain `run:` steps.
 
 ## 13–14. The App
 
@@ -477,6 +496,18 @@ this section rests on for exactly the exposure control 1 exists to limit.
   environment *stores*; it cannot observe what plan-time code does with it, and
   a credential the consumer's own workflow maps in from a repository secret is
   outside what it can see at all.
+- **Unconditional OIDC minting in the apply jobs.** GHA's `permissions:` cannot
+  be an expression, so `id-token: write` on the wave jobs is not gated on
+  `AWS_ROLE_ARN` — every consumer, cloud or not, now runs apply cells in a job
+  that can mint an OIDC token for any audience, from a job that executes
+  branch-authored Terramate scripts (see "Plan-time code execution" — the apply
+  cell runs the reviewed plan, but the Terramate configuration around it is still
+  the branch's). The engine cannot avoid this: the grant is per job, statically.
+  The only mitigation is on the cloud side — an `environment:` claim condition
+  (control 9) on **every** role that trusts this repository's OIDC provider, so
+  a token minted in one job cannot assume a role meant for another. A role whose
+  trust policy names only `repo:<owner>/<repo>:*` is assumable from every job
+  here, including a plan cell.
 - **Reviewer comprehension.** The exact-plan invariant guarantees the applied
   plan is the reviewed one. It guarantees nothing about the reviewer having
   understood it.

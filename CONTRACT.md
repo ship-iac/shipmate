@@ -199,19 +199,36 @@ never used.
 ## State backend
 
 The apply-path reusable workflows (`deploy.yml`, `apply-all.yml`, `apply.yml`,
-and the `apply-env-level.yml` they call) take an **optional** `state_suffix`
+and the `apply-env-level.yml` they call) take a **required** `state_suffix`
 input, and the `apply-cell` / `drift-cell` actions an optional `state-path`:
 
 - **Non-empty** — the consumer's state is a local backend materialized in the
   working tree. `apply-env-level.yml` passes `<stack>/<state_suffix>` as
   `state-path`, and the cell restores that path via `actions/state` before the
   run and saves it after (`drift-cell` restores only; it never writes state).
-- **Empty or omitted** — a **remote backend** (for example S3) owns the state.
-  Both `actions/state` steps are skipped entirely and shipmate never handles a
-  state file; the backend and its locking are the consumer's configuration.
+- **Explicitly empty** (`state_suffix: ''`) — a **remote backend** (for example
+  S3) owns the state. Both `actions/state` steps are skipped entirely and
+  shipmate never handles a state file; the backend and its locking are the
+  consumer's configuration.
 
-Nothing else differs between the two. The exact-plan `.otplan` artifact flow,
-the fingerprint verification, the wave ordering, and the apply checks are
+`state_suffix` declares no default, so **omitting** it is a workflow-resolution
+error, not a third mode. That loudness is deliberate: a wrapper that forgot its
+state configuration would otherwise restore nothing, apply, discard the state,
+and still report `applied` — a green gate over infrastructure nothing recorded.
+A remote backend opts in by writing the empty string.
+
+The input is **repo-wide**. A repository mixing local- and remote-backend stacks
+has no correct value — non-empty makes `actions/cache/save` target a nonexistent
+path for the remote stacks, empty silently discards the local ones — so a mixed
+repository is unsupported.
+
+The drift wrapper is consumer-authored and builds `state-path` itself. On a
+remote backend pass `state-path: ''` (or omit the input on the `drift-cell`
+step); never a bare `${{ matrix.stack }}/`, which is non-empty and so **runs**
+the restore against the stack directory instead of skipping it.
+
+Nothing else differs between the two modes. The exact-plan `.otplan` artifact
+flow, the fingerprint verification, the wave ordering, and the apply checks are
 identical either way — a remote-backend cell simply has no state artifact, so
 it can never be blocked on one.
 
@@ -237,12 +254,20 @@ On the apply path the engine passes through whatever role the `<env>-apply`
 Environment names, and nothing more: which role that is — and whether two
 environments' roles live in different AWS accounts — is a property of *where the
 consumer sets the variable*, not something the engine resolves or validates.
+"Per Environment" is where the consumer *should* set it, not an enforcement:
+`vars` resolve organization → repository → environment, so an `AWS_ROLE_ARN` set
+at repository or organization level is read identically by every wave job in
+every environment, with no warning. The only real bound is the role's own
+trust-policy claim condition (`docs/hardening.md` §7–9).
 
 On the plan path, cloud credentials are entirely the consumer's own concern. The
 engine neither provides a credentials step nor requires one: a consumer that
 needs plan-time cloud access adds its own step to its own `plan.yml`, where the
 job's plan Environment supplies the role. Setting `AWS_ROLE_ARN` on a plan
-Environment does nothing by itself, because no engine job reads it there.
+Environment does nothing by itself, because no engine job reads it there. The
+same holds for **drift**: `drift.yml` is the consumer's own workflow, so a
+remote-backend consumer whose nightly drift needs the role adds its own
+credentials step there too.
 
 It follows that the plan/apply role split is the consumer's to configure and to
 enforce in the roles' trust policies. The engine verifies nothing about either
@@ -1153,10 +1178,11 @@ bare-apply path as `.github/workflows/apply-all.yml` (detect → env-levels
 targeted path as `.github/workflows/apply.yml` (single-env detect → one
 `apply-env-level.yml` call → gate refresh + result comment). A
 consuming repo carries two thin wrappers: `deploy.yml` (`on: push` to the
-default branch; passes only its flavor's `state_suffix`, which it omits
-entirely on a remote backend) and `apply.yml` (`workflow_dispatch`; its
+default branch; passes only its flavor's `state_suffix`, which it sets to `''`
+on a remote backend) and `apply.yml` (`workflow_dispatch`; its
 optional `environment` input routes to the targeted or bare engine workflow).
-Both wrappers grant `id-token: write` on the calling job (see AWS OIDC,
+Both wrappers **must** grant `id-token: write` on the calling job, added in the
+same pull request that repins past the change introducing it (see AWS OIDC,
 above).
 
 ## OpenTofu note
