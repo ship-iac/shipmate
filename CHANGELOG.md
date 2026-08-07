@@ -11,6 +11,73 @@ section below names the SHA the release tags.
 The version line stays `v0.x` while action inputs, check names, and the comment
 grammar are declared unstable in `README.md`.
 
+## [0.7.0] — 2026-08-07
+
+Tags <SHA>.
+
+**One consumer action beyond re-pinning, and it is not optional:** a wrapper
+that calls `apply.yml`, `apply-all.yml` or `deploy.yml` must add
+`id-token: write` to the calling job — and to the workflow's top-level
+`permissions:` block if it declares one — in the same change that re-pins to
+this release. **Including consumers that use no cloud credentials at all.**
+GitHub caps a called workflow's permissions at each `uses:` boundary, so without
+the grant the run fails at workflow-resolution time, taking every wave job with
+it — nothing applies and nothing partially applies. Opting *in* to AWS OIDC is a
+separate, later step: two variables, `AWS_ROLE_ARN` and `AWS_REGION`, on each
+`<env>-apply` environment you want cloud access from. With them unset the
+credentials step is skipped and the job holds no cloud credential, which is why
+the sample repos on the local backend still run credential-free.
+
+### Added
+
+- **The apply path can mint an AWS OIDC token.** Every wave job in
+  `apply-env-level.yml` carries `id-token: write` and runs a `Configure cloud
+  credentials (AWS OIDC)` step gated on `vars.AWS_ROLE_ARN != ''`, before the
+  cell — so the assumed role's session variables are in place for the plan
+  restore and `tofu`. They are `AWS_*`, so the apply-match fingerprint excludes
+  them (`CONTRACT.md` §Apply-match fingerprint). `snapshot` and `complete`
+  deliberately get no token: neither reaches a provider. The nine jobs across
+  `apply.yml`, `apply-all.yml` and `deploy.yml` that call `apply-env-level.yml`
+  grant `id-token: write` so it survives the `uses:` boundary. The plan path is
+  not wired for this.
+- **`actions/apply-cell` and `actions/drift-cell` accept an empty `state-path`**
+  (`required: false`, default `""`), with every `actions/state` step gated on
+  it, so a consumer whose state lives in a remote backend skips artifact state
+  entirely instead of round-tripping a directory the backend owns. On that path
+  the restore is `skipped` rather than `failure`, so a remote-backend cell can
+  never be blocked on artifact state it never had. The exact-plan `.otplan`
+  artifact flow is unchanged — that is how an apply proves it is applying the
+  reviewed plan, and it is not state.
+
+### Changed
+
+- `apply-env-level.yml` declares a top-level `permissions: {}` floor. Every job
+  in it already sets its own block; the floor means a job that later loses one
+  inherits nothing rather than everything the caller granted — which now
+  includes `id-token: write`.
+- `docs/hardening.md` controls 7–9, and checklist rows 7, 9, 18 and 19, now
+  describe the credential path that exists rather than one that did not.
+  Including what it does *not* bound: `id-token: write` on the wave jobs is
+  unconditional, because a GitHub Actions `permissions:` block cannot be an
+  expression, so an apply job can always *request* a token. What decides which
+  role it can actually assume is the role's own trust policy and its
+  `environment:` claim condition — not the location of the `AWS_ROLE_ARN`
+  variable, which resolves organization → repository → environment and is
+  therefore advisory scoping only.
+
+### Known, and deliberately not changed here
+
+- **`state_suffix` stays required on all four apply-path workflows**, including
+  for consumers on a remote backend, who pass `state_suffix: ""` explicitly.
+  Making it optional would be one line, and it is the wrong line: an *omitted*
+  input would then read as "a remote backend owns state" — the same silence for
+  a consumer who meant it and one who forgot. On a new or empty stack the second
+  case is not visible either, because there is no state to fail against. That
+  run applies real resources, skips the state save, and leaves the required gate
+  green over infrastructure nothing recorded. An explicit empty string costs the
+  remote-backend consumer one character and makes the choice legible in the
+  wrapper.
+
 ## [0.6.0] — 2026-08-06
 
 Tags `4fbb572`.

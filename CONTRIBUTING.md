@@ -53,7 +53,9 @@ pull request.
 Runnable end-to-end examples live in the sample repositories:
 [repo-example-stacks](https://github.com/ship-iac/repo-example-stacks),
 [repo-example-folders](https://github.com/ship-iac/repo-example-folders),
-[repo-example-workspaces](https://github.com/ship-iac/repo-example-workspaces).
+[repo-example-workspaces](https://github.com/ship-iac/repo-example-workspaces)
+and [repo-example-stacks-aws](https://github.com/ship-iac/repo-example-stacks-aws),
+the flat-layout one that runs against real AWS.
 
 ## License
 
