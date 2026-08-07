@@ -13,7 +13,7 @@ grammar are declared unstable in `README.md`.
 
 ## [0.7.2] — 2026-08-07
 
-Tags <SHA>.
+Tags `6973262`.
 
 **No consumer action beyond re-pinning**, and re-pinning matters here: the fix
 lives in `scripts/`, which `actions/summary` runs out of its own pinned
