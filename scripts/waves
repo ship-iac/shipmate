@@ -1,18 +1,16 @@
 #!/usr/bin/env python3
 """Compute apply waves = topological levels of the Terramate `after` DAG.
 
-Reads `terramate experimental run-graph` dot output on stdin and a work-set of
-{stack, environment, workload} cells from SHIPMATE_WORKSET (JSON). Emits
-wave0..wave7 cell arrays. Ordering is over the FULL graph, then filtered to the
-work set, so transitive order through unchanged stacks is preserved and empty
-middle waves are normal.
+Ordering is over the FULL graph, then filtered to the work set, so transitive
+order through unchanged stacks is preserved and empty middle waves are normal.
+
+A module, never a program: apply-detect, env-order and the detect scripts
+`_load` it.
 """
 
 import json
-import os
 import re
-import sys
-from graphlib import CycleError, TopologicalSorter
+from graphlib import TopologicalSorter
 
 MAX_WAVES = 8
 _NODE = re.compile(r'(\w+)\s*\[label="([^"]+)"\]')
@@ -89,33 +87,21 @@ def guard_max_waves(waves):
         )
 
 
+def pad_waves(waves):
+    """`waves` as a {wave0..wave{MAX_WAVES-1}: cells} dict, short lists padded.
+
+    ALWAYS call `guard_max_waves` first. This TRUNCATES: a populated wave at
+    index >= MAX_WAVES is dropped silently, so an unguarded caller applies
+    nothing for those cells and reports success. The ordering is pinned by
+    test_waves.test_every_pad_waves_caller_guards_first.
+
+    Every key is always present -- apply-env-level.yml indexes
+    `fromJSON(waves_json).waveN` for every N and errors on a missing one."""
+    return {f"wave{i}": (waves[i] if i < len(waves) else []) for i in range(MAX_WAVES)}
+
+
 def write_waves(fh, waves):
-    """Emit wave0..wave{MAX_WAVES-1} (JSON arrays), an aggregate `waves` JSON
-    object (all MAX_WAVES keys, shaped for apply-env-level.yml's waves_json
-    input), + the `empty` flag to a GITHUB_OUTPUT file handle. Shared by this
-    script and apply-detect."""
-    padded = {f"wave{i}": (waves[i] if i < len(waves) else []) for i in range(MAX_WAVES)}
-    for i in range(MAX_WAVES):
-        fh.write(f"wave{i}={json.dumps(padded[f'wave{i}'])}\n")
-    fh.write(f"waves={json.dumps(padded)}\n")
+    """Emit the aggregate `waves` JSON object + the `empty` flag to a
+    GITHUB_OUTPUT file handle. Truncating -- see `pad_waves`."""
+    fh.write(f"waves={json.dumps(pad_waves(waves))}\n")
     fh.write(f"empty={'false' if any(waves) else 'true'}\n")
-
-
-def main(argv):
-    deps = parse_dot(sys.stdin.read())
-    try:
-        lv = levels(deps)
-    except CycleError as e:
-        raise SystemExit(f"::error::dependency cycle in run-graph: {e}") from e
-    waves = assign_waves(lv, json.loads(os.environ.get("SHIPMATE_WORKSET") or "[]"))
-    if "--reverse" in argv:
-        waves = list(reversed(waves))
-    # Guard AFTER reversing: --reverse can move a populated low level past index 7,
-    # where write_waves would silently drop it.
-    guard_max_waves(waves)
-    with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
-        write_waves(fh, waves)
-
-
-if __name__ == "__main__":
-    main(sys.argv)

@@ -1,3 +1,4 @@
+import ast
 import io
 import json
 
@@ -6,6 +7,7 @@ from _loader import SCRIPTS as _dir
 from _loader import load_script
 
 w = load_script("waves")
+eo = load_script("env-order")
 
 FIXTURE = (_dir / "tests" / "fixtures" / "run-graph-stacks.dot").read_text()
 
@@ -41,17 +43,6 @@ def test_assign_waves_preserves_transitive_order_with_empty_middle():
     assert waves[0] == [{"stack": "stacks/dns", "environment": "dev-us", "workload": "net"}]
     assert waves[1] == [] and waves[2] == []
     assert waves[3] == [{"stack": "stacks/app", "environment": "dev-eu", "workload": "app"}]
-
-
-def test_main_treats_set_but_empty_workset_as_empty_list(monkeypatch, tmp_path):
-    monkeypatch.setenv("SHIPMATE_WORKSET", "")
-    out_file = tmp_path / "gh_output"
-    monkeypatch.setenv("GITHUB_OUTPUT", str(out_file))
-    import io
-
-    monkeypatch.setattr("sys.stdin", io.StringIO(FIXTURE))
-    w.main([])  # must not raise json.JSONDecodeError on an empty-string env
-    assert "empty=true" in out_file.read_text()
 
 
 def test_assign_waves_cross_env_edge_same_wave_index():
@@ -111,40 +102,9 @@ def test_guard_max_waves_ignores_empty_trailing_levels():
     w.guard_max_waves(waves)  # must not raise
 
 
-def _linear_chain_dot(n):
-    """A dot fixture with n nodes in a straight dependency chain s1->s2->...->sn,
-    i.e. n topological levels, one node per level."""
-    lines = ["digraph  {"]
-    for i in range(1, n + 1):
-        lines.append(f'\tn{i}[label="/stacks/s{i}"];')
-    for i in range(1, n):
-        lines.append(f"\tn{i}->n{i + 1};")
-    lines.append("}")
-    return "\n".join(lines)
-
-
-def test_main_guard_fires_only_after_reverse_moves_wave_past_max(monkeypatch, tmp_path):
-    # 9 levels total; only the level-0 stack is in the work set. Pre-reverse it
-    # sits at wave index 0 (fine). --reverse moves it to index 8 (the 9th wave)
-    # -- the guard must run AFTER reversing, not before.
-    chain = _linear_chain_dot(w.MAX_WAVES + 1)
-    workset = json.dumps([{"stack": "stacks/s1", "environment": "dev-eu", "workload": ""}])
-
-    monkeypatch.setattr("sys.stdin", io.StringIO(chain))
-    monkeypatch.setenv("SHIPMATE_WORKSET", workset)
-    out_file = tmp_path / "gh_output"
-    monkeypatch.setenv("GITHUB_OUTPUT", str(out_file))
-    w.main([])  # no --reverse: wave index 0 -- must not raise
-    assert "wave0=" in out_file.read_text()
-
-    monkeypatch.setattr("sys.stdin", io.StringIO(chain))
-    with pytest.raises(SystemExit):
-        w.main(["--reverse"])
-
-
 def test_write_waves_emits_aggregate_waves_json():
-    # apply-env-level.yml consumes a single waves_json object and errors on a
-    # missing waveN key -- the aggregate must always carry all 8 keys.
+    # apply-env-level.yml indexes fromJSON(waves_json).waveN for every N and
+    # errors on a missing key -- the aggregate must always carry all 8.
     fh = io.StringIO()
     cells = [{"stack": "stacks/dns", "environment": "dev-eu"}]
     w.write_waves(fh, [cells, []])
@@ -153,6 +113,71 @@ def test_write_waves_emits_aggregate_waves_json():
     assert set(agg) == {f"wave{i}" for i in range(w.MAX_WAVES)}
     assert agg["wave0"] == cells
     assert all(agg[f"wave{i}"] == [] for i in range(1, w.MAX_WAVES))
-    # the flat outputs and the aggregate must agree
-    assert json.loads(out["wave0"]) == agg["wave0"]
     assert out["empty"] == "false"
+
+
+def test_write_waves_pads_short_and_flags_empty():
+    fh = io.StringIO()
+    w.write_waves(fh, [])
+    out = dict(line.split("=", 1) for line in fh.getvalue().strip().splitlines())
+    assert json.loads(out["waves"]) == {f"wave{i}": [] for i in range(w.MAX_WAVES)}
+    assert out["empty"] == "true"
+
+
+def _linear_chain_dot(n):
+    """A dot fixture of n nodes in a straight chain s1->...->sn: n topological
+    levels, one node per level."""
+    lines = ["digraph  {"]
+    lines += [f'\tn{i}[label="/stacks/s{i}"];' for i in range(1, n + 1)]
+    lines += [f"\tn{i}->n{i + 1};" for i in range(1, n)]
+    return "\n".join(lines + ["}"])
+
+
+# Every function that reaches `pad_waves`, and the module it lives in.
+# pad_waves TRUNCATES past MAX_WAVES, so each must call guard_max_waves first
+# or a too-deep change applies nothing for the dropped cells and reports
+# success. Add a row here whenever a new caller lands.
+_PAD_CALLERS = (("apply-detect", "main"), ("env-order", "waves_by_env_level"))
+
+
+def _call_order(script, func):
+    """Names of the `wv.`/module-level calls in `func`, in source order."""
+    tree = ast.parse((_dir / script).read_text(encoding="utf-8"))
+    body = next(n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == func)
+    return [
+        node.func.attr if isinstance(node.func, ast.Attribute) else node.func.id
+        for node in ast.walk(body)
+        if isinstance(node, ast.Call) and isinstance(node.func, (ast.Attribute, ast.Name))
+    ]
+
+
+@pytest.mark.parametrize(("script", "func"), _PAD_CALLERS)
+def test_every_pad_waves_caller_guards_first(script, func):
+    """The guard-before-truncate ordering, pinned at the CALL SITE.
+
+    Unit-testing guard_max_waves on hand-built lists does not pin that any
+    production path still calls it: deleting the call from both callers left
+    the whole suite green. Asserted over the parsed AST, so a guard call moved
+    below the pad -- or commented out -- fails."""
+    order = _call_order(script, func)
+    pad = next(
+        (i for i, name in enumerate(order) if name in ("pad_waves", "write_waves")),
+        None,
+    )
+    assert pad is not None, f"{script}.{func} no longer reaches pad_waves"
+    guard = order.index("guard_max_waves") if "guard_max_waves" in order else None
+    assert guard is not None, f"{script}.{func} does not call guard_max_waves"
+    assert guard < pad, f"{script}.{func} pads before guarding"
+
+
+def test_env_level_waves_refuses_a_change_deeper_than_max_waves():
+    """The behavioural half: the guard actually fires through a real caller,
+    rather than dropping the level-8 cells into a silent no-op apply."""
+    deps = w.parse_dot(_linear_chain_dot(w.MAX_WAVES + 1))
+    deep = f"stacks/s{w.MAX_WAVES + 1}"
+    pending = [{"stack": deep, "environment": "dev-eu"}]
+
+    with pytest.raises(SystemExit) as exc:
+        eo.waves_by_env_level(pending, deps, {"dev-eu": 0})
+
+    assert "dependency levels" in str(exc.value)

@@ -8,11 +8,10 @@ grammar: env/<name>) -- no GitHub API or token required.
 
 main() also runs the consumer plan/summary wiring checks (scripts/wiring) and
 FAILS a pull-request run on a confident break. detect is the only job upstream
-of all three wiring failure modes, and two of the three otherwise merge green:
-GitHub resolves a workflow_run trigger against the workflow name recorded on
-the default branch, so breaking the plan workflow's name or the summary wrapper
-does not stop this pull request from getting its gate -- it stops every pull
-request afterwards, including the one opened to fix it.
+of all three failure modes, and two of the three otherwise merge green: GitHub
+resolves a workflow_run trigger against the workflow name recorded on the
+DEFAULT BRANCH, so breaking the plan workflow's name or the summary wrapper
+stops every pull request afterwards -- including the one opened to fix it.
 """
 
 import importlib.util
@@ -43,11 +42,10 @@ _PR_EVENTS = ("pull_request", "pull_request_target")
 
 MATRIX_LIMIT = 256
 
-#: Stack paths whose plan check name (grammar `<stack> / <env>`, verb-less)
-#: would land inside a namespace the engine selects on, mapped to the rejection
-#: raised. The `shipmate` case is the one that fails silently: summary-comment
-#: resolves each row's plan link by exact `<stack> / <env>` lookup, so the link
-#: points at the wrong check rather than erroring.
+#: Stack paths whose verb-less plan check name would land inside a namespace
+#: the engine selects on. `shipmate` fails SILENTLY: summary-comment resolves
+#: each row's plan link by exact `<stack> / <env>` lookup, so the link points at
+#: the wrong check rather than erroring.
 RESERVED_STACK_PATHS = {
     "apply": (
         "::error::a stack path may not be exactly 'apply': its plan check "
@@ -132,13 +130,11 @@ def env_membership(all_stacks=False, base="", require_env_tag=True):
     """({env: [stacks...]}, {stack: [tags...]}) from Terramate tags (CONTRACT
     tag grammar: env/<name>).
 
-    `require_env_tag` (default True) is the plan/deploy fan-out posture: a
-    stack with no env/* tag fails loud, because there it would contribute no
-    cells and silently vanish from the matrix. The artifact-sourced bare-apply
-    path passes False -- an untagged stack produces no `plan.<env>.<slug>`
-    artifact and so contributes no cell regardless, and an unrelated untagged
-    stack anywhere else in the repo must not abort the apply (the targeted
-    `shipmate apply <env>` path never tag-validates either)."""
+    `require_env_tag` (default True) is the plan/deploy fan-out posture: an
+    untagged stack fails loud, because there it would silently vanish from the
+    matrix. The artifact-sourced bare-apply path passes False -- an untagged
+    stack produces no `plan.<env>.<slug>` artifact and so contributes no cell
+    regardless, and an unrelated one must not abort the apply."""
     stacks = _list_stacks(all_stacks, base)
     tags_by_stack = {s: _tags(s) for s in stacks}
     if require_env_tag:
@@ -181,31 +177,23 @@ def fork_pr_error(event_name, repository, payload):
     """The `::error::` line rejecting a fork pull request, or "" when this run
     may be planned.
 
-    A fork's `pull_request` run is handed no secrets, but the plan cell still
-    runs `terramate`/`tofu` over the fork's own HCL on the consumer's runners
-    and with whatever the plan environment exposes as *variables* -- variables
-    are not secrets and are not withheld. Fork pull requests are therefore not
-    supported at all; the branch has to live in the repository.
+    A fork's run is handed no secrets, but the plan cell still runs
+    `terramate`/`tofu` over the fork's own HCL on the consumer's runners with
+    whatever the plan environment exposes as *variables* -- which are not
+    secrets and are not withheld. Fork pull requests are not supported at all.
 
-    Loud rather than an empty matrix: `summary.yml` refuses a fork head, so no
-    `shipmate / gate` status is ever written and the required check never
-    appears. A green "nothing to plan" would leave an outside contributor
-    waiting on a gate that structurally cannot arrive.
+    Loud rather than an empty matrix: `summary.yml` refuses a fork head, so a
+    green "nothing to plan" would leave an outside contributor waiting on a gate
+    that structurally cannot arrive.
 
-    Keyed on the event being a pull request, never on a missing head repository:
-    the drift path calls this script with all-stacks and no pull request context
-    (`schedule` / `workflow_dispatch`), where `head.repo` is absent by
-    construction. Keying on the field instead would kill nightly drift silently.
-    Both pull-request events count -- `pull_request` and `pull_request_target`,
-    which carries the same `pull_request.head.repo.full_name`. The latter
-    especially: it is the one pull-request event that runs at the base ref with
-    the repository's secrets, so refusing nothing there is the worst place to
-    fail open.
+    Keyed on the EVENT being a pull request, never on a missing head repository:
+    the drift path runs with no pull-request context, where `head.repo` is
+    absent by construction, and keying on the field would kill nightly drift
+    silently. Both PR events count -- `pull_request_target` especially, the one
+    that runs at the base ref with the repository's secrets.
 
-    Within a pull request event, an undeterminable head repository is rejected
-    -- a payload missing, unreadable, or without
-    `pull_request.head.repo.full_name` (the shape GitHub sends once the fork has
-    been deleted). A same-repository pull request always carries it, so
+    Within a PR event an undeterminable head repository is REJECTED: a
+    same-repository pull request always carries `head.repo.full_name`, so
     "unknown" only ever means a run this script cannot vouch for."""
     if event_name not in _PR_EVENTS:
         return ""
@@ -228,32 +216,20 @@ def workflow_files(root):
     """{filename: bytes} for `.github/workflows` under `root`, or None when the
     directory cannot be listed.
 
-    Read off the local checkout rather than the API: on a `pull_request` event
-    that checkout is the MERGE commit, which is the state the gate will actually
-    live under once this pull request lands.
+    Read off the local checkout, not the API: on a `pull_request` event that
+    checkout is the MERGE commit -- the state the gate will live under once this
+    pull request lands. Not so on `pull_request_target` (base ref), but a plan
+    workflow on that trigger is itself reported (`wiring.BAD_TRIGGER`).
 
-    That guarantee covers `pull_request` only. `_PR_EVENTS` also carries
-    `pull_request_target`, where the default checkout is the BASE ref, so the
-    check there judges the wiring the pull request has not changed yet: a break
-    the pull request introduces passes, and once the base is broken the pull
-    request that FIXES it still fails. Not worked around here, because a plan
-    workflow on `pull_request_target` is a misconfiguration in its own right --
-    `findings` reports it (`wiring.BAD_TRIGGER`) and doctor's fork-trigger probe
-    warns about it separately.
+    Nothing is DROPPED for being unreadable: every `.yml`/`.yaml` name appears,
+    mapped to None when its bytes cannot be had. Deliberately no `is_file()`
+    filter -- it swallows its own OSError and returns False, so an entry whose
+    stat failed would vanish, and a vanished `plan.yml` reads BROKEN rather than
+    unverified.
 
-    That also means this reads whatever the checkout materialized. An absent or
-    relocated checkout degrades to None and so to UNKNOWN, but a SPARSE checkout
-    holding `plan.yml` without the consumer's summary wrapper produces a partial
-    listing indistinguishable from a real absence, and `findings` calls that
-    BROKEN. Unlikely -- `detect` needs the whole tree for terramate anyway -- but
-    it is the one input shape here that turns into a false failure.
-
-    Nothing is DROPPED for being unreadable: every `.yml`/`.yaml` name in the
-    listing appears, mapped to None when its bytes cannot be had. Deliberately no
-    `is_file()` filter, because `Path.is_file()` swallows its own OSError and
-    returns False -- an entry whose stat failed would vanish from the listing
-    instead, and a vanished `plan.yml` is reported BROKEN rather than unverified.
-    A directory ending in `.yml` fails its read and degrades the same way.
+    Known false-failure shape: a SPARSE checkout holding `plan.yml` without the
+    summary wrapper is indistinguishable from a real absence, which `findings`
+    calls BROKEN. Unlikely -- `detect` needs the whole tree for terramate.
     """
     d = pathlib.Path(root) / ".github" / "workflows"
     try:
@@ -276,21 +252,17 @@ def wiring_report(found, event_name):
     `wiring.findings`.
 
     Fails only a pull-request event, exactly like `fork_pr_error`: the drift
-    path (`schedule` / `workflow_dispatch`, `all-stacks: true`) must keep
-    running against a repository whose wiring is already broken, or one merged
-    mistake takes nightly drift down in every consumer. Off that path the same
-    finding is a warning, which also makes drift a post-merge detector.
+    path must keep running against already-broken wiring, or one merged mistake
+    takes nightly drift down in every consumer. Off that path the same finding
+    is a warning, which also makes drift a post-merge detector.
 
     UNKNOWN never blocks and never warns. A false positive would red every pull
-    request in every consumer until an engine fix and a re-pin, so the only
-    findings allowed to reach `::error::` are the near-tautological ones
-    `scripts/wiring` classifies as BROKEN.
+    request in every consumer until an engine fix and a re-pin, so only BROKEN
+    reaches `::error::`.
 
     Deliberately no GHA data escaping, unlike doctor's `render_annotations`:
-    every message here is a module constant, and the one interpolation is
-    `ascii()` of a single line, which cannot contain a newline or a carriage
-    return. Only a literal `%` in a workflow name could render oddly, and it
-    still names the right file.
+    every message is a module constant and the one interpolation is `ascii()`
+    of a single line, which cannot contain a newline.
     """
     lines = [f"::notice title={wi.WIRING_TITLE}::{m}" for state, m in found if state == wi.UNKNOWN]
     broken = [m for state, m in found if state == wi.BROKEN]

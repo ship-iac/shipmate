@@ -54,6 +54,17 @@ def _repo(tmp_path, files):
     return tmp_path
 
 
+# Plan-then-commit, the pair each CLI's write path runs. Composed here rather
+# than exported from the module: a one-call wrapper with no production caller
+# would let these tests pass over an ordering the CLI never takes.
+def _rewrite(root, targets, new_sha):
+    return ri._commit(root, ri._plan(root, targets, new_sha))
+
+
+def _rewrite_consumer(root, new_sha, label):
+    return rc._commit_consumer(root, rc._plan_consumer(root, new_sha, label))
+
+
 def test_rewrite_replaces_only_the_targeted_path_and_sha(tmp_path):
     root = _repo(
         tmp_path,
@@ -65,7 +76,7 @@ def test_rewrite_replaces_only_the_targeted_path_and_sha(tmp_path):
         },
     )
 
-    changed = ri.rewrite(root, {("actions/setup", OLD)}, NEW)
+    changed = _rewrite(root, {("actions/setup", OLD)}, NEW)
 
     text = (root / ".github/workflows/apply.yml").read_text(encoding="utf-8")
     assert changed == [(".github/workflows/apply.yml", 1)]
@@ -85,7 +96,7 @@ def test_rewrite_preserves_a_trailing_comment(tmp_path):
         },
     )
 
-    ri.rewrite(root, {("actions/state", OLD)}, NEW)
+    _rewrite(root, {("actions/state", OLD)}, NEW)
 
     text = (root / "actions/apply-cell/action.yml").read_text(encoding="utf-8")
     assert text.strip().endswith("# pinned to a commit on main")
@@ -103,7 +114,7 @@ def test_rewrite_counts_every_occurrence_in_a_file(tmp_path):
         },
     )
 
-    assert ri.rewrite(root, {("actions/setup", OLD)}, NEW) == [
+    assert _rewrite(root, {("actions/setup", OLD)}, NEW) == [
         (".github/workflows/apply-env-level.yml", 2)
     ]
 
@@ -114,7 +125,7 @@ def test_rewrite_reports_no_change_when_nothing_matches(tmp_path):
         {".github/workflows/apply.yml": f"  - uses: ship-iac/shipmate/actions/setup@{OTHER}\n"},
     )
 
-    assert ri.rewrite(root, {("actions/setup", OLD)}, NEW) == []
+    assert _rewrite(root, {("actions/setup", OLD)}, NEW) == []
 
 
 def test_rewrite_writes_lf_not_crlf(tmp_path):
@@ -129,7 +140,7 @@ def test_rewrite_writes_lf_not_crlf(tmp_path):
     p = root / ".github/workflows/apply.yml"
     p.write_bytes(f"  - uses: ship-iac/shipmate/actions/setup@{OLD}\n".encode())
 
-    ri.rewrite(root, {("actions/setup", OLD)}, NEW)
+    _rewrite(root, {("actions/setup", OLD)}, NEW)
 
     assert b"\r\n" not in p.read_bytes()
 
@@ -150,7 +161,7 @@ def test_rewrite_preserves_existing_crlf(tmp_path):
     p.write_bytes(crlf_body.encode())
     before = p.read_bytes().count(b"\r\n")
 
-    changed = ri.rewrite(root, {("actions/setup", OLD)}, NEW)
+    changed = _rewrite(root, {("actions/setup", OLD)}, NEW)
 
     after = p.read_bytes()
     assert changed == [(".github/workflows/apply.yml", 1)]
@@ -404,7 +415,7 @@ def test_rewrite_ignores_files_outside_the_two_source_shapes(tmp_path):
         },
     )
 
-    changed = ri.rewrite(root, {("actions/setup", OLD)}, NEW)
+    changed = _rewrite(root, {("actions/setup", OLD)}, NEW)
 
     assert changed == [(".github/workflows/apply.yml", 1)]
     assert OLD in (root / "docs/releasing.md").read_text(encoding="utf-8")
@@ -430,7 +441,7 @@ def test_rewrite_consumer_bumps_every_engine_ref_regardless_of_path(tmp_path):
     # rewrite_consumer's return became (changed, matched) for F9 (main() needs
     # the total-matched count to tell "matched nothing" apart from "matched N,
     # all already current"); updated this unpack deliberately.
-    changed, matched = rc.rewrite_consumer(root, NEW, None)
+    changed, matched = _rewrite_consumer(root, NEW, None)
 
     plan = (root / ".github/workflows/plan.yml").read_text(encoding="utf-8")
     apply_ = (root / ".github/workflows/apply.yml").read_text(encoding="utf-8")
@@ -446,7 +457,7 @@ def test_rewrite_consumer_sets_the_release_label_comment(tmp_path):
         {".github/workflows/plan.yml": f"      - uses: ship-iac/shipmate/actions/setup@{OLD}\n"},
     )
 
-    rc.rewrite_consumer(root, NEW, "v0.2.0")
+    _rewrite_consumer(root, NEW, "v0.2.0")
 
     text = (root / ".github/workflows/plan.yml").read_text(encoding="utf-8")
     assert text.rstrip("\n").endswith(f"@{NEW} # v0.2.0")
@@ -462,7 +473,7 @@ def test_rewrite_consumer_replaces_a_stale_label_comment(tmp_path):
         },
     )
 
-    rc.rewrite_consumer(root, NEW, "v0.2.0")
+    _rewrite_consumer(root, NEW, "v0.2.0")
 
     text = (root / ".github/workflows/plan.yml").read_text(encoding="utf-8")
     assert "v0.1.0" not in text
@@ -485,7 +496,7 @@ def test_rewrite_consumer_does_not_swallow_a_following_comment_line(tmp_path):
         },
     )
 
-    rc.rewrite_consumer(root, NEW, "v0.2.0")
+    _rewrite_consumer(root, NEW, "v0.2.0")
 
     text = (root / ".github/workflows/plan.yml").read_text(encoding="utf-8")
     assert "      # keep this comment\n" in text
@@ -504,7 +515,7 @@ def test_rewrite_consumer_leaves_third_party_pins_alone(tmp_path):
         },
     )
 
-    rc.rewrite_consumer(root, NEW, "v0.2.0")
+    _rewrite_consumer(root, NEW, "v0.2.0")
 
     text = (root / ".github/workflows/plan.yml").read_text(encoding="utf-8")
     assert f"actions/checkout@{OTHER} # v7.0.1" in text
@@ -522,7 +533,7 @@ def test_rewrite_consumer_writes_lf_not_crlf(tmp_path):
     p = root / ".github/workflows/plan.yml"
     p.write_bytes(f"      - uses: ship-iac/shipmate/actions/setup@{OLD}\n".encode())
 
-    rc.rewrite_consumer(root, NEW, None)
+    _rewrite_consumer(root, NEW, None)
 
     assert b"\r\n" not in p.read_bytes()
 
@@ -543,7 +554,7 @@ def test_rewrite_consumer_preserves_existing_crlf(tmp_path):
     p.write_bytes(crlf_body.encode())
     before = p.read_bytes().count(b"\r\n")
 
-    rc.rewrite_consumer(root, NEW, None)
+    _rewrite_consumer(root, NEW, None)
 
     after = p.read_bytes()
     assert after.count(b"\r\n") == before
@@ -564,7 +575,7 @@ def test_rewrite_consumer_preserves_a_double_quoted_ref(tmp_path):
         },
     )
 
-    rc.rewrite_consumer(root, NEW, None)
+    _rewrite_consumer(root, NEW, None)
 
     text = (root / ".github/workflows/plan.yml").read_text(encoding="utf-8")
     assert f'"ship-iac/shipmate/actions/setup@{NEW}"' in text
@@ -579,7 +590,7 @@ def test_rewrite_consumer_requires_the_same_quote_to_close_the_ref(tmp_path):
     line = f"      - uses: \"ship-iac/shipmate/actions/setup@{OLD} # it's pinned\n"
     root = _repo(tmp_path, {".github/workflows/plan.yml": line})
 
-    rc.rewrite_consumer(root, NEW, None)
+    _rewrite_consumer(root, NEW, None)
 
     text = (root / ".github/workflows/plan.yml").read_text(encoding="utf-8")
     assert f"@{NEW}" in text
@@ -596,7 +607,7 @@ def test_rewrite_consumer_preserves_a_single_quoted_ref_with_label(tmp_path):
         },
     )
 
-    rc.rewrite_consumer(root, NEW, "v0.2.0")
+    _rewrite_consumer(root, NEW, "v0.2.0")
 
     text = (root / ".github/workflows/plan.yml").read_text(encoding="utf-8")
     assert text.rstrip("\n").endswith(f"'ship-iac/shipmate/actions/setup@{NEW}' # v0.2.0")
@@ -670,29 +681,12 @@ def test_main_force_does_not_bypass_the_no_refs_refusal(tmp_path, capsys):
     assert OLD in (root / ".github/workflows/plan.yml").read_text(encoding="utf-8")
 
 
-def test_survivors_finds_a_tag_pinned_ref_the_sha_only_rewrite_cannot_touch(tmp_path):
-    # F3: _CONSUMER_REF only matches 40-hex SHAs, so a tag-pinned engine ref
-    # (or a short/uppercase SHA) is invisible to the rewrite and would
-    # otherwise be left behind silently while the tool reports success.
-    root = _repo(
-        tmp_path,
-        {
-            ".github/workflows/plan.yml": (
-                f"      - uses: ship-iac/shipmate/actions/setup@v0.1.0\n"
-                f"      - uses: ship-iac/shipmate/actions/state@{NEW}\n"
-            )
-        },
-    )
-
-    survivors = rc._survivors(root, NEW)
-
-    assert len(survivors) == 1
-    assert "actions/setup@v0.1.0" in survivors[0]
-
-
-def test_survivors_does_not_flag_a_correctly_rewritten_quoted_ref(tmp_path):
-    # Interaction check: the F3 survivor scan must not misread a quote that
-    # F2's rewrite correctly re-emitted around the new SHA as a leftover.
+def test_consumer_survivor_scan_ignores_a_correctly_rewritten_quoted_ref(tmp_path):
+    # The scan must not misread a quote the rewrite correctly re-emitted around
+    # the new SHA as a leftover. Over the PLANNED text, as _rewrite_and_report
+    # runs it -- a post-write disk read covers a path the CLI never takes. The
+    # positive case (a tag-pinned ref surviving) is covered end to end by
+    # test_main_reports_partial_rewrite_when_a_ref_survives.
     root = _repo(
         tmp_path,
         {
@@ -702,10 +696,9 @@ def test_survivors_does_not_flag_a_correctly_rewritten_quoted_ref(tmp_path):
         },
     )
 
-    rc.rewrite_consumer(root, NEW, None)
-    survivors = rc._survivors(root, NEW)
+    planned = rc._plan_consumer(root, NEW, None)
 
-    assert survivors == []
+    assert pinrefs.scan_survivors([(p.path, p.text) for p in planned], NEW) == []
 
 
 def test_main_reports_partial_rewrite_when_a_ref_survives(tmp_path, capsys):

@@ -21,13 +21,9 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 class GitFailure(RuntimeError):
     """A git invocation this model depends on failed, so its answer is
-    unknown -- not empty.
-
-    Without this, a failed ``git ls-tree`` and a commit that genuinely has no
-    pin-bearing files are indistinguishable: both leave ``source_paths``
-    reporting nothing found, and every caller downstream (the CI guard,
-    ``pin_status``, ``repin_consumer``) would read that as "no problems" or
-    "not a valid target" when the true answer is "we could not check."
+    unknown -- not empty. Without it, a failed ``git ls-tree`` and a commit with
+    no pin-bearing files both leave ``source_paths`` reporting nothing, and
+    every caller reads that as "no problems" instead of "could not check."
     """
 
     def __init__(self, commit, stderr):
@@ -45,28 +41,21 @@ SCRIPT_REF = re.compile(r"\$GITHUB_ACTION_PATH/\.\./\.\./scripts/([A-Za-z0-9_-]+
 LOAD_REF = re.compile(r"""(?<![A-Za-z0-9_])_load\(\s*["']([^"']+)["']\s*\)""")
 # Any engine ref regardless of shape -- what the SHA-only REF and
 # repin_consumer._CONSUMER_REF cannot see, and would leave behind silently.
-# A quoted `uses:` scalar is legal YAML, so a quote around the whole scalar is
-# not part of the ref: excluding quotes from the ref group is what stops a
-# trailing one making a correctly rewritten ref look like a survivor. A quote
-# directly after the `@` is a different animal -- it is never canonical, and
-# neither REF nor _CONSUMER_REF can rewrite it -- so `quote` is captured and
-# scan_survivors reports the ref even when the value inside already reads as
-# the new SHA.
+# Quotes are excluded from the ref group so a trailing one on a legal quoted
+# `uses:` scalar cannot make a correctly rewritten ref look like a survivor.
+# A quote directly after the `@` is never canonical and no rewriter can touch
+# it, so `quote` is captured and reported even at the new SHA.
 ANY_ENGINE_REF = re.compile(r"ship-iac/shipmate/([^@\s'\"]+)@(?P<quote>['\"])?([^\s'\"#]+)")
 
 
 def scan_survivors(path_text_pairs, new_sha):
     """Engine refs across ``(path, text)`` pairs not left pinned to ``new_sha``.
 
-    A ref the SHA-targeted substitution could not touch must be named, not
-    swallowed into a reported success -- that is the all-or-nothing promise of
-    ``repin_consumer`` (every engine ref moves together) and of
-    ``repin_internal --all``. NOT of repin_internal's default stale-only mode,
-    which legitimately leaves every non-target pin alone: run this over that and
-    it fires on all of them, which is why the caller guards it.
-
-    Takes ``(path, text)`` rather than a root, so the same scan serves pre-write
-    plan validation and a working-tree read.
+    Serves the all-or-nothing promise of ``repin_consumer`` and
+    ``repin_internal --all``: a ref the substitution could not touch must be
+    named, not swallowed into a reported success. NOT valid for repin_internal's
+    default stale-only mode, which legitimately leaves non-target pins alone --
+    the caller guards it.
     """
     out = []
     for rel, text in path_text_pairs:
@@ -100,11 +89,8 @@ def read_text(path):
     before that normalization collapses CRLF to LF.
 
     Pair with ``write_text(path, text, newline)`` to round-trip a file's
-    existing convention. Without this, a rewriter that reads with
-    ``read_text(encoding="utf-8")`` (which silently normalizes CRLF to ``\\n``)
-    and writes LF-only flips a CRLF-committed workflow to LF over a one-line
-    pin bump -- the same whole-file-diff harm ``write_text`` already guards
-    against, just in the other direction.
+    convention: reading normalized and writing LF-only flips a CRLF-committed
+    workflow to LF over a one-line pin bump.
     """
     raw = path.read_bytes()
     crlf = raw.count(b"\r\n")
@@ -117,29 +103,21 @@ def write_text(path, text, newline="\n"):
     """Write ``text`` (``\\n``-delimited) to ``path`` as UTF-8 using ``newline``
     as the line ending.
 
-    pathlib's default ``newline=None`` translates every "\\n" to ``os.linesep``,
-    so on Windows rewriting a workflow file would flip the whole file to CRLF --
-    burying a one-line pin bump in a whole-file diff for any consumer repo
-    without a .gitattributes eol rule. ``newline`` defaults to ``"\\n"`` for
-    callers with no established convention to preserve (fresh files, fixtures);
-    a rewriter reading an existing file should pass through what ``read_text``
-    reported.
+    Never pathlib's default ``newline=None``: it translates every "\\n" to
+    ``os.linesep``, so on Windows a one-line pin bump becomes a whole-file CRLF
+    diff. Pass through what ``read_text`` reported; the ``"\\n"`` default is for
+    fresh files with no convention to preserve.
     """
     path.write_bytes(text.replace("\n", newline).encode("utf-8"))
 
 
 def atomic_write_text(path, text, newline="\n"):
-    """Write ``text`` to ``path`` like ``write_text``, but so the write is
-    atomic per file: the new content lands in a temporary file in ``path``'s
-    own directory first, then ``os.replace`` swaps it into place. ``os.replace``
-    is atomic on both Windows and POSIX, so nothing ever observes ``path``
-    half-written -- a reader always sees either the old content or the new,
-    never a partial write.
+    """Write ``text`` to ``path`` like ``write_text``, atomically PER FILE:
+    temp file in ``path``'s own directory, then ``os.replace`` (atomic on both
+    Windows and POSIX), so nothing ever observes a half-written file.
 
-    This is per-file atomicity only, not a cross-file transaction: a caller
-    writing several files this way in a loop can still be interrupted between
-    two calls, leaving whichever files were already replaced changed and the
-    rest untouched. Recover with ``git status`` / ``git checkout --``.
+    Not a cross-file transaction -- an interrupt between two calls leaves the
+    already-replaced files changed. Recover with ``git checkout --``.
     """
     fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
     try:
@@ -194,14 +172,12 @@ def source_paths(commit=None, root=None):
     """Repo-relative posix paths of pin-bearing files. ``commit=None`` reads the
     working tree; a commit reads that commit's tree.
 
-    ``root`` overrides ROOT for working-tree reads, so the re-pin tools can run
-    against a fixture directory without a second copy of this glob. It is
-    meaningless with ``commit`` -- a tree read has no filesystem root -- and
-    combining them raises rather than silently reading the wrong repo.
+    ``root`` overrides ROOT for working-tree reads (fixture directories). It is
+    meaningless with ``commit`` and combining them raises rather than silently
+    reading the wrong repo.
 
     Both shapes match ``.yml`` and ``.yaml``: GitHub accepts either, and a
-    workflow that escaped the guard by spelling its extension differently is
-    exactly the silent hole this model exists to prevent.
+    workflow escaping the guard on its extension is the hole this prevents.
     """
     if commit is not None and root is not None:
         raise ValueError("source_paths: root is only meaningful for a working-tree read")
@@ -224,8 +200,7 @@ def refs_at(commit=None):
     """(pinned-path, sha, source-path) for every internal self-reference, sorted.
 
     ``commit=None`` reads the working tree -- what the guard checks, since an
-    in-flight edit to a pin must be seen before it is committed. A commit reads
-    that commit's tree, which is how pin_status answers questions about history.
+    in-flight edit to a pin must be seen before it is committed.
     """
     refs = set()
     for src in source_paths(commit):
@@ -245,10 +220,9 @@ def direct_script_refs(action_yaml_text):
 def strip_comments(script_text):
     """``script_text`` with comment text blanked, positions otherwise preserved.
 
-    Falls back to the input unchanged when it does not tokenize. This reads
-    arbitrary historical commits, and a derivation that raises is worse than one
-    that occasionally over-reports: over-reporting diffs an extra path, raising
-    means no pin verdict at all.
+    Falls back to the input unchanged when it does not tokenize: this reads
+    arbitrary historical commits, and over-reporting diffs an extra path while
+    raising means no pin verdict at all.
     """
     try:
         spans = [
@@ -267,10 +241,9 @@ def strip_comments(script_text):
 def load_refs(script_text):
     """Script names a helper cross-loads via the repo's ``_load("<name>")`` pattern.
 
-    Comments are stripped first. A commented-out or merely documented
-    ``_load("waves")`` is not an edge, and treating it as one puts a path into
-    the closure that the guard then diffs on every pin check -- a phantom
-    dependency reported against an action that never runs it.
+    Comments are stripped first: a commented-out or merely documented
+    ``_load("waves")`` would put a phantom dependency into the closure, diffed
+    on every pin check against an action that never runs it.
     """
     return set(LOAD_REF.findall(strip_comments(script_text)))
 
@@ -326,10 +299,9 @@ def diff_status(path, sha, baseline):
 class PinIssue(NamedTuple):
     """One problem with one pin.
 
-    Records, not prose. The re-pin tools need to know *which* (path, sha) to
-    rewrite and must not rewrite a pin whose diff merely errored -- recovering
-    that by substring-matching a formatted message would make a message reword
-    silently empty the fixer's target list while CI stays red.
+    Records, not prose: the re-pin tools select on ``kind``, never on a
+    formatted message. Substring-matching one would let a reword silently empty
+    the fixer's target list while CI stays red.
     """
 
     path: str  # the pinned path
@@ -346,21 +318,15 @@ ACTIONABLE = ("stale", "dep_stale")
 
 
 #: format_issue's baseline_desc for a caller that baselines a commit on itself
-#: (dev/pin_status.py, dev/repin_consumer.py) rather than on the mainline the
-#: CI guard and dev/repin_internal.py compare against. Reusing the mainline
-#: wording there would tell a release engineer the mainline moved past their
-#: target, when the real fact is that the target's own tree runs stale code.
+#: (pin_status, repin_consumer) rather than on the mainline. The mainline
+#: wording there would claim the mainline moved past the target, when the fact
+#: is that the target's own tree runs stale code.
 SELF_BASELINE_DESC = "is out of date against this commit's own tree"
 
 
 def format_issue(i, baseline_desc="changed on the mainline since"):
-    """The reader-facing line for an issue.
-
-    ``baseline_desc`` completes "but <path> ..." / "-- <dep> ..." and names
-    what the comparison was actually made against; pass ``SELF_BASELINE_DESC``
-    when the issue came from a commit-baselined ``pin_issues`` call rather
-    than a mainline-baselined one.
-    """
+    """The reader-facing line for an issue. ``baseline_desc`` completes
+    "but <path> ..." / "-- <dep> ..." and names what was compared against."""
     if i.kind == "stale":
         return f"{i.src} pins {i.path}@{i.sha[:12]} but {i.path} {baseline_desc}"
     if i.kind == "dep_stale":
@@ -393,9 +359,8 @@ def _dependency_issues(path, sha, baseline, src):
 def pin_issues(refs, baseline):
     """Every problem with ``refs`` against ``baseline``, as PinIssue records.
 
-    One record per (path, sha, src) triple per problem -- a pin referenced from
-    two workflows yields two records, because each is a separate line a reader
-    has to go fix.
+    One record per (path, sha, src) triple per problem: a pin referenced from
+    two workflows is two separate lines a reader has to go fix.
     """
     out = []
     for path, sha, src in refs:

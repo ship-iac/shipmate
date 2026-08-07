@@ -114,27 +114,6 @@ def _commit_consumer(root, planned):
     return changed, matched
 
 
-def rewrite_consumer(root, new_sha, label):
-    """Point every engine ref in ``root``'s workflows at ``new_sha``.
-
-    Returns ``(changed, matched)`` -- see ``_commit_consumer``. Plans every
-    workflow in memory first, then commits -- see ``_plan_consumer``/
-    ``_commit_consumer``.
-    """
-    return _commit_consumer(root, _plan_consumer(root, new_sha, label))
-
-
-def _survivors(root, new_sha):
-    """``pinrefs.scan_survivors`` read fresh off ``root``'s workflows on disk.
-
-    Catches what ``_CONSUMER_REF``'s 40-hex-only rewrite cannot -- a tag, a
-    short SHA, an uppercase one (test_repin's F3 cases)."""
-    wf = root / ".github" / "workflows"
-    files = sorted(wf.glob("*.yml")) + sorted(wf.glob("*.yaml"))
-    pairs = [(f.relative_to(root).as_posix(), f.read_text(encoding="utf-8")) for f in files]
-    return pinrefs.scan_survivors(pairs, new_sha)
-
-
 def _resolve_sha(sha):
     """Full 40-hex sha for ``sha``, or None if it does not resolve here."""
     resolved = pinrefs.resolve(sha)
