@@ -76,15 +76,6 @@ def _commit(root, planned):
     return changed
 
 
-def rewrite(root, targets, new_sha):
-    """Substitute each ``(path, old_sha)`` in ``targets`` with ``new_sha``.
-
-    Returns (source_path, replacements) for files that changed. Plans every
-    candidate file in memory first, then commits -- see ``_plan``/``_commit``.
-    """
-    return _commit(root, _plan(root, targets, new_sha))
-
-
 def _survivor_report(survivors, new_sha):
     """Print and return 1 if ``survivors`` is non-empty; else None.
 

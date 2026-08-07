@@ -2,8 +2,9 @@
 *.log
 .DS_Store
 
-# local agent guidance, not shipped
+# local agent guidance and session artifacts, not shipped — this repo is public
 CLAUDE.md
+.superpowers/
 __pycache__/
 
 # tooling / IDE

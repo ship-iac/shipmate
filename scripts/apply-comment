@@ -8,22 +8,13 @@ the expected-cell set (waves JSON — targeted or per-env-level), the gate
 verdict, and the excluded/skipped envs (apply-all only), and writes a fresh
 comment.md -- this comment is never upserted, unlike the plan sticky comment.
 
-This deliberately duplicates summary-comment's `render_section` /
-`build_comment` shape (full -> truncated-at-a-line-boundary -> link-only
-degradation, up-front link-only budget reserve) rather than adding a
-`mode=plan|apply` switch to that script or writing a fully independent
-renderer: the injection-critical primitives (fence escaping, `_md_escape`,
-size budgeting) are imported from summary-comment and written once, but the
-layout genuinely differs -- a different summary line, different trailer
-wording, no diff_map (apply output is not a plan diff), a blocked-cell form
-with no fence at all, and the direction truncation cuts from. A plan diff is
-read top-down, so summary-comment's degradation keeps the head. Apply output
-is the opposite: the diagnostic that matters -- a fatal `Error:`, or the
-closing `Apply complete! Resources: ...` line -- is always at the END, so
-this script's read (`_read_tail`) and truncation (`render_apply_section`)
-both keep the TAIL instead, and the file read is decoded permissively
-(`errors="replace"`) since apply.txt is arbitrary provider/local-exec stdout,
-not guaranteed valid UTF-8. Do not "fix" this into a shared mode switch.
+DO NOT refactor this and summary-comment into one renderer with a
+`mode=plan|apply` switch. The injection-critical primitives (fence escaping,
+`_md_escape`, size budgeting) are already imported from summary-comment and
+written once; what differs is the layout and, critically, the direction
+truncation cuts from. A plan diff is read top-down and keeps its head; apply
+output's decisive line (a fatal `Error:`, or `Apply complete! Resources: ...`)
+is always last, so this script keeps the TAIL.
 """
 
 import glob
@@ -47,31 +38,22 @@ def _load(fname):
 
 
 sc = _load("summary-comment")
-# Reused for BOTH its stdin JSONL parser (same contract this script's own
-# jobs-listing input follows: newline-delimited JSON, blank lines skipped, a
-# malformed line fails loud naming the offending line) AND its check-run
-# helpers -- `from_app`, `latest_by_name`, `done_names` -- which
-# `check_state_maps` below calls to decide which apply checks are done. That
-# reuse is load-bearing, not incidental: "what counts as a done apply check"
-# must stay written once in apply-gate, shared with the `shipmate / gate`
-# status and both detect paths, so this comment's row states can never
-# disagree with the work queue they report on. Changing `DONE_CONCLUSIONS` or
-# `latest_by_name` in apply-gate therefore changes what this comment claims
-# about a cell -- see apply_check_state.
+# COUPLING: "what counts as a done apply check" is written once in apply-gate
+# and shared with the gate status and both detect paths, so this comment's row
+# states can never disagree with the work queue they report on. A second
+# predicate here would drift silently.
 ag = _load("apply-gate")
 
 # COUPLED to env-order.MAX_ENV_LEVELS (which lists the GHA slots that move with
-# it); pinned equal by test_apply_comment. Kept as a local constant rather than
-# an `_load("env-order")`, which would widen this renderer's pin closure.
+# it); pinned equal by test_apply_comment. A local constant rather than an
+# `_load("env-order")`, which would widen this renderer's pin closure.
 MAX_ENV_LEVELS = 4
 
 CELL_KEYS = ("stack", "stack_path", "environment", "result", "reason")
 _RESULTS = frozenset({"applied", "failed", "blocked"})
-# Display statuses are a SUPERSET of cell.json's `result` enum above:
-# `unrecorded` is derived at render time from the real apply-check state (see
-# apply_check_state), never written by apply-cell, so the artifact grammar in
-# CONTRACT.md is unchanged and _validate_cell keeps rejecting an out-of-enum
-# artifact value as pin skew.
+# Display statuses are a SUPERSET of cell.json's `result` enum: `unrecorded` is
+# derived at render time (see apply_check_state), never written by apply-cell,
+# so _validate_cell keeps rejecting an out-of-enum artifact value as pin skew.
 _EMOJI = {
     "applied": "✅",
     "failed": "❌",
@@ -86,11 +68,8 @@ _EMOJI = {
 _SECTION_STATUSES = ("applied", "failed", "unrecorded")
 
 # Human phrase per display status, for the <details> summary line. `unrecorded`
-# is an internal enum token: leaking it into the comment would make a section
-# header read "— unrecorded" where the table legend, the note below and
-# CONTRACT.md all say "applied but not recorded", leaving the reader to guess
-# whether it means "not applied" or "applied but the check is pending" -- the
-# exact ambiguity the note exists to remove.
+# is an internal enum token; the reader-facing wording must match the table
+# legend and CONTRACT.md.
 _STATUS_PHRASE = {
     "applied": "applied",
     "failed": "failed",
@@ -99,21 +78,15 @@ _STATUS_PHRASE = {
     "unrecorded": "applied but not recorded",
 }
 
-# How many cells the unrecorded note names before it summarizes the rest. The
-# cap exists because this note rides in `top`, the one string the HARD_CAP
-# table-only fallback re-emits verbatim -- see _unrecorded_note.
+# How many cells the unrecorded note names before it summarizes the rest.
 _UNRECORDED_NAMED = 5
 
 
 def _not_attempted_note(env_name):
     """The 'apply check stays pending' note, parameterized on the targeted
-    environment: a targeted `shipmate apply <env>` run must tell the
-    reader to retry with that same targeted form, not the bare `shipmate
-    apply` -- the bare form excludes explicit envs
-    (`global.shipmate.explicit_envs`) from its work set and therefore cannot
-    retry an explicit env. env_name is author-controlled (a Terramate tag /
-    GitHub Environment name) so it is escaped the same way every other
-    display value in this file is."""
+    environment: a bare `shipmate apply` excludes explicit envs
+    (`global.shipmate.explicit_envs`), so it cannot retry one — the note must
+    name the targeted form. env_name is author-controlled and escaped."""
     cmd = f"shipmate apply {sc._md_escape(env_name)}" if env_name else "shipmate apply"
     return f"_⏭️ not attempted — the apply check stays pending; retry with `{cmd}`._"
 
@@ -121,35 +94,15 @@ def _not_attempted_note(env_name):
 def _unrecorded_note(rows):
     """The 'applied but not recorded' note, naming every affected cell.
 
-    One comment-wide note rather than a per-cell line (the shape `blocked`
-    cells get) on purpose: a per-cell line needs a third branch in
-    build_comment's render loop plus its own entry in the up-front size
-    reserve, and build_comment is at 7 of the C901 ceiling of 8. This lives in
-    its own function, called from _top_section, so build_comment's budget is
-    untouched -- and an unrecorded cell still gets a full <details> section
-    (see _SECTION_STATUSES), because its apply output is real and is exactly
-    what the reader needs.
+    Cell names are author-controlled, so **bold** + `_md_escape` — never a
+    backtick code span, which `_md_escape` does not escape.
 
-    Cell names are author-controlled (Terramate tags, GitHub Environment
-    names, apply-cell's stack-name input) so both go through _md_escape, in
-    the same **bold** form _blocked_line uses -- deliberately not a backtick
-    code span, since _md_escape does not escape a backtick.
-
-    Capped at _UNRECORDED_NAMED cells, with the rest summarized as a count.
-    The cap is not cosmetic. This note rides in `top` (built by _top_section),
-    not in the per-row section/blocked-line loop, so it is counted in
-    build_comment's `used` before that loop the same way the header and table
-    are -- and `top` is exactly what the HARD_CAP table-only fallback re-emits
-    verbatim (`top + fallback + footer`) when even every link-only section and
-    blocked one-liner still overflows. Unlike unbounded blocked lines, which
-    that fallback sheds along with every other per-row line, this note can
-    never be shed: uncapped it could only push the render past HARD_CAP into
-    the final `SystemExit`, which skips the POST step and costs the whole
-    comment -- on precisely the run that needed it most, since the usual cause
-    of `unrecorded` rows is correlated across cells (an expired App key, a
-    checks-API outage) and so strands a whole wide matrix at once. Capping
-    bounds the note to a few hundred characters regardless of fan-out; the
-    table above still lists every affected cell with its own ⚠️."""
+    The _UNRECORDED_NAMED cap is not cosmetic. This note rides in `top`, which
+    the HARD_CAP table-only fallback re-emits verbatim and so can never shed;
+    uncapped it could only push the render past HARD_CAP into `SystemExit`,
+    costing the whole comment. Unrecorded rows are usually correlated across
+    cells (expired App key, checks-API outage), so that is precisely the run
+    that needs the comment most. The table still lists every affected cell."""
     cells = [
         f"**{sc._md_escape(r['stack_display'])} / {sc._md_escape(r['environment'])}**"
         for r in rows
@@ -170,16 +123,10 @@ def _unrecorded_note(rows):
     )
 
 
-# `Apply complete! Resources: <int> added, <int> changed, <int> destroyed` --
-# digits-only captures, so a look-alike line in author-controlled apply.txt
-# cannot inject anything into the resources table cell. Anchored to the whole
-# line (^...$, re.M): OpenTofu prints the `Outputs:` block AFTER the "Apply
-# complete!" line, so an *unanchored* match would let an output value merely
-# containing that literal string (e.g. `foo = "Apply complete! Resources: 99
-# added, ..."`) win as the "last" match -- a wrong number, not an injection
-# (still digits-only), but wrong. Anchoring requires the match to BE the
-# whole line, which a `name = "..."`-embedded copy never is. The caller keeps
-# the *last* genuine match.
+# Digits-only captures, so a look-alike line in author-controlled apply.txt
+# cannot inject into the resources cell. Whole-line anchored (^...$, re.M)
+# because tofu prints `Outputs:` AFTER this line: an unanchored match would let
+# an output value merely containing the literal win as the last match.
 _RESOURCES_RE = re.compile(
     r"^Apply complete! Resources: (\d+) added, (\d+) changed, (\d+) destroyed\.?$",
     re.MULTILINE,
@@ -188,11 +135,9 @@ _RESOURCES_RE = re.compile(
 
 def _validate_cell(cell, path):
     """Type/enum-check cell.json values past the missing-keys check, mirroring
-    summary-comment's `_validate_cell`. All five apply-cell keys are strings;
-    `result` is additionally constrained to the three-value enum -- a
-    pin-skewed/crafted cell.json carrying the right keys with the wrong types
-    or an out-of-enum result would otherwise land unescaped in the comment or
-    silently fall through the render's status dispatch."""
+    summary-comment's `_validate_cell`. A pin-skewed or crafted cell.json with
+    the right keys but wrong types would otherwise land unescaped in the
+    comment, and an out-of-enum result would fall through the status dispatch."""
     for k in CELL_KEYS:
         if type(cell[k]) is not str:
             raise SystemExit(f"::error::cell summary {path} key {k!r} must be a string")
@@ -206,31 +151,16 @@ def _validate_cell(cell, path):
 def _read_tail(path, budget):
     """Read the trailing `budget` characters of `path`, decoded permissively.
 
-    Apply output is tail-oriented: the diagnostic that matters -- a fatal
-    `Error:` line, or the closing `Apply complete! Resources: ...` line -- is
-    always the LAST thing tofu prints, never the first. That is the opposite
-    of plan.txt, whose identical-looking head-first cap was harmless: a plan
-    is only ever rendered (in full, truncated, or not at all), never parsed
-    for a line that lives at a particular end of it. Apply output IS parsed
-    for a trailing line (`_resources`), so a head cap here silently blanks
-    that parse on any output long enough to need capping, and a head-first
-    truncation of a failed apply's body drops the one line the table's ❌
-    sends the reader looking for. So this seeks from the end instead of
-    reading from the start -- bounded (a fixed-size read near the tail, never
-    the whole file) but keeping the characters that matter.
+    Seeks from the END, unlike plan.txt's head-first cap: apply output IS
+    parsed for a trailing line (`_resources`), so a head cap silently blanks
+    that parse on any output long enough to need capping, and drops the `Error:`
+    line the table's ❌ sends the reader looking for.
 
-    Decoded with errors="replace": apply.txt is provider/local-exec stdout,
-    not guaranteed valid UTF-8. A single non-UTF-8 byte anywhere in the file
-    must not raise UnicodeDecodeError and abort the whole render -- every
-    cell's comment, including ones that applied cleanly, would be lost with
-    it. A stray byte becomes a replacement character instead.
+    errors="replace": apply.txt is provider/local-exec stdout, not guaranteed
+    valid UTF-8, and one stray byte must not abort the whole render.
 
-    The byte window read is wider than `budget` characters could ever need
-    (UTF-8's worst case is 4 bytes/char) so a multi-byte codepoint straddling
-    the seek point still has room to decode before the result is sliced down
-    to exactly `budget` characters. Whatever the seek point lands inside --
-    a partial line, a partial character -- the caller drops the leading
-    fragment rather than emit it (see the truncated_front handling below).
+    The byte window is 4x `budget` (UTF-8's worst case) so a codepoint
+    straddling the seek point still decodes before the slice down to `budget`.
     """
     with open(path, "rb") as fh:
         fh.seek(0, os.SEEK_END)
@@ -253,15 +183,8 @@ def _read_tail(path, budget):
     return text
 
 
-# Terminal escape sequences that show up in real `tofu apply` stdout+stderr:
-#   - CSI: ESC `[` ... a final byte in `@`-`~` -- SGR colour codes
-#     (`ESC[0m`, `ESC[1m`, `ESC[36;1m`, ...) are the vast majority of these.
-#   - two-character escapes: ESC followed by a single byte in `@`-`_`.
-#   - OSC: ESC `]` ... terminated by BEL or `ESC \` (e.g. terminal title-set
-#     sequences some TF_LOG/local-exec wrappers emit).
-# The CSI branch is listed first so a well-formed CSI run is matched whole
-# (including its final byte) rather than falling through to the shorter
-# two-character branch, which would otherwise also match a bare `ESC[`.
+# CSI is listed FIRST so a well-formed CSI run matches whole, including its
+# final byte; the two-character branch would otherwise match a bare `ESC[`.
 _ANSI_RE = re.compile(
     r"\x1b\[[0-?]*[ -/]*[@-~]"  # CSI
     r"|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)"  # OSC
@@ -270,10 +193,8 @@ _ANSI_RE = re.compile(
 
 
 def _strip_ansi(text):
-    """Strip terminal escape sequences (ANSI colour codes and friends) from
-    `text`. Ordinary printable text and `\\n` are left untouched; `\\r` is
-    also left alone -- it is not an escape sequence and is not part of this
-    finding."""
+    """Strip terminal escape sequences from `text`. `\\r` is left alone — not an
+    escape sequence."""
     return _ANSI_RE.sub("", text)
 
 
@@ -283,36 +204,18 @@ def load_cells(cells_dir):
     out-of-enum result, fails loud -- that is apply-cell/apply-comment pin
     skew, not a state to render around.
 
-    ANSI escape sequences are stripped here, at read time, before the text is
-    handed to anything else -- this placement is load-bearing for two
-    reasons. First, `_fence_of` (below, via `render_apply_section`) computes
-    the fence length from the longest backtick run in the text it is given;
-    stripping afterwards could merge two separate backtick runs that an
-    escape sequence had been sitting between (a backtick, then `ESC[0m`, then
-    another backtick, is two 1-backtick runs in the raw bytes but becomes one
-    2-backtick run once the escape in between is gone) into a longer run than
-    the already-computed fence accounted for, reopening the fence-escape hole
-    the computed fence exists to close. Stripping first means `_fence_of`
-    always sees the final bytes that will actually be emitted. Second,
-    `_resources` matches a line-anchored regex (`^Apply complete! ...$`,
-    `re.MULTILINE`); a colour sequence at the start or end of that line (tofu
-    commonly wraps it, e.g. `ESC[1mApply complete! ...ESC[0m`) would defeat
-    the anchor and blank the resources column. Stripping first makes the
-    anchor robust regardless of what the underlying `tofu apply` invocation
-    did or didn't do with color output.
+    ANSI stripping happens HERE, before any other consumer sees the text, and
+    the ordering is load-bearing both ways:
 
-    Stripping happens on the text `_read_tail` returns (after its tail slice
-    and leading-fragment drop), not inside `_read_tail` on the wider window
-    it reads before slicing. The only place a truncation can split an escape
-    sequence in half is at the FRONT of that window -- the tail (the end of
-    the file, where the diagnostic that matters lives) is never cut -- and
-    `_read_tail` already discards everything up to and including the first
-    newline of a truncated read as an unusable leading fragment. Any split-
-    sequence debris from either of `_read_tail`'s two cut points (the initial
-    byte-window seek, and the later char-budget slice) can therefore only
-    ever land inside that already-discarded fragment, so stripping after
-    `_read_tail` returns sees only whole sequences and needs no extra
-    boundary handling of its own."""
+    - Strip before `_fence_of`. It sizes the fence from the longest backtick
+      run; stripping afterwards can merge two runs an escape sat between into
+      a longer one than the fence accounted for, reopening the fence-escape
+      hole the computed fence exists to close.
+    - Strip before `_resources`. Its regex is line-anchored, and tofu commonly
+      wraps that line in colour (`ESC[1m...ESC[0m`), which defeats the anchor.
+    - Strip AFTER `_read_tail`, not inside it. `_read_tail`'s only cut that can
+      split a sequence is at the front of its window, and it already discards
+      that leading fragment — so this only ever sees whole sequences."""
     out = []
     for p in sorted(glob.glob(os.path.join(cells_dir, "**", "cell.json"), recursive=True)):
         with open(p, encoding="utf-8") as fh:
@@ -394,16 +297,13 @@ def check_state_maps(check_run_lines, app_id):
 
     `present` is every App-authored `apply / ...` check name on the head SHA
     (newest run per name); `done` is the subset whose newest run completed with
-    a good conclusion. Both come from `apply-gate`'s public helpers, so the
-    "what counts as done" predicate stays written once and shared with the gate
-    and both detects -- a second predicate here could disagree with the work
-    queue it is supposed to be reporting on.
+    a good conclusion. Both come from `apply-gate`, per this module's COUPLING
+    note.
 
     An empty app id warns and reports no data rather than raising the way
-    `from_app` does on its own: a missing SHIPMATE_APP_ID must cost this one
-    display axis, never the whole comment (for comment-ops the comment IS the
-    feedback channel). Nothing else is printed to stdout -- comment.md is
-    written to a file -- so a workflow command here is safe."""
+    `from_app` does: for comment-ops the comment IS the feedback channel, so a
+    missing SHIPMATE_APP_ID must cost this one display axis, never the whole
+    comment."""
     if not app_id:
         print(
             "::warning::SHIPMATE_APP_ID is empty — the apply result comment falls back "
@@ -418,35 +318,18 @@ def load_check_maps(path, app_id):
     """check_state_maps over the scan step's output file, tolerating absence
     or corruption.
 
-    The scan step already degrades a failed fetch to an empty file, so a
-    MISSING file means the caller is an older pinned apply-summary that has no
-    scan step at all (the two-step internal-pin window in docs/releasing.md) --
-    silent no-data, no warning: that skew window is expected, not an error.
+    A MISSING file is silent no-data: the scan step degrades a failed fetch to
+    an empty file, so absence means an older pinned apply-summary with no scan
+    step at all (the two-step pin window in docs/releasing.md) — expected, not
+    an error.
 
-    A malformed line (parse_jsonl's SystemExit) or an unreadable file (a
-    generic OSError, e.g. a permissions error) must cost this one display axis
-    only, never the whole comment -- for comment-ops the comment IS the
-    feedback channel, so a bad checks.jsonl must degrade to no data with a
-    warning rather than propagate and kill the render step entirely. Both
-    cases are simply no data -- see apply_check_state for why no data is the
-    safe state.
-
-    A non-numeric SHIPMATE_APP_ID (e.g. the App's *client id* pasted in place
-    of its numeric app id) makes `ag.from_app`'s `int(app_id)` raise
-    ValueError -- also just this one display axis, same degradation. The
-    token-mint step in actions/apply-summary's action.yml runs before the
-    render step and would itself fail first on the same bad id (it needs the
-    numeric app id too), so in practice this ValueError guard is defence in
-    depth for a misconfiguration that should already have failed loud
-    upstream, not the primary place a bad app id is expected to be caught.
-
-    KeyError/TypeError/AttributeError are caught for the same reason: a line
-    that is valid JSON but not the expected check-run shape (a null or scalar
-    element inside `.check_runs`, or a payload change that projects `.name` to
-    null) reaches `latest_by_name`'s `run["name"].startswith(...)` and raises
-    from there. The scan step's `--jq` projection makes that unlikely, but the
-    cost of being wrong is the whole comment, so the net is closed by shape
-    rather than left to trust in the projection."""
+    Every other failure degrades to no data WITH a warning, never propagates:
+    for comment-ops the comment IS the feedback channel, so losing this one
+    display axis must not cost the whole render. That covers a malformed line
+    (parse_jsonl's SystemExit), an unreadable file (OSError), a non-numeric
+    SHIPMATE_APP_ID (ValueError from `int(app_id)`), and a valid-JSON line of
+    the wrong shape reaching `latest_by_name` (KeyError/TypeError/
+    AttributeError). See apply_check_state for why no data is the safe state."""
     try:
         with open(path, encoding="utf-8") as fh:
             return check_state_maps(fh, app_id)
@@ -486,12 +369,10 @@ def apply_check_state(rows, present, done):
 
     The pending apply checks ARE the work queue, so they -- not the per-cell
     artifact -- are the authority on whether a unit is done. `Compose cell
-    summary` derives its verdict from the apply step alone and uploads it
-    BEFORE `Save state`, the completion-token mint and `Complete the apply
-    check` can fail (or be skipped on cancellation), so an `applied` artifact
-    can coexist with a still-pending check; and the cosmetic
-    continue-on-error upload can drop, leaving a genuinely applied cell with no
-    artifact at all. Two directions, therefore:
+    summary` uploads BEFORE the completion-token mint and `Complete the apply
+    check`, so an `applied` artifact can coexist with a pending check; and the
+    continue-on-error upload can drop, leaving an applied cell with no artifact.
+    Two directions, therefore:
 
     - applied + pending check -> `unrecorded`: the apply succeeded but was not
       recorded, the gate stays pending, and the stack needs a re-plan (state
@@ -525,15 +406,11 @@ def _resources(text):
 
 
 def _job_url(row, jobs, run_url):
-    """Per-cell log link: jobs display FORWARD-built `apply / <stack_path> /
-    <env>` (the CONTRACT grammar), matched as a suffix of the listed job name.
-    Every caller level prepends its own job name, and the prefix differs per
-    route -- `<consumer job> / L<n> / apply / ...` on the env-level paths
-    (deploy, bare apply), `<consumer job> / waves / apply / ...` on the
-    single-env dispatch -- so only the suffix is matched, on a ` / `-separated
-    boundary (not a bare `endswith`) so a job named e.g. `reapply / ...` cannot
-    false-positive on the `apply / ...` suffix. No match -> fall back to the
-    workflow-run URL."""
+    """Per-cell log link: the FORWARD-built `apply / <stack_path> / <env>`
+    CONTRACT name, matched as a suffix of the listed job name — every caller
+    level prepends its own job name and the prefix differs per route. Matched on
+    a ` / ` boundary, not a bare `endswith`, so `reapply / ...` cannot
+    false-positive. No match -> the workflow-run URL."""
     target = _check_name(row)
     url = None
     for job in jobs:
@@ -564,18 +441,16 @@ def _summary_line(row):
 def _link_only(row, url):
     """The smallest possible section for a row: no output, just a link.
 
-    Two distinct reasons land here and they must not share one sentence. Output
-    that exists but does not fit is "too large"; output that never arrived is
-    unavailable, and saying "too large" about it is simply false -- a row
-    promoted from not_attempted (its check is done, only the cosmetic
-    continue-on-error artifact upload dropped) has no apply.txt at all. The
-    linked run may not even contain that cell's apply: when another run
-    completed the check, `_job_url` finds no matching job name in this run's
-    jobs listing and falls back to this run's URL, so the missing-output
-    wording deliberately does not promise the output is at the other end.
-    The branch lives here rather than at the call sites so build_comment's
-    up-front size reserve -- which calls this same function per row -- reserves
-    exactly what will be rendered, and so its C901 budget is untouched."""
+    Two reasons land here and must not share one sentence. Output that exists
+    but does not fit is "too large"; output that never arrived is unavailable,
+    and the linked run may not even contain that cell's apply (`_job_url` falls
+    back to this run's URL) -- so that wording promises nothing about what is at
+    the other end.
+
+    Keep the branch INSIDE this function. build_comment's up-front size reserve
+    calls it per row, so it reserves exactly what will be rendered; branching at
+    the call sites instead reserves one shape and renders another, and the
+    assembled body then overruns sc.HARD_CAP and posts no comment at all."""
     if row["apply_text"] is None:
         body = f"_Apply output unavailable for this cell — [run log]({url})._"
     else:
@@ -585,17 +460,12 @@ def _link_only(row, url):
 
 def render_apply_section(row, text, url, limit):
     """Largest details section that fits in `limit` characters: full apply.txt
-    -> truncated -> link-only. Truncation keeps the TAIL, not the head: a
-    failed apply's fatal `Error:` line and a successful apply's closing
-    `Apply complete! Resources: ...` line are both at the END of the output,
-    so cutting the FRONT (and saying so) keeps the line a reader opens this
-    section for; cutting the back the way the plan renderer does would drop
-    exactly that. Still cut at a line boundary -- the leading partial line
-    left over from the cut is dropped, never emitted as a fragment -- and the
-    fence for the truncated body still reuses the full body's fence so a cut
-    can never re-open the fence-escape hole. A cell whose apply.txt is
-    missing (result applied/failed but the artifact carries no apply.txt)
-    degrades to link-only rather than crashing."""
+    -> truncated -> link-only.
+
+    Truncation keeps the TAIL, cutting the front, unlike the plan renderer:
+    the line a reader opens this section for is always at the end. Cut at a
+    line boundary, and the truncated body REUSES the full body's fence so a cut
+    can never re-open the fence-escape hole."""
     if text is None:
         return _link_only(row, url)
     f = sc._fence_of(text)
@@ -638,15 +508,9 @@ def _gate_sentence(gate):
 
 
 def _excluded_skipped_lines(excluded, skipped):
-    """The excluded/skipped-env sentences, copied verbatim from apply-all.yml's
-    inline shell. Callers gate this on the all-environments form (`not
-    env_name`) themselves -- shared by `_footer` (full table render) and
-    `_short_form` (nothing to tabulate) so both surfaces carry the same
-    actionable warning instead of the short form silently dropping it.
-    Environment names here are author-controlled (Terramate tags / GitHub
-    Environment names, same as everywhere else in this file) so every one is
-    `_md_escape`d -- these are the comment's most actionable sentences, not
-    a place to let that guarantee lapse."""
+    """The excluded/skipped-env sentences. Shared by `_footer` and
+    `_short_form` so the short form cannot silently drop the comment's most
+    actionable warning. Env names are author-controlled, so `_md_escape`d."""
     lines = []
     if excluded:
         envs = ", ".join(f"`{sc._md_escape(e)}`" for e in excluded)
@@ -660,8 +524,7 @@ def _excluded_skipped_lines(excluded, skipped):
 
 def _footer(gate, run_url, excluded, skipped, env_name):
     """Excluded/skipped-env lines (all-environments form only), the gate
-    sentence, then the run link -- copied verbatim from the existing inline
-    shell in apply.yml / apply-all.yml's 'Result comment via the App' steps."""
+    sentence, then the run link."""
     parts = []
     if not env_name:
         parts.extend(_excluded_skipped_lines(excluded, skipped))
@@ -672,26 +535,19 @@ def _footer(gate, run_url, excluded, skipped, env_name):
 
 def _results_failed(results_csv):
     """Tokenize SHIPMATE_RESULTS (`join(needs.*.result, ',')`) and report
-    whether any job-level outcome signals failure. The one tokenizer shared
-    by the short form and the table path's failure line -- so the two
-    can never disagree about what 'failed' means for the same results
-    string.
+    whether any job-level outcome signals failure. One tokenizer, shared by the
+    short form and the table path, so the two cannot disagree.
 
-    A blank token counts as failure -- this restores the semantics of the
-    shell tokenizer this replaced (`echo "$RESULTS" | tr ',' '\\n' | grep
-    -qvE '^(success|skipped)$'`): an empty line never matches that
-    alternation, so a blank segment (or a wholly empty string) read as
-    failure. Dropping empty tokens instead would let a blank result read as
-    clean, silently turning "failed" into "found no pending applies to
-    run"."""
+    A blank token counts as FAILURE. Dropping empty tokens would let a blank
+    result read as clean, silently turning "failed" into "found no pending
+    applies to run"."""
     tokens = results_csv.split(",")
     return any(t not in ("success", "skipped") for t in tokens)
 
 
 def _apply_head(env_name, emoji, word):
-    """The `:x:`/`:white_check_mark:` lead sentence, byte-identical to the
-    pre-change inline shell. Shared so the table path's failure line
-    reuses the exact failed-form wording instead of a reworded duplicate."""
+    """The `:x:`/`:white_check_mark:` lead sentence. Shared so the table path's
+    failure line reuses the exact wording instead of a reworded duplicate."""
     if env_name:
         return f"{emoji} shipmate: `shipmate apply {sc._md_escape(env_name)}` {word}."
     return f"{emoji} shipmate: `shipmate apply` (all environments) {word}."
@@ -699,14 +555,9 @@ def _apply_head(env_name, emoji, word):
 
 def _short_form(results_csv, env_name, gate, run_url, excluded, skipped):
     """Used only when the expected set is empty and no cells were downloaded
-    (nothing to tabulate). Reuses the existing one-liner sentences from
-    apply.yml / apply-all.yml, plus the run link (new -- the old inline
-    one-liner never linked the run). Also carries the excluded/skipped-env
-    lines (all-environments form only) -- today's inline shell
-    (apply-all.yml) appends them unconditionally in every branch, including
-    this nothing-pending one, so dropping them here would regress the most
-    actionable case: an all-levels-empty run whose only pending work is an
-    explicit env."""
+    (nothing to tabulate). Carries the excluded/skipped-env lines too: an
+    all-levels-empty run whose only pending work is an explicit env is exactly
+    the case where they matter most."""
     if _results_failed(results_csv):
         head = _apply_head(env_name, ":x:", "failed")
     else:
@@ -720,29 +571,15 @@ def _short_form(results_csv, env_name, gate, run_url, excluded, skipped):
 
 
 def _failure_line(results_csv, rows, env_name):
-    """SHIPMATE_RESULTS is the job-level failure signal (the old inline
-    shell's only source of a 'failed' word). Once the expected cell set is
-    non-empty, the table becomes the comment's status source and this signal
-    was previously dropped -- so an apply run that dies before any cell
-    reports (a missing/denied `<env>-apply` environment, a job-level cancel)
-    rendered every expected cell as an all-benign not_attempted, with no ❌
-    and no 'failed' anywhere. When results signals failure and no row
-    already carries failed/blocked (the common case still has its own ❌/🚫
-    rows and needs no extra line), surface the short form's own failure
-    sentence -- reusing _apply_head via the shared _results_failed tokenizer
-    -- so the old one-liner's failure signal survives verbatim even though
-    the table now carries the per-cell detail.
+    """The job-level failure signal, surfaced when the table cannot carry it.
+    An apply run that dies before any cell reports (a denied `<env>-apply`
+    environment, a job-level cancel) renders every expected cell as a benign
+    not_attempted, with no ❌ anywhere — this restores it.
 
-    `unrecorded` is deliberately NOT in the suppression set, even though it
-    gets its own ⚠️ row and its own note: those describe ONE cell in ONE
-    environment, and say nothing about a different environment whose job
-    died before any cell reported at all (a denied `<env>-apply` environment,
-    a job-level cancel) -- exactly the all-environments mixed case this
-    function exists to catch. Suppressing on `unrecorded` would let a ⚠️ in
-    env A silently swallow the only ❌ that env B's dead-before-any-cell
-    failure is ever going to get. A ⚠️ row is allowed to sit beside the
-    generic ❌ in the common single-environment case too: the run genuinely
-    did fail, and the redundancy never loses a signal."""
+    `unrecorded` is deliberately NOT in the suppression set. Its ⚠️ describes
+    ONE cell in ONE environment and says nothing about a different environment
+    that died before reporting; suppressing on it would let a ⚠️ in env A
+    swallow the only ❌ env B is ever going to get."""
     if not _results_failed(results_csv):
         return ""
     if any(r["status"] in ("failed", "blocked") for r in rows):
@@ -770,17 +607,14 @@ def _top_section(env_name, results_csv, rows, jobs, run_url):
 
 
 def build_comment(rows, jobs, run_url, gate, excluded, skipped, env_name, results_csv=""):
-    """Assemble the comment under SIZE_BUDGET. Sections render in table order
-    (not grouped by status): attempted cells (applied/failed/unrecorded) get a
-    details section with the same degradation as summary-comment; blocked cells get a
-    single no-fence line; not-attempted cells get no section. Every attempted
-    cell is guaranteed at least a link-only section, and every blocked cell
-    its one-line reason: the space ALL remaining attempted cells' link-only
-    fallbacks and ALL remaining blocked cells' one-liners need is reserved up
-    front (together), so an early giant apply.txt cannot starve a later
-    cell's link -- or a run with hundreds of blocked cells (each a small,
-    fixed-size line) starve the FIRST attempted cell's guaranteed minimum by
-    going uncounted until it was already too late."""
+    """Assemble the comment under SIZE_BUDGET. Sections render in table order:
+    attempted cells get a details section, blocked cells a single no-fence
+    line, not-attempted cells none.
+
+    The space every remaining link-only fallback and blocked one-liner needs is
+    reserved UP FRONT, together. Otherwise an early giant apply.txt starves a
+    later cell's link, and hundreds of blocked cells starve the first attempted
+    cell's guaranteed minimum by going uncounted until too late."""
     top = _top_section(env_name, results_csv, rows, jobs, run_url)
     footer = "\n\n" + _footer(gate, run_url, excluded, skipped, env_name)
     used = len(top) + len(footer)
@@ -832,10 +666,6 @@ def main():
     jobs = ag.parse_jsonl(sys.stdin)
     downloaded = load_cells(os.environ.get("CELLS", "cells"))
     expected = _expected_cells()
-    # The apply checks are the work queue and therefore the authority on what
-    # is done; the artifacts only say what each cell's own job believed. See
-    # apply_check_state. Absent/unreadable check data degrades to artifact-only
-    # rendering rather than inventing a state.
     present, done = load_check_maps(
         os.environ.get("SHIPMATE_CHECKS", "checks.jsonl"),
         os.environ.get("SHIPMATE_APP_ID", ""),
@@ -847,10 +677,8 @@ def main():
         f"{os.environ['GITHUB_SERVER_URL']}/{os.environ['GITHUB_REPOSITORY']}"
         f"/actions/runs/{os.environ['GITHUB_RUN_ID']}"
     )
-    # Hoisted out of the branch below: the short form needs these too (an
-    # excluded explicit env can be the *entire* reason nothing else is
-    # pending), not just the full table render. SHIPMATE_RESULTS likewise
-    # threads into the table path too, not just the short form.
+    # Both render paths need these: an excluded explicit env can be the entire
+    # reason nothing else is pending.
     excluded = json.loads(os.environ.get("SHIPMATE_EXCLUDED_ENVS") or "[]")
     skipped = json.loads(os.environ.get("SHIPMATE_SKIPPED_ENVS") or "[]")
     results_csv = os.environ.get("SHIPMATE_RESULTS", "") or ""

@@ -11,6 +11,23 @@ section below names the SHA the release tags.
 The version line stays `v0.x` while action inputs, check names, and the comment
 grammar are declared unstable in `README.md`.
 
+## [Unreleased]
+
+### Removed — breaking
+
+- `actions/apply-detect` no longer declares the per-wave outputs `wave0` …
+  `wave7`. Use the aggregate `waves` object (`fromJSON(...).waveN`), which
+  `apply.yml` and `apply-env-level.yml` have consumed since 0.6.0.
+
+  **This break is silent.** GitHub Actions resolves a read of an undeclared
+  composite-action output to the empty string rather than erroring, so a
+  workflow still on the old shape gets `needs.detect.outputs.wave0 == ''`:
+  the `!= '[]'` skip condition stays true, the wave job is not skipped, and
+  `fromJSON('')` then fails at matrix expansion — the apply run dies before
+  any cell applies and every apply check stays pending. Before re-pinning past
+  this release, grep your workflows for `outputs.wave` and move them to
+  `fromJSON(needs.detect.outputs.waves).waveN`.
+
 ## [0.7.2] — 2026-08-07
 
 Tags `6973262`.
