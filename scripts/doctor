@@ -1145,7 +1145,10 @@ def _declared_envs(cells_dir):
     every environment probe against a name that cannot exist, producing
     findings about an environment nobody declared."""
     envs = set()
-    for cj in cells_dir.glob("cell-summary.*/cell.json"):
+    # Recursive: a single matching artifact is extracted without its
+    # per-artifact directory (see scripts/pending-checks), so both layouts
+    # occur.
+    for cj in cells_dir.glob("**/cell.json"):
         try:
             env = json.loads(cj.read_text(encoding="utf-8"))["environment"]
         except (OSError, ValueError, KeyError, TypeError):

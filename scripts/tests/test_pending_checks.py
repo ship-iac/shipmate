@@ -96,3 +96,28 @@ def test_cells_sorted_and_multiple(tmp_path):
     )
     names = [b["name"] for b in pc.bodies(str(tmp_path), HEAD)]
     assert names == ["apply / stacks/app / dev-eu", "apply / stacks/app / dev-us"]
+
+
+def test_single_cell_downloaded_flat_still_yields_a_body(tmp_path):
+    # `actions/download-artifact` extracts into `path` itself, with no
+    # per-artifact subdirectory, whenever exactly ONE artifact matches the
+    # pattern (`artifacts.length === 1 ? resolvedPath : join(resolvedPath,
+    # name)`). A one-cell plan therefore lands at `cells/cell.json`, and a
+    # glob that insists on the nested layout emits nothing -- no pending apply
+    # check, so the pre-apply snapshot refuses ("nothing to complete
+    # afterwards") and post-merge deploy-detect finds an empty work queue.
+    (tmp_path / "cell.json").write_text(
+        json.dumps(
+            {
+                "stack": "auth",
+                "stack_path": "stacks/auth",
+                "environment": "dev-eu",
+                "changed": True,
+                "fingerprint": "c" * 64,
+            }
+        ),
+        encoding="utf-8",
+    )
+    (body,) = pc.bodies(str(tmp_path), HEAD)
+    assert body["name"] == "apply / stacks/auth / dev-eu"
+    assert body["status"] == "queued"
