@@ -2,7 +2,11 @@ name: summary
 on:
   workflow_call:
     secrets:
-      SHIPMATE_APP_PRIVATE_KEY: { required: true }
+      # `required: false` — see apply.yml's note. This workflow's only job binds
+      # `environment: shipmate-engine`, so a required declaration happens to be
+      # satisfiable today; adding any job that does not bind the environment
+      # would make every consumer that scopes the key to it fail at load time.
+      SHIPMATE_APP_PRIVATE_KEY: { required: false }
 jobs:
   summary:
     # One gate write per head SHA. Two plan runs for the same commit
