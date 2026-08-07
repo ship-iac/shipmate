@@ -11,7 +11,12 @@ section below names the SHA the release tags.
 The version line stays `v0.x` while action inputs, check names, and the comment
 grammar are declared unstable in `README.md`.
 
-## [Unreleased]
+## [0.8.0] — 2026-08-08
+
+**Re-pinning requires one edit if your workflows read the per-wave outputs
+directly** — see below; grep for `outputs.wave` first. Otherwise re-pinning is
+all it takes. The rest of this release is internal: dead surface removed and
+comment prose cut, with no behaviour change.
 
 ### Removed — breaking
 
@@ -27,6 +32,25 @@ grammar are declared unstable in `README.md`.
   any cell applies and every apply check stays pending. Before re-pinning past
   this release, grep your workflows for `outputs.wave` and move them to
   `fromJSON(needs.detect.outputs.waves).waveN`.
+
+- `dev/repin_consumer.rewrite_consumer`, `dev/repin_consumer._survivors` and
+  `dev/repin_internal.rewrite`, and `scripts/waves`' command-line entry point
+  (`main`, `--reverse`, `SHIPMATE_WORKSET`). None had a production caller;
+  `dev/` is maintainer tooling and `scripts/waves` is only ever `_load`ed as a
+  module, so no consumer surface is affected.
+
+### Added
+
+- **A guard pinning that `guard_max_waves` runs before the wave map is padded.**
+  No behaviour changed and no release was ever affected — the guard call was
+  present and correct in every shipped version. What was missing was anything
+  holding it there: removing the call from both live callers (`apply-detect`,
+  `env-order`) left the entire suite green, in this release and every one before
+  it. Since `pad_waves` truncates, an unguarded regression would have dropped
+  the deepest cells of a change spanning more than 8 dependency levels — the
+  apply run finishing green having applied nothing for them, their apply checks
+  left pending. Now pinned over the parsed AST for each caller, plus a
+  behavioural test through `waves_by_env_level`.
 
 ## [0.7.2] — 2026-08-07
 
