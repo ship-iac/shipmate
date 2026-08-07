@@ -171,7 +171,7 @@ samples on a commit with no release, which is exactly the state the probe reads
 as staleness.
 
 ```bash
-for d in repo-example-stacks repo-example-folders repo-example-workspaces; do
+for d in repo-example-stacks repo-example-folders repo-example-workspaces repo-example-stacks-aws; do
   python dev/repin_consumer.py --repo "../$d" --sha <release-sha> --label vX.Y.Z
 done
 ```

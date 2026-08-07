@@ -94,6 +94,7 @@ Click **Install**, choose **Only select repositories**, and pick:
 - `repo-example-stacks`
 - `repo-example-folders`
 - `repo-example-workspaces`
+- `repo-example-stacks-aws`
 
 (and any other consumer repo that wires up comment-ops). Add repos to the
 installation later from the same page as new consumer repos come online.
@@ -108,7 +109,7 @@ default branch:
 
 ```bash
 ORG=<org>
-REPOS="repo-example-stacks repo-example-folders repo-example-workspaces"
+REPOS="repo-example-stacks repo-example-folders repo-example-workspaces repo-example-stacks-aws"
 
 for NAME in $REPOS; do
   REPO="$ORG/$NAME"
@@ -167,7 +168,7 @@ Per-repo, in one pass over the consumer list:
 
 ```bash
 ORG=<org>
-REPOS="repo-example-stacks repo-example-folders repo-example-workspaces"
+REPOS="repo-example-stacks repo-example-folders repo-example-workspaces repo-example-stacks-aws"
 TEAM=<approvers-team-slug>          # may differ per repo; set it per repo either way
 APP_ID=<app-id-from-step-2-output>
 
@@ -214,7 +215,7 @@ so set it per-repo as above):
 
 ```bash
 gh variable set SHIPMATE_APP_ID --org <org> --visibility selected \
-  --repos "repo-example-stacks,repo-example-folders,repo-example-workspaces" \
+  --repos "repo-example-stacks,repo-example-folders,repo-example-workspaces,repo-example-stacks-aws" \
   --body "<app-id-from-step-2-output>"
 ```
 
@@ -232,7 +233,7 @@ every consumer repo, not just once for the org.
 
    ```bash
    ORG=<org>
-   REPOS="repo-example-stacks repo-example-folders repo-example-workspaces"
+   REPOS="repo-example-stacks repo-example-folders repo-example-workspaces repo-example-stacks-aws"
 
    KEY=$(cat new-key.pem)
    if [ -z "$KEY" ]; then

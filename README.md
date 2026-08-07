@@ -301,6 +301,10 @@ workflows wired up:
 - [repo-example-folders](https://github.com/ship-iac/repo-example-folders) — folder-per-env/region (no injected vars)
 - [repo-example-workspaces](https://github.com/ship-iac/repo-example-workspaces) — workspace-per-env (`TF_WORKSPACE`)
 
+A fourth runs on real cloud, and is the only one that needs credentials:
+
+- [repo-example-stacks-aws](https://github.com/ship-iac/repo-example-stacks-aws) — the `stacks` flavor flattened (every stack at the repo root) on AWS: S3 backend with native locking, GitHub OIDC roles, one SSM parameter per stack
+
 ## Development
 
 The engine's logic lives in a few small Python helper scripts under `scripts/`
