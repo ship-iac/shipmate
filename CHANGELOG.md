@@ -13,7 +13,7 @@ grammar are declared unstable in `README.md`.
 
 ## [0.7.0] — 2026-08-07
 
-Tags <SHA>.
+Tags `6be3d34`.
 
 **One consumer action beyond re-pinning, and it is not optional:** a wrapper
 that calls `apply.yml`, `apply-all.yml` or `deploy.yml` must add
