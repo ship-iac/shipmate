@@ -57,7 +57,7 @@ jobs:
           terramate-version: ${{ vars.TERRAMATE_VERSION }}
           tofu-version: ${{ vars.TOFU_VERSION }}
       - id: d
-        uses: ship-iac/shipmate/actions/apply-detect@2330cbef9a48e29ffd99df4624e19fbf4d2985a4
+        uses: ship-iac/shipmate/actions/apply-detect@f918f67854d25bb4a4485ab728e1c4518f002a13
         with:
           environment: ${{ inputs.environment }}
           plan-run-id: ${{ inputs.plan_run_id }}
@@ -126,7 +126,7 @@ jobs:
           app-id: ${{ vars.SHIPMATE_APP_ID }}
           private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
       - name: Post apply result comment
-        uses: ship-iac/shipmate/actions/apply-summary@17d5e93bda614568fda0c5686547364ec8f5662b
+        uses: ship-iac/shipmate/actions/apply-summary@f918f67854d25bb4a4485ab728e1c4518f002a13
         with:
           pr-number: ${{ inputs.pr_number }}
           head-sha: ${{ inputs.ref }}
