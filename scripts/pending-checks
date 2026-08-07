@@ -18,7 +18,12 @@ import pathlib
 
 def bodies(cells_dir, head_sha):
     out = []
-    for cj in sorted(pathlib.Path(cells_dir).glob("cell-summary.*/cell.json")):
+    # Recursive, not `cell-summary.*/cell.json`: `actions/download-artifact`
+    # drops the per-artifact subdirectory when exactly one artifact matches the
+    # pattern, so a one-cell plan lands at `<cells>/cell.json`. Insisting on the
+    # nested layout emitted nothing there -- no pending apply check, so the
+    # pre-apply snapshot refuses and deploy-detect's work queue comes up empty.
+    for cj in sorted(pathlib.Path(cells_dir).glob("**/cell.json")):
         cell = json.loads(cj.read_text(encoding="utf-8"))
         if "fingerprint" not in cell:
             raise SystemExit(

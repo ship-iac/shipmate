@@ -2551,3 +2551,13 @@ def test_gh_token_stays_unset_when_it_was_unset_before(monkeypatch):
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
     assert doctor._plan_env_secret_warnings(_ctx()) == []
     assert "GH_TOKEN" not in os.environ
+
+
+def test_declared_envs_reads_a_flat_single_artifact_download(tmp_path):
+    # Same layout split `pending-checks` has to survive: with exactly one
+    # matching artifact, the download lands at `<cells>/cell.json` with no
+    # per-artifact directory. Insisting on the nested layout silently empties
+    # the declared-env set, which skips every environment probe on any
+    # single-cell plan.
+    (tmp_path / "cell.json").write_text(json.dumps({"environment": "dev-eu"}), encoding="utf-8")
+    assert doctor._declared_envs(tmp_path) == {"dev-eu"}
