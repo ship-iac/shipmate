@@ -8,13 +8,14 @@ on:
       plan_run_id: { required: true, type: string }
       state_suffix: { required: true, type: string }
     secrets:
-      # Declared explicitly so the interface fails loud if a consumer wrapper
-      # forgets it. `vars` (SHIPMATE_APP_ID, TERRAMATE_VERSION, TOFU_VERSION)
-      # are inherited by a called workflow automatically; secrets are NOT — a
-      # wrapper must pass this (or use `secrets: inherit`), else the App-token
-      # step in `summary` mints an empty key and the whole run reports red.
-      # Feeds both gate-refresh's App-token mint and the result-comment mint.
-      SHIPMATE_APP_PRIVATE_KEY: { required: true }
+      # `required: false` is load-bearing, not laxity: consumers hold this key
+      # as a secret on the `shipmate-engine` environment (docs/github-app.md
+      # §5), and `secrets: inherit` cannot satisfy a *required* declaration from
+      # an environment — GHA rejects the call before any step of the first
+      # callee job that binds no environment (`guard`), so the whole run dies
+      # red with "Secret ... is required, but not provided while calling".
+      # `summary` binds `environment: shipmate-engine` and reads the key there.
+      SHIPMATE_APP_PRIVATE_KEY: { required: false }
       SHIPMATE_PLAN_PASSPHRASE: { required: false }
 jobs:
   # `gh workflow run apply.yml` by a human with write access would otherwise

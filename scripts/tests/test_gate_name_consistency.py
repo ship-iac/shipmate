@@ -320,6 +320,30 @@ def _declares_app_private_key_secret(workflow_doc):
     return "SHIPMATE_APP_PRIVATE_KEY" in secrets
 
 
+def test_app_key_secret_interface_is_never_required():
+    """No `workflow_call` interface may declare `SHIPMATE_APP_PRIVATE_KEY`
+    required. Consumers scope that key to the `shipmate-engine` environment
+    (docs/github-app.md §5), and `secrets: inherit` cannot satisfy a required
+    declaration from an environment: GHA rejects the call before any step of the
+    first callee job that binds no environment, killing the whole run. The jobs
+    that mint the App token bind the environment and read the key from there, so
+    requiring it buys nothing and breaks the documented storage model.
+    """
+    offenders = []
+    for wf in sorted(WORKFLOWS.glob("*.yml")):
+        doc = yaml.safe_load(wf.read_text(encoding="utf-8")) or {}
+        on = doc.get("on") or doc.get(True) or {}
+        decl = ((on.get("workflow_call") or {}).get("secrets") or {}).get(
+            "SHIPMATE_APP_PRIVATE_KEY"
+        )
+        if isinstance(decl, dict) and decl.get("required") is True:
+            offenders.append(wf.name)
+    assert not offenders, (
+        f"workflow(s) declare SHIPMATE_APP_PRIVATE_KEY required, which an "
+        f"environment-scoped consumer secret can never satisfy: {offenders}"
+    )
+
+
 def _reusable_caller_offense(wf_name, job_name, job, workflow_docs):
     """Check one reusable-workflow-caller job; return an offense string, or
     None if credential-threading into the callee is sound."""
