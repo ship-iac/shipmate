@@ -11,6 +11,32 @@ section below names the SHA the release tags.
 The version line stays `v0.x` while action inputs, check names, and the comment
 grammar are declared unstable in `README.md`.
 
+## [0.7.2] — 2026-08-07
+
+Tags <SHA>.
+
+**No consumer action beyond re-pinning**, and re-pinning matters here: the fix
+lives in `scripts/`, which `actions/summary` runs out of its own pinned
+checkout, so a consumer still pinned to v0.7.1 keeps the old behaviour.
+
+### Fixed
+
+- **A plan that produced exactly one changed cell created no pending apply
+  check**, so that change could not be applied by either path. `pending-checks`
+  and `doctor` globbed `cell-summary.*/cell.json`, but
+  `actions/download-artifact` extracts into `path` itself, with no per-artifact
+  subdirectory, whenever exactly one artifact matches the pattern — so a
+  one-cell plan lands at `cells/cell.json` and both readers saw an empty
+  directory. Pre-merge, `shipmate apply <env>` then failed in `waves / snapshot`
+  with `no App-authored apply check named 'apply / <stack> / <env>' on the head
+  SHA before apply`; post-merge, `deploy-detect` read an empty work queue,
+  because the pending apply checks **are** that queue. The gate stayed pending
+  throughout — this failed closed, never green over unapplied infrastructure —
+  but the only way past it was a second changed cell. `doctor` was also silently
+  skipping every environment probe on such a plan. Both readers now glob
+  recursively, matching `summary-comment`, which already did, which is why the
+  plan comment and gate looked healthy while the apply path was dead.
+
 ## [0.7.1] — 2026-08-07
 
 Tags `2fdf60f`.
