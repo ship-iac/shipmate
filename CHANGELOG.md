@@ -13,6 +13,8 @@ grammar are declared unstable in `README.md`.
 
 ## [0.8.0] — 2026-08-08
 
+Tags `5ee006b`.
+
 **Re-pinning requires one edit if your workflows read the per-wave outputs
 directly** — see below; grep for `outputs.wave` first. Otherwise re-pinning is
 all it takes. The rest of this release is internal: dead surface removed and
