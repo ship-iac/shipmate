@@ -11,6 +11,36 @@ section below names the SHA the release tags.
 The version line stays `v0.x` while action inputs, check names, and the comment
 grammar are declared unstable in `README.md`.
 
+## [0.7.1] — 2026-08-07
+
+Tags <SHA>.
+
+**No consumer action beyond re-pinning.** If your pre-merge `shipmate apply
+<env>` has been failing with `Secret SHIPMATE_APP_PRIVATE_KEY is required, but
+not provided while calling`, this release is the fix and re-pinning is all it
+takes.
+
+### Fixed
+
+- **`apply.yml`, `apply-all.yml` and `summary.yml` no longer declare
+  `SHIPMATE_APP_PRIVATE_KEY` a *required* `workflow_call` secret**, which made
+  the documented way of storing that key unusable on the pre-merge apply path.
+  `docs/github-app.md` §5 puts the key on the `shipmate-engine` **environment**,
+  and deliberately not in a repository secret — but `secrets: inherit` forwards
+  only what is in the caller's context, and an environment secret never is. A
+  required declaration is therefore unsatisfiable, and GitHub rejects the call
+  before any step of the first callee job that binds no `environment:` — `guard`
+  — so a dispatched `shipmate apply <env>` died red with **zero steps executed**.
+  Nothing was applied and nothing partially applied; only the verb was dead.
+  Post-merge `deploy.yml` was unaffected because its declaration was already
+  optional, and `summary.yml` carried the requirement without failing only
+  because its single job binds `environment: shipmate-engine`, which resolves the
+  key. The credential still reaches everything that needs it: every job that
+  mints an App token binds that environment and reads it there. A consumer that
+  keeps the key as a repository secret instead trades a load-time rejection for a
+  red run at the mint step — the behaviour `deploy.yml` has always had — and
+  `shipmate doctor` names a missing key directly.
+
 ## [0.7.0] — 2026-08-07
 
 Tags `6be3d34`.
