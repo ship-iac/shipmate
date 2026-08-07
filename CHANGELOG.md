@@ -13,7 +13,7 @@ grammar are declared unstable in `README.md`.
 
 ## [0.7.1] — 2026-08-07
 
-Tags <SHA>.
+Tags `2fdf60f`.
 
 **No consumer action beyond re-pinning.** If your pre-merge `shipmate apply
 <env>` has been failing with `Secret SHIPMATE_APP_PRIVATE_KEY is required, but
