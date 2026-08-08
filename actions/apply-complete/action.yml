@@ -31,17 +31,33 @@ runs:
       # The listing also lags: a wave job can finish seconds before its
       # conclusion is readable here, and a cell we cannot yet decide is not a
       # cell that did not run. So listing and selection are one retry loop --
-      # re-fetch until the script reports every snapshot cell resolved (exit
-      # 0), and only then proceed to the token and the PATCHes. Cells still
-      # unresolved after the retries fail the step by name: a stranded check
-      # blocks the gate forever while reporting success everywhere a human
-      # looks, so it must never pass as one.
+      # the `gh api` fetch is inside the `for` because re-reading the listing
+      # IS the retry; hoisting it turns twelve attempts into one, plus 110
+      # seconds of sleeping over a snapshot that can never change.
+      #
+      # An empty listing (or a fetch that failed outright) is the most extreme
+      # form of exactly that lag, so it is retried rather than failed on the
+      # first attempt. A failed fetch takes the same path without reading the
+      # file it half-wrote: a truncated listing matches a subset of cells and
+      # so slips past the script's all-cells-unmatched floor.
+      #
+      # Ids accumulate across attempts and are deduped at the end, because
+      # replicas differ: attempt 4 can land on a staler one than attempt 3 and
+      # lose a row attempt 3 already saw. A later read may add a completion,
+      # never revoke one -- the ids only ever come from a job GitHub recorded
+      # as `success`.
       #
       # ~2 minutes of budget, not the ~30s a lag is expected to need, because
-      # exhausting it is expensive rather than merely annoying: this step
-      # failing fails `complete`, which fails the env-level, and deploy.yml's
-      # `!failure()` guards then skip every successor env-level -- halting a
-      # multi-region deploy over infrastructure that already applied.
+      # exhausting it is expensive rather than merely annoying: it fails
+      # `complete`, which fails the env-level, and deploy.yml's `!failure()`
+      # guards then skip every successor env-level -- halting a multi-region
+      # deploy over infrastructure that already applied.
+      #
+      # Which is also why exhaustion does not fail *here*: the steps below
+      # complete the checks this run did earn, and the last step then fails
+      # the job over the cells it did not. Failing at this point instead would
+      # discard a whole level's completions over one lagging cell, stranding
+      # 29 checks to report the 30th.
       #
       # Only exit 75 (EX_TEMPFAIL) means "ask me again"; any other non-zero is
       # the script itself failing and is propagated immediately, so a broken
@@ -50,38 +66,45 @@ runs:
       #
       # Diagnostics are echoed once, after the loop, not per attempt: the file
       # is rewritten each time, so a 12-attempt run would otherwise log the
-      # same warning 12 times. On exhaustion the annotation quotes only the
-      # script's `unresolved cells:` line -- the file may also hold the
-      # unmatched-cells warning, and `::error::` prefixed onto that lists the
-      # wrong cells and pushes the right ones onto an un-annotated line.
+      # same warning 12 times. The stranded marker keeps only the script's
+      # `retry:` lines -- the file also holds warnings naming cells that no
+      # retry could have helped, and annotating those as the reason for the
+      # failure names the wrong cells.
       run: |
         set -euo pipefail
+        : > "$RUNNER_TEMP/earned-ids.txt"
+        : > "$RUNNER_TEMP/stranded.txt"
         ok=""
         attempts=12
         for n in $(seq "$attempts"); do
-          gh api --paginate --jq '.jobs[]' \
-            "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs?per_page=100" \
-            > "$RUNNER_TEMP/jobs.jsonl"
-          if [ ! -s "$RUNNER_TEMP/jobs.jsonl" ]; then
-            echo "::error::run jobs listing came back empty — cannot tell which wave cells succeeded; refusing to silently complete nothing"
-            exit 1
-          fi
           rc=0
-          python3 "$GITHUB_ACTION_PATH/../../scripts/apply-complete" \
-            < "$RUNNER_TEMP/jobs.jsonl" \
-            > "$RUNNER_TEMP/complete-ids.txt" \
-            2> "$RUNNER_TEMP/diagnostics.txt" || rc=$?
+          : > "$RUNNER_TEMP/attempt-ids.txt"
+          if gh api --paginate --jq '.jobs[]' \
+               "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs?per_page=100" \
+               > "$RUNNER_TEMP/jobs.jsonl" && [ -s "$RUNNER_TEMP/jobs.jsonl" ]; then
+            python3 "$GITHUB_ACTION_PATH/../../scripts/apply-complete" \
+              < "$RUNNER_TEMP/jobs.jsonl" \
+              > "$RUNNER_TEMP/attempt-ids.txt" \
+              2> "$RUNNER_TEMP/diagnostics.txt" || rc=$?
+          else
+            rc=75
+            echo "retry: the run jobs listing came back empty or unreadable — cannot tell which wave cells succeeded" \
+              > "$RUNNER_TEMP/diagnostics.txt"
+          fi
+          cat "$RUNNER_TEMP/attempt-ids.txt" >> "$RUNNER_TEMP/earned-ids.txt"
           case "$rc" in
             0) ok=1; break ;;
             75) if [ "$n" -lt "$attempts" ]; then sleep 10; fi ;;
             *) cat "$RUNNER_TEMP/diagnostics.txt" >&2; exit "$rc" ;;
           esac
         done
+        sort -u "$RUNNER_TEMP/earned-ids.txt" > "$RUNNER_TEMP/complete-ids.txt"
         cat "$RUNNER_TEMP/diagnostics.txt" >&2
         if [ -z "$ok" ]; then
-          stranded=$(sed -n 's/^unresolved cells: //p' "$RUNNER_TEMP/diagnostics.txt")
-          echo "::error::the jobs listing never reported a conclusion for these cells; their apply checks would be stranded pending: $stranded"
-          exit 1
+          sed -n 's/^retry: //p' "$RUNNER_TEMP/diagnostics.txt" > "$RUNNER_TEMP/stranded.txt"
+          [ -s "$RUNNER_TEMP/stranded.txt" ] ||
+            echo "the retries were exhausted without the script naming a reason" \
+              > "$RUNNER_TEMP/stranded.txt"
         fi
 
     - name: Mint App installation token
@@ -119,3 +142,16 @@ runs:
           done
           [ -n "$ok" ] || { echo "::error::failed to complete apply check $id after retries"; exit 1; }
         done < "$RUNNER_TEMP/complete-ids.txt"
+
+    - name: Fail over any cell the jobs listing never resolved
+      shell: bash
+      # Deliberately last, and deliberately still a failure: the completions
+      # above are the earned half of this run, and a stranded check blocks the
+      # gate forever while reporting success everywhere a human looks, so it
+      # must never pass as one.
+      run: |
+        set -euo pipefail
+        if [ -s "$RUNNER_TEMP/stranded.txt" ]; then
+          echo "::error::the retries were exhausted and these apply checks are left pending: $(tr '\n' ' ' < "$RUNNER_TEMP/stranded.txt")"
+          exit 1
+        fi
