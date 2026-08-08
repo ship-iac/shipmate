@@ -5,9 +5,12 @@ import os
 import subprocess
 import sys
 
-from _loader import SCRIPTS, action_steps, load_script
+import pytest
+from _loader import ENGINE, SCRIPTS, action_steps, load_script, usable_bash
 
 apply_complete = load_script("apply-complete")
+
+_BASH = usable_bash()
 
 SNAP = {
     "stacks/dns\x00dev-eu": [1],
@@ -24,20 +27,25 @@ def test_completes_only_cells_whose_wave_job_succeeded():
         job("waves / apply / stacks/dns / dev-eu", "success"),
         job("waves / apply / stacks/app / dev-eu", "failure"),
     ]
-    assert apply_complete.to_complete(SNAP, jobs) == ([1], [], [])
+    assert apply_complete.to_complete(SNAP, jobs) == ([1], [], [], ["stacks/app / dev-eu"])
 
 
 def test_matches_the_nested_reusable_workflow_job_name_suffix():
     # A called workflow's jobs display as `<caller job> / <called job> / <job>`.
     jobs = [job("targeted / waves / apply / stacks/app / dev-eu", "success")]
-    assert apply_complete.to_complete(SNAP, jobs) == ([2, 3], [], ["stacks/dns / dev-eu"])
+    assert apply_complete.to_complete(SNAP, jobs) == ([2, 3], [], ["stacks/dns / dev-eu"], [])
 
 
 def test_a_cancelled_or_missing_job_leaves_the_check_pending():
     jobs = [
         job("waves / apply / stacks/dns / dev-eu", "cancelled"),
     ]
-    assert apply_complete.to_complete(SNAP, jobs) == ([], [], ["stacks/app / dev-eu"])
+    assert apply_complete.to_complete(SNAP, jobs) == (
+        [],
+        [],
+        ["stacks/app / dev-eu"],
+        ["stacks/dns / dev-eu"],
+    )
 
 
 def test_a_rerun_success_after_a_failure_completes_the_cell():
@@ -45,7 +53,7 @@ def test_a_rerun_success_after_a_failure_completes_the_cell():
         job("waves / apply / stacks/dns / dev-eu", "failure"),
         job("waves / apply / stacks/dns / dev-eu", "success"),
     ]
-    assert apply_complete.to_complete(SNAP, jobs) == ([1], [], ["stacks/app / dev-eu"])
+    assert apply_complete.to_complete(SNAP, jobs) == ([1], [], ["stacks/app / dev-eu"], [])
 
 
 def test_never_completes_a_cell_that_was_not_snapshotted():
@@ -83,16 +91,16 @@ def test_a_job_present_without_a_conclusion_is_unresolved_not_dropped():
     # The listing lagging a finished job is the whole reason for the retry
     # loop: a null conclusion must be reported, never read as "did not run".
     jobs = [job("waves / apply / stacks/dns / dev-eu", None)]
-    ids, unresolved, _ = apply_complete.to_complete(SNAP, jobs)
+    ids, unresolved, _, _ = apply_complete.to_complete(SNAP, jobs)
     assert (ids, unresolved) == ([], ["stacks/dns / dev-eu"])
 
 
 def test_a_cell_with_no_matching_job_at_all_is_unmatched_not_unresolved():
-    # Skip-propagation: an earlier wave failing skips wave1..wave7, so those
-    # cells never get a job. Retrying cannot help -- they are named, not
-    # retried.
+    # Skip-propagation: an earlier wave failing skips wave1..wave7, and GitHub
+    # never expands a skipped job's matrix, so those cells get no job row at
+    # all. Retrying cannot help -- they are named, not retried.
     jobs = [job("waves / apply / stacks/dns / dev-eu", "success")]
-    assert apply_complete.to_complete(SNAP, jobs) == ([1], [], ["stacks/app / dev-eu"])
+    assert apply_complete.to_complete(SNAP, jobs) == ([1], [], ["stacks/app / dev-eu"], [])
 
 
 def test_skipped_and_failure_are_terminal_and_neither_completes_nor_blocks():
@@ -100,7 +108,9 @@ def test_skipped_and_failure_are_terminal_and_neither_completes_nor_blocks():
         job("waves / apply / stacks/dns / dev-eu", "skipped"),
         job("waves / apply / stacks/app / dev-eu", "failure"),
     ]
-    assert apply_complete.to_complete(SNAP, jobs) == ([], [], [])
+    ids, unresolved, unmatched, unsuccessful = apply_complete.to_complete(SNAP, jobs)
+    assert (ids, unresolved, unmatched) == ([], [], [])
+    assert unsuccessful == ["stacks/app / dev-eu", "stacks/dns / dev-eu"]
 
 
 LIVE_SNAP = {
@@ -121,10 +131,10 @@ def _live_jobs(stale):
 
 
 def test_the_live_shape_reports_exactly_the_unpropagated_cell():
-    ids, unresolved, unmatched = apply_complete.to_complete(
+    ids, unresolved, unmatched, unsuccessful = apply_complete.to_complete(
         LIVE_SNAP, _live_jobs("tenant-2\x00dev-us")
     )
-    assert unmatched == []
+    assert (unmatched, unsuccessful) == ([], [])
     assert unresolved == ["tenant-2 / dev-us"]
     assert ids == sorted(i for k, v in LIVE_SNAP.items() if k != "tenant-2\x00dev-us" for i in v)
 
@@ -142,6 +152,7 @@ def _run(snapshot, jobs):
 def test_main_exits_with_the_retry_code_and_names_the_unresolved_cells():
     done = _run(LIVE_SNAP, _live_jobs("tenant-2\x00dev-us"))
     assert done.returncode == apply_complete.UNRESOLVED_EXIT
+    assert apply_complete.RETRY_PREFIX in done.stderr
     assert "tenant-2 / dev-us" in done.stderr
 
 
@@ -165,13 +176,32 @@ def test_main_names_the_unmatched_cells_instead_of_dropping_them_silently():
     assert "stacks/app / dev-eu" in done.stderr
 
 
-def test_main_refuses_a_listing_that_matches_no_snapshot_cell_at_all():
-    # A run always lists its own wave jobs, so zero matches is never a real
-    # run state -- it is a lost or truncated listing, and completing nothing
-    # off it strands every check while the step reports success.
+def test_main_names_the_cells_whose_apply_job_did_not_succeed():
+    # A failed/cancelled/skipped cell legitimately stays pending, and no retry
+    # changes that -- but exiting 0 while saying nothing about it is the silent
+    # drop this step exists to eliminate.
+    done = _run(
+        SNAP,
+        [
+            job("waves / apply / stacks/dns / dev-eu", "success"),
+            job("waves / apply / stacks/app / dev-eu", "failure"),
+        ],
+    )
+    assert done.returncode == 0
+    assert done.stdout.split() == ["1"]
+    assert "::warning::" in done.stderr
+    assert "stacks/app / dev-eu" in done.stderr
+
+
+def test_the_zero_match_floor_is_retryable_not_an_immediate_hard_failure():
+    # A run always lists its own wave jobs, so zero matches is never a real run
+    # state -- it is a lost, truncated or lagging listing. Completing nothing
+    # off it strands every check, so it must never exit 0; and it exits the
+    # retryable code, because the loop exists to outlast exactly this lag.
     done = _run(SNAP, [job("waves / apply / stacks/rogue / dev-eu", "success")])
-    assert done.returncode == 1
-    assert "::error::" in done.stderr
+    assert done.returncode == apply_complete.UNRESOLVED_EXIT
+    assert apply_complete.RETRY_PREFIX in done.stderr
+    assert "refusing to complete nothing" in done.stderr
     assert done.stdout.strip() == ""
 
 
@@ -186,13 +216,13 @@ def test_the_app_token_is_minted_after_the_listing_and_selection_step():
     assert mint > listing
 
 
-def test_the_retry_arm_names_the_scripts_temporary_failure_code():
-    # The bash `case` arm hardcodes the number; a drift between the two turns
-    # "ask me again" into an immediate hard failure, or vice versa.
-    body = next(
-        s["run"] for s in action_steps("apply-complete") if "actions/runs" in s.get("run", "")
-    )
-    assert f"{apply_complete.UNRESOLVED_EXIT})" in body
+def test_the_stranded_failure_is_reported_after_the_completion_patches():
+    # The whole point of deferring it: failing at selection time discards the
+    # completions this run did earn.
+    steps = action_steps("apply-complete")
+    patch = next(i for i, s in enumerate(steps) if "check-runs/$id" in (s.get("run") or ""))
+    fail = next(i for i, s in enumerate(steps) if s.get("name", "").startswith("Fail over"))
+    assert fail > patch
 
 
 def _loop_body():
@@ -201,19 +231,221 @@ def _loop_body():
     )
 
 
-def test_the_exhaustion_annotation_names_the_unresolved_cells_and_nothing_else():
-    # stderr also carries the unmatched-cells warning; annotating the whole
-    # file emits `::error::::warning::…` and strands the real cells on a
-    # second, un-annotated line.
-    body = _loop_body()
-    assert f"s/^{apply_complete.UNRESOLVED_PREFIX}//p" in body
-    errors = [ln for ln in body.splitlines() if "::error::" in ln]
-    assert errors
-    assert not [ln for ln in errors if "diagnostics.txt" in ln]
+def _fail_body():
+    return next(
+        s["run"]
+        for s in action_steps("apply-complete")
+        if s.get("name", "").startswith("Fail over")
+    )
 
 
-def test_diagnostics_are_echoed_once_after_the_retry_loop():
+def _case_arms(body):
+    """The `case "$rc"` arms of the retry loop, as pattern -> body text."""
+    arms = {}
+    for line in body.splitlines():
+        stripped = line.strip()
+        pat, sep, rest = stripped.partition(")")
+        if sep and rest.rstrip().endswith(";;"):
+            arms[pat] = rest.rstrip()[:-2].strip()
+    return arms
+
+
+def test_the_retry_arm_sleeps_and_only_the_fallthrough_arm_leaves_the_loop():
+    # Pinning the digits alone was satisfiable by swapping the two arms' bodies,
+    # which turns "ask me again" into an instant deploy-halting failure.
+    arms = _case_arms(_loop_body())
+    retry = arms[f"{apply_complete.UNRESOLVED_EXIT}"]
+    assert "sleep" in retry
+    assert "exit" not in retry and "break" not in retry
+    assert "exit" in arms["*"]
+    assert "break" in arms["0"] and "sleep" not in arms["0"]
+
+
+def test_diagnostics_are_echoed_after_the_retry_loop():
+    # Inside the loop it would repeat the same warning up to 12 times; the file
+    # is rewritten every attempt, so only the last one describes the outcome.
     lines = [ln.strip() for ln in _loop_body().splitlines()]
-    echo = 'cat "$RUNNER_TEMP/diagnostics.txt" >&2'
-    assert lines.count(echo) == 1, "the unconditional echo must not sit inside the retry loop"
-    assert lines.index(echo) > lines.index("done")
+    done = max(i for i, ln in enumerate(lines) if ln == "done")
+    echo = max(i for i, ln in enumerate(lines) if 'diagnostics.txt" >&2' in ln)
+    assert echo > done
+
+
+# --- The composed behaviour, executed against a stubbed `gh` -----------------
+#
+# `gh`, `sleep` and `python3` are bash functions, which bash resolves before
+# PATH, so nothing is installed; `python3` forwards to the interpreter running
+# the suite, so the real scripts/apply-complete decides every cell.
+
+GH_STUB = r"""
+gh() {
+  n=$(( $(cat "$ATTEMPT") + 1 ))
+  printf '%s' "$n" > "$ATTEMPT"
+  f="$FIXTURES/$n.jsonl"
+  [ -f "$f" ] || f="$FIXTURES/$LAST_FIXTURE.jsonl"
+  if [ "$(head -n 1 "$f")" = FAIL ]; then tail -n +2 "$f"; return 1; fi
+  cat "$f"
+}
+sleep() { :; }
+python3() { "$PYEXE" "$@"; }
+"""
+
+HARNESS_SNAP = {
+    "dns\x00dev-eu": [11],
+    "app\x00dev-eu": [22],
+    "web\x00dev-eu": [33],
+}
+
+
+def _jsonl(jobs):
+    return "".join(json.dumps(j) + "\n" for j in jobs)
+
+
+def _run_body(tmp_path, body, env):
+    assert _BASH is not None  # callers are skipif-gated on this; narrows the type too
+    script = tmp_path / f"step-{abs(hash(body)) % 10**8}.sh"
+    script.write_text(GH_STUB + body, encoding="utf-8", newline="\n")
+    return subprocess.run(
+        [_BASH, str(script)], cwd=tmp_path, env=env, capture_output=True, text=True, timeout=120
+    )
+
+
+def _select(tmp_path, listings, snapshot=None):
+    """Execute the selection step with `listings[n]` served on attempt n.
+
+    A listing is a jsonl string, ``""`` for an empty one, or ``None`` for a
+    fetch that writes one row and then fails. The last entry is served for
+    every further attempt.
+    """
+    fixtures = tmp_path / "fixtures"
+    fixtures.mkdir()
+    for i, listing in enumerate(listings, 1):
+        (fixtures / f"{i}.jsonl").write_text(
+            "FAIL\n" + _all_success("dns") if listing is None else listing,
+            encoding="utf-8",
+            newline="\n",
+        )
+    runner_temp = tmp_path / "runner"
+    runner_temp.mkdir()
+    (tmp_path / "attempt").write_text("0", encoding="utf-8")
+    env = {
+        **os.environ,
+        "GH_TOKEN": "x",
+        "GITHUB_REPOSITORY": "acme/demo",
+        "GITHUB_RUN_ID": "999",
+        "GITHUB_ACTION_PATH": str(ENGINE / "actions" / "apply-complete").replace("\\", "/"),
+        "RUNNER_TEMP": str(runner_temp).replace("\\", "/"),
+        "SHIPMATE_SNAPSHOT_JSON": json.dumps(snapshot if snapshot is not None else HARNESS_SNAP),
+        "FIXTURES": str(fixtures).replace("\\", "/"),
+        "LAST_FIXTURE": str(len(listings)),
+        "ATTEMPT": str(tmp_path / "attempt").replace("\\", "/"),
+        "PYEXE": sys.executable.replace("\\", "/"),
+    }
+    proc = _run_body(tmp_path, _loop_body(), env)
+    ids = (runner_temp / "complete-ids.txt").read_text(encoding="utf-8").split()
+    attempts = int((tmp_path / "attempt").read_text(encoding="utf-8"))
+    return proc, ids, attempts, env
+
+
+def _all_success(*cells):
+    return _jsonl([job(f"L0 / apply / {c} / dev-eu", "success") for c in cells])
+
+
+@pytest.mark.skipif(_BASH is None, reason="bash not installed")
+def test_the_listing_is_refetched_on_every_attempt(tmp_path):
+    # The property that makes this a retry at all: hoisting the fetch above the
+    # `for` re-reads one frozen snapshot twelve times and sleeps 110s over it.
+    lagging = _jsonl(
+        [
+            job("L0 / apply / dns / dev-eu", "success"),
+            job("L0 / apply / app / dev-eu", "success"),
+            job("L0 / apply / web / dev-eu", None),
+        ]
+    )
+    proc, ids, attempts, _ = _select(
+        tmp_path, [lagging, lagging, _all_success("dns", "app", "web")]
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert attempts == 3
+    assert sorted(ids) == ["11", "22", "33"]
+
+
+@pytest.mark.skipif(_BASH is None, reason="bash not installed")
+def test_an_empty_listing_is_retried_rather_than_failed_on_the_first_attempt(tmp_path):
+    proc, ids, attempts, _ = _select(tmp_path, ["", "", _all_success("dns", "app", "web")])
+    assert proc.returncode == 0, proc.stderr
+    assert attempts == 3
+    assert sorted(ids) == ["11", "22", "33"]
+
+
+@pytest.mark.skipif(_BASH is None, reason="bash not installed")
+def test_a_failed_fetch_never_feeds_its_half_written_file_to_the_selection(tmp_path):
+    # A truncated listing matches a subset of cells, so it slips past the
+    # all-cells-unmatched floor and completes only the rows that survived.
+    proc, ids, attempts, _ = _select(tmp_path, [None, _all_success("dns", "app", "web")])
+    assert proc.returncode == 0, proc.stderr
+    assert attempts == 2
+    assert sorted(ids) == ["11", "22", "33"]
+
+
+@pytest.mark.skipif(_BASH is None, reason="bash not installed")
+def test_a_listing_matching_no_cell_at_all_is_retried_and_completes_nothing_meanwhile(tmp_path):
+    # The zero-match floor routed through the loop rather than around it.
+    proc, ids, attempts, _ = _select(
+        tmp_path, [_all_success("rogue"), _all_success("dns", "app", "web")]
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert attempts == 2
+    assert sorted(ids) == ["11", "22", "33"]
+
+
+@pytest.mark.skipif(_BASH is None, reason="bash not installed")
+def test_an_id_earned_by_one_attempt_survives_a_staler_later_listing(tmp_path):
+    # Replicas differ: a later read can be missing a row an earlier one had.
+    # A later read may add a completion; it may never revoke one.
+    first = _jsonl(
+        [
+            job("L0 / apply / dns / dev-eu", "success"),
+            job("L0 / apply / app / dev-eu", "success"),
+            job("L0 / apply / web / dev-eu", None),
+        ]
+    )
+    staler = _all_success("web")  # dns and app have vanished from this replica
+    proc, ids, _, _ = _select(tmp_path, [first, staler])
+    assert proc.returncode == 0, proc.stderr
+    assert sorted(ids) == ["11", "22", "33"]
+
+
+@pytest.mark.skipif(_BASH is None, reason="bash not installed")
+def test_exhaustion_keeps_the_earned_completions_and_then_fails_naming_only_the_stranded(tmp_path):
+    # One cell resolves, one is unmatched (skip-propagation), one never
+    # resolves. The earned id must still reach the PATCH step, the unmatched
+    # cell must be a warning and not the reason for the failure, and the
+    # stranded cell must be named in the `::error::`.
+    lagging = _jsonl(
+        [
+            job("L0 / apply / dns / dev-eu", "success"),
+            job("L0 / apply / web / dev-eu", None),
+        ]
+    )
+    proc, ids, attempts, env = _select(tmp_path, [lagging])
+    assert proc.returncode == 0, proc.stderr
+    assert attempts == 12
+    assert ids == ["11"]
+    assert proc.stderr.count("::warning::") == 1
+    assert "app / dev-eu" in proc.stderr
+
+    fail = _run_body(tmp_path, _fail_body(), env)
+    assert fail.returncode == 1
+    errors = [ln for ln in fail.stdout.splitlines() if "::error::" in ln]
+    assert len(errors) == 1
+    assert "web / dev-eu" in errors[0]
+    assert "app / dev-eu" not in errors[0]
+    assert "::warning::" not in errors[0]
+
+
+@pytest.mark.skipif(_BASH is None, reason="bash not installed")
+def test_a_fully_resolved_run_leaves_nothing_for_the_stranded_step_to_fail_on(tmp_path):
+    proc, ids, _, env = _select(tmp_path, [_all_success("dns", "app", "web")])
+    assert proc.returncode == 0, proc.stderr
+    assert sorted(ids) == ["11", "22", "33"]
+    assert _run_body(tmp_path, _fail_body(), env).returncode == 0
