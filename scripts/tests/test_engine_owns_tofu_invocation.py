@@ -18,8 +18,6 @@ import shlex
 from _loader import action_steps
 
 _CELLS = ("plan-cell", "apply-cell", "drift-cell")
-#: Shell tokens that end a command's own argument list.
-_OPERATORS = frozenset({"2>&1", "|", "||", "&&", ";", "&", ">", ">>", "<"})
 
 
 def _command_lines(cell):
@@ -68,28 +66,27 @@ def test_apply_cell_applies_the_reviewed_plan_file():
     lines = [ln for ln in _command_lines("apply-cell") if "tofu apply" in ln]
     assert len(lines) == 1, f"expected exactly one `tofu apply` line, got {lines}"
     line = lines[0]
-    # Positional, not "appears somewhere on the line". Both weaker forms have a
-    # live counterexample that re-plans from branch configuration while staying
-    # green: `-auto-approve # stack.otplan 2>&1 | tee …` (a substring or an
-    # endswith-after-stripping-2>&1 check reads the comment as the argument), and
-    # `-auto-approve && echo stack.otplan 2>&1 | …` (token membership reads
-    # echo's argument as apply's). So: take the tokens after `apply`, cut at the
-    # first shell operator, and require the plan file to be what is left last.
-    # shlex handles the quoting and drops comments -- and unlike cutting at the
-    # first `#` it does not mangle a `#` inside quotes (plan-cell has one).
+    # The whole argument vector, not a set of things that must appear in it.
+    # Every weaker shape had a live counterexample that re-plans from branch
+    # configuration and auto-approves the result while staying green: a substring
+    # check reads `# stack.otplan` out of a comment; token membership reads
+    # `&& echo stack.otplan`'s argument as apply's; and truncating on a *list* of
+    # shell operators only has to miss one spelling -- `2> stack.otplan` deletes
+    # two characters from the real line, passes no plan file at all, and was
+    # green while `2>&1` was in the list and `2>` was not.
+    #
+    # So there is no operator vocabulary to get wrong: cut on the one literal the
+    # real line actually contains, then compare the vector exactly. Any extra,
+    # missing, reordered, or smuggled token changes it -- including a re-added
+    # `-lock=false` (the apply deliberately takes the backend's lock). shlex
+    # handles the quoting and drops comments, and unlike cutting at the first `#`
+    # it does not mangle a `#` inside quotes (plan-cell has one).
     tokens = shlex.split(line, comments=True)
     assert "apply" in tokens, f"apply-cell: `apply` is not its own token: {line}"
-    args = list(
-        itertools.takewhile(lambda t: t not in _OPERATORS, tokens[tokens.index("apply") + 1 :])
+    args = list(itertools.takewhile(lambda t: t != "2>&1", tokens[tokens.index("apply") + 1 :]))
+    assert args == ["-input=false", "-auto-approve", "stack.otplan"], (
+        f"apply-cell must apply the reviewed plan and nothing else, got {args}: {line}"
     )
-    assert args and args[-1] == "stack.otplan", (
-        f"apply-cell must apply the stored plan file as `tofu apply`'s last "
-        f"argument, got {args}: {line}"
-    )
-    assert "-auto-approve" in args and "-input=false" in args, line
-    # Flags forbidden, not just flags present: the apply deliberately takes the
-    # backend's lock, so re-adding -lock=false must not be invisible here.
-    assert "-lock=false" not in tokens, f"apply must take the backend lock: {line}"
 
 
 def test_plan_cells_write_the_plan_file_the_apply_reads():
