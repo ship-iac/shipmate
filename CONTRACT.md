@@ -1124,27 +1124,42 @@ credentials, and the Terramate configuration around the cell (see
 ## Terramate safeguards
 
 Terramate ships four default-on safeguards that run before `terramate run` (not
-before `list` / `generate` / `experimental`).
-shipmate applies a **specific reviewed SHA** — the plan artifact reviewed on the
-pull request — which on the merge-deploy path is legitimately **behind `main`**
-(the squash-merge drops the PR-head SHA from `main`). Exactly one safeguard is
-incompatible with that model; the engine disables it and keeps the rest:
+before `list` / `generate` / `experimental`). Two of the four are evaluated on
+every `terramate run`; the two working-tree checks are evaluated **only on the
+recursive, non-`--dry-run` path**, so the cells' `--no-recursive` invocations
+never reach them (Terramate 0.17.1, `commands/run/run.go`: `GitFileSafeguards`
+is called under `if !s.DryRun` inside the recursive branch only). Of the two
+that do run, shipmate disables exactly one —
+it applies a **specific reviewed SHA**, the plan artifact reviewed on the pull
+request, which on the merge-deploy path is legitimately **behind `main`** (the
+squash-merge drops the PR-head SHA from `main`):
 
-| Safeguard | Policy | Rationale |
+| Safeguard | Runs on a cell? | Policy |
 |---|---|---|
-| `git-out-of-sync` | **disabled** | shipmate applies a chosen reviewed SHA that is legitimately behind `main`; remote-freshness is the wrong assertion for the exact-plan model. |
-| `git-untracked` | kept | A genuinely unexpected untracked file must still block. shipmate's own artifacts are gitignored (below). |
-| `git-uncommitted` | kept | A real dirty tree must block; gitignored artifacts are not tracked-file changes. |
-| `outdated-code` | kept | Catches hand-edited / stale generated `.tf`, complementing the plan codegen check. |
+| `git-out-of-sync` | yes | **disabled** — remote-freshness is the wrong assertion for the exact-plan model. Load-bearing: without the flag a cell on a reviewed SHA behind `main` refuses outright. |
+| `outdated-code` | yes | kept — catches hand-edited / stale generated `.tf`, complementing the plan codegen check. Consumer-overridable — see the `terramate.config` prohibition below. |
+| `git-untracked` | **no** — skipped under `--no-recursive` | never disabled by the engine, but do not rely on it: an unexpected untracked file does not block a cell. |
+| `git-uncommitted` | **no** — skipped under `--no-recursive` | never disabled by the engine, but do not rely on it: a dirty tree does not block a cell. |
 
 **Mechanism (engine-controlled).** The cells invoke `terramate run … -- tofu …`
 — `plan-cell`, `apply-cell`, `drift-cell`, each twice (an `init`, then the
 `plan`/`apply`) — and every one of those invocations passes
 `--disable-safeguards=git-out-of-sync`. The policy is versioned in the engine
-actions (pinned by SHA); consumers get the correct policy for free by pinning,
-and never set it in their own `terramate.config`. The engine never disables via
-the meta `git` or `all` keywords (either would silently drop
-`outdated-code` / `git-untracked` / `git-uncommitted`).
+actions (pinned by SHA), so consumers get the correct policy for free by pinning.
+The engine never disables via the meta `all` keyword (it drops `outdated-code`
+too — `all` is the only keyword that does; `git` covers the three git checks
+only) nor via `git` (which would pre-disable the two working-tree checks should a
+future Terramate start evaluating them here).
+
+A consuming repository **must not** set `disable_safeguards` in its own
+`terramate.config`. The engine's flag wins for the git checks, but not for
+`outdated-code`: `checkGenCode` consults the consumer's config after the engine's
+flags, so `disable_safeguards = ["outdated-code"]` (or `"all"`) silences the one
+working safeguard the cells still have, and the engine cannot detect or override
+it. The `detect` job's `terramate generate --detailed-exit-code` still catches
+stale codegen — `disable_safeguards` gates `terramate run`, not `generate` — but
+that step lives in the consumer's own plan workflow, so it is a second thing the
+consumer controls rather than an engine backstop.
 
 **Consistency invariant.** The disabled-safeguard set is identical across
 `plan-cell`, `apply-cell`, and `drift-cell`, and across both invocations within
@@ -1152,15 +1167,22 @@ a cell — exactly `{git-out-of-sync}`. A drift between the three cells, or
 between a cell's two invocations, is a defect (guarded by a test, like the
 TF_VAR fingerprint).
 
-**Consumer gitignore requirement.** Because `git-untracked` and
-`git-uncommitted` stay live, a consuming repository **must gitignore** the
-artifacts shipmate materializes in the working tree during a run — the reviewed
-plan (`*.otplan`), the fingerprint (`fingerprint.txt`), OpenTofu's own working
-directory in each stack (`.terraform/`, `.terraform.lock.hcl`), and the flavor's
-state path when it has one (a remote backend materializes none — see State
-backend, above). `init` runs as its own invocation ahead of the `plan`/`apply`,
-so what it writes is present for every safeguard evaluation that follows it. An ungitignored artifact, or a genuinely dirty tree, then still fails
-loud (by design) rather than producing a silent wrong apply.
+**Consumer gitignore requirement.** A consuming repository **must gitignore** the
+per-run machine artifacts shipmate materializes in its working tree — the
+reviewed plan (`*.otplan`), the fingerprint (`fingerprint.txt`), OpenTofu's
+working directory in each stack (`.terraform/`), and the flavor's state path when
+it has one (a remote backend materializes none — see State backend, above). The
+reason is not a safeguard: shipmate writes into the consumer's own checkout, none
+of those belong in a commit, and a `terramate run` of the consumer's own that
+omits `--no-recursive` refuses on them (`git-untracked` *does* fire there).
+
+`.terraform.lock.hcl` is the consumer's call, not shipmate's: committing it is
+OpenTofu's own recommendation for pinning provider versions and hashes, and a
+cell tolerates it either way — `init -reconfigure` may rewrite it, but that is a
+tracked-file change and `git-uncommitted` never runs on a cell. Committing it
+also makes `actions/setup`'s provider cache key
+(`hashFiles('**/.terraform.lock.hcl')`) vary with the actual provider set instead
+of hashing nothing.
 
 ## Env apply order
 

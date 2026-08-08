@@ -29,9 +29,9 @@ from _loader import action_steps
 # into that appended copy, which a line-wide scan had caught before the window
 # replaced it; and a `./evil.sh ;` prefix, which a tail-only check also misses.
 #
-# These duplicate the --disable-safeguards literal that test_safeguards.py pins.
-# That is deliberate: one duplicated literal against four proved fail-open shapes
-# is the right trade. Do NOT "de-duplicate" it by narrowing back to a window.
+# Since ca53489 deleted test_safeguards.py, this is the only guard on
+# --disable-safeguards=git-out-of-sync -- a flag CONTRACT.md documents as
+# load-bearing, not belt-and-suspenders. Do NOT narrow back to a window.
 _WRAPPER = [
     "terramate",
     "run",
@@ -47,8 +47,8 @@ _PLAN = [*_WRAPPER, "tofu", "plan", "-input=false", "-lock=false", "-out=stack.o
 # plan file. No -auto-approve either: a stored plan never prompts, so the flag
 # would be inert, and without it a lost `stack.otplan` argument fails on
 # "Error asking for approval" instead of re-planning from branch content and
-# applying that unattended. Teed to RUNNER_TEMP -- never the repo tree, where
-# the live git-untracked safeguard runs.
+# applying that unattended. Teed to RUNNER_TEMP -- never the repo tree, which is
+# the consumer's checkout.
 _APPLY = [
     *_WRAPPER,
     "tofu",

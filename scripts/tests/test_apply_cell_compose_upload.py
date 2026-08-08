@@ -12,11 +12,12 @@ without a re-plan. `continue-on-error: true` on both steps fixes this without
 weakening the failed-apply case: the apply step's own failure still makes
 `success()` false for the completion steps regardless of these two.
 
-Same file: `cell.json` / `apply.txt` were written into the repo tree,
-which the sibling fail-safe steps explicitly avoid (a stray untracked file at
-repo root fails the apply once git-untracked runs). Writing under
-`$RUNNER_TEMP` instead removes the ordering dependency on "nothing after this
-touches terramate/tofu" entirely.
+Same file: `cell.json` / `apply.txt` were written into the repo tree, which is
+the consumer's checkout and which the sibling fail-safe steps explicitly avoid.
+Writing under `$RUNNER_TEMP` instead keeps these two summary artifacts out of it.
+The ones a run must materialize in the tree (`stack.otplan`, `fingerprint.txt`,
+`.terraform/`, the state path) are covered by CONTRACT.md's gitignore
+requirement instead.
 """
 
 from _loader import action_steps
