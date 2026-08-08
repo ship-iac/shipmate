@@ -62,11 +62,12 @@ _APPLY = [
 ]
 
 
-def _sole_line(cell, needle):
-    """The cell's one live command line containing ``needle``, tokenized."""
-    lines = [ln for ln in _command_lines(cell) if needle in ln]
-    assert len(lines) == 1, f"{cell}: expected exactly one `{needle}` line, got {lines}"
-    return shlex.split(lines[0], comments=True)
+#: Every `terramate run` each cell is expected to make, in order.
+_EXPECTED = {
+    "plan-cell": [_INIT, _PLAN],
+    "drift-cell": [_INIT, _PLAN],
+    "apply-cell": [_INIT, _APPLY],
+}
 
 
 def _command_lines(cell):
@@ -98,36 +99,22 @@ def test_no_cell_delegates_to_a_branch_defined_script():
         assert not offenders, f"{cell}: delegates the command to branch HCL: {offenders}"
 
 
-def test_every_terramate_run_names_tofu_after_a_double_dash():
-    for cell in _CELLS:
-        lines = [ln for ln in _command_lines(cell) if "terramate run " in ln]
-        assert len(lines) == 2, (
-            f"{cell}: expected exactly two `terramate run` invocations -- an init "
-            f"line and a plan/apply line -- found {len(lines)}: {lines}"
-        )
-        for line in lines:
-            head, sep, tail = line.partition(" -- ")
-            assert sep, f"{cell}: no `--` separator, terramate may parse tofu's flags: {line}"
-            assert tail.startswith("tofu "), f"{cell}: command after `--` is not tofu: {line}"
+def test_each_cell_runs_exactly_the_engines_own_invocations():
+    """Every `terramate run` in the cell, in order, argument for argument.
 
+    One comparison per cell rather than one per command. Selecting the lines to
+    check by the tofu subcommand on them (`tofu apply`, `tofu plan`) left an
+    *extra* invocation examined by nothing but a separate count, and that count
+    selected on the substring `"terramate run "` -- which a doubled space
+    defeats, including the one `_command_lines` itself produces when it joins
+    `terramate \\` + newline + `run`. A live `tofu apply` with no plan file could
+    be added to any cell that way with every test green.
 
-def test_apply_cell_applies_the_reviewed_plan_file():
-    tokens = _sole_line("apply-cell", "tofu apply")
-    assert tokens == _APPLY, (
-        f"apply-cell must apply the reviewed plan and nothing else, got {tokens}"
-    )
-
-
-def test_plan_cells_write_the_plan_file_the_apply_reads():
-    for cell in ("plan-cell", "drift-cell"):
-        tokens = _sole_line(cell, "tofu plan")
-        assert tokens == _PLAN, f"{cell}: unexpected plan invocation, got {tokens}"
-
-
-def test_every_cell_initializes_with_the_engines_own_init():
-    """The init line is the third live `terramate run` in these cells and the
-    same smuggling works on it: appending `&& tofu apply …` to it leaves the
-    line count at 2 and the ` -- ` partition pointing at `tofu init`."""
-    for cell in _CELLS:
-        tokens = _sole_line(cell, "tofu init")
-        assert tokens == _INIT, f"{cell}: unexpected init invocation, got {tokens}"
+    So: one regex selector, one expected list, no second selector to disagree
+    with the first. Comparing the whole list also pins the count, and pins
+    init-before-plan/apply ordering, without either being asserted separately.
+    """
+    for cell, expected in _EXPECTED.items():
+        lines = [ln for ln in _command_lines(cell) if re.search(r"terramate\s+run\b", ln)]
+        got = [shlex.split(ln, comments=True) for ln in lines]
+        assert got == expected, f"{cell}: unexpected invocations, got {got}"
