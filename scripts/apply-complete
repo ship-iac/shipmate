@@ -14,6 +14,28 @@ job's own name to `apply / <stack> / <env>`. The suffix match requires a
 named e.g. `reapply / <stack> / <env>` shares the trailing characters but is
 a different verb entirely, and a bare `endswith` would let it complete a
 check its own apply never earned.
+
+A cell is therefore classified, not merely filtered, into three states.
+
+*Matched, terminal* — decided here: its ids are emitted iff the conclusion is
+`success`.
+
+*Matched, no conclusion yet* — the listing lags, by seconds, a job that has
+already ended. Under a plain success filter this cell is indistinguishable
+from one that never ran, so it would be dropped and its check stranded
+pending forever. It is reported unresolved instead, and `main` exits
+`UNRESOLVED_EXIT` so the caller can tell "ask me again" from "I broke".
+
+*No matching job at all* — the snapshot comes from the same `waves_json` the
+caller fans out (`actions/apply-snapshot`), so every snapshot cell is a cell
+of this run; there is no "belongs to another environment" case. What there is
+is skip-propagation: wave1..wave7 carry `if: !failure() && !cancelled()`, and
+`complete` runs on `always()`, so an early wave failing leaves the later
+waves' cells with no per-cell job for the listing to match. Those checks
+legitimately stay pending -- but a lost or truncated listing looks exactly
+the same, so they are named in a warning rather than skipped in silence, and
+a listing that matches *no* cell at all fails the run: a run always lists its
+own wave jobs.
 """
 
 import json
@@ -21,24 +43,53 @@ import os
 import sys
 
 SEP = "\x00"
+UNRESOLVED_EXIT = 75  # EX_TEMPFAIL; not 2, which CPython itself exits with.
+# The caller greps this prefix out of stderr to annotate the cells it gave up
+# on, so it is a line-anchored contract, not a message: stderr also carries the
+# unmatched-cells warning, which names different cells.
+UNRESOLVED_PREFIX = "unresolved cells: "
 
 
 def to_complete(snapshot, jobs):
-    succeeded = {j.get("name", "") for j in jobs if j.get("conclusion") == "success"}
     out = []
+    unresolved = []
+    unmatched = []
     for key, ids in snapshot.items():
         stack, env = key.split(SEP)
         suffix = f"apply / {stack} / {env}"
-        if any(name == suffix or name.endswith(f"/ {suffix}") for name in succeeded):
+        matched = [
+            j for j in jobs if (name := j.get("name", "")) == suffix or name.endswith(f"/ {suffix}")
+        ]
+        if any(j.get("conclusion") == "success" for j in matched):
             out.extend(ids)
-    return sorted(out)
+        elif not matched:
+            unmatched.append(f"{stack} / {env}")
+        elif not all(j.get("conclusion") is not None for j in matched):
+            unresolved.append(f"{stack} / {env}")
+    return sorted(out), sorted(unresolved), sorted(unmatched)
 
 
 def main():
     snapshot = json.loads(os.environ["SHIPMATE_SNAPSHOT_JSON"])
     jobs = [json.loads(line) for line in sys.stdin if line.strip()]
-    for cid in to_complete(snapshot, jobs):
+    ids, unresolved, unmatched = to_complete(snapshot, jobs)
+    for cid in ids:
         print(cid)
+    if unmatched:
+        print(
+            "::warning::no job in this run's listing matched these cells, so their apply "
+            f"checks stay pending: {', '.join(unmatched)}",
+            file=sys.stderr,
+        )
+    if snapshot and len(unmatched) == len(snapshot):
+        raise SystemExit(
+            f"::error::none of the {len(snapshot)} snapshot cells matched a job in this "
+            "run's listing — a run always lists its own wave jobs, so the listing cannot "
+            "be trusted; refusing to complete nothing"
+        )
+    if unresolved:
+        print(UNRESOLVED_PREFIX + ", ".join(unresolved), file=sys.stderr)
+        sys.exit(UNRESOLVED_EXIT)
 
 
 if __name__ == "__main__":

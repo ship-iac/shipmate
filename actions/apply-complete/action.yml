@@ -16,34 +16,73 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: List run jobs
+    - name: List run jobs and select the checks earned by this run
       shell: bash
       env:
         GH_TOKEN: ${{ inputs.github-token }}
+        SHIPMATE_SNAPSHOT_JSON: ${{ inputs.snapshot }}
       # A 256-cell level exceeds the 100-per-page cap, so --paginate --jq
       # streams one job object per line for scripts/apply-complete to read on
       # stdin. Unlike actions/apply-summary's cosmetic log-link listing, this
       # one decides which checks get completed: an empty or failed listing
       # must fail the step loudly rather than degrade to no data, or a
       # successful apply would silently strand every check pending.
+      #
+      # The listing also lags: a wave job can finish seconds before its
+      # conclusion is readable here, and a cell we cannot yet decide is not a
+      # cell that did not run. So listing and selection are one retry loop --
+      # re-fetch until the script reports every snapshot cell resolved (exit
+      # 0), and only then proceed to the token and the PATCHes. Cells still
+      # unresolved after the retries fail the step by name: a stranded check
+      # blocks the gate forever while reporting success everywhere a human
+      # looks, so it must never pass as one.
+      #
+      # ~2 minutes of budget, not the ~30s a lag is expected to need, because
+      # exhausting it is expensive rather than merely annoying: this step
+      # failing fails `complete`, which fails the env-level, and deploy.yml's
+      # `!failure()` guards then skip every successor env-level -- halting a
+      # multi-region deploy over infrastructure that already applied.
+      #
+      # Only exit 75 (EX_TEMPFAIL) means "ask me again"; any other non-zero is
+      # the script itself failing and is propagated immediately, so a broken
+      # invocation is not retried for two minutes and then misreported as a
+      # stale listing.
+      #
+      # Diagnostics are echoed once, after the loop, not per attempt: the file
+      # is rewritten each time, so a 12-attempt run would otherwise log the
+      # same warning 12 times. On exhaustion the annotation quotes only the
+      # script's `unresolved cells:` line -- the file may also hold the
+      # unmatched-cells warning, and `::error::` prefixed onto that lists the
+      # wrong cells and pushes the right ones onto an un-annotated line.
       run: |
         set -euo pipefail
-        gh api --paginate --jq '.jobs[]' \
-          "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs?per_page=100" \
-          > "$RUNNER_TEMP/jobs.jsonl"
-        if [ ! -s "$RUNNER_TEMP/jobs.jsonl" ]; then
-          echo "::error::run jobs listing came back empty — cannot tell which wave cells succeeded; refusing to silently complete nothing"
+        ok=""
+        attempts=12
+        for n in $(seq "$attempts"); do
+          gh api --paginate --jq '.jobs[]' \
+            "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs?per_page=100" \
+            > "$RUNNER_TEMP/jobs.jsonl"
+          if [ ! -s "$RUNNER_TEMP/jobs.jsonl" ]; then
+            echo "::error::run jobs listing came back empty — cannot tell which wave cells succeeded; refusing to silently complete nothing"
+            exit 1
+          fi
+          rc=0
+          python3 "$GITHUB_ACTION_PATH/../../scripts/apply-complete" \
+            < "$RUNNER_TEMP/jobs.jsonl" \
+            > "$RUNNER_TEMP/complete-ids.txt" \
+            2> "$RUNNER_TEMP/diagnostics.txt" || rc=$?
+          case "$rc" in
+            0) ok=1; break ;;
+            75) if [ "$n" -lt "$attempts" ]; then sleep 10; fi ;;
+            *) cat "$RUNNER_TEMP/diagnostics.txt" >&2; exit "$rc" ;;
+          esac
+        done
+        cat "$RUNNER_TEMP/diagnostics.txt" >&2
+        if [ -z "$ok" ]; then
+          stranded=$(sed -n 's/^unresolved cells: //p' "$RUNNER_TEMP/diagnostics.txt")
+          echo "::error::the jobs listing never reported a conclusion for these cells; their apply checks would be stranded pending: $stranded"
           exit 1
         fi
-
-    - name: Select the checks earned by this run
-      shell: bash
-      env:
-        SHIPMATE_SNAPSHOT_JSON: ${{ inputs.snapshot }}
-      run: |
-        set -euo pipefail
-        python3 "$GITHUB_ACTION_PATH/../../scripts/apply-complete" \
-          < "$RUNNER_TEMP/jobs.jsonl" > "$RUNNER_TEMP/complete-ids.txt"
 
     - name: Mint App installation token
       # Minted after the jobs listing (which can fail/abort) rather than
