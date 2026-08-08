@@ -14,6 +14,15 @@ job's own name to `apply / <stack> / <env>`. The suffix match requires a
 named e.g. `reapply / <stack> / <env>` shares the trailing characters but is
 a different verb entirely, and a bare `endswith` would let it complete a
 check its own apply never earned.
+
+A cell is therefore classified, not merely filtered. The listing can lag a
+job's own conclusion by seconds, so a cell whose job exists but has not
+reached a conclusion yet is indistinguishable, under a plain success filter,
+from a cell that is not part of this run at all (a targeted apply of one
+environment). The first must be retried; the second must be skipped in
+silence. Only a cell with no matching job whatsoever is skipped; a matching
+job that is not terminal is reported unresolved, and `main` exits
+`UNRESOLVED_EXIT` so the caller can tell "ask me again" from "I broke".
 """
 
 import json
@@ -21,24 +30,38 @@ import os
 import sys
 
 SEP = "\x00"
+UNRESOLVED_EXIT = 2
+
+
+def _terminal(job):
+    return job.get("status") == "completed" and job.get("conclusion") is not None
 
 
 def to_complete(snapshot, jobs):
-    succeeded = {j.get("name", "") for j in jobs if j.get("conclusion") == "success"}
     out = []
+    unresolved = []
     for key, ids in snapshot.items():
         stack, env = key.split(SEP)
         suffix = f"apply / {stack} / {env}"
-        if any(name == suffix or name.endswith(f"/ {suffix}") for name in succeeded):
+        matched = [
+            j for j in jobs if (name := j.get("name", "")) == suffix or name.endswith(f"/ {suffix}")
+        ]
+        if any(j.get("conclusion") == "success" for j in matched):
             out.extend(ids)
-    return sorted(out)
+        elif not all(_terminal(j) for j in matched):
+            unresolved.append(f"{stack} / {env}")
+    return sorted(out), sorted(unresolved)
 
 
 def main():
     snapshot = json.loads(os.environ["SHIPMATE_SNAPSHOT_JSON"])
     jobs = [json.loads(line) for line in sys.stdin if line.strip()]
-    for cid in to_complete(snapshot, jobs):
+    ids, unresolved = to_complete(snapshot, jobs)
+    for cid in ids:
         print(cid)
+    if unresolved:
+        print("unresolved cells: " + ", ".join(unresolved), file=sys.stderr)
+        sys.exit(UNRESOLVED_EXIT)
 
 
 if __name__ == "__main__":

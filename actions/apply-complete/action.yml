@@ -16,34 +16,52 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: List run jobs
+    - name: List run jobs and select the checks earned by this run
       shell: bash
       env:
         GH_TOKEN: ${{ inputs.github-token }}
+        SHIPMATE_SNAPSHOT_JSON: ${{ inputs.snapshot }}
       # A 256-cell level exceeds the 100-per-page cap, so --paginate --jq
       # streams one job object per line for scripts/apply-complete to read on
       # stdin. Unlike actions/apply-summary's cosmetic log-link listing, this
       # one decides which checks get completed: an empty or failed listing
       # must fail the step loudly rather than degrade to no data, or a
       # successful apply would silently strand every check pending.
+      #
+      # The listing also lags: a wave job can finish seconds before its
+      # conclusion is readable here, and a cell we cannot yet decide is not a
+      # cell that did not run. So listing and selection are one retry loop --
+      # re-fetch until the script reports every snapshot cell resolved (exit
+      # 0), and only then proceed to the token and the PATCHes. Cells still
+      # unresolved after the retries fail the step by name: a stranded check
+      # blocks the gate forever while reporting success everywhere a human
+      # looks, so it must never pass as one.
       run: |
         set -euo pipefail
-        gh api --paginate --jq '.jobs[]' \
-          "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs?per_page=100" \
-          > "$RUNNER_TEMP/jobs.jsonl"
-        if [ ! -s "$RUNNER_TEMP/jobs.jsonl" ]; then
-          echo "::error::run jobs listing came back empty — cannot tell which wave cells succeeded; refusing to silently complete nothing"
+        ok=""
+        for _ in 1 2 3 4 5 6; do
+          gh api --paginate --jq '.jobs[]' \
+            "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs?per_page=100" \
+            > "$RUNNER_TEMP/jobs.jsonl"
+          if [ ! -s "$RUNNER_TEMP/jobs.jsonl" ]; then
+            echo "::error::run jobs listing came back empty — cannot tell which wave cells succeeded; refusing to silently complete nothing"
+            exit 1
+          fi
+          rc=0
+          python3 "$GITHUB_ACTION_PATH/../../scripts/apply-complete" \
+            < "$RUNNER_TEMP/jobs.jsonl" \
+            > "$RUNNER_TEMP/complete-ids.txt" \
+            2> "$RUNNER_TEMP/unresolved.txt" || rc=$?
+          case "$rc" in
+            0) ok=1; break ;;
+            2) cat "$RUNNER_TEMP/unresolved.txt"; sleep 5 ;;
+            *) cat "$RUNNER_TEMP/unresolved.txt" >&2; exit "$rc" ;;
+          esac
+        done
+        if [ -z "$ok" ]; then
+          echo "::error::$(cat "$RUNNER_TEMP/unresolved.txt") — the jobs listing never reported a conclusion for these cells; their apply checks would be stranded pending"
           exit 1
         fi
-
-    - name: Select the checks earned by this run
-      shell: bash
-      env:
-        SHIPMATE_SNAPSHOT_JSON: ${{ inputs.snapshot }}
-      run: |
-        set -euo pipefail
-        python3 "$GITHUB_ACTION_PATH/../../scripts/apply-complete" \
-          < "$RUNNER_TEMP/jobs.jsonl" > "$RUNNER_TEMP/complete-ids.txt"
 
     - name: Mint App installation token
       # Minted after the jobs listing (which can fail/abort) rather than
