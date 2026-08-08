@@ -1106,7 +1106,7 @@ directory and the safeguard policy only:
 | Cell | Commands |
 |---|---|
 | `plan-cell`, `drift-cell` | `tofu init -input=false -reconfigure`; `tofu plan -input=false -lock=false -out=stack.otplan` |
-| `apply-cell` | `tofu init -input=false -reconfigure`; `tofu apply -input=false -auto-approve stack.otplan` |
+| `apply-cell` | `tofu init -input=false -reconfigure`; `tofu apply -input=false stack.otplan` |
 
 A consumer repository therefore needs **no `script` blocks and no
 `terramate.config.experiments = ["scripts"]`**. `init` always passes
@@ -1155,9 +1155,11 @@ TF_VAR fingerprint).
 **Consumer gitignore requirement.** Because `git-untracked` and
 `git-uncommitted` stay live, a consuming repository **must gitignore** the
 artifacts shipmate materializes in the working tree during a run — the reviewed
-plan (`*.otplan`), the fingerprint (`fingerprint.txt`), and the flavor's state
-path when it has one (a remote backend materializes none — see State backend,
-above). An ungitignored artifact, or a genuinely dirty tree, then still fails
+plan (`*.otplan`), the fingerprint (`fingerprint.txt`), OpenTofu's own working
+directory in each stack (`.terraform/`, `.terraform.lock.hcl`), and the flavor's
+state path when it has one (a remote backend materializes none — see State
+backend, above). `init` runs as its own invocation ahead of the `plan`/`apply`,
+so what it writes is present for every safeguard evaluation that follows it. An ungitignored artifact, or a genuinely dirty tree, then still fails
 loud (by design) rather than producing a silent wrong apply.
 
 ## Env apply order

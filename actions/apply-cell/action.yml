@@ -122,6 +122,11 @@ runs:
       # still fails the step on a failed init (fail-safe), and above the group
       # so that failure's diagnostics are not buried in a group this step then
       # exits without ever closing.
+      # No `-auto-approve`: applying a stored plan never prompts, so the flag is
+      # inert here -- and its absence is a backstop. Were the `stack.otplan`
+      # argument ever lost, `-input=false` alone fails with "Error asking for
+      # approval", where `-auto-approve` would re-plan from branch content and
+      # apply that unattended.
       # Tee combined stdout+stderr to RUNNER_TEMP (never the repo tree -- the
       # live git-untracked safeguard runs on this path) for the cell-summary
       # artifact. errexit is turned off for just this one pipeline and the
@@ -140,7 +145,7 @@ runs:
         terramate run --disable-safeguards=git-out-of-sync --no-recursive -C "$STACK" -- tofu init -input=false -reconfigure
         echo "::group::terramate apply: $STACK"
         set +e
-        terramate run --disable-safeguards=git-out-of-sync --no-recursive -C "$STACK" -- tofu apply -input=false -auto-approve stack.otplan 2>&1 | tee "$RUNNER_TEMP/apply.txt"
+        terramate run --disable-safeguards=git-out-of-sync --no-recursive -C "$STACK" -- tofu apply -input=false stack.otplan 2>&1 | tee "$RUNNER_TEMP/apply.txt"
         status="${PIPESTATUS[0]}"
         set -e
         echo "::endgroup::"

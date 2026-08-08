@@ -44,14 +44,16 @@ _WRAPPER = [
 _INIT = [*_WRAPPER, "tofu", "init", "-input=false", "-reconfigure"]
 _PLAN = [*_WRAPPER, "tofu", "plan", "-input=false", "-lock=false", "-out=stack.otplan"]
 # The apply takes the backend's lock (no -lock=false) and applies the reviewed
-# plan file. Teed to RUNNER_TEMP -- never the repo tree, where the live
-# git-untracked safeguard runs.
+# plan file. No -auto-approve either: a stored plan never prompts, so the flag
+# would be inert, and without it a lost `stack.otplan` argument fails on
+# "Error asking for approval" instead of re-planning from branch content and
+# applying that unattended. Teed to RUNNER_TEMP -- never the repo tree, where
+# the live git-untracked safeguard runs.
 _APPLY = [
     *_WRAPPER,
     "tofu",
     "apply",
     "-input=false",
-    "-auto-approve",
     "stack.otplan",
     "2>&1",
     "|",
@@ -124,9 +126,9 @@ def test_each_cell_runs_exactly_the_engines_own_terramate_run_invocations():
         # No comments=True: shlex ends a word at a `#` ANYWHERE inside it, bash
         # only at the start of a word. `-out=stack.otplan#||tofu apply …` is one
         # bash word plus a live second command, and shlex read it as the bare
-        # `-out=stack.otplan` the vector expects -- green, while the cell ran an
-        # auto-approved apply with no plan file. Without the flag the `#` and its
-        # payload stay in the token, the vector differs, and it reds.
+        # `-out=stack.otplan` the vector expects -- green, while the cell ran a
+        # second live command. Without the flag the `#` and its payload stay in
+        # the token, the vector differs, and it reds.
         #
         # Cost, accepted and fail-closed: a trailing inline comment on one of
         # these lines now reds. No cell has one; whole-line comments are stripped
