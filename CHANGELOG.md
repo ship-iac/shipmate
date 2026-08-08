@@ -13,7 +13,7 @@ grammar are declared unstable in `README.md`.
 
 ## [0.9.0] — 2026-08-09
 
-Tags `TBD` (backfilled by the first commit after the tag).
+Tags `12bdceb`.
 
 No action inputs, outputs, check names or comment grammar changed — but read
 the `script`-block note below before re-pinning: this is the one release where
