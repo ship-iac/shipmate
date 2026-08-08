@@ -30,26 +30,18 @@ grammar changed.
   invocation.
 
   Two behaviour deltas to know before you re-pin. The apply no longer passes
-  `-lock=false`, so on a local/filesystem backend it now takes the backend lock
-  (the plan still runs unlocked — a plan is read-only). And `tofu init` runs
+  `-lock=false`, so it now takes whatever lock the configured backend has (the
+  plan still runs unlocked — a plan is read-only). And `tofu init` runs
   outside the teed pipeline, so its output no longer reaches `apply.txt`: a cell
   whose init fails is reported `failed` and renders link-only in the apply
   comment ("Apply output unavailable"), with the error in the job log.
 
-  **Read this before re-pinning if you customized a `script` block.** No repo
-  change is required to adopt — a repository that still defines `script "plan"` /
-  `script "apply"` keeps working, because the engine simply stops reading those
-  blocks. But that is also the capability loss: **any command a `script` block
-  added is no longer executed, and nothing signals it.** A `tofu validate` gate,
-  a pre-step, a wrapper around plan or apply — including one added by a subtree
-  `override.tm.hcl` for a single stack — silently stops running the moment you
-  re-pin, and a check you added to fail closed will fail open instead. There is
-  no per-stack or per-pipeline command customization to replace it: the command
-  list is now the engine's, identical for every stack (see `CONTRACT.md`
-  § Engine-owned tofu invocation). Audit for `script` blocks that do more than
-  `init` + `plan`/`apply` before you re-pin, and move anything load-bearing into
-  the configuration tofu itself reads — a `validate`-style gate belongs in a
-  check the plan surfaces, not in a command list the engine no longer consults.
+  No repo change is required to adopt — a repository that still defines
+  `script "plan"` / `script "apply"` keeps working, because the engine stops
+  reading those blocks. That is also the behaviour change: **any command a
+  `script` block added is no longer executed, and nothing signals it.** A `tofu
+  validate` gate, a pre-step, or a wrapper around plan or apply stops running the
+  moment you re-pin, so a check you added to fail closed fails open instead.
 
   New repositories need neither those blocks nor
   `terramate.config.experiments = ["scripts"]`.
