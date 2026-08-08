@@ -798,7 +798,9 @@ verbatim:
   blocked it, or why an earlier step failed first; the empty string for
   `applied`/`failed`).
 - `apply.txt` — the apply step's combined stdout+stderr, present only when
-  the apply step actually ran (absent for a cell blocked before then).
+  the apply step actually ran (absent for a cell blocked before then, and for a
+  cell whose init failed before the apply pipeline was reached — that cell is
+  failed, not blocked).
 
 `apply-cell` (writer) and `scripts/apply-comment` (reader, via
 `actions/apply-summary`) are pinned by the same SHA in a consumer's
@@ -979,8 +981,8 @@ log) → link-only. `apply.txt` itself is read from the end of the file
 (bounded — a fixed-size read near the tail, never the whole file) and
 decoded permissively: a non-UTF-8 byte anywhere in it becomes a replacement
 character instead of aborting the render. Terminal escape sequences (colour
-codes and similar) are stripped from that text as it is read, since a
-consumer's own `apply` script is not required to disable them. Every
+codes and similar) are stripped from that text as it is read, since the apply
+output is tofu's own and is not required to be colour-free. Every
 remaining attempted cell's link-only space, and every blocked cell's
 one-line reason, are reserved up
 front, and the render fails loud rather than post a comment that would
@@ -1093,10 +1095,35 @@ produced, which is any branch; `docs/hardening.md` #7–9 says to treat it so.
   engine SHA must match on both. A mismatch surfaces as the fail-safe above, not
   a silent wrong apply.
 
+## Engine-owned tofu invocation
+
+The engine names the `tofu` command every cell runs; a consumer repository
+supplies stacks, generated `.tf`, and Terramate metadata, never the command
+line. Cells call `terramate run --disable-safeguards=git-out-of-sync
+--no-recursive -C <stack> -- tofu …`, so Terramate contributes the stack working
+directory and the safeguard policy only:
+
+| Cell | Commands |
+|---|---|
+| `plan-cell`, `drift-cell` | `tofu init -input=false -reconfigure`; `tofu plan -input=false -lock=false -out=stack.otplan` |
+| `apply-cell` | `tofu init -input=false -reconfigure`; `tofu apply -input=false -auto-approve stack.otplan` |
+
+A consumer repository therefore needs **no `script` blocks and no
+`terramate.config.experiments = ["scripts"]`**. `init` always passes
+`-reconfigure` so a backend whose configuration is derived per-environment
+re-initializes cleanly; the plan is taken with `-lock=false` (a plan is
+read-only) and the apply takes the backend's lock.
+
+Consequence for reviewers: the exact-plan invariant — apply the reviewed
+`stack.otplan` and nothing else — is enforced by the engine at a pinned SHA, not
+by branch content. What a pull request can still influence is what tofu *reads*:
+providers, modules, and `external` data sources all execute under the cell's
+credentials (see `docs/hardening.md`).
+
 ## Terramate safeguards
 
-Terramate ships four default-on safeguards that run before `terramate run` /
-`terramate script run` (not before `list` / `generate` / `experimental`).
+Terramate ships four default-on safeguards that run before `terramate run` (not
+before `list` / `generate` / `experimental`).
 shipmate applies a **specific reviewed SHA** — the plan artifact reviewed on the
 pull request — which on the merge-deploy path is legitimately **behind `main`**
 (the squash-merge drops the PR-head SHA from `main`). Exactly one safeguard is
@@ -1109,18 +1136,20 @@ incompatible with that model; the engine disables it and keeps the rest:
 | `git-uncommitted` | kept | A real dirty tree must block; gitignored artifacts are not tracked-file changes. |
 | `outdated-code` | kept | Catches hand-edited / stale generated `.tf`, complementing the plan codegen check. |
 
-**Mechanism (engine-controlled).** The three `terramate script run` sites —
-`plan-cell`, `apply-cell`, `drift-cell` — pass `--disable-safeguards=git-out-of-sync`
-on the invocation. The policy is versioned in the engine actions (pinned by SHA);
-consumers get the correct policy for free by pinning, and never set it in their
-own `terramate.config`. The engine never disables via the meta `git` or `all`
-keywords (either would silently drop `outdated-code` / `git-untracked` /
-`git-uncommitted`).
+**Mechanism (engine-controlled).** The cells invoke `terramate run … -- tofu …`
+— `plan-cell`, `apply-cell`, `drift-cell`, each twice (an `init`, then the
+`plan`/`apply`) — and every one of those invocations passes
+`--disable-safeguards=git-out-of-sync`. The policy is versioned in the engine
+actions (pinned by SHA); consumers get the correct policy for free by pinning,
+and never set it in their own `terramate.config`. The engine never disables via
+the meta `git` or `all` keywords (either would silently drop
+`outdated-code` / `git-untracked` / `git-uncommitted`).
 
 **Consistency invariant.** The disabled-safeguard set is identical across
-`plan-cell`, `apply-cell`, and `drift-cell` — exactly `{git-out-of-sync}`. A
-drift between the three cells is a defect (guarded by a test, like the TF_VAR
-fingerprint).
+`plan-cell`, `apply-cell`, and `drift-cell`, and across both invocations within
+a cell — exactly `{git-out-of-sync}`. A drift between the three cells, or
+between a cell's two invocations, is a defect (guarded by a test, like the
+TF_VAR fingerprint).
 
 **Consumer gitignore requirement.** Because `git-untracked` and
 `git-uncommitted` stay live, a consuming repository **must gitignore** the
