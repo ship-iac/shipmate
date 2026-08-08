@@ -16,8 +16,6 @@ import shlex
 
 from _loader import action_steps
 
-_CELLS = ("plan-cell", "apply-cell", "drift-cell")
-
 # The expected invocations, HAND-WRITTEN token by token against the flag set the
 # engine means to run -- never derived from the action files. A vector computed
 # from the file under test passes whatever that file says and pins nothing, which
@@ -68,6 +66,9 @@ _EXPECTED = {
     "drift-cell": [_INIT, _PLAN],
     "apply-cell": [_INIT, _APPLY],
 }
+# One source for the cell list, so a cell added here cannot be guarded by one of
+# the tests below and silently skipped by the other.
+_CELLS = tuple(_EXPECTED)
 
 
 def _command_lines(cell):
