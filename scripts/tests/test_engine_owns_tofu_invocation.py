@@ -100,8 +100,12 @@ def test_no_cell_delegates_to_a_branch_defined_script():
         assert not offenders, f"{cell}: delegates the command to branch HCL: {offenders}"
 
 
-def test_each_cell_runs_exactly_the_engines_own_invocations():
-    """Every `terramate run` in the cell, in order, argument for argument.
+def test_each_cell_runs_exactly_the_engines_own_terramate_run_invocations():
+    """Every `terramate run` line in the cell, in order, argument for argument.
+
+    Scope is exactly what the selector sees: `terramate run` lines. Other ways to
+    reach tofu -- a variable holding the command, an `eval`, a bare `tofu` with no
+    wrapper, a `uses:` step -- are outside this test and are not claimed by it.
 
     One comparison per cell rather than one per command. Selecting the lines to
     check by the tofu subcommand on them (`tofu apply`, `tofu plan`) left an
@@ -117,5 +121,16 @@ def test_each_cell_runs_exactly_the_engines_own_invocations():
     """
     for cell, expected in _EXPECTED.items():
         lines = [ln for ln in _command_lines(cell) if re.search(r"terramate\s+run\b", ln)]
-        got = [shlex.split(ln, comments=True) for ln in lines]
+        # No comments=True: shlex ends a word at a `#` ANYWHERE inside it, bash
+        # only at the start of a word. `-out=stack.otplan#||tofu apply …` is one
+        # bash word plus a live second command, and shlex read it as the bare
+        # `-out=stack.otplan` the vector expects -- green, while the cell ran an
+        # auto-approved apply with no plan file. Without the flag the `#` and its
+        # payload stay in the token, the vector differs, and it reds.
+        #
+        # Cost, accepted and fail-closed: a trailing inline comment on one of
+        # these lines now reds. No cell has one; whole-line comments are stripped
+        # by _command_lines and belong above the line, where they all are today.
+        # Do NOT re-add comments=True to make such a red go away.
+        got = [shlex.split(ln) for ln in lines]
         assert got == expected, f"{cell}: unexpected invocations, got {got}"
