@@ -111,9 +111,22 @@ runs:
       shell: bash
       env:
         STACK: ${{ inputs.stack }}
-      # The fixture 'apply' script runs `tofu apply stack.otplan` (honors the
-      # auth subtree override). tofu rejects a plan whose state moved since it
-      # was generated -> non-zero exit -> apply check stays pending (fail-safe).
+      # The engine owns the command: `tofu apply stack.otplan` applies the
+      # reviewed plan artifact and nothing else, so the exact-plan invariant no
+      # longer depends on branch content. tofu rejects a plan whose state moved
+      # since it was generated -> non-zero exit -> apply check stays pending
+      # (fail-safe).
+      # `init` runs on its own line, outside the teed pipeline: its output is
+      # setup noise, and apply.txt is reviewer-facing comment data. It stays
+      # above BOTH the group marker and `set +e` -- above `set +e` so errexit
+      # still fails the step on a failed init (fail-safe), and above the group
+      # so that failure's diagnostics are not buried in a group this step then
+      # exits without ever closing.
+      # No `-auto-approve`: applying a stored plan never prompts, so the flag is
+      # inert here -- and its absence is a backstop. Were the `stack.otplan`
+      # argument ever lost, `-input=false` alone fails with "Error asking for
+      # approval", where `-auto-approve` would re-plan from branch content and
+      # apply that unattended.
       # Tee combined stdout+stderr to RUNNER_TEMP (never the repo tree -- the
       # live git-untracked safeguard runs on this path) for the cell-summary
       # artifact. errexit is turned off for just this one pipeline and the
@@ -129,9 +142,10 @@ runs:
       # masking a success -- or manufacturing one.
       run: |
         set -euo pipefail
+        terramate run --disable-safeguards=git-out-of-sync --no-recursive -C "$STACK" -- tofu init -input=false -reconfigure
         echo "::group::terramate apply: $STACK"
         set +e
-        terramate script run --disable-safeguards=git-out-of-sync --no-recursive -C "$STACK" apply 2>&1 | tee "$RUNNER_TEMP/apply.txt"
+        terramate run --disable-safeguards=git-out-of-sync --no-recursive -C "$STACK" -- tofu apply -input=false stack.otplan 2>&1 | tee "$RUNNER_TEMP/apply.txt"
         status="${PIPESTATUS[0]}"
         set -e
         echo "::endgroup::"

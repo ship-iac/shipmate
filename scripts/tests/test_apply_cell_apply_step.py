@@ -2,7 +2,7 @@
 strand an otherwise-successful apply's check pending -- nor let a `tee`
 success paper over a real apply failure.
 
-The step pipes `terramate script run ... apply 2>&1 | tee "$RUNNER_TEMP/apply.txt"`
+The step pipes `terramate run ... -- tofu apply ... 2>&1 | tee "$RUNNER_TEMP/apply.txt"`
 under `set -euo pipefail`. With pipefail (or plain errexit reacting to the
 pipeline's last-command status) live across that pipeline, a `tee` failure
 alone -- a full $RUNNER_TEMP, a disk hiccup mid-write, nothing to do with
@@ -39,14 +39,22 @@ def test_apply_step_captures_pipestatus_and_exits_on_it():
     assert last_line in ('exit "$status"', "exit $status")
 
 
-def _run_step(tmp_path, *, terramate_body, tee_body):
+def _run_step(tmp_path, *, terramate_body, tee_body, init_body="return 0"):
     """Execute the real, unmodified step script from action.yml with
     `terramate` and `tee` replaced by bash functions -- bash resolves a
     function before searching PATH, so this needs no fake executables or
     exec bits (fragile to set up portably on a Windows dev box)."""
     assert _BASH is not None  # callers are skipif-gated on this; narrows the type too
     run = _apply_step()["run"]
-    harness = f"terramate() {{ {terramate_body} ; }}\ntee() {{ {tee_body} ; }}\n" + run
+    # The step calls terramate twice: a plain `init` line, then the teed
+    # apply. `terramate_body` ends in `exit`, which dies in a subshell inside
+    # the pipeline but would kill this whole script on the init line -- so the
+    # stub dispatches on the tofu subcommand and returns success for init.
+    harness = (
+        f'terramate() {{ case "$*" in *"tofu apply"*) {terramate_body} ;; '
+        f"*) {init_body} ;; esac ; }}\n"
+        f"tee() {{ {tee_body} ; }}\n"
+    ) + run
     script = tmp_path / "step.sh"
     script.write_text(harness, encoding="utf-8", newline="\n")
     runner_temp = tmp_path / "rt"
@@ -89,3 +97,26 @@ def test_failed_apply_and_failed_tee_still_fails_the_step(tmp_path):
         tee_body='cat > "$1" ; exit 1',
     )
     assert r.returncode == 7, f"stdout={r.stdout!r} stderr={r.stderr!r}"
+
+
+@pytest.mark.skipif(_BASH is None, reason="bash not installed")
+def test_failed_init_fails_the_step_before_the_apply(tmp_path):
+    # init runs outside the pipeline; errexit must stop the step there rather
+    # than fall through to an apply of a plan against an uninitialized dir.
+    # `return 5`, not `exit 5`: the init line is a plain function call in the
+    # current shell, so an `exit` body terminates the script whatever the
+    # ordering and this test could not fail on the regression it names (moving
+    # `set +e` above the init line). Returning leaves errexit to do the work.
+    r = _run_step(
+        tmp_path,
+        terramate_body="echo applied ; exit 0",
+        tee_body='echo TEE_RAN >&2 ; cat > "$1" ; exit 0',
+        init_body="echo init boom >&2 ; return 5",
+    )
+    assert r.returncode == 5, f"stdout={r.stdout!r} stderr={r.stderr!r}"
+    # ...and the apply never ran. Asserted via tee's marker on stderr, not on
+    # the apply's own output: the apply is piped into tee, whose stub swallows
+    # that output into apply.txt, so `"applied" not in r.stdout` holds even
+    # when the pipeline did run. tee's own stderr escapes the pipe, and tee
+    # runs iff the pipeline did.
+    assert "TEE_RAN" not in r.stderr, f"apply ran despite a failed init: {r.stderr!r}"

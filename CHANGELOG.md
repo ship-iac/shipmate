@@ -11,6 +11,45 @@ section below names the SHA the release tags.
 The version line stays `v0.x` while action inputs, check names, and the comment
 grammar are declared unstable in `README.md`.
 
+## [Unreleased]
+
+No action inputs, outputs, check names or comment grammar changed — but read
+the `script`-block note below before re-pinning: this is the one release where
+re-pinning alone can change what runs in your repository.
+
+### Changed
+
+- **The cells invoke `terramate run … -- tofu …` and name the commands
+  themselves.** `plan-cell`, `apply-cell`, and `drift-cell` ran `terramate
+  script run <name>`, whose command list lives in the consuming repository's
+  HCL — author-controlled on a pull request, so the exact-plan invariant (apply
+  the reviewed `stack.otplan`, nothing else) was enforced by the branch rather
+  than by the engine. Terramate stays in the path for the stack working
+  directory and the safeguard policy, which is unchanged
+  (`--disable-safeguards=git-out-of-sync`, now asserted on every invocation
+  rather than on one line per cell). See `CONTRACT.md` § Engine-owned tofu
+  invocation.
+
+  Two behaviour deltas to know before you re-pin. The apply no longer passes
+  `-lock=false`, so it now takes whatever lock the configured backend has (the
+  plan still runs unlocked — a plan is read-only); on a remote backend, an apply
+  killed outright — a cancelled run, a concurrency displacement — can leave that
+  lock held, and the next apply then fails acquiring it until someone runs
+  `tofu force-unlock`. And `tofu init` runs
+  outside the teed pipeline, so its output no longer reaches `apply.txt`: a cell
+  whose init fails is reported `failed` and renders link-only in the apply
+  comment ("Apply output unavailable"), with the error in the job log.
+
+  A repository that still defines `script "plan"` / `script "apply"` keeps
+  working, because the engine stops reading those blocks. That is also the
+  behaviour change: **any command a `script` block added is no longer executed,
+  and nothing signals it.** A `tofu validate` gate, a pre-step, or a wrapper
+  around plan or apply stops running the moment you re-pin, so a check you added
+  to fail closed fails open instead.
+
+  New repositories need neither those blocks nor
+  `terramate.config.experiments = ["scripts"]`.
+
 ## [0.8.1] — 2026-08-08
 
 Tags `bec15e4`.

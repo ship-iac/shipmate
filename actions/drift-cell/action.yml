@@ -42,11 +42,21 @@ runs:
       shell: bash
       env:
         STACK: ${{ inputs.stack }}
+      # `init` sits above the group marker: its output is setup noise, not plan
+      # output. errexit is lifted for the plan itself so the group is closed on
+      # a failing plan too -- tofu's error text is the one thing a reader needs
+      # here, and an unclosed `::group::` collapses it. The explicit exit keeps
+      # a failed plan from falling through to the classify steps below.
       run: |
         set -euo pipefail
+        terramate run --disable-safeguards=git-out-of-sync --no-recursive -C "$STACK" -- tofu init -input=false -reconfigure
         echo "::group::terramate plan: $STACK"
-        terramate script run --disable-safeguards=git-out-of-sync --no-recursive -C "$STACK" plan
+        set +e
+        terramate run --disable-safeguards=git-out-of-sync --no-recursive -C "$STACK" -- tofu plan -input=false -lock=false -out=stack.otplan
+        status=$?
+        set -e
         echo "::endgroup::"
+        [ "$status" -eq 0 ] || exit "$status"
         tofu -chdir="$STACK" show -json stack.otplan > plan.json
         python3 "$GITHUB_ACTION_PATH/../../scripts/plan-classify" plan.json
 

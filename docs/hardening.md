@@ -490,7 +490,7 @@ this section rests on for exactly the exposure control 1 exists to limit.
   inside the repository; control 1 (who can push a branch) is what bounds that.
 - **Plan-time code execution.** Reviewing a plan means reading output produced
   by a pipeline running the author's code. A hostile provider, an `external`
-  data source, or a `terramate` script block executes during plan. Control 8
+  data source, or a module the branch points at executes during plan. Control 8
   bounds the damage; nothing eliminates it.
   `shipmate doctor`'s plan-environment secret probe reports what such an
   environment *stores*; it cannot observe what plan-time code does with it, and
@@ -499,8 +499,8 @@ this section rests on for exactly the exposure control 1 exists to limit.
 - **Unconditional OIDC minting in the apply jobs.** GHA's `permissions:` cannot
   be an expression, so `id-token: write` on the wave jobs is not gated on
   `AWS_ROLE_ARN` — every consumer, cloud or not, now runs apply cells in a job
-  that can mint an OIDC token for any audience, from a job that executes
-  branch-authored Terramate scripts (see "Plan-time code execution" — the apply
+  that can mint an OIDC token for any audience, from a job that runs tofu over
+  branch-authored configuration (see "Plan-time code execution" — the apply
   cell runs the reviewed plan, but the Terramate configuration around it is still
   the branch's). The engine cannot avoid this: the grant is per job, statically.
   The only mitigation is on the cloud side — an `environment:` claim condition
