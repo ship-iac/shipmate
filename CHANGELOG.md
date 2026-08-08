@@ -11,6 +11,48 @@ section below names the SHA the release tags.
 The version line stays `v0.x` while action inputs, check names, and the comment
 grammar are declared unstable in `README.md`.
 
+## [0.8.1] — 2026-08-08
+
+Tags `TBD` (backfilled by the first commit after the tag).
+
+Re-pinning is all it takes: no action inputs, outputs, check names or comment
+grammar changed. One behavioural difference worth knowing before you re-pin —
+the `complete` step can now spend up to two minutes re-reading the run's jobs
+listing before it gives up, where it previously read once.
+
+### Fixed
+
+- **`apply-complete` no longer strands apply checks when the run's jobs listing
+  lags.** It selected check-run ids from `GET /actions/runs/{id}/jobs` by
+  `conclusion == "success"`, so a cell whose conclusion had not yet propagated
+  was indistinguishable from one that never ran: its ids were dropped and the
+  step still exited 0. Seen live — an apply whose eight cells all succeeded left
+  one check `queued` and `shipmate / gate` blocked the PR permanently, while
+  every surface a human reads showed success. The step now classifies each
+  snapshot cell (terminal, absent, or not yet terminal), re-reads the listing
+  until nothing is unresolved, and fails loudly naming whatever it could not
+  resolve.
+
+  This is the gate failing *closed* either way — the danger was never a bad
+  merge, it was that nothing said the check would sit pending forever.
+
+- **Running out of retries no longer discards the completions the run earned.**
+  The first cut of the retry loop exited before the PATCH step, so one lagging
+  cell in a thirty-cell level stranded all thirty checks where previously
+  twenty-nine completed. Earned ids now accumulate across attempts, are
+  completed, and only then does the step fail on what is left.
+
+- **An empty listing, a failed fetch, and the zero-match floor are retried too.**
+  Each previously hard-failed on the first attempt — the most extreme forms of
+  the very lag the loop exists to absorb were the cases that got none of its
+  budget. Since a failed `complete` fails its env-level and `deploy.yml` skips
+  every successor, that turned a transient blip into a halted multi-region
+  deploy over infrastructure that had already applied.
+
+- **Cells left pending are named, whatever the reason.** Cells that are terminal
+  but not successful (a skipped or failed wave) were dropped as silently as the
+  lagging ones. Nothing that leaves an apply check pending is silent now.
+
 ## [0.8.0] — 2026-08-08
 
 Tags `5ee006b`.
