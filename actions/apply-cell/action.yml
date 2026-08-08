@@ -116,8 +116,12 @@ runs:
       # longer depends on branch content. tofu rejects a plan whose state moved
       # since it was generated -> non-zero exit -> apply check stays pending
       # (fail-safe).
-      # `init` runs on its own line, before the teed pipeline: its output is
-      # setup noise, and apply.txt is reviewer-facing comment data.
+      # `init` runs on its own line, outside the teed pipeline: its output is
+      # setup noise, and apply.txt is reviewer-facing comment data. It stays
+      # above BOTH the group marker and `set +e` -- above `set +e` so errexit
+      # still fails the step on a failed init (fail-safe), and above the group
+      # so that failure's diagnostics are not buried in a group this step then
+      # exits without ever closing.
       # Tee combined stdout+stderr to RUNNER_TEMP (never the repo tree -- the
       # live git-untracked safeguard runs on this path) for the cell-summary
       # artifact. errexit is turned off for just this one pipeline and the
@@ -133,8 +137,8 @@ runs:
       # masking a success -- or manufacturing one.
       run: |
         set -euo pipefail
-        echo "::group::terramate apply: $STACK"
         terramate run --disable-safeguards=git-out-of-sync --no-recursive -C "$STACK" -- tofu init -input=false -reconfigure
+        echo "::group::terramate apply: $STACK"
         set +e
         terramate run --disable-safeguards=git-out-of-sync --no-recursive -C "$STACK" -- tofu apply -input=false -auto-approve stack.otplan 2>&1 | tee "$RUNNER_TEMP/apply.txt"
         status="${PIPESTATUS[0]}"

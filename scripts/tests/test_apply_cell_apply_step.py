@@ -103,10 +103,20 @@ def test_failed_apply_and_failed_tee_still_fails_the_step(tmp_path):
 def test_failed_init_fails_the_step_before_the_apply(tmp_path):
     # init runs outside the pipeline; errexit must stop the step there rather
     # than fall through to an apply of a plan against an uninitialized dir.
+    # `return 5`, not `exit 5`: the init line is a plain function call in the
+    # current shell, so an `exit` body terminates the script whatever the
+    # ordering and this test could not fail on the regression it names (moving
+    # `set +e` above the init line). Returning leaves errexit to do the work.
     r = _run_step(
         tmp_path,
         terramate_body="echo applied ; exit 0",
-        tee_body='cat > "$1" ; exit 0',
-        init_body="echo init boom >&2 ; exit 5",
+        tee_body='echo TEE_RAN >&2 ; cat > "$1" ; exit 0',
+        init_body="echo init boom >&2 ; return 5",
     )
     assert r.returncode == 5, f"stdout={r.stdout!r} stderr={r.stderr!r}"
+    # ...and the apply never ran. Asserted via tee's marker on stderr, not on
+    # the apply's own output: the apply is piped into tee, whose stub swallows
+    # that output into apply.txt, so `"applied" not in r.stdout` holds even
+    # when the pipeline did run. tee's own stderr escapes the pipe, and tee
+    # runs iff the pipeline did.
+    assert "TEE_RAN" not in r.stderr, f"apply ran despite a failed init: {r.stderr!r}"
