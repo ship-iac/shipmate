@@ -47,6 +47,13 @@ runs:
       # the script itself failing and is propagated immediately, so a broken
       # invocation is not retried for two minutes and then misreported as a
       # stale listing.
+      #
+      # Diagnostics are echoed once, after the loop, not per attempt: the file
+      # is rewritten each time, so a 12-attempt run would otherwise log the
+      # same warning 12 times. On exhaustion the annotation quotes only the
+      # script's `unresolved cells:` line -- the file may also hold the
+      # unmatched-cells warning, and `::error::` prefixed onto that lists the
+      # wrong cells and pushes the right ones onto an un-annotated line.
       run: |
         set -euo pipefail
         ok=""
@@ -64,15 +71,16 @@ runs:
             < "$RUNNER_TEMP/jobs.jsonl" \
             > "$RUNNER_TEMP/complete-ids.txt" \
             2> "$RUNNER_TEMP/diagnostics.txt" || rc=$?
-          cat "$RUNNER_TEMP/diagnostics.txt" >&2
           case "$rc" in
             0) ok=1; break ;;
             75) if [ "$n" -lt "$attempts" ]; then sleep 10; fi ;;
-            *) exit "$rc" ;;
+            *) cat "$RUNNER_TEMP/diagnostics.txt" >&2; exit "$rc" ;;
           esac
         done
+        cat "$RUNNER_TEMP/diagnostics.txt" >&2
         if [ -z "$ok" ]; then
-          echo "::error::$(cat "$RUNNER_TEMP/diagnostics.txt") — the jobs listing never reported a conclusion for these cells; their apply checks would be stranded pending"
+          stranded=$(sed -n 's/^unresolved cells: //p' "$RUNNER_TEMP/diagnostics.txt")
+          echo "::error::the jobs listing never reported a conclusion for these cells; their apply checks would be stranded pending: $stranded"
           exit 1
         fi
 

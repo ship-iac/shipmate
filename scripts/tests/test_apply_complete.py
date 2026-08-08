@@ -193,3 +193,27 @@ def test_the_retry_arm_names_the_scripts_temporary_failure_code():
         s["run"] for s in action_steps("apply-complete") if "actions/runs" in s.get("run", "")
     )
     assert f"{apply_complete.UNRESOLVED_EXIT})" in body
+
+
+def _loop_body():
+    return next(
+        s["run"] for s in action_steps("apply-complete") if "actions/runs" in s.get("run", "")
+    )
+
+
+def test_the_exhaustion_annotation_names_the_unresolved_cells_and_nothing_else():
+    # stderr also carries the unmatched-cells warning; annotating the whole
+    # file emits `::error::::warning::…` and strands the real cells on a
+    # second, un-annotated line.
+    body = _loop_body()
+    assert f"s/^{apply_complete.UNRESOLVED_PREFIX}//p" in body
+    errors = [ln for ln in body.splitlines() if "::error::" in ln]
+    assert errors
+    assert not [ln for ln in errors if "diagnostics.txt" in ln]
+
+
+def test_diagnostics_are_echoed_once_after_the_retry_loop():
+    lines = [ln.strip() for ln in _loop_body().splitlines()]
+    echo = 'cat "$RUNNER_TEMP/diagnostics.txt" >&2'
+    assert lines.count(echo) == 1, "the unconditional echo must not sit inside the retry loop"
+    assert lines.index(echo) > lines.index("done")

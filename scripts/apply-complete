@@ -44,6 +44,10 @@ import sys
 
 SEP = "\x00"
 UNRESOLVED_EXIT = 75  # EX_TEMPFAIL; not 2, which CPython itself exits with.
+# The caller greps this prefix out of stderr to annotate the cells it gave up
+# on, so it is a line-anchored contract, not a message: stderr also carries the
+# unmatched-cells warning, which names different cells.
+UNRESOLVED_PREFIX = "unresolved cells: "
 
 
 def to_complete(snapshot, jobs):
@@ -84,7 +88,7 @@ def main():
             "be trusted; refusing to complete nothing"
         )
     if unresolved:
-        print("unresolved cells: " + ", ".join(unresolved), file=sys.stderr)
+        print(UNRESOLVED_PREFIX + ", ".join(unresolved), file=sys.stderr)
         sys.exit(UNRESOLVED_EXIT)
 
 
