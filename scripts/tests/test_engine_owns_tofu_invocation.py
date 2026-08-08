@@ -11,13 +11,62 @@ Asserted per cell on the parsed step bodies, not on file text: a `script run`
 mention surviving in a comment is fine, a live one is not.
 """
 
-import itertools
 import re
 import shlex
 
 from _loader import action_steps
 
 _CELLS = ("plan-cell", "apply-cell", "drift-cell")
+
+# The expected invocations, HAND-WRITTEN token by token against the flag set the
+# engine means to run -- never derived from the action files. A vector computed
+# from the file under test passes whatever that file says and pins nothing, which
+# is the tautology version of every hole found in this guard so far.
+#
+# Whole lines, not a window inside them. Comparing a slice (the tokens between
+# `apply` and `2>&1`) asserted nothing about either edge, and four fail-open
+# shapes followed: a second `&& terramate run … -- tofu apply` appended past the
+# truncation point; a `true apply … ;` decoy ahead of it, whose tokens matched the
+# expected slice so the real apply was never examined; a `-lock=false` smuggled
+# into that appended copy, which a line-wide scan had caught before the window
+# replaced it; and a `./evil.sh ;` prefix, which a tail-only check also misses.
+#
+# These duplicate the --disable-safeguards literal that test_safeguards.py pins.
+# That is deliberate: one duplicated literal against four proved fail-open shapes
+# is the right trade. Do NOT "de-duplicate" it by narrowing back to a window.
+_WRAPPER = [
+    "terramate",
+    "run",
+    "--disable-safeguards=git-out-of-sync",
+    "--no-recursive",
+    "-C",
+    "$STACK",
+    "--",
+]
+_INIT = [*_WRAPPER, "tofu", "init", "-input=false", "-reconfigure"]
+_PLAN = [*_WRAPPER, "tofu", "plan", "-input=false", "-lock=false", "-out=stack.otplan"]
+# The apply takes the backend's lock (no -lock=false) and applies the reviewed
+# plan file. Teed to RUNNER_TEMP -- never the repo tree, where the live
+# git-untracked safeguard runs.
+_APPLY = [
+    *_WRAPPER,
+    "tofu",
+    "apply",
+    "-input=false",
+    "-auto-approve",
+    "stack.otplan",
+    "2>&1",
+    "|",
+    "tee",
+    "$RUNNER_TEMP/apply.txt",
+]
+
+
+def _sole_line(cell, needle):
+    """The cell's one live command line containing ``needle``, tokenized."""
+    lines = [ln for ln in _command_lines(cell) if needle in ln]
+    assert len(lines) == 1, f"{cell}: expected exactly one `{needle}` line, got {lines}"
+    return shlex.split(lines[0], comments=True)
 
 
 def _command_lines(cell):
@@ -63,34 +112,22 @@ def test_every_terramate_run_names_tofu_after_a_double_dash():
 
 
 def test_apply_cell_applies_the_reviewed_plan_file():
-    lines = [ln for ln in _command_lines("apply-cell") if "tofu apply" in ln]
-    assert len(lines) == 1, f"expected exactly one `tofu apply` line, got {lines}"
-    line = lines[0]
-    # The whole argument vector, not a set of things that must appear in it.
-    # Every weaker shape had a live counterexample that re-plans from branch
-    # configuration and auto-approves the result while staying green: a substring
-    # check reads `# stack.otplan` out of a comment; token membership reads
-    # `&& echo stack.otplan`'s argument as apply's; and truncating on a *list* of
-    # shell operators only has to miss one spelling -- `2> stack.otplan` deletes
-    # two characters from the real line, passes no plan file at all, and was
-    # green while `2>&1` was in the list and `2>` was not.
-    #
-    # So there is no operator vocabulary to get wrong: cut on the one literal the
-    # real line actually contains, then compare the vector exactly. Any extra,
-    # missing, reordered, or smuggled token changes it -- including a re-added
-    # `-lock=false` (the apply deliberately takes the backend's lock). shlex
-    # handles the quoting and drops comments, and unlike cutting at the first `#`
-    # it does not mangle a `#` inside quotes (plan-cell has one).
-    tokens = shlex.split(line, comments=True)
-    assert "apply" in tokens, f"apply-cell: `apply` is not its own token: {line}"
-    args = list(itertools.takewhile(lambda t: t != "2>&1", tokens[tokens.index("apply") + 1 :]))
-    assert args == ["-input=false", "-auto-approve", "stack.otplan"], (
-        f"apply-cell must apply the reviewed plan and nothing else, got {args}: {line}"
+    tokens = _sole_line("apply-cell", "tofu apply")
+    assert tokens == _APPLY, (
+        f"apply-cell must apply the reviewed plan and nothing else, got {tokens}"
     )
 
 
 def test_plan_cells_write_the_plan_file_the_apply_reads():
     for cell in ("plan-cell", "drift-cell"):
-        lines = [ln for ln in _command_lines(cell) if "tofu plan" in ln]
-        assert len(lines) == 1, f"{cell}: expected exactly one `tofu plan` line, got {lines}"
-        assert "-out=stack.otplan" in lines[0], f"{cell}: {lines[0]}"
+        tokens = _sole_line(cell, "tofu plan")
+        assert tokens == _PLAN, f"{cell}: unexpected plan invocation, got {tokens}"
+
+
+def test_every_cell_initializes_with_the_engines_own_init():
+    """The init line is the third live `terramate run` in these cells and the
+    same smuggling works on it: appending `&& tofu apply …` to it leaves the
+    line count at 2 and the ` -- ` partition pointing at `tofu init`."""
+    for cell in _CELLS:
+        tokens = _sole_line(cell, "tofu init")
+        assert tokens == _INIT, f"{cell}: unexpected init invocation, got {tokens}"
