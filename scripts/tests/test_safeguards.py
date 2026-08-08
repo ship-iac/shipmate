@@ -27,7 +27,9 @@ def _run_flags(cell):
     """
     runs = [s["run"] for s in action_steps(cell) if s.get("shell") == "bash" and "run" in s]
     lines = [ln for text in runs for ln in text.splitlines() if "terramate run " in ln]
-    assert len(lines) >= 1, f"{cell}: no `terramate run` line found"
+    assert len(lines) >= 2, (
+        f"{cell}: expected an init line and a plan/apply line, found {len(lines)}"
+    )
     parsed = set()
     for line in lines:
         # Reject the short meta-form outright: -X == --disable-safeguards=all.
