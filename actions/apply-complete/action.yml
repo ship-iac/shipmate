@@ -36,10 +36,22 @@ runs:
       # unresolved after the retries fail the step by name: a stranded check
       # blocks the gate forever while reporting success everywhere a human
       # looks, so it must never pass as one.
+      #
+      # ~2 minutes of budget, not the ~30s a lag is expected to need, because
+      # exhausting it is expensive rather than merely annoying: this step
+      # failing fails `complete`, which fails the env-level, and deploy.yml's
+      # `!failure()` guards then skip every successor env-level -- halting a
+      # multi-region deploy over infrastructure that already applied.
+      #
+      # Only exit 75 (EX_TEMPFAIL) means "ask me again"; any other non-zero is
+      # the script itself failing and is propagated immediately, so a broken
+      # invocation is not retried for two minutes and then misreported as a
+      # stale listing.
       run: |
         set -euo pipefail
         ok=""
-        for _ in 1 2 3 4 5 6; do
+        attempts=12
+        for n in $(seq "$attempts"); do
           gh api --paginate --jq '.jobs[]' \
             "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs?per_page=100" \
             > "$RUNNER_TEMP/jobs.jsonl"
@@ -51,15 +63,16 @@ runs:
           python3 "$GITHUB_ACTION_PATH/../../scripts/apply-complete" \
             < "$RUNNER_TEMP/jobs.jsonl" \
             > "$RUNNER_TEMP/complete-ids.txt" \
-            2> "$RUNNER_TEMP/unresolved.txt" || rc=$?
+            2> "$RUNNER_TEMP/diagnostics.txt" || rc=$?
+          cat "$RUNNER_TEMP/diagnostics.txt" >&2
           case "$rc" in
             0) ok=1; break ;;
-            2) cat "$RUNNER_TEMP/unresolved.txt"; sleep 5 ;;
-            *) cat "$RUNNER_TEMP/unresolved.txt" >&2; exit "$rc" ;;
+            75) if [ "$n" -lt "$attempts" ]; then sleep 10; fi ;;
+            *) exit "$rc" ;;
           esac
         done
         if [ -z "$ok" ]; then
-          echo "::error::$(cat "$RUNNER_TEMP/unresolved.txt") — the jobs listing never reported a conclusion for these cells; their apply checks would be stranded pending"
+          echo "::error::$(cat "$RUNNER_TEMP/diagnostics.txt") — the jobs listing never reported a conclusion for these cells; their apply checks would be stranded pending"
           exit 1
         fi
 
