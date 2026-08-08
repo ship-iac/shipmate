@@ -508,6 +508,16 @@ this section rests on for exactly the exposure control 1 exists to limit.
   a token minted in one job cannot assume a role meant for another. A role whose
   trust policy names only `repo:<owner>/<repo>:*` is assumable from every job
   here, including a plan cell.
+- **A `.tf` file nobody committed.** Terramate's `git-untracked` /
+  `git-uncommitted` safeguards do not run on a cell (see `CONTRACT.md`
+  §Terramate safeguards), and `outdated-code` only checks files Terramate
+  itself generates. A stray `evil.tf` in a stack directory — left by an earlier
+  job on a **self-hosted or otherwise reused runner**, or written by a consumer
+  workflow step that runs before `plan-cell` — is read by `tofu plan` and baked
+  into the reviewed `.otplan` with nothing flagging it. On ephemeral
+  GitHub-hosted runners the checkout is fresh each job and the only writer is
+  shipmate itself; on a reused runner, a `git clean -xdf`-equivalent before the
+  plan job is the consumer's control, not the engine's.
 - **Reviewer comprehension.** The exact-plan invariant guarantees the applied
   plan is the reviewed one. It guarantees nothing about the reviewer having
   understood it.

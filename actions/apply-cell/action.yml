@@ -83,10 +83,9 @@ runs:
         STACK_NAME: ${{ inputs.stack-name }}
       run: |
         set -euo pipefail
-        # Move the reviewed fingerprint OUT of the repo tree: once git-out-of-sync
-        # is disabled, git-untracked runs on the apply path, and a stray untracked
-        # file at repo root would fail the apply. Only the regenerated
-        # fingerprint.txt (a gitignored artifact) may remain in the tree.
+        # Move the reviewed fingerprint OUT of the repo tree: the action runs in
+        # the consumer's checkout and must not leave a stray file at repo root.
+        # Only the regenerated fingerprint.txt (a gitignored artifact) remains.
         expected="$RUNNER_TEMP/expected-fingerprint.txt"
         mv fingerprint.txt "$expected"
         python3 "$GITHUB_ACTION_PATH/../../scripts/plan-classify" --fingerprint-only
@@ -128,7 +127,7 @@ runs:
       # approval", where `-auto-approve` would re-plan from branch content and
       # apply that unattended.
       # Tee combined stdout+stderr to RUNNER_TEMP (never the repo tree -- the
-      # live git-untracked safeguard runs on this path) for the cell-summary
+      # action runs in the consumer's checkout) for the cell-summary
       # artifact. errexit is turned off for just this one pipeline and the
       # step exits explicitly on tofu's own status, captured via
       # PIPESTATUS[0]: with errexit (and pipefail) live across the pipeline, a
@@ -192,11 +191,8 @@ runs:
       # the reviewed .otplan, so if this step failed the job outright, a
       # re-run would hit the exact-plan stale-plan fail-safe with no way back
       # on an otherwise-successful apply. Writes cell.json to $RUNNER_TEMP, not
-      # the repo tree -- the
-      # sibling steps above avoid a stray untracked file at repo root
-      # failing the apply (git-untracked runs on this path); this step was
-      # previously safe only because no terramate/tofu step follows it,
-      # which writing to RUNNER_TEMP no longer depends on.
+      # the repo tree -- like its sibling steps above, it must not leave a stray
+      # file in the consumer's checkout.
       if: always()
       continue-on-error: true
       shell: bash

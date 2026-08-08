@@ -11,6 +11,29 @@ section below names the SHA the release tags.
 The version line stays `v0.x` while action inputs, check names, and the comment
 grammar are declared unstable in `README.md`.
 
+## [Unreleased]
+
+### Fixed
+
+- **`CONTRACT.md` § Terramate safeguards described a protection that does not
+  run.** It said `git-untracked` and `git-uncommitted` stay live on the cells and
+  that "a real dirty tree must block". Terramate evaluates both only on the
+  recursive path (0.17.1, `commands/run/run.go`), and every cell passes
+  `--no-recursive`, so neither is ever reached: an untracked file or a modified
+  tracked file in the checkout does **not** block a plan or an apply. Documented
+  behaviour only — no engine behaviour changed. `outdated-code` and
+  `git-out-of-sync` do run, and the engine's
+  `--disable-safeguards=git-out-of-sync` is load-bearing: without it a cell on a
+  reviewed SHA behind the default branch refuses outright. Two things follow for
+  a consuming repository: `outdated-code`, now the only working safeguard on a
+  cell, is **overridable from your own `terramate.config`** and the engine cannot
+  re-enable it — do not set `disable_safeguards` there; and
+  `.terraform.lock.hcl` has come **out** of the mandatory gitignore list, since
+  committing it is OpenTofu's recommendation for pinning providers and a cell
+  tolerates it either way. The rest of that list is unchanged and still a MUST.
+  See `CONTRACT.md` § Terramate safeguards, and `docs/hardening.md` § What none
+  of this fixes for the stray-`.tf` residual this leaves on reused runners.
+
 ## [0.9.0] — 2026-08-09
 
 Tags `12bdceb`.
