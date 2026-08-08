@@ -13,7 +13,7 @@ grammar are declared unstable in `README.md`.
 
 ## [0.8.1] — 2026-08-08
 
-Tags `TBD` (backfilled by the first commit after the tag).
+Tags `bec15e4`.
 
 Re-pinning is all it takes: no action inputs, outputs, check names or comment
 grammar changed. One behavioural difference worth knowing before you re-pin —
