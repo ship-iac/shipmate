@@ -12,6 +12,7 @@ mention surviving in a comment is fine, a live one is not.
 """
 
 import re
+import shlex
 
 from _loader import action_steps
 
@@ -64,10 +65,19 @@ def test_apply_cell_applies_the_reviewed_plan_file():
     lines = [ln for ln in _command_lines("apply-cell") if "tofu apply" in ln]
     assert len(lines) == 1, f"expected exactly one `tofu apply` line, got {lines}"
     line = lines[0]
-    assert line.rstrip().endswith("stack.otplan") or "stack.otplan 2>&1" in line, (
-        f"apply-cell must apply the stored plan file: {line}"
-    )
-    assert "-auto-approve" in line and "-input=false" in line, line
+    # Tokenized, not substring-matched: the plan file has to be a real argument.
+    # `tofu apply -auto-approve # stack.otplan 2>&1 | tee …` is a live line that
+    # re-plans from config instead of applying the reviewed plan, and it satisfies
+    # any test that only looks for the text -- including a check that strips from
+    # ` 2>&1` and then calls endswith, since the comment sits before the redirect.
+    # shlex with comments=True drops it, and unlike stripping at the first `#` it
+    # does not mangle a `#` inside quotes (plan-cell has one).
+    tokens = shlex.split(line, comments=True)
+    assert "stack.otplan" in tokens, f"apply-cell must apply the stored plan file: {line}"
+    assert "-auto-approve" in tokens and "-input=false" in tokens, line
+    # Flags forbidden, not just flags present: the apply deliberately takes the
+    # backend's lock, so re-adding -lock=false must not be invisible here.
+    assert "-lock=false" not in tokens, f"apply must take the backend lock: {line}"
 
 
 def test_plan_cells_write_the_plan_file_the_apply_reads():

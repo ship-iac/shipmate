@@ -28,10 +28,12 @@ runs:
       # The engine owns the tofu command line: a pull request cannot redefine
       # what "plan" means. terramate stays in the path for stack cwd and the
       # safeguard policy only.
+      # `init` sits above the group marker so a failed init's diagnostics are not
+      # buried in a group this step then exits without ever closing (errexit).
       run: |
         set -euo pipefail
-        echo "::group::terramate plan: $STACK"
         terramate run --disable-safeguards=git-out-of-sync --no-recursive -C "$STACK" -- tofu init -input=false -reconfigure
+        echo "::group::terramate plan: $STACK"
         terramate run --disable-safeguards=git-out-of-sync --no-recursive -C "$STACK" -- tofu plan -input=false -lock=false -out=stack.otplan
         echo "::endgroup::"
 

@@ -42,10 +42,12 @@ runs:
       shell: bash
       env:
         STACK: ${{ inputs.stack }}
+      # `init` sits above the group marker so a failed init's diagnostics are not
+      # buried in a group this step then exits without ever closing (errexit).
       run: |
         set -euo pipefail
-        echo "::group::terramate plan: $STACK"
         terramate run --disable-safeguards=git-out-of-sync --no-recursive -C "$STACK" -- tofu init -input=false -reconfigure
+        echo "::group::terramate plan: $STACK"
         terramate run --disable-safeguards=git-out-of-sync --no-recursive -C "$STACK" -- tofu plan -input=false -lock=false -out=stack.otplan
         echo "::endgroup::"
         tofu -chdir="$STACK" show -json stack.otplan > plan.json
