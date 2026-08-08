@@ -11,35 +11,49 @@ Asserted per cell on the parsed step bodies, not on file text: a `script run`
 mention surviving in a comment is fine, a live one is not.
 """
 
+import re
+
 from _loader import action_steps
 
 _CELLS = ("plan-cell", "apply-cell", "drift-cell")
 
 
 def _command_lines(cell):
-    """Non-comment, non-blank lines from the cell's bash step bodies."""
-    runs = [s["run"] for s in action_steps(cell) if s.get("shell") == "bash" and "run" in s]
-    return [
+    """Live command lines from every `run:` body in the cell.
+
+    Every step with a `run:`, not only `shell: bash` ones -- selecting on the
+    shell lets a delegation evade the guard by moving to `shell: sh`, which runs
+    the same command. Comments and blanks are dropped first (a `script run`
+    mention in prose is not an invocation), then backslash continuations are
+    joined, so a command split across two lines is matched as the one command it
+    is. Order matters: comments end at the newline in shell, so a trailing `\\`
+    inside one does not continue it.
+    """
+    runs = [s["run"] for s in action_steps(cell) if "run" in s]
+    kept = [
         stripped
         for text in runs
         for ln in text.splitlines()
         if (stripped := ln.strip()) and not stripped.startswith("#")
     ]
+    return "\n".join(kept).replace("\\\n", " ").splitlines()
 
 
 def test_no_cell_delegates_to_a_branch_defined_script():
     for cell in _CELLS:
-        offenders = [ln for ln in _command_lines(cell) if "script run" in ln]
+        # `script\s+run`, not the literal: any run of whitespace joins the two
+        # words, including the space a joined line continuation leaves behind.
+        offenders = [ln for ln in _command_lines(cell) if re.search(r"script\s+run", ln)]
         assert not offenders, f"{cell}: delegates the command to branch HCL: {offenders}"
 
 
 def test_every_terramate_run_names_tofu_after_a_double_dash():
     for cell in _CELLS:
-        # Non-empty only: that each cell runs *two* invocations (an init, then
-        # the plan/apply) is pinned by test_safeguards.py, which asserts the
-        # identical --disable-safeguards value on every one of them.
         lines = [ln for ln in _command_lines(cell) if "terramate run " in ln]
-        assert lines, f"{cell}: no `terramate run` invocation"
+        assert len(lines) == 2, (
+            f"{cell}: expected exactly two `terramate run` invocations -- an init "
+            f"line and a plan/apply line -- found {len(lines)}: {lines}"
+        )
         for line in lines:
             head, sep, tail = line.partition(" -- ")
             assert sep, f"{cell}: no `--` separator, terramate may parse tofu's flags: {line}"

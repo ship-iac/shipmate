@@ -1118,7 +1118,8 @@ Consequence for reviewers: the exact-plan invariant — apply the reviewed
 `stack.otplan` and nothing else — is enforced by the engine at a pinned SHA, not
 by branch content. What a pull request can still influence is what tofu *reads*:
 providers, modules, and `external` data sources all execute under the cell's
-credentials (see `docs/hardening.md`).
+credentials, and the Terramate configuration around the cell (see
+`docs/hardening.md`).
 
 ## Terramate safeguards
 

@@ -26,7 +26,16 @@ def _run_flags(cell):
     agreed frozenset and fails if they disagree.
     """
     runs = [s["run"] for s in action_steps(cell) if s.get("shell") == "bash" and "run" in s]
-    lines = [ln for text in runs for ln in text.splitlines() if "terramate run " in ln]
+    # Comment lines are dropped before counting: commenting an invocation out is
+    # the ordinary way to disable it, and a filter that only looks for the text
+    # counts the disabled line toward the >= 2 below and parses the policy out of
+    # it -- the count would be satisfiable by a comment.
+    lines = [
+        ln
+        for text in runs
+        for raw in text.splitlines()
+        if (ln := raw.strip()) and not ln.startswith("#") and "terramate run " in ln
+    ]
     assert len(lines) >= 2, (
         f"{cell}: expected an init line and a plan/apply line, found {len(lines)}"
     )
