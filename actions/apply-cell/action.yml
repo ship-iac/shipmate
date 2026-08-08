@@ -111,9 +111,13 @@ runs:
       shell: bash
       env:
         STACK: ${{ inputs.stack }}
-      # The fixture 'apply' script runs `tofu apply stack.otplan` (honors the
-      # auth subtree override). tofu rejects a plan whose state moved since it
-      # was generated -> non-zero exit -> apply check stays pending (fail-safe).
+      # The engine owns the command: `tofu apply stack.otplan` applies the
+      # reviewed plan artifact and nothing else, so the exact-plan invariant no
+      # longer depends on branch content. tofu rejects a plan whose state moved
+      # since it was generated -> non-zero exit -> apply check stays pending
+      # (fail-safe).
+      # `init` runs on its own line, before the teed pipeline: its output is
+      # setup noise, and apply.txt is reviewer-facing comment data.
       # Tee combined stdout+stderr to RUNNER_TEMP (never the repo tree -- the
       # live git-untracked safeguard runs on this path) for the cell-summary
       # artifact. errexit is turned off for just this one pipeline and the
@@ -130,8 +134,9 @@ runs:
       run: |
         set -euo pipefail
         echo "::group::terramate apply: $STACK"
+        terramate run --disable-safeguards=git-out-of-sync --no-recursive -C "$STACK" -- tofu init -input=false -reconfigure
         set +e
-        terramate script run --disable-safeguards=git-out-of-sync --no-recursive -C "$STACK" apply 2>&1 | tee "$RUNNER_TEMP/apply.txt"
+        terramate run --disable-safeguards=git-out-of-sync --no-recursive -C "$STACK" -- tofu apply -input=false -auto-approve stack.otplan 2>&1 | tee "$RUNNER_TEMP/apply.txt"
         status="${PIPESTATUS[0]}"
         set -e
         echo "::endgroup::"
