@@ -287,53 +287,10 @@ for repositories the installing organization controls.
 
 ## Environment setup
 
-Every logical environment needs a GitHub Environment pair (`<env>`,
-`<env>-apply`), plus the one fixed `shipmate-engine` environment that holds
-the App key (`docs/github-app.md`). `<env>`/`<env>-apply` are never named in
-workflow YAML at all — they're read from Terramate stack tags at runtime.
-`shipmate-engine` is different: it's the one *literal* environment name that
-does appear in workflow YAML (CONTRACT.md's one carve-out to "no env names in
-workflow YAML — ever"), because it names a single fixed thing rather than a
-per-repo logical environment. Most of its appearances are inside the
-engine's own reusable workflows, but two consumer-owned workflows declare it
-directly too — `comment-ops.yml`'s `ops` job and `drift.yml`'s `issues`
-job — because both mint the App token themselves rather than delegating to
-a called reusable workflow, and both run at the default-branch ref by
-construction (`issue_comment`, the nightly `schedule`), which is what lets
-them.
-
-Create each with `gh api -X PUT repos/<owner>/<repo>/environments/<name>`,
-then set protection rules from Settings → Environments → `<name>` (or the API):
-
-- **`shipmate-engine`** (create once, regardless of how many env tiers you
-  run): deployment branch policy **Selected branches**, naming exactly the
-  default branch. No reviewers — this environment's job is scoping the App
-  key to trusted workflow runs, not gating a human decision, and reviewers
-  here would stall every plan and apply run waiting for an approval nobody is
-  meant to give. `shipmate doctor` checks both that this environment exists
-  and that its policy actually names the default branch.
-- **`<env>`** (plan): no reviewers, no deployment branch policy at all —
-  reviewers block every plan cell, and a branch policy blocks every plan cell
-  whose pull request targets a branch it does not name (plan jobs run at the
-  pull request's *base* ref) (`docs/hardening.md` §8; `shipmate doctor` warns on
-  either).
-
-`<env>-apply` splits by tier, and this is the split `docs/hardening.md`
-describes at the credential level (§6–9) restated as environment settings:
-
-- **dev / staging — branch policy only, self-service.** Deployment branch
-  policy restricted to the default branch (closes the direct-branch-secret
-  path, `docs/hardening.md` #17); no required reviewers, so `shipmate apply`
-  proceeds without a human in the loop. Deliberate: these tiers exist so a
-  team can self-serve, and their blast radius doesn't warrant a reviewer.
-- **prod — branch policy *and* required reviewers *and* "Prevent
-  self-review".** Same branch policy, plus required reviewers (a team, not
-  one person) with self-review prevented (`docs/hardening.md` #6) — the one
-  gate an App token cannot forge, since a reviewer decision is a human
-  action a minted token cannot take. List `prod` in
-  `global.shipmate.explicit_envs` too, so a bare `shipmate apply` skips it and
-  it is only ever reached via the targeted `shipmate apply prod` (which then
-  pauses for the environment reviewer).
+Environment setup lives in `getting-started.md`: §Required — plan →
+§Environments for this tier has the `<env>` plan environments and
+`shipmate-engine`, and §Required — apply → §Environment setup has the
+`<env>-apply` environments and their dev/staging vs prod split.
 
 ## Review policy for `shipmate apply`
 
@@ -353,7 +310,8 @@ fails closed rather than proceeding unreviewed.)
   config — set it on the ruleset (the `pull_request` rule).
 - **Per-environment approval** (e.g. dev applies freely, prod needs a human):
   configure **required reviewers on the `<env>-apply` GitHub Environment**, not
-  in the ruleset. This gates both pre-merge `shipmate apply <env>` and the
+  in the ruleset (`getting-started.md` §Required — apply → §Environment setup has
+  those settings). This gates both pre-merge `shipmate apply <env>` and the
   post-merge `deploy.yml` apply, since both run against `<env>-apply`.
   - Deployment approvals differ from PR reviews: a reviewer **can approve
     their own deployment** by default, so a sole maintainer still gets a
@@ -367,41 +325,6 @@ fails closed rather than proceeding unreviewed.)
   reviewers) are free on public repos but require GitHub Pro/Team/Enterprise on
   private repos — the same class of constraint as the ruleset note in
   "free-tier private repos" below.
-
-## Recipe: automerge after apply
-
-Because the merge gate is the single `shipmate / gate` check, GitHub's
-native auto-merge composes with shipmate for free — no engine configuration,
-no extra workflow. Once auto-merge is armed on a PR, finishing the applies is
-the last green check, so the PR merges itself:
-
-1. **One-time repo setting:** allow auto-merge —
-   `gh repo edit <owner>/<repo> --enable-auto-merge` (or Settings → General →
-   "Allow auto-merge").
-2. **Per PR:** review and approve, arm auto-merge
-   (`gh pr merge <n> --auto --merge`, or the "Enable auto-merge" button), then
-   comment `shipmate apply`. When every environment's applies complete,
-   `shipmate / gate` flips to `success` and GitHub merges the PR.
-
-Properties that fall out of the existing gate semantics:
-
-- **Explicit environments still gate.** An environment listed in
-  `global.shipmate.explicit_envs` is skipped by the bare `shipmate apply` and its
-  apply checks stay pending — gate stays pending, so auto-merge waits
-  until someone runs the targeted `shipmate apply <env>`. Arming auto-merge never
-  weakens the apply-before-merge guarantee; it only removes the final click.
-- **Stale bases don't sneak through.** With "require branches up to date"
-  (strict), a base moved since the plans ran blocks the auto-merge until the
-  branch is updated — and updating re-runs the plan on the new head, which
-  resets gate to pending until the fresh plans are applied. The
-  exact-plan invariant is preserved.
-- **The post-merge deploy still runs.** GitHub performs the auto-merge as the
-  user who armed it (not `GITHUB_TOKEN`), so the resulting push event triggers
-  `deploy.yml` normally — which no-ops idempotently when everything was
-  applied pre-merge.
-- **Any merge method works.** Squash merges are fine: `deploy-detect` maps the
-  merge commit back to the PR head SHA via the commit→PR association, not the
-  commit graph.
 
 ## Note: free-tier private repos
 

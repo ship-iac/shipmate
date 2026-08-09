@@ -1,0 +1,149 @@
+# AWS setup
+
+The worked example for everything below is
+[repo-example-stacks-aws](https://github.com/ship-iac/repo-example-stacks-aws) —
+the only sample repository that holds cloud credentials. The semantics of record
+are [`../CONTRACT.md`](../CONTRACT.md) §AWS OIDC and §State backend; this page is
+how the sample satisfies them.
+
+Nothing here is required to run shipmate. The engine ships no credential of its
+own and is cloud-agnostic by default; the other three sample repositories run
+credential-free on a local backend.
+
+## S3 backend
+
+State lives in one S3 bucket with **native locking** — `use_lockfile = true`, so
+S3's conditional writes hold the lock and there is no separate lock table. The
+sample generates the backend per stack from `root.tm.hcl`:
+
+```hcl
+generate_hcl "_backend.tf" {
+  condition = global.state_role_arn == ""
+  content {
+    terraform {
+      backend "s3" {
+        bucket       = "repo-examples-shipmate-state"
+        key          = "repo-example-stacks-aws/${var.env}/${var.region}${terramate.stack.path.absolute}/terraform.tfstate"
+        region       = "eu-north-1"
+        use_lockfile = true
+        encrypt      = true
+        profile      = var.use_profile ? "${global.workload}-${var.env}" : null
+      }
+    }
+  }
+}
+```
+
+The `key` is what makes this one state file per stack × environment: it embeds
+`var.env`, `var.region` and the stack's absolute Terramate path, all from the
+same values the fan-out already carries. `profile` is for running by hand — in CI
+`var.use_profile` defaults to `false` and the SDK reads the ambient OIDC session.
+
+The sample carries a second, mutually exclusive `generate_hcl "_backend.tf"`
+block, guarded on `global.state_role_arn != ""`, which adds an `assume_role` hop
+so the backend reaches the bucket through a dedicated state role. Two blocks
+rather than one conditional attribute because Terramate 0.17.1 has no
+`tm_unset()`, and a bare `unset` emits `assume_role = unset`, which survives
+`fmt` and `validate` and dies at `init`.
+
+Because the backend owns the state, the apply-path wrappers pass
+`state_suffix: ""`. That is the explicitly-empty mode of
+[`../CONTRACT.md`](../CONTRACT.md) §State backend: both `actions/state` steps are
+skipped entirely and shipmate never handles a state file. The input declares no
+default, so omitting it is a workflow-resolution error rather than a third mode.
+
+## GitHub OIDC
+
+Each environment gets its own IAM role, assumed through GitHub's OIDC provider
+(`token.actions.githubusercontent.com`) — no long-lived access key anywhere. The
+role's trust policy conditions the `sub` claim on the environment claim
+(`environment:<env>-apply` for an apply role, the plan environment's own name for
+a read-only plan role), which is the only control that decides which environments
+can actually assume it; see [`hardening.md`](hardening.md) §7–9 for why that, and
+not where you put the variable, is the enforcing bound.
+
+**Write the trust condition from the subject your own logs show, not from the
+documented shape.** GitHub Actions issues the `sub` claim with the numeric
+organization and repository ids embedded:
+
+```
+repo:ship-iac@305536692/repo-example-stacks-aws@1325724489:environment:dev-us
+```
+
+while `GET repos/{owner}/{repo}/actions/oidc/customization/sub` reports
+`use_immutable_subject: false` — the API contradicts the token, so its answer is
+not evidence. A trust policy written against the human-readable
+`repo:<owner>/<repo>:...` form then fails with a bare `AccessDenied — Not
+authorized to perform sts:AssumeRoleWithWebIdentity` and nothing wrong-looking in
+the policy, the provider, or the workflow. Failed `AssumeRoleWithWebIdentity`
+calls are CloudTrail management events, visible in Event history with no trail
+configured, and `userIdentity.userName` is the exact subject that arrived:
+
+```bash
+aws cloudtrail lookup-events \
+  --lookup-attributes AttributeKey=EventName,AttributeValue=AssumeRoleWithWebIdentity \
+  --max-results 3 --region us-east-1
+```
+
+`requestParameters` is `null` on those events — the subject is only in
+`userIdentity.userName`. The immutable form is also the stronger condition: a
+repository renamed or recreated under an old name cannot inherit the trust.
+
+## Environment variables
+
+A consumer opts into AWS OIDC by setting two GitHub Environment **variables** —
+not secrets, since neither is one:
+
+- `AWS_ROLE_ARN` — the IAM role the job assumes.
+- `AWS_REGION` — the region passed to the credentials step.
+
+With `AWS_ROLE_ARN` unset the engine's credentials step is skipped and the job
+holds no cloud credential at all, which is how the three non-AWS sample
+repositories run credential-free.
+
+Set them on each `<env>-apply` environment and nowhere else — but understand that
+this scoping is advisory, not enforced. `vars` resolve organization → repository
+→ environment, so an `AWS_ROLE_ARN` set at repository or organization level is
+read identically by every wave job in every environment, with no warning and
+nothing in the engine to guard it. The role's trust policy is the real bound.
+
+## Where the credentials step goes
+
+**On the apply path the consumer writes no credentials step.** The engine's
+`apply-env-level.yml` runs `aws-actions/configure-aws-credentials` in every wave
+job itself — after `actions/setup`, before `apply-cell`, gated on
+`if: ${{ vars.AWS_ROLE_ARN != '' }}` — reading the variables from the
+`<env>-apply` environment the job is bound to. The wrapper's only obligation is
+`id-token: write` on the calling job (see
+[`getting-started.md`](getting-started.md) §Required — apply).
+
+**On the plan and drift paths the step is the consumer's own**, because
+`plan.yml` and `drift.yml` are consumer-owned workflows and the engine provides
+no credentials step there. In both sample workflows it sits in the same position:
+after the `ship-iac/shipmate/actions/setup` step and before the cell action
+(`plan-cell`, `drift-cell`), so the assumed session exists by the time `tofu`
+runs and setup has not yet been given a credential it does not need.
+
+Both sample steps are unconditional, because that repository sets the variables
+on every environment. If some of your environments run credential-free, copy the
+engine's `if: ${{ vars.AWS_ROLE_ARN != '' }}` guard onto your step — with the
+variable unset, `configure-aws-credentials` has no role to assume and the cell
+fails there rather than skipping.
+
+A plan role should be read-only. A plan environment can have no approval rules
+and no branch policy at all ([`hardening.md`](hardening.md) §8), so whatever it
+releases is reachable by anyone who can push a branch.
+
+## The sample's workload
+
+Every stack manages `random_pet` and `terraform_data` null resources plus one
+`aws_ssm_parameter`, named
+`/shipmate/repo-example-stacks-aws/<env>/<stack path>` — so the real AWS
+footprint of a full fan-out is one SSM parameter per stack × environment, and the
+S3 state object beside it.
+
+That is deliberately the smallest thing that still proves a real provider, a real
+remote backend and real locking: the fixtures the repository exercises (stale
+plan, drift, precondition failure) come from the null resources, while the SSM
+parameter and the S3 lock are what make the run indistinguishable from a
+production one from the engine's side.
