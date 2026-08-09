@@ -13,6 +13,59 @@ grammar are declared unstable in `README.md`.
 
 ## [Unreleased]
 
+### Changed
+
+- **BREAKING — the plan path is one workflow now, and every consumer must
+  rewrite `plan.yml` and delete `summary.yml`.** `plan.yml` moves to
+  `pull_request_target` and gains a third job, `summary`, which is
+  `uses: <owner>/shipmate/.github/workflows/summary.yml@<sha>` with
+  `secrets: inherit` and five inputs (`pr-number`, `head-sha`, `detect-result`,
+  `plan-result`, `planned-cells`). Because `pull_request_target` checks out the
+  base by default, `detect` and `plan` must now name
+  `ref: ${{ github.event.pull_request.head.sha }}` on their checkout explicitly
+  — without it they plan the base branch and report a clean plan for a pull
+  request they never read. The consumer's `.github/workflows/summary.yml` is
+  deleted; the engine's is now a `workflow_call` workflow whose single job binds
+  `shipmate-engine`, checks out nothing, and carries both trust conditions (the
+  fork refusal and the draft skip) on its own `if:`, where a consumer cannot
+  drop them. The old `workflow_run` topology is **not supported** — a repository
+  that re-pins without rewriting gets no gate, so the pull request cannot merge.
+  Nothing matches on the plan workflow's path or its `name:` any longer. Copy
+  the reference `plan.yml` from a `repo-example-*` sample. See `CONTRACT.md`
+  §Post-plan topology.
+- **Plans now run against the branch tip, not the merge commit.** The old
+  `pull_request` trigger checked out `refs/pull/<n>/merge`; the explicit
+  `head.sha` checkout does not produce a merge ref. A pull request behind its
+  base now plans what the branch says rather than what the merge would produce.
+  The surviving safety net is the stale-plan refusal at apply time, which still
+  fails a plan whose state or base has moved; **require branches to be up to
+  date before merging** (`docs/branch-protection.md`) is the setting that closes
+  the rest.
+- **A summary-job failure now reds the whole plan run.** The summary job lives
+  inside the plan run rather than in a separate `workflow_run` run, so a run
+  whose gate could not be written no longer reports `success`. Queries that look
+  for a *successful* plan run — comment-ops' reviewed-plan lookup, its
+  cell-summary fetch for `shipmate doctor`, and `deploy-detect`'s post-merge
+  artifact lookup — stop finding it. Fail-closed (apply refuses, and re-running
+  the run fixes it), but it is new coupling between the summary step and every
+  consumer of the plan run's conclusion.
+- **Two open pull requests sharing one head SHA both write the gate.** The
+  newest-run-for-this-SHA arbitration went with `workflow_run`, and the caller's
+  `concurrency: plan-<pr number>` group is keyed on the pull request number, so
+  it does not cover this case. Last write wins, as before.
+- **`shipmate doctor` has ten probes, not eleven.** The consumer plan/summary
+  wiring probe is gone with the coupling it policed; `scripts/wiring` and its
+  `detect`-time gate are deleted with it. Doctor's `pull_request_target` probe
+  now exempts `.github/workflows/plan.yml` by exact name and warns for every
+  other workflow file, because the trigger is safe only in the shape the engine
+  ships — the credentialed job checking nothing out.
+- **The `plan-matrix.<N>` marker artifact is gone.** `detect` declares the
+  planned cell count as an action output and the caller passes it to the summary
+  job as `planned-cells`, so the gate no longer reconciles an artifact listing;
+  `actions/summary` loses its `artifact-count` input. The gate still holds
+  whenever the cell summaries read disagree with the planned count, in either
+  direction.
+
 ### Fixed
 
 - **`CONTRACT.md` § Terramate safeguards described a protection that does not

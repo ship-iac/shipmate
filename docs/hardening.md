@@ -31,21 +31,29 @@ apply-environment path and limit who can reach even the residual one.
 
 Fork pull requests are outside this, and are refused outright — the engine will
 not plan a pull request whose head repository is not this repository (see
-"Contributors without push access"). The App key is out of their reach twice
-over: it lives only in the `shipmate-engine` GitHub Environment
-(`docs/github-app.md` §Key-exposure boundary), reachable only by the trusted
-`summary`/apply workflows running at the default-branch ref, and never inside a
-`pull_request`-triggered job, fork or not. Adding a `pull_request_target`
-workflow — the usual way to label or comment on fork pull requests — reverses
-that: unlike `pull_request`, it runs at the **base** ref, which is exactly what
-would satisfy `shipmate-engine`'s default-branch-only policy if such a job
-declared that environment — while still checking out and acting on content the
-fork author controls. That combination (a ref the policy trusts, executing
-input it doesn't) is the no-push-access version of the attack this page opens
-with, and it is reachable regardless of the fork refusal above, which only
-governs the plan path. Don't add one to a repository that holds the App key —
-`shipmate doctor` warns for any workflow file that declares the trigger. See
-"Contributors without push access" for the trade-off that follows.
+"Contributors without push access").
+
+**`pull_request_target` is how the engine reaches the App key, so the question
+is never the trigger but the shape.** The plan workflow runs on
+`pull_request_target`, which evaluates at the **base** ref — the one ref
+`shipmate-engine`'s default-branch-only policy trusts. That is deliberate: it is
+what lets the plan run's trusted `summary` job mint an App token and write the
+`shipmate / gate` status. What makes it safe is a property of that job, not of
+the trigger: **it executes no repository content at all.** It is a call to the
+engine's own reusable workflow, it has no checkout step, and the two jobs that
+do check out the pull request's head — `detect` and `plan` — bind no environment
+and hold no credential. A consumer cannot add a checkout to the trusted job,
+because they do not own its steps.
+
+The dangerous shape is the same trigger without that separation: a workflow
+that checks out or otherwise acts on the pull request's own content inside a job
+that names an environment. A ref the policy trusts, executing input it doesn't,
+is the no-push-access version of the attack this page opens with, and it is
+reachable regardless of the fork refusal above, which only governs the plan
+path. That is the shape a labeler or commenter workflow usually takes — don't
+add one to a repository that holds the App key. `shipmate doctor` warns for
+every workflow file declaring the trigger except `plan.yml`, matched by exact
+name. See "Contributors without push access" for the trade-off that follows.
 
 ## Checklist
 
@@ -425,6 +433,14 @@ A re-pin of the engine that never creates this environment — the other ordinar
 way to regress this — leaves the key a repository secret again, readable by any
 branch's workflow. That one the probe does catch.
 
+**Measured, not inferred.** The branch policy is evaluated against the ref the
+run itself is at, and a job that declares this environment from a non-default
+ref is refused *before its first step* — no runner, nothing handed over. The
+same job on `pull_request_target` is admitted, because that trigger evaluates at
+the base branch ref. Both halves were run against a live repository rather than
+read out of documentation; they are what the plan path's trusted `summary` job
+rests on.
+
 **Tag pushes are covered, and there is one way to uncover them.** A deployment
 branch policy is typed: the entry naming your default branch is a **branch**
 policy, and it matches no tag, so a workflow run at `refs/tags/…` that declares
@@ -439,7 +455,7 @@ included, because it compares the policy names against the default branch alone.
 ## Contributors without push access
 
 **Fork pull requests are refused outright.** `actions/build-matrix` fails the
-step when the triggering `pull_request` event's head repository is not this
+step when the triggering pull-request event's head repository is not this
 repository, and there is no input, variable or setting that turns that off — it
 is a rule of the engine, not a configurable. A fork's plan is refused before any
 stack is enumerated and before any `tofu` process starts. It is not refused
@@ -449,20 +465,28 @@ before `detect`'s own `terramate` steps: in the reference `plan.yml`,
 globals, `tm_*` functions and generate blocks included. Moving the refusal ahead
 of them means reordering your own `plan.yml`.
 
-That refusal is about **code execution**, not secrets. A fork's `pull_request`
-run receives no repository secrets, and `plan.yml` holds no App key in any case
-— nothing in `plan.yml` ever does, since the key lives only in
-`shipmate-engine` — but a plan cell still executes the pull request's own
+That refusal is about **code execution**, not secrets. `detect` and `plan` hold
+no App key — the key lives only in `shipmate-engine`, which those jobs do not
+bind — but a plan cell still executes the pull request's own
 Terramate/OpenTofu code and reads whatever the plan environment exposes as
 *variables*, which are not secrets and are not withheld from a fork. For an
 infrastructure repository that is arbitrary code execution offered to anyone who
 can open a pull request.
 
-The refusal is loud (a red step) rather than a quiet empty matrix, because a
-fork pull request could not merge either way: the trusted `summary` workflow
-refuses to act on a `workflow_run` whose `head_repository` differs from
-`github.repository` (see `docs/github-app.md` §Key-exposure boundary), so no
-`shipmate / gate` status is ever written and the required check never appears.
+**The App key is now inside a workflow a fork pull request can start**, because
+the plan workflow runs on `pull_request_target` and that trigger fires for a
+fork. Two things keep it out of reach, and they are both structural rather than
+conventions. The trusted `summary` job declines when
+`github.event.pull_request.head.repo.full_name` is not `github.repository` — a
+job-level `if:`, so the job never starts, no deployment is created and the
+environment is never entered. And that job has no checkout, so even admitted it
+would run nothing the fork wrote. Both live in engine-owned, SHA-pinned YAML
+(`CONTRACT.md` §Post-plan topology); a consumer cannot drop either.
+
+The refusal in `detect` is loud (a red step) rather than a quiet empty matrix,
+because a fork pull request could not merge either way: with the `summary` job
+declined, no `shipmate / gate` status is ever written and the required check
+never appears.
 A green "nothing to plan" would leave an outside contributor waiting on a gate
 that structurally cannot arrive. Comment-ops has nothing to dispatch either —
 no gate, no reviewed plan to point `shipmate apply` at.
@@ -470,24 +494,26 @@ no gate, no reviewed plan to point `shipmate apply` at.
 So the fork model is safe but not self-service: a maintainer must bring the
 branch into the repository (`gh pr checkout` then push to a branch) for it to
 plan and apply — which is exactly what the refusal message tells the
-contributor to ask for. Plan that in, rather than granting push access to make the
-inconvenience go away — and resist the other shortcut, a `pull_request_target`
-workflow to do something useful on fork pull requests. That trades the property
-this section rests on for exactly the exposure control 1 exists to limit.
+contributor to ask for. Plan that in, rather than granting push access to make
+the inconvenience go away — and resist the other shortcut, a second
+`pull_request_target` workflow to do something useful on fork pull requests.
+Doing that in the shape a labeler takes — acting on the pull request's own
+content from a job that names an environment — trades the property this section
+rests on for exactly the exposure control 1 exists to limit.
 
 ## What none of this fixes
 
-- **A fabricated `plan-matrix.<N>` marker.** The gate holds unless the plan run
-  published exactly one readable marker naming the cell count, and the listed
-  `cell-summary.*` count matches it (see `CONTRACT.md` §Plan comment). That
-  marker is published by the plan run, which executes the pull request's own
-  code *and its own workflow file*, so an author with **write access** can
-  publish any count they like — including a zero that greens a quiet gate over
-  stacks that were planned. The marker defends against an eventually-consistent
-  artifacts API, not against a privileged author, who can already fabricate the
-  whole artifact surface the summary reads: the cell summaries, the `cell.json`
-  verdicts, the `.otplan` files. Nothing here makes the gate unforgeable from
-  inside the repository; control 1 (who can push a branch) is what bounds that.
+- **A fabricated planned-cell count.** The gate holds unless the number of
+  `cell-summary.*` artifacts read equals the count `detect` reported (see
+  `CONTRACT.md` §Plan comment). That count comes out of the plan run, which
+  executes the pull request's own code *and its own workflow file*, so an author
+  with **write access** can report any count they like — including a zero that
+  greens a quiet gate over stacks that were planned. The check catches a
+  download or parse that came up short, not a privileged author, who can already
+  fabricate the whole artifact surface the summary reads: the cell summaries,
+  the `cell.json` verdicts, the `.otplan` files. Nothing here makes the gate
+  unforgeable from inside the repository; control 1 (who can push a branch) is
+  what bounds that.
 - **Plan-time code execution.** Reviewing a plan means reading output produced
   by a pipeline running the author's code. A hostile provider, an `external`
   data source, or a module the branch points at executes during plan. Control 8

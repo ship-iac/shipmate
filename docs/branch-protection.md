@@ -12,9 +12,10 @@ is enforced entirely by GitHub branch protection requiring one aggregate check:
   checks come and go as stacks and environments change; requiring the single
   `shipmate / gate` roll-up means the required-checks list never needs
   editing when a stack or environment is added or removed.
-- **Require branches to be up to date before merging** (strict). Plans run on
-  the PR head ref, so this closes the plan-against-stale-base gap: a PR must be
-  current with the base before it can merge.
+- **Require branches to be up to date before merging** (strict). Plans run
+  against the pull request's **branch tip**, not against a merge commit, so this
+  closes the plan-against-stale-base gap: a PR must be current with the base
+  before it can merge.
 
 `shipmate / gate` is created by `actions/summary` on the PR head commit and
 resolves to:
@@ -123,10 +124,14 @@ environment exists and its deployment branch policy actually names the default
 branch (see `docs/hardening.md` #16 and `docs/github-app.md` §Key-exposure
 boundary — this is the probe that catches a re-pin that never (re-)creates
 that environment, which would otherwise leave the App key a repository secret
-again with nothing else to notice), any workflow file declaring the
+again with nothing else to notice), any workflow file other than `plan.yml`
+declaring the
 `pull_request_target` trigger (it runs at the base ref with the repository's
-secrets while acting on content the pull request author controls —
-`docs/hardening.md` §10–12; the probe reads the same workflow files as the pin
+secrets, and a workflow that also acts on content the pull request author
+controls from a job naming an environment hands those secrets to a fork —
+`docs/hardening.md`; `plan.yml` is exempt by exact name because it uses the
+trigger in the one shape that is safe, with the credentialed job checking
+nothing out; the probe reads the same workflow files as the pin
 probe, at the same commit, so a pull request that removes the trigger is not
 still reported for it), engine
 action-pin freshness in the consumer's own workflow files (read at the commit
