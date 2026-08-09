@@ -5,7 +5,8 @@
 ## Checklist
 
 - [ ] `uv run ruff check .`, `uv run ruff format .`, `uv run pytest scripts/tests`
-      and `uv run ty check` are green ([`docs/development.md`](https://github.com/ship-iac/shipmate/blob/main/docs/development.md#toolchain))
+      are green, and `uv run ty check` shows nothing new — `ty` is beta and
+      non-blocking ([`docs/development.md`](https://github.com/ship-iac/shipmate/blob/main/docs/development.md#toolchain))
 - [ ] No `CONTRACT.md` string changes — check names, tag grammar, comment
       grammar — or `CONTRACT.md` is updated in this change
 - [ ] Docs updated

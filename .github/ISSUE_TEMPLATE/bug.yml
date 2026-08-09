@@ -8,7 +8,11 @@ body:
         **Do not paste plan output or the values of environment variables.**
         Plan output carries your infrastructure detail, and `TF_VAR_*` values
         are inputs to real resources. Describe what the plan did instead, and
-        refer to variables by name.
+        refer to variables by name. The same goes for the `shipmate doctor`
+        report below: it is an inventory of what is *not* configured, and can
+        name your environments, a plan environment's secret names and the
+        approvers team slug — redact those, and treat the list of missing
+        controls as sensitive in its own right.
 
         For a security vulnerability, do not open an issue at all — use the
         repository's **Security** tab (see [`SECURITY.md`](https://github.com/ship-iac/shipmate/blob/main/SECURITY.md)).
@@ -29,6 +33,7 @@ body:
       description: How the IaC in your repository is laid out.
       options:
         - stacks
+        - stacks (flattened to repo root)
         - folders
         - workspaces
         - other
@@ -42,6 +47,7 @@ body:
       options:
         - plan
         - apply
+        - apply-all
         - deploy
         - drift
         - comment-ops
@@ -61,7 +67,9 @@ body:
         comment. It reports settings problems, not plan or apply failures, and
         never blocks. See [`docs/troubleshooting.md`](https://github.com/ship-iac/shipmate/blob/main/docs/troubleshooting.md#shipmate-doctor).
 
-        Comment `shipmate doctor` on a pull request and paste the report here.
+        Comment `shipmate doctor` on a pull request and paste the report
+        here, redacted as described above.
+      render: markdown
     validations:
       required: true
 

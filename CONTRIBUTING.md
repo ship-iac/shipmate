@@ -11,7 +11,7 @@ composite actions under `actions/`. The dev toolchain is
 has the repo layout, the commands to run before opening a PR, and how the tests
 are meant to work.
 
-## Reporting a bug
+## Reporting a bug or asking for a feature
 
 Open an issue from the Issues tab — **Bug report** for something the engine gets
 wrong, **Feature request** for something it cannot do. For a security
