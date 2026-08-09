@@ -574,6 +574,15 @@ gate, the sticky comments, drift issues) is created by a job bound to the fixed
 boundary), each running at a ref that satisfies its default-branch-only
 policy for a different reason.
 
+**Adopting this topology takes one ungatable pull request.** A `pull_request`
+run uses the workflow file from the pull request's own head; a
+`pull_request_target` run uses the file on the default branch. The commit that
+switches the trigger therefore satisfies neither — its head no longer declares
+`pull_request`, and the default branch does not yet declare
+`pull_request_target` — so it produces no plan run and no `shipmate / gate`.
+Merge that one pull request with an administrative bypass and restore
+enforcement straight after; every pull request following it gates normally.
+
 **The `summary` job must grant `permissions: contents: read`.** A called
 workflow's permissions are capped by the calling job's, and the callee requests
 that scope — so a caller that grants less kills the run at **startup**: no job,

@@ -39,6 +39,17 @@ and the `repo-example-*` samples carry the new shape from this release onward.
   fork refusal and the draft skip) on its own `if:`, where a consumer cannot
   drop them. The old `workflow_run` topology is **not supported** — a repository
   that re-pins without rewriting gets no gate, so the pull request cannot merge.
+  **The migration pull request cannot gate itself, and needs a one-time
+  bypass.** A `pull_request` run uses the workflow file from the pull request's
+  own head, which no longer declares that trigger; a `pull_request_target` run
+  uses the file on the default branch, which does not declare it yet. So the
+  pull request that performs the migration produces no plan run, no checks and
+  no `shipmate / gate` at all — verified, not predicted. No ordering avoids it:
+  the first commit whose head declares only `pull_request_target` is
+  ungatable by construction. Merge that one pull request with an administrative
+  bypass (an org-admin `bypass_actor` on the ruleset, or a temporary
+  `enforcement: evaluate`), and restore enforcement immediately afterwards. Every
+  pull request after it gates normally.
   Nothing matches on the plan workflow's `name:` any longer, but its **file
   path stays load-bearing** and unguarded: `apply-detect`'s provenance gate,
   `deploy-detect`'s post-merge lookup, comment-ops' reviewed-plan lookup and
