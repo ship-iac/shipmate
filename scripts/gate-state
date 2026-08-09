@@ -98,8 +98,9 @@ def decide(*, detect_result, plan_result, planned_cells, cell_count, pending):
             "unknown — re-plan before merging",
             _HOLD,
         )
-    # `or`, so the plan-job checks still run before the evidence check: cells
-    # nobody planned must not be described as a shortfall.
+    # `or`, so the plan-job checks still run before the evidence check: a plan
+    # job that broke or never ran is reported as a plan problem rather than
+    # shadowed by the evidence-shortfall message it also produces.
     gap = _plan_gap(plan_result=plan_result, planned=planned) or _evidence_gap(
         cell_count=cell_count, planned=planned
     )

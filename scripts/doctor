@@ -277,8 +277,10 @@ def _env_shape_findings(name, env, data, is_apply):
             (
                 WARNING,
                 f"GitHub Environment `{name}` is a plan environment but has a "
-                "deployment branch policy — plans from feature branches will be "
-                "refused; plan environments must allow all branches.",
+                "deployment branch policy — plan jobs run at the pull request's "
+                "base ref, so a policy that does not name every branch pull "
+                "requests target refuses those plan cells; plan environments "
+                "must allow all branches.",
             )
         )
     if is_apply and not approval:

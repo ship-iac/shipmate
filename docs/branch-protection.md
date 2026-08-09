@@ -22,7 +22,9 @@ resolves to:
 
 | State | gate | Merge |
 |-------|-----------|-------|
-| A plan cell (or `detect`) failed | `failure` — "plan incomplete" | blocked |
+| `detect` did not succeed | `failure` — "change detection did not succeed" | blocked |
+| A plan cell failed | `failure` — "plan incomplete" | blocked |
+| The plan job was cancelled | no status written at all | blocked (the required check never arrives) |
 | Plans succeeded, applies still pending | `pending` | blocked |
 | Nothing left to apply | `success` | allowed |
 
@@ -306,9 +308,11 @@ then set protection rules from Settings → Environments → `<name>` (or the AP
   here would stall every plan and apply run waiting for an approval nobody is
   meant to give. `shipmate doctor` checks both that this environment exists
   and that its policy actually names the default branch.
-- **`<env>`** (plan): no reviewers, no deployment branch policy at all — plan
-  runs against a pull request head ref, which any restriction here blocks
-  outright (`docs/hardening.md` §8; `shipmate doctor` warns on either).
+- **`<env>`** (plan): no reviewers, no deployment branch policy at all —
+  reviewers block every plan cell, and a branch policy blocks every plan cell
+  whose pull request targets a branch it does not name (plan jobs run at the
+  pull request's *base* ref) (`docs/hardening.md` §8; `shipmate doctor` warns on
+  either).
 
 `<env>-apply` splits by tier, and this is the split `docs/hardening.md`
 describes at the credential level (§6–9) restated as environment settings:

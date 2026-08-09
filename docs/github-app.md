@@ -320,11 +320,24 @@ exists and that its policy actually says so). GitHub evaluates a deployment
 branch policy against the ref the triggering job runs at, which is what does
 the actual work here:
 
-- **A `pull_request`-triggered job can never reach the key.** Its ref is
-  `refs/pull/<n>/merge` — the ephemeral merge ref GitHub builds for the pull
-  request — which matches no named-branch pattern a deployment branch policy
-  can express. Nor can a `push` to a non-default branch: measured, not
-  inferred, such a job is refused before its first step.
+- **On the plan path, the deployment branch policy is not what holds the
+  line — the workflow file is.** Under `pull_request_target` *every* job in the
+  plan run, the checkout-bearing `plan` matrix job included, evaluates at
+  `refs/heads/<base>` and therefore satisfies the policy. And the `plan` job's
+  `environment:` is branch-authored data: it is `matrix.environment`, which
+  `build-matrix` derives from `env/*` Terramate tags in the head checkout, so a
+  pull request that tags a stack `env/shipmate-engine` produces a plan cell
+  naming that environment. What makes that inert is that `pull_request_target`
+  runs the **base** copy of `plan.yml`, and in the base copy the only place
+  `secrets.SHIPMATE_APP_PRIVATE_KEY` is named is inside the called reusable
+  workflow — a branch author cannot add a secret reference.
+
+  **The constraint that follows: no job in `plan.yml` other than the `summary`
+  call may reference a `shipmate-engine` secret.** Adding one hands it to a plan
+  cell whose environment the branch chooses.
+- **A `push` to a non-default branch cannot reach the key** — measured, not
+  inferred, such a job is refused before its first step, because a branch ref
+  matches no pattern the policy names.
 - **The jobs that can reach the key all run at the default-branch ref.** The
   plan workflow triggers on `pull_request_target`, which evaluates at the base
   branch ref rather than the pull request head, so its trusted `summary` job —

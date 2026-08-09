@@ -30,7 +30,10 @@ grammar are declared unstable in `README.md`.
   fork refusal and the draft skip) on its own `if:`, where a consumer cannot
   drop them. The old `workflow_run` topology is **not supported** — a repository
   that re-pins without rewriting gets no gate, so the pull request cannot merge.
-  Nothing matches on the plan workflow's path or its `name:` any longer. The
+  Nothing matches on the plan workflow's `name:` any longer, but its **file
+  path stays load-bearing** and unguarded: `apply-detect`'s provenance gate,
+  `deploy-detect`'s post-merge lookup, comment-ops' reviewed-plan lookup and
+  doctor's `pull_request_target` exemption all address it as `plan.yml`. The
   `repo-example-*` samples carry the new shape from the release that ships this
   change onward; `CONTRACT.md` §Post-plan topology is the written form.
 - **Plans now run against the branch tip, not the merge commit.** The old

@@ -618,11 +618,23 @@ policy for a different reason:
   same reason: it authors the drift Issues under an App token, and a
   scheduled or manually dispatched run evaluates at the default branch.
 
-Nothing matches on the plan workflow's file path or its `name:` any more, and
-no check inspects consumer workflow YAML for this wiring. (Doctor still reads
-those files for two unrelated probes — stale engine pins and
-`pull_request_target` triggers — and neither can observe whether the gate will
-be written.) A consumer that omits the `summary`
+Nothing matches on the plan workflow's `name:` any more, and no check inspects
+consumer workflow YAML for this wiring. (Doctor still reads those files for two
+unrelated probes — stale engine pins and `pull_request_target` triggers — and
+neither can observe whether the gate will be written.)
+
+The **file path is still load-bearing**, and nothing warns when it moves:
+`scripts/apply-detect`'s provenance gate refuses a dispatched apply whose plan
+run did not come from a `plan.yml`, `scripts/deploy-detect` resolves the
+post-merge plan run through
+`actions/workflows/plan.yml/runs`, and `actions/comment-ops` uses that same
+endpoint twice — for the reviewed-plan lookup behind `shipmate apply` and for
+doctor's cell-summary fetch. Doctor's `pull_request_target` probe exempts the
+plan workflow by exact name. Rename the file and applies are refused as stale,
+doctor silently skips its environment probes, and a post-merge deploy finds no
+plan run.
+
+A consumer that omits the `summary`
 job gets no `shipmate / gate` status at all, so the pull request cannot merge —
 the failure is visible and fail-closed.
 

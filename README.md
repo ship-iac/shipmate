@@ -50,7 +50,7 @@ default-branch ref (`pull_request_target`, `issue_comment`,
 `workflow_dispatch`, `push`). A branch-authored workflow naming that
 environment is denied the deployment and gets nothing. `pull_request_target` is
 the exception that makes the plan path work: it evaluates at the base ref, so
-the one job that reaches the key runs no repository content and checks nothing
+the one job that names the key runs no repository content and checks nothing
 out. Environments are the only
 scoping GitHub offers here — there is no per-workflow secret scoping.
 
@@ -189,7 +189,8 @@ full picture below:
   `shipmate · plan / <stack> / <env>` in the UI); `actions/plan-cell`
   writes the **full plan text to the job's step summary** (reachable one click
   from the check), uploads the `.otplan` + a TF_VAR fingerprint as an
-  artifact. Neither job binds an environment or holds an App credential.
+  artifact. `detect` binds no environment; `plan` binds only the plan
+  environment for the cell it is planning, never one holding an App credential.
   `detect` also
   **refuses fork pull requests**: a plan would run the fork's own
   Terramate/OpenTofu code on your runners with your plan environment's

@@ -291,8 +291,10 @@ control.
   condition is the only thing that decides which environments can actually
   assume it.
 - **Plan environments must have no approval-type protection rules (required
-  reviewers, wait timers) and no deployment branch policy** — the engine plans
-  on a pull request head ref, so any of those blocks every plan cell and leaves
+  reviewers, wait timers) and no deployment branch policy** — an approval rule
+  blocks every plan cell outright, and a branch policy blocks every plan cell
+  whose pull request targets a branch the policy does not name (plan jobs run at
+  the pull request's *base* ref). Either leaves
   the gate red until it is removed (`shipmate doctor` warns; see
   `docs/branch-protection.md`). That constraint is not negotiable, so treat a
   plan environment as readable by anyone with push access: a plan cell runs
@@ -470,13 +472,22 @@ before `detect`'s own `terramate` steps: in the reference `plan.yml`,
 globals, `tm_*` functions and generate blocks included. Moving the refusal ahead
 of them means reordering your own `plan.yml`.
 
-That refusal is about **code execution**, not secrets. `detect` and `plan` hold
-no App key — the key lives only in `shipmate-engine`, which those jobs do not
-bind — but a plan cell still executes the pull request's own
-Terramate/OpenTofu code and reads whatever the plan environment exposes as
-*variables*, which are not secrets and are not withheld from a fork. For an
-infrastructure repository that is arbitrary code execution offered to anyone who
-can open a pull request.
+That refusal is now the **only** thing keeping a fork out of a plan cell.
+`pull_request_target` does not sandbox a fork's run: nothing is withheld from
+it, so a plan cell reached by a fork would read the plan environment's
+variables *and its secrets* (the reference `plan.yml` passes
+`secrets.SHIPMATE_PLAN_PASSPHRASE` into `actions/plan-cell`) while executing the
+pull request's own Terramate/OpenTofu code. Under the old `pull_request`
+trigger, GitHub withholding secrets from a fork was a second, independently
+enforced layer; that layer is gone. Defense in depth went from two layers to
+one, and the one is `build-matrix`'s refusal in `detect` plus the `plan` job's
+`needs: detect`. Keep both — dropping the `needs:` edge, or moving `plan` off
+`detect`'s matrix, re-opens the whole surface to anyone who can fork.
+
+`detect` and `plan` still hold no App key — the key lives only in
+`shipmate-engine`, which those jobs do not bind. For an infrastructure
+repository the standing residual is arbitrary code execution offered to anyone
+who can open a pull request *from a branch in the repository*.
 
 **The App key is now inside a workflow a fork pull request can start**, because
 the plan workflow runs on `pull_request_target` and that trigger fires for a
@@ -511,7 +522,7 @@ for exactly the exposure control 1 exists to limit.
 - **A fabricated planned-cell count.** The gate holds unless the number of
   `cell-summary.*` artifacts read equals the count `detect` reported (see
   `CONTRACT.md` §Plan comment). That count comes out of the plan run, which
-  executes the pull request's own code *and its own workflow file*, so an author
+  executes the pull request's own code, so an author
   with **write access** can report any count they like — including a zero that
   greens a quiet gate over stacks that were planned. The check catches a
   download or parse that came up short, not a privileged author, who can already
