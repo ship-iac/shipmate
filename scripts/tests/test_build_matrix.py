@@ -1,3 +1,5 @@
+import json
+
 import pytest
 from _loader import load_script
 
@@ -211,7 +213,9 @@ def test_event_payload_degrades_to_empty_dict(tmp_path):
     assert bm._event_payload(str(listy)) == {}
 
 
-def _run_main(monkeypatch, tmp_path, env, cells=(("stacks/app", "dev-eu"),), called=None):
+def _run_main(
+    monkeypatch, tmp_path, env, cells=(("stacks/app", "dev-eu"),), called=None, plan_workflow=True
+):
     """main() with GITHUB_OUTPUT redirected, returning (parsed outputs, calls)
     where calls records compute_cells' arguments -- so a rejection is
     observable as the stack enumeration never having run. Pass `called` to keep
@@ -219,6 +223,13 @@ def _run_main(monkeypatch, tmp_path, env, cells=(("stacks/app", "dev-eu"),), cal
     out = tmp_path / "out.txt"
     out.write_text("", encoding="utf-8")
     monkeypatch.setenv("GITHUB_OUTPUT", str(out))
+    # main() reads the checkout it runs in: the plan workflow has to be where
+    # plan_workflow_error requires it, and the engine repo (pytest's cwd) has no
+    # plan.yml of its own.
+    (tmp_path / ".github" / "workflows").mkdir(parents=True, exist_ok=True)
+    if plan_workflow:
+        (tmp_path / ".github" / "workflows" / "plan.yml").write_text("", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
     for k in (
         "SHIPMATE_ALL_STACKS",
         "GITHUB_EVENT_NAME",
@@ -241,8 +252,6 @@ def _run_main(monkeypatch, tmp_path, env, cells=(("stacks/app", "dev-eu"),), cal
 
 
 def _event_file(tmp_path, head_repo):
-    import json
-
     path = tmp_path / "event.json"
     path.write_text(json.dumps(_payload(head_repo)), encoding="utf-8")
     return str(path)
@@ -329,6 +338,107 @@ def test_main_drift_run_is_unaffected(monkeypatch, tmp_path):
     )
     assert outputs["empty"] == "false"
     assert called == [(True, "")]
+
+
+def _head_payload(sha):
+    return {"pull_request": {"head": {"sha": sha}}}
+
+
+def test_head_checkout_matching_the_pull_request_head_is_planned(monkeypatch):
+    monkeypatch.setattr(bm, "_run", lambda args: "cafe1234\n")
+    assert bm.head_checkout_error("pull_request_target", _head_payload("cafe1234")) == ""
+
+
+def test_head_checkout_of_the_base_is_refused(monkeypatch):
+    # The pull_request_target default: actions/checkout took the base branch, so
+    # terramate would diff the base against itself and report nothing changed.
+    monkeypatch.setattr(bm, "_run", lambda args: "basebase\n")
+    err = bm.head_checkout_error("pull_request_target", _head_payload("cafe1234"))
+    assert err.startswith("::error::")
+    assert "ref: ${{ github.event.pull_request.head.sha }}" in err
+    assert "cafe1234" in err and "basebase" in err
+
+
+def test_head_checkout_check_is_skipped_off_pull_request_target(monkeypatch):
+    # The drift path has no pull-request context and no reason to be at any
+    # particular commit; `git rev-parse` must not even run. `pull_request` is in
+    # the same list on purpose: its default checkout is `refs/pull/<n>/merge`, a
+    # merge commit that equals neither SHA, so comparing it would refuse every
+    # correctly wired consumer still on that trigger.
+    monkeypatch.setattr(
+        bm, "_run", lambda args: pytest.fail("head checkout was probed off pull_request_target")
+    )
+    for event in ("pull_request", "schedule", "workflow_dispatch", "push", ""):
+        assert bm.head_checkout_error(event, _head_payload("cafe1234")) == ""
+
+
+def test_head_checkout_check_is_skipped_when_the_payload_has_no_head_sha(monkeypatch):
+    monkeypatch.setattr(bm, "_run", lambda args: pytest.fail("probed with no head sha"))
+    assert bm.head_checkout_error("pull_request_target", {}) == ""
+
+
+def test_plan_workflow_at_the_contract_path_is_planned(tmp_path):
+    (tmp_path / ".github" / "workflows").mkdir(parents=True)
+    (tmp_path / ".github" / "workflows" / "plan.yml").write_text("", encoding="utf-8")
+    assert bm.plan_workflow_error("pull_request_target", str(tmp_path)) == ""
+
+
+def test_a_renamed_plan_workflow_is_refused(tmp_path):
+    # Four lookups match `.github/workflows/plan.yml` byte-for-byte; a rename
+    # merges green and wedges every apply from that commit on.
+    (tmp_path / ".github" / "workflows").mkdir(parents=True)
+    (tmp_path / ".github" / "workflows" / "shipmate-plan.yml").write_text("", encoding="utf-8")
+    err = bm.plan_workflow_error("pull_request", str(tmp_path))
+    assert err.startswith("::error::")
+    assert ".github/workflows/plan.yml" in err
+
+
+def test_plan_workflow_check_is_skipped_off_a_pull_request(tmp_path):
+    for event in ("schedule", "workflow_dispatch", "push", ""):
+        assert bm.plan_workflow_error(event, str(tmp_path)) == ""
+
+
+def test_main_refuses_a_base_checkout(monkeypatch, tmp_path):
+    called = []
+    monkeypatch.setattr(bm, "_run", lambda args: "basebase\n")
+    event = tmp_path / "head-event.json"
+    event.write_text(
+        json.dumps(
+            {"pull_request": {"head": {"sha": "cafe1234", "repo": {"full_name": "acme/iac"}}}}
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(SystemExit) as excinfo:
+        _run_main(
+            monkeypatch,
+            tmp_path,
+            {
+                "GITHUB_EVENT_NAME": "pull_request_target",
+                "GITHUB_REPOSITORY": "acme/iac",
+                "GITHUB_EVENT_PATH": str(event),
+            },
+            called=called,
+        )
+    assert "ref: ${{ github.event.pull_request.head.sha }}" in str(excinfo.value)
+    assert called == []
+
+
+def test_main_refuses_a_missing_plan_workflow(monkeypatch, tmp_path):
+    called = []
+    with pytest.raises(SystemExit) as excinfo:
+        _run_main(
+            monkeypatch,
+            tmp_path,
+            {
+                "GITHUB_EVENT_NAME": "pull_request",
+                "GITHUB_REPOSITORY": "acme/iac",
+                "GITHUB_EVENT_PATH": _event_file(tmp_path, "acme/iac"),
+            },
+            called=called,
+            plan_workflow=False,
+        )
+    assert ".github/workflows/plan.yml" in str(excinfo.value)
+    assert called == []
 
 
 def test_build_matrix_action_declares_no_fork_input():

@@ -20,6 +20,11 @@ _PR_EVENTS = ("pull_request", "pull_request_target")
 
 MATRIX_LIMIT = 256
 
+#: Where the plan workflow must live. Four lookups match this path literally:
+#: `apply-detect`'s reviewed-plan provenance gate, comment-ops' two plan-run
+#: lookups, and `deploy-detect`'s post-merge plan-run lookup.
+PLAN_WORKFLOW = ".github/workflows/plan.yml"
+
 #: Stack paths whose verb-less plan check name would land inside a namespace
 #: the engine selects on. `shipmate` fails SILENTLY: summary-comment resolves
 #: each row's plan link by exact `<stack> / <env>` lookup, so the link points at
@@ -190,14 +195,79 @@ def fork_pr_error(event_name, repository, payload):
     )
 
 
+def head_checkout_error(event_name, payload):
+    """The `::error::` line refusing a checkout that is not the pull request
+    head, or "" when this run may be planned.
+
+    `pull_request_target` checks out the BASE branch by default, so every
+    checkout in the consumer's `plan.yml` has to name
+    `ref: github.event.pull_request.head.sha`. Nothing else verifies it: without
+    it this run diffs the base against itself, the matrix comes out empty, the
+    plan job is skipped and the gate greens over a pull request nobody planned —
+    with no pending apply checks, so the post-merge deploy has an empty queue.
+
+    Keyed on the EVENT, like `fork_pr_error` — but on `pull_request_target`
+    alone, not both PR events. Under `pull_request` the default checkout is
+    `refs/pull/<n>/merge`, whose HEAD is a merge commit that is neither the head
+    SHA nor the base: it structurally contains the pull request's content, and
+    comparing it against the head SHA would refuse every correctly wired
+    `pull_request` consumer. The silent base checkout only exists under
+    `pull_request_target`.
+
+    A payload with no head SHA is skipped rather than refused — `fork_pr_error`
+    has already rejected any PR payload this script could not read.
+    """
+    if event_name != "pull_request_target":
+        return ""
+    head_sha = ((payload.get("pull_request") or {}).get("head") or {}).get("sha") or ""
+    if not head_sha:
+        return ""
+    checked_out = _run(["git", "rev-parse", "HEAD"]).strip()
+    if checked_out == head_sha:
+        return ""
+    return (
+        f"::error::this run checked out {checked_out}, which is not this pull request's "
+        f"head commit {head_sha} — under `pull_request_target` `actions/checkout` takes "
+        "the base branch unless it is given "
+        "ref: ${{ github.event.pull_request.head.sha }}. Add that to every checkout in "
+        "`.github/workflows/plan.yml`; without it planning diffs the base against itself, "
+        "silently reports no changes, and the gate greens with nothing queued to apply."
+    )
+
+
+def plan_workflow_error(event_name, root="."):
+    """The `::error::` line refusing a checkout with no plan workflow at
+    `PLAN_WORKFLOW`, or "" when this run may be planned.
+
+    A sparse checkout would fail this falsely; `detect` needs the whole tree for
+    terramate, so that shape does not occur here.
+    """
+    if event_name not in _PR_EVENTS:
+        return ""
+    if os.path.isfile(os.path.join(root, PLAN_WORKFLOW)):
+        return ""
+    return (
+        f"::error::this repository has no `{PLAN_WORKFLOW}` — that exact path is matched "
+        "literally by everything downstream of a plan, so from this commit on: every "
+        "dispatched `shipmate apply` is refused by the reviewed-plan provenance gate, "
+        "comment-ops finds no plan run and reports the reviewed plan stale forever, "
+        "`shipmate doctor` loses this run's cell summaries and skips its environment "
+        "probes, and the post-merge deploy resolves no plan run so its applies have no "
+        f"artifacts. Move the plan workflow back to `{PLAN_WORKFLOW}`."
+    )
+
+
 def main():
     all_stacks = os.environ.get("SHIPMATE_ALL_STACKS", "") == "true"
     base = os.environ.get("SHIPMATE_BASE_SHA", "")
     event_name = os.environ.get("GITHUB_EVENT_NAME", "")
-    rejection = fork_pr_error(
-        event_name,
-        os.environ.get("GITHUB_REPOSITORY", ""),
-        _event_payload(os.environ.get("GITHUB_EVENT_PATH", "")),
+    payload = _event_payload(os.environ.get("GITHUB_EVENT_PATH", ""))
+    # `or`, so the fork refusal precedes the two consumer-wiring checks: a fork
+    # head must be turned away before this script shells out or reads its tree.
+    rejection = (
+        fork_pr_error(event_name, os.environ.get("GITHUB_REPOSITORY", ""), payload)
+        or head_checkout_error(event_name, payload)
+        or plan_workflow_error(event_name)
     )
     if rejection:
         raise SystemExit(rejection)
