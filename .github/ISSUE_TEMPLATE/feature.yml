@@ -1,0 +1,28 @@
+name: Feature request
+description: Something shipmate should be able to do and cannot
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What are you trying to do, and where does shipmate stop you?
+    validations:
+      required: true
+
+  - type: markdown
+    attributes:
+      value: |
+        Flavor-specific needs belong in shipmate, as an action input or a
+        feature — never as patch code in a consuming repo. So the next question
+        is a genuine one, not a hurdle: if your repository already solves this
+        with its own code, that is usually the signal shipmate is missing an
+        input.
+
+  - type: textarea
+    id: why-not-consumer
+    attributes:
+      label: Why this cannot live in your own repository
+      description: What makes this the engine's job rather than your workflow's?
+    validations:
+      required: true

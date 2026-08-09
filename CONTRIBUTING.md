@@ -13,7 +13,10 @@ are meant to work.
 
 ## Reporting a bug
 
-Open an issue from the Issues tab.
+Open an issue from the Issues tab — **Bug report** for something the engine gets
+wrong, **Feature request** for something it cannot do. For a security
+vulnerability use the Security tab instead, not an issue (see
+[SECURITY.md](SECURITY.md)).
 
 ## Guidelines
 
