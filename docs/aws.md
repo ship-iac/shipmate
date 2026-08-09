@@ -14,7 +14,9 @@ credential-free on a local backend.
 
 State lives in one S3 bucket with **native locking** — `use_lockfile = true`, so
 S3's conditional writes hold the lock and there is no separate lock table. The
-sample generates the backend per stack from `root.tm.hcl`:
+sample's `root.tm.hcl` carries two mutually exclusive variants of the backend
+block; this is the simpler one, generated when no dedicated state role is
+configured:
 
 ```hcl
 generate_hcl "_backend.tf" {
@@ -39,9 +41,11 @@ The `key` is what makes this one state file per stack × environment: it embeds
 same values the fan-out already carries. `profile` is for running by hand — in CI
 `var.use_profile` defaults to `false` and the SDK reads the ambient OIDC session.
 
-The sample carries a second, mutually exclusive `generate_hcl "_backend.tf"`
-block, guarded on `global.state_role_arn != ""`, which adds an `assume_role` hop
-so the backend reaches the bucket through a dedicated state role. Two blocks
+The other `generate_hcl "_backend.tf"` block is guarded on
+`global.state_role_arn != ""` and adds an `assume_role` hop so the backend reaches
+the bucket through a dedicated state role. That is the block the sample actually
+generates — `root.tm.hcl` sets `state_role_arn` to a real ARN, and only
+`sandbox/box` overrides it to `""` and reaches the bucket directly. Two blocks
 rather than one conditional attribute because Terramate 0.17.1 has no
 `tm_unset()`, and a bare `unset` emits `assume_role = unset`, which survives
 `fmt` and `validate` and dies at `init`.
@@ -101,11 +105,23 @@ With `AWS_ROLE_ARN` unset the engine's credentials step is skipped and the job
 holds no cloud credential at all, which is how the three non-AWS sample
 repositories run credential-free.
 
-Set them on each `<env>-apply` environment and nowhere else — but understand that
-this scoping is advisory, not enforced. `vars` resolve organization → repository
-→ environment, so an `AWS_ROLE_ARN` set at repository or organization level is
-read identically by every wave job in every environment, with no warning and
-nothing in the engine to guard it. The role's trust policy is the real bound.
+Set them per environment, and **never at repository or organization level**:
+
+- on each `<env>-apply` you want cloud access from — that is the apply path, where
+  the engine reads them ([`hardening.md`](hardening.md) #18);
+- and, only if your `plan.yml` carries its own credentials step, on each `<env>`
+  plan environment too, with a **read-only** plan role. That is what
+  `repo-example-stacks-aws` does: its `dev-eu` / `dev-us` plan environments name a
+  read-only role and its `<env>-apply` environments name the apply role. A plan
+  environment can have no approval rules and no branch policy at all
+  ([`hardening.md`](hardening.md) §8), so whatever role it names is reachable by
+  anyone who can push a branch.
+
+That per-environment scoping is advisory, not enforced. `vars` resolve
+organization → repository → environment, so an `AWS_ROLE_ARN` set at repository or
+organization level is read identically by every job in every environment, with no
+warning and nothing in the engine to guard it. The role's trust policy is the real
+bound.
 
 ## Where the credentials step goes
 
@@ -129,10 +145,6 @@ on every environment. If some of your environments run credential-free, copy the
 engine's `if: ${{ vars.AWS_ROLE_ARN != '' }}` guard onto your step — with the
 variable unset, `configure-aws-credentials` has no role to assume and the cell
 fails there rather than skipping.
-
-A plan role should be read-only. A plan environment can have no approval rules
-and no branch policy at all ([`hardening.md`](hardening.md) §8), so whatever it
-releases is reachable by anyone who can push a branch.
 
 ## The sample's workload
 

@@ -285,9 +285,7 @@ mitigation. Note also that `app/manifest.json` declares
 `"public": false`: the shipmate App is registered per organization and intended
 for repositories the installing organization controls.
 
-## Environment setup
-
-Environment setup lives in `getting-started.md`: §Required — plan →
+**Environment setup** lives in `getting-started.md`: §Required — plan →
 §Environments for this tier has the `<env>` plan environments and
 `shipmate-engine`, and §Required — apply → §Environment setup has the
 `<env>-apply` environments and their dev/staging vs prod split.

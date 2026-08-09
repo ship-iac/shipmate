@@ -10,8 +10,8 @@ does with that wiring.
   how a stack declares its environment membership — no environment name ever
   appears in workflow YAML. Tag grammar:
   [`../CONTRACT.md`](../CONTRACT.md) §Tag grammar.
-- **The Terramate and OpenTofu versions the engine pins.** They are in
-  [`../VERSIONS`](../VERSIONS); set them as the repository variables
+- **The Terramate and OpenTofu versions this release is tested against.** They
+  are in [`../VERSIONS`](../VERSIONS); set them as the repository variables
   `TERRAMATE_VERSION` and `TOFU_VERSION`, which the workflows below read.
 - **`gh` authenticated with admin on the repository** — every tier creates
   environments, variables or rulesets.
@@ -30,8 +30,8 @@ and — because `plan.yml`'s `summary` job creates them — the pending
 branch protection will require.
 
 **This tier is not usable alone.** The `summary` job mints a GitHub App
-installation token, so without the App there is no `summary` job: no gate status
-and no apply checks at all.
+installation token, so without the App it cannot mint one: no gate status and no
+apply checks at all, and the run goes red.
 
 Register and install the App **first** — [`github-app.md`](github-app.md) is the
 one-time runbook. It is a prerequisite of this tier, not an optional extra.
@@ -58,7 +58,12 @@ set protection rules from Settings → Environments → `<name>` (or the API):
   reviewers block every plan cell, and a branch policy blocks every plan cell
   whose pull request targets a branch it does not name (plan jobs run at the
   pull request's *base* ref) ([`hardening.md`](hardening.md) §8;
-  `shipmate doctor` warns on either).
+  `shipmate doctor` warns on either). If your `plan.yml` needs plan-time cloud
+  credentials — as the fence below does — this is also where its role goes: set
+  `AWS_ROLE_ARN` and `AWS_REGION` on each `<env>`, naming a **read-only** plan
+  role ([`aws.md`](aws.md) §Environment variables). A plan environment can have
+  no protection at all, so anyone who can push a branch can reach whatever it
+  names.
 
 ### The plan workflow
 
@@ -172,6 +177,13 @@ solely so `configure-aws-credentials` can assume the read-only plan role. A
 consumer with no plan-time cloud credentials drops both that grant and the
 credentials step.
 
+`SHIPMATE_PLAN_PASSPHRASE` is optional — unset, plan artifacts are stored
+unencrypted. If you set it, it must be a **repository** secret, not an
+environment one, and specifically not on `shipmate-engine`: a plan cell names its
+own plan environment, so a passphrase scoped elsewhere resolves to empty at plan
+time and every later apply fails its plaintext-artifact check
+([`../CONTRACT.md`](../CONTRACT.md) §Plan artifact encryption).
+
 ## Required — apply
 
 This tier gets you `shipmate apply` in a pull request comment (a pre-merge apply
@@ -221,8 +233,9 @@ rules from Settings → Environments → `<name>` (or the API):
 > `permissions:` block, it needs the grant there too. This applies to `apply.yml`
 > and `deploy.yml` wrappers, **not** to `plan.yml`.
 >
-> **`state_suffix` is required but may be `""`.** It is an input of the engine's
-> reusable `apply.yml` and `deploy.yml` (both `required: true`), not of the plan
+> **`state_suffix` is required but may be `""`.** It is a `required: true` input
+> of every apply-path reusable workflow — `apply.yml`, `apply-all.yml`,
+> `deploy.yml` and the `apply-env-level.yml` they call — and of none of the plan
 > path. `""` means a remote backend owns the state, and the engine's state
 > restore/save steps are skipped. Omitting the input entirely is a
 > workflow-resolution error on purpose: a forgotten state configuration must
