@@ -42,7 +42,11 @@ Every logical environment needs a GitHub Environment pair (`<env>`,
 `<env>-apply`), plus the one fixed `shipmate-engine` environment that holds the
 App key ([`github-app.md`](github-app.md)). `<env>`/`<env>-apply` are never named
 in workflow YAML at all — they're read from Terramate stack tags at runtime. This
-tier needs `<env>` and `shipmate-engine`; `<env>-apply` is the apply tier's.
+tier needs `<env>` and `shipmate-engine`; `<env>-apply` is the apply tier's —
+but create it now anyway. `shipmate doctor` runs on every plan run and warns for
+each half of a pair that does not exist, so tier 1 with only `<env>` annotates
+every pull request with "GitHub Environment `<env>-apply` does not exist" until
+the apply tier is done.
 
 Create each `<env>` with
 `gh api -X PUT repos/<owner>/<repo>/environments/<name>`, then set protection
@@ -82,6 +86,18 @@ rules from Settings → Environments → `<name>` (or the API):
 `ref: ${{ github.event.pull_request.head.sha }}` on the two checkouts is
 load-bearing: `pull_request_target` runs at the *base* ref, so without it the run
 plans the base branch and reports a clean plan for code it never read.
+
+**The filenames are load-bearing too.** `actions/build-matrix` refuses to plan a
+repository that has no `.github/workflows/plan.yml`, and the apply path refuses a
+plan run whose workflow path is not `plan.yml` — the name is matched literally.
+`apply.yml` is the name `actions/dispatch` targets by default, so an apply
+wrapper called anything else is dispatched by nothing and `shipmate apply`
+silently reaches no workflow. Create both under exactly those names.
+
+The fences on this page are transcribed from the sample repositories, which pin
+`runs-on: ubuntu-slim`. Use whichever runner label your own plan offers —
+`ubuntu-latest` is the safe default; a label your plan does not provide leaves
+every job waiting for a runner that never arrives.
 
 ```yaml
 name: shipmate · plan

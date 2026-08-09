@@ -95,7 +95,7 @@ can satisfy the required check.
 **Environment setup** lives in `getting-started.md`: §Required — plan →
 §Environments for this tier has the `<env>` plan environments and
 `shipmate-engine`, and §Required — apply → §Environment setup has the
-`<env>-apply` environments and their dev/staging vs prod split.
+`<env>-apply` environments.
 
 ## Review policy for `shipmate apply`
 

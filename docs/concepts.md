@@ -106,7 +106,9 @@ of its CI configuration.
 
 ## The plan path
 
-The `plan.yml` workflow (thin and identical across repo layouts; see the
+The `plan.yml` workflow (the same shape across repo layouts — what differs is
+the `plan` job's per-flavor `env:` block, `TF_VAR_*` or `TF_WORKSPACE` or
+nothing, and whether it carries a cloud credentials step at all; see the
 `repo-example-*` samples) runs on every pull request and has **three jobs**:
 `detect`, `plan`, and `summary`. It triggers on `pull_request_target`, which
 runs at the base ref — that is what lets the trusted `summary` job reach the App
@@ -180,7 +182,7 @@ settings that bound that, see [`hardening.md`](hardening.md).
 
 shipmate follows a **serverless plan→store→review→apply** model — the reviewed
 plan is stored and applied verbatim, with no server or database. A consumer's
-`deploy.yml` is a 19-line wrapper over the engine's reusable deploy workflow
+`deploy.yml` is a 22-line wrapper over the engine's reusable deploy workflow
 (passing only its flavor's `state_suffix`); `drift.yml` is a thin sample-repo
 workflow over shipmate actions.
 

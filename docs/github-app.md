@@ -96,6 +96,13 @@ environment secret is. If the App-owning repo is itself a consumer, §6 runs thi
 command again there after placing the key on that repo's environment — a no-op
 by then, and harmless in that order.
 
+**Deleting the secret does not invalidate the key it held**, and every key an App
+holds mints valid tokens. That PEM was readable by any workflow on any branch of
+that repository for the whole setup window, so treat it as exposed and retire it:
+App settings (`.../settings/apps/shipmate`) → **Private keys** → the key
+`register-app` created (the older one — not the key you generated and downloaded
+above) → **Delete**. It is the same button §7 uses to retire a rotated key.
+
 **Do not re-run this script against a consumer repo to "install" the key
 there.** That would store a plain repo secret, readable by any branch's
 workflow — exactly the shape steps 5–6 exist to replace. Put the PEM you just

@@ -234,10 +234,12 @@ costs, so the choice is made with the price visible:
   jobs running at the default branch, which is a real bound and not a reviewer
   gate: no human sees the deployment before its secrets are released.
 
-For production, also list it in `global.shipmate.explicit_envs` so a bare
-`shipmate apply` skips it and it is reached only by the targeted
-`shipmate apply <env>`. Use the **bare environment name** there — `prod`, not
-`prod-apply`; the value is matched against the environment name carried by the
+Pair every environment you gate with `global.shipmate.explicit_envs`, whichever
+ones those are: list it there so a bare `shipmate apply` skips it and it is
+reached only by the targeted `shipmate apply <env>`. Left off, a bare
+`shipmate apply` fans out into that environment and stalls there waiting for the
+reviewer nobody expected to be asked. Use the **bare environment name** —
+`staging`, not `staging-apply`; the value is matched against the environment name carried by the
 apply checks (see CONTRACT.md), and a `-apply`-suffixed entry validates
 silently and skips nothing.
 
@@ -262,16 +264,20 @@ control.
 
 ## 7–9. Credentials
 
-> **The credential path is AWS OIDC, opt-in per environment, and apply-side
-> only so far.** Every wave job in `apply-env-level.yml` requests
+> **The credential path is AWS OIDC, opt-in per environment, and engine-wired
+> on the apply side only.** Every wave job in `apply-env-level.yml` requests
 > `id-token: write` and runs a credentials step gated on `vars.AWS_ROLE_ARN`; a
 > consumer opts in by setting `AWS_ROLE_ARN` and `AWS_REGION` as variables on
 > that job's `<env>-apply` environment. With them unset the step is skipped and
 > no cloud credential exists in the job, which is why the sample repos (null
 > resources, local state) still run credential-free. With them set, the assumed
 > role's session env vars do reach `tofu` — they are `AWS_*`, so the fingerprint
-> excludes them (CONTRACT.md §Apply-match fingerprint). The plan path is not
-> wired for this yet.
+> excludes them (CONTRACT.md §Apply-match fingerprint). On the plan path the
+> engine wires no credentials step because it owns no plan workflow: `plan.yml`
+> is the consumer's, so the consumer adds `configure-aws-credentials` to it and
+> the plan `<env>` environment supplies a **read-only** role
+> (`docs/aws.md` §Where the credentials step goes). OIDC is available on both
+> paths; only the wiring differs in whose file it lives in.
 >
 > No job interpolates a consumer *secret*: do not move a long-lived access key
 > into an environment secret expecting the engine to pick it up — it will not,
@@ -297,8 +303,11 @@ control.
   identically by every wave job in every apply environment that does not set its
   own, with no warning and nothing in the engine to guard it —
   "opt in per environment" (CONTRACT.md §AWS OIDC) is where you *should* set it,
-  not something GitHub or shipmate enforces. Set it on each `<env>-apply` and
-  nowhere else, and understand that the enforcing control is not the variable's
+  not something GitHub or shipmate enforces. Set it on each `<env>-apply` — and,
+  if your `plan.yml` carries its own credentials step, on each `<env>` plan
+  environment with a **read-only** plan role (`docs/aws.md` §Environment
+  variables) — never at repository or organization level, and understand that
+  the enforcing control is not the variable's
   location at all: it is the **role's trust policy**, whose `environment:` claim
   condition is the only thing that decides which environments can actually
   assume it.
@@ -315,14 +324,15 @@ control.
   only. Assume `SHIPMATE_PLAN_PASSPHRASE` is readable by the same people for the
   same reason.
   The strongest version of this control is a plan environment with **no secret
-  in it at all**. Two ways to get there, in order of preference: read the
-  provider's state through a path that needs no long-lived credential of its
-  own, and — when the engine's credential path exists — a **read-only** OIDC
-  role whose trust policy is conditioned on the plan environment's claim
-  (`repo:<owner>/<repo>:environment:<env>`, the plan environment, not
-  `<env>-apply`), so a token minted in a plan cell can never assume the apply
-  role. Until then the honest statement is the one above: whatever a plan
-  environment holds is readable by anyone who can push a branch.
+  in it at all**, and it is reachable today: put a **read-only** OIDC role's
+  ARN in the plan environment as a *variable*, assumed by a
+  `configure-aws-credentials` step in your own `plan.yml` (`docs/aws.md`
+  §Where the credentials step goes), with the role's trust policy conditioned on
+  the plan environment's claim (`repo:<owner>/<repo>:environment:<env>`, the
+  plan environment, not `<env>-apply`), so a token minted in a plan cell can
+  never assume the apply role. That removes the long-lived key; it does not
+  remove the statement above — whatever the plan environment names is reachable
+  by anyone who can push a branch, which is why the role must be read-only.
 
   `shipmate doctor` notes the secrets a plan environment holds — the count is
   exact, and the names it prints (names only, since no GitHub API returns a

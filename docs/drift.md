@@ -21,7 +21,10 @@ leaving any open Issue for it untouched rather than auto-closing it.
 Transcribed from
 [repo-example-stacks-aws](https://github.com/ship-iac/repo-example-stacks-aws)
 `.github/workflows/drift.yml`. It is a consumer-owned workflow, not a call into a
-reusable engine workflow.
+reusable engine workflow. Being a transcription, it pins the sample's
+`runs-on: ubuntu-slim`; use whichever runner label your own plan offers
+(`ubuntu-latest` is the safe default), or the jobs wait for a runner that never
+arrives.
 
 ```yaml
 name: shipmate · drift
