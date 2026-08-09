@@ -542,18 +542,9 @@ def test_marker_round_trip_guard_summary_action_matches_script():
     assert sc.build_comment([], {}, "u").startswith(sc.MARKER)
 
 
-def test_comment_links_to_the_plan_run_when_one_is_supplied(tmp_path, monkeypatch):
-    # GITHUB_RUN_ID is the trusted summary run, which holds neither the plan
-    # logs nor the artifacts the footer promises -- the plan run's URL wins.
-    monkeypatch.setenv("SHIPMATE_PLAN_RUN_URL", "https://gh/o/r/actions/runs/42")
-    _run_main(tmp_path, monkeypatch, [_cell()])
-    body = (tmp_path / "comment.md").read_text(encoding="utf-8")
-    assert "[Logs & artifacts](https://gh/o/r/actions/runs/42)" in body
-    assert "/actions/runs/1)" not in body
-
-
-def test_comment_falls_back_to_this_run_when_no_plan_run_url_is_supplied(tmp_path, monkeypatch):
-    monkeypatch.delenv("SHIPMATE_PLAN_RUN_URL", raising=False)
+def test_comment_links_to_this_run(tmp_path, monkeypatch):
+    # The summary job runs inside the plan run, so this run holds the logs and
+    # the artifacts the footer promises.
     _run_main(tmp_path, monkeypatch, [_cell()])
     body = (tmp_path / "comment.md").read_text(encoding="utf-8")
     assert "[Logs & artifacts](https://gh/o/r/actions/runs/1)" in body

@@ -11,19 +11,15 @@ inputs:
     description: Directory holding downloaded cell-summary.*/cell.json.
     required: false
     default: cells
-  run-conclusion:
-    description: 'Conclusion of the plan workflow run (github.event.workflow_run.conclusion): success|failure|cancelled|skipped|…'
+  detect-result:
+    description: 'Result of the plan workflow''s detect job (needs.detect.result): success|failure|cancelled|skipped.'
     required: true
-  artifact-count:
-    description: Number of cell-summary.* artifacts the API reports for that plan run, or "unknown" when that listing could not be read. Never decides "nothing changed" on its own — a zero here is quiet only when matrix-count agrees the plan matrix was empty, and a shortfall against either matrix-count or the parsed cells holds the gate, as does "unknown". Always supply matrix-count alongside it — the runner does not enforce `required` for a composite action, so omitting it silently holds every pull request.
+  plan-result:
+    description: 'Result of the plan workflow''s plan matrix job (needs.plan.result). "skipped" is the NORMAL empty-matrix case, not a failure.'
     required: true
-  matrix-count:
-    description: How many cells the plan matrix had, read from the plan run's `plan-matrix.<N>` marker artifact, or "unknown" when no single marker could be read. Distinguishes an empty matrix (0 — docs-only or pin-bump) from an artifact listing that did not show the cells, which holds the gate.
+  planned-cells:
+    description: How many cells detect planned (its `count` output). Compared against the cell summaries this job parses; any disagreement holds the gate.
     required: true
-  plan-run-url:
-    description: 'HTML URL of the plan workflow run (github.event.workflow_run.html_url). Used for the comment footer, the per-cell fallback link and the gate''s target_url; this run''s URL is used when empty.'
-    required: false
-    default: ""
   app-id:
     description: shipmate App id (a repo/org variable, not a secret).
     required: true
@@ -91,7 +87,6 @@ runs:
         GH_TOKEN: ${{ steps.token.outputs.token }}
         CELLS: ${{ inputs.cells-dir }}
         HEAD_SHA: ${{ inputs.head-sha }}
-        SHIPMATE_PLAN_RUN_URL: ${{ inputs.plan-run-url }}
       run: |
         set -euo pipefail
         [[ "$HEAD_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::head-sha must be a 40-char lowercase hex SHA (got: $HEAD_SHA)"; exit 1; }
@@ -115,12 +110,11 @@ runs:
       id: gate
       shell: bash
       env:
-        SHIPMATE_RUN_CONCLUSION: ${{ inputs.run-conclusion }}
-        SHIPMATE_ARTIFACT_COUNT: ${{ inputs.artifact-count }}
-        SHIPMATE_MATRIX_COUNT: ${{ inputs.matrix-count }}
+        SHIPMATE_DETECT_RESULT: ${{ inputs.detect-result }}
+        SHIPMATE_PLAN_RESULT: ${{ inputs.plan-result }}
+        SHIPMATE_PLANNED_CELLS: ${{ inputs.planned-cells }}
         SHIPMATE_CELL_COUNT: ${{ steps.build.outputs.count }}
         SHIPMATE_PENDING: ${{ steps.build.outputs.pending }}
-        SHIPMATE_PLAN_RUN_URL: ${{ inputs.plan-run-url }}
       run: |
         set -euo pipefail
         python3 "$GITHUB_ACTION_PATH/../../scripts/gate-state" > gate.json
@@ -171,7 +165,7 @@ runs:
         GH_TOKEN: ${{ steps.token.outputs.token }}
         PR: ${{ inputs.pr-number }}
         MODE: ${{ steps.gate.outputs.comment_mode }}
-        RUN_CONCLUSION: ${{ inputs.run-conclusion }}
+        PLAN_RESULT: ${{ inputs.plan-result }}
       run: |
         set -euo pipefail
         marker='<!-- shipmate:summary -->'
@@ -201,16 +195,15 @@ runs:
         # one id per matching page; the first line is the single id PATCH needs.
         id=$(head -n1 summary-comment-ids.txt)
         # gate-state has already collapsed every "the plan can't be trusted"
-        # case (a non-success plan run, an unknown artifact count, a
-        # cell/artifact-count shortfall, no readable plan-matrix marker, or an
-        # artifact listing that disagrees with the marker's cell count)
-        # into comment_mode=hold. Warn and leave any existing comment
-        # untouched rather than overwriting the review surface with an
-        # incomplete picture — `Create/refresh gate` below also fails the
-        # gate on the same cases, so the pull request still shows that
-        # something is wrong.
+        # case (a failed detect, a failed plan job, a plan job skipped with
+        # cells planned, an unreported planned count, or a shortfall between
+        # the planned cells and the summaries this job read) into
+        # comment_mode=hold. Warn and leave any existing comment untouched
+        # rather than overwriting the review surface with an incomplete
+        # picture — `Create/refresh gate` below also fails the gate on the same
+        # cases, so the pull request still shows that something is wrong.
         if [ "$MODE" = "hold" ]; then
-          echo "::warning::the plan run ($RUN_CONCLUSION) did not produce a trustworthy set of cell summaries; the sticky plan comment was left as it is"
+          echo "::warning::the plan job ($PLAN_RESULT) did not produce a trustworthy set of cell summaries; the sticky plan comment was left as it is"
           exit 0
         fi
         nothing_changed=false
@@ -249,7 +242,7 @@ runs:
         GH_TOKEN: ${{ steps.token.outputs.token }}
         HEAD_SHA: ${{ inputs.head-sha }}
         STATE: ${{ steps.gate.outputs.state }}
-        RUN_CONCLUSION: ${{ inputs.run-conclusion }}
+        PLAN_RESULT: ${{ inputs.plan-result }}
       run: |
         set -euo pipefail
         # The gate is a commit STATUS, not a check-run. A check-run is bound to a
@@ -263,9 +256,9 @@ runs:
         # App-authored checks and sticky comment above — one minted token
         # covers all three writes for this job.
         # gate-state already wrote gate.json and the state output. An empty
-        # state means "write nothing" — a skipped or cancelled plan run.
+        # state means "write nothing" — a cancelled plan job.
         if [ -z "${STATE}" ]; then
-          echo "plan run was ${RUN_CONCLUSION}; no gate written"
+          echo "plan job was ${PLAN_RESULT}; no gate written"
           exit 0
         fi
         gh api "repos/$GITHUB_REPOSITORY/statuses/$HEAD_SHA" --input gate.json >/dev/null

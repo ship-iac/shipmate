@@ -1,23 +1,16 @@
 #!/usr/bin/env python3
 """Decide the `shipmate / gate` state, and whether the sticky comment may be written.
 
-Runs in the trusted post-plan job (`workflow_run`), which has no `needs`, so the
-plan run's own conclusion replaces the per-job results this logic used to read.
+Runs in the trusted `summary` job of the plan workflow, which `needs:` the
+`detect` and `plan` jobs and is handed their results directly.
 
-Three counts describe one plan run, and the gate greens only when all three
-agree. `matrix_count` is how many cells `detect` planned, published by
-`actions/build-matrix` as the artifact name `plan-matrix.<N>` because a
-`workflow_run` event carries no job outputs; `artifact_count` is how many
-`cell-summary.*` artifacts the API reports for that run; `cell_count` is how
-many of them this job actually parsed. Each is `unknown` when the workflow could
-not determine it. A missing marker, a listing that does not match it, or a
-shortfall between listed and parsed means the evidence for this run is
-incomplete -- a lagging artifact listing, a failed download, or an engine pin
-skew -- and incomplete evidence must never green the gate. A zero cell count
-means "nothing changed" only when the marker says the matrix was empty; without
-it, zero is indistinguishable from a listing that simply did not show the cells,
-and greening it merges reviewed stacks that have no apply check and so are never
-applied.
+Two numbers describe one plan run and the gate greens only when they agree:
+`planned_cells` is how many cells `detect` planned, and `cell_count` is how many
+cell summaries this job actually parsed. A shortfall means a download or a parse
+did not produce the evidence the gate would be greening over, and incomplete
+evidence must never green the gate: `deploy-detect`'s work queue IS the pending
+apply checks, so a green gate over missing cells merges reviewed stacks that are
+then never applied.
 """
 
 import json
@@ -32,10 +25,9 @@ _NOTHING = "nothing-changed"
 def _as_int(value):
     """A reported count as an int, or None when the caller could not count it.
 
-    The workflow reports `unknown` when the plan run's artifact listing failed,
-    when the run published no plan-matrix marker (or two that disagreed), and
-    the `with:` fallback reports it for a step that emitted no output at all.
-    Anything that is not a base-10 integer is that same state.
+    An input the action never wired, or a step that emitted no output at all,
+    arrives as the empty string. Anything that is not a base-10 integer is that
+    same "nobody reported a count" state.
     """
     try:
         return int(str(value), 10)
@@ -43,55 +35,74 @@ def _as_int(value):
         return None
 
 
-def _evidence_gap(*, counted, cell_count, planned):
-    """A hold description when this plan run's evidence is incomplete, else None.
+def _plan_gap(*, plan_result, planned):
+    """A hold description when the plan job produced no usable plan, else None.
 
-    `counted` and `planned` are None when the workflow could not report a
-    number. Ordered so that every check a plausible count could satisfy comes
-    after the two that no count can.
+    `skipped` with cells planned is the one that is not obviously a failure: the
+    job the matrix was built for did not run at all, so there is nothing to
+    review and nothing to apply.
     """
-    if counted is None:
+    if plan_result == "skipped" and planned != 0:
+        return f"the plan job did not run for {planned} planned cell(s) — re-plan before merging"
+    if plan_result not in ("success", "skipped"):
         return (
-            "the plan run's artifact list could not be read, so its evidence is "
-            "unknown — re-plan this run before merging"
-        )
-    if planned is None:
-        return (
-            "the plan run published no plan-matrix marker — re-pin "
-            "actions/build-matrix, then re-plan before merging"
-        )
-    if counted != planned:
-        return (
-            f"the plan run planned {planned} cell(s) but its artifact list shows "
-            f"{counted} — re-plan before merging"
-        )
-    if cell_count < counted:
-        # Reaching here means the listing agreed with the marker, so this is a
-        # download or parse shortfall -- usually partial, not total. Say how many
-        # of how many, or a maintainer hunts a failure that did not happen.
-        return (
-            f"only {cell_count} of {counted} cell summaries could be read from the plan "
-            "run's artifacts — re-run before merging"
+            f"plan incomplete (plan job: {plan_result}) — fix the failing "
+            "<stack> / <env> plan check before merging"
         )
     return None
 
 
-def decide(*, run_conclusion, artifact_count, cell_count, matrix_count, pending):
+def _evidence_gap(*, cell_count, planned):
+    """A hold description when this run's evidence is incomplete, else None.
+
+    One comparison, both directions. A same-run download that failed leaves
+    `cell_count` at 0 against a non-zero `planned`, which holds — and a parse
+    that produced more cells than were planned describes a run nobody can
+    account for, which holds for the same reason.
+    """
+    if cell_count != planned:
+        return (
+            f"the plan job planned {planned} cell(s) but {cell_count} cell "
+            "summary/summaries could be read — re-plan before merging"
+        )
+    return None
+
+
+def decide(*, detect_result, plan_result, planned_cells, cell_count, pending):
     """Return (state, description, comment_mode).
 
     state is None when nothing should be written at all.
+
+    `plan_result` is a JOB result, not the old run conclusion, and the two
+    disagree on exactly one value: `skipped`. A run whose plan matrix was empty
+    used to arrive here as a SUCCESSFUL run; it now arrives as a skipped job.
+    Treating that as "write nothing" would leave every docs-only pull request
+    with no gate at all — so `skipped` is accepted, and then measured against
+    the same evidence checks as a successful plan rather than short-circuiting
+    past them.
     """
-    if run_conclusion in ("skipped", "cancelled"):
-        return None, "", _HOLD
-    if run_conclusion != "success":
+    if detect_result != "success":
         return (
             "failure",
-            f"plan incomplete (plan run: {run_conclusion}) — fix the failing "
-            "<stack> / <env> plan check before merging",
+            f"change detection did not succeed ({detect_result}) — fix the "
+            "shipmate / detect job before merging",
             _HOLD,
         )
-    planned = _as_int(matrix_count)
-    gap = _evidence_gap(counted=_as_int(artifact_count), cell_count=cell_count, planned=planned)
+    if plan_result == "cancelled":
+        return None, "", _HOLD
+    planned = _as_int(planned_cells)
+    if planned is None:
+        return (
+            "failure",
+            "the planned cell count was not reported, so this run's evidence is "
+            "unknown — re-plan before merging",
+            _HOLD,
+        )
+    # `or`, so the plan-job checks still run before the evidence check: cells
+    # nobody planned must not be described as a shortfall.
+    gap = _plan_gap(plan_result=plan_result, planned=planned) or _evidence_gap(
+        cell_count=cell_count, planned=planned
+    )
     if gap:
         return "failure", gap, _HOLD
     if pending:
@@ -108,10 +119,10 @@ def decide(*, run_conclusion, artifact_count, cell_count, matrix_count, pending)
 
 def main():
     state, desc, mode = decide(
-        run_conclusion=os.environ["SHIPMATE_RUN_CONCLUSION"],
-        artifact_count=os.environ.get("SHIPMATE_ARTIFACT_COUNT", ""),
+        detect_result=os.environ["SHIPMATE_DETECT_RESULT"],
+        plan_result=os.environ["SHIPMATE_PLAN_RESULT"],
+        planned_cells=os.environ.get("SHIPMATE_PLANNED_CELLS", ""),
         cell_count=int(os.environ.get("SHIPMATE_CELL_COUNT", "0")),
-        matrix_count=os.environ.get("SHIPMATE_MATRIX_COUNT", ""),
         pending=os.environ.get("SHIPMATE_PENDING", "false") == "true",
     )
     with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
@@ -120,17 +131,11 @@ def main():
     if state is None:
         return
     body = {"state": state, "context": "shipmate / gate", "description": desc[:140]}
-    # The plan run's URL when the caller supplied it. GITHUB_RUN_ID is this
-    # trusted summary run -- a five-step job with no plan output and no
-    # artifacts -- so clicking the gate would land nowhere useful; it stays as
-    # the fallback for a caller that passes nothing.
-    plan_run_url = os.environ.get("SHIPMATE_PLAN_RUN_URL", "")
+    # This job runs inside the plan run, so this run's URL is the right target.
     server, repo, run_id = (
         os.environ.get(k, "") for k in ("GITHUB_SERVER_URL", "GITHUB_REPOSITORY", "GITHUB_RUN_ID")
     )
-    if plan_run_url:
-        body["target_url"] = plan_run_url
-    elif server and repo and run_id:
+    if server and repo and run_id:
         body["target_url"] = f"{server}/{repo}/actions/runs/{run_id}"
     json.dump(body, sys.stdout)
 

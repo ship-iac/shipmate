@@ -499,21 +499,7 @@ def test_strip_comment_keeps_a_hash_inside_a_token():
     assert wi._strip_comment("branches: [release#1]") == "branches: [release#1]"
 
 
-def test_the_plan_path_matches_the_engine_summary_guard():
-    """Source-derived coupling guard. The engine's reusable `summary.yml` skips
-    every job unless `github.event.workflow_run.path` equals this exact string;
-    if that guard and this module's literal drift apart, the probe passes a
-    repository the engine will refuse.
-
-    Reads the `if:` expression out of the workflow rather than grepping the
-    file, so the literal appearing only in a comment cannot satisfy it.
-    """
-    import yaml
-
-    spec = yaml.safe_load(
-        (ENGINE / ".github" / "workflows" / "summary.yml").read_text(encoding="utf-8")
-    )
-    guard = spec["jobs"]["summary"]["if"]
-    assert f"workflow_run.path == '{wi.PLAN_PATH}'" in " ".join(guard.split()), (
-        "the engine summary.yml path guard no longer matches wiring.PLAN_PATH"
-    )
+# The engine's `summary.yml` no longer carries a `workflow_run.path` guard --
+# it is a `workflow_call` job inside the plan run -- so there is nothing on the
+# engine side for `wiring.PLAN_PATH` to be coupled to any more. The guard that
+# pinned that agreement died with the mechanism.
