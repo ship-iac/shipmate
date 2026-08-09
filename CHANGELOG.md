@@ -13,7 +13,7 @@ grammar are declared unstable in `README.md`.
 
 ## [0.10.0] — 2026-08-09
 
-Tags `TBD` (backfilled by the first commit after the tag).
+Tags `bbd9a74`.
 
 **Re-pinning alone is not enough for this release.** The consumer contract for
 the plan path changed: you must rewrite `.github/workflows/plan.yml` and delete
