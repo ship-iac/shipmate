@@ -68,7 +68,9 @@ uv run pytest scripts/tests    # unit tests
 uv run ty check                # type-check (beta)
 ```
 
-See [CONTRIBUTING.md](CONTRIBUTING.md).
+[`docs/development.md`](docs/development.md) has the repo layout, the testing
+model, and how guard tests must be written. See also
+[CONTRIBUTING.md](CONTRIBUTING.md).
 
 ---
 
