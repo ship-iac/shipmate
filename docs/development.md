@@ -81,6 +81,14 @@ commented out, the draft-skip deleted — left the suite byte-identical to green
 - **Mutation-prove every guard.** Break the thing the test names, run it, watch
   it fail, revert, watch it pass. A guard nobody has seen fail is unverified,
   whatever its name says.
+- **Prove one break per promise the name and docstring make.** Mutation-proving
+  only covers the mutation you thought of. A test here whose docstring claimed
+  to guard prose in three files, with a body of `assert len(doctor.PROBES) == 9`,
+  was mutation-proved against `PROBES` — the one thing it could detect — and
+  shipped through three review passes; reverting any of the prose sites left it
+  green. Read your test's name and docstring as a list of claims and break each
+  one. A guard whose proof is narrower than its name is the "cannot fail"
+  failure wearing a disguise, and it survives review *because* a proof exists.
 - **When the guarded thing is one fully known value, compare the whole value
   against a hand-written constant.** Checking a part — a substring, a token, a
   window, an operator denylist — is right about the example you were shown and
@@ -88,5 +96,15 @@ commented out, the draft-skip deleted — left the suite byte-identical to green
   the file it checks, because a derived vector passes whatever the file says.
   And use one selector per property: two selectors for the same property will
   disagree eventually.
+- **Write the guard's threat model down, and stop when it is covered.** One
+  guard here took ten review rounds, most of them defending against a deliberate
+  hostile edit to an engine file that is SHA-pinned and reviewed on every PR — an
+  author who can make that edit does not need the evasion. The realistic failure
+  is accidental regression: a reverted line, a dropped flag, a commented-out
+  invocation. State that in the module docstring, along with what the guard
+  deliberately does not cover. Without it, every "here is an evasion" review
+  finding reads as actionable and the hardening loop never ends.
+  `scripts/tests/test_docs_yaml_parses.py` is a short example: its docstring
+  names the failure it expects and the ceiling it accepts.
 
 `scripts/tests/test_apply_cell_failsafe_wiring_guard.py` is the model to copy.
