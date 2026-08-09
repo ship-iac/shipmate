@@ -193,10 +193,13 @@ def _quiet_new_probes():
     the older gate/environment probes via the top-level `warnings()` don't pick
     up incidental noise from these five.
 
-    The last two read the same workflow listing. The summary fixture's `uses:`
-    line is an engine pin, so the pin probe has something to read and needs the
+    The last two read the same workflow listing. `_QUIET_PLAN`'s `uses:` line is
+    an engine pin, so the pin probe has something to read and needs the
     release endpoints to agree with it -- the pinned SHA and the SHA the release
-    lookup returns are the same `_SHA`, or it reports staleness. The plan-env
+    lookup returns are the same `_SHA`, or it reports staleness. That same file
+    is on `pull_request_target` and named `plan.yml`, which is what keeps the
+    fork-trigger probe quiet: it is the exemption, not the absence of the
+    trigger. The plan-env
     secret probe reads one listing per plan env; an empty one keeps the healthy
     path quiet."""
     return {

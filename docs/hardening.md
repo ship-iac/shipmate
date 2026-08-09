@@ -336,14 +336,10 @@ Settings → Actions → General:
 - **Fork pull request workflows**: require approval for **all outside
   collaborators** (the strictest option), and never enable "Send secrets to
   workflows from fork pull requests". In workflow code the rule is about the
-  shape rather than the trigger: `pull_request_target` runs at the base ref,
-  which satisfies `shipmate-engine`'s branch policy, so no workflow on it may
-  act on fork-author-controlled content from a job binding a credentialed
-  environment — that combination is the no-push-access version of the attack
-  this page opens with. shipmate's own `plan.yml` uses the trigger and does not
-  have that shape: the job holding the App key checks nothing out (see the top
-  of this page). `shipmate doctor` names any *other* workflow file declaring the
-  trigger; `plan.yml` is exempt by exact name.
+  shape rather than the trigger — stated in full at the top of this page, and
+  the reason shipmate's own `plan.yml` may use `pull_request_target` while a
+  labeler workflow may not. `shipmate doctor` names any *other* workflow file
+  declaring the trigger; `plan.yml` is exempt by exact name.
 - **Allowed actions**: allow the engine (`<owner>/shipmate/*`) plus the pinned
   third-party actions the workflows use — which now includes
   `aws-actions/configure-aws-credentials`, on the apply path, even for a consumer
@@ -506,9 +502,9 @@ plan and apply — which is exactly what the refusal message tells the
 contributor to ask for. Plan that in, rather than granting push access to make
 the inconvenience go away — and resist the other shortcut, a second
 `pull_request_target` workflow to do something useful on fork pull requests.
-Doing that in the shape a labeler takes — acting on the pull request's own
-content from a job that names an environment — trades the property this section
-rests on for exactly the exposure control 1 exists to limit.
+Whether that is safe is the shape question stated at the top of this page; in
+the shape a labeler usually takes it trades the property this section rests on
+for exactly the exposure control 1 exists to limit.
 
 ## What none of this fixes
 

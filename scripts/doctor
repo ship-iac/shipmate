@@ -926,8 +926,9 @@ def _fork_trigger_warnings(ctx):
                 "policy trusts, so a fork can reach them. shipmate's own `plan.yml` "
                 "uses this trigger safely because the job holding the App key runs "
                 "no repository content at all. If this workflow checks out or acts "
-                "on the pull request's own code in a job that names an environment, "
-                "it does not have that property — remove the trigger or split those "
+                "on the pull request's own code in a job binding a CREDENTIALED "
+                "environment — one holding the App key or cloud credentials — it "
+                "does not have that property. Remove the trigger or split those "
                 "two things apart (see docs/hardening.md).",
             )
         ]
