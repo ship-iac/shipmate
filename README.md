@@ -17,7 +17,8 @@ tag or branch name: a commit SHA is immutable, so a consumer's workflow behavior
 cannot change underneath it without an explicit, reviewed bump. shipmate
 publishes a GitHub Release per release SHA, which is what lets Dependabot's
 `github-actions` ecosystem propose that bump; `shipmate doctor` names any pin
-that differs from the latest release. See [`CONTRACT.md`](CONTRACT.md) §Consumption.
+that differs from the latest release. See [`CONTRACT.md`](CONTRACT.md) §Consumption
+and [`docs/upgrading.md`](docs/upgrading.md).
 
 ## Why setup is not two clicks
 
