@@ -148,4 +148,4 @@ once the repo is public or on a paid plan.
 ## Upgrading
 
 Re-pinning, Dependabot, and the past migrations that needed more than a pin
-bump: [`upgrading.md`](upgrading.md) §Past migrations.
+bump: [`upgrading.md`](upgrading.md).

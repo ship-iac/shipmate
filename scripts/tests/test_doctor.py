@@ -408,7 +408,7 @@ def test_plan_env_with_reviewers_warned(monkeypatch):
 
 
 def test_plan_env_wait_timer_is_not_diagnosed_as_an_approval_hang(monkeypatch):
-    # docs/branch-protection.md deliberately lumps wait timers in with
+    # docs/troubleshooting.md deliberately lumps wait timers in with
     # reviewers (both stop a plan job from starting when it should), so the
     # finding must fire -- but its wording must fit the rule it names.
     responses = _protection(

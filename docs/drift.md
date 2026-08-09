@@ -8,7 +8,9 @@ A nightly cron fans out over **all** stacks × environments — not the changed 
 — and plans each one. A separate `issues` job then turns those results into
 GitHub Issues: one labelled `drift` Issue per drifted stack × environment,
 titled `drift: <env> / <stack>`, updated in place while the drift persists and
-closed with a "Drift resolved" comment on the next clean run.
+closed with a "Drift resolved" comment on the next clean run. The lookup is over
+**open** Issues only, so drift that returns later opens a fresh Issue rather
+than reopening the closed one.
 
 A cell whose plan attempt did not succeed is not treated as clean: `drift-cell`
 records `plan_ok: false`, and `actions/drift-issues` skips that cell entirely,
@@ -119,6 +121,14 @@ jobs:
           slack-webhook: ${{ vars.SLACK_WEBHOOK }}
 ```
 
+**A local-backend repository must add `state-path` to the `drift-cell` step.**
+The fence above is the AWS sample's, and a remote backend needs none. On a local
+backend the drift wrapper is what builds the path — `repo-example-stacks` passes
+`state-path: ${{ matrix.stack }}/.state`, matching the `<stack>/<state_suffix>`
+its apply path passes ([`../CONTRACT.md`](../CONTRACT.md) §State backend). Omit
+it and every cell plans against no state and reports the whole repository as
+drifted, every night.
+
 **The credential split is the point.** The `drift` matrix job binds the plan
 environment of the cell it is planning (`environment: ${{ matrix.environment }}`)
 and holds **no App credential**. All it does with its result is upload one
@@ -131,9 +141,9 @@ compromised drift cell cannot open, edit or close an Issue.
 
 That split makes the artifact the **only** channel by which a cell's drift
 becomes visible. `drift-cell`'s compose and upload steps run `if: always()` and
-are deliberately not `continue-on-error`: lose the artifact and `drift-issues`
-simply does not see the cell — no Issue, no Slack, and a green nightly run over
-real drift. Both gated jobs also refuse to run off the default branch, resolved
+are deliberately not `continue-on-error`: were the artifact allowed to go
+missing, `drift-issues` would simply not see the cell — no Issue, no Slack, and
+a green nightly run over real drift. Both gated jobs also refuse to run off the default branch, resolved
 from the API by `detect` rather than read from the `schedule` event payload.
 
 The `aws-actions/configure-aws-credentials` step is the consumer's own, in the
@@ -143,8 +153,9 @@ same position as on the plan path — see
 ## Slack (optional)
 
 The sample wires Slack through one input on `drift-issues`:
-`slack-webhook: ${{ vars.SLACK_WEBHOOK }}`, a GitHub variable resolved in the
-`shipmate-engine` environment the `issues` job binds. The input's default is the
+`slack-webhook: ${{ vars.SLACK_WEBHOOK }}`, a GitHub variable you may set at
+repo, org, or on the `shipmate-engine` environment the `issues` job binds
+(`vars.` resolves environment → repository → organization). The input's default is the
 empty string, so with `SLACK_WEBHOOK` unset the expression renders empty and no
 notification is attempted — nothing else changes.
 
@@ -161,7 +172,6 @@ cells.
 `build-matrix` runs with `all-stacks: "true"` and an empty `base-sha`, so the
 matrix is every stack × environment in the repository, every night — runner
 minutes scale with the **full** matrix, not the changed set. Each cell is a
-`tofu init` plus a `tofu plan`
-against real state, which also means real backend and provider API traffic on
-that schedule. The knobs are the cron expression and how many environments you
+`tofu init` plus a `tofu plan` against real state, which also means real backend
+and provider API traffic on that schedule. The knobs are the cron expression and how many environments you
 tag stacks into; there is no partial-matrix input.

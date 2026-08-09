@@ -36,7 +36,9 @@ run. See [`troubleshooting.md`](troubleshooting.md) §shipmate doctor.
 ## Past migrations
 
 An entry applies only if you are moving *from* a pin older than the release it
-names.
+names. The entries below `0.2.0` predate the first tagged release, or
+`CHANGELOG.md` does not pin one; they are kept for repositories moving from a
+very old pin.
 
 ### 0.10.0 — the plan path is one workflow, and re-pinning alone is not enough
 
@@ -79,9 +81,10 @@ base plans what the branch says. The surviving safety net is the stale-plan
 refusal at apply time; **require branches to be up to date before merging**
 ([`branch-protection.md`](branch-protection.md)) closes the rest.
 
-### 0.2.0 — apply check-name field order flipped: every PR planned before the bump needs a new commit, and a re-plan is not enough
+### 0.2.0 — apply check-name field order flipped
 
-The apply check is now `apply / <stack> / <env>` (was `apply / <env> /
+**Every pull request planned before the bump needs a new commit, and a re-plan
+is not enough.** The apply check is now `apply / <stack> / <env>` (was `apply / <env> /
 <stack>`). Nothing in branch protection references it (only `shipmate / gate` is
 required), so no ruleset edit is needed — but old-order checks left on a head
 SHA break **both** directions, and a re-plan fixes neither, because it adds the
@@ -110,9 +113,6 @@ is updatable only by the app that created it, and these were App-authored). If a
 deploy already went red this way, the stacks are in fact applied: re-plan on a
 follow-up PR, get "no changes" checks, and the next deploy no-ops green. New PRs
 are unaffected.
-
-The entries below predate the first tagged release, or `CHANGELOG.md` does not
-pin one; they are kept for repositories moving from a very old pin.
 
 ### Flip `integration_id` in the same change as the engine-SHA bump
 

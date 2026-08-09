@@ -88,8 +88,8 @@ without it.
 
 ## 4. Install the App on your repository
 
-The App must be **installed** (separately from being registered) on every repo
-that runs `comment-ops.yml` / `dispatch`:
+The App must be **installed** (separately from being registered) on the
+repository that runs `comment-ops.yml` / `dispatch`:
 
 ```
 https://github.com/organizations/<org>/settings/apps/shipmate/installations
@@ -161,7 +161,7 @@ every consumer repo has it.
 
 ```bash
 REPO=<owner>/<repo>
-TEAM=<approvers-team-slug>          # may differ per repo; set it per repo either way
+TEAM=<approvers-team-slug>          # the GitHub team slug, not a display name
 APP_ID=<app-id-from-step-2-output>
 
 KEY=$(cat shipmate-app.private-key.pem)
@@ -408,6 +408,9 @@ JSON
   gh variable set SHIPMATE_APP_ID --repo "$REPO" --body "$APP_ID"
   gh secret set SHIPMATE_APP_PRIVATE_KEY --repo "$REPO" --env shipmate-engine \
     --body "$KEY"
+  # Removes any same-named repository secret, which would otherwise stay
+  # readable by any workflow on any branch — see §6 for why. No error when
+  # there was none.
   gh secret delete SHIPMATE_APP_PRIVATE_KEY --repo "$REPO" 2>/dev/null || true
 done
 ```

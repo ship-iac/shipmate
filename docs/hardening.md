@@ -82,7 +82,7 @@ name. See "Contributors without push access" for the trade-off that follows.
 | 15 | Shorten Actions retention | Settings → Actions | `shipmate doctor` report disclosure |
 | 16 | `shipmate-engine` Environment exists, deployment branch policy restricted to the default branch | Environment | Repository-secret App key readable by any branch |
 | 17 | Deployment branch policy restricted to the default branch on every `<env>-apply` | Environment | Branch-authored workflow claiming apply-environment secrets directly |
-| 18 | `AWS_ROLE_ARN` + `AWS_REGION` as variables on **each** `<env>-apply` you want cloud access from — set nowhere else | Environment variables | Opting in per environment; set at repo/org level they apply to every apply environment at once (§7–9) |
+| 18 | `AWS_ROLE_ARN` + `AWS_REGION` as variables on **each** `<env>-apply` you want cloud access from — never at repository or organization level | Environment variables | Opting in per environment; set at repo/org level they apply to every apply environment at once (§7–9) |
 | 19 | `id-token: write` on the call-site job of every consumer wrapper that calls the engine's apply-path workflows | Consumer workflow YAML | Nothing — it is **required**: GitHub caps a called workflow's permissions at each `uses:` boundary, so without it every apply run fails at workflow-resolution time, cloud or not |
 
 ## 1. Write access
@@ -388,7 +388,7 @@ is not:
   repository-list edit per repository plus a single org-secret write for the
   alternative, and rotation as N `gh secret set --env` writes rather than that
   one org-secret write.
-  `docs/github-app.md` §5–7 carries the loops.
+  `docs/github-app.md` §7 and §Appendix carry the loops.
 - The only way to remove it is to stop putting the key in the repositories,
   which requires something outside GitHub Actions to hold it. That is a
   different architecture, not a setting.
@@ -404,7 +404,7 @@ repository would need a secret in order to avoid having a secret.
 The `shipmate doctor` report is written to the job summary as well as to a
 comment, and a job summary cannot be edited or redacted. Shorten the Actions
 retention window if that inventory is sensitive
-(`docs/branch-protection.md` §"Who can ask for the report").
+(`docs/troubleshooting.md` §"Who can ask for the report").
 
 ## 16. The `shipmate-engine` environment
 

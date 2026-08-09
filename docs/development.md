@@ -78,13 +78,14 @@ commented out, the draft-skip deleted — left the suite byte-identical to green
   file, take the job or step, and compare whole expressions. A substring
   assertion is satisfied by the same words appearing in a *comment*, and by an
   inverted operator (`==`→`!=`, `&&`→`||`) that keeps the text intact.
+  `scripts/tests/test_apply_cell_failsafe_wiring_guard.py` is the model to copy.
 - **Mutation-prove every guard.** Break the thing the test names, run it, watch
   it fail, revert, watch it pass. A guard nobody has seen fail is unverified,
   whatever its name says.
 - **Prove one break per promise the name and docstring make.** Mutation-proving
   only covers the mutation you thought of. A test here whose docstring claimed
-  to guard prose in three files, with a body of `assert len(doctor.PROBES) == 9`,
-  was mutation-proved against `PROBES` — the one thing it could detect — and
+  to guard prose in three files, with a body of `assert len(doctor.PROBES) == 9`
+  (since fixed), was mutation-proved against `PROBES` — the one thing it could detect — and
   shipped through three review passes; reverting any of the prose sites left it
   green. Read your test's name and docstring as a list of claims and break each
   one. A guard whose proof is narrower than its name is the "cannot fail"
@@ -95,7 +96,13 @@ commented out, the draft-skip deleted — left the suite byte-identical to green
   leaves the class open. The constant must be hand-written, never derived from
   the file it checks, because a derived vector passes whatever the file says.
   And use one selector per property: two selectors for the same property will
-  disagree eventually.
+  disagree eventually. This is less code, not more discipline: the guard that
+  finally adopted the whole-value form did so as a net deletion of a helper,
+  three tests and a denylist.
+  `test_current_failsafe_set_is_exactly_the_four_known_ids` in
+  `scripts/tests/test_apply_cell_failsafe_wiring_guard.py` is the shape — note
+  that its module docstring argues against hardcoded lists for the *structural*
+  guards around it; this one is a deliberate tripwire.
 - **Write the guard's threat model down, and stop when it is covered.** One
   guard here took ten review rounds, most of them defending against a deliberate
   hostile edit to an engine file that is SHA-pinned and reviewed on every PR — an
@@ -106,5 +113,3 @@ commented out, the draft-skip deleted — left the suite byte-identical to green
   finding reads as actionable and the hardening loop never ends.
   `scripts/tests/test_docs_yaml_parses.py` is a short example: its docstring
   names the failure it expects and the ceiling it accepts.
-
-`scripts/tests/test_apply_cell_failsafe_wiring_guard.py` is the model to copy.

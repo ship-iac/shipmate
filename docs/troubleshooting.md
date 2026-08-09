@@ -257,15 +257,13 @@ ruleset.
 
 ### A pull request planned zero cells
 
-No `<stack> / <env>` checks appear, no plan comment is posted, and the gate goes
-green over no work.
+No `<stack> / <env>` checks appear, no plan comment is posted — unless there is
+already a plan comment to keep current, or `doctor` raised a warning on that
+run, either of which still posts one — and the gate goes green over no work.
 
 Change detection is `terramate list --changed`, so a pull request that touches
 no stack's own files and changes no generated `.tf` — an engine-pin bump, a docs
-edit — plans nothing. This is expected, not a fault. The silence is narrow:
-with nothing changed the plan comment is skipped only when there is no existing
-plan comment to keep current and `doctor` raised no warning on that run; either
-of those still posts.
+edit — plans nothing. This is expected, not a fault.
 
 ### Fork pull request refused
 
@@ -298,11 +296,13 @@ the environment exists and that its policy actually names the default branch.
 
 ### The post-merge deploy was dropped as superseded
 
-A pull request merged, no deploy run appears for it, and its stacks are still
-pending.
+A pull request merged, the deploy run for that merge was cancelled before it
+started, and its stacks are still pending.
 
-There is no server-side queue behind the apply path, so GitHub Actions can drop
-a superseded run. The stacks stay pending and visible, which is the recoverable
+There is no server-side queue behind the apply path: the consumer `deploy.yml`
+declares a run-level `concurrency` group (`group: deploy-main`), and GitHub
+drops the older *pending* run whenever a second merge lands while the first is
+still queued. The stacks stay pending and visible, which is the recoverable
 state: re-run that deploy. `deploy-detect` rebuilds its work queue from the
 apply checks that are still pending, so a re-run is idempotent — anything
 already applied is skipped.
