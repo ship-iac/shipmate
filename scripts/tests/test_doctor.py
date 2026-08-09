@@ -1833,9 +1833,7 @@ def test_an_indented_on_is_not_the_top_level_one(monkeypatch):
     """`_on_block`'s column-0 anchoring. Any key ending in `on` is an unanchored
     match -- `python-version: 3.12` is `versi` + `on:` -- and matching it
     retargets the block this probe reads, onto a line that can never name an
-    event, so the trigger one line below goes unreported. The anchoring is held
-    twice over (`_ON_KEY`'s `^` and the `.match`), so this reds only when both
-    are gone -- which is what a rewrite of the slicer would do."""
+    event, so the trigger one line below goes unreported."""
     responses = _fork_responses(
         {"label.yml": "env:\n  python-version: 3.12\non:\n  pull_request_target:\n"}
     )
@@ -1874,15 +1872,21 @@ def test_a_byte_order_mark_does_not_hide_the_on_block(monkeypatch):
 
 
 def test_an_invalid_utf8_byte_does_not_abort_the_scan(monkeypatch):
-    """`errors="replace"`: a workflow file written through a lossy encoding is
-    not valid UTF-8, and a strict decode would raise out of the probe rather
-    than report the trigger sitting in the same file."""
+    """`errors="replace"`, both halves. A workflow written through a lossy
+    encoding is not valid UTF-8: a strict decode raises out of the probe rather
+    than reporting the trigger sitting in the same file, and an `ignore` decode
+    DROPS the bad byte, splicing `pull_request_targ<0xe9>et` back into the very
+    token this probe matches on -- a warning manufactured for a repository that
+    declares no such trigger. U+FFFD keeps the token broken."""
     responses = _fork_responses({"label.yml": ""})
     responses[f"{_WF_DIR}/label.yml{_REF}"] = _wf_bytes(b"# caf\xe9\non:\n  pull_request_target:\n")
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
     out = doctor._fork_trigger_warnings(_ctx())
     assert len(out) == 1
     assert out[0][0] == doctor.WARNING
+
+    responses[f"{_WF_DIR}/label.yml{_REF}"] = _wf_bytes(b"on: [pull_request_targ\xe9et]\n")
+    assert doctor._fork_trigger_warnings(_ctx()) == []
 
 
 def test_strip_comment_ends_a_line_at_a_comment():

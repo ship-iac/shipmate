@@ -827,12 +827,11 @@ FORK_TRIGGER_NO_COMMIT = (
 
 
 #: `on` at column 0 only, optionally quoted: a workflow's `on:` is a top-level
-#: key, so an indented one belongs to something else. Unanchored, a
-#: `    python-version: 3.12` would match (`versi` + `on:`) and silently
-#: retarget the block this probe reads. Both the `^` and `_on_block`'s `.match`
-#: deliver that anchoring, either alone being enough — so a rewrite has to drop
-#: both before the guard below reds.
-_ON_KEY = re.compile(r"""^["']?on["']?[ \t]*:(?P<rest>.*)$""")
+#: key, so an indented one belongs to something else. `_on_block` matches rather
+#: than searches, and that is the whole of the anchoring — unanchored,
+#: `    python-version: 3.12` matches (`versi` + `on:`) and silently retargets
+#: the block this probe reads.
+_ON_KEY = re.compile(r"""["']?on["']?[ \t]*:(?P<rest>.*)$""")
 
 
 def _strip_comment(line):
