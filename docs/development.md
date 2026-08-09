@@ -85,9 +85,9 @@ commented out, the draft-skip deleted — left the suite byte-identical to green
 - **Prove one break per promise the name and docstring make.** Mutation-proving
   only covers the mutation you thought of. A test here whose docstring claimed
   to guard prose in three files, with a body of `assert len(doctor.PROBES) == 9`
-  (since fixed), was mutation-proved against `PROBES` — the one thing it could detect — and
-  shipped through three review passes; reverting any of the prose sites left it
-  green. Read your test's name and docstring as a list of claims and break each
+  (since fixed), was mutation-proved against `PROBES` — the one thing it could
+  detect — and shipped through three review passes; reverting any of the prose
+  sites left it green. Read your test's name and docstring as a list of claims and break each
   one. A guard whose proof is narrower than its name is the "cannot fail"
   failure wearing a disguise, and it survives review *because* a proof exists.
 - **When the guarded thing is one fully known value, compare the whole value
@@ -96,9 +96,12 @@ commented out, the draft-skip deleted — left the suite byte-identical to green
   leaves the class open. The constant must be hand-written, never derived from
   the file it checks, because a derived vector passes whatever the file says.
   And use one selector per property: two selectors for the same property will
-  disagree eventually. This is less code, not more discipline: the guard that
-  finally adopted the whole-value form did so as a net deletion of a helper,
-  three tests and a denylist.
+  disagree eventually. This is less code, not more discipline:
+  `scripts/tests/test_engine_owns_tofu_invocation.py` adopted the whole-value
+  form — each cell's entire `terramate run` line, tokenized, against a
+  hand-written constant — as a net deletion of a helper, three tests and a
+  denylist, after ten rounds in which every fix checked a part and reasoned
+  about the rest.
   `test_current_failsafe_set_is_exactly_the_four_known_ids` in
   `scripts/tests/test_apply_cell_failsafe_wiring_guard.py` is the shape — note
   that its module docstring argues against hardcoded lists for the *structural*

@@ -44,26 +44,37 @@ App key ([`github-app.md`](github-app.md)). `<env>`/`<env>-apply` are never name
 in workflow YAML at all — they're read from Terramate stack tags at runtime. This
 tier needs `<env>` and `shipmate-engine`; `<env>-apply` is the apply tier's.
 
-Create each with `gh api -X PUT repos/<owner>/<repo>/environments/<name>`, then
-set protection rules from Settings → Environments → `<name>` (or the API):
+Create each `<env>` with
+`gh api -X PUT repos/<owner>/<repo>/environments/<name>`, then set protection
+rules from Settings → Environments → `<name>` (or the API):
 
 - **`shipmate-engine`** (create once, regardless of how many env tiers you
-  run): deployment branch policy **Selected branches**, naming exactly the
-  default branch. No reviewers — this environment's job is scoping the App
-  key to trusted workflow runs, not gating a human decision, and reviewers
-  here would stall every plan and apply run waiting for an approval nobody is
-  meant to give. `shipmate doctor` checks both that this environment exists
-  and that its policy actually names the default branch.
+  run): [`github-app.md`](github-app.md) §5 creates it, and is a prerequisite of
+  this tier — use the commands there rather than a bare `PUT`, which leaves the
+  environment with no deployment branch policy and so releases the App private
+  key to any ref that names it. No reviewers — this environment's job is scoping
+  the App key to trusted workflow runs, not gating a human decision, and
+  reviewers here would stall every plan and apply run waiting for an approval
+  nobody is meant to give.
 - **`<env>`** (plan): no reviewers, no deployment branch policy at all —
   reviewers block every plan cell, and a branch policy blocks every plan cell
   whose pull request targets a branch it does not name (plan jobs run at the
-  pull request's *base* ref) ([`hardening.md`](hardening.md) §8;
+  pull request's *base* ref) ([`hardening.md`](hardening.md) #8;
   `shipmate doctor` warns on either). If your `plan.yml` needs plan-time cloud
   credentials — as the fence below does — this is also where its role goes: set
   `AWS_ROLE_ARN` and `AWS_REGION` on each `<env>`, naming a **read-only** plan
   role ([`aws.md`](aws.md) §Environment variables). A plan environment can have
   no protection at all, so anyone who can push a branch can reach whatever it
   names.
+- **The variables your layout injects**, on **each** `<env>` and (in the apply
+  tier) each `<env>-apply`: `TF_VAR_env` and `TF_VAR_region` where the backend
+  path and resources are built from them, `TF_WORKSPACE` for workspace-per-env,
+  nothing for folder-per-env, whose leaves fix env and region by path. The plan
+  fence below reads `vars.TF_VAR_env` / `vars.TF_VAR_region`; unset, they render
+  empty, and an S3 backend `key` built from them collapses to one shared state
+  object for every environment.
+  [`../CONTRACT.md`](../CONTRACT.md) §Env model is the per-layout table;
+  [`concepts.md`](concepts.md) explains where they land.
 
 ### The plan workflow
 
@@ -190,6 +201,15 @@ This tier gets you `shipmate apply` in a pull request comment (a pre-merge apply
 of the reviewed plan) and an idempotent post-merge apply on push to the default
 branch.
 
+`shipmate apply` runs only for a member of the team named by
+`SHIPMATE_APPROVERS_TEAM` (set per repository in
+[`github-app.md`](github-app.md) §6), on a pull request that is mergeable and
+satisfies the branch ruleset's review policy, and only against a plan for the
+pull request's **current** head — the four apply requirements in
+[`../CONTRACT.md`](../CONTRACT.md) §Comment-ops
+([`concepts.md`](concepts.md) §Comment-ops for the shape). A refused comment
+names which requirement failed.
+
 **The two are coupled, and the coupling decides which files you need.** If you
 require `shipmate / gate` as a branch-protection check — tier 3 — then applies
 have to happen **pre-merge**, because the gate stays non-green while any
@@ -201,7 +221,7 @@ repository that does *not* require the gate.
 ### Environment setup
 
 `<env>-apply` splits by tier, and this is the split
-[`hardening.md`](hardening.md) describes at the credential level (§6–9) restated
+[`hardening.md`](hardening.md) describes at the credential level (#6–9) restated
 as environment settings. Create each with
 `gh api -X PUT repos/<owner>/<repo>/environments/<name>`, then set protection
 rules from Settings → Environments → `<name>` (or the API):
@@ -236,8 +256,14 @@ rules from Settings → Environments → `<name>` (or the API):
 > **`state_suffix` is required but may be `""`.** It is a `required: true` input
 > of every apply-path reusable workflow — `apply.yml`, `apply-all.yml`,
 > `deploy.yml` and the `apply-env-level.yml` they call — and of none of the plan
-> path. `""` means a remote backend owns the state, and the engine's state
-> restore/save steps are skipped. Omitting the input entirely is a
+> path. `""` — what the fences below paste, because this page's worked example
+> is S3 — means a remote backend owns the state, and the engine's state
+> restore/save steps are skipped. A **local backend** materialized in the working
+> tree passes instead the path segment under each stack directory where its state
+> file lives: `repo-example-stacks` passes `.state`, and the engine then restores
+> and saves `<stack>/.state` around every apply
+> ([`../CONTRACT.md`](../CONTRACT.md) §State backend). Pasting `""` there applies
+> against no state at all. Omitting the input entirely is a
 > workflow-resolution error on purpose: a forgotten state configuration must
 > fail loud rather than apply with no state at all.
 
@@ -416,11 +442,17 @@ Properties that fall out of the existing gate semantics:
   apply checks stay pending — gate stays pending, so auto-merge waits
   until someone runs the targeted `shipmate apply <env>`. Arming auto-merge never
   weakens the apply-before-merge guarantee; it only removes the final click.
-- **Stale bases don't sneak through.** With "require branches up to date"
-  (strict), a base moved since the plans ran blocks the auto-merge until the
-  branch is updated — and updating re-runs the plan on the new head, which
+- **Stale bases don't sneak through the merge.** With "require branches up to
+  date" (strict), a base moved since the plans ran blocks the auto-merge until
+  the branch is updated — and updating re-runs the plan on the new head, which
   resets gate to pending until the fresh plans are applied. The
   exact-plan invariant is preserved.
+
+  Strict gates **merging** and nothing else, so it does not protect the apply:
+  a `shipmate apply <env>` from a stale branch applies the plan as reviewed, and
+  a stack updated and merged to main since this branch forked is rolled back in
+  real infrastructure ([`branch-protection.md`](branch-protection.md)). Update
+  the branch *before* commenting `shipmate apply`, not after.
 - **The post-merge deploy still runs.** GitHub performs the auto-merge as the
   user who armed it (not `GITHUB_TOKEN`), so the resulting push event triggers
   `deploy.yml` normally — which no-ops idempotently when everything was

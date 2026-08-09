@@ -114,14 +114,14 @@ Set them per environment, and **never at repository or organization level**:
   `repo-example-stacks-aws` does: its `dev-eu` / `dev-us` plan environments name a
   read-only role and its `<env>-apply` environments name the apply role. A plan
   environment can have no approval rules and no branch policy at all
-  ([`hardening.md`](hardening.md) §8), so whatever role it names is reachable by
+  ([`hardening.md`](hardening.md) #8), so whatever role it names is reachable by
   anyone who can push a branch.
 
-That per-environment scoping is advisory, not enforced. `vars` resolve
-organization → repository → environment, so an `AWS_ROLE_ARN` set at repository or
-organization level is read identically by every job in every environment, with no
-warning and nothing in the engine to guard it. The role's trust policy is the real
-bound.
+That per-environment scoping is advisory, not enforced. For `vars` the most
+specific wins — environment overrides repository overrides organization — so an
+`AWS_ROLE_ARN` set at repository or organization level is read identically by
+every job in every environment that does not set its own, with no warning and
+nothing in the engine to guard it. The role's trust policy is the real bound.
 
 ## Where the credentials step goes
 

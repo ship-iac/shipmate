@@ -280,10 +280,11 @@ control.
   worth nothing without control 6, so treat the two as one setting.
 
   **For the OIDC path the scoping is advisory, and this is worth being blunt
-  about.** `AWS_ROLE_ARN` and `AWS_REGION` are `vars`, and `vars` resolve
-  organization → repository → environment. A repository- or organization-level
-  `AWS_ROLE_ARN` is therefore picked up identically by every wave job in every
-  apply environment, with no warning and nothing in the engine to guard it —
+  about.** `AWS_ROLE_ARN` and `AWS_REGION` are `vars`, and for `vars` the most
+  specific wins: environment overrides repository overrides organization. A
+  repository- or organization-level `AWS_ROLE_ARN` is therefore picked up
+  identically by every wave job in every apply environment that does not set its
+  own, with no warning and nothing in the engine to guard it —
   "opt in per environment" (CONTRACT.md §AWS OIDC) is where you *should* set it,
   not something GitHub or shipmate enforces. Set it on each `<env>-apply` and
   nowhere else, and understand that the enforcing control is not the variable's
@@ -296,7 +297,7 @@ control.
   whose pull request targets a branch the policy does not name (plan jobs run at
   the pull request's *base* ref). Either leaves
   the gate red until it is removed (`shipmate doctor` warns; see
-  `docs/branch-protection.md`). That constraint is not negotiable, so treat a
+  `docs/troubleshooting.md`). That constraint is not negotiable, so treat a
   plan environment as readable by anyone with push access: a plan cell runs
   `terramate`/`tofu` over branch code, which is arbitrary code execution with
   whatever that environment holds. Read-only, blast-radius-free credentials

@@ -72,11 +72,20 @@ stores, on `GITHUB_REPOSITORY` (typically the App-owning repo itself, e.g.
   only as the one place the PEM lives outside your local disk, alongside the
   App settings page.
 
-**Do not re-run this against a consumer repo to "install" the key there.**
-That would store a plain repo secret, readable by any branch's workflow —
-exactly the shape steps 5–6 exist to replace. Copy the PEM from here (or
-re-download it from the App settings) into each consumer repo's
-`shipmate-engine` **environment** secret instead (steps 5–6, below).
+`register-app` prints `App created: id=… slug=…` and nothing else: the PEM
+passes through it in memory and is never written to disk, and `gh` cannot read a
+secret's value back once set. Step 6 needs the key **as a file**, so download one
+now — App settings (`.../settings/apps/shipmate`) → **Private keys** →
+**Generate a private key**, the same button §7 uses. Save the download as
+`shipmate-app.private-key.pem` in the directory you will run step 6 from. An App
+holds several private keys and every one of them mints valid tokens, so this
+does not invalidate the one stored above.
+
+**Do not re-run this script against a consumer repo to "install" the key
+there.** That would store a plain repo secret, readable by any branch's
+workflow — exactly the shape steps 5–6 exist to replace. Put the PEM you just
+downloaded into each consumer repo's `shipmate-engine` **environment** secret
+instead (steps 5–6, below).
 
 ## 3. Upload a logo (optional but recommended)
 
@@ -155,8 +164,8 @@ loops — see the appendix.
 
 Each consumer repo needs `SHIPMATE_APPROVERS_TEAM` (the GitHub team slug whose
 members may run `shipmate apply`) plus the app id/key from step 2. `gh` cannot read
-back a secret's value once set (GitHub never exposes it), so keep the PEM from
-`register-app`'s conversion around (or re-download it from App settings) until
+back a secret's value once set (GitHub never exposes it), so this step reads the
+`shipmate-app.private-key.pem` you downloaded in step 2 — keep that file until
 every consumer repo has it.
 
 ```bash

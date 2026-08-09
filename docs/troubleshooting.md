@@ -104,9 +104,10 @@ given pull request changed; the declared set comes from that commit's plan
 matrix. So the report's all-clear line names the environments it actually probed
 instead of implying the repository's environments are all sound, and a clean
 secret probe says nothing about an environment this pull request did not touch.
-Separately, the report states plainly when some of the commit's workflow runs had not finished yet,
-and when the warnings harvest itself could not complete (or may be truncated by
-GitHub's per-step annotation cap), rather than claiming a false all-clear.
+Separately, the report states plainly when some of the commit's workflow runs
+had not finished yet, and when the warnings harvest itself could not complete
+(or may be truncated by GitHub's per-step annotation cap), rather than claiming
+a false all-clear.
 
 The harvest is deliberately uncurated: it reports the annotations as GitHub
 recorded them, including ones from the third-party actions the engine pins, so a

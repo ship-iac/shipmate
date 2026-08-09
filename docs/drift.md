@@ -143,8 +143,9 @@ That split makes the artifact the **only** channel by which a cell's drift
 becomes visible. `drift-cell`'s compose and upload steps run `if: always()` and
 are deliberately not `continue-on-error`: were the artifact allowed to go
 missing, `drift-issues` would simply not see the cell — no Issue, no Slack, and
-a green nightly run over real drift. Both gated jobs also refuse to run off the default branch, resolved
-from the API by `detect` rather than read from the `schedule` event payload.
+a green nightly run over real drift. Both gated jobs also refuse to run off the
+default branch, resolved from the API by `detect` rather than read from the
+`schedule` event payload.
 
 The `aws-actions/configure-aws-credentials` step is the consumer's own, in the
 same position as on the plan path — see
@@ -155,9 +156,10 @@ same position as on the plan path — see
 The sample wires Slack through one input on `drift-issues`:
 `slack-webhook: ${{ vars.SLACK_WEBHOOK }}`, a GitHub variable you may set at
 repo, org, or on the `shipmate-engine` environment the `issues` job binds
-(`vars.` resolves environment → repository → organization). The input's default is the
-empty string, so with `SLACK_WEBHOOK` unset the expression renders empty and no
-notification is attempted — nothing else changes.
+(for `vars.`, most specific wins: environment overrides repository overrides
+organization). The input's default is the empty string, so with `SLACK_WEBHOOK`
+unset the expression renders empty and no notification is attempted — nothing
+else changes.
 
 When it is set, `drift-issues` POSTs one message per cell that is drifted on this
 run (the same cells whose Issue it just created or updated), a single-line
@@ -173,5 +175,5 @@ cells.
 matrix is every stack × environment in the repository, every night — runner
 minutes scale with the **full** matrix, not the changed set. Each cell is a
 `tofu init` plus a `tofu plan` against real state, which also means real backend
-and provider API traffic on that schedule. The knobs are the cron expression and how many environments you
-tag stacks into; there is no partial-matrix input.
+and provider API traffic on that schedule. The knobs are the cron expression and
+how many environments you tag stacks into; there is no partial-matrix input.
