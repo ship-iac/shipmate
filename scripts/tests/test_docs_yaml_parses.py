@@ -1,7 +1,8 @@
 """Guards every ```yaml fence in README.md and docs/*.md: it must load via
-yaml.safe_load, and it must load to a mapping -- the fences are workflow files,
+yaml.safe_load, it must load to a mapping -- the fences are workflow files,
 and one that loads to a bare string or None is a mangled paste rather than a
-workflow.
+workflow -- and discovery must lose none of them, so a fence the pairing
+logic drops fails the guard rather than going unchecked.
 
 Threat model: the realistic failure is an accidental bad paste, or a later edit
 that outdents a line and breaks a block's indentation. Reviewers reading prose
@@ -22,7 +23,13 @@ from _loader import ENGINE
 
 DOCS = ENGINE / "docs"
 
+_PAGES = [ENGINE / "README.md", *sorted(DOCS.glob("*.md"))]
+
 _FENCE = re.compile(r"^(?P<indent>[ \t]*)```yaml[ \t]*$\n(?P<body>.*?)^\1```", re.M | re.S)
+
+# Openers as a reader sees them, not as _FENCE pairs them: `yml`, and an info
+# string after the language, both count here and neither pairs above.
+_OPENER = re.compile(r"^[ \t]*```ya?ml\b", re.M)
 
 
 def _fences():
@@ -32,7 +39,7 @@ def _fences():
     file, and indented fences (inside a list item) are dedented rather than
     skipped -- a fence this misses is a fence nothing checks.
     """
-    for page in [ENGINE / "README.md", *sorted(DOCS.glob("*.md"))]:
+    for page in _PAGES:
         text = page.read_text(encoding="utf-8")
         for m in _FENCE.finditer(text):
             yield page, text[: m.start()].count("\n") + 1, textwrap.dedent(m.group("body"))
@@ -41,13 +48,22 @@ def _fences():
 _FENCES = list(_fences())
 
 
-def test_fences_were_discovered():
-    # Without this, a discovery bug parametrizes zero cases and the suite is
-    # green while checking nothing. Four is the floor the docs already carry.
-    assert len(_FENCES) >= 4, (
-        f"found only {len(_FENCES)} ```yaml fences in README.md + docs/*.md -- "
-        "the documented consumer workflows account for at least four, so "
-        "discovery is broken"
+def test_every_fence_was_discovered():
+    """No fence is silently dropped: _FENCE pairs as many as the pages open.
+
+    _FENCE skips whatever it cannot pair, so a relabelled opener, an info
+    string, or a mangled closing delimiter would drop a fence out of the
+    parametrization and leave the suite green over an unchecked workflow.
+    """
+    openers = sum(len(_OPENER.findall(p.read_text(encoding="utf-8"))) for p in _PAGES)
+    # A discovery bug that finds nothing parametrizes zero cases and checks
+    # nothing, which is green either way without this.
+    assert openers > 0, "found no ```yaml fence openers in README.md + docs/*.md"
+    assert len(_FENCES) == openers, (
+        f"{openers} ```yaml fence openers in README.md + docs/*.md but only "
+        f"{len(_FENCES)} paired into checkable fences -- the unpaired ones are "
+        "not parsed by anything (relabelled opener, info string, or a broken "
+        "closing delimiter)"
     )
 
 
