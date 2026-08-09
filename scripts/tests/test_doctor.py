@@ -212,9 +212,8 @@ def _quiet_new_probes():
         f"repos/{_REPO}/environments/shipmate-engine/deployment-branch-policies": {
             "branch_policies": [{"name": _BRANCH}]
         },
-        f"{_WF_DIR}{_REF}": _wf_listing("plan.yml", "summary.yml"),
+        f"{_WF_DIR}{_REF}": _wf_listing("plan.yml"),
         f"{_WF_DIR}/plan.yml{_REF}": _wf_file(_QUIET_PLAN),
-        f"{_WF_DIR}/summary.yml{_REF}": _wf_file(_QUIET_SUMMARY),
         f"repos/{_ENGINE_REPO}/releases/latest": {"tag_name": "v9.9.9"},
         f"repos/{_ENGINE_REPO}/commits/v9.9.9": {"sha": _SHA},
     }
@@ -764,16 +763,15 @@ def _wf_file(text):
 _SHA = "a" * 40
 _OTHER_SHA = "b" * 40
 
-# The workflow pair `_quiet_new_probes()` serves. Defined here rather
+# The consumer workflow `_quiet_new_probes()` serves: the shipped shape, one
+# `pull_request_target` file exempt from the fork-trigger probe by exact name,
+# carrying a fresh engine pin for the pin probe. Defined here rather
 # than next to that fixture because interpolating `_SHA` happens at import time,
 # while the fixture's own body is only evaluated when a test calls it.
-_QUIET_PLAN = "name: shipmate · plan\non:\n  pull_request:\n"
-_QUIET_SUMMARY = (
-    "name: shipmate · summary\n"
+_QUIET_PLAN = (
+    "name: shipmate · plan\n"
     "on:\n"
-    "  workflow_run:\n"
-    '    workflows: ["shipmate · plan"]\n'
-    "    types: [completed]\n"
+    "  pull_request_target:\n"
     "jobs:\n"
     "  summary:\n"
     f"    uses: {_ENGINE_REPO}/.github/workflows/summary.yml@{_SHA}\n"

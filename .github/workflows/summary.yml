@@ -25,8 +25,8 @@ on:
       SHIPMATE_APP_PRIVATE_KEY: { required: false }
 jobs:
   summary:
-    # Both clauses live here rather than in the caller because nothing inspects
-    # consumer workflow YAML any more. A consumer who kept this job and dropped
+    # Both clauses live here rather than in the caller because no check inspects
+    # the caller's YAML for this. A consumer who kept this job and dropped
     # a clause would hand a fork pull request an App-authored gate — fail-open,
     # and invisible. On the job, not on a step: a skipped job creates no
     # deployment and never enters the environment.

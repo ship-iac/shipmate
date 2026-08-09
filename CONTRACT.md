@@ -90,8 +90,7 @@ always created by the GitHub Actions app and its name is the only part that
 can say which tool produced it. (`plan.yml`'s third job, `summary`, is a call
 to an engine-defined reusable workflow, so its jobs are named there rather than
 by the consumer — see §Post-plan topology.) These names are not required checks
-and a consumer may pick
-others; nothing in the engine reconstructs them.
+and a consumer may pick others; nothing in the engine reconstructs them.
 
 Everything in the check/status namespace is **ASCII and slash-delimited**, which
 is GitHub's own convention for status contexts (`ci/circleci`), and — for
@@ -576,8 +575,10 @@ boundary), each running at a ref that satisfies its default-branch-only
 policy for a different reason:
 
 - **`plan.yml`**'s `detect` and `plan` jobs (consumer, `pull_request_target`) —
-  they upload plan artifacts and cell summaries; they author nothing, bind to
-  no environment and mint no App token. `pull_request_target` checks out the
+  they upload plan artifacts and cell summaries; they author nothing and mint no
+  App token. `detect` binds no environment; `plan` binds only the plan
+  environment for the cell it is planning, never one holding an App credential.
+  `pull_request_target` checks out the
   **base** by default, so both jobs must name
   `ref: ${{ github.event.pull_request.head.sha }}` explicitly; without it they
   plan the base branch and report a clean plan for a pull request they never
@@ -618,7 +619,10 @@ policy for a different reason:
   scheduled or manually dispatched run evaluates at the default branch.
 
 Nothing matches on the plan workflow's file path or its `name:` any more, and
-no check inspects consumer workflow YAML. A consumer that omits the `summary`
+no check inspects consumer workflow YAML for this wiring. (Doctor still reads
+those files for two unrelated probes — stale engine pins and
+`pull_request_target` triggers — and neither can observe whether the gate will
+be written.) A consumer that omits the `summary`
 job gets no `shipmate / gate` status at all, so the pull request cannot merge —
 the failure is visible and fail-closed.
 
@@ -1042,10 +1046,12 @@ the engine `apply.yml` for the targeted form. Consumers set
 `SHIPMATE_PLAN_PASSPHRASE` as a **repository** secret and forward it with
 `secrets: inherit` in their `deploy.yml` and `apply.yml` wrapper workflows.
 
-Not an environment secret, and specifically **not** on `shipmate-engine`: plan
-cells run on a `pull_request` ref (`refs/pull/<n>/merge`), which satisfies no
-deployment branch policy, so a passphrase scoped that way resolves to empty at
-plan time and every later apply fails its plaintext-artifact check. Scoping it
+Not an environment secret, and specifically **not** on `shipmate-engine`: a
+secret on one environment is released only to a job that *names* that
+environment, and a plan cell names its own plan environment instead. So a
+passphrase scoped to `shipmate-engine` resolves to empty at
+plan time and every later apply fails its plaintext-artifact check — the ref the
+plan run happens to be at is beside the point. Scoping it
 to a plan environment buys nothing either — those must have no branch policy at
 all (`docs/hardening.md` §6), so any branch's workflow can name one and read it.
 Unlike the App private key, this secret must be readable wherever plans are

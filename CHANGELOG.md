@@ -30,15 +30,15 @@ grammar are declared unstable in `README.md`.
   fork refusal and the draft skip) on its own `if:`, where a consumer cannot
   drop them. The old `workflow_run` topology is **not supported** — a repository
   that re-pins without rewriting gets no gate, so the pull request cannot merge.
-  Nothing matches on the plan workflow's path or its `name:` any longer. Copy
-  the reference `plan.yml` from a `repo-example-*` sample. See `CONTRACT.md`
-  §Post-plan topology.
+  Nothing matches on the plan workflow's path or its `name:` any longer. The
+  `repo-example-*` samples carry the new shape from the release that ships this
+  change onward; `CONTRACT.md` §Post-plan topology is the written form.
 - **Plans now run against the branch tip, not the merge commit.** The old
   `pull_request` trigger checked out `refs/pull/<n>/merge`; the explicit
   `head.sha` checkout does not produce a merge ref. A pull request behind its
   base now plans what the branch says rather than what the merge would produce.
   The surviving safety net is the stale-plan refusal at apply time, which still
-  fails a plan whose state or base has moved; **require branches to be up to
+  fails a plan whose state has moved; **require branches to be up to
   date before merging** (`docs/branch-protection.md`) is the setting that closes
   the rest.
 - **A summary-job failure now reds the whole plan run.** The summary job lives

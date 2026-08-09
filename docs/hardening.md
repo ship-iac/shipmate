@@ -40,14 +40,20 @@ is never the trigger but the shape.** The plan workflow runs on
 what lets the plan run's trusted `summary` job mint an App token and write the
 `shipmate / gate` status. What makes it safe is a property of that job, not of
 the trigger: **it executes no repository content at all.** It is a call to the
-engine's own reusable workflow, it has no checkout step, and the two jobs that
-do check out the pull request's head — `detect` and `plan` — bind no environment
-and hold no credential. A consumer cannot add a checkout to the trusted job,
-because they do not own its steps.
+engine's own reusable workflow, and it has no checkout step. A consumer cannot
+add one, because they do not own that job's steps. The two jobs that *do* check
+out the pull request's head — `detect` and `plan` — reach no credentialed
+environment: `detect` binds none, and `plan` binds only the *plan* environment
+for the cell it is planning, which by design holds no App key and no
+apply-capable secret (controls 8, 6 and 17). What a plan environment does hold
+is still executed against by branch content — that is the standing residual this
+page opens with, unchanged by this trigger.
 
 The dangerous shape is the same trigger without that separation: a workflow
 that checks out or otherwise acts on the pull request's own content inside a job
-that names an environment. A ref the policy trusts, executing input it doesn't,
+that names a **credentialed** environment — one holding the App key, or cloud
+credentials. "Names an environment" is not the criterion; which environment is.
+A ref the policy trusts, executing input it doesn't,
 is the no-push-access version of the attack this page opens with, and it is
 reachable regardless of the fork refusal above, which only governs the plan
 path. That is the shape a labeler or commenter workflow usually takes — don't
@@ -329,12 +335,15 @@ Settings → Actions → General:
   permissions they need per job.
 - **Fork pull request workflows**: require approval for **all outside
   collaborators** (the strictest option), and never enable "Send secrets to
-  workflows from fork pull requests". The same rule applies in workflow code:
-  no `pull_request_target` in a repository holding the App key — it runs at
-  the base ref (which would satisfy `shipmate-engine`'s branch policy if the
-  job declared that environment) while still acting on fork-author-controlled
-  content, which is the no-push-access version of the attack this page opens
-  with. `shipmate doctor` reports any workflow file that declares it, by name.
+  workflows from fork pull requests". In workflow code the rule is about the
+  shape rather than the trigger: `pull_request_target` runs at the base ref,
+  which satisfies `shipmate-engine`'s branch policy, so no workflow on it may
+  act on fork-author-controlled content from a job binding a credentialed
+  environment — that combination is the no-push-access version of the attack
+  this page opens with. shipmate's own `plan.yml` uses the trigger and does not
+  have that shape: the job holding the App key checks nothing out (see the top
+  of this page). `shipmate doctor` names any *other* workflow file declaring the
+  trigger; `plan.yml` is exempt by exact name.
 - **Allowed actions**: allow the engine (`<owner>/shipmate/*`) plus the pinned
   third-party actions the workflows use — which now includes
   `aws-actions/configure-aws-credentials`, on the apply path, even for a consumer

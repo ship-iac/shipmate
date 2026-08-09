@@ -360,8 +360,9 @@ the actual work here:
 What none of this defends against is a change to the trusted workflow files
 themselves (`summary.yml`, `apply.yml`, and the rest) landing on the default
 branch, where they *would* satisfy the environment's policy. That path runs
-through an ordinary pull request and merge — no `pull_request`-triggered job
-is ever in a position to skip review and reach the key directly, unlike the
+through an ordinary pull request and merge — no `pull_request`- or
+`pull_request_target`-triggered job that checks out branch content is ever in a
+position to skip review and reach the key directly, unlike the
 old repository-secret model. The backstop there is **`require_code_owner_review`**
 on the branch ruleset (`docs/hardening.md` #4): a GitHub App cannot be a
 CODEOWNER, so the App itself can never approve a change to its own trust
