@@ -11,7 +11,16 @@ section below names the SHA the release tags.
 The version line stays `v0.x` while action inputs, check names, and the comment
 grammar are declared unstable in `README.md`.
 
-## [Unreleased]
+## [0.10.0] — 2026-08-09
+
+Tags `TBD` (backfilled by the first commit after the tag).
+
+**Re-pinning alone is not enough for this release.** The consumer contract for
+the plan path changed: you must rewrite `.github/workflows/plan.yml` and delete
+`.github/workflows/summary.yml` in the same change that moves your pins. A
+repository that re-pins without rewriting gets no `shipmate / gate`, so its pull
+requests cannot merge. `CONTRACT.md` §Post-plan topology is the written form,
+and the `repo-example-*` samples carry the new shape from this release onward.
 
 ### Changed
 
