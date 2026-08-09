@@ -21,7 +21,7 @@ body:
     id: engine-pin
     attributes:
       label: Engine pin
-      description: The full commit SHA (or release tag) your workflows pin shipmate to.
+      description: The full commit SHA your workflows pin shipmate to.
       placeholder: ship-iac/shipmate/actions/plan-cell@<sha>
     validations:
       required: true
@@ -67,11 +67,11 @@ body:
         comment. It reports settings problems, not plan or apply failures, and
         never blocks. See [`docs/troubleshooting.md`](https://github.com/ship-iac/shipmate/blob/main/docs/troubleshooting.md#shipmate-doctor).
 
-        Comment `shipmate doctor` on a pull request and paste the report
-        here, redacted as described above.
+        If you have comment-ops working, run `shipmate doctor` and paste the
+        report here, redacted as described above.
       render: markdown
     validations:
-      required: true
+      required: false
 
   - type: textarea
     id: expected
