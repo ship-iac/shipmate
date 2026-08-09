@@ -5,6 +5,7 @@ Three files have to agree on five names; nothing at runtime notices when they
 stop agreeing, and the failure is a gate decided from defaults.
 """
 
+import ast
 import json
 import re
 
@@ -35,18 +36,51 @@ def test_the_action_hands_gate_state_exactly_these_env_vars():
     assert _summary_action_gate_step()["env"] == EXPECTED_GATE_ENV
 
 
+def _is_os_environ(node):
+    return (
+        isinstance(node, ast.Attribute)
+        and node.attr == "environ"
+        and isinstance(node.value, ast.Name)
+        and node.value.id == "os"
+    )
+
+
+def _gate_state_env_reads():
+    """The `SHIPMATE_*` names gate-state actually reads, from its parse tree.
+
+    Both read forms: the two required values are subscripts, so `main()` dies
+    loudly when the action stops setting them; the rest carry a default. A
+    regex over the raw source cannot tell either form from the same words in a
+    comment -- commenting out the `SHIPMATE_PENDING` read and hardcoding
+    `pending=False` left the regex version green. An `ast` walk sees only code.
+    """
+    tree = ast.parse((SCRIPTS / "gate-state").read_text(encoding="utf-8"))
+    names = set()
+    for node in ast.walk(tree):
+        key = None
+        if isinstance(node, ast.Subscript) and _is_os_environ(node.value):
+            key = node.slice
+        elif (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "get"
+            and _is_os_environ(node.func.value)
+            and node.args
+        ):
+            key = node.args[0]
+        if isinstance(key, ast.Constant) and str(key.value).startswith("SHIPMATE_"):
+            names.add(key.value)
+    return names
+
+
 def test_gate_state_reads_every_env_var_the_action_supplies():
     """The whole set of names gate-state reads, not a membership scan.
 
-    A substring check passes on a name that survives only in a comment, and it
-    cannot see the inverse at all: gate-state reading a name the action never
-    sets, which decides the gate from that read's default.
+    Both directions: a name the action supplies that gate-state stopped reading
+    (the gate then decided from that read's default), and a name gate-state
+    reads that the action never sets.
     """
-    source = (SCRIPTS / "gate-state").read_text(encoding="utf-8")
-    # Both read forms: the two required values are subscripts, so `main()` dies
-    # loudly when the action stops setting them; the rest carry a default.
-    reads = set(re.findall(r'os\.environ(?:\.get\(|\[)\s*"(SHIPMATE_[A-Z_]+)"', source))
-    assert reads == set(EXPECTED_GATE_ENV)
+    assert _gate_state_env_reads() == set(EXPECTED_GATE_ENV)
 
 
 def test_the_planned_count_does_not_default_to_a_number():

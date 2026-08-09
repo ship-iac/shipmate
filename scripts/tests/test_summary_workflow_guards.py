@@ -23,7 +23,17 @@ EXPECTED_IF = (
     "github.event.pull_request.head.repo.full_name == github.repository && "
     "github.event.pull_request.draft == false"
 )
-EXPECTED_INPUTS = {"pr-number", "head-sha", "detect-result", "plan-result", "planned-cells"}
+# The whole declaration per input, not just the names. A `default:` added here
+# is what makes a caller that stops passing the input silent: `planned-cells`
+# would arrive as '0', `cell_count` as 0, and the gate would green over a run
+# that planned cells. `required: false` does the same by another route.
+EXPECTED_INPUTS = {
+    "pr-number": {"required": True, "type": "string"},
+    "head-sha": {"required": True, "type": "string"},
+    "detect-result": {"required": True, "type": "string"},
+    "plan-result": {"required": True, "type": "string"},
+    "planned-cells": {"required": True, "type": "string"},
+}
 # The whole job, as an ordered list of what each step runs. Subsumes "no
 # checkout": a checkout step, a `run:` step, or any extra step at all changes
 # this list. A substring scan for "checkout" would miss every one of those.
@@ -86,4 +96,4 @@ def test_the_workflow_call_inputs_are_exactly_these():
     # `doc[True]` is not a typo: PyYAML parses the bare key `on:` as the boolean
     # True.
     _, doc = _summary_job()
-    assert set(doc[True]["workflow_call"]["inputs"]) == EXPECTED_INPUTS
+    assert doc[True]["workflow_call"]["inputs"] == EXPECTED_INPUTS
