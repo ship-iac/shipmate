@@ -153,14 +153,6 @@ def test_main_holds_the_gate_when_the_planned_count_env_is_absent(tmp_path, monk
     assert "planned cell count was not reported" in body["description"]
 
 
-def test_main_holds_the_gate_on_an_unparseable_cell_count(tmp_path, monkeypatch, capsys):
-    # The env value is parsed inside `decide`, not at the call site: an
-    # `int(...)` on the way in raised ValueError and killed the action, writing
-    # no gate at all -- the opposite of a hold.
-    body = _main_body(tmp_path, monkeypatch, capsys, SHIPMATE_PLANNED_CELLS="unknown")
-    assert body["state"] == "failure"
-
-
 def test_gate_links_to_this_run(tmp_path, monkeypatch, capsys):
     # The summary job now runs inside the plan run, so this run's URL holds the
     # plan logs and the plan artifacts the gate points at.

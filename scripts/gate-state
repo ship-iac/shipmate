@@ -122,6 +122,10 @@ def main():
         detect_result=os.environ["SHIPMATE_DETECT_RESULT"],
         plan_result=os.environ["SHIPMATE_PLAN_RESULT"],
         planned_cells=os.environ.get("SHIPMATE_PLANNED_CELLS", ""),
+        # Bare `int()`, unlike the planned count: this one is `len(cells)` from
+        # summary-comment, so a non-integer here means that step did not run and
+        # the ValueError kills the action before any gate is written -- which
+        # blocks the merge. Fail-closed, and not the same guarantee as a hold.
         cell_count=int(os.environ.get("SHIPMATE_CELL_COUNT", "0")),
         pending=os.environ.get("SHIPMATE_PENDING", "false") == "true",
     )

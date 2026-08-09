@@ -36,9 +36,17 @@ def test_the_action_hands_gate_state_exactly_these_env_vars():
 
 
 def test_gate_state_reads_every_env_var_the_action_supplies():
+    """The whole set of names gate-state reads, not a membership scan.
+
+    A substring check passes on a name that survives only in a comment, and it
+    cannot see the inverse at all: gate-state reading a name the action never
+    sets, which decides the gate from that read's default.
+    """
     source = (SCRIPTS / "gate-state").read_text(encoding="utf-8")
-    for name in EXPECTED_GATE_ENV:
-        assert name in source, f"the action sets {name} and gate-state never reads it"
+    # Both read forms: the two required values are subscripts, so `main()` dies
+    # loudly when the action stops setting them; the rest carry a default.
+    reads = set(re.findall(r'os\.environ(?:\.get\(|\[)\s*"(SHIPMATE_[A-Z_]+)"', source))
+    assert reads == set(EXPECTED_GATE_ENV)
 
 
 def test_the_planned_count_does_not_default_to_a_number():
