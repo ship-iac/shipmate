@@ -68,9 +68,9 @@ stores, on `GITHUB_REPOSITORY` (typically the App-owning repo itself, e.g.
 `<org>/shipmate`):
 
 - `SHIPMATE_APP_ID` — repo **variable** (app id; not secret).
-- `SHIPMATE_APP_PRIVATE_KEY` — repo **secret** (PEM private key) — kept here
-  only as the one place the PEM lives outside your local disk, alongside the
-  App settings page.
+- `SHIPMATE_APP_PRIVATE_KEY` — repo **secret** (PEM private key), which you
+  delete again two paragraphs below. Nothing reads it: it is not the key §6
+  deploys, and it is not a backup you can retrieve.
 
 `register-app` prints `App created: id=… slug=…` and nothing else: the PEM
 passes through it in memory and is never written to disk, and `gh` cannot read a
@@ -78,8 +78,23 @@ secret's value back once set. Step 6 needs the key **as a file**, so download on
 now — App settings (`.../settings/apps/shipmate`) → **Private keys** →
 **Generate a private key**, the same button §7 uses. Save the download as
 `shipmate-app.private-key.pem` in the directory you will run step 6 from. An App
-holds several private keys and every one of them mints valid tokens, so this
-does not invalidate the one stored above.
+holds several private keys and every one of them mints valid tokens, so
+generating this one invalidates nothing.
+
+That makes the secret above dead weight with a blast radius: the key it holds is
+a working App private key that no step deploys and nothing reads, sitting in a
+repository secret — readable by any workflow on any branch of that repository.
+Delete it:
+
+```bash
+gh secret delete SHIPMATE_APP_PRIVATE_KEY --repo <org>/shipmate
+```
+
+This is the same deletion §6 performs on each consumer repository, for the same
+reason: a repository secret is scoped to nothing, and only the `shipmate-engine`
+environment secret is. If the App-owning repo is itself a consumer, §6 runs this
+command again there after placing the key on that repo's environment — a no-op
+by then, and harmless in that order.
 
 **Do not re-run this script against a consumer repo to "install" the key
 there.** That would store a plain repo secret, readable by any branch's

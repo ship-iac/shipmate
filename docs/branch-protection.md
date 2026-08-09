@@ -113,14 +113,15 @@ fails closed rather than proceeding unreviewed.)
   review): GitHub enforces the approval count / CODEOWNERS / last-push-approval,
   and `shipmate apply` stays blocked until `reviewDecision` clears. No shipmate
   config — set it on the ruleset (the `pull_request` rule).
-- **Per-environment approval** (e.g. dev applies freely, prod needs a human):
-  configure **required reviewers on the `<env>-apply` GitHub Environment**, not
+- **Per-environment approval** — which environments require a human is your
+  policy to set, per environment (production only, every apply environment, or
+  anything between; `hardening.md` #6 states the trade-off). Configure it with **required reviewers on the `<env>-apply` GitHub Environment**, not
   in the ruleset (`getting-started.md` §Required — apply → §Environment setup has
   those settings). This gates both pre-merge `shipmate apply <env>` and the
   post-merge `deploy.yml` apply, since both run against `<env>-apply`.
   - Deployment approvals differ from PR reviews: a reviewer **can approve
     their own deployment** by default, so a sole maintainer still gets a
-    confirm-step on prod. Tick "Prevent self-review" on the environment for
+    confirm-step on a gated environment. Tick "Prevent self-review" on the environment for
     genuine four-eyes once there's a team.
   - Pair a reviewer-gated production env with
     `global.shipmate.explicit_envs` so the bare `shipmate apply` skips it and

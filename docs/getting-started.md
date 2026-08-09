@@ -220,26 +220,29 @@ repository that does *not* require the gate.
 
 ### Environment setup
 
-`<env>-apply` splits by tier, and this is the split
-[`hardening.md`](hardening.md) describes at the credential level (#6–9) restated
-as environment settings. Create each with
+These are the environment-level settings behind the credential controls
+[`hardening.md`](hardening.md) #6–9 describes; the reviewer question below is
+the one that page leaves to you. Create each environment with
 `gh api -X PUT repos/<owner>/<repo>/environments/<name>`, then set protection
 rules from Settings → Environments → `<name>` (or the API):
 
-- **dev / staging — branch policy only, self-service.** Deployment branch
-  policy restricted to the default branch (closes the direct-branch-secret
-  path, [`hardening.md`](hardening.md) #17); no required reviewers, so
-  `shipmate apply` proceeds without a human in the loop. Deliberate: these tiers
-  exist so a team can self-serve, and their blast radius doesn't warrant a
-  reviewer.
-- **prod — branch policy *and* required reviewers *and* "Prevent
-  self-review".** Same branch policy, plus required reviewers (a team, not
-  one person) with self-review prevented ([`hardening.md`](hardening.md) #6) —
-  the one gate an App token cannot forge, since a reviewer decision is a human
-  action a minted token cannot take. List `prod` in
-  `global.shipmate.explicit_envs` too, so a bare `shipmate apply` skips it and
-  it is only ever reached via the targeted `shipmate apply prod` (which then
-  pauses for the environment reviewer).
+- **Every `<env>-apply` — deployment branch policy restricted to the default
+  branch.** Closes the direct-branch-secret path
+  ([`hardening.md`](hardening.md) #17). This is the baseline, and it is not a
+  reviewer gate: the secrets are released without a human seeing the
+  deployment.
+- **Required reviewers and "Prevent self-review" — per environment, your
+  call.** With them, an apply to that environment pauses for a named team, and
+  that pause is the one gate an App installation token cannot forge, since a
+  reviewer decision is a human action a minted token cannot take. Without them
+  the tier is self-service and applies proceed unattended. Teams commonly gate
+  production and leave dev self-service; the maximally-hardened position gates
+  every apply environment. [`hardening.md`](hardening.md) #6 states what each
+  choice costs — shipmate does not make it for you.
+- **Pair a reviewer-gated environment with `global.shipmate.explicit_envs`.**
+  List the bare env name (`prod`, not `prod-apply`) so a bare `shipmate apply`
+  skips it and it is only ever reached via the targeted `shipmate apply prod`
+  (which then pauses for the environment reviewer).
 
 ### The apply workflows
 

@@ -70,8 +70,8 @@ name. See "Contributors without push access" for the trade-off that follows.
 | 3 | Required check `shipmate / gate` with `integration_id`, strict | Branch ruleset | A *third party* posting `shipmate / gate` under another identity |
 | 4 | ≥1 approving review, code-owner review, dismiss stale, require approval of most recent push | Branch ruleset | Self-merge; the code-owner review is **unforgeable** at merge time (an App cannot be a `CODEOWNERS` entry) *provided a `CODEOWNERS` entry actually covers the IaC paths* — the rule is a no-op for changed files with no owner — and the approval *count* never is |
 | 5 | Block force-push and deletion on the default branch | Branch ruleset | History rewrite after apply |
-| 6 | Required reviewers + "Prevent self-review" on **every** `<env>-apply` that holds a secret | Environment | **Unforgeable** at apply time — the last line of defense once a merge has happened, and what makes row 7 hold |
-| 7 | Cloud credentials scoped to `<env>-apply` — the OIDC path's `AWS_ROLE_ARN`/`AWS_REGION` as environment **variables**, any residual static key as an environment **secret** — never repo- or org-level | Environment | Repo-wide exposure (bounded *only* in combination with row 6; and for a variable the scoping is advisory — see §7–9) |
+| 6 | Required reviewers + "Prevent self-review" on the `<env>-apply` environments you decide to gate (§6 states the trade-off; the choice is yours) | Environment | **Unforgeable** at apply time — the last line of defense once a merge has happened, on each environment you apply it to |
+| 7 | Cloud credentials scoped to `<env>-apply` — the OIDC path's `AWS_ROLE_ARN`/`AWS_REGION` as environment **variables**, any residual static key as an environment **secret** — never repo- or org-level | Environment | Repo-wide exposure (for a secret, bounded *only* on an environment that also carries row 6; and for a variable the scoping is advisory — see §7–9) |
 | 8 | Plan environments hold read-only, blast-radius-free credentials, no approval rules, no branch policy — ideally no secret at all (`shipmate doctor` reports what it finds) | Environment | Plan-time code execution |
 | 9 | OIDC with an `environment:` claim condition instead of static keys | Cloud IdP | Long-lived credential theft — and, since the engine's apply jobs mint OIDC tokens unconditionally, this claim condition is the **only** bound on which role an apply job can assume (see §7–9) |
 | 10 | Default `GITHUB_TOKEN` = read-only; Actions may not approve PRs | Settings → Actions | Token privilege creep |
@@ -212,16 +212,27 @@ an App cannot supply because it cannot be listed in `CODEOWNERS`. They are
 unforgeable at different points, which is why both matter: code-owner review
 guards the **merge**, the `<env>-apply` reviewer guards the **apply**.
 
-On every `<env>-apply` environment that holds a secret or touches real
-infrastructure — **including dev and staging**:
+On an `<env>-apply` environment you decide to gate:
 
 - add required reviewers (a team, not one person),
 - tick **Prevent self-review**.
 
-Do not scope this to production. An environment with no protection rules hands
-its secrets to any job that names it, from any branch, with no approval and no
-deployment — so an unprotected `dev-eu-apply` is a repository secret with extra
-steps (this is what control 7 leans on).
+**Which environments to gate is a policy decision, and it is yours.** The
+maximally-hardened position is a reviewer on every `<env>-apply` that holds a
+secret or touches real infrastructure, dev and staging included. Many teams
+accept unreviewed applies on low-blast-radius tiers to keep them self-service.
+shipmate does not choose for you; what it can do is state what an ungated tier
+costs, so the choice is made with the price visible:
+
+- The apply to that environment is gated by nothing a holder of the App private
+  key cannot produce. Every other control on this page is either upstream of the
+  merge or forgeable with that key; this row is the only one that is not.
+- Control 7's scoping buys nothing there. An environment with no protection
+  rules at all hands its secrets to any job that names it, from any branch, with
+  no approval and no deployment — an unprotected `dev-eu-apply` is a repository
+  secret with extra steps. Row 17's deployment branch policy narrows that to
+  jobs running at the default branch, which is a real bound and not a reviewer
+  gate: no human sees the deployment before its secrets are released.
 
 For production, also list it in `global.shipmate.explicit_envs` so a bare
 `shipmate apply` skips it and it is reached only by the targeted

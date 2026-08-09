@@ -87,8 +87,9 @@ commented out, the draft-skip deleted — left the suite byte-identical to green
   to guard prose in three files, with a body of `assert len(doctor.PROBES) == 9`
   (since fixed), was mutation-proved against `PROBES` — the one thing it could
   detect — and shipped through three review passes; reverting any of the prose
-  sites left it green. Read your test's name and docstring as a list of claims and break each
-  one. A guard whose proof is narrower than its name is the "cannot fail"
+  sites left it green. Read your test's name and docstring as a list of claims
+  and break each one. A guard whose proof is narrower than its name is the
+  "cannot fail"
   failure wearing a disguise, and it survives review *because* a proof exists.
 - **When the guarded thing is one fully known value, compare the whole value
   against a hand-written constant.** Checking a part — a substring, a token, a
