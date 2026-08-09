@@ -90,7 +90,7 @@ findings as workflow annotations titled `shipmate doctor`
 (`::warning title=shipmate doctor::<text>` / `::notice title=shipmate
 doctor::<text>`) — read-only, never blocking. Comment `shipmate doctor` on a
 pull request for a consolidated report: a sticky comment (marker `<!--
-shipmate:doctor -->`, upserted in place like the plan comment) combining eleven
+shipmate:doctor -->`, upserted in place like the plan comment) combining ten
 live probes — a missing or mis-pinned `shipmate / gate` rule on the default
 branch (no active ruleset requiring it, or one that doesn't pin
 `integration_id` to the shipmate App, or that isn't strict),
@@ -134,17 +134,12 @@ under examination, so the pull request that bumps a stale pin is not itself
 reported stale, and restricted to pins of the engine's own repository, which
 the probe learns at runtime from the running action rather than from any
 hardcoded slug — another org's shared action is not shipmate's to report on),
-the consumer plan/summary wiring the gate status silently depends on (the plan
-workflow's path, its exact `shipmate · plan` name, and a `workflow_run` wrapper
-calling the engine's reusable summary workflow — read at the same commit as the
-pin probe, and re-stated here on demand because comment-ops is not downstream
-of the summary job and so still answers when that wiring is broken),
 whether the configured approvers team resolves in the org, and
 whether the shipmate App installation still grants the manifest's full
 permission set — with the warning and failure annotations GitHub already
 recorded on this commit's workflow runs (shipmate's own and any other
 Actions workflow run on that commit; third-party-app-authored check runs are
-excluded). Only nine of the eleven probes can produce a finding from the plan
+excluded). Only eight of the ten probes can produce a finding from the plan
 path's own `annotate`-mode run (`actions/summary`): the approvers-team probe
 needs the `SHIPMATE_TEAM` environment variable, which the plan path does
 not supply, and
