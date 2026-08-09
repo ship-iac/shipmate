@@ -12,16 +12,23 @@ is enforced entirely by GitHub branch protection requiring one aggregate check:
   checks come and go as stacks and environments change; requiring the single
   `shipmate / gate` roll-up means the required-checks list never needs
   editing when a stack or environment is added or removed.
-- **Require branches to be up to date before merging** (strict). Plans run on
-  the PR head ref, so this closes the plan-against-stale-base gap: a PR must be
-  current with the base before it can merge.
+- **Require branches to be up to date before merging** (strict). Plans run
+  against the pull request's **branch tip**, not against a merge commit, so a
+  plan can describe a base the branch has not seen. Strict protection makes a
+  pull request current with the base **before it can merge** — it gates merging
+  and nothing else. It does not gate the pre-merge apply path: a `shipmate apply
+  <env>` run from a stale branch applies the plan as reviewed, so a stack that
+  was updated and merged to main since this branch forked is rolled back in real
+  infrastructure. **Update the branch before running a pre-merge apply.**
 
 `shipmate / gate` is created by `actions/summary` on the PR head commit and
 resolves to:
 
 | State | gate | Merge |
 |-------|-----------|-------|
-| A plan cell (or `detect`) failed | `failure` — "plan incomplete" | blocked |
+| `detect` did not succeed | `failure` — "change detection did not succeed" | blocked |
+| A plan cell failed | `failure` — "plan incomplete" | blocked |
+| The plan job was cancelled | no status written at all | blocked (the required check never arrives) |
 | Plans succeeded, applies still pending | `pending` | blocked |
 | Nothing left to apply | `success` | allowed |
 
@@ -90,7 +97,7 @@ findings as workflow annotations titled `shipmate doctor`
 (`::warning title=shipmate doctor::<text>` / `::notice title=shipmate
 doctor::<text>`) — read-only, never blocking. Comment `shipmate doctor` on a
 pull request for a consolidated report: a sticky comment (marker `<!--
-shipmate:doctor -->`, upserted in place like the plan comment) combining eleven
+shipmate:doctor -->`, upserted in place like the plan comment) combining ten
 live probes — a missing or mis-pinned `shipmate / gate` rule on the default
 branch (no active ruleset requiring it, or one that doesn't pin
 `integration_id` to the shipmate App, or that isn't strict),
@@ -123,10 +130,14 @@ environment exists and its deployment branch policy actually names the default
 branch (see `docs/hardening.md` #16 and `docs/github-app.md` §Key-exposure
 boundary — this is the probe that catches a re-pin that never (re-)creates
 that environment, which would otherwise leave the App key a repository secret
-again with nothing else to notice), any workflow file declaring the
+again with nothing else to notice), any workflow file other than `plan.yml`
+declaring the
 `pull_request_target` trigger (it runs at the base ref with the repository's
-secrets while acting on content the pull request author controls —
-`docs/hardening.md` §10–12; the probe reads the same workflow files as the pin
+secrets, and a workflow that also acts on content the pull request author
+controls from a job naming an environment hands those secrets to a fork —
+`docs/hardening.md`; `plan.yml` is exempt by exact name because it uses the
+trigger in the one shape that is safe, with the credentialed job checking
+nothing out; the probe reads the same workflow files as the pin
 probe, at the same commit, so a pull request that removes the trigger is not
 still reported for it), engine
 action-pin freshness in the consumer's own workflow files (read at the commit
@@ -134,17 +145,12 @@ under examination, so the pull request that bumps a stale pin is not itself
 reported stale, and restricted to pins of the engine's own repository, which
 the probe learns at runtime from the running action rather than from any
 hardcoded slug — another org's shared action is not shipmate's to report on),
-the consumer plan/summary wiring the gate status silently depends on (the plan
-workflow's path, its exact `shipmate · plan` name, and a `workflow_run` wrapper
-calling the engine's reusable summary workflow — read at the same commit as the
-pin probe, and re-stated here on demand because comment-ops is not downstream
-of the summary job and so still answers when that wiring is broken),
 whether the configured approvers team resolves in the org, and
 whether the shipmate App installation still grants the manifest's full
 permission set — with the warning and failure annotations GitHub already
 recorded on this commit's workflow runs (shipmate's own and any other
 Actions workflow run on that commit; third-party-app-authored check runs are
-excluded). Only nine of the eleven probes can produce a finding from the plan
+excluded). Only eight of the ten probes can produce a finding from the plan
 path's own `annotate`-mode run (`actions/summary`): the approvers-team probe
 needs the `SHIPMATE_TEAM` environment variable, which the plan path does
 not supply, and
@@ -306,9 +312,11 @@ then set protection rules from Settings → Environments → `<name>` (or the AP
   here would stall every plan and apply run waiting for an approval nobody is
   meant to give. `shipmate doctor` checks both that this environment exists
   and that its policy actually names the default branch.
-- **`<env>`** (plan): no reviewers, no deployment branch policy at all — plan
-  runs against a pull request head ref, which any restriction here blocks
-  outright (`docs/hardening.md` §8; `shipmate doctor` warns on either).
+- **`<env>`** (plan): no reviewers, no deployment branch policy at all —
+  reviewers block every plan cell, and a branch policy blocks every plan cell
+  whose pull request targets a branch it does not name (plan jobs run at the
+  pull request's *base* ref) (`docs/hardening.md` §8; `shipmate doctor` warns on
+  either).
 
 `<env>-apply` splits by tier, and this is the split `docs/hardening.md`
 describes at the credential level (§6–9) restated as environment settings:

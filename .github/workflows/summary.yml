@@ -1,6 +1,22 @@
 name: summary
 on:
   workflow_call:
+    inputs:
+      pr-number:
+        required: true
+        type: string
+      head-sha:
+        required: true
+        type: string
+      detect-result:
+        required: true
+        type: string
+      plan-result:
+        required: true
+        type: string
+      planned-cells:
+        required: true
+        type: string
     secrets:
       # `required: false` — see apply.yml's note. This workflow's only job binds
       # `environment: shipmate-engine`, so a required declaration happens to be
@@ -9,239 +25,39 @@ on:
       SHIPMATE_APP_PRIVATE_KEY: { required: false }
 jobs:
   summary:
-    # One gate write per head SHA. Two plan runs for the same commit
-    # (draft->ready, or a rapid re-push) produce two workflow_run events, and
-    # commit-status writes are last-write-wins in arrival order. Job level, not
-    # workflow level: a called workflow's top-level `concurrency:` is ignored.
-    concurrency:
-      group: shipmate-summary-${{ github.event.workflow_run.head_sha }}
-      cancel-in-progress: true
-    # Three guards, each closing a specific path:
-    #  - `path`: `workflow_run.workflows:` in the caller matches by workflow
-    #    NAME, so a branch file merely named like the plan workflow could fire
-    #    this one; matching the file path instead pins it to the real file.
-    #  - `event == 'pull_request'`: excludes a push-triggered run of that same
-    #    file.
-    #  - `head_repository.full_name`: a fork's plan run must not author
-    #    checks, comments or a gate under the App identity now that this job
-    #    — not the plan job — holds the key.
+    # Both clauses live here rather than in the caller because no check inspects
+    # the caller's YAML for this. A consumer who kept this job and dropped
+    # a clause would hand a fork pull request an App-authored gate — fail-open,
+    # and invisible. On the job, not on a step: a skipped job creates no
+    # deployment and never enters the environment.
     if: >-
-      github.event.workflow_run.path == '.github/workflows/plan.yml' &&
-      github.event.workflow_run.event == 'pull_request' &&
-      github.event.workflow_run.head_repository.full_name == github.repository
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.draft == false
     runs-on: ubuntu-latest
-    # Deployment branch policy: default branch only. A workflow_run job runs at
-    # the default-branch ref, so it passes; a branch-authored workflow naming
-    # this environment is denied and never sees the key.
     environment: shipmate-engine
     permissions:
-      actions: read
       contents: read
-      # The pull-request fallback lookup below; a callee's permissions are
-      # capped by the caller job's, so the consumer wrapper must grant it too.
-      pull-requests: read
     steps:
-      - name: Skip when a newer plan run exists for this head SHA
-        id: newest
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-          SHA: ${{ github.event.workflow_run.head_sha }}
-          WORKFLOW_ID: ${{ github.event.workflow_run.workflow_id }}
-          THIS_RUN: ${{ github.event.workflow_run.id }}
-        run: |
-          set -uo pipefail
-          # No `e` flag: a 502 or a secondary rate limit on the listing below
-          # would otherwise fail the step and skip every later one, including
-          # `Create/refresh gate` — the required check would never appear and
-          # the pull request would be blocked with only a red engine run to
-          # explain it. Proceeding on an unreadable listing is the recoverable
-          # direction: the job `concurrency` group already cancels in-progress
-          # duplicates and gate writes are last-write-wins, so a possibly
-          # superseded gate write can be corrected; no gate write cannot.
-          # `gh api` rejects `--slurp` together with `--jq` on the same
-          # invocation, so this pipes into a standalone `jq` instead.
-          # Filters on `status == "completed"`, not `conclusion == "success"`:
-          # a failing run's own conclusion is "failure", so a success-only
-          # filter never lets a failing run see itself as the newest, and a
-          # stale green gate outlives a newer red one.
-          # `sort_by(..., .id) | last` tiebreaks a same-second run_started_at
-          # tie (draft->ready) on the higher run id.
-          if ! newest=$(gh api --paginate --slurp \
-            "repos/$GITHUB_REPOSITORY/actions/workflows/$WORKFLOW_ID/runs?head_sha=$SHA&per_page=100" \
-            | jq -r '[.[].workflow_runs[] | select(.status == "completed")] | sort_by(.run_started_at, .id) | last | .id // empty'); then
-            echo "::warning::could not determine whether a newer plan run exists for this head SHA; proceeding"
-            echo "proceed=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          if [ -n "$newest" ] && [ "$newest" != "$THIS_RUN" ]; then
-            echo "superseded by run $newest"
-            echo "proceed=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "proceed=true" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Resolve the pull request number
-        id: pr
-        if: steps.newest.outputs.proceed == 'true'
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-          SHA: ${{ github.event.workflow_run.head_sha }}
-          FROM_EVENT: ${{ toJSON(github.event.workflow_run.pull_requests) }}
-        run: |
-          set -euo pipefail
-          # Identifiers come from the event or the API — never from artifacts,
-          # which the untrusted plan run wrote.
-          # `.[0]` of either source picked a pull request by arbitrary index.
-          # A head SHA that is the tip of two open pull requests (stacked
-          # branches) could resolve to the draft one, which blanks the number
-          # below and leaves the real pull request with no gate at all. Collect
-          # every candidate whose head is exactly this SHA instead, lowest
-          # number first, and take the first OPEN non-draft — deterministic,
-          # and it prefers a non-draft over a draft.
-          cands=$(printf '%s' "$FROM_EVENT" \
-            | jq -r --arg sha "$SHA" '[.[] | select((.head.sha // "") == $sha) | .number] | sort | .[]')
-          if [ -z "$cands" ]; then
-            cands=$(gh api "repos/$GITHUB_REPOSITORY/commits/$SHA/pulls" \
-              | jq -r --arg sha "$SHA" '[.[] | select(.state == "open" and (.head.sha // "") == $sha) | .number] | sort | .[]')
-          fi
-          # The deleted plan.yml summary job carried `github.event.pull_request.draft
-          # == false`. Restore it here: a draft skips every plan job, and a run
-          # that planned nothing must never write a gate.
-          n=""
-          draft_seen=false
-          for c in $cands; do
-            # Captured separately, not inlined in `[ "$(...)" = ... ]`: a
-            # failing `gh api` call there is only an argument to `[`, not the
-            # executed command, so it is exempt from `set -e` and its empty
-            # output would read as "not a draft" -- failing OPEN.
-            # "is a draft" and "could not be read" are different outcomes and
-            # must not share a branch. A real draft skips quietly (planning is
-            # skipped on a draft, so there is nothing to summarise), but an
-            # unreadable response is a failure: folding it into the draft path
-            # blanks the number, skips every later step, and leaves a GREEN run
-            # with no gate at all -- which lets reviewed changes merge
-            # unapplied. Fail the step instead; a red engine run blocks the
-            # merge, which is the recoverable direction.
-            if ! info=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$c" --jq '.state + " " + (.draft | tostring)'); then
-              echo "::error::could not read pull request #$c for $SHA; refusing to treat an unreadable pull request as a draft"
-              exit 1
-            fi
-            if [ "$info" = "open false" ]; then
-              n="$c"
-              break
-            fi
-            draft_seen=true
-          done
-          if [ -z "$n" ] && [ "$draft_seen" = "true" ]; then
-            echo "every pull request for $SHA is a draft or closed; nothing to summarise"
-          fi
-          if [ -z "$n" ] && [ "$draft_seen" = "false" ]; then
-            echo "::warning::no open pull request found for $SHA; nothing to summarise"
-          fi
-          echo "number=$n" >> "$GITHUB_OUTPUT"
-
-      - name: Count and download the plan run's cell summaries
-        id: artifacts
-        if: steps.pr.outputs.number != ''
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RUN_ID: ${{ github.event.workflow_run.id }}
-        run: |
-          set -uo pipefail
-          # Two facts about one plan run, read from a single listing so they
-          # cannot describe different moments: how many cells `detect` planned
-          # (the `plan-matrix.<N>` marker artifact -- a `workflow_run` event
-          # carries no job outputs, so the count can only arrive as a name), and
-          # how many `cell-summary.*` artifacts the API reports. `unknown` for
-          # either, never a number: gate-state holds on any non-integer, and any
-          # number is comparable against a cell count -- the one that happens to
-          # match greens the gate over evidence nobody saw.
-          # `gh api` rejects `--slurp` together with `--jq`, so this pipes into
-          # a standalone `jq`.
-          cells=unknown
-          planned=unknown
-          readable=false
-          attempt=0
-          while [ "$attempt" -lt 3 ]; do
-            attempt=$((attempt + 1))
-            # Reset every attempt: an attempt that reads nothing must never
-            # report the previous one's numbers as if it had just seen them.
-            cells=unknown
-            planned=unknown
-            readable=false
-            if listing=$(gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID/artifacts?per_page=100"); then
-              readable=true
-              cells=$(printf '%s' "$listing" | jq '[.[].artifacts[] | select(.name | startswith("cell-summary."))] | length') || cells=""
-              # `unique | if length == 1`, not `first`: two markers disagreeing
-              # means this run is not describable by one number.
-              # No backslash anywhere in the match: an escaped `\.` would have to
-              # survive this block scalar, the single quotes and jq's own string
-              # parsing, and one lost backslash silently widens the match or
-              # fails to compile.
-              planned=$(printf '%s' "$listing" | jq -r '[.[].artifacts[].name | select(startswith("plan-matrix.")) | ltrimstr("plan-matrix.") | select(test("^[0-9]+$"))] | unique | if length == 1 then .[0] else "unknown" end') || planned=""
-            fi
-            # Anything that is not a run of digits is `unknown`. An empty answer
-            # (an empty response body, or a program that failed) must never read
-            # as two counts agreeing below, and a cell count that could not be
-            # derived is a listing this job did not manage to read.
-            case "$cells" in "" | *[!0-9]*) cells=unknown; readable=false ;; esac
-            case "$planned" in "" | *[!0-9]*) planned=unknown ;; esac
-            if [ "$planned" != "unknown" ] && [ "$cells" = "$planned" ]; then
-              break
-            fi
-            # The artifacts listing is read-after-write eventually consistent and
-            # this runs seconds after the plan run finished, so an unreadable,
-            # marker-less or short listing is routinely just early.
-            [ "$attempt" -lt 3 ] && sleep 5
-          done
-          # One warning per cause, each naming a recovery that actually works:
-          # the gate description is capped at 140 characters, so the run page is
-          # where the reason has to be legible. Every message points at re-running
-          # THIS run first, because every hold here is a read of the plan run's
-          # artifact list and this run is the only thing that re-reads it.
-          # Re-running the plan run is the wrong advice: its cells would 409 on
-          # the artifacts the first attempt already uploaded (plan-cell's uploads
-          # are not `overwrite:`), turning a recoverable hold into a red plan.
-          if [ "$readable" = "false" ]; then
-            echo "::warning::could not read this plan run's artifact list, so its evidence is unknown and the gate will hold — re-run this summary run to read the list again; do not re-run the plan run"
-          elif [ "$planned" = "unknown" ]; then
-            echo "::warning::this plan run published no readable plan-matrix marker; the gate will hold — the list is usually just lagging, so re-run this summary run first; if it persists, actions/build-matrix is pinned to an older engine revision than this workflow"
-          elif [ "$cells" != "$planned" ]; then
-            echo "::warning::the plan run planned $planned cell(s) but its artifact list shows $cells; the gate will hold — re-run this summary run; if it persists, push again to re-plan"
-          fi
-          echo "count=$cells" >> "$GITHUB_OUTPUT"
-          echo "matrix_count=$planned" >> "$GITHUB_OUTPUT"
-
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        if: steps.pr.outputs.number != '' && steps.artifacts.outputs.count != '0'
+        # Unconditional: skipping it when zero cells were planned would make
+        # gate-state's "more cells than planned" branch structurally unreachable,
+        # so a run reporting zero planned cells while cell summaries exist would
+        # green the gate instead of holding. A `pattern:` that matches nothing
+        # is a no-op for this action, not a failure — only `name:` errors on a
+        # miss — so there is nothing to guard against.
+        # A failed download must reach gate-state as a cell-summary shortfall it
+        # reports on the gate, not as a dead job that writes no gate at all.
         continue-on-error: true
         with:
           pattern: cell-summary.*
           path: cells
-          run-id: ${{ github.event.workflow_run.id }}
-          github-token: ${{ github.token }}
 
       - uses: ship-iac/shipmate/actions/summary@f918f67854d25bb4a4485ab728e1c4518f002a13 # pinned to a commit on main
-        if: steps.pr.outputs.number != ''
         with:
-          pr-number: ${{ steps.pr.outputs.number }}
-          head-sha: ${{ github.event.workflow_run.head_sha }}
-          run-conclusion: ${{ github.event.workflow_run.conclusion }}
-          # This run has neither the plan logs nor the plan artifacts; the
-          # comment footer, the per-cell fallback links and the gate's
-          # target_url must all point at the plan run.
-          plan-run-url: ${{ github.event.workflow_run.html_url }}
-          # `|| 'unknown'` on both counts, never a number: the fallback covers a
-          # step that emitted no output at all (skipped, or dead before its
-          # echoes), which the step itself cannot report. It is not the channel
-          # for a found-nothing listing -- the step writes `0` or `unknown`
-          # itself there. A numeric stand-in would be comparable against a cell
-          # count, and the one that happens to match greens the gate over
-          # evidence nobody saw; gate-state holds on any non-integer.
-          artifact-count: ${{ steps.artifacts.outputs.count || 'unknown' }}
-          matrix-count: ${{ steps.artifacts.outputs.matrix_count || 'unknown' }}
+          pr-number: ${{ inputs.pr-number }}
+          head-sha: ${{ inputs.head-sha }}
+          detect-result: ${{ inputs.detect-result }}
+          plan-result: ${{ inputs.plan-result }}
+          planned-cells: ${{ inputs.planned-cells }}
           app-id: ${{ vars.SHIPMATE_APP_ID }}
           private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}

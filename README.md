@@ -46,10 +46,14 @@ request as the App, or mark applies complete that never ran.
 That is why the key is not a repository secret. It lives as an **environment**
 secret on `shipmate-engine`, whose deployment branch policy names only the
 default branch, and every step that mints an App token runs at the
-default-branch ref (`workflow_run`, `issue_comment`, `workflow_dispatch`,
-`push`). A branch-authored workflow naming that environment is denied the
-deployment and gets nothing; a `pull_request` job is denied too, because its ref
-(`refs/pull/<n>/merge`) matches no branch pattern. Environments are the only
+default-branch ref (`pull_request_target`, `issue_comment`,
+`workflow_dispatch`, `push`). A branch-authored *workflow* naming that
+environment is denied the deployment and gets nothing — the plan path's narrower
+residual, where the workflow file is the base copy, is in `docs/github-app.md`
+§Key-exposure boundary. `pull_request_target` is
+the exception that makes the plan path work: it evaluates at the base ref, so
+the one job that names the key runs no repository content and checks nothing
+out. Environments are the only
 scoping GitHub offers here — there is no per-workflow secret scoping.
 
 **So the one extra environment is the price of not operating a service.** It is
@@ -164,17 +168,12 @@ of its CI configuration.
 ## Plan
 
 The `plan.yml` workflow (thin and identical across repo layouts; see the
-`repo-example-*` samples) runs on every pull request and **must keep both its
-file path and its `name:`** — `.github/workflows/plan.yml`, named
-`shipmate · plan` — because the `summary.yml` workflow below is chained onto
-it by both: a `workflow_run` trigger that matches by **name**, and (inside
-the trusted workflow that trigger calls) an explicit check of the exact
-**file path**. Renaming either one, independently, gets a plan that runs but
-never gates. `detect` now says so out loud, and fails the pull request on it.
-The `name:` half would otherwise bite only from the merge that lands it
-onward, so the renaming pull request itself still gates and merges green; see
-`CONTRACT.md` §Post-plan topology for both halves and for what
-`detect` does about them. Give its one non-fan-out job the
+`repo-example-*` samples) runs on every pull request and has **three jobs**:
+`detect`, `plan`, and `summary`. It triggers on `pull_request_target`, which
+runs at the base ref — that is what lets the trusted `summary` job reach the App
+key, and `detect` and `plan` therefore have to name
+`ref: ${{ github.event.pull_request.head.sha }}` on their checkout explicitly or
+they plan the base branch instead. Give `detect` the
 display name `shipmate / detect`, since its check run is created by GitHub
 Actions (a job's check run always is) and a bare `detect` in the checks list
 says nothing about which tool produced it. See [`CONTRACT.md`](CONTRACT.md)
@@ -192,24 +191,27 @@ full picture below:
   `shipmate · plan / <stack> / <env>` in the UI); `actions/plan-cell`
   writes the **full plan text to the job's step summary** (reachable one click
   from the check), uploads the `.otplan` + a TF_VAR fingerprint as an
-  artifact. `plan.yml` holds no App credential at all — the App private key
-  never enters a `pull_request`-triggered job, full stop. `detect` also
+  artifact. `detect` binds no environment; `plan` binds only the plan
+  environment for the cell it is planning, never one holding an App credential.
+  `detect` also
   **refuses fork pull requests**: a plan would run the fork's own
   Terramate/OpenTofu code on your runners with your plan environment's
   variables, so the branch has to live in the repository. There is no input to
   allow them.
+- **`summary`** — `uses:` the engine's reusable
+  `.github/workflows/summary.yml` with `secrets: inherit`, passing the pull
+  request number, the head SHA, the two other jobs' results and the planned cell
+  count. The credentialed work happens inside that callee, in a single job bound
+  to the fixed `shipmate-engine` GitHub Environment (`docs/github-app.md`) with
+  **no checkout of its own**: it downloads this run's cell summaries and calls
+  `actions/summary`, which creates the matching
+  `apply / <stack> / <env>` check **pending** (or completed "no changes") and
+  upserts one sticky PR comment (a stack × env table) and the aggregate
+  **`shipmate / gate`** commit status, which stays non-green while any apply is
+  pending or any plan cell failed. That job declines outright — before its first
+  step — on a fork pull request or a draft.
 
-A separate `summary.yml` workflow — triggered by `workflow_run` once
-`plan.yml` completes, and bound to the fixed `shipmate-engine` GitHub
-Environment (`docs/github-app.md`) — does the credentialed work: it resolves
-the pull request, then calls `actions/summary`, which creates the matching
-`apply / <stack> / <env>` check **pending** (or completed "no changes") and
-upserts one sticky PR comment (a stack × env table) and the aggregate
-**`shipmate / gate`** commit status, which stays non-green while any apply is
-pending or any plan cell failed. Being a `workflow_run` job it runs at the
-default-branch ref, from the workflow file on that branch rather than from the
-pull request head — and it declines outright when the plan run's
-`head_repository` isn't this repository. Fork pull requests do not get that far:
+Fork pull requests do not get that far anyway:
 `detect` refuses them (see above), so a fork's plan fails fast rather than
 fanning out plan cells over fork-authored code. A pull request that changed
 no stacks gets no plan comment at all — nothing is posted when there are no

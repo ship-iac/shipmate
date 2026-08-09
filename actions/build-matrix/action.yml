@@ -15,6 +15,9 @@ outputs:
   empty:
     description: '"true" when no stack changed in any environment.'
     value: ${{ steps.build.outputs.empty }}
+  count:
+    description: How many cells the plan matrix has. Read by the trusted summary job to check that every planned cell produced a summary.
+    value: ${{ steps.build.outputs.count }}
 runs:
   using: composite
   steps:
@@ -24,40 +27,4 @@ runs:
       env:
         SHIPMATE_BASE_SHA: ${{ inputs.base-sha }}
         SHIPMATE_ALL_STACKS: ${{ inputs.all-stacks }}
-        # The engine's own owner/repo, resolved by GitHub at runtime -- the
-        # wiring check pins the consumer's reusable-summary `uses:` to it, and
-        # shipmate never hardcodes an org. Empty when this action runs from a
-        # local path, which the check treats as "any slug".
-        SHIPMATE_ENGINE_REPO: ${{ github.action_repository }}
       run: python3 "$GITHUB_ACTION_PATH/../../scripts/build-matrix"
-
-    - name: Record the planned cell count
-      shell: bash
-      env:
-        SHIPMATE_MATRIX_COUNT: ${{ steps.build.outputs.count }}
-      run: |
-        set -euo pipefail
-        # A `workflow_run` event carries no job outputs, so the trusted
-        # post-plan job cannot see this count -- it travels as an artifact NAME
-        # instead, read out of the artifact listing that job already makes.
-        # Without it, a `cell-summary.*` count of zero is indistinguishable from
-        # an artifact listing that simply did not show the cells yet, and the
-        # gate greens over stacks that then merge with no apply check.
-        # Validated here rather than in the reader: a non-numeric name holds the
-        # gate two jobs later, where nothing explains why.
-        [[ "$SHIPMATE_MATRIX_COUNT" =~ ^[0-9]+$ ]] || { echo "::error::planned cell count must be a non-negative integer (got: $SHIPMATE_MATRIX_COUNT)"; exit 1; }
-        # $RUNNER_TEMP, not the workspace: this action runs inside the
-        # consumer's checkout and must not leave an untracked file in it.
-        mkdir -p "$RUNNER_TEMP/plan-matrix"
-        printf '%s\n' "$SHIPMATE_MATRIX_COUNT" > "$RUNNER_TEMP/plan-matrix/count.txt"
-
-    - name: Publish the planned cell count
-      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-      with:
-        name: plan-matrix.${{ steps.build.outputs.count }}
-        path: ${{ runner.temp }}/plan-matrix/count.txt
-        # `warn` (the default) publishes nothing and holds every gate.
-        if-no-files-found: error
-        # Artifacts are per-run and immutable: a re-run of this job would 409.
-        overwrite: true
-        retention-days: 1

@@ -320,21 +320,37 @@ exists and that its policy actually says so). GitHub evaluates a deployment
 branch policy against the ref the triggering job runs at, which is what does
 the actual work here:
 
-- **A `pull_request`-triggered job can never reach the key.** Its ref is
-  `refs/pull/<n>/merge` — the ephemeral merge ref GitHub builds for the pull
-  request — which matches no named-branch pattern a deployment branch policy
-  can express. This holds regardless of which repository opened the pull
-  request, so it is also why `plan.yml` (a `pull_request` workflow by
-  construction) carries no App key anywhere in it: putting one there would
-  satisfy no policy and only widen the blast radius for nothing.
+- **On the plan path, the deployment branch policy is not what holds the
+  line — the workflow file is.** Under `pull_request_target` *every* job in the
+  plan run, the checkout-bearing `plan` matrix job included, evaluates at
+  `refs/heads/<base>` and therefore satisfies the policy. And the `plan` job's
+  `environment:` is branch-authored data: it is `matrix.environment`, which
+  `build-matrix` derives from `env/*` Terramate tags in the head checkout, so a
+  pull request that tags a stack `env/shipmate-engine` produces a plan cell
+  naming that environment. What makes that inert is that `pull_request_target`
+  runs the **base** copy of `plan.yml`, and in the base copy the only place
+  `secrets.SHIPMATE_APP_PRIVATE_KEY` is named is inside the called reusable
+  workflow — a branch author cannot add a secret reference.
+
+  **The constraint that follows: no job in `plan.yml` other than the `summary`
+  call may reference a `shipmate-engine` secret.** Adding one hands it to a plan
+  cell whose environment the branch chooses.
+- **A `push` to a non-default branch cannot reach the key** — measured, not
+  inferred, such a job is refused before its first step, because a branch ref
+  matches no pattern the policy names.
 - **The jobs that can reach the key all run at the default-branch ref.** The
-  trusted `summary` workflow (`.github/workflows/summary.yml`) is triggered
-  by `workflow_run` against the just-completed plan run and is itself defined
-  on the default branch — a `workflow_run` job runs at the ref of the
-  workflow *file*, not the PR head, so it satisfies the policy. The apply and
+  plan workflow triggers on `pull_request_target`, which evaluates at the base
+  branch ref rather than the pull request head, so its trusted `summary` job —
+  the engine's reusable `.github/workflows/summary.yml`, called with
+  `secrets: inherit` — satisfies the policy. The apply and
   deploy paths reach the key the same way: `workflow_dispatch` from
   comment-ops, or `push` to the default branch. Nothing that starts from
   arbitrary branch content ever does.
+- **The one job that holds the key runs no repository content.** The reusable
+  summary workflow has no checkout step, and a consumer cannot add one: they
+  call the workflow, they do not own its steps. Reaching the key from a
+  pull-request-side trigger is safe only in that shape — see `CONTRACT.md`
+  §Post-plan topology and `docs/hardening.md`.
 - The *token* minted from the key is still readable in plaintext by any step
   in the job that mints it, same as before the key moved — the environment
   boundary controls **which jobs can mint one**, not what a job does with it
@@ -345,18 +361,21 @@ the actual work here:
   *other* identity — `GITHUB_TOKEN`'s `github-actions` identity, or a
   different GitHub App — posting a status under the same context, which
   without the pin would satisfy the required check outright.
-- The `summary` workflow adds one more explicit guard: it refuses to act when
-  `github.event.workflow_run.head_repository.full_name` differs from
-  `github.repository` — a fork's plan run. A fork's plan run is still a
-  `pull_request` run, so the ref-mismatch argument above already keeps it
-  from the key; this guard exists so that fact doesn't have to be re-derived
-  every time the trigger or ref evaluation changes.
+- The `summary` workflow's job `if:` is load-bearing rather than
+  belt-and-braces: it refuses when
+  `github.event.pull_request.head.repo.full_name` differs from
+  `github.repository`, and again when the pull request is a draft. Under
+  `pull_request_target` a fork's pull request *does* reach the base ref, so
+  nothing else would stop that job; and the environment admits a draft's run,
+  which without the second clause would write a gate over a plan that never
+  ran. Being on the job, a refusal creates no deployment at all.
 
 What none of this defends against is a change to the trusted workflow files
 themselves (`summary.yml`, `apply.yml`, and the rest) landing on the default
 branch, where they *would* satisfy the environment's policy. That path runs
-through an ordinary pull request and merge — no `pull_request`-triggered job
-is ever in a position to skip review and reach the key directly, unlike the
+through an ordinary pull request and merge — no `pull_request`- or
+`pull_request_target`-triggered job that checks out branch content is ever in a
+position to skip review and reach the key directly, unlike the
 old repository-secret model. The backstop there is **`require_code_owner_review`**
 on the branch ruleset (`docs/hardening.md` #4): a GitHub App cannot be a
 CODEOWNER, so the App itself can never approve a change to its own trust

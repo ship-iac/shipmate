@@ -87,11 +87,10 @@ name its own non-fan-out plan job into the same namespace so the checks list
 identifies the tool — `shipmate / detect` is the recommended name, and the
 reference `plan.yml` in the samples uses it, because a job's check run is
 always created by the GitHub Actions app and its name is the only part that
-can say which tool produced it. (There is no `summary` job inside `plan.yml`
-to name this way: the trusted summary step now runs from a separate,
-engine-defined `summary.yml` workflow at the default-branch ref — see §Post-plan
-topology.) These names are not required checks and a consumer may pick
-others; nothing in the engine reconstructs them.
+can say which tool produced it. (`plan.yml`'s third job, `summary`, is a call
+to an engine-defined reusable workflow, so its jobs are named there rather than
+by the consumer — see §Post-plan topology.) These names are not required checks
+and a consumer may pick others; nothing in the engine reconstructs them.
 
 Everything in the check/status namespace is **ASCII and slash-delimited**, which
 is GitHub's own convention for status contexts (`ci/circleci`), and — for
@@ -349,13 +348,13 @@ only labels the output as shipmate's own.
 `shipmate doctor` posts a consolidated, sticky report — one comment per pull
 request, identified by the HTML marker `<!-- shipmate:doctor -->` (distinct
 from the plan comment's `<!-- shipmate:summary -->`) and upserted in place the
-same way. It combines eleven live settings probes (gate ruleset,
+same way. It combines ten live settings probes (gate ruleset,
 default-branch `pull_request` rule, environment pair existence, environment
 protection shape, plan-environment secrets, the `shipmate-engine`
 environment's own existence and default-branch scoping, `pull_request_target`
-triggers in the consumer's workflow files, engine action-pin freshness, the
-consumer plan/summary wiring the gate status silently depends on (§Post-plan
-topology), approvers-team resolvability, and App installation permission
+triggers in the consumer's workflow files other than `plan.yml`, which uses
+that trigger by design, engine action-pin freshness,
+approvers-team resolvability, and App installation permission
 drift — see `docs/branch-protection.md`) with a harvest of the warning and
 failure annotations GitHub already recorded on this commit's workflow runs
 (shipmate's own and any other Actions workflow run on that commit;
@@ -366,7 +365,7 @@ when the report was rendered, it says so and asks for the command again once
 they have, and if the harvest itself could not be read in full it says that
 too — the two are separate statements, since a run that has not finished has
 recorded nothing yet while a run that could not be read may have recorded
-plenty. Only nine of the eleven
+plenty. Only eight of the ten
 probes can produce a finding from the plan path's own `annotate`-mode
 invocation: the approvers-team probe needs the `SHIPMATE_TEAM` environment
 variable, which the plan path does not supply, so it silently returns
@@ -564,34 +563,76 @@ triggered by a pre-merge comment or a post-merge push.
 
 ## Post-plan topology
 
-The App private key never enters a `pull_request`-triggered job. The
-consumer's `plan.yml` — checked out at the PR head, running arbitrary pull
-request content — holds no App credential anywhere in it. Every
-App-authored surface listed above (apply checks, the gate, the sticky
-comments, drift issues) is created by a job bound to the fixed
+The consumer's plan workflow is **one file on `pull_request_target` with three
+jobs**. `detect` and `plan` are untrusted: they check out the pull request's own
+head and hold no App credential. `summary` is a `uses:` of the engine's reusable
+`.github/workflows/summary.yml` with `secrets: inherit`, and everything trusted
+happens inside that callee — one job, `environment: shipmate-engine`, no
+checkout at all. Every App-authored surface listed above (apply checks, the
+gate, the sticky comments, drift issues) is created by a job bound to the fixed
 `shipmate-engine` GitHub Environment (`docs/github-app.md` §Key-exposure
 boundary), each running at a ref that satisfies its default-branch-only
-policy for a different reason:
+policy for a different reason.
 
-- **`plan.yml`** (consumer, `pull_request`) — `detect` + the plan matrix job
-  only. Uploads plan artifacts and cell summaries; authors nothing, binds to
-  no environment and mints no App token. `actions/build-matrix` fails `detect`
+**The `summary` job must grant `permissions: contents: read`.** A called
+workflow's permissions are capped by the calling job's, and the callee requests
+that scope — so a caller that grants less kills the run at **startup**: no job,
+no log, no annotation, and no `shipmate / gate`. Fail-closed, since the pull
+request cannot merge without the gate, but there is nothing on the run page to
+say why, and the plan jobs never start either. Copy the reference `summary` job
+whole rather than trimming its `permissions:` block.
+
+Under `pull_request_target` a plan run's `head_sha` and `head_branch` are the
+**pull request's** head commit and branch, not the base branch's — every
+plan-run lookup in the engine (`?head_sha=<pr head>`) depends on that. What *is*
+base-branch under this trigger is the checkout: `GITHUB_SHA` and `GITHUB_REF`
+name the base, which is why the `detect` and `plan` jobs must pass
+`ref: ${{ github.event.pull_request.head.sha }}` explicitly. The two are
+routinely confused; they are opposite sides of the same trigger.
+
+**Requirement: no job in `plan.yml` other than the `summary` call may reference
+a `shipmate-engine` secret.** Under `pull_request_target` every job in this file
+runs at a ref the environment's policy admits, and the `plan` job's
+`environment:` is chosen by branch-authored `env/*` tags — so the base-owned
+workflow file naming no such secret outside the callee is what keeps the key out
+of branch reach. `docs/github-app.md` §Key-exposure boundary has the reasoning.
+
+The three jobs:
+
+- **`plan.yml`**'s `detect` and `plan` jobs (consumer, `pull_request_target`) —
+  they upload plan artifacts and cell summaries; they author nothing and mint no
+  App token. `detect` binds no environment; `plan` binds only the plan
+  environment for the cell it is planning, never one holding an App credential.
+  `pull_request_target` checks out the
+  **base** by default, so both jobs must name
+  `ref: ${{ github.event.pull_request.head.sha }}` explicitly; without it they
+  plan the base branch and report a clean plan for a pull request they never
+  read. `actions/build-matrix` refuses that: on `pull_request_target` it
+  compares the event's head SHA against the commit it is running on, and it
+  also refuses a checkout with no `.github/workflows/plan.yml` — that path is
+  matched literally by the reviewed-plan lookups and a renamed plan workflow
+  wedges every later apply. `actions/build-matrix` fails `detect`
   outright when the event's head repository is not the running repository:
   **fork pull requests are not planned**, with no input to permit them. A
   fork's plan would execute the pull request's own Terramate/OpenTofu code with
-  the plan environment's variables (variables are not secrets and are not
-  withheld from a fork), and no `shipmate / gate` is ever written for a fork
+  everything the plan environment holds — `pull_request_target` withholds
+  nothing from a fork's run, its *secrets* included, so this refusal plus
+  `plan`'s `needs: detect` is the only layer keeping a fork out
+  (`docs/hardening.md` §16). No `shipmate / gate` is ever written for a fork
   head, so the refusal is loud rather than an empty matrix. The guard keys on
-  the event being a `pull_request`; the drift path (`all-stacks`, `schedule`)
+  the event being a pull-request event (`pull_request` or
+  `pull_request_target`); the drift path (`all-stacks`, `schedule`)
   is unaffected.
-- **`summary.yml`** (consumer, `workflow_run` on `plan.yml`'s completion) — a
-  thin wrapper (`uses:` the engine's reusable `.github/workflows/summary.yml`,
-  `secrets: inherit`) that resolves the pull request, downloads the plan
-  run's cell summaries, and calls `actions/summary` under an App token
-  minted inside `shipmate-engine`. This is what creates the pending
+- **`plan.yml`**'s `summary` job (consumer, a call to the engine's reusable
+  `.github/workflows/summary.yml`) — it downloads this same run's cell
+  summaries and calls `actions/summary` under an App token minted inside
+  `shipmate-engine`. This is what creates the pending
   `apply / <stack> / <env>` checks, the sticky plan comment, and the
-  `shipmate / gate` status. A `workflow_run` job runs at the ref of the
-  workflow *file*, which is the default branch here.
+  `shipmate / gate` status. `pull_request_target` evaluates at the base branch
+  ref, which is what satisfies the environment's policy. The caller passes five
+  inputs — `pr-number`, `head-sha`, `detect-result`, `plan-result`,
+  `planned-cells` — all from the event payload and the two `needs:` results;
+  nothing is recovered from artifacts or from a second API lookup.
 - **`apply.yml` / `apply-all.yml` / `apply-env-level.yml` / `deploy.yml`**
   (consumer, `workflow_dispatch` via comment-ops, or `push` to the default
   branch) — the jobs that mint an App token (completing apply checks,
@@ -608,74 +649,64 @@ policy for a different reason:
   same reason: it authors the drift Issues under an App token, and a
   scheduled or manually dispatched run evaluates at the default branch.
 
-**Requirement, verbatim, in two halves that must both hold: the consumer's
-plan workflow must live at `.github/workflows/plan.yml`, and its top-level
-`name:` must be `shipmate · plan`.** Two independent checks gate whether
-`summary.yml` ever runs, and either one failing is equally silent — but they
-break at different moments, and only one of them breaks the pull request that
-introduces it:
+Nothing matches on the plan workflow's `name:` any more, and no check inspects
+consumer workflow YAML for this wiring. (Doctor still reads those files for two
+unrelated probes — stale engine pins and `pull_request_target` triggers — and
+neither can observe whether the gate will be written.)
 
-- the consumer's `summary.yml` triggers on
-  `workflow_run: { workflows: ["shipmate · plan"] }` — GitHub matches this by
-  the completed workflow's **name**, not its file path, and it resolves that
-  name against the workflow entity as recorded on the **default branch**, not
-  against the name the completed run itself carried. A branch that renames
-  `plan.yml`'s `name:` therefore still fires the trigger for its own plan run:
-  the renaming pull request gets its gate and merges green. The breakage
-  begins at **merge**, and applies to every pull request afterwards —
-  including the one opened to fix it, which is itself gateless and needs an
-  administrator to merge. Editing the consumer's own `summary.yml` behaves the
-  same way, for the neighbouring reason: a `workflow_run` trigger is read from
-  the default branch, so breaking the wrapper takes effect only once it lands
-  there;
-- the trusted, engine-defined `summary.yml` it calls additionally checks
-  `github.event.workflow_run.path == '.github/workflows/plan.yml'` exactly —
-  so even if the *name* still matches, moving the plan matrix to a
-  differently-named **file** fails this guard instead. This is the half that
-  fails closed **before** the merge: the guard reads the completed run's own
-  path, so the pull request that moves the file loses its own gate.
+The **file path is still load-bearing**, and nothing diagnoses a rename as the
+cause:
+`scripts/apply-detect`'s provenance gate refuses a dispatched apply whose plan
+run did not come from a `plan.yml`, `scripts/deploy-detect` resolves the
+post-merge plan run through
+`actions/workflows/plan.yml/runs`, and `actions/comment-ops` uses that same
+endpoint twice — for the reviewed-plan lookup behind `shipmate apply` and for
+doctor's cell-summary fetch. Doctor's `pull_request_target` probe exempts the
+plan workflow by exact name. Rename the file and applies are refused as stale,
+doctor skips its environment probes, a post-merge deploy finds no plan run, and
+the renamed file starts drawing doctor's own `pull_request_target` warning. Each
+symptom surfaces on its own — comment-ops annotates the skipped probes — but
+none of them names the rename.
 
-A consumer that breaks either one gets a plan that runs to completion,
-produces no summary, no `apply` checks, and no `shipmate / gate` status, and
-raises no error anywhere.
+A consumer that omits the `summary`
+job gets no `shipmate / gate` status at all, so the pull request cannot merge —
+the failure is visible and fail-closed.
 
-`actions/build-matrix` runs all three checks — the path, the `name:`, and a
-`workflow_run` wrapper calling the engine's reusable `summary.yml` — inside
-`detect` on every plan run, off the checkout it already has, and **fails
-`detect`** on a confident break for a `pull_request` or `pull_request_target`
-event; that is what catches the two default-branch-resolved breaks on the pull
-request introducing them, rather than after the merge that makes them
-permanent. On any other event (the drift schedule) the same finding is a
-warning, so one merged mistake does not take nightly drift down everywhere.
-`shipmate doctor` reports the same three conditions on demand, read at the
-commit under examination — comment-ops is not downstream of the summary
-wiring, so that report still answers when the wiring is broken.
+Both trust conditions live on the **callee's** job `if:`, in engine-owned,
+SHA-pinned YAML, and neither is duplicated into the consumer's file:
 
-Two limits of that check are worth stating, because both are deliberate. It
-recognises the wrapper by finding the `workflow_run` trigger naming
-`shipmate · plan` and the `uses:` of the engine's reusable `summary.yml` **in
-the same file**. A wrapper that instead delegates the `uses:` to a second
-workflow — local, or shared from another repository — is a valid GitHub
-Actions topology and gates correctly, but the check cannot follow the hop, so
-it reports the wiring as *unverified* rather than failing the run. And on a
-`pull_request_target` event the checkout is the base ref, so the check judges
-the wiring the pull request has not changed yet; that matters little, because a
-plan workflow on `pull_request_target` is itself reported broken — the engine's
-summary job requires `workflow_run.event == 'pull_request'` exactly.
+```
+github.event.pull_request.head.repo.full_name == github.repository &&
+github.event.pull_request.draft == false
+```
 
-Binding these jobs to the `shipmate-engine` environment rather than trusting
-the trigger alone closes two paths a trigger check alone would not:
+They sit there rather than in the caller because a consumer who kept the job and
+dropped a clause would hand a fork pull request an App-authored gate — fail-open
+and unobserved. It is a job-level `if:`, not a step-level check, so a skipped
+job creates no deployment and never enters the environment. Reached from any
+other event, `github.event.pull_request` is empty and the expression is false.
 
-- A fork's `plan.yml` run completes normally but produces nothing further —
-  the `summary.yml` job additionally checks
-  `head_repository.full_name == github.repository` and declines otherwise
+The caller's `summary` job carries **no** security-relevant condition. It keeps
+only `if: ${{ !cancelled() }}` and deliberately does not require `detect` or
+`plan` to have succeeded: a failed detect or plan must still produce a red gate
+with an explanation, because no gate at all is a pull request nobody can
+diagnose. `detect` and `plan` keep their own `draft == false` condition, which is
+a cost control (it stops a draft burning runners), not a security property.
+
+Binding the callee's job to the `shipmate-engine` environment rather than
+trusting the trigger alone closes two paths a trigger check alone would not:
+
+- A fork's plan run completes normally but produces nothing further — the fork
+  clause above declines the `summary` job
   (`docs/hardening.md` §"Contributors without push access").
 - A branch-authored workflow cannot reach the key by simply declaring
   `environment: shipmate-engine` itself: that environment's deployment
-  branch policy is scoped to the default branch, and a job triggered by
-  `pull_request` (or by a `push` to any other branch) never satisfies it,
-  regardless of what the workflow file says (`docs/github-app.md`
-  §Key-exposure boundary).
+  branch policy is scoped to the default branch, and a job triggered by a
+  `push` to any other branch — or by `pull_request`, whose ref is
+  `refs/pull/<n>/merge` — never satisfies it, regardless of what the workflow
+  file says. `pull_request_target` is the one pull-request-side trigger that
+  does satisfy it, which is why the trust conditions above are engine-owned
+  (`docs/github-app.md` §Key-exposure boundary).
 
 ## Consumption
 
@@ -816,9 +847,9 @@ identified by the HTML marker written verbatim as the comment's first line:
 - `<!-- shipmate:summary -->`
 
 A run whose cell count is zero writes the empty-table body **only** when that
-zero means "no stacks changed" — the plan run's `plan-matrix.<N>` marker reports
-zero cells. Every other zero (a marker that could not be read, a listing that
-disagrees with the marker, a failed `detect`, plan cells that all failed
+zero means "no stacks changed" — `detect` reported a planned count of zero.
+Every other zero (a planned count that disagrees with the cell summaries
+actually read, a failed `detect`, plan cells that all failed
 before uploading a cell summary, a failed `cell-summary.*` download) leaves the
 plan unknown, so the run writes nothing at all and any existing comment — the
 reviewed plan for the previous push — is left standing rather than PATCHed down
@@ -880,15 +911,10 @@ consumer's `plan.yml`, so the schema upgrades atomically; the summary
 fails loud on a `cell.json` missing schema keys rather than rendering around
 pin skew.
 
-One further artifact travels alongside them:
-
-- `plan-matrix.<N>` — published by `actions/build-matrix` on every plan run,
-  where `<N>` is the number of cells the plan matrix had. The name *is* the
-  payload: the trusted post-plan job reads `N` out of the artifact listing,
-  because a `workflow_run` event carries no job outputs. It holds a one-line
-  `count.txt` only because an artifact must have a file. Writer and reader are
-  pinned by the same SHA in a consumer's `plan.yml` and `summary.yml`; a partial
-  re-pin holds every gate rather than greening one.
+The count those summaries are measured against is not an artifact: `detect`
+declares it as the `count` output of `actions/build-matrix`, and the `summary`
+job receives it as the `planned-cells` input. A cell count that disagrees with
+it holds the gate in either direction.
 
 ## Apply result comment
 
@@ -1066,10 +1092,12 @@ the engine `apply.yml` for the targeted form. Consumers set
 `SHIPMATE_PLAN_PASSPHRASE` as a **repository** secret and forward it with
 `secrets: inherit` in their `deploy.yml` and `apply.yml` wrapper workflows.
 
-Not an environment secret, and specifically **not** on `shipmate-engine`: plan
-cells run on a `pull_request` ref (`refs/pull/<n>/merge`), which satisfies no
-deployment branch policy, so a passphrase scoped that way resolves to empty at
-plan time and every later apply fails its plaintext-artifact check. Scoping it
+Not an environment secret, and specifically **not** on `shipmate-engine`: a
+secret on one environment is released only to a job that *names* that
+environment, and a plan cell names its own plan environment instead. So a
+passphrase scoped to `shipmate-engine` resolves to empty at
+plan time and every later apply fails its plaintext-artifact check — the ref the
+plan run happens to be at is beside the point. Scoping it
 to a plan environment buys nothing either — those must have no branch policy at
 all (`docs/hardening.md` §6), so any branch's workflow can name one and read it.
 Unlike the App private key, this secret must be readable wherever plans are

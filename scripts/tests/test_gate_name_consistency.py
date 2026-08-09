@@ -23,9 +23,9 @@ SKIP_DIRS = {
     "node_modules",
 }
 GATE = "shipmate / gate"
-# The literal's home in `actions/summary` moved to `scripts/gate-state` (the
-# trusted post-plan `workflow_run` job has no `needs`, so a shared script
-# decides gate state instead of an inline heredoc in the action); the
+# The literal's home in `actions/summary` moved to `scripts/gate-state` (a
+# shared script decides gate state, where it can be unit- and mutation-tested,
+# instead of an inline heredoc in the action or a workflow `if:`); the
 # composite action itself now only POSTs the body gate-state already built.
 WRITERS = [
     "scripts/gate-state",

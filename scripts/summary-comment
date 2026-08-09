@@ -310,11 +310,9 @@ def main():
     # apply checks keep their `apply / ` verb and so never collide.
     checks = ag.latest_by_name(ag.parse_jsonl(sys.stdin), prefix="")
     cells = load_cells(os.environ.get("CELLS", "cells"))
-    # The plan run's URL when the caller supplied it: GITHUB_RUN_ID is the
-    # trusted summary run, which holds neither the plan logs nor the artifacts
-    # the footer and the per-cell fallback link promise. Falls back to this run
-    # when the caller passes nothing.
-    run_url = os.environ.get("SHIPMATE_PLAN_RUN_URL", "") or (
+    # This job runs inside the plan run, so this run holds the logs and the
+    # artifacts the footer and the per-cell fallback link promise.
+    run_url = (
         f"{os.environ['GITHUB_SERVER_URL']}/{os.environ['GITHUB_REPOSITORY']}"
         f"/actions/runs/{os.environ['GITHUB_RUN_ID']}"
     )

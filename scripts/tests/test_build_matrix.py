@@ -1,7 +1,7 @@
-import pathlib
+import json
 
 import pytest
-from _loader import action_steps, load_script
+from _loader import load_script
 
 bm = load_script("build-matrix")
 
@@ -213,7 +213,9 @@ def test_event_payload_degrades_to_empty_dict(tmp_path):
     assert bm._event_payload(str(listy)) == {}
 
 
-def _run_main(monkeypatch, tmp_path, env, cells=(("stacks/app", "dev-eu"),), called=None):
+def _run_main(
+    monkeypatch, tmp_path, env, cells=(("stacks/app", "dev-eu"),), called=None, plan_workflow=True
+):
     """main() with GITHUB_OUTPUT redirected, returning (parsed outputs, calls)
     where calls records compute_cells' arguments -- so a rejection is
     observable as the stack enumeration never having run. Pass `called` to keep
@@ -221,11 +223,12 @@ def _run_main(monkeypatch, tmp_path, env, cells=(("stacks/app", "dev-eu"),), cal
     out = tmp_path / "out.txt"
     out.write_text("", encoding="utf-8")
     monkeypatch.setenv("GITHUB_OUTPUT", str(out))
-    # main() reads the wiring off the CURRENT DIRECTORY, which under pytest is
-    # the engine checkout -- a repository that legitimately has no plan.yml and
-    # would fail every pull-request case below. tmp_path has no
-    # `.github/workflows` at all, so the wiring degrades to UNKNOWN, which never
-    # blocks; the wiring path itself is exercised by the cases further down.
+    # main() reads the checkout it runs in: the plan workflow has to be where
+    # plan_workflow_error requires it, and the engine repo (pytest's cwd) has no
+    # plan.yml of its own.
+    (tmp_path / ".github" / "workflows").mkdir(parents=True, exist_ok=True)
+    if plan_workflow:
+        (tmp_path / ".github" / "workflows" / "plan.yml").write_text("", encoding="utf-8")
     monkeypatch.chdir(tmp_path)
     for k in (
         "SHIPMATE_ALL_STACKS",
@@ -249,8 +252,6 @@ def _run_main(monkeypatch, tmp_path, env, cells=(("stacks/app", "dev-eu"),), cal
 
 
 def _event_file(tmp_path, head_repo):
-    import json
-
     path = tmp_path / "event.json"
     path.write_text(json.dumps(_payload(head_repo)), encoding="utf-8")
     return str(path)
@@ -303,11 +304,8 @@ def test_main_does_not_enumerate_stacks_for_a_fork(monkeypatch, tmp_path):
     monkeypatch.setenv("GITHUB_REPOSITORY", "acme/iac")
     monkeypatch.setenv("GITHUB_EVENT_PATH", _event_file(tmp_path, "outsider/iac"))
     monkeypatch.setenv("GITHUB_OUTPUT", str(tmp_path / "out.txt"))
-    # Same reason as _run_main's: without this the wiring check reads the engine
-    # checkout, raises `shipmate wiring` first, and this guard passes on somebody
-    # else's SystemExit -- proving nothing about the fork rejection. The
-    # assertion below names the rejection for the same reason.
-    monkeypatch.chdir(tmp_path)
+    # The assertion names the rejection so this guard cannot pass on somebody
+    # else's SystemExit.
     with pytest.raises(SystemExit) as excinfo:
         bm.main()
     assert "fork pull requests are not supported" in str(excinfo.value)
@@ -342,6 +340,107 @@ def test_main_drift_run_is_unaffected(monkeypatch, tmp_path):
     assert called == [(True, "")]
 
 
+def _head_payload(sha):
+    return {"pull_request": {"head": {"sha": sha}}}
+
+
+def test_head_checkout_matching_the_pull_request_head_is_planned(monkeypatch):
+    monkeypatch.setattr(bm, "_run", lambda args: "cafe1234\n")
+    assert bm.head_checkout_error("pull_request_target", _head_payload("cafe1234")) == ""
+
+
+def test_head_checkout_of_the_base_is_refused(monkeypatch):
+    # The pull_request_target default: actions/checkout took the base branch, so
+    # terramate would diff the base against itself and report nothing changed.
+    monkeypatch.setattr(bm, "_run", lambda args: "basebase\n")
+    err = bm.head_checkout_error("pull_request_target", _head_payload("cafe1234"))
+    assert err.startswith("::error::")
+    assert "ref: ${{ github.event.pull_request.head.sha }}" in err
+    assert "cafe1234" in err and "basebase" in err
+
+
+def test_head_checkout_check_is_skipped_off_pull_request_target(monkeypatch):
+    # The drift path has no pull-request context and no reason to be at any
+    # particular commit; `git rev-parse` must not even run. `pull_request` is in
+    # the same list on purpose: its default checkout is `refs/pull/<n>/merge`, a
+    # merge commit that equals neither SHA, so comparing it would refuse every
+    # correctly wired consumer still on that trigger.
+    monkeypatch.setattr(
+        bm, "_run", lambda args: pytest.fail("head checkout was probed off pull_request_target")
+    )
+    for event in ("pull_request", "schedule", "workflow_dispatch", "push", ""):
+        assert bm.head_checkout_error(event, _head_payload("cafe1234")) == ""
+
+
+def test_head_checkout_check_is_skipped_when_the_payload_has_no_head_sha(monkeypatch):
+    monkeypatch.setattr(bm, "_run", lambda args: pytest.fail("probed with no head sha"))
+    assert bm.head_checkout_error("pull_request_target", {}) == ""
+
+
+def test_plan_workflow_at_the_contract_path_is_planned(tmp_path):
+    (tmp_path / ".github" / "workflows").mkdir(parents=True)
+    (tmp_path / ".github" / "workflows" / "plan.yml").write_text("", encoding="utf-8")
+    assert bm.plan_workflow_error("pull_request_target", str(tmp_path)) == ""
+
+
+def test_a_renamed_plan_workflow_is_refused(tmp_path):
+    # Four lookups match `.github/workflows/plan.yml` byte-for-byte; a rename
+    # merges green and wedges every apply from that commit on.
+    (tmp_path / ".github" / "workflows").mkdir(parents=True)
+    (tmp_path / ".github" / "workflows" / "shipmate-plan.yml").write_text("", encoding="utf-8")
+    err = bm.plan_workflow_error("pull_request", str(tmp_path))
+    assert err.startswith("::error::")
+    assert ".github/workflows/plan.yml" in err
+
+
+def test_plan_workflow_check_is_skipped_off_a_pull_request(tmp_path):
+    for event in ("schedule", "workflow_dispatch", "push", ""):
+        assert bm.plan_workflow_error(event, str(tmp_path)) == ""
+
+
+def test_main_refuses_a_base_checkout(monkeypatch, tmp_path):
+    called = []
+    monkeypatch.setattr(bm, "_run", lambda args: "basebase\n")
+    event = tmp_path / "head-event.json"
+    event.write_text(
+        json.dumps(
+            {"pull_request": {"head": {"sha": "cafe1234", "repo": {"full_name": "acme/iac"}}}}
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(SystemExit) as excinfo:
+        _run_main(
+            monkeypatch,
+            tmp_path,
+            {
+                "GITHUB_EVENT_NAME": "pull_request_target",
+                "GITHUB_REPOSITORY": "acme/iac",
+                "GITHUB_EVENT_PATH": str(event),
+            },
+            called=called,
+        )
+    assert "ref: ${{ github.event.pull_request.head.sha }}" in str(excinfo.value)
+    assert called == []
+
+
+def test_main_refuses_a_missing_plan_workflow(monkeypatch, tmp_path):
+    called = []
+    with pytest.raises(SystemExit) as excinfo:
+        _run_main(
+            monkeypatch,
+            tmp_path,
+            {
+                "GITHUB_EVENT_NAME": "pull_request",
+                "GITHUB_REPOSITORY": "acme/iac",
+                "GITHUB_EVENT_PATH": _event_file(tmp_path, "acme/iac"),
+            },
+            called=called,
+            plan_workflow=False,
+        )
+    assert ".github/workflows/plan.yml" in str(excinfo.value)
+    assert called == []
+
+
 def test_build_matrix_action_declares_no_fork_input():
     # The refusal is a business rule, not a configurable: an input here would
     # be a way to turn it off.
@@ -352,183 +451,16 @@ def test_build_matrix_action_declares_no_fork_input():
     assert set(doc["inputs"]) == {"base-sha", "all-stacks"}
 
 
-wi = load_script("wiring")
+def test_build_matrix_action_declares_the_outputs_the_gate_reads():
+    # `count` is what the trusted summary job measures its evidence against, so
+    # a rename or a rewire here is a silent hole in the gate. Hand-written,
+    # name -> wiring; descriptions are prose and deliberately not pinned.
+    import yaml
+    from _loader import ACTIONS
 
-_BROKEN = [(wi.BROKEN, "plan.yml is named 'x'")]
-_UNKNOWN = [(wi.UNKNOWN, "could not read .github/workflows")]
-
-
-def test_a_broken_wiring_fails_a_pull_request():
-    """build-matrix has no never-fails contract and already exits loud for fork
-    pull requests. Two of the three wiring breaks MERGE GREEN otherwise: the
-    workflow_run trigger resolves against the default branch, so the pull
-    request that breaks the name or the summary wrapper still gets its own gate,
-    and the fix pull request afterwards has none."""
-    lines, error = bm.wiring_report(_BROKEN, "pull_request")
-    assert error.startswith("::error")
-    assert wi.WIRING_TITLE in error
-    assert "plan.yml is named 'x'" in error
-
-
-def test_a_broken_wiring_fails_a_pull_request_target_too():
-    lines, error = bm.wiring_report(_BROKEN, "pull_request_target")
-    assert error.startswith("::error")
-
-
-@pytest.mark.parametrize("event", ["schedule", "workflow_dispatch", "push"])
-def test_a_broken_wiring_only_warns_off_the_pull_request_path(event):
-    """The drift path calls this script with all-stacks and no pull-request
-    context. An already-merged break must not kill nightly drift -- and drift
-    then becomes a second, post-merge detector of a break that landed."""
-    lines, error = bm.wiring_report(_BROKEN, event)
-    assert error == ""
-    assert lines == [f"::warning title={wi.WIRING_TITLE}::plan.yml is named 'x'"]
-
-
-@pytest.mark.parametrize("event", ["pull_request", "schedule"])
-def test_an_unknown_wiring_never_blocks_and_never_warns(event):
-    """A false positive here would block every pull request in every consumer
-    until an engine fix and a re-pin, so anything short of certain is a notice."""
-    lines, error = bm.wiring_report(_UNKNOWN, event)
-    assert error == ""
-    assert lines == [f"::notice title={wi.WIRING_TITLE}::could not read .github/workflows"]
-
-
-def test_a_clean_wiring_emits_nothing():
-    assert bm.wiring_report([], "pull_request") == ([], "")
-
-
-def test_workflow_files_reads_the_local_checkout(tmp_path):
-    d = tmp_path / ".github" / "workflows"
-    d.mkdir(parents=True)
-    (d / "plan.yml").write_bytes(b"name: x\n")
-    (d / "notes.md").write_bytes(b"ignored")
-    (d / "nested").mkdir()
-    assert bm.workflow_files(tmp_path) == {"plan.yml": b"name: x\n"}
-
-
-def test_workflow_files_returns_none_without_a_workflows_directory(tmp_path):
-    assert bm.workflow_files(tmp_path) is None
-
-
-def test_workflow_files_maps_an_unreadable_file_to_none(tmp_path, monkeypatch):
-    """The per-file None is the only thing between an unreadable plan.yml and a
-    false BROKEN: `findings` degrades a None entry to UNKNOWN, but only if the
-    name reaches it at all. Dropping it would read as "no plan.yml"."""
-    d = tmp_path / ".github" / "workflows"
-    d.mkdir(parents=True)
-    (d / "plan.yml").write_bytes(b"name: x\n")
-    (d / "summary.yml").write_bytes(b"on: workflow_run\n")
-
-    real = pathlib.Path.read_bytes
-
-    def refuse(self):
-        # A chmod does not reliably deny a read on Windows, so the failure is
-        # injected at the one call that would raise on a real permission denial.
-        if self.name == "plan.yml":
-            raise OSError("permission denied")
-        return real(self)
-
-    monkeypatch.setattr(pathlib.Path, "read_bytes", refuse)
-    assert bm.workflow_files(tmp_path) == {
-        "plan.yml": None,
-        "summary.yml": b"on: workflow_run\n",
+    doc = yaml.safe_load((ACTIONS / "build-matrix/action.yml").read_text(encoding="utf-8"))
+    assert {name: spec["value"] for name, spec in doc["outputs"].items()} == {
+        "matrix": "${{ steps.build.outputs.matrix }}",
+        "empty": "${{ steps.build.outputs.empty }}",
+        "count": "${{ steps.build.outputs.count }}",
     }
-
-
-def test_workflow_files_degrades_an_unstattable_entry_instead_of_dropping_it(tmp_path):
-    """`Path.is_file()` swallows OSError and answers False, so filtering on it
-    would DROP an entry whose stat failed -- and a dropped `plan.yml` is BROKEN,
-    not unverified. A directory named `plan.yml` stands in for that entry: it is
-    the portable way to make the listing hold a name whose bytes cannot be read.
-    """
-    d = tmp_path / ".github" / "workflows"
-    (d / "plan.yml").mkdir(parents=True)
-    assert bm.workflow_files(tmp_path) == {"plan.yml": None}
-    # And the finding that reaches the run is the degraded one, never BAD_PATH.
-    assert wi.findings(bm.workflow_files(tmp_path), "") == [
-        wi.PLAN_UNREADABLE,
-        wi.WIRING_UNREADABLE,
-    ]
-
-
-def test_the_action_supplies_the_engine_repo_to_the_matrix_step():
-    """The wiring check pins the reusable-summary `uses:` to the engine's own
-    slug, which is never hardcoded -- it arrives as github.action_repository."""
-    steps = action_steps("build-matrix")
-    compute = next(s for s in steps if s.get("id") == "build")
-    assert compute["env"]["SHIPMATE_ENGINE_REPO"] == "${{ github.action_repository }}"
-
-
-def _broken_checkout(tmp_path):
-    """A checkout whose plan.yml carries the wrong workflow name."""
-    d = tmp_path / ".github" / "workflows"
-    d.mkdir(parents=True)
-    (d / "plan.yml").write_bytes(b"name: plan\n")
-    return tmp_path
-
-
-def test_main_fails_a_pull_request_on_a_broken_wiring(monkeypatch, tmp_path):
-    """The report is only a decision until main() acts on it: without the call,
-    every test above still passes and no run ever fails."""
-    _broken_checkout(tmp_path)
-    with pytest.raises(SystemExit) as excinfo:
-        _run_main(
-            monkeypatch,
-            tmp_path,
-            {
-                "GITHUB_EVENT_NAME": "pull_request",
-                "GITHUB_REPOSITORY": "acme/iac",
-                "GITHUB_EVENT_PATH": _event_file(tmp_path, "acme/iac"),
-            },
-        )
-    assert str(excinfo.value).startswith(f"::error title={wi.WIRING_TITLE}::")
-
-
-def test_main_still_plans_a_drift_run_over_a_broken_wiring(monkeypatch, tmp_path, capsys):
-    _broken_checkout(tmp_path)
-    outputs, called = _run_main(
-        monkeypatch,
-        tmp_path,
-        {"SHIPMATE_ALL_STACKS": "true", "GITHUB_EVENT_NAME": "schedule"},
-    )
-    assert outputs["empty"] == "false"
-    assert called == [(True, "")]
-    # The warning is the whole of "drift becomes a second, post-merge detector":
-    # main() computing the report and never printing it plans the run just the
-    # same, and reports nothing to anybody.
-    printed = capsys.readouterr().out
-    assert f"::warning title={wi.WIRING_TITLE}::" in printed
-    assert wi.PLAN_NAME in printed
-
-
-def test_main_emits_an_unknown_wiring_notice(monkeypatch, tmp_path, capsys):
-    """The notice path out of main() is not covered by the case above, which
-    only has a BROKEN to print. tmp_path has no `.github/workflows` at all."""
-    _run_main(
-        monkeypatch,
-        tmp_path,
-        {"SHIPMATE_ALL_STACKS": "true", "GITHUB_EVENT_NAME": "schedule"},
-    )
-    assert f"::notice title={wi.WIRING_TITLE}::" in capsys.readouterr().out
-
-
-def test_main_checks_the_wiring_before_enumerating_stacks(monkeypatch, tmp_path):
-    """The fork guard's twin (`test_main_does_not_enumerate_stacks_for_a_fork`).
-    Placement, not merely the raise: a wiring check run after `compute_cells`
-    still fails the job, but only after `detect` has spent a terramate run on a
-    repository whose plan can never gate."""
-    _broken_checkout(tmp_path)
-
-    def boom(*a, **k):
-        pytest.fail("compute_cells ran over a broken wiring")
-
-    monkeypatch.setattr(bm, "compute_cells", boom)
-    monkeypatch.setenv("GITHUB_EVENT_NAME", "pull_request")
-    monkeypatch.setenv("GITHUB_REPOSITORY", "acme/iac")
-    monkeypatch.setenv("GITHUB_EVENT_PATH", _event_file(tmp_path, "acme/iac"))
-    monkeypatch.setenv("GITHUB_OUTPUT", str(tmp_path / "out.txt"))
-    monkeypatch.chdir(tmp_path)
-    with pytest.raises(SystemExit) as excinfo:
-        bm.main()
-    assert str(excinfo.value).startswith(f"::error title={wi.WIRING_TITLE}::")

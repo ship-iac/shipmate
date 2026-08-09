@@ -7,7 +7,7 @@ Three modes, selected via SHIPMATE_DOCTOR_MODE:
   actions/summary right after a plan run. NEVER fails the run: a probe
   error becomes a 'could not verify' note — doctor guards onboarding, it
   must not take down the plan path.
-- report: render the sticky PR comment on demand — the eleven live probes'
+- report: render the sticky PR comment on demand — the ten live probes'
   findings plus a harvest of the warnings GitHub already recorded as
   annotations on this commit's workflow check runs.
 - check-ids: reduce a check-runs JSONL listing to the (id, name) pairs worth
@@ -28,7 +28,6 @@ Probes:
 - secrets held by each declared plan environment.
 - engine action-pin freshness in the consumer's workflow files.
 - `pull_request_target` triggers in the consumer's workflow files.
-- the consumer plan/summary wiring (path, workflow name, `workflow_run` wrapper).
 - approvers team resolvability in the repo's org.
 - GitHub App installation permission drift.
 """
@@ -57,11 +56,6 @@ bm = _load("build-matrix")
 _gh_json = bm.gh_json
 sc = _load("summary-comment")
 _md_escape = sc._md_escape
-wi = _load("wiring")
-# One implementation, aliased rather than duplicated: the `pull_request_target`
-# probe and the wiring checks slice the same `on:` block, and two copies would
-# drift on exactly the edge cases that made this matcher wrong twice.
-_on_block = wi._on_block
 
 GATE = "shipmate / gate"
 
@@ -283,8 +277,10 @@ def _env_shape_findings(name, env, data, is_apply):
             (
                 WARNING,
                 f"GitHub Environment `{name}` is a plan environment but has a "
-                "deployment branch policy — plans from feature branches will be "
-                "refused; plan environments must allow all branches.",
+                "deployment branch policy — plan jobs run at the pull request's "
+                "base ref, so a policy that does not name every branch pull "
+                "requests target refuses those plan cells; plan environments "
+                "must allow all branches.",
             )
         )
     if is_apply and not approval:
@@ -635,45 +631,35 @@ def _contents_ref(ctx):
     return f"?ref={sha}" if _SHA40.fullmatch(sha) else None
 
 
-def _workflow_entries(base):
-    """([(name, is_file)], readable): the `.yml`/`.yaml` entries of the workflow
-    directory listing, each tagged with whether it is a regular file.
+def _workflow_names(base):
+    """([names], readable): the `.yml`/`.yaml` regular files of the workflow
+    directory listing.
 
-    The three probes reading this want OPPOSITE things from a non-file entry (a
-    directory named `*.yml`): dropping it hands the wiring probe a BROKEN "no
-    plan workflow", keeping it untagged aborts the pin and fork-trigger scans
-    for the whole directory. So carry both facts and let each probe pick."""
+    A non-file entry (a directory named `*.yml`) is skipped rather than
+    degraded: the probes reading this scan file CONTENT and cannot read one, and
+    treating it as an unreadable file would trip their stop-at-the-first-failure
+    branch and silently drop every finding in the rest of the directory."""
     try:
         listing = _gh_json(base)
     except (Exception, SystemExit):  # noqa: BLE001 - degrade, see PIN_UNREADABLE
         return [], False
     return [
-        (e["name"], e.get("type") == "file")
+        e["name"]
         for e in listing
-        if e["name"].endswith((".yml", ".yaml"))
+        if e["name"].endswith((".yml", ".yaml")) and e.get("type") == "file"
     ], True
 
 
-def _workflow_names(base):
-    """([names], readable) for the probes that scan file CONTENT — the pin and
-    fork-trigger probes. Non-file entries are skipped rather than degraded:
-    neither probe can read one, and treating it as an unreadable file would trip
-    their stop-at-the-first-failure branch and silently drop every finding in
-    the rest of the directory."""
-    entries, readable = _workflow_entries(base)
-    return [name for name, is_file in entries if is_file], readable
-
-
-def _workflow_bytes(path):
-    """One workflow file's raw bytes, or None when it cannot be read.
-
-    Bytes, not text: the wiring probe compares a workflow name whose whole
-    failure mode is a lossy re-encoding, and `wiring.decode` owns the single
-    decode policy both it and `build-matrix` read through.
+def _workflow_text(path):
+    """One workflow file's decoded text, or None when it cannot be read.
 
     Anything that is not a base64 blob is UNREADABLE, not empty: a >1 MB file
     answers with `encoding: "none"` and empty `content`, which would otherwise
-    decode to a readable EMPTY `plan.yml` and be reported BROKEN.
+    decode to a readable EMPTY workflow the probes read as clean.
+
+    `errors="replace"` keeps a mis-encoded byte from raising, and one leading
+    U+FEFF is dropped: a BOM sits in front of the column-0 `on:` key, which
+    `_on_block` would otherwise read as no top-level trigger block at all.
     """
     try:
         blob = _gh_json(path)
@@ -681,13 +667,8 @@ def _workflow_bytes(path):
         return None
     if not isinstance(blob, dict) or blob.get("encoding") != "base64":
         return None
-    return base64.b64decode(blob.get("content", ""))
-
-
-def _workflow_text(path):
-    """One workflow file's decoded text, or None when it cannot be read."""
-    blob = _workflow_bytes(path)
-    return None if blob is None else wi.decode(blob)
+    text = base64.b64decode(blob.get("content", "")).decode("utf-8", "replace")
+    return text.removeprefix("\ufeff")
 
 
 def _scan_workflow_texts(ctx, ref, per_file, unreadable):
@@ -847,6 +828,43 @@ FORK_TRIGGER_NO_COMMIT = (
 )
 
 
+#: `on` at column 0 only, optionally quoted: a workflow's `on:` is a top-level
+#: key, so an indented one belongs to something else. `_on_block` matches rather
+#: than searches, and that is the whole of the anchoring — unanchored,
+#: `    python-version: 3.12` matches (`versi` + `on:`) and silently retargets
+#: the block this probe reads.
+_ON_KEY = re.compile(r"""["']?on["']?[ \t]*:(?P<rest>.*)$""")
+
+
+def _strip_comment(line):
+    """`line` up to its YAML comment marker: a `#` at the start of the line or
+    preceded by whitespace. A `#` inside a token (`branch#1`) is not a comment."""
+    for i, ch in enumerate(line):
+        if ch == "#" and (i == 0 or line[i - 1] in " \t"):
+            return line[:i]
+    return line
+
+
+def _on_block(text):
+    """(inline remainder of the `on:` line, its following lines) with comments
+    stripped, or (None, []) for a file with no top-level `on:`. The block runs to
+    the first line starting at column 0; blank and comment-only lines do not end
+    it."""
+    lines = text.splitlines()
+    for i, line in enumerate(lines):
+        m = _ON_KEY.match(line)
+        if not m:
+            continue
+        block = []
+        for nxt in lines[i + 1 :]:
+            stripped = _strip_comment(nxt)
+            if stripped.strip() and not stripped[0].isspace():
+                break
+            block.append(stripped)
+        return _strip_comment(m.group("rest")), block
+    return None, []
+
+
 def _event_lines(inline, block):
     """The lines of an `on:` value that can name an event: the inline remainder,
     plus — for a block mapping or sequence — only its shallowest children.
@@ -893,6 +911,12 @@ def _fork_trigger_warnings(ctx):
         return [FORK_TRIGGER_NO_COMMIT]
 
     def finding(text, name):
+        # The engine's own plan workflow is on this trigger by design: the job
+        # holding the App key is the engine's reusable summary workflow, which
+        # checks out nothing. Exact name — a `custom-plan.yml` is a consumer
+        # file and gets the warning.
+        if name == "plan.yml":
+            return []
         if not declares_pull_request_target(text):
             return []
         return [
@@ -901,55 +925,17 @@ def _fork_trigger_warnings(ctx):
                 f"`{name}` triggers on `pull_request_target` — that trigger runs at "
                 "the base ref with this repository's secrets, and on a pull request "
                 "into the default branch that is the ref `shipmate-engine`'s branch "
-                "policy trusts, while acting on content the pull request author "
-                "controls, so a fork can reach them. Remove it, or move the "
-                "privileged work to a `workflow_run` job (see docs/hardening.md).",
+                "policy trusts, so a fork can reach them. shipmate's own `plan.yml` "
+                "uses this trigger safely because the job holding the App key runs "
+                "no repository content at all. If this workflow checks out or acts "
+                "on the pull request's own code in a job binding a CREDENTIALED "
+                "environment — one holding the App key or cloud credentials — it "
+                "does not have that property. Remove the trigger or split those "
+                "two things apart (see docs/hardening.md).",
             )
         ]
 
     return _scan_workflow_texts(ctx, ref, finding, FORK_TRIGGER_UNREADABLE)
-
-
-WIRING_NO_COMMIT = (
-    NOTICE,
-    "the plan/summary wiring was not verified — the commit under examination "
-    "could not be determined.",
-)
-
-
-def _wiring_warnings(ctx):
-    """The three conditions the `shipmate / gate` status silently depends on:
-    the plan workflow's path, its exact name, and a `workflow_run` wrapper
-    calling the engine's reusable summary workflow (`scripts/wiring`).
-
-    The on-demand half of `actions/build-matrix`' identical in-run checks.
-    Reachable even when the wiring is broken (comment-ops runs on
-    `issue_comment`, not downstream of summary), and it covers the case `detect`
-    structurally cannot: a plan workflow deleted outright never runs `detect`.
-
-    Deliberately no `engine_repo` precondition, unlike PIN_NO_ENGINE: two of the
-    three checks never look at it, so refusing to report is a strictly worse
-    all-clear than reporting them.
-    """
-    ref = _contents_ref(ctx)
-    if ref is None:
-        return [WIRING_NO_COMMIT]
-    base = f"repos/{ctx['repo']}/contents/{_WORKFLOWS_DIR}"
-    entries, readable = _workflow_entries(f"{base}{ref}")
-    # None, not {}: an unreadable listing is "not verified", while an empty
-    # directory really is a missing plan workflow. A non-file entry is carried
-    # as unreadable rather than skipped, so a directory named `plan.yml` reads
-    # as "could not read it" and not as "there is no plan workflow".
-    files = None
-    if readable:
-        files = {
-            name: _workflow_bytes(f"{base}/{name}{ref}") if is_file else None
-            for name, is_file in entries
-        }
-    return [
-        (WARNING if state == wi.BROKEN else NOTICE, message)
-        for state, message in wi.findings(files, ctx["engine_repo"])
-    ]
 
 
 def _one_line(s, limit=200):
@@ -1009,7 +995,6 @@ PROBES = (
     _plan_env_secret_warnings,
     _pin_warnings,
     _fork_trigger_warnings,
-    _wiring_warnings,
     _team_warnings,
     _app_permission_warnings,
 )
@@ -1209,13 +1194,7 @@ def harvest_sections(annotations):
 
     Drops notices, and drops the plan path's own doctor annotations: the live
     probes in this same report re-state those findings, so keeping both
-    double-reports every settings problem. `wi.WIRING_TITLE` goes too, but at
-    WARNING level ONLY.
-
-    Its FAILURE-level annotation is KEPT. `detect` reads the merge commit and
-    this probe the pull request head, so a break living only on the base branch
-    reds `detect` while the live probe reads clean — dropping it would render an
-    all-clear over a red, gate-blocking run with the reason stated nowhere.
+    double-reports every settings problem. Every other title is kept.
     """
     by_check = {}
     for a in annotations:
@@ -1223,8 +1202,6 @@ def harvest_sections(annotations):
         if level not in HARVEST_LEVELS:
             continue
         if a.get("title") == DOCTOR_TITLE:
-            continue
-        if a.get("title") == wi.WIRING_TITLE and level == "warning":
             continue
         by_check.setdefault(a.get("check_name") or "(unnamed check)", []).append(a)
     return by_check
