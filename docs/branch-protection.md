@@ -13,9 +13,13 @@ is enforced entirely by GitHub branch protection requiring one aggregate check:
   `shipmate / gate` roll-up means the required-checks list never needs
   editing when a stack or environment is added or removed.
 - **Require branches to be up to date before merging** (strict). Plans run
-  against the pull request's **branch tip**, not against a merge commit, so this
-  closes the plan-against-stale-base gap: a PR must be current with the base
-  before it can merge.
+  against the pull request's **branch tip**, not against a merge commit, so a
+  plan can describe a base the branch has not seen. Strict protection makes a
+  pull request current with the base **before it can merge** — it gates merging
+  and nothing else. It does not gate the pre-merge apply path: a `shipmate apply
+  <env>` run from a stale branch applies the plan as reviewed, so a stack that
+  was updated and merged to main since this branch forked is rolled back in real
+  infrastructure. **Update the branch before running a pre-merge apply.**
 
 `shipmate / gate` is created by `actions/summary` on the PR head commit and
 resolves to:

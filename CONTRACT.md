@@ -574,6 +574,14 @@ gate, the sticky comments, drift issues) is created by a job bound to the fixed
 boundary), each running at a ref that satisfies its default-branch-only
 policy for a different reason.
 
+Under `pull_request_target` a plan run's `head_sha` and `head_branch` are the
+**pull request's** head commit and branch, not the base branch's — every
+plan-run lookup in the engine (`?head_sha=<pr head>`) depends on that. What *is*
+base-branch under this trigger is the checkout: `GITHUB_SHA` and `GITHUB_REF`
+name the base, which is why the `detect` and `plan` jobs must pass
+`ref: ${{ github.event.pull_request.head.sha }}` explicitly. The two are
+routinely confused; they are opposite sides of the same trigger.
+
 **Requirement: no job in `plan.yml` other than the `summary` call may reference
 a `shipmate-engine` secret.** Under `pull_request_target` every job in this file
 runs at a ref the environment's policy admits, and the `plan` job's
@@ -591,7 +599,11 @@ The three jobs:
   **base** by default, so both jobs must name
   `ref: ${{ github.event.pull_request.head.sha }}` explicitly; without it they
   plan the base branch and report a clean plan for a pull request they never
-  read. `actions/build-matrix` fails `detect`
+  read. `actions/build-matrix` refuses that: on `pull_request_target` it
+  compares the event's head SHA against the commit it is running on, and it
+  also refuses a checkout with no `.github/workflows/plan.yml` — that path is
+  matched literally by the reviewed-plan lookups and a renamed plan workflow
+  wedges every later apply. `actions/build-matrix` fails `detect`
   outright when the event's head repository is not the running repository:
   **fork pull requests are not planned**, with no input to permit them. A
   fork's plan would execute the pull request's own Terramate/OpenTofu code with
