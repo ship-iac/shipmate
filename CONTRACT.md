@@ -572,7 +572,16 @@ checkout at all. Every App-authored surface listed above (apply checks, the
 gate, the sticky comments, drift issues) is created by a job bound to the fixed
 `shipmate-engine` GitHub Environment (`docs/github-app.md` §Key-exposure
 boundary), each running at a ref that satisfies its default-branch-only
-policy for a different reason:
+policy for a different reason.
+
+**Requirement: no job in `plan.yml` other than the `summary` call may reference
+a `shipmate-engine` secret.** Under `pull_request_target` every job in this file
+runs at a ref the environment's policy admits, and the `plan` job's
+`environment:` is chosen by branch-authored `env/*` tags — so the base-owned
+workflow file naming no such secret outside the callee is what keeps the key out
+of branch reach. `docs/github-app.md` §Key-exposure boundary has the reasoning.
+
+The three jobs:
 
 - **`plan.yml`**'s `detect` and `plan` jobs (consumer, `pull_request_target`) —
   they upload plan artifacts and cell summaries; they author nothing and mint no
@@ -586,8 +595,10 @@ policy for a different reason:
   outright when the event's head repository is not the running repository:
   **fork pull requests are not planned**, with no input to permit them. A
   fork's plan would execute the pull request's own Terramate/OpenTofu code with
-  the plan environment's variables (variables are not secrets and are not
-  withheld from a fork), and no `shipmate / gate` is ever written for a fork
+  everything the plan environment holds — `pull_request_target` withholds
+  nothing from a fork's run, its *secrets* included, so this refusal plus
+  `plan`'s `needs: detect` is the only layer keeping a fork out
+  (`docs/hardening.md` §16). No `shipmate / gate` is ever written for a fork
   head, so the refusal is loud rather than an empty matrix. The guard keys on
   the event being a pull-request event (`pull_request` or
   `pull_request_target`); the drift path (`all-stacks`, `schedule`)
@@ -623,7 +634,8 @@ consumer workflow YAML for this wiring. (Doctor still reads those files for two
 unrelated probes — stale engine pins and `pull_request_target` triggers — and
 neither can observe whether the gate will be written.)
 
-The **file path is still load-bearing**, and nothing warns when it moves:
+The **file path is still load-bearing**, and nothing diagnoses a rename as the
+cause:
 `scripts/apply-detect`'s provenance gate refuses a dispatched apply whose plan
 run did not come from a `plan.yml`, `scripts/deploy-detect` resolves the
 post-merge plan run through
@@ -631,8 +643,10 @@ post-merge plan run through
 endpoint twice — for the reviewed-plan lookup behind `shipmate apply` and for
 doctor's cell-summary fetch. Doctor's `pull_request_target` probe exempts the
 plan workflow by exact name. Rename the file and applies are refused as stale,
-doctor silently skips its environment probes, and a post-merge deploy finds no
-plan run.
+doctor skips its environment probes, a post-merge deploy finds no plan run, and
+the renamed file starts drawing doctor's own `pull_request_target` warning. Each
+symptom surfaces on its own — comment-ops annotates the skipped probes — but
+none of them names the rename.
 
 A consumer that omits the `summary`
 job gets no `shipmate / gate` status at all, so the pull request cannot merge —

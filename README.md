@@ -47,8 +47,10 @@ That is why the key is not a repository secret. It lives as an **environment**
 secret on `shipmate-engine`, whose deployment branch policy names only the
 default branch, and every step that mints an App token runs at the
 default-branch ref (`pull_request_target`, `issue_comment`,
-`workflow_dispatch`, `push`). A branch-authored workflow naming that
-environment is denied the deployment and gets nothing. `pull_request_target` is
+`workflow_dispatch`, `push`). A branch-authored *workflow* naming that
+environment is denied the deployment and gets nothing — the plan path's narrower
+residual, where the workflow file is the base copy, is in `docs/github-app.md`
+§Key-exposure boundary. `pull_request_target` is
 the exception that makes the plan path work: it evaluates at the base ref, so
 the one job that names the key runs no repository content and checks nothing
 out. Environments are the only
