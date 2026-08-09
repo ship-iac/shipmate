@@ -1810,6 +1810,30 @@ def test_quoted_event_name_comparison_is_silent(monkeypatch):
     assert doctor._fork_trigger_warnings(_ctx()) == []
 
 
+def test_the_shipmate_plan_workflow_is_not_warned_about(monkeypatch):
+    # plan.yml declaring pull_request_target IS the shape the engine ships: the
+    # job that holds the App key is the engine's reusable summary workflow,
+    # which checks out nothing. Warning about it would train readers to ignore
+    # the finding on the labeler workflow that actually is dangerous.
+    responses = _fork_responses({"plan.yml": "on:\n  pull_request_target:\n    types: [opened]\n"})
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    assert doctor._fork_trigger_warnings(_ctx()) == []
+
+
+def test_another_workflow_is_still_warned_about_alongside_plan_yml(monkeypatch):
+    # The exemption is by exact filename and nothing else.
+    responses = _fork_responses(
+        {
+            "plan.yml": "on:\n  pull_request_target:\n    types: [opened]\n",
+            "labeler.yml": "on:\n  pull_request_target:\n    types: [opened]\n",
+        }
+    )
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    out = doctor._fork_trigger_warnings(_ctx())
+    assert len(out) == 1
+    assert "labeler.yml" in out[0][1]
+
+
 def test_every_offending_workflow_is_named(monkeypatch):
     responses = _fork_responses(
         {
@@ -2120,9 +2144,9 @@ def test_a_non_file_workflow_entry_does_not_blind_the_fork_trigger_probe(monkeyp
     responses = {
         f"{_WF_DIR}{_REF}": [
             {"name": "sub.yml", "type": "dir"},
-            {"name": "plan.yml", "type": "file"},
+            {"name": "triage.yml", "type": "file"},
         ],
-        f"{_WF_DIR}/plan.yml{_REF}": _wf_file("on:\n  pull_request_target:\n"),
+        f"{_WF_DIR}/triage.yml{_REF}": _wf_file("on:\n  pull_request_target:\n"),
     }
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
     out = doctor._fork_trigger_warnings(_ctx())

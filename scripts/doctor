@@ -909,6 +909,12 @@ def _fork_trigger_warnings(ctx):
         return [FORK_TRIGGER_NO_COMMIT]
 
     def finding(text, name):
+        # The engine's own plan workflow is on this trigger by design: the job
+        # holding the App key is the engine's reusable summary workflow, which
+        # checks out nothing. Exact name — a `custom-plan.yml` is a consumer
+        # file and gets the warning.
+        if name == "plan.yml":
+            return []
         if not declares_pull_request_target(text):
             return []
         return [
@@ -917,9 +923,12 @@ def _fork_trigger_warnings(ctx):
                 f"`{name}` triggers on `pull_request_target` — that trigger runs at "
                 "the base ref with this repository's secrets, and on a pull request "
                 "into the default branch that is the ref `shipmate-engine`'s branch "
-                "policy trusts, while acting on content the pull request author "
-                "controls, so a fork can reach them. Remove it, or move the "
-                "privileged work to a `workflow_run` job (see docs/hardening.md).",
+                "policy trusts, so a fork can reach them. shipmate's own `plan.yml` "
+                "uses this trigger safely because the job holding the App key runs "
+                "no repository content at all. If this workflow checks out or acts "
+                "on the pull request's own code in a job that names an environment, "
+                "it does not have that property — remove the trigger or split those "
+                "two things apart (see docs/hardening.md).",
             )
         ]
 
