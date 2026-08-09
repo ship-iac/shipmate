@@ -26,4 +26,6 @@ Actions themselves should be reported to those projects.
 
 - Pin every shipmate action **by full commit SHA** (see `CONTRACT.md`) so
   upstream changes cannot reach your pipelines unreviewed.
-- shipmate is in early development; treat it accordingly until a tagged release.
+- shipmate is pre-1.0: action inputs, check names and the comment grammar may
+  change between releases. Pin by commit SHA and review each bump rather than
+  taking it unread.
