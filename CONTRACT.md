@@ -574,6 +574,14 @@ gate, the sticky comments, drift issues) is created by a job bound to the fixed
 boundary), each running at a ref that satisfies its default-branch-only
 policy for a different reason.
 
+**The `summary` job must grant `permissions: contents: read`.** A called
+workflow's permissions are capped by the calling job's, and the callee requests
+that scope — so a caller that grants less kills the run at **startup**: no job,
+no log, no annotation, and no `shipmate / gate`. Fail-closed, since the pull
+request cannot merge without the gate, but there is nothing on the run page to
+say why, and the plan jobs never start either. Copy the reference `summary` job
+whole rather than trimming its `permissions:` block.
+
 Under `pull_request_target` a plan run's `head_sha` and `head_branch` are the
 **pull request's** head commit and branch, not the base branch's — every
 plan-run lookup in the engine (`?head_sha=<pr head>`) depends on that. What *is*

@@ -35,7 +35,10 @@ grammar are declared unstable in `README.md`.
   `deploy-detect`'s post-merge lookup, comment-ops' reviewed-plan lookup and
   doctor's `pull_request_target` exemption all address it as `plan.yml`. The
   `repo-example-*` samples carry the new shape from the release that ships this
-  change onward; `CONTRACT.md` §Post-plan topology is the written form.
+  change onward; `CONTRACT.md` §Post-plan topology is the written form. The
+  `summary` job must also grant `permissions: contents: read`: a callee's
+  permissions are capped by the calling job's, and granting less kills the whole
+  run at startup with no job, no log and no annotation to explain it.
 - **Plans now run against the branch tip, not the merge commit.** The old
   `pull_request` trigger checked out `refs/pull/<n>/merge`; the explicit
   `head.sha` checkout does not produce a merge ref. A pull request behind its
