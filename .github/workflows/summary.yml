@@ -39,7 +39,12 @@ jobs:
       contents: read
     steps:
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        if: inputs.planned-cells != '0'
+        # Unconditional: skipping it when zero cells were planned would make
+        # gate-state's "more cells than planned" branch structurally unreachable,
+        # so a run reporting zero planned cells while cell summaries exist would
+        # green the gate instead of holding. A `pattern:` that matches nothing
+        # is a no-op for this action, not a failure — only `name:` errors on a
+        # miss — so there is nothing to guard against.
         # A failed download must reach gate-state as a cell-summary shortfall it
         # reports on the gate, not as a dead job that writes no gate at all.
         continue-on-error: true

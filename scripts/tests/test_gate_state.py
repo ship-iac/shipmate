@@ -90,9 +90,14 @@ def test_a_non_integer_planned_count_holds(planned):
 
 
 def test_fewer_cells_than_planned_holds():
-    state, _, mode = d(planned_cells="3", cell_count=2)
+    state, desc, mode = d(planned_cells="3", cell_count=2)
     assert state == "failure"
     assert mode == "hold"
+    # The recovery has to survive the 140-char truncation, and it must not be
+    # "re-plan": plan-cell's uploads are not `overwrite:`, so re-running a plan
+    # job that already published its artifacts 409s.
+    assert "re-run this summary job" in desc[:140]
+    assert "re-plan" not in desc
 
 
 def test_more_cells_than_planned_holds():
