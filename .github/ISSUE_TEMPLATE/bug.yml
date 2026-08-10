@@ -1,0 +1,90 @@
+name: Bug report
+description: Something in the engine behaves differently than documented
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Do not paste plan output or the values of environment variables.**
+        Plan output carries your infrastructure detail, and `TF_VAR_*` values
+        are inputs to real resources. Describe what the plan did instead, and
+        refer to variables by name. The same goes for the `shipmate doctor`
+        report below: it is an inventory of what is *not* configured, and can
+        name your environments, a plan environment's secret names and the
+        approvers team slug — redact those, and treat the list of missing
+        controls as sensitive in its own right.
+
+        For a security vulnerability, do not open an issue at all — use the
+        repository's **Security** tab (see [`SECURITY.md`](https://github.com/ship-iac/shipmate/blob/main/SECURITY.md)).
+
+  - type: input
+    id: engine-pin
+    attributes:
+      label: Engine pin
+      description: The full commit SHA your workflows pin shipmate to.
+      placeholder: ship-iac/shipmate/actions/plan-cell@<sha>
+    validations:
+      required: true
+
+  - type: dropdown
+    id: flavor
+    attributes:
+      label: Repo layout
+      description: How the IaC in your repository is laid out.
+      options:
+        - stacks
+        - stacks (flattened to repo root)
+        - folders
+        - workspaces
+        - other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: workflow
+    attributes:
+      label: Which workflow
+      options:
+        - plan
+        - apply
+        - apply-all
+        - deploy
+        - drift
+        - comment-ops
+    validations:
+      required: true
+
+  - type: textarea
+    id: doctor
+    attributes:
+      label: shipmate doctor report
+      description: |
+        `shipmate doctor` is a pull request comment command. It runs a set of
+        live probes over the repository's settings — gate ruleset, review
+        requirements, GitHub Environments and their protection shape, plan
+        environment secrets, engine pin freshness, the approvers team, the
+        shipmate App installation — and posts a consolidated report as a sticky
+        comment. It reports settings problems, not plan or apply failures, and
+        never blocks. See [`docs/troubleshooting.md`](https://github.com/ship-iac/shipmate/blob/main/docs/troubleshooting.md#shipmate-doctor).
+
+        If you have comment-ops working, run `shipmate doctor` and paste the
+        report here, redacted as described above.
+      render: markdown
+    validations:
+      required: false
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected
+      description: What you expected to happen, and where that expectation comes from.
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual
+      description: What happened instead. Link the workflow run if it is public.
+    validations:
+      required: true

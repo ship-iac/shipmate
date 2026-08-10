@@ -70,8 +70,8 @@ name. See "Contributors without push access" for the trade-off that follows.
 | 3 | Required check `shipmate / gate` with `integration_id`, strict | Branch ruleset | A *third party* posting `shipmate / gate` under another identity |
 | 4 | ≥1 approving review, code-owner review, dismiss stale, require approval of most recent push | Branch ruleset | Self-merge; the code-owner review is **unforgeable** at merge time (an App cannot be a `CODEOWNERS` entry) *provided a `CODEOWNERS` entry actually covers the IaC paths* — the rule is a no-op for changed files with no owner — and the approval *count* never is |
 | 5 | Block force-push and deletion on the default branch | Branch ruleset | History rewrite after apply |
-| 6 | Required reviewers + "Prevent self-review" on **every** `<env>-apply` that holds a secret | Environment | **Unforgeable** at apply time — the last line of defense once a merge has happened, and what makes row 7 hold |
-| 7 | Cloud credentials scoped to `<env>-apply` — the OIDC path's `AWS_ROLE_ARN`/`AWS_REGION` as environment **variables**, any residual static key as an environment **secret** — never repo- or org-level | Environment | Repo-wide exposure (bounded *only* in combination with row 6; and for a variable the scoping is advisory — see §7–9) |
+| 6 | Required reviewers + "Prevent self-review" on the `<env>-apply` environments you decide to gate (§6 states the trade-off; the choice is yours) | Environment | **Unforgeable** at apply time — the last line of defense once a merge has happened, on each environment you apply it to |
+| 7 | Cloud credentials scoped to `<env>-apply` — the OIDC path's `AWS_ROLE_ARN`/`AWS_REGION` as environment **variables**, any residual static key as an environment **secret** — never repo- or org-level | Environment | Repo-wide exposure (for a secret, bounded *only* on an environment that also carries row 6; and for a variable the scoping is advisory — see §7–9) |
 | 8 | Plan environments hold read-only, blast-radius-free credentials, no approval rules, no branch policy — ideally no secret at all (`shipmate doctor` reports what it finds) | Environment | Plan-time code execution |
 | 9 | OIDC with an `environment:` claim condition instead of static keys | Cloud IdP | Long-lived credential theft — and, since the engine's apply jobs mint OIDC tokens unconditionally, this claim condition is the **only** bound on which role an apply job can assume (see §7–9) |
 | 10 | Default `GITHUB_TOKEN` = read-only; Actions may not approve PRs | Settings → Actions | Token privilege creep |
@@ -82,7 +82,7 @@ name. See "Contributors without push access" for the trade-off that follows.
 | 15 | Shorten Actions retention | Settings → Actions | `shipmate doctor` report disclosure |
 | 16 | `shipmate-engine` Environment exists, deployment branch policy restricted to the default branch | Environment | Repository-secret App key readable by any branch |
 | 17 | Deployment branch policy restricted to the default branch on every `<env>-apply` | Environment | Branch-authored workflow claiming apply-environment secrets directly |
-| 18 | `AWS_ROLE_ARN` + `AWS_REGION` as variables on **each** `<env>-apply` you want cloud access from — set nowhere else | Environment variables | Opting in per environment; set at repo/org level they apply to every apply environment at once (§7–9) |
+| 18 | `AWS_ROLE_ARN` + `AWS_REGION` as variables on **each** `<env>-apply` you want cloud access from — never at repository or organization level | Environment variables | Opting in per environment; set at repo/org level they apply to every apply environment at once (§7–9) |
 | 19 | `id-token: write` on the call-site job of every consumer wrapper that calls the engine's apply-path workflows | Consumer workflow YAML | Nothing — it is **required**: GitHub caps a called workflow's permissions at each `uses:` boundary, so without it every apply run fails at workflow-resolution time, cloud or not |
 
 ## 1. Write access
@@ -212,21 +212,34 @@ an App cannot supply because it cannot be listed in `CODEOWNERS`. They are
 unforgeable at different points, which is why both matter: code-owner review
 guards the **merge**, the `<env>-apply` reviewer guards the **apply**.
 
-On every `<env>-apply` environment that holds a secret or touches real
-infrastructure — **including dev and staging**:
+On an `<env>-apply` environment you decide to gate:
 
 - add required reviewers (a team, not one person),
 - tick **Prevent self-review**.
 
-Do not scope this to production. An environment with no protection rules hands
-its secrets to any job that names it, from any branch, with no approval and no
-deployment — so an unprotected `dev-eu-apply` is a repository secret with extra
-steps (this is what control 7 leans on).
+**Which environments to gate is a policy decision, and it is yours.** The
+maximally-hardened position is a reviewer on every `<env>-apply` that holds a
+secret or touches real infrastructure, dev and staging included. Many teams
+accept unreviewed applies on low-blast-radius tiers to keep them self-service.
+shipmate does not choose for you; what it can do is state what an ungated tier
+costs, so the choice is made with the price visible:
 
-For production, also list it in `global.shipmate.explicit_envs` so a bare
-`shipmate apply` skips it and it is reached only by the targeted
-`shipmate apply <env>`. Use the **bare environment name** there — `prod`, not
-`prod-apply`; the value is matched against the environment name carried by the
+- The apply to that environment is gated by nothing a holder of the App private
+  key cannot produce. Every other control on this page is either upstream of the
+  merge or forgeable with that key; this row is the only one that is not.
+- Control 7's scoping buys nothing there. An environment with no protection
+  rules at all hands its secrets to any job that names it, from any branch, with
+  no approval and no deployment — an unprotected `dev-eu-apply` is a repository
+  secret with extra steps. Row 17's deployment branch policy narrows that to
+  jobs running at the default branch, which is a real bound and not a reviewer
+  gate: no human sees the deployment before its secrets are released.
+
+Pair every environment you gate with `global.shipmate.explicit_envs`, whichever
+ones those are: list it there so a bare `shipmate apply` skips it and it is
+reached only by the targeted `shipmate apply <env>`. Left off, a bare
+`shipmate apply` fans out into that environment and stalls there waiting for the
+reviewer nobody expected to be asked. Use the **bare environment name** —
+`staging`, not `staging-apply`; the value is matched against the environment name carried by the
 apply checks (see CONTRACT.md), and a `-apply`-suffixed entry validates
 silently and skips nothing.
 
@@ -251,16 +264,20 @@ control.
 
 ## 7–9. Credentials
 
-> **The credential path is AWS OIDC, opt-in per environment, and apply-side
-> only so far.** Every wave job in `apply-env-level.yml` requests
+> **The credential path is AWS OIDC, opt-in per environment, and engine-wired
+> on the apply side only.** Every wave job in `apply-env-level.yml` requests
 > `id-token: write` and runs a credentials step gated on `vars.AWS_ROLE_ARN`; a
 > consumer opts in by setting `AWS_ROLE_ARN` and `AWS_REGION` as variables on
 > that job's `<env>-apply` environment. With them unset the step is skipped and
 > no cloud credential exists in the job, which is why the sample repos (null
 > resources, local state) still run credential-free. With them set, the assumed
 > role's session env vars do reach `tofu` — they are `AWS_*`, so the fingerprint
-> excludes them (CONTRACT.md §Apply-match fingerprint). The plan path is not
-> wired for this yet.
+> excludes them (CONTRACT.md §Apply-match fingerprint). On the plan path the
+> engine wires no credentials step because it owns no plan workflow: `plan.yml`
+> is the consumer's, so the consumer adds `configure-aws-credentials` to it and
+> the plan `<env>` environment supplies a **read-only** role
+> (`docs/aws.md` §Where the credentials step goes). OIDC is available on both
+> paths; only the wiring differs in whose file it lives in.
 >
 > No job interpolates a consumer *secret*: do not move a long-lived access key
 > into an environment secret expecting the engine to pick it up — it will not,
@@ -280,13 +297,17 @@ control.
   worth nothing without control 6, so treat the two as one setting.
 
   **For the OIDC path the scoping is advisory, and this is worth being blunt
-  about.** `AWS_ROLE_ARN` and `AWS_REGION` are `vars`, and `vars` resolve
-  organization → repository → environment. A repository- or organization-level
-  `AWS_ROLE_ARN` is therefore picked up identically by every wave job in every
-  apply environment, with no warning and nothing in the engine to guard it —
+  about.** `AWS_ROLE_ARN` and `AWS_REGION` are `vars`, and for `vars` the most
+  specific wins: environment overrides repository overrides organization. A
+  repository- or organization-level `AWS_ROLE_ARN` is therefore picked up
+  identically by every wave job in every apply environment that does not set its
+  own, with no warning and nothing in the engine to guard it —
   "opt in per environment" (CONTRACT.md §AWS OIDC) is where you *should* set it,
-  not something GitHub or shipmate enforces. Set it on each `<env>-apply` and
-  nowhere else, and understand that the enforcing control is not the variable's
+  not something GitHub or shipmate enforces. Set it on each `<env>-apply` — and,
+  if your `plan.yml` carries its own credentials step, on each `<env>` plan
+  environment with a **read-only** plan role (`docs/aws.md` §Environment
+  variables) — never at repository or organization level, and understand that
+  the enforcing control is not the variable's
   location at all: it is the **role's trust policy**, whose `environment:` claim
   condition is the only thing that decides which environments can actually
   assume it.
@@ -296,21 +317,22 @@ control.
   whose pull request targets a branch the policy does not name (plan jobs run at
   the pull request's *base* ref). Either leaves
   the gate red until it is removed (`shipmate doctor` warns; see
-  `docs/branch-protection.md`). That constraint is not negotiable, so treat a
+  `docs/troubleshooting.md`). That constraint is not negotiable, so treat a
   plan environment as readable by anyone with push access: a plan cell runs
   `terramate`/`tofu` over branch code, which is arbitrary code execution with
   whatever that environment holds. Read-only, blast-radius-free credentials
   only. Assume `SHIPMATE_PLAN_PASSPHRASE` is readable by the same people for the
   same reason.
   The strongest version of this control is a plan environment with **no secret
-  in it at all**. Two ways to get there, in order of preference: read the
-  provider's state through a path that needs no long-lived credential of its
-  own, and — when the engine's credential path exists — a **read-only** OIDC
-  role whose trust policy is conditioned on the plan environment's claim
-  (`repo:<owner>/<repo>:environment:<env>`, the plan environment, not
-  `<env>-apply`), so a token minted in a plan cell can never assume the apply
-  role. Until then the honest statement is the one above: whatever a plan
-  environment holds is readable by anyone who can push a branch.
+  in it at all**, and it is reachable today: put a **read-only** OIDC role's
+  ARN in the plan environment as a *variable*, assumed by a
+  `configure-aws-credentials` step in your own `plan.yml` (`docs/aws.md`
+  §Where the credentials step goes), with the role's trust policy conditioned on
+  the plan environment's claim (`repo:<owner>/<repo>:environment:<env>`, the
+  plan environment, not `<env>-apply`), so a token minted in a plan cell can
+  never assume the apply role. That removes the long-lived key; it does not
+  remove the statement above — whatever the plan environment names is reachable
+  by anyone who can push a branch, which is why the role must be read-only.
 
   `shipmate doctor` notes the secrets a plan environment holds — the count is
   exact, and the names it prints (names only, since no GitHub API returns a
@@ -388,7 +410,7 @@ is not:
   repository-list edit per repository plus a single org-secret write for the
   alternative, and rotation as N `gh secret set --env` writes rather than that
   one org-secret write.
-  `docs/github-app.md` §5–7 carries the loops.
+  `docs/github-app.md` §7 and §Appendix carry the loops.
 - The only way to remove it is to stop putting the key in the repositories,
   which requires something outside GitHub Actions to hold it. That is a
   different architecture, not a setting.
@@ -404,7 +426,7 @@ repository would need a secret in order to avoid having a secret.
 The `shipmate doctor` report is written to the job summary as well as to a
 comment, and a job summary cannot be edited or redacted. Shorten the Actions
 retention window if that inventory is sensitive
-(`docs/branch-protection.md` §"Who can ask for the report").
+(`docs/troubleshooting.md` §"Who can ask for the report").
 
 ## 16. The `shipmate-engine` environment
 

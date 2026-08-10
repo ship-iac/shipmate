@@ -408,7 +408,7 @@ def test_plan_env_with_reviewers_warned(monkeypatch):
 
 
 def test_plan_env_wait_timer_is_not_diagnosed_as_an_approval_hang(monkeypatch):
-    # docs/branch-protection.md deliberately lumps wait timers in with
+    # docs/troubleshooting.md deliberately lumps wait timers in with
     # reviewers (both stop a plan job from starting when it should), so the
     # finding must fire -- but its wording must fit the rule it names.
     responses = _protection(
@@ -2109,7 +2109,7 @@ def test_probe_count_is_stated_correctly_in_the_docs():
     - `scripts/doctor`'s module docstring: (1) "the <n> live probes" and (2) the
       `Probes:` bullet list below it (one bullet per probe);
     - `CONTRACT.md`: (3) "<n> live settings probes" and (4) "<n-2> of the <n>";
-    - `docs/branch-protection.md`: (5) "combining <n>" and (6) "<n-2> of the <n>
+    - `docs/troubleshooting.md`: (5) "combining <n>" and (6) "<n-2> of the <n>
       probes".
 
     The number words come from the count rather than being hardcoded, so this
@@ -2130,9 +2130,9 @@ def test_probe_count_is_stated_correctly_in_the_docs():
     assert f"{word} live settings probes" in contract
     assert f"{plan_word} of the {word}" in contract
 
-    protection = (ENGINE / "docs" / "branch-protection.md").read_text(encoding="utf-8")
-    assert f"combining {word}" in protection
-    assert f"{plan_word} of the {word} probes" in protection
+    trouble = (ENGINE / "docs" / "troubleshooting.md").read_text(encoding="utf-8")
+    assert f"combining {word}" in trouble
+    assert f"{plan_word} of the {word} probes" in trouble
 
 
 def test_a_non_file_workflow_entry_does_not_blind_the_fork_trigger_probe(monkeypatch):
