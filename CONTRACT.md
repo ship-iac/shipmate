@@ -219,7 +219,16 @@ A remote backend opts in by writing the empty string.
 The input is **repo-wide**. A repository mixing local- and remote-backend stacks
 has no correct value — non-empty makes `actions/cache/save` target a nonexistent
 path for the remote stacks, empty silently discards the local ones — so a mixed
-repository is unsupported.
+repository is unsupported. That forecloses a gradual migration in which one
+workload moves to a remote backend first: the backend move has to be repo-wide
+and land with the wrapper's `state_suffix` change in the same step.
+
+**On the state key.** Where the consumer's backend derives a key per stack,
+derive it from `terramate.stack.path.absolute` (as `docs/aws.md` does), which
+is unique by construction across the whole tree. A key built from
+`${workload}/${stack_name}` is not: `accounts/sandbox` and
+`stacks/sandbox/box` differ by path, not by name, and would share one state
+file.
 
 The drift wrapper is consumer-authored and builds `state-path` itself. On a
 remote backend pass `state-path: ''` (or omit the input on the `drift-cell`
@@ -309,6 +318,13 @@ must appear in Terramate stack tag lists is the `env/<name>` /
 `workload/<name>` form. A stack may carry several `env/*` tags at once (for
 example, a shared stack tagged both `env/staging` and `env/production`)
 when the same stack participates in more than one environment.
+
+An `env/<name>` tag is mandatory: `detect` fails the **whole run** when any
+stack lacks one, rather than skipping that stack. That scope is deliberate — a
+silently skipped stack plans and applies nothing while the gate goes green over
+it, which is the one failure this contract will not trade for convenience. The
+failure names every untagged stack it found, so an incremental migration is
+worked down from that list rather than one re-run per stack.
 
 ## Comment-ops
 
@@ -480,6 +496,15 @@ merge — until someone runs `shipmate apply <env>` for them. An absent global
 (or `[]`) means a bare apply targets everything. Malformed `explicit_envs`
 shapes (not a list of strings) fail loud, like `env_order`.
 
+`explicit_envs` constrains the bare pre-merge `shipmate apply` **only**. The
+post-merge deploy applies every cell whose apply check is still pending,
+explicit environments included; the control on that path is the `<env>-apply`
+environment's required reviewers, not this global. The asymmetry is deliberate:
+after merge the pull request is closed, and the apply requirements above include
+**mergeable**, so a deploy that honoured the global would strand those cells
+with no path to apply at all: their `apply / <stack> / <env>` checks would sit
+pending forever.
+
 A parsed `shipmate apply <env>` command is authorized only when it satisfies
 **apply requirements** — named, Atlantis-style, checked in order, each with
 its own actionable rejection reason:
@@ -582,6 +607,11 @@ switches the trigger therefore satisfies neither — its head no longer declares
 `pull_request_target` — so it produces no plan run and no `shipmate / gate`.
 Merge that one pull request with an administrative bypass and restore
 enforcement straight after; every pull request following it gates normally.
+
+For a repository migrating **from** another TACO, that same pull request is
+ungated by both systems at once: the outgoing tool's checks are being removed
+in it, and shipmate's cannot run on it yet. Review it as the one change nothing
+plans.
 
 **The `summary` job must grant `permissions: contents: read`.** A called
 workflow's permissions are capped by the calling job's, and the callee requests
