@@ -1201,12 +1201,15 @@ too — `all` is the only keyword that does; `git` covers the three git checks
 only) nor via `git` (which would pre-disable the two working-tree checks should a
 future Terramate start evaluating them here).
 
-A consuming repository **must not** set `disable_safeguards` in its own
-`terramate.config`. The engine's flag wins for the git checks, but not for
-`outdated-code`: `checkGenCode` consults the consumer's config after the engine's
-flags, so `disable_safeguards = ["outdated-code"]` (or `"all"`) silences the one
-working safeguard the cells still have, and the engine cannot detect or override
-it. The `detect` job's `terramate generate --detailed-exit-code` still catches
+A consuming repository **must not** disable `outdated-code` — or `all`, which
+includes it — via `disable_safeguards` in its own `terramate.config`. The
+engine's flag wins for the git checks, but not for `outdated-code`:
+`checkGenCode` consults the consumer's config after the engine's flags, so
+`disable_safeguards = ["outdated-code"]` (or `"all"`) silences the one working
+safeguard the cells still have, and the engine cannot detect or override it.
+Disabling `git-untracked` or `git-uncommitted` there changes nothing for cells,
+which never reach them (see the table above); it still affects the consumer's
+own recursive `terramate run` invocations. The `detect` job's `terramate generate --detailed-exit-code` still catches
 stale codegen — `disable_safeguards` gates `terramate run`, not `generate` — but
 that step lives in the consumer's own plan workflow, so it is a second thing the
 consumer controls rather than an engine backstop.
