@@ -33,6 +33,41 @@ the signal is then `shipmate doctor`'s pin-freshness probe, which reports a pin
 that differs from the latest release, plus the annotation it emits on every plan
 run. See [`troubleshooting.md`](troubleshooting.md) §shipmate doctor.
 
+## Migrating from another TACO
+
+A repository that already works under another Terraform automation tool arrives
+with four things expressed somewhere shipmate does not read. None of them is a
+shipmate defect and none of them announces itself, so each is worth a deliberate
+pass before the first plan run.
+
+**Ordering.** Wave ordering comes **only** from the Terramate `after` DAG. If
+your ordering lives in the outgoing tool's configuration, it must be ported into
+`after` — and **nothing will report the omission**, because a missing edge is
+indistinguishable from a stack that is genuinely independent. Treat the outgoing
+tool's config as a *lower bound* on the real graph, not as the graph: one
+migration that audited the OpenTofu code instead of porting the config went from
+6 declared edges to 105, and from 2 wave levels to 6. The check is the
+`::notice::` line the `detect` job prints on every run — stack count, `after`
+edge count, wave levels, and how many stacks would apply concurrently. A reader
+who knows the repository can judge that number immediately; nobody else can.
+
+**Tags.** Environment membership is derived from `env/<name>` tags and nothing
+else. Terramate tags are otherwise free-form, so a repository that predates
+shipmate is likely using them for something unrelated. See
+[`getting-started.md`](getting-started.md) §Before you start.
+
+**A named AWS profile in generated HCL.** The apply path holds only the OIDC
+session, so a literal `profile` in a `provider` or `backend` block fails there
+while still planning fine locally. See [`aws.md`](aws.md).
+
+**`terramate.config.run.env` rewriting `TF_VAR_*`.** Terramate applies `run.env`
+after the ambient environment, so an assignment to `TF_VAR_env`, `TF_VAR_region`
+or `TF_WORKSPACE` wins over what the GitHub Environment injected — invisibly,
+because the fingerprint is computed outside `terramate run` and so agrees on
+both sides. `detect` injects a sentinel into those three variables and fails the
+run when one comes back changed. [`../CONTRACT.md`](../CONTRACT.md) §Env model
+has the rule and the `tm_try` form that keeps a local default.
+
 ## Past migrations
 
 An entry applies only if you are moving *from* a pin older than the release it
