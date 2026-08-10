@@ -42,6 +42,23 @@ def test_main_writes_the_key_to_a_file_and_creates_no_repository_secret(monkeypa
         assert stat.S_IMODE(out.stat().st_mode) == 0o600
 
 
+def test_main_refuses_an_out_path_that_already_exists(monkeypatch, tmp_path):
+    # POSIX applies the mode only on creation, so writing into a file left by an
+    # earlier bootstrap would inherit its 0644 -- and overwriting it destroys a
+    # key the single-use manifest code can never mint again.
+    out = tmp_path / "key.pem"
+    out.write_text("AN EARLIER KEY", encoding="utf-8")
+    _stub_run(monkeypatch)
+
+    with pytest.raises(SystemExit) as exc:
+        ra.main(
+            ["--name", "shipmate-acme", "--repo", "org/repo", "--out", str(out), "--code", "c123"]
+        )
+
+    assert str(out) in str(exc.value)
+    assert out.read_text(encoding="utf-8") == "AN EARLIER KEY"
+
+
 def test_out_is_required(monkeypatch):
     # An optional --out defaults to writing the key nowhere, which is the same
     # failure as writing it to a secret: the key is minted and then unreachable.

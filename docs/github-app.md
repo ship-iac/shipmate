@@ -69,9 +69,11 @@ The command in step 1 converts the captured code
 - `SHIPMATE_APP_ID` — a repository **variable** on `--repo` (typically the
   App-owning repo itself, e.g. `<org>/shipmate`). The app id is not a secret.
   It also prints it, as `App created: id=… slug=…`.
-- The private key — the file named by `--out`, created readable only by you
-  (mode `0600`; on Windows, where that mode has no equivalent, only the
-  read-only bit is honoured).
+- The private key — the file named by `--out`, which must not already exist:
+  the command refuses rather than overwrite, because the key it replaced could
+  never be minted again. It is created mode `0600` on Linux and macOS. **On
+  Windows the mode is not applied at all** — the file inherits the directory's
+  ACLs — so run the command from a directory only you can read.
 
 **No repository secret is created**, and nothing else on this page creates one
 either: a repository secret is readable by any workflow on any branch, while the
@@ -161,7 +163,7 @@ loops — see the appendix.
 ## 6. Set the approvers team + propagate credentials
 
 Each consumer repo needs `SHIPMATE_APPROVERS_TEAM` (the GitHub team slug whose
-members may run `shipmate apply`) plus the app id/key from step 2. `gh` cannot read
+members may run `shipmate apply`) plus the app id/key from step 1. `gh` cannot read
 back a secret's value once set (GitHub never exposes it), so this step reads the
 `shipmate-app.private-key.pem` step 1 wrote — keep that file until every
 consumer repo has it.
@@ -169,7 +171,7 @@ consumer repo has it.
 ```bash
 REPO=<owner>/<repo>
 TEAM=<approvers-team-slug>          # the GitHub team slug, not a display name
-APP_ID=<app-id-from-step-2-output>
+APP_ID=<app-id-from-step-1-output>
 
 KEY=$(cat shipmate-app.private-key.pem)
 if [ -z "$KEY" ]; then
@@ -209,7 +211,7 @@ so set it per-repo as above):
 ```bash
 gh variable set SHIPMATE_APP_ID --org <org> --visibility selected \
   --repos "<repo>,<repo>" \
-  --body "<app-id-from-step-2-output>"
+  --body "<app-id-from-step-1-output>"
 ```
 
 `SHIPMATE_APP_PRIVATE_KEY` cannot follow it there: environment secrets are
@@ -391,7 +393,7 @@ writing an empty secret to every repository.
 ```bash
 REPOS="<owner>/<repo> <owner>/<repo>"
 TEAM=<approvers-team-slug>          # may differ per repo; set it per repo either way
-APP_ID=<app-id-from-step-2-output>
+APP_ID=<app-id-from-step-1-output>
 
 KEY=$(cat shipmate-app.private-key.pem)
 if [ -z "$KEY" ]; then

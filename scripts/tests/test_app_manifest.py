@@ -16,6 +16,11 @@ def test_manifest_declares_the_loopback_redirect_url():
     assert MANIFEST["redirect_url"] == "http://127.0.0.1:8723/callback"
 
 
+def test_manifest_registers_a_private_app():
+    # §Reference states it, and a public App is installable by any org.
+    assert MANIFEST["public"] is False
+
+
 def test_manifest_name_is_a_placeholder():
     # App names are unique across all of GitHub, so a verbatim name is rejected
     # for every org but the first one to register it.

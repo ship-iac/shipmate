@@ -9,7 +9,9 @@ via a manifest is a browser POST, so this builds the self-submitting form from
 app/manifest.json, opens it, and receives GitHub's redirect on a loopback
 listener it started first -- the single-use code never leaves the machine.
 It then converts the code, stores the app id as a repository variable, and
-writes the private key to --out with mode 0600.
+creates the private key at --out, which must not already exist. The file is
+mode 0600 where the platform has modes; on Windows it inherits the directory's
+ACLs, so choose a directory only you can read.
 
 The key goes to a file, never to a repository secret: a repository secret is
 readable by any workflow on any branch, which is the placement §5's
@@ -131,9 +133,21 @@ def _capture_code(name, org):
 
 
 def _write_key(path, pem):
-    """Create the PEM at `path` with mode 0600 from the start -- a chmod after
-    the write leaves the key world-readable for the length of the write."""
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    """Create the PEM at `path`, owner-only where the platform has modes.
+
+    `O_EXCL` is the load-bearing flag, twice over. POSIX applies the mode
+    argument only when the call creates the file, so writing into a path that
+    already exists -- the browser-downloaded key an earlier bootstrap left at
+    this very filename -- would inherit its 0644. And the key this overwrote
+    could never be converted again: the manifest code is single-use.
+    """
+    try:
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except FileExistsError:
+        raise SystemExit(
+            f"{path} already exists; refusing to overwrite it. The App is registered and its "
+            "key is now unrecoverable -- generate a replacement in the App's settings."
+        ) from None
     with os.fdopen(fd, "w", encoding="utf-8", newline="") as fh:
         fh.write(pem)
 
