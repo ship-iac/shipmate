@@ -135,9 +135,7 @@ def test_compute_cells_raises_on_untagged_stack(monkeypatch):
 
 
 def test_untagged_failure_names_the_count_and_every_stack(monkeypatch):
-    # The failure is the operator's whole to-do list: it must name how many
-    # stacks are untagged and all of them, sorted -- not the first one hit --
-    # so a migration can be re-run and watched shrink.
+    # So a migration can be re-run and watched shrink.
     stacks = ["stacks/zeta", "stacks/alpha", "stacks/mid"]
     monkeypatch.setattr(bm, "_list_stacks", lambda all_stacks, base: stacks)
     monkeypatch.setattr(bm, "_tags", lambda s: ["workload/util"])

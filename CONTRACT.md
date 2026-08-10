@@ -18,9 +18,10 @@ these names verbatim:
 environment name and the Terramate **stack path** (as emitted by
 `terramate list` / `experimental run-graph --label stack.dir`, e.g.
 `stacks/network`) for that unit of work (for example,
-`stacks/network / staging` and `apply / stacks/network / staging`). Both grammars put the stack first, so a
-reader scans one column; the apply name is the plan name with the verb in
-front. The check name uses the stack **path**, never a display name — so the
+`stacks/network / staging` and `apply / stacks/network / staging`). Both
+grammars put the stack first, so a reader scans one column; the apply name is
+the plan name with the verb in front. The check name uses the stack **path**,
+never a display name — so the
 code that *creates* the apply check (`pending-checks`, run by `actions/summary`),
 *completes* it (`apply-cell`), *filters the still-pending queue*
 (`deploy-detect` / `apply-detect` / `apply-all-detect`, which only ever have the
@@ -801,7 +802,7 @@ trusting the trigger alone closes two paths a trigger check alone would not:
   (Python ≥ 3.11), `git`, `curl`, `jq`, `openssl`, and `gh`.
 - Every GitHub-hosted Ubuntu image satisfies this, including the minimal
   `ubuntu-slim` image, whose
-  [included-software list](https://github.com/actions/runner-images/blob/main/images/ubuntu-slim/ubuntu-slim-Readme.md)
+  [included-software list](https://github.com/actions/runner-images/blob/066b3201a74f4551f70c221a71c49746d02c0864/images/ubuntu-slim/ubuntu-slim-Readme.md)
   names the GitHub CLI. That one is load-bearing for the drift path: the
   default-branch probe in the consumer's `drift.yml` calls `gh api` in a job
   with no `setup` step before it. Self-hosted runners must preinstall these
@@ -1250,8 +1251,9 @@ engine's flag wins for the git checks, but not for `outdated-code`:
 safeguard the cells still have, and the engine cannot detect or override it.
 Disabling `git-untracked` or `git-uncommitted` there changes nothing for cells,
 which never reach them (see the table above); it still affects the consumer's
-own recursive `terramate run` invocations. The `detect` job's `terramate generate --detailed-exit-code` still catches
-stale codegen — `disable_safeguards` gates `terramate run`, not `generate` — but
+own recursive `terramate run` invocations. The `detect` job's
+`terramate generate --detailed-exit-code` still catches stale codegen —
+`disable_safeguards` gates `terramate run`, not `generate` — but
 that step lives in the consumer's own plan workflow, so it is a second thing the
 consumer controls rather than an engine backstop.
 
