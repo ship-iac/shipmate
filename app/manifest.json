@@ -1,6 +1,7 @@
 {
-  "name": "shipmate",
+  "name": "shipmate-<your-org>",
   "url": "https://github.com/ship-iac/shipmate",
+  "redirect_url": "http://127.0.0.1:8723/callback",
   "hook_attributes": { "url": "https://github.com/ship-iac/shipmate", "active": false },
   "public": false,
   "default_permissions": {

@@ -11,8 +11,8 @@ pre-merge apply cannot be kicked off with the default token. The same App
 also authors every apply check, the `shipmate / gate` commit status, the
 sticky plan/result comments, and drift issues — installation tokens minted
 fresh per job, never a long-lived credential in the workflow. The bot
-identity `shipmate[bot]` is derived automatically from the App name
-(`shipmate`) once it's registered.
+identity is derived automatically from the App name once it's registered, so
+an App named `shipmate-acme` comments as `shipmate-acme[bot]`.
 
 This is a runbook, not a tutorial: run the commands in order. Steps 1–3 register
 the App once per GitHub org; steps 4–6 onboard one repository, and are written
@@ -25,35 +25,41 @@ same commands in a loop — see the appendix.
 - Admin rights on the org that will own the App.
 - This repo checked out locally (`app/manifest.json` is read by the steps below).
 
-## 1. Run the manifest flow (browser)
+## 1. Register the App
 
-GitHub App registration via a manifest is a browser POST, not an API call.
-Build a self-submitting HTML form from `app/manifest.json` and open it:
+GitHub App registration via a manifest is a browser POST, not an API call, and
+GitHub answers it with a redirect carrying a single-use `code`. One command
+does the whole leg:
 
 ```bash
-ORG=<your-org>   # e.g. ship-iac
-
-python3 - "$ORG" <<'PY' > /tmp/shipmate-app-manifest.html
-import json, sys
-org = sys.argv[1]
-manifest = json.load(open("app/manifest.json"))
-print(f"""<!doctype html>
-<form id="f" action="https://github.com/organizations/{org}/settings/apps/new?state=shipmate-setup" method="post">
-<input type="hidden" name="manifest" value='{json.dumps(manifest)}'>
-</form>
-<script>document.getElementById("f").submit()</script>
-""")
-PY
-
-# Open the file in a browser (pick the one for your OS):
-open /tmp/shipmate-app-manifest.html          # macOS
-xdg-open /tmp/shipmate-app-manifest.html      # Linux
-start /tmp/shipmate-app-manifest.html         # Windows (cmd)
+python3 scripts/register-app \
+  --name shipmate-<your-org> \
+  --repo <your-org>/shipmate \
+  --out shipmate-app.private-key.pem
 ```
 
-Confirm creation in the GitHub UI. GitHub redirects to
-`https://github.com/organizations/<org>/settings/apps/<slug>?code=<code>` —
-copy the `code` query-param value; it is single-use and short-lived.
+It builds the self-submitting form from `app/manifest.json`, opens it in your
+browser, and receives GitHub's redirect on a loopback listener it started
+first — so the `code` never leaves the machine and there is nothing to copy.
+Confirm the registration in the GitHub UI when the browser lands on it; the
+terminal continues by itself. §2 covers what the command then stores.
+
+**Edit the name.** GitHub App names are unique **across all of GitHub**, and
+`ship-iac` already holds `shipmate`, so a verbatim paste is rejected with "Name
+has already been taken" — after the browser POST, which is a slow way to find
+out. `app/manifest.json` therefore ships `shipmate-<your-org>` as a placeholder,
+and `--name` overrides it. Later sections' App-settings URLs
+(`.../settings/apps/shipmate`) name the App you registered, so substitute
+accordingly.
+
+The knock-on is already handled: the bot identity is derived from the App name,
+so a renamed App comments as `shipmate-<your-org>[bot]` rather than
+`shipmate[bot]`. The sticky plan and doctor comments are looked up by their
+marker plus a `Bot` comment author, never by a hardcoded login.
+
+The manifest's `redirect_url` (`http://127.0.0.1:8723/callback`) is a working
+default for anyone hand-building the form instead; `register-app` overrides it
+with the port its listener actually bound.
 
 ## 2. Convert the code to credentials
 
