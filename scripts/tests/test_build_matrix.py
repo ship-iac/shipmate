@@ -100,6 +100,7 @@ def test_compute_cells_fans_out_multi_env(monkeypatch):
     # Happy path only -- does NOT exercise the untagged-stack guard.
     monkeypatch.setattr(bm, "_list_stacks", lambda all_stacks, base: ["stacks/app"])
     monkeypatch.setattr(bm, "_tags", lambda s: ["env/dev-eu", "env/dev-us", "workload/app"])
+    monkeypatch.setattr(bm, "assert_run_env_roundtrip", lambda stack_dir: None)
     cells = bm.compute_cells(all_stacks=True)
     assert cells == [
         {"stack": "stacks/app", "environment": "dev-eu", "workload": "app"},
@@ -155,6 +156,110 @@ def test_env_membership_require_env_tag_false_ignores_untagged(monkeypatch):
     stacks_by_env, tags_by_stack = bm.env_membership(all_stacks=True, require_env_tag=False)
     assert stacks_by_env == {"dev-eu": ["stacks/app"]}
     assert tags_by_stack == tags  # orphan still reported in tags, just not bucketed
+
+
+def _stub_terramate(monkeypatch, stacks, env_lines, calls=None):
+    """Stub the ONE subprocess entry point, so these cases reach the probe
+    through the real `compute_cells` path rather than calling it directly."""
+    for name in ("TF_VAR_env", "TF_VAR_region", "TF_WORKSPACE"):
+        monkeypatch.delenv(name, raising=False)
+
+    def fake_run(args, env=None):
+        if args[:2] == ["terramate", "list"]:
+            return "".join(f"{s}\n" for s in stacks)
+        if "eval" in args:
+            return '["env/dev-eu"]'
+        if args[-1] == "env":
+            if calls is not None:
+                calls.append((args, env))
+            return env_lines
+        pytest.fail(f"unexpected command: {args}")
+
+    monkeypatch.setattr(bm, "_run", fake_run)
+
+
+_SURVIVED = (
+    "PATH=/usr/bin\n"
+    "TF_VAR_env=SHIPMATE_RT_PROBE\n"
+    "TF_VAR_region=SHIPMATE_RT_PROBE\n"
+    "TF_WORKSPACE=SHIPMATE_RT_PROBE\n"
+)
+
+_TF_VAR_ENV_REWRITTEN = (
+    "::error::this repository's terramate.config.run.env rewrites TF_VAR_env: detect "
+    "injected 'SHIPMATE_RT_PROBE' and `terramate run` reported 'dev'. Every cell "
+    "would plan and apply under a value CI did not choose, and the plan/apply "
+    "fingerprint is computed outside `terramate run`, so both sides agree and "
+    "nothing else reports it. Do not assign TF_VAR_env, TF_VAR_region, TF_WORKSPACE "
+    "there; to keep a local default, put the injected name first in the chain — "
+    'tm_try(env.TF_VAR_env, env.env, "dev"). See CONTRACT.md §Env model.'
+)
+
+_TF_WORKSPACE_REWRITTEN = (
+    "::error::this repository's terramate.config.run.env rewrites TF_WORKSPACE: detect "
+    "injected 'SHIPMATE_RT_PROBE' and `terramate run` reported 'default'. Every cell "
+    "would plan and apply under a value CI did not choose, and the plan/apply "
+    "fingerprint is computed outside `terramate run`, so both sides agree and "
+    "nothing else reports it. Do not assign TF_VAR_env, TF_VAR_region, TF_WORKSPACE "
+    "there; to keep a local default, put the injected name first in the chain — "
+    'tm_try(env.TF_VAR_env, env.env, "dev"). See CONTRACT.md §Env model.'
+)
+
+
+def test_compute_cells_probes_that_the_injected_environment_survives(monkeypatch):
+    calls = []
+    _stub_terramate(monkeypatch, ["stacks/app"], _SURVIVED, calls)
+    assert bm.compute_cells(all_stacks=True) == [
+        {"stack": "stacks/app", "environment": "dev-eu", "workload": ""}
+    ]
+    args, env = calls[0]
+    assert args == [
+        "terramate",
+        "run",
+        "--disable-safeguards=git-out-of-sync",
+        "--no-recursive",
+        "-C",
+        "stacks/app",
+        "--",
+        "env",
+    ]
+    assert {k: v for k, v in env.items() if k in bm.RT_VARS} == {
+        "TF_VAR_env": "SHIPMATE_RT_PROBE",
+        "TF_VAR_region": "SHIPMATE_RT_PROBE",
+        "TF_WORKSPACE": "SHIPMATE_RT_PROBE",
+    }
+
+
+def test_compute_cells_refuses_a_rewritten_tf_var_env(monkeypatch):
+    # The sentinel, not the ambient value: detect binds no environment, so an
+    # ambient comparison would pass here whatever run.env did.
+    _stub_terramate(
+        monkeypatch,
+        ["stacks/app"],
+        _SURVIVED.replace("TF_VAR_env=SHIPMATE_RT_PROBE", "TF_VAR_env=dev"),
+    )
+    with pytest.raises(SystemExit) as exc_info:
+        bm.compute_cells(all_stacks=True)
+    assert str(exc_info.value) == _TF_VAR_ENV_REWRITTEN
+
+
+def test_compute_cells_refuses_a_rewritten_tf_workspace(monkeypatch):
+    _stub_terramate(
+        monkeypatch,
+        ["stacks/app"],
+        _SURVIVED.replace("TF_WORKSPACE=SHIPMATE_RT_PROBE", "TF_WORKSPACE=default"),
+    )
+    with pytest.raises(SystemExit) as exc_info:
+        bm.compute_cells(all_stacks=True)
+    assert str(exc_info.value) == _TF_WORKSPACE_REWRITTEN
+
+
+def test_compute_cells_skips_the_probe_with_no_stacks(monkeypatch):
+    # Nothing to run the probe in: `terramate run -C` needs a stack directory.
+    calls = []
+    _stub_terramate(monkeypatch, [], "", calls)
+    assert bm.compute_cells(all_stacks=True) == []
+    assert calls == []
 
 
 def _payload(head_repo):

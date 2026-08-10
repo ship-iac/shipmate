@@ -69,10 +69,10 @@ def build_matrix(envs, stacks_by_env, tags_by_stack):
     return cells
 
 
-def _run(args):
+def _run(args, env=None):
     # args is a code-controlled tool invocation (gh/terramate/tofu by PATH name),
     # never user input, and shell=False — safe.
-    p = subprocess.run(args, capture_output=True, text=True)  # noqa: S603
+    p = subprocess.run(args, capture_output=True, text=True, env=env)  # noqa: S603
     if p.returncode != 0:
         # Surface the tool's own error; a swallowed stderr makes CI opaque.
         sys.stderr.write(p.stderr)
@@ -135,8 +135,64 @@ def env_membership(all_stacks=False, base="", require_env_tag=True):
     return stacks_by_env, tags_by_stack
 
 
+#: Injected by `assert_run_env_roundtrip` and expected back unchanged. A value
+#: that cannot occur naturally, because comparing the AMBIENT value would be
+#: vacuous exactly where this runs: detect binds no environment, so all three
+#: variables are unset there and any reported value would compare equal to
+#: nothing.
+RT_SENTINEL = "SHIPMATE_RT_PROBE"
+RT_VARS = ("TF_VAR_env", "TF_VAR_region", "TF_WORKSPACE")
+
+
+def assert_run_env_roundtrip(stack_dir):
+    """Fail loud when the consuming repository's `terramate.config.run.env`
+    rewrites one of the three variables the GitHub Environment injects.
+
+    `run.env` is applied to the child process AFTER the ambient environment, so
+    it wins. `plan-classify --fingerprint-only` runs outside `terramate run`, so
+    plan and apply both hash the correct job environment while `tofu` on both
+    sides ran under the rewritten one: the fingerprint agrees, the exact-plan
+    invariant holds, and every cell collapses onto one state key with plan, gate
+    and apply all green.
+
+    Repo-wide config, so one arbitrary stack answers for the whole tree."""
+    out = _run(
+        [
+            "terramate",
+            "run",
+            "--disable-safeguards=git-out-of-sync",
+            "--no-recursive",
+            "-C",
+            stack_dir,
+            "--",
+            "env",
+        ],
+        env={**os.environ, **{name: RT_SENTINEL for name in RT_VARS}},
+    )
+    reported = {}
+    for line in out.splitlines():
+        name, sep, value = line.partition("=")
+        if sep:
+            reported[name] = value
+    for name in RT_VARS:
+        got = reported.get(name)
+        if got != RT_SENTINEL:
+            shown = "(unset)" if got is None else repr(got)
+            raise SystemExit(
+                f"::error::this repository's terramate.config.run.env rewrites {name}: detect "
+                f"injected '{RT_SENTINEL}' and `terramate run` reported {shown}. Every cell "
+                "would plan and apply under a value CI did not choose, and the plan/apply "
+                "fingerprint is computed outside `terramate run`, so both sides agree and "
+                f"nothing else reports it. Do not assign {', '.join(RT_VARS)} there; to keep a "
+                "local default, put the injected name first in the chain — "
+                'tm_try(env.TF_VAR_env, env.env, "dev"). See CONTRACT.md §Env model.'
+            )
+
+
 def compute_cells(all_stacks=False, base=""):
     stacks_by_env, tags_by_stack = env_membership(all_stacks, base)
+    if tags_by_stack:
+        assert_run_env_roundtrip(sorted(tags_by_stack)[0])
     return build_matrix(sorted(stacks_by_env), stacks_by_env, tags_by_stack)
 
 
