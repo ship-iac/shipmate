@@ -12,13 +12,18 @@ def test_multi_env_stack_yields_one_cell_per_env():
         stacks_by_env={"dev-eu": ["stacks/app"], "dev-us": ["stacks/app", "stacks/dns"]},
         tags_by_stack={
             "stacks/app": ["env/dev-eu", "env/dev-us"],
-            "stacks/dns": ["env/dev-us", "workload/net"],
+            "stacks/dns": ["env/dev-us", "workload/net-edge"],
         },
     )
     assert cells == [
-        {"stack": "stacks/app", "environment": "dev-eu", "workload": ""},
-        {"stack": "stacks/app", "environment": "dev-us", "workload": ""},
-        {"stack": "stacks/dns", "environment": "dev-us", "workload": "net"},
+        {"stack": "stacks/app", "environment": "dev-eu", "workload": "", "workload_var": ""},
+        {"stack": "stacks/app", "environment": "dev-us", "workload": "", "workload_var": ""},
+        {
+            "stack": "stacks/dns",
+            "environment": "dev-us",
+            "workload": "net-edge",
+            "workload_var": "NET_EDGE",
+        },
     ]
 
 
@@ -45,7 +50,9 @@ def test_nested_apply_stack_is_allowed():
     cells = bm.build_matrix(
         ["dev-eu"], {"dev-eu": ["infra/apply"]}, {"infra/apply": ["env/dev-eu"]}
     )
-    assert cells == [{"stack": "infra/apply", "environment": "dev-eu", "workload": ""}]
+    assert cells == [
+        {"stack": "infra/apply", "environment": "dev-eu", "workload": "", "workload_var": ""}
+    ]
 
 
 def test_rejects_stack_path_exactly_shipmate():
@@ -62,7 +69,9 @@ def test_nested_shipmate_stack_is_allowed():
     cells = bm.build_matrix(
         ["dev-eu"], {"dev-eu": ["infra/shipmate"]}, {"infra/shipmate": ["env/dev-eu"]}
     )
-    assert cells == [{"stack": "infra/shipmate", "environment": "dev-eu", "workload": ""}]
+    assert cells == [
+        {"stack": "infra/shipmate", "environment": "dev-eu", "workload": "", "workload_var": ""}
+    ]
 
 
 def test_list_stacks_changed_uses_changed_flag(monkeypatch):
@@ -102,8 +111,8 @@ def test_compute_cells_fans_out_multi_env(monkeypatch):
     monkeypatch.setattr(bm, "_tags", lambda s: ["env/dev-eu", "env/dev-us", "workload/app"])
     cells = bm.compute_cells(all_stacks=True)
     assert cells == [
-        {"stack": "stacks/app", "environment": "dev-eu", "workload": "app"},
-        {"stack": "stacks/app", "environment": "dev-us", "workload": "app"},
+        {"stack": "stacks/app", "environment": "dev-eu", "workload": "app", "workload_var": "APP"},
+        {"stack": "stacks/app", "environment": "dev-us", "workload": "app", "workload_var": "APP"},
     ]
 
 

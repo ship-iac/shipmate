@@ -56,7 +56,17 @@ def build_matrix(envs, stacks_by_env, tags_by_stack):
                 if tag.startswith("workload/"):
                     workload = tag[len("workload/") :]
                     break
-            cells.append({"stack": stack, "environment": env, "workload": workload})
+            cells.append(
+                {
+                    "stack": stack,
+                    "environment": env,
+                    "workload": workload,
+                    # GitHub upper-cases variable names and GHA expressions have
+                    # no toUpper, so the AWS_ROLE_ARN_<WORKLOAD> lookup key can
+                    # only be computed here.
+                    "workload_var": workload.upper().replace("-", "_"),
+                }
+            )
     cells.sort(key=lambda c: (c["environment"], c["stack"]))
     for reserved, message in RESERVED_STACK_PATHS.items():
         if any(c["stack"] == reserved for c in cells):
