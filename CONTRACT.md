@@ -776,6 +776,14 @@ trusting the trigger alone closes two paths a trigger check alone would not:
   stacks and M environments (accounting for which stacks are tagged into
   which environments) fans out into up to N×M plan units and N×M apply
   units, each with its own check (see Check names, above).
+- The plan fan-out is bounded at **256 cells** (`build-matrix`'s `MATRIX_LIMIT`,
+  the GitHub Actions matrix limit). Above it `build-matrix` raises
+  `MatrixTooLarge` and `detect` fails the run before any cell starts.
+  The way past it is to apply in named environments across several runs
+  (`shipmate apply <env>`), or to reduce the number of environments in play —
+  not to split the pull request, which is not always possible: a one-line edit
+  to a shared local module correctly marks every dependent stack changed, and
+  that is one atomic change by nature.
 - Plans fan out flat: all applicable plan units for a pull request run
   concurrently, with no ordering dependency between them.
 - Applies run in waves: the `after` relationships between Terramate stacks
