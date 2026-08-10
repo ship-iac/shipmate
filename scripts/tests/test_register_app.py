@@ -1,46 +1,82 @@
+import http.client
+import http.server
+import stat
+import sys
+import threading
+
 import pytest
 from _loader import load_script
 
 ra = load_script("register-app")
 
 
-def test_main_stores_id_as_variable_and_pem_as_secret(monkeypatch):
-    # Guards the id/pem parse+store: a swap (id<->pem) or wrong gh subcommand
-    # would only surface during a real one-time registration otherwise.
-    monkeypatch.setenv("MANIFEST_CODE", "code123")
-    monkeypatch.setenv("GITHUB_REPOSITORY", "org/repo")
+def _stub_run(monkeypatch):
+    """Record every `gh` argv; answer the conversion call with a fixed App."""
     calls = []
 
     def fake_run(args, **kw):
         calls.append(args)
         if "conversions" in args[-1]:
-            return '{"id": 42, "pem": "PRIVATE_KEY", "slug": "shipmate"}'
+            return '{"id": 42, "pem": "PRIVATE_KEY", "slug": "shipmate-acme"}'
         return ""
 
     monkeypatch.setattr(ra, "_run", fake_run)
-    ra.main()
+    return calls
 
-    assert calls[0] == ["gh", "api", "-X", "POST", "app-manifests/code123/conversions"]
-    assert [
-        "gh",
-        "variable",
-        "set",
-        "SHIPMATE_APP_ID",
-        "--repo",
-        "org/repo",
-        "--body",
-        "42",
-    ] in calls
-    assert [
-        "gh",
-        "secret",
-        "set",
-        "SHIPMATE_APP_PRIVATE_KEY",
-        "--repo",
-        "org/repo",
-        "--body",
-        "PRIVATE_KEY",
-    ] in calls
+
+def test_main_writes_the_key_to_a_file_and_creates_no_repository_secret(monkeypatch, tmp_path):
+    # The whole command list, not a scan: a `gh secret set` restored anywhere in
+    # the file puts the App key in a repository secret, readable by any workflow
+    # on any branch -- the exact placement docs/github-app.md §5 exists to avoid.
+    out = tmp_path / "key.pem"
+    calls = _stub_run(monkeypatch)
+
+    ra.main(["--name", "shipmate-acme", "--repo", "org/repo", "--out", str(out), "--code", "c123"])
+
+    assert calls == [
+        ["gh", "api", "-X", "POST", "app-manifests/c123/conversions"],
+        ["gh", "variable", "set", "SHIPMATE_APP_ID", "--repo", "org/repo", "--body", "42"],
+    ]
+    assert out.read_text(encoding="utf-8") == "PRIVATE_KEY"
+    if sys.platform != "win32":
+        assert stat.S_IMODE(out.stat().st_mode) == 0o600
+
+
+def test_out_is_required(monkeypatch):
+    # An optional --out defaults to writing the key nowhere, which is the same
+    # failure as writing it to a secret: the key is minted and then unreachable.
+    _stub_run(monkeypatch)
+
+    with pytest.raises(SystemExit) as exc:
+        ra.main(["--name", "shipmate-acme", "--repo", "org/repo", "--code", "c123"])
+
+    assert exc.value.code == 2
+
+
+def _get(server, path):
+    handled = threading.Thread(target=server.handle_request, daemon=True)
+    handled.start()
+    conn = http.client.HTTPConnection("127.0.0.1", server.server_port, timeout=5)
+    conn.request("GET", path)
+    status = conn.getresponse().status
+    conn.close()
+    handled.join(5)
+    return status
+
+
+def test_the_listener_captures_the_code_and_refuses_a_request_without_one():
+    # The capture is what keeps the single-use code off the clipboard, and the
+    # browser asks for /favicon.ico on the same port -- answering that as a
+    # capture would end the wait with no code at all.
+    ra._Handler.code = None
+    server = http.server.HTTPServer(("127.0.0.1", 0), ra._Handler)
+    try:
+        assert _get(server, "/favicon.ico") == 404
+        assert ra._Handler.code is None
+        assert _get(server, "/callback?code=abc123") == 200
+        assert ra._Handler.code == "abc123"
+    finally:
+        server.server_close()
 
 
 def _failing_gh(monkeypatch, stderr):

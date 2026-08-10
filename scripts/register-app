@@ -1,19 +1,47 @@
 #!/usr/bin/env python3
-"""Exchange a GitHub App manifest-flow `code` for credentials, then store them.
+"""Register the shipmate GitHub App and store its credentials, in one command.
 
-One-time dev/ops setup. The manifest flow is browser-driven (docs/github-app.md
-walks it): you POST app/manifest.json via a tiny HTML form, GitHub redirects
-with `?code=...`. Paste that code here (MANIFEST_CODE) to convert it to an app
-id + private key, then this stores the id as a repo variable and the key as a
-repo secret via `gh`.
+    python3 scripts/register-app --name shipmate-<org> --repo <org>/shipmate \
+        --out shipmate-app.private-key.pem
+
+One-time dev/ops setup; docs/github-app.md §1-§2 is the runbook. Registration
+via a manifest is a browser POST, so this builds the self-submitting form from
+app/manifest.json, opens it, and receives GitHub's redirect on a loopback
+listener it started first -- the single-use code never leaves the machine.
+It then converts the code, stores the app id as a repository variable, and
+writes the private key to --out with mode 0600.
+
+The key goes to a file, never to a repository secret: a repository secret is
+readable by any workflow on any branch, which is the placement §5's
+`shipmate-engine` environment exists to replace. --out serves both placements.
+
+Use --code to skip the browser leg with a code you already hold (single-use and
+short-lived, so this is for a retry after a later step failed).
 """
 
+import argparse
+import http.server
 import json
 import os
+import pathlib
 import subprocess
 import sys
+import tempfile
+import threading
+import urllib.parse
+import webbrowser
 
 REDACTED = "***"
+
+MANIFEST = pathlib.Path(__file__).resolve().parents[1] / "app" / "manifest.json"
+
+DONE_PAGE = b"""<!doctype html><meta charset=utf-8>
+<title>shipmate registered</title>
+<body style="font:16px system-ui;max-width:34em;margin:4em auto">
+<h1>App registered</h1>
+<p>The code was captured locally. Return to the terminal &mdash; it is storing the
+credentials now.</p>
+"""
 
 
 def _scrub(text, secrets):
@@ -44,21 +72,92 @@ def _run(args, secrets=(), **kw):
     return p.stdout
 
 
-def main():
-    code = os.environ["MANIFEST_CODE"]
-    repo = os.environ["GITHUB_REPOSITORY"]
+class _Handler(http.server.BaseHTTPRequestHandler):
+    code = None
+
+    def do_GET(self):  # noqa: N802 -- BaseHTTPRequestHandler's dispatch name
+        params = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+        got = params.get("code", [None])[0]
+        if not got:
+            # The browser also asks this port for /favicon.ico; answering that
+            # as a capture would end the wait holding no code.
+            self.send_error(404)
+            return
+        _Handler.code = got
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(DONE_PAGE)))
+        self.end_headers()
+        self.wfile.write(DONE_PAGE)
+
+    def log_message(self, *args):
+        pass  # the request line carries the single-use code
+
+
+def _capture_code(name, org):
+    """Post the manifest from the browser and return the code GitHub redirects
+    with, caught on a loopback listener bound to a free port."""
+    manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
+    manifest["name"] = name
+
+    server = http.server.HTTPServer(("127.0.0.1", 0), _Handler)
+    manifest["redirect_url"] = f"http://127.0.0.1:{server.server_port}/callback"
+    action = f"https://github.com/organizations/{org}/settings/apps/new?state=shipmate-setup"
+    form = f"""<!doctype html><meta charset=utf-8>
+<title>Register {name}</title>
+<form id="f" action="{action}" method="post">
+<input type="hidden" name="manifest" value='{json.dumps(manifest)}'>
+</form>
+<p style="font:16px system-ui">Submitting to GitHub&hellip;
+<button type="submit" form="f">Continue</button></p>
+<script>document.getElementById("f").submit()</script>
+"""
+    fd, html = tempfile.mkstemp(prefix="shipmate-app-manifest-", suffix=".html")
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        fh.write(form)
+
+    print(f"Listening on {manifest['redirect_url']}; opening {html}")
+    opener = threading.Thread(target=webbrowser.open, args=(pathlib.Path(html).as_uri(),))
+    opener.daemon = True
+    opener.start()
+    print("Confirm the registration in the browser (Ctrl-C to abort).")
+    try:
+        while _Handler.code is None:
+            server.handle_request()
+    finally:
+        server.server_close()
+        pathlib.Path(html).unlink(missing_ok=True)
+    return _Handler.code
+
+
+def _write_key(path, pem):
+    """Create the PEM at `path` with mode 0600 from the start -- a chmod after
+    the write leaves the key world-readable for the length of the write."""
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8", newline="") as fh:
+        fh.write(pem)
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(description="Register the shipmate GitHub App.")
+    ap.add_argument("--name", required=True, help="App name; unique across all of GitHub")
+    ap.add_argument("--repo", required=True, help="<org>/<repo> the app id is stored on")
+    ap.add_argument("--out", required=True, help="path the private key is written to (mode 0600)")
+    ap.add_argument("--code", help="skip the browser leg and convert this manifest code")
+    args = ap.parse_args(argv)
+    org = args.repo.split("/")[0]
+
+    code = args.code or _capture_code(args.name, org)
     out = _run(["gh", "api", "-X", "POST", f"app-manifests/{code}/conversions"], secrets=(code,))
     app = json.loads(out)
     app_id = str(app["id"])
-    pem = app["pem"]
+    # Before the variable set: a failing `gh` there would otherwise lose a key
+    # that exists only in this process and can never be converted again.
+    _write_key(args.out, app["pem"])
     print(f"App created: id={app_id} slug={app.get('slug')}")
-    _run(["gh", "variable", "set", "SHIPMATE_APP_ID", "--repo", repo, "--body", app_id])
-    _run(
-        ["gh", "secret", "set", "SHIPMATE_APP_PRIVATE_KEY", "--repo", repo, "--body", pem],
-        secrets=(pem,),
-    )
-    print("Stored SHIPMATE_APP_ID (variable) and SHIPMATE_APP_PRIVATE_KEY (secret).")
-    print("Next: install the App on the sample repos (see docs/github-app.md).")
+    _run(["gh", "variable", "set", "SHIPMATE_APP_ID", "--repo", args.repo, "--body", app_id])
+    print(f"Stored SHIPMATE_APP_ID (variable) and wrote the private key to {args.out}.")
+    print("Next: install the App, then place that key per docs/github-app.md §4-§6.")
 
 
 if __name__ == "__main__":
