@@ -16,9 +16,9 @@ these names verbatim:
 
 `<env>` and `<stack>` are placeholders substituted with the actual
 environment name and the Terramate **stack path** (as emitted by
-`terramate list` / `experimental run-graph`, e.g. `stacks/network`) for that
-unit of work (for example, `stacks/network / staging` and
-`apply / stacks/network / staging`). Both grammars put the stack first, so a
+`terramate list` / `experimental run-graph --label stack.dir`, e.g.
+`stacks/network`) for that unit of work (for example,
+`stacks/network / staging` and `apply / stacks/network / staging`). Both grammars put the stack first, so a
 reader scans one column; the apply name is the plan name with the verb in
 front. The check name uses the stack **path**, never a display name — so the
 code that *creates* the apply check (`pending-checks`, run by `actions/summary`),
