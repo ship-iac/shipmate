@@ -22,8 +22,8 @@ jobs:
   # Its own job, not a first step of `detect`: `summary` must refuse a rejected
   # dispatch (it mints the App key and comments on the dispatcher-supplied PR
   # number) while still posting the failure comment and refreshing the gate
-  # when `detect` genuinely fails -- a matrix over the 256-cell cap, an
-  # env_order cycle, a bad plan run id. Keying `summary` on this job separates
+  # when `detect` genuinely fails -- an env_order cycle, a bad plan run id.
+  # Keying `summary` on this job separates
   # the two: `needs.guard.result == 'success'` is false only for an
   # unauthorised dispatch. No secrets, no environment, no checkout.
   guard:
@@ -140,9 +140,8 @@ jobs:
     # the bot-actor rejection failed; `needs.guard.result == 'success'` closes
     # that. Keyed on `guard` and NOT on `detect`: `always()` is needed so
     # results/gate-refresh post when an envlevel failed or was cancelled, and a
-    # genuine `detect` failure (a matrix over the 256-cell cap, an env_order
-    # cycle, a bad plan run id) must still get the developer a failure comment
-    # and a gate refresh.
+    # genuine `detect` failure (an env_order cycle, a bad plan run id) must
+    # still get the developer a failure comment and a gate refresh.
     if: ${{ always() && needs.guard.result == 'success' }}
     runs-on: ubuntu-latest
     # Both steps below mint the App key (via secrets.SHIPMATE_APP_PRIVATE_KEY),

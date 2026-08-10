@@ -814,11 +814,14 @@ trusting the trigger alone closes two paths a trigger check alone would not:
 - The plan fan-out is bounded at **256 cells** (`build-matrix`'s `MATRIX_LIMIT`,
   the GitHub Actions matrix limit). Above it `build-matrix` raises
   `MatrixTooLarge` and `detect` fails the run before any cell starts.
-  The way past it is to apply in named environments across several runs
-  (`shipmate apply <env>`), or to reduce the number of environments in play —
-  not to split the pull request, which is not always possible: a one-line edit
-  to a shared local module correctly marks every dependent stack changed, and
-  that is one atomic change by nature.
+  The way past it is to split the change across several pull requests: the
+  matrix is built over `terramate list --changed`, so a narrower diff is a
+  smaller matrix. Splitting cannot help when the fan-out comes from a one-line
+  edit to a shared local module — that correctly marks every dependent stack
+  changed and is one atomic change by nature — and there the only lever is to
+  reduce the number of environments in play. A targeted `shipmate apply <env>`
+  is not a way past it: the ceiling is enforced in the plan fan-out, so a run
+  that trips it produces no reviewed plan artifact for any apply path to use.
 - Plans fan out flat: all applicable plan units for a pull request run
   concurrently, with no ordering dependency between them.
 - Applies run in waves: the `after` relationships between Terramate stacks

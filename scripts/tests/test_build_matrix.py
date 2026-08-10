@@ -27,15 +27,18 @@ def test_empty_when_no_changed_stacks():
 
 
 def test_raises_above_256_cells():
-    # The remediation must match CONTRACT.md §Fan-out: splitting the pull request
-    # is not an escape hatch, because a shared-module edit is one atomic change.
+    # The remediation must match CONTRACT.md §Fan-out: splitting the change is the
+    # general remedy, and `shipmate apply <env>` is not an escape hatch -- the
+    # ceiling trips in plan detect, so no reviewed plan exists to apply.
     stacks = [f"stacks/s{i}" for i in range(257)]
     with pytest.raises(bm.MatrixTooLarge) as exc_info:
         bm.build_matrix(["dev-eu"], {"dev-eu": stacks}, {s: ["env/dev-eu"] for s in stacks})
     assert str(exc_info.value) == (
         "257 plan cells exceeds the GitHub Actions matrix limit of 256. "
-        "Apply in named environments across several runs (`shipmate apply <env>`), "
-        "or reduce the number of environments in play."
+        "Split the change across several pull requests -- the matrix is built over "
+        "`terramate list --changed`. A one-line edit to a shared local module correctly "
+        "marks every dependent stack changed and is one atomic change by nature; there the "
+        "only lever is to reduce the number of environments in play."
     )
 
 
