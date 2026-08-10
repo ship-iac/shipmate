@@ -1,3 +1,5 @@
+import json
+
 import pytest
 from _detect_fixtures import check_run as _check
 from _detect_fixtures import completed_names
@@ -14,7 +16,7 @@ def test_workset_matches_plan_artifacts_for_env():
         "cell-summary.dev-eu.stacks-app",
     ]  # not a plan artifact — excluded
     graph_paths = ["stacks/app", "stacks/dns", "stacks/platform"]
-    cells = ad.workset_from_artifacts(names, "dev-eu", graph_paths)
+    cells = ad.workset_from_artifacts(names, "dev-eu", graph_paths, {})
     stacks = sorted(c["stack"] for c in cells)
     assert stacks == ["stacks/app", "stacks/dns"]
     assert all(c["environment"] == "dev-eu" for c in cells)
@@ -37,22 +39,16 @@ def test_workset_attaches_workload_var_from_the_tags():
     ]
 
 
-def test_workset_without_a_tag_map_carries_an_empty_workload_var():
-    assert ad.workset_from_artifacts(["plan.dev-eu.stacks-app"], "dev-eu", ["stacks/app"]) == [
-        {"stack": "stacks/app", "environment": "dev-eu", "workload_var": ""}
-    ]
-
-
 def test_workset_ignores_slug_with_wrong_env_suffix():
     names = ["plan.dev-eu-apply.stacks-app"]  # not the plain env
-    cells = ad.workset_from_artifacts(names, "dev-eu", ["stacks/app"])
+    cells = ad.workset_from_artifacts(names, "dev-eu", ["stacks/app"], {})
     assert cells == []
 
 
 def test_workset_env_suffix_no_cross_match():
     # env "eu" must NOT match "dev-eu" artifacts (forward-construct, no reverse split)
     names = ["plan.dev-eu.stacks-app"]
-    assert ad.workset_from_artifacts(names, "eu", ["stacks/app"]) == []
+    assert ad.workset_from_artifacts(names, "eu", ["stacks/app"], {}) == []
 
 
 def test_old_delimiter_collision_no_longer_forward_matches():
@@ -63,14 +59,14 @@ def test_old_delimiter_collision_no_longer_forward_matches():
     # `plan.dev-eu.stacks-app` and env "eu" constructs `plan.eu.stacks-app-dev`
     # -> no match.
     names = ["plan.dev-eu.stacks-app"]
-    assert ad.workset_from_artifacts(names, "eu", ["stacks/app-dev"]) == []
+    assert ad.workset_from_artifacts(names, "eu", ["stacks/app-dev"], {}) == []
 
 
 def test_workset_slug_collision_fails_loud():
     # two distinct paths slug identically -> ambiguous artifact match -> fail loud
     names = ["plan.dev-eu.stacks-a-b"]
     with pytest.raises(SystemExit):
-        ad.workset_from_artifacts(names, "dev-eu", ["stacks/a/b", "stacks-a/b"])
+        ad.workset_from_artifacts(names, "dev-eu", ["stacks/a/b", "stacks-a/b"], {})
 
 
 def test_filter_pending_drops_completed():
@@ -257,3 +253,32 @@ def test_duplicate_run_newer_queued_stays_pending():
     ]
     done = ad.ag.done_names(checks)
     assert ad.filter_pending(cells, done) == cells
+
+
+def test_main_wires_the_tag_map_into_the_cells(tmp_path, monkeypatch):
+    # The whole point of deriving the map: without this, dropping the
+    # env_membership call at the call site leaves every cell role-less and the
+    # suite green.
+    out = tmp_path / "out"
+    for k, v in {
+        "GITHUB_REPOSITORY": "o/r",
+        "SHIPMATE_ENV": "dev-eu",
+        "SHIPMATE_PLAN_RUN_ID": "42",
+        "SHIPMATE_HEAD_SHA": "a" * 40,
+        "GITHUB_OUTPUT": str(out),
+    }.items():
+        monkeypatch.setenv(k, v)
+    monkeypatch.setattr(ad, "verify_plan_run", lambda *a: None)
+    monkeypatch.setattr(ad, "run_graph_deps", lambda: {"stacks/app": set()})
+    monkeypatch.setattr(ad, "_artifact_names", lambda *a: ["plan.dev-eu.stacks-app"])
+    monkeypatch.setattr(ad, "completed_apply_names", lambda *a: set())
+    monkeypatch.setattr(
+        ad.bm,
+        "env_membership",
+        lambda **kw: ({}, {"stacks/app": ["env/dev-eu", "workload/net-edge"]}),
+    )
+    ad.main()
+    parsed = dict(ln.split("=", 1) for ln in out.read_text(encoding="utf-8").splitlines())
+    assert json.loads(parsed["waves"])["wave0"] == [
+        {"stack": "stacks/app", "environment": "dev-eu", "workload_var": "NET_EDGE"}
+    ]

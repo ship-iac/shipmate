@@ -45,7 +45,7 @@ def _slug(path):
     return path.replace("/", "-")
 
 
-def workset_from_artifacts(artifact_names, env, graph_paths, tags_by_stack=None):
+def workset_from_artifacts(artifact_names, env, graph_paths, tags_by_stack):
     """Cells for `env` = graph stacks whose exact `plan.<env>.<slug>` artifact is
     present in the plan run. Forward-construct the expected name per graph path,
     never reverse-parse it (`validate_env` guards what makes that safe).
@@ -54,14 +54,15 @@ def workset_from_artifacts(artifact_names, env, graph_paths, tags_by_stack=None)
     `workload_var` comes from the tags, never from the artifact name: the slug
     grammar is what keeps artifact names collision-free and nothing may be added
     to it. A stack missing from the map carries "" and applies with the
-    environment's generic role."""
+    environment's generic role; the map itself is REQUIRED, so a caller that
+    stops deriving it raises here instead of silently applying every cell with
+    the generic role."""
     names = set(artifact_names)
-    tags = tags_by_stack or {}
     cells = [
         {
             "stack": p,
             "environment": env,
-            "workload_var": bm.workload_var(bm.workload_of(tags.get(p, []))),
+            "workload_var": bm.workload_var(bm.workload_of(tags_by_stack.get(p, []))),
         }
         for p in graph_paths
         if f"plan.{env}.{_slug(p)}" in names

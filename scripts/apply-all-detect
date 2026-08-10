@@ -44,7 +44,7 @@ eo = _load("env-order")
 # No apply-gate alias -- see deploy-detect and test_detect_app_scoping.
 
 
-def cells_from_artifacts(artifact_names, stacks_by_env, tags_by_stack=None):
+def cells_from_artifacts(artifact_names, stacks_by_env, tags_by_stack):
     """All-envs workset: per env (from tags, never from artifact-name
     parsing), forward-match `plan.<env>.<slug>` exactly like the single-env
     path — including its slug-collision, dotted-env and workload handling."""
