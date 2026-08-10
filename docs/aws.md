@@ -159,6 +159,17 @@ engine's `if: ${{ vars.AWS_ROLE_ARN != '' }}` guard onto your step — with the
 variable unset, `configure-aws-credentials` has no role to assume and the cell
 fails there rather than skipping.
 
+## Runner choice
+
+The documented fences in [`getting-started.md`](getting-started.md) and
+[`drift.md`](drift.md) use `runs-on: ubuntu-slim`, which suits the three
+credential-free samples: their cells download no provider. An AWS repository
+does — every cell pulls `hashicorp/aws` — and if `.terraform.lock.hcl` is
+gitignored, as it is in `repo-example-stacks-aws`, every `init -reconfigure`
+re-resolves it from scratch. On a cloud repository weigh the slim image against
+that download before copying the label; `ubuntu-latest` remains the safe
+default.
+
 ## The sample's workload
 
 Every stack manages `random_pet` and `terraform_data` null resources plus one

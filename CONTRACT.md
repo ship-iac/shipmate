@@ -762,7 +762,12 @@ trusting the trigger alone closes two paths a trigger check alone would not:
   and the `gh` CLI. A runner must therefore provide: `bash`, `python3`
   (Python ≥ 3.11), `git`, `curl`, `jq`, `openssl`, and `gh`.
 - Every GitHub-hosted Ubuntu image satisfies this, including the minimal
-  `ubuntu-slim` image. Self-hosted runners must preinstall these tools.
+  `ubuntu-slim` image, whose
+  [included-software list](https://github.com/actions/runner-images/blob/main/images/ubuntu-slim/ubuntu-slim-Readme.md)
+  names the GitHub CLI. That one is load-bearing for the drift path: the
+  default-branch probe in the consumer's `drift.yml` calls `gh api` in a job
+  with no `setup` step before it. Self-hosted runners must preinstall these
+  tools.
 - The Python scripts have **no third-party dependencies** — nothing is
   `pip install`ed at runtime, so no Python setup step (or network access
   to a package index) is required or performed.
