@@ -151,3 +151,28 @@ def test_foreign_app_completed_check_stays_pending(monkeypatch):
     cells = [{"stack": "stacks/app", "environment": "dev-eu", "workload": ""}]
     done = _completed(monkeypatch, [_check(app={"id": 15368})])
     assert dd.filter_pending(cells, done) == cells
+
+
+def test_main_emits_the_dag_shape_notice(monkeypatch, tmp_path, capsys):
+    # The post-merge path is where a flat DAG applies the whole repository at
+    # once, so this is the run that most needs the line. deploy-detect has its
+    # own main(); importing apply-detect emits nothing on its own.
+    deps = {"stacks/a": set(), "stacks/b": {"stacks/a"}}
+    monkeypatch.setattr(dd, "_merged_head", lambda repo, merge_sha: "headsha")
+    monkeypatch.setattr(dd, "_gh_json", lambda path: {"workflow_runs": []})
+    monkeypatch.setattr(
+        dd.bm,
+        "compute_cells",
+        lambda all_stacks, base: [{"stack": "stacks/a", "environment": "dev-eu", "workload": ""}],
+    )
+    monkeypatch.setattr(dd.ad, "completed_apply_names", lambda repo, head: set())
+    monkeypatch.setattr(dd.ad, "run_graph_deps", lambda: deps)
+    monkeypatch.setattr(dd.eo, "read_env_order", lambda: {})
+    monkeypatch.setenv("GITHUB_REPOSITORY", "acme/iac")
+    monkeypatch.setenv("GITHUB_SHA", "merge123")
+    monkeypatch.setenv("GITHUB_OUTPUT", str(tmp_path / "out.txt"))
+    dd.main()
+    assert (
+        "::notice::2 stacks, 1 after edges, 2 wave levels; 1 stacks would apply concurrently"
+        in capsys.readouterr().out.splitlines()
+    )

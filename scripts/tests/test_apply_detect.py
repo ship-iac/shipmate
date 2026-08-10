@@ -90,6 +90,53 @@ def test_check_runs_jsonl_parsing_reuses_apply_gates_parse_jsonl(monkeypatch):
     assert "not-json-garbage" in str(exc_info.value)
 
 
+def test_dag_shape_notice_reports_a_flat_graph():
+    # The migration shape: every stack independent, so the whole repository
+    # would apply at once. Nothing can detect the missing edges — this line is
+    # how a reader who knows the repository notices.
+    deps = {"stacks/a": set(), "stacks/b": set(), "stacks/c": set()}
+    assert ad.dag_shape_notice(deps) == (
+        "::notice::3 stacks, 0 after edges, 1 wave levels; 3 stacks would apply concurrently"
+    )
+
+
+def test_dag_shape_notice_reports_a_layered_graph():
+    # `stacks/d` carries two edges on purpose: with one edge per dependent stack
+    # an edge count and a count of stacks-that-have-dependencies agree, and the
+    # figure a reader is being asked to judge is the edge count.
+    deps = {
+        "stacks/a": set(),
+        "stacks/b": {"stacks/a"},
+        "stacks/c": {"stacks/a"},
+        "stacks/d": {"stacks/b", "stacks/c"},
+    }
+    assert ad.dag_shape_notice(deps) == (
+        "::notice::4 stacks, 4 after edges, 3 wave levels; 2 stacks would apply concurrently"
+    )
+
+
+def test_main_emits_the_dag_shape_notice(monkeypatch, tmp_path, capsys):
+    # The line is worth nothing unprinted: this executes the real entry point.
+    deps = {"stacks/a": set(), "stacks/b": {"stacks/a"}}
+    monkeypatch.setattr(ad, "verify_plan_run", lambda repo, run_id, head: None)
+    monkeypatch.setattr(ad, "run_graph_deps", lambda: deps)
+    monkeypatch.setattr(ad, "_artifact_names", lambda repo, run_id: ["plan.dev-eu.stacks-a"])
+    monkeypatch.setattr(ad, "completed_apply_names", lambda repo, head: set())
+    for name, value in {
+        "GITHUB_REPOSITORY": "acme/iac",
+        "SHIPMATE_ENV": "dev-eu",
+        "SHIPMATE_PLAN_RUN_ID": "123456",
+        "SHIPMATE_HEAD_SHA": "0123456789abcdef0123456789abcdef01234567",
+        "GITHUB_OUTPUT": str(tmp_path / "out.txt"),
+    }.items():
+        monkeypatch.setenv(name, value)
+    ad.main()
+    assert (
+        "::notice::2 stacks, 1 after edges, 2 wave levels; 1 stacks would apply concurrently"
+        in capsys.readouterr().out.splitlines()
+    )
+
+
 def test_verify_plan_run_rejects_mismatched_head_sha(monkeypatch):
     monkeypatch.setattr(
         ad,
