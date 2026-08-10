@@ -2,8 +2,8 @@
 
 Invariants:
 - every wave job in apply-env-level.yml carries id-token: write, exactly one
-  credentials step gated on vars.AWS_ROLE_ARN, placed BEFORE the apply-cell
-  step, and the empty-suffix state-path expression;
+  credentials step gated on the workload role or vars.AWS_ROLE_ARN, placed
+  BEFORE the apply-cell step, and the empty-suffix state-path expression;
 - apply-env-level.yml declares a workflow-level `permissions: {}` floor, and the
   snapshot and complete jobs declare exactly the scopes they need -- neither
   gets id-token (neither touches the cloud, and complete holds the App key);
@@ -18,7 +18,16 @@ import yaml
 from _loader import WORKFLOWS
 
 CRED_ACTION = "aws-actions/configure-aws-credentials"
-CRED_IF = "${{ vars.AWS_ROLE_ARN != '' }}"
+CRED_IF = (
+    "${{ (matrix.workload_var != '' "
+    "&& vars[format('AWS_ROLE_ARN_{0}', matrix.workload_var)]) != '' "
+    "|| vars.AWS_ROLE_ARN != '' }}"
+)
+ROLE_TO_ASSUME = (
+    "${{ matrix.workload_var != '' "
+    "&& vars[format('AWS_ROLE_ARN_{0}', matrix.workload_var)] "
+    "|| vars.AWS_ROLE_ARN }}"
+)
 STATE_PATH_EXPR = (
     "${{ inputs.state_suffix != '' && format('{0}/{1}', matrix.stack, inputs.state_suffix) || '' }}"
 )
@@ -79,9 +88,9 @@ def test_every_wave_has_exactly_one_gated_cred_step_before_apply_cell():
         )
         cred = steps[cred_idx[0]]
         assert cred.get("if") == CRED_IF, (
-            f"{wave}: credentials step must be gated on vars.AWS_ROLE_ARN"
+            f"{wave}: credentials step must be gated on the workload role or AWS_ROLE_ARN"
         )
-        assert cred["with"]["role-to-assume"] == "${{ vars.AWS_ROLE_ARN }}"
+        assert cred["with"]["role-to-assume"] == ROLE_TO_ASSUME
         assert cred["with"]["aws-region"] == "${{ vars.AWS_REGION }}"
         cell_idx = [i for i, s in enumerate(steps) if _is_cell(s)]
         assert len(cell_idx) == 1, f"{wave}: expected exactly one apply-cell step"

@@ -61,14 +61,16 @@ jobs:
         with:
           terramate-version: ${{ vars.TERRAMATE_VERSION }}
           tofu-version: ${{ vars.TOFU_VERSION }}
-      # Inert unless the consumer sets AWS_ROLE_ARN on this job's environment:
-      # the engine stays cloud-agnostic by default, and a consumer opts into
-      # AWS OIDC per environment (plan/apply roles may differ per env/account).
+      # Inert unless the consumer sets a role on this job's environment: the
+      # engine stays cloud-agnostic by default, and a consumer opts into AWS
+      # OIDC per environment (plan/apply roles may differ per env/account).
+      # AWS_ROLE_ARN_<WORKLOAD> wins over AWS_ROLE_ARN, so one environment can
+      # serve several workloads.
       - name: Configure cloud credentials (AWS OIDC)
-        if: ${{ vars.AWS_ROLE_ARN != '' }}
+        if: ${{ (matrix.workload_var != '' && vars[format('AWS_ROLE_ARN_{0}', matrix.workload_var)]) != '' || vars.AWS_ROLE_ARN != '' }}
         uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
         with:
-          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          role-to-assume: ${{ matrix.workload_var != '' && vars[format('AWS_ROLE_ARN_{0}', matrix.workload_var)] || vars.AWS_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
       - uses: ship-iac/shipmate/actions/apply-cell@9c579faca9615b12cebbb7d65a3e15dd89cb39d1
         with:
@@ -107,14 +109,16 @@ jobs:
         with:
           terramate-version: ${{ vars.TERRAMATE_VERSION }}
           tofu-version: ${{ vars.TOFU_VERSION }}
-      # Inert unless the consumer sets AWS_ROLE_ARN on this job's environment:
-      # the engine stays cloud-agnostic by default, and a consumer opts into
-      # AWS OIDC per environment (plan/apply roles may differ per env/account).
+      # Inert unless the consumer sets a role on this job's environment: the
+      # engine stays cloud-agnostic by default, and a consumer opts into AWS
+      # OIDC per environment (plan/apply roles may differ per env/account).
+      # AWS_ROLE_ARN_<WORKLOAD> wins over AWS_ROLE_ARN, so one environment can
+      # serve several workloads.
       - name: Configure cloud credentials (AWS OIDC)
-        if: ${{ vars.AWS_ROLE_ARN != '' }}
+        if: ${{ (matrix.workload_var != '' && vars[format('AWS_ROLE_ARN_{0}', matrix.workload_var)]) != '' || vars.AWS_ROLE_ARN != '' }}
         uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
         with:
-          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          role-to-assume: ${{ matrix.workload_var != '' && vars[format('AWS_ROLE_ARN_{0}', matrix.workload_var)] || vars.AWS_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
       - uses: ship-iac/shipmate/actions/apply-cell@9c579faca9615b12cebbb7d65a3e15dd89cb39d1
         with:
@@ -153,14 +157,16 @@ jobs:
         with:
           terramate-version: ${{ vars.TERRAMATE_VERSION }}
           tofu-version: ${{ vars.TOFU_VERSION }}
-      # Inert unless the consumer sets AWS_ROLE_ARN on this job's environment:
-      # the engine stays cloud-agnostic by default, and a consumer opts into
-      # AWS OIDC per environment (plan/apply roles may differ per env/account).
+      # Inert unless the consumer sets a role on this job's environment: the
+      # engine stays cloud-agnostic by default, and a consumer opts into AWS
+      # OIDC per environment (plan/apply roles may differ per env/account).
+      # AWS_ROLE_ARN_<WORKLOAD> wins over AWS_ROLE_ARN, so one environment can
+      # serve several workloads.
       - name: Configure cloud credentials (AWS OIDC)
-        if: ${{ vars.AWS_ROLE_ARN != '' }}
+        if: ${{ (matrix.workload_var != '' && vars[format('AWS_ROLE_ARN_{0}', matrix.workload_var)]) != '' || vars.AWS_ROLE_ARN != '' }}
         uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
         with:
-          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          role-to-assume: ${{ matrix.workload_var != '' && vars[format('AWS_ROLE_ARN_{0}', matrix.workload_var)] || vars.AWS_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
       - uses: ship-iac/shipmate/actions/apply-cell@9c579faca9615b12cebbb7d65a3e15dd89cb39d1
         with:
@@ -199,14 +205,16 @@ jobs:
         with:
           terramate-version: ${{ vars.TERRAMATE_VERSION }}
           tofu-version: ${{ vars.TOFU_VERSION }}
-      # Inert unless the consumer sets AWS_ROLE_ARN on this job's environment:
-      # the engine stays cloud-agnostic by default, and a consumer opts into
-      # AWS OIDC per environment (plan/apply roles may differ per env/account).
+      # Inert unless the consumer sets a role on this job's environment: the
+      # engine stays cloud-agnostic by default, and a consumer opts into AWS
+      # OIDC per environment (plan/apply roles may differ per env/account).
+      # AWS_ROLE_ARN_<WORKLOAD> wins over AWS_ROLE_ARN, so one environment can
+      # serve several workloads.
       - name: Configure cloud credentials (AWS OIDC)
-        if: ${{ vars.AWS_ROLE_ARN != '' }}
+        if: ${{ (matrix.workload_var != '' && vars[format('AWS_ROLE_ARN_{0}', matrix.workload_var)]) != '' || vars.AWS_ROLE_ARN != '' }}
         uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
         with:
-          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          role-to-assume: ${{ matrix.workload_var != '' && vars[format('AWS_ROLE_ARN_{0}', matrix.workload_var)] || vars.AWS_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
       - uses: ship-iac/shipmate/actions/apply-cell@9c579faca9615b12cebbb7d65a3e15dd89cb39d1
         with:
@@ -245,14 +253,16 @@ jobs:
         with:
           terramate-version: ${{ vars.TERRAMATE_VERSION }}
           tofu-version: ${{ vars.TOFU_VERSION }}
-      # Inert unless the consumer sets AWS_ROLE_ARN on this job's environment:
-      # the engine stays cloud-agnostic by default, and a consumer opts into
-      # AWS OIDC per environment (plan/apply roles may differ per env/account).
+      # Inert unless the consumer sets a role on this job's environment: the
+      # engine stays cloud-agnostic by default, and a consumer opts into AWS
+      # OIDC per environment (plan/apply roles may differ per env/account).
+      # AWS_ROLE_ARN_<WORKLOAD> wins over AWS_ROLE_ARN, so one environment can
+      # serve several workloads.
       - name: Configure cloud credentials (AWS OIDC)
-        if: ${{ vars.AWS_ROLE_ARN != '' }}
+        if: ${{ (matrix.workload_var != '' && vars[format('AWS_ROLE_ARN_{0}', matrix.workload_var)]) != '' || vars.AWS_ROLE_ARN != '' }}
         uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
         with:
-          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          role-to-assume: ${{ matrix.workload_var != '' && vars[format('AWS_ROLE_ARN_{0}', matrix.workload_var)] || vars.AWS_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
       - uses: ship-iac/shipmate/actions/apply-cell@9c579faca9615b12cebbb7d65a3e15dd89cb39d1
         with:
@@ -291,14 +301,16 @@ jobs:
         with:
           terramate-version: ${{ vars.TERRAMATE_VERSION }}
           tofu-version: ${{ vars.TOFU_VERSION }}
-      # Inert unless the consumer sets AWS_ROLE_ARN on this job's environment:
-      # the engine stays cloud-agnostic by default, and a consumer opts into
-      # AWS OIDC per environment (plan/apply roles may differ per env/account).
+      # Inert unless the consumer sets a role on this job's environment: the
+      # engine stays cloud-agnostic by default, and a consumer opts into AWS
+      # OIDC per environment (plan/apply roles may differ per env/account).
+      # AWS_ROLE_ARN_<WORKLOAD> wins over AWS_ROLE_ARN, so one environment can
+      # serve several workloads.
       - name: Configure cloud credentials (AWS OIDC)
-        if: ${{ vars.AWS_ROLE_ARN != '' }}
+        if: ${{ (matrix.workload_var != '' && vars[format('AWS_ROLE_ARN_{0}', matrix.workload_var)]) != '' || vars.AWS_ROLE_ARN != '' }}
         uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
         with:
-          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          role-to-assume: ${{ matrix.workload_var != '' && vars[format('AWS_ROLE_ARN_{0}', matrix.workload_var)] || vars.AWS_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
       - uses: ship-iac/shipmate/actions/apply-cell@9c579faca9615b12cebbb7d65a3e15dd89cb39d1
         with:
@@ -337,14 +349,16 @@ jobs:
         with:
           terramate-version: ${{ vars.TERRAMATE_VERSION }}
           tofu-version: ${{ vars.TOFU_VERSION }}
-      # Inert unless the consumer sets AWS_ROLE_ARN on this job's environment:
-      # the engine stays cloud-agnostic by default, and a consumer opts into
-      # AWS OIDC per environment (plan/apply roles may differ per env/account).
+      # Inert unless the consumer sets a role on this job's environment: the
+      # engine stays cloud-agnostic by default, and a consumer opts into AWS
+      # OIDC per environment (plan/apply roles may differ per env/account).
+      # AWS_ROLE_ARN_<WORKLOAD> wins over AWS_ROLE_ARN, so one environment can
+      # serve several workloads.
       - name: Configure cloud credentials (AWS OIDC)
-        if: ${{ vars.AWS_ROLE_ARN != '' }}
+        if: ${{ (matrix.workload_var != '' && vars[format('AWS_ROLE_ARN_{0}', matrix.workload_var)]) != '' || vars.AWS_ROLE_ARN != '' }}
         uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
         with:
-          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          role-to-assume: ${{ matrix.workload_var != '' && vars[format('AWS_ROLE_ARN_{0}', matrix.workload_var)] || vars.AWS_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
       - uses: ship-iac/shipmate/actions/apply-cell@9c579faca9615b12cebbb7d65a3e15dd89cb39d1
         with:
@@ -383,14 +397,16 @@ jobs:
         with:
           terramate-version: ${{ vars.TERRAMATE_VERSION }}
           tofu-version: ${{ vars.TOFU_VERSION }}
-      # Inert unless the consumer sets AWS_ROLE_ARN on this job's environment:
-      # the engine stays cloud-agnostic by default, and a consumer opts into
-      # AWS OIDC per environment (plan/apply roles may differ per env/account).
+      # Inert unless the consumer sets a role on this job's environment: the
+      # engine stays cloud-agnostic by default, and a consumer opts into AWS
+      # OIDC per environment (plan/apply roles may differ per env/account).
+      # AWS_ROLE_ARN_<WORKLOAD> wins over AWS_ROLE_ARN, so one environment can
+      # serve several workloads.
       - name: Configure cloud credentials (AWS OIDC)
-        if: ${{ vars.AWS_ROLE_ARN != '' }}
+        if: ${{ (matrix.workload_var != '' && vars[format('AWS_ROLE_ARN_{0}', matrix.workload_var)]) != '' || vars.AWS_ROLE_ARN != '' }}
         uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
         with:
-          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          role-to-assume: ${{ matrix.workload_var != '' && vars[format('AWS_ROLE_ARN_{0}', matrix.workload_var)] || vars.AWS_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
       - uses: ship-iac/shipmate/actions/apply-cell@9c579faca9615b12cebbb7d65a3e15dd89cb39d1
         with:
