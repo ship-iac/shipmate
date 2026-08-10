@@ -240,11 +240,17 @@ variables on it:
 - `AWS_ROLE_ARN` — the IAM role the job assumes via GitHub's OIDC provider.
 - `AWS_REGION` — the region passed to the credentials step.
 
-With `AWS_ROLE_ARN` unset the credentials step is skipped and the job holds no
+On the apply path a wave job first looks for `AWS_ROLE_ARN_<WORKLOAD>`, where
+`<WORKLOAD>` is the cell's `workload/<name>` tag upper-cased with `-` replaced
+by `_`, and falls back to `AWS_ROLE_ARN` when the cell carries no workload tag
+or that variable is unset — so one `<env>-apply` Environment can serve several
+workloads with a role each.
+
+With neither variable set the credentials step is skipped and the job holds no
 cloud credential at all, which is how the sample repos run credential-free.
 This is wired on the **apply path only**: every wave job of
 `apply-env-level.yml` requests `id-token: write` and runs
-`aws-actions/configure-aws-credentials` gated on `vars.AWS_ROLE_ARN != ''`
+`aws-actions/configure-aws-credentials`, gated on one of those roles being set,
 before its apply-cell step, reading the variables from the `<env>-apply`
 Environment it is bound to. The `snapshot` and `complete` jobs deliberately get
 no token. Plan cells have no credentials step.
