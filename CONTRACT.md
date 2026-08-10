@@ -319,12 +319,20 @@ must appear in Terramate stack tag lists is the `env/<name>` /
 example, a shared stack tagged both `env/staging` and `env/production`)
 when the same stack participates in more than one environment.
 
-An `env/<name>` tag is mandatory: `detect` fails the **whole run** when any
-stack lacks one, rather than skipping that stack. That scope is deliberate — a
-silently skipped stack plans and applies nothing while the gate goes green over
-it, which is the one failure this contract will not trade for convenience. The
-failure names every untagged stack it found, so an incremental migration is
-worked down from that list rather than one re-run per stack.
+An `env/<name>` tag is mandatory for every stack a run inspects, and an
+untagged one fails the **whole run** rather than being skipped. Which stacks
+are inspected differs by path: the **changed** set on the plan and deploy
+paths, so untagged stacks elsewhere in the tree do not fail a plan run until
+one of them changes; every stack on the drift path, which is therefore the
+repo-wide backstop that catches the rest; and none on the artifact-sourced
+bare-apply `detect`, which exempts the check deliberately — an untagged stack
+produces no plan artifact and so contributes no cell anyway, and an unrelated
+one must not abort an apply. Failing the whole run rather than the one stack is
+deliberate too: a silently skipped stack plans and applies nothing while the
+gate goes green over it, which is the one failure this contract will not trade
+for convenience. The failure names every untagged stack it found, so an
+incremental migration is worked down from that list rather than one re-run per
+stack.
 
 ## Comment-ops
 
