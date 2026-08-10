@@ -206,6 +206,17 @@ _TF_WORKSPACE_REWRITTEN = (
 )
 
 
+_TF_VAR_REGION_UNREPORTED = (
+    "::error::this repository's terramate.config.run.env rewrites TF_VAR_region: detect "
+    "injected 'SHIPMATE_RT_PROBE' and `terramate run` reported (unset). Every cell "
+    "would plan and apply under a value CI did not choose, and the plan/apply "
+    "fingerprint is computed outside `terramate run`, so both sides agree and "
+    "nothing else reports it. Do not assign TF_VAR_env, TF_VAR_region, TF_WORKSPACE "
+    "there; to keep a local default, put the injected name first in the chain — "
+    'tm_try(env.TF_VAR_env, env.env, "dev"). See CONTRACT.md §Env model.'
+)
+
+
 def test_compute_cells_probes_that_the_injected_environment_survives(monkeypatch):
     calls = []
     _stub_terramate(monkeypatch, ["stacks/app"], _SURVIVED, calls)
@@ -252,6 +263,21 @@ def test_compute_cells_refuses_a_rewritten_tf_workspace(monkeypatch):
     with pytest.raises(SystemExit) as exc_info:
         bm.compute_cells(all_stacks=True)
     assert str(exc_info.value) == _TF_WORKSPACE_REWRITTEN
+
+
+def test_compute_cells_refuses_a_variable_terramate_run_never_reported(monkeypatch):
+    # Dropped, not rewritten: `run.env` can also unset. An absent variable is
+    # the same defect as a changed one — the cell would run under whatever the
+    # tool decided rather than what CI injected — so "not reported" must not
+    # read as "fine".
+    _stub_terramate(
+        monkeypatch,
+        ["stacks/app"],
+        _SURVIVED.replace("TF_VAR_region=SHIPMATE_RT_PROBE\n", ""),
+    )
+    with pytest.raises(SystemExit) as exc_info:
+        bm.compute_cells(all_stacks=True)
+    assert str(exc_info.value) == _TF_VAR_REGION_UNREPORTED
 
 
 def test_compute_cells_skips_the_probe_with_no_stacks(monkeypatch):
