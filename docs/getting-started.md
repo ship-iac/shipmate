@@ -10,6 +10,15 @@ does with that wiring.
   how a stack declares its environment membership — no environment name ever
   appears in workflow YAML. Tag grammar:
   [`../CONTRACT.md`](../CONTRACT.md) §Tag grammar.
+
+  For an existing repository this is the largest item on the page, not a
+  checkbox. `build-matrix` derives environment membership solely from
+  `env/<name>` tags and fails `detect` for any stack lacking one, and Terramate
+  tags are otherwise free-form — so a repository that predates shipmate is
+  almost certainly using them for something else entirely, and **every** stack
+  has to be re-tagged before a single plan run works. The work is additive,
+  mechanical and reviewable, but it is repo-wide and has to land in one commit
+  to be worth anything.
 - **The Terramate and OpenTofu versions this release is tested against.** They
   are in [`../VERSIONS`](../VERSIONS); set them as the repository variables
   `TERRAMATE_VERSION` and `TOFU_VERSION`, which the workflows below read.
