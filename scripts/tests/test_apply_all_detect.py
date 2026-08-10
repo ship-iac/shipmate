@@ -24,6 +24,19 @@ def test_cells_from_artifacts_all_envs():
     ]
 
 
+def test_cells_from_artifacts_attaches_workload_var_from_the_tags():
+    cells = aad.cells_from_artifacts(
+        ["plan.dev-eu.stacks-app", "plan.dev-us.stacks-app", "plan.dev-eu.stacks-dns"],
+        {"dev-eu": ["stacks/app", "stacks/dns"], "dev-us": ["stacks/app"]},
+        {"stacks/app": ["workload/net-edge"]},  # stacks/dns absent -> ""
+    )
+    assert cells == [
+        {"stack": "stacks/app", "environment": "dev-eu", "workload_var": "NET_EDGE"},
+        {"stack": "stacks/dns", "environment": "dev-eu", "workload_var": ""},
+        {"stack": "stacks/app", "environment": "dev-us", "workload_var": "NET_EDGE"},
+    ]
+
+
 def test_cells_from_artifacts_env_without_artifacts_contributes_nothing():
     cells = aad.cells_from_artifacts(
         ["plan.dev-eu.stacks-app"], {"dev-eu": ["stacks/app"], "prod": ["stacks/app"]}

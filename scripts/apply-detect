@@ -45,14 +45,26 @@ def _slug(path):
     return path.replace("/", "-")
 
 
-def workset_from_artifacts(artifact_names, env, graph_paths):
+def workset_from_artifacts(artifact_names, env, graph_paths, tags_by_stack=None):
     """Cells for `env` = graph stacks whose exact `plan.<env>.<slug>` artifact is
     present in the plan run. Forward-construct the expected name per graph path,
     never reverse-parse it (`validate_env` guards what makes that safe).
-    path->slug is many-to-one, so fail loud if two paths collide."""
+    path->slug is many-to-one, so fail loud if two paths collide.
+
+    `workload_var` comes from the tags, never from the artifact name: the slug
+    grammar is what keeps artifact names collision-free and nothing may be added
+    to it. A stack missing from the map carries "" and applies with the
+    environment's generic role."""
     names = set(artifact_names)
+    tags = tags_by_stack or {}
     cells = [
-        {"stack": p, "environment": env} for p in graph_paths if f"plan.{env}.{_slug(p)}" in names
+        {
+            "stack": p,
+            "environment": env,
+            "workload_var": bm.workload_var(bm.workload_of(tags.get(p, []))),
+        }
+        for p in graph_paths
+        if f"plan.{env}.{_slug(p)}" in names
     ]
     slugs = [_slug(c["stack"]) for c in cells]
     dupes = sorted({s for s in slugs if slugs.count(s) > 1})
@@ -186,7 +198,8 @@ def main():
     graph_paths = list(deps.keys())
 
     names = _artifact_names(repo, plan_run_id)
-    cells = workset_from_artifacts(names, env, graph_paths)
+    _, tags_by_stack = bm.env_membership(all_stacks=True, require_env_tag=False)
+    cells = workset_from_artifacts(names, env, graph_paths, tags_by_stack)
 
     completed = completed_apply_names(repo, head)
     pending = filter_pending(cells, completed)

@@ -47,24 +47,35 @@ class MatrixTooLarge(Exception):
     pass
 
 
+def workload_of(tags):
+    """The stack's `workload/<name>` tag name, or "" when it carries none."""
+    for tag in tags:
+        if tag.startswith("workload/"):
+            return tag[len("workload/") :]
+    return ""
+
+
+def workload_var(workload):
+    """The `AWS_ROLE_ARN_<WORKLOAD>` suffix for a workload name.
+
+    GitHub upper-cases variable names and GHA expressions have no toUpper, so
+    this key can only be computed here. ONE definition: apply-detect and
+    apply-all-detect attach it to their artifact-derived cells too, and a second
+    copy would eventually disagree with this one."""
+    return workload.upper().replace("-", "_")
+
+
 def build_matrix(envs, stacks_by_env, tags_by_stack):
     cells = []
     for env in envs:
         for stack in stacks_by_env.get(env, []):
-            workload = ""
-            for tag in tags_by_stack.get(stack, []):
-                if tag.startswith("workload/"):
-                    workload = tag[len("workload/") :]
-                    break
+            workload = workload_of(tags_by_stack.get(stack, []))
             cells.append(
                 {
                     "stack": stack,
                     "environment": env,
                     "workload": workload,
-                    # GitHub upper-cases variable names and GHA expressions have
-                    # no toUpper, so the AWS_ROLE_ARN_<WORKLOAD> lookup key can
-                    # only be computed here.
-                    "workload_var": workload.upper().replace("-", "_"),
+                    "workload_var": workload_var(workload),
                 }
             )
     cells.sort(key=lambda c: (c["environment"], c["stack"]))

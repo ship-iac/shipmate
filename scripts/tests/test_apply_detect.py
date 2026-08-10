@@ -20,6 +20,29 @@ def test_workset_matches_plan_artifacts_for_env():
     assert all(c["environment"] == "dev-eu" for c in cells)
 
 
+def test_workset_attaches_workload_var_from_the_tags():
+    # A stack in the artifacts but absent from the tag map gets "" -- the map is
+    # built from a separate terramate query and must never be able to raise here.
+    names = ["plan.dev-eu.stacks-app", "plan.dev-eu.stacks-dns", "plan.dev-eu.stacks-platform"]
+    cells = ad.workset_from_artifacts(
+        names,
+        "dev-eu",
+        ["stacks/app", "stacks/dns", "stacks/platform"],
+        {"stacks/app": ["env/dev-eu", "workload/net-edge"], "stacks/dns": ["env/dev-eu"]},
+    )
+    assert cells == [
+        {"stack": "stacks/app", "environment": "dev-eu", "workload_var": "NET_EDGE"},
+        {"stack": "stacks/dns", "environment": "dev-eu", "workload_var": ""},
+        {"stack": "stacks/platform", "environment": "dev-eu", "workload_var": ""},
+    ]
+
+
+def test_workset_without_a_tag_map_carries_an_empty_workload_var():
+    assert ad.workset_from_artifacts(["plan.dev-eu.stacks-app"], "dev-eu", ["stacks/app"]) == [
+        {"stack": "stacks/app", "environment": "dev-eu", "workload_var": ""}
+    ]
+
+
 def test_workset_ignores_slug_with_wrong_env_suffix():
     names = ["plan.dev-eu-apply.stacks-app"]  # not the plain env
     cells = ad.workset_from_artifacts(names, "dev-eu", ["stacks/app"])
