@@ -56,6 +56,19 @@ Because the backend owns the state, the apply-path wrappers pass
 skipped entirely and shipmate never handles a state file. The input declares no
 default, so omitting it is a workflow-resolution error rather than a third mode.
 
+## Named profiles must be conditional
+
+`profile` being conditional above is a constraint on how you write HCL, not a
+stylistic choice. The apply jobs run inside the engine's reusable workflows and
+there is no consumer step between `setup` and `apply-cell`, so there is nowhere
+to write an `~/.aws/config`; the apply path holds only the OIDC session. Any
+`provider` or `backend` block carrying a literal `profile` therefore fails at
+apply. Gate the profile on a variable that defaults to `false` —
+`var.use_profile ? "…" : null` — so the same code serves a run by hand and CI.
+
+Worth stating rather than discovering: such a block plans fine locally, where
+the named profile exists, and only fails once it reaches the apply path.
+
 ## GitHub OIDC
 
 Each environment gets its own IAM role, assumed through GitHub's OIDC provider
