@@ -101,16 +101,16 @@ not secrets, since neither is one:
 - `AWS_ROLE_ARN` — the IAM role the job assumes.
 - `AWS_REGION` — the region passed to the credentials step.
 
-With neither of them set the engine's credentials step is skipped and the job
-holds no cloud credential at all, which is how the three non-AWS sample
-repositories run credential-free.
-
 On the apply path a third, optional variable takes precedence:
 
 - `AWS_ROLE_ARN_<WORKLOAD>` — the role for cells carrying a `workload/<name>`
   tag. `<WORKLOAD>` is that tag's name upper-cased with `-` replaced by `_`
   (`workload/net-edge` → `AWS_ROLE_ARN_NET_EDGE`). When the cell has no workload
   tag, or that variable is unset, the job falls back to `AWS_ROLE_ARN`.
+
+With no role variable set the engine's credentials step is skipped and the job
+holds no cloud credential at all, which is how the three non-AWS sample
+repositories run credential-free.
 
 That is the Environment-count arithmetic: without it, one role per workload
 means one Environment per (env × region × workload); with it, a single
@@ -153,8 +153,8 @@ after the `ship-iac/shipmate/actions/setup` step and before the cell action
 runs and setup has not yet been given a credential it does not need.
 
 Both sample steps are unconditional, because that repository sets the variables
-on every environment. If some of your environments run credential-free, copy the
-engine's `if: ${{ vars.AWS_ROLE_ARN != '' }}` guard onto your step — with the
+on every environment. If some of your environments run credential-free, guard
+your step with `if: ${{ vars.AWS_ROLE_ARN != '' }}` — with the
 variable unset, `configure-aws-credentials` has no role to assume and the cell
 fails there rather than skipping.
 

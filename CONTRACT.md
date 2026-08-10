@@ -246,7 +246,7 @@ by `_`, and falls back to `AWS_ROLE_ARN` when the cell carries no workload tag
 or that variable is unset — so one `<env>-apply` Environment can serve several
 workloads with a role each.
 
-With neither variable set the credentials step is skipped and the job holds no
+With no role variable set the credentials step is skipped and the job holds no
 cloud credential at all, which is how the sample repos run credential-free.
 This is wired on the **apply path only**: every wave job of
 `apply-env-level.yml` requests `id-token: write` and runs
