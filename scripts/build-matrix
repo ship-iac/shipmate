@@ -64,7 +64,8 @@ def build_matrix(envs, stacks_by_env, tags_by_stack):
     if len(cells) > MATRIX_LIMIT:
         raise MatrixTooLarge(
             f"{len(cells)} plan cells exceeds the GitHub Actions matrix limit of {MATRIX_LIMIT}. "
-            "Split the change across multiple PRs."
+            "Apply in named environments across several runs (`shipmate apply <env>`), "
+            "or reduce the number of environments in play."
         )
     return cells
 
