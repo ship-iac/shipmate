@@ -124,7 +124,7 @@ def env_membership(all_stacks=False, base="", require_env_tag=True):
         untagged = [s for s in stacks if not any(t.startswith("env/") for t in tags_by_stack[s])]
         if untagged:
             raise SystemExit(
-                "::error::stack(s) have no env/* tag and cannot fan out to any "
+                f"::error::{len(untagged)} stack(s) have no env/* tag and cannot fan out to any "
                 "environment (they would silently skip): " + ", ".join(sorted(untagged))
             )
     stacks_by_env = {}

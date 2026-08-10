@@ -124,6 +124,21 @@ def test_compute_cells_raises_on_untagged_stack(monkeypatch):
     assert "stacks/app" not in str(exc_info.value)
 
 
+def test_untagged_failure_names_the_count_and_every_stack(monkeypatch):
+    # The failure is the operator's whole to-do list: it must name how many
+    # stacks are untagged and all of them, sorted -- not the first one hit --
+    # so a migration can be re-run and watched shrink.
+    stacks = ["stacks/zeta", "stacks/alpha", "stacks/mid"]
+    monkeypatch.setattr(bm, "_list_stacks", lambda all_stacks, base: stacks)
+    monkeypatch.setattr(bm, "_tags", lambda s: ["workload/util"])
+    with pytest.raises(SystemExit) as exc_info:
+        bm.env_membership(all_stacks=True)
+    assert str(exc_info.value) == (
+        "::error::3 stack(s) have no env/* tag and cannot fan out to any "
+        "environment (they would silently skip): stacks/alpha, stacks/mid, stacks/zeta"
+    )
+
+
 def test_env_membership_groups_stacks_by_env_tag(monkeypatch):
     monkeypatch.setattr(bm, "_list_stacks", lambda all_stacks, base: ["stacks/app", "stacks/dns"])
     tags = {
