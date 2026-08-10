@@ -206,8 +206,8 @@ never used.
   `TF_DATA_DIR` needs the same resolution, or the per-env `.terraform` split
   drifts from what tofu receives.
 
-  Every path that builds cells from Terramate tags injects a sentinel value
-  into those three variables, runs `terramate run … -- env` for **one** stack,
+  Every path that calls `compute_cells` injects a sentinel value into those
+  three variables, runs `terramate run … -- env` for **one** stack,
   and fails the run when any of them comes back changed: the plan matrix's
   `detect` job, the post-merge deploy's own detect, and the nightly drift run.
   Repo-wide config, so one stack answers for the tree. The dispatched and bare

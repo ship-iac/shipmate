@@ -46,10 +46,16 @@ your ordering lives in the outgoing tool's configuration, it must be ported into
 indistinguishable from a stack that is genuinely independent. Treat the outgoing
 tool's config as a *lower bound* on the real graph, not as the graph: one
 migration that audited the OpenTofu code instead of porting the config went from
-6 declared edges to 105, and from 2 wave levels to 6. The check is the
-`::notice::` line the `detect` job prints on every run — stack count, `after`
+6 declared edges to 105, and from 2 wave levels to 6.
+
+The apply paths report the shape as a `::notice::` line — stack count, `after`
 edge count, wave levels, and how many stacks would apply concurrently. A reader
-who knows the repository can judge that number immediately; nobody else can.
+who knows the repository can judge that last number immediately; nobody else
+can. It is printed by the detect job of a dispatched `shipmate apply <env>` and
+by the post-merge deploy's detect, so it arrives **after** the pull request that
+would have been the place to fix the graph. A **plan** run does not print it.
+Before that point the equivalent is
+`terramate experimental run-graph --label stack.dir` run locally.
 
 **Tags.** Environment membership is derived from `env/<name>` tags and nothing
 else. Terramate tags are otherwise free-form, so a repository that predates
