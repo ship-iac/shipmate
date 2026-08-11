@@ -299,7 +299,7 @@ def test_compute_cells_probes_that_the_injected_environment_survives(monkeypatch
     calls = []
     _stub_terramate(monkeypatch, ["stacks/app"], _SURVIVED, calls)
     assert bm.compute_cells(all_stacks=True) == [
-        {"stack": "stacks/app", "environment": "dev-eu", "workload": ""}
+        {"stack": "stacks/app", "environment": "dev-eu", "workload": "", "workload_var": ""}
     ]
     args, env = calls[0]
     assert args == [
