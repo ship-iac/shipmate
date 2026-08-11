@@ -43,7 +43,14 @@ jobs:
       fail-fast: false
       matrix:
         include: ${{ fromJSON(inputs.waves_json).wave0 }}
-    environment: ${{ matrix.environment }}-apply
+    # A repository variable, not a workflow input: which environment an apply
+    # binds decides whether the reviewer gate and the apply role apply to it, and
+    # branch content must not be able to choose that. Listing a logical env opts
+    # it into one environment for both plan and apply; everything else keeps the
+    # separate <env>-apply.
+    environment: >-
+      ${{ contains(format(',{0},', vars.SHIPMATE_SHARED_ENVS), format(',{0},', matrix.environment))
+      && matrix.environment || format('{0}-apply', matrix.environment) }}
     concurrency:
       group: apply-${{ matrix.environment }}-${{ matrix.stack }}
       cancel-in-progress: false
@@ -89,7 +96,9 @@ jobs:
       fail-fast: false
       matrix:
         include: ${{ fromJSON(inputs.waves_json).wave1 }}
-    environment: ${{ matrix.environment }}-apply
+    environment: >-
+      ${{ contains(format(',{0},', vars.SHIPMATE_SHARED_ENVS), format(',{0},', matrix.environment))
+      && matrix.environment || format('{0}-apply', matrix.environment) }}
     concurrency:
       group: apply-${{ matrix.environment }}-${{ matrix.stack }}
       cancel-in-progress: false
@@ -135,7 +144,9 @@ jobs:
       fail-fast: false
       matrix:
         include: ${{ fromJSON(inputs.waves_json).wave2 }}
-    environment: ${{ matrix.environment }}-apply
+    environment: >-
+      ${{ contains(format(',{0},', vars.SHIPMATE_SHARED_ENVS), format(',{0},', matrix.environment))
+      && matrix.environment || format('{0}-apply', matrix.environment) }}
     concurrency:
       group: apply-${{ matrix.environment }}-${{ matrix.stack }}
       cancel-in-progress: false
@@ -181,7 +192,9 @@ jobs:
       fail-fast: false
       matrix:
         include: ${{ fromJSON(inputs.waves_json).wave3 }}
-    environment: ${{ matrix.environment }}-apply
+    environment: >-
+      ${{ contains(format(',{0},', vars.SHIPMATE_SHARED_ENVS), format(',{0},', matrix.environment))
+      && matrix.environment || format('{0}-apply', matrix.environment) }}
     concurrency:
       group: apply-${{ matrix.environment }}-${{ matrix.stack }}
       cancel-in-progress: false
@@ -227,7 +240,9 @@ jobs:
       fail-fast: false
       matrix:
         include: ${{ fromJSON(inputs.waves_json).wave4 }}
-    environment: ${{ matrix.environment }}-apply
+    environment: >-
+      ${{ contains(format(',{0},', vars.SHIPMATE_SHARED_ENVS), format(',{0},', matrix.environment))
+      && matrix.environment || format('{0}-apply', matrix.environment) }}
     concurrency:
       group: apply-${{ matrix.environment }}-${{ matrix.stack }}
       cancel-in-progress: false
@@ -273,7 +288,9 @@ jobs:
       fail-fast: false
       matrix:
         include: ${{ fromJSON(inputs.waves_json).wave5 }}
-    environment: ${{ matrix.environment }}-apply
+    environment: >-
+      ${{ contains(format(',{0},', vars.SHIPMATE_SHARED_ENVS), format(',{0},', matrix.environment))
+      && matrix.environment || format('{0}-apply', matrix.environment) }}
     concurrency:
       group: apply-${{ matrix.environment }}-${{ matrix.stack }}
       cancel-in-progress: false
@@ -319,7 +336,9 @@ jobs:
       fail-fast: false
       matrix:
         include: ${{ fromJSON(inputs.waves_json).wave6 }}
-    environment: ${{ matrix.environment }}-apply
+    environment: >-
+      ${{ contains(format(',{0},', vars.SHIPMATE_SHARED_ENVS), format(',{0},', matrix.environment))
+      && matrix.environment || format('{0}-apply', matrix.environment) }}
     concurrency:
       group: apply-${{ matrix.environment }}-${{ matrix.stack }}
       cancel-in-progress: false
@@ -365,7 +384,9 @@ jobs:
       fail-fast: false
       matrix:
         include: ${{ fromJSON(inputs.waves_json).wave7 }}
-    environment: ${{ matrix.environment }}-apply
+    environment: >-
+      ${{ contains(format(',{0},', vars.SHIPMATE_SHARED_ENVS), format(',{0},', matrix.environment))
+      && matrix.environment || format('{0}-apply', matrix.environment) }}
     concurrency:
       group: apply-${{ matrix.environment }}-${{ matrix.stack }}
       cancel-in-progress: false
