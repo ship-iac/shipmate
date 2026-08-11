@@ -98,6 +98,58 @@ def test_the_app_id_is_printed_before_the_key_is_written(monkeypatch, tmp_path, 
     assert "App created: id=42 slug=shipmate-acme" in capsys.readouterr().out
 
 
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("--repo", "org/../../evil"),
+        ("--repo", "org"),
+        ("--name", "shipmate' onload='alert(1)"),
+    ],
+)
+def test_main_refuses_an_operator_value_before_it_reaches_gh(monkeypatch, tmp_path, field, value):
+    # --repo's owner half is interpolated into the registration URL and both
+    # halves into `gh variable set --repo`; --name is embedded in the local HTML
+    # form, where a quote escapes the attribute holding it.
+    calls = _stub_run(monkeypatch)
+    argv = {
+        "--name": "shipmate-acme",
+        "--repo": "org/repo",
+        "--out": str(tmp_path / "key.pem"),
+        "--code": "c123",
+        field: value,
+    }
+
+    with pytest.raises(SystemExit) as exc:
+        ra.main([token for pair in argv.items() for token in pair])
+
+    assert repr(value) in str(exc.value)
+    assert calls == []
+
+
+def test_main_refuses_a_manifest_code_that_would_retarget_the_api_path(monkeypatch, tmp_path):
+    # The code lands in `app-manifests/<code>/conversions` and arrives over a
+    # loopback socket: a '/' in it points the conversion at another endpoint.
+    # The refusal must not echo it -- it converts into a private key.
+    calls = _stub_run(monkeypatch)
+
+    with pytest.raises(SystemExit) as exc:
+        ra.main(
+            [
+                "--name",
+                "shipmate-acme",
+                "--repo",
+                "org/repo",
+                "--out",
+                str(tmp_path / "key.pem"),
+                "--code",
+                "../../user/repo/keys",
+            ]
+        )
+
+    assert str(exc.value) == ("the manifest code must be letters, digits, '_' or '-'; refusing it.")
+    assert calls == []
+
+
 def test_out_is_required(monkeypatch):
     # An optional --out defaults to writing the key nowhere, which is the same
     # failure as writing it to a secret: the key is minted and then unreachable.
