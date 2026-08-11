@@ -53,11 +53,13 @@ name, and `secrets: inherit` is no longer a supported call shape.
 
 ### Added
 
-- **An empty App key now names its cause.** Every job that mints an App
-  installation token first checks that the key arrived and, if it did not,
-  reports which of the three wiring mistakes to look at. The upstream mint
-  reported only "must be set to a non-empty string", which three unrelated
-  causes produce.
+- **An empty App key now names its cause.** Every job whose App-token mint is
+  mandatory first checks that the key arrived and, if it did not, reports which
+  of the three wiring mistakes to look at. The upstream mint reported only "must
+  be set to a non-empty string", which three unrelated causes produce.
+  `comment-ops` is deliberately excluded: its mints already fall back to a PR
+  comment that says the same thing, and `shipmate help` answers with no App
+  token at all.
 
 ## [0.11.0] — 2026-08-11
 

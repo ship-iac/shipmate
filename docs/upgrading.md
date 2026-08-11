@@ -82,6 +82,43 @@ names. The entries below `0.2.0` predate the first tagged release, or
 `CHANGELOG.md` does not pin one; they are kept for repositories moving from a
 very old pin.
 
+### 0.12.0 — wrappers pass secrets by name, and re-pinning alone is not enough
+
+Replace `secrets: inherit` in every wrapper job that calls an engine reusable
+workflow, in the same change that moves your pins. Pass **only what each callee
+declares** — naming one it does not is a load-time error that kills the run with
+no job and no log:
+
+| Your wrapper job calls | Pass |
+|---|---|
+| `summary.yml` (in `plan.yml`) | `SHIPMATE_APP_PRIVATE_KEY` |
+| `apply.yml`, `apply-all.yml`, `deploy.yml` | that **and** `SHIPMATE_PLAN_PASSPHRASE` |
+
+```yaml
+    secrets:
+      SHIPMATE_APP_PRIVATE_KEY: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
+      SHIPMATE_PLAN_PASSPHRASE: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
+```
+
+Dropping the passphrase line where a callee declares it is the quiet failure to
+watch for: the run starts, and every apply cell then fails its plan-decrypt
+fail-safe. Repositories that never set `SHIPMATE_PLAN_PASSPHRASE` pass it
+anyway — it resolves to empty, which is what an unencrypted consumer already
+had.
+
+Key placement does not change: `SHIPMATE_APP_PRIVATE_KEY` stays a secret on the
+`shipmate-engine` environment. A called workflow's `environment:` resolves in
+*your* repository and its value wins over whatever the caller passed, so a
+wrapper job that binds no environment passes an empty string and the mint still
+succeeds.
+
+Inside the engine's own organization `inherit` keeps working, so a repository
+that skips this stays green while handing the engine every secret it can see
+([`hardening.md`](hardening.md) §What the engine receives from your repository).
+Outside it, `inherit` delivers nothing **and** suppresses what the
+`shipmate-engine` environment would have supplied: no `shipmate / gate`, no
+pending `apply / <stack> / <env>` checks, no sticky comment.
+
 ### 0.10.0 — the plan path is one workflow, and re-pinning alone is not enough
 
 You must rewrite `.github/workflows/plan.yml` and delete
@@ -186,7 +223,9 @@ the calling job's `GITHUB_TOKEN` permissions. Remove any `statuses: write` /
 `checks: write` grant from jobs that run these actions, and thread `app-id` +
 `private-key` into the `with:` of each call (for a reusable-workflow caller job,
 pass `SHIPMATE_APP_PRIVATE_KEY` by name in the job's `secrets:` block instead —
-the called workflow declares it under `on.workflow_call.secrets`). A leftover
+the called workflow declares it under `on.workflow_call.secrets`; on the apply
+and deploy paths that block carries `SHIPMATE_PLAN_PASSPHRASE` too, see
+§0.12.0). A leftover
 `GITHUB_TOKEN` grant is stale, not harmful by itself, but remove it — the writer
 step doesn't use it, and it needlessly widens the default token's scope.
 

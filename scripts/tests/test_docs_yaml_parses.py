@@ -84,7 +84,10 @@ def test_yaml_fence_loads_to_a_mapping(page, line, body):
     )
 
 
-_PREFIX = "ship-iac/shipmate/.github/workflows/"
+# Owner-agnostic: the pages publish `<owner>/shipmate/...` as well as the
+# engine's own org, and a selector that recognizes only one spelling silently
+# stops checking the other.
+_PATH = "/shipmate/.github/workflows/"
 
 
 def _engine_workflow_calls(doc):
@@ -93,8 +96,8 @@ def _engine_workflow_calls(doc):
     jobs = doc.get("jobs") if isinstance(doc, dict) else None
     for name, job in (jobs or {}).items():
         uses = job.get("uses") or "" if isinstance(job, dict) else ""
-        if uses.startswith(_PREFIX):
-            yield name, uses[len(_PREFIX) :].split("@", 1)[0], job
+        if _PATH in uses:
+            yield name, uses.split(_PATH, 1)[1].split("@", 1)[0], job
 
 
 @pytest.mark.parametrize(
@@ -126,3 +129,21 @@ def test_documented_wrapper_passes_engine_secrets_by_name(page, line, body):
             f"{where} must pass exactly {ENGINE_CALL_SECRETS[target]} to `{target}`; "
             f"got {job.get('secrets')!r}"
         )
+
+
+def test_the_wrapper_snippets_are_still_being_found():
+    """A floor under the guard above, which asserts nothing when its selector
+    matches nothing. Zero matches is indistinguishable from all-clear per fence,
+    so the count of documented engine calls is pinned here instead: rewording a
+    `uses:` out of the selector's reach fails rather than going quiet."""
+    found = sorted(
+        (page.relative_to(ENGINE).as_posix(), target)
+        for page, _, body in _FENCES
+        for _, target, _ in _engine_workflow_calls(yaml.safe_load(body))
+    )
+    assert found == [
+        ("docs/getting-started.md", "apply-all.yml"),
+        ("docs/getting-started.md", "apply.yml"),
+        ("docs/getting-started.md", "deploy.yml"),
+        ("docs/getting-started.md", "summary.yml"),
+    ], f"documented engine reusable-workflow calls changed: {found}"
