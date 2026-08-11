@@ -146,11 +146,12 @@ never used.
 
 ## Env model
 
-- One GitHub Environment exists per logical environment (for example,
-  `staging`, `production`). The Environment is always the unit of binding,
-  apply-gating, protection, and the plan/apply split — **even when it carries
-  no variables**. What it injects depends on how the consumer repo models
-  environments (its IaC layout):
+- Every logical environment (for example `staging`, `production`) is carried by
+  GitHub Environments named after it: `staging-plan` and `staging-apply` by
+  default, or a single `staging` in shared mode (both namings below). The
+  Environment is always the unit of binding, apply-gating, protection, and the
+  plan/apply split — **even when it carries no variables**. What it injects
+  depends on how the consumer repo models environments (its IaC layout):
 
   | Repo layout | Env identity injected by the GitHub Environment | Mechanism |
   |-------------|--------------------------------------------------|-----------|
@@ -175,6 +176,36 @@ never used.
   protection rules (required reviewers, wait timers) than plan, even though both
   act against the same logical environment. "The apply environment" below means
   `<env>-apply` in split mode and the bare `<env>` in shared mode.
+- **The two sides are bound by different owners, and only the apply side reads
+  the variable.** `SHIPMATE_SHARED_ENVS` is read by the eight wave jobs of the
+  engine's `apply-env-level.yml`, so the apply side resolves the mode **per env**,
+  from repository settings. The plan side is bound in `plan.yml` and `drift.yml`,
+  which are the **consumer's** files and out of the engine's reach: whatever
+  expression sits there is the plan-side rule for the whole repository. Two
+  supported shapes follow:
+  - **Uniform repository** — every logical env in the same mode. Bind
+    `${{ matrix.environment }}-plan` (all-split) or `${{ matrix.environment }}`
+    (all-shared) statically. This is the common case.
+  - **Mixed repository** — some envs shared, some split. A static plan-side
+    binding is then wrong for half the repository, so carry the engine's own
+    expression, with `-plan` as the fallback, and let the one variable drive both
+    paths:
+
+    ```yaml
+    environment: >-
+      ${{ contains(format(',{0},', vars.SHIPMATE_SHARED_ENVS), format(',{0},', matrix.environment))
+      && matrix.environment || format('{0}-plan', matrix.environment) }}
+    ```
+
+    Both content lines sit at the same indent: a folded scalar keeps a newline
+    inside the parsed value where the indent changes, and GitHub then rejects the
+    expression.
+
+  A static bare binding in a mixed repository is the failure this rule exists to
+  prevent: the split envs' plan cells bind a bare `<env>` nobody created, GitHub
+  auto-creates it empty, and the plan runs with no `TF_VAR_*` — where the layout
+  gives `TF_VAR_env` a fallback default, that plan silently describes the **wrong**
+  environment and a reviewer approves it. The loud refusal only arrives at apply.
 - **A logical env may opt into one shared environment (shared mode).** Listing
   it in the `SHIPMATE_SHARED_ENVS` **repository variable** makes both paths bind
   the bare `<env>` — one environment, no suffix. The price is stated in
@@ -185,7 +216,7 @@ never used.
   - The value is a comma-separated list of **logical** env names, matched on
     comma boundaries, so `dev-us` does not match an entry `dev-us-2`.
   - **No spaces after the commas.** `dev-eu, dev-us` leaves `dev-us` unmatched:
-    the entry is ` dev-us` and the comparison is exact. The direction is
+    the entry is ` dev-us` and each entry is compared whole, spaces included. The direction is
     fail-safe — the env stays split, and with no `<env>-apply` environment the
     apply-match fingerprint refuses the cell — but it is the mistake consumers
     actually make.
@@ -214,9 +245,10 @@ never used.
   hardcode `staging`, `production`, or any other environment name. Workflows
   discover environments dynamically from stack tags (see Tag grammar,
   below) and GitHub Environment configuration. Adding a new environment is
-  purely a data change: create the GitHub Environment, then tag the stacks
-  that belong to it. No workflow YAML is edited to add or remove an
-  environment. The one carve-out is `shipmate-engine` — a single fixed
+  purely a data change: create its GitHub Environments (`<env>-plan` and
+  `<env>-apply`, or one bare `<env>` listed in `SHIPMATE_SHARED_ENVS`), then tag
+  the stacks that belong to it. No workflow YAML is edited to add or remove an
+  environment — the suffix in `plan.yml`'s binding is written once, for every env. The one carve-out is `shipmate-engine` — a single fixed
   environment name, not a logical environment a consumer defines or names
   itself, that exists purely to scope the App private key to the
   default-branch ref (see `docs/github-app.md` §Key-exposure boundary). It

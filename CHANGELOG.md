@@ -29,7 +29,11 @@ the same change that moves your pins.
   `plan.yml`'s `plan` job and `drift.yml`'s `drift` job. Create the environments
   **before** editing the workflows: a job binding an environment that does not
   exist gets an empty one auto-created by GitHub, and a flavor whose `TF_VAR_env`
-  has a fallback default then plans the wrong environment instead of failing.
+  has a fallback default then plans the wrong environment instead of failing. Only
+  the engine's apply waves read `SHIPMATE_SHARED_ENVS`; your plan-side binding is
+  one expression for the whole repository, so a repository running **mixed** modes
+  carries the engine's expression there rather than a static suffix
+  (`CONTRACT.md` §Env model, `docs/upgrading.md` §0.13.0).
 
   Nothing else moves — `matrix.environment`, check names, tags, `explicit_envs`,
   artifact names and comment grammar all key on the bare logical env name; the
@@ -62,7 +66,8 @@ the same change that moves your pins.
   that which one is bound is undetermined and the other's protection rules are
   inert. It reads environment *names*, never the variable (that needs a permission
   the App manifest does not declare), so a repository with a bare `<env>` and the
-  variable unset gets no finding: bare-only is what shared mode looks like.
+  variable unset gets no *existence* finding — bare-only is what shared mode looks
+  like, and it is reported as a shared environment.
 
 ## [0.12.0] — 2026-08-11
 

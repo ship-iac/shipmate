@@ -72,7 +72,7 @@ name. See "Contributors without push access" for the trade-off that follows.
 | 5 | Block force-push and deletion on the default branch | Branch ruleset | History rewrite after apply |
 | 6 | Required reviewers + "Prevent self-review" on the `<env>-apply` environments you decide to gate (§6 states the trade-off; the choice is yours) | Environment | **Unforgeable** at apply time — the last line of defense once a merge has happened, on each environment you apply it to |
 | 7 | Cloud credentials scoped to `<env>-apply` — the OIDC path's `AWS_ROLE_ARN`/`AWS_REGION` as environment **variables**, any residual static key as an environment **secret** — never repo- or org-level | Environment | Repo-wide exposure (for a secret, bounded *only* on an environment that also carries row 6; and for a variable the scoping is advisory — see §7–9) |
-| 8 | Plan environments (`<env>-plan`; in shared mode the bare `<env>`, which is the apply environment too) hold read-only, blast-radius-free credentials, no approval rules, no branch policy — ideally no secret at all (`shipmate doctor` reports what it finds) | Environment | Plan-time code execution |
+| 8 | Plan environments (`<env>-plan`; in shared mode the bare `<env>`, which is the apply environment too) hold read-only, blast-radius-free credentials, no approval rules, and no branch policy — except on a shared environment, where a default-branch policy is row 17 doing real work and plan cells still pass it (see below) — ideally no secret at all (`shipmate doctor` reports what it finds) | Environment | Plan-time code execution |
 | 9 | OIDC with an `environment:` claim condition instead of static keys | Cloud IdP | Long-lived credential theft — and, since the engine's apply jobs mint OIDC tokens unconditionally, this claim condition is the **only** bound on which role an apply job can assume (see §7–9). In shared mode it separates nothing: both tokens carry the same `environment:` claim |
 | 10 | Default `GITHUB_TOKEN` = read-only; Actions may not approve PRs | Settings → Actions | Token privilege creep |
 | 11 | Require approval for all outside collaborators' workflow runs | Settings → Actions | Drive-by fork execution |
@@ -88,13 +88,20 @@ name. See "Contributors without push access" for the trade-off that follows.
 Rows 6, 7, 17 and 18 name `<env>-apply`, which is the apply environment in the
 default **split** naming (`<env>-plan` + `<env>-apply`). A logical env listed in
 the `SHIPMATE_SHARED_ENVS` repository variable binds one bare `<env>` on both
-paths instead (CONTRACT.md §Env model), and that environment **cannot carry rows
-6 or 17**: a protection rule and a deployment branch policy each gate every job
-that binds the environment, with no per-job filter, so a reviewer stalls the plan
-cells and the nightly drift run, and a default-branch-only policy refuses plan
-cells whose base ref it does not name. Listing an env there forfeits both
-controls for that env — the reviewer gate is not relocated, it is gone — and
-rows 7 and 18 then place credentials on an environment plan-time code can reach.
+paths instead (CONTRACT.md §Env model). On such an environment:
+
+- **Row 6 is forfeited.** A protection rule gates every job that binds the
+  environment, with no per-job filter, so a required reviewer or a wait timer
+  stalls the plan cells and the nightly drift run. The reviewer gate is not
+  relocated, it is gone, and rows 7 and 18 then place credentials on an
+  environment plan-time code reaches.
+- **Row 17 still works, conditionally.** A deployment branch policy naming the
+  default branch admits plan cells (they evaluate at the pull request's *base*
+  ref), the scheduled drift run and the apply, while still refusing a
+  branch-authored workflow that names the environment — the control row 17 exists
+  for. It holds only while every pull request targets a branch the policy names; a
+  repository using release branches must open the policy up, and then row 17 is
+  forfeited too.
 
 ## 1. Write access
 
@@ -249,9 +256,10 @@ costs, so the choice is made with the price visible:
   reviewer on it stalls every plan cell and the nightly drift run — so the gate
   is not merely unset, it is unavailable, and no later decision can turn it on
   without splitting the environment again. The same environment is what plan-time
-  branch code runs inside, so control 7's scoping and row 17's policy lose their
-  meaning there too, and the OIDC claim condition in §7–9 can no longer tell a
-  plan token from an apply one.
+  branch code runs inside, so control 7's scoping buys nothing against that code
+  and the OIDC claim condition in §7–9 can no longer tell a plan token from an
+  apply one. Row 17's branch policy is the one control that survives, and only
+  while every pull request targets a branch it names.
 
 Pair every environment you gate with `global.shipmate.explicit_envs`, whichever
 ones those are: list it there so a bare `shipmate apply` skips it and it is

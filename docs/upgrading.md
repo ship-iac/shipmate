@@ -98,38 +98,67 @@ injects nothing and the fallback supplies a name nobody chose.
 
 Split mode (the default, keeps the reviewer gate):
 
-1. Create `<env>-plan` and copy the bare `<env>`'s variables to it (`TF_VAR_env`,
-   `TF_VAR_region` / `TF_WORKSPACE`, any plan-side `AWS_ROLE_ARN` /
+1. Create `<env>-plan` and copy the bare `<env>`'s **variables** to it
+   (`TF_VAR_env`, `TF_VAR_region` / `TF_WORKSPACE`, any plan-side `AWS_ROLE_ARN` /
    `AWS_REGION`). Keep the plan environment policy-free: no reviewers, no
-   deployment branch policy.
-2. Delete the bare `<env>` once nothing binds it — left in place beside
-   `<env>-plan` it makes the naming ambiguous, and `shipmate doctor` warns for
-   exactly that.
-3. Change `environment:` to `${{ matrix.environment }}-plan` in the `plan` job of
+   deployment branch policy. Environment **secrets** cannot be copied — no API
+   returns a secret's value — so re-enter each one by hand; a plan-side secret
+   left behind (`SHIPMATE_PLAN_PASSPHRASE` is the one to watch) resolves to empty
+   and every later apply fails its plan-decrypt fail-safe.
+2. Change `environment:` to `${{ matrix.environment }}-plan` in the `plan` job of
    `plan.yml` **and** the `drift` job of `drift.yml`. Nothing else moves:
    `matrix.environment`, check names, tags, `explicit_envs` and artifact names
    all stay the bare logical name.
+3. **Merge that change**, then delete the bare `<env>`. `plan.yml` runs on
+   `pull_request_target`, so until the edit is on the default branch every plan
+   run — the migration pull request's own included — uses the **base** copy and
+   still binds the bare environment. Deleting it before the merge means the next
+   plan re-creates it empty and plans with no variables, which is the hazard
+   above. Between the merge and the delete, doctor warns that the naming is
+   ambiguous; that warning is the migration's own to-do list.
 4. `<env>-apply` is unchanged.
 
 Shared mode (one environment, opt in per env):
 
-1. Keep the bare `<env>` and delete `<env>-apply` — the same ambiguity rule
-   applies in this direction.
-2. Add the logical env name to the `SHIPMATE_SHARED_ENVS` repository variable:
+1. Add the logical env name to the `SHIPMATE_SHARED_ENVS` repository variable:
    comma-separated, **no spaces after the commas** (` dev-us` is not `dev-us`,
    and that env silently stays split).
-3. Leave `plan.yml` and `drift.yml` binding the bare `${{ matrix.environment }}`.
-4. Know the price: a reviewer or a wait timer on that environment stalls the plan
+2. Keep the bare `<env>`, and delete `<env>-apply` once nothing binds it — left in
+   place it makes the naming ambiguous, and doctor warns for exactly that.
+3. Know the price: a reviewer or a wait timer on that environment stalls the plan
    cells and the nightly drift run, so the reviewer gate is gone rather than
    moved, and plan and apply OIDC tokens become identical in `sub`
    ([`hardening.md`](hardening.md) §6, §7–9).
 
+**The plan-side binding is repository-wide; only the apply side reads the
+variable.** The wave jobs of the engine's `apply-env-level.yml` read
+`SHIPMATE_SHARED_ENVS` per env, but `plan.yml` and `drift.yml` are yours and the
+engine cannot reach their `environment:` line, so what you write there applies to
+every env at once. If **every** env moves the same way, bind statically —
+`${{ matrix.environment }}-plan` for all-split, `${{ matrix.environment }}` for
+all-shared. For a **mixed** repository, carry the engine's own expression so one
+variable drives both paths ([`../CONTRACT.md`](../CONTRACT.md) §Env model has the
+rule and the indentation constraint):
+
+```yaml
+    environment: >-
+      ${{ contains(format(',{0},', vars.SHIPMATE_SHARED_ENVS), format(',{0},', matrix.environment))
+      && matrix.environment || format('{0}-plan', matrix.environment) }}
+```
+
+A static bare binding in a mixed repository is the quiet failure here: the split
+envs' plan cells bind an environment you deleted, GitHub auto-creates it empty,
+and a layout with a `TF_VAR_env` fallback default plans the wrong environment for
+a reviewer to approve. Nothing refuses until the apply.
+
 **One silence to expect.** `shipmate doctor` infers the mode from the environment
 *names* — it never reads `SHIPMATE_SHARED_ENVS`, which would need a permission the
 App manifest does not declare. So a repository that keeps a bare `<env>` and never
-sets the variable gets **no** finding at all, where the old code warned that
+sets the variable gets **no existence finding**, where the old code warned that
 `<env>-apply` was missing: bare-only is exactly what a correctly configured shared
-env looks like. The apply itself still fails loud — it binds `<env>-apply`, GitHub
+env looks like, and doctor reports it as one — you still get its shared-environment
+findings (unreviewed applies, a warning if it carries approval rules, its secrets),
+just nothing saying an environment is missing. The apply itself still fails loud — it binds `<env>-apply`, GitHub
 auto-creates it empty, and the apply-match fingerprint refuses the cell naming
 every missing `TF_VAR_*` ([`troubleshooting.md`](troubleshooting.md) §`Saved plan
 is stale`).

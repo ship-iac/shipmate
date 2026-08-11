@@ -61,7 +61,8 @@ and `shipmate-engine`; `<env>-apply` is the apply tier's — but create it now
 anyway. `shipmate doctor` runs on every plan run and warns for each half of a
 pair that does not exist, so tier 1 with only `<env>-plan` annotates every pull
 request with "GitHub Environment `<env>-apply` does not exist" until the apply
-tier is done.
+tier is done. (With **neither** half created you get one warning naming both, and
+the shared alternative below.)
 
 **One environment instead of two.** A logical env may share a single bare
 `<env>` between plan and apply: create `<env>` alone (no `-plan`, no `-apply`),
@@ -71,6 +72,13 @@ spaces), and drop the `-plan` suffix from the `environment:` line of your
 split for that env, and those are not recoverable without splitting the
 environment again — read [`hardening.md`](hardening.md) §6 and §7–9 for the full
 price before choosing it.
+
+Only the engine's apply waves read that variable. The `environment:` line in your
+`plan.yml` and `drift.yml` is **one expression for the whole repository**, so a
+repository that shares *some* envs and splits others cannot bind a static suffix
+there — it carries the engine's own expression instead
+([`../CONTRACT.md`](../CONTRACT.md) §Env model). Pick one mode for all your
+environments and the static form below is right.
 
 Create each environment with
 `gh api -X PUT repos/<owner>/<repo>/environments/<name>`, then set protection

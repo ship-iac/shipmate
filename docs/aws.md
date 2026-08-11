@@ -81,7 +81,9 @@ not where you put the variable, is the enforcing bound.
 
 **Write the trust condition from the subject your own logs show, not from the
 documented shape.** GitHub Actions issues the `sub` claim with the numeric
-organization and repository ids embedded:
+organization and repository ids embedded — captured from that sample repository
+before its environments were renamed, so the environment segment here is a bare
+`dev-us` where a split repository reads `dev-us-plan` / `dev-us-apply`:
 
 ```
 repo:ship-iac@305536692/repo-example-stacks-aws@1325724489:environment:dev-us
