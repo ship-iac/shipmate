@@ -216,8 +216,8 @@ never used.
   - The value is a comma-separated list of **logical** env names, matched on
     comma boundaries, so `dev-us` does not match an entry `dev-us-2`.
   - **No spaces after the commas.** `dev-eu, dev-us` leaves `dev-us` unmatched:
-    the entry is ` dev-us` and each entry is compared whole, spaces included. The direction is
-    fail-safe — the env stays split, and with no `<env>-apply` environment the
+    the entry is ` dev-us` and each entry is compared whole, spaces included.
+    The direction is fail-safe — the env stays split, and with no `<env>-apply` environment the
     apply-match fingerprint refuses the cell — but it is the mistake consumers
     actually make.
   - **Matching is case-insensitive**, because GitHub's `contains()` is:
@@ -248,7 +248,8 @@ never used.
   purely a data change: create its GitHub Environments (`<env>-plan` and
   `<env>-apply`, or one bare `<env>` listed in `SHIPMATE_SHARED_ENVS`), then tag
   the stacks that belong to it. No workflow YAML is edited to add or remove an
-  environment — the suffix in `plan.yml`'s binding is written once, for every env. The one carve-out is `shipmate-engine` — a single fixed
+  environment — the suffix in `plan.yml`'s binding is written once, for every
+  env. The one carve-out is `shipmate-engine` — a single fixed
   environment name, not a logical environment a consumer defines or names
   itself, that exists purely to scope the App private key to the
   default-branch ref (see `docs/github-app.md` §Key-exposure boundary). It

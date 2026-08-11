@@ -137,7 +137,8 @@ environment of the cell it is planning
 (`environment: ${{ matrix.environment }}-plan` above — drop the suffix if **every**
 env in the repository shares one environment between plan and apply, or carry the
 engine's mode expression if only some do:
-[`../CONTRACT.md`](../CONTRACT.md) §Env model) and holds **no App credential**. All it does with its result is upload one
+[`../CONTRACT.md`](../CONTRACT.md) §Env model) and holds **no App credential**.
+All it does with its result is upload one
 `drift-summary.<env>.<stack-slug>` artifact holding a `cell.json`. The `issues`
 job binds `shipmate-engine`, and `actions/drift-issues` mints the App
 installation token there — it is the only job on the drift path that does. A plan

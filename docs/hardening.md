@@ -345,7 +345,11 @@ control.
   whose pull request targets a branch the policy does not name (plan jobs run at
   the pull request's *base* ref). Either leaves
   the gate red until it is removed (`shipmate doctor` warns; see
-  `docs/troubleshooting.md`). That constraint is not negotiable, so treat a
+  `docs/troubleshooting.md`). One carve-out, and only for the branch policy: on a
+  **shared** environment a default-branch policy is row 17 doing real work, plan
+  cells pass it at the base ref, and doctor notes it rather than warning. The
+  approval-rule half is absolute in both namings. That constraint is not
+  negotiable, so treat a
   plan environment as readable by anyone with push access: a plan cell runs
   `terramate`/`tofu` over branch code, which is arbitrary code execution with
   whatever that environment holds. Read-only, blast-radius-free credentials

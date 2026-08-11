@@ -158,7 +158,8 @@ sets the variable gets **no existence finding**, where the old code warned that
 `<env>-apply` was missing: bare-only is exactly what a correctly configured shared
 env looks like, and doctor reports it as one — you still get its shared-environment
 findings (unreviewed applies, a warning if it carries approval rules, its secrets),
-just nothing saying an environment is missing. The apply itself still fails loud — it binds `<env>-apply`, GitHub
+just nothing saying an environment is missing. The apply itself still fails loud
+— it binds `<env>-apply`, GitHub
 auto-creates it empty, and the apply-match fingerprint refuses the cell naming
 every missing `TF_VAR_*` ([`troubleshooting.md`](troubleshooting.md) §`Saved plan
 is stale`).
