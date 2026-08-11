@@ -97,6 +97,19 @@ runs:
         [[ "$COMMENT_ID" =~ ^[0-9]+$ ]] || { echo "::error::comment-id must be numeric (got: $COMMENT_ID)"; exit 1; }
         python3 "$GITHUB_ACTION_PATH/../../scripts/comment-parse"
 
+    - name: Verify the App key arrived
+      if: ${{ steps.parse.outputs.is_command == 'true' }}
+      shell: bash
+      env:
+        APP_ID: ${{ inputs.app-id }}
+        PRIVATE_KEY: ${{ inputs.private-key }}
+      run: |
+        set -euo pipefail
+        if [ -z "$PRIVATE_KEY" ]; then
+          echo "::error::The shipmate App private key did not reach this job. Three causes, in the order worth checking: (1) the calling workflow used 'secrets: inherit' across an organization boundary -- GitHub delivers no inherited secrets there, and inherit also suppresses the value this job's environment binding would otherwise supply, so pass the secret by name instead; (2) the caller left SHIPMATE_APP_PRIVATE_KEY out of its secrets block; (3) this job binds no environment, or binds one that holds no secret of that name. See docs/getting-started.md."
+          exit 1
+        fi
+        [ -n "$APP_ID" ] || { echo "::error::SHIPMATE_APP_ID is unset. Set it as a repository or organization variable (docs/github-app.md)."; exit 1; }
     - name: Reject malformed / reserved command
       # Runs only when it IS a shipmate command but not valid. Non-commands are
       # silently ignored (no output). GITHUB_TOKEN posts the comment.
