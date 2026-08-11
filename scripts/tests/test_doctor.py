@@ -203,8 +203,8 @@ def _quiet_new_probes():
     secret probe reads one listing per plan env; an empty one keeps the healthy
     path quiet."""
     return {
-        f"repos/{_REPO}/environments/dev-eu": _env("dev-eu"),
-        f"repos/{_REPO}/environments/dev-eu/secrets?per_page=100": _secrets(),
+        f"repos/{_REPO}/environments/dev-eu-plan": _env("dev-eu-plan"),
+        f"repos/{_REPO}/environments/dev-eu-plan/secrets?per_page=100": _secrets(),
         f"repos/{_REPO}/environments/dev-eu-apply": _env(
             "dev-eu-apply", rules=("required_reviewers",)
         ),
@@ -226,7 +226,7 @@ def test_healthy_repo_emits_nothing(monkeypatch):
     responses = {
         f"repos/{_REPO}/rules/branches/{_BRANCH}?per_page=100": _gate_rule(),
         f"repos/{_REPO}/environments?per_page=100": _environments(
-            "dev-eu", "dev-eu-apply", "shipmate-engine"
+            "dev-eu-plan", "dev-eu-apply", "shipmate-engine"
         ),
         **_quiet_new_probes(),
     }
@@ -234,12 +234,15 @@ def test_healthy_repo_emits_nothing(monkeypatch):
     assert doctor.warnings(_ctx()) == []
 
 
-def test_missing_environment_pair_warned(monkeypatch):
+def test_missing_environment_of_the_split_pair_warned(monkeypatch):
+    """Split mode with one half absent names the absent half SPECIFICALLY, not
+    the pair: naming both would tell a consumer to create an environment they
+    already have."""
     responses = {
         f"repos/{_REPO}/rules/branches/{_BRANCH}?per_page=100": _gate_rule(),
         # dev-eu-apply is missing; shipmate-engine present so only the pair
         # probe's own finding surfaces
-        f"repos/{_REPO}/environments?per_page=100": _environments("dev-eu", "shipmate-engine"),
+        f"repos/{_REPO}/environments?per_page=100": _environments("dev-eu-plan", "shipmate-engine"),
         **_quiet_new_probes(),
     }
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
@@ -247,14 +250,74 @@ def test_missing_environment_pair_warned(monkeypatch):
     assert len(out) == 1
     level, text = out[0]
     assert level == doctor.WARNING
-    assert "dev-eu-apply" in text
+    assert "`dev-eu-apply`" in text
+    assert "`dev-eu-plan`" not in text
+
+
+def _existence(*names):
+    """`_environment_warnings`' only read: the environments listing."""
+    return lambda path: _environments(*names)
+
+
+def test_env_mode_names_each_of_the_four_listings():
+    """The whole inference table, pinned on the returned string. The mode comes
+    from environment NAMES and nothing else -- reading the repository variable
+    that actually selects it would need an App permission `app/manifest.json`
+    does not declare."""
+    assert doctor._env_mode("dev-eu", {"dev-eu", "dev-eu-apply"}) == "ambiguous"
+    assert doctor._env_mode("dev-eu", {"dev-eu"}) == "shared"
+    assert doctor._env_mode("dev-eu", {"dev-eu-plan", "dev-eu-apply"}) == "split"
+    assert doctor._env_mode("dev-eu", {"prod-eu-plan"}) == "missing"
+    # Either half of the suffixed pair alone still means split -- the missing
+    # half is a finding, not a different mode.
+    assert doctor._env_mode("dev-eu", {"dev-eu-plan"}) == "split"
+    assert doctor._env_mode("dev-eu", {"dev-eu-apply"}) == "split"
+    assert doctor._env_mode("dev-eu", {"dev-eu", "dev-eu-plan"}) == "ambiguous"
+
+
+def test_no_environment_at_all_names_both_modes(monkeypatch):
+    """A consumer with nothing created must be able to reach either mode from
+    the finding alone: both split names, the shared name, and the variable that
+    opts into shared."""
+    monkeypatch.setattr(doctor, "_gh_json", _existence("shipmate-engine"))
+    out = doctor._environment_warnings(_ctx())
+    assert len(out) == 1
+    level, text = out[0]
+    assert level == doctor.WARNING
+    assert "`dev-eu-plan`" in text
+    assert "`dev-eu-apply`" in text
+    assert "`dev-eu`" in text
+    assert "SHIPMATE_SHARED_ENVS" in text
+
+
+def test_ambiguous_environment_naming_is_the_phantom_control_warning(monkeypatch):
+    """Both namings present is the one silent failure: whichever environment the
+    apply waves do not bind is protected by rules in no code path, and it reads
+    as a control that is there. So the finding names both, says the binding is
+    decided by the variable, and says the unused one's rules do nothing."""
+    monkeypatch.setattr(doctor, "_gh_json", _existence("dev-eu", "dev-eu-apply"))
+    out = doctor._environment_warnings(_ctx())
+    assert len(out) == 1
+    level, text = out[0]
+    assert level == doctor.WARNING
+    assert "`dev-eu`" in text
+    assert "`dev-eu-apply`" in text
+    assert "SHIPMATE_SHARED_ENVS" in text
+    assert "inert" in text
+
+
+def test_shared_environment_produces_no_existence_finding(monkeypatch):
+    """The bare name alone IS shared mode, a supported configuration -- not a
+    half-created split pair."""
+    monkeypatch.setattr(doctor, "_gh_json", _existence("dev-eu"))
+    assert doctor._environment_warnings(_ctx()) == []
 
 
 def test_gate_rule_wrong_integration_id_warned(monkeypatch):
     responses = {
         f"repos/{_REPO}/rules/branches/{_BRANCH}?per_page=100": _gate_rule(integration_id=15368),
         f"repos/{_REPO}/environments?per_page=100": _environments(
-            "dev-eu", "dev-eu-apply", "shipmate-engine"
+            "dev-eu-plan", "dev-eu-apply", "shipmate-engine"
         ),
         **_quiet_new_probes(),
     }
@@ -275,7 +338,7 @@ def test_gate_rule_absent_warned(monkeypatch):
             _pull_request_rule(),
         ],
         f"repos/{_REPO}/environments?per_page=100": _environments(
-            "dev-eu", "dev-eu-apply", "shipmate-engine"
+            "dev-eu-plan", "dev-eu-apply", "shipmate-engine"
         ),
         **_quiet_new_probes(),
     }
@@ -291,7 +354,7 @@ def test_strict_policy_off_warned(monkeypatch):
     responses = {
         f"repos/{_REPO}/rules/branches/{_BRANCH}?per_page=100": _gate_rule(strict=False),
         f"repos/{_REPO}/environments?per_page=100": _environments(
-            "dev-eu", "dev-eu-apply", "shipmate-engine"
+            "dev-eu-plan", "dev-eu-apply", "shipmate-engine"
         ),
         **_quiet_new_probes(),
     }
@@ -321,7 +384,9 @@ def test_probe_403_degrades_to_note_not_failure(monkeypatch):
             raise SystemExit("::error::command failed (1): gh api ...")
         if path in quiet:
             return quiet[path]
-        return _environments("dev-eu", "shipmate-engine")  # dev-eu-apply missing -> its own warning
+        return _environments(
+            "dev-eu-plan", "shipmate-engine"
+        )  # dev-eu-apply missing -> its own warning
 
     monkeypatch.setattr(doctor, "_gh_json", fake_gh_json)
     out = doctor.warnings(_ctx())
@@ -347,7 +412,7 @@ def test_probe_generic_exception_degrades_to_note(monkeypatch):
             raise RuntimeError("connection reset")
         if path in quiet:
             return quiet[path]
-        return _environments("dev-eu", "dev-eu-apply", "shipmate-engine")
+        return _environments("dev-eu-plan", "dev-eu-apply", "shipmate-engine")
 
     monkeypatch.setattr(doctor, "_gh_json", fake_gh_json)
     out = doctor.warnings(_ctx())
@@ -370,7 +435,7 @@ def test_degrade_note_names_the_probe_and_drops_the_workflow_command_prefix(monk
             raise SystemExit(f"::error::command failed (1): gh api {path}")
         if path in quiet:
             return quiet[path]
-        return _environments("dev-eu", "dev-eu-apply", "shipmate-engine")
+        return _environments("dev-eu-plan", "dev-eu-apply", "shipmate-engine")
 
     monkeypatch.setattr(doctor, "_gh_json", gh)
     out = doctor.warnings(_ctx())
@@ -394,7 +459,7 @@ def _protection(*envs, listed=None):
 
 def test_plan_env_with_reviewers_warned(monkeypatch):
     responses = _protection(
-        _env("dev-eu", rules=("required_reviewers",)),
+        _env("dev-eu-plan", rules=("required_reviewers",)),
         _env("dev-eu-apply", rules=("required_reviewers",)),
     )
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
@@ -403,7 +468,7 @@ def test_plan_env_with_reviewers_warned(monkeypatch):
     assert out[0][0] == doctor.WARNING
     # Not "will hang waiting for approval": `approval` is every rule that isn't
     # a branch policy, so a wait timer lands here too and is not an approval.
-    assert "dev-eu" in out[0][1] and "will not start immediately" in out[0][1]
+    assert "`dev-eu-plan`" in out[0][1] and "will not start immediately" in out[0][1]
     assert "approval" not in out[0][1]
 
 
@@ -412,7 +477,7 @@ def test_plan_env_wait_timer_is_not_diagnosed_as_an_approval_hang(monkeypatch):
     # reviewers (both stop a plan job from starting when it should), so the
     # finding must fire -- but its wording must fit the rule it names.
     responses = _protection(
-        _env("dev-eu", rules=("wait_timer",)),
+        _env("dev-eu-plan", rules=("wait_timer",)),
         _env("dev-eu-apply", rules=("required_reviewers",)),
     )
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
@@ -424,7 +489,7 @@ def test_plan_env_wait_timer_is_not_diagnosed_as_an_approval_hang(monkeypatch):
 
 
 def test_apply_env_without_approval_rules_noted(monkeypatch):
-    responses = _protection(_env("dev-eu"), _env("dev-eu-apply"))
+    responses = _protection(_env("dev-eu-plan"), _env("dev-eu-apply"))
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
     out = doctor._env_protection_warnings(_ctx())
     assert len(out) == 1
@@ -445,7 +510,7 @@ def test_apply_env_with_only_a_branch_policy_is_still_noted(monkeypatch):
     an unreviewed apply environment as protected — the exact inverse of the
     finding's purpose."""
     responses = _protection(
-        _env("dev-eu"),
+        _env("dev-eu-plan"),
         _env("dev-eu-apply", branch_policy={"protected_branches": True}),
     )
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
@@ -459,7 +524,7 @@ def test_apply_env_with_an_approval_rule_and_a_branch_policy_is_silent(monkeypat
     # The other shape of the same pair: a genuinely reviewed apply environment
     # that also restricts branches must produce nothing.
     responses = _protection(
-        _env("dev-eu"),
+        _env("dev-eu-plan"),
         _env(
             "dev-eu-apply",
             rules=("required_reviewers",),
@@ -472,7 +537,7 @@ def test_apply_env_with_an_approval_rule_and_a_branch_policy_is_silent(monkeypat
 
 def test_plan_env_branch_policy_warned(monkeypatch):
     responses = _protection(
-        _env("dev-eu", branch_policy={"protected_branches": True}),
+        _env("dev-eu-plan", branch_policy={"protected_branches": True}),
         _env("dev-eu-apply", rules=("required_reviewers",)),
     )
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
@@ -482,13 +547,81 @@ def test_plan_env_branch_policy_warned(monkeypatch):
     assert "branch policy" in out[0][1]
 
 
+def test_shared_env_with_reviewers_warns_about_plan_cells_and_drift(monkeypatch):
+    """Protection rules gate every job binding the environment and GitHub offers
+    no per-job filter, so on a shared environment reviewers stall the plan cells
+    AND the nightly drift run -- both have to be named, or a consumer reads the
+    finding as being only about applies."""
+    responses = _protection(_env("dev-eu", rules=("required_reviewers",)))
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    out = doctor._env_protection_warnings(_ctx())
+    assert len(out) == 1
+    assert out[0][0] == doctor.WARNING
+    assert "`dev-eu`" in out[0][1]
+    assert "required_reviewers" in out[0][1]
+    assert "plan cells" in out[0][1]
+    assert "drift" in out[0][1]
+
+
+def test_shared_env_with_a_branch_policy_is_a_notice_naming_the_trade_both_ways(monkeypatch):
+    """NOTICE, not the WARNING a split plan environment gets: on a shared
+    environment the policy is a real control over which branches may claim its
+    secrets, and it is simultaneously what refuses plan cells whose base ref it
+    does not name. A consumer whose pull requests all target the default branch
+    is correct to set it, so a WARNING would be one nobody can clear."""
+    responses = _protection(_env("dev-eu", branch_policy={"protected_branches": True}))
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    out = doctor._env_protection_warnings(_ctx())
+    assert [lvl for lvl, _ in out] == [doctor.NOTICE, doctor.NOTICE]
+    policy = next(t for _, t in out if "branch policy" in t)
+    assert "secrets" in policy  # the control it provides
+    assert "base ref" in policy  # the plan cells it can refuse
+
+
+def test_shared_env_without_approval_rules_says_no_gate_is_available(monkeypatch):
+    """The split apply-env note says applies are unreviewed; on a shared
+    environment it must also say that adding a reviewer is not an option while
+    the environment is shared -- otherwise the fix it implies stalls every plan
+    cell."""
+    responses = _protection(_env("dev-eu"))
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    out = doctor._env_protection_warnings(_ctx())
+    assert len(out) == 1
+    assert out[0][0] == doctor.NOTICE
+    assert "`dev-eu`" in out[0][1]
+    assert "unreviewed" in out[0][1]
+    assert "no reviewer gate is available" in out[0][1]
+
+
+def test_ambiguous_naming_still_reports_the_phantom_reviewer(monkeypatch):
+    """Ambiguous mode reads every name that exists, so reviewers sitting on the
+    environment nothing binds are still reported. Reading only one naming would
+    hide exactly the configuration the ambiguity finding exists for."""
+    responses = _protection(
+        _env("dev-eu"),
+        _env("dev-eu-plan"),
+        _env("dev-eu-apply", rules=("required_reviewers",)),
+    )
+    seen = []
+
+    def gh(path):
+        seen.append(path)
+        return responses[path]
+
+    monkeypatch.setattr(doctor, "_gh_json", gh)
+    doctor._env_protection_warnings(_ctx())
+    assert f"repos/{_REPO}/environments/dev-eu" in seen
+    assert f"repos/{_REPO}/environments/dev-eu-plan" in seen
+    assert f"repos/{_REPO}/environments/dev-eu-apply" in seen
+
+
 def test_env_protection_missing_env_is_not_this_probes_problem(monkeypatch):
     """An environment that does not exist is `_environment_warnings`' finding,
     not this probe's — so a name absent from the environments listing is skipped
     without a per-environment read and without a finding. That used to be
     achieved by catching every per-environment exception and continuing, which
     silenced 403s and 5xx on environments that DO exist."""
-    responses = _protection(_env("dev-eu"), listed=["dev-eu"])
+    responses = _protection(_env("dev-eu-plan"), listed=["dev-eu-plan"])
     seen = []
 
     def gh(path):
@@ -520,7 +653,7 @@ def test_env_protection_unreadable_existing_env_is_a_notice_naming_it(monkeypatc
     code) and got swallowed, so the report went on to say the settings probes
     found no problems. Listing first makes the two distinguishable:
     present-but-unreadable is a note that names the environment."""
-    responses = _protection(_env("dev-eu"), listed=["dev-eu", "dev-eu-apply"])
+    responses = _protection(_env("dev-eu-plan"), listed=["dev-eu-plan", "dev-eu-apply"])
 
     def gh(path):
         if path.endswith("dev-eu-apply"):
@@ -745,7 +878,7 @@ def test_engine_environment_probe_is_registered(monkeypatch):
     responses = {
         f"repos/{_REPO}/rules/branches/{_BRANCH}?per_page=100": _gate_rule(),
         # shipmate-engine deliberately absent from the listing
-        f"repos/{_REPO}/environments?per_page=100": _environments("dev-eu", "dev-eu-apply"),
+        f"repos/{_REPO}/environments?per_page=100": _environments("dev-eu-plan", "dev-eu-apply"),
         **_quiet_new_probes(),
     }
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
@@ -1969,7 +2102,7 @@ def test_fork_trigger_probe_is_registered(monkeypatch):
     assert doctor._fork_trigger_warnings in doctor.PROBES
     responses = {
         f"repos/{_REPO}/rules/branches/{_BRANCH}?per_page=100": _gate_rule(),
-        f"repos/{_REPO}/environments?per_page=100": _environments("dev-eu", "dev-eu-apply"),
+        f"repos/{_REPO}/environments?per_page=100": _environments("dev-eu-plan", "dev-eu-apply"),
         **_quiet_new_probes(),
         f"{_WF_DIR}{_REF}": _wf_listing("label.yml"),
         f"{_WF_DIR}/label.yml{_REF}": _wf_file("on:\n  pull_request_target:\n"),
@@ -2214,8 +2347,8 @@ def test_plan_env_holding_secrets_is_a_notice_naming_each(monkeypatch):
     means misconfiguration. Same posture as the apply-env-without-reviewers
     note."""
     responses = {
-        f"repos/{_REPO}/environments?per_page=100": _environments("dev-eu", "dev-eu-apply"),
-        f"repos/{_REPO}/environments/dev-eu/secrets?per_page=100": _secrets(
+        f"repos/{_REPO}/environments?per_page=100": _environments("dev-eu-plan", "dev-eu-apply"),
+        f"repos/{_REPO}/environments/dev-eu-plan/secrets?per_page=100": _secrets(
             "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"
         ),
     }
@@ -2236,8 +2369,10 @@ def test_the_notice_states_the_rule_and_never_that_this_env_is_unprotected(monke
     reading protection data, which is the sibling's read, so that neither
     probe's failure can silence the other."""
     responses = {
-        f"repos/{_REPO}/environments?per_page=100": _environments("dev-eu"),
-        f"repos/{_REPO}/environments/dev-eu/secrets?per_page=100": _secrets("AWS_ACCESS_KEY_ID"),
+        f"repos/{_REPO}/environments?per_page=100": _environments("dev-eu-plan"),
+        f"repos/{_REPO}/environments/dev-eu-plan/secrets?per_page=100": _secrets(
+            "AWS_ACCESS_KEY_ID"
+        ),
     }
     asked = []
 
@@ -2254,8 +2389,85 @@ def test_the_notice_states_the_rule_and_never_that_this_env_is_unprotected(monke
     assert not [p for p in asked if "deployment-branch-policies" in p], asked
     assert asked == [
         f"repos/{_REPO}/environments?per_page=100",
+        f"repos/{_REPO}/environments/dev-eu-plan/secrets?per_page=100",
+    ]
+
+
+def test_shared_mode_reads_the_bare_env_and_says_it_is_the_apply_env_too(monkeypatch):
+    """In shared mode the plan environment IS the apply environment, so its
+    finding cannot be the split one: the credential a consumer put there for
+    applying is reachable by plan-time code. Pinned on the requested paths as
+    well as the wording -- a probe that read the right environment and worded it
+    as a split plan environment understates the exposure."""
+    responses = {
+        f"repos/{_REPO}/environments?per_page=100": _environments("dev-eu"),
+        f"repos/{_REPO}/environments/dev-eu/secrets?per_page=100": _secrets("AWS_ROLE_ARN"),
+    }
+    asked = []
+
+    def fake(path):
+        asked.append(path)
+        return responses[path]
+
+    monkeypatch.setattr(doctor, "_gh_json", fake)
+    found = doctor._plan_env_secret_warnings(_ctx())
+    assert [lvl for lvl, _ in found] == [doctor.NOTICE]
+    assert "`AWS_ROLE_ARN`" in found[0][1]
+    assert "apply environment" in found[0][1]
+    assert "plan-time code" in found[0][1]
+    assert asked == [
+        f"repos/{_REPO}/environments?per_page=100",
         f"repos/{_REPO}/environments/dev-eu/secrets?per_page=100",
     ]
+
+
+def test_ambiguous_mode_reads_both_plan_side_names_and_never_the_apply_one(monkeypatch):
+    """With both namings present either could be the plan environment, so both
+    are read -- and `<env>-apply` is read in neither mode, because control 7
+    *requires* credentials there."""
+    responses = {
+        f"repos/{_REPO}/environments?per_page=100": _environments(
+            "dev-eu", "dev-eu-plan", "dev-eu-apply"
+        ),
+        f"repos/{_REPO}/environments/dev-eu/secrets?per_page=100": _secrets(),
+        f"repos/{_REPO}/environments/dev-eu-plan/secrets?per_page=100": _secrets(),
+    }
+    asked = []
+
+    def fake(path):
+        asked.append(path)
+        return responses[path]
+
+    monkeypatch.setattr(doctor, "_gh_json", fake)
+    assert doctor._plan_env_secret_warnings(_ctx()) == []
+    assert f"repos/{_REPO}/environments/dev-eu/secrets?per_page=100" in asked
+    assert f"repos/{_REPO}/environments/dev-eu-plan/secrets?per_page=100" in asked
+    assert not [p for p in asked if "dev-eu-apply" in p], asked
+
+
+def test_no_probe_reads_a_repository_variable(monkeypatch):
+    """The mode is inferred from environment names precisely so that doctor needs
+    no `variables: read` permission -- `app/manifest.json` does not declare one,
+    and adding it costs every installation a re-accept. A future "just read the
+    variable" edit must break here rather than degrade silently on every
+    consumer. Asserted over every path a full `warnings()` run requests."""
+    responses = {
+        f"repos/{_REPO}/rules/branches/{_BRANCH}?per_page=100": _gate_rule(),
+        f"repos/{_REPO}/environments?per_page=100": _environments(
+            "dev-eu-plan", "dev-eu-apply", "shipmate-engine"
+        ),
+        **_quiet_new_probes(),
+    }
+    asked = []
+
+    def fake(path):
+        asked.append(path)
+        return responses[path]
+
+    monkeypatch.setattr(doctor, "_gh_json", fake)
+    assert doctor.warnings(_ctx()) == []
+    assert asked, "the probes read nothing, so this would pass vacuously"
+    assert not [p for p in asked if "variables" in p], asked
 
 
 def test_a_truncated_listing_cannot_clear_the_app_key(monkeypatch):
@@ -2265,8 +2477,10 @@ def test_a_truncated_listing_cannot_clear_the_app_key(monkeypatch):
     configuration no document blesses reading as a routine note. Absence is
     reportable only when the read was complete."""
     responses = {
-        f"repos/{_REPO}/environments?per_page=100": _environments("dev-eu"),
-        f"repos/{_REPO}/environments/dev-eu/secrets?per_page=100": _secrets("A", "B", total=150),
+        f"repos/{_REPO}/environments?per_page=100": _environments("dev-eu-plan"),
+        f"repos/{_REPO}/environments/dev-eu-plan/secrets?per_page=100": _secrets(
+            "A", "B", total=150
+        ),
     }
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
     found = doctor._plan_env_secret_warnings(_ctx())
@@ -2280,8 +2494,8 @@ def test_a_complete_listing_without_the_app_key_stays_a_single_notice(monkeypatc
     name really did clear the key, so the fail-closed branch must not fire on
     every environment that holds secrets."""
     responses = {
-        f"repos/{_REPO}/environments?per_page=100": _environments("dev-eu"),
-        f"repos/{_REPO}/environments/dev-eu/secrets?per_page=100": _secrets("A", "B"),
+        f"repos/{_REPO}/environments?per_page=100": _environments("dev-eu-plan"),
+        f"repos/{_REPO}/environments/dev-eu-plan/secrets?per_page=100": _secrets("A", "B"),
     }
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
     assert [lvl for lvl, _ in doctor._plan_env_secret_warnings(_ctx())] == [doctor.NOTICE]
@@ -2291,8 +2505,8 @@ def test_a_truncated_listing_that_did_show_the_app_key_reports_holding_it(monkey
     """Truncation must not downgrade a positive match to "could not determine":
     the key was read, so the finding is that the environment holds it."""
     responses = {
-        f"repos/{_REPO}/environments?per_page=100": _environments("dev-eu"),
-        f"repos/{_REPO}/environments/dev-eu/secrets?per_page=100": _secrets(
+        f"repos/{_REPO}/environments?per_page=100": _environments("dev-eu-plan"),
+        f"repos/{_REPO}/environments/dev-eu-plan/secrets?per_page=100": _secrets(
             "SHIPMATE_APP_PRIVATE_KEY", "A", total=150
         ),
     }
@@ -2310,8 +2524,8 @@ def test_apply_env_secrets_are_never_read(monkeypatch):
     then dropped the result would satisfy a findings-only assertion."""
     seen = []
     responses = {
-        f"repos/{_REPO}/environments?per_page=100": _environments("dev-eu", "dev-eu-apply"),
-        f"repos/{_REPO}/environments/dev-eu/secrets?per_page=100": _secrets(),
+        f"repos/{_REPO}/environments?per_page=100": _environments("dev-eu-plan", "dev-eu-apply"),
+        f"repos/{_REPO}/environments/dev-eu-plan/secrets?per_page=100": _secrets(),
     }
 
     def fake(path):
@@ -2329,8 +2543,8 @@ def test_engine_environment_secrets_are_never_read(monkeypatch):
     environment nobody tagged into is not its business."""
     seen = []
     responses = {
-        f"repos/{_REPO}/environments?per_page=100": _environments("dev-eu", "shipmate-engine"),
-        f"repos/{_REPO}/environments/dev-eu/secrets?per_page=100": _secrets(),
+        f"repos/{_REPO}/environments?per_page=100": _environments("dev-eu-plan", "shipmate-engine"),
+        f"repos/{_REPO}/environments/dev-eu-plan/secrets?per_page=100": _secrets(),
     }
 
     def fake(path):
@@ -2346,8 +2560,8 @@ def test_app_private_key_in_a_plan_env_is_a_warning(monkeypatch):
     """The one configuration no document blesses: plan-time code execution
     could mint an App token with it. A name match, not a pattern guess."""
     responses = {
-        f"repos/{_REPO}/environments?per_page=100": _environments("dev-eu"),
-        f"repos/{_REPO}/environments/dev-eu/secrets?per_page=100": _secrets(
+        f"repos/{_REPO}/environments?per_page=100": _environments("dev-eu-plan"),
+        f"repos/{_REPO}/environments/dev-eu-plan/secrets?per_page=100": _secrets(
             "SHIPMATE_APP_PRIVATE_KEY"
         ),
     }
@@ -2395,8 +2609,8 @@ def test_an_environment_that_does_not_exist_is_never_read(monkeypatch):
     probe that read the missing environment and swallowed the error would also
     return []."""
     responses = {
-        f"repos/{_REPO}/environments?per_page=100": _environments("dev-eu"),
-        f"repos/{_REPO}/environments/dev-eu/secrets?per_page=100": _secrets(),
+        f"repos/{_REPO}/environments?per_page=100": _environments("dev-eu-plan"),
+        f"repos/{_REPO}/environments/dev-eu-plan/secrets?per_page=100": _secrets(),
     }
     asked = []
 
@@ -2418,8 +2632,8 @@ def test_a_long_secret_list_is_capped_so_it_cannot_eat_the_size_budget(monkeypat
     that also understated the total would hide secrets, not just their names."""
     names = [f"CONSUMER_CREDENTIAL_NUMBER_{i:03d}" for i in range(60)]
     responses = {
-        f"repos/{_REPO}/environments?per_page=100": _environments("dev-eu"),
-        f"repos/{_REPO}/environments/dev-eu/secrets?per_page=100": _secrets(*names),
+        f"repos/{_REPO}/environments?per_page=100": _environments("dev-eu-plan"),
+        f"repos/{_REPO}/environments/dev-eu-plan/secrets?per_page=100": _secrets(*names),
     }
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
     found = doctor._plan_env_secret_warnings(_ctx())
@@ -2435,19 +2649,21 @@ def test_one_env_listing_failure_is_a_notice_and_the_others_still_report(monkeyp
     """Per-environment degrade, like `_env_protection_warnings`: one 403 must
     not silence the environment that could be read."""
     responses = {
-        f"repos/{_REPO}/environments?per_page=100": _environments("dev-eu", "dev-us"),
-        f"repos/{_REPO}/environments/dev-us/secrets?per_page=100": _secrets("GOOGLE_CREDENTIALS"),
+        f"repos/{_REPO}/environments?per_page=100": _environments("dev-eu-plan", "dev-us-plan"),
+        f"repos/{_REPO}/environments/dev-us-plan/secrets?per_page=100": _secrets(
+            "GOOGLE_CREDENTIALS"
+        ),
     }
 
     def fake(path):
-        if path.endswith("dev-eu/secrets?per_page=100"):
+        if path.endswith("dev-eu-plan/secrets?per_page=100"):
             raise SystemExit(f"::error::command failed (1): gh api {path}")
         return responses[path]
 
     monkeypatch.setattr(doctor, "_gh_json", fake)
     found = doctor._plan_env_secret_warnings(_ctx(envs={"dev-eu", "dev-us"}))
     assert [lvl for lvl, _ in found] == [doctor.NOTICE, doctor.NOTICE]
-    assert "`dev-eu`" in found[0][1]
+    assert "`dev-eu-plan`" in found[0][1]
     assert "could not be listed" in found[0][1]
     assert "`GOOGLE_CREDENTIALS`" in found[1][1]
 
@@ -2475,8 +2691,10 @@ def test_truncated_secret_listing_reads_as_at_least(monkeypatch):
     the App-key check could not be completed
     (`test_a_truncated_listing_cannot_clear_the_app_key`)."""
     responses = {
-        f"repos/{_REPO}/environments?per_page=100": _environments("dev-eu"),
-        f"repos/{_REPO}/environments/dev-eu/secrets?per_page=100": _secrets("A", "B", total=150),
+        f"repos/{_REPO}/environments?per_page=100": _environments("dev-eu-plan"),
+        f"repos/{_REPO}/environments/dev-eu-plan/secrets?per_page=100": _secrets(
+            "A", "B", total=150
+        ),
     }
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
     found = doctor._plan_env_secret_warnings(_ctx())
@@ -2497,7 +2715,7 @@ def test_secret_listing_uses_the_env_token_and_restores_gh_token(monkeypatch):
             seen["secrets_call"] = os.environ.get("GH_TOKEN")
             return _secrets()
         seen["listing_call"] = os.environ.get("GH_TOKEN")
-        return _environments("dev-eu")
+        return _environments("dev-eu-plan")
 
     monkeypatch.setattr(doctor, "_gh_json", fake)
     assert doctor._plan_env_secret_warnings(_ctx()) == []
@@ -2513,8 +2731,8 @@ def test_gh_token_stays_unset_when_it_was_unset_before(monkeypatch):
     monkeypatch.delenv("GH_TOKEN", raising=False)
     monkeypatch.setenv("SHIPMATE_ENV_TOKEN", "envtok")
     responses = {
-        f"repos/{_REPO}/environments?per_page=100": _environments("dev-eu"),
-        f"repos/{_REPO}/environments/dev-eu/secrets?per_page=100": _secrets(),
+        f"repos/{_REPO}/environments?per_page=100": _environments("dev-eu-plan"),
+        f"repos/{_REPO}/environments/dev-eu-plan/secrets?per_page=100": _secrets(),
     }
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
     assert doctor._plan_env_secret_warnings(_ctx()) == []
