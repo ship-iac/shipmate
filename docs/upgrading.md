@@ -82,6 +82,58 @@ names. The entries below `0.2.0` predate the first tagged release, or
 `CHANGELOG.md` does not pin one; they are kept for repositories moving from a
 very old pin.
 
+### 0.13.0 — every environment is renamed, and re-pinning alone is not enough
+
+Plan and apply now bind `<env>-plan` and `<env>-apply`; the bare `<env>` means
+one environment shared between both paths. There is no compatibility shim: the
+old naming (`<env>` for plan, `<env>-apply` for apply) resolves to environments
+that no longer play those roles, so every logical env is migrated by hand, per
+env, in the same change that moves your pins.
+
+**Create the environments first, then edit the workflows.** Doing it the other
+way round means plan cells bind an environment that does not exist yet, GitHub
+auto-creates it empty, and a flavor whose `TF_VAR_env` has a fallback default
+then plans **the wrong environment** instead of failing — the empty environment
+injects nothing and the fallback supplies a name nobody chose.
+
+Split mode (the default, keeps the reviewer gate):
+
+1. Create `<env>-plan` and copy the bare `<env>`'s variables to it (`TF_VAR_env`,
+   `TF_VAR_region` / `TF_WORKSPACE`, any plan-side `AWS_ROLE_ARN` /
+   `AWS_REGION`). Keep the plan environment policy-free: no reviewers, no
+   deployment branch policy.
+2. Delete the bare `<env>` once nothing binds it — left in place beside
+   `<env>-plan` it makes the naming ambiguous, and `shipmate doctor` warns for
+   exactly that.
+3. Change `environment:` to `${{ matrix.environment }}-plan` in the `plan` job of
+   `plan.yml` **and** the `drift` job of `drift.yml`. Nothing else moves:
+   `matrix.environment`, check names, tags, `explicit_envs` and artifact names
+   all stay the bare logical name.
+4. `<env>-apply` is unchanged.
+
+Shared mode (one environment, opt in per env):
+
+1. Keep the bare `<env>` and delete `<env>-apply` — the same ambiguity rule
+   applies in this direction.
+2. Add the logical env name to the `SHIPMATE_SHARED_ENVS` repository variable:
+   comma-separated, **no spaces after the commas** (` dev-us` is not `dev-us`,
+   and that env silently stays split).
+3. Leave `plan.yml` and `drift.yml` binding the bare `${{ matrix.environment }}`.
+4. Know the price: a reviewer or a wait timer on that environment stalls the plan
+   cells and the nightly drift run, so the reviewer gate is gone rather than
+   moved, and plan and apply OIDC tokens become identical in `sub`
+   ([`hardening.md`](hardening.md) §6, §7–9).
+
+**One silence to expect.** `shipmate doctor` infers the mode from the environment
+*names* — it never reads `SHIPMATE_SHARED_ENVS`, which would need a permission the
+App manifest does not declare. So a repository that keeps a bare `<env>` and never
+sets the variable gets **no** finding at all, where the old code warned that
+`<env>-apply` was missing: bare-only is exactly what a correctly configured shared
+env looks like. The apply itself still fails loud — it binds `<env>-apply`, GitHub
+auto-creates it empty, and the apply-match fingerprint refuses the cell naming
+every missing `TF_VAR_*` ([`troubleshooting.md`](troubleshooting.md) §`Saved plan
+is stale`).
+
 ### 0.12.0 — wrappers pass secrets by name, and re-pinning alone is not enough
 
 Replace `secrets: inherit` in every wrapper job that calls an engine reusable

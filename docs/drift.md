@@ -76,7 +76,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.detect.outputs.matrix) }}
-    environment: ${{ matrix.environment }}
+    environment: ${{ matrix.environment }}-plan
     name: ${{ matrix.stack }} / ${{ matrix.environment }}
     env:
       TF_VAR_env: ${{ vars.TF_VAR_env }}
@@ -133,8 +133,9 @@ it and every cell plans against no state and reports the whole repository as
 drifted, every night.
 
 **The credential split is the point.** The `drift` matrix job binds the plan
-environment of the cell it is planning (`environment: ${{ matrix.environment }}`)
-and holds **no App credential**. All it does with its result is upload one
+environment of the cell it is planning
+(`environment: ${{ matrix.environment }}-plan`; drop the suffix for an env sharing
+one environment between plan and apply) and holds **no App credential**. All it does with its result is upload one
 `drift-summary.<env>.<stack-slug>` artifact holding a `cell.json`. The `issues`
 job binds `shipmate-engine`, and `actions/drift-issues` mints the App
 installation token there — it is the only job on the drift path that does. A plan

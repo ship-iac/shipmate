@@ -74,8 +74,8 @@ the named profile exists, and only fails once it reaches the apply path.
 Each environment gets its own IAM role, assumed through GitHub's OIDC provider
 (`token.actions.githubusercontent.com`) — no long-lived access key anywhere. The
 role's trust policy conditions the `sub` claim on the environment claim
-(`environment:<env>-apply` for an apply role, the plan environment's own name for
-a read-only plan role), which is the only control that decides which environments
+(`environment:<env>-apply` for an apply role, `environment:<env>-plan` for a
+read-only plan role), which is the only control that decides which environments
 can actually assume it; see [`hardening.md`](hardening.md) §7–9 for why that, and
 not where you put the variable, is the enforcing bound.
 
@@ -134,10 +134,10 @@ Set them per environment, and **never at repository or organization level**:
 
 - on each `<env>-apply` you want cloud access from — that is the apply path, where
   the engine reads them ([`hardening.md`](hardening.md) #18);
-- and, only if your `plan.yml` carries its own credentials step, on each `<env>`
-  plan environment too, with a **read-only** plan role. That is what
-  `repo-example-stacks-aws` does: its `dev-eu` / `dev-us` plan environments name a
-  read-only role and its `<env>-apply` environments name the apply role. A plan
+- and, only if your `plan.yml` carries its own credentials step, on each
+  `<env>-plan` environment too, with a **read-only** plan role. That is what
+  `repo-example-stacks-aws` does: its plan environments name a read-only role
+  and its apply environments name the apply role. A plan
   environment can have no approval rules and no branch policy at all
   ([`hardening.md`](hardening.md) #8), so whatever role it names is reachable by
   anyone who can push a branch.
@@ -153,10 +153,16 @@ nothing in the engine to guard it. The role's trust policy is the real bound.
 **On the apply path the consumer writes no credentials step.** The engine's
 `apply-env-level.yml` runs `aws-actions/configure-aws-credentials` in every wave
 job itself — after `actions/setup`, before `apply-cell`, gated on either role
-being set — reading the variables from the `<env>-apply` environment the job is
-bound to. The wrapper's only obligation is
+being set — reading the variables from the apply environment the job is bound to
+(`<env>-apply`, or the bare `<env>` in shared mode). The wrapper's only obligation is
 `id-token: write` on the calling job (see
 [`getting-started.md`](getting-started.md) §Required — apply).
+
+The plan-side role lives on the `<env>-plan` environment. In **shared mode** — a
+logical env listed in `SHIPMATE_SHARED_ENVS` binds one bare `<env>` on both paths
+— there is one role for both, so the plan job can assume whatever that role can
+do; keep it read-only or accept that plan-time branch code has write access
+([`hardening.md`](hardening.md) §7–9).
 
 **On the plan and drift paths the step is the consumer's own**, because
 `plan.yml` and `drift.yml` are consumer-owned workflows and the engine provides

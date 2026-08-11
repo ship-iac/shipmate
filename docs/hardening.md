@@ -72,8 +72,8 @@ name. See "Contributors without push access" for the trade-off that follows.
 | 5 | Block force-push and deletion on the default branch | Branch ruleset | History rewrite after apply |
 | 6 | Required reviewers + "Prevent self-review" on the `<env>-apply` environments you decide to gate (§6 states the trade-off; the choice is yours) | Environment | **Unforgeable** at apply time — the last line of defense once a merge has happened, on each environment you apply it to |
 | 7 | Cloud credentials scoped to `<env>-apply` — the OIDC path's `AWS_ROLE_ARN`/`AWS_REGION` as environment **variables**, any residual static key as an environment **secret** — never repo- or org-level | Environment | Repo-wide exposure (for a secret, bounded *only* on an environment that also carries row 6; and for a variable the scoping is advisory — see §7–9) |
-| 8 | Plan environments hold read-only, blast-radius-free credentials, no approval rules, no branch policy — ideally no secret at all (`shipmate doctor` reports what it finds) | Environment | Plan-time code execution |
-| 9 | OIDC with an `environment:` claim condition instead of static keys | Cloud IdP | Long-lived credential theft — and, since the engine's apply jobs mint OIDC tokens unconditionally, this claim condition is the **only** bound on which role an apply job can assume (see §7–9) |
+| 8 | Plan environments (`<env>-plan`; in shared mode the bare `<env>`, which is the apply environment too) hold read-only, blast-radius-free credentials, no approval rules, no branch policy — ideally no secret at all (`shipmate doctor` reports what it finds) | Environment | Plan-time code execution |
+| 9 | OIDC with an `environment:` claim condition instead of static keys | Cloud IdP | Long-lived credential theft — and, since the engine's apply jobs mint OIDC tokens unconditionally, this claim condition is the **only** bound on which role an apply job can assume (see §7–9). In shared mode it separates nothing: both tokens carry the same `environment:` claim |
 | 10 | Default `GITHUB_TOKEN` = read-only; Actions may not approve PRs | Settings → Actions | Token privilege creep |
 | 11 | Require approval for all outside collaborators' workflow runs | Settings → Actions | Drive-by fork execution |
 | 12 | Allowed-actions list (this engine + pinned third parties) | Settings → Actions | Supply chain |
@@ -84,6 +84,17 @@ name. See "Contributors without push access" for the trade-off that follows.
 | 17 | Deployment branch policy restricted to the default branch on every `<env>-apply` | Environment | Branch-authored workflow claiming apply-environment secrets directly |
 | 18 | `AWS_ROLE_ARN` + `AWS_REGION` as variables on **each** `<env>-apply` you want cloud access from — never at repository or organization level | Environment variables | Opting in per environment; set at repo/org level they apply to every apply environment at once (§7–9) |
 | 19 | `id-token: write` on the call-site job of every consumer wrapper that calls the engine's apply-path workflows | Consumer workflow YAML | Nothing — it is **required**: GitHub caps a called workflow's permissions at each `uses:` boundary, so without it every apply run fails at workflow-resolution time, cloud or not |
+
+Rows 6, 7, 17 and 18 name `<env>-apply`, which is the apply environment in the
+default **split** naming (`<env>-plan` + `<env>-apply`). A logical env listed in
+the `SHIPMATE_SHARED_ENVS` repository variable binds one bare `<env>` on both
+paths instead (CONTRACT.md §Env model), and that environment **cannot carry rows
+6 or 17**: a protection rule and a deployment branch policy each gate every job
+that binds the environment, with no per-job filter, so a reviewer stalls the plan
+cells and the nightly drift run, and a default-branch-only policy refuses plan
+cells whose base ref it does not name. Listing an env there forfeits both
+controls for that env — the reviewer gate is not relocated, it is gone — and
+rows 7 and 18 then place credentials on an environment plan-time code can reach.
 
 ## 1. Write access
 
@@ -233,15 +244,23 @@ costs, so the choice is made with the price visible:
   secret with extra steps. Row 17's deployment branch policy narrows that to
   jobs running at the default branch, which is a real bound and not a reviewer
   gate: no human sees the deployment before its secrets are released.
+- **Shared mode is the strongest form of ungated.** A logical env listed in
+  `SHIPMATE_SHARED_ENVS` binds one bare `<env>` for plan and apply, and a
+  reviewer on it stalls every plan cell and the nightly drift run — so the gate
+  is not merely unset, it is unavailable, and no later decision can turn it on
+  without splitting the environment again. The same environment is what plan-time
+  branch code runs inside, so control 7's scoping and row 17's policy lose their
+  meaning there too, and the OIDC claim condition in §7–9 can no longer tell a
+  plan token from an apply one.
 
 Pair every environment you gate with `global.shipmate.explicit_envs`, whichever
 ones those are: list it there so a bare `shipmate apply` skips it and it is
 reached only by the targeted `shipmate apply <env>`. Left off, a bare
 `shipmate apply` fans out into that environment and stalls there waiting for the
 reviewer nobody expected to be asked. Use the **bare environment name** —
-`staging`, not `staging-apply`; the value is matched against the environment name carried by the
-apply checks (see CONTRACT.md), and a `-apply`-suffixed entry validates
-silently and skips nothing.
+`staging`, not `staging-plan` or `staging-apply`; the value is matched against the
+environment name carried by the apply checks (see CONTRACT.md), and an entry
+carrying **either** suffix validates silently and skips nothing.
 
 `explicit_envs` is read from the *pull request branch* and can therefore be
 edited by whoever pushed the branch. Treat it as ergonomics; the environment
@@ -276,7 +295,7 @@ control.
 > excludes them (CONTRACT.md §Apply-match fingerprint). On the plan path the
 > engine wires no credentials step because it owns no plan workflow: `plan.yml`
 > is the consumer's, so the consumer adds `configure-aws-credentials` to it and
-> the plan `<env>` environment supplies a **read-only** role
+> the plan environment (`<env>-plan`) supplies a **read-only** role
 > (`docs/aws.md` §Where the credentials step goes). OIDC is available on both
 > paths; only the wiring differs in whose file it lives in.
 >
@@ -305,7 +324,7 @@ control.
   own, with no warning and nothing in the engine to guard it —
   "opt in per environment" (CONTRACT.md §AWS OIDC) is where you *should* set it,
   not something GitHub or shipmate enforces. Set it on each `<env>-apply` — and,
-  if your `plan.yml` carries its own credentials step, on each `<env>` plan
+  if your `plan.yml` carries its own credentials step, on each `<env>-plan`
   environment with a **read-only** plan role (`docs/aws.md` §Environment
   variables) — never at repository or organization level, and understand that
   the enforcing control is not the variable's
@@ -329,8 +348,8 @@ control.
   ARN in the plan environment as a *variable*, assumed by a
   `configure-aws-credentials` step in your own `plan.yml` (`docs/aws.md`
   §Where the credentials step goes), with the role's trust policy conditioned on
-  the plan environment's claim (`repo:<owner>/<repo>:environment:<env>`, the
-  plan environment, not `<env>-apply`), so a token minted in a plan cell can
+  the plan environment's claim (`repo:<owner>/<repo>:environment:<env>-plan`,
+  the plan environment, not `<env>-apply`), so a token minted in a plan cell can
   never assume the apply role. That removes the long-lived key; it does not
   remove the statement above — whatever the plan environment names is reachable
   by anyone who can push a branch, which is why the role must be read-only.
@@ -350,6 +369,17 @@ control.
   plan cell — or from a branch workflow — cannot assume the apply role. Do this
   on **every** role reachable from the repository, not only the apply role: see
   "What none of this fixes" for why it is the only bound that holds.
+- **In shared mode the claim condition cannot separate the two paths.** With one
+  bare `<env>` bound by plan and apply, both tokens carry
+  `repo:<owner>/<repo>:environment:<env>` — byte-identical `sub` — so no trust
+  policy can admit the apply job and refuse the plan job, and plan-time branch
+  code can assume the write role directly. Separate *variable names* do not help:
+  a variable is not a boundary, and code running in the job can name any ARN it
+  likes. This is only zero-impact where the plan path requests no `id-token:
+  write` and holds no cloud credentials at all. GitHub's per-repository `sub`
+  customization (adding `job_workflow_ref` to the claim, so the engine's apply
+  workflow file is part of what the policy matches) is the escape hatch; it is
+  consumer-side, unsupported by the engine, and out of scope here.
 
 ## 10–12. Actions settings
 

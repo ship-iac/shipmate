@@ -572,7 +572,7 @@ def _short_form(results_csv, env_name, gate, run_url, excluded, skipped):
 
 def _failure_line(results_csv, rows, env_name):
     """The job-level failure signal, surfaced when the table cannot carry it.
-    An apply run that dies before any cell reports (a denied `<env>-apply`
+    An apply run that dies before any cell reports (a denied apply
     environment, a job-level cancel) renders every expected cell as a benign
     not_attempted, with no ❌ anywhere — this restores it.
 
