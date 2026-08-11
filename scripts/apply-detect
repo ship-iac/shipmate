@@ -156,6 +156,25 @@ def run_graph_deps():
     return wv.parse_dot(bm._run(["terramate", "experimental", "run-graph", "--label", "stack.dir"]))
 
 
+def dag_shape_notice(deps):
+    """One line describing the apply DAG's shape: how many stacks, how many
+    declared `after` edges, how many topological levels, and how wide the widest
+    level is.
+
+    Always a notice, never a warning. Wave ordering comes only from the `after`
+    DAG, and "no declared dependency" is a legitimate state, so nothing can
+    detect a MISSING edge — a repository migrating from another tool leaves its
+    ordering behind in that tool's config with nothing to say so. What this line
+    buys is a reader who knows the repository seeing the concurrency figure and
+    knowing at once whether it is true."""
+    lv = wv.levels(deps)
+    return (
+        f"::notice::{len(deps)} stacks, {sum(len(d) for d in deps.values())} after edges, "
+        f"{len(lv)} wave levels; {max((len(x) for x in lv), default=0)} stacks would apply "
+        "concurrently"
+    )
+
+
 def validate_head_sha(value):
     """Guard against a malformed SHIPMATE_HEAD_SHA retargeting the gh api URLs
     built from it (e.g. `/`, `?`, `..`). Safe to echo — not a secret."""
@@ -214,6 +233,7 @@ def main():
 
     waves = wv.assign_waves(wv.levels(deps), pending)
     wv.guard_max_waves(waves)
+    print(dag_shape_notice(deps))
     print(
         f"::notice title=apply-detect::env={env} plan_run={plan_run_id} head={head} "
         f"cells={len(cells)} completed={len(completed)} pending={len(pending)} "

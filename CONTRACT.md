@@ -195,6 +195,26 @@ never used.
   (`staging`, `dev-eu`) hardcoded anywhere — `shipmate-engine` is the one
   literal exception, spelled identically everywhere it appears because it
   names one fixed thing, not a per-repo variable.
+- A consuming repository's `terramate.config.run.env` **must not** assign
+  `TF_VAR_env`, `TF_VAR_region` or `TF_WORKSPACE`. Terramate applies `run.env`
+  to the child process after the ambient environment, so such an assignment
+  wins over what the GitHub Environment injected — and silently: the
+  plan/apply fingerprint is computed outside `terramate run`, so both sides
+  hash the same correct job environment while `tofu` on both sides ran under
+  the rewritten one. Every cell then collapses onto one state key with plan,
+  gate and apply all green. To give local runs a default, put the injected
+  name first in the chain — `tm_try(env.TF_VAR_env, env.env, "dev")`.
+  `TF_DATA_DIR` needs the same resolution, or the per-env `.terraform` split
+  drifts from what tofu receives.
+
+  Every path that calls `compute_cells` injects a sentinel value into those
+  three variables, runs `terramate run … -- env` for **one** stack,
+  and fails the run when any of them comes back changed: the plan matrix's
+  `detect` job, the post-merge deploy's own detect, and the nightly drift run.
+  Repo-wide config, so one stack answers for the tree. The dispatched and bare
+  `shipmate apply` detects reconstruct their cells from plan artifacts instead
+  and never reach this probe — by then the plan run that would have caught it
+  has already happened.
 
 ## State backend
 
