@@ -26,6 +26,7 @@ import http.server
 import json
 import os
 import pathlib
+import secrets
 import subprocess
 import sys
 import tempfile
@@ -76,13 +77,17 @@ def _run(args, secrets=(), **kw):
 
 class _Handler(http.server.BaseHTTPRequestHandler):
     code = None
+    state = None
 
     def do_GET(self):  # noqa: N802 -- BaseHTTPRequestHandler's dispatch name
         params = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
         got = params.get("code", [None])[0]
-        if not got:
+        if not got or params.get("state", [None])[0] != _Handler.state:
             # The browser also asks this port for /favicon.ico; answering that
-            # as a capture would end the wait holding no code.
+            # as a capture would end the wait holding no code. And the port is
+            # reachable by anything on this machine: a callback that does not
+            # carry this run's state is some other App's code, which main()
+            # would convert and store as if it were ours.
             self.send_error(404)
             return
         _Handler.code = got
@@ -102,9 +107,10 @@ def _capture_code(name, org):
     manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
     manifest["name"] = name
 
+    _Handler.state = secrets.token_urlsafe(16)
     server = http.server.HTTPServer(("127.0.0.1", 0), _Handler)
     manifest["redirect_url"] = f"http://127.0.0.1:{server.server_port}/callback"
-    action = f"https://github.com/organizations/{org}/settings/apps/new?state=shipmate-setup"
+    action = f"https://github.com/organizations/{org}/settings/apps/new?state={_Handler.state}"
     form = f"""<!doctype html><meta charset=utf-8>
 <title>Register {name}</title>
 <form id="f" action="{action}" method="post">
@@ -132,6 +138,21 @@ def _capture_code(name, org):
     return _Handler.code
 
 
+def _validate_out(path):
+    """Refuse an unusable --out BEFORE the conversion call.
+
+    After it, the key exists only in this process and the single-use manifest
+    code can never mint another, so every reason the write could fail has to be
+    found while failing is still free."""
+    parent = pathlib.Path(path).parent
+    if pathlib.Path(path).exists():
+        raise SystemExit(f"{path} already exists; refusing to overwrite it. Choose another --out.")
+    if not parent.is_dir():
+        raise SystemExit(f"{path}: the directory {parent} does not exist. Create it first.")
+    if not os.access(parent, os.W_OK):
+        raise SystemExit(f"{path}: the directory {parent} is not writable.")
+
+
 def _write_key(path, pem):
     """Create the PEM at `path`, owner-only where the platform has modes.
 
@@ -148,6 +169,11 @@ def _write_key(path, pem):
             f"{path} already exists; refusing to overwrite it. The App is registered and its "
             "key is now unrecoverable -- generate a replacement in the App's settings."
         ) from None
+    except OSError as e:
+        raise SystemExit(
+            f"{path} could not be created ({e}). The App was created and its key existed only "
+            "in this process, so it is lost -- generate a replacement in the App's settings."
+        ) from None
     with os.fdopen(fd, "w", encoding="utf-8", newline="") as fh:
         fh.write(pem)
 
@@ -161,14 +187,16 @@ def main(argv=None):
     args = ap.parse_args(argv)
     org = args.repo.split("/")[0]
 
+    _validate_out(args.out)
     code = args.code or _capture_code(args.name, org)
     out = _run(["gh", "api", "-X", "POST", f"app-manifests/{code}/conversions"], secrets=(code,))
     app = json.loads(out)
     app_id = str(app["id"])
-    # Before the variable set: a failing `gh` there would otherwise lose a key
-    # that exists only in this process and can never be converted again.
-    _write_key(args.out, app["pem"])
+    # The id first, so a refusal below still leaves the operator with it; then
+    # the key, before the variable set, because a failing `gh` there would
+    # otherwise lose a key that exists only in this process.
     print(f"App created: id={app_id} slug={app.get('slug')}")
+    _write_key(args.out, app["pem"])
     _run(["gh", "variable", "set", "SHIPMATE_APP_ID", "--repo", args.repo, "--body", app_id])
     print(f"Stored SHIPMATE_APP_ID (variable) and wrote the private key to {args.out}.")
     print("Next: install the App, then place that key per docs/github-app.md §4-§6.")

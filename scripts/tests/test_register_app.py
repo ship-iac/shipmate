@@ -44,11 +44,11 @@ def test_main_writes_the_key_to_a_file_and_creates_no_repository_secret(monkeypa
 
 def test_main_refuses_an_out_path_that_already_exists(monkeypatch, tmp_path):
     # POSIX applies the mode only on creation, so writing into a file left by an
-    # earlier bootstrap would inherit its 0644 -- and overwriting it destroys a
-    # key the single-use manifest code can never mint again.
+    # earlier bootstrap would inherit its 0644. The refusal comes BEFORE the
+    # conversion call -- refusing after it costs an App key nothing can mint again.
     out = tmp_path / "key.pem"
     out.write_text("AN EARLIER KEY", encoding="utf-8")
-    _stub_run(monkeypatch)
+    calls = _stub_run(monkeypatch)
 
     with pytest.raises(SystemExit) as exc:
         ra.main(
@@ -57,6 +57,45 @@ def test_main_refuses_an_out_path_that_already_exists(monkeypatch, tmp_path):
 
     assert str(out) in str(exc.value)
     assert out.read_text(encoding="utf-8") == "AN EARLIER KEY"
+    assert calls == []
+
+
+def test_main_refuses_an_out_path_whose_directory_does_not_exist(monkeypatch, tmp_path):
+    # os.open raises here too, but only after the App exists -- and then the PEM
+    # is in process memory alone. Refuse while refusing is still free.
+    out = tmp_path / "nope" / "key.pem"
+    calls = _stub_run(monkeypatch)
+
+    with pytest.raises(SystemExit) as exc:
+        ra.main(
+            ["--name", "shipmate-acme", "--repo", "org/repo", "--out", str(out), "--code", "c123"]
+        )
+
+    assert str(out) in str(exc.value)
+    assert calls == []
+
+
+def test_the_app_id_is_printed_before_the_key_is_written(monkeypatch, tmp_path, capsys):
+    # A refusal from _write_key leaves an App that exists on GitHub; without the
+    # id the operator cannot even find it to generate a replacement key.
+    _stub_run(monkeypatch)
+    monkeypatch.setattr(ra, "_write_key", lambda path, pem: (_ for _ in ()).throw(SystemExit("no")))
+
+    with pytest.raises(SystemExit):
+        ra.main(
+            [
+                "--name",
+                "shipmate-acme",
+                "--repo",
+                "org/repo",
+                "--out",
+                str(tmp_path / "key.pem"),
+                "--code",
+                "c123",
+            ]
+        )
+
+    assert "App created: id=42 slug=shipmate-acme" in capsys.readouterr().out
 
 
 def test_out_is_required(monkeypatch):
@@ -84,13 +123,19 @@ def _get(server, path):
 def test_the_listener_captures_the_code_and_refuses_a_request_without_one():
     # The capture is what keeps the single-use code off the clipboard, and the
     # browser asks for /favicon.ico on the same port -- answering that as a
-    # capture would end the wait with no code at all.
+    # capture would end the wait with no code at all. A callback carrying a code
+    # but not this run's state is another App's registration, delivered by
+    # anything that can reach the port: converting it would write that App's key
+    # to --out and store its id as SHIPMATE_APP_ID.
     ra._Handler.code = None
+    ra._Handler.state = "this-runs-state"
     server = http.server.HTTPServer(("127.0.0.1", 0), ra._Handler)
     try:
         assert _get(server, "/favicon.ico") == 404
         assert ra._Handler.code is None
-        assert _get(server, "/callback?code=abc123") == 200
+        assert _get(server, "/callback?code=forged&state=shipmate-setup") == 404
+        assert ra._Handler.code is None
+        assert _get(server, "/callback?code=abc123&state=this-runs-state") == 200
         assert ra._Handler.code == "abc123"
     finally:
         server.server_close()
