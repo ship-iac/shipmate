@@ -22,6 +22,9 @@ on:
       # `environment: shipmate-engine`, so a required declaration happens to be
       # satisfiable today; adding any job that does not bind the environment
       # would make every consumer that scopes the key to it fail at load time.
+      # Declaring nothing else is also load-bearing: mapping a secret a callee
+      # does not declare is a hard load-time error, so a consumer's plan
+      # wrapper passes this key alone and never the passphrase.
       SHIPMATE_APP_PRIVATE_KEY: { required: false }
 jobs:
   summary:

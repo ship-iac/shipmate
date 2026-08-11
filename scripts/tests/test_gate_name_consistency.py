@@ -8,7 +8,7 @@ test_check_runs_filter_aligned guards the check-runs read discipline.
 """
 
 import yaml
-from _loader import ENGINE, WORKFLOWS
+from _loader import ENGINE, ENGINE_CALL_SECRETS, WORKFLOWS
 
 # Generated / third-party / VCS dirs: never shipmate source, and their contents
 # (compiled .pyc constant pools, vendored packages) can carry the retired token
@@ -360,10 +360,16 @@ def _reusable_caller_offense(wf_name, job_name, job, workflow_docs):
             f"{wf_name}:{job_name} -> {target} missing "
             "SHIPMATE_APP_PRIVATE_KEY in on.workflow_call.secrets"
         )
-    if job.get("secrets") != "inherit":
+    expected = ENGINE_CALL_SECRETS.get(target)
+    if expected is None:
         return (
-            f"{wf_name}:{job_name} -> {target}: not using `secrets: inherit` "
-            "(explicit secret mappings must include SHIPMATE_APP_PRIVATE_KEY)"
+            f"{wf_name}:{job_name} -> {target}: _loader.ENGINE_CALL_SECRETS holds no "
+            "expected secrets block for this callee -- add its whole block there"
+        )
+    if job.get("secrets") != expected:
+        return (
+            f"{wf_name}:{job_name} -> {target}: must pass exactly {expected}; "
+            f"got {job.get('secrets')!r}"
         )
     return None
 
@@ -390,12 +396,18 @@ def test_credentialed_action_steps_thread_app_credentials():
     installation token and 403 (or silently no-op) without both.
 
     For a job that is itself a reusable-workflow CALLER (`uses:` points at
-    another `.github/workflows/*.yml` and relies on `secrets: inherit` to
-    forward `SHIPMATE_APP_PRIVATE_KEY` down into it), the credential is
-    threaded structurally rather than passed as a `with:` input -- assert
-    instead that the CALLED workflow declares `SHIPMATE_APP_PRIVATE_KEY` under
-    `on.workflow_call.secrets`, and that the caller uses `secrets: inherit`
-    (not a selective mapping that could omit it).
+    another `.github/workflows/*.yml`), the credential is threaded through the
+    `secrets:` block rather than passed as a `with:` input -- assert instead
+    that the CALLED workflow declares `SHIPMATE_APP_PRIVATE_KEY` under
+    `on.workflow_call.secrets`, and that the caller passes the whole block
+    `_loader.ENGINE_CALL_SECRETS` names for that callee.
+
+    Never `secrets: inherit`, including on these engine-internal hops. The
+    files sit in one organization but the RUN belongs to the consumer, and
+    inherit is evaluated against the run: a cross-organization consumer's
+    applies would execute and then strand their `apply / <stack> / <env>`
+    checks pending forever, because `apply-env-level.yml`'s `complete` job
+    would hold no key to complete them with.
     """
     offenders = []
     workflow_docs = {

@@ -10,14 +10,15 @@ on:
       # "a remote backend owns state".
       state_suffix: { required: true, type: string }
     secrets:
-      # Declared for documentation; consumers pass `secrets: inherit`. `vars`
-      # (TERRAMATE_VERSION, TOFU_VERSION, SLACK_WEBHOOK) are inherited by a
-      # called workflow automatically; secrets are NOT — without inherit the
-      # env-level applies of an encrypting consumer would all fail their
-      # decrypt fail-safe.
+      # Consumers pass this by name. `vars` (TERRAMATE_VERSION, TOFU_VERSION,
+      # SLACK_WEBHOOK) are inherited by a called workflow automatically;
+      # secrets are NOT, and an encrypting consumer that forwards nothing has
+      # every env-level apply fail its decrypt fail-safe. There is no
+      # environment to fall back on: the wave jobs bind `<env>-apply`, not
+      # `shipmate-engine`, so this one has to travel down the call chain.
       SHIPMATE_PLAN_PASSPHRASE: { required: false }
       # Feeds the summary job's gate-refresh + Complete-gate App-token mints.
-      # Consumers pass `secrets: inherit`; an empty key fails loud at mint.
+      # An empty key fails loud at mint.
       SHIPMATE_APP_PRIVATE_KEY: { required: false }
 jobs:
   detect:
@@ -62,13 +63,17 @@ jobs:
       head_sha: ${{ needs.detect.outputs.head_sha }}
       plan_run_id: ${{ needs.detect.outputs.plan_run_id }}
       state_suffix: ${{ inputs.state_suffix }}
-    # `inherit`, not an explicit `secrets:` mapping: apply-env-level.yml is pinned
-    # by SHA, and in the window before the post-merge pin bump that pinned revision
-    # may not yet declare SHIPMATE_PLAN_PASSPHRASE. Passing an undeclared secret via
-    # an explicit mapping is a hard load-time error (unlike an undeclared action
-    # input, which is silently ignored); `inherit` is not validated against the
-    # callee and forwards the optional passphrase when the consumer set it.
-    secrets: inherit
+    # Named, never `inherit`: these two files sit in one organization but the RUN
+    # belongs to the consumer, and `inherit` is evaluated against the run -- so a
+    # cross-organization consumer's `complete` job would hold no key, and its
+    # applies would execute and strand their apply checks pending forever.
+    # Ordering rule for adding a secret here: declare it in apply-env-level.yml,
+    # merge, bump the pin below, and only then map it in this block. Mapping a
+    # secret the pinned callee does not declare is a hard load-time error (unlike
+    # an undeclared action input, which is silently ignored) -- docs/releasing.md.
+    secrets:
+      SHIPMATE_APP_PRIVATE_KEY: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
+      SHIPMATE_PLAN_PASSPHRASE: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
 
   envlevel1:
     # Display name only (job id unchanged) — see apply.yml's `waves` job.
@@ -82,7 +87,9 @@ jobs:
       head_sha: ${{ needs.detect.outputs.head_sha }}
       plan_run_id: ${{ needs.detect.outputs.plan_run_id }}
       state_suffix: ${{ inputs.state_suffix }}
-    secrets: inherit
+    secrets:
+      SHIPMATE_APP_PRIVATE_KEY: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
+      SHIPMATE_PLAN_PASSPHRASE: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
 
   envlevel2:
     # Display name only (job id unchanged) — see apply.yml's `waves` job.
@@ -96,7 +103,9 @@ jobs:
       head_sha: ${{ needs.detect.outputs.head_sha }}
       plan_run_id: ${{ needs.detect.outputs.plan_run_id }}
       state_suffix: ${{ inputs.state_suffix }}
-    secrets: inherit
+    secrets:
+      SHIPMATE_APP_PRIVATE_KEY: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
+      SHIPMATE_PLAN_PASSPHRASE: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
 
   envlevel3:
     # Display name only (job id unchanged) — see apply.yml's `waves` job.
@@ -110,7 +119,9 @@ jobs:
       head_sha: ${{ needs.detect.outputs.head_sha }}
       plan_run_id: ${{ needs.detect.outputs.plan_run_id }}
       state_suffix: ${{ inputs.state_suffix }}
-    secrets: inherit
+    secrets:
+      SHIPMATE_APP_PRIVATE_KEY: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
+      SHIPMATE_PLAN_PASSPHRASE: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
 
   summary:
     needs: [detect, envlevel0, envlevel1, envlevel2, envlevel3]
