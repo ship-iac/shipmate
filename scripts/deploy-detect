@@ -83,6 +83,7 @@ def main():
     ).get("workflow_runs", [])
     plan_run = runs[0]["id"] if runs else ""
     level_counts = [sum(len(waves[f"wave{i}"]) for i in range(wv.MAX_WAVES)) for waves in per_level]
+    print(ad.dag_shape_notice(deps))
     print(
         f"::notice title=deploy-detect::base={os.environ.get('SHIPMATE_BASE_SHA', '')} "
         f"head={head} cells={len(cells)} completed={len(completed)} pending={len(pending)} "

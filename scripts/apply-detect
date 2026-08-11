@@ -45,14 +45,31 @@ def _slug(path):
     return path.replace("/", "-")
 
 
-def workset_from_artifacts(artifact_names, env, graph_paths):
+def workset_paths(artifact_names, env, graph_paths):
+    """Graph stacks whose exact `plan.<env>.<slug>` artifact is present."""
+    names = set(artifact_names)
+    return [p for p in graph_paths if f"plan.{env}.{_slug(p)}" in names]
+
+
+def workset_from_artifacts(artifact_names, env, graph_paths, tags_by_stack):
     """Cells for `env` = graph stacks whose exact `plan.<env>.<slug>` artifact is
     present in the plan run. Forward-construct the expected name per graph path,
     never reverse-parse it (`validate_env` guards what makes that safe).
-    path->slug is many-to-one, so fail loud if two paths collide."""
-    names = set(artifact_names)
+    path->slug is many-to-one, so fail loud if two paths collide.
+
+    `workload_var` comes from the tags, never from the artifact name: the slug
+    grammar is what keeps artifact names collision-free and nothing may be added
+    to it. A stack missing from the map carries "" and applies with the
+    environment's generic role; the map itself is REQUIRED, so a caller that
+    stops deriving it raises here instead of silently applying every cell with
+    the generic role."""
     cells = [
-        {"stack": p, "environment": env} for p in graph_paths if f"plan.{env}.{_slug(p)}" in names
+        {
+            "stack": p,
+            "environment": env,
+            "workload_var": bm.workload_var(bm.workload_of(tags_by_stack.get(p, []))),
+        }
+        for p in workset_paths(artifact_names, env, graph_paths)
     ]
     slugs = [_slug(c["stack"]) for c in cells]
     dupes = sorted({s for s in slugs if slugs.count(s) > 1})
@@ -139,6 +156,25 @@ def run_graph_deps():
     return wv.parse_dot(bm._run(["terramate", "experimental", "run-graph", "--label", "stack.dir"]))
 
 
+def dag_shape_notice(deps):
+    """One line describing the apply DAG's shape: how many stacks, how many
+    declared `after` edges, how many topological levels, and how wide the widest
+    level is.
+
+    Always a notice, never a warning. Wave ordering comes only from the `after`
+    DAG, and "no declared dependency" is a legitimate state, so nothing can
+    detect a MISSING edge — a repository migrating from another tool leaves its
+    ordering behind in that tool's config with nothing to say so. What this line
+    buys is a reader who knows the repository seeing the concurrency figure and
+    knowing at once whether it is true."""
+    lv = wv.levels(deps)
+    return (
+        f"::notice::{len(deps)} stacks, {sum(len(d) for d in deps.values())} after edges, "
+        f"{len(lv)} wave levels; {max((len(x) for x in lv), default=0)} stacks would apply "
+        "concurrently"
+    )
+
+
 def validate_head_sha(value):
     """Guard against a malformed SHIPMATE_HEAD_SHA retargeting the gh api URLs
     built from it (e.g. `/`, `?`, `..`). Safe to echo — not a secret."""
@@ -186,13 +222,18 @@ def main():
     graph_paths = list(deps.keys())
 
     names = _artifact_names(repo, plan_run_id)
-    cells = workset_from_artifacts(names, env, graph_paths)
+    # Tags only for the workset: this path reconstructs its cells from the plan
+    # artifacts plus the run-graph, and evaluating the whole tree would let one
+    # unrelated stack's unresolvable expression block an approved plan.
+    paths = workset_paths(names, env, graph_paths)
+    cells = workset_from_artifacts(names, env, paths, {p: bm._tags(p) for p in paths})
 
     completed = completed_apply_names(repo, head)
     pending = filter_pending(cells, completed)
 
     waves = wv.assign_waves(wv.levels(deps), pending)
     wv.guard_max_waves(waves)
+    print(dag_shape_notice(deps))
     print(
         f"::notice title=apply-detect::env={env} plan_run={plan_run_id} head={head} "
         f"cells={len(cells)} completed={len(completed)} pending={len(pending)} "

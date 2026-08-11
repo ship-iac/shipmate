@@ -16,11 +16,12 @@ these names verbatim:
 
 `<env>` and `<stack>` are placeholders substituted with the actual
 environment name and the Terramate **stack path** (as emitted by
-`terramate list` / `experimental run-graph`, e.g. `stacks/network`) for that
-unit of work (for example, `stacks/network / staging` and
-`apply / stacks/network / staging`). Both grammars put the stack first, so a
-reader scans one column; the apply name is the plan name with the verb in
-front. The check name uses the stack **path**, never a display name — so the
+`terramate list` / `experimental run-graph --label stack.dir`, e.g.
+`stacks/network`) for that unit of work (for example,
+`stacks/network / staging` and `apply / stacks/network / staging`). Both
+grammars put the stack first, so a reader scans one column; the apply name is
+the plan name with the verb in front. The check name uses the stack **path**,
+never a display name — so the
 code that *creates* the apply check (`pending-checks`, run by `actions/summary`),
 *completes* it (`apply-cell`), *filters the still-pending queue*
 (`deploy-detect` / `apply-detect` / `apply-all-detect`, which only ever have the
@@ -194,6 +195,26 @@ never used.
   (`staging`, `dev-eu`) hardcoded anywhere — `shipmate-engine` is the one
   literal exception, spelled identically everywhere it appears because it
   names one fixed thing, not a per-repo variable.
+- A consuming repository's `terramate.config.run.env` **must not** assign
+  `TF_VAR_env`, `TF_VAR_region` or `TF_WORKSPACE`. Terramate applies `run.env`
+  to the child process after the ambient environment, so such an assignment
+  wins over what the GitHub Environment injected — and silently: the
+  plan/apply fingerprint is computed outside `terramate run`, so both sides
+  hash the same correct job environment while `tofu` on both sides ran under
+  the rewritten one. Every cell then collapses onto one state key with plan,
+  gate and apply all green. To give local runs a default, put the injected
+  name first in the chain — `tm_try(env.TF_VAR_env, env.env, "dev")`.
+  `TF_DATA_DIR` needs the same resolution, or the per-env `.terraform` split
+  drifts from what tofu receives.
+
+  Every path that calls `compute_cells` injects a sentinel value into those
+  three variables, runs `terramate run … -- env` for **one** stack,
+  and fails the run when any of them comes back changed: the plan matrix's
+  `detect` job, the post-merge deploy's own detect, and the nightly drift run.
+  Repo-wide config, so one stack answers for the tree. The dispatched and bare
+  `shipmate apply` detects reconstruct their cells from plan artifacts instead
+  and never reach this probe — by then the plan run that would have caught it
+  has already happened.
 
 ## State backend
 
@@ -219,7 +240,17 @@ A remote backend opts in by writing the empty string.
 The input is **repo-wide**. A repository mixing local- and remote-backend stacks
 has no correct value — non-empty makes `actions/cache/save` target a nonexistent
 path for the remote stacks, empty silently discards the local ones — so a mixed
-repository is unsupported.
+repository is unsupported. That forecloses a gradual migration in which one
+workload moves to a remote backend first: the backend move has to be repo-wide
+and land with the wrapper's `state_suffix` change in the same step.
+
+**On the state key.** Where the consumer's backend derives a key per stack,
+derive it from `terramate.stack.path.absolute` (as `docs/aws.md` does), which
+is unique by construction across the whole tree. A key built from
+`${workload}/${stack_name}` is not: a stack's default name is its directory's
+basename, so `accounts/sandbox/network` and `stacks/prod/network` both name
+`network` and, when both carry the same `workload/<name>` tag, render one key
+and share one state file.
 
 The drift wrapper is consumer-authored and builds `state-path` itself. On a
 remote backend pass `state-path: ''` (or omit the input on the `drift-cell`
@@ -240,11 +271,17 @@ variables on it:
 - `AWS_ROLE_ARN` — the IAM role the job assumes via GitHub's OIDC provider.
 - `AWS_REGION` — the region passed to the credentials step.
 
-With `AWS_ROLE_ARN` unset the credentials step is skipped and the job holds no
+On the apply path a wave job first looks for `AWS_ROLE_ARN_<WORKLOAD>`, where
+`<WORKLOAD>` is the cell's `workload/<name>` tag upper-cased with `-` replaced
+by `_`, and falls back to `AWS_ROLE_ARN` when the cell carries no workload tag
+or that variable is unset — so one `<env>-apply` Environment can serve several
+workloads with a role each.
+
+With no role variable set the credentials step is skipped and the job holds no
 cloud credential at all, which is how the sample repos run credential-free.
 This is wired on the **apply path only**: every wave job of
 `apply-env-level.yml` requests `id-token: write` and runs
-`aws-actions/configure-aws-credentials` gated on `vars.AWS_ROLE_ARN != ''`
+`aws-actions/configure-aws-credentials`, gated on one of those roles being set,
 before its apply-cell step, reading the variables from the `<env>-apply`
 Environment it is bound to. The `snapshot` and `complete` jobs deliberately get
 no token. Plan cells have no credentials step.
@@ -309,6 +346,21 @@ must appear in Terramate stack tag lists is the `env/<name>` /
 `workload/<name>` form. A stack may carry several `env/*` tags at once (for
 example, a shared stack tagged both `env/staging` and `env/production`)
 when the same stack participates in more than one environment.
+
+An `env/<name>` tag is mandatory for every stack a run inspects, and an
+untagged one fails the **whole run** rather than being skipped. Which stacks
+are inspected differs by path: the **changed** set on the plan and deploy
+paths, so untagged stacks elsewhere in the tree do not fail a plan run until
+one of them changes; every stack on the drift path, which is therefore the
+repo-wide backstop that catches the rest; and none on the artifact-sourced
+bare-apply `detect`, which exempts the check deliberately — an untagged stack
+produces no plan artifact and so contributes no cell anyway, and an unrelated
+one must not abort an apply. Failing the whole run rather than the one stack is
+deliberate too: a silently skipped stack plans and applies nothing while the
+gate goes green over it, which is the one failure this contract will not trade
+for convenience. The failure names every untagged stack it found, so an
+incremental migration is worked down from that list rather than one re-run per
+stack.
 
 ## Comment-ops
 
@@ -480,6 +532,15 @@ merge — until someone runs `shipmate apply <env>` for them. An absent global
 (or `[]`) means a bare apply targets everything. Malformed `explicit_envs`
 shapes (not a list of strings) fail loud, like `env_order`.
 
+`explicit_envs` constrains the bare pre-merge `shipmate apply` **only**. The
+post-merge deploy applies every cell whose apply check is still pending,
+explicit environments included; the control on that path is the `<env>-apply`
+environment's required reviewers, not this global. The asymmetry is deliberate:
+after merge the pull request is closed, and the apply requirements above include
+**mergeable**, so a deploy that honoured the global would strand those cells
+with no path to apply at all: their `apply / <stack> / <env>` checks would sit
+pending forever.
+
 A parsed `shipmate apply <env>` command is authorized only when it satisfies
 **apply requirements** — named, Atlantis-style, checked in order, each with
 its own actionable rejection reason:
@@ -582,6 +643,11 @@ switches the trigger therefore satisfies neither — its head no longer declares
 `pull_request_target` — so it produces no plan run and no `shipmate / gate`.
 Merge that one pull request with an administrative bypass and restore
 enforcement straight after; every pull request following it gates normally.
+
+For a repository migrating **from** another TACO, that same pull request is
+ungated by both systems at once: the outgoing tool's checks are being removed
+in it, and shipmate's cannot run on it yet. Review it as the one change nothing
+plans.
 
 **The `summary` job must grant `permissions: contents: read`.** A called
 workflow's permissions are capped by the calling job's, and the callee requests
@@ -762,7 +828,12 @@ trusting the trigger alone closes two paths a trigger check alone would not:
   and the `gh` CLI. A runner must therefore provide: `bash`, `python3`
   (Python ≥ 3.11), `git`, `curl`, `jq`, `openssl`, and `gh`.
 - Every GitHub-hosted Ubuntu image satisfies this, including the minimal
-  `ubuntu-slim` image. Self-hosted runners must preinstall these tools.
+  `ubuntu-slim` image, whose
+  [included-software list](https://github.com/actions/runner-images/blob/066b3201a74f4551f70c221a71c49746d02c0864/images/ubuntu-slim/ubuntu-slim-Readme.md)
+  names the GitHub CLI. That one is load-bearing for the drift path: the
+  default-branch probe in the consumer's `drift.yml` calls `gh api` in a job
+  with no `setup` step before it. Self-hosted runners must preinstall these
+  tools.
 - The Python scripts have **no third-party dependencies** — nothing is
   `pip install`ed at runtime, so no Python setup step (or network access
   to a package index) is required or performed.
@@ -776,6 +847,17 @@ trusting the trigger alone closes two paths a trigger check alone would not:
   stacks and M environments (accounting for which stacks are tagged into
   which environments) fans out into up to N×M plan units and N×M apply
   units, each with its own check (see Check names, above).
+- The plan fan-out is bounded at **256 cells** (`build-matrix`'s `MATRIX_LIMIT`,
+  the GitHub Actions matrix limit). Above it `build-matrix` raises
+  `MatrixTooLarge` and `detect` fails the run before any cell starts.
+  The way past it is to split the change across several pull requests: the
+  matrix is built over `terramate list --changed`, so a narrower diff is a
+  smaller matrix. Splitting cannot help when the fan-out comes from a one-line
+  edit to a shared local module — that correctly marks every dependent stack
+  changed and is one atomic change by nature — and there the only lever is to
+  reduce the number of environments in play. A targeted `shipmate apply <env>`
+  is not a way past it: the ceiling is enforced in the plan fan-out, so a run
+  that trips it produces no reviewed plan artifact for any apply path to use.
 - Plans fan out flat: all applicable plan units for a pull request run
   concurrently, with no ordering dependency between them.
 - Applies run in waves: the `after` relationships between Terramate stacks
@@ -1188,13 +1270,17 @@ too — `all` is the only keyword that does; `git` covers the three git checks
 only) nor via `git` (which would pre-disable the two working-tree checks should a
 future Terramate start evaluating them here).
 
-A consuming repository **must not** set `disable_safeguards` in its own
-`terramate.config`. The engine's flag wins for the git checks, but not for
-`outdated-code`: `checkGenCode` consults the consumer's config after the engine's
-flags, so `disable_safeguards = ["outdated-code"]` (or `"all"`) silences the one
-working safeguard the cells still have, and the engine cannot detect or override
-it. The `detect` job's `terramate generate --detailed-exit-code` still catches
-stale codegen — `disable_safeguards` gates `terramate run`, not `generate` — but
+A consuming repository **must not** disable `outdated-code` — or `all`, which
+includes it — via `disable_safeguards` in its own `terramate.config`. The
+engine's flag wins for the git checks, but not for `outdated-code`:
+`checkGenCode` consults the consumer's config after the engine's flags, so
+`disable_safeguards = ["outdated-code"]` (or `"all"`) silences the one working
+safeguard the cells still have, and the engine cannot detect or override it.
+Disabling `git-untracked` or `git-uncommitted` there changes nothing for cells,
+which never reach them (see the table above); it still affects the consumer's
+own recursive `terramate run` invocations. The `detect` job's
+`terramate generate --detailed-exit-code` still catches stale codegen —
+`disable_safeguards` gates `terramate run`, not `generate` — but
 that step lives in the consumer's own plan workflow, so it is a second thing the
 consumer controls rather than an engine backstop.
 

@@ -56,6 +56,19 @@ Because the backend owns the state, the apply-path wrappers pass
 skipped entirely and shipmate never handles a state file. The input declares no
 default, so omitting it is a workflow-resolution error rather than a third mode.
 
+## Named profiles must be conditional
+
+`profile` being conditional above is a constraint on how you write HCL, not a
+stylistic choice. The apply jobs run inside the engine's reusable workflows and
+there is no consumer step between `setup` and `apply-cell`, so there is nowhere
+to write an `~/.aws/config`; the apply path holds only the OIDC session. Any
+`provider` or `backend` block carrying a literal `profile` therefore fails at
+apply. Gate the profile on a variable that defaults to `false` —
+`var.use_profile ? "…" : null` — so the same code serves a run by hand and CI.
+
+Worth stating rather than discovering: such a block plans fine locally, where
+the named profile exists, and only fails once it reaches the apply path.
+
 ## GitHub OIDC
 
 Each environment gets its own IAM role, assumed through GitHub's OIDC provider
@@ -101,9 +114,21 @@ not secrets, since neither is one:
 - `AWS_ROLE_ARN` — the IAM role the job assumes.
 - `AWS_REGION` — the region passed to the credentials step.
 
-With `AWS_ROLE_ARN` unset the engine's credentials step is skipped and the job
+On the apply path a third, optional variable takes precedence:
+
+- `AWS_ROLE_ARN_<WORKLOAD>` — the role for cells carrying a `workload/<name>`
+  tag. `<WORKLOAD>` is that tag's name upper-cased with `-` replaced by `_`
+  (`workload/net-edge` → `AWS_ROLE_ARN_NET_EDGE`). When the cell has no workload
+  tag, or that variable is unset, the job falls back to `AWS_ROLE_ARN`.
+
+With no role variable set the engine's credentials step is skipped and the job
 holds no cloud credential at all, which is how the three non-AWS sample
 repositories run credential-free.
+
+That is the Environment-count arithmetic: without it, one role per workload
+means one Environment per (env × region × workload); with it, a single
+`<env>-apply` Environment can serve several workloads, each assuming its own
+role.
 
 Set them per environment, and **never at repository or organization level**:
 
@@ -127,9 +152,9 @@ nothing in the engine to guard it. The role's trust policy is the real bound.
 
 **On the apply path the consumer writes no credentials step.** The engine's
 `apply-env-level.yml` runs `aws-actions/configure-aws-credentials` in every wave
-job itself — after `actions/setup`, before `apply-cell`, gated on
-`if: ${{ vars.AWS_ROLE_ARN != '' }}` — reading the variables from the
-`<env>-apply` environment the job is bound to. The wrapper's only obligation is
+job itself — after `actions/setup`, before `apply-cell`, gated on either role
+being set — reading the variables from the `<env>-apply` environment the job is
+bound to. The wrapper's only obligation is
 `id-token: write` on the calling job (see
 [`getting-started.md`](getting-started.md) §Required — apply).
 
@@ -141,10 +166,21 @@ after the `ship-iac/shipmate/actions/setup` step and before the cell action
 runs and setup has not yet been given a credential it does not need.
 
 Both sample steps are unconditional, because that repository sets the variables
-on every environment. If some of your environments run credential-free, copy the
-engine's `if: ${{ vars.AWS_ROLE_ARN != '' }}` guard onto your step — with the
+on every environment. If some of your environments run credential-free, guard
+your step with `if: ${{ vars.AWS_ROLE_ARN != '' }}` — with the
 variable unset, `configure-aws-credentials` has no role to assume and the cell
 fails there rather than skipping.
+
+## Runner choice
+
+The documented fences in [`getting-started.md`](getting-started.md) and
+[`drift.md`](drift.md) use `runs-on: ubuntu-slim`, which suits the three
+credential-free samples: their cells download no provider. An AWS repository
+does — every cell pulls `hashicorp/aws` — and if `.terraform.lock.hcl` is
+gitignored, as it is in `repo-example-stacks-aws`, every `init -reconfigure`
+re-resolves it from scratch. On a cloud repository weigh the slim image against
+that download before copying the label; `ubuntu-latest` remains the safe
+default.
 
 ## The sample's workload
 

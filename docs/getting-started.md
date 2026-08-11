@@ -10,6 +10,20 @@ does with that wiring.
   how a stack declares its environment membership — no environment name ever
   appears in workflow YAML. Tag grammar:
   [`../CONTRACT.md`](../CONTRACT.md) §Tag grammar.
+
+  For an existing repository this is the largest item on the page, not a
+  checkbox. `build-matrix` derives environment membership solely from
+  `env/<name>` tags, and Terramate tags are otherwise free-form — so a
+  repository that predates shipmate is almost certainly using them for
+  something else entirely, and **every** stack ends up re-tagged. The work is
+  additive, mechanical and reviewable, but it is repo-wide.
+
+  It does not have to land in one commit. `detect` only inspects the stacks a
+  run touches: an untagged stack fails the whole run as soon as it is in the
+  **changed** set, so re-tagging can follow the stacks you are changing anyway,
+  and the failure lists every untagged stack it found for you to work down. The
+  nightly drift run is the repo-wide backstop — it inspects every stack, so it
+  fails until the last one is tagged.
 - **The Terramate and OpenTofu versions this release is tested against.** They
   are in [`../VERSIONS`](../VERSIONS); set them as the repository variables
   `TERRAMATE_VERSION` and `TOFU_VERSION`, which the workflows below read.

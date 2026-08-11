@@ -1,3 +1,5 @@
+import json
+
 import pytest
 from _detect_fixtures import check_run as _check
 from _detect_fixtures import completed_names
@@ -14,22 +16,39 @@ def test_workset_matches_plan_artifacts_for_env():
         "cell-summary.dev-eu.stacks-app",
     ]  # not a plan artifact — excluded
     graph_paths = ["stacks/app", "stacks/dns", "stacks/platform"]
-    cells = ad.workset_from_artifacts(names, "dev-eu", graph_paths)
+    cells = ad.workset_from_artifacts(names, "dev-eu", graph_paths, {})
     stacks = sorted(c["stack"] for c in cells)
     assert stacks == ["stacks/app", "stacks/dns"]
     assert all(c["environment"] == "dev-eu" for c in cells)
 
 
+def test_workset_attaches_workload_var_from_the_tags():
+    # A stack in the artifacts but absent from the tag map gets "" -- the map is
+    # built from a separate terramate query and must never be able to raise here.
+    names = ["plan.dev-eu.stacks-app", "plan.dev-eu.stacks-dns", "plan.dev-eu.stacks-platform"]
+    cells = ad.workset_from_artifacts(
+        names,
+        "dev-eu",
+        ["stacks/app", "stacks/dns", "stacks/platform"],
+        {"stacks/app": ["env/dev-eu", "workload/net-edge"], "stacks/dns": ["env/dev-eu"]},
+    )
+    assert cells == [
+        {"stack": "stacks/app", "environment": "dev-eu", "workload_var": "NET_EDGE"},
+        {"stack": "stacks/dns", "environment": "dev-eu", "workload_var": ""},
+        {"stack": "stacks/platform", "environment": "dev-eu", "workload_var": ""},
+    ]
+
+
 def test_workset_ignores_slug_with_wrong_env_suffix():
     names = ["plan.dev-eu-apply.stacks-app"]  # not the plain env
-    cells = ad.workset_from_artifacts(names, "dev-eu", ["stacks/app"])
+    cells = ad.workset_from_artifacts(names, "dev-eu", ["stacks/app"], {})
     assert cells == []
 
 
 def test_workset_env_suffix_no_cross_match():
     # env "eu" must NOT match "dev-eu" artifacts (forward-construct, no reverse split)
     names = ["plan.dev-eu.stacks-app"]
-    assert ad.workset_from_artifacts(names, "eu", ["stacks/app"]) == []
+    assert ad.workset_from_artifacts(names, "eu", ["stacks/app"], {}) == []
 
 
 def test_old_delimiter_collision_no_longer_forward_matches():
@@ -40,14 +59,14 @@ def test_old_delimiter_collision_no_longer_forward_matches():
     # `plan.dev-eu.stacks-app` and env "eu" constructs `plan.eu.stacks-app-dev`
     # -> no match.
     names = ["plan.dev-eu.stacks-app"]
-    assert ad.workset_from_artifacts(names, "eu", ["stacks/app-dev"]) == []
+    assert ad.workset_from_artifacts(names, "eu", ["stacks/app-dev"], {}) == []
 
 
 def test_workset_slug_collision_fails_loud():
     # two distinct paths slug identically -> ambiguous artifact match -> fail loud
     names = ["plan.dev-eu.stacks-a-b"]
     with pytest.raises(SystemExit):
-        ad.workset_from_artifacts(names, "dev-eu", ["stacks/a/b", "stacks-a/b"])
+        ad.workset_from_artifacts(names, "dev-eu", ["stacks/a/b", "stacks-a/b"], {})
 
 
 def test_filter_pending_drops_completed():
@@ -88,6 +107,56 @@ def test_check_runs_jsonl_parsing_reuses_apply_gates_parse_jsonl(monkeypatch):
     with pytest.raises(SystemExit) as exc_info:
         _completed(monkeypatch, ['{"a": 1}', "not-json-garbage-{{{"])
     assert "not-json-garbage" in str(exc_info.value)
+
+
+def test_dag_shape_notice_reports_a_flat_graph():
+    # The migration shape: every stack independent, so the whole repository
+    # would apply at once. Nothing can detect the missing edges — this line is
+    # how a reader who knows the repository notices.
+    deps = {"stacks/a": set(), "stacks/b": set(), "stacks/c": set()}
+    assert ad.dag_shape_notice(deps) == (
+        "::notice::3 stacks, 0 after edges, 1 wave levels; 3 stacks would apply concurrently"
+    )
+
+
+def test_dag_shape_notice_reports_a_layered_graph():
+    # `stacks/d` carries two edges on purpose: with one edge per dependent stack
+    # an edge count and a count of stacks-that-have-dependencies agree, and the
+    # figure a reader is being asked to judge is the edge count.
+    deps = {
+        "stacks/a": set(),
+        "stacks/b": {"stacks/a"},
+        "stacks/c": {"stacks/a"},
+        "stacks/d": {"stacks/b", "stacks/c"},
+    }
+    assert ad.dag_shape_notice(deps) == (
+        "::notice::4 stacks, 4 after edges, 3 wave levels; 2 stacks would apply concurrently"
+    )
+
+
+def test_main_emits_the_dag_shape_notice(monkeypatch, tmp_path, capsys):
+    # The line is worth nothing unprinted: this executes the real entry point.
+    deps = {"stacks/a": set(), "stacks/b": {"stacks/a"}}
+    monkeypatch.setattr(ad, "verify_plan_run", lambda repo, run_id, head: None)
+    monkeypatch.setattr(ad, "run_graph_deps", lambda: deps)
+    monkeypatch.setattr(ad, "_artifact_names", lambda repo, run_id: ["plan.dev-eu.stacks-a"])
+    monkeypatch.setattr(ad, "completed_apply_names", lambda repo, head: set())
+    # Every terramate call main() makes must be stubbed: CI installs uv alone,
+    # so a real invocation passes on a developer machine and fails there.
+    monkeypatch.setattr(ad.bm, "_tags", lambda stack: ["env/dev-eu"])
+    for name, value in {
+        "GITHUB_REPOSITORY": "acme/iac",
+        "SHIPMATE_ENV": "dev-eu",
+        "SHIPMATE_PLAN_RUN_ID": "123456",
+        "SHIPMATE_HEAD_SHA": "0123456789abcdef0123456789abcdef01234567",
+        "GITHUB_OUTPUT": str(tmp_path / "out.txt"),
+    }.items():
+        monkeypatch.setenv(name, value)
+    ad.main()
+    assert (
+        "::notice::2 stacks, 1 after edges, 2 wave levels; 1 stacks would apply concurrently"
+        in capsys.readouterr().out.splitlines()
+    )
 
 
 def test_verify_plan_run_rejects_mismatched_head_sha(monkeypatch):
@@ -234,3 +303,37 @@ def test_duplicate_run_newer_queued_stays_pending():
     ]
     done = ad.ag.done_names(checks)
     assert ad.filter_pending(cells, done) == cells
+
+
+def test_main_wires_the_tag_map_into_the_cells(tmp_path, monkeypatch):
+    # Two claims at once: the map reaches the cells (without it every cell is
+    # role-less and the suite stays green), and it is derived for the workset
+    # alone -- evaluating `stacks/unrelated` would let a stack this apply never
+    # touches block an approved plan.
+    out = tmp_path / "out"
+    for k, v in {
+        "GITHUB_REPOSITORY": "o/r",
+        "SHIPMATE_ENV": "dev-eu",
+        "SHIPMATE_PLAN_RUN_ID": "42",
+        "SHIPMATE_HEAD_SHA": "a" * 40,
+        "GITHUB_OUTPUT": str(out),
+    }.items():
+        monkeypatch.setenv(k, v)
+    monkeypatch.setattr(ad, "verify_plan_run", lambda *a: None)
+    monkeypatch.setattr(
+        ad, "run_graph_deps", lambda: {"stacks/app": set(), "stacks/unrelated": set()}
+    )
+    monkeypatch.setattr(ad, "_artifact_names", lambda *a: ["plan.dev-eu.stacks-app"])
+    monkeypatch.setattr(ad, "completed_apply_names", lambda *a: set())
+    evaluated = []
+    monkeypatch.setattr(
+        ad.bm,
+        "_tags",
+        lambda stack: evaluated.append(stack) or ["env/dev-eu", "workload/net-edge"],
+    )
+    ad.main()
+    parsed = dict(ln.split("=", 1) for ln in out.read_text(encoding="utf-8").splitlines())
+    assert json.loads(parsed["waves"])["wave0"] == [
+        {"stack": "stacks/app", "environment": "dev-eu", "workload_var": "NET_EDGE"}
+    ]
+    assert evaluated == ["stacks/app"]

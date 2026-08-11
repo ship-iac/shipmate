@@ -1,3 +1,5 @@
+import json
+
 import pytest
 from _detect_fixtures import check_run, completed_names
 from _loader import load_script
@@ -16,7 +18,7 @@ def test_cells_from_artifacts_all_envs():
         "dev-eu": ["stacks/app", "stacks/dns", "stacks/platform"],
         "dev-us": ["stacks/app"],
     }
-    cells = aad.cells_from_artifacts(names, stacks_by_env)
+    cells = aad.cells_from_artifacts(names, stacks_by_env, {})
     assert sorted((c["environment"], c["stack"]) for c in cells) == [
         ("dev-eu", "stacks/app"),
         ("dev-eu", "stacks/dns"),
@@ -24,9 +26,22 @@ def test_cells_from_artifacts_all_envs():
     ]
 
 
+def test_cells_from_artifacts_attaches_workload_var_from_the_tags():
+    cells = aad.cells_from_artifacts(
+        ["plan.dev-eu.stacks-app", "plan.dev-us.stacks-app", "plan.dev-eu.stacks-dns"],
+        {"dev-eu": ["stacks/app", "stacks/dns"], "dev-us": ["stacks/app"]},
+        {"stacks/app": ["workload/net-edge"]},  # stacks/dns absent -> ""
+    )
+    assert cells == [
+        {"stack": "stacks/app", "environment": "dev-eu", "workload_var": "NET_EDGE"},
+        {"stack": "stacks/dns", "environment": "dev-eu", "workload_var": ""},
+        {"stack": "stacks/app", "environment": "dev-us", "workload_var": "NET_EDGE"},
+    ]
+
+
 def test_cells_from_artifacts_env_without_artifacts_contributes_nothing():
     cells = aad.cells_from_artifacts(
-        ["plan.dev-eu.stacks-app"], {"dev-eu": ["stacks/app"], "prod": ["stacks/app"]}
+        ["plan.dev-eu.stacks-app"], {"dev-eu": ["stacks/app"], "prod": ["stacks/app"]}, {}
     )
     assert all(c["environment"] == "dev-eu" for c in cells)
 
@@ -34,7 +49,7 @@ def test_cells_from_artifacts_env_without_artifacts_contributes_nothing():
 def test_cells_from_artifacts_slug_collision_fails_loud():
     with pytest.raises(SystemExit):
         aad.cells_from_artifacts(
-            ["plan.dev-eu.stacks-a-b"], {"dev-eu": ["stacks/a/b", "stacks-a/b"]}
+            ["plan.dev-eu.stacks-a-b"], {"dev-eu": ["stacks/a/b", "stacks-a/b"]}, {}
         )
 
 
@@ -42,7 +57,7 @@ def test_cells_from_artifacts_rejects_dotted_env():
     # env names come from tags here, but the artifact-name boundary invariant
     # is enforced at this trust boundary too, like apply-detect's main().
     with pytest.raises(SystemExit):
-        aad.cells_from_artifacts([], {"dev.eu": ["stacks/app"]})
+        aad.cells_from_artifacts([], {"dev.eu": ["stacks/app"]}, {})
 
 
 def test_partition_no_explicit_envs():
@@ -90,3 +105,33 @@ def test_reuses_single_sourced_helpers():
     assert not hasattr(aad, "ag")
     assert not hasattr(aad, "dd")
     assert not hasattr(aad, "workset_from_artifacts_impl")
+
+
+def test_main_wires_the_tag_map_into_the_cells(tmp_path, monkeypatch):
+    out = tmp_path / "out"
+    for k, v in {
+        "GITHUB_REPOSITORY": "o/r",
+        "SHIPMATE_PLAN_RUN_ID": "42",
+        "SHIPMATE_HEAD_SHA": "a" * 40,
+        "GITHUB_OUTPUT": str(out),
+    }.items():
+        monkeypatch.setenv(k, v)
+    monkeypatch.setattr(aad.ad, "verify_plan_run", lambda *a: None)
+    monkeypatch.setattr(aad.ad, "run_graph_deps", lambda: {"stacks/app": set()})
+    monkeypatch.setattr(aad.ad, "_artifact_names", lambda *a: ["plan.dev-eu.stacks-app"])
+    monkeypatch.setattr(aad.ad, "completed_apply_names", lambda *a: set())
+    monkeypatch.setattr(aad.eo, "read_env_order", lambda: {})
+    monkeypatch.setattr(aad.eo, "read_explicit_envs", lambda: [])
+    monkeypatch.setattr(
+        aad.bm,
+        "env_membership",
+        lambda **kw: (
+            {"dev-eu": ["stacks/app"]},
+            {"stacks/app": ["env/dev-eu", "workload/net-edge"]},
+        ),
+    )
+    aad.main()
+    parsed = dict(ln.split("=", 1) for ln in out.read_text(encoding="utf-8").splitlines())
+    assert json.loads(parsed["envlevel0_waves"])["wave0"] == [
+        {"stack": "stacks/app", "environment": "dev-eu", "workload_var": "NET_EDGE"}
+    ]
