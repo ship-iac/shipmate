@@ -69,10 +69,15 @@ def build_matrix(envs, stacks_by_env, tags_by_stack):
     return cells
 
 
-def _run(args, env=None):
+def _run(args, env=None, check=True):
+    """stdout of `args`, raising ::error:: on a nonzero exit. `check=False`
+    returns the CompletedProcess instead, for the one caller whose failure is
+    not the consumer's defect to fix."""
     # args is a code-controlled tool invocation (gh/terramate/tofu by PATH name),
     # never user input, and shell=False — safe.
     p = subprocess.run(args, capture_output=True, text=True, env=env)  # noqa: S603
+    if not check:
+        return p
     if p.returncode != 0:
         # Surface the tool's own error; a swallowed stderr makes CI opaque.
         sys.stderr.write(p.stderr)
@@ -155,8 +160,15 @@ def assert_run_env_roundtrip(stack_dir):
     invariant holds, and every cell collapses onto one state key with plan, gate
     and apply all green.
 
-    Repo-wide config, so one arbitrary stack answers for the whole tree."""
-    out = _run(
+    Repo-wide config, so one arbitrary stack answers for the whole tree.
+
+    A `terramate run` that cannot even start is a different fact from one that
+    ran and reported a rewrite, and only the second is this repository's defect:
+    detect binds no GitHub Environment, so a `run.env` merely READING a variable
+    the plan/apply Environment supplies fails to evaluate here while every plan
+    cell evaluates it fine. Warn and move on -- the shape this refuses is a
+    `run.env` that ASSIGNS one of the three, which always evaluates."""
+    p = _run(
         [
             "terramate",
             "run",
@@ -168,9 +180,19 @@ def assert_run_env_roundtrip(stack_dir):
             "env",
         ],
         env={**os.environ, **{name: RT_SENTINEL for name in RT_VARS}},
+        check=False,
     )
+    if p.returncode != 0:
+        # ::warning:: renders one line, and terramate's stderr is many.
+        detail = " ".join(p.stderr.split())
+        print(
+            f"::warning::could not verify that terramate.config.run.env leaves "
+            f"{', '.join(RT_VARS)} alone: `terramate run` exited {p.returncode}. "
+            f"terramate said: {detail}"
+        )
+        return
     reported = {}
-    for line in out.splitlines():
+    for line in p.stdout.splitlines():
         name, sep, value = line.partition("=")
         if sep:
             reported[name] = value

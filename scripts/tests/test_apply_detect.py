@@ -122,6 +122,9 @@ def test_main_emits_the_dag_shape_notice(monkeypatch, tmp_path, capsys):
     monkeypatch.setattr(ad, "run_graph_deps", lambda: deps)
     monkeypatch.setattr(ad, "_artifact_names", lambda repo, run_id: ["plan.dev-eu.stacks-a"])
     monkeypatch.setattr(ad, "completed_apply_names", lambda repo, head: set())
+    # Every terramate call main() makes must be stubbed: CI installs uv alone,
+    # so a real invocation passes on a developer machine and fails there.
+    monkeypatch.setattr(ad.bm, "_tags", lambda stack: ["env/dev-eu"])
     for name, value in {
         "GITHUB_REPOSITORY": "acme/iac",
         "SHIPMATE_ENV": "dev-eu",
