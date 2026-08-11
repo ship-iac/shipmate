@@ -593,10 +593,11 @@ def test_shared_env_without_approval_rules_says_no_gate_is_available(monkeypatch
     assert "no reviewer gate is available" in out[0][1]
 
 
-def test_ambiguous_naming_still_reports_the_phantom_reviewer(monkeypatch):
-    """Ambiguous mode reads every name that exists, so reviewers sitting on the
-    environment nothing binds are still reported. Reading only one naming would
-    hide exactly the configuration the ambiguity finding exists for."""
+def test_ambiguous_naming_reads_the_protection_shape_of_both_namings(monkeypatch):
+    """Ambiguous mode reads every environment that exists, not just one naming's
+    -- pinned on the requested paths, which is all this asserts. The
+    report-level statement that the unused naming's rules are inert is
+    `_environment_warnings`' ambiguity WARNING, not a per-rule finding here."""
     responses = _protection(
         _env("dev-eu"),
         _env("dev-eu-plan"),
@@ -613,6 +614,43 @@ def test_ambiguous_naming_still_reports_the_phantom_reviewer(monkeypatch):
     assert f"repos/{_REPO}/environments/dev-eu" in seen
     assert f"repos/{_REPO}/environments/dev-eu-plan" in seen
     assert f"repos/{_REPO}/environments/dev-eu-apply" in seen
+
+
+# The certain form of the shared-role opening clause. Hand-written, not imported
+# from `doctor`: the point is that the ambiguous findings must NOT contain it.
+_SHARED_ASSERTED = "GitHub Environment `dev-eu`, shared between plan and apply,"
+
+
+def test_shared_role_findings_hedge_the_mode_when_the_naming_is_ambiguous(monkeypatch):
+    """With both namings present the sibling ambiguity WARNING says the binding is
+    undetermined, so a finding here may not assert that the bare environment IS
+    shared -- with the variable unset nothing binds it and its reviewers stall
+    nothing. Two findings in one report may not contradict each other; the
+    plan-env secret notice has the same rule for the same reason."""
+    responses = _protection(
+        _env("dev-eu", rules=("required_reviewers",)),
+        _env("dev-eu-apply", rules=("required_reviewers",)),
+    )
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    out = doctor._env_protection_warnings(_ctx())
+    assert len(out) == 1
+    level, text = out[0]
+    assert level == doctor.WARNING
+    assert _SHARED_ASSERTED not in text
+    assert "shared between plan and apply only if" in text
+    assert "SHIPMATE_SHARED_ENVS" in text
+    assert "bound by nothing at all otherwise" in text
+
+
+def test_a_genuinely_shared_env_still_states_the_mode_outright(monkeypatch):
+    """The counterpart: shared mode is not ambiguous, so hedging every shared
+    finding would make the honest use case unreadable."""
+    responses = _protection(_env("dev-eu", rules=("required_reviewers",)))
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    out = doctor._env_protection_warnings(_ctx())
+    assert len(out) == 1
+    assert _SHARED_ASSERTED in out[0][1]
+    assert "only if" not in out[0][1]
 
 
 def test_env_protection_missing_env_is_not_this_probes_problem(monkeypatch):
@@ -2445,6 +2483,28 @@ def test_ambiguous_mode_reads_both_plan_side_names_and_never_the_apply_one(monke
     assert not [p for p in asked if "dev-eu-apply" in p], asked
 
 
+def test_ambiguous_mode_secret_findings_do_not_assert_the_environments_role(monkeypatch):
+    """Same rule as the protection findings: with both namings present the report
+    already says the binding is undetermined, so neither the notice nor the
+    App-key warning may call this environment shared or a plan environment."""
+    responses = {
+        f"repos/{_REPO}/environments?per_page=100": _environments(
+            "dev-eu", "dev-eu-plan", "dev-eu-apply"
+        ),
+        f"repos/{_REPO}/environments/dev-eu/secrets?per_page=100": _secrets(
+            "SHIPMATE_APP_PRIVATE_KEY"
+        ),
+        f"repos/{_REPO}/environments/dev-eu-plan/secrets?per_page=100": _secrets(),
+    }
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    found = doctor._plan_env_secret_warnings(_ctx())
+    assert [lvl for lvl, _ in found] == [doctor.NOTICE, doctor.WARNING]
+    assert _SHARED_ASSERTED not in found[0][1]
+    assert "shared between plan and apply only if" in found[0][1]
+    assert "plan environment `dev-eu`" not in found[1][1]
+    assert "environment `dev-eu` holds `SHIPMATE_APP_PRIVATE_KEY`" in found[1][1]
+
+
 def test_no_probe_reads_a_repository_variable(monkeypatch):
     """The mode is inferred from environment names precisely so that doctor needs
     no `variables: read` permission -- `app/manifest.json` does not declare one,
@@ -2571,6 +2631,8 @@ def test_app_private_key_in_a_plan_env_is_a_warning(monkeypatch):
     assert "forge" in found[1][1]
     assert doctor.GATE in found[1][1]
     assert doctor._ENGINE_ENV in found[1][1]
+    # Split mode is not ambiguous, so the definite noun is correct here.
+    assert "plan environment `dev-eu-plan` holds" in found[1][1]
 
 
 def test_no_env_token_is_a_warning_and_reads_nothing(monkeypatch):
