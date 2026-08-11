@@ -13,13 +13,63 @@ def test_multi_env_stack_yields_one_cell_per_env():
         stacks_by_env={"dev-eu": ["stacks/app"], "dev-us": ["stacks/app", "stacks/dns"]},
         tags_by_stack={
             "stacks/app": ["env/dev-eu", "env/dev-us"],
-            "stacks/dns": ["env/dev-us", "workload/net"],
+            "stacks/dns": ["env/dev-us", "workload/net-edge"],
         },
     )
     assert cells == [
-        {"stack": "stacks/app", "environment": "dev-eu", "workload": ""},
-        {"stack": "stacks/app", "environment": "dev-us", "workload": ""},
-        {"stack": "stacks/dns", "environment": "dev-us", "workload": "net"},
+        {"stack": "stacks/app", "environment": "dev-eu", "workload": "", "workload_var": ""},
+        {"stack": "stacks/app", "environment": "dev-us", "workload": "", "workload_var": ""},
+        {
+            "stack": "stacks/dns",
+            "environment": "dev-us",
+            "workload": "net-edge",
+            "workload_var": "NET_EDGE",
+        },
+    ]
+
+
+def test_two_workload_tags_collapsing_to_one_variable_fail_loud():
+    # Terramate accepts '_' in a tag value, so `net-edge` and `net_edge` are two
+    # workloads that name one AWS_ROLE_ARN_NET_EDGE -- one of them would apply
+    # real infrastructure under the other's IAM identity.
+    with pytest.raises(SystemExit) as exc_info:
+        bm.build_matrix(
+            envs=["dev-eu"],
+            stacks_by_env={"dev-eu": ["stacks/a", "stacks/b"]},
+            tags_by_stack={
+                "stacks/a": ["env/dev-eu", "workload/net-edge"],
+                "stacks/b": ["env/dev-eu", "workload/net_edge"],
+            },
+        )
+    assert str(exc_info.value) == (
+        "::error::workload/net-edge, workload/net_edge all map to AWS_ROLE_ARN_NET_EDGE: "
+        "the variable name upper-cases the tag and replaces '-' with '_', so one Environment "
+        "variable would have to hold every one of those workloads' role ARNs and some cells "
+        "would apply under an IAM identity that is not theirs. Rename one workload tag."
+    )
+
+
+def test_workloads_with_distinct_variables_build_normally():
+    assert bm.build_matrix(
+        envs=["dev-eu"],
+        stacks_by_env={"dev-eu": ["stacks/a", "stacks/b"]},
+        tags_by_stack={
+            "stacks/a": ["env/dev-eu", "workload/net-edge"],
+            "stacks/b": ["env/dev-eu", "workload/net-core"],
+        },
+    ) == [
+        {
+            "stack": "stacks/a",
+            "environment": "dev-eu",
+            "workload": "net-edge",
+            "workload_var": "NET_EDGE",
+        },
+        {
+            "stack": "stacks/b",
+            "environment": "dev-eu",
+            "workload": "net-core",
+            "workload_var": "NET_CORE",
+        },
     ]
 
 
@@ -28,9 +78,19 @@ def test_empty_when_no_changed_stacks():
 
 
 def test_raises_above_256_cells():
+    # The remediation must match CONTRACT.md §Fan-out: splitting the change is the
+    # general remedy, and `shipmate apply <env>` is not an escape hatch -- the
+    # ceiling trips in plan detect, so no reviewed plan exists to apply.
     stacks = [f"stacks/s{i}" for i in range(257)]
-    with pytest.raises(bm.MatrixTooLarge):
+    with pytest.raises(bm.MatrixTooLarge) as exc_info:
         bm.build_matrix(["dev-eu"], {"dev-eu": stacks}, {s: ["env/dev-eu"] for s in stacks})
+    assert str(exc_info.value) == (
+        "257 plan cells exceeds the GitHub Actions matrix limit of 256. "
+        "Split the change across several pull requests -- the matrix is built over "
+        "`terramate list --changed`. A one-line edit to a shared local module correctly "
+        "marks every dependent stack changed and is one atomic change by nature; there the "
+        "only lever is to reduce the number of environments in play."
+    )
 
 
 def test_rejects_stack_path_exactly_apply():
@@ -46,7 +106,9 @@ def test_nested_apply_stack_is_allowed():
     cells = bm.build_matrix(
         ["dev-eu"], {"dev-eu": ["infra/apply"]}, {"infra/apply": ["env/dev-eu"]}
     )
-    assert cells == [{"stack": "infra/apply", "environment": "dev-eu", "workload": ""}]
+    assert cells == [
+        {"stack": "infra/apply", "environment": "dev-eu", "workload": "", "workload_var": ""}
+    ]
 
 
 def test_rejects_stack_path_exactly_shipmate():
@@ -63,7 +125,9 @@ def test_nested_shipmate_stack_is_allowed():
     cells = bm.build_matrix(
         ["dev-eu"], {"dev-eu": ["infra/shipmate"]}, {"infra/shipmate": ["env/dev-eu"]}
     )
-    assert cells == [{"stack": "infra/shipmate", "environment": "dev-eu", "workload": ""}]
+    assert cells == [
+        {"stack": "infra/shipmate", "environment": "dev-eu", "workload": "", "workload_var": ""}
+    ]
 
 
 def test_list_stacks_changed_uses_changed_flag(monkeypatch):
@@ -104,8 +168,8 @@ def test_compute_cells_fans_out_multi_env(monkeypatch):
     monkeypatch.setattr(bm, "assert_run_env_roundtrip", lambda stack_dir: None)
     cells = bm.compute_cells(all_stacks=True)
     assert cells == [
-        {"stack": "stacks/app", "environment": "dev-eu", "workload": "app"},
-        {"stack": "stacks/app", "environment": "dev-us", "workload": "app"},
+        {"stack": "stacks/app", "environment": "dev-eu", "workload": "app", "workload_var": "APP"},
+        {"stack": "stacks/app", "environment": "dev-us", "workload": "app", "workload_var": "APP"},
     ]
 
 
@@ -124,6 +188,19 @@ def test_compute_cells_raises_on_untagged_stack(monkeypatch):
         bm.compute_cells(all_stacks=True)
     assert "stacks/orphan" in str(exc_info.value)
     assert "stacks/app" not in str(exc_info.value)
+
+
+def test_untagged_failure_names_the_count_and_every_stack(monkeypatch):
+    # So a migration can be re-run and watched shrink.
+    stacks = ["stacks/zeta", "stacks/alpha", "stacks/mid"]
+    monkeypatch.setattr(bm, "_list_stacks", lambda all_stacks, base: stacks)
+    monkeypatch.setattr(bm, "_tags", lambda s: ["workload/util"])
+    with pytest.raises(SystemExit) as exc_info:
+        bm.env_membership(all_stacks=True)
+    assert str(exc_info.value) == (
+        "::error::3 stack(s) have no env/* tag and cannot fan out to any "
+        "environment (they would silently skip): stacks/alpha, stacks/mid, stacks/zeta"
+    )
 
 
 def test_env_membership_groups_stacks_by_env_tag(monkeypatch):
