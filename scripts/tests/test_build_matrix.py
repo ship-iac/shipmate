@@ -27,6 +27,51 @@ def test_multi_env_stack_yields_one_cell_per_env():
     ]
 
 
+def test_two_workload_tags_collapsing_to_one_variable_fail_loud():
+    # Terramate accepts '_' in a tag value, so `net-edge` and `net_edge` are two
+    # workloads that name one AWS_ROLE_ARN_NET_EDGE -- one of them would apply
+    # real infrastructure under the other's IAM identity.
+    with pytest.raises(SystemExit) as exc_info:
+        bm.build_matrix(
+            envs=["dev-eu"],
+            stacks_by_env={"dev-eu": ["stacks/a", "stacks/b"]},
+            tags_by_stack={
+                "stacks/a": ["env/dev-eu", "workload/net-edge"],
+                "stacks/b": ["env/dev-eu", "workload/net_edge"],
+            },
+        )
+    assert str(exc_info.value) == (
+        "::error::workload/net-edge, workload/net_edge all map to AWS_ROLE_ARN_NET_EDGE: "
+        "the variable name upper-cases the tag and replaces '-' with '_', so one Environment "
+        "variable would have to hold every one of those workloads' role ARNs and some cells "
+        "would apply under an IAM identity that is not theirs. Rename one workload tag."
+    )
+
+
+def test_workloads_with_distinct_variables_build_normally():
+    assert bm.build_matrix(
+        envs=["dev-eu"],
+        stacks_by_env={"dev-eu": ["stacks/a", "stacks/b"]},
+        tags_by_stack={
+            "stacks/a": ["env/dev-eu", "workload/net-edge"],
+            "stacks/b": ["env/dev-eu", "workload/net-core"],
+        },
+    ) == [
+        {
+            "stack": "stacks/a",
+            "environment": "dev-eu",
+            "workload": "net-edge",
+            "workload_var": "NET_EDGE",
+        },
+        {
+            "stack": "stacks/b",
+            "environment": "dev-eu",
+            "workload": "net-core",
+            "workload_var": "NET_CORE",
+        },
+    ]
+
+
 def test_empty_when_no_changed_stacks():
     assert bm.build_matrix(["dev-eu"], {"dev-eu": []}, {}) == []
 

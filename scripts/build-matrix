@@ -65,6 +65,25 @@ def workload_var(workload):
     return workload.upper().replace("-", "_")
 
 
+def guard_workload_var_collisions(cells):
+    """`workload_var` is not injective: `net-edge` and `net_edge` both render
+    NET_EDGE. Fail closed rather than pick one -- the losing workload's cells
+    would apply under an IAM role that is not theirs."""
+    by_var = {}
+    for c in cells:
+        if c["workload"]:
+            by_var.setdefault(c["workload_var"], set()).add(c["workload"])
+    for var, workloads in sorted(by_var.items()):
+        if len(workloads) > 1:
+            tags = ", ".join(f"workload/{w}" for w in sorted(workloads))
+            raise SystemExit(
+                f"::error::{tags} all map to AWS_ROLE_ARN_{var}: the variable name upper-cases "
+                "the tag and replaces '-' with '_', so one Environment variable would have to "
+                "hold every one of those workloads' role ARNs and some cells would apply under "
+                "an IAM identity that is not theirs. Rename one workload tag."
+            )
+
+
 def build_matrix(envs, stacks_by_env, tags_by_stack):
     cells = []
     for env in envs:
@@ -82,6 +101,7 @@ def build_matrix(envs, stacks_by_env, tags_by_stack):
     for reserved, message in RESERVED_STACK_PATHS.items():
         if any(c["stack"] == reserved for c in cells):
             raise SystemExit(message)
+    guard_workload_var_collisions(cells)
     if len(cells) > MATRIX_LIMIT:
         raise MatrixTooLarge(
             f"{len(cells)} plan cells exceeds the GitHub Actions matrix limit of {MATRIX_LIMIT}. "
