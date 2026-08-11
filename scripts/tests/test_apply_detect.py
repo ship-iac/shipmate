@@ -256,9 +256,10 @@ def test_duplicate_run_newer_queued_stays_pending():
 
 
 def test_main_wires_the_tag_map_into_the_cells(tmp_path, monkeypatch):
-    # The whole point of deriving the map: without this, dropping the
-    # env_membership call at the call site leaves every cell role-less and the
-    # suite green.
+    # Two claims at once: the map reaches the cells (without it every cell is
+    # role-less and the suite stays green), and it is derived for the workset
+    # alone -- evaluating `stacks/unrelated` would let a stack this apply never
+    # touches block an approved plan.
     out = tmp_path / "out"
     for k, v in {
         "GITHUB_REPOSITORY": "o/r",
@@ -269,16 +270,20 @@ def test_main_wires_the_tag_map_into_the_cells(tmp_path, monkeypatch):
     }.items():
         monkeypatch.setenv(k, v)
     monkeypatch.setattr(ad, "verify_plan_run", lambda *a: None)
-    monkeypatch.setattr(ad, "run_graph_deps", lambda: {"stacks/app": set()})
+    monkeypatch.setattr(
+        ad, "run_graph_deps", lambda: {"stacks/app": set(), "stacks/unrelated": set()}
+    )
     monkeypatch.setattr(ad, "_artifact_names", lambda *a: ["plan.dev-eu.stacks-app"])
     monkeypatch.setattr(ad, "completed_apply_names", lambda *a: set())
+    evaluated = []
     monkeypatch.setattr(
         ad.bm,
-        "env_membership",
-        lambda **kw: ({}, {"stacks/app": ["env/dev-eu", "workload/net-edge"]}),
+        "_tags",
+        lambda stack: evaluated.append(stack) or ["env/dev-eu", "workload/net-edge"],
     )
     ad.main()
     parsed = dict(ln.split("=", 1) for ln in out.read_text(encoding="utf-8").splitlines())
     assert json.loads(parsed["waves"])["wave0"] == [
         {"stack": "stacks/app", "environment": "dev-eu", "workload_var": "NET_EDGE"}
     ]
+    assert evaluated == ["stacks/app"]
