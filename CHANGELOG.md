@@ -13,7 +13,7 @@ grammar are declared unstable in `README.md`.
 
 ## [0.12.0] — 2026-08-11
 
-Tags `TBD`.
+Tags `e9eb27d`.
 
 **Re-pinning is not enough for this release: rewrite your wrapper `secrets:`
 blocks in the same change.** Every documented wrapper now passes secrets by
