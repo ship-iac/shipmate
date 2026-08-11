@@ -627,7 +627,8 @@ triggered by a pre-merge comment or a post-merge push.
 The consumer's plan workflow is **one file on `pull_request_target` with three
 jobs**. `detect` and `plan` are untrusted: they check out the pull request's own
 head and hold no App credential. `summary` is a `uses:` of the engine's reusable
-`.github/workflows/summary.yml` with `secrets: inherit`, and everything trusted
+`.github/workflows/summary.yml` passing `SHIPMATE_APP_PRIVATE_KEY` by name
+(never `secrets: inherit`), and everything trusted
 happens inside that callee — one job, `environment: shipmate-engine`, no
 checkout at all. Every App-authored surface listed above (apply checks, the
 gate, the sticky comments, drift issues) is created by a job bound to the fixed
@@ -1180,8 +1181,10 @@ as the optional `SHIPMATE_PLAN_PASSPHRASE` secret into the reusable
 `apply-env-level.yml` workflow — via the engine `deploy.yml` for the
 merge-deploy path, via the engine `apply-all.yml` for the bare form, and via
 the engine `apply.yml` for the targeted form. Consumers set
-`SHIPMATE_PLAN_PASSPHRASE` as a **repository** secret and forward it with
-`secrets: inherit` in their `deploy.yml` and `apply.yml` wrapper workflows.
+`SHIPMATE_PLAN_PASSPHRASE` as a **repository** secret and forward it **by name**
+in the `secrets:` block of their `deploy.yml` and `apply.yml` wrapper workflows.
+Never `secrets: inherit`: it hands the engine the caller's whole secret set, and
+across an organization boundary it delivers nothing at all.
 
 Not an environment secret, and specifically **not** on `shipmate-engine`: a
 secret on one environment is released only to a job that *names* that

@@ -335,8 +335,10 @@ the actual work here:
 - **The jobs that can reach the key all run at the default-branch ref.** The
   plan workflow triggers on `pull_request_target`, which evaluates at the base
   branch ref rather than the pull request head, so its trusted `summary` job —
-  the engine's reusable `.github/workflows/summary.yml`, called with
-  `secrets: inherit` — satisfies the policy. The apply and
+  the engine's reusable `.github/workflows/summary.yml` — satisfies the policy.
+  It reads the key from this environment, which resolves in the *calling*
+  repository, so the caller passes the secret by name and holds nothing itself
+  (that is also what makes a consumer in another organization work). The apply and
   deploy paths reach the key the same way: `workflow_dispatch` from
   comment-ops, or `push` to the default branch. Nothing that starts from
   arbitrary branch content ever does.

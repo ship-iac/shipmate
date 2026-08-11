@@ -10,11 +10,13 @@ on:
     secrets:
       # `required: false` is load-bearing, not laxity: consumers hold this key
       # as a secret on the `shipmate-engine` environment (docs/github-app.md
-      # §5), and `secrets: inherit` cannot satisfy a *required* declaration from
-      # an environment — GHA rejects the call before any step of the first
-      # callee job that binds no environment (`guard`), so the whole run dies
-      # red with "Secret ... is required, but not provided while calling".
-      # `summary` binds `environment: shipmate-engine` and reads the key there.
+      # §5), so a caller that binds no environment has no value to pass. It
+      # does not need one — `summary` binds `environment: shipmate-engine`,
+      # which resolves in the *caller's* repository, and an environment's value
+      # wins over whatever the caller passed, empty included. A *required*
+      # declaration would reject the call before any step of the first callee
+      # job that binds no environment (`guard`), killing the run red with
+      # "Secret ... is required, but not provided while calling".
       SHIPMATE_APP_PRIVATE_KEY: { required: false }
       SHIPMATE_PLAN_PASSPHRASE: { required: false }
 jobs:
@@ -87,13 +89,17 @@ jobs:
       head_sha: ${{ needs.detect.outputs.head_sha }}
       plan_run_id: ${{ needs.detect.outputs.plan_run_id }}
       state_suffix: ${{ inputs.state_suffix }}
-    # `inherit`, not an explicit `secrets:` mapping: apply-env-level.yml is pinned
-    # by SHA, and in the window before the post-merge pin bump that pinned revision
-    # may not yet declare SHIPMATE_PLAN_PASSPHRASE. Passing an undeclared secret via
-    # an explicit mapping is a hard load-time error (unlike an undeclared action
-    # input, which is silently ignored); `inherit` is not validated against the
-    # callee and forwards the optional passphrase when the consumer set it.
-    secrets: inherit
+    # Named, never `inherit`: these two files sit in one organization but the RUN
+    # belongs to the consumer, and `inherit` is evaluated against the run -- so a
+    # cross-organization consumer's `complete` job would hold no key, and its
+    # applies would execute and strand their apply checks pending forever.
+    # Ordering rule for adding a secret here: declare it in apply-env-level.yml,
+    # merge, bump the pin below, and only then map it in this block. Mapping a
+    # secret the pinned callee does not declare is a hard load-time error (unlike
+    # an undeclared action input, which is silently ignored) -- docs/releasing.md.
+    secrets:
+      SHIPMATE_APP_PRIVATE_KEY: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
+      SHIPMATE_PLAN_PASSPHRASE: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
 
   summary:
     needs: [guard, detect, apply]

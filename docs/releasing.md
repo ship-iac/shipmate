@@ -48,6 +48,24 @@ asserts on, so the two cannot disagree. `--check` reports without writing;
 stale subset — a bigger diff, no correctness difference, and it makes "which
 tree is running" one grep.
 
+### Adding a secret to a reusable workflow is the same cascade
+
+`apply.yml`, `apply-all.yml` and `deploy.yml` pass named secrets to the SHA-pinned
+`apply-env-level.yml`. Mapping a secret the **pinned** callee does not declare is
+a hard load-time error — unlike an undeclared action input, which is silently
+ignored — so a new secret lands in three steps, in this order:
+
+1. Declare it under `on.workflow_call.secrets` in the callee, and merge.
+2. Bump the callers' pin to that commit (the cascade above).
+3. Only then add the line to each caller's `secrets:` block.
+
+Skipping to step 3 breaks every apply and deploy run at workflow resolution, with
+no job and no log. This ordering is why these calls once used `secrets: inherit`,
+which is not validated against the callee — but inherit is evaluated against the
+*run*, not the file, so it delivers nothing when the run belongs to a consumer in
+another organization, and suppresses what the callee's `environment:` would have
+supplied. Named secrets plus this ordering is the trade that works both ways.
+
 ### Consumers must bump every engine ref in one change
 
 A consumer's own `uses:` pins are outside the guard's reach, and two of them are

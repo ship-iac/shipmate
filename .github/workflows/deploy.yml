@@ -10,14 +10,15 @@ on:
       # "a remote backend owns state".
       state_suffix: { required: true, type: string }
     secrets:
-      # Declared for documentation; consumers pass `secrets: inherit`. `vars`
-      # (TERRAMATE_VERSION, TOFU_VERSION, SLACK_WEBHOOK) are inherited by a
-      # called workflow automatically; secrets are NOT — without inherit the
-      # env-level applies of an encrypting consumer would all fail their
-      # decrypt fail-safe.
+      # Consumers pass this by name. `vars` (TERRAMATE_VERSION, TOFU_VERSION,
+      # SLACK_WEBHOOK) are inherited by a called workflow automatically;
+      # secrets are NOT, and an encrypting consumer that forwards nothing has
+      # every env-level apply fail its decrypt fail-safe. There is no
+      # environment to fall back on: the wave jobs bind `<env>-apply`, not
+      # `shipmate-engine`, so this one has to travel down the call chain.
       SHIPMATE_PLAN_PASSPHRASE: { required: false }
       # Feeds the summary job's gate-refresh + Complete-gate App-token mints.
-      # Consumers pass `secrets: inherit`; an empty key fails loud at mint.
+      # An empty key fails loud at mint.
       SHIPMATE_APP_PRIVATE_KEY: { required: false }
 jobs:
   detect:
@@ -62,13 +63,17 @@ jobs:
       head_sha: ${{ needs.detect.outputs.head_sha }}
       plan_run_id: ${{ needs.detect.outputs.plan_run_id }}
       state_suffix: ${{ inputs.state_suffix }}
-    # `inherit`, not an explicit `secrets:` mapping: apply-env-level.yml is pinned
-    # by SHA, and in the window before the post-merge pin bump that pinned revision
-    # may not yet declare SHIPMATE_PLAN_PASSPHRASE. Passing an undeclared secret via
-    # an explicit mapping is a hard load-time error (unlike an undeclared action
-    # input, which is silently ignored); `inherit` is not validated against the
-    # callee and forwards the optional passphrase when the consumer set it.
-    secrets: inherit
+    # Named, never `inherit`: these two files sit in one organization but the RUN
+    # belongs to the consumer, and `inherit` is evaluated against the run -- so a
+    # cross-organization consumer's `complete` job would hold no key, and its
+    # applies would execute and strand their apply checks pending forever.
+    # Ordering rule for adding a secret here: declare it in apply-env-level.yml,
+    # merge, bump the pin below, and only then map it in this block. Mapping a
+    # secret the pinned callee does not declare is a hard load-time error (unlike
+    # an undeclared action input, which is silently ignored) -- docs/releasing.md.
+    secrets:
+      SHIPMATE_APP_PRIVATE_KEY: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
+      SHIPMATE_PLAN_PASSPHRASE: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
 
   envlevel1:
     # Display name only (job id unchanged) — see apply.yml's `waves` job.
@@ -82,7 +87,9 @@ jobs:
       head_sha: ${{ needs.detect.outputs.head_sha }}
       plan_run_id: ${{ needs.detect.outputs.plan_run_id }}
       state_suffix: ${{ inputs.state_suffix }}
-    secrets: inherit
+    secrets:
+      SHIPMATE_APP_PRIVATE_KEY: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
+      SHIPMATE_PLAN_PASSPHRASE: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
 
   envlevel2:
     # Display name only (job id unchanged) — see apply.yml's `waves` job.
@@ -96,7 +103,9 @@ jobs:
       head_sha: ${{ needs.detect.outputs.head_sha }}
       plan_run_id: ${{ needs.detect.outputs.plan_run_id }}
       state_suffix: ${{ inputs.state_suffix }}
-    secrets: inherit
+    secrets:
+      SHIPMATE_APP_PRIVATE_KEY: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
+      SHIPMATE_PLAN_PASSPHRASE: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
 
   envlevel3:
     # Display name only (job id unchanged) — see apply.yml's `waves` job.
@@ -110,7 +119,9 @@ jobs:
       head_sha: ${{ needs.detect.outputs.head_sha }}
       plan_run_id: ${{ needs.detect.outputs.plan_run_id }}
       state_suffix: ${{ inputs.state_suffix }}
-    secrets: inherit
+    secrets:
+      SHIPMATE_APP_PRIVATE_KEY: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
+      SHIPMATE_PLAN_PASSPHRASE: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
 
   summary:
     needs: [detect, envlevel0, envlevel1, envlevel2, envlevel3]
@@ -123,6 +134,18 @@ jobs:
     environment: shipmate-engine
     permissions: {}
     steps:
+      - name: Verify the App key arrived
+        shell: bash
+        env:
+          APP_ID: ${{ vars.SHIPMATE_APP_ID }}
+          PRIVATE_KEY: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "$PRIVATE_KEY" ]; then
+            echo "::error::The shipmate App private key did not reach this job. Three causes, in the order worth checking: (1) the calling workflow used 'secrets: inherit' across an organization boundary -- GitHub delivers no inherited secrets there, and inherit also suppresses the value this job's environment binding would otherwise supply, so pass the secret by name instead; (2) the caller left SHIPMATE_APP_PRIVATE_KEY out of its secrets block; (3) this job binds no environment, or binds one that holds no secret of that name. See docs/getting-started.md."
+            exit 1
+          fi
+          [ -n "$APP_ID" ] || { echo "::error::SHIPMATE_APP_ID is unset. Set it as a repository or organization variable (docs/github-app.md)."; exit 1; }
       - name: Mint App installation token
         id: token
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0

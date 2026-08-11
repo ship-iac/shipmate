@@ -16,7 +16,7 @@ import textwrap
 
 import pytest
 import yaml
-from _loader import ENGINE
+from _loader import ENGINE, ENGINE_CALL_SECRETS
 
 # ponytail: catches syntax rot from a bad paste, not semantic drift away from the
 # sample repos -- proving a documented workflow still runs is the sample repos' CI.
@@ -82,3 +82,68 @@ def test_yaml_fence_loads_to_a_mapping(page, line, body):
         f"{where} ```yaml fence loaded to {type(doc).__name__}, not a mapping -- "
         "the fences are workflow files, so this one is a mangled paste"
     )
+
+
+# Owner-agnostic: the pages publish `<owner>/shipmate/...` as well as the
+# engine's own org, and a selector that recognizes only one spelling silently
+# stops checking the other.
+_PATH = "/shipmate/.github/workflows/"
+
+
+def _engine_workflow_calls(doc):
+    """(job name, callee file name, job) per fence job that `uses:` an engine
+    reusable workflow."""
+    jobs = doc.get("jobs") if isinstance(doc, dict) else None
+    for name, job in (jobs or {}).items():
+        uses = job.get("uses") or "" if isinstance(job, dict) else ""
+        if _PATH in uses:
+            yield name, uses.split(_PATH, 1)[1].split("@", 1)[0], job
+
+
+@pytest.mark.parametrize(
+    ("page", "line", "body"),
+    _FENCES,
+    ids=[f"{page.name}:{line}" for page, line, _ in _FENCES],
+)
+def test_documented_wrapper_passes_engine_secrets_by_name(page, line, body):
+    """A documented wrapper names the secrets it forwards; `secrets: inherit`
+    is never one of the shapes we publish.
+
+    Measured in a cross-organization consumer: `inherit` delivers nothing there
+    AND suppresses the key the callee's `environment: shipmate-engine` would
+    have supplied, so a consumer outside `ship-iac` following these snippets
+    gets no App-authored surface at all -- no gate, no apply checks, no comment.
+    Same-organization it also hands the engine every secret the repository holds.
+
+    Whole-block comparison against `_loader.ENGINE_CALL_SECRETS`: a key-set test
+    would pass an entry whose value expression was mistyped, and reading the
+    expected set out of the callee would pass whatever that file says.
+    """
+    for job_name, target, job in _engine_workflow_calls(yaml.safe_load(body)):
+        where = f"{page.relative_to(ENGINE).as_posix()}:{line} job `{job_name}`"
+        assert target in ENGINE_CALL_SECRETS, (
+            f"{where} calls `{target}`, which _loader.ENGINE_CALL_SECRETS does not "
+            "know -- add its whole expected secrets block there"
+        )
+        assert job.get("secrets") == ENGINE_CALL_SECRETS[target], (
+            f"{where} must pass exactly {ENGINE_CALL_SECRETS[target]} to `{target}`; "
+            f"got {job.get('secrets')!r}"
+        )
+
+
+def test_the_wrapper_snippets_are_still_being_found():
+    """A floor under the guard above, which asserts nothing when its selector
+    matches nothing. Zero matches is indistinguishable from all-clear per fence,
+    so the count of documented engine calls is pinned here instead: rewording a
+    `uses:` out of the selector's reach fails rather than going quiet."""
+    found = sorted(
+        (page.relative_to(ENGINE).as_posix(), target)
+        for page, _, body in _FENCES
+        for _, target, _ in _engine_workflow_calls(yaml.safe_load(body))
+    )
+    assert found == [
+        ("docs/getting-started.md", "apply-all.yml"),
+        ("docs/getting-started.md", "apply.yml"),
+        ("docs/getting-started.md", "deploy.yml"),
+        ("docs/getting-started.md", "summary.yml"),
+    ], f"documented engine reusable-workflow calls changed: {found}"

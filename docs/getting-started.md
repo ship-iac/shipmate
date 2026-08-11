@@ -201,7 +201,8 @@ jobs:
     uses: ship-iac/shipmate/.github/workflows/summary.yml@<engine-sha>  # see the latest release
     permissions:
       contents: read
-    secrets: inherit
+    secrets:
+      SHIPMATE_APP_PRIVATE_KEY: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
     with:
       pr-number: ${{ github.event.pull_request.number }}
       head-sha: ${{ github.event.pull_request.head.sha }}
@@ -383,7 +384,9 @@ jobs:
     if: ${{ inputs.environment != '' }}
     uses: ship-iac/shipmate/.github/workflows/apply.yml@<engine-sha>  # see the latest release
     permissions: { contents: read, checks: read, actions: read, id-token: write }
-    secrets: inherit
+    secrets:
+      SHIPMATE_APP_PRIVATE_KEY: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
+      SHIPMATE_PLAN_PASSPHRASE: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
     with:
       environment: ${{ inputs.environment }}
       ref: ${{ inputs.ref }}
@@ -394,7 +397,9 @@ jobs:
     if: ${{ inputs.environment == '' }}
     uses: ship-iac/shipmate/.github/workflows/apply-all.yml@<engine-sha>  # see the latest release
     permissions: { contents: read, checks: read, actions: read, id-token: write }
-    secrets: inherit
+    secrets:
+      SHIPMATE_APP_PRIVATE_KEY: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
+      SHIPMATE_PLAN_PASSPHRASE: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
     with:
       ref: ${{ inputs.ref }}
       pr_number: ${{ inputs.pr_number }}
@@ -426,10 +431,54 @@ jobs:
     name: post-merge
     uses: ship-iac/shipmate/.github/workflows/deploy.yml@<engine-sha>  # see the latest release
     permissions: { contents: read, checks: read, pull-requests: read, actions: read, id-token: write }
-    secrets: inherit
+    secrets:
+      SHIPMATE_APP_PRIVATE_KEY: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
+      SHIPMATE_PLAN_PASSPHRASE: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
     with:
       state_suffix: ""
 ```
+
+### Why the wrappers name their secrets
+
+Every snippet above passes secrets by name and none uses `secrets: inherit`.
+Two reasons, and the second one is a hard failure:
+
+- `inherit` hands the engine every secret your repository can see, not the two
+  it uses ([`hardening.md`](hardening.md) §What the engine receives).
+- **`inherit` works only within one organization or enterprise.** Called from a
+  repository outside the engine's organization it delivers nothing — and it does
+  not fall back, it *suppresses*: the callee job binds
+  `environment: shipmate-engine`, that environment resolves in **your**
+  repository, and its value would have been used, except that `inherit`
+  replaced the secrets context wholesale. So "add the environment and keep
+  `inherit`" does not work; the App key never arrives, and every App-authored
+  surface silently fails to exist — no `shipmate / gate`, no pending
+  `apply / <stack> / <env>` checks, no sticky comment.
+
+Pass only what each callee **declares**: `summary.yml` declares
+`SHIPMATE_APP_PRIVATE_KEY` alone, while `apply.yml`, `apply-all.yml` and
+`deploy.yml` declare the passphrase too. Naming a secret the callee does not
+declare is a load-time error that kills the run with no job and no log.
+
+### Consumers outside the engine's organization
+
+Nothing else changes. In particular the key placement does not: it stays a
+secret on **your** `shipmate-engine` environment, with a deployment branch
+policy naming your default branch ([`github-app.md`](github-app.md) §5), and
+it never becomes a repository or organization secret. A called workflow's
+`environment:` resolves in the calling repository, so only the workflow *file*
+comes from the engine's organization — the credential never leaves yours.
+
+An environment's value also wins over whatever the caller passes, empty
+included. A wrapper job that binds no environment therefore passes
+`${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}` as an empty string and the mint still
+succeeds, which is why the same snippets serve both same-organization and
+cross-organization consumers.
+
+`SHIPMATE_PLAN_PASSPHRASE` is the exception, and it is not affected by the
+boundary: the wave jobs bind `<env>-apply`, not `shipmate-engine`, so that
+secret has no environment to be read from and must travel down the call chain
+as a repository secret you pass by name.
 
 ## Required — enforce the gate
 

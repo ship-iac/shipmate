@@ -482,6 +482,25 @@ with tag-push access can create at any commit, including one carrying a workflow
 of their choosing. `shipmate doctor` warns about any extra policy here, tag ones
 included, because it compares the policy names against the default branch alone.
 
+## What the engine receives from your repository
+
+The documented wrappers pass exactly two secrets by name:
+`SHIPMATE_APP_PRIVATE_KEY` and — on the apply and deploy paths only —
+`SHIPMATE_PLAN_PASSPHRASE`. Nothing else crosses into a called workflow, because
+GHA forwards no secret a caller does not name.
+
+`secrets: inherit` forwards **every** secret the calling repository can see:
+cloud access keys, PATs, third-party API tokens, anything a later, unrelated
+workflow added. A reusable workflow is upgraded by moving a SHA, so the set a
+consumer hands over is not the set they reviewed. If you keep `inherit` — it
+still works inside one organization — treat the engine as holding your whole
+secret inventory, and size the review of each pin bump accordingly.
+
+Across an organization boundary `inherit` does not merely forward less: it
+delivers nothing **and** suppresses the value the callee's `environment:` would
+otherwise supply. A consumer outside the engine's organization must pass the
+secrets by name; §16's key placement does not change.
+
 ## Contributors without push access
 
 **Fork pull requests are refused outright.** `actions/build-matrix` fails the
