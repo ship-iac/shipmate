@@ -45,9 +45,9 @@ jobs:
         include: ${{ fromJSON(inputs.waves_json).wave0 }}
     # A repository variable, not a workflow input: which environment an apply
     # binds decides whether the reviewer gate and the apply role apply to it, and
-    # branch content must not be able to choose that. Listing a logical env opts
-    # it into one environment for both plan and apply; everything else keeps the
-    # separate <env>-apply.
+    # branch content must not be able to choose that. A listed env's applies bind
+    # the bare environment; the consumer's plan workflow must name the same one
+    # (CONTRACT.md).
     environment: >-
       ${{ contains(format(',{0},', vars.SHIPMATE_SHARED_ENVS), format(',{0},', matrix.environment))
       && matrix.environment || format('{0}-apply', matrix.environment) }}
