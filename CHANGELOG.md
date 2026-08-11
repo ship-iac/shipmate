@@ -11,7 +11,9 @@ section below names the SHA the release tags.
 The version line stays `v0.x` while action inputs, check names, and the comment
 grammar are declared unstable in `README.md`.
 
-## [Unreleased]
+## [0.12.0] — 2026-08-11
+
+Tags `TBD`.
 
 **Re-pinning is not enough for this release: rewrite your wrapper `secrets:`
 blocks in the same change.** Every documented wrapper now passes secrets by
