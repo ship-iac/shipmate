@@ -266,8 +266,9 @@ control.
 
 > **The credential path is AWS OIDC, opt-in per environment, and engine-wired
 > on the apply side only.** Every wave job in `apply-env-level.yml` requests
-> `id-token: write` and runs a credentials step gated on `vars.AWS_ROLE_ARN`; a
-> consumer opts in by setting `AWS_ROLE_ARN` and `AWS_REGION` as variables on
+> `id-token: write` and runs a credentials step gated on the environment naming
+> a role; a consumer opts in by setting `AWS_ROLE_ARN` (or the cell's
+> `AWS_ROLE_ARN_<WORKLOAD>`, which wins) and `AWS_REGION` as variables on
 > that job's `<env>-apply` environment. With them unset the step is skipped and
 > no cloud credential exists in the job, which is why the sample repos (null
 > resources, local state) still run credential-free. With them set, the assumed

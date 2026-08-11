@@ -10,7 +10,7 @@ inputs:
     default: "false"
 outputs:
   matrix:
-    description: 'JSON {"include":[{stack,environment,workload},...]} for the plan matrix.'
+    description: 'JSON {"include":[{stack,environment,workload,workload_var},...]} for the plan matrix.'
     value: ${{ steps.build.outputs.matrix }}
   empty:
     description: '"true" when no stack changed in any environment.'

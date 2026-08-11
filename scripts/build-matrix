@@ -47,20 +47,61 @@ class MatrixTooLarge(Exception):
     pass
 
 
+def workload_of(tags):
+    """The stack's `workload/<name>` tag name, or "" when it carries none."""
+    for tag in tags:
+        if tag.startswith("workload/"):
+            return tag[len("workload/") :]
+    return ""
+
+
+def workload_var(workload):
+    """The `AWS_ROLE_ARN_<WORKLOAD>` suffix for a workload name.
+
+    GitHub upper-cases variable names and GHA expressions have no toUpper, so
+    this key can only be computed here. ONE definition: apply-detect and
+    apply-all-detect attach it to their artifact-derived cells too, and a second
+    copy would eventually disagree with this one."""
+    return workload.upper().replace("-", "_")
+
+
+def guard_workload_var_collisions(cells):
+    """`workload_var` is not injective: `net-edge` and `net_edge` both render
+    NET_EDGE. Fail closed rather than pick one -- the losing workload's cells
+    would apply under an IAM role that is not theirs."""
+    by_var = {}
+    for c in cells:
+        if c["workload"]:
+            by_var.setdefault(c["workload_var"], set()).add(c["workload"])
+    for var, workloads in sorted(by_var.items()):
+        if len(workloads) > 1:
+            tags = ", ".join(f"workload/{w}" for w in sorted(workloads))
+            raise SystemExit(
+                f"::error::{tags} all map to AWS_ROLE_ARN_{var}: the variable name upper-cases "
+                "the tag and replaces '-' with '_', so one Environment variable would have to "
+                "hold every one of those workloads' role ARNs and some cells would apply under "
+                "an IAM identity that is not theirs. Rename one workload tag."
+            )
+
+
 def build_matrix(envs, stacks_by_env, tags_by_stack):
     cells = []
     for env in envs:
         for stack in stacks_by_env.get(env, []):
-            workload = ""
-            for tag in tags_by_stack.get(stack, []):
-                if tag.startswith("workload/"):
-                    workload = tag[len("workload/") :]
-                    break
-            cells.append({"stack": stack, "environment": env, "workload": workload})
+            workload = workload_of(tags_by_stack.get(stack, []))
+            cells.append(
+                {
+                    "stack": stack,
+                    "environment": env,
+                    "workload": workload,
+                    "workload_var": workload_var(workload),
+                }
+            )
     cells.sort(key=lambda c: (c["environment"], c["stack"]))
     for reserved, message in RESERVED_STACK_PATHS.items():
         if any(c["stack"] == reserved for c in cells):
             raise SystemExit(message)
+    guard_workload_var_collisions(cells)
     if len(cells) > MATRIX_LIMIT:
         raise MatrixTooLarge(
             f"{len(cells)} plan cells exceeds the GitHub Actions matrix limit of {MATRIX_LIMIT}. "
