@@ -11,6 +11,107 @@ section below names the SHA the release tags.
 The version line stays `v0.x` while action inputs, check names, and the comment
 grammar are declared unstable in `README.md`.
 
+## [0.11.0] — 2026-08-11
+
+Tags `TBD`.
+
+**Re-pinning is enough for this release, but read the two notes first.** No
+consumer workflow file has to be rewritten. However, one new `detect`-time
+assertion can fail a repository that has been planning green, and it does so
+because that repository was already applying under the wrong environment — see
+below. The one-time App bootstrap also changed shape; that only matters if you
+are registering a new App.
+
+### Added
+
+- **`AWS_ROLE_ARN_<WORKLOAD>` selects the apply role per workload.** The engine
+  read exactly one `AWS_ROLE_ARN` from the Environment a cell binds to, which
+  forced one GitHub Environment per (workload × env × region) on any repository
+  whose Environments are shared across workloads. Each wave job now prefers
+  `AWS_ROLE_ARN_<WORKLOAD>` when the cell carries a `workload/<name>` tag and
+  falls back to `AWS_ROLE_ARN`, so one Environment can serve several workloads.
+  `<WORKLOAD>` is the tag upper-cased with `-` mapped to `_`. Opt-in: a
+  repository that sets only `AWS_ROLE_ARN` is unaffected on every path. The
+  suffix is carried onto artifact-derived cells too, so the dispatched and bare
+  `shipmate apply` paths behave like the post-merge deploy.
+- **`detect` asserts that the injected environment survives `terramate run`.**
+  See Changed — this is the note to read before re-pinning.
+- **The apply DAG's shape is reported.** The dispatched `shipmate apply` detect
+  and the post-merge deploy detect print stack count, `after` edge count,
+  topological level count and the size of the largest level. A missing `after`
+  edge cannot be detected — "no declared dependency" is a legitimate state — so
+  this reports the shape and lets a reviewer who knows the repository judge it.
+  A plan run does not print it; `docs/upgrading.md` says so and points at
+  `terramate experimental run-graph --label stack.dir` for the point where the
+  information is still actionable.
+- **`docs/upgrading.md` gains a migrating-from-another-tool section.** Ordering,
+  tags, conditional AWS profiles and `run.env` are all the same shape: things a
+  working repository already expresses somewhere the engine does not read.
+
+### Changed
+
+- **`detect` now fails when `terramate.config.run.env` rewrites `TF_VAR_env`,
+  `TF_VAR_region` or `TF_WORKSPACE`.** `run.env` is applied to the child process
+  *after* the ambient environment, so it wins over what the GitHub Environment
+  injected — and `plan-classify --fingerprint-only` runs outside `terramate run`,
+  so plan and apply both hash the correct job environment while `tofu` on both
+  sides ran under the rewritten one. The fingerprint agrees, the exact-plan
+  invariant holds, and every cell can collapse onto one state key with plan,
+  gate and apply all green. `detect` injects a sentinel and asserts it comes
+  back unchanged. To keep a local default, put the injected name first in the
+  chain: `tm_try(env.TF_VAR_env, env.env, "dev")`. `TF_DATA_DIR` needs the same
+  resolution or the per-environment `.terraform` split drifts from what `tofu`
+  actually receives. A config that cannot be evaluated in `detect` at all — a
+  bare `env.X` supplied only by the plan Environment — is reported as a warning
+  rather than failing the run.
+- **A workload-variable collision fails loud.** `workload/net-edge` and
+  `workload/net_edge` both map to `AWS_ROLE_ARN_NET_EDGE`, so one Environment
+  variable would serve two workloads and a wave job would apply under the wrong
+  IAM identity. `detect` refuses rather than picking one, naming both tags.
+- **The untagged-stack failure names every untagged stack and the count**, not
+  the first one it hit, so a migration can be re-run and watched shrink.
+- **The matrix-ceiling error points at remedies that exist.** `MATRIX_LIMIT` is
+  enforced only where cells are built from Terramate tags, so when it trips
+  there is no successful plan run and no reviewed `.otplan` — a targeted
+  `shipmate apply <env>` is not a way past it. Splitting the change is the
+  general remedy; where the fan-out comes from a shared local module, which is
+  one atomic change by nature, the only lever is reducing the environments in
+  play. `CONTRACT.md` §Fan-out states the ceiling.
+- **BREAKING for the bootstrap only — `scripts/register-app` takes `--name` and
+  `--out` and creates no repository secret.** It previously wrote the App
+  private key to a repository secret, readable by any workflow on any branch,
+  which is the exposure the engine's key placement exists to prevent. It now
+  writes the PEM to `--out` with `O_EXCL` and mode `0600` (POSIX; on Windows the
+  mode is not applied and the file inherits the directory's ACLs). The three
+  paragraphs of remediation `docs/github-app.md` §2 carried are gone with it.
+  Registration is one command: a one-shot `127.0.0.1` listener captures the
+  manifest code, matched against a per-run `state`, so the code never leaves the
+  machine and there is no copy-paste step. This affects you only if you register
+  a new App; an existing installation is untouched.
+
+### Fixed
+
+- **`app/manifest.json` had no `redirect_url`,** so GitHub rejected the manifest
+  POST outright and step 1 of `docs/github-app.md` failed for everyone.
+- **The manifest's App name was one GitHub already reserves globally.** App
+  names are unique across all of GitHub, so a verbatim paste was rejected with
+  "Name has already been taken". It is a placeholder now.
+- **`terramate experimental run-graph` needs `--label stack.dir`** to emit stack
+  paths. Without it nodes are labelled by stack *name*, so same-named stacks in
+  different directories collapse into one node — the norm in a
+  `{workload}/{stack}` layout.
+- **The `disable_safeguards` prohibition is narrowed** to `outdated-code` and
+  `all`, which are what actually break `checkGenCode`. The two working-tree
+  checks are never evaluated on a `--no-recursive` cell.
+- **A named AWS `profile` in generated HCL is documented as a requirement**, not
+  an example: the apply path holds only the OIDC session and there is no
+  consumer step in which to write an `~/.aws/config`, so a literal `profile`
+  must be conditional on a variable defaulting to false.
+- **`explicit_envs`' boundary is stated.** It constrains the bare pre-merge
+  `shipmate apply` only. Honouring it post-merge would strand those cells: the
+  pull request is closed by then and the apply requirements include
+  `mergeable`, so nothing could ever apply them.
+
 ## [0.10.0] — 2026-08-09
 
 Tags `bbd9a74`.
