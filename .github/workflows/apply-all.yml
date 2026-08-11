@@ -169,13 +169,13 @@ jobs:
     steps:
       - name: Complete gate if every apply check is done
         id: gate
-        uses: ship-iac/shipmate/actions/gate-refresh@83960876131bf43583026d39948184079c807e33
+        uses: ship-iac/shipmate/actions/gate-refresh@4ab4d7a13c1db20003938dbd72b34290217176f4
         with:
           head-sha: ${{ inputs.ref }}
           app-id: ${{ vars.SHIPMATE_APP_ID }}
           private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
       - name: Post apply result comment
-        uses: ship-iac/shipmate/actions/apply-summary@9c579faca9615b12cebbb7d65a3e15dd89cb39d1
+        uses: ship-iac/shipmate/actions/apply-summary@4ab4d7a13c1db20003938dbd72b34290217176f4
         with:
           pr-number: ${{ inputs.pr_number }}
           head-sha: ${{ inputs.ref }}

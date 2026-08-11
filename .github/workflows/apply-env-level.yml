@@ -415,7 +415,7 @@ jobs:
     permissions: { actions: read }
     environment: shipmate-engine
     steps:
-      - uses: ship-iac/shipmate/actions/apply-complete@addd78d790f4cefc5297e19519649ad96d91540d
+      - uses: ship-iac/shipmate/actions/apply-complete@4ab4d7a13c1db20003938dbd72b34290217176f4
         with:
           snapshot: ${{ needs.snapshot.outputs.snapshot }}
           app-id: ${{ vars.SHIPMATE_APP_ID }}
