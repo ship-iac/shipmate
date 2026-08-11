@@ -57,6 +57,27 @@ SCRIPTS = _SCRIPTS
 ACTIONS = ENGINE / "actions"
 WORKFLOWS = ENGINE / ".github" / "workflows"
 
+_APP_KEY = {"SHIPMATE_APP_PRIVATE_KEY": "${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}"}
+_APP_KEY_AND_PASSPHRASE = {
+    "SHIPMATE_APP_PRIVATE_KEY": "${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}",
+    "SHIPMATE_PLAN_PASSPHRASE": "${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}",
+}
+
+#: The whole `secrets:` block every caller of an engine reusable workflow must
+#: write, keyed by callee file name. Hand-written, never derived from the
+#: callee's own declarations: a guard that reads them back passes whatever the
+#: file says. Two rules meet here -- `secrets: inherit` delivers nothing across
+#: an organization boundary and suppresses what the callee's `environment:`
+#: would otherwise supply, and mapping a secret the callee does not declare is a
+#: load-time failure, which is why `summary.yml` takes one secret and not two.
+ENGINE_CALL_SECRETS = {
+    "summary.yml": _APP_KEY,
+    "apply.yml": _APP_KEY_AND_PASSPHRASE,
+    "apply-all.yml": _APP_KEY_AND_PASSPHRASE,
+    "deploy.yml": _APP_KEY_AND_PASSPHRASE,
+    "apply-env-level.yml": _APP_KEY_AND_PASSPHRASE,
+}
+
 
 def load_script(fname):
     """Load ``scripts/<fname>``, named with ``-`` mapped to ``_``."""

@@ -201,7 +201,8 @@ jobs:
     uses: ship-iac/shipmate/.github/workflows/summary.yml@<engine-sha>  # see the latest release
     permissions:
       contents: read
-    secrets: inherit
+    secrets:
+      SHIPMATE_APP_PRIVATE_KEY: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
     with:
       pr-number: ${{ github.event.pull_request.number }}
       head-sha: ${{ github.event.pull_request.head.sha }}
@@ -383,7 +384,9 @@ jobs:
     if: ${{ inputs.environment != '' }}
     uses: ship-iac/shipmate/.github/workflows/apply.yml@<engine-sha>  # see the latest release
     permissions: { contents: read, checks: read, actions: read, id-token: write }
-    secrets: inherit
+    secrets:
+      SHIPMATE_APP_PRIVATE_KEY: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
+      SHIPMATE_PLAN_PASSPHRASE: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
     with:
       environment: ${{ inputs.environment }}
       ref: ${{ inputs.ref }}
@@ -394,7 +397,9 @@ jobs:
     if: ${{ inputs.environment == '' }}
     uses: ship-iac/shipmate/.github/workflows/apply-all.yml@<engine-sha>  # see the latest release
     permissions: { contents: read, checks: read, actions: read, id-token: write }
-    secrets: inherit
+    secrets:
+      SHIPMATE_APP_PRIVATE_KEY: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
+      SHIPMATE_PLAN_PASSPHRASE: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
     with:
       ref: ${{ inputs.ref }}
       pr_number: ${{ inputs.pr_number }}
@@ -426,7 +431,9 @@ jobs:
     name: post-merge
     uses: ship-iac/shipmate/.github/workflows/deploy.yml@<engine-sha>  # see the latest release
     permissions: { contents: read, checks: read, pull-requests: read, actions: read, id-token: write }
-    secrets: inherit
+    secrets:
+      SHIPMATE_APP_PRIVATE_KEY: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
+      SHIPMATE_PLAN_PASSPHRASE: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
     with:
       state_suffix: ""
 ```
