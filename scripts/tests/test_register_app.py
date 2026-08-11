@@ -1,46 +1,196 @@
+import http.client
+import http.server
+import stat
+import sys
+import threading
+
 import pytest
 from _loader import load_script
 
 ra = load_script("register-app")
 
 
-def test_main_stores_id_as_variable_and_pem_as_secret(monkeypatch):
-    # Guards the id/pem parse+store: a swap (id<->pem) or wrong gh subcommand
-    # would only surface during a real one-time registration otherwise.
-    monkeypatch.setenv("MANIFEST_CODE", "code123")
-    monkeypatch.setenv("GITHUB_REPOSITORY", "org/repo")
+def _stub_run(monkeypatch):
+    """Record every `gh` argv; answer the conversion call with a fixed App."""
     calls = []
 
     def fake_run(args, **kw):
         calls.append(args)
         if "conversions" in args[-1]:
-            return '{"id": 42, "pem": "PRIVATE_KEY", "slug": "shipmate"}'
+            return '{"id": 42, "pem": "PRIVATE_KEY", "slug": "shipmate-acme"}'
         return ""
 
     monkeypatch.setattr(ra, "_run", fake_run)
-    ra.main()
+    return calls
 
-    assert calls[0] == ["gh", "api", "-X", "POST", "app-manifests/code123/conversions"]
-    assert [
-        "gh",
-        "variable",
-        "set",
-        "SHIPMATE_APP_ID",
-        "--repo",
-        "org/repo",
-        "--body",
-        "42",
-    ] in calls
-    assert [
-        "gh",
-        "secret",
-        "set",
-        "SHIPMATE_APP_PRIVATE_KEY",
-        "--repo",
-        "org/repo",
-        "--body",
-        "PRIVATE_KEY",
-    ] in calls
+
+def test_main_writes_the_key_to_a_file_and_creates_no_repository_secret(monkeypatch, tmp_path):
+    # The whole command list, not a scan: a `gh secret set` restored anywhere in
+    # the file puts the App key in a repository secret, readable by any workflow
+    # on any branch -- the exact placement docs/github-app.md §5 exists to avoid.
+    out = tmp_path / "key.pem"
+    calls = _stub_run(monkeypatch)
+
+    ra.main(["--name", "shipmate-acme", "--repo", "org/repo", "--out", str(out), "--code", "c123"])
+
+    assert calls == [
+        ["gh", "api", "-X", "POST", "app-manifests/c123/conversions"],
+        ["gh", "variable", "set", "SHIPMATE_APP_ID", "--repo", "org/repo", "--body", "42"],
+    ]
+    assert out.read_text(encoding="utf-8") == "PRIVATE_KEY"
+    if sys.platform != "win32":
+        assert stat.S_IMODE(out.stat().st_mode) == 0o600
+
+
+def test_main_refuses_an_out_path_that_already_exists(monkeypatch, tmp_path):
+    # POSIX applies the mode only on creation, so writing into a file left by an
+    # earlier bootstrap would inherit its 0644. The refusal comes BEFORE the
+    # conversion call -- refusing after it costs an App key nothing can mint again.
+    out = tmp_path / "key.pem"
+    out.write_text("AN EARLIER KEY", encoding="utf-8")
+    calls = _stub_run(monkeypatch)
+
+    with pytest.raises(SystemExit) as exc:
+        ra.main(
+            ["--name", "shipmate-acme", "--repo", "org/repo", "--out", str(out), "--code", "c123"]
+        )
+
+    assert str(out) in str(exc.value)
+    assert out.read_text(encoding="utf-8") == "AN EARLIER KEY"
+    assert calls == []
+
+
+def test_main_refuses_an_out_path_whose_directory_does_not_exist(monkeypatch, tmp_path):
+    # os.open raises here too, but only after the App exists -- and then the PEM
+    # is in process memory alone. Refuse while refusing is still free.
+    out = tmp_path / "nope" / "key.pem"
+    calls = _stub_run(monkeypatch)
+
+    with pytest.raises(SystemExit) as exc:
+        ra.main(
+            ["--name", "shipmate-acme", "--repo", "org/repo", "--out", str(out), "--code", "c123"]
+        )
+
+    assert str(out) in str(exc.value)
+    assert calls == []
+
+
+def test_the_app_id_is_printed_before_the_key_is_written(monkeypatch, tmp_path, capsys):
+    # A refusal from _write_key leaves an App that exists on GitHub; without the
+    # id the operator cannot even find it to generate a replacement key.
+    _stub_run(monkeypatch)
+    monkeypatch.setattr(ra, "_write_key", lambda path, pem: (_ for _ in ()).throw(SystemExit("no")))
+
+    with pytest.raises(SystemExit):
+        ra.main(
+            [
+                "--name",
+                "shipmate-acme",
+                "--repo",
+                "org/repo",
+                "--out",
+                str(tmp_path / "key.pem"),
+                "--code",
+                "c123",
+            ]
+        )
+
+    assert "App created: id=42 slug=shipmate-acme" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("--repo", "org/../../evil"),
+        ("--repo", "org"),
+        ("--name", "shipmate' onload='alert(1)"),
+    ],
+)
+def test_main_refuses_an_operator_value_before_it_reaches_gh(monkeypatch, tmp_path, field, value):
+    # --repo's owner half is interpolated into the registration URL and both
+    # halves into `gh variable set --repo`; --name is embedded in the local HTML
+    # form, where a quote escapes the attribute holding it.
+    calls = _stub_run(monkeypatch)
+    argv = {
+        "--name": "shipmate-acme",
+        "--repo": "org/repo",
+        "--out": str(tmp_path / "key.pem"),
+        "--code": "c123",
+        field: value,
+    }
+
+    with pytest.raises(SystemExit) as exc:
+        ra.main([token for pair in argv.items() for token in pair])
+
+    assert repr(value) in str(exc.value)
+    assert calls == []
+
+
+def test_main_refuses_a_manifest_code_that_would_retarget_the_api_path(monkeypatch, tmp_path):
+    # The code lands in `app-manifests/<code>/conversions` and arrives over a
+    # loopback socket: a '/' in it points the conversion at another endpoint.
+    # The refusal must not echo it -- it converts into a private key.
+    calls = _stub_run(monkeypatch)
+
+    with pytest.raises(SystemExit) as exc:
+        ra.main(
+            [
+                "--name",
+                "shipmate-acme",
+                "--repo",
+                "org/repo",
+                "--out",
+                str(tmp_path / "key.pem"),
+                "--code",
+                "../../user/repo/keys",
+            ]
+        )
+
+    assert str(exc.value) == ("the manifest code must be letters, digits, '_' or '-'; refusing it.")
+    assert calls == []
+
+
+def test_out_is_required(monkeypatch):
+    # An optional --out defaults to writing the key nowhere, which is the same
+    # failure as writing it to a secret: the key is minted and then unreachable.
+    _stub_run(monkeypatch)
+
+    with pytest.raises(SystemExit) as exc:
+        ra.main(["--name", "shipmate-acme", "--repo", "org/repo", "--code", "c123"])
+
+    assert exc.value.code == 2
+
+
+def _get(server, path):
+    handled = threading.Thread(target=server.handle_request, daemon=True)
+    handled.start()
+    conn = http.client.HTTPConnection("127.0.0.1", server.server_port, timeout=5)
+    conn.request("GET", path)
+    status = conn.getresponse().status
+    conn.close()
+    handled.join(5)
+    return status
+
+
+def test_the_listener_captures_the_code_and_refuses_a_request_without_one():
+    # The capture is what keeps the single-use code off the clipboard, and the
+    # browser asks for /favicon.ico on the same port -- answering that as a
+    # capture would end the wait with no code at all. A callback carrying a code
+    # but not this run's state is another App's registration, delivered by
+    # anything that can reach the port: converting it would write that App's key
+    # to --out and store its id as SHIPMATE_APP_ID.
+    ra._Handler.code = None
+    ra._Handler.state = "this-runs-state"
+    server = http.server.HTTPServer(("127.0.0.1", 0), ra._Handler)
+    try:
+        assert _get(server, "/favicon.ico") == 404
+        assert ra._Handler.code is None
+        assert _get(server, "/callback?code=forged&state=shipmate-setup") == 404
+        assert ra._Handler.code is None
+        assert _get(server, "/callback?code=abc123&state=this-runs-state") == 200
+        assert ra._Handler.code == "abc123"
+    finally:
+        server.server_close()
 
 
 def _failing_gh(monkeypatch, stderr):

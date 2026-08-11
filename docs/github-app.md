@@ -11,8 +11,8 @@ pre-merge apply cannot be kicked off with the default token. The same App
 also authors every apply check, the `shipmate / gate` commit status, the
 sticky plan/result comments, and drift issues — installation tokens minted
 fresh per job, never a long-lived credential in the workflow. The bot
-identity `shipmate[bot]` is derived automatically from the App name
-(`shipmate`) once it's registered.
+identity is derived automatically from the App name once it's registered, so
+an App named `shipmate-acme` comments as `shipmate-acme[bot]`.
 
 This is a runbook, not a tutorial: run the commands in order. Steps 1–3 register
 the App once per GitHub org; steps 4–6 onboard one repository, and are written
@@ -25,89 +25,67 @@ same commands in a loop — see the appendix.
 - Admin rights on the org that will own the App.
 - This repo checked out locally (`app/manifest.json` is read by the steps below).
 
-## 1. Run the manifest flow (browser)
+## 1. Register the App
 
-GitHub App registration via a manifest is a browser POST, not an API call.
-Build a self-submitting HTML form from `app/manifest.json` and open it:
-
-```bash
-ORG=<your-org>   # e.g. ship-iac
-
-python3 - "$ORG" <<'PY' > /tmp/shipmate-app-manifest.html
-import json, sys
-org = sys.argv[1]
-manifest = json.load(open("app/manifest.json"))
-print(f"""<!doctype html>
-<form id="f" action="https://github.com/organizations/{org}/settings/apps/new?state=shipmate-setup" method="post">
-<input type="hidden" name="manifest" value='{json.dumps(manifest)}'>
-</form>
-<script>document.getElementById("f").submit()</script>
-""")
-PY
-
-# Open the file in a browser (pick the one for your OS):
-open /tmp/shipmate-app-manifest.html          # macOS
-xdg-open /tmp/shipmate-app-manifest.html      # Linux
-start /tmp/shipmate-app-manifest.html         # Windows (cmd)
-```
-
-Confirm creation in the GitHub UI. GitHub redirects to
-`https://github.com/organizations/<org>/settings/apps/<slug>?code=<code>` —
-copy the `code` query-param value; it is single-use and short-lived.
-
-## 2. Convert the code to credentials
+GitHub App registration via a manifest is a browser POST, not an API call, and
+GitHub answers it with a redirect carrying a single-use `code`. One command
+does the whole leg:
 
 ```bash
-MANIFEST_CODE=<code-from-the-redirect> \
-GITHUB_REPOSITORY=<org>/shipmate \
-python3 scripts/register-app
+python3 scripts/register-app \
+  --name shipmate-<your-org> \
+  --repo <your-org>/shipmate \
+  --out shipmate-app.private-key.pem
 ```
 
-This calls `gh api -X POST app-manifests/$MANIFEST_CODE/conversions`, then
-stores, on `GITHUB_REPOSITORY` (typically the App-owning repo itself, e.g.
-`<org>/shipmate`):
+It builds the self-submitting form from `app/manifest.json`, opens it in your
+browser, and receives GitHub's redirect on a loopback listener it started
+first — so the `code` never leaves the machine and there is nothing to copy.
+Confirm the registration in the GitHub UI when the browser lands on it; the
+terminal continues by itself. §2 covers what the command then stores.
 
-- `SHIPMATE_APP_ID` — repo **variable** (app id; not secret).
-- `SHIPMATE_APP_PRIVATE_KEY` — repo **secret** (PEM private key), which you
-  delete again two paragraphs below. Nothing reads it: it is not the key §6
-  deploys, and it is not a backup you can retrieve.
+**Edit the name.** GitHub App names are unique **across all of GitHub**, and
+`ship-iac` already holds `shipmate`, so a verbatim paste is rejected with "Name
+has already been taken" — after the browser POST, which is a slow way to find
+out. `app/manifest.json` therefore ships `shipmate-<your-org>` as a placeholder,
+and `--name` overrides it. Later sections' App-settings URLs
+(`.../settings/apps/shipmate`) name the App you registered, so substitute
+accordingly.
 
-`register-app` prints `App created: id=… slug=…` and nothing else: the PEM
-passes through it in memory and is never written to disk, and `gh` cannot read a
-secret's value back once set. Step 6 needs the key **as a file**, so download one
-now — App settings (`.../settings/apps/shipmate`) → **Private keys** →
-**Generate a private key**, the same button §7 uses. Save the download as
-`shipmate-app.private-key.pem` in the directory you will run step 6 from. An App
-holds several private keys and every one of them mints valid tokens, so
-generating this one invalidates nothing.
+The knock-on is already handled: the bot identity is derived from the App name,
+so a renamed App comments as `shipmate-<your-org>[bot]` rather than
+`shipmate[bot]`. The sticky plan and doctor comments are looked up by their
+marker plus a `Bot` comment author, never by a hardcoded login.
 
-That makes the secret above dead weight with a blast radius: the key it holds is
-a working App private key that no step deploys and nothing reads, sitting in a
-repository secret — readable by any workflow on any branch of that repository.
-Delete it:
+The manifest's `redirect_url` (`http://127.0.0.1:8723/callback`) is a working
+default for anyone hand-building the form instead; `register-app` overrides it
+with the port its listener actually bound.
 
-```bash
-gh secret delete SHIPMATE_APP_PRIVATE_KEY --repo <org>/shipmate
-```
+## 2. What step 1 stored
 
-This is the same deletion §6 performs on each consumer repository, for the same
-reason: a repository secret is scoped to nothing, and only the `shipmate-engine`
-environment secret is. If the App-owning repo is itself a consumer, §6 runs this
-command again there after placing the key on that repo's environment — a no-op
-by then, and harmless in that order.
+The command in step 1 converts the captured code
+(`gh api -X POST app-manifests/<code>/conversions`) and then stores two things:
 
-**Deleting the secret does not invalidate the key it held**, and every key an App
-holds mints valid tokens. That PEM was readable by any workflow on any branch of
-that repository for the whole setup window, so treat it as exposed and retire it:
-App settings (`.../settings/apps/shipmate`) → **Private keys** → the key
-`register-app` created (the older one — not the key you generated and downloaded
-above) → **Delete**. It is the same button §7 uses to retire a rotated key.
+- `SHIPMATE_APP_ID` — a repository **variable** on `--repo` (typically the
+  App-owning repo itself, e.g. `<org>/shipmate`). The app id is not a secret.
+  It also prints it, as `App created: id=… slug=…`.
+- The private key — the file named by `--out`, which must not already exist:
+  the command refuses rather than overwrite, because the key it replaced could
+  never be minted again. It is created mode `0600` on Linux and macOS. **On
+  Windows the mode is not applied at all** — the file inherits the directory's
+  ACLs — so run the command from a directory only you can read.
 
-**Do not re-run this script against a consumer repo to "install" the key
-there.** That would store a plain repo secret, readable by any branch's
-workflow — exactly the shape steps 5–6 exist to replace. Put the PEM you just
-downloaded into each consumer repo's `shipmate-engine` **environment** secret
-instead (steps 5–6, below).
+**No repository secret is created**, and nothing else on this page creates one
+either: a repository secret is readable by any workflow on any branch, while the
+`shipmate-engine` environment secret §5 and §6 place the key in is scoped to one
+ref. That is the whole key-exposure boundary, described at the end of this page.
+
+Keep the `--out` file: §6 reads it for every consumer repository, and `gh`
+cannot read a secret's value back once set. Shred it once every repository has
+it (`shred -u shipmate-app.private-key.pem` or equivalent). If you lose it
+before then, generate a replacement — App settings → **Private keys** →
+**Generate a private key** — rather than re-registering; an App holds several
+keys and each one mints valid tokens, so generating one invalidates nothing.
 
 ## 3. Upload a logo (optional but recommended)
 
@@ -185,15 +163,15 @@ loops — see the appendix.
 ## 6. Set the approvers team + propagate credentials
 
 Each consumer repo needs `SHIPMATE_APPROVERS_TEAM` (the GitHub team slug whose
-members may run `shipmate apply`) plus the app id/key from step 2. `gh` cannot read
+members may run `shipmate apply`) plus the app id/key from step 1. `gh` cannot read
 back a secret's value once set (GitHub never exposes it), so this step reads the
-`shipmate-app.private-key.pem` you downloaded in step 2 — keep that file until
-every consumer repo has it.
+`shipmate-app.private-key.pem` step 1 wrote — keep that file until every
+consumer repo has it.
 
 ```bash
 REPO=<owner>/<repo>
 TEAM=<approvers-team-slug>          # the GitHub team slug, not a display name
-APP_ID=<app-id-from-step-2-output>
+APP_ID=<app-id-from-step-1-output>
 
 KEY=$(cat shipmate-app.private-key.pem)
 if [ -z "$KEY" ]; then
@@ -233,7 +211,7 @@ so set it per-repo as above):
 ```bash
 gh variable set SHIPMATE_APP_ID --org <org> --visibility selected \
   --repos "<repo>,<repo>" \
-  --body "<app-id-from-step-2-output>"
+  --body "<app-id-from-step-1-output>"
 ```
 
 `SHIPMATE_APP_PRIVATE_KEY` cannot follow it there: environment secrets are
@@ -415,7 +393,7 @@ writing an empty secret to every repository.
 ```bash
 REPOS="<owner>/<repo> <owner>/<repo>"
 TEAM=<approvers-team-slug>          # may differ per repo; set it per repo either way
-APP_ID=<app-id-from-step-2-output>
+APP_ID=<app-id-from-step-1-output>
 
 KEY=$(cat shipmate-app.private-key.pem)
 if [ -z "$KEY" ]; then
