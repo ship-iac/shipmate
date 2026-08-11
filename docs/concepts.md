@@ -140,7 +140,8 @@ full picture below:
   variables, so the branch has to live in the repository. There is no input to
   allow them.
 - **`summary`** — `uses:` the engine's reusable
-  `.github/workflows/summary.yml` with `secrets: inherit`, passing the pull
+  `.github/workflows/summary.yml`, passing `SHIPMATE_APP_PRIVATE_KEY` by name
+  (never `secrets: inherit` — `docs/getting-started.md`) plus the pull
   request number, the head SHA, the two other jobs' results and the planned cell
   count. The credentialed work happens inside that callee, in a single job bound
   to the fixed `shipmate-engine` GitHub Environment (`docs/github-app.md`) with

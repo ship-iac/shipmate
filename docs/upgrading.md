@@ -91,7 +91,9 @@ requests cannot merge — the old `workflow_run` topology is not supported.
 
 `plan.yml` moves to `pull_request_target` and gains a third job, `summary`,
 which is `uses: <owner>/shipmate/.github/workflows/summary.yml@<sha>` with
-`secrets: inherit` and five inputs (`pr-number`, `head-sha`, `detect-result`,
+`secrets: { SHIPMATE_APP_PRIVATE_KEY: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }} }`
+— that secret alone, since a callee rejects a name it does not declare — and
+five inputs (`pr-number`, `head-sha`, `detect-result`,
 `plan-result`, `planned-cells`), and `permissions: contents: read` — a callee's
 permissions are capped by the calling job's, and granting less kills the whole
 run at startup with no job, no log and no annotation to explain it. Because
@@ -183,8 +185,8 @@ The App manifest now carries both scopes, so `actions/summary` /
 the calling job's `GITHUB_TOKEN` permissions. Remove any `statuses: write` /
 `checks: write` grant from jobs that run these actions, and thread `app-id` +
 `private-key` into the `with:` of each call (for a reusable-workflow caller job,
-`secrets: inherit` covers it, as long as the called workflow declares
-`SHIPMATE_APP_PRIVATE_KEY` under `on.workflow_call.secrets`). A leftover
+pass `SHIPMATE_APP_PRIVATE_KEY` by name in the job's `secrets:` block instead —
+the called workflow declares it under `on.workflow_call.secrets`). A leftover
 `GITHUB_TOKEN` grant is stale, not harmful by itself, but remove it — the writer
 step doesn't use it, and it needlessly widens the default token's scope.
 

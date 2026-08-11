@@ -11,6 +11,54 @@ section below names the SHA the release tags.
 The version line stays `v0.x` while action inputs, check names, and the comment
 grammar are declared unstable in `README.md`.
 
+## [Unreleased]
+
+**Re-pinning is not enough for this release: rewrite your wrapper `secrets:`
+blocks in the same change.** Every documented wrapper now passes secrets by
+name, and `secrets: inherit` is no longer a supported call shape.
+
+### Changed
+
+- **BREAKING for consumers — pass the engine's secrets by name.** In your
+  `plan.yml`, `apply.yml` and `deploy.yml`, replace `secrets: inherit` with the
+  block `docs/getting-started.md` shows. Pass only what each callee declares:
+  `summary.yml` takes `SHIPMATE_APP_PRIVATE_KEY` alone, while `apply.yml`,
+  `apply-all.yml` and `deploy.yml` take `SHIPMATE_PLAN_PASSPHRASE` as well —
+  naming a secret a callee does not declare kills the run at load time. Keeping
+  `inherit` still works inside the engine's own organization, so this is not an
+  immediate breakage there, but it is the only supported shape from here.
+
+  Two reasons. `inherit` forwards *every* secret the calling repository can see
+  — cloud keys, PATs, anything a later workflow added — to a workflow that is
+  upgraded by moving a SHA. And it works only within one organization or
+  enterprise: called from outside, it delivers nothing **and** suppresses the
+  value the callee's `environment: shipmate-engine` binding would have supplied,
+  so the App key never arrives and no App-authored surface exists at all — no
+  `shipmate / gate`, no pending apply checks, no comment. Measured in a
+  cross-organization consumer, both halves.
+
+  Key placement does **not** change: the key stays a secret on your
+  `shipmate-engine` environment. A called workflow's `environment:` resolves in
+  the *calling* repository, and an environment's value wins over whatever the
+  caller passes, empty included — which is why the same snippets serve
+  consumers inside and outside the engine's organization.
+- **The engine's own reusable calls pass named secrets too.** `apply.yml`,
+  `apply-all.yml` and `deploy.yml` inherited into `apply-env-level.yml`. Both
+  files live in one organization, but `inherit` is evaluated against the *run*,
+  which belongs to the consumer — so a cross-organization consumer's applies
+  would have executed and then stranded their `apply / <stack> / <env>` checks
+  pending forever. No consumer-side change could have reached that hop.
+  Adding a secret to a reusable workflow now follows an ordering rule
+  (`docs/releasing.md`): declare in the callee, merge, bump the pin, then map.
+
+### Added
+
+- **An empty App key now names its cause.** Every job that mints an App
+  installation token first checks that the key arrived and, if it did not,
+  reports which of the three wiring mistakes to look at. The upstream mint
+  reported only "must be set to a non-empty string", which three unrelated
+  causes produce.
+
 ## [0.11.0] — 2026-08-11
 
 Tags `4034746`.
