@@ -13,7 +13,7 @@ grammar are declared unstable in `README.md`.
 
 ## [0.11.0] — 2026-08-11
 
-Tags `TBD`.
+Tags `4034746`.
 
 **Re-pinning is enough for this release, but read the two notes first.** No
 consumer workflow file has to be rewritten. However, one new `detect`-time
