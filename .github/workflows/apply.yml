@@ -57,7 +57,7 @@ jobs:
           terramate-version: ${{ vars.TERRAMATE_VERSION }}
           tofu-version: ${{ vars.TOFU_VERSION }}
       - id: d
-        uses: ship-iac/shipmate/actions/apply-detect@9c579faca9615b12cebbb7d65a3e15dd89cb39d1
+        uses: ship-iac/shipmate/actions/apply-detect@f3a88b94017c534c3a41e0bbc4e346d34e331182
         with:
           environment: ${{ inputs.environment }}
           plan-run-id: ${{ inputs.plan_run_id }}
@@ -80,7 +80,7 @@ jobs:
     # `!= 'true'` guard below reads as "not empty" and fans out anyway.
     needs: [guard, detect]
     if: ${{ !failure() && !cancelled() && needs.detect.outputs.empty != 'true' }}
-    uses: ship-iac/shipmate/.github/workflows/apply-env-level.yml@d286b1126acd0ff77e9824ddd86cf89f60e9db03 # pinned to a commit on main
+    uses: ship-iac/shipmate/.github/workflows/apply-env-level.yml@f3a88b94017c534c3a41e0bbc4e346d34e331182 # pinned to a commit on main
     permissions: { contents: read, checks: read, actions: read, id-token: write }
     with:
       waves_json: ${{ needs.detect.outputs.waves }}
