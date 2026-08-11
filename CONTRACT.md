@@ -227,9 +227,10 @@ and land with the wrapper's `state_suffix` change in the same step.
 **On the state key.** Where the consumer's backend derives a key per stack,
 derive it from `terramate.stack.path.absolute` (as `docs/aws.md` does), which
 is unique by construction across the whole tree. A key built from
-`${workload}/${stack_name}` is not: `accounts/sandbox` and
-`stacks/sandbox/box` differ by path, not by name, and would share one state
-file.
+`${workload}/${stack_name}` is not: a stack's default name is its directory's
+basename, so `accounts/sandbox/network` and `stacks/prod/network` both name
+`network` and, when both carry the same `workload/<name>` tag, render one key
+and share one state file.
 
 The drift wrapper is consumer-authored and builds `state-path` itself. On a
 remote backend pass `state-path: ''` (or omit the input on the `drift-cell`
