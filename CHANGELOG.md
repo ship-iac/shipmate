@@ -11,6 +11,118 @@ section below names the SHA the release tags.
 The version line stays `v0.x` while action inputs, check names, and the comment
 grammar are declared unstable in `README.md`.
 
+## [0.14.0] — unreleased
+
+Tags `TBD`.
+
+**Re-pinning is enough for this release, with one exception: grep your
+`global.shipmate.explicit_envs` for entries carrying a `-plan` or `-apply`
+suffix before you bump the pin.** Such an entry used to validate and then match
+nothing; it now fails the run, naming the entry and the bare env name to write
+instead (`docs/upgrading.md` §0.14.0). Nothing else needs consumer action — no
+workflow edit, no environment to create, rename or delete, no permission to
+grant. The previous release's per-env migration has no counterpart here.
+
+### Added
+
+- **An apply that binds a GitHub Environment which does not exist is now
+  refused before any wave runs.** `actions/verify-environments` runs as one step
+  in `apply-env-level.yml`'s `snapshot` job, which every apply route fans
+  through and which already runs before `wave0` holding no credential. GitHub
+  creates a missing environment on demand — no variables, no secrets, no
+  reviewers, no wait timer, no deployment branch policy — and the apply-match
+  fingerprint cannot catch that: it compares variable *content*, so a
+  legitimately empty shared environment and an auto-created one hash identically
+  for any layout that injects no non-empty `TF_VAR_*` and no `TF_WORKSPACE`.
+  Existence, checked before the waves, is the only discriminator. It is
+  fail-closed in the three places that would otherwise have defaulted open — a
+  listing that could not be read fails the run (a re-run clears a transient
+  failure), a listing whose `total_count` exceeds what it returned fails the
+  run, and a hand-off carrying no cell is malformed rather than an idle pass.
+
+  **No consumer change.** The `snapshot` job additionally declares
+  `actions: read`, which is measured rather than decorative: on a **private**
+  repository the environments endpoint returns 403 under the `checks: read` the
+  job declared, and a scope matrix on that repository isolated `actions: read`
+  as the scope that works — `contents: read` and `deployments: read` both 403.
+  All nine jobs calling `apply-env-level.yml` across the documented `apply.yml`,
+  `apply-all.yml` and `deploy.yml` already grant it for their wave jobs, so the
+  permission cap at each `uses:` boundary is already high enough and no wrapper
+  changes. Worth knowing only if you wrote your wrappers by hand.
+
+  Read the scope for what it is. This closes the apply side for **every**
+  layout, the folder-per-env one the fingerprint cannot help included; it does
+  *not* make a mis-set naming mode loud in general, because the plan-side
+  binding is consumer YAML the engine cannot read. Out of scope by design: a
+  race between the pre-flight and the waves, and an environment that exists but
+  is wrong — including one an earlier mis-set run auto-created, which satisfies
+  existence from then on. The pre-flight runs per env-level, so a later level's
+  refusal can follow an earlier level's applies.
+
+### Changed
+
+- **BREAKING for consumers — `global.shipmate.explicit_envs` rejects an entry
+  carrying a `-plan` or `-apply` suffix.** The value is matched against the bare
+  logical env name on the apply checks, so a suffixed entry validated and then
+  excluded nothing: the env an author meant to hold back from a bare
+  `shipmate apply` was applied by it. That is now a loud failure naming the
+  entry and the bare name to write instead. Every documented environment name
+  now carries a suffix, which is what makes the mistake likely — a configuration
+  that worked before this release can fail on the pin bump alone.
+  `CONTRACT.md` and `docs/hardening.md` state the rule rather than the old
+  silent failure.
+- **`shipmate doctor` fails loud when the environments listing is truncated.**
+  It read one unpaged request as complete; a partial page infers a naming mode
+  the repository is not in, which asserts the wrong mode and redirects the
+  plan-secret probe to the wrong environment. `total_count` is read strictly —
+  absence of the key means completeness is unknown, not complete. Consumer-
+  visible edge: a repository with more than 100 GitHub Environments now gets
+  doctor's degrade warnings for the environment probes where it used to get
+  environment findings.
+
+### Fixed
+
+- **`shipmate doctor` reports what the environment names actually imply.** In
+  ambiguous naming — a bare `<env>` beside a suffixed sibling — it had stopped
+  running the per-role existence loop, so a repository holding `prod` and
+  `prod-plan` and no `prod-apply` was no longer told the half was missing; and
+  the bare environment's deployment-branch-policy finding had dropped to shared
+  mode's NOTICE, whose text calls that policy correct, when while the naming is
+  ambiguous that environment is what an unmigrated `plan.yml` still binds and
+  the policy refuses those plan cells. Both are restored.
+
+  The ambiguity WARNING no longer asserts that the unused naming's protection
+  rules are inert, and no longer advises deleting that environment: the plan
+  side is bound by the consumer's own `plan.yml`, which the engine cannot read,
+  so with a static `-plan` binding and the env shared **both** namings are live.
+  It names what decides each side and says either naming may be the unbound one.
+  The App-key and secret findings take their noun from the environment's role
+  rather than the repository's mode, so shared mode no longer reads "plan
+  environment `dev-eu`" beside a sibling notice calling the same environment
+  shared. And the findings for a name that does not exist no longer say stacks
+  "cannot plan or apply" — the binding resolves to a name GitHub auto-creates
+  empty, so the jobs run and describe whatever the layout defaults to.
+- **A mode/name mismatch fails loud only where the environment injects
+  something the fingerprint reads.** `0.13.0` said it does so "by
+  construction". The fingerprint hashes non-empty `TF_VAR_*` plus
+  `TF_WORKSPACE`, so a folder-per-env layout hashes the empty set on both sides,
+  matches, and — before this release's pre-flight — applied inside the
+  auto-created environment. The condition is now stated once normatively in
+  `CONTRACT.md` §Env model, and every site that leaned on the claim references
+  it: this changelog's `0.13.0` entry, `docs/upgrading.md` §0.13.0,
+  `docs/troubleshooting.md`, and the apply-binding guard's docstring. Also
+  corrected: on such a layout what a mismatch silently loses is the
+  environment's protection rules and its OIDC subject binding, not the code
+  applied or the state file addressed. An environment holding only
+  `AWS_ROLE_ARN` gets no refusal either.
+- **The static plan-side bindings are now pinned by a guard**, not only the
+  mixed-mode expression in the contract. `docs/getting-started.md`'s `plan.yml`
+  and `docs/drift.md`'s `drift.yml` — the fences a new consumer copies
+  wholesale — had nothing but "does it parse" behind them, so a binding could
+  lose its suffix in a docs edit. Same shape as the existing assertions: a
+  hand-written constant, the whole `(job, environment)` value compared, and
+  exactly one env-bearing job asserted per page.
+
 ## [0.13.0] — 2026-08-12
 
 Tags `181413c`.

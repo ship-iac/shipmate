@@ -82,6 +82,30 @@ names. The entries below `0.2.0` predate the first tagged release, or
 `CHANGELOG.md` does not pin one; they are kept for repositories moving from a
 very old pin.
 
+### 0.14.0 — check `explicit_envs` for suffixed entries, then re-pin
+
+**Re-pinning is enough, with one exception.** Grep your Terramate globals for
+`explicit_envs` and remove any `-plan` / `-apply` suffix from its entries before
+you bump the pin. The value is matched against the bare logical env name on the
+apply checks, so a suffixed entry used to validate and exclude nothing — the env
+you meant to hold back from a bare `shipmate apply` was applied by it. It is now
+a loud failure naming the entry and the bare name to write instead. Every
+documented environment name carries a suffix since `0.13.0`, which is what makes
+this mistake likely; the fix is a one-line edit, and it can ship before the pin
+bump.
+
+**One edge worth knowing:** `shipmate doctor` no longer infers an environment
+naming mode from a partial listing. A repository with more than 100 GitHub
+Environments now gets doctor's degrade warnings for the environment probes where
+it previously got environment findings — nothing else about the run changes.
+
+Nothing else in `0.14.0` needs consumer action: no workflow edit, no environment
+to create, rename or delete, and no permission to add. The new pre-flight that
+refuses an apply binding a non-existent environment needs `actions: read` on the
+`snapshot` job, which the documented `apply.yml`, `apply-all.yml` and
+`deploy.yml` wrappers already grant — check it only if you wrote your wrappers
+by hand.
+
 ### 0.13.0 — every environment is renamed, and re-pinning alone is not enough
 
 Plan and apply now bind `<env>-plan` and `<env>-apply`; the bare `<env>` means
