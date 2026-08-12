@@ -268,7 +268,7 @@ reached only by the targeted `shipmate apply <env>`. Left off, a bare
 reviewer nobody expected to be asked. Use the **bare environment name** —
 `staging`, not `staging-plan` or `staging-apply`; the value is matched against the
 environment name carried by the apply checks (see CONTRACT.md), and an entry
-carrying **either** suffix validates silently and skips nothing.
+carrying either suffix is a configuration error the engine rejects loudly.
 
 `explicit_envs` is read from the *pull request branch* and can therefore be
 edited by whoever pushed the branch. Treat it as ergonomics; the environment

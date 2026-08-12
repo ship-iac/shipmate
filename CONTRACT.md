@@ -205,7 +205,9 @@ never used.
   prevent: the split envs' plan cells bind a bare `<env>` nobody created, GitHub
   auto-creates it empty, and the plan runs with no `TF_VAR_*` — where the layout
   gives `TF_VAR_env` a fallback default, that plan silently describes the **wrong**
-  environment and a reviewer approves it. The loud refusal only arrives at apply.
+  environment and a reviewer approves it. The loud refusal only arrives at apply,
+  and only where the environment injects a variable the fingerprint sees (see the
+  fail-loud bullet below).
 - **A logical env may opt into one shared environment (shared mode).** Listing
   it in the `SHIPMATE_SHARED_ENVS` **repository variable** makes both paths bind
   the bare `<env>` — one environment, no suffix. The price is stated in
@@ -218,8 +220,8 @@ never used.
   - **No spaces after the commas.** `dev-eu, dev-us` leaves `dev-us` unmatched:
     the entry is ` dev-us` and each entry is compared whole, spaces included.
     The direction is fail-safe — the env stays split, and with no `<env>-apply` environment the
-    apply-match fingerprint refuses the cell — but it is the mistake consumers
-    actually make.
+    apply-match fingerprint refuses the cell, subject to the condition in the
+    fail-loud bullet below — but it is the mistake consumers actually make.
   - **Matching is case-insensitive**, because GitHub's `contains()` is:
     `SHIPMATE_SHARED_ENVS=Prod` opts `prod` into shared mode. The expression
     normalizes nothing.
@@ -234,13 +236,28 @@ never used.
     existing `foo-apply` that env's shared environment, or `foo`'s apply
     environment?) and binds `foo-apply-apply` on the apply path. Nothing
     validates this; it is a naming rule.
-- **A mode that disagrees with the environment names fails loud, by
-  construction.** The binding then resolves to an environment that does not
-  exist, GitHub auto-creates it empty, no `TF_VAR_*` reaches the cell, and the
-  apply-match fingerprint refuses it naming the missing variables. That is the
-  reason for the naming: under an asymmetric naming the dangerous direction was
-  silent, because the environment the apply wave fell back on was the live plan
-  environment.
+- **A mode that disagrees with the environment names fails loud — on every
+  layout whose GitHub Environment injects at least one non-empty `TF_VAR_*` or
+  `TF_WORKSPACE`.** The binding
+  then resolves to an environment that does not exist, GitHub auto-creates it
+  empty, no `TF_VAR_*` reaches the cell, and the apply-match fingerprint refuses
+  it naming the missing variables. That is the reason for the naming: under an
+  asymmetric naming the dangerous direction was silent, because the environment
+  the apply wave fell back on was the live plan environment.
+
+  **The condition, stated once for every page that leans on it.** The
+  fingerprint hashes only non-empty `TF_VAR_*` plus `TF_WORKSPACE` (see
+  Apply-match fingerprint, below), so it can only refuse a cell whose
+  environment injects one of those. The DRY layout (`TF_VAR_env`,
+  `TF_VAR_region`) and the workspace layout (`TF_WORKSPACE`) both do, and both
+  get the loud refusal. The **folder-per-env layout injects nothing** — env
+  identity is the leaf's path — so plan and apply both hash the empty set, the
+  fingerprint matches, and the apply proceeds against the right code and the
+  right state but inside an environment GitHub auto-created with no reviewers,
+  no wait timer and no deployment branch policy. Nothing in the pipeline refuses
+  that: on a no-variable layout the environments are the only control over the
+  apply, and a mode/name mismatch is reported by `shipmate doctor`'s naming
+  findings rather than by the apply.
 - **No env names in workflow YAML — ever.** Workflow files must not
   hardcode `staging`, `production`, or any other environment name. Workflows
   discover environments dynamically from stack tags (see Tag grammar,
@@ -600,7 +617,9 @@ must always be named: their `apply / <stack> / <env>` checks simply stay
 pending under a bare apply — so `shipmate / gate` keeps gating the
 merge — until someone runs `shipmate apply <env>` for them. An absent global
 (or `[]`) means a bare apply targets everything. Malformed `explicit_envs`
-shapes (not a list of strings) fail loud, like `env_order`.
+shapes (not a list of strings) fail loud, like `env_order`, and so does an entry
+carrying a `-plan` or `-apply` suffix: the value is matched against the **bare
+logical** env name, so a suffixed entry would skip nothing.
 
 `explicit_envs` constrains the bare pre-merge `shipmate apply` **only**. The
 post-merge deploy applies every cell whose apply check is still pending,

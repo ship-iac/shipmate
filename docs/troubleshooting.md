@@ -38,10 +38,14 @@ synthesizes a `branch_policy` protection rule for any environment with a
 deployment branch policy, and a branch policy is not a review; the role each
 environment plays is inferred from the environment **names** — doctor never reads
 `SHIPMATE_SHARED_ENVS` — so a shared environment carrying approval rules warns
-that they stall the plan cells and the nightly drift run, its branch policy and
-its missing approval rules are notes, and an env with a bare `<env>` *and* a
-suffixed sibling warns that which one is bound is undetermined and the other's
-protection rules are inert), the secrets a
+that they stall the plan cells and the nightly drift run, its missing approval
+rules are a note, and its branch policy is a note only while no suffixed sibling
+exists: once one does, an unmigrated `plan.yml` may still bind the bare
+environment, so the policy is warned about as the plan-stall it can be. An env
+with a bare `<env>` *and* a suffixed sibling warns that which naming each path
+binds is undetermined, so either naming may be bound by nothing with its
+protection rules reading as a control in no code path — and the missing half of
+the suffixed pair is still reported), the secrets a
 plan environment holds (names only — the API never returns a value; a plan
 cell runs branch code with whatever that environment releases and control 8
 forbids protecting it, so a note giving the count — exact unless the listing was
@@ -234,7 +238,11 @@ gate greening over an unapplied stack.
 environment-naming or `SHIPMATE_SHARED_ENVS` change, the cause is not the plan.**
 The apply job bound an environment that does not exist, GitHub auto-created it
 empty, and no variables reached the cell — which is the loud failure the naming
-is designed to produce. Two ways to arrive there:
+is designed to produce on any layout whose environment injects a non-empty
+`TF_VAR_*` or `TF_WORKSPACE`. (A
+folder-per-env layout injects none, hashes the empty set on both sides and so
+never reaches this error at all; see [`../CONTRACT.md`](../CONTRACT.md) §Env
+model for what that layout gives up instead.) Two ways to arrive there:
 
 - **The mode disagrees with the names.** Split naming (`<env>-plan` +
   `<env>-apply`) with the env listed in `SHIPMATE_SHARED_ENVS`, or a single bare

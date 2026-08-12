@@ -192,7 +192,8 @@ rule and the indentation constraint):
 A static bare binding in a mixed repository is the quiet failure here: the split
 envs' plan cells bind an environment you deleted, GitHub auto-creates it empty,
 and a layout with a `TF_VAR_env` fallback default plans the wrong environment for
-a reviewer to approve. Nothing refuses until the apply.
+a reviewer to approve. Nothing refuses until the apply — and on a folder-per-env
+layout nothing refuses at all ([`../CONTRACT.md`](../CONTRACT.md) §Env model).
 
 **Set `SHIPMATE_SHARED_ENVS` before that expression reaches the default branch.**
 The expression falls back to `<env>-plan`, and shared mode never creates one, so
@@ -208,11 +209,16 @@ sets the variable gets **no existence finding**, where the old code warned that
 `<env>-apply` was missing: bare-only is exactly what a correctly configured shared
 env looks like, and doctor reports it as one — you still get its shared-environment
 findings (unreviewed applies, a warning if it carries approval rules, its secrets),
-just nothing saying an environment is missing. The apply itself still fails loud
-— it binds `<env>-apply`, GitHub
-auto-creates it empty, and the apply-match fingerprint refuses the cell naming
-every missing `TF_VAR_*` ([`troubleshooting.md`](troubleshooting.md) §`Saved plan
-is stale`).
+just nothing saying an environment is missing. On a layout whose environment
+injects a non-empty `TF_VAR_*` or `TF_WORKSPACE` the apply itself still fails loud — it binds `<env>-apply`,
+GitHub auto-creates it empty, and the apply-match fingerprint refuses the cell
+naming every missing `TF_VAR_*` ([`troubleshooting.md`](troubleshooting.md)
+§`Saved plan is stale`). **On a folder-per-env layout it does not**: nothing is
+injected, both sides hash the empty set, and the apply runs inside that empty
+environment with none of its protection rules
+([`../CONTRACT.md`](../CONTRACT.md) §Env model states the condition and what it
+leaves as the only control). If that is your layout, treat this silence as the
+whole check and verify the mode against the environment names by hand.
 
 ### 0.12.0 — wrappers pass secrets by name, and re-pinning alone is not enough
 
