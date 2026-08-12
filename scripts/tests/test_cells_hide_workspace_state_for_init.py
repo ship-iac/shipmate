@@ -25,12 +25,19 @@ from _loader import action_steps
 #: state be moved *inside* the empty directory init recreates, both red.
 #: `mktemp -du` rather than a fixed name so the hidden path cannot collide with
 #: anything already in RUNNER_TEMP and swallow the state it holds.
+#: Bound to a name rather than wrapped across two lines inside the list below:
+#: adjacent string literals in a list are one dropped comma away from silently
+#: merging two pinned lines into one.
+_INIT_LINE = (
+    "terramate run --disable-safeguards=git-out-of-sync --no-recursive -C "
+    '"$STACK" -- tofu init -input=false -reconfigure'
+)
+
 _HIDE_INIT_RESTORE = [
     'ws="$STACK/terraform.tfstate.d"',
     'hidden=$(mktemp -du "$RUNNER_TEMP/tfstate.d.XXXXXX")',
     'if [ -d "$ws" ]; then mv "$ws" "$hidden"; fi',
-    "terramate run --disable-safeguards=git-out-of-sync --no-recursive -C "
-    '"$STACK" -- tofu init -input=false -reconfigure',
+    _INIT_LINE,
     'if [ -d "$hidden" ]; then rm -rf "$ws"; mv "$hidden" "$ws"; fi',
     '[ "$init_status" -eq 0 ] || exit "$init_status"',
 ]

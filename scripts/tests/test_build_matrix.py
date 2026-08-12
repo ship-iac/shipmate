@@ -251,7 +251,11 @@ def _stub_terramate(monkeypatch, stacks, env_lines, calls=None):
             if calls is not None:
                 calls.append((args, env))
             return subprocess.CompletedProcess(args, 0, env_lines, "")
-        pytest.fail(f"unexpected command: {args}")
+        # `raise` rather than a bare `pytest.fail(...)` call so the function has no
+        # implicit fall-through beside its three value returns. Same exception the
+        # call raises, and `Failed` is a BaseException, so a broad `except Exception`
+        # in the code under test still cannot swallow it.
+        raise pytest.fail.Exception(f"unexpected command: {args}")
 
     monkeypatch.setattr(bm, "_run", fake_run)
 
@@ -381,11 +385,12 @@ def test_compute_cells_warns_and_continues_when_the_probe_cannot_run(monkeypatch
     # The cell dict's own shape is pinned by test_multi_env_stack_yields_one_cell_per_env;
     # what this case adds is that the fan-out happened at all after the probe failed.
     assert [(c["stack"], c["environment"]) for c in cells] == [("stacks/app", "dev-eu")]
-    assert capsys.readouterr().out.splitlines() == [
+    expected_warning = (
         "::warning::could not verify that terramate.config.run.env leaves TF_VAR_env, "
         "TF_VAR_region, TF_WORKSPACE alone: `terramate run` exited 1. terramate said: "
         "Error: evaluating terramate.config.run.env > undefined variable env.TF_VAR_env"
-    ]
+    )
+    assert capsys.readouterr().out.splitlines() == [expected_warning]
 
 
 def test_compute_cells_skips_the_probe_with_no_stacks(monkeypatch):
