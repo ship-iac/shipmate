@@ -38,7 +38,7 @@ jobs:
       # auto-created environment and a legitimately empty shared one are
       # byte-identical in content). Existence is the only discriminator, and it
       # is only worth checking before the waves.
-      - uses: ship-iac/shipmate/actions/verify-environments@22cf11d09b2823ead7f4fb02b2350595d70fab2c
+      - uses: ship-iac/shipmate/actions/verify-environments@9c0354a97cd97e07967dac2c7e36f524cdc18700
         with:
           waves-json: ${{ inputs.waves_json }}
           shared-envs: ${{ vars.SHIPMATE_SHARED_ENVS }}
