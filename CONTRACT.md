@@ -205,7 +205,9 @@ never used.
   prevent: the split envs' plan cells bind a bare `<env>` nobody created, GitHub
   auto-creates it empty, and the plan runs with no `TF_VAR_*` — where the layout
   gives `TF_VAR_env` a fallback default, that plan silently describes the **wrong**
-  environment and a reviewer approves it. The loud refusal only arrives at apply.
+  environment and a reviewer approves it. The loud refusal only arrives at apply,
+  and only where the environment injects a variable the fingerprint sees (see the
+  fail-loud bullet below).
 - **A logical env may opt into one shared environment (shared mode).** Listing
   it in the `SHIPMATE_SHARED_ENVS` **repository variable** makes both paths bind
   the bare `<env>` — one environment, no suffix. The price is stated in
@@ -235,7 +237,8 @@ never used.
     environment?) and binds `foo-apply-apply` on the apply path. Nothing
     validates this; it is a naming rule.
 - **A mode that disagrees with the environment names fails loud — on every
-  layout whose GitHub Environment injects at least one variable.** The binding
+  layout whose GitHub Environment injects at least one non-empty `TF_VAR_*` or
+  `TF_WORKSPACE`.** The binding
   then resolves to an environment that does not exist, GitHub auto-creates it
   empty, no `TF_VAR_*` reaches the cell, and the apply-match fingerprint refuses
   it naming the missing variables. That is the reason for the naming: under an

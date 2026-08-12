@@ -288,17 +288,19 @@ def _shared_intro(name, env, mode):
 
     Neither branch asserts the mode: sharing is selected by the
     `SHIPMATE_SHARED_ENVS` repository variable, which doctor cannot read. In
-    ambiguous mode the sibling existence WARNING already says the binding is
-    undetermined, and with the variable unset nothing binds the bare environment
-    at all; in shared mode the variable is what makes the bare environment the
-    apply environment too, and a half-done migration that renamed the
-    environments and forgot the variable leaves the applies binding
+    ambiguous mode it may not go on to assert that nothing binds the bare
+    environment either -- the plan side is bound by the consumer's own `plan.yml`,
+    which doctor does not read, so a static `<env>-plan` binding with the env
+    shared leaves both namings live; in shared mode the variable is what makes the
+    bare environment the apply environment too, and a half-done migration that
+    renamed the environments and forgot the variable leaves the applies binding
     `<env>-apply`. Two findings in one report may not contradict each other."""
     if mode == AMBIGUOUS:
         return (
             f"GitHub Environment `{name}` — shared between plan and apply only if "
             f"`{env}` is listed in the `SHIPMATE_SHARED_ENVS` repository variable, which "
-            "doctor cannot read, and bound by nothing at all otherwise —"
+            "doctor cannot read, and the suffixed naming exists beside it, so which "
+            "naming each path binds is undetermined —"
         )
     return (
         f"GitHub Environment `{name}` — shared between plan and apply while `{env}` is "
@@ -317,9 +319,10 @@ def _env_noun(mode, role):
 
 
 def _missing_half(name, env, role, mode):
-    """One absent half of the split pair. In ambiguous mode the bare `{env}` may
-    be what a path binds, so the consequence is stated conditionally rather than
-    as "cannot {role}"."""
+    """One absent half of the split pair. Neither branch says the jobs "cannot
+    {role}": the binding resolves to a name GitHub auto-creates empty, so they
+    run. In ambiguous mode the bare `{env}` may be what a path binds instead, so
+    there the consequence is conditional as well."""
     if mode == AMBIGUOUS:
         return (
             f"GitHub Environment `{name}` does not exist while `{env}` does — if this "
@@ -329,8 +332,9 @@ def _missing_half(name, env, role, mode):
             "environment."
         )
     return (
-        f"GitHub Environment `{name}` does not exist — stacks tagged "
-        f"`env:{env}` cannot {role} (create it and set TF_VAR_* vars)."
+        f"GitHub Environment `{name}` does not exist — the {role} jobs for stacks tagged "
+        f"`env:{env}` bind a name GitHub auto-creates empty, with no variables, no secrets "
+        "and none of its protection rules. Create it and set its TF_VAR_* vars."
     )
 
 

@@ -306,13 +306,20 @@ def test_ambiguous_environment_naming_is_the_phantom_control_warning(monkeypatch
     deleting it."""
     monkeypatch.setattr(doctor, "_gh_json", _existence("dev-eu", "dev-eu-apply"))
     out = doctor._environment_warnings(_ctx())
+    # Two findings and no more: the ambiguity WARNING plus the missing `dev-eu-plan`
+    # (its own test below). Without a count, `out[0]` is an unpinned position.
+    assert len(out) == 2, out
     level, text = out[0]
     assert level == doctor.WARNING
     assert "`dev-eu`" in text
     assert "`dev-eu-apply`" in text
     assert "SHIPMATE_SHARED_ENVS" in text
     assert "plan.yml" in text
+    # The binding half...
     assert "Either naming may therefore be bound by nothing" in text
+    # ...and the phantom-control half this test is named for. Both halves, or the
+    # name and docstring claim more than the body checks.
+    assert "reading as a control that is in no code path" in text
     assert "the other is bound by nothing" not in text
     assert "Delete the environments" not in text
 
@@ -330,6 +337,21 @@ def test_ambiguous_naming_still_reports_the_missing_half(monkeypatch):
     # Not "cannot apply": while `dev-eu` exists it may be what the apply waves
     # bind, so the consequence is conditional.
     assert "cannot apply" not in missing[0]
+
+
+def test_split_missing_half_does_not_claim_the_jobs_cannot_run(monkeypatch):
+    """Same correction as the MISSING-mode finding, in the other branch of the
+    same helper: with `dev-eu-plan` present and `dev-eu-apply` absent the apply
+    binds a name GitHub auto-creates empty and, on a layout injecting nothing,
+    proceeds. "cannot apply" sends the reader looking for a failed run."""
+    monkeypatch.setattr(doctor, "_gh_json", _existence("dev-eu-plan"))
+    out = doctor._environment_warnings(_ctx())
+    assert len(out) == 1
+    level, text = out[0]
+    assert level == doctor.WARNING
+    assert "`dev-eu-apply` does not exist" in text
+    assert "cannot apply" not in text
+    assert "auto-creates empty" in text
 
 
 def test_missing_mode_says_the_binding_auto_creates_an_empty_environment(monkeypatch):
@@ -657,7 +679,6 @@ def test_shared_env_without_approval_rules_says_no_gate_is_available(monkeypatch
 def test_ambiguous_naming_reads_the_protection_shape_of_both_namings(monkeypatch):
     """Ambiguous mode reads every environment that exists, not just one naming's
     -- pinned on the requested paths, which is all this asserts. The
-    report-level statement that the unused naming's rules are inert is
     report-level statement that one naming may be bound by nothing is
     `_environment_warnings`' ambiguity WARNING, not a per-rule finding here."""
     responses = _protection(
@@ -687,19 +708,28 @@ _SHARED_INTRO = (
     "listed in the `SHIPMATE_SHARED_ENVS` repository variable, which doctor cannot "
     "read —"
 )
+#: Hedged both ways: the ambiguous clause may not assert that the bare
+#: environment IS shared, and may not assert that nothing binds it either -- a
+#: static `<env>-plan` plan-side binding with the env shared leaves both namings
+#: live, and doctor reads neither the variable nor the consumer's `plan.yml`.
 _AMBIGUOUS_INTRO = (
     "GitHub Environment `dev-eu` — shared between plan and apply only if `dev-eu` is "
     "listed in the `SHIPMATE_SHARED_ENVS` repository variable, which doctor cannot "
-    "read, and bound by nothing at all otherwise —"
+    "read, and the suffixed naming exists beside it, so which naming each path binds "
+    "is undetermined —"
 )
+#: The flat "nothing binds it" assertion the ambiguous clause used to make.
+_AMBIGUOUS_UNBOUND = "bound by nothing at all otherwise"
 
 
 def test_shared_role_findings_hedge_the_mode_when_the_naming_is_ambiguous(monkeypatch):
     """With both namings present the sibling ambiguity WARNING says the binding is
     undetermined, so a finding here may not assert that the bare environment IS
-    shared -- with the variable unset nothing binds it and its reviewers stall
-    nothing. Two findings in one report may not contradict each other; the
-    plan-env secret notice has the same rule for the same reason."""
+    shared -- nor that nothing binds it, which the ambiguous branch-policy WARNING
+    in the same report would contradict, and which a reader could act on by
+    deleting an environment an unmigrated `plan.yml` still binds. Two findings in
+    one report may not contradict each other; the plan-env secret notice has the
+    same rule for the same reason."""
     responses = _protection(
         _env("dev-eu", rules=("required_reviewers",)),
         _env("dev-eu-apply", rules=("required_reviewers",)),
@@ -710,6 +740,7 @@ def test_shared_role_findings_hedge_the_mode_when_the_naming_is_ambiguous(monkey
     level, text = out[0]
     assert level == doctor.WARNING
     assert _SHARED_ASSERTED not in text
+    assert _AMBIGUOUS_UNBOUND not in text
     assert text.startswith(_AMBIGUOUS_INTRO)
 
 
@@ -2577,6 +2608,7 @@ def test_ambiguous_mode_secret_findings_do_not_assert_the_environments_role(monk
     found = doctor._plan_env_secret_warnings(_ctx())
     assert [lvl for lvl, _ in found] == [doctor.NOTICE, doctor.WARNING]
     assert _SHARED_ASSERTED not in found[0][1]
+    assert _AMBIGUOUS_UNBOUND not in found[0][1]
     assert found[0][1].startswith(_AMBIGUOUS_INTRO)
     assert "it is the apply environment too" not in found[0][1]
     assert "it may be the apply environment too" in found[0][1]

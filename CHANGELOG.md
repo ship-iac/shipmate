@@ -41,8 +41,8 @@ the same change that moves your pins.
   artifact names and comment grammar all key on the bare logical env name; the
   suffix exists only where a job binds an environment.
 
-  The rename is what makes a mis-set mode loud wherever the environment injects
-  a variable. Under the old naming the dangerous direction was silent: an apply
+  The rename is what makes a mis-set mode loud wherever the environment injects a
+  non-empty `TF_VAR_*` or `TF_WORKSPACE`. Under the old naming the dangerous direction was silent: an apply
   wave falling back to the bare `<env>` landed on the live *plan* environment and
   applied with plan variables, no reviewer and no apply role. Now either mismatch
   resolves to an environment nobody created, and the apply-match fingerprint
