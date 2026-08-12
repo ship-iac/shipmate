@@ -28,16 +28,24 @@ code-owner review off leaves no unforgeable merge-time control at all and warns;
 the booleans are unioned across every `pull_request` rule on the branch, since
 GitHub enforces the union across layered rulesets),
 a missing GitHub
-Environment (`<env>` / `<env>-apply`) for a tagged-in environment, the
+Environment (`<env>-plan` / `<env>-apply`, or a single shared `<env>`) for a
+tagged-in environment, the
 plan/apply environment protection shape (a plan environment must have no
 approval-type protection rules — required reviewers or wait timers — and no
 deployment branch policy; an apply environment with no approval rule is only a
 note, and "no approval rule" is deliberately not "no protection rules": GitHub
 synthesizes a `branch_policy` protection rule for any environment with a
-deployment branch policy, and a branch policy is not a review), the secrets a
+deployment branch policy, and a branch policy is not a review; the role each
+environment plays is inferred from the environment **names** — doctor never reads
+`SHIPMATE_SHARED_ENVS` — so a shared environment carrying approval rules warns
+that they stall the plan cells and the nightly drift run, its branch policy and
+its missing approval rules are notes, and an env with a bare `<env>` *and* a
+suffixed sibling warns that which one is bound is undetermined and the other's
+protection rules are inert), the secrets a
 plan environment holds (names only — the API never returns a value; a plan
 cell runs branch code with whatever that environment releases and control 8
-forbids protecting it, so a note giving the exact count and a capped list of
+forbids protecting it, so a note giving the count — exact unless the listing was
+too long to read whole — and a capped list of
 the names — a crowded environment's later names are not printed, so that one
 finding cannot spend the whole report's size budget — and a warning if
 `SHIPMATE_APP_PRIVATE_KEY` is one of them), whether the `shipmate-engine`
@@ -98,7 +106,7 @@ listing too long to read whole **warns** that whether the environment holds
 `SHIPMATE_APP_PRIVATE_KEY` could not be determined, rather than reading as a
 routine note about the names it did see.
 
-All three environment probes — pair existence, protection shape, and the
+All three environment probes — existence, protection shape, and the
 secrets a plan environment holds — cover only the environments of the stacks a
 given pull request changed; the declared set comes from that commit's plan
 matrix. So the report's all-clear line names the environments it actually probed
@@ -221,6 +229,21 @@ The fix is a re-plan — push, or re-run the plan workflow — and an apply of t
 fresh plan. There is no force: an apply that silently re-planned would apply
 something nobody reviewed, and the check left pending is exactly what stops the
 gate greening over an unapplied stack.
+
+**If the mismatch names *every* `TF_VAR_*` and it started right after an
+environment-naming or `SHIPMATE_SHARED_ENVS` change, the cause is not the plan.**
+The apply job bound an environment that does not exist, GitHub auto-created it
+empty, and no variables reached the cell — which is the loud failure the naming
+is designed to produce. Two ways to arrive there:
+
+- **The mode disagrees with the names.** Split naming (`<env>-plan` +
+  `<env>-apply`) with the env listed in `SHIPMATE_SHARED_ENVS`, or a single bare
+  `<env>` with it not listed. Check the variable against the environments that
+  actually exist — the failing job's own page names the environment it bound, and
+  an empty one that nobody created is the tell.
+- **Spaces after the commas in `SHIPMATE_SHARED_ENVS`.** `dev-eu, dev-us` matches
+  `dev-eu` only: the second entry is ` dev-us` and the comparison is exact, so
+  that env silently stays split. Same symptom, different cause.
 
 ### `shipmate / gate` never goes green
 

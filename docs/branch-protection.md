@@ -93,7 +93,7 @@ can satisfy the required check.
 `shipmate doctor`'s report and its authorization are in `troubleshooting.md`.
 
 **Environment setup** lives in `getting-started.md`: §Required — plan →
-§Environments for this tier has the `<env>` plan environments and
+§Environments for this tier has the `<env>-plan` environments and
 `shipmate-engine`, and §Required — apply → §Environment setup has the
 `<env>-apply` environments.
 
@@ -118,7 +118,10 @@ fails closed rather than proceeding unreviewed.)
   anything between; `hardening.md` #6 states the trade-off). Configure it with **required reviewers on the `<env>-apply` GitHub Environment**, not
   in the ruleset (`getting-started.md` §Required — apply → §Environment setup has
   those settings). This gates both pre-merge `shipmate apply <env>` and the
-  post-merge `deploy.yml` apply, since both run against `<env>-apply`.
+  post-merge `deploy.yml` apply, since both run against the apply environment. An
+  env sharing one environment between plan and apply (`SHIPMATE_SHARED_ENVS`)
+  cannot be gated this way at all — a reviewer there stalls the plan cells too
+  (`hardening.md` §6).
   - Deployment approvals differ from PR reviews: a reviewer **can approve
     their own deployment** by default, so a sole maintainer still gets a
     confirm-step on a gated environment. Tick "Prevent self-review" on the environment for

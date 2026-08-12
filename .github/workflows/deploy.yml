@@ -14,8 +14,9 @@ on:
       # SLACK_WEBHOOK) are inherited by a called workflow automatically;
       # secrets are NOT, and an encrypting consumer that forwards nothing has
       # every env-level apply fail its decrypt fail-safe. There is no
-      # environment to fall back on: the wave jobs bind `<env>-apply`, not
-      # `shipmate-engine`, so this one has to travel down the call chain.
+      # environment to fall back on: the wave jobs bind the env's apply
+      # environment, not `shipmate-engine`, so this one has to travel down the
+      # call chain.
       SHIPMATE_PLAN_PASSPHRASE: { required: false }
       # Feeds the summary job's gate-refresh + Complete-gate App-token mints.
       # An empty key fails loud at mint.

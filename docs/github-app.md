@@ -321,7 +321,9 @@ the actual work here:
   `environment:` is branch-authored data: it is `matrix.environment`, which
   `build-matrix` derives from `env/*` Terramate tags in the head checkout, so a
   pull request that tags a stack `env/shipmate-engine` produces a plan cell
-  naming that environment. What makes that inert is that `pull_request_target`
+  naming an environment of its choosing (`shipmate-engine-plan` with the
+  documented `-plan` suffix on that binding, the bare `shipmate-engine` in a
+  repository that shares one environment between plan and apply). What makes that inert is that `pull_request_target`
   runs the **base** copy of `plan.yml`, and in the base copy the only place
   `secrets.SHIPMATE_APP_PRIVATE_KEY` is named is inside the called reusable
   workflow — a branch author cannot add a secret reference.

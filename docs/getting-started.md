@@ -52,17 +52,37 @@ one-time runbook. It is a prerequisite of this tier, not an optional extra.
 
 ### Environments for this tier
 
-Every logical environment needs a GitHub Environment pair (`<env>`,
+Every logical environment needs a GitHub Environment pair (`<env>-plan`,
 `<env>-apply`), plus the one fixed `shipmate-engine` environment that holds the
-App key ([`github-app.md`](github-app.md)). `<env>`/`<env>-apply` are never named
-in workflow YAML at all — they're read from Terramate stack tags at runtime. This
-tier needs `<env>` and `shipmate-engine`; `<env>-apply` is the apply tier's —
-but create it now anyway. `shipmate doctor` runs on every plan run and warns for
-each half of a pair that does not exist, so tier 1 with only `<env>` annotates
-every pull request with "GitHub Environment `<env>-apply` does not exist" until
-the apply tier is done.
+App key ([`github-app.md`](github-app.md)). Neither half is ever named in
+workflow YAML — the logical env comes from Terramate stack tags at runtime and the
+suffix is added where the job binds the environment. This tier needs `<env>-plan`
+and `shipmate-engine`; `<env>-apply` is the apply tier's — but create it now
+anyway, unless that env shares one environment (below), where creating both a bare
+`<env>` and an `<env>-apply` is the ambiguous naming doctor warns about.
+`shipmate doctor` runs on every plan run and warns for each half of a
+pair that does not exist, so tier 1 with only `<env>-plan` annotates every pull
+request with "GitHub Environment `<env>-apply` does not exist" until the apply
+tier is done. (With **neither** half created you get one warning naming both, and
+the shared alternative below.)
 
-Create each `<env>` with
+**One environment instead of two.** A logical env may share a single bare
+`<env>` between plan and apply: create `<env>` alone (no `-plan`, no `-apply`),
+list it in the `SHIPMATE_SHARED_ENVS` repository variable (comma-separated, no
+spaces), and drop the `-plan` suffix from the `environment:` line of your
+`plan.yml` and `drift.yml`. It costs the reviewer gate and the OIDC subject
+split for that env, and those are not recoverable without splitting the
+environment again — read [`hardening.md`](hardening.md) §6 and §7–9 for the full
+price before choosing it.
+
+Only the engine's apply waves read that variable. The `environment:` line in your
+`plan.yml` and `drift.yml` is **one expression for the whole repository**, so a
+repository that shares *some* envs and splits others cannot bind a static suffix
+there — it carries the engine's own expression instead
+([`../CONTRACT.md`](../CONTRACT.md) §Env model). Pick one mode for all your
+environments and the static form below is right.
+
+Create each environment with
 `gh api -X PUT repos/<owner>/<repo>/environments/<name>`, then set protection
 rules from Settings → Environments → `<name>` (or the API):
 
@@ -74,18 +94,18 @@ rules from Settings → Environments → `<name>` (or the API):
   the App key to trusted workflow runs, not gating a human decision, and
   reviewers here would stall every plan and apply run waiting for an approval
   nobody is meant to give.
-- **`<env>`** (plan): no reviewers, no deployment branch policy at all —
+- **`<env>-plan`** (plan): no reviewers, no deployment branch policy at all —
   reviewers block every plan cell, and a branch policy blocks every plan cell
   whose pull request targets a branch it does not name (plan jobs run at the
   pull request's *base* ref) ([`hardening.md`](hardening.md) #8;
   `shipmate doctor` warns on either). If your `plan.yml` needs plan-time cloud
   credentials — as the fence below does — this is also where its role goes: set
-  `AWS_ROLE_ARN` and `AWS_REGION` on each `<env>`, naming a **read-only** plan
+  `AWS_ROLE_ARN` and `AWS_REGION` on each `<env>-plan`, naming a **read-only** plan
   role ([`aws.md`](aws.md) §Environment variables). A plan environment can have
   no protection at all, so anyone who can push a branch can reach whatever it
   names.
-- **The variables your layout injects**, on **each** `<env>` and (in the apply
-  tier) each `<env>-apply`: `TF_VAR_env` and `TF_VAR_region` where the backend
+- **The variables your layout injects**, on **each** `<env>-plan` and (in the
+  apply tier) each `<env>-apply`: `TF_VAR_env` and `TF_VAR_region` where the backend
   path and resources are built from them, `TF_WORKSPACE` for workspace-per-env,
   nothing for folder-per-env, whose leaves fix env and region by path. The plan
   fence below reads `vars.TF_VAR_env` / `vars.TF_VAR_region`; unset, they render
@@ -165,7 +185,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.detect.outputs.matrix) }}
-    environment: ${{ matrix.environment }}
+    environment: ${{ matrix.environment }}-plan
     name: ${{ matrix.stack }} / ${{ matrix.environment }}
     env:
       TF_VAR_env: ${{ vars.TF_VAR_env }}
@@ -261,17 +281,25 @@ rules from Settings → Environments → `<name>` (or the API):
   branch.** Closes the direct-branch-secret path
   ([`hardening.md`](hardening.md) #17). This is the baseline, and it is not a
   reviewer gate: the secrets are released without a human seeing the
-  deployment.
+  deployment. A shared env has no `<env>-apply`; the policy goes on its bare
+  `<env>`, where it is the one control of this set that still applies — and,
+  because plan cells run at the pull request's base ref, it also refuses any
+  plan cell whose base ref it does not name ([`hardening.md`](hardening.md) #6).
 - **Required reviewers and "Prevent self-review" — per environment, your
-  call.** With them, an apply to that environment pauses for a named team, and
-  that pause is the one gate an App installation token cannot forge, since a
-  reviewer decision is a human action a minted token cannot take. Without them
-  the tier is self-service and applies proceed unattended. Teams commonly gate
-  production and leave dev self-service; the maximally-hardened position gates
-  every apply environment. [`hardening.md`](hardening.md) #6 states what each
-  choice costs — shipmate does not make it for you.
+  call**, for every env that has an `<env>-apply`. A shared env is not one of
+  them: a reviewer on the bare `<env>` stalls the plan cells and the nightly
+  drift run too, so the gate there is unavailable rather than declined, and
+  turning it on later means splitting the environment again
+  ([`hardening.md`](hardening.md) #6). With them, an apply to that environment
+  pauses for a named team, and that pause is the one gate an App installation
+  token cannot forge, since a reviewer decision is a human action a minted
+  token cannot take. Without them the tier is self-service and applies proceed
+  unattended. Teams commonly gate production and leave dev self-service; the
+  maximally-hardened position gates every apply environment.
+  [`hardening.md`](hardening.md) #6 states what each choice costs — shipmate
+  does not make it for you.
 - **Pair a reviewer-gated environment with `global.shipmate.explicit_envs`.**
-  List the bare env name (`prod`, not `prod-apply`) so a bare `shipmate apply`
+  List the bare env name (`prod` — neither `prod-plan` nor `prod-apply`) so a bare `shipmate apply`
   skips it and it is only ever reached via the targeted `shipmate apply prod`
   (which then pauses for the environment reviewer).
 
@@ -476,7 +504,7 @@ succeeds, which is why the same snippets serve both same-organization and
 cross-organization consumers.
 
 `SHIPMATE_PLAN_PASSPHRASE` is the exception, and it is not affected by the
-boundary: the wave jobs bind `<env>-apply`, not `shipmate-engine`, so that
+boundary: the wave jobs bind the env's apply environment, not `shipmate-engine`, so that
 secret has no environment to be read from and must travel down the call chain
 as a repository secret you pass by name.
 

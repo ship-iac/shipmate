@@ -98,9 +98,11 @@ organization controls.
 ## Dynamic environments
 
 Environments are not hardcoded into workflow YAML. An environment is
-defined by a GitHub Environment plus tags applied to the stacks that belong
-to it; adding a new environment is a data change (create the Environment,
-tag the relevant stacks), never a workflow code change. This keeps the
+defined by the GitHub Environments named after it (`<env>-plan` and
+`<env>-apply`, or one shared `<env>` — `../CONTRACT.md` §Env model) plus tags
+applied to the stacks that belong to it; adding a new environment is a data change
+(create its Environments, tag the relevant stacks), never a workflow code
+change. This keeps the
 number of environments a repository supports independent of the complexity
 of its CI configuration.
 

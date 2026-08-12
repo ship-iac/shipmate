@@ -82,6 +82,126 @@ names. The entries below `0.2.0` predate the first tagged release, or
 `CHANGELOG.md` does not pin one; they are kept for repositories moving from a
 very old pin.
 
+### 0.13.0 — every environment is renamed, and re-pinning alone is not enough
+
+Plan and apply now bind `<env>-plan` and `<env>-apply`; the bare `<env>` means
+one environment shared between both paths. There is no compatibility shim: the
+old naming (`<env>` for plan, `<env>-apply` for apply) resolves to environments
+that no longer play those roles, so every logical env is migrated by hand, per
+env, in the same change that moves your pins.
+
+**Create the environments first, then edit the workflows.** Doing it the other
+way round means plan cells bind an environment that does not exist yet, GitHub
+auto-creates it empty, and a flavor whose `TF_VAR_env` has a fallback default
+then plans **the wrong environment** instead of failing — the empty environment
+injects nothing and the fallback supplies a name nobody chose.
+
+Split mode (the default, keeps the reviewer gate):
+
+1. **If the plan side assumes a cloud role through OIDC, widen that role's trust
+   policy before you create the environment.** The environment claim is *inside*
+   the `sub` condition ([`aws.md`](aws.md) §GitHub OIDC), so a role conditioned on
+   `…:environment:<env>` stops matching the moment plan cells bind `<env>-plan`,
+   and the only symptom is a bare `AccessDenied — Not authorized to perform
+   sts:AssumeRoleWithWebIdentity` with nothing wrong-looking in the policy, the
+   provider or the workflow. **Add** `…:environment:<env>-plan` alongside the
+   existing subject — the condition value takes a list — rather than replacing it:
+   until step 3's edit is on the default branch, plan runs still bind the bare
+   environment and a single-value rewrite breaks every one of them. Write the
+   subject in the immutable form your own OIDC logs show, not the documented shape
+   (same section).
+2. Create `<env>-plan` and copy the bare `<env>`'s **variables** to it
+   (`TF_VAR_env`, `TF_VAR_region` / `TF_WORKSPACE`, any plan-side `AWS_ROLE_ARN` /
+   `AWS_REGION`). Keep the plan environment policy-free: no reviewers, no
+   deployment branch policy. Environment **secrets** cannot be copied — no API
+   returns a secret's value — so re-enter each one by hand; a plan-side secret
+   left behind (`SHIPMATE_PLAN_PASSPHRASE` is the one to watch) resolves to empty
+   and every later apply fails its plan-decrypt fail-safe.
+3. Change `environment:` to `${{ matrix.environment }}-plan` in the `plan` job of
+   `plan.yml` **and** the `drift` job of `drift.yml`. Nothing else moves:
+   `matrix.environment`, check names, tags, `explicit_envs` and artifact names
+   all stay the bare logical name.
+4. **Merge that change**, then delete the bare `<env>`. `plan.yml` runs on
+   `pull_request_target`, so until the edit is on the default branch every plan
+   run — the migration pull request's own included — uses the **base** copy and
+   still binds the bare environment. Deleting it before the merge means the next
+   plan re-creates it empty and plans with no variables, which is the hazard
+   above. Between the merge and the delete, doctor warns that the naming is
+   ambiguous; that warning is the migration's own to-do list.
+5. Drop `…:environment:<env>` from the plan role's trust policy once the bare
+   environment is deleted and no run can present it any more. Left in place, the
+   old subject stays presentable to the role, and GitHub auto-creates an
+   environment the moment anything binds that name — a stale subject is a
+   standing way back in, and nothing in the pipeline probes IAM to notice it.
+6. `<env>-apply` is unchanged, its apply role included — the name it binds and the
+   claim it presents both stay as they were.
+
+Shared mode (one environment, opt in per env):
+
+1. **Copy `<env>-apply`'s variables and secrets onto the bare `<env>` first.**
+   Both are read from whichever environment the wave binds, and step 3 flips that
+   binding — not the delete in step 4. Variables copy; environment **secrets**
+   cannot (no API returns a secret's value), so re-enter each one by hand and
+   confirm the bare environment holds every name `<env>-apply` did. A secret that
+   exists only on `<env>-apply` is unrecoverable after the delete.
+2. **If applies assume a cloud role through OIDC, add the bare subject to that
+   role's trust policy** — `…:environment:<env>` alongside the existing
+   `…:environment:<env>-apply`, in the immutable form your own OIDC logs show
+   ([`aws.md`](aws.md) §GitHub OIDC). The environment claim is inside the `sub`
+   condition, so without this the role stops matching the moment step 3 binds the
+   bare environment, and the failure is the same undiagnosable `AccessDenied` that
+   section describes. The shared environment holds **one** `AWS_ROLE_ARN` for both
+   paths, so decide there whether that is the apply role or a read-only one — plan
+   cells running branch code will assume whatever it names.
+3. Add the logical env name to the `SHIPMATE_SHARED_ENVS` repository variable:
+   comma-separated, **no spaces after the commas** (` dev-us` is not `dev-us`,
+   and that env silently stays split). This is the step that moves the binding.
+4. Keep the bare `<env>`, and delete `<env>-apply` once nothing binds it — left in
+   place it makes the naming ambiguous, and doctor warns for exactly that.
+5. Drop `…:environment:<env>-apply` from the trust policy once that environment is
+   gone. Left in place, the old subject stays presentable to the role, and
+   GitHub auto-creates an environment the moment anything binds that name — a
+   stale subject is a standing way back in, and nothing in the pipeline probes
+   IAM to notice it.
+6. Know the price: a reviewer or a wait timer on that environment stalls the plan
+   cells and the nightly drift run, so the reviewer gate is gone rather than
+   moved, and plan and apply OIDC tokens become identical in `sub`
+   ([`hardening.md`](hardening.md) §6, §7–9).
+
+**The plan-side binding is repository-wide; only the apply side reads the
+variable.** The wave jobs of the engine's `apply-env-level.yml` read
+`SHIPMATE_SHARED_ENVS` per env, but `plan.yml` and `drift.yml` are yours and the
+engine cannot reach their `environment:` line, so what you write there applies to
+every env at once. If **every** env moves the same way, bind statically —
+`${{ matrix.environment }}-plan` for all-split, `${{ matrix.environment }}` for
+all-shared. For a **mixed** repository, carry the engine's own expression so one
+variable drives both paths ([`../CONTRACT.md`](../CONTRACT.md) §Env model has the
+rule and the indentation constraint):
+
+```yaml
+    environment: >-
+      ${{ contains(format(',{0},', vars.SHIPMATE_SHARED_ENVS), format(',{0},', matrix.environment))
+      && matrix.environment || format('{0}-plan', matrix.environment) }}
+```
+
+A static bare binding in a mixed repository is the quiet failure here: the split
+envs' plan cells bind an environment you deleted, GitHub auto-creates it empty,
+and a layout with a `TF_VAR_env` fallback default plans the wrong environment for
+a reviewer to approve. Nothing refuses until the apply.
+
+**One silence to expect.** `shipmate doctor` infers the mode from the environment
+*names* — it never reads `SHIPMATE_SHARED_ENVS`, which would need a permission the
+App manifest does not declare. So a repository that keeps a bare `<env>` and never
+sets the variable gets **no existence finding**, where the old code warned that
+`<env>-apply` was missing: bare-only is exactly what a correctly configured shared
+env looks like, and doctor reports it as one — you still get its shared-environment
+findings (unreviewed applies, a warning if it carries approval rules, its secrets),
+just nothing saying an environment is missing. The apply itself still fails loud
+— it binds `<env>-apply`, GitHub
+auto-creates it empty, and the apply-match fingerprint refuses the cell naming
+every missing `TF_VAR_*` ([`troubleshooting.md`](troubleshooting.md) §`Saved plan
+is stale`).
+
 ### 0.12.0 — wrappers pass secrets by name, and re-pinning alone is not enough
 
 Replace `secrets: inherit` in every wrapper job that calls an engine reusable

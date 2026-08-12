@@ -146,11 +146,12 @@ never used.
 
 ## Env model
 
-- One GitHub Environment exists per logical environment (for example,
-  `staging`, `production`). The Environment is always the unit of binding,
-  apply-gating, protection, and the plan/apply split — **even when it carries
-  no variables**. What it injects depends on how the consumer repo models
-  environments (its IaC layout):
+- Every logical environment (for example `staging`, `production`) is carried by
+  GitHub Environments named after it: `staging-plan` and `staging-apply` by
+  default, or a single `staging` in shared mode (both namings below). The
+  Environment is always the unit of binding, apply-gating, protection, and the
+  plan/apply split — **even when it carries no variables**. What it injects
+  depends on how the consumer repo models environments (its IaC layout):
 
   | Repo layout | Env identity injected by the GitHub Environment | Mechanism |
   |-------------|--------------------------------------------------|-----------|
@@ -169,17 +170,86 @@ never used.
   environment) carry required reviewers configured on the GitHub
   Environment itself, so approval gating is enforced by GitHub, not by
   workflow logic.
-- Plan and apply are split into distinct GitHub Environments: plan jobs run
-  against `<env>`, apply jobs run against `<env>-apply`. This lets apply
-  carry stricter protection rules (required reviewers, wait timers) than
-  plan, even though both act against the same logical environment.
+- **Plan and apply bind different GitHub Environments by default (split
+  mode).** For a logical env `<env>`, plan jobs (and the nightly drift run) bind
+  `<env>-plan`, apply jobs bind `<env>-apply`. This lets apply carry stricter
+  protection rules (required reviewers, wait timers) than plan, even though both
+  act against the same logical environment. "The apply environment" below means
+  `<env>-apply` in split mode and the bare `<env>` in shared mode.
+- **The two sides are bound by different owners, and only the apply side reads
+  the variable.** `SHIPMATE_SHARED_ENVS` is read by the eight wave jobs of the
+  engine's `apply-env-level.yml`, so the apply side resolves the mode **per env**,
+  from repository settings. The plan side is bound in `plan.yml` and `drift.yml`,
+  which are the **consumer's** files and out of the engine's reach: whatever
+  expression sits there is the plan-side rule for the whole repository. Two
+  supported shapes follow:
+  - **Uniform repository** — every logical env in the same mode. Bind
+    `${{ matrix.environment }}-plan` (all-split) or `${{ matrix.environment }}`
+    (all-shared) statically. This is the common case.
+  - **Mixed repository** — some envs shared, some split. A static plan-side
+    binding is then wrong for half the repository, so carry the engine's own
+    expression, with `-plan` as the fallback, and let the one variable drive both
+    paths:
+
+    ```yaml
+    environment: >-
+      ${{ contains(format(',{0},', vars.SHIPMATE_SHARED_ENVS), format(',{0},', matrix.environment))
+      && matrix.environment || format('{0}-plan', matrix.environment) }}
+    ```
+
+    Both content lines sit at the same indent: a folded scalar keeps a newline
+    inside the parsed value where the indent changes, and GitHub then rejects the
+    expression.
+
+  A static bare binding in a mixed repository is the failure this rule exists to
+  prevent: the split envs' plan cells bind a bare `<env>` nobody created, GitHub
+  auto-creates it empty, and the plan runs with no `TF_VAR_*` — where the layout
+  gives `TF_VAR_env` a fallback default, that plan silently describes the **wrong**
+  environment and a reviewer approves it. The loud refusal only arrives at apply.
+- **A logical env may opt into one shared environment (shared mode).** Listing
+  it in the `SHIPMATE_SHARED_ENVS` **repository variable** makes both paths bind
+  the bare `<env>` — one environment, no suffix. The price is stated in
+  `docs/hardening.md` (§6 and §7–9): a protection rule on a shared environment
+  gates the plan cells and the nightly drift run too, so the reviewer gate is
+  given up rather than relocated, and plan and apply OIDC tokens become identical
+  in `sub`, so no trust policy can separate them.
+  - The value is a comma-separated list of **logical** env names, matched on
+    comma boundaries, so `dev-us` does not match an entry `dev-us-2`.
+  - **No spaces after the commas.** `dev-eu, dev-us` leaves `dev-us` unmatched:
+    the entry is ` dev-us` and each entry is compared whole, spaces included.
+    The direction is fail-safe — the env stays split, and with no `<env>-apply` environment the
+    apply-match fingerprint refuses the cell — but it is the mistake consumers
+    actually make.
+  - **Matching is case-insensitive**, because GitHub's `contains()` is:
+    `SHIPMATE_SHARED_ENVS=Prod` opts `prod` into shared mode. The expression
+    normalizes nothing.
+  - The variable is deliberately repository-level, not a Terramate global and
+    not a workflow input: a global is branch content, so a pull request could
+    flip the mode and bind an environment the reviewer gate is not on, and an
+    input buys nothing a repository variable does not — changing a repository
+    variable needs settings access, the same trust level as the environments and
+    the ruleset it interacts with.
+  - **`-plan` and `-apply` are reserved suffixes for logical env names.** A
+    logical env literally named `foo-apply` makes the naming undecidable (is an
+    existing `foo-apply` that env's shared environment, or `foo`'s apply
+    environment?) and binds `foo-apply-apply` on the apply path. Nothing
+    validates this; it is a naming rule.
+- **A mode that disagrees with the environment names fails loud, by
+  construction.** The binding then resolves to an environment that does not
+  exist, GitHub auto-creates it empty, no `TF_VAR_*` reaches the cell, and the
+  apply-match fingerprint refuses it naming the missing variables. That is the
+  reason for the naming: under an asymmetric naming the dangerous direction was
+  silent, because the environment the apply wave fell back on was the live plan
+  environment.
 - **No env names in workflow YAML — ever.** Workflow files must not
   hardcode `staging`, `production`, or any other environment name. Workflows
   discover environments dynamically from stack tags (see Tag grammar,
   below) and GitHub Environment configuration. Adding a new environment is
-  purely a data change: create the GitHub Environment, then tag the stacks
-  that belong to it. No workflow YAML is edited to add or remove an
-  environment. The one carve-out is `shipmate-engine` — a single fixed
+  purely a data change: create its GitHub Environments (`<env>-plan` and
+  `<env>-apply`, or one bare `<env>` listed in `SHIPMATE_SHARED_ENVS`), then tag
+  the stacks that belong to it. No workflow YAML is edited to add or remove an
+  environment — the suffix in `plan.yml`'s binding is written once, for every
+  env. The one carve-out is `shipmate-engine` — a single fixed
   environment name, not a logical environment a consumer defines or names
   itself, that exists purely to scope the App private key to the
   default-branch ref (see `docs/github-app.md` §Key-exposure boundary). It
@@ -274,7 +344,7 @@ variables on it:
 On the apply path a wave job first looks for `AWS_ROLE_ARN_<WORKLOAD>`, where
 `<WORKLOAD>` is the cell's `workload/<name>` tag upper-cased with `-` replaced
 by `_`, and falls back to `AWS_ROLE_ARN` when the cell carries no workload tag
-or that variable is unset — so one `<env>-apply` Environment can serve several
+or that variable is unset — so one apply Environment can serve several
 workloads with a role each.
 
 With no role variable set the credentials step is skipped and the job holds no
@@ -282,12 +352,12 @@ cloud credential at all, which is how the sample repos run credential-free.
 This is wired on the **apply path only**: every wave job of
 `apply-env-level.yml` requests `id-token: write` and runs
 `aws-actions/configure-aws-credentials`, gated on one of those roles being set,
-before its apply-cell step, reading the variables from the `<env>-apply`
-Environment it is bound to. The `snapshot` and `complete` jobs deliberately get
+before its apply-cell step, reading the variables from the apply Environment it
+is bound to. The `snapshot` and `complete` jobs deliberately get
 no token. Plan cells have no credentials step.
 
-On the apply path the engine passes through whatever role the `<env>-apply`
-Environment names, and nothing more: which role that is — and whether two
+On the apply path the engine passes through whatever role the apply Environment
+names, and nothing more: which role that is — and whether two
 environments' roles live in different AWS accounts — is a property of *where the
 consumer sets the variable*, not something the engine resolves or validates.
 "Per Environment" is where the consumer *should* set it, not an enforcement:
@@ -401,7 +471,7 @@ only labels the output as shipmate's own.
 request, identified by the HTML marker `<!-- shipmate:doctor -->` (distinct
 from the plan comment's `<!-- shipmate:summary -->`) and upserted in place the
 same way. It combines ten live settings probes (gate ruleset,
-default-branch `pull_request` rule, environment pair existence, environment
+default-branch `pull_request` rule, environment existence, environment
 protection shape, plan-environment secrets, the `shipmate-engine`
 environment's own existence and default-branch scoping, `pull_request_target`
 triggers in the consumer's workflow files other than `plan.yml`, which uses
@@ -429,7 +499,7 @@ they surface findings only via `shipmate doctor`, never on the plan path's
 own annotations.
 
 Four of the probes are narrower than the repository. All three **environment**
-probes (pair existence, protection shape, and the secrets a plan environment
+probes (existence, protection shape, and the secrets a plan environment
 holds) see only the environments of the stacks this pull request changed — the
 declared set comes from the plan matrix's cell summaries — so the report's all-clear line names the environments it actually
 covered instead of claiming the repository's environments are all sound, and
@@ -534,8 +604,9 @@ shapes (not a list of strings) fail loud, like `env_order`.
 
 `explicit_envs` constrains the bare pre-merge `shipmate apply` **only**. The
 post-merge deploy applies every cell whose apply check is still pending,
-explicit environments included; the control on that path is the `<env>-apply`
-environment's required reviewers, not this global. The asymmetry is deliberate:
+explicit environments included; the control on that path is the apply
+environment's required reviewers — which a shared environment cannot carry (see
+§Env model) — not this global. The asymmetry is deliberate:
 after merge the pull request is closed, and the apply requirements above include
 **mergeable**, so a deploy that honoured the global would strand those cells
 with no path to apply at all: their `apply / <stack> / <env>` checks would sit
@@ -1024,7 +1095,7 @@ only when the job-level `SHIPMATE_RESULTS` outcome signals a failure and no
 row already carries `failed`/`blocked` (the common case has its own ❌/🚫
 rows and needs no extra line), reusing the header's own wording with a ❌ so
 an apply run that dies before any cell reports (a missing/denied
-`<env>-apply` environment, a job-level cancel) still surfaces a failure
+apply environment, a job-level cancel) still surfaces a failure
 signal; an overview table (one row per expected cell — status emoji
 ✅ applied / ⚠️ applied but not recorded / ❌ failed /
 🚫 blocked / ⏭️ not attempted, stack, env, `+A ~C -D`

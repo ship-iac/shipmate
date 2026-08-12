@@ -11,6 +11,64 @@ section below names the SHA the release tags.
 The version line stays `v0.x` while action inputs, check names, and the comment
 grammar are declared unstable in `README.md`.
 
+## [0.13.0] — unreleased
+
+Tags `TBD`.
+
+**Re-pinning is not enough for this release: every GitHub Environment is renamed,
+and `plan.yml` / `drift.yml` change one line each.** There is no compatibility
+shim — `docs/upgrading.md` §0.13.0 is the per-env migration, and it must happen in
+the same change that moves your pins.
+
+### Changed
+
+- **BREAKING for consumers — plan and apply bind `<env>-plan` and
+  `<env>-apply`.** The plan side was the bare `<env>`; it is now `<env>-plan`, so
+  per logical env: create `<env>-plan`, copy the bare environment's variables to
+  it, delete the bare `<env>`, and bind `${{ matrix.environment }}-plan` in
+  `plan.yml`'s `plan` job and `drift.yml`'s `drift` job. Create the environments
+  **before** editing the workflows: a job binding an environment that does not
+  exist gets an empty one auto-created by GitHub, and a flavor whose `TF_VAR_env`
+  has a fallback default then plans the wrong environment instead of failing. Only
+  the engine's apply waves read `SHIPMATE_SHARED_ENVS`; your plan-side binding is
+  one expression for the whole repository, so a repository running **mixed** modes
+  carries the engine's expression there rather than a static suffix
+  (`CONTRACT.md` §Env model, `docs/upgrading.md` §0.13.0).
+
+  Nothing else moves — `matrix.environment`, check names, tags, `explicit_envs`,
+  artifact names and comment grammar all key on the bare logical env name; the
+  suffix exists only where a job binds an environment.
+
+  The rename is what makes a mis-set mode loud. Under the old naming the
+  dangerous direction was silent: an apply wave falling back to the bare `<env>`
+  landed on the live *plan* environment and applied with plan variables, no
+  reviewer and no apply role. Now either mismatch resolves to an environment
+  nobody created, and the apply-match fingerprint refuses the cell.
+
+### Added
+
+- **`SHIPMATE_SHARED_ENVS` — one environment for both paths, opt in per env.** A
+  logical env named in this repository variable (comma-separated logical names,
+  **no spaces after the commas**, matched case-insensitively on comma boundaries)
+  binds the bare `<env>` for plan and apply alike. `-plan` and `-apply` are
+  reserved suffixes for logical env names.
+
+  What it costs, for that env: the **reviewer gate** — not relocated, removed,
+  because a protection rule gates every job binding the environment and would
+  stall the plan cells and the nightly drift run — and the **OIDC subject split**:
+  plan and apply tokens become identical in `sub`, so no trust policy can separate
+  them and plan-time branch code can assume the write role. A deployment branch
+  policy scoped to the default branch becomes conditional too, since plan runs at
+  the pull request's base ref. `docs/hardening.md` §6 and §7–9 state the full
+  price; choose it for envs where the plan path holds no credentials at all.
+- **`shipmate doctor` infers the naming per env and words its findings for it.**
+  Split, shared, or ambiguous — a bare `<env>` beside a suffixed sibling warns
+  that which one is bound is undetermined and the other's protection rules are
+  inert. It reads environment *names*, never the variable (that needs a permission
+  the App manifest does not declare), so a repository with a bare `<env>` and the
+  variable unset gets no *existence* finding — bare-only is what shared mode looks
+  like, and it is reported as a shared environment.
+
 ## [0.12.0] — 2026-08-11
 
 Tags `e9eb27d`.
