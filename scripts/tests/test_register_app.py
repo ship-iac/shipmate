@@ -126,6 +126,31 @@ def test_main_refuses_an_operator_value_before_it_reaches_gh(monkeypatch, tmp_pa
     assert calls == []
 
 
+def test_main_refuses_an_owner_that_could_be_read_as_a_flag(monkeypatch, tmp_path):
+    # `--repo`'s value is its own argv element in `gh variable set --repo <value>`,
+    # so one starting with '-' is the shape a CLI reads as a flag. GitHub logins
+    # cannot start with '-' either. Written in the `--repo=` form deliberately:
+    # argparse itself refuses the space-separated form, so that shape never
+    # reaches the regex and would prove nothing about it.
+    calls = _stub_run(monkeypatch)
+
+    with pytest.raises(SystemExit) as exc:
+        ra.main(
+            [
+                "--name",
+                "shipmate-acme",
+                "--repo=-evil/repo",
+                "--out",
+                str(tmp_path / "key.pem"),
+                "--code",
+                "c123",
+            ]
+        )
+
+    assert str(exc.value) == "--repo must be <owner>/<repo>: '-evil/repo'"
+    assert calls == []
+
+
 def test_main_refuses_a_manifest_code_that_would_retarget_the_api_path(monkeypatch, tmp_path):
     # The code lands in `app-manifests/<code>/conversions` and arrives over a
     # loopback socket: a '/' in it points the conversion at another endpoint.
