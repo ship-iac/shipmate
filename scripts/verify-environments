@@ -1,0 +1,99 @@
+#!/usr/bin/env python3
+"""Refuse an apply run whose cells would bind a GitHub Environment nobody created.
+
+GitHub creates a missing environment on demand, with no reviewers, no wait timer
+and no deployment branch policy, and the apply proceeds inside it. Nothing else
+in the engine sees that: the apply-match fingerprint compares variable *content*,
+and a legitimately empty shared environment is byte-identical to an auto-created
+one — a layout injecting no non-empty `TF_VAR_*` or `TF_WORKSPACE` hashes the
+empty set on both sides, matches, and applies. Existence, checked before any wave
+starts, is the only discriminator.
+
+Scope: the **apply-side** binding only. The plan side is bound in the consumer's
+own `plan.yml`/`drift.yml`, which the engine cannot read.
+"""
+
+import json
+import os
+import sys
+
+
+def apply_binding(env, shared_envs):
+    """The environment `apply-env-level.yml`'s wave jobs bind for a logical env.
+
+    The wave jobs' rule, restated — a listed env binds the bare name, anything
+    else falls through to `<env>-apply`. Entries are compared whole between comma
+    boundaries, so a space un-lists one (`dev-eu, dev-us` leaves `dev-us`
+    unlisted) and `dev-us` does not match an entry `dev-us-2`; matching is
+    case-insensitive because GitHub's `contains()` is.
+
+    This rule now exists twice — here and as the YAML ternary in eight wave jobs.
+    Neither side is derived from the other: both are compared to one hand-written
+    constant in scripts/tests/test_apply_env_binding_guard.py.
+    """
+    listed = f",{env},".lower() in f",{shared_envs},".lower()
+    return env if listed else f"{env}-apply"
+
+
+def required_bindings(waves, shared_envs):
+    """Every apply-side environment name this run's cells will bind."""
+    envs = {cell["environment"] for cells in waves.values() for cell in cells or []}
+    if not envs:
+        # The callers gate every route on a non-empty level, so a payload with no
+        # cell is a broken handoff, not an idle run. Passing it would make an
+        # unreadable matrix the way to skip this check entirely.
+        raise SystemExit(
+            "::error::the wave matrices carry no cell, so no environment could be "
+            "checked; this workflow is only called when there is work to apply, so "
+            "this is a malformed hand-off rather than an empty run."
+        )
+    return sorted({apply_binding(env, shared_envs) for env in envs})
+
+
+def existing_names(listing):
+    """The repository's environment names, or a refusal if the listing is partial.
+
+    One page is not a check. `total_count` is read strictly: a listing missing the
+    key has unknown completeness, and reading it as complete would make every
+    unread environment look absent — or, worse, invite softening this refusal.
+    """
+    names = {e["name"] for e in listing.get("environments") or []}
+    if listing["total_count"] > len(names):
+        raise SystemExit(
+            f"::error::the environments listing is truncated "
+            f"({listing['total_count']} environments, {len(names)} read), so the "
+            "apply-path pre-flight cannot tell a missing environment from an unread "
+            "one; refusing to apply."
+        )
+    return names
+
+
+def main():
+    raw_waves = os.environ["SHIPMATE_WAVES_JSON"]
+    try:
+        waves = json.loads(raw_waves)
+    except ValueError as exc:
+        raise SystemExit(
+            f"::error::the wave matrices did not parse as JSON ({exc}), so no "
+            "environment could be checked; refusing to apply."
+        ) from exc
+    bindings = required_bindings(waves, os.environ["SHIPMATE_SHARED_ENVS"])
+    existing = existing_names(json.load(sys.stdin))
+    missing = [b for b in bindings if b not in existing]
+    if missing:
+        raise SystemExit(
+            "::error::this apply would bind GitHub Environment(s) that do not "
+            f"exist: {', '.join(missing)} — GitHub creates a missing environment on "
+            "demand with no reviewers, no wait timer and no deployment branch "
+            "policy, so the apply would run outside every control that environment "
+            "is meant to carry. Two ways to fix it: create each environment named "
+            "above, or correct the SHIPMATE_SHARED_ENVS repository variable so the "
+            "apply binds the environments you did create — a listed env binds the "
+            "bare <env>, anything else binds <env>-apply, and entries are compared "
+            "whole between commas so a stray space un-lists one."
+        )
+    print(f"::notice::apply-path environments verified: {', '.join(bindings)}")
+
+
+if __name__ == "__main__":
+    main()

@@ -220,8 +220,10 @@ never used.
   - **No spaces after the commas.** `dev-eu, dev-us` leaves `dev-us` unmatched:
     the entry is ` dev-us` and each entry is compared whole, spaces included.
     The direction is fail-safe — the env stays split, and with no `<env>-apply` environment the
-    apply-match fingerprint refuses the cell, subject to the condition in the
-    fail-loud bullet below — but it is the mistake consumers actually make.
+    existence pre-flight refuses the run before any wave applies, and the
+    apply-match fingerprint would refuse the cell too, subject to the condition
+    in the fail-loud bullet below — but it is the mistake consumers actually
+    make.
   - **Matching is case-insensitive**, because GitHub's `contains()` is:
     `SHIPMATE_SHARED_ENVS=Prod` opts `prod` into shared mode. The expression
     normalizes nothing.
@@ -254,10 +256,36 @@ never used.
   identity is the leaf's path — so plan and apply both hash the empty set, the
   fingerprint matches, and the apply proceeds against the right code and the
   right state but inside an environment GitHub auto-created with no reviewers,
-  no wait timer and no deployment branch policy. Nothing in the pipeline refuses
-  that: on a no-variable layout the environments are the only control over the
-  apply, and a mode/name mismatch is reported by `shipmate doctor`'s naming
-  findings rather than by the apply.
+  no wait timer and no deployment branch policy. The **fingerprint** cannot see
+  that on such a layout — it compares variable content, and a legitimately empty
+  shared environment is byte-identical to an auto-created one. What refuses it
+  is the separate existence pre-flight in the next bullet, which is
+  unconditional; `shipmate doctor` additionally reports the naming mismatch
+  advisorily on a pull request.
+- **A binding that names no existing environment is refused before any wave
+  applies.** `apply-env-level.yml`'s `snapshot` job — which every apply route
+  fans through, and which runs before `wave0` — computes the apply-side binding
+  for every cell in the incoming matrix, lists the repository's environments
+  once, and fails the run naming every computed binding the repository does not
+  have, plus both ways to fix it: create that environment, or correct
+  `SHIPMATE_SHARED_ENVS`. This is a **second and independent** mechanism from
+  the fingerprint refusal above, and it is the one that covers the layouts the
+  fingerprint cannot: it compares **existence**, not variable content, so it
+  holds whatever the environment injects, including nothing.
+  - Its own failures are fail-closed as well. A listing that could not be read,
+    or one whose `total_count` exceeds the number of environments returned,
+    fails the run rather than letting the applies through — a check that did not
+    happen is not a passed check. A transient failure clears on a re-run of the
+    workflow.
+  - It costs a caller nothing: the default `GITHUB_TOKEN` lists environments
+    under the `checks: read` block `snapshot` already declares, so no new
+    `permissions:` grant, App key or App permission is involved.
+  - **Deliberately out of scope**, so what it promises stays readable: the
+    **plan-side** binding, which lives in the consumer's own `plan.yml` /
+    `drift.yml` and is out of the engine's reach; an environment that **exists
+    but is wrong** (empty, mis-scoped, missing its role — content is the
+    fingerprint's and `shipmate doctor`'s subject); and an environment created
+    or deleted in the window between the pre-flight and the wave jobs.
 - **No env names in workflow YAML — ever.** Workflow files must not
   hardcode `staging`, `production`, or any other environment name. Workflows
   discover environments dynamically from stack tags (see Tag grammar,

@@ -58,6 +58,7 @@ extend-include = [
     "scripts/plan-crypt",
     "scripts/register-app",
     "scripts/summary-comment",
+    "scripts/verify-environments",
     "scripts/waves",
 ]
 

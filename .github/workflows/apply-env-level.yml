@@ -16,7 +16,8 @@ on:
 # the caller granted -- which now includes id-token: write.
 permissions: {}
 jobs:
-  # Capture the apply-check ids BEFORE any wave runs. No secret, no
+  # Pre-flight, before any wave runs: verify the environments the waves will
+  # bind exist, then capture the apply-check ids. No secret, no
   # environment needed -- but permissions cap at each `uses:` boundary, so
   # every caller job below must also grant checks:read or this job fails at
   # workflow-resolution time.
@@ -26,6 +27,17 @@ jobs:
     outputs:
       snapshot: ${{ steps.snap.outputs.snapshot }}
     steps:
+      # First, before anything else in this workflow: an apply that binds an
+      # environment nobody created gets one auto-created with no reviewers, no
+      # wait timer and no branch policy, and the fingerprint cannot see it (an
+      # auto-created environment and a legitimately empty shared one are
+      # byte-identical in content). Existence is the only discriminator, and it
+      # is only worth checking before the waves.
+      - uses: ship-iac/shipmate/actions/verify-environments@22cf11d09b2823ead7f4fb02b2350595d70fab2c
+        with:
+          waves-json: ${{ inputs.waves_json }}
+          shared-envs: ${{ vars.SHIPMATE_SHARED_ENVS }}
+          github-token: ${{ github.token }}
       - id: snap
         uses: ship-iac/shipmate/actions/apply-snapshot@83960876131bf43583026d39948184079c807e33
         with:
