@@ -244,8 +244,10 @@ folder-per-env layout injects none, hashes the empty set on both sides and so
 never reaches this error at all; see [`../CONTRACT.md`](../CONTRACT.md) §Env
 model for what that layout gives up instead.) In practice the pre-flight in the
 next section refuses such a run before any wave starts, whatever the layout
-injects, so reaching *this* error from a naming change means the environment
-went missing after the pre-flight passed. Two ways to arrive there:
+injects, so reaching *this* error from a naming change usually means either the
+environment went missing after the pre-flight passed, or it exists because an
+earlier mis-set run auto-created it empty — an environment that exists satisfies
+the pre-flight and still injects nothing. Two ways to arrive there:
 
 - **The mode disagrees with the names.** Split naming (`<env>-plan` +
   `<env>-apply`) with the env listed in `SHIPMATE_SHARED_ENVS`, or a single bare
@@ -273,7 +275,11 @@ Two fixes, and the error names both because either can be the right one:
 
 - **Create each environment named.** The apply path binds `<env>-apply` for a
   split env and the bare `<env>` for one listed in the `SHIPMATE_SHARED_ENVS`
-  repository variable.
+  repository variable. Existence is matched **case-exactly** against the stack's
+  env tag, while the `SHIPMATE_SHARED_ENVS` listing is case-insensitive — so an
+  environment differing from the named binding only in case does not satisfy the
+  pre-flight, and GitHub may reject a second one as a duplicate. Rename the
+  existing environment (or the tag) to match rather than creating another.
 - **Correct `SHIPMATE_SHARED_ENVS`.** If the environments you created are the
   ones you meant, the variable is what disagrees with them: an entry for an env
   that is really split, a missing entry for one that is really shared, a typo, or

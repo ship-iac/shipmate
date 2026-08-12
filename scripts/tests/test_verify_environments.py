@@ -50,6 +50,12 @@ def test_a_payload_with_no_cell_is_refused_rather_than_passed():
     assert "no cell" in str(exc.value)
 
 
+def test_a_cell_without_an_environment_is_refused_rather_than_tracebacking():
+    with pytest.raises(SystemExit) as exc:
+        vf.required_bindings({"wave0": [{"stack": "a"}]}, "")
+    assert "carries no 'environment' key" in str(exc.value)
+
+
 def test_a_truncated_listing_is_refused():
     with pytest.raises(SystemExit) as exc:
         vf.existing_names(_listing(["dev-eu-apply"], total=200))

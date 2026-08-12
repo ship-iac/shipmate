@@ -260,7 +260,8 @@ never used.
   that on such a layout — it compares variable content, and a legitimately empty
   shared environment is byte-identical to an auto-created one. What refuses it
   is the separate existence pre-flight in the next bullet, which is
-  unconditional; `shipmate doctor` additionally reports the naming mismatch
+  unconditional on the apply-side binding — whatever the environment injects,
+  within the scope its own bullet states; `shipmate doctor` additionally reports the naming mismatch
   advisorily on a pull request.
 - **A binding that names no existing environment is refused before any wave
   applies.** `apply-env-level.yml`'s `snapshot` job — which every apply route
@@ -271,7 +272,11 @@ never used.
   `SHIPMATE_SHARED_ENVS`. This is a **second and independent** mechanism from
   the fingerprint refusal above, and it is the one that covers the layouts the
   fingerprint cannot: it compares **existence**, not variable content, so it
-  holds whatever the environment injects, including nothing.
+  holds whatever the environment injects, including nothing. It runs once per
+  `apply-env-level.yml` call, so an env-ordered deploy can have completed an
+  earlier level's applies before a later level is refused — a partial deploy, not
+  an unverified apply: every level verifies its own environments before its own
+  waves.
   - Its own failures are fail-closed as well. A listing that could not be read,
     or one whose `total_count` exceeds the number of environments returned,
     fails the run rather than letting the applies through — a check that did not

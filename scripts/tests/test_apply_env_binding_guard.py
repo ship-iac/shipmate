@@ -120,6 +120,10 @@ def test_snapshot_verifies_the_environments_before_snapshotting_the_checks():
         "the whole job before wave0, or the applies it exists to refuse have "
         "already started"
     )
+    assert steps[0].get("continue-on-error") in (None, False), (
+        "the pre-flight step is continue-on-error: it would name the missing "
+        "environments and let the waves apply into them anyway"
+    )
     assert _jobs()["wave0"]["needs"] == ["snapshot"], (
         "wave0 must gate on snapshot, or the pre-flight refuses a run whose first "
         "wave is already applying"

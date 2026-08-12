@@ -37,7 +37,14 @@ def apply_binding(env, shared_envs):
 
 def required_bindings(waves, shared_envs):
     """Every apply-side environment name this run's cells will bind."""
-    envs = {cell["environment"] for cells in waves.values() for cell in cells or []}
+    try:
+        envs = {cell["environment"] for cells in waves.values() for cell in cells or []}
+    except KeyError as exc:
+        raise SystemExit(
+            f"::error::a wave matrix cell carries no {exc} key, so the environment it "
+            "would bind could not be checked; this is a malformed hand-off rather than "
+            "an empty run; refusing to apply."
+        ) from exc
     if not envs:
         # The callers gate every route on a non-empty level, so a payload with no
         # cell is a broken handoff, not an idle run. Passing it would make an
