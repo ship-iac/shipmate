@@ -242,7 +242,12 @@ is designed to produce on any layout whose environment injects a non-empty
 `TF_VAR_*` or `TF_WORKSPACE`. (A
 folder-per-env layout injects none, hashes the empty set on both sides and so
 never reaches this error at all; see [`../CONTRACT.md`](../CONTRACT.md) §Env
-model for what that layout gives up instead.) Two ways to arrive there:
+model for what that layout gives up instead.) In practice the pre-flight in the
+next section refuses such a run before any wave starts, whatever the layout
+injects, so reaching *this* error from a naming change usually means either the
+environment went missing after the pre-flight passed, or it exists because an
+earlier mis-set run auto-created it empty — an environment that exists satisfies
+the pre-flight and still injects nothing. Two ways to arrive there:
 
 - **The mode disagrees with the names.** Split naming (`<env>-plan` +
   `<env>-apply`) with the env listed in `SHIPMATE_SHARED_ENVS`, or a single bare
@@ -252,6 +257,56 @@ model for what that layout gives up instead.) Two ways to arrive there:
 - **Spaces after the commas in `SHIPMATE_SHARED_ENVS`.** `dev-eu, dev-us` matches
   `dev-eu` only: the second entry is ` dev-us` and the comparison is exact, so
   that env silently stays split. Same symptom, different cause.
+
+### `this apply would bind GitHub Environment(s) that do not exist`
+
+The apply run stopped in its `snapshot` job, before any wave, and the error names
+every environment the applies would have bound that the repository does not have.
+
+Why it refuses instead of warning: GitHub creates a missing environment **on
+demand**, with no reviewers, no wait timer and no deployment branch policy, and
+the apply then runs inside it. That environment is the only control over an apply
+on a layout injecting no variables — the apply-match fingerprint compares
+variable *content*, and an auto-created environment is byte-identical to a
+legitimately empty shared one — so existence, checked before the waves, is the
+only thing that can tell them apart.
+
+Two fixes, and the error names both because either can be the right one:
+
+- **Create each environment named.** The apply path binds `<env>-apply` for a
+  split env and the bare `<env>` for one listed in the `SHIPMATE_SHARED_ENVS`
+  repository variable. Existence is matched **case-exactly** against the stack's
+  env tag, while the `SHIPMATE_SHARED_ENVS` listing is case-insensitive — so an
+  environment differing from the named binding only in case does not satisfy the
+  pre-flight, and GitHub may reject a second one as a duplicate. Rename the
+  existing environment (or the tag) to match rather than creating another.
+- **Correct `SHIPMATE_SHARED_ENVS`.** If the environments you created are the
+  ones you meant, the variable is what disagrees with them: an entry for an env
+  that is really split, a missing entry for one that is really shared, a typo, or
+  a space after a comma (`dev-eu, dev-us` leaves ` dev-us` as the entry, and
+  entries are compared whole). `shipmate doctor` on a pull request reports what
+  the environment names imply per env, which is the fastest way to see which side
+  is wrong.
+
+Two neighbouring failures from the same step, both also fail-closed:
+
+- **`could not list this repository's GitHub Environments`.** The check did not
+  happen, so the applies are refused rather than permitted. Check first that the
+  job calling `apply-env-level.yml` grants **`actions: read`**: permissions cap at
+  each `uses:` boundary, and on a **private** repository listing environments 403s
+  with `checks: read` alone. Every apply route shipped here grants it already, so
+  a persistent 403 points at a hand-written caller. A 5xx or a rate limit clears
+  on a re-run of the workflow.
+- **`the environments listing is truncated`.** One page did not cover the
+  repository's environments, so a missing environment cannot be told from an
+  unread one. Reduce the number of environments, or re-run — this is a hard
+  ceiling around 100 environments, not a transient.
+
+What this does **not** cover, deliberately: the plan-side binding (that is in
+your own `plan.yml` / `drift.yml`, which the engine cannot read), an environment
+that exists but is empty or mis-scoped (the fingerprint and `shipmate doctor`
+cover content), and an environment deleted between the pre-flight and the wave
+that binds it.
 
 ### `shipmate / gate` never goes green
 

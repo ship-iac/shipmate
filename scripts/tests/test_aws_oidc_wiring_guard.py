@@ -70,7 +70,10 @@ def test_snapshot_and_complete_jobs_get_exactly_their_declared_permissions():
     # Whole-mapping comparison, not `id-token is None`: the realistic break is
     # the block being deleted, and an absent block is not an absent scope -- the
     # job then inherits the caller's grants (or, with the floor above, nothing).
-    expected = {"snapshot": {"checks": "read"}, "complete": {"actions": "read"}}
+    expected = {
+        "snapshot": {"checks": "read", "actions": "read"},
+        "complete": {"actions": "read"},
+    }
     jobs = _load("apply-env-level.yml")["jobs"]
     for name, perms in expected.items():
         assert jobs[name].get("permissions") == perms, (
