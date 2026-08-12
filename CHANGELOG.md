@@ -11,9 +11,9 @@ section below names the SHA the release tags.
 The version line stays `v0.x` while action inputs, check names, and the comment
 grammar are declared unstable in `README.md`.
 
-## [0.14.0] — unreleased
+## [0.14.0] — 2026-08-12
 
-Tags `TBD`.
+Tags `f485a78`.
 
 **Re-pinning is enough for this release, with one exception: grep your
 `global.shipmate.explicit_envs` for entries carrying a `-plan` or `-apply`
