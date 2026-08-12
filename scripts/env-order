@@ -83,9 +83,12 @@ def read_env_order(run=None):
 
 
 def _validate_explicit_envs(envs):
-    """Raise SystemExit unless `envs` is a list of env-name strings. Guards the
-    HCL author typo of a bare string (silently iterated char-by-char) and any
-    non-list global — same fail-loud posture as env_order."""
+    """Raise SystemExit unless `envs` is a list of bare env-name strings. Guards
+    the HCL author typo of a bare string (silently iterated char-by-char), any
+    non-list global, and an entry carrying a `-plan`/`-apply` environment suffix —
+    the value is matched against the bare env name on the apply checks, so a
+    suffixed entry would skip nothing at all. Same fail-loud posture as
+    env_order."""
     if not isinstance(envs, list):
         raise SystemExit(
             "::error::explicit_envs global must be a list of env-name strings, "
@@ -97,6 +100,14 @@ def _validate_explicit_envs(envs):
             f"::error::explicit_envs elements must all be env-name strings; "
             f"got non-string element(s) {bad!r}"
         )
+    for e in envs:
+        for suffix in ("-plan", "-apply"):
+            if e.endswith(suffix):
+                raise SystemExit(
+                    f"::error::explicit_envs entry {e!r} carries the environment suffix "
+                    f"{suffix!r}; explicit_envs is matched against the bare logical env "
+                    f"name — write {e[: -len(suffix)]!r} instead."
+                )
     return envs
 
 

@@ -1,3 +1,5 @@
+import json
+
 import pytest
 from _loader import load_script
 
@@ -195,6 +197,22 @@ def test_read_explicit_envs_rejects_dict():
 def test_read_explicit_envs_rejects_non_str_element():
     with pytest.raises(SystemExit):
         eo.read_explicit_envs(run=lambda args: '["prod", 123]')
+
+
+def test_read_explicit_envs_rejects_an_environment_suffix():
+    """`explicit_envs` is matched against the bare logical env name the apply
+    checks carry, so `prod-apply` or `prod-plan` would skip nothing while looking
+    right -- and every documented environment name now carries a suffix, which is
+    what makes the mistake likely. Both suffixes fail loud, naming the offending
+    entry and the bare name to write instead."""
+    for entry in ("prod-apply", "prod-plan"):
+        with pytest.raises(SystemExit) as e:
+            eo.read_explicit_envs(run=lambda args, entry=entry: json.dumps(["dev", entry]))
+        assert entry in str(e.value)
+        assert "'prod'" in str(e.value)
+    # The bare name is still accepted, and a logical env whose name merely
+    # contains the word is not a suffix match.
+    assert eo.read_explicit_envs(run=lambda args: '["prod", "plan-eu"]') == ["prod", "plan-eu"]
 
 
 def test_blocked_envs_direct_predecessor():

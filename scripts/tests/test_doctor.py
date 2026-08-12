@@ -159,8 +159,14 @@ def _gate_rule(integration_id=999, strict=True):
     ]
 
 
-def _environments(*names):
-    return {"environments": [{"name": n} for n in names]}
+def _environments(*names, total=None):
+    """The environments listing. `total` defaults to the number of names given;
+    pass a larger value to model the truncated read `per_page=100` without
+    pagination can produce."""
+    return {
+        "total_count": len(names) if total is None else total,
+        "environments": [{"name": n} for n in names],
+    }
 
 
 def _secrets(*names, total=None):
@@ -291,19 +297,53 @@ def test_no_environment_at_all_names_both_modes(monkeypatch):
 
 
 def test_ambiguous_environment_naming_is_the_phantom_control_warning(monkeypatch):
-    """Both namings present is the one silent failure: whichever environment the
-    apply waves do not bind is protected by rules in no code path, and it reads
-    as a control that is there. So the finding names both, says the binding is
-    decided by the variable, and says the unused one's rules do nothing."""
+    """Both namings present is the one silent failure: whichever environment
+    nothing binds is protected by rules in no code path, and it reads as a control
+    that is there. So the finding names both, says the binding is decided by the
+    variable and by the consumer's own plan.yml, and hedges *which* naming is the
+    unbound one -- with a static plan-side `-plan` binding and the env shared,
+    both namings are live, so this may not assert that one is inert nor advise
+    deleting it."""
     monkeypatch.setattr(doctor, "_gh_json", _existence("dev-eu", "dev-eu-apply"))
     out = doctor._environment_warnings(_ctx())
-    assert len(out) == 1
     level, text = out[0]
     assert level == doctor.WARNING
     assert "`dev-eu`" in text
     assert "`dev-eu-apply`" in text
     assert "SHIPMATE_SHARED_ENVS" in text
-    assert "inert" in text
+    assert "plan.yml" in text
+    assert "Either naming may therefore be bound by nothing" in text
+    assert "the other is bound by nothing" not in text
+    assert "Delete the environments" not in text
+
+
+def test_ambiguous_naming_still_reports_the_missing_half(monkeypatch):
+    """A consumer holding `dev-eu` + `dev-eu-plan` and no `dev-eu-apply` must
+    still be told `dev-eu-apply` does not exist. The ambiguity WARNING says
+    nothing about which environments exist, so dropping this loop hides a
+    genuinely half-created split pair behind it -- fail-closed."""
+    monkeypatch.setattr(doctor, "_gh_json", _existence("dev-eu", "dev-eu-plan"))
+    out = doctor._environment_warnings(_ctx())
+    missing = [t for lvl, t in out if lvl == doctor.WARNING and "does not exist" in t]
+    assert len(missing) == 1, out
+    assert "`dev-eu-apply` does not exist" in missing[0]
+    # Not "cannot apply": while `dev-eu` exists it may be what the apply waves
+    # bind, so the consequence is conditional.
+    assert "cannot apply" not in missing[0]
+
+
+def test_missing_mode_says_the_binding_auto_creates_an_empty_environment(monkeypatch):
+    """`env:<env>` stacks with neither suffixed environment do NOT stop planning:
+    the binding resolves to a name GitHub auto-creates empty, so the plan runs and
+    describes whatever the layout defaults to. Claiming they "cannot plan or
+    apply" sends the reader looking for a failed run there is none of."""
+    monkeypatch.setattr(doctor, "_gh_json", _existence("shipmate-engine"))
+    out = doctor._environment_warnings(_ctx())
+    assert len(out) == 1
+    level, text = out[0]
+    assert level == doctor.WARNING
+    assert "cannot plan or apply" not in text
+    assert "auto-creates empty" in text
 
 
 def test_shared_environment_produces_no_existence_finding(monkeypatch):
@@ -578,6 +618,27 @@ def test_shared_env_with_a_branch_policy_is_a_notice_naming_the_trade_both_ways(
     assert "base ref" in policy  # the plan cells it can refuse
 
 
+def test_ambiguous_bare_env_with_a_branch_policy_keeps_the_plan_stall_warning(monkeypatch):
+    """The NOTICE above is shared mode's accepted trade and only shared mode's.
+    While both namings exist the bare environment is what an unmigrated `plan.yml`
+    still binds, so a policy on it is the plan-stall misconfiguration the plan
+    environment's WARNING exists to diagnose -- not a legitimate secret-release
+    control. Downgrading it here made an unfinished migration a note."""
+    responses = _protection(
+        _env("dev-eu", branch_policy={"protected_branches": True}),
+        _env("dev-eu-apply"),
+    )
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    out = doctor._env_protection_warnings(_ctx())
+    policy = [(lvl, t) for lvl, t in out if "branch policy" in t]
+    assert len(policy) == 1, out
+    assert policy[0][0] == doctor.WARNING
+    assert "base ref" in policy[0][1]
+    # The shared-mode NOTICE's own clause: it may not be reused here, because
+    # while the naming is ambiguous the policy is not "correct".
+    assert "Correct while every pull request targets a branch it names" not in policy[0][1]
+
+
 def test_shared_env_without_approval_rules_says_no_gate_is_available(monkeypatch):
     """The split apply-env note says applies are unreviewed; on a shared
     environment it must also say that adding a reviewer is not an option while
@@ -597,6 +658,7 @@ def test_ambiguous_naming_reads_the_protection_shape_of_both_namings(monkeypatch
     """Ambiguous mode reads every environment that exists, not just one naming's
     -- pinned on the requested paths, which is all this asserts. The
     report-level statement that the unused naming's rules are inert is
+    report-level statement that one naming may be bound by nothing is
     `_environment_warnings`' ambiguity WARNING, not a per-rule finding here."""
     responses = _protection(
         _env("dev-eu"),
@@ -2650,6 +2712,43 @@ def test_app_private_key_in_a_plan_env_is_a_warning(monkeypatch):
     assert doctor._ENGINE_ENV in found[1][1]
     # Split mode is not ambiguous, so the definite noun is correct here.
     assert "plan environment `dev-eu-plan` holds" in found[1][1]
+
+
+def test_shared_mode_app_key_warning_does_not_call_the_env_a_plan_environment(monkeypatch):
+    """The noun follows the ROLE, not the mode. In shared mode the sibling NOTICE
+    in the same report calls `dev-eu` shared between both paths, so this warning
+    may not call the same environment the plan environment."""
+    responses = {
+        f"repos/{_REPO}/environments?per_page=100": _environments("dev-eu"),
+        f"repos/{_REPO}/environments/dev-eu/secrets?per_page=100": _secrets(
+            "SHIPMATE_APP_PRIVATE_KEY"
+        ),
+    }
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    found = doctor._plan_env_secret_warnings(_ctx())
+    assert [lvl for lvl, _ in found] == [doctor.NOTICE, doctor.WARNING]
+    assert "plan environment `dev-eu`" not in found[1][1]
+    assert "environment `dev-eu` holds `SHIPMATE_APP_PRIVATE_KEY`" in found[1][1]
+
+
+def test_a_truncated_environments_listing_refuses_to_infer_a_mode(monkeypatch):
+    """A partial listing used to produce a false "does not exist"; it now also
+    produces a wrong MODE, which asserts a naming the repository is not using and
+    redirects the plan-secret probe to the wrong environment. So it raises, and
+    `warnings()` degrades every environment probe loudly rather than reporting on
+    half the names."""
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: _environments("dev-eu-plan", total=140))
+    with pytest.raises(SystemExit, match="truncated"):
+        doctor._existing_env_names(_ctx())
+
+
+def test_an_environments_listing_without_a_total_count_is_not_taken_as_complete(monkeypatch):
+    """Absence-means-complete would be fail-open: a listing that stops reporting
+    `total_count` would silently pass as the whole set. The KeyError reaches
+    `warnings()`' degrade instead."""
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: {"environments": [{"name": "dev-eu"}]})
+    with pytest.raises(KeyError):
+        doctor._existing_env_names(_ctx())
 
 
 def test_no_env_token_is_a_warning_and_reads_nothing(monkeypatch):

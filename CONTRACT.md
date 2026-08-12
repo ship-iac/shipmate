@@ -614,7 +614,9 @@ must always be named: their `apply / <stack> / <env>` checks simply stay
 pending under a bare apply — so `shipmate / gate` keeps gating the
 merge — until someone runs `shipmate apply <env>` for them. An absent global
 (or `[]`) means a bare apply targets everything. Malformed `explicit_envs`
-shapes (not a list of strings) fail loud, like `env_order`.
+shapes (not a list of strings) fail loud, like `env_order`, and so does an entry
+carrying a `-plan` or `-apply` suffix: the value is matched against the **bare
+logical** env name, so a suffixed entry would skip nothing.
 
 `explicit_envs` constrains the bare pre-merge `shipmate apply` **only**. The
 post-merge deploy applies every cell whose apply check is still pending,

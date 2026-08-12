@@ -224,10 +224,21 @@ def _existing_env_names(ctx):
     Re-read per probe rather than shared through `ctx`: `warnings()` degrades
     per probe, so one endpoint failure must not silence the others.
 
-    per_page=100: one page covers >=50 logical env pairs; bm.gh_json does not
-    multi-page merge."""
+    per_page=100 covers >=50 logical env pairs, and `bm.gh_json` does not
+    multi-page merge, so a repository past that raises rather than infers a mode
+    from half the names: a wrong mode asserts a mode the repository is not in and
+    redirects the plan-secret probe to the wrong environment. `total_count` is
+    read strictly -- a listing missing the key is a listing whose completeness is
+    unknown, and the KeyError degrades every environment probe loudly."""
     listing = _gh_json(f"repos/{ctx['repo']}/environments?per_page=100")
-    return {e["name"] for e in listing.get("environments", [])}
+    names = {e["name"] for e in listing.get("environments", [])}
+    if listing["total_count"] > len(names):
+        raise SystemExit(
+            f"::error::the environments listing is truncated ({listing['total_count']} "
+            f"environments, {len(names)} read) — the naming of each environment cannot be "
+            "determined from a partial listing."
+        )
+    return names
 
 
 SPLIT, SHARED, AMBIGUOUS, MISSING = "split", "shared", "ambiguous", "missing"
@@ -296,11 +307,31 @@ def _shared_intro(name, env, mode):
     )
 
 
-def _env_noun(mode):
-    """How a plan-side finding may name the environment's role. Ambiguous mode
-    cannot call it the plan environment: whether anything binds it depends on the
+def _env_noun(mode, role):
+    """How a plan-side finding may name the environment's role. The shared role
+    cannot be called the plan environment -- a sibling finding in the same report
+    calls the same environment shared between both paths -- and in ambiguous mode
+    neither can `<env>-plan`, since whether anything binds it depends on the
     repository variable."""
-    return "environment" if mode == AMBIGUOUS else "plan environment"
+    return "plan environment" if role == "plan" and mode != AMBIGUOUS else "environment"
+
+
+def _missing_half(name, env, role, mode):
+    """One absent half of the split pair. In ambiguous mode the bare `{env}` may
+    be what a path binds, so the consequence is stated conditionally rather than
+    as "cannot {role}"."""
+    if mode == AMBIGUOUS:
+        return (
+            f"GitHub Environment `{name}` does not exist while `{env}` does — if this "
+            f"repository binds the split naming, the {role} jobs for `env:{env}` bind a "
+            "name GitHub auto-creates empty, with none of its variables, secrets or "
+            f"protection rules. Create it, or delete `{env}` if both paths share one "
+            "environment."
+        )
+    return (
+        f"GitHub Environment `{name}` does not exist — stacks tagged "
+        f"`env:{env}` cannot {role} (create it and set TF_VAR_* vars)."
+    )
 
 
 def _environment_warnings(ctx):
@@ -321,8 +352,11 @@ def _environment_warnings(ctx):
                 (
                     WARNING,
                     f"neither GitHub Environment `{env}-plan` nor `{env}-apply` exists — "
-                    f"stacks tagged `env:{env}` cannot plan or apply. Create both and set "
-                    f"their TF_VAR_* variables, or create a single `{env}` and list `{env}` "
+                    f"every job for stacks tagged `env:{env}` binds a name GitHub "
+                    "auto-creates empty: no variables, no secrets, no reviewers and no "
+                    "branch policy, so a plan describes whatever the layout defaults to "
+                    "rather than this environment. Create both and set their TF_VAR_* "
+                    f"variables, or create a single `{env}` and list `{env}` "
                     "in the `SHIPMATE_SHARED_ENVS` repository variable to share one "
                     "environment between plan and apply (which gives up the reviewer gate "
                     "and the OIDC subject split).",
@@ -334,23 +368,23 @@ def _environment_warnings(ctx):
                 (
                     WARNING,
                     f"GitHub Environments `{env}` and {present} exist side by side for "
-                    f"`env:{env}` — which one the plan and apply waves bind depends on whether "
-                    f"`{env}` is listed in the `SHIPMATE_SHARED_ENVS` repository variable, "
-                    "so the other is bound by nothing and its protection rules are inert: "
-                    "they read as a control that is in no code path. Delete the "
-                    "environments belonging to the naming this repository does not use.",
+                    f"`env:{env}` — the apply waves bind `{env}` while `{env}` is listed in "
+                    f"the `SHIPMATE_SHARED_ENVS` repository variable and `{env}-apply` "
+                    "otherwise, and the plan side is bound by this repository's own "
+                    "`plan.yml` and `drift.yml`; doctor reads neither the variable nor those "
+                    "files, so which naming each path binds is undetermined here. Either "
+                    "naming may therefore be bound by nothing, with its protection rules "
+                    "reading as a control that is in no code path. Establish both bindings "
+                    "before removing either naming — with a static plan-side `-plan` binding "
+                    f"and `{env}` shared, both namings are live.",
                 )
             )
-        elif mode == SPLIT:
-            for name, role in _role_names(env, mode):
+        if mode in (SPLIT, AMBIGUOUS):
+            # Ambiguous mode reports the missing half too: fail-closed, and the
+            # ambiguity WARNING above says nothing about which environments exist.
+            for name, role in _role_names(env, SPLIT):
                 if name not in names:
-                    out.append(
-                        (
-                            WARNING,
-                            f"GitHub Environment `{name}` does not exist — stacks tagged "
-                            f"`env:{env}` cannot {role} (create it and set TF_VAR_* vars).",
-                        )
-                    )
+                    out.append((WARNING, _missing_half(name, env, role, mode)))
     return out
 
 
@@ -408,7 +442,23 @@ def _env_shape_findings(name, env, data, role, mode):
                 f"`{env}-apply` and remove `{env}` from `SHIPMATE_SHARED_ENVS`.",
             )
         )
-    if role == "shared" and policy:
+    if role == "shared" and policy and mode == AMBIGUOUS:
+        # The NOTICE below is shared mode's accepted trade, and only shared
+        # mode's: while the naming is ambiguous the bare environment is what an
+        # unmigrated `plan.yml` still binds, so the plan-stall this diagnoses is
+        # a live misconfiguration rather than a legitimate secret-release control.
+        out.append(
+            (
+                WARNING,
+                f"GitHub Environment `{name}` has a deployment branch policy, and `{env}` "
+                "is also named by the split naming — plan jobs run at the pull request's "
+                f"base ref, so for as long as anything binds `{env}` on the plan path a "
+                "policy that does not name every branch pull requests target refuses those "
+                f"plan cells. Open it up, or finish the move to `{env}-plan` and "
+                f"`{env}-apply` and keep the policy on the apply environment.",
+            )
+        )
+    if role == "shared" and policy and mode != AMBIGUOUS:
         # NOTICE, not the plan environment's WARNING: on a shared environment the
         # policy is a real control over which branches may claim its secrets, and
         # a consumer whose pull requests all target the default branch is right
@@ -681,7 +731,7 @@ def _secret_finding(name, env, role, mode, count, shown):
             "(docs/hardening.md control 8)."
         )
     return (
-        f"{_env_noun(mode)} `{name}` holds {count} secret(s) ({shown}) — a plan "
+        f"{_env_noun(mode, role)} `{name}` holds {count} secret(s) ({shown}) — a plan "
         "cell runs the pull request branch's own code with whatever this "
         "environment releases to it, and a plan environment must have no "
         "approval rules and no deployment branch policy for its plan cells to "
@@ -735,7 +785,7 @@ def _plan_env_secret_warnings(ctx):
                     (
                         NOTICE,
                         f"GitHub Environment `{name}`'s secrets could not be listed "
-                        f"({_degrade_reason(e)}) — whether this {_env_noun(mode)} holds "
+                        f"({_degrade_reason(e)}) — whether this {_env_noun(mode, role)} holds "
                         "credentials reachable by plan-time code was not checked.",
                     )
                 )
@@ -750,7 +800,7 @@ def _plan_env_secret_warnings(ctx):
             shown = _one_line(", ".join(f"`{n}`" for n in sorted(names)), 400)
             count = f"at least {total}" if total > len(names) else str(len(names))
             out.append((NOTICE, _secret_finding(name, env, role, mode, count, shown)))
-            out += _app_key_findings(name, names, total, _env_noun(mode))
+            out += _app_key_findings(name, names, total, _env_noun(mode, role))
     return out
 
 

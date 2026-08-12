@@ -69,8 +69,10 @@ the same change that moves your pins.
   price; choose it for envs where the plan path holds no credentials at all.
 - **`shipmate doctor` infers the naming per env and words its findings for it.**
   Split, shared, or ambiguous — a bare `<env>` beside a suffixed sibling warns
-  that which one is bound is undetermined and the other's protection rules are
-  inert. It reads environment *names*, never the variable (that needs a permission
+  that which naming each path binds is undetermined, so either one may be bound
+  by nothing with its protection rules reading as a control in no code path, and
+  the missing half of the split pair is still reported.
+  It reads environment *names*, never the variable (that needs a permission
   the App manifest does not declare), so a repository with a bare `<env>` and the
   variable unset gets no *existence* finding — bare-only is what shared mode looks
   like, and it is reported as a shared environment.
