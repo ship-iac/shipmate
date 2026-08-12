@@ -129,13 +129,16 @@ Split mode (the default, keeps the reviewer gate):
    above. Between the merge and the delete, doctor warns that the naming is
    ambiguous; that warning is the migration's own to-do list.
 5. Drop `…:environment:<env>` from the plan role's trust policy once the bare
-   environment is deleted and no run can present it any more.
+   environment is deleted and no run can present it any more. Left in place, the
+   old subject stays presentable to the role, and GitHub auto-creates an
+   environment the moment anything binds that name — a stale subject is a
+   standing way back in, and nothing in the pipeline probes IAM to notice it.
 6. `<env>-apply` is unchanged, its apply role included — the name it binds and the
    claim it presents both stay as they were.
 
 Shared mode (one environment, opt in per env):
 
-1. **Move `<env>-apply`'s variables and secrets onto the bare `<env>` first.**
+1. **Copy `<env>-apply`'s variables and secrets onto the bare `<env>` first.**
    Both are read from whichever environment the wave binds, and step 3 flips that
    binding — not the delete in step 4. Variables copy; environment **secrets**
    cannot (no API returns a secret's value), so re-enter each one by hand and
@@ -156,7 +159,10 @@ Shared mode (one environment, opt in per env):
 4. Keep the bare `<env>`, and delete `<env>-apply` once nothing binds it — left in
    place it makes the naming ambiguous, and doctor warns for exactly that.
 5. Drop `…:environment:<env>-apply` from the trust policy once that environment is
-   gone.
+   gone. Left in place, the old subject stays presentable to the role, and
+   GitHub auto-creates an environment the moment anything binds that name — a
+   stale subject is a standing way back in, and nothing in the pipeline probes
+   IAM to notice it.
 6. Know the price: a reviewer or a wait timer on that environment stalls the plan
    cells and the nightly drift run, so the reviewer gate is gone rather than
    moved, and plan and apply OIDC tokens become identical in `sub`

@@ -282,20 +282,22 @@ rules from Settings → Environments → `<name>` (or the API):
   ([`hardening.md`](hardening.md) #17). This is the baseline, and it is not a
   reviewer gate: the secrets are released without a human seeing the
   deployment. A shared env has no `<env>-apply`; the policy goes on its bare
-  `<env>`, where it is the one control of this set that still applies
-  ([`hardening.md`](hardening.md) §6).
+  `<env>`, where it is the one control of this set that still applies — and,
+  because plan cells run at the pull request's base ref, it also refuses any
+  plan cell whose base ref it does not name ([`hardening.md`](hardening.md) #6).
 - **Required reviewers and "Prevent self-review" — per environment, your
   call**, for every env that has an `<env>-apply`. A shared env is not one of
   them: a reviewer on the bare `<env>` stalls the plan cells and the nightly
   drift run too, so the gate there is unavailable rather than declined, and
   turning it on later means splitting the environment again
-  ([`hardening.md`](hardening.md) §6). With them, an apply to that environment pauses for a named team, and
-  that pause is the one gate an App installation token cannot forge, since a
-  reviewer decision is a human action a minted token cannot take. Without them
-  the tier is self-service and applies proceed unattended. Teams commonly gate
-  production and leave dev self-service; the maximally-hardened position gates
-  every apply environment. [`hardening.md`](hardening.md) #6 states what each
-  choice costs — shipmate does not make it for you.
+  ([`hardening.md`](hardening.md) #6). With them, an apply to that environment
+  pauses for a named team, and that pause is the one gate an App installation
+  token cannot forge, since a reviewer decision is a human action a minted
+  token cannot take. Without them the tier is self-service and applies proceed
+  unattended. Teams commonly gate production and leave dev self-service; the
+  maximally-hardened position gates every apply environment.
+  [`hardening.md`](hardening.md) #6 states what each choice costs — shipmate
+  does not make it for you.
 - **Pair a reviewer-gated environment with `global.shipmate.explicit_envs`.**
   List the bare env name (`prod` — neither `prod-plan` nor `prod-apply`) so a bare `shipmate apply`
   skips it and it is only ever reached via the targeted `shipmate apply prod`
