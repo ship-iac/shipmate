@@ -47,9 +47,26 @@ runs:
       # a failing plan too -- tofu's error text is the one thing a reader needs
       # here, and an unclosed `::group::` collapses it. The explicit exit keeps
       # a failed plan from falling through to the classify steps below.
+      # Restored local-backend workspace state arrives without the `.terraform`
+      # record that marks the backend initialised, so `init` reads it as legacy
+      # state awaiting migration and `-input=false` turns that question into a
+      # hard error. Hide it across the init and put it back either way: under
+      # `-reconfigure` a migration is never intended, and non-interactively it
+      # could never have been answered. errexit is lifted only so the restore
+      # runs on a failed init; the explicit exit keeps that failure fatal.
       run: |
         set -euo pipefail
+        ws="$STACK/terraform.tfstate.d"
+        hidden=$(mktemp -du "$RUNNER_TEMP/tfstate.d.XXXXXX")
+        if [ -d "$ws" ]; then mv "$ws" "$hidden"; fi
+        set +e
         terramate run --disable-safeguards=git-out-of-sync --no-recursive -C "$STACK" -- tofu init -input=false -reconfigure
+        init_status=$?
+        set -e
+        # init recreates $ws empty; drop that so the real state replaces it
+        # rather than being moved inside it.
+        if [ -d "$hidden" ]; then rm -rf "$ws"; mv "$hidden" "$ws"; fi
+        [ "$init_status" -eq 0 ] || exit "$init_status"
         echo "::group::terramate plan: $STACK"
         set +e
         terramate run --disable-safeguards=git-out-of-sync --no-recursive -C "$STACK" -- tofu plan -input=false -lock=false -out=stack.otplan

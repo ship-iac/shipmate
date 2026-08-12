@@ -117,10 +117,16 @@ runs:
       # (fail-safe).
       # `init` runs on its own line, outside the teed pipeline: its output is
       # setup noise, and apply.txt is reviewer-facing comment data. It stays
-      # above BOTH the group marker and `set +e` -- above `set +e` so errexit
-      # still fails the step on a failed init (fail-safe), and above the group
-      # so that failure's diagnostics are not buried in a group this step then
-      # exits without ever closing.
+      # above the group marker so that failure's diagnostics are not buried in
+      # a group this step then exits without ever closing.
+      # Restored local-backend workspace state arrives without the `.terraform`
+      # record that marks the backend initialised, so `init` reads it as legacy
+      # state awaiting migration and `-input=false` turns that question into a
+      # hard error. Hide it across the init and put it back either way: under
+      # `-reconfigure` a migration is never intended, and non-interactively it
+      # could never have been answered. errexit is lifted only so the restore
+      # runs on a failed init; the explicit exit keeps that failure fatal --
+      # nothing applies against state the engine could not initialise.
       # No `-auto-approve`: applying a stored plan never prompts, so the flag is
       # inert here -- and its absence is a backstop. Were the `stack.otplan`
       # argument ever lost, `-input=false` alone fails with "Error asking for
@@ -141,7 +147,17 @@ runs:
       # masking a success -- or manufacturing one.
       run: |
         set -euo pipefail
+        ws="$STACK/terraform.tfstate.d"
+        hidden=$(mktemp -du "$RUNNER_TEMP/tfstate.d.XXXXXX")
+        if [ -d "$ws" ]; then mv "$ws" "$hidden"; fi
+        set +e
         terramate run --disable-safeguards=git-out-of-sync --no-recursive -C "$STACK" -- tofu init -input=false -reconfigure
+        init_status=$?
+        set -e
+        # init recreates $ws empty; drop that so the real state replaces it
+        # rather than being moved inside it.
+        if [ -d "$hidden" ]; then rm -rf "$ws"; mv "$hidden" "$ws"; fi
+        [ "$init_status" -eq 0 ] || exit "$init_status"
         echo "::group::terramate apply: $STACK"
         set +e
         terramate run --disable-safeguards=git-out-of-sync --no-recursive -C "$STACK" -- tofu apply -input=false stack.otplan 2>&1 | tee "$RUNNER_TEMP/apply.txt"
