@@ -275,17 +275,25 @@ def _role_names(env, mode, roles=None):
 def _shared_intro(name, env, mode):
     """Opening clause of a shared-role finding.
 
-    Ambiguous mode gets a hedge, not an assertion: the sibling existence WARNING
-    says the binding is undetermined, and with the variable unset nothing binds
-    the bare environment at all, so none of what follows applies to it. Two
-    findings in one report may not contradict each other."""
+    Neither branch asserts the mode: sharing is selected by the
+    `SHIPMATE_SHARED_ENVS` repository variable, which doctor cannot read. In
+    ambiguous mode the sibling existence WARNING already says the binding is
+    undetermined, and with the variable unset nothing binds the bare environment
+    at all; in shared mode the variable is what makes the bare environment the
+    apply environment too, and a half-done migration that renamed the
+    environments and forgot the variable leaves the applies binding
+    `<env>-apply`. Two findings in one report may not contradict each other."""
     if mode == AMBIGUOUS:
         return (
             f"GitHub Environment `{name}` — shared between plan and apply only if "
             f"`{env}` is listed in the `SHIPMATE_SHARED_ENVS` repository variable, which "
             "doctor cannot read, and bound by nothing at all otherwise —"
         )
-    return f"GitHub Environment `{name}`, shared between plan and apply,"
+    return (
+        f"GitHub Environment `{name}` — shared between plan and apply while `{env}` is "
+        "listed in the `SHIPMATE_SHARED_ENVS` repository variable, which doctor cannot "
+        "read —"
+    )
 
 
 def _env_noun(mode):
@@ -657,13 +665,14 @@ def _secret_finding(name, env, role, mode, count, shown):
     The shared variant does not repeat control 8's "no approval rules and no
     deployment branch policy" rule: on a shared environment a branch policy is a
     legitimate secret-release control, so stating it as a requirement would
-    contradict `_env_protection_warnings`' NOTICE about the same setting. In
-    ambiguous mode `_shared_intro` and `_env_noun` hedge the mode instead of
-    asserting it."""
+    contradict `_env_protection_warnings`' NOTICE about the same setting.
+    Whether the environment is the apply environment too rides on the repository
+    variable doctor cannot read, so `_shared_intro` and this text hedge it; the
+    advice that follows is the conservative read either way."""
     if role == "shared":
         return (
-            f"{_shared_intro(name, env, mode)} holds {count} secret(s) ({shown}) — it is "
-            "the apply environment too, so a plan cell "
+            f"{_shared_intro(name, env, mode)} holds {count} secret(s) ({shown}) — it may "
+            "be the apply environment too, so a plan cell "
             "runs the pull request branch's own code with everything it releases: any "
             "credential held there for applying is reachable by plan-time code. "
             "Protection rules on it would stall those plan cells, so it cannot be gated "

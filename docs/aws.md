@@ -79,6 +79,11 @@ read-only plan role), which is the only control that decides which environments
 can actually assume it; see [`hardening.md`](hardening.md) §7–9 for why that, and
 not where you put the variable, is the enforcing bound.
 
+Because the claim is inside the condition, **renaming an environment breaks its
+role's trust policy** — add the new subject before the rename and drop the old one
+after; [`upgrading.md`](upgrading.md) §0.13.0 has the ordered steps for both the
+split and the shared migration.
+
 **Write the trust condition from the subject your own logs show, not from the
 documented shape.** GitHub Actions issues the `sub` claim with the numeric
 organization and repository ids embedded — captured from that sample repository

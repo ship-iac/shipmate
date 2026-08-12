@@ -44,7 +44,8 @@ suffixed sibling warns that which one is bound is undetermined and the other's
 protection rules are inert), the secrets a
 plan environment holds (names only — the API never returns a value; a plan
 cell runs branch code with whatever that environment releases and control 8
-forbids protecting it, so a note giving the exact count and a capped list of
+forbids protecting it, so a note giving the count — exact unless the listing was
+too long to read whole — and a capped list of
 the names — a crowded environment's later names are not printed, so that one
 finding cannot spend the whole report's size budget — and a warning if
 `SHIPMATE_APP_PRIVATE_KEY` is one of them), whether the `shipmate-engine`

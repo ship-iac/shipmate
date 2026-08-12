@@ -58,7 +58,9 @@ App key ([`github-app.md`](github-app.md)). Neither half is ever named in
 workflow YAML — the logical env comes from Terramate stack tags at runtime and the
 suffix is added where the job binds the environment. This tier needs `<env>-plan`
 and `shipmate-engine`; `<env>-apply` is the apply tier's — but create it now
-anyway. `shipmate doctor` runs on every plan run and warns for each half of a
+anyway, unless that env shares one environment (below), where creating both a bare
+`<env>` and an `<env>-apply` is the ambiguous naming doctor warns about.
+`shipmate doctor` runs on every plan run and warns for each half of a
 pair that does not exist, so tier 1 with only `<env>-plan` annotates every pull
 request with "GitHub Environment `<env>-apply` does not exist" until the apply
 tier is done. (With **neither** half created you get one warning naming both, and
@@ -279,9 +281,15 @@ rules from Settings → Environments → `<name>` (or the API):
   branch.** Closes the direct-branch-secret path
   ([`hardening.md`](hardening.md) #17). This is the baseline, and it is not a
   reviewer gate: the secrets are released without a human seeing the
-  deployment.
+  deployment. A shared env has no `<env>-apply`; the policy goes on its bare
+  `<env>`, where it is the one control of this set that still applies
+  ([`hardening.md`](hardening.md) §6).
 - **Required reviewers and "Prevent self-review" — per environment, your
-  call.** With them, an apply to that environment pauses for a named team, and
+  call**, for every env that has an `<env>-apply`. A shared env is not one of
+  them: a reviewer on the bare `<env>` stalls the plan cells and the nightly
+  drift run too, so the gate there is unavailable rather than declined, and
+  turning it on later means splitting the environment again
+  ([`hardening.md`](hardening.md) §6). With them, an apply to that environment pauses for a named team, and
   that pause is the one gate an App installation token cannot forge, since a
   reviewer decision is a human action a minted token cannot take. Without them
   the tier is self-service and applies proceed unattended. Teams commonly gate

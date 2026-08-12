@@ -616,9 +616,20 @@ def test_ambiguous_naming_reads_the_protection_shape_of_both_namings(monkeypatch
     assert f"repos/{_REPO}/environments/dev-eu-apply" in seen
 
 
-# The certain form of the shared-role opening clause. Hand-written, not imported
-# from `doctor`: the point is that the ambiguous findings must NOT contain it.
+# The three forms of the shared-role opening clause, hand-written rather than
+# imported from `doctor`: `_SHARED_ASSERTED` is the flat assertion no mode may
+# produce, the other two are the whole opening clause each mode must produce.
 _SHARED_ASSERTED = "GitHub Environment `dev-eu`, shared between plan and apply,"
+_SHARED_INTRO = (
+    "GitHub Environment `dev-eu` — shared between plan and apply while `dev-eu` is "
+    "listed in the `SHIPMATE_SHARED_ENVS` repository variable, which doctor cannot "
+    "read —"
+)
+_AMBIGUOUS_INTRO = (
+    "GitHub Environment `dev-eu` — shared between plan and apply only if `dev-eu` is "
+    "listed in the `SHIPMATE_SHARED_ENVS` repository variable, which doctor cannot "
+    "read, and bound by nothing at all otherwise —"
+)
 
 
 def test_shared_role_findings_hedge_the_mode_when_the_naming_is_ambiguous(monkeypatch):
@@ -637,20 +648,22 @@ def test_shared_role_findings_hedge_the_mode_when_the_naming_is_ambiguous(monkey
     level, text = out[0]
     assert level == doctor.WARNING
     assert _SHARED_ASSERTED not in text
-    assert "shared between plan and apply only if" in text
-    assert "SHIPMATE_SHARED_ENVS" in text
-    assert "bound by nothing at all otherwise" in text
+    assert text.startswith(_AMBIGUOUS_INTRO)
 
 
-def test_a_genuinely_shared_env_still_states_the_mode_outright(monkeypatch):
-    """The counterpart: shared mode is not ambiguous, so hedging every shared
-    finding would make the honest use case unreadable."""
+def test_a_shared_env_names_the_variable_its_mode_depends_on(monkeypatch):
+    """Shared mode is selected by `SHIPMATE_SHARED_ENVS`, which doctor cannot
+    read, so this finding may not assert the mode either: a migration that
+    renamed the environments and forgot the variable has applies binding
+    `dev-eu-apply` while the bare `dev-eu` looks shared. Its clause differs from
+    the ambiguous one -- here the plan side does bind this environment -- so both
+    whole clauses are pinned."""
     responses = _protection(_env("dev-eu", rules=("required_reviewers",)))
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
     out = doctor._env_protection_warnings(_ctx())
     assert len(out) == 1
-    assert _SHARED_ASSERTED in out[0][1]
-    assert "only if" not in out[0][1]
+    assert _SHARED_ASSERTED not in out[0][1]
+    assert out[0][1].startswith(_SHARED_INTRO)
 
 
 def test_env_protection_missing_env_is_not_this_probes_problem(monkeypatch):
@@ -1392,7 +1405,7 @@ def test_report_all_clear():
 
 
 def test_all_clear_names_the_environments_the_probes_actually_covered():
-    """All three environment probes — pair existence, protection shape and
+    """All three environment probes — environment existence, protection shape and
     plan-environment secrets — see only the environments of the stacks this
     pull request changed — the declared set comes from the plan matrix's cell
     summaries — so a categorical "no problems found by the settings probes"
@@ -2486,7 +2499,9 @@ def test_ambiguous_mode_reads_both_plan_side_names_and_never_the_apply_one(monke
 def test_ambiguous_mode_secret_findings_do_not_assert_the_environments_role(monkeypatch):
     """Same rule as the protection findings: with both namings present the report
     already says the binding is undetermined, so neither the notice nor the
-    App-key warning may call this environment shared or a plan environment."""
+    App-key warning may call this environment shared or a plan environment --
+    including the notice's later clause about the apply role, which used to
+    assert what the opening clause had just hedged."""
     responses = {
         f"repos/{_REPO}/environments?per_page=100": _environments(
             "dev-eu", "dev-eu-plan", "dev-eu-apply"
@@ -2500,7 +2515,9 @@ def test_ambiguous_mode_secret_findings_do_not_assert_the_environments_role(monk
     found = doctor._plan_env_secret_warnings(_ctx())
     assert [lvl for lvl, _ in found] == [doctor.NOTICE, doctor.WARNING]
     assert _SHARED_ASSERTED not in found[0][1]
-    assert "shared between plan and apply only if" in found[0][1]
+    assert found[0][1].startswith(_AMBIGUOUS_INTRO)
+    assert "it is the apply environment too" not in found[0][1]
+    assert "it may be the apply environment too" in found[0][1]
     assert "plan environment `dev-eu`" not in found[1][1]
     assert "environment `dev-eu` holds `SHIPMATE_APP_PRIVATE_KEY`" in found[1][1]
 

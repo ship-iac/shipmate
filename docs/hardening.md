@@ -367,7 +367,8 @@ control.
   by anyone who can push a branch, which is why the role must be read-only.
 
   `shipmate doctor` notes the secrets a plan environment holds — the count is
-  exact, and the names it prints (names only, since no GitHub API returns a
+  exact unless the listing was too long to read whole, when it reads `at least
+  N` — and the names it prints (names only, since no GitHub API returns a
   secret's value) are capped, so a crowded environment's later names are not
   printed; the cap keeps one finding from spending the whole report's size
   budget. It warns if `SHIPMATE_APP_PRIVATE_KEY` is one of them, and says the
