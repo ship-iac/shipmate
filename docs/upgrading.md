@@ -150,9 +150,14 @@ Shared mode (one environment, opt in per env):
    ([`aws.md`](aws.md) §GitHub OIDC). The environment claim is inside the `sub`
    condition, so without this the role stops matching the moment step 3 binds the
    bare environment, and the failure is the same undiagnosable `AccessDenied` that
-   section describes. The shared environment holds **one** `AWS_ROLE_ARN` for both
-   paths, so decide there whether that is the apply role or a read-only one — plan
-   cells running branch code will assume whatever it names.
+   section describes. The shared environment holds **one** `AWS_ROLE_ARN` and the
+   wave jobs read it, so it must name the apply role; plan cells running branch
+   code then assume that role too, which is the cost priced in
+   [`hardening.md`](hardening.md) §7–9. **If your `plan.yml` carries its own
+   credentials step, make this edit before step 1**: that copy already repoints the
+   bare environment at the apply role while plan cells still bind that environment,
+   so the `AccessDenied` arrives at step 1, not step 3. Widening early grants
+   nothing — no run presents the bare subject to the apply role until then.
 3. Add the logical env name to the `SHIPMATE_SHARED_ENVS` repository variable:
    comma-separated, **no spaces after the commas** (` dev-us` is not `dev-us`,
    and that env silently stays split). This is the step that moves the binding.
@@ -188,6 +193,13 @@ A static bare binding in a mixed repository is the quiet failure here: the split
 envs' plan cells bind an environment you deleted, GitHub auto-creates it empty,
 and a layout with a `TF_VAR_env` fallback default plans the wrong environment for
 a reviewer to approve. Nothing refuses until the apply.
+
+**Set `SHIPMATE_SHARED_ENVS` before that expression reaches the default branch.**
+The expression falls back to `<env>-plan`, and shared mode never creates one, so
+merged with the variable unset every shared env's plan cells bind a `<env>-plan`
+nobody made — auto-created empty, with the same outcome as above. So finish the
+shared path's steps 1–3 for **every** env you are sharing before the change
+carrying this expression merges.
 
 **One silence to expect.** `shipmate doctor` infers the mode from the environment
 *names* — it never reads `SHIPMATE_SHARED_ENVS`, which would need a permission the

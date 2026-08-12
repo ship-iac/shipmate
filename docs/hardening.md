@@ -72,7 +72,7 @@ name. See "Contributors without push access" for the trade-off that follows.
 | 5 | Block force-push and deletion on the default branch | Branch ruleset | History rewrite after apply |
 | 6 | Required reviewers + "Prevent self-review" on the `<env>-apply` environments you decide to gate (§6 states the trade-off; the choice is yours) | Environment | **Unforgeable** at apply time — the last line of defense once a merge has happened, on each environment you apply it to |
 | 7 | Cloud credentials scoped to `<env>-apply` — the OIDC path's `AWS_ROLE_ARN`/`AWS_REGION` as environment **variables**, any residual static key as an environment **secret** — never repo- or org-level | Environment | Repo-wide exposure (for a secret, bounded *only* on an environment that also carries row 6; and for a variable the scoping is advisory — see §7–9) |
-| 8 | Plan environments (`<env>-plan`; in shared mode the bare `<env>`, which is the apply environment too) hold read-only, blast-radius-free credentials, no approval rules, and no branch policy — except on a shared environment, where a default-branch policy is row 17 doing real work and plan cells still pass it (see below) — ideally no secret at all (`shipmate doctor` reports what it finds) | Environment | Plan-time code execution |
+| 8 | Plan environments (`<env>-plan`; in shared mode the bare `<env>`, which must hold the apply role instead — §7–9) hold read-only, blast-radius-free credentials, no approval rules, and no branch policy — except on a shared environment, where a default-branch policy is row 17 doing real work and plan cells still pass it (see below) — ideally no secret at all (`shipmate doctor` reports what it finds) | Environment | Plan-time code execution |
 | 9 | OIDC with an `environment:` claim condition instead of static keys | Cloud IdP | Long-lived credential theft — and, since the engine's apply jobs mint OIDC tokens unconditionally, this claim condition is the **only** bound on which role an apply job can assume (see §7–9). In shared mode it separates nothing: both tokens carry the same `environment:` claim |
 | 10 | Default `GITHUB_TOKEN` = read-only; Actions may not approve PRs | Settings → Actions | Token privilege creep |
 | 11 | Require approval for all outside collaborators' workflow runs | Settings → Actions | Drive-by fork execution |
@@ -382,14 +382,21 @@ control.
   plan cell — or from a branch workflow — cannot assume the apply role. Do this
   on **every** role reachable from the repository, not only the apply role: see
   "What none of this fixes" for why it is the only bound that holds.
-- **In shared mode the claim condition cannot separate the two paths.** With one
-  bare `<env>` bound by plan and apply, both tokens carry
+- **In shared mode the plan path holds the apply role.** The bare `<env>` carries
+  one `AWS_ROLE_ARN` (or one `AWS_ROLE_ARN_<WORKLOAD>`) and the wave jobs read it
+  off that environment, so it must name the **apply** role or every apply fails at
+  provider init — and a consumer's own `plan.yml` credentials step reads the same
+  variable from the same environment. So a read-only plan role is unreachable for
+  every shared env: plan cells and the nightly drift run assume the write role
+  while executing branch-authored HCL ("Plan-time code execution" — a provider or
+  an `external` data source runs at plan time). The claim condition cannot
+  separate the two paths either: both tokens carry
   `repo:<owner>/<repo>:environment:<env>` — byte-identical `sub` — so no trust
-  policy can admit the apply job and refuse the plan job, and plan-time branch
-  code can assume the write role directly. Separate *variable names* do not help:
-  a variable is not a boundary, and code running in the job can name any ARN it
-  likes. This is only zero-impact where the plan path requests no `id-token:
-  write` and holds no cloud credentials at all. GitHub's per-repository `sub`
+  policy can admit the apply job and refuse the plan job. Separate *variable
+  names* do not help: a variable is not a boundary, and code running in the job
+  can name any ARN it likes. A plan path that holds no cloud credentials at all —
+  no `id-token: write`, no credentials step — pays none of this, which is what
+  makes shared mode reasonable there. GitHub's per-repository `sub`
   customization (adding `job_workflow_ref` to the claim, so the engine's apply
   workflow file is part of what the policy matches) is the escape hatch; it is
   consumer-side, unsupported by the engine, and out of scope here.

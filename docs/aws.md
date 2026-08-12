@@ -167,8 +167,9 @@ being set — reading the variables from the apply environment the job is bound 
 
 The plan-side role lives on the `<env>-plan` environment. In **shared mode** — a
 logical env listed in `SHIPMATE_SHARED_ENVS` binds one bare `<env>` on both paths
-— there is one role for both, so the plan job can assume whatever that role can
-do; keep it read-only or accept that plan-time branch code has write access
+— there is one role for both and the wave jobs read it, so it must be the apply
+role: plan-time branch code and the drift run then have write access, and the
+read-only plan role is unreachable for that env
 ([`hardening.md`](hardening.md) §7–9).
 
 **On the plan and drift paths the step is the consumer's own**, because
