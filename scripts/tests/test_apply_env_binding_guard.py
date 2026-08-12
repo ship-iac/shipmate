@@ -5,7 +5,10 @@ Invariants:
   listed in vars.SHIPMATE_SHARED_ENVS binds the logical name, anything else
   falls through to <env>-apply. The fall-through is the fail-safe direction --
   the reviewer gate, the OIDC environment claim split and any environment secret
-  all live on the apply environment;
+  all live on the apply environment -- and where that environment does not exist
+  the apply-match fingerprint refuses the cell, on every layout that injects a
+  variable (CONTRACT.md §Env model states the condition and the one layout that
+  gets no refusal);
 - snapshot binds no environment at all and complete binds shipmate-engine: a job
   that gains an env-derived binding is the regression;
 - every wave's concurrency block still keys on the logical matrix.environment,

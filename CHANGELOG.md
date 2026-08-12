@@ -25,8 +25,10 @@ the same change that moves your pins.
 - **BREAKING for consumers — plan and apply bind `<env>-plan` and
   `<env>-apply`.** The plan side was the bare `<env>`; it is now `<env>-plan`, so
   per logical env: create `<env>-plan`, copy the bare environment's variables to
-  it, delete the bare `<env>`, and bind `${{ matrix.environment }}-plan` in
-  `plan.yml`'s `plan` job and `drift.yml`'s `drift` job. Create the environments
+  it, bind `${{ matrix.environment }}-plan` in `plan.yml`'s `plan` job and
+  `drift.yml`'s `drift` job, **merge that**, and only then delete the bare
+  `<env>` — `plan.yml` is `pull_request_target`, so until the edit is on the
+  default branch every plan run still binds the bare environment. Create the environments
   **before** editing the workflows: a job binding an environment that does not
   exist gets an empty one auto-created by GitHub, and a flavor whose `TF_VAR_env`
   has a fallback default then plans the wrong environment instead of failing. Only
@@ -39,11 +41,15 @@ the same change that moves your pins.
   artifact names and comment grammar all key on the bare logical env name; the
   suffix exists only where a job binds an environment.
 
-  The rename is what makes a mis-set mode loud. Under the old naming the
-  dangerous direction was silent: an apply wave falling back to the bare `<env>`
-  landed on the live *plan* environment and applied with plan variables, no
-  reviewer and no apply role. Now either mismatch resolves to an environment
-  nobody created, and the apply-match fingerprint refuses the cell.
+  The rename is what makes a mis-set mode loud wherever the environment injects
+  a variable. Under the old naming the dangerous direction was silent: an apply
+  wave falling back to the bare `<env>` landed on the live *plan* environment and
+  applied with plan variables, no reviewer and no apply role. Now either mismatch
+  resolves to an environment nobody created, and the apply-match fingerprint
+  refuses the cell — except on a folder-per-env layout, which injects nothing, so
+  both sides hash the empty set and the apply runs inside that auto-created
+  environment. There the mismatch is `shipmate doctor`'s finding, not the apply's
+  (`CONTRACT.md` §Env model states the condition).
 
 ### Added
 
