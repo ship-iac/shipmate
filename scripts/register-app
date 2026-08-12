@@ -44,9 +44,12 @@ REDACTED = "***"
 #: are alphanumeric-with-hyphens, and a repository name starts alphanumeric,
 #: which is what forecloses '.' and '..'. `--name` is embedded in the local HTML
 #: form -- where a quote would escape the attribute holding it -- and 34 is
-#: GitHub's App-name limit.
+#: GitHub's App-name limit. Both halves of `--repo` start alphanumeric, as GitHub
+#: logins and repository names do: the value is its own argv element after
+#: `--repo`, and one beginning with '-' is the shape a downstream CLI reads as a
+#: flag rather than a value.
 _CODE_RE = re.compile(r"[A-Za-z0-9_-]+")
-_REPO_RE = re.compile(r"[A-Za-z0-9-]+/[A-Za-z0-9][A-Za-z0-9._-]*")
+_REPO_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9][A-Za-z0-9._-]*")
 _NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9 ._-]{0,33}")
 
 MANIFEST = pathlib.Path(__file__).resolve().parents[1] / "app" / "manifest.json"
