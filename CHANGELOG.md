@@ -11,9 +11,9 @@ section below names the SHA the release tags.
 The version line stays `v0.x` while action inputs, check names, and the comment
 grammar are declared unstable in `README.md`.
 
-## [0.13.0] — unreleased
+## [0.13.0] — 2026-08-12
 
-Tags `TBD`.
+Tags `181413c`.
 
 **Re-pinning is not enough for this release: every GitHub Environment is renamed,
 and `plan.yml` / `drift.yml` change one line each.** There is no compatibility
