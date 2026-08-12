@@ -75,7 +75,16 @@ The `pull_request` rule is what `shipmate doctor`'s review-rule probe checks, an
 `require_code_owner_review` is the half of it a leaked App private key cannot
 satisfy — an App cannot be a CODEOWNER. It only bites for changed files a
 `CODEOWNERS` entry actually covers, so keep an entry covering the paths the IaC
-and the workflows live in. A sole maintainer who wants
+and the workflows live in.
+
+**A single maintainer cannot satisfy `require_last_push_approval` and
+`require_code_owner_review` together** where `CODEOWNERS` covers the changed
+files: the pusher cannot approve their own last push, and an App cannot be a code
+owner, so there is nobody left to approve. That posture needs either a **narrow**
+`CODEOWNERS` — covering `/.github/workflows/` alone, say, so ordinary IaC pull
+requests need no code-owner approval — or a bypass actor on the ruleset, which
+spends exactly the control a leaked App key cannot get past. A sole maintainer who
+wants
 `required_approving_review_count: 0` should read `docs/hardening.md` §3–5 before
 changing it — that page has the reasoning for each of these rules, and this block
 is just its recommendation made pasteable.

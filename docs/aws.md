@@ -185,6 +185,20 @@ your step with `if: ${{ vars.AWS_ROLE_ARN != '' }}` — with the
 variable unset, `configure-aws-credentials` has no role to assume and the cell
 fails there rather than skipping.
 
+## A green plan does not size either policy
+
+A plan against **empty state** refreshes nothing, so none of the resource reads
+the run will eventually need are ever attempted: a too-tight policy on either
+role first surfaces at the **apply**, and once state exists the plan role is only
+exercised as far as the refresh reaches. Read a green plan as evidence that the
+role could be assumed, not that it can read.
+
+One trap survives an otherwise careful policy: an action that takes **no
+resource-level permission** — `ssm:DescribeParameters` is the common one — can
+never be satisfied by an ARN-scoped statement, so it needs its own statement on
+`"*"` even where every other action on that service is correctly scoped to one
+prefix.
+
 ## Runner choice
 
 The documented fences in [`getting-started.md`](getting-started.md) and

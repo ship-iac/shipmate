@@ -234,6 +234,24 @@ fresh plan. There is no force: an apply that silently re-planned would apply
 something nobody reviewed, and the check left pending is exactly what stops the
 gate greening over an unapplied stack.
 
+**A retry is not a re-plan, and the pending check makes the retry look
+available.** A failed apply leaves its `apply / <stack> / <env>` check *pending*
+rather than failed, so `snapshot` accepts a fresh `shipmate apply <env>` for that
+cell — the right recovery when nothing moved (a credentials failure, a rate limit,
+a cancelled run). If the apply **partially** succeeded, the state serial advanced
+and the stored plan no longer matches it, so that retry is refused here instead.
+Re-plan first; the two recoveries are not interchangeable.
+
+**No supported route aims an apply at a superseded plan**, which is why this error
+normally means the state moved rather than that the wrong plan was chosen.
+both dispatched apply workflows refuse in their `guard` job any dispatch whose
+actor is not a `[bot]` — a hand-run one fails with `apply must be dispatched by
+the shipmate App via comment-ops, not by a direct workflow_dispatch` — and
+comment-ops
+resolves the newest successful plan run for the pull request's **current** head,
+refusing the command when that head has none. These fail-safes are defence in
+depth behind that control, not the only thing behind it.
+
 **If the mismatch names *every* `TF_VAR_*` and it started right after an
 environment-naming or `SHIPMATE_SHARED_ENVS` change, the cause is not the plan.**
 The apply job bound an environment that does not exist, GitHub auto-created it
