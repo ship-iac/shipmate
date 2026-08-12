@@ -11,6 +11,72 @@ section below names the SHA the release tags.
 The version line stays `v0.x` while action inputs, check names, and the comment
 grammar are declared unstable in `README.md`.
 
+## [0.14.1] — 2026-08-12
+
+Tags `<sha>`.
+
+**Re-pinning is all it takes**: no action input, check name, comment grammar,
+environment or workflow edit changes, and there is nothing to migrate. One
+behavioural difference worth knowing before you re-pin — every cell now moves a
+restored `terraform.tfstate.d` aside for the duration of `tofu init` and back
+afterwards.
+
+### Fixed
+
+- **A `local` backend selecting its environment through `TF_WORKSPACE` can plan
+  at all.** `actions/state` restores `<stack>/terraform.tfstate.d` into a fresh
+  checkout that holds no `.terraform` record marking the backend initialised, so
+  `tofu init` classified it as legacy state awaiting migration and asked whether
+  to copy it — and `-input=false` turns that question into `Error asking for
+  state migration action: input is disabled`, before any plan output exists to
+  read. The shape is nastier than a plain failure: the **first** apply on such a
+  repository succeeds, because nothing is cached yet and nothing is restored, and
+  every run after it fails, starting with the next pull request's plan.
+
+  `plan-cell`, `drift-cell` and `apply-cell` now move the directory aside for the
+  init and move it back afterwards, on the failure path too. Both halves are
+  load-bearing: without the move-aside the init dies, without the move-back the
+  cell plans or applies against no state at all. The hidden path comes from
+  `mktemp -du` rather than a fixed name, so it cannot collide with something
+  already in `RUNNER_TEMP` and swallow the state that holds. The single-state
+  case — one `terraform.tfstate`, as the folder-per-env layout has — is
+  short-circuited by OpenTofu and is deliberately not hidden.
+
+  Nothing regressed here: the path had never executed. It surfaced on
+  `repo-example-workspaces`, whose resources carry no keeper, so
+  `terramate list --changed` had always returned nothing and no cell of that
+  flavour had ever planned.
+
+- **`scripts/register-app` refuses a `--repo` owner beginning with `-`.** The
+  value is its own argv element in `gh variable set --repo <value>`, where one
+  starting with a hyphen is the shape a CLI reads as a flag rather than a value;
+  GitHub logins cannot start with one either, so the pattern now anchors both
+  halves alphanumeric. Hand-run bootstrap only, and `argparse` already refused
+  the space-separated form — the `--repo=` form is what reached the regex.
+
+### Added
+
+- **Three documentation limits that cost a consumer a round trip each**, all
+  reported from a real AWS bootstrap outside this organization:
+  - `docs/aws.md` — a plan against **empty state** refreshes nothing, so none of
+    the resource reads the run will need are attempted: a too-tight policy on
+    either role first surfaces at the **apply**, and once state exists the plan
+    role is exercised only as far as the refresh reaches. Plus the trap that
+    survives an otherwise careful policy — an action taking no resource-level
+    permission (`ssm:DescribeParameters`) can never be satisfied by an ARN-scoped
+    statement.
+  - `docs/troubleshooting.md` — a retry is not a re-plan. A failed apply leaves
+    its `apply / <stack> / <env>` check *pending*, so `snapshot` accepts a retry,
+    which is the right recovery only when nothing moved; a partial apply that
+    advanced the state serial needs a re-plan, and the exact-plan fail-safe
+    refuses the retry instead. And no supported route aims an apply at a
+    superseded plan, so those fail-safes sit behind a control that already
+    prevents the situation.
+  - `docs/branch-protection.md` — a single maintainer with a `CODEOWNERS`
+    covering the changed files cannot satisfy `require_last_push_approval` and
+    `require_code_owner_review` together: narrow the `CODEOWNERS` or add a bypass
+    actor, which spends exactly the control a leaked App key cannot get past.
+
 ## [0.14.0] — 2026-08-12
 
 Tags `f485a78`.
