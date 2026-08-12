@@ -282,9 +282,13 @@ never used.
     fails the run rather than letting the applies through — a check that did not
     happen is not a passed check. A transient failure clears on a re-run of the
     workflow.
-  - It costs a caller nothing: the default `GITHUB_TOKEN` lists environments
-    under the `checks: read` block `snapshot` already declares, so no new
-    `permissions:` grant, App key or App permission is involved.
+  - It costs a caller nothing, but not because it needs nothing: listing
+    environments needs `actions: read` — on a **private** repository the default
+    `GITHUB_TOKEN` gets a 403 with `checks: read` alone — and every apply route's
+    call site already grants `actions: read` for its wave jobs and `complete`, so
+    the `uses:` permission cap is already high enough. A hand-written wrapper
+    calling `apply-env-level.yml` must grant it. No App key or App permission is
+    involved.
   - **Deliberately out of scope**, so what it promises stays readable: the
     **plan-side** binding, which lives in the consumer's own `plan.yml` /
     `drift.yml` and is out of the engine's reach; an environment that **exists

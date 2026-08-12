@@ -291,10 +291,12 @@ Two fixes, and the error names both because either can be the right one:
 Two neighbouring failures from the same step, both also fail-closed:
 
 - **`could not list this repository's GitHub Environments`.** The check did not
-  happen, so the applies are refused rather than permitted. A 5xx or a rate limit
-  clears on a re-run of the workflow. A persistent failure means the token cannot
-  read environments — nothing a consumer normally configures, since the default
-  `GITHUB_TOKEN` can list them under the permissions this job already declares.
+  happen, so the applies are refused rather than permitted. Check first that the
+  job calling `apply-env-level.yml` grants **`actions: read`**: permissions cap at
+  each `uses:` boundary, and on a **private** repository listing environments 403s
+  with `checks: read` alone. Every apply route shipped here grants it already, so
+  a persistent 403 points at a hand-written caller. A 5xx or a rate limit clears
+  on a re-run of the workflow.
 - **`the environments listing is truncated`.** One page did not cover the
   repository's environments, so a missing environment cannot be told from an
   unread one. Reduce the number of environments, or re-run — this is a hard

@@ -21,9 +21,14 @@ jobs:
   # environment needed -- but permissions cap at each `uses:` boundary, so
   # every caller job below must also grant checks:read or this job fails at
   # workflow-resolution time.
+  #
+  # actions:read is not decorative: on a private repository, listing the
+  # environments 403s with checks:read alone, and actions:read is the scope that
+  # unlocks it (measured; the mapping is undocumented). Every call site already
+  # grants it for the wave jobs and `complete`.
   snapshot:
     runs-on: ubuntu-latest
-    permissions: { checks: read }
+    permissions: { checks: read, actions: read }
     outputs:
       snapshot: ${{ steps.snap.outputs.snapshot }}
     steps:
