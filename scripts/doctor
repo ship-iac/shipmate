@@ -338,17 +338,49 @@ def _missing_half(name, env, role, mode):
     )
 
 
+def _ambiguous_envs(names):
+    """Logical envs that exist under both namings, from the environment names
+    alone. This one check needs no declared environment set -- it compares
+    environment names against each other -- so it is reported even when no plan
+    run supplied that set. One failed cell out of a fan-out withholds it, and a
+    half-migrated repository is exactly when the finding is wanted."""
+    return {
+        stem
+        for name in names
+        for suffix in ("-plan", "-apply")
+        if name.endswith(suffix) and (stem := name.removesuffix(suffix)) in names
+    }
+
+
+def _ambiguity(env, names):
+    present = ", ".join(f"`{n}`" for n, _ in _role_names(env, SPLIT) if n in names)
+    return (
+        f"GitHub Environments `{env}` and {present} exist side by side for "
+        f"`env:{env}` — the apply waves bind `{env}` while `{env}` is listed in "
+        f"the `SHIPMATE_SHARED_ENVS` repository variable and `{env}-apply` "
+        "otherwise, and the plan side is bound by this repository's own "
+        "`plan.yml` and `drift.yml`; doctor reads neither the variable nor those "
+        "files, so which naming each path binds is undetermined here. Either "
+        "naming may therefore be bound by nothing, with its protection rules "
+        "reading as a control that is in no code path. Establish both bindings "
+        "before removing either naming — with a static plan-side `-plan` binding "
+        f"and `{env}` shared, both namings are live."
+    )
+
+
 def _environment_warnings(ctx):
+    names = _existing_env_names(ctx)
+    out = [(WARNING, _ambiguity(env, names)) for env in sorted(_ambiguous_envs(names))]
     if not ctx["envs_available"]:
-        return [
+        out.append(
             (
                 NOTICE,
                 "no plan run with cell summaries for this commit — the declared "
-                "environment set is unknown, so the environment probes were skipped.",
+                "environment set is unknown, so the remaining environment probes were "
+                "skipped. The ambiguous-naming check above does not need it.",
             )
-        ]
-    names = _existing_env_names(ctx)
-    out = []
+        )
+        return out
     for env in sorted(ctx["envs"]):
         mode = _env_mode(env, names)
         if mode == MISSING:
@@ -366,23 +398,8 @@ def _environment_warnings(ctx):
                     "and the OIDC subject split).",
                 )
             )
-        elif mode == AMBIGUOUS:
-            present = ", ".join(f"`{n}`" for n, _ in _role_names(env, SPLIT) if n in names)
-            out.append(
-                (
-                    WARNING,
-                    f"GitHub Environments `{env}` and {present} exist side by side for "
-                    f"`env:{env}` — the apply waves bind `{env}` while `{env}` is listed in "
-                    f"the `SHIPMATE_SHARED_ENVS` repository variable and `{env}-apply` "
-                    "otherwise, and the plan side is bound by this repository's own "
-                    "`plan.yml` and `drift.yml`; doctor reads neither the variable nor those "
-                    "files, so which naming each path binds is undetermined here. Either "
-                    "naming may therefore be bound by nothing, with its protection rules "
-                    "reading as a control that is in no code path. Establish both bindings "
-                    "before removing either naming — with a static plan-side `-plan` binding "
-                    f"and `{env}` shared, both namings are live.",
-                )
-            )
+        # Ambiguity is reported by the name scan above, for every logical env in
+        # the repository rather than only the ones this plan run covered.
         if mode in (SPLIT, AMBIGUOUS):
             # Ambiguous mode reports the missing half too: fail-closed, and the
             # ambiguity WARNING above says nothing about which environments exist.
