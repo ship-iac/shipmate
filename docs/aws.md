@@ -84,6 +84,15 @@ role's trust policy** — add the new subject before the rename and drop the old
 after; [`upgrading.md`](upgrading.md) §0.13.0 has the ordered steps for both the
 split and the shared migration.
 
+**Dropping the old subject afterwards is not tidying.** GitHub auto-creates an
+environment the instant a job binds its name, with none of that environment's
+protection rules, and nothing in the pipeline probes IAM — so a subject left
+trusted for a deleted environment is a standing way back in, reachable by anyone
+who can get a job to bind that name. Follow what it reaches rather than what the
+role is called: a read-only plan role that may `sts:AssumeRole` a state role ends
+at **state write**, not at read, and a plan of a state file it can rewrite is
+worth nothing.
+
 **Write the trust condition from the subject your own logs show, not from the
 documented shape.** GitHub Actions issues the `sub` claim with the numeric
 organization and repository ids embedded — captured from that sample repository

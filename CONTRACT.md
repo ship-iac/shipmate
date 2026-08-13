@@ -203,9 +203,14 @@ never used.
 
   A static bare binding in a mixed repository is the failure this rule exists to
   prevent: the split envs' plan cells bind a bare `<env>` nobody created, GitHub
-  auto-creates it empty, and the plan runs with no `TF_VAR_*` — where the layout
-  gives `TF_VAR_env` a fallback default, that plan silently describes the **wrong**
-  environment and a reviewer approves it. The loud refusal only arrives at apply,
+  auto-creates it empty, and the plan runs with no `TF_VAR_*` — so it silently
+  describes the **wrong** environment and a reviewer approves it. A missing
+  variable default does not make that loud: `${{ vars.X }}` sets the `env:` key to
+  the empty string, a `run.env` `tm_try` chain passes an empty value through
+  instead of falling back, and `TF_VAR_env=` satisfies a variable with no default —
+  so the layouts differ only in *which* wrong environment gets planned
+  ([`docs/upgrading.md`](docs/upgrading.md) §0.13.0 has the measurement). The loud
+  refusal only arrives at apply,
   and only where the environment injects a variable the fingerprint sees (see the
   fail-loud bullet below).
 - **A logical env may opt into one shared environment (shared mode).** Listing
