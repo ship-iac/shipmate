@@ -11,6 +11,84 @@ section below names the SHA the release tags.
 The version line stays `v0.x` while action inputs, check names, and the comment
 grammar are declared unstable in `README.md`.
 
+## [0.14.2] — 2026-08-13
+
+Tags `<sha>`.
+
+**Re-pinning is all it takes**: no action input, check name, comment grammar,
+environment or workflow edit changes, and there is nothing to migrate. One
+behavioural difference worth knowing before you re-pin — `shipmate doctor`'s
+ambiguous-naming warning is now reported without a successful plan run behind it,
+and for every logical environment in the repository rather than only the ones the
+pull request planned.
+
+### Fixed
+
+- **`shipmate doctor` reports ambiguous environment naming even when the declared
+  environment set is unknown.** doctor's environment probes read the declared set
+  from the cell summaries of a plan run that **succeeded**, so a single cell lost
+  to something unrelated — a provider-registry timeout in a 13-cell fan-out —
+  withheld *every* environment finding, including the ambiguous-naming warnings
+  that are the reason to run doctor between a migration's merge and its delete.
+
+  That one check needs no declared set: it compares GitHub Environment **names**
+  against each other (a bare `<env>` beside `<env>-plan` or `<env>-apply`), which
+  is why it survives doctor not being able to read `SHIPMATE_SHARED_ENVS` either.
+  It is now derived from the environments listing alone and reported either way.
+  Two consequences: it covers every logical environment in the repository rather
+  than only the ones a given pull request changed, and the warning has one text
+  source, so a mid-migration report cannot disagree with a post-migration one. The
+  probes that genuinely need the declared set — the missing half of a split pair,
+  the plan/apply protection shape, the secrets a plan environment holds — are
+  unchanged and still say when they were skipped.
+
+- **A documented claim that was wrong in the fail-open direction.**
+  `docs/upgrading.md` §0.13.0 and `CONTRACT.md` §Env model both argued that a
+  layout whose `TF_VAR_env` has no fallback default fails **loudly** when a plan
+  cell binds an environment GitHub auto-created empty. It does not. Measured on
+  Terramate 0.17.1 / OpenTofu 1.12.4: `${{ vars.TF_VAR_env }}` for a variable the
+  environment does not hold still sets the `env:` key, to the empty string; a
+  `run.env` chain of the form `tm_try(env.TF_VAR_env, env.env, "dev")` passes that
+  empty string through rather than falling back, because an empty value is a value
+  and not a miss; and `TF_VAR_env=` satisfies a `variable "env"` that declares no
+  default. So the layouts differ only in **which** wrong environment gets planned —
+  a fallback default's name, or an empty one, which is a different state address —
+  not in whether the plan is quiet. Both pages carry the measurement now and say
+  not to count on a missing default.
+
+### Added
+
+Five documentation sites, all from a cross-organization consumer's report after it
+performed the `0.13.0` environment rename on a layout with **per-workload** OIDC
+roles rather than per-environment ones:
+
+- `docs/upgrading.md` §0.13.0 — **the split/shared asymmetry is stated first**,
+  before both ordered lists instead of after them: in split mode
+  `SHIPMATE_SHARED_ENVS` does nothing and the workflow edit flips the binding, in
+  shared mode the variable flips it and the delete is cleanup. Establishing that an
+  all-split repository never sets the variable previously took reading both lists
+  plus the mixed-repository note. Step 3 also says to **verify the binding in
+  `drift.yml`** by dispatching a run: a green plan run is no evidence about a file
+  the engine cannot read, and the nightly path is where a mis-set binding surfaces
+  last.
+- `docs/aws.md` §GitHub OIDC — what a **stale environment subject reaches**, which
+  is what makes dropping it after the rename more than tidying: follow the closure
+  of what the role can assume, not the role's name, and a read-only plan role that
+  may `sts:AssumeRole` a state role ends at state **write**.
+- `docs/hardening.md` §7–9 — read `SHIPMATE_SHARED_ENVS` at the granularity of what
+  it spends rather than where it is set. The list is per environment, which invites
+  reading a shared cell as revisitable; what it gives up is shipmate's ability to
+  say *plan may read, apply may write* for that cell, and the only way back is
+  splitting the environment again.
+- `docs/hardening.md` §3–5 and `docs/branch-protection.md` — **GitHub evaluates
+  `CODEOWNERS` from the pull request's base branch**, so a sole maintainer's
+  narrowing cannot travel with the workflow-touching change it exists to unblock; it
+  has to merge first, on its own. With a floor: an entry owning `/.github/` (or
+  `CODEOWNERS`' own path) owns the fix too, leaving a ruleset bypass actor as the
+  only way out.
+- `docs/troubleshooting.md` — the ambiguity exemption above, its widened scope, and
+  why it is deliberate.
+
 ## [0.14.1] — 2026-08-12
 
 Tags `8cceb4a`.
