@@ -83,8 +83,18 @@ files: the pusher cannot approve their own last push, and an App cannot be a cod
 owner, so there is nobody left to approve. That posture needs either a **narrow**
 `CODEOWNERS` — covering `/.github/workflows/` alone, say, so ordinary IaC pull
 requests need no code-owner approval — or a bypass actor on the ruleset, which
-spends exactly the control a leaked App key cannot get past. A sole maintainer who
-wants
+spends exactly the control a leaked App key cannot get past.
+
+**If you narrow `CODEOWNERS`, land that on its own pull request first.** GitHub
+evaluates `CODEOWNERS` from the pull request's **base** branch, so a narrowing
+committed alongside the change it is meant to unblock does not apply to that pull
+request — the old ownership still decides, and the pull request stays unmergeable.
+This bites precisely on a `CODEOWNERS` covering `/.github/workflows/`, because the
+pull requests it blocks are the ones that edit a workflow — an engine migration
+that moves an `environment:` line, say. It also has a floor: the narrowing is
+itself mergeable only because `.github/CODEOWNERS` is not under a path it owns. A
+`CODEOWNERS` entry covering `/.github/` — or the file's own path — owns the fix,
+and then a bypass actor is the only way out. A sole maintainer who wants
 `required_approving_review_count: 0` should read `docs/hardening.md` §3–5 before
 changing it — that page has the reasoning for each of these rules, and this block
 is just its recommendation made pasteable.

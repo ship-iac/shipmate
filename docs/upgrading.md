@@ -114,11 +114,25 @@ old naming (`<env>` for plan, `<env>-apply` for apply) resolves to environments
 that no longer play those roles, so every logical env is migrated by hand, per
 env, in the same change that moves your pins.
 
+**Which step moves the binding is not the same in the two modes, and it is the
+easiest thing on this page to get backwards.** In **split** mode
+`SHIPMATE_SHARED_ENVS` does nothing and the workflow edit flips the binding; in
+**shared** mode the variable flips the binding and the delete is only cleanup. So
+an all-split repository never sets the variable at all and binds a static
+`${{ matrix.environment }}-plan`; read the two ordered lists below with that
+straight, and the mixed case after them.
+
 **Create the environments first, then edit the workflows.** Doing it the other
 way round means plan cells bind an environment that does not exist yet, GitHub
-auto-creates it empty, and a flavor whose `TF_VAR_env` has a fallback default
-then plans **the wrong environment** instead of failing — the empty environment
-injects nothing and the fallback supplies a name nobody chose.
+auto-creates it empty, and the plan that follows is **quiet either way** — with a
+`TF_VAR_env` fallback default it plans a name nobody chose, and without one it
+plans an *empty* environment name, which is a different state address rather than
+a failure. Measured on Terramate 0.17.1 / OpenTofu 1.12.4: `${{ vars.X }}` for a
+variable the environment does not hold still sets the `env:` key, to the empty
+string; a `run.env` chain of the form
+`tm_try(env.TF_VAR_env, env.env, "dev")` passes that empty string through rather
+than falling back; and `TF_VAR_env=` satisfies a `variable "env"` that declares no
+default. **Do not count on a missing default to make this loud.**
 
 Split mode (the default, keeps the reviewer gate):
 
@@ -144,7 +158,11 @@ Split mode (the default, keeps the reviewer gate):
 3. Change `environment:` to `${{ matrix.environment }}-plan` in the `plan` job of
    `plan.yml` **and** the `drift` job of `drift.yml`. Nothing else moves:
    `matrix.environment`, check names, tags, `explicit_envs` and artifact names
-   all stay the bare logical name.
+   all stay the bare logical name. **Verify it in both**, and do not wait for the
+   night's drift run to do it for you: a green plan run says nothing about a file
+   the engine cannot read, and `drift.yml` is where a mis-set binding surfaces
+   last. Dispatch a drift run after the merge and check that the `<env>-plan`
+   environments each pick up a fresh deployment record from it.
 4. **Merge that change**, then delete the bare `<env>`. `plan.yml` runs on
    `pull_request_target`, so until the edit is on the default branch every plan
    run — the migration pull request's own included — uses the **base** copy and
@@ -215,9 +233,10 @@ rule and the indentation constraint):
 
 A static bare binding in a mixed repository is the quiet failure here: the split
 envs' plan cells bind an environment you deleted, GitHub auto-creates it empty,
-and a layout with a `TF_VAR_env` fallback default plans the wrong environment for
-a reviewer to approve. Nothing refuses until the apply — and on a folder-per-env
-layout nothing refuses at all ([`../CONTRACT.md`](../CONTRACT.md) §Env model).
+and the cell plans the wrong environment — a fallback default's name, or an empty
+one — for a reviewer to approve, per the measurement above. Nothing refuses until
+the apply — and on a folder-per-env layout nothing refuses at all
+([`../CONTRACT.md`](../CONTRACT.md) §Env model).
 
 **Set `SHIPMATE_SHARED_ENVS` before that expression reaches the default branch.**
 The expression falls back to `<env>-plan`, and shared mode never creates one, so

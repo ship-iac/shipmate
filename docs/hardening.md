@@ -220,6 +220,16 @@ requirement appears. `shipmate doctor` warns when the rule requires approvals bu
 not code-owner review — it does not check `CODEOWNERS` coverage, and it never
 fails a run, so that is a warning, not enforcement.
 
+**Know which copy of `CODEOWNERS` decides, before you need to change it.** GitHub
+evaluates it from the pull request's **base** branch, so narrowing or widening
+ownership never applies to the pull request carrying the edit — it has to merge
+first, on its own. That is the difference between a sole maintainer being able to
+merge an engine migration that touches a workflow file and not being able to, and
+it has a floor worth checking now: an entry that owns `/.github/` (or
+`CODEOWNERS`' own path) owns the fix too, leaving a ruleset bypass actor as the
+only way out — and that spends the one merge-time control a leaked App key cannot
+satisfy. `docs/branch-protection.md` has the sole-maintainer shape.
+
 ## 6. Environment reviewers — the gate that holds after a merge
 
 Environment reviewers are **users and teams**. A GitHub App installation token
@@ -400,6 +410,17 @@ control.
   customization (adding `job_workflow_ref` to the claim, so the engine's apply
   workflow file is part of what the policy matches) is the escape hatch; it is
   consumer-side, unsupported by the engine, and out of scope here.
+- **Read the toggle at the granularity of what it spends, not of where it is
+  set.** `SHIPMATE_SHARED_ENVS` is a list of environments, which invites reading a
+  shared cell as a setting you can revisit; the OIDC consequence is not
+  revisitable. What each listed cell gives up is not a knob on that cell — it is
+  shipmate's ability to say *plan may read, apply may write* **for** that cell, and
+  the only way back is splitting the environment again. A repository that lists
+  every cell cannot express the read/write split anywhere, for any environment, and
+  the variable looks identical in both cases. So decide it as a posture, per cell,
+  before the migration rather than after: shared where plan-time branch code
+  holding the write role is genuinely acceptable, split everywhere you would ever
+  want a reviewer or a read-only plan role.
 
 ## 10–12. Actions settings
 
