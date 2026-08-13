@@ -161,8 +161,17 @@ python dev/pin_status.py <release-sha>   # exit 0 == safe to pin
 ```
 
 ```bash
-gh release create v0.2.0 --target <release-sha> --title v0.2.0 --generate-notes
+git tag -a v0.2.0 -m v0.2.0 <release-sha> && git push origin v0.2.0
+gh release create v0.2.0 --title v0.2.0 --generate-notes --verify-tag
 ```
+
+**Push the tag first; `--target` does not work on this repository.**
+`gh release create v0.2.0 --target <sha>` was the documented form and it is
+rejected — `tag_name is not a valid tag` / `Release.target_commitish is invalid`,
+with the release SHA verified as `main`'s tip through the API in the same breath.
+Observed on `v0.14.2`; the cause was not diagnosed, so treat only the two-step
+form above as known-good. `--verify-tag` is what keeps the second command from
+inventing a tag when the push did not land.
 
 Three constraints, each with a specific failure mode:
 
