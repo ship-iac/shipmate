@@ -116,6 +116,14 @@ given pull request changed; the declared set comes from that commit's plan
 matrix. So the report's all-clear line names the environments it actually probed
 instead of implying the repository's environments are all sound, and a clean
 secret probe says nothing about an environment this pull request did not touch.
+The declared set needs a plan run that **succeeded**, so one failed cell in a
+fan-out withholds it and the report says so. **One check is exempt and reported
+anyway: the ambiguous-naming warning** (a bare `<env>` beside `<env>-plan` or
+`<env>-apply`), which compares environment names against each other and needs no
+declared set — it therefore covers every logical environment in the repository,
+not only this pull request's. That is deliberate: the moment the warning is most
+wanted is mid-migration, between the merge and the delete, when a fan-out is at
+its most likely to lose a cell to something unrelated.
 Separately, the report states plainly when some of the commit's workflow runs
 had not finished yet, and when the warnings harvest itself could not complete
 (or may be truncated by GitHub's per-step annotation cap), rather than claiming

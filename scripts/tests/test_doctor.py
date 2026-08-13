@@ -70,14 +70,37 @@ def test_render_annotations_one_line_per_level_and_escapes():
     assert all("\n" not in line for line in out)
 
 
-def test_envs_unavailable_skips_environment_probes(monkeypatch):
-    monkeypatch.setattr(
-        doctor, "_gh_json", lambda path: pytest.fail(f"env probe hit the API: {path}")
-    )
+def test_envs_unavailable_skips_the_probes_that_need_the_declared_set(monkeypatch):
+    """Without the declared environment set, the only findings a listing alone
+    supports are the ambiguous-naming ones -- a missing half of a split pair is
+    unknowable, since nothing says `prod` is an environment this repository
+    declares."""
+    monkeypatch.setattr(doctor, "_gh_json", _existence("dev-eu", "dev-eu-plan", "prod-apply"))
     out = doctor._environment_warnings(_ctx(envs=set(), envs_available=False))
-    assert len(out) == 1
-    assert out[0][0] == doctor.NOTICE
-    assert "no plan run" in out[0][1]
+    assert [lvl for lvl, _ in out] == [doctor.WARNING, doctor.NOTICE]
+    assert "`dev-eu` and `dev-eu-plan` exist side by side" in out[0][1]
+    assert all("prod" not in text for _, text in out)
+    assert "no plan run" in out[1][1]
+
+
+def test_envs_unavailable_reports_the_ambiguity_the_declared_set_would_have(monkeypatch):
+    """The finding is the same one a green plan run produces, so a mid-migration
+    doctor is not worth less than a post-migration one. One flaked cell out of a
+    13-cell fan-out withholds the declared set, and the ambiguity warning is the
+    reason to run doctor between the merge and the delete."""
+    monkeypatch.setattr(doctor, "_gh_json", _existence("dev-eu", "dev-eu-plan", "dev-eu-apply"))
+    dark = doctor._environment_warnings(_ctx(envs=set(), envs_available=False))
+    lit = doctor._environment_warnings(_ctx(envs={"dev-eu"}))
+    assert [t for lvl, t in dark if lvl == doctor.WARNING] == [t for _, t in lit]
+
+
+def test_split_naming_alone_is_never_read_as_ambiguous(monkeypatch):
+    """The name scan must not turn every split repository's report into a
+    warning: `<env>-plan`/`<env>-apply` with no bare `<env>` is the default
+    naming, and only the bare name existing beside a suffixed one is ambiguous."""
+    monkeypatch.setattr(doctor, "_gh_json", _existence("dev-eu-plan", "dev-eu-apply", "prod-plan"))
+    out = doctor._environment_warnings(_ctx(envs=set(), envs_available=False))
+    assert [lvl for lvl, _ in out] == [doctor.NOTICE]
 
 
 def test_ctx_from_env_missing_cells_dir_yields_empty_envs(monkeypatch, tmp_path):
@@ -1702,10 +1725,11 @@ def test_report_escapes_hostile_annotation_text():
     assert "[go](http://e)" not in body
 
 
-def test_skipped_environment_probes_are_stated_exactly_once():
+def test_skipped_environment_probes_are_stated_exactly_once(monkeypatch):
     """The "skipped" wording comes from one place -- `_environment_warnings`,
     keyed on `envs_available` -- so the preamble and the finding can neither
     repeat it nor disagree about it."""
+    monkeypatch.setattr(doctor, "_gh_json", _existence("dev-eu-plan", "dev-eu-apply"))
     findings = doctor._environment_warnings(_ctx(envs=set(), envs_available=False))
     body = doctor.render_report(findings, [], _ctx(envs_available=False, plan_run_id=""))
     assert "environment probes were skipped" in body
