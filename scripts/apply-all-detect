@@ -9,14 +9,16 @@ on the merge-deploy path. Env membership comes from stack tags
 (build-matrix.env_membership) so artifact and check names are only ever
 constructed forward, never reverse-parsed.
 
-Two exclusions distinguish the bare form from deploy:
+Three exclusions distinguish the bare form from deploy:
 - envs listed in `global.shipmate.explicit_envs` (typically prod) are removed
   before env-levels are built; their apply checks simply stay pending, so
   `shipmate / gate` keeps gating the merge until a targeted
   `shipmate apply <env>` completes them;
 - envs ordered (transitively) after an unapplied explicit env are skipped
   with a notice — their ordering precondition cannot be met this run,
-  exactly like a failed predecessor level.
+  exactly like a failed predecessor level;
+- when `SHIPMATE_UNGATED_ENVS` is set, envs it does not list are held until
+  the PR carries an approving review, dropped the same way.
 """
 
 import importlib.util
@@ -41,6 +43,7 @@ ad = _load("apply-detect")
 bm = _load("build-matrix")
 wv = _load("waves")
 eo = _load("env-order")
+az = _load("authorize")
 # No apply-gate alias -- see deploy-detect and test_detect_app_scoping.
 
 
@@ -66,6 +69,24 @@ def partition_envs(pending_envs, explicit, order):
     return excluded, skipped
 
 
+def review_held(pending_envs, ungated, decision):
+    """Envs whose apply waits for a review this run.
+
+    Empty `ungated` means the feature is not configured and nothing is ever
+    held — an un-opted-in repository behaves exactly as before, including when
+    the review job is skipped and no decision arrives. Otherwise only the two
+    pass values apply everything; REVIEW_REQUIRED applies the listed envs and
+    holds the rest, and every remaining value — an explicit CHANGES_REQUESTED,
+    an unknown enum, an absent decision — holds all of them."""
+    if not ungated:
+        return []
+    if decision in ("NONE", "APPROVED"):
+        return []
+    if decision == "REVIEW_REQUIRED":
+        return sorted(e for e in pending_envs if e.casefold() not in ungated)
+    return sorted(pending_envs)
+
+
 def main():
     repo = os.environ["GITHUB_REPOSITORY"]
     plan_run_id = os.environ["SHIPMATE_PLAN_RUN_ID"]
@@ -83,11 +104,21 @@ def main():
     pending = ad.filter_pending(cells, completed)
 
     order = eo.read_env_order()
-    excluded, skipped = partition_envs(
-        {c["environment"] for c in pending}, eo.read_explicit_envs(), order
-    )
-    dropped = set(excluded) | set(skipped)
+    pending_envs = {c["environment"] for c in pending}
+    ungated = az.parse_ungated_envs(os.environ.get("SHIPMATE_UNGATED_ENVS", ""))
+    decision = os.environ.get("SHIPMATE_REVIEW_DECISION", "")
+    held = review_held(pending_envs, ungated, decision)
+    excluded, skipped = partition_envs(pending_envs, eo.read_explicit_envs() + held, order)
+    # An explicit env is "run `shipmate apply <env>`", a held one is "get a
+    # review" -- two causes, two outputs, or the comment names the wrong fix.
+    excluded = sorted(set(excluded) - set(held))
+    dropped = set(excluded) | set(skipped) | set(held)
     runnable = [c for c in pending if c["environment"] not in dropped]
+    # From `runnable`, never from `pending & ungated`: a listed env can still be
+    # excluded or skipped, and claiming it applied is worse than saying nothing.
+    applied_ungated = (
+        sorted({c["environment"] for c in runnable}) if decision == "REVIEW_REQUIRED" else []
+    )
 
     deps = ad.run_graph_deps()
     levels = eo.env_levels(order, {c["environment"] for c in runnable})
@@ -98,7 +129,8 @@ def main():
     print(
         f"::notice title=apply-all-detect::plan_run={plan_run_id} head={head} "
         f"cells={len(cells)} pending={len(pending)} envlevels={level_counts} "
-        f"excluded_explicit={excluded} skipped_after_explicit={skipped}"
+        f"excluded_explicit={excluded} skipped_after_explicit={skipped} "
+        f"review_held={held} applied_ungated={applied_ungated}"
     )
     with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
         eo.write_env_level_waves(fh, per_level)
@@ -106,6 +138,8 @@ def main():
         fh.write(f"plan_run_id={plan_run_id}\n")
         fh.write(f"excluded_envs={json.dumps(excluded)}\n")
         fh.write(f"skipped_envs={json.dumps(skipped)}\n")
+        fh.write(f"review_held_envs={json.dumps(held)}\n")
+        fh.write(f"applied_ungated_envs={json.dumps(applied_ungated)}\n")
 
 
 if __name__ == "__main__":

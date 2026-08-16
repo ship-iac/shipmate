@@ -116,6 +116,8 @@ def test_main_wires_the_tag_map_into_the_cells(tmp_path, monkeypatch):
         "GITHUB_OUTPUT": str(out),
     }.items():
         monkeypatch.setenv(k, v)
+    for k in ("SHIPMATE_UNGATED_ENVS", "SHIPMATE_REVIEW_DECISION"):
+        monkeypatch.delenv(k, raising=False)
     monkeypatch.setattr(aad.ad, "verify_plan_run", lambda *a: None)
     monkeypatch.setattr(aad.ad, "run_graph_deps", lambda: {"stacks/app": set()})
     monkeypatch.setattr(aad.ad, "_artifact_names", lambda *a: ["plan.dev-eu.stacks-app"])
@@ -135,3 +137,139 @@ def test_main_wires_the_tag_map_into_the_cells(tmp_path, monkeypatch):
     assert json.loads(parsed["envlevel0_waves"])["wave0"] == [
         {"stack": "stacks/app", "environment": "dev-eu", "workload_var": "NET_EDGE"}
     ]
+
+
+PENDING = {"dev-eu", "dev-us", "prod-eu"}
+UNGATED = frozenset({"dev-eu", "dev-us"})
+
+
+@pytest.mark.parametrize(
+    ("decision", "expected"),
+    [
+        ("NONE", []),
+        ("APPROVED", []),
+        ("REVIEW_REQUIRED", ["prod-eu"]),
+        ("CHANGES_REQUESTED", ["dev-eu", "dev-us", "prod-eu"]),
+        ("", ["dev-eu", "dev-us", "prod-eu"]),
+        ("BANANA", ["dev-eu", "dev-us", "prod-eu"]),
+    ],
+)
+def test_review_held_decision_table(decision, expected):
+    assert aad.review_held(PENDING, UNGATED, decision) == expected
+
+
+@pytest.mark.parametrize(
+    "decision", ["NONE", "APPROVED", "REVIEW_REQUIRED", "CHANGES_REQUESTED", "", "BANANA"]
+)
+def test_review_held_holds_nothing_when_the_variable_is_unset(decision):
+    # The backward-compat hinge: an un-opted-in repository's bare apply must
+    # behave exactly as it does today, including when the review job was
+    # skipped and the decision arrives empty.
+    assert aad.review_held(PENDING, frozenset(), decision) == []
+
+
+def test_review_held_matches_the_variable_case_insensitively():
+    ungated = aad.az.parse_ungated_envs("DEV-EU")
+    assert aad.review_held({"dev-eu", "prod-eu"}, ungated, "REVIEW_REQUIRED") == ["prod-eu"]
+
+
+def _run_main(tmp_path, monkeypatch, *, envs, order=None, explicit=(), ungated=None, decision=None):
+    """main() over one `stacks/app` cell per env in `envs`, everything the
+    script reaches from GitHub/Terramate stubbed. Returns parsed GITHUB_OUTPUT."""
+    out = tmp_path / "out"
+    for k, v in {
+        "GITHUB_REPOSITORY": "o/r",
+        "SHIPMATE_PLAN_RUN_ID": "42",
+        "SHIPMATE_HEAD_SHA": "a" * 40,
+        "GITHUB_OUTPUT": str(out),
+    }.items():
+        monkeypatch.setenv(k, v)
+    for k, v in (("SHIPMATE_UNGATED_ENVS", ungated), ("SHIPMATE_REVIEW_DECISION", decision)):
+        if v is None:
+            monkeypatch.delenv(k, raising=False)
+        else:
+            monkeypatch.setenv(k, v)
+    monkeypatch.setattr(aad.ad, "verify_plan_run", lambda *a: None)
+    monkeypatch.setattr(aad.ad, "run_graph_deps", lambda: {"stacks/app": set()})
+    artifacts = [f"plan.{e}.stacks-app" for e in envs]
+    monkeypatch.setattr(aad.ad, "_artifact_names", lambda *a: artifacts)
+    monkeypatch.setattr(aad.ad, "completed_apply_names", lambda *a: set())
+    monkeypatch.setattr(aad.eo, "read_env_order", lambda: dict(order or {}))
+    monkeypatch.setattr(aad.eo, "read_explicit_envs", lambda: list(explicit))
+    monkeypatch.setattr(
+        aad.bm,
+        "env_membership",
+        lambda **kw: ({e: ["stacks/app"] for e in envs}, {"stacks/app": []}),
+    )
+    aad.main()
+    return dict(ln.split("=", 1) for ln in out.read_text(encoding="utf-8").splitlines())
+
+
+def _wave_envs(parsed):
+    return sorted(
+        c["environment"]
+        for lvl in range(aad.eo.MAX_ENV_LEVELS)
+        for w in [json.loads(parsed[f"envlevel{lvl}_waves"])]
+        for i in range(aad.wv.MAX_WAVES)
+        for c in w[f"wave{i}"]
+    )
+
+
+def test_main_holds_unlisted_envs_and_skips_their_successors(tmp_path, monkeypatch):
+    parsed = _run_main(
+        tmp_path,
+        monkeypatch,
+        envs=["dev-eu", "dev-us", "prod-eu"],
+        order={"dev-us": ["prod-eu"]},
+        ungated="dev-eu,dev-us",
+        decision="REVIEW_REQUIRED",
+    )
+    assert _wave_envs(parsed) == ["dev-eu"]
+    assert json.loads(parsed["review_held_envs"]) == ["prod-eu"]
+    assert json.loads(parsed["applied_ungated_envs"]) == ["dev-eu"]
+    assert json.loads(parsed["excluded_envs"]) == []
+    assert json.loads(parsed["skipped_envs"]) == ["dev-us"]
+
+
+def test_main_reports_every_env_applied_when_all_of_them_are_listed(tmp_path, monkeypatch):
+    parsed = _run_main(
+        tmp_path,
+        monkeypatch,
+        envs=["dev-eu", "prod-eu"],
+        ungated="dev-eu,prod-eu",
+        decision="REVIEW_REQUIRED",
+    )
+    assert _wave_envs(parsed) == ["dev-eu", "prod-eu"]
+    assert json.loads(parsed["review_held_envs"]) == []
+    assert json.loads(parsed["applied_ungated_envs"]) == ["dev-eu", "prod-eu"]
+
+
+def test_main_omits_a_listed_explicit_env_from_the_applied_report(tmp_path, monkeypatch):
+    # dev-us is ungated but explicit: it never ran, so the comment must not
+    # claim it applied.
+    parsed = _run_main(
+        tmp_path,
+        monkeypatch,
+        envs=["dev-eu", "dev-us"],
+        explicit=["dev-us"],
+        ungated="dev-eu,dev-us",
+        decision="REVIEW_REQUIRED",
+    )
+    assert json.loads(parsed["excluded_envs"]) == ["dev-us"]
+    assert json.loads(parsed["applied_ungated_envs"]) == ["dev-eu"]
+    assert _wave_envs(parsed) == ["dev-eu"]
+
+
+def test_main_without_the_variable_runs_every_env_and_reports_nothing(tmp_path, monkeypatch):
+    parsed = _run_main(
+        tmp_path,
+        monkeypatch,
+        envs=["dev-eu", "dev-us", "prod-eu"],
+        order={"dev-us": ["prod-eu"]},
+        decision="CHANGES_REQUESTED",
+    )
+    assert _wave_envs(parsed) == ["dev-eu", "dev-us", "prod-eu"]
+    assert json.loads(parsed["review_held_envs"]) == []
+    assert json.loads(parsed["applied_ungated_envs"]) == []
+    assert json.loads(parsed["excluded_envs"]) == []
+    assert json.loads(parsed["skipped_envs"]) == []
