@@ -260,6 +260,20 @@ def test_main_omits_a_listed_explicit_env_from_the_applied_report(tmp_path, monk
     assert _wave_envs(parsed) == ["dev-eu"]
 
 
+def test_main_claims_nothing_applied_ungated_when_the_variable_is_unset(tmp_path, monkeypatch):
+    # REVIEW_REQUIRED with no list is an ordinary unreviewed apply on the
+    # ruleset's terms -- nothing was exempted, so the comment must not name
+    # every env as applied-without-review.
+    parsed = _run_main(
+        tmp_path,
+        monkeypatch,
+        envs=["dev-eu", "prod-eu"],
+        decision="REVIEW_REQUIRED",
+    )
+    assert _wave_envs(parsed) == ["dev-eu", "prod-eu"]
+    assert json.loads(parsed["applied_ungated_envs"]) == []
+
+
 def test_main_without_the_variable_runs_every_env_and_reports_nothing(tmp_path, monkeypatch):
     parsed = _run_main(
         tmp_path,

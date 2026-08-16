@@ -36,8 +36,68 @@ jobs:
           echo "::error::apply-all must be dispatched by the shipmate App via comment-ops, not by a direct workflow_dispatch"
           exit 1
 
-  detect:
+  # The review state the bare-apply partition needs, re-read here rather than
+  # accepted as a dispatch input: `guard` above admits any bot actor holding
+  # actions:write, so an input would be a claim that surface could forge.
+  # Its own job because `detect` checks out the PR head and runs Terramate over
+  # branch-controlled HCL -- no token belongs in that job. `environment:` is how
+  # a callee reaches the App key (same mechanism as `summary` below), and the
+  # `if:` keeps un-opted-in consumers from paying a deployment record for it.
+  review:
     needs: [guard]
+    if: ${{ vars.SHIPMATE_UNGATED_ENVS != '' }}
+    runs-on: ubuntu-latest
+    environment: shipmate-engine
+    permissions: {}
+    outputs:
+      decision: ${{ steps.rd.outputs.decision }}
+    steps:
+      - name: Verify the App key arrived
+        shell: bash
+        env:
+          APP_ID: ${{ vars.SHIPMATE_APP_ID }}
+          PRIVATE_KEY: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "$PRIVATE_KEY" ]; then
+            echo "::error::The shipmate App private key did not reach this job. Three causes, in the order worth checking: (1) the calling workflow used 'secrets: inherit' across an organization boundary -- GitHub delivers no inherited secrets there, and inherit also suppresses the value this job's environment binding would otherwise supply, so pass the secret by name instead; (2) the caller left SHIPMATE_APP_PRIVATE_KEY out of its secrets block; (3) this job binds no environment, or binds one that holds no secret of that name. See docs/getting-started.md."
+            exit 1
+          fi
+          [ -n "$APP_ID" ] || { echo "::error::SHIPMATE_APP_ID is unset. Set it as a repository or organization variable (docs/github-app.md)."; exit 1; }
+      - id: token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.SHIPMATE_APP_ID }}
+          private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-pull-requests: read
+      - id: rd
+        shell: bash
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          OWNER: ${{ github.repository_owner }}
+          PR_NUMBER: ${{ inputs.pr_number }}
+        run: |
+          set -euo pipefail
+          # A null decision means the ruleset requires no review; normalize it
+          # to the same NONE sentinel comment-ops uses, so both readers fail
+          # closed on anything else. Never defaulted in a workflow expression:
+          # a skipped review job must arrive empty, which holds every env.
+          # The $owner/$repo/$pr tokens are GraphQL query variables (bound via
+          # -F), not shell variables -- single quotes are intentional.
+          # shellcheck disable=SC2016
+          rd=$(gh api graphql -f query='query($owner:String!,$repo:String!,$pr:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$pr){reviewDecision}}}' \
+            -F owner="$OWNER" -F repo="${GITHUB_REPOSITORY#*/}" -F pr="$PR_NUMBER" \
+            --jq '.data.repository.pullRequest.reviewDecision // "NONE"')
+          echo "decision=$rd" >> "$GITHUB_OUTPUT"
+
+  detect:
+    # `review` is SKIPPED for an un-opted-in consumer, and GHA's default
+    # `success()` would skip this job behind it. A `review` that FAILS is caught
+    # by `!failure()`, so nothing applies and the run is visibly red.
+    needs: [guard, review]
+    if: ${{ !failure() && !cancelled() }}
     runs-on: ubuntu-latest
     permissions: { contents: read, checks: read, actions: read }
     outputs:
@@ -53,6 +113,8 @@ jobs:
       plan_run_id: ${{ steps.d.outputs.plan_run_id }}
       excluded_envs: ${{ steps.d.outputs.excluded_envs }}
       skipped_envs: ${{ steps.d.outputs.skipped_envs }}
+      review_held_envs: ${{ steps.d.outputs.review_held_envs }}
+      applied_ungated_envs: ${{ steps.d.outputs.applied_ungated_envs }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { fetch-depth: 0, ref: "${{ inputs.ref }}" }
@@ -67,6 +129,10 @@ jobs:
           head-sha: ${{ inputs.ref }}
           github-token: ${{ github.token }}
           app-id: ${{ vars.SHIPMATE_APP_ID }}
+          # Passed through raw, never defaulted: a skipped `review` job yields
+          # an empty decision, and empty is the hold-everything value.
+          ungated-envs: ${{ vars.SHIPMATE_UNGATED_ENVS }}
+          review-decision: ${{ needs.review.outputs.decision }}
 
   envlevel0:
     # Display name only (job id unchanged) — see apply.yml's `waves` job.
@@ -145,7 +211,12 @@ jobs:
       SHIPMATE_PLAN_PASSPHRASE: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
 
   summary:
-    needs: [guard, detect, envlevel0, envlevel1, envlevel2, envlevel3]
+    # `review` is in this list because `results:` below is
+    # `join(needs.*.result, ',')` -- which covers only THIS job's needs. A
+    # failed `review` skips `detect` (correctly: nothing applies, the gate stays
+    # pending) while `summary` still runs on `guard`'s success, so without the
+    # entry the comment renders the non-failure form over a run that died.
+    needs: [guard, review, detect, envlevel0, envlevel1, envlevel2, envlevel3]
     # `always()` alone would still run this job -- and mint the App key -- when
     # the bot-actor rejection failed; `needs.guard.result == 'success'` closes
     # that. Keyed on `guard` and NOT on `detect`: `always()` is needed so

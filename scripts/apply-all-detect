@@ -117,7 +117,9 @@ def main():
     # From `runnable`, never from `pending & ungated`: a listed env can still be
     # excluded or skipped, and claiming it applied is worse than saying nothing.
     applied_ungated = (
-        sorted({c["environment"] for c in runnable}) if decision == "REVIEW_REQUIRED" else []
+        sorted({c["environment"] for c in runnable})
+        if ungated and decision == "REVIEW_REQUIRED"
+        else []
     )
 
     deps = ad.run_graph_deps()

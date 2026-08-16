@@ -78,6 +78,7 @@ _SITES = {
     ACTIONS / "dispatch" / "action.yml": (("runs", "steps"), _ACTION_ENV),
     ACTIONS / "drift-issues" / "action.yml": (("runs", "steps"), _ACTION_ENV),
     WORKFLOWS / "deploy.yml": (("jobs", "summary", "steps"), _WORKFLOW_ENV),
+    WORKFLOWS / "apply-all.yml": (("jobs", "review", "steps"), _WORKFLOW_ENV),
     ACTIONS / "comment-ops" / "action.yml": None,
 }
 

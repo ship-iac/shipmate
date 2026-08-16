@@ -44,6 +44,12 @@ GUARD_ERROR_LINE = {
         "not by a direct workflow_dispatch"
     ),
 }
+#: The whole `needs:` list each apply path's `detect` carries. Hand-written per
+#: file rather than a shared `[GUARD_JOB]`: apply-all's `detect` also waits on
+#: the `review` job that reads the pull request's review decision server-side.
+#: Still compared whole, so neither `guard` dropping out nor an unreviewed extra
+#: dependency can slip in.
+DETECT_NEEDS = {"apply.yml": ["guard"], "apply-all.yml": ["guard", "review"]}
 SUMMARY_IF = "${{ always() && needs.guard.result == 'success' }}"
 APPLY_PATHS = ("apply.yml", "apply-all.yml")
 
@@ -101,8 +107,9 @@ def test_every_apply_fan_out_job_carries_the_guard_in_its_needs():
     # rejection visible to each job's `!failure()` clause.
     for name in APPLY_PATHS:
         jobs = _jobs(name)
-        assert _needs(jobs["detect"]) == [GUARD_JOB], (
-            f"{name}: detect must need exactly [{GUARD_JOB!r}], got {_needs(jobs['detect'])!r}"
+        assert _needs(jobs["detect"]) == DETECT_NEEDS[name], (
+            f"{name}: detect must need exactly {DETECT_NEEDS[name]!r}, "
+            f"got {_needs(jobs['detect'])!r}"
         )
         for job_id, job in jobs.items():
             if job_id in (GUARD_JOB, "detect"):
