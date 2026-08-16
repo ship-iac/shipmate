@@ -1281,15 +1281,20 @@ either path. Excluded environments name the
 `shipmate apply <env>` that applies them; skipped ones name their ordering
 cause. The two review sentences (see §Comment-ops) are:
 
-- **held** — "an approving review is required before applying", naming the
-  environments and asking for the review, and naming no command, because a
-  held environment may also be an explicit one that a bare apply would not
-  pick up even once reviewed;
+- **held** — "the pull request's review state does not permit applying",
+  naming the environments and asking for an approving review, or for a
+  requested-changes review to be resolved or dismissed, and naming no
+  command, because a held environment may also be an explicit one that a bare
+  apply would not pick up even once reviewed. The sentence is deliberately
+  cause-agnostic: three distinct decisions hold an environment
+  (`REVIEW_REQUIRED` on an unlisted env, `CHANGES_REQUESTED`, or an unknown or
+  absent decision), and only the run's own apply-all-detect notice carries
+  which one, since the decision never reaches this renderer;
 - **applied ungated** — the environments the run was permitted to apply
   without an approving review, per `SHIPMATE_UNGATED_ENVS`. It is the only
-  audit trail an unreviewed apply leaves: under a ruleset requiring zero
-  approvals GitHub reports no review decision at all, so nothing else in a run
-  distinguishes a reviewed apply from an unreviewed one. It states a
+  audit trail an unreviewed apply leaves: `reviewDecision` is a live value
+  with no history, so once the review lands nothing else in a run
+  distinguishes an apply that waited for it from one that did not. It states a
   permission, never an outcome — the set is derived before any wave runs, so
   it points at the run for what actually applied and reserves "applied" for
   the ✅ rows.

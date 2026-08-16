@@ -370,8 +370,8 @@ ruleset.
 
 ### An environment was held for review, or the apply was refused
 
-The apply comment says *"Held — an approving review is required before
-applying"*, or `shipmate apply` was refused with a review reason.
+The apply comment says *"Held — the pull request's review state does not
+permit applying"*, or `shipmate apply` was refused with a review reason.
 
 `SHIPMATE_UNGATED_ENVS` exempts the environments it names from the review
 requirement and nothing else. A **targeted** `shipmate apply <env>` is decided
