@@ -245,8 +245,11 @@ def test_empty_list_keeps_todays_review_required_message(environment):
     # With no variable set, the message must not mention the opt-out at all.
     ok, reason = _decide(review_decision="REVIEW_REQUIRED", environment=environment)
     assert not ok
-    assert reason == _decide(review_decision="REVIEW_REQUIRED")[1]
-    assert "SHIPMATE_UNGATED_ENVS" not in reason
+    assert reason == (
+        "not authorized: PR review is required by the branch ruleset and "
+        "has not been satisfied; obtain the required approving review(s), "
+        "then re-run `shipmate apply`."
+    )
 
 
 def test_exemption_does_not_reach_the_other_checks():
