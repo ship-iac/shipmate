@@ -736,8 +736,10 @@ absent decision still fails closed. Nor does it touch the `<env>-apply`
 environment's required reviewers — that is a different control, gating the
 deployment rather than the code review (see `docs/hardening.md`).
 
-Parse rules are `SHIPMATE_SHARED_ENVS`' (§Env model), footguns included: split
-on commas, no spaces around them. An entry carrying a `-plan` / `-apply`
+The comma grammar is `SHIPMATE_SHARED_ENVS`' (§Env model): entries are compared
+whole between comma boundaries, so there are no spaces around them. What
+differs is the failure mode — where a mistyped entry there is silently
+un-listed, here it is refused. An entry carrying a `-plan` / `-apply`
 suffix, or one with surrounding whitespace, is a **loud configuration error**
 naming the entry and the bare name to write instead — neither would match
 anything, and a silently inert entry would leave an operator believing an
@@ -1265,9 +1267,11 @@ holding evidence that an apply ran. The footer carries the bare-apply form's
 environment-disposition sentences, a gate-completion sentence (complete
 or still-pending, from the gate verdict), and the run link.
 
-The disposition sentences are four, one per cause, and the short form the size
-fallback renders carries the same set — the most actionable warning in the
-comment cannot be dropped by truncation. Excluded environments name the
+The disposition sentences are four, one per cause, and both render paths carry
+the same set: the footer above and the short form used when there is no table
+to render are fed by one shared function, and the size fallback keeps the
+footer whole — so the comment's most actionable warning cannot be lost on
+either path. Excluded environments name the
 `shipmate apply <env>` that applies them; skipped ones name their ordering
 cause. The two review sentences (see §Comment-ops) are:
 

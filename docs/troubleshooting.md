@@ -414,6 +414,14 @@ apply`, though: it is still listed in `global.shipmate.explicit_envs`, so it
 still needs a targeted `shipmate apply <env>`. That is why the held sentence
 names no command.
 
+**A listed environment that is also explicit is not held.** It is reported as
+excluded, with the usual "run `shipmate apply <env>`" — and that targeted apply
+then succeeds **without** an approving review, because the environment is
+listed. Listing an environment and marking it explicit are independent: the
+first decides whether a review is required, the second only decides that a bare
+apply will not reach it. An environment that must never apply unreviewed does
+not belong in `SHIPMATE_UNGATED_ENVS`.
+
 ### A pull request planned zero cells
 
 No `<stack> / <env>` checks appear, no plan comment is posted — unless there is

@@ -197,12 +197,21 @@ ever sees their combined result via `reviewDecision`:
   themselves. Keep it even if you decide dismiss-on-push is too disruptive for
   your team — it is the one that survives that trade-off.
 
-`required_approving_review_count` is the **repository-wide** review
-requirement, and it is the only review policy the apply path has: shipmate
-reads the ruleset's verdict and imposes nothing of its own. At `0` the ruleset
-requires no review, GitHub reports no review decision, and `scripts/authorize`
-passes on that for **every** environment — so no apply path anywhere requires a
-reviewed pull request, and nothing requires one before a merge either. A
+`required_approving_review_count` is the **approval-count** half of one
+repository-wide review rule. The apply path never reads the count: it reads
+`reviewDecision`, the whole `pull_request` rule's verdict — the count,
+`require_code_owner_review` and `require_last_push_approval` combined — and
+shipmate imposes no review policy of its own on top of it.
+
+Setting the count to `0` **with code-owner review off** is the version that
+costs the most: GitHub then reports no review decision at all,
+`scripts/authorize` passes on that for **every** environment, so no apply path
+anywhere requires a reviewed pull request — and no merge-time control a holder
+of the App private key cannot satisfy is left either. `shipmate doctor` warns
+for exactly that combination. Count `0` **with** `require_code_owner_review`
+on is a different setting: the code-owner review still gates the **merge**
+wherever a `CODEOWNERS` entry covers the changed files, which is why doctor
+reports that combination as a note rather than a warning. Either way, a
 `CHANGES_REQUESTED` review still blocks an apply until it is resolved or
 dismissed (`authorize` passes only on `NONE` or `APPROVED`; see
 `docs/branch-protection.md` §"Review policy").
