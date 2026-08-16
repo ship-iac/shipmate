@@ -184,6 +184,24 @@ def test_parse_ungated_envs_rejects_environment_suffix():
         assert repr("dev-eu") in message
 
 
+@pytest.mark.parametrize("entry", ['"dev-eu"', "dev eu", "dev/eu", "dev.eu", "-dev-eu", "$dev"])
+def test_parse_ungated_envs_rejects_an_entry_that_is_not_an_env_name(entry):
+    # The suffix and whitespace checks name two shapes of silently-inert entry;
+    # the promise ("no silently inert entry") covers the class. A pasted quote,
+    # an internal space or a path separator matches no environment either, and
+    # the operator would believe the environment is ungated when it is not.
+    with pytest.raises(SystemExit) as exc:
+        az.parse_ungated_envs(f"dev-us,{entry}")
+    assert repr(entry) in str(exc.value)
+
+
+@pytest.mark.parametrize("entry", ["dev-eu", "DEV-EU", "dev_eu", "env1"])
+def test_parse_ungated_envs_accepts_every_env_name_shape(entry):
+    # The other half of the allow-list: refusing a legal env name would refuse
+    # applies the operator opted in for.
+    assert az.parse_ungated_envs(entry) == frozenset({entry.casefold()})
+
+
 def test_parse_ungated_envs_rejects_padded_entry():
     # A space-padded entry would silently match nothing; refuse and name it.
     for entry in (" dev-eu", "dev-eu "):

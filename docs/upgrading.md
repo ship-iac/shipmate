@@ -101,7 +101,11 @@ With the variable set but the workflow line left out, `shipmate apply` refuses
 exactly as it does today — comment-ops receives an empty list, so both the
 targeted and the bare form are refused. That is the expected failure mode of a
 half-finished opt-in, and it is the one worth recognizing: the refusal is not a
-bug, and there is no silent widening in the other direction.
+bug. Omitting the line cannot widen anything — but writing it as a **literal**
+list rather than the variable reference in step 2 can: comment-ops would then
+exempt environments the engine's own partition never holds. See
+[`getting-started.md`](getting-started.md) §"Applying chosen environments
+without an approving review".
 
 Two things it does not change, worth confirming against your own policy before
 you set it: an environment's `required_reviewers` still gates the deployment

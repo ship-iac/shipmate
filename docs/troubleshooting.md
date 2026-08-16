@@ -397,15 +397,18 @@ needs `ungated-envs: ${{ vars.SHIPMATE_UNGATED_ENVS }}` too; without it
 comment-ops sees an empty list and refuses both forms. See
 [`upgrading.md`](upgrading.md) §"Opt-in: per-environment review gating".
 
-**The run failed with a `SHIPMATE_UNGATED_ENVS` error.** Two entry shapes are
-rejected loudly rather than left silently inert, because neither would ever
-match an environment:
+**The run failed with a `SHIPMATE_UNGATED_ENVS` error.** An entry that is not a
+bare env name is rejected loudly rather than left silently inert, because none
+of these would ever match an environment:
 
 - a `-plan` / `-apply` suffix — the list is matched against the **bare logical**
   env name carried by the apply checks, so write `dev-eu`, not `dev-eu-apply`;
 - surrounding whitespace — `dev-eu, dev-us` is an entry `" dev-us"`. The list is
   comma-separated with **no spaces**; the error names the entry and the exact
-  value to write.
+  value to write;
+- anything outside the env charset (letters, digits, `-`, `_`) — a pasted
+  `"dev-eu"` with its quotes, an internal space, a `/`. The variable holds the
+  bare list, unquoted.
 
 **`shipmate apply` answers with nothing at all — no reaction, no comment.** A
 malformed entry is rejected inside the Authorize step, which fails the run

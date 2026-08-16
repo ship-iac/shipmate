@@ -595,12 +595,23 @@ All three parts are needed. With the variable set and the input missing,
 comment-ops sees an empty list and applies are refused exactly as before — the
 omission closes rather than widens. With none of them, nothing changes at all.
 
+Write that input as the variable reference shown above and **never as a literal
+list**. comment-ops has no access to the `vars` context of its own, so the input
+is its only view of the list — while the engine's `apply-all.yml` reads
+`vars.SHIPMATE_UNGATED_ENVS` directly. A literal naming an environment the
+variable omits is authorized at comment time and then never held on the apply
+path (with the variable unset, `apply-all.yml` skips the partition entirely and
+applies **every** pending environment), and because nothing was exempted as far
+as the engine is concerned, the apply comment carries no
+"without an approving review" sentence either. One source, two readers: keep
+them the same source.
+
 The third part is a pin: your `apply.yml` must reference
 `.github/workflows/apply-all.yml@` at the same release as `comment-ops.yml`
 (or later), because a bare `shipmate apply` is authorized in one file and
 partitioned in the other. Bump only `comment-ops.yml` and an unreviewed bare
 apply reaches an engine with no partition, which applies **every** pending
-environment with no approving review — the one way this feature fails open.
+environment with no approving review.
 
 What this does and does not do: a listed environment may be applied without an
 approving review; every other apply requirement still decides, including

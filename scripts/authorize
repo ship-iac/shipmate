@@ -16,15 +16,27 @@ other value — including an absent/empty one — fails closed, except that
 
 import json
 import os
+import re
+
+#: An entry that cannot BE an env name matches nothing, and a silently inert
+#: entry leaves an operator believing an environment is ungated when it is not.
+#: Allow-list rather than deny-list: naming the two shapes that go wrong most
+#: often (a padded entry, a suffixed one) left every other shape — a pasted
+#: `"dev-eu"`, an internal space, a slash — silently inert. Env names come from
+#: Terramate `env/<name>` tags; the charset is comment-parse's env grammar plus
+#: `_` (a legal tag character no `shipmate apply <env>` can name) and either
+#: case, since the match itself is case-insensitive.
+_ENV_ENTRY = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*")
 
 
 def parse_ungated_envs(raw):
     """Env names exempt from the review requirement, casefolded.
 
     Comma-separated bare logical env names, matched case-insensitively against
-    the env on the apply checks. A `-plan`/`-apply` suffix or a stray space
-    would exempt nothing at all, so both are configuration errors rather than
-    a silently inert entry."""
+    the env on the apply checks. Anything that is not a bare env name — a
+    `-plan`/`-apply` suffix, a stray space, a pasted quote — would exempt
+    nothing at all, so each is a configuration error rather than a silently
+    inert entry."""
     envs = [e for e in (raw or "").split(",") if e]
     for e in envs:
         if e != e.strip():
@@ -32,6 +44,13 @@ def parse_ungated_envs(raw):
                 f"::error::SHIPMATE_UNGATED_ENVS entry {e!r} has surrounding "
                 f"whitespace; the list is comma-separated with no spaces — "
                 f"write {e.strip()!r}."
+            )
+        if not _ENV_ENTRY.fullmatch(e):
+            raise SystemExit(
+                f"::error::SHIPMATE_UNGATED_ENVS entry {e!r} is not an "
+                f"environment name; entries are bare logical env names "
+                f"(letters, digits, '-' and '_'), comma-separated, with no "
+                f"quotes, spaces or path separators."
             )
         for suffix in ("-plan", "-apply"):
             if e.endswith(suffix):

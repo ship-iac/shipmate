@@ -739,11 +739,14 @@ deployment rather than the code review (see `docs/hardening.md`).
 The comma grammar is `SHIPMATE_SHARED_ENVS`' (§Env model): entries are compared
 whole between comma boundaries, so there are no spaces around them. What
 differs is the failure mode — where a mistyped entry there is silently
-un-listed, here it is refused. An entry carrying a `-plan` / `-apply`
-suffix, or one with surrounding whitespace, is a **loud configuration error**
-naming the entry and the bare name to write instead — neither would match
-anything, and a silently inert entry would leave an operator believing an
-environment is ungated when it is not.
+un-listed, here it is refused. An entry that is not a bare env name is a
+**loud configuration error** naming the entry: surrounding whitespace and a
+`-plan` / `-apply` suffix each get their own message naming the value to write
+instead, and anything outside the env charset (letters, digits, `-`, `_`) —
+a pasted quote, an internal space, a path separator — is refused as not an
+environment name. None of them would match anything, and a silently inert
+entry would leave an operator believing an environment is ungated when it is
+not.
 
 **Unset or empty is the default and exempts nothing**: every environment keeps
 the ruleset's review requirement, which is the behaviour of every engine
@@ -754,7 +757,14 @@ Opting in takes **three** things, and the variable alone is not enough:
 
 1. the repository variable,
 2. `ungated-envs: ${{ vars.SHIPMATE_UNGATED_ENVS }}` on the `comment-ops` step
-   of the consumer's own `comment-ops.yml`, and
+   of the consumer's own `comment-ops.yml` — that expression, never a literal
+   list: a composite action cannot read the `vars` context, so the input is
+   comment-ops' only view of the list, while `apply-all.yml` reads the variable
+   itself. An input naming an environment the variable omits authorizes an
+   unreviewed apply that the partition then never holds (with the variable
+   unset the `review` job is skipped and there is no partition at all), and
+   `applied_ungated_envs` stays empty, so the apply comment carries no audit
+   sentence for it either; and
 3. the consumer's `apply.yml` pinning `.github/workflows/apply-all.yml@` at or
    past the release that carries this feature. §Consumption's one-change rule
    already requires it; here breaking it fails **open**, not loudly — a bare
