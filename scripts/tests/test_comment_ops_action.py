@@ -624,6 +624,36 @@ def test_the_ungated_envs_input_is_optional_and_defaults_to_empty():
     assert spec["default"] == ""
 
 
+#: The exemption report's whole body, hand-written. It claims PERMISSION and
+#: never completion -- at comment time the dispatch has not run, so any verb
+#: about the outcome would be a claim this step cannot make.
+_EXEMPTION_BODY = (
+    ":memo: shipmate: environment \\`$ENVIRONMENT\\` is permitted to apply "
+    "without an approving review, per the \\`SHIPMATE_UNGATED_ENVS\\` repository "
+    "variable — see the apply result comment for what actually applied."
+)
+
+
+def _exemption_step():
+    return next(
+        s for s in action_steps("comment-ops") if s.get("name") == "Report the review exemption"
+    )
+
+
+def test_the_exemption_report_fires_only_when_the_exemption_fired():
+    """Not on `authorized == 'true'`: an ordinary reviewed apply is authorized
+    too, and this sentence over it would be false."""
+    assert _exemption_step()["if"] == "${{ steps.authz.outputs.ungated_exemption == 'true' }}"
+    assert _exemption_step()["env"]["ENVIRONMENT"] == "${{ steps.authz.outputs.environment }}"
+
+
+def test_the_exemption_report_claims_permission_never_completion():
+    run = _exemption_step()["run"]
+    assert f'-f body="{_EXEMPTION_BODY}"' in run, (
+        f"the exemption report's body is not the pinned sentence: {run!r}"
+    )
+
+
 def test_authorize_step_supplies_every_env_var_authorize_reads():
     """Derived from `scripts/authorize`'s own source, not a hand-listed set: a
     SHIPMATE_* name added to the script later would otherwise read as empty in

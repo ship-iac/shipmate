@@ -407,6 +407,17 @@ match an environment:
   comma-separated with **no spaces**; the error names the entry and the exact
   value to write.
 
+**`shipmate apply` answers with nothing at all — no reaction, no comment.** A
+malformed entry is rejected inside the Authorize step, which fails the run
+before either the 🚀 reaction or the refusal comment is reached. So a
+repository-wide breakage of `shipmate apply` (every command, every environment,
+however well-formed) is invisible on the pull request itself. The real error is
+the
+`::error::SHIPMATE_UNGATED_ENVS entry ...` annotation on the comment-ops
+workflow run; open that run from the Actions tab and fix the variable. A
+targeted apply that was genuinely refused always comments its reason, so
+silence points at the variable rather than at the authorization.
+
 **A held environment is also an explicit environment.** When both causes apply
 it is reported as held, not as excluded, because the review is the thing to get
 first. Getting it does not release the environment into a bare `shipmate

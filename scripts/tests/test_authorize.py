@@ -295,3 +295,85 @@ def test_main_reads_ungated_envs_and_environment(tmp_path, monkeypatch):
     assert "SHIPMATE_UNGATED_ENVS" in text
     assert "`prod-eu`" in text
     assert "environment=prod-eu" in text
+
+
+def _main_output(tmp_path, monkeypatch, *, pr=PR_OK, plan_run=RUN_OK, **env):
+    pr_json = tmp_path / "pr.json"
+    pr_json.write_text(json.dumps(pr), encoding="utf-8")
+    run_json = tmp_path / "plan_run.json"
+    run_json.write_text(json.dumps(plan_run), encoding="utf-8")
+    out = tmp_path / "out.txt"
+    out.touch()
+    base = {
+        "IS_MEMBER": "true",
+        "APPROVERS_TEAM": "deployers",
+        "PR_JSON": str(pr_json),
+        "PLAN_RUN_JSON": str(run_json),
+        "GITHUB_OUTPUT": str(out),
+        "REVIEW_DECISION": "NONE",
+        "SHIPMATE_ENV": "",
+        "SHIPMATE_UNGATED_ENVS": "",
+    }
+    base.update(env)
+    for key, value in base.items():
+        monkeypatch.setenv(key, value)
+    az.main()
+    return dict(
+        ln.split("=", 1) for ln in out.read_text(encoding="utf-8").splitlines() if "=" in ln
+    )
+
+
+def test_ungated_exemption_is_not_reported_when_a_later_requirement_refused(tmp_path, monkeypatch):
+    # The exemption passed the review check and the apply was still refused
+    # (stale plan, checked after it). The report claims permission to apply, so
+    # it must not post over a refusal.
+    parsed = _main_output(
+        tmp_path,
+        monkeypatch,
+        plan_run={"id": 555, "head_sha": "older"},
+        REVIEW_DECISION="REVIEW_REQUIRED",
+        SHIPMATE_ENV="dev-eu",
+        SHIPMATE_UNGATED_ENVS="dev-eu",
+    )
+    assert parsed["authorized"] == "false"
+    assert parsed["ungated_exemption"] == "false"
+
+
+@pytest.mark.parametrize(
+    ("decision", "environment", "ungated", "pr", "expected"),
+    [
+        # The exemption fired: this apply proceeds with no approving review and
+        # the comment-ops report is its only trace.
+        ("REVIEW_REQUIRED", "dev-eu", "dev-eu", PR_OK, "true"),
+        ("REVIEW_REQUIRED", "DEV-EU", "dev-eu", PR_OK, "true"),
+        # Authorized, but not by the exemption -- an ordinary reviewed apply.
+        ("APPROVED", "dev-eu", "dev-eu", PR_OK, "false"),
+        ("NONE", "dev-eu", "dev-eu", PR_OK, "false"),
+        # Not exempt at all.
+        ("REVIEW_REQUIRED", "prod-eu", "dev-eu", PR_OK, "false"),
+        ("REVIEW_REQUIRED", "dev-eu", "", PR_OK, "false"),
+        # Bare apply: partitioned per env by apply-all-detect, which reports it.
+        ("REVIEW_REQUIRED", "", "dev-eu", PR_OK, "false"),
+        # Exempt from review, refused anyway (unmergeable) -- reporting a
+        # permitted apply over a refused one would be a false audit line.
+        (
+            "REVIEW_REQUIRED",
+            "dev-eu",
+            "dev-eu",
+            {"mergeable": False, "mergeable_state": "dirty", "head": {"sha": "abc123"}},
+            "false",
+        ),
+    ],
+)
+def test_ungated_exemption_output_is_set_only_when_the_exemption_fired(
+    tmp_path, monkeypatch, decision, environment, ungated, pr, expected
+):
+    parsed = _main_output(
+        tmp_path,
+        monkeypatch,
+        pr=pr,
+        REVIEW_DECISION=decision,
+        SHIPMATE_ENV=environment,
+        SHIPMATE_UNGATED_ENVS=ungated,
+    )
+    assert parsed["ungated_exemption"] == expected

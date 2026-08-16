@@ -80,16 +80,20 @@ jobs:
           PR_NUMBER: ${{ inputs.pr_number }}
         run: |
           set -euo pipefail
-          # A null decision means the ruleset requires no review; normalize it
-          # to the same NONE sentinel comment-ops uses, so both readers fail
-          # closed on anything else. Never defaulted in a workflow expression:
-          # a skipped review job must arrive empty, which holds every env.
+          # NONE is the sentinel for a PR that exists with a null decision --
+          # the ruleset requires no review. Nothing here has proved the PR
+          # exists (unlike comment-ops, which reads it over REST first), and a
+          # pr_number matching no pull request returns a null `pullRequest`
+          # with no errors and exit 0 -- so that case gets its own value, which
+          # detect's catch-all holds every env on. Never defaulted in a
+          # workflow expression: a skipped review job must arrive empty, which
+          # holds every env too.
           # The $owner/$repo/$pr tokens are GraphQL query variables (bound via
           # -F), not shell variables -- single quotes are intentional.
           # shellcheck disable=SC2016
           rd=$(gh api graphql -f query='query($owner:String!,$repo:String!,$pr:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$pr){reviewDecision}}}' \
             -F owner="$OWNER" -F repo="${GITHUB_REPOSITORY#*/}" -F pr="$PR_NUMBER" \
-            --jq '.data.repository.pullRequest.reviewDecision // "NONE"')
+            --jq '.data.repository.pullRequest | if type == "object" then (.reviewDecision // "NONE") else "MISSING_PR" end')
           echo "decision=$rd" >> "$GITHUB_OUTPUT"
 
   detect:

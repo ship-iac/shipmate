@@ -750,11 +750,17 @@ the ruleset's review requirement, which is the behaviour of every engine
 revision before the variable existed. This is the opposite direction from
 `SHIPMATE_SHARED_ENVS`, where unset means split.
 
-Opting in takes **two** things, and the variable alone is not enough:
+Opting in takes **three** things, and the variable alone is not enough:
 
-1. the repository variable, and
+1. the repository variable,
 2. `ungated-envs: ${{ vars.SHIPMATE_UNGATED_ENVS }}` on the `comment-ops` step
-   of the consumer's own `comment-ops.yml`.
+   of the consumer's own `comment-ops.yml`, and
+3. the consumer's `apply.yml` pinning `.github/workflows/apply-all.yml@` at or
+   past the release that carries this feature. §Consumption's one-change rule
+   already requires it; here breaking it fails **open**, not loudly — a bare
+   `shipmate apply` authorized under `REVIEW_REQUIRED` by a fresh
+   `comment-ops.yml` and dispatched into an engine older than the partition
+   applies **every** pending environment with no approving review.
 
 With the variable set and that line absent, comment-ops sees an empty list and
 **both** forms of `shipmate apply` get the unchanged refusal — the omission

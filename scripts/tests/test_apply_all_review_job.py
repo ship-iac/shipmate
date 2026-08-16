@@ -36,6 +36,19 @@ _DETECT_IF = "${{ !failure() && !cancelled() }}"
 _DETECT_NEEDS = ["guard", "review"]
 _SUMMARY_NEEDS = ["guard", "review", "detect", "envlevel0", "envlevel1", "envlevel2", "envlevel3"]
 
+#: The whole `--jq` program, hand-written. It is the entire mapping from the
+#: GraphQL response to the decision `detect` partitions on, and the fail-open
+#: form is one edit away: `.data.repository.pullRequest.reviewDecision //
+#: "NONE"` (comment-ops' expression, which is safe only because that job proves
+#: the pull request exists first) turns a pr_number matching no pull request
+#: into the value that applies everything. Compared whole -- a check for
+#: `MISSING_PR` alone passes an expression that also defaults a null decision
+#: to something `review_held` lets through.
+_REVIEW_JQ = (
+    '--jq \'.data.repository.pullRequest | if type == "object" '
+    'then (.reviewDecision // "NONE") else "MISSING_PR" end\''
+)
+
 #: The whole permission set the review mint may request -- reading the decision
 #: needs pull-requests, and nothing else.
 _MINT_PERMISSIONS = {"permission-pull-requests": "read"}
@@ -104,6 +117,15 @@ def test_the_action_feeds_every_shipmate_env_var_the_script_reads():
     step = action_yaml("apply-all-detect")["runs"]["steps"][0]
     missing = read - set(step["env"])
     assert not missing, f"the action's env: block omits {sorted(missing)}"
+
+
+def test_the_decision_query_distinguishes_a_missing_pull_request():
+    """A null `pullRequest` is not "no review required": `gh` exits 0 with no
+    errors array, so the jq default is the only thing standing between a bad
+    pr_number and applying every environment unreviewed."""
+    step = next(s for s in _review()["steps"] if s.get("id") == "rd")
+    jq = [ln.strip() for ln in step["run"].splitlines() if ln.strip().startswith("--jq")]
+    assert jq == [_REVIEW_JQ + ")"], f"the review job's jq program changed: {jq}"
 
 
 def test_summary_needs_review_so_a_failed_review_reddens_the_comment():

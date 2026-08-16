@@ -718,8 +718,9 @@ def test_footer_escapes_evil_excluded_and_skipped_env_names():
 
 
 _HELD_SENTENCE = (
-    "Held — an approving review is required before applying: `prod`. "
-    "Get the review, then re-run the apply."
+    "Held — the pull request's review state does not permit applying: `prod`. "
+    "Get an approving review, or resolve or dismiss a requested-changes "
+    "review; the run log's apply-all-detect notice names the decision seen."
 )
 _UNGATED_SENTENCE = (
     "Ungated environment(s) permitted to apply without an approving review, "
@@ -738,41 +739,16 @@ def test_held_line_names_review_and_never_a_targeted_apply_command():
 
 
 def test_applied_ungated_line_states_no_review_and_names_the_variable():
-    # The audit sentence: with required_approving_review_count 0 GitHub reports
-    # no review decision at all, so nothing else in the run distinguishes a
-    # reviewed apply from an unreviewed one.
+    """The audit sentence, pinned whole.
+
+    `reviewDecision` keeps no history, so once the review lands nothing else in
+    the run distinguishes an apply that waited for it from one that did not.
+    Whole-value, because the property is also that no clause claims the named
+    envs COMPLETED: detect derives the set from `runnable`, before any wave
+    runs, so a failed wave leaves an env named here that never applied.
+    """
     (line,) = ac._env_disposition_lines([], [], [], ["dev-eu"])
     assert line == _UNGATED_SENTENCE
-
-
-# Completion vocabulary. Substrings, so `succeeded`/`successful` and
-# `complete`/`completed` are each one entry; deliberately no short fragment
-# (`ran`, `done`) that a longer innocent word could contain.
-_COMPLETION_WORDS = ("applied", "success", "succeed", "complete", "clean", "landed")
-
-
-def test_applied_ungated_line_does_not_claim_the_named_envs_succeeded():
-    """No clause of the audit line asserts the named envs completed.
-
-    detect derives the set from `runnable` -- the envs whose apply was
-    PERMITTED to proceed unreviewed -- before any wave runs, so a failed wave
-    or an env-level skipped behind a failed predecessor leaves an env named
-    here that never applied. This comment's own legend reserves "applied" for
-    the ✅ state, so a completion verb in this line contradicts the table
-    beside it.
-
-    Split at the em-dash and check both halves, because a completion claim can
-    hide in either: the CLAIM half must carry no completion word at all, and
-    the OUTCOME half must be exactly the hand-written pointer -- an appended
-    "and applied cleanly" lives there and would otherwise pass a head- or
-    tail-anchored check."""
-    (line,) = ac._env_disposition_lines([], [], [], ["dev-eu"])
-    claim, sep, outcome = line.partition(" — ")
-    assert sep, f"the line must separate its claim from where the outcome lives: {line!r}"
-    assert outcome == "see this run for what actually applied."
-    lowered = claim.casefold()
-    for word in _COMPLETION_WORDS:
-        assert word not in lowered, f"claim clause asserts completion via {word!r}: {claim!r}"
 
 
 def test_short_form_carries_held_and_ungated_sentences():

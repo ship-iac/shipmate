@@ -78,12 +78,20 @@ has the rule and the `tm_try` form that keeps a local default.
 ## Opt-in: per-environment review gating
 
 `SHIPMATE_UNGATED_ENVS` lets named environments be applied without an approving
-review while the rest keep the branch ruleset's requirement. It is opt-in in
-both halves, and **re-pinning changes nothing on its own**:
+review while the rest keep the branch ruleset's requirement. It is opt-in, and
+**re-pinning changes nothing on its own**:
 
-1. set the `SHIPMATE_UNGATED_ENVS` repository variable, and
+1. set the `SHIPMATE_UNGATED_ENVS` repository variable,
 2. add `ungated-envs: ${{ vars.SHIPMATE_UNGATED_ENVS }}` to the `comment-ops`
-   step in your `comment-ops.yml`.
+   step in your `comment-ops.yml`, and
+3. re-pin your `apply.yml`'s `.github/workflows/apply-all.yml@` to this release
+   too — not only `comment-ops.yml`. The two files carry separate pins, and a
+   bare `shipmate apply` is authorized in `comment-ops.yml` but partitioned in
+   `apply-all.yml`: bump only the first and an unreviewed bare apply is
+   dispatched into an engine that has no partition at all, applying **every**
+   pending environment without an approving review. This is §Re-pinning's
+   one-change rule; on this feature breaking it fails **open** rather than
+   loudly.
 
 With the variable unset, every environment keeps its review requirement and
 every apply path behaves exactly as it did before — there is nothing to migrate

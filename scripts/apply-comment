@@ -516,14 +516,17 @@ def _env_disposition_lines(excluded, skipped, held=(), applied_ungated=()):
 
     The held sentence names no command: a held env can also be an explicit env
     (the held cause wins, so it is not in `excluded`), and a bare `shipmate
-    apply` would not pick it up once reviewed.
+    apply` would not pick it up once reviewed. It is also cause-agnostic --
+    three decisions hold (REVIEW_REQUIRED on an unlisted env, CHANGES_REQUESTED,
+    and an unknown or absent decision) and only the run's own detect notice
+    carries which one, since the decision never reaches this renderer.
 
     An empty `applied_ungated` renders NOTHING, and never "zero environments
     applied" -- it is populated only under a REVIEW_REQUIRED decision with
     SHIPMATE_UNGATED_ENVS set. That sentence is the only audit trail an
-    unreviewed apply leaves: with required_approving_review_count 0 GitHub
-    reports no review decision at all, so nothing else in the run tells a
-    reviewed apply from an unreviewed one. No clause of it uses a completion
+    unreviewed apply leaves: `reviewDecision` is a live value with no history,
+    so once the review lands nothing in the run tells an apply that waited for
+    it from one that did not. No clause of it uses a completion
     verb for the named envs -- detect derives the set from `runnable`, before
     any wave runs, so a failed wave or a skipped env-level leaves an env named
     here that never applied, and this comment's own legend reserves "applied"
@@ -541,8 +544,9 @@ def _env_disposition_lines(excluded, skipped, held=(), applied_ungated=()):
     if held:
         envs = ", ".join(f"`{sc._md_escape(e)}`" for e in held)
         lines.append(
-            f"Held — an approving review is required before applying: {envs}. "
-            "Get the review, then re-run the apply."
+            f"Held — the pull request's review state does not permit applying: {envs}. "
+            "Get an approving review, or resolve or dismiss a requested-changes "
+            "review; the run log's apply-all-detect notice names the decision seen."
         )
     if applied_ungated:
         envs = ", ".join(f"`{sc._md_escape(e)}`" for e in applied_ungated)

@@ -152,6 +152,10 @@ UNGATED = frozenset({"dev-eu", "dev-us"})
         ("CHANGES_REQUESTED", ["dev-eu", "dev-us", "prod-eu"]),
         ("", ["dev-eu", "dev-us", "prod-eu"]),
         ("BANANA", ["dev-eu", "dev-us", "prod-eu"]),
+        # The review job's sentinel for a pr_number matching no pull request:
+        # GraphQL returns a null pullRequest with no errors, so the query
+        # succeeds and only this value keeps the run from applying everything.
+        ("MISSING_PR", ["dev-eu", "dev-us", "prod-eu"]),
     ],
 )
 def test_review_held_decision_table(decision, expected):
@@ -271,6 +275,22 @@ def test_main_claims_nothing_applied_ungated_when_the_variable_is_unset(tmp_path
         decision="REVIEW_REQUIRED",
     )
     assert _wave_envs(parsed) == ["dev-eu", "prod-eu"]
+    assert json.loads(parsed["applied_ungated_envs"]) == []
+
+
+def test_main_claims_nothing_applied_ungated_on_a_reviewed_pull_request(tmp_path, monkeypatch):
+    # The variable is set and the envs are listed, but the PR was APPROVED --
+    # the exemption never fired, so "permitted to apply without an approving
+    # review" over a reviewed run would be a false audit line.
+    parsed = _run_main(
+        tmp_path,
+        monkeypatch,
+        envs=["dev-eu", "prod-eu"],
+        ungated="dev-eu,prod-eu",
+        decision="APPROVED",
+    )
+    assert _wave_envs(parsed) == ["dev-eu", "prod-eu"]
+    assert json.loads(parsed["review_held_envs"]) == []
     assert json.loads(parsed["applied_ungated_envs"]) == []
 
 

@@ -523,6 +523,22 @@ runs:
           -f content=rocket >/dev/null
         echo "::notice title=comment-ops::command authorized (apply is dispatched by the caller's next step)"
 
+    # A report, not a decision — authorize already decided. It exists because
+    # `reviewDecision` keeps no history: once the review lands, nothing else
+    # records that this apply was permitted without one. Wording matches
+    # apply-comment's bare-path sentence and claims permission, never
+    # completion — nothing has applied at comment time.
+    - name: Report the review exemption
+      if: ${{ steps.authz.outputs.ungated_exemption == 'true' }}
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        PR_NUMBER: ${{ inputs.pr-number }}
+        ENVIRONMENT: ${{ steps.authz.outputs.environment }}
+      run: |
+        set -euo pipefail
+        gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -f body=":memo: shipmate: environment \`$ENVIRONMENT\` is permitted to apply without an approving review, per the \`SHIPMATE_UNGATED_ENVS\` repository variable — see the apply result comment for what actually applied." >/dev/null
+
     - name: Reject with reason
       if: ${{ steps.parse.outputs.route == 'apply' && steps.apptoken.outcome == 'success' && steps.authz.outputs.authorized != 'true' }}
       shell: bash

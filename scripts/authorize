@@ -146,6 +146,7 @@ def main():
     # One read, used for both the decision and the reported output — the value
     # the decision used and the value reported can never differ.
     environment = os.environ.get("SHIPMATE_ENV", "")
+    ungated_envs = parse_ungated_envs(os.environ.get("SHIPMATE_UNGATED_ENVS", ""))
     ok, reason = decide(
         is_member=is_member,
         approvers_team=os.environ.get("APPROVERS_TEAM", ""),
@@ -153,10 +154,23 @@ def main():
         pr=pr,
         plan_run=plan_run,
         environment=environment,
-        ungated_envs=parse_ungated_envs(os.environ.get("SHIPMATE_UNGATED_ENVS", "")),
+        ungated_envs=ungated_envs,
+    )
+    # The targeted path's audit trail. `reviewDecision` is a live value with no
+    # history, so once the review lands nothing distinguishes an apply that
+    # waited for it from one that did not. Requires `ok`: a later requirement
+    # (a stale plan) still refuses, and a report over a refused apply is false.
+    # Requires a named environment: a bare apply is reported per env by
+    # apply-all-detect instead, and has no single env to name here.
+    exempted = (
+        ok
+        and review_decision == "REVIEW_REQUIRED"
+        and bool(environment)
+        and environment.casefold() in ungated_envs
     )
     with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
         fh.write(f"authorized={'true' if ok else 'false'}\n")
+        fh.write(f"ungated_exemption={'true' if exempted else 'false'}\n")
         fh.write(f"reason={reason}\n")
         fh.write(f"environment={environment}\n")
         fh.write(f"plan_run_id={plan_run.get('id', '')}\n")

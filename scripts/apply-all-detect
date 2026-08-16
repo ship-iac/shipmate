@@ -132,7 +132,11 @@ def main():
         f"::notice title=apply-all-detect::plan_run={plan_run_id} head={head} "
         f"cells={len(cells)} pending={len(pending)} envlevels={level_counts} "
         f"excluded_explicit={excluded} skipped_after_explicit={skipped} "
-        f"review_held={held} applied_ungated={applied_ungated}"
+        f"review_held={held} applied_ungated={applied_ungated} "
+        # The hold cause: an everything-held run is otherwise indistinguishable
+        # from a CHANGES_REQUESTED one, and an absent decision (a skipped or
+        # mis-wired review job) renders visibly as ''.
+        f"review_decision={decision!r}"
     )
     with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
         eo.write_env_level_waves(fh, per_level)
