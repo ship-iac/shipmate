@@ -15,8 +15,7 @@ grammar are declared unstable in `README.md`.
 
 ## [0.15.0] — 2026-08-17
 
-Tags the merge commit of this section's pull request; the SHA line is backfilled
-by the first commit after the tag.
+Tags `19de76c`.
 
 **Re-pinning is not enough to use the feature, and re-pinning alone still
 changes behaviour.** Opting in takes three things — the `SHIPMATE_UNGATED_ENVS`
