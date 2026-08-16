@@ -540,7 +540,9 @@ def _env_disposition_lines(excluded, skipped, held=(), applied_ungated=()):
         lines.append(f"Explicit environment(s) left pending: {envs} — run {cmds} to apply them.")
     if skipped:
         envs = ", ".join(f"`{sc._md_escape(e)}`" for e in skipped)
-        lines.append(f"Skipped (ordered after an unapplied explicit environment): {envs}.")
+        # Cause-agnostic: `partition_envs` blocks on explicit AND held envs, so
+        # naming "explicit" here misattributes every hold-induced skip.
+        lines.append(f"Skipped (ordered after an environment not applying this run): {envs}.")
     if held:
         envs = ", ".join(f"`{sc._md_escape(e)}`" for e in held)
         lines.append(

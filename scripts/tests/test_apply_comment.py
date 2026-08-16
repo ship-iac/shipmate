@@ -679,7 +679,7 @@ def test_short_form_includes_excluded_and_skipped_lines_all_environments():
         "Explicit environment(s) left pending: `prod` — run `shipmate apply prod` to apply them."
         in body
     )
-    assert "Skipped (ordered after an unapplied explicit environment): `staging`." in body
+    assert "Skipped (ordered after an environment not applying this run): `staging`." in body
     assert "gate` is complete" in body
     assert RUN_URL in body
 
@@ -909,7 +909,7 @@ def test_footer_excluded_and_skipped_only_for_all_environments_form():
         "Explicit environment(s) left pending: `prod` — run `shipmate apply prod` to apply them."
         in footer_all
     )
-    assert "Skipped (ordered after an unapplied explicit environment): `staging`." in footer_all
+    assert "Skipped (ordered after an environment not applying this run): `staging`." in footer_all
 
 
 # --- not-attempted note names the targeted env -------------------------------
