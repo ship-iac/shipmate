@@ -293,6 +293,21 @@ def test_main_holds_every_env_unreviewed_when_the_variable_is_unset(tmp_path, mo
     assert json.loads(parsed["applied_ungated_envs"]) == []
 
 
+def test_main_holds_every_env_when_the_decision_variable_is_absent(tmp_path, monkeypatch):
+    # `decision=None` deletes SHIPMATE_REVIEW_DECISION, so this is the only test
+    # that exercises the `os.environ.get(..., "")` default -- the whole
+    # fail-closed behaviour when the review job's output never reaches the
+    # action. Without it the default could be flipped to "APPROVED" unnoticed.
+    parsed = _run_main(
+        tmp_path,
+        monkeypatch,
+        envs=["dev-eu", "prod-eu"],
+        decision=None,
+    )
+    assert _wave_envs(parsed) == []
+    assert json.loads(parsed["review_held_envs"]) == ["dev-eu", "prod-eu"]
+
+
 def test_main_applies_every_env_on_an_approved_pr_with_no_variable(tmp_path, monkeypatch):
     # The un-opted-in consumer's ordinary run: APPROVED applies every pending
     # env regardless of the list, so the unconditional review job costs them a

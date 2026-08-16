@@ -85,14 +85,16 @@ things for every consumer — see below):
 1. set the `SHIPMATE_UNGATED_ENVS` repository variable,
 2. add `ungated-envs: ${{ vars.SHIPMATE_UNGATED_ENVS }}` to the `comment-ops`
    step in your `comment-ops.yml`, and
-3. re-pin your `apply.yml`'s `.github/workflows/apply-all.yml@` to this release
-   too — not only `comment-ops.yml`. The two files carry separate pins, and a
-   bare `shipmate apply` is authorized in `comment-ops.yml` but partitioned in
-   `apply-all.yml`: bump only the first and an unreviewed bare apply is
-   dispatched into an engine that has no partition at all, applying **every**
-   pending environment without an approving review. This is §Re-pinning's
-   one-change rule; on this feature breaking it fails **open** rather than
-   loudly.
+3. re-pin **both** engine references in your `apply.yml` — the targeted job's
+   `.github/workflows/apply.yml@` and the bare job's
+   `.github/workflows/apply-all.yml@` — to this release too, not only
+   `comment-ops.yml`. The files carry separate pins, and an apply is authorized
+   in `comment-ops.yml` but enforced in the engine: bump only the first and an
+   unreviewed apply is dispatched into an engine that enforces nothing —
+   **every** pending environment applies through a stale `apply-all.yml@`, and
+   the named environment applies through a stale `apply.yml@`. This is
+   §Re-pinning's one-change rule; on this feature breaking it fails **open**
+   rather than loudly.
 
 With the variable unset, every environment keeps its review requirement, so
 *what applies* is unchanged. Three things do change for everyone, opted in or
@@ -100,7 +102,7 @@ not, because both apply workflows now re-read the review decision themselves in
 an unconditional `review` job:
 
 - **One extra `shipmate-engine` deployment record per apply run.** The
-  workflow's `summary` job already creates one; this is the second.
+  workflow's `summary` job already creates one; this is the second. If your repository has put required reviewers on the `shipmate-engine` environment, that approval is now requested at the **start** of an apply run rather than at its end — no shipmate doc recommends that configuration, but the timing change is real.
 - **A broken App-key wiring is now a loud early failure.** The `review` job
   mints an App token, and it runs before anything applies — so a repository
   whose `SHIPMATE_APP_PRIVATE_KEY` or `SHIPMATE_APP_ID` never reaches the

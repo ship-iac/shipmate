@@ -606,12 +606,14 @@ unreviewed apply), and one omitting an environment the variable names refuses at
 comment time an apply the engine would have allowed. One source, two readers:
 keep them the same source.
 
-The third part is a pin: your `apply.yml` must reference
-`.github/workflows/apply-all.yml@` at the same release as `comment-ops.yml`
-(or later), because a bare `shipmate apply` is authorized in one file and
-partitioned in the other. Bump only `comment-ops.yml` and an unreviewed bare
-apply reaches an engine with no partition, which applies **every** pending
-environment with no approving review.
+The third part is a pin, and your `apply.yml` carries **two** engine
+references — `.github/workflows/apply.yml@` on the targeted job and
+`.github/workflows/apply-all.yml@` on the bare one. Both must sit at the same
+release as `comment-ops.yml` (or later), because an apply is authorized in one
+file and enforced in the other. Bump only `comment-ops.yml` and an unreviewed
+apply reaches an engine that enforces nothing: through the stale `apply-all.yml@`
+it applies **every** pending environment with no approving review, and through
+the stale `apply.yml@` it applies the named environment unreviewed.
 
 What this does and does not do: a listed environment may be applied without an
 approving review; every other apply requirement still decides, including

@@ -203,7 +203,17 @@ def validate_env(value):
     (the source of env names), but that is an upstream tool's invariant; enforce
     it here at the trust boundary rather than trusting it silently. A dotted env
     would let distinct (env, slug) pairs render the same artifact name and
-    cross-enrol the wrong stack into a wave — the exact bug the rename removed."""
+    cross-enrol the wrong stack into a wave — the exact bug the rename removed.
+
+    Empty is refused for a second reason: `_review_reason` reads an empty
+    environment as a BARE apply and exempts it whenever the variable names any
+    env at all, so an unset SHIPMATE_ENV would slip past `refuse_unreviewed`
+    below. This path is single-env by construction; there is no bare form here."""
+    if not value:
+        raise SystemExit(
+            "::error::SHIPMATE_ENV is empty; the targeted apply path is single-env "
+            "and its review refusal is evaluated per environment."
+        )
     if "." in value:
         raise SystemExit(
             f"::error::SHIPMATE_ENV must not contain '.' (would break plan.<env>.<slug> "

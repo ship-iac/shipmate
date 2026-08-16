@@ -764,12 +764,16 @@ Opting in takes **three** things, and the variable alone is not enough:
    naming an environment the variable omits costs a dispatched run that the
    engine then refuses, and one omitting an environment the variable names
    refuses at comment time an apply the engine would have allowed; and
-3. the consumer's `apply.yml` pinning `.github/workflows/apply-all.yml@` at or
-   past the release that carries this feature. §Consumption's one-change rule
-   already requires it; here breaking it fails **open**, not loudly — a bare
-   `shipmate apply` authorized under `REVIEW_REQUIRED` by a fresh
+3. the consumer's `apply.yml` pinning **both** engine references —
+   `.github/workflows/apply.yml@` (the targeted job) and
+   `.github/workflows/apply-all.yml@` (the bare job) — at or past the release
+   that carries this feature. §Consumption's one-change rule already requires
+   it; here breaking it fails **open**, not loudly, and once per reference: a
+   bare `shipmate apply` authorized under `REVIEW_REQUIRED` by a fresh
    `comment-ops.yml` and dispatched into an engine older than the partition
-   applies **every** pending environment with no approving review.
+   applies **every** pending environment with no approving review, and a
+   targeted `shipmate apply <env>` dispatched into an engine older than the
+   `review` job applies that environment unreviewed.
 
 With the variable set and that line absent, comment-ops sees an empty list and
 **both** forms of `shipmate apply` get the unchanged refusal — the omission

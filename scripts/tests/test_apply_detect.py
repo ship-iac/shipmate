@@ -266,6 +266,14 @@ def test_validate_env_rejects_dot():
         ad.validate_env("dev.eu")
 
 
+def test_validate_env_rejects_empty():
+    # An empty env reads as a BARE apply inside _review_reason, which exempts it
+    # whenever SHIPMATE_UNGATED_ENVS names anything -- a bypassed refusal on a
+    # gate path. There is no bare form on this workflow.
+    with pytest.raises(SystemExit):
+        ad.validate_env("")
+
+
 def test_validate_env_accepts_normal():
     ad.validate_env("dev-eu")  # hyphenated env is fine
     ad.validate_env("eu")  # must not raise
@@ -426,6 +434,31 @@ def test_main_refuses_before_it_touches_the_plan_run(monkeypatch, tmp_path):
     }.items():
         monkeypatch.setenv(name, value)
     monkeypatch.delenv("SHIPMATE_UNGATED_ENVS", raising=False)
+    with pytest.raises(SystemExit) as exc_info:
+        ad.main()
+    assert str(exc_info.value).startswith("::error::not authorized")
+
+
+def test_main_refuses_when_the_decision_variable_is_absent(monkeypatch, tmp_path):
+    # The default in `os.environ.get("SHIPMATE_REVIEW_DECISION", "")` is the
+    # whole fail-closed behaviour when the review job's output never reaches
+    # the action, and every other main() test sets the variable -- so without
+    # this case the default could be flipped to "APPROVED" unnoticed.
+    def _boom(*a, **kw):
+        raise AssertionError("main() proceeded with no review decision at all")
+
+    monkeypatch.setattr(ad, "verify_plan_run", _boom)
+    monkeypatch.setattr(ad, "run_graph_deps", _boom)
+    for name, value in {
+        "GITHUB_REPOSITORY": "acme/iac",
+        "SHIPMATE_ENV": "dev-eu",
+        "SHIPMATE_PLAN_RUN_ID": "123456",
+        "SHIPMATE_HEAD_SHA": "0123456789abcdef0123456789abcdef01234567",
+        "GITHUB_OUTPUT": str(tmp_path / "out.txt"),
+    }.items():
+        monkeypatch.setenv(name, value)
+    for name in ("SHIPMATE_REVIEW_DECISION", "SHIPMATE_UNGATED_ENVS"):
+        monkeypatch.delenv(name, raising=False)
     with pytest.raises(SystemExit) as exc_info:
         ad.main()
     assert str(exc_info.value).startswith("::error::not authorized")
