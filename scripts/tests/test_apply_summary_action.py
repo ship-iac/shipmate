@@ -275,3 +275,15 @@ def test_engine_callers_pass_head_sha_to_apply_summary():
         assert (step.get("with") or {}).get("head-sha") == "${{ inputs.ref }}", (
             f"{wf} must thread the head SHA into apply-summary"
         )
+
+
+def test_apply_all_passes_the_held_and_ungated_outputs_to_apply_summary():
+    """apply-all.yml is the only caller carrying these (apply.yml is the
+    targeted form). Four detect outputs are JSON arrays of env names with
+    identical shape, so a crossed wire renders a plausible-looking comment
+    naming the wrong environments for the wrong reason."""
+    spec = yaml.safe_load((WORKFLOWS / "apply-all.yml").read_text(encoding="utf-8"))
+    step = _find_step(spec["jobs"]["summary"]["steps"], uses_contains="actions/apply-summary")
+    with_ = step.get("with") or {}
+    assert with_.get("review-held-envs") == "${{ needs.detect.outputs.review_held_envs }}"
+    assert with_.get("applied-ungated-envs") == "${{ needs.detect.outputs.applied_ungated_envs }}"

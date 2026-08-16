@@ -717,6 +717,98 @@ def test_footer_escapes_evil_excluded_and_skipped_env_names():
     assert "&lt;/summary&gt;&lt;b&gt;evil" in footer
 
 
+_HELD_SENTENCE = (
+    "Held — an approving review is required before applying: `prod`. "
+    "Get the review, then re-run the apply."
+)
+_UNGATED_SENTENCE = (
+    "Applied without an approving review: `dev-eu` — listed in the "
+    "`SHIPMATE_UNGATED_ENVS` repository variable."
+)
+
+
+def test_held_line_names_review_and_never_a_targeted_apply_command():
+    # A held env can also be an explicit env, in which case the review alone
+    # does not release it -- so this sentence must not name a command at all.
+    # `shipmate apply prod` would additionally be a command that refuses.
+    (line,) = ac._excluded_skipped_lines([], [], ["prod"], [])
+    assert line == _HELD_SENTENCE
+    assert "shipmate apply prod" not in line
+
+
+def test_applied_ungated_line_states_no_review_and_names_the_variable():
+    # The audit sentence: with required_approving_review_count 0 GitHub reports
+    # no review decision at all, so nothing else in the run distinguishes a
+    # reviewed apply from an unreviewed one.
+    (line,) = ac._excluded_skipped_lines([], [], [], ["dev-eu"])
+    assert line == _UNGATED_SENTENCE
+
+
+def test_short_form_carries_held_and_ungated_sentences():
+    # The short form is what a nothing-tabulated run renders, and the audit
+    # sentence is exactly the one that must not be droppable.
+    body = ac._short_form("success,skipped", "", "complete", RUN_URL, [], [], ["prod"], ["dev-eu"])
+    assert _HELD_SENTENCE in body
+    assert _UNGATED_SENTENCE in body
+
+
+def test_footer_carries_held_and_ungated_sentences():
+    footer = ac._footer("pending", RUN_URL, [], [], "", ["prod"], ["dev-eu"])
+    assert _HELD_SENTENCE in footer
+    assert _UNGATED_SENTENCE in footer
+
+
+def test_held_and_ungated_lines_escape_evil_env_names():
+    evil = "x</summary><b>evil"
+    joined = " ".join(ac._excluded_skipped_lines([], [], [evil], [evil]))
+    assert "</summary><b>evil" not in joined
+    assert "&lt;/summary&gt;&lt;b&gt;evil" in joined
+
+
+def test_comment_is_unchanged_when_held_and_ungated_are_empty():
+    rows = [_row()]
+    baseline = ac.build_comment(rows, [], RUN_URL, "pending", ["prod"], ["staging"], "")
+    assert baseline == ac.build_comment(
+        rows, [], RUN_URL, "pending", ["prod"], ["staging"], "", "", [], []
+    )
+    assert "Held" not in baseline
+    assert "without an approving review" not in baseline
+
+
+def _render_held_ungated(monkeypatch, tmp_path, waves):
+    monkeypatch.setenv("CELLS", str(tmp_path / "empty"))
+    monkeypatch.setenv("SHIPMATE_ENVIRONMENT", "")
+    monkeypatch.setenv("SHIPMATE_WAVES_JSON", "")
+    for i in range(ac.MAX_ENV_LEVELS):
+        monkeypatch.setenv(f"SHIPMATE_ENVLEVEL{i}_WAVES", "")
+    monkeypatch.setenv("SHIPMATE_ENVLEVEL0_WAVES", waves)
+    monkeypatch.setenv("SHIPMATE_RESULTS", "success,skipped")
+    monkeypatch.setenv("SHIPMATE_GATE", "complete")
+    monkeypatch.setenv("SHIPMATE_REVIEW_HELD_ENVS", json.dumps(["prod"]))
+    monkeypatch.setenv("SHIPMATE_APPLIED_UNGATED_ENVS", json.dumps(["dev-eu"]))
+    monkeypatch.setenv("GITHUB_SERVER_URL", "https://github.com")
+    monkeypatch.setenv("GITHUB_REPOSITORY", "acme/repo")
+    monkeypatch.setenv("GITHUB_RUN_ID", "42")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("sys.stdin", io.StringIO(""))
+    ac.main()
+    return (tmp_path / "comment.md").read_text(encoding="utf-8")
+
+
+def test_main_renders_both_sentences_in_the_short_form(monkeypatch, tmp_path):
+    body = _render_held_ungated(monkeypatch, tmp_path, "")
+    assert _HELD_SENTENCE in body
+    assert _UNGATED_SENTENCE in body
+
+
+def test_main_renders_both_sentences_in_the_table_form(monkeypatch, tmp_path):
+    waves = json.dumps({"wave0": [{"stack": "stacks/app", "environment": "dev-eu"}]})
+    body = _render_held_ungated(monkeypatch, tmp_path, waves)
+    assert "| ⏭️ |" in body  # sanity: the table path, not the short form
+    assert _HELD_SENTENCE in body
+    assert _UNGATED_SENTENCE in body
+
+
 def test_build_comment_uses_short_form_when_no_rows_and_no_expected(monkeypatch, tmp_path):
     monkeypatch.setenv("CELLS", str(tmp_path / "empty"))
     monkeypatch.setenv("SHIPMATE_ENVIRONMENT", "dev-eu")

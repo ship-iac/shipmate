@@ -36,6 +36,14 @@ inputs:
     description: JSON array of environments skipped after an unapplied explicit environment (all-environments form only). Empty = [].
     required: false
     default: ""
+  review-held-envs:
+    description: JSON array of environments held until an approving review lands (all-environments form only). Empty = [].
+    required: false
+    default: ""
+  applied-ungated-envs:
+    description: "JSON array of environments applied without an approving review, per SHIPMATE_UNGATED_ENVS (all-environments form only). Empty = []."
+    required: false
+    default: ""
   results:
     description: "join(needs.*.result, ',') from the caller — feeds the short-form nothing-pending sentence."
     required: true
@@ -167,6 +175,8 @@ runs:
         SHIPMATE_GATE: ${{ inputs.gate-verdict }}
         SHIPMATE_EXCLUDED_ENVS: ${{ inputs.excluded-envs }}
         SHIPMATE_SKIPPED_ENVS: ${{ inputs.skipped-envs }}
+        SHIPMATE_REVIEW_HELD_ENVS: ${{ inputs.review-held-envs }}
+        SHIPMATE_APPLIED_UNGATED_ENVS: ${{ inputs.applied-ungated-envs }}
         SHIPMATE_CHECKS: checks.jsonl
         SHIPMATE_APP_ID: ${{ inputs.app-id }}
       run: |

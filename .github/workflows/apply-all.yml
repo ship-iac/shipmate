@@ -259,6 +259,8 @@ jobs:
           envlevel3-waves: ${{ needs.detect.outputs.envlevel3_waves }}
           excluded-envs: ${{ needs.detect.outputs.excluded_envs }}
           skipped-envs: ${{ needs.detect.outputs.skipped_envs }}
+          review-held-envs: ${{ needs.detect.outputs.review_held_envs }}
+          applied-ungated-envs: ${{ needs.detect.outputs.applied_ungated_envs }}
           results: ${{ join(needs.*.result, ',') }}
           gate-verdict: ${{ steps.gate.outputs.verdict }}
           github-token: ${{ github.token }}
