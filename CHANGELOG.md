@@ -13,6 +13,19 @@ grammar are declared unstable in `README.md`.
 
 ## [Unreleased]
 
+## [0.15.0] — 2026-08-17
+
+Tags the merge commit of this section's pull request; the SHA line is backfilled
+by the first commit after the tag.
+
+**Re-pinning is not enough to use the feature, and re-pinning alone still
+changes behaviour.** Opting in takes three things — the `SHIPMATE_UNGATED_ENVS`
+repository variable, the `ungated-envs:` line on your `comment-ops` step, and
+both engine references in your `apply.yml` pinned at or past this release. A
+stale engine pin against a wired `comment-ops.yml` is the one way this feature
+fails open; `docs/upgrading.md` §"Opt-in: per-environment review gating" ranks
+the two edges.
+
 **Re-pinning changes behaviour for every consumer**, opted in or not. Both apply
 workflows now run an unconditional `review` job that re-reads the pull request's
 `reviewDecision` server-side before anything applies. Three consequences:
