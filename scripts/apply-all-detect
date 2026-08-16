@@ -14,9 +14,10 @@ Three exclusions distinguish the bare form from deploy:
   before env-levels are built; their apply checks simply stay pending, so
   `shipmate / gate` keeps gating the merge until a targeted
   `shipmate apply <env>` completes them;
-- envs ordered (transitively) after an unapplied explicit env are skipped
-  with a notice — their ordering precondition cannot be met this run,
-  exactly like a failed predecessor level;
+- envs ordered (transitively) after an env not applying this run — held or
+  excluded as explicit — are skipped with a notice — their ordering
+  precondition cannot be met this run, exactly like a failed predecessor
+  level;
 - envs the PR's review decision does not authorize are held until it carries
   an approving review, dropped the same way; `SHIPMATE_UNGATED_ENVS` narrows
   that hold by naming the envs exempt from it.

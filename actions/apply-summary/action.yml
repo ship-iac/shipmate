@@ -33,7 +33,7 @@ inputs:
     required: false
     default: ""
   skipped-envs:
-    description: JSON array of environments skipped after an unapplied explicit environment (all-environments form only). Empty = [].
+    description: "JSON array of environments skipped because they are ordered after an environment not applying this run (held for review, or excluded as explicit); all-environments form only. Empty = []."
     required: false
     default: ""
   review-held-envs:

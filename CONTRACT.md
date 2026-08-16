@@ -1304,8 +1304,10 @@ the same set: the footer above and the short form used when there is no table
 to render are fed by one shared function, and the size fallback keeps the
 footer whole — so the comment's most actionable warning cannot be lost on
 either path. Excluded environments name the
-`shipmate apply <env>` that applies them; skipped ones name their ordering
-cause. The two review sentences (see §Comment-ops) are:
+`shipmate apply <env>` that applies them; skipped ones do not name a cause, since
+being skipped can mean either an unapplied explicit environment or a held
+one — the excluded and held sentences carry that distinction instead. The
+two review sentences (see §Comment-ops) are:
 
 - **held** — "the pull request's review state does not permit applying",
   naming the environments and asking for an approving review, or for a
@@ -1616,9 +1618,9 @@ env-levels and applies level 0 fully before level 1, with the same
 failure-skips-successor-levels rule. An environment excluded as explicit
 keeps its position in the order: environments that do not depend on it run
 normally at their own level, while environments ordered (transitively) after
-an unapplied explicit environment are skipped with a notice — their ordering
-precondition cannot be met in that run, exactly like a failed predecessor
-level. Completed cells skip idempotently, so re-commenting `shipmate apply`
+an environment not applying this run — held for review or excluded as
+explicit — are skipped with a notice — their ordering precondition cannot be
+met in that run, exactly like a failed predecessor level. Completed cells skip idempotently, so re-commenting `shipmate apply`
 resumes where the previous run stopped.
 
 The engine ships this as a reusable, parameterized workflow
