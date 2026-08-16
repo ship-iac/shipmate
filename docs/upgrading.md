@@ -19,6 +19,22 @@ human readers and for Dependabot's bookkeeping; the ref that resolves is always
 the SHA. The SHA of record for a release is named in that release's section of
 [`../CHANGELOG.md`](../CHANGELOG.md).
 
+**Resolving a tag to its commit takes the dereferencing call.** Releases from
+`v0.14.2` on are *annotated* tags, so `git/ref/tags/<tag>` returns the **tag
+object's** SHA — 40 hex characters from a 200 response, and not a ref a workflow
+can check out. Nothing a consumer sees separates the two values, so a pin at the
+tag object fails at ref resolution on every later run, in a repository whose
+change said "no migration required". This form dereferences, in one call, for
+annotated and lightweight tags alike:
+
+```console
+$ gh api repos/<owner>/shipmate/commits/v0.14.2 --jq .sha
+741118f8bd7dae55ebce4c980c6ed4f3c7579a99
+```
+
+Locally, `git rev-parse v0.14.2^{commit}` — the `^{commit}` is the same
+dereference.
+
 ## Dependabot
 
 shipmate publishes a GitHub Release per release SHA, so a consumer with
