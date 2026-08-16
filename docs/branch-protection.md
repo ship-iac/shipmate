@@ -142,7 +142,9 @@ fails closed rather than proceeding unreviewed.)
   `CHANGES_REQUESTED` still blocks, as do the other apply requirements — and a
   bare `shipmate apply` on an unreviewed pull request applies the named
   environments and holds the rest, their apply checks left pending, so the gate
-  keeps blocking the merge. Opting in also takes one line in `comment-ops.yml`;
+  keeps blocking the merge — and with the variable unset or empty, "the rest" is
+  every environment, since the engine enforces on the variable itself. Opting in
+  also takes one line in `comment-ops.yml`;
   anyone with the **Write** role can edit the variable. Semantics:
   `../CONTRACT.md` §Comment-ops. What it costs against the deployment-side
   gate: `hardening.md` §3–5.

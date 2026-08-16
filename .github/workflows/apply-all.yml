@@ -41,11 +41,15 @@ jobs:
   # actions:write, so an input would be a claim that surface could forge.
   # Its own job because `detect` checks out the PR head and runs Terramate over
   # branch-controlled HCL -- no token belongs in that job. `environment:` is how
-  # a callee reaches the App key (same mechanism as `summary` below), and the
-  # `if:` keeps un-opted-in consumers from paying a deployment record for it.
+  # a callee reaches the App key (same mechanism as `summary` below).
+  #
+  # Deliberately unconditional -- no `if:`. A gate on the repository variable is
+  # what let a `ungated-envs` action input wider than the variable escape
+  # enforcement, and running always is also what closes the TOCTOU between the
+  # comment that authorized this apply and the dispatch: the decision is re-read
+  # here, so an approval dismissed in between holds.
   review:
     needs: [guard]
-    if: ${{ vars.SHIPMATE_UNGATED_ENVS != '' }}
     runs-on: ubuntu-latest
     environment: shipmate-engine
     permissions: {}
@@ -86,8 +90,8 @@ jobs:
           # pr_number matching no pull request returns a null `pullRequest`
           # with no errors and exit 0 -- so that case gets its own value, which
           # detect's catch-all holds every env on. Never defaulted in a
-          # workflow expression: a skipped review job must arrive empty, which
-          # holds every env too.
+          # workflow expression: a decision that fails to arrive must arrive
+          # empty, which holds every env too.
           # The $owner/$repo/$pr tokens are GraphQL query variables (bound via
           # -F), not shell variables -- single quotes are intentional.
           # shellcheck disable=SC2016
@@ -97,9 +101,10 @@ jobs:
           echo "decision=$rd" >> "$GITHUB_OUTPUT"
 
   detect:
-    # `review` is SKIPPED for an un-opted-in consumer, and GHA's default
-    # `success()` would skip this job behind it. A `review` that FAILS is caught
-    # by `!failure()`, so nothing applies and the run is visibly red.
+    # A `review` that FAILS is caught by `!failure()`, so nothing applies and
+    # the run is visibly red. The explicit `if:` stays rather than reverting to
+    # GHA's default `success()`: both forms refuse a failed `review`, and this
+    # one says so.
     needs: [guard, review]
     if: ${{ !failure() && !cancelled() }}
     runs-on: ubuntu-latest
@@ -133,8 +138,8 @@ jobs:
           head-sha: ${{ inputs.ref }}
           github-token: ${{ github.token }}
           app-id: ${{ vars.SHIPMATE_APP_ID }}
-          # Passed through raw, never defaulted: a skipped `review` job yields
-          # an empty decision, and empty is the hold-everything value.
+          # Passed through raw, never defaulted: an empty decision means the
+          # review signal never arrived, and empty is the hold-everything value.
           ungated-envs: ${{ vars.SHIPMATE_UNGATED_ENVS }}
           review-decision: ${{ needs.review.outputs.decision }}
 
@@ -145,9 +150,7 @@ jobs:
     # `!failure()` here: without them a rejected dispatch (or a review job that
     # could not mint the App key) skips `detect`, and a skipped `detect` reads
     # its outputs as empty strings -- which the `!= 'true'` guard below reads as
-    # "not empty" and fans out anyway, on `fromJSON('')`. A SKIPPED `review` is
-    # neither `failure()` nor `cancelled()`, so the un-opted-in path is
-    # unchanged.
+    # "not empty" and fans out anyway, on `fromJSON('')`.
     needs: [guard, review, detect]
     if: ${{ !failure() && !cancelled() && needs.detect.outputs.envlevel0_empty != 'true' && !contains(join(needs.*.result, ','), 'cancelled') }}
     uses: ship-iac/shipmate/.github/workflows/apply-env-level.yml@8dcf08e1ed6bc14fbedfc532151f91f314ebb172 # pinned to a commit on main

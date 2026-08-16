@@ -593,18 +593,18 @@ and pass it to the `comment-ops` step of the `comment-ops.yml` above:
 
 All three parts are needed. With the variable set and the input missing,
 comment-ops sees an empty list and applies are refused exactly as before — the
-omission closes rather than widens. With none of them, nothing changes at all.
+omission closes rather than widens. With none of them, *what applies* is
+unchanged: every environment keeps the ruleset's requirement.
 
 Write that input as the variable reference shown above and **never as a literal
 list**. comment-ops has no access to the `vars` context of its own, so the input
-is its only view of the list — while the engine's `apply-all.yml` reads
-`vars.SHIPMATE_UNGATED_ENVS` directly. A literal naming an environment the
-variable omits is authorized at comment time and then never held on the apply
-path (with the variable unset, `apply-all.yml` skips the partition entirely and
-applies **every** pending environment), and because nothing was exempted as far
-as the engine is concerned, the apply comment carries no
-"without an approving review" sentence either. One source, two readers: keep
-them the same source.
+is its only view of the list — while both engine apply workflows read
+`vars.SHIPMATE_UNGATED_ENVS` directly and enforce on it themselves. The input is
+therefore an ergonomic rather than policy: a literal naming an environment the
+variable omits buys a dispatched run the engine refuses (a wasted run, not an
+unreviewed apply), and one omitting an environment the variable names refuses at
+comment time an apply the engine would have allowed. One source, two readers:
+keep them the same source.
 
 The third part is a pin: your `apply.yml` must reference
 `.github/workflows/apply-all.yml@` at the same release as `comment-ops.yml`

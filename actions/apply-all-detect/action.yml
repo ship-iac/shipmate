@@ -14,11 +14,11 @@ inputs:
     description: shipmate App id (repo/org variable); only checks authored by this App count as done.
     required: true
   ungated-envs:
-    description: SHIPMATE_UNGATED_ENVS verbatim — comma-separated envs applied without waiting for an approving review. An empty value is inert; nothing is ever held, and every env's review requirement is the branch ruleset's alone, exactly as before this input existed.
+    description: SHIPMATE_UNGATED_ENVS verbatim — comma-separated envs applied without waiting for an approving review. An empty value exempts nothing, so an unreviewed PR holds every env. Supply it together with review-decision, never one without the other.
     required: false
     default: ''
   review-decision:
-    description: The PR's reviewDecision, from the review job. Empty with no ungated envs is the un-opted-in case; empty WITH ungated envs holds every env.
+    description: The PR's reviewDecision, from the review job. Only NONE and APPROVED apply everything; an empty value means the decision never arrived and holds every env.
     required: false
     default: ''
 outputs:

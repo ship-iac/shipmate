@@ -26,7 +26,7 @@ inputs:
     description: 'GITHUB_TOKEN with issues:write and pull-requests:write (reactions + reject comments + PR reads).'
     required: true
   ungated-envs:
-    description: 'Optional: SHIPMATE_UNGATED_ENVS verbatim (comma-separated bare env names). Environments listed here may be applied without an approving review; every other environment keeps the branch ruleset requirement. Omitted or empty = every environment keeps it. Wire it to the vars.SHIPMATE_UNGATED_ENVS repository variable and NEVER to a literal list: a literal wider than that variable fails OPEN, because the engine reads the variable itself on the apply path — a bare apply this input authorizes is then partitioned by a list that omits the same environments (or, with the variable unset, not partitioned at all), and the targeted path never consults the variable.'
+    description: 'Optional: SHIPMATE_UNGATED_ENVS verbatim (comma-separated bare env names). Environments listed here may be applied without an approving review; every other environment keeps the branch ruleset requirement. Omitted or empty = every environment keeps it. Ergonomics, not policy: the engine reads vars.SHIPMATE_UNGATED_ENVS itself on both apply paths and enforces there, so this input only buys a crisp PR-comment refusal instead of a dispatched run that refuses inside the engine. Wire it to the vars.SHIPMATE_UNGATED_ENVS repository variable anyway — an input wider than the variable costs a wasted run, and one narrower refuses an apply the engine would have allowed.'
     required: false
     default: ''
 outputs:

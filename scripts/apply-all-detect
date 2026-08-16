@@ -17,8 +17,9 @@ Three exclusions distinguish the bare form from deploy:
 - envs ordered (transitively) after an unapplied explicit env are skipped
   with a notice — their ordering precondition cannot be met this run,
   exactly like a failed predecessor level;
-- when `SHIPMATE_UNGATED_ENVS` is set, envs it does not list are held until
-  the PR carries an approving review, dropped the same way.
+- envs the PR's review decision does not authorize are held until it carries
+  an approving review, dropped the same way; `SHIPMATE_UNGATED_ENVS` narrows
+  that hold by naming the envs exempt from it.
 """
 
 import importlib.util
@@ -72,14 +73,13 @@ def partition_envs(pending_envs, explicit, order):
 def review_held(pending_envs, ungated, decision):
     """Envs whose apply waits for a review this run.
 
-    Empty `ungated` means the feature is not configured and nothing is ever
-    held — an un-opted-in repository behaves exactly as before, including when
-    the review job is skipped and no decision arrives. Otherwise only the two
-    pass values apply everything; REVIEW_REQUIRED applies the listed envs and
-    holds the rest, and every remaining value — an explicit CHANGES_REQUESTED,
-    an unknown enum, an absent decision — holds all of them."""
-    if not ungated:
-        return []
+    The decision decides, and `ungated` only narrows what REVIEW_REQUIRED holds:
+    the two pass values apply everything regardless of the list; REVIEW_REQUIRED
+    applies the listed envs and holds the rest — every env when the list is
+    empty; and every remaining value — an explicit CHANGES_REQUESTED, an unknown
+    enum, an absent decision — holds all of them. An absent decision is now
+    reachable only through wiring drift: the review job carries no `if:`, and a
+    review job that fails skips this script entirely."""
     if decision in ("NONE", "APPROVED"):
         return []
     if decision == "REVIEW_REQUIRED":
@@ -134,8 +134,8 @@ def main():
         f"excluded_explicit={excluded} skipped_after_explicit={skipped} "
         f"review_held={held} applied_ungated={applied_ungated} "
         # The hold cause: an everything-held run is otherwise indistinguishable
-        # from a CHANGES_REQUESTED one, and an absent decision (a skipped or
-        # mis-wired review job) renders visibly as ''.
+        # from a CHANGES_REQUESTED one, and an absent decision (a mis-wired
+        # review job) renders visibly as ''.
         f"review_decision={decision!r}"
     )
     with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:

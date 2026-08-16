@@ -711,9 +711,9 @@ code-owner review, last-push approval) is what the apply path waits for, and
 there is no owners parser here to disagree with it.
 
 A bare `shipmate apply` is authorized once at comment time, by the same four
-apply requirements. That is the whole review decision unless
-`SHIPMATE_UNGATED_ENVS` is set, in which case the run is additionally
-partitioned per environment on the apply path (below). Both forms
+apply requirements. Comment time is never the whole review decision: both apply
+paths re-read `reviewDecision` server-side before anything applies (below), so
+an approval dismissed between the comment and the dispatch holds. Both forms
 dispatch the consumer's single `apply.yml` wrapper; its optional `environment`
 input selects the path (set → targeted, empty → bare). Both share the same
 App-minted `workflow_dispatch` mechanism and the same per-env
@@ -749,9 +749,9 @@ entry would leave an operator believing an environment is ungated when it is
 not.
 
 **Unset or empty is the default and exempts nothing**: every environment keeps
-the ruleset's review requirement, which is the behaviour of every engine
-revision before the variable existed. This is the opposite direction from
-`SHIPMATE_SHARED_ENVS`, where unset means split.
+the ruleset's review requirement, so *what applies* is what applied before the
+variable existed. This is the opposite direction from `SHIPMATE_SHARED_ENVS`,
+where unset means split.
 
 Opting in takes **three** things, and the variable alone is not enough:
 
@@ -759,12 +759,11 @@ Opting in takes **three** things, and the variable alone is not enough:
 2. `ungated-envs: ${{ vars.SHIPMATE_UNGATED_ENVS }}` on the `comment-ops` step
    of the consumer's own `comment-ops.yml` — that expression, never a literal
    list: a composite action cannot read the `vars` context, so the input is
-   comment-ops' only view of the list, while `apply-all.yml` reads the variable
-   itself. An input naming an environment the variable omits authorizes an
-   unreviewed apply that the partition then never holds (with the variable
-   unset the `review` job is skipped and there is no partition at all), and
-   `applied_ungated_envs` stays empty, so the apply comment carries no audit
-   sentence for it either; and
+   comment-ops' only view of the list. It is an ergonomic, not policy — both
+   apply paths read the variable themselves and enforce there — so an input
+   naming an environment the variable omits costs a dispatched run that the
+   engine then refuses, and one omitting an environment the variable names
+   refuses at comment time an apply the engine would have allowed; and
 3. the consumer's `apply.yml` pinning `.github/workflows/apply-all.yml@` at or
    past the release that carries this feature. §Consumption's one-change rule
    already requires it; here breaking it fails **open**, not loudly — a bare
@@ -779,15 +778,21 @@ closes, it never silently widens.
 The decision has two seats, because `authorize` returns one verdict per
 dispatch while a bare apply spans many environments:
 
-- **Targeted `shipmate apply <env>`** — decided in `actions/comment-ops`. The
-  env is known at comment time: `REVIEW_REQUIRED` on a listed env authorizes,
-  on any other env it refuses with the usual message extended to name the
-  variable the env is missing from.
+Both engine workflows re-read `reviewDecision` themselves in a `review` job
+rather than trusting a dispatch input, and that job is unconditional — the
+repository variable is the only source of this policy, and only engine-owned
+workflows read it.
+
+- **Targeted `shipmate apply <env>`** — the env is known at comment time, so
+  `actions/comment-ops` refuses early: `REVIEW_REQUIRED` on a listed env
+  authorizes, on any other env it refuses with the usual message extended to
+  name the variable the env is missing from. The engine's `apply.yml` then
+  re-applies the identical rule to the freshly read decision and **refuses the
+  run** before any wave, leaving every apply check — and the gate — pending.
 - **Bare `shipmate apply`** — authorized at comment time whenever the list is
-  non-empty, then partitioned per environment by the engine's `apply-all.yml`,
-  which re-reads `reviewDecision` itself in a `review` job rather than
-  trusting a dispatch input. `NONE` / `APPROVED` apply everything;
-  `REVIEW_REQUIRED` applies the listed environments and **holds** the rest;
+  non-empty, then partitioned per environment by the engine's `apply-all.yml`.
+  `NONE` / `APPROVED` apply everything; `REVIEW_REQUIRED` applies the listed
+  environments and **holds** the rest — all of them when the list is empty;
   `CHANGES_REQUESTED`, an unknown value, or no decision at all holds
   everything, listed environments included.
 

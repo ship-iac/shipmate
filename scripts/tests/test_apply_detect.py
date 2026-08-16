@@ -150,8 +150,11 @@ def test_main_emits_the_dag_shape_notice(monkeypatch, tmp_path, capsys):
         "SHIPMATE_PLAN_RUN_ID": "123456",
         "SHIPMATE_HEAD_SHA": "0123456789abcdef0123456789abcdef01234567",
         "GITHUB_OUTPUT": str(tmp_path / "out.txt"),
+        # An absent decision refuses the run; this test is about the notice.
+        "SHIPMATE_REVIEW_DECISION": "APPROVED",
     }.items():
         monkeypatch.setenv(name, value)
+    monkeypatch.delenv("SHIPMATE_UNGATED_ENVS", raising=False)
     ad.main()
     assert (
         "::notice::2 stacks, 1 after edges, 2 wave levels; 1 stacks would apply concurrently"
@@ -317,8 +320,10 @@ def test_main_wires_the_tag_map_into_the_cells(tmp_path, monkeypatch):
         "SHIPMATE_PLAN_RUN_ID": "42",
         "SHIPMATE_HEAD_SHA": "a" * 40,
         "GITHUB_OUTPUT": str(out),
+        "SHIPMATE_REVIEW_DECISION": "APPROVED",
     }.items():
         monkeypatch.setenv(k, v)
+    monkeypatch.delenv("SHIPMATE_UNGATED_ENVS", raising=False)
     monkeypatch.setattr(ad, "verify_plan_run", lambda *a: None)
     monkeypatch.setattr(
         ad, "run_graph_deps", lambda: {"stacks/app": set(), "stacks/unrelated": set()}
@@ -337,3 +342,90 @@ def test_main_wires_the_tag_map_into_the_cells(tmp_path, monkeypatch):
         {"stack": "stacks/app", "environment": "dev-eu", "workload_var": "NET_EDGE"}
     ]
     assert evaluated == ["stacks/app"]
+
+
+# --- the targeted path re-verifies the review decision ----------------------
+# `apply.yml` used to consult the review decision nowhere at all, so an
+# `ungated-envs` input wider than vars.SHIPMATE_UNGATED_ENVS applied unreviewed
+# there unconditionally. The engine now reads the variable itself and refuses.
+
+
+@pytest.mark.parametrize(
+    ("decision", "ungated"),
+    [
+        ("NONE", ""),
+        ("APPROVED", ""),
+        ("APPROVED", "prod-eu"),
+        ("REVIEW_REQUIRED", "dev-eu"),
+        ("REVIEW_REQUIRED", "other,DEV-EU"),
+    ],
+)
+def test_refuse_unreviewed_lets_an_authorized_apply_through(decision, ungated):
+    ad.refuse_unreviewed("dev-eu", ungated, decision)  # must not raise
+
+
+@pytest.mark.parametrize(
+    ("decision", "ungated"),
+    [
+        # The hole: an unreviewed PR with the variable unset. The input the
+        # consumer wired into comment-ops cannot widen this.
+        ("REVIEW_REQUIRED", ""),
+        # Listed, but not THIS env.
+        ("REVIEW_REQUIRED", "prod-eu"),
+        ("CHANGES_REQUESTED", "dev-eu"),
+        # The review job's sentinel for a pr_number matching no pull request.
+        ("MISSING_PR", "dev-eu"),
+        ("BANANA", ""),
+        # Wiring drift: the decision never arrived at all.
+        ("", "dev-eu"),
+        ("", ""),
+    ],
+)
+def test_refuse_unreviewed_refuses_everything_else(decision, ungated):
+    with pytest.raises(SystemExit) as exc_info:
+        ad.refuse_unreviewed("dev-eu", ungated, decision)
+    assert str(exc_info.value).startswith("::error::not authorized")
+
+
+def test_refuse_unreviewed_reuses_authorizes_selector_verbatim():
+    # One function decides review policy on all three call sites; a second
+    # implementation here would eventually disagree with comment-ops about the
+    # same pull request. Reason text compared whole, not paraphrased.
+    reason = ad.az._review_reason("REVIEW_REQUIRED", "dev-eu", frozenset({"prod-eu"}))
+    with pytest.raises(SystemExit) as exc_info:
+        ad.refuse_unreviewed("dev-eu", "prod-eu", "REVIEW_REQUIRED")
+    assert str(exc_info.value) == f"::error::{reason}"
+
+
+def test_refuse_unreviewed_rejects_a_malformed_variable_entry():
+    # parse_ungated_envs fails closed on an entry that could never match an env
+    # name -- a silently inert entry leaves an operator believing an
+    # environment is exempt when it is not.
+    with pytest.raises(SystemExit):
+        ad.refuse_unreviewed("dev-eu", "dev-eu-apply", "REVIEW_REQUIRED")
+
+
+def test_main_refuses_before_it_touches_the_plan_run(monkeypatch, tmp_path):
+    # The refusal is the first thing after input validation: the run dies
+    # before any API call, before any wave, and the apply checks -- and so the
+    # gate -- stay pending.
+    def _boom(*a, **kw):
+        raise AssertionError("main() reached the plan-run lookup on an unreviewed apply")
+
+    monkeypatch.setattr(ad, "verify_plan_run", _boom)
+    monkeypatch.setattr(ad, "run_graph_deps", _boom)
+    monkeypatch.setattr(ad, "_artifact_names", _boom)
+    monkeypatch.setattr(ad, "completed_apply_names", _boom)
+    for name, value in {
+        "GITHUB_REPOSITORY": "acme/iac",
+        "SHIPMATE_ENV": "dev-eu",
+        "SHIPMATE_PLAN_RUN_ID": "123456",
+        "SHIPMATE_HEAD_SHA": "0123456789abcdef0123456789abcdef01234567",
+        "GITHUB_OUTPUT": str(tmp_path / "out.txt"),
+        "SHIPMATE_REVIEW_DECISION": "REVIEW_REQUIRED",
+    }.items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.delenv("SHIPMATE_UNGATED_ENVS", raising=False)
+    with pytest.raises(SystemExit) as exc_info:
+        ad.main()
+    assert str(exc_info.value).startswith("::error::not authorized")

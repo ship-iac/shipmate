@@ -227,8 +227,11 @@ without the other:
   ruleset still requires the review before the **merge**, `CHANGES_REQUESTED`
   still refuses, and the approvers-team, mergeable and exact-plan requirements
   are untouched (CONTRACT.md §Comment-ops). Environments it does not name are
-  held out of a bare `shipmate apply`, their apply checks left pending, so the
-  gate keeps blocking the merge until they are applied with a review in hand.
+  held out of a bare `shipmate apply` and refused on a targeted one, their apply
+  checks left pending, so the gate keeps blocking the merge until they are
+  applied with a review in hand. Both engine apply workflows read the variable
+  themselves and enforce on it; the `comment-ops.yml` line is an early refusal,
+  not the policy.
   Opting in also takes one line in `comment-ops.yml` — see
   `docs/getting-started.md`.
 - **Environment `required_reviewers`** on `<env>-apply` (§6) gates *the

@@ -376,21 +376,24 @@ permit applying"*, or `shipmate apply` was refused with a review reason.
 `SHIPMATE_UNGATED_ENVS` exempts the environments it names from the review
 requirement and nothing else. A **targeted** `shipmate apply <env>` is decided
 at comment time: an unlisted env gets the usual refusal, extended to say the
-env is not listed in the variable. A **bare** `shipmate apply` is partitioned
+env is not listed in the variable, and the engine re-applies the same rule to
+the decision it reads at apply time — a run refused there dies before any wave,
+leaving the apply checks pending. A **bare** `shipmate apply` is partitioned
 per environment on the apply path, from the review decision read there:
 
 | `reviewDecision` when the apply runs | what applies |
 |---|---|
 | `NONE` (the ruleset requires no review) or `APPROVED` | everything pending — no partition |
-| `REVIEW_REQUIRED` | the listed environments; every other pending environment is held |
+| `REVIEW_REQUIRED` | the listed environments; every other pending environment is held — all of them when the variable is unset or empty |
 | `CHANGES_REQUESTED` | nothing — every environment is held, listed ones included |
 | anything else, or no decision arrived | nothing — every environment is held |
 
 Held environments keep their `apply / <stack> / <env>` checks pending, so
 `shipmate / gate` stays pending and the merge stays blocked; environments
-ordered after a held one are skipped for the same run. With the variable unset
-or empty, no environment is ever held on this path — the whole table applies
-only to a repository that opted in.
+ordered after a held one are skipped for the same run. The variable only ever
+narrows what a `REVIEW_REQUIRED` decision holds; it is the decision that
+decides, so an unreviewed pull request holds every environment in a repository
+that set nothing.
 
 **The apply is refused although the variable is set.** The `comment-ops` step
 needs `ungated-envs: ${{ vars.SHIPMATE_UNGATED_ENVS }}` too; without it

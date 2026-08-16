@@ -78,8 +78,9 @@ has the rule and the `tm_try` form that keeps a local default.
 ## Opt-in: per-environment review gating
 
 `SHIPMATE_UNGATED_ENVS` lets named environments be applied without an approving
-review while the rest keep the branch ruleset's requirement. It is opt-in, and
-**re-pinning changes nothing on its own**:
+review while the rest keep the branch ruleset's requirement. The exemption is
+opt-in and **re-pinning exempts nothing on its own** (it does change two other
+things for every consumer — see below):
 
 1. set the `SHIPMATE_UNGATED_ENVS` repository variable,
 2. add `ungated-envs: ${{ vars.SHIPMATE_UNGATED_ENVS }}` to the `comment-ops`
@@ -93,18 +94,31 @@ review while the rest keep the branch ruleset's requirement. It is opt-in, and
    one-change rule; on this feature breaking it fails **open** rather than
    loudly.
 
-With the variable unset, every environment keeps its review requirement and
-every apply path behaves exactly as it did before — there is nothing to migrate
-and no way for the re-pin to widen anything.
+With the variable unset, every environment keeps its review requirement, so
+*what applies* is unchanged. Three things do change for everyone, opted in or
+not, because both apply workflows now re-read the review decision themselves in
+an unconditional `review` job:
+
+- **One extra `shipmate-engine` deployment record per apply run.** The
+  workflow's `summary` job already creates one; this is the second.
+- **A broken App-key wiring is now a loud early failure.** The `review` job
+  mints an App token, and it runs before anything applies — so a repository
+  whose `SHIPMATE_APP_PRIVATE_KEY` or `SHIPMATE_APP_ID` never reaches the
+  engine now fails the run at the start, with the three-cause diagnosis, rather
+  than applying and then failing to complete its apply checks. If your applies
+  have been completing with stranded checks, this is where you will see why.
+- **A pre-existing TOCTOU is closed.** Until now only comment-ops read the
+  review decision, so an approval dismissed between the comment and the
+  dispatch applied anyway. The engine re-reads it at apply time and holds.
 
 With the variable set but the workflow line left out, `shipmate apply` refuses
 exactly as it does today — comment-ops receives an empty list, so both the
 targeted and the bare form are refused. That is the expected failure mode of a
 half-finished opt-in, and it is the one worth recognizing: the refusal is not a
-bug. Omitting the line cannot widen anything — but writing it as a **literal**
-list rather than the variable reference in step 2 can: comment-ops would then
-exempt environments the engine's own partition never holds. See
-[`getting-started.md`](getting-started.md) §"Applying chosen environments
+bug. Writing it as a **literal** list rather than the variable reference in
+step 2 now costs a wasted run rather than an unreviewed apply — the engine reads
+the variable itself on both paths and refuses what the variable does not exempt.
+See [`getting-started.md`](getting-started.md) §"Applying chosen environments
 without an approving review".
 
 Two things it does not change, worth confirming against your own policy before
