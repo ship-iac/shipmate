@@ -665,6 +665,18 @@ def test_short_form_nothing_pending_all_environments():
     assert RUN_URL in body
 
 
+def test_short_form_all_held_does_not_claim_success_or_nothing_pending():
+    # The headline path of the review gate: every env held, every job-level
+    # result benign. A green head here contradicts the Held sentence beneath it.
+    body = ac._short_form("success,skipped", "", "pending", RUN_URL, [], [], ["prod"])
+    assert body.startswith(
+        ":no_entry_sign: shipmate: `shipmate apply` (all environments) "
+        "applied nothing — environments are held for review."
+    )
+    assert ":white_check_mark:" not in body
+    assert "found no pending applies" not in body
+
+
 def test_short_form_includes_excluded_and_skipped_lines_all_environments():
     # Regression guard: today's live apply-all.yml one-liner appends these
     # sentences unconditionally, including in the nothing-pending branch --

@@ -600,6 +600,12 @@ def _short_form(
     env is exactly the case where they matter most."""
     if _results_failed(results_csv):
         head = _apply_head(env_name, ":x:", "failed")
+    elif held:
+        # Work WAS pending and the engine refused it — a green "found no
+        # pending applies" head would contradict the Held sentence below it.
+        head = _apply_head(
+            env_name, ":no_entry_sign:", "applied nothing — environments are held for review"
+        )
     else:
         head = _apply_head(env_name, ":white_check_mark:", "found no pending applies to run")
     parts = [head]
