@@ -1,5 +1,6 @@
 import json
 
+import pytest
 from _loader import SCRIPTS as _D
 from _loader import load_script
 
@@ -7,6 +8,7 @@ az = load_script("authorize")
 
 PR_OK = {"mergeable": True, "mergeable_state": "clean", "head": {"sha": "abc123"}}
 RUN_OK = {"id": 555, "head_sha": "abc123"}
+UNGATED_DEV = frozenset({"dev-eu"})
 
 
 def _decide(**kw):
@@ -84,7 +86,14 @@ def test_review_reject_reasons_are_distinct():
     reasons = {
         _decide(review_decision=value)[1] for value in ("REVIEW_REQUIRED", "CHANGES_REQUESTED", "")
     }
-    assert len(reasons) == 3
+    reasons.add(
+        _decide(
+            review_decision="REVIEW_REQUIRED",
+            environment="prod-eu",
+            ungated_envs=UNGATED_DEV,
+        )[1]
+    )
+    assert len(reasons) == 4
 
 
 def test_main_reads_review_decision_env(tmp_path, monkeypatch):
@@ -142,3 +151,144 @@ def test_mergeable_null_reports_still_computing_not_conflict():
         pr={"mergeable": None, "mergeable_state": "unknown", "head": {"sha": "abc123"}}
     )
     assert not ok and "computing" in reason and "conflict" not in reason
+
+
+def test_parse_ungated_envs_empty_yields_empty_set():
+    assert az.parse_ungated_envs("") == frozenset()
+
+
+def test_parse_ungated_envs_splits_on_commas():
+    assert az.parse_ungated_envs("dev-eu,dev-us") == frozenset({"dev-eu", "dev-us"})
+
+
+def test_parse_ungated_envs_ignores_empty_fields():
+    assert az.parse_ungated_envs("dev-eu,") == frozenset({"dev-eu"})
+
+
+def test_ungated_env_match_is_case_insensitive():
+    # Pinned through _review_reason, where the match is used: an uppercase
+    # variable entry must exempt a lowercase env and vice versa.
+    assert az._review_reason("REVIEW_REQUIRED", "dev-eu", az.parse_ungated_envs("DEV-EU")) is None
+    assert az._review_reason("REVIEW_REQUIRED", "DEV-EU", az.parse_ungated_envs("dev-eu")) is None
+
+
+def test_parse_ungated_envs_rejects_environment_suffix():
+    # A `-plan`/`-apply` suffixed entry would exempt nothing — refuse loudly and
+    # name the bare env to write instead.
+    for entry, suffix in (("dev-eu-plan", "-plan"), ("dev-eu-apply", "-apply")):
+        with pytest.raises(SystemExit) as exc:
+            az.parse_ungated_envs(entry)
+        message = str(exc.value)
+        assert repr(entry) in message
+        assert repr(suffix) in message
+        assert repr("dev-eu") in message
+
+
+def test_parse_ungated_envs_rejects_padded_entry():
+    # A space-padded entry would silently match nothing; refuse and name it.
+    for entry in (" dev-eu", "dev-eu "):
+        with pytest.raises(SystemExit) as exc:
+            az.parse_ungated_envs(f"dev-us,{entry}")
+        message = str(exc.value)
+        assert repr(entry) in message
+        assert repr("dev-eu") in message
+
+
+@pytest.mark.parametrize(
+    ("review_decision", "environment", "ungated_envs", "authorized"),
+    [
+        ("REVIEW_REQUIRED", "dev-eu", UNGATED_DEV, True),
+        ("REVIEW_REQUIRED", "prod-eu", UNGATED_DEV, False),
+        ("REVIEW_REQUIRED", "dev-eu", frozenset(), False),
+        ("REVIEW_REQUIRED", "", UNGATED_DEV, True),
+        ("REVIEW_REQUIRED", "", frozenset(), False),
+        ("CHANGES_REQUESTED", "dev-eu", UNGATED_DEV, False),
+        ("", "dev-eu", UNGATED_DEV, False),
+        ("BANANA", "dev-eu", UNGATED_DEV, False),
+        ("NONE", "dev-eu", UNGATED_DEV, True),
+        ("APPROVED", "dev-eu", UNGATED_DEV, True),
+    ],
+    ids=[
+        "listed-env-exempt",
+        "unlisted-env-refused",
+        "no-list-refused",
+        "bare-apply-exempt",
+        "bare-apply-no-list-refused",
+        "changes-requested-not-exempt",
+        "absent-decision-fails-closed",
+        "unknown-decision-fails-closed",
+        "none-authorizes",
+        "approved-authorizes",
+    ],
+)
+def test_ungated_env_decision_table(review_decision, environment, ungated_envs, authorized):
+    ok, reason = _decide(
+        review_decision=review_decision,
+        environment=environment,
+        ungated_envs=ungated_envs,
+    )
+    assert ok is authorized
+    assert (reason == "") is authorized
+
+
+def test_unlisted_env_reason_names_the_variable():
+    ok, reason = _decide(
+        review_decision="REVIEW_REQUIRED", environment="prod-eu", ungated_envs=UNGATED_DEV
+    )
+    assert not ok
+    assert "SHIPMATE_UNGATED_ENVS" in reason
+    assert "`prod-eu`" in reason
+
+
+@pytest.mark.parametrize("environment", ["dev-eu", ""])
+def test_empty_list_keeps_todays_review_required_message(environment):
+    # With no variable set, the message must not mention the opt-out at all.
+    ok, reason = _decide(review_decision="REVIEW_REQUIRED", environment=environment)
+    assert not ok
+    assert reason == _decide(review_decision="REVIEW_REQUIRED")[1]
+    assert "SHIPMATE_UNGATED_ENVS" not in reason
+
+
+def test_exemption_does_not_reach_the_other_checks():
+    # An exempting decision must not authorize anything the other predicates
+    # refuse — the exemption sits inside the review check, not around it.
+    exempt = dict(review_decision="REVIEW_REQUIRED", environment="dev-eu", ungated_envs=UNGATED_DEV)
+    ok, reason = _decide(is_member=False, **exempt)
+    assert not ok and "not a member" in reason
+    ok, reason = _decide(
+        pr={"mergeable": False, "mergeable_state": "dirty", "head": {"sha": "abc123"}}, **exempt
+    )
+    assert not ok and "not mergeable" in reason
+    ok, reason = _decide(plan_run={}, **exempt)
+    assert not ok and "no reviewed plan" in reason
+    ok, reason = _decide(plan_run={"id": 9, "head_sha": "OLD"}, **exempt)
+    assert not ok and "stale" in reason
+
+
+def test_main_reads_ungated_envs_and_environment(tmp_path, monkeypatch):
+    # Pins that both SHIPMATE_UNGATED_ENVS and SHIPMATE_ENV reach decide():
+    # the env is deliberately NOT in the list, so the refusal carries the
+    # variable-aware message only if both values arrived.
+    pr_json = tmp_path / "pr.json"
+    pr_json.write_text(json.dumps(PR_OK), encoding="utf-8")
+    run_json = tmp_path / "plan_run.json"
+    run_json.write_text(json.dumps(RUN_OK), encoding="utf-8")
+    out = tmp_path / "out.txt"
+    out.touch()
+    for key, value in {
+        "IS_MEMBER": "true",
+        "APPROVERS_TEAM": "deployers",
+        "PR_JSON": str(pr_json),
+        "PLAN_RUN_JSON": str(run_json),
+        "GITHUB_OUTPUT": str(out),
+        "REVIEW_DECISION": "REVIEW_REQUIRED",
+        "SHIPMATE_ENV": "prod-eu",
+        "SHIPMATE_UNGATED_ENVS": "dev-eu",
+    }.items():
+        monkeypatch.setenv(key, value)
+    az.main()
+    text = out.read_text(encoding="utf-8")
+    assert "authorized=false" in text
+    assert "SHIPMATE_UNGATED_ENVS" in text
+    assert "`prod-eu`" in text
+    assert "environment=prod-eu" in text

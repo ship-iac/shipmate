@@ -16,13 +16,49 @@ import json
 import os
 
 
-def _review_reason(review_decision):
+def parse_ungated_envs(raw):
+    """Env names exempt from the review requirement, casefolded.
+
+    Comma-separated bare logical env names, matched case-insensitively against
+    the env on the apply checks. A `-plan`/`-apply` suffix or a stray space
+    would exempt nothing at all, so both are configuration errors rather than
+    a silently inert entry."""
+    envs = [e for e in (raw or "").split(",") if e]
+    for e in envs:
+        if e != e.strip():
+            raise SystemExit(
+                f"::error::SHIPMATE_UNGATED_ENVS entry {e!r} has surrounding "
+                f"whitespace; the list is comma-separated with no spaces — "
+                f"write {e.strip()!r}."
+            )
+        for suffix in ("-plan", "-apply"):
+            if e.endswith(suffix):
+                raise SystemExit(
+                    f"::error::SHIPMATE_UNGATED_ENVS entry {e!r} carries the "
+                    f"environment suffix {suffix!r}; the list is matched against "
+                    f"the bare logical env name — write {e[: -len(suffix)]!r} instead."
+                )
+    return frozenset(e.casefold() for e in envs)
+
+
+def _review_reason(review_decision, environment="", ungated_envs=frozenset()):
     """Reject reason for the ruleset-delegated review check, or None to pass.
 
     Only the explicit pass values authorize: NONE (comment-ops' sentinel for a
     null decision — no review required by the ruleset) and APPROVED. Anything
-    else fails closed."""
+    else fails closed. An environment listed in SHIPMATE_UNGATED_ENVS is exempt
+    from REVIEW_REQUIRED and from nothing else; a bare apply passes here when
+    any env is listed and is partitioned per env in apply-all-detect."""
     if review_decision == "REVIEW_REQUIRED":
+        if ungated_envs and (not environment or environment.casefold() in ungated_envs):
+            return None
+        if ungated_envs:
+            return (
+                f"not authorized: PR review is required by the branch ruleset "
+                f"and has not been satisfied, and `{environment}` is not listed "
+                f"in the SHIPMATE_UNGATED_ENVS repository variable; obtain the "
+                f"required approving review(s), then re-run `shipmate apply`."
+            )
         return (
             "not authorized: PR review is required by the branch ruleset and "
             "has not been satisfied; obtain the required approving review(s), "
@@ -46,7 +82,16 @@ def _review_reason(review_decision):
     return None
 
 
-def decide(*, is_member, approvers_team, review_decision, pr, plan_run):
+def decide(
+    *,
+    is_member,
+    approvers_team,
+    review_decision,
+    pr,
+    plan_run,
+    environment="",
+    ungated_envs=frozenset(),
+):
     """Return (authorized, reason). reason is '' when authorized."""
     if not is_member:
         return False, (
@@ -66,7 +111,7 @@ def decide(*, is_member, approvers_team, review_decision, pr, plan_run):
             f"PR is not mergeable (state: {state}); resolve conflicts "
             f"or branch-protection requirements first."
         )
-    review_reason = _review_reason(review_decision)
+    review_reason = _review_reason(review_decision, environment, ungated_envs)
     if review_reason:
         return False, review_reason
     if not plan_run:
@@ -96,17 +141,22 @@ def main():
     plan_run = _read_json("PLAN_RUN_JSON", {})
     is_member = os.environ.get("IS_MEMBER", "false") == "true"
     review_decision = os.environ.get("REVIEW_DECISION", "")
+    # One read, used for both the decision and the reported output — the value
+    # the decision used and the value reported can never differ.
+    environment = os.environ.get("SHIPMATE_ENV", "")
     ok, reason = decide(
         is_member=is_member,
         approvers_team=os.environ.get("APPROVERS_TEAM", ""),
         review_decision=review_decision,
         pr=pr,
         plan_run=plan_run,
+        environment=environment,
+        ungated_envs=parse_ungated_envs(os.environ.get("SHIPMATE_UNGATED_ENVS", "")),
     )
     with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
         fh.write(f"authorized={'true' if ok else 'false'}\n")
         fh.write(f"reason={reason}\n")
-        fh.write(f"environment={os.environ.get('SHIPMATE_ENV', '')}\n")
+        fh.write(f"environment={environment}\n")
         fh.write(f"plan_run_id={plan_run.get('id', '')}\n")
         fh.write(f"head_sha={pr.get('head', {}).get('sha', '')}\n")
     print(f"::notice title=authorize::authorized={ok} reason={reason or 'ok'}")
