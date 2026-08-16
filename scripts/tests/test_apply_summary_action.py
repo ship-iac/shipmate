@@ -111,6 +111,38 @@ def test_render_step_feeds_every_env_var_the_script_reads():
     )
 
 
+# The read-set guard above compares env: KEYS only, so it cannot see two
+# values swapped between two keys. Every SHIPMATE_*_ENVS input is a JSON array
+# of env names, so a swap type-checks, renders, and names the wrong
+# environments under the wrong sentence -- "held" naming what applied
+# unreviewed, and the reverse. One whole-value comparison against a
+# hand-written mapping, never one derived from the file, per the repo's
+# assert-the-whole rule; a second selector for just the two new keys would
+# relocate the hole rather than close it.
+_RENDER_ENV = {
+    "CELLS": "${{ inputs.cells-dir }}",
+    "SHIPMATE_ENVIRONMENT": "${{ inputs.environment }}",
+    "SHIPMATE_WAVES_JSON": "${{ inputs.waves-json }}",
+    "SHIPMATE_ENVLEVEL0_WAVES": "${{ inputs.envlevel0-waves }}",
+    "SHIPMATE_ENVLEVEL1_WAVES": "${{ inputs.envlevel1-waves }}",
+    "SHIPMATE_ENVLEVEL2_WAVES": "${{ inputs.envlevel2-waves }}",
+    "SHIPMATE_ENVLEVEL3_WAVES": "${{ inputs.envlevel3-waves }}",
+    "SHIPMATE_RESULTS": "${{ inputs.results }}",
+    "SHIPMATE_GATE": "${{ inputs.gate-verdict }}",
+    "SHIPMATE_EXCLUDED_ENVS": "${{ inputs.excluded-envs }}",
+    "SHIPMATE_SKIPPED_ENVS": "${{ inputs.skipped-envs }}",
+    "SHIPMATE_REVIEW_HELD_ENVS": "${{ inputs.review-held-envs }}",
+    "SHIPMATE_APPLIED_UNGATED_ENVS": "${{ inputs.applied-ungated-envs }}",
+    "SHIPMATE_CHECKS": "checks.jsonl",
+    "SHIPMATE_APP_ID": "${{ inputs.app-id }}",
+}
+
+
+def test_render_step_env_block_matches_the_expected_mapping():
+    render_step = _find_step(_load_action()["runs"]["steps"], run_contains="scripts/apply-comment")
+    assert (render_step.get("env") or {}) == _RENDER_ENV
+
+
 def test_render_step_never_interpolates_expr_directly():
     """Belt-and-suspenders alongside test_actions_shellcheck.py: every
     author-controlled value must reach the script through env:, never a

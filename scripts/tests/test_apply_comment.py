@@ -697,7 +697,7 @@ def test_excluded_skipped_lines_escape_evil_env_names():
     # GitHub Environment names), same as every other display value in this
     # file -- these sentences must not be the one place that guarantee lapses.
     evil = "x</summary><b>evil"
-    lines = ac._excluded_skipped_lines([evil], [evil])
+    lines = ac._env_disposition_lines([evil], [evil])
     joined = " ".join(lines)
     assert "</summary><b>evil" not in joined
     assert "&lt;/summary&gt;&lt;b&gt;evil" in joined
@@ -722,8 +722,9 @@ _HELD_SENTENCE = (
     "Get the review, then re-run the apply."
 )
 _UNGATED_SENTENCE = (
-    "Applied without an approving review: `dev-eu` — listed in the "
-    "`SHIPMATE_UNGATED_ENVS` repository variable."
+    "Ungated environment(s) whose cells were applied without an approving review, "
+    "per the `SHIPMATE_UNGATED_ENVS` repository variable: `dev-eu` — "
+    "see this run for what actually succeeded."
 )
 
 
@@ -731,7 +732,7 @@ def test_held_line_names_review_and_never_a_targeted_apply_command():
     # A held env can also be an explicit env, in which case the review alone
     # does not release it -- so this sentence must not name a command at all.
     # `shipmate apply prod` would additionally be a command that refuses.
-    (line,) = ac._excluded_skipped_lines([], [], ["prod"], [])
+    (line,) = ac._env_disposition_lines([], [], ["prod"], [])
     assert line == _HELD_SENTENCE
     assert "shipmate apply prod" not in line
 
@@ -740,8 +741,20 @@ def test_applied_ungated_line_states_no_review_and_names_the_variable():
     # The audit sentence: with required_approving_review_count 0 GitHub reports
     # no review decision at all, so nothing else in the run distinguishes a
     # reviewed apply from an unreviewed one.
-    (line,) = ac._excluded_skipped_lines([], [], [], ["dev-eu"])
+    (line,) = ac._env_disposition_lines([], [], [], ["dev-eu"])
     assert line == _UNGATED_SENTENCE
+
+
+def test_applied_ungated_line_does_not_claim_the_named_envs_succeeded():
+    # detect derives the set from `runnable` -- the envs whose apply was
+    # PERMITTED to proceed unreviewed -- before any wave runs. A failed wave or
+    # an env-level skipped behind a failed predecessor leaves an env named here
+    # that never applied, so the sentence must claim permission and attempt
+    # only, and send the reader elsewhere for the outcome. It points at the run
+    # rather than the table because the short form renders no table.
+    (line,) = ac._env_disposition_lines([], [], [], ["dev-eu"])
+    assert not line.startswith("Applied")
+    assert line.endswith("— see this run for what actually succeeded.")
 
 
 def test_short_form_carries_held_and_ungated_sentences():
@@ -760,7 +773,7 @@ def test_footer_carries_held_and_ungated_sentences():
 
 def test_held_and_ungated_lines_escape_evil_env_names():
     evil = "x</summary><b>evil"
-    joined = " ".join(ac._excluded_skipped_lines([], [], [evil], [evil]))
+    joined = " ".join(ac._env_disposition_lines([], [], [evil], [evil]))
     assert "</summary><b>evil" not in joined
     assert "&lt;/summary&gt;&lt;b&gt;evil" in joined
 

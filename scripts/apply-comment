@@ -508,10 +508,11 @@ def _gate_sentence(gate):
     )
 
 
-def _excluded_skipped_lines(excluded, skipped, held=(), applied_ungated=()):
-    """The excluded/skipped/held/ungated-env sentences. Shared by `_footer` and
-    `_short_form` so the short form cannot silently drop the comment's most
-    actionable warning. Env names are author-controlled, so `_md_escape`d.
+def _env_disposition_lines(excluded, skipped, held=(), applied_ungated=()):
+    """One sentence per env disposition this run produced: excluded, skipped,
+    held for review, applied ungated. Shared by `_footer` and `_short_form` so
+    the short form cannot silently drop the comment's most actionable warning.
+    Env names are author-controlled, so `_md_escape`d.
 
     The held sentence names no command: a held env can also be an explicit env
     (the held cause wins, so it is not in `excluded`), and a bare `shipmate
@@ -522,7 +523,11 @@ def _excluded_skipped_lines(excluded, skipped, held=(), applied_ungated=()):
     SHIPMATE_UNGATED_ENVS set. That sentence is the only audit trail an
     unreviewed apply leaves: with required_approving_review_count 0 GitHub
     reports no review decision at all, so nothing else in the run tells a
-    reviewed apply from an unreviewed one."""
+    reviewed apply from an unreviewed one. It claims permission and attempt but
+    never success -- detect derives the set from `runnable`, before any wave
+    runs, so a failed wave or a skipped env-level leaves an env named here that
+    never applied. It points at the run rather than the table because the short
+    form has no table."""
     lines = []
     if excluded:
         envs = ", ".join(f"`{sc._md_escape(e)}`" for e in excluded)
@@ -540,8 +545,9 @@ def _excluded_skipped_lines(excluded, skipped, held=(), applied_ungated=()):
     if applied_ungated:
         envs = ", ".join(f"`{sc._md_escape(e)}`" for e in applied_ungated)
         lines.append(
-            f"Applied without an approving review: {envs} — listed in the "
-            "`SHIPMATE_UNGATED_ENVS` repository variable."
+            "Ungated environment(s) whose cells were applied without an approving "
+            f"review, per the `SHIPMATE_UNGATED_ENVS` repository variable: {envs} — "
+            "see this run for what actually succeeded."
         )
     return lines
 
@@ -551,7 +557,7 @@ def _footer(gate, run_url, excluded, skipped, env_name, held=(), applied_ungated
     gate sentence, then the run link."""
     parts = []
     if not env_name:
-        parts.extend(_excluded_skipped_lines(excluded, skipped, held, applied_ungated))
+        parts.extend(_env_disposition_lines(excluded, skipped, held, applied_ungated))
     parts.append(_gate_sentence(gate))
     parts.append(f"[Logs & artifacts]({run_url})")
     return "\n\n".join(parts)
@@ -590,7 +596,7 @@ def _short_form(
         head = _apply_head(env_name, ":white_check_mark:", "found no pending applies to run")
     parts = [head]
     if not env_name:
-        parts.extend(_excluded_skipped_lines(excluded, skipped, held, applied_ungated))
+        parts.extend(_env_disposition_lines(excluded, skipped, held, applied_ungated))
     parts.append(_gate_sentence(gate))
     parts.append(f"[Logs & artifacts]({run_url})")
     return " ".join(parts)
