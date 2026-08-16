@@ -25,6 +25,10 @@ inputs:
   github-token:
     description: 'GITHUB_TOKEN with issues:write and pull-requests:write (reactions + reject comments + PR reads).'
     required: true
+  ungated-envs:
+    description: 'Optional: SHIPMATE_UNGATED_ENVS verbatim (comma-separated bare env names). Environments listed here may be applied without an approving review; every other environment keeps the branch ruleset requirement. Omitted or empty = every environment keeps it.'
+    required: false
+    default: ''
 outputs:
   authorized:
     description: true when the command is valid and authorized.
@@ -504,6 +508,7 @@ runs:
         PR_JSON: pr.json
         PLAN_RUN_JSON: plan_run.json
         SHIPMATE_ENV: ${{ steps.parse.outputs.env }}
+        SHIPMATE_UNGATED_ENVS: ${{ inputs.ungated-envs }}
       run: python3 "$GITHUB_ACTION_PATH/../../scripts/authorize"
 
     - name: React on accept

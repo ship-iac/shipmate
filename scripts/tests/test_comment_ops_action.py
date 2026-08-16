@@ -8,7 +8,7 @@ the action would parse, authorize, and then silently do nothing.
 import json
 import re
 
-from _loader import ACTIONS, ENGINE, SCRIPTS, action_steps, load_script
+from _loader import ACTIONS, ENGINE, SCRIPTS, action_steps, action_yaml, load_script
 
 _ACTION_FILE = ACTIONS / "comment-ops" / "action.yml"
 _ACTION = _ACTION_FILE.read_text(encoding="utf-8")
@@ -602,3 +602,33 @@ def test_both_prose_permission_lists_name_every_manifest_permission():
             assert f"`{name}: {level}`" in listing, (
                 f"{doc}'s permission list does not name `{name}: {level}`"
             )
+
+
+def _authorize_step():
+    step = next(s for s in action_steps("comment-ops") if s.get("name") == "Authorize")
+    assert step.get("env"), "the Authorize step declares no env: block"
+    return step
+
+
+def test_authorize_step_receives_the_ungated_envs_input():
+    assert _authorize_step()["env"]["SHIPMATE_UNGATED_ENVS"] == "${{ inputs.ungated-envs }}"
+
+
+def test_the_ungated_envs_input_is_optional_and_defaults_to_empty():
+    """A consumer who never writes the `ungated-envs:` line must keep the branch
+    ruleset's review requirement on every environment, so the input has to be
+    optional AND default to the empty string that `parse_ungated_envs` reads as
+    "nothing is exempt"."""
+    spec = action_yaml("comment-ops")["inputs"]["ungated-envs"]
+    assert spec["required"] is False
+    assert spec["default"] == ""
+
+
+def test_authorize_step_supplies_every_env_var_authorize_reads():
+    """Derived from `scripts/authorize`'s own source, not a hand-listed set: a
+    SHIPMATE_* name added to the script later would otherwise read as empty in
+    this step and silently take the fail-closed branch."""
+    src = (SCRIPTS / "authorize").read_text(encoding="utf-8")
+    read = set(re.findall(r"os\.environ(?:\.get)?[\[(]['\"](SHIPMATE_[A-Z_]+)['\"]", src))
+    assert read, "expected at least one SHIPMATE_* read in authorize"
+    assert read <= set(_authorize_step()["env"])

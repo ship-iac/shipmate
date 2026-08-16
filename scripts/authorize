@@ -9,7 +9,9 @@ means new commits landed since the last plan -> stale -> re-plan. Review policy
 is delegated to the branch ruleset via GitHub's `reviewDecision`, not re-derived
 here: only the explicit pass values `NONE` (comment-ops' sentinel for a null
 decision — no review required by the ruleset) and `APPROVED` authorize; any
-other value — including an absent/empty one — fails closed.
+other value — including an absent/empty one — fails closed, except that
+`REVIEW_REQUIRED` also authorizes for an environment listed in
+`SHIPMATE_UNGATED_ENVS`.
 """
 
 import json
