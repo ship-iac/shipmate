@@ -654,7 +654,8 @@ The env is optional for `apply`. A targeted `shipmate apply <env>` applies one
 environment; a bare `shipmate apply` applies **every** environment that has a
 reviewed plan for the current PR head, in `env_order` env-levels (see Env
 apply order, below), **except** environments listed in the Terramate global
-`global.shipmate.explicit_envs`. Explicit environments (typically production)
+`global.shipmate.explicit_envs` and environments **held for review** under
+`SHIPMATE_UNGATED_ENVS` (below). Explicit environments (typically production)
 must always be named: their `apply / <stack> / <env>` checks simply stay
 pending under a bare apply — so `shipmate / gate` keeps gating the
 merge — until someone runs `shipmate apply <env>` for them. An absent global
@@ -688,19 +689,103 @@ its own actionable rejection reason:
   single source of review policy; shipmate imposes none of its own. A ruleset
   requiring zero approvals reports no decision even when an approval exists,
   but a `CHANGES_REQUESTED` review still blocks. Any other value — including
-  an absent or empty decision — fails closed with a wiring-error reason;
+  an absent or empty decision — fails closed with a wiring-error reason. An
+  environment listed in the `SHIPMATE_UNGATED_ENVS` repository variable is
+  exempt from this requirement, and from no other (below);
 - **undiverged**: a reviewed plan exists for the pull request's **current**
   head SHA (the most recent successful plan run — the automatic plan run on
   pull-request open, autoplan — whose head matches; a plan for an older head
   means new commits landed since — stale, re-plan required).
 
-A bare `shipmate apply` is authorized exactly once, by the same four apply
-requirements — one authorization decision covers the whole multi-environment
-run. Both forms
+`undiverged` is only the comment-time half of shipmate's **exact-plan** rule.
+The cell that applies re-verifies the reviewed `.otplan` against current state
+and against the TF_VAR fingerprint recorded at plan time (§Apply-match
+fingerprint), and refuses with "saved plan is stale" rather than re-planning.
+The pair is therefore strictly stronger than a base-divergence check: a plan
+the base branch never moved under, but that state moved under, is refused too.
+
+Review policy is read from GitHub's own `reviewDecision` — the verdict the
+branch ruleset computes. shipmate never parses `CODEOWNERS` and keeps no
+second copy of the rule: whatever the ruleset requires (approval counts,
+code-owner review, last-push approval) is what the apply path waits for, and
+there is no owners parser here to disagree with it.
+
+A bare `shipmate apply` is authorized once at comment time, by the same four
+apply requirements. That is the whole review decision unless
+`SHIPMATE_UNGATED_ENVS` is set, in which case the run is additionally
+partitioned per environment on the apply path (below). Both forms
 dispatch the consumer's single `apply.yml` wrapper; its optional `environment`
 input selects the path (set → targeted, empty → bare). Both share the same
 App-minted `workflow_dispatch` mechanism and the same per-env
 `apply-<env>-<stack>` concurrency groups.
+
+The **repository variable** `SHIPMATE_UNGATED_ENVS` lists the environments that
+may be applied without an approving review — comma-separated **bare logical**
+env names, matched case-insensitively against the env on the apply checks:
+
+```
+SHIPMATE_UNGATED_ENVS = dev-eu,dev-us
+```
+
+It exempts **one** requirement, `reviewed`, and only its `REVIEW_REQUIRED`
+value. Everything else still decides, on a listed environment exactly as on any
+other: **shipmate team** membership, **mergeable**, **undiverged** and the
+exact-plan rule are unchanged; a `CHANGES_REQUESTED` review still refuses,
+because an explicit human "no" is not an absent review; and an unknown or
+absent decision still fails closed. Nor does it touch the `<env>-apply`
+environment's required reviewers — that is a different control, gating the
+deployment rather than the code review (see `docs/hardening.md`).
+
+Parse rules are `SHIPMATE_SHARED_ENVS`' (§Env model), footguns included: split
+on commas, no spaces around them. An entry carrying a `-plan` / `-apply`
+suffix, or one with surrounding whitespace, is a **loud configuration error**
+naming the entry and the bare name to write instead — neither would match
+anything, and a silently inert entry would leave an operator believing an
+environment is ungated when it is not.
+
+**Unset or empty is the default and exempts nothing**: every environment keeps
+the ruleset's review requirement, which is the behaviour of every engine
+revision before the variable existed. This is the opposite direction from
+`SHIPMATE_SHARED_ENVS`, where unset means split.
+
+Opting in takes **two** things, and the variable alone is not enough:
+
+1. the repository variable, and
+2. `ungated-envs: ${{ vars.SHIPMATE_UNGATED_ENVS }}` on the `comment-ops` step
+   of the consumer's own `comment-ops.yml`.
+
+With the variable set and that line absent, comment-ops sees an empty list and
+**both** forms of `shipmate apply` get the unchanged refusal — the omission
+closes, it never silently widens.
+
+The decision has two seats, because `authorize` returns one verdict per
+dispatch while a bare apply spans many environments:
+
+- **Targeted `shipmate apply <env>`** — decided in `actions/comment-ops`. The
+  env is known at comment time: `REVIEW_REQUIRED` on a listed env authorizes,
+  on any other env it refuses with the usual message extended to name the
+  variable the env is missing from.
+- **Bare `shipmate apply`** — authorized at comment time whenever the list is
+  non-empty, then partitioned per environment by the engine's `apply-all.yml`,
+  which re-reads `reviewDecision` itself in a `review` job rather than
+  trusting a dispatch input. `NONE` / `APPROVED` apply everything;
+  `REVIEW_REQUIRED` applies the listed environments and **holds** the rest;
+  `CHANGES_REQUESTED`, an unknown value, or no decision at all holds
+  everything, listed environments included.
+
+A **held** environment travels the path `explicit_envs` exclusions already
+travel: dropped before env-levels are built, its `apply / <stack> / <env>`
+checks left **pending** — so `shipmate / gate` stays pending and the merge
+stays blocked — and environments ordered after it are skipped. The apply result
+comment names both halves: which environments were held for review, and which
+applied under the exemption (§Apply result comment).
+
+The variable is **not an admin boundary**. GitHub grants creating, updating and
+deleting Actions variables to the **Write** role and above, so anyone who can
+push can also edit this list, and `shipmate doctor` does not read it. What it
+does buy is that relaxing the gate is a separate, deliberate act against
+repository settings — it cannot ride inside the pull request that benefits from
+it, the way a Terramate global in the branch could.
 
 The GitHub App carries this permission set: `actions: write`,
 `pull_requests: write`, `contents: read`, `members: read`, `checks: write`,
@@ -1177,8 +1262,27 @@ same waves JSON `apply-detect` / `apply-all-detect` already compute, and a
 cell counts as attempted when its artifact actually downloaded or its apply
 check is already done — the render can never claim nothing is pending while
 holding evidence that an apply ran. The footer carries the bare-apply form's
-excluded/skipped-environment sentences, a gate-completion sentence (complete
+environment-disposition sentences, a gate-completion sentence (complete
 or still-pending, from the gate verdict), and the run link.
+
+The disposition sentences are four, one per cause, and the short form the size
+fallback renders carries the same set — the most actionable warning in the
+comment cannot be dropped by truncation. Excluded environments name the
+`shipmate apply <env>` that applies them; skipped ones name their ordering
+cause. The two review sentences (see §Comment-ops) are:
+
+- **held** — "an approving review is required before applying", naming the
+  environments and asking for the review, and naming no command, because a
+  held environment may also be an explicit one that a bare apply would not
+  pick up even once reviewed;
+- **applied ungated** — the environments the run was permitted to apply
+  without an approving review, per `SHIPMATE_UNGATED_ENVS`. It is the only
+  audit trail an unreviewed apply leaves: under a ruleset requiring zero
+  approvals GitHub reports no review decision at all, so nothing else in a run
+  distinguishes a reviewed apply from an unreviewed one. It states a
+  permission, never an outcome — the set is derived before any wave runs, so
+  it points at the run for what actually applied and reserves "applied" for
+  the ✅ rows.
 
 Row status is derived from **both** the per-cell artifact and the real state of
 that cell's `apply / <stack> / <env>` check on the head SHA, which

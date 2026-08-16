@@ -368,6 +368,52 @@ right name authored by any other identity leaves the pull request blocked — as
 does a pin to the wrong App id. See `branch-protection.md` §Reproducible
 ruleset.
 
+### An environment was held for review, or the apply was refused
+
+The apply comment says *"Held — an approving review is required before
+applying"*, or `shipmate apply` was refused with a review reason.
+
+`SHIPMATE_UNGATED_ENVS` exempts the environments it names from the review
+requirement and nothing else. A **targeted** `shipmate apply <env>` is decided
+at comment time: an unlisted env gets the usual refusal, extended to say the
+env is not listed in the variable. A **bare** `shipmate apply` is partitioned
+per environment on the apply path, from the review decision read there:
+
+| `reviewDecision` when the apply runs | what applies |
+|---|---|
+| `NONE` (the ruleset requires no review) or `APPROVED` | everything pending — no partition |
+| `REVIEW_REQUIRED` | the listed environments; every other pending environment is held |
+| `CHANGES_REQUESTED` | nothing — every environment is held, listed ones included |
+| anything else, or no decision arrived | nothing — every environment is held |
+
+Held environments keep their `apply / <stack> / <env>` checks pending, so
+`shipmate / gate` stays pending and the merge stays blocked; environments
+ordered after a held one are skipped for the same run. With the variable unset
+or empty, no environment is ever held on this path — the whole table applies
+only to a repository that opted in.
+
+**The apply is refused although the variable is set.** The `comment-ops` step
+needs `ungated-envs: ${{ vars.SHIPMATE_UNGATED_ENVS }}` too; without it
+comment-ops sees an empty list and refuses both forms. See
+[`upgrading.md`](upgrading.md) §"Opt-in: per-environment review gating".
+
+**The run failed with a `SHIPMATE_UNGATED_ENVS` error.** Two entry shapes are
+rejected loudly rather than left silently inert, because neither would ever
+match an environment:
+
+- a `-plan` / `-apply` suffix — the list is matched against the **bare logical**
+  env name carried by the apply checks, so write `dev-eu`, not `dev-eu-apply`;
+- surrounding whitespace — `dev-eu, dev-us` is an entry `" dev-us"`. The list is
+  comma-separated with **no spaces**; the error names the entry and the exact
+  value to write.
+
+**A held environment is also an explicit environment.** When both causes apply
+it is reported as held, not as excluded, because the review is the thing to get
+first. Getting it does not release the environment into a bare `shipmate
+apply`, though: it is still listed in `global.shipmate.explicit_envs`, so it
+still needs a targeted `shipmate apply <env>`. That is why the held sentence
+names no command.
+
 ### A pull request planned zero cells
 
 No `<stack> / <env>` checks appear, no plan comment is posted — unless there is

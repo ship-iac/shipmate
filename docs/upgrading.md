@@ -75,6 +75,31 @@ both sides. `detect` injects a sentinel into those three variables and fails the
 run when one comes back changed. [`../CONTRACT.md`](../CONTRACT.md) §Env model
 has the rule and the `tm_try` form that keeps a local default.
 
+## Opt-in: per-environment review gating
+
+`SHIPMATE_UNGATED_ENVS` lets named environments be applied without an approving
+review while the rest keep the branch ruleset's requirement. It is opt-in in
+both halves, and **re-pinning changes nothing on its own**:
+
+1. set the `SHIPMATE_UNGATED_ENVS` repository variable, and
+2. add `ungated-envs: ${{ vars.SHIPMATE_UNGATED_ENVS }}` to the `comment-ops`
+   step in your `comment-ops.yml`.
+
+With the variable unset, every environment keeps its review requirement and
+every apply path behaves exactly as it did before — there is nothing to migrate
+and no way for the re-pin to widen anything.
+
+With the variable set but the workflow line left out, `shipmate apply` refuses
+exactly as it does today — comment-ops receives an empty list, so both the
+targeted and the bare form are refused. That is the expected failure mode of a
+half-finished opt-in, and it is the one worth recognizing: the refusal is not a
+bug, and there is no silent widening in the other direction.
+
+Two things it does not change, worth confirming against your own policy before
+you set it: an environment's `required_reviewers` still gates the deployment
+(a separate control — see [`hardening.md`](hardening.md) §3–5), and the
+variable is editable by anyone holding the **Write** role.
+
 ## Past migrations
 
 An entry applies only if you are moving *from* a pin older than the release it

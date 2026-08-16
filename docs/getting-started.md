@@ -571,6 +571,43 @@ Properties that fall out of the existing gate semantics:
   merge commit back to the PR head SHA via the commit→PR association, not the
   commit graph.
 
+### Applying chosen environments without an approving review
+
+The branch ruleset's review requirement is repository-wide, so requiring an
+approval before merge also requires one before every apply. To keep a low-tier
+environment self-service while the rest stay gated, name it in the
+`SHIPMATE_UNGATED_ENVS` **repository variable** — comma-separated bare logical
+env names, no spaces:
+
+```
+SHIPMATE_UNGATED_ENVS = dev-eu,dev-us
+```
+
+and pass it to the `comment-ops` step of the `comment-ops.yml` above:
+
+```yaml
+        with:
+          # ...the inputs above, plus:
+          ungated-envs: ${{ vars.SHIPMATE_UNGATED_ENVS }}
+```
+
+Both parts are needed. With the variable set and the input missing, comment-ops
+sees an empty list and applies are refused exactly as before — the omission
+closes rather than widens. With neither, nothing changes at all.
+
+What this does and does not do: a listed environment may be applied without an
+approving review; every other apply requirement still decides, including
+`CHANGES_REQUESTED`, and every unlisted environment keeps the requirement. A
+bare `shipmate apply` on an unreviewed pull request applies the listed
+environments and **holds** the rest — their apply checks stay pending, so
+`shipmate / gate` stays pending and the merge stays blocked until they are
+applied with a review in hand. The variable is editable by anyone with the
+**Write** role; it makes relaxing the gate a deliberate change to repository
+settings rather than something a pull request can do to itself, and claims
+nothing beyond that. Full semantics in [`../CONTRACT.md`](../CONTRACT.md)
+§Comment-ops; the trade-off against environment reviewers is in
+[`hardening.md`](hardening.md) §3–5.
+
 ### Further hardening
 
 Everything above is the minimum that works. [`hardening.md`](hardening.md) is the

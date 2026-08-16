@@ -197,12 +197,49 @@ ever sees their combined result via `reviewDecision`:
   themselves. Keep it even if you decide dismiss-on-push is too disruptive for
   your team — it is the one that survives that trade-off.
 
-With `required_approving_review_count: 0` (sole-maintainer mode), `shipmate
-apply` proceeds without an approving review — but a `CHANGES_REQUESTED` review
-still blocks it until it is resolved or dismissed (`scripts/authorize` passes
-only on `NONE` or `APPROVED`; see `docs/branch-protection.md` §"Review policy").
-That is a deliberate mode, not an oversight, but do not run it with more than
-one person holding push access.
+`required_approving_review_count` is the **repository-wide** review
+requirement, and it is the only review policy the apply path has: shipmate
+reads the ruleset's verdict and imposes nothing of its own. At `0` the ruleset
+requires no review, GitHub reports no review decision, and `scripts/authorize`
+passes on that for **every** environment — so no apply path anywhere requires a
+reviewed pull request, and nothing requires one before a merge either. A
+`CHANGES_REQUESTED` review still blocks an apply until it is resolved or
+dismissed (`authorize` passes only on `NONE` or `APPROVED`; see
+`docs/branch-protection.md` §"Review policy").
+
+Keeping the count at `1` and exempting named environments is the other way to
+get self-service applies on a low-blast-radius tier. The two per-environment
+controls below do **different** jobs, and an organization can want either
+without the other:
+
+- **`SHIPMATE_UNGATED_ENVS`** (repository variable) exempts the environments it
+  names from *the code review before apply* — and from nothing else. The
+  ruleset still requires the review before the **merge**, `CHANGES_REQUESTED`
+  still refuses, and the approvers-team, mergeable and exact-plan requirements
+  are untouched (CONTRACT.md §Comment-ops). Environments it does not name are
+  held out of a bare `shipmate apply`, their apply checks left pending, so the
+  gate keeps blocking the merge until they are applied with a review in hand.
+  Opting in also takes one line in `comment-ops.yml` — see
+  `docs/getting-started.md`.
+- **Environment `required_reviewers`** on `<env>-apply` (§6) gates *the
+  deployment*: a human other than the author releases the environment's
+  secrets and lets the apply proceed. It is unforgeable by a holder of the App
+  private key, which the review requirement above is not.
+
+Two things to know before relying on the variable:
+
+- **It is not an admin boundary.** GitHub grants *"Create, update, and delete
+  GitHub Actions variables"* to **Write and above**, so anyone who can push can
+  also edit the list, and `shipmate doctor` does not read it. What it buys is
+  that relaxing the gate is a separate, deliberate act against repository
+  settings, with no plan attached and no reviewer reading it as code — it
+  cannot ride inside the pull request that benefits from it. Do not carry
+  control 1's grant over to it by assumption.
+- **It is inert at `required_approving_review_count: 0`.** Every environment is
+  already ungated there, so listing some narrows nothing. The variable can only
+  relax an existing requirement, never create one, and nothing warns about the
+  combination — a repository that sets both, and believes prod is gated, gets
+  no signal that it is not.
 
 `require_code_owner_review` is doing more work here than the approval count.
 A GitHub App cannot be listed in `CODEOWNERS`, so a code-owner review is one of
@@ -244,6 +281,22 @@ On an `<env>-apply` environment you decide to gate:
 
 - add required reviewers (a team, not one person),
 - tick **Prevent self-review**.
+
+Two platform ceilings this control cannot be configured past:
+
+- **Six reviewers, one approval.** An environment takes at most six users or
+  teams, and a single one of them approving releases the deployment. There is
+  no quorum and no per-team requirement, so "two of SRE", or "one security
+  **and** one platform", is not expressible here. Quorum has to come from the
+  pull request side — which is repository-wide, and so cannot be asked of one
+  environment alone.
+- **Protection rules are ignored on private repositories on the Free plan.**
+  Environments exist there, deployments record, and nothing errors — the
+  reviewer requirement simply does not apply. shipmate's whole per-environment
+  model is GitHub Environments, so on that plan a repository can evaluate the
+  entire pipeline and see it work with none of the protection in this section
+  in force. Rows 6, 16 and 17 presuppose a public repository or Team/Pro and
+  above.
 
 **Which environments to gate is a policy decision, and it is yours.** The
 maximally-hardened position is a reviewer on every `<env>-apply` that holds a
