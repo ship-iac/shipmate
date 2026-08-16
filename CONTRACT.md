@@ -775,6 +775,13 @@ Opting in takes **three** things, and the variable alone is not enough:
    targeted `shipmate apply <env>` dispatched into an engine older than the
    `review` job applies that environment unreviewed.
 
+   The two edges are not equally likely. The bare-apply one needs all three
+   opt-in things aligned — variable set, item 2 correctly wired, only the
+   second pin forgotten. The targeted one needs neither: item 2 written as a
+   literal (never mind the variable) already authorizes the dispatch on its
+   own, so a stale `apply.yml@` alone turns what a fresh pin would downgrade
+   to a wasted run into an unreviewed apply.
+
 With the variable set and that line absent, comment-ops sees an empty list and
 **both** forms of `shipmate apply` get the unchanged refusal — the omission
 closes, it never silently widens.

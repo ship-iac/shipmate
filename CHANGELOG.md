@@ -18,7 +18,10 @@ workflows now run an unconditional `review` job that re-reads the pull request's
 `reviewDecision` server-side before anything applies. Three consequences:
 
 - **One extra `shipmate-engine` deployment record per apply run** — the `summary`
-  job already creates one; this is the second. If your repository has put required reviewers on the `shipmate-engine` environment, that approval is now requested at the **start** of an apply run rather than at its end — no shipmate doc recommends that configuration, but the timing change is real.
+  job already creates one; this is the second. If your repository has put
+  required reviewers on the `shipmate-engine` environment, that approval is now
+  requested at the **start** of an apply run rather than at its end — no
+  shipmate doc recommends that configuration, but the timing change is real.
 - **A broken App-key wiring becomes a loud early failure.** The `review` job
   mints an App token before any wave, so a repository whose
   `SHIPMATE_APP_PRIVATE_KEY` or `SHIPMATE_APP_ID` never reaches the engine now

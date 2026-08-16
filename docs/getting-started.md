@@ -615,6 +615,14 @@ apply reaches an engine that enforces nothing: through the stale `apply-all.yml@
 it applies **every** pending environment with no approving review, and through
 the stale `apply.yml@` it applies the named environment unreviewed.
 
+These are not equally likely. The bare-apply edge needs a genuine opt-in —
+the variable set, `comment-ops.yml` correctly wired, only the second pin
+forgotten. The targeted edge does not: write the literal named above in step
+2 and comment-ops authorizes the dispatch with no variable ever set. Under a
+fresh `apply.yml@` that literal only buys a wasted run, as described above;
+under a stale one it is the unreviewed apply — one mis-wiring away, no
+opt-in required.
+
 What this does and does not do: a listed environment may be applied without an
 approving review; every other apply requirement still decides, including
 `CHANGES_REQUESTED`, and every unlisted environment keeps the requirement. A

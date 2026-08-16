@@ -94,7 +94,11 @@ things for every consumer — see below):
    **every** pending environment applies through a stale `apply-all.yml@`, and
    the named environment applies through a stale `apply.yml@`. This is
    §Re-pinning's one-change rule; on this feature breaking it fails **open**
-   rather than loudly.
+   rather than loudly. The two are not equally likely: the bare-apply edge
+   needs the full opt-in aligned, while the targeted edge is also reached by
+   the step-2 literal mis-wiring below on its own, no opt-in needed — see
+   §"Applying chosen environments without an approving review" in
+   [`getting-started.md`](getting-started.md) for that ranking in full.
 
 With the variable unset, every environment keeps its review requirement, so
 *what applies* is unchanged. Three things do change for everyone, opted in or
@@ -102,7 +106,11 @@ not, because both apply workflows now re-read the review decision themselves in
 an unconditional `review` job:
 
 - **One extra `shipmate-engine` deployment record per apply run.** The
-  workflow's `summary` job already creates one; this is the second. If your repository has put required reviewers on the `shipmate-engine` environment, that approval is now requested at the **start** of an apply run rather than at its end — no shipmate doc recommends that configuration, but the timing change is real.
+  workflow's `summary` job already creates one; this is the second. If your
+  repository has put required reviewers on the `shipmate-engine` environment,
+  that approval is now requested at the **start** of an apply run rather than
+  at its end — no shipmate doc recommends that configuration, but the timing
+  change is real.
 - **A broken App-key wiring is now a loud early failure.** The `review` job
   mints an App token, and it runs before anything applies — so a repository
   whose `SHIPMATE_APP_PRIVATE_KEY` or `SHIPMATE_APP_ID` never reaches the
