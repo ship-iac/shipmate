@@ -44,6 +44,41 @@ GUARD_ERROR_LINE = {
         "not by a direct workflow_dispatch"
     ),
 }
+#: The whole `needs:` list each apply path's `detect` carries. Both wait on the
+#: `review` job that reads the pull request's review decision server-side.
+#: Compared whole, so neither `guard` dropping out nor an unreviewed extra
+#: dependency can slip in.
+DETECT_NEEDS = {"apply.yml": ["guard", "review"], "apply-all.yml": ["guard", "review"]}
+#: The whole `needs:` list of every job downstream of `detect`, per file. Every
+#: job that can fail BEFORE `detect` has to appear, or its failure never reaches
+#: this job's `!failure()`: `detect` is skipped, its outputs read as empty
+#: strings, the `!= 'true'` clause reads empty as "not empty", and the job fans
+#: out on `fromJSON('')`. `summary` is in the map for the other half of the same
+#: property -- its `results:` is `join(needs.*.result, ',')` over its OWN needs,
+#: so an omitted pre-`detect` job renders the non-failure comment over a run
+#: that died. Compared whole, per job, so neither a pre-`detect` job dropping
+#: out nor a new one being omitted passes unnoticed.
+DOWNSTREAM_NEEDS = {
+    "apply.yml": {
+        "apply": ["guard", "review", "detect"],
+        "summary": ["guard", "review", "detect", "apply"],
+    },
+    "apply-all.yml": {
+        "envlevel0": ["guard", "review", "detect"],
+        "envlevel1": ["guard", "review", "detect", "envlevel0"],
+        "envlevel2": ["guard", "review", "detect", "envlevel0", "envlevel1"],
+        "envlevel3": ["guard", "review", "detect", "envlevel0", "envlevel1", "envlevel2"],
+        "summary": [
+            "guard",
+            "review",
+            "detect",
+            "envlevel0",
+            "envlevel1",
+            "envlevel2",
+            "envlevel3",
+        ],
+    },
+}
 SUMMARY_IF = "${{ always() && needs.guard.result == 'success' }}"
 APPLY_PATHS = ("apply.yml", "apply-all.yml")
 
@@ -101,14 +136,34 @@ def test_every_apply_fan_out_job_carries_the_guard_in_its_needs():
     # rejection visible to each job's `!failure()` clause.
     for name in APPLY_PATHS:
         jobs = _jobs(name)
-        assert _needs(jobs["detect"]) == [GUARD_JOB], (
-            f"{name}: detect must need exactly [{GUARD_JOB!r}], got {_needs(jobs['detect'])!r}"
+        assert _needs(jobs["detect"]) == DETECT_NEEDS[name], (
+            f"{name}: detect must need exactly {DETECT_NEEDS[name]!r}, "
+            f"got {_needs(jobs['detect'])!r}"
         )
         for job_id, job in jobs.items():
             if job_id in (GUARD_JOB, "detect"):
                 continue
             assert GUARD_JOB in _needs(job), (
                 f"{name}: job {job_id!r} must carry {GUARD_JOB!r} in its needs, got {_needs(job)!r}"
+            )
+
+
+def test_every_apply_fan_out_job_needs_every_job_that_runs_before_detect():
+    for name, expected_by_job in DOWNSTREAM_NEEDS.items():
+        jobs = _jobs(name)
+        # Discovery decides the scope: a job added downstream of `detect` and
+        # left out of the map is exactly the omission this pins.
+        downstream = {j for j in jobs if j not in (GUARD_JOB, "detect", "review")}
+        assert downstream == set(expected_by_job), (
+            f"{name}: jobs downstream of detect are {sorted(downstream)}, but this "
+            f"guard knows {sorted(expected_by_job)} -- add the new job's whole needs list"
+        )
+        for job_id, expected in expected_by_job.items():
+            assert _needs(jobs[job_id]) == expected, (
+                f"{name}: {job_id} must need exactly {expected!r}, "
+                f"got {_needs(jobs[job_id])!r} -- a job that can fail before `detect` "
+                "and is missing here has its failure invisible to this job's "
+                "`!failure()`, and the job fans out on an empty waves_json"
             )
 
 

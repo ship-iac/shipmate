@@ -25,6 +25,10 @@ inputs:
   github-token:
     description: 'GITHUB_TOKEN with issues:write and pull-requests:write (reactions + reject comments + PR reads).'
     required: true
+  ungated-envs:
+    description: 'Optional: SHIPMATE_UNGATED_ENVS verbatim (comma-separated bare env names). Environments listed here may be applied without an approving review; every other environment keeps the branch ruleset requirement. Omitted or empty = every environment keeps it. Ergonomics, not policy: the engine reads vars.SHIPMATE_UNGATED_ENVS itself on both apply paths and enforces there, so this input only buys a crisp PR-comment refusal instead of a dispatched run that refuses inside the engine. Wire it to the vars.SHIPMATE_UNGATED_ENVS repository variable anyway — an input wider than the variable costs a wasted run, and one narrower refuses an apply the engine would have allowed.'
+    required: false
+    default: ''
 outputs:
   authorized:
     description: true when the command is valid and authorized.
@@ -504,6 +508,7 @@ runs:
         PR_JSON: pr.json
         PLAN_RUN_JSON: plan_run.json
         SHIPMATE_ENV: ${{ steps.parse.outputs.env }}
+        SHIPMATE_UNGATED_ENVS: ${{ inputs.ungated-envs }}
       run: python3 "$GITHUB_ACTION_PATH/../../scripts/authorize"
 
     - name: React on accept
@@ -517,6 +522,22 @@ runs:
         gh api -X POST "repos/$GITHUB_REPOSITORY/issues/comments/$COMMENT_ID/reactions" \
           -f content=rocket >/dev/null
         echo "::notice title=comment-ops::command authorized (apply is dispatched by the caller's next step)"
+
+    # A report, not a decision — authorize already decided. It exists because
+    # `reviewDecision` keeps no history: once the review lands, nothing else
+    # records that this apply was permitted without one. Wording matches
+    # apply-comment's bare-path sentence and claims permission, never
+    # completion — nothing has applied at comment time.
+    - name: Report the review exemption
+      if: ${{ steps.authz.outputs.ungated_exemption == 'true' }}
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        PR_NUMBER: ${{ inputs.pr-number }}
+        ENVIRONMENT: ${{ steps.authz.outputs.environment }}
+      run: |
+        set -euo pipefail
+        gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -f body=":memo: shipmate: environment \`$ENVIRONMENT\` is permitted to apply without an approving review, per the \`SHIPMATE_UNGATED_ENVS\` repository variable — see the apply result comment for what actually applied." >/dev/null
 
     - name: Reject with reason
       if: ${{ steps.parse.outputs.route == 'apply' && steps.apptoken.outcome == 'success' && steps.authz.outputs.authorized != 'true' }}

@@ -16,6 +16,14 @@ inputs:
   app-id:
     description: shipmate App id (repo/org variable); only checks authored by this App count as done.
     required: true
+  ungated-envs:
+    description: SHIPMATE_UNGATED_ENVS verbatim — comma-separated envs applied without waiting for an approving review. Supply it together with review-decision, never one without the other.
+    required: false
+    default: ''
+  review-decision:
+    description: The PR's reviewDecision, from the review job. Only NONE and APPROVED authorize; an empty value means the decision never arrived and refuses the run.
+    required: false
+    default: ''
 outputs:
   waves: { description: "All waves as one JSON object {wave0..wave7} (apply-env-level.yml waves_json shape)", value: "${{ steps.d.outputs.waves }}" }
   empty: { description: true when no cell is pending, value: "${{ steps.d.outputs.empty }}" }
@@ -33,4 +41,6 @@ runs:
         SHIPMATE_PLAN_RUN_ID: ${{ inputs.plan-run-id }}
         SHIPMATE_HEAD_SHA: ${{ inputs.head-sha }}
         SHIPMATE_APP_ID: ${{ inputs.app-id }}
+        SHIPMATE_UNGATED_ENVS: ${{ inputs.ungated-envs }}
+        SHIPMATE_REVIEW_DECISION: ${{ inputs.review-decision }}
       run: python3 "$GITHUB_ACTION_PATH/../../scripts/apply-detect"

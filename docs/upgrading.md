@@ -75,6 +75,67 @@ both sides. `detect` injects a sentinel into those three variables and fails the
 run when one comes back changed. [`../CONTRACT.md`](../CONTRACT.md) §Env model
 has the rule and the `tm_try` form that keeps a local default.
 
+## Opt-in: per-environment review gating
+
+`SHIPMATE_UNGATED_ENVS` lets named environments be applied without an approving
+review while the rest keep the branch ruleset's requirement. The exemption is
+opt-in and **re-pinning exempts nothing on its own** (it does change two other
+things for every consumer — see below):
+
+1. set the `SHIPMATE_UNGATED_ENVS` repository variable,
+2. add `ungated-envs: ${{ vars.SHIPMATE_UNGATED_ENVS }}` to the `comment-ops`
+   step in your `comment-ops.yml`, and
+3. re-pin **both** engine references in your `apply.yml` — the targeted job's
+   `.github/workflows/apply.yml@` and the bare job's
+   `.github/workflows/apply-all.yml@` — to this release too, not only
+   `comment-ops.yml`. The files carry separate pins, and an apply is authorized
+   in `comment-ops.yml` but enforced in the engine: bump only the first and an
+   unreviewed apply is dispatched into an engine that enforces nothing —
+   **every** pending environment applies through a stale `apply-all.yml@`, and
+   the named environment applies through a stale `apply.yml@`. This is
+   §Re-pinning's one-change rule; on this feature breaking it fails **open**
+   rather than loudly. The two are not equally likely: the bare-apply edge
+   needs the full opt-in aligned, while the targeted edge is also reached by
+   the step-2 literal mis-wiring below on its own, no opt-in needed — see
+   §"Applying chosen environments without an approving review" in
+   [`getting-started.md`](getting-started.md) for that ranking in full.
+
+With the variable unset, every environment keeps its review requirement, so
+*what applies* is unchanged. Three things do change for everyone, opted in or
+not, because both apply workflows now re-read the review decision themselves in
+an unconditional `review` job:
+
+- **One extra `shipmate-engine` deployment record per apply run.** The
+  workflow's `summary` job already creates one; this is the second. If your
+  repository has put required reviewers on the `shipmate-engine` environment,
+  that approval is now requested at the **start** of an apply run rather than
+  at its end — no shipmate doc recommends that configuration, but the timing
+  change is real.
+- **A broken App-key wiring is now a loud early failure.** The `review` job
+  mints an App token, and it runs before anything applies — so a repository
+  whose `SHIPMATE_APP_PRIVATE_KEY` or `SHIPMATE_APP_ID` never reaches the
+  engine now fails the run at the start, with the three-cause diagnosis, rather
+  than applying and then failing to complete its apply checks. If your applies
+  have been completing with stranded checks, this is where you will see why.
+- **A pre-existing TOCTOU is closed.** Until now only comment-ops read the
+  review decision, so an approval dismissed between the comment and the
+  dispatch applied anyway. The engine re-reads it at apply time and holds.
+
+With the variable set but the workflow line left out, `shipmate apply` refuses
+exactly as it does today — comment-ops receives an empty list, so both the
+targeted and the bare form are refused. That is the expected failure mode of a
+half-finished opt-in, and it is the one worth recognizing: the refusal is not a
+bug. Writing it as a **literal** list rather than the variable reference in
+step 2 now costs a wasted run rather than an unreviewed apply — the engine reads
+the variable itself on both paths and refuses what the variable does not exempt.
+See [`getting-started.md`](getting-started.md) §"Applying chosen environments
+without an approving review".
+
+Two things it does not change, worth confirming against your own policy before
+you set it: an environment's `required_reviewers` still gates the deployment
+(a separate control — see [`hardening.md`](hardening.md) §3–5), and the
+variable is editable by anyone holding the **Write** role.
+
 ## Past migrations
 
 An entry applies only if you are moving *from* a pin older than the release it

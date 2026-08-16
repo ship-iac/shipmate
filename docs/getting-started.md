@@ -571,6 +571,71 @@ Properties that fall out of the existing gate semantics:
   merge commit back to the PR head SHA via the commit→PR association, not the
   commit graph.
 
+### Applying chosen environments without an approving review
+
+The branch ruleset's review requirement is repository-wide, so requiring an
+approval before merge also requires one before every apply. To keep a low-tier
+environment self-service while the rest stay gated, name it in the
+`SHIPMATE_UNGATED_ENVS` **repository variable** — comma-separated bare logical
+env names, no spaces:
+
+```
+SHIPMATE_UNGATED_ENVS = dev-eu,dev-us
+```
+
+and pass it to the `comment-ops` step of the `comment-ops.yml` above:
+
+```yaml
+        with:
+          # ...the inputs above, plus:
+          ungated-envs: ${{ vars.SHIPMATE_UNGATED_ENVS }}
+```
+
+All three parts are needed. With the variable set and the input missing,
+comment-ops sees an empty list and applies are refused exactly as before — the
+omission closes rather than widens. With none of them, *what applies* is
+unchanged: every environment keeps the ruleset's requirement.
+
+Write that input as the variable reference shown above and **never as a literal
+list**. comment-ops has no access to the `vars` context of its own, so the input
+is its only view of the list — while both engine apply workflows read
+`vars.SHIPMATE_UNGATED_ENVS` directly and enforce on it themselves. The input is
+therefore an ergonomic rather than policy: a literal naming an environment the
+variable omits buys a dispatched run the engine refuses (a wasted run, not an
+unreviewed apply), and one omitting an environment the variable names refuses at
+comment time an apply the engine would have allowed. One source, two readers:
+keep them the same source.
+
+The third part is a pin, and your `apply.yml` carries **two** engine
+references — `.github/workflows/apply.yml@` on the targeted job and
+`.github/workflows/apply-all.yml@` on the bare one. Both must sit at the same
+release as `comment-ops.yml` (or later), because an apply is authorized in one
+file and enforced in the other. Bump only `comment-ops.yml` and an unreviewed
+apply reaches an engine that enforces nothing: through the stale `apply-all.yml@`
+it applies **every** pending environment with no approving review, and through
+the stale `apply.yml@` it applies the named environment unreviewed.
+
+These are not equally likely. The bare-apply edge needs a genuine opt-in —
+the variable set, `comment-ops.yml` correctly wired, only the second pin
+forgotten. The targeted edge does not: write the literal named above in step
+2 and comment-ops authorizes the dispatch with no variable ever set. Under a
+fresh `apply.yml@` that literal only buys a wasted run, as described above;
+under a stale one it is the unreviewed apply — one mis-wiring away, no
+opt-in required.
+
+What this does and does not do: a listed environment may be applied without an
+approving review; every other apply requirement still decides, including
+`CHANGES_REQUESTED`, and every unlisted environment keeps the requirement. A
+bare `shipmate apply` on an unreviewed pull request applies the listed
+environments and **holds** the rest — their apply checks stay pending, so
+`shipmate / gate` stays pending and the merge stays blocked until they are
+applied with a review in hand. The variable is editable by anyone with the
+**Write** role; it makes relaxing the gate a deliberate change to repository
+settings rather than something a pull request can do to itself, and claims
+nothing beyond that. Full semantics in [`../CONTRACT.md`](../CONTRACT.md)
+§Comment-ops; the trade-off against environment reviewers is in
+[`hardening.md`](hardening.md) §3–5.
+
 ### Further hardening
 
 Everything above is the minimum that works. [`hardening.md`](hardening.md) is the

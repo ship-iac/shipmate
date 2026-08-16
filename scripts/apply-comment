@@ -5,8 +5,9 @@ Reads the run's jobs listing as JSON Lines on stdin (one object per line,
 keys `name`/`html_url`, as emitted by `gh api --paginate .../jobs --jq
 '.jobs[]'`), per-cell `apply-summary.*` artifacts from the $CELLS directory,
 the expected-cell set (waves JSON — targeted or per-env-level), the gate
-verdict, and the excluded/skipped envs (apply-all only), and writes a fresh
-comment.md -- this comment is never upserted, unlike the plan sticky comment.
+verdict, and the excluded/skipped/held/ungated envs (apply-all only), and writes
+a fresh comment.md -- this comment is never upserted, unlike the plan sticky
+comment.
 
 DO NOT refactor this and summary-comment into one renderer with a
 `mode=plan|apply` switch. The injection-critical primitives (fence escaping,
@@ -507,10 +508,31 @@ def _gate_sentence(gate):
     )
 
 
-def _excluded_skipped_lines(excluded, skipped):
-    """The excluded/skipped-env sentences. Shared by `_footer` and
-    `_short_form` so the short form cannot silently drop the comment's most
-    actionable warning. Env names are author-controlled, so `_md_escape`d."""
+def _env_disposition_lines(excluded, skipped, held=(), applied_ungated=()):
+    """One sentence per env disposition this run produced: excluded, skipped,
+    held for review, applied ungated. Shared by `_footer` and `_short_form` so
+    the short form cannot silently drop the comment's most actionable warning.
+    Env names are author-controlled, so `_md_escape`d.
+
+    The held sentence names no command: a held env can also be an explicit env
+    (the held cause wins, so it is not in `excluded`), and a bare `shipmate
+    apply` would not pick it up once reviewed. It is also cause-agnostic --
+    three decisions hold (REVIEW_REQUIRED on an unlisted env, CHANGES_REQUESTED,
+    and an unknown or absent decision) and only the run's own detect notice
+    carries which one, since the decision never reaches this renderer.
+
+    An empty `applied_ungated` renders NOTHING, and never "zero environments
+    applied" -- it is populated only under a REVIEW_REQUIRED decision with
+    SHIPMATE_UNGATED_ENVS set. That sentence is the only audit trail an
+    unreviewed apply leaves: `reviewDecision` is a live value with no history,
+    so once the review lands nothing in the run tells an apply that waited for
+    it from one that did not. No clause of it uses a completion
+    verb for the named envs -- detect derives the set from `runnable`, before
+    any wave runs, so a failed wave or a skipped env-level leaves an env named
+    here that never applied, and this comment's own legend reserves "applied"
+    for the ✅ state (_EMOJI), so a completion verb would contradict the table
+    beside it. It points at the run rather than the table because the short
+    form has no table."""
     lines = []
     if excluded:
         envs = ", ".join(f"`{sc._md_escape(e)}`" for e in excluded)
@@ -518,16 +540,32 @@ def _excluded_skipped_lines(excluded, skipped):
         lines.append(f"Explicit environment(s) left pending: {envs} — run {cmds} to apply them.")
     if skipped:
         envs = ", ".join(f"`{sc._md_escape(e)}`" for e in skipped)
-        lines.append(f"Skipped (ordered after an unapplied explicit environment): {envs}.")
+        # Cause-agnostic: `partition_envs` blocks on explicit AND held envs, so
+        # naming "explicit" here misattributes every hold-induced skip.
+        lines.append(f"Skipped (ordered after an environment not applying this run): {envs}.")
+    if held:
+        envs = ", ".join(f"`{sc._md_escape(e)}`" for e in held)
+        lines.append(
+            f"Held — the pull request's review state does not permit applying: {envs}. "
+            "Get an approving review, or resolve or dismiss a requested-changes "
+            "review; the run log's apply-all-detect notice names the decision seen."
+        )
+    if applied_ungated:
+        envs = ", ".join(f"`{sc._md_escape(e)}`" for e in applied_ungated)
+        lines.append(
+            "Ungated environment(s) permitted to apply without an approving review, "
+            f"per the `SHIPMATE_UNGATED_ENVS` repository variable: {envs} — "
+            "see this run for what actually applied."
+        )
     return lines
 
 
-def _footer(gate, run_url, excluded, skipped, env_name):
-    """Excluded/skipped-env lines (all-environments form only), the gate
-    sentence, then the run link."""
+def _footer(gate, run_url, excluded, skipped, env_name, held=(), applied_ungated=()):
+    """Excluded/skipped/held/ungated-env lines (all-environments form only), the
+    gate sentence, then the run link."""
     parts = []
     if not env_name:
-        parts.extend(_excluded_skipped_lines(excluded, skipped))
+        parts.extend(_env_disposition_lines(excluded, skipped, held, applied_ungated))
     parts.append(_gate_sentence(gate))
     parts.append(f"[Logs & artifacts]({run_url})")
     return "\n\n".join(parts)
@@ -553,18 +591,26 @@ def _apply_head(env_name, emoji, word):
     return f"{emoji} shipmate: `shipmate apply` (all environments) {word}."
 
 
-def _short_form(results_csv, env_name, gate, run_url, excluded, skipped):
+def _short_form(
+    results_csv, env_name, gate, run_url, excluded, skipped, held=(), applied_ungated=()
+):
     """Used only when the expected set is empty and no cells were downloaded
-    (nothing to tabulate). Carries the excluded/skipped-env lines too: an
-    all-levels-empty run whose only pending work is an explicit env is exactly
-    the case where they matter most."""
+    (nothing to tabulate). Carries the excluded/skipped/held/ungated-env lines
+    too: an all-levels-empty run whose only pending work is an explicit or held
+    env is exactly the case where they matter most."""
     if _results_failed(results_csv):
         head = _apply_head(env_name, ":x:", "failed")
+    elif held:
+        # Work WAS pending and the engine refused it — a green "found no
+        # pending applies" head would contradict the Held sentence below it.
+        head = _apply_head(
+            env_name, ":no_entry_sign:", "applied nothing — environments are held for review"
+        )
     else:
         head = _apply_head(env_name, ":white_check_mark:", "found no pending applies to run")
     parts = [head]
     if not env_name:
-        parts.extend(_excluded_skipped_lines(excluded, skipped))
+        parts.extend(_env_disposition_lines(excluded, skipped, held, applied_ungated))
     parts.append(_gate_sentence(gate))
     parts.append(f"[Logs & artifacts]({run_url})")
     return " ".join(parts)
@@ -606,7 +652,18 @@ def _top_section(env_name, results_csv, rows, jobs, run_url):
     return top
 
 
-def build_comment(rows, jobs, run_url, gate, excluded, skipped, env_name, results_csv=""):
+def build_comment(
+    rows,
+    jobs,
+    run_url,
+    gate,
+    excluded,
+    skipped,
+    env_name,
+    results_csv="",
+    held=(),
+    applied_ungated=(),
+):
     """Assemble the comment under SIZE_BUDGET. Sections render in table order:
     attempted cells get a details section, blocked cells a single no-fence
     line, not-attempted cells none.
@@ -616,7 +673,7 @@ def build_comment(rows, jobs, run_url, gate, excluded, skipped, env_name, result
     later cell's link, and hundreds of blocked cells starve the first attempted
     cell's guaranteed minimum by going uncounted until too late."""
     top = _top_section(env_name, results_csv, rows, jobs, run_url)
-    footer = "\n\n" + _footer(gate, run_url, excluded, skipped, env_name)
+    footer = "\n\n" + _footer(gate, run_url, excluded, skipped, env_name, held, applied_ungated)
     used = len(top) + len(footer)
 
     urls = {id(r): _job_url(r, jobs, run_url) for r in rows}
@@ -681,12 +738,27 @@ def main():
     # reason nothing else is pending.
     excluded = json.loads(os.environ.get("SHIPMATE_EXCLUDED_ENVS") or "[]")
     skipped = json.loads(os.environ.get("SHIPMATE_SKIPPED_ENVS") or "[]")
+    held = json.loads(os.environ.get("SHIPMATE_REVIEW_HELD_ENVS") or "[]")
+    applied_ungated = json.loads(os.environ.get("SHIPMATE_APPLIED_UNGATED_ENVS") or "[]")
     results_csv = os.environ.get("SHIPMATE_RESULTS", "") or ""
 
     if not rows:
-        body = _short_form(results_csv, env_name, gate, run_url, excluded, skipped)
+        body = _short_form(
+            results_csv, env_name, gate, run_url, excluded, skipped, held, applied_ungated
+        )
     else:
-        body = build_comment(rows, jobs, run_url, gate, excluded, skipped, env_name, results_csv)
+        body = build_comment(
+            rows,
+            jobs,
+            run_url,
+            gate,
+            excluded,
+            skipped,
+            env_name,
+            results_csv,
+            held,
+            applied_ungated,
+        )
 
     with open("comment.md", "w", encoding="utf-8") as fh:
         fh.write(body)

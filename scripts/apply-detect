@@ -13,6 +13,10 @@ and match), drop cells whose apply check already completed (idempotent no-op),
 then wave-order. A targeted `shipmate apply <env>` is single-env and explicit by
 design — it never blocks on other environments; region-level sequencing across
 envs is handled separately on the apply-all path.
+
+Before any of that, the PR's review decision — read server-side by the `review`
+job, narrowed by `SHIPMATE_UNGATED_ENVS` — must authorize this environment, or
+the run refuses.
 """
 
 import importlib.util
@@ -39,6 +43,7 @@ def _load(fname):
 bm = _load("build-matrix")
 wv = _load("waves")
 ag = _load("apply-gate")
+az = _load("authorize")
 
 
 def _slug(path):
@@ -198,12 +203,36 @@ def validate_env(value):
     (the source of env names), but that is an upstream tool's invariant; enforce
     it here at the trust boundary rather than trusting it silently. A dotted env
     would let distinct (env, slug) pairs render the same artifact name and
-    cross-enrol the wrong stack into a wave — the exact bug the rename removed."""
+    cross-enrol the wrong stack into a wave — the exact bug the rename removed.
+
+    Empty is refused for a second reason: `_review_reason` reads an empty
+    environment as a BARE apply and exempts it whenever the variable names any
+    env at all, so an unset SHIPMATE_ENV would slip past `refuse_unreviewed`
+    below. This path is single-env by construction; there is no bare form here."""
+    if not value:
+        raise SystemExit(
+            "::error::SHIPMATE_ENV is empty; the targeted apply path is single-env "
+            "and its review refusal is evaluated per environment."
+        )
     if "." in value:
         raise SystemExit(
             f"::error::SHIPMATE_ENV must not contain '.' (would break plan.<env>.<slug> "
             f"artifact-name disambiguation): {value!r}"
         )
+
+
+def refuse_unreviewed(env, raw_ungated, decision):
+    """Refuse a targeted apply the PR's review decision does not authorize.
+
+    The same `authorize._review_reason` comment-ops evaluated, re-run against the
+    decision the `review` job read server-side: comment-ops decided on the state
+    at comment time, and an approval dismissed since then must not still apply.
+    Refusing here rather than in workflow YAML is deliberate — the review job has
+    no checkout, so it holds no scripts. The run dies before any wave, the apply
+    checks stay pending, and the gate stays pending with them."""
+    reason = az._review_reason(decision, env, az.parse_ungated_envs(raw_ungated))
+    if reason:
+        raise SystemExit(f"::error::{reason}")
 
 
 def main():
@@ -215,6 +244,11 @@ def main():
     validate_head_sha(head)
     validate_plan_run_id(plan_run_id)
     validate_env(env)
+    refuse_unreviewed(
+        env,
+        os.environ.get("SHIPMATE_UNGATED_ENVS", ""),
+        os.environ.get("SHIPMATE_REVIEW_DECISION", ""),
+    )
 
     verify_plan_run(repo, plan_run_id, head)
 

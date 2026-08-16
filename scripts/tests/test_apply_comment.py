@@ -665,6 +665,18 @@ def test_short_form_nothing_pending_all_environments():
     assert RUN_URL in body
 
 
+def test_short_form_all_held_does_not_claim_success_or_nothing_pending():
+    # The headline path of the review gate: every env held, every job-level
+    # result benign. A green head here contradicts the Held sentence beneath it.
+    body = ac._short_form("success,skipped", "", "pending", RUN_URL, [], [], ["prod"])
+    assert body.startswith(
+        ":no_entry_sign: shipmate: `shipmate apply` (all environments) "
+        "applied nothing — environments are held for review."
+    )
+    assert ":white_check_mark:" not in body
+    assert "found no pending applies" not in body
+
+
 def test_short_form_includes_excluded_and_skipped_lines_all_environments():
     # Regression guard: today's live apply-all.yml one-liner appends these
     # sentences unconditionally, including in the nothing-pending branch --
@@ -679,7 +691,7 @@ def test_short_form_includes_excluded_and_skipped_lines_all_environments():
         "Explicit environment(s) left pending: `prod` — run `shipmate apply prod` to apply them."
         in body
     )
-    assert "Skipped (ordered after an unapplied explicit environment): `staging`." in body
+    assert "Skipped (ordered after an environment not applying this run): `staging`." in body
     assert "gate` is complete" in body
     assert RUN_URL in body
 
@@ -692,12 +704,12 @@ def test_short_form_omits_excluded_skipped_for_targeted_env():
     assert "Skipped" not in body
 
 
-def test_excluded_skipped_lines_escape_evil_env_names():
+def test_env_disposition_lines_escape_evil_env_names():
     # excluded/skipped env names are author-controlled (Terramate tags /
     # GitHub Environment names), same as every other display value in this
     # file -- these sentences must not be the one place that guarantee lapses.
     evil = "x</summary><b>evil"
-    lines = ac._excluded_skipped_lines([evil], [evil])
+    lines = ac._env_disposition_lines([evil], [evil])
     joined = " ".join(lines)
     assert "</summary><b>evil" not in joined
     assert "&lt;/summary&gt;&lt;b&gt;evil" in joined
@@ -715,6 +727,105 @@ def test_footer_escapes_evil_excluded_and_skipped_env_names():
     footer = ac._footer("pending", RUN_URL, [evil], [evil], "")
     assert "</summary><b>evil" not in footer
     assert "&lt;/summary&gt;&lt;b&gt;evil" in footer
+
+
+_HELD_SENTENCE = (
+    "Held — the pull request's review state does not permit applying: `prod`. "
+    "Get an approving review, or resolve or dismiss a requested-changes "
+    "review; the run log's apply-all-detect notice names the decision seen."
+)
+_UNGATED_SENTENCE = (
+    "Ungated environment(s) permitted to apply without an approving review, "
+    "per the `SHIPMATE_UNGATED_ENVS` repository variable: `dev-eu` — "
+    "see this run for what actually applied."
+)
+
+
+def test_held_line_names_review_and_never_a_targeted_apply_command():
+    # A held env can also be an explicit env, in which case the review alone
+    # does not release it -- so this sentence must not name a command at all.
+    # `shipmate apply prod` would additionally be a command that refuses.
+    (line,) = ac._env_disposition_lines([], [], ["prod"], [])
+    assert line == _HELD_SENTENCE
+    assert "shipmate apply prod" not in line
+
+
+def test_applied_ungated_line_states_no_review_and_names_the_variable():
+    """The audit sentence, pinned whole.
+
+    `reviewDecision` keeps no history, so once the review lands nothing else in
+    the run distinguishes an apply that waited for it from one that did not.
+    Whole-value, because the property is also that no clause claims the named
+    envs COMPLETED: detect derives the set from `runnable`, before any wave
+    runs, so a failed wave leaves an env named here that never applied.
+    """
+    (line,) = ac._env_disposition_lines([], [], [], ["dev-eu"])
+    assert line == _UNGATED_SENTENCE
+
+
+def test_short_form_carries_held_and_ungated_sentences():
+    # The short form is what a nothing-tabulated run renders, and the audit
+    # sentence is exactly the one that must not be droppable.
+    body = ac._short_form("success,skipped", "", "complete", RUN_URL, [], [], ["prod"], ["dev-eu"])
+    assert _HELD_SENTENCE in body
+    assert _UNGATED_SENTENCE in body
+
+
+def test_footer_carries_held_and_ungated_sentences():
+    footer = ac._footer("pending", RUN_URL, [], [], "", ["prod"], ["dev-eu"])
+    assert _HELD_SENTENCE in footer
+    assert _UNGATED_SENTENCE in footer
+
+
+def test_held_and_ungated_lines_escape_evil_env_names():
+    evil = "x</summary><b>evil"
+    joined = " ".join(ac._env_disposition_lines([], [], [evil], [evil]))
+    assert "</summary><b>evil" not in joined
+    assert "&lt;/summary&gt;&lt;b&gt;evil" in joined
+
+
+def test_comment_is_unchanged_when_held_and_ungated_are_empty():
+    rows = [_row()]
+    baseline = ac.build_comment(rows, [], RUN_URL, "pending", ["prod"], ["staging"], "")
+    assert baseline == ac.build_comment(
+        rows, [], RUN_URL, "pending", ["prod"], ["staging"], "", "", [], []
+    )
+    assert "Held" not in baseline
+    assert "without an approving review" not in baseline
+
+
+def _render_held_ungated(monkeypatch, tmp_path, waves):
+    monkeypatch.setenv("CELLS", str(tmp_path / "empty"))
+    monkeypatch.setenv("SHIPMATE_ENVIRONMENT", "")
+    monkeypatch.setenv("SHIPMATE_WAVES_JSON", "")
+    for i in range(ac.MAX_ENV_LEVELS):
+        monkeypatch.setenv(f"SHIPMATE_ENVLEVEL{i}_WAVES", "")
+    monkeypatch.setenv("SHIPMATE_ENVLEVEL0_WAVES", waves)
+    monkeypatch.setenv("SHIPMATE_RESULTS", "success,skipped")
+    monkeypatch.setenv("SHIPMATE_GATE", "complete")
+    monkeypatch.setenv("SHIPMATE_REVIEW_HELD_ENVS", json.dumps(["prod"]))
+    monkeypatch.setenv("SHIPMATE_APPLIED_UNGATED_ENVS", json.dumps(["dev-eu"]))
+    monkeypatch.setenv("GITHUB_SERVER_URL", "https://github.com")
+    monkeypatch.setenv("GITHUB_REPOSITORY", "acme/repo")
+    monkeypatch.setenv("GITHUB_RUN_ID", "42")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("sys.stdin", io.StringIO(""))
+    ac.main()
+    return (tmp_path / "comment.md").read_text(encoding="utf-8")
+
+
+def test_main_renders_both_sentences_in_the_short_form(monkeypatch, tmp_path):
+    body = _render_held_ungated(monkeypatch, tmp_path, "")
+    assert _HELD_SENTENCE in body
+    assert _UNGATED_SENTENCE in body
+
+
+def test_main_renders_both_sentences_in_the_table_form(monkeypatch, tmp_path):
+    waves = json.dumps({"wave0": [{"stack": "stacks/app", "environment": "dev-eu"}]})
+    body = _render_held_ungated(monkeypatch, tmp_path, waves)
+    assert "| ⏭️ |" in body  # sanity: the table path, not the short form
+    assert _HELD_SENTENCE in body
+    assert _UNGATED_SENTENCE in body
 
 
 def test_build_comment_uses_short_form_when_no_rows_and_no_expected(monkeypatch, tmp_path):
@@ -810,7 +921,7 @@ def test_footer_excluded_and_skipped_only_for_all_environments_form():
         "Explicit environment(s) left pending: `prod` — run `shipmate apply prod` to apply them."
         in footer_all
     )
-    assert "Skipped (ordered after an unapplied explicit environment): `staging`." in footer_all
+    assert "Skipped (ordered after an environment not applying this run): `staging`." in footer_all
 
 
 # --- not-attempted note names the targeted env -------------------------------

@@ -8,7 +8,7 @@ the action would parse, authorize, and then silently do nothing.
 import json
 import re
 
-from _loader import ACTIONS, ENGINE, SCRIPTS, action_steps, load_script
+from _loader import ACTIONS, ENGINE, SCRIPTS, action_steps, action_yaml, load_script
 
 _ACTION_FILE = ACTIONS / "comment-ops" / "action.yml"
 _ACTION = _ACTION_FILE.read_text(encoding="utf-8")
@@ -602,3 +602,63 @@ def test_both_prose_permission_lists_name_every_manifest_permission():
             assert f"`{name}: {level}`" in listing, (
                 f"{doc}'s permission list does not name `{name}: {level}`"
             )
+
+
+def _authorize_step():
+    step = next(s for s in action_steps("comment-ops") if s.get("name") == "Authorize")
+    assert step.get("env"), "the Authorize step declares no env: block"
+    return step
+
+
+def test_authorize_step_receives_the_ungated_envs_input():
+    assert _authorize_step()["env"]["SHIPMATE_UNGATED_ENVS"] == "${{ inputs.ungated-envs }}"
+
+
+def test_the_ungated_envs_input_is_optional_and_defaults_to_empty():
+    """A consumer who never writes the `ungated-envs:` line must keep the branch
+    ruleset's review requirement on every environment, so the input has to be
+    optional AND default to the empty string that `parse_ungated_envs` reads as
+    "nothing is exempt"."""
+    spec = action_yaml("comment-ops")["inputs"]["ungated-envs"]
+    assert spec["required"] is False
+    assert spec["default"] == ""
+
+
+#: The exemption report's whole body, hand-written. It claims PERMISSION and
+#: never completion -- at comment time the dispatch has not run, so any verb
+#: about the outcome would be a claim this step cannot make.
+_EXEMPTION_BODY = (
+    ":memo: shipmate: environment \\`$ENVIRONMENT\\` is permitted to apply "
+    "without an approving review, per the \\`SHIPMATE_UNGATED_ENVS\\` repository "
+    "variable — see the apply result comment for what actually applied."
+)
+
+
+def _exemption_step():
+    return next(
+        s for s in action_steps("comment-ops") if s.get("name") == "Report the review exemption"
+    )
+
+
+def test_the_exemption_report_fires_only_when_the_exemption_fired():
+    """Not on `authorized == 'true'`: an ordinary reviewed apply is authorized
+    too, and this sentence over it would be false."""
+    assert _exemption_step()["if"] == "${{ steps.authz.outputs.ungated_exemption == 'true' }}"
+    assert _exemption_step()["env"]["ENVIRONMENT"] == "${{ steps.authz.outputs.environment }}"
+
+
+def test_the_exemption_report_claims_permission_never_completion():
+    run = _exemption_step()["run"]
+    assert f'-f body="{_EXEMPTION_BODY}"' in run, (
+        f"the exemption report's body is not the pinned sentence: {run!r}"
+    )
+
+
+def test_authorize_step_supplies_every_env_var_authorize_reads():
+    """Derived from `scripts/authorize`'s own source, not a hand-listed set: a
+    SHIPMATE_* name added to the script later would otherwise read as empty in
+    this step and silently take the fail-closed branch."""
+    src = (SCRIPTS / "authorize").read_text(encoding="utf-8")
+    read = set(re.findall(r"os\.environ(?:\.get)?[\[(]['\"](SHIPMATE_[A-Z_]+)['\"]", src))
+    assert read, "expected at least one SHIPMATE_* read in authorize"
+    assert read <= set(_authorize_step()["env"])

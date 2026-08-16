@@ -9,20 +9,77 @@ means new commits landed since the last plan -> stale -> re-plan. Review policy
 is delegated to the branch ruleset via GitHub's `reviewDecision`, not re-derived
 here: only the explicit pass values `NONE` (comment-ops' sentinel for a null
 decision — no review required by the ruleset) and `APPROVED` authorize; any
-other value — including an absent/empty one — fails closed.
+other value — including an absent/empty one — fails closed, except that
+`REVIEW_REQUIRED` also authorizes for an environment listed in
+`SHIPMATE_UNGATED_ENVS`.
 """
 
 import json
 import os
+import re
+
+#: An entry that cannot BE an env name matches nothing, and a silently inert
+#: entry leaves an operator believing an environment is ungated when it is not.
+#: Allow-list rather than deny-list: naming the two shapes that go wrong most
+#: often (a padded entry, a suffixed one) left every other shape — a pasted
+#: `"dev-eu"`, an internal space, a slash — silently inert. Env names come from
+#: Terramate `env/<name>` tags; the charset is comment-parse's env grammar plus
+#: `_` (a legal tag character no `shipmate apply <env>` can name) and either
+#: case, since the match itself is case-insensitive.
+_ENV_ENTRY = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*")
 
 
-def _review_reason(review_decision):
+def parse_ungated_envs(raw):
+    """Env names exempt from the review requirement, casefolded.
+
+    Comma-separated bare logical env names, matched case-insensitively against
+    the env on the apply checks. Anything that is not a bare env name — a
+    `-plan`/`-apply` suffix, a stray space, a pasted quote — would exempt
+    nothing at all, so each is a configuration error rather than a silently
+    inert entry."""
+    envs = [e for e in (raw or "").split(",") if e]
+    for e in envs:
+        if e != e.strip():
+            raise SystemExit(
+                f"::error::SHIPMATE_UNGATED_ENVS entry {e!r} has surrounding "
+                f"whitespace; the list is comma-separated with no spaces — "
+                f"write {e.strip()!r}."
+            )
+        if not _ENV_ENTRY.fullmatch(e):
+            raise SystemExit(
+                f"::error::SHIPMATE_UNGATED_ENVS entry {e!r} is not an "
+                f"environment name; entries are bare logical env names "
+                f"(letters, digits, '-' and '_'), comma-separated, with no "
+                f"quotes, spaces or path separators."
+            )
+        for suffix in ("-plan", "-apply"):
+            if e.endswith(suffix):
+                raise SystemExit(
+                    f"::error::SHIPMATE_UNGATED_ENVS entry {e!r} carries the "
+                    f"environment suffix {suffix!r}; the list is matched against "
+                    f"the bare logical env name — write {e[: -len(suffix)]!r} instead."
+                )
+    return frozenset(e.casefold() for e in envs)
+
+
+def _review_reason(review_decision, environment="", ungated_envs=frozenset()):
     """Reject reason for the ruleset-delegated review check, or None to pass.
 
     Only the explicit pass values authorize: NONE (comment-ops' sentinel for a
     null decision — no review required by the ruleset) and APPROVED. Anything
-    else fails closed."""
+    else fails closed. An environment listed in SHIPMATE_UNGATED_ENVS is exempt
+    from REVIEW_REQUIRED and from nothing else; a bare apply passes here when
+    any env is listed and is partitioned per env in apply-all-detect."""
     if review_decision == "REVIEW_REQUIRED":
+        if ungated_envs and (not environment or environment.casefold() in ungated_envs):
+            return None
+        if ungated_envs:
+            return (
+                f"not authorized: PR review is required by the branch ruleset "
+                f"and has not been satisfied, and `{environment}` is not listed "
+                f"in the SHIPMATE_UNGATED_ENVS repository variable; obtain the "
+                f"required approving review(s), then re-run `shipmate apply`."
+            )
         return (
             "not authorized: PR review is required by the branch ruleset and "
             "has not been satisfied; obtain the required approving review(s), "
@@ -46,7 +103,16 @@ def _review_reason(review_decision):
     return None
 
 
-def decide(*, is_member, approvers_team, review_decision, pr, plan_run):
+def decide(
+    *,
+    is_member,
+    approvers_team,
+    review_decision,
+    pr,
+    plan_run,
+    environment="",
+    ungated_envs=frozenset(),
+):
     """Return (authorized, reason). reason is '' when authorized."""
     if not is_member:
         return False, (
@@ -66,7 +132,7 @@ def decide(*, is_member, approvers_team, review_decision, pr, plan_run):
             f"PR is not mergeable (state: {state}); resolve conflicts "
             f"or branch-protection requirements first."
         )
-    review_reason = _review_reason(review_decision)
+    review_reason = _review_reason(review_decision, environment, ungated_envs)
     if review_reason:
         return False, review_reason
     if not plan_run:
@@ -96,17 +162,36 @@ def main():
     plan_run = _read_json("PLAN_RUN_JSON", {})
     is_member = os.environ.get("IS_MEMBER", "false") == "true"
     review_decision = os.environ.get("REVIEW_DECISION", "")
+    # One read, used for both the decision and the reported output — the value
+    # the decision used and the value reported can never differ.
+    environment = os.environ.get("SHIPMATE_ENV", "")
+    ungated_envs = parse_ungated_envs(os.environ.get("SHIPMATE_UNGATED_ENVS", ""))
     ok, reason = decide(
         is_member=is_member,
         approvers_team=os.environ.get("APPROVERS_TEAM", ""),
         review_decision=review_decision,
         pr=pr,
         plan_run=plan_run,
+        environment=environment,
+        ungated_envs=ungated_envs,
+    )
+    # The targeted path's audit trail. `reviewDecision` is a live value with no
+    # history, so once the review lands nothing distinguishes an apply that
+    # waited for it from one that did not. Requires `ok`: a later requirement
+    # (a stale plan) still refuses, and a report over a refused apply is false.
+    # Requires a named environment: a bare apply is reported per env by
+    # apply-all-detect instead, and has no single env to name here.
+    exempted = (
+        ok
+        and review_decision == "REVIEW_REQUIRED"
+        and bool(environment)
+        and environment.casefold() in ungated_envs
     )
     with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
         fh.write(f"authorized={'true' if ok else 'false'}\n")
+        fh.write(f"ungated_exemption={'true' if exempted else 'false'}\n")
         fh.write(f"reason={reason}\n")
-        fh.write(f"environment={os.environ.get('SHIPMATE_ENV', '')}\n")
+        fh.write(f"environment={environment}\n")
         fh.write(f"plan_run_id={plan_run.get('id', '')}\n")
         fh.write(f"head_sha={pr.get('head', {}).get('sha', '')}\n")
     print(f"::notice title=authorize::authorized={ok} reason={reason or 'ok'}")

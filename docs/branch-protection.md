@@ -130,8 +130,24 @@ fails closed rather than proceeding unreviewed.)
   resolved.
 - **Team mode** (`required_approving_review_count` ≥ 1 and/or code-owner
   review): GitHub enforces the approval count / CODEOWNERS / last-push-approval,
-  and `shipmate apply` stays blocked until `reviewDecision` clears. No shipmate
+  and `shipmate apply` stays blocked until `reviewDecision` clears — for every
+  environment, unless some are exempted (next bullet). No shipmate
   config — set it on the ruleset (the `pull_request` rule).
+- **Team mode with named environments exempted** (`SHIPMATE_UNGATED_ENVS`): the
+  ruleset requirement is repository-wide, so the two bullets above are
+  otherwise all-or-nothing. This repository **variable** names the logical
+  environments `shipmate apply` may apply without an approving review, while
+  the ruleset keeps requiring one for the merge and every unnamed environment
+  keeps it for apply too. It exempts `REVIEW_REQUIRED` and nothing else —
+  `CHANGES_REQUESTED` still blocks, as do the other apply requirements — and a
+  bare `shipmate apply` on an unreviewed pull request applies the named
+  environments and holds the rest, their apply checks left pending, so the gate
+  keeps blocking the merge — and with the variable unset or empty, "the rest" is
+  every environment, since the engine enforces on the variable itself. Opting in
+  also takes one line in `comment-ops.yml`;
+  anyone with the **Write** role can edit the variable. Semantics:
+  `../CONTRACT.md` §Comment-ops. What it costs against the deployment-side
+  gate: `hardening.md` §3–5.
 - **Per-environment approval** — which environments require a human is your
   policy to set, per environment (production only, every apply environment, or
   anything between; `hardening.md` #6 states the trade-off). Configure it with **required reviewers on the `<env>-apply` GitHub Environment**, not

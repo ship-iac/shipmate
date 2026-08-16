@@ -11,6 +11,50 @@ section below names the SHA the release tags.
 The version line stays `v0.x` while action inputs, check names, and the comment
 grammar are declared unstable in `README.md`.
 
+## [Unreleased]
+
+**Re-pinning changes behaviour for every consumer**, opted in or not. Both apply
+workflows now run an unconditional `review` job that re-reads the pull request's
+`reviewDecision` server-side before anything applies. Three consequences:
+
+- **One extra `shipmate-engine` deployment record per apply run** — the `summary`
+  job already creates one; this is the second. If your repository has put
+  required reviewers on the `shipmate-engine` environment, that approval is now
+  requested at the **start** of an apply run rather than at its end — no
+  shipmate doc recommends that configuration, but the timing change is real.
+- **A broken App-key wiring becomes a loud early failure.** The `review` job
+  mints an App token before any wave, so a repository whose
+  `SHIPMATE_APP_PRIVATE_KEY` or `SHIPMATE_APP_ID` never reaches the engine now
+  fails the run at the start, with the three-cause diagnosis, instead of applying
+  and then failing to complete its apply checks.
+- **A pre-existing TOCTOU is closed for everyone.** Only `comment-ops` used to
+  read the review decision, so an approval dismissed between the comment and the
+  dispatch still applied. The engine now re-reads it at apply time and holds.
+
+*What applies* is unchanged for a repository that sets no
+`SHIPMATE_UNGATED_ENVS`: every environment keeps the branch ruleset's review
+requirement.
+
+### Added
+
+- **Per-environment review gating (`SHIPMATE_UNGATED_ENVS`).** A repository
+  variable naming the logical environments `shipmate apply` may apply without an
+  approving review, while the ruleset keeps requiring one for the merge and every
+  unnamed environment keeps it for apply. It exempts `REVIEW_REQUIRED` and
+  nothing else — `CHANGES_REQUESTED`, approvers-team membership, mergeable and
+  the exact-plan rule all still decide. A bare `shipmate apply` on an unreviewed
+  pull request applies the named environments and **holds** the rest, their apply
+  checks left pending so `shipmate / gate` keeps blocking the merge; a targeted
+  `shipmate apply <env>` on an unnamed environment is refused. Opting in also
+  takes one line in `comment-ops.yml` — `docs/getting-started.md` §"Applying
+  chosen environments without an approving review" and `docs/upgrading.md`
+  §"Opt-in: per-environment review gating".
+
+  The repository variable is the **only** source of this policy, and only
+  engine-owned workflows read it. `comment-ops`' `ungated-envs` input buys the
+  crisp early refusal and nothing more: an input wider than the variable costs a
+  dispatched run the engine refuses, not an unreviewed apply.
+
 ## [0.14.2] — 2026-08-13
 
 Tags `741118f`.

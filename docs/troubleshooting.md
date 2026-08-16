@@ -368,6 +368,77 @@ right name authored by any other identity leaves the pull request blocked — as
 does a pin to the wrong App id. See `branch-protection.md` §Reproducible
 ruleset.
 
+### An environment was held for review, or the apply was refused
+
+The apply comment says *"Held — the pull request's review state does not
+permit applying"*, or `shipmate apply` was refused with a review reason.
+
+`SHIPMATE_UNGATED_ENVS` exempts the environments it names from the review
+requirement and nothing else. A **targeted** `shipmate apply <env>` is decided
+at comment time: an unlisted env gets the usual refusal, extended to say the
+env is not listed in the variable, and the engine re-applies the same rule to
+the decision it reads at apply time — a run refused there dies before any wave,
+leaving the apply checks pending. A **bare** `shipmate apply` is partitioned
+per environment on the apply path, from the review decision read there:
+
+| `reviewDecision` when the apply runs | what applies |
+|---|---|
+| `NONE` (the ruleset requires no review) or `APPROVED` | everything pending — no partition |
+| `REVIEW_REQUIRED` | the listed environments; every other pending environment is held — all of them when the variable is unset or empty |
+| `CHANGES_REQUESTED` | nothing — every environment is held, listed ones included |
+| anything else, or no decision arrived | nothing — every environment is held |
+
+Held environments keep their `apply / <stack> / <env>` checks pending, so
+`shipmate / gate` stays pending and the merge stays blocked; environments
+ordered after a held one are skipped for the same run. The variable only ever
+narrows what a `REVIEW_REQUIRED` decision holds; it is the decision that
+decides, so an unreviewed pull request holds every environment in a repository
+that set nothing.
+
+**The apply is refused although the variable is set.** The `comment-ops` step
+needs `ungated-envs: ${{ vars.SHIPMATE_UNGATED_ENVS }}` too; without it
+comment-ops sees an empty list and refuses both forms. See
+[`upgrading.md`](upgrading.md) §"Opt-in: per-environment review gating".
+
+**The run failed with a `SHIPMATE_UNGATED_ENVS` error.** An entry that is not a
+bare env name is rejected loudly rather than left silently inert, because none
+of these would ever match an environment:
+
+- a `-plan` / `-apply` suffix — the list is matched against the **bare logical**
+  env name carried by the apply checks, so write `dev-eu`, not `dev-eu-apply`;
+- surrounding whitespace — `dev-eu, dev-us` is an entry `" dev-us"`. The list is
+  comma-separated with **no spaces**; the error names the entry and the exact
+  value to write;
+- anything outside the env charset (letters, digits, `-`, `_`) — a pasted
+  `"dev-eu"` with its quotes, an internal space, a `/`. The variable holds the
+  bare list, unquoted.
+
+**`shipmate apply` answers with nothing at all — no reaction, no comment.** A
+malformed entry is rejected inside the Authorize step, which fails the run
+before either the 🚀 reaction or the refusal comment is reached. So a
+repository-wide breakage of `shipmate apply` (every command, every environment,
+however well-formed) is invisible on the pull request itself. The real error is
+the
+`::error::SHIPMATE_UNGATED_ENVS entry ...` annotation on the comment-ops
+workflow run; open that run from the Actions tab and fix the variable. A
+targeted apply that was genuinely refused always comments its reason, so
+silence points at the variable rather than at the authorization.
+
+**A held environment is also an explicit environment.** When both causes apply
+it is reported as held, not as excluded, because the review is the thing to get
+first. Getting it does not release the environment into a bare `shipmate
+apply`, though: it is still listed in `global.shipmate.explicit_envs`, so it
+still needs a targeted `shipmate apply <env>`. That is why the held sentence
+names no command.
+
+**A listed environment that is also explicit is not held.** It is reported as
+excluded, with the usual "run `shipmate apply <env>`" — and that targeted apply
+then succeeds **without** an approving review, because the environment is
+listed. Listing an environment and marking it explicit are independent: the
+first decides whether a review is required, the second only decides that a bare
+apply will not reach it. An environment that must never apply unreviewed does
+not belong in `SHIPMATE_UNGATED_ENVS`.
+
 ### A pull request planned zero cells
 
 No `<stack> / <env>` checks appear, no plan comment is posted — unless there is
