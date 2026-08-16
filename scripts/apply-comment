@@ -523,10 +523,12 @@ def _env_disposition_lines(excluded, skipped, held=(), applied_ungated=()):
     SHIPMATE_UNGATED_ENVS set. That sentence is the only audit trail an
     unreviewed apply leaves: with required_approving_review_count 0 GitHub
     reports no review decision at all, so nothing else in the run tells a
-    reviewed apply from an unreviewed one. It claims permission and attempt but
-    never success -- detect derives the set from `runnable`, before any wave
-    runs, so a failed wave or a skipped env-level leaves an env named here that
-    never applied. It points at the run rather than the table because the short
+    reviewed apply from an unreviewed one. No clause of it uses a completion
+    verb for the named envs -- detect derives the set from `runnable`, before
+    any wave runs, so a failed wave or a skipped env-level leaves an env named
+    here that never applied, and this comment's own legend reserves "applied"
+    for the ✅ state (_EMOJI), so a completion verb would contradict the table
+    beside it. It points at the run rather than the table because the short
     form has no table."""
     lines = []
     if excluded:
@@ -545,9 +547,9 @@ def _env_disposition_lines(excluded, skipped, held=(), applied_ungated=()):
     if applied_ungated:
         envs = ", ".join(f"`{sc._md_escape(e)}`" for e in applied_ungated)
         lines.append(
-            "Ungated environment(s) whose cells were applied without an approving "
-            f"review, per the `SHIPMATE_UNGATED_ENVS` repository variable: {envs} — "
-            "see this run for what actually succeeded."
+            "Ungated environment(s) permitted to apply without an approving review, "
+            f"per the `SHIPMATE_UNGATED_ENVS` repository variable: {envs} — "
+            "see this run for what actually applied."
         )
     return lines
 

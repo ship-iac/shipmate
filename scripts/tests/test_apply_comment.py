@@ -692,7 +692,7 @@ def test_short_form_omits_excluded_skipped_for_targeted_env():
     assert "Skipped" not in body
 
 
-def test_excluded_skipped_lines_escape_evil_env_names():
+def test_env_disposition_lines_escape_evil_env_names():
     # excluded/skipped env names are author-controlled (Terramate tags /
     # GitHub Environment names), same as every other display value in this
     # file -- these sentences must not be the one place that guarantee lapses.
@@ -722,9 +722,9 @@ _HELD_SENTENCE = (
     "Get the review, then re-run the apply."
 )
 _UNGATED_SENTENCE = (
-    "Ungated environment(s) whose cells were applied without an approving review, "
+    "Ungated environment(s) permitted to apply without an approving review, "
     "per the `SHIPMATE_UNGATED_ENVS` repository variable: `dev-eu` — "
-    "see this run for what actually succeeded."
+    "see this run for what actually applied."
 )
 
 
@@ -745,16 +745,34 @@ def test_applied_ungated_line_states_no_review_and_names_the_variable():
     assert line == _UNGATED_SENTENCE
 
 
+# Completion vocabulary. Substrings, so `succeeded`/`successful` and
+# `complete`/`completed` are each one entry; deliberately no short fragment
+# (`ran`, `done`) that a longer innocent word could contain.
+_COMPLETION_WORDS = ("applied", "success", "succeed", "complete", "clean", "landed")
+
+
 def test_applied_ungated_line_does_not_claim_the_named_envs_succeeded():
-    # detect derives the set from `runnable` -- the envs whose apply was
-    # PERMITTED to proceed unreviewed -- before any wave runs. A failed wave or
-    # an env-level skipped behind a failed predecessor leaves an env named here
-    # that never applied, so the sentence must claim permission and attempt
-    # only, and send the reader elsewhere for the outcome. It points at the run
-    # rather than the table because the short form renders no table.
+    """No clause of the audit line asserts the named envs completed.
+
+    detect derives the set from `runnable` -- the envs whose apply was
+    PERMITTED to proceed unreviewed -- before any wave runs, so a failed wave
+    or an env-level skipped behind a failed predecessor leaves an env named
+    here that never applied. This comment's own legend reserves "applied" for
+    the ✅ state, so a completion verb in this line contradicts the table
+    beside it.
+
+    Split at the em-dash and check both halves, because a completion claim can
+    hide in either: the CLAIM half must carry no completion word at all, and
+    the OUTCOME half must be exactly the hand-written pointer -- an appended
+    "and applied cleanly" lives there and would otherwise pass a head- or
+    tail-anchored check."""
     (line,) = ac._env_disposition_lines([], [], [], ["dev-eu"])
-    assert not line.startswith("Applied")
-    assert line.endswith("— see this run for what actually succeeded.")
+    claim, sep, outcome = line.partition(" — ")
+    assert sep, f"the line must separate its claim from where the outcome lives: {line!r}"
+    assert outcome == "see this run for what actually applied."
+    lowered = claim.casefold()
+    for word in _COMPLETION_WORDS:
+        assert word not in lowered, f"claim clause asserts completion via {word!r}: {claim!r}"
 
 
 def test_short_form_carries_held_and_ungated_sentences():
