@@ -335,7 +335,8 @@ costs, so the choice is made with the price visible:
   branch code runs inside, so control 7's scoping buys nothing against that code
   and the OIDC claim condition in §7–9 can no longer tell a plan token from an
   apply one. Row 17's branch policy is the one control that survives, and only
-  while every pull request targets a branch it names.
+  while every pull request targets a branch it names. Who may flip this posture
+  on is a separate question from what it costs — see §7–9.
 
 Pair every environment you gate with `global.shipmate.explicit_envs`, whichever
 ones those are: list it there so a bare `shipmate apply` skips it and it is
@@ -487,6 +488,16 @@ control.
   before the migration rather than after: shared where plan-time branch code
   holding the write role is genuinely acceptable, split everywhere you would ever
   want a reviewer or a read-only plan role.
+- **The toggle is not admin-gated.** `SHIPMATE_SHARED_ENVS` is a repository
+  **variable**, and GitHub grants *"Create, update, and delete GitHub Actions
+  variables"* to **Write and above** — this posture decision is not scoped to
+  control 1's grant, it is reachable by anyone holding it. On a repository whose
+  plan path carries its own credentials, one comma-separated entry moves plan
+  cells running unreviewed branch code onto the apply role, and the nightly drift
+  run with them. `shipmate doctor` cannot warn about it either: it infers the
+  mode from environment names and never reads the variable, which would need a
+  permission the App manifest does not declare. Control 2 restricts a branch;
+  this restricts none of it — do not carry that protection over by assumption.
 
 ## 10–12. Actions settings
 
