@@ -50,6 +50,18 @@ GUARD_ERROR_LINE = {
 #: Still compared whole, so neither `guard` dropping out nor an unreviewed extra
 #: dependency can slip in.
 DETECT_NEEDS = {"apply.yml": ["guard"], "apply-all.yml": ["guard", "review"]}
+#: The whole `needs:` list of each apply-all fan-out job. Every job that can
+#: fail BEFORE `detect` has to appear, or its failure never reaches this job's
+#: `!failure()`: `detect` is skipped, its outputs read as empty strings, the
+#: `!= 'true'` clause reads empty as "not empty", and the job fans out on
+#: `fromJSON('')`. Compared whole, per job, so neither a pre-`detect` job
+#: dropping out nor a new one being omitted passes unnoticed.
+ENVLEVEL_NEEDS = {
+    "envlevel0": ["guard", "review", "detect"],
+    "envlevel1": ["guard", "review", "detect", "envlevel0"],
+    "envlevel2": ["guard", "review", "detect", "envlevel0", "envlevel1"],
+    "envlevel3": ["guard", "review", "detect", "envlevel0", "envlevel1", "envlevel2"],
+}
 SUMMARY_IF = "${{ always() && needs.guard.result == 'success' }}"
 APPLY_PATHS = ("apply.yml", "apply-all.yml")
 
@@ -117,6 +129,17 @@ def test_every_apply_fan_out_job_carries_the_guard_in_its_needs():
             assert GUARD_JOB in _needs(job), (
                 f"{name}: job {job_id!r} must carry {GUARD_JOB!r} in its needs, got {_needs(job)!r}"
             )
+
+
+def test_every_apply_all_fan_out_job_needs_every_job_that_runs_before_detect():
+    jobs = _jobs("apply-all.yml")
+    for job_id, expected in ENVLEVEL_NEEDS.items():
+        assert _needs(jobs[job_id]) == expected, (
+            f"apply-all.yml: {job_id} must need exactly {expected!r}, "
+            f"got {_needs(jobs[job_id])!r} -- a job that can fail before `detect` "
+            "and is missing here has its failure invisible to this job's "
+            "`!failure()`, and the job fans out on an empty waves_json"
+        )
 
 
 def test_deploy_detect_carries_no_bot_actor_guard():

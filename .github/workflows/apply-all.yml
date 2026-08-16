@@ -137,11 +137,14 @@ jobs:
   envlevel0:
     # Display name only (job id unchanged) — see apply.yml's `waves` job.
     name: L0
-    # `guard` is in `needs` as well, so its failure reaches `!failure()` here:
-    # without it a rejected dispatch skips `detect`, and a skipped `detect`
-    # reads its outputs as empty strings -- which the `!= 'true'` guard below
-    # reads as "not empty" and fans out anyway.
-    needs: [guard, detect]
+    # `guard` and `review` are in `needs` as well, so their failures reach
+    # `!failure()` here: without them a rejected dispatch (or a review job that
+    # could not mint the App key) skips `detect`, and a skipped `detect` reads
+    # its outputs as empty strings -- which the `!= 'true'` guard below reads as
+    # "not empty" and fans out anyway, on `fromJSON('')`. A SKIPPED `review` is
+    # neither `failure()` nor `cancelled()`, so the un-opted-in path is
+    # unchanged.
+    needs: [guard, review, detect]
     if: ${{ !failure() && !cancelled() && needs.detect.outputs.envlevel0_empty != 'true' && !contains(join(needs.*.result, ','), 'cancelled') }}
     uses: ship-iac/shipmate/.github/workflows/apply-env-level.yml@8dcf08e1ed6bc14fbedfc532151f91f314ebb172 # pinned to a commit on main
     permissions: { contents: read, checks: read, actions: read, id-token: write }
@@ -165,7 +168,7 @@ jobs:
   envlevel1:
     # Display name only (job id unchanged) — see apply.yml's `waves` job.
     name: L1
-    needs: [guard, detect, envlevel0]
+    needs: [guard, review, detect, envlevel0]
     if: ${{ !failure() && !cancelled() && needs.detect.outputs.envlevel1_empty != 'true' && !contains(join(needs.*.result, ','), 'cancelled') }}
     uses: ship-iac/shipmate/.github/workflows/apply-env-level.yml@8dcf08e1ed6bc14fbedfc532151f91f314ebb172 # pinned to a commit on main
     permissions: { contents: read, checks: read, actions: read, id-token: write }
@@ -181,7 +184,7 @@ jobs:
   envlevel2:
     # Display name only (job id unchanged) — see apply.yml's `waves` job.
     name: L2
-    needs: [guard, detect, envlevel0, envlevel1]
+    needs: [guard, review, detect, envlevel0, envlevel1]
     if: ${{ !failure() && !cancelled() && needs.detect.outputs.envlevel2_empty != 'true' && !contains(join(needs.*.result, ','), 'cancelled') }}
     uses: ship-iac/shipmate/.github/workflows/apply-env-level.yml@8dcf08e1ed6bc14fbedfc532151f91f314ebb172 # pinned to a commit on main
     permissions: { contents: read, checks: read, actions: read, id-token: write }
@@ -197,7 +200,7 @@ jobs:
   envlevel3:
     # Display name only (job id unchanged) — see apply.yml's `waves` job.
     name: L3
-    needs: [guard, detect, envlevel0, envlevel1, envlevel2]
+    needs: [guard, review, detect, envlevel0, envlevel1, envlevel2]
     if: ${{ !failure() && !cancelled() && needs.detect.outputs.envlevel3_empty != 'true' && !contains(join(needs.*.result, ','), 'cancelled') }}
     uses: ship-iac/shipmate/.github/workflows/apply-env-level.yml@8dcf08e1ed6bc14fbedfc532151f91f314ebb172 # pinned to a commit on main
     permissions: { contents: read, checks: read, actions: read, id-token: write }

@@ -74,8 +74,10 @@ def test_detect_needs_review_and_survives_it_being_skipped():
     arrives, and without the explicit `if:` GHA's default `success()` skips
     `detect` behind a skipped `review` -- which is the whole un-opted-in path."""
     detect = _jobs("apply-all.yml")["detect"]
-    assert detect["needs"] == _DETECT_NEEDS
-    assert detect["if"] == _DETECT_IF
+    assert detect.get("needs") == _DETECT_NEEDS
+    # `.get`, not `[...]`: a DELETED `if:` is the fail-open mutation, and a
+    # KeyError would red without naming the expression that went missing.
+    assert detect.get("if") == _DETECT_IF
 
 
 def test_detect_sources_both_new_inputs_from_the_server_side_values():
