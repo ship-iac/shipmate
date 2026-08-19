@@ -70,7 +70,7 @@ name. See "Contributors without push access" for the trade-off that follows.
 | 3 | Required check `shipmate / gate` with `integration_id`, strict | Branch ruleset | A *third party* posting `shipmate / gate` under another identity |
 | 4 | ≥1 approving review, code-owner review, dismiss stale, require approval of most recent push | Branch ruleset | Self-merge; the code-owner review is **unforgeable** at merge time (an App cannot be a `CODEOWNERS` entry) *provided a `CODEOWNERS` entry actually covers the IaC paths* — the rule is a no-op for changed files with no owner — and the approval *count* never is |
 | 5 | Block force-push and deletion on the default branch | Branch ruleset | History rewrite after apply |
-| 6 | Required reviewers + "Prevent self-review" on the `<env>-apply` environments you decide to gate (§6 states the trade-off; the choice is yours) | Environment | **Unforgeable** at apply time — the last line of defense once a merge has happened, on each environment you apply it to |
+| 6 | Required reviewers + "Prevent self-review" on the `<env>-apply` environments you decide to gate (§6 states the trade-off; the choice is yours) — **on a private repository this rule needs Enterprise**, see "Plan prerequisites" | Environment | **Unforgeable** at apply time — the last line of defense once a merge has happened, on each environment you apply it to |
 | 7 | Cloud credentials scoped to `<env>-apply` — the OIDC path's `AWS_ROLE_ARN`/`AWS_REGION` as environment **variables**, any residual static key as an environment **secret** — never repo- or org-level | Environment | Repo-wide exposure (for a secret, bounded *only* on an environment that also carries row 6; and for a variable the scoping is advisory — see §7–9) |
 | 8 | Plan environments (`<env>-plan`; in shared mode the bare `<env>`, which must hold the apply role instead — §7–9) hold read-only, blast-radius-free credentials, no approval rules, and no branch policy — except on a shared environment, where a default-branch policy is row 17 doing real work and plan cells still pass it (see below) — ideally no secret at all (`shipmate doctor` reports what it finds) | Environment | Plan-time code execution |
 | 9 | OIDC with an `environment:` claim condition instead of static keys | Cloud IdP | Long-lived credential theft — and, since the engine's apply jobs mint OIDC tokens unconditionally, this claim condition is the **only** bound on which role an apply job can assume (see §7–9). In shared mode it separates nothing: both tokens carry the same `environment:` claim |
@@ -102,6 +102,54 @@ paths instead (CONTRACT.md §Env model). On such an environment:
   for. It holds only while every pull request targets a branch the policy names; a
   repository using release branches must open the policy up, and then row 17 is
   forfeited too.
+
+### Plan prerequisites
+
+Four rows are not configurable on every GitHub plan. Check them before you design
+a posture on one, because the checklist reads as if every row were always
+available and row 6 is the one a production posture usually rests on.
+
+| Row | Public repository | Private repository |
+|---|---|---|
+| 3–5 (branch ruleset) | any plan | Pro / Team / Enterprise |
+| 6 (required reviewers, wait timer) | any plan | **Enterprise only** |
+| 16, 17 (environments, deployment branch policies) | any plan | Pro / Team / Enterprise |
+
+On GitHub Free, Pro or Team, *"required reviewers are only available for public
+repositories"* and *"wait timers are only available for public repositories"*
+([Deployments and environments](https://docs.github.com/en/actions/reference/workflows-and-actions/deployments-and-environments)).
+Creating one on a private repository is refused by the API:
+
+```console
+$ gh api -X PUT repos/<org>/<repo>/environments/prod-apply --input reviewers.json
+Failed to create the environment protection rule. Please ensure the billing plan
+supports the required reviewers protection rule. (HTTP 422)
+```
+
+Deployment branches and tags are a separate rule and *are* available on private
+repositories from Pro/Team up, so rows 16 and 17 hold where row 6 does not. A
+private repository on Team can therefore carry every row on this page **except
+6** — the one row that is unforgeable at apply time.
+
+**What is left when row 6 is unavailable**, and it is a coherent posture rather
+than a broken one:
+
+- production absent from `SHIPMATE_UNGATED_ENVS`, so no apply reaches it without
+  an approving review on the pull request;
+- production in `global.shipmate.explicit_envs`, so a bare `shipmate apply`
+  skips it and only the targeted `shipmate apply <env>` reaches it;
+- row 17's deployment branch policy naming the default branch on every
+  `<env>-apply`;
+- rows 7–9's read/write credential split, which is then the only App-unforgeable
+  control on this page still standing.
+
+Read that list for what it does not contain: **no apply-time human approval at
+all.** Every control in it is either upstream of the merge or satisfiable by a
+holder of the App private key — including the review requirement, which the App
+can supply as an approving review unless a `CODEOWNERS` entry covers the changed
+paths (rows 3–5). §6 is written as though the reviewer gate were always an option;
+on a private repository below Enterprise it is not, and the pull-request review
+plus the code-owner requirement is the whole gate.
 
 ## 1. Write access
 
@@ -282,6 +330,10 @@ satisfy. `docs/branch-protection.md` has the sole-maintainer shape.
 
 ## 6. Environment reviewers — the gate that holds after a merge
 
+**Check "Plan prerequisites" first: on a private repository this rule requires
+Enterprise, and below it the API refuses to create one.** Everything in this
+section describes a control that plan cannot have.
+
 Environment reviewers are **users and teams**. A GitHub App installation token
 cannot be a reviewer and cannot approve a pending deployment, so this is the
 **second** of the two controls in the list that an attacker holding the App
@@ -303,13 +355,22 @@ Two platform ceilings this control cannot be configured past:
   **and** one platform", is not expressible here. Quorum has to come from the
   pull request side — which is repository-wide, and so cannot be asked of one
   environment alone.
-- **Protection rules are ignored on private repositories on the Free plan.**
-  Environments exist there, deployments record, and nothing errors — the
-  reviewer requirement simply does not apply. shipmate's whole per-environment
-  model is GitHub Environments, so on that plan a repository can evaluate the
-  entire pipeline and see it work with none of the protection in this section
-  in force. Rows 6, 16 and 17 presuppose a public repository or Team/Pro and
-  above.
+- **On a private repository this rule needs Enterprise — it cannot be created at
+  all below it.** GitHub's plan comparison does not say so on the environments
+  page; the sentence that bites is *"required reviewers are only available for
+  public repositories"* on GitHub Free, Pro and Team
+  ([Deployments and environments](https://docs.github.com/en/actions/reference/workflows-and-actions/deployments-and-environments)),
+  and the API refuses with `HTTP 422 ... Please ensure the billing plan supports
+  the required reviewers protection rule`. Measured on a private repository in a
+  Team-plan organization; a wait timer is refused identically, a deployment branch
+  policy creates fine. See "Plan prerequisites" for what posture is left when this
+  section is unavailable — it is one with no apply-time approval at all, so do not
+  design production gating on this section without checking the plan first.
+  Separately, on the **Free** plan a private repository's protection rules are
+  ignored rather than refused: environments exist, deployments record, nothing
+  errors, and none of the protection in this section is in force. Row 6 therefore
+  presupposes a public repository or Enterprise; rows 16 and 17 presuppose a
+  public repository or Pro/Team and above.
 
 **Which environments to gate is a policy decision, and it is yours.** The
 maximally-hardened position is a reviewer on every `<env>-apply` that holds a

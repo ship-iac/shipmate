@@ -165,10 +165,15 @@ fails closed rather than proceeding unreviewed.)
     `global.shipmate.explicit_envs` so the bare `shipmate apply` skips it and
     it is only ever applied via the targeted `shipmate apply <env>` (which
     then pauses for the environment reviewer).
-- **Private-repo caveat:** GitHub Environment protection rules (required
-  reviewers) are free on public repos but require GitHub Pro/Team/Enterprise on
-  private repos — the same class of constraint as the ruleset note in
-  "free-tier private repos" below.
+- **Private-repo caveat:** required reviewers (and wait timers) are free on
+  public repos but require **Enterprise** on private ones — on Free, Pro and
+  Team they are "only available for public repositories"
+  ([GitHub docs](https://docs.github.com/en/actions/reference/workflows-and-actions/deployments-and-environments)),
+  and the API refuses with `HTTP 422 ... Please ensure the billing plan supports
+  the required reviewers protection rule`. Deployment branch policies are a
+  different rule and do work on private repos from Pro/Team up. `hardening.md`
+  §Plan prerequisites has the per-row table and the posture left without a
+  reviewer gate.
 
 ## Note: free-tier private repos
 

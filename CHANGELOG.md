@@ -13,6 +13,18 @@ grammar are declared unstable in `README.md`.
 
 ## [Unreleased]
 
+### Documentation
+
+- `docs/hardening.md` gains a **Plan prerequisites** section: which checklist rows
+  a GitHub plan can actually configure. Row 6 (environment required reviewers, wait
+  timers) needs **Enterprise** on a private repository — on Free, Pro and Team the
+  API refuses to create one with an `HTTP 422` naming the billing plan — while rows
+  3–5, 16 and 17 hold from Pro/Team up. The section also states the posture that is
+  left without row 6, and that it contains no apply-time human approval at all. The
+  old claim that rows 6, 16 and 17 "presuppose a public repository or Team/Pro and
+  above" was wrong for row 6. Same correction in `docs/branch-protection.md`'s
+  private-repo caveat. Reported by the cross-organization consumer.
+
 ## [0.15.0] — 2026-08-17
 
 Tags `19de76c`.
