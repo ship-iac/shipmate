@@ -17,8 +17,9 @@ grammar are declared unstable in `README.md`.
 
 - `docs/hardening.md` gains a **Plan prerequisites** section: which checklist rows
   a GitHub plan can actually configure. Row 6 (environment required reviewers, wait
-  timers) needs **Enterprise** on a private repository — on Free, Pro and Team the
-  API refuses to create one with an `HTTP 422` naming the billing plan — while rows
+  timers) needs **Enterprise** on a private repository — below it the API refuses
+  to create one with an `HTTP 422` naming the billing plan (measured on Team;
+  on Free the rule may instead be created and ignored) — while rows
   3–5, 16 and 17 hold from Pro/Team up. The section also states the posture that is
   left without row 6, and that it contains no apply-time human approval at all. The
   old claim that rows 6, 16 and 17 "presuppose a public repository or Team/Pro and

@@ -169,8 +169,9 @@ fails closed rather than proceeding unreviewed.)
   public repos but require **Enterprise** on private ones — on Free, Pro and
   Team they are "only available for public repositories"
   ([GitHub docs](https://docs.github.com/en/actions/reference/workflows-and-actions/deployments-and-environments)),
-  and the API refuses with `HTTP 422 ... Please ensure the billing plan supports
-  the required reviewers protection rule`. Deployment branch policies are a
+  and on Team the API refuses with `HTTP 422 ... Please ensure the billing plan
+  supports the required reviewers protection rule` (on Free the rule may instead
+  be created and silently ignored — `hardening.md` §6). Deployment branch policies are a
   different rule and do work on private repos from Pro/Team up. `hardening.md`
   §Plan prerequisites has the per-row table and the posture left without a
   reviewer gate.

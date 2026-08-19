@@ -105,7 +105,7 @@ paths instead (CONTRACT.md §Env model). On such an environment:
 
 ### Plan prerequisites
 
-Four rows are not configurable on every GitHub plan. Check them before you design
+Rows 3–6, 16 and 17 are not configurable on every GitHub plan. Check them before you design
 a posture on one, because the checklist reads as if every row were always
 available and row 6 is the one a production posture usually rests on.
 
@@ -115,10 +115,13 @@ available and row 6 is the one a production posture usually rests on.
 | 6 (required reviewers, wait timer) | any plan | **Enterprise only** |
 | 16, 17 (environments, deployment branch policies) | any plan | Pro / Team / Enterprise |
 
+Row 2's push ruleset is plan-gated on its own axis — see §2.
+
 On GitHub Free, Pro or Team, *"required reviewers are only available for public
 repositories"* and *"wait timers are only available for public repositories"*
 ([Deployments and environments](https://docs.github.com/en/actions/reference/workflows-and-actions/deployments-and-environments)).
-Creating one on a private repository is refused by the API:
+Creating one on a private repository is refused by the API (measured on Team; see
+§6 for what Free does):
 
 ```console
 $ gh api -X PUT repos/<org>/<repo>/environments/prod-apply --input reviewers.json
@@ -136,8 +139,13 @@ than a broken one:
 
 - production absent from `SHIPMATE_UNGATED_ENVS`, so no apply reaches it without
   an approving review on the pull request;
-- production in `global.shipmate.explicit_envs`, so a bare `shipmate apply`
-  skips it and only the targeted `shipmate apply <env>` reaches it;
+- production in `global.shipmate.explicit_envs`, so **before the merge** a bare
+  `shipmate apply` skips it and only the targeted `shipmate apply <env>` reaches
+  it — the global constrains that path only. The post-merge deploy applies every
+  cell whose apply check is still pending, explicit environments included
+  (CONTRACT.md §Comment-ops), and the control it relies on there is exactly row
+  6: with row 6 unavailable, a production cell left pending at merge applies on
+  the push to the default branch with no approval of any kind;
 - row 17's deployment branch policy naming the default branch on every
   `<env>-apply`;
 - rows 7–9's read/write credential split, which is then the only App-unforgeable
@@ -361,14 +369,18 @@ Two platform ceilings this control cannot be configured past:
   public repositories"* on GitHub Free, Pro and Team
   ([Deployments and environments](https://docs.github.com/en/actions/reference/workflows-and-actions/deployments-and-environments)),
   and the API refuses with `HTTP 422 ... Please ensure the billing plan supports
-  the required reviewers protection rule`. Measured on a private repository in a
-  Team-plan organization; a wait timer is refused identically, a deployment branch
-  policy creates fine. See "Plan prerequisites" for what posture is left when this
-  section is unavailable — it is one with no apply-time approval at all, so do not
-  design production gating on this section without checking the plan first.
-  Separately, on the **Free** plan a private repository's protection rules are
-  ignored rather than refused: environments exist, deployments record, nothing
-  errors, and none of the protection in this section is in force. Row 6 therefore
+  the required reviewers protection rule`. The refusal was **measured on a
+  private repository in a Team-plan organization** — there, a wait timer is
+  refused identically and a deployment branch policy creates fine. On **Free** the
+  refusal is unmeasured and an earlier observation had a private repository's
+  protection rules *ignored* rather than refused: environments exist, deployments
+  record, nothing errors, and the reviewer requirement simply does not apply.
+  Which of the two you hit does not change the posture — below Enterprise on a
+  private repository none of the protection in this section is in force — but it
+  does change what you see, so do not read a created-without-error rule as an
+  enforced one. See "Plan prerequisites" for what is left when this section is
+  unavailable: a posture with no apply-time approval at all, so do not design
+  production gating on this section without checking the plan first. Row 6
   presupposes a public repository or Enterprise; rows 16 and 17 presuppose a
   public repository or Pro/Team and above.
 
