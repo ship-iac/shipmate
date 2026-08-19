@@ -1217,12 +1217,14 @@ App name, which a consumer org may have had to slug differently than
 trail of previous plans for the PR.
 
 Structure, in order: an overview table (one row per planned stack ×
-environment: verdict emoji — 🟢 no changes / 🟡 changes / 🔴 contains
-destroys — add/change/destroy counts, and a link to that cell's
-`<stack> / <env>` plan-job check run), then one `<details>` section per
+environment: verdict emoji — 🟢 no changes / 🟡 changes — add/change/destroy
+counts, and a link to that cell's `<stack> / <env>` plan-job check run),
+then one `<details>` section per
 **changed** cell containing the rendered plan inside a `diff`-tagged code
 fence (change signs moved to column 0; `~` mapped to `!`). Cells with no
-changes get a table row only. Check links are built **forward** from the
+changes get a table row only. The verdict is deliberately two-state: a
+destroy count also covers ordinary replacements, so impact is carried by the
+counts rather than by a severity colour. Check links are built **forward** from the
 cell's `(stack-path, environment)` pair using the check-name grammar above;
 when the check run cannot be resolved, the link degrades to the workflow-run
 URL.
