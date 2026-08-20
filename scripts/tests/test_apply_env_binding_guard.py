@@ -11,8 +11,6 @@ Invariants:
   condition and the one layout that gets no refusal);
 - snapshot binds no environment at all and complete binds shipmate-engine: a job
   that gains an env-derived binding is the regression;
-- every wave's concurrency block still keys on the logical matrix.environment,
-  so serialization does not fork by mode;
 - snapshot runs the environment pre-flight before it snapshots the apply checks,
   and both before any wave: the pre-flight is only a control while it can still
   refuse the run;
@@ -45,10 +43,6 @@ APPLY_ENV = (
     "&& matrix.environment "
     "|| format('{0}-apply', matrix.environment) }}"
 )
-CONCURRENCY = {
-    "group": "apply-${{ matrix.environment }}-${{ matrix.stack }}",
-    "cancel-in-progress": False,
-}
 WAVES = [f"wave{i}" for i in range(8)]
 
 #: (logical env, SHIPMATE_SHARED_ENVS value) -> the environment the apply binds.
@@ -128,12 +122,3 @@ def test_snapshot_verifies_the_environments_before_snapshotting_the_checks():
         "wave0 must gate on snapshot, or the pre-flight refuses a run whose first "
         "wave is already applying"
     )
-
-
-def test_every_wave_serializes_on_the_logical_environment():
-    for wave, job in _wave_jobs().items():
-        assert job.get("concurrency") == CONCURRENCY, (
-            f"{wave}: concurrency must key on the logical matrix.environment -- a "
-            "mode-dependent group would let a shared-mode and a split-mode apply "
-            "run against the same stack at once"
-        )

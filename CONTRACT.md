@@ -869,9 +869,12 @@ itself), not something a separate API call authors, so it necessarily stays
 on the `github-actions` identity regardless of App permissions.
 
 `shipmate apply` and `deploy.yml` share the same per-env, per-stack
-`apply-<env>-<stack>` concurrency group, so exactly one apply ever runs
-against a given stack × environment at a time, regardless of whether it was
-triggered by a pre-merge comment or a post-merge push.
+`apply-<env>-<stack>` concurrency group, declared with
+`cancel-in-progress: false` on every wave job (§Fan-out), so exactly one apply
+ever runs against a given stack × environment at a time, regardless of whether
+it was triggered by a pre-merge comment or a post-merge push. A second apply for
+the same cell queues behind the first rather than racing or cancelling it, and
+is then refused by the exact-plan fail-safe if the first advanced the state.
 
 ## Post-plan topology
 
