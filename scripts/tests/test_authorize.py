@@ -395,3 +395,42 @@ def test_ungated_exemption_output_is_set_only_when_the_exemption_fired(
         SHIPMATE_UNGATED_ENVS=ungated,
     )
     assert parsed["ungated_exemption"] == expected
+
+
+def test_unlock_needs_only_team_membership():
+    ok, reason = az.decide(
+        is_member=True,
+        approvers_team="infra",
+        review_decision="",  # no decision at all
+        pr={"mergeable": None, "head": {"sha": "a" * 40}},  # a merged PR
+        plan_run={},  # no reviewed plan
+        environment="dev-eu",
+        verb="unlock",
+    )
+    assert (ok, reason) == (True, "")
+
+
+def test_unlock_still_refuses_a_non_member():
+    ok, reason = az.decide(
+        is_member=False,
+        approvers_team="infra",
+        review_decision="APPROVED",
+        pr={"mergeable": True, "head": {"sha": "a" * 40}},
+        plan_run={"head_sha": "a" * 40},
+        environment="dev-eu",
+        verb="unlock",
+    )
+    assert not ok and "not a member" in reason
+
+
+def test_apply_is_unchanged_by_the_verb_default():
+    # The apply path must not become laxer: same inputs as the unlock case above.
+    ok, reason = az.decide(
+        is_member=True,
+        approvers_team="infra",
+        review_decision="",
+        pr={"mergeable": None, "head": {"sha": "a" * 40}},
+        plan_run={},
+        environment="dev-eu",
+    )
+    assert not ok
