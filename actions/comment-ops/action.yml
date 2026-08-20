@@ -45,6 +45,9 @@ outputs:
   head-sha:
     description: PR head SHA.
     value: ${{ steps.authz.outputs.head_sha }}
+  mode:
+    description: apply (default) or unlock — the dispatch mode the parsed verb selects.
+    value: ${{ steps.parse.outputs.route == 'unlock' && 'unlock' || 'apply' }}
 runs:
   using: composite
   steps:
@@ -425,7 +428,7 @@ runs:
 
     - name: Mint App token (members:read)
       id: apptoken
-      if: ${{ steps.parse.outputs.route == 'apply' }}
+      if: ${{ steps.parse.outputs.route == 'apply' || steps.parse.outputs.route == 'unlock' }}
       # Don't hard-fail the job if the token can't be minted (e.g. the App isn't
       # installed on this repo) — the next step reports it to the commenter.
       continue-on-error: true
@@ -438,7 +441,7 @@ runs:
         permission-members: read
 
     - name: App token unavailable (App not installed?)
-      if: ${{ steps.parse.outputs.route == 'apply' && steps.apptoken.outcome != 'success' }}
+      if: ${{ (steps.parse.outputs.route == 'apply' || steps.parse.outputs.route == 'unlock') && steps.apptoken.outcome != 'success' }}
       shell: bash
       env:
         GH_TOKEN: ${{ inputs.github-token }}
@@ -449,7 +452,7 @@ runs:
 
     - name: Gather authorization inputs
       id: gather
-      if: ${{ steps.parse.outputs.route == 'apply' && steps.apptoken.outcome == 'success' }}
+      if: ${{ (steps.parse.outputs.route == 'apply' || steps.parse.outputs.route == 'unlock') && steps.apptoken.outcome == 'success' }}
       shell: bash
       env:
         GH_TOKEN: ${{ inputs.github-token }}
@@ -458,17 +461,26 @@ runs:
         TEAM: ${{ inputs.approvers-team }}
         USER: ${{ inputs.comment-user }}
         PR_NUMBER: ${{ inputs.pr-number }}
+        SHIPMATE_VERB: ${{ steps.parse.outputs.route }}
       run: |
         set -euo pipefail
         # PR (retry until mergeable is computed; GitHub computes it async).
-        pr_ok=""
-        for _ in 1 2 3 4 5; do
+        # Not for unlock: it ignores `mergeable`, and a *merged* PR reports it
+        # null forever — exactly the stranded-lock case unlock exists for — so the
+        # retries would only cost 15s and end in a warning that is false for a
+        # verb that never reads the field.
+        if [ "$SHIPMATE_VERB" != unlock ]; then
+          pr_ok=""
+          for _ in 1 2 3 4 5; do
+            gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" > pr.json
+            m=$(python3 -c "import json;print(json.load(open('pr.json')).get('mergeable'))")
+            if [ "$m" != "None" ]; then pr_ok=1; break; fi
+            sleep 3
+          done
+          [ -n "$pr_ok" ] || echo "::warning::PR mergeable still unknown after retries; treating as not-ready"
+        else
           gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" > pr.json
-          m=$(python3 -c "import json;print(json.load(open('pr.json')).get('mergeable'))")
-          if [ "$m" != "None" ]; then pr_ok=1; break; fi
-          sleep 3
-        done
-        [ -n "$pr_ok" ] || echo "::warning::PR mergeable still unknown after retries; treating as not-ready"
+        fi
         # Review decision (ruleset-driven). A null decision means the ruleset
         # requires no review; normalize it to the explicit NONE sentinel —
         # authorize fails closed on anything that isn't NONE or a decision
@@ -491,15 +503,21 @@ runs:
           echo "is_member=false" >> "$GITHUB_OUTPUT"
         fi
         # Successful plan run for the CURRENT head (the reviewed-plan lookup).
-        head=$(python3 -c "import json;print(json.load(open('pr.json'))['head']['sha'])")
-        gh api "repos/$GITHUB_REPOSITORY/actions/workflows/plan.yml/runs?head_sha=$head&status=success" \
-          --jq '{id: (.workflow_runs[0].id // ""), head_sha: (.workflow_runs[0].head_sha // "")}' > plan_run.json
-        # Empty id -> no plan run; normalize to {} so authorize treats it as stale.
-        python3 -c "import json;d=json.load(open('plan_run.json'));open('plan_run.json','w').write(json.dumps(d if d.get('id') else {}))"
+        # An unlock consumes no plan artifact and must not depend on a plan
+        # run existing; authorize ignores the file for unlock, so leave it {}.
+        if [ "$SHIPMATE_VERB" != unlock ]; then
+          head=$(python3 -c "import json;print(json.load(open('pr.json'))['head']['sha'])")
+          gh api "repos/$GITHUB_REPOSITORY/actions/workflows/plan.yml/runs?head_sha=$head&status=success" \
+            --jq '{id: (.workflow_runs[0].id // ""), head_sha: (.workflow_runs[0].head_sha // "")}' > plan_run.json
+          # Empty id -> no plan run; normalize to {} so authorize treats it as stale.
+          python3 -c "import json;d=json.load(open('plan_run.json'));open('plan_run.json','w').write(json.dumps(d if d.get('id') else {}))"
+        else
+          echo '{}' > plan_run.json
+        fi
 
     - name: Authorize
       id: authz
-      if: ${{ steps.parse.outputs.route == 'apply' && steps.apptoken.outcome == 'success' }}
+      if: ${{ (steps.parse.outputs.route == 'apply' || steps.parse.outputs.route == 'unlock') && steps.apptoken.outcome == 'success' }}
       shell: bash
       env:
         IS_MEMBER: ${{ steps.gather.outputs.is_member }}
@@ -509,6 +527,7 @@ runs:
         PLAN_RUN_JSON: plan_run.json
         SHIPMATE_ENV: ${{ steps.parse.outputs.env }}
         SHIPMATE_UNGATED_ENVS: ${{ inputs.ungated-envs }}
+        SHIPMATE_VERB: ${{ steps.parse.outputs.route }}
       run: python3 "$GITHUB_ACTION_PATH/../../scripts/authorize"
 
     - name: React on accept
@@ -540,7 +559,7 @@ runs:
         gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -f body=":memo: shipmate: environment \`$ENVIRONMENT\` is permitted to apply without an approving review, per the \`SHIPMATE_UNGATED_ENVS\` repository variable — see the apply result comment for what actually applied." >/dev/null
 
     - name: Reject with reason
-      if: ${{ steps.parse.outputs.route == 'apply' && steps.apptoken.outcome == 'success' && steps.authz.outputs.authorized != 'true' }}
+      if: ${{ (steps.parse.outputs.route == 'apply' || steps.parse.outputs.route == 'unlock') && steps.apptoken.outcome == 'success' && steps.authz.outputs.authorized != 'true' }}
       shell: bash
       env:
         GH_TOKEN: ${{ inputs.github-token }}

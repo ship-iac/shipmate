@@ -662,3 +662,48 @@ def test_authorize_step_supplies_every_env_var_authorize_reads():
     read = set(re.findall(r"os\.environ(?:\.get)?[\[(]['\"](SHIPMATE_[A-Z_]+)['\"]", src))
     assert read, "expected at least one SHIPMATE_* read in authorize"
     assert read <= set(_authorize_step()["env"])
+
+
+#: Every step the apply route gates on, with the whole `if:` expression it must
+#: carry -- hand-written, not derived from the action. `unlock` reuses these
+#: steps rather than growing a parallel set, so each one has to admit exactly
+#: the two routes: narrow one back and an unlock parses, authorizes and then
+#: silently does nothing.
+_SHARED_ROUTE_IFS = {
+    "Mint App token (members:read)": (
+        "${{ steps.parse.outputs.route == 'apply' || steps.parse.outputs.route == 'unlock' }}"
+    ),
+    "App token unavailable (App not installed?)": (
+        "${{ (steps.parse.outputs.route == 'apply' || steps.parse.outputs.route == 'unlock')"
+        " && steps.apptoken.outcome != 'success' }}"
+    ),
+    "Gather authorization inputs": (
+        "${{ (steps.parse.outputs.route == 'apply' || steps.parse.outputs.route == 'unlock')"
+        " && steps.apptoken.outcome == 'success' }}"
+    ),
+    "Authorize": (
+        "${{ (steps.parse.outputs.route == 'apply' || steps.parse.outputs.route == 'unlock')"
+        " && steps.apptoken.outcome == 'success' }}"
+    ),
+    "Reject with reason": (
+        "${{ (steps.parse.outputs.route == 'apply' || steps.parse.outputs.route == 'unlock')"
+        " && steps.apptoken.outcome == 'success' && steps.authz.outputs.authorized != 'true' }}"
+    ),
+}
+
+
+def test_the_apply_route_steps_admit_exactly_apply_and_unlock():
+    matched = {
+        s["name"]: s.get("if")
+        for s in action_steps("comment-ops")
+        if s.get("name") in _SHARED_ROUTE_IFS
+    }
+    assert matched == _SHARED_ROUTE_IFS
+
+
+def test_the_mode_output_names_the_dispatch_mode_the_route_selects():
+    """Task 7's dispatch keys off this, so a literal here sends every unlock
+    down the apply path."""
+    assert action_yaml("comment-ops")["outputs"]["mode"]["value"] == (
+        "${{ steps.parse.outputs.route == 'unlock' && 'unlock' || 'apply' }}"
+    )
