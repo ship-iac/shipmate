@@ -204,8 +204,11 @@ def main():
     # (a stale plan) still refuses, and a report over a refused apply is false.
     # Requires a named environment: a bare apply is reported per env by
     # apply-all-detect instead, and has no single env to name here.
+    # Requires verb="apply": the exemption is an audit record about applying
+    # without a review; unlock applies nothing, so must never produce this output.
     exempted = (
-        ok
+        verb == "apply"
+        and ok
         and review_decision == "REVIEW_REQUIRED"
         and bool(environment)
         and environment.casefold() in ungated_envs
