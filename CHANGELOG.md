@@ -13,6 +13,19 @@ grammar are declared unstable in `README.md`.
 
 ## [Unreleased]
 
+### Changed
+
+- **The plan comment's verdict is two-state.** It rendered `🔴` whenever a cell
+  had a non-zero destroy count, and a destroy count also covers ordinary
+  replacements — an immutable attribute changing, a `keepers` value moving, a
+  provider forcing replacement — so a routine version bump rendered every
+  affected cell red, in the table a reader scans when something has actually
+  broken. The verdict is now `🟢` no changes / `🟡` changes; impact is carried by
+  the add/change/destroy counts already in the row and the section header. A
+  large teardown and a one-line change render the same `🟡` — the counts beside
+  them are what differ. No input, output or check name changes. Reported by the
+  cross-organization consumer.
+
 ### Documentation
 
 - `docs/hardening.md` gains a **Plan prerequisites** section: which checklist rows

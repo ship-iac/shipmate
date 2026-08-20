@@ -112,9 +112,10 @@ def fence(text, f=None, lang="diff"):
 
 
 def emoji(cell):
-    if not cell["changed"]:
-        return "🟢"
-    return "🔴" if cell["destroy"] else "🟡"
+    """🟢 no changes / 🟡 changes. Deliberately two-state: a destroy count
+    also covers ordinary replacements, so red on it renders healthy plans as
+    broken. Magnitude is the row's own add/change/destroy counts."""
+    return "🟡" if cell["changed"] else "🟢"
 
 
 def _md_escape(s):

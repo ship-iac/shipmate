@@ -102,7 +102,8 @@ def test_fence_lang_param_plain_vs_default_diff():
 
 def test_emoji_verdicts():
     assert sc.emoji(_cell(changed=False, add=0)) == "🟢"
-    assert sc.emoji(_cell(destroy=2)) == "🔴"
+    # A destroy count also covers replacements -- it must not render red.
+    assert sc.emoji(_cell(destroy=2)) == "🟡"
     assert sc.emoji(_cell()) == "🟡"
 
 
@@ -139,7 +140,7 @@ def test_build_table_row_per_cell_with_emoji_counts_and_link():
     ]
     table = sc.build_table(cells, CHECKS, RUN_URL)
     assert "| 🟡 | stacks/app | dev-eu | 1 | 0 | 0 | [plan](https://ck/app-eu) |" in table
-    assert "| 🔴 | stacks/db | dev-us | 0 | 0 | 2 | [plan](https://ck/db-us) |" in table
+    assert "| 🟡 | stacks/db | dev-us | 0 | 0 | 2 | [plan](https://ck/db-us) |" in table
 
 
 def test_build_table_empty_case():
