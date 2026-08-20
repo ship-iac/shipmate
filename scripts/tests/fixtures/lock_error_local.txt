@@ -1,0 +1,12 @@
+│ Error: Error acquiring the state lock
+│
+│ Error message: The process cannot access the file because another process
+│ has locked a portion of the file.
+│ Lock Info:
+│   ID:        6e191647-8a1d-d0fc-5096-9dd8d93b2fb6
+│   Path:      terraform.tfstate
+│   Operation: OperationTypeApply
+│   Who:       LAPTOP\kenp8@Laptop
+│   Version:   1.12.4
+│   Created:   2026-08-20 19:46:05.0074419 +0000 UTC
+│   Info:

@@ -1,0 +1,14 @@
+│ Error: Error acquiring the state lock
+│
+│ Error message: operation error S3: PutObject, https response error
+│ StatusCode: 412, RequestID: VTVF48Z1HB5NQJDE, HostID: …,
+│ api error PreconditionFailed: At least one of the pre-conditions you
+│ specified did not hold
+│ Lock Info:
+│   ID:        0f866bdc-d621-7230-876f-fa7398eff1f8
+│   Path:      repo-examples-shipmate-state/repo-example-stacks-aws/sbx/eu-west-1/sandbox/box/terraform.tfstate
+│   Operation: OperationTypePlan
+│   Who:       LAPTOP\kenp8@Laptop
+│   Version:   1.12.4
+│   Created:   2026-08-20 19:53:19.7388258 +0000 UTC
+│   Info:
