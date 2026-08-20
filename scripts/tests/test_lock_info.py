@@ -50,6 +50,17 @@ def test_a_truncated_block_is_not_a_lock():
     assert li.parse(text) is None
 
 
+def test_a_block_cut_after_the_id_is_not_a_lock():
+    # Fail closed: ID is captured and valid, but the block is cut off before
+    # the other required fields, so guessing an id from half a block is refused.
+    text = (
+        "│ Error: Error acquiring the state lock\n"
+        "│ Lock Info:\n"
+        "│   ID:        6e191647-8a1d-d0fc-5096-9dd8d93b2fb6\n"
+    )
+    assert li.parse(text) is None
+
+
 def test_lock_info_without_the_acquisition_error_is_not_a_lock():
     text = "│ Lock Info:\n│   ID:        6e191647-8a1d-d0fc-5096-9dd8d93b2fb6\n"
     assert li.parse(text) is None

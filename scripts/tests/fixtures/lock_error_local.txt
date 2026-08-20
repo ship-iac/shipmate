@@ -1,3 +1,4 @@
+╷
 │ Error: Error acquiring the state lock
 │
 │ Error message: The process cannot access the file because another process
@@ -10,3 +11,10 @@
 │   Version:   1.12.4
 │   Created:   2026-08-20 19:46:05.0074419 +0000 UTC
 │   Info:
+│
+│
+│ OpenTofu acquires a state lock to protect the state from being written
+│ by multiple users at the same time. Please resolve the issue above and try
+│ again. For most commands, you can disable locking with the "-lock=false"
+│ flag, but this is not recommended.
+╵

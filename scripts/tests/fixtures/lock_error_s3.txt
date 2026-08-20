@@ -1,7 +1,9 @@
+╷
 │ Error: Error acquiring the state lock
 │
 │ Error message: operation error S3: PutObject, https response error
-│ StatusCode: 412, RequestID: VTVF48Z1HB5NQJDE, HostID: …,
+│ StatusCode: 412, RequestID: VTVF48Z1HB5NQJDE, HostID:
+│ UgZ7rteEJR3fPKjEHo3T637DEPJskby8KT93YTxUANL04G33kx9nPVjB/LW+jCSPxRGpRM/YHHZL7FXQJxm7Q+4mGF1QzWLz,
 │ api error PreconditionFailed: At least one of the pre-conditions you
 │ specified did not hold
 │ Lock Info:
@@ -12,3 +14,10 @@
 │   Version:   1.12.4
 │   Created:   2026-08-20 19:53:19.7388258 +0000 UTC
 │   Info:
+│
+│
+│ OpenTofu acquires a state lock to protect the state from being written
+│ by multiple users at the same time. Please resolve the issue above and try
+│ again. For most commands, you can disable locking with the "-lock=false"
+│ flag, but this is not recommended.
+╵
