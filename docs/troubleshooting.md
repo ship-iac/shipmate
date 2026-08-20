@@ -250,6 +250,12 @@ a cancelled run). If the apply **partially** succeeded, the state serial advance
 and the stored plan no longer matches it, so that retry is refused here instead.
 Re-plan first; the two recoveries are not interchangeable.
 
+A cancelled run has one further failure mode a bare retry cannot clear: it can
+die holding the state lock, and every later apply of that cell then fails
+acquiring it. The apply result comment names each such cell, the held lock's id
+and when it was taken, and the command that releases it — releasing the lock is
+not recovery either, so if the reviewed plan has gone stale, re-plan.
+
 **No supported route aims an apply at a superseded plan**, which is why this error
 normally means the state moved rather than that the wrong plan was chosen.
 both dispatched apply workflows refuse in their `guard` job any dispatch whose
