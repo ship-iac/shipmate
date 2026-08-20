@@ -1741,25 +1741,51 @@ def test_lock_note_escapes_author_controlled_names():
     assert "&lt;/summary&gt;&lt;b&gt;evil" in note
 
 
-def test_lock_note_escapes_the_lock_values_from_apply_text():
-    # `Created` is captured verbatim by lock-info, and apply.txt is provider /
-    # local-exec output a stack under review can influence. The id is
-    # charset-pinned by lock-info, so `created` is the only place an evil
-    # payload can reach the note -- and it must not survive unescaped.
-    text = _fixture_text("lock_error_s3.txt").replace(
-        "2026-08-20 19:53:19.7388258 +0000 UTC", "x</summary><b>evil"
+def _lock_text(created):
+    """The s3 lock capture with a chosen `Created:` value."""
+    return _fixture_text("lock_error_s3.txt").replace(
+        "2026-08-20 19:53:19.7388258 +0000 UTC", created
     )
+
+
+def test_lock_note_omits_held_since_when_the_created_value_was_refused():
+    # `Created` is unbounded runtime output, so lock-info blanks a value that
+    # fails its guard rather than losing the whole lock (the id is what the
+    # engine acts on). The note must then read grammatically without it.
     rows = [
         _row(
             status="failed",
             stack_display="app",
             environment="dev-eu",
-            apply_text=text,
+            apply_text=_lock_text("x</summary><b>evil **and** bold"),
         )
     ]
     note = ac._lock_note(rows, "dev-eu")
-    assert "</summary>" not in note
-    assert "&lt;/summary&gt;&lt;b&gt;evil" in note
+    assert "0f866bdc-d621-7230-876f-fa7398eff1f8" in note
+    assert "held since" not in note
+    assert "evil" not in note and "</summary>" not in note
+    assert "(lock **0f866bdc-d621-7230-876f-fa7398eff1f8**) — an earlier apply" in note
+
+
+def test_lock_note_cannot_blow_the_comment_cap():
+    # apply.txt is capped at SIZE_BUDGET, not per-field: a crafted `Created:`
+    # line of ~59,900 chars parses fine, and _LOCK_NAMED bounds the cell COUNT,
+    # not the rendered LENGTH. The note rides in `top`, which the HARD_CAP
+    # table-only fallback re-emits verbatim and can never shed -- so an
+    # unguarded value would cost the whole comment with 2-3 failed cells.
+    rows = [
+        _row(
+            status="failed",
+            stack_display=f"s{i}",
+            stack_path=f"stacks/s{i}",
+            environment="dev-eu",
+            apply_text=_lock_text("2" * 59_900),
+        )
+        for i in range(3)
+    ]
+    body = ac.build_comment(rows, [], RUN_URL, "pending", [], [], "dev-eu")
+    assert len(body) <= ac.sc.HARD_CAP
+    assert "state lock held" in body
 
 
 def test_lock_note_bare_form_stays_bare():

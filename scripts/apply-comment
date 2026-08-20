@@ -130,6 +130,17 @@ def _unrecorded_note(rows):
     )
 
 
+def _lock_cell(row, lock):
+    """One cell of the state-lock note: its name, the lock id, and when the lock
+    was taken -- the last omitted entirely when lock-info refused the `Created`
+    value (unbounded runtime output), so the sentence stays grammatical."""
+    held = f", held since **{sc._md_escape(lock['created'])}**" if lock["created"] else ""
+    return (
+        f"**{sc._md_escape(row['stack_display'])} / {sc._md_escape(row['environment'])}** "
+        f"(lock **{sc._md_escape(lock['id'])}**{held})"
+    )
+
+
 def _lock_note(rows, env_name):
     """The 'state lock held' note, naming every cell whose apply could not
     acquire the lock.
@@ -137,7 +148,12 @@ def _lock_note(rows, env_name):
     Cell names are author-controlled, and the lock id and creation time come
     from apply.txt -- provider and `local-exec` output a stack under review can
     influence -- so all four are **bold** + `_md_escape`, never a backtick code
-    span, which `_md_escape` does not escape.
+    span, which `_md_escape` does not escape. `_md_escape` alone is not enough
+    for the lock values, which is why lock-info bounds their length and charset
+    at the source: it escapes neither `*` nor a backtick, and `apply_text` is
+    capped only in total, so one crafted `Created:` line could both break out of
+    the bold span and, since _LOCK_NAMED bounds the cell COUNT and not the
+    rendered length, push `top` past HARD_CAP and cost the whole comment.
 
     The _LOCK_NAMED cap is the `_unrecorded_note` cap for the same reason: this
     note rides in `top`, which the HARD_CAP table-only fallback re-emits
@@ -159,12 +175,7 @@ def _lock_note(rows, env_name):
     if not hits:
         return ""
     named, rest = hits[:_LOCK_NAMED], len(hits) - _LOCK_NAMED
-    listed = ", ".join(
-        f"**{sc._md_escape(r['stack_display'])} / {sc._md_escape(r['environment'])}** "
-        f"(lock **{sc._md_escape(lock['id'])}**, held since "
-        f"**{sc._md_escape(lock['created'])}**)"
-        for r, lock in named
-    )
+    listed = ", ".join(_lock_cell(r, lock) for r, lock in named)
     if rest > 0:
         listed += f", and {rest} more (see the ❌ rows above)"
     cmd = f"shipmate unlock {sc._md_escape(env_name)}" if env_name else "shipmate unlock <env>"

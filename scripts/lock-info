@@ -13,8 +13,8 @@ line differs — so nothing here reads that line. The block arrives inside
 OpenTofu's `|`-prefixed diagnostic box even with no TTY, and values are
 space-padded after the colon.
 
-Fail-closed by construction: anything short of a complete, in-charset block
-returns None, which every caller reads as "do not unlock".
+Fail-closed by construction: anything short of a complete block with an
+in-charset `ID` returns None, which every caller reads as "do not unlock".
 
 `Who` is deliberately not returned. It is `user@host` (`runner@fv-az…` on a
 hosted runner), so it cannot attribute a run, and a caller that could see it
@@ -41,6 +41,15 @@ _ID_RE = re.compile(r"^[0-9a-fA-F][0-9a-fA-F-]{7,63}$")
 _WANTED = {"ID": "id", "Path": "path", "Operation": "operation", "Created": "created"}
 
 
+# `created` and `operation` are display-only, and unlike `id` they have no
+# format the engine can rely on -- apply.txt is provider/`local-exec` output,
+# capped only in total (60,000 chars), so one `Created:` line can carry tens of
+# thousands of characters or markdown emphasis into the bot comment that renders
+# it. Both are whitelisted at the source so every consumer inherits the bound.
+_CREATED_RE = re.compile(r"^[0-9A-Za-z:.+\- ]{1,64}$")
+_OPERATION_RE = re.compile(r"^[A-Za-z]{1,32}$")
+
+
 def _strip(line):
     return _PREFIX_RE.sub("", line).strip()
 
@@ -52,6 +61,13 @@ def parse(text):
     partial block means the output was truncated (the tail cap in
     apply-comment, a killed process), and guessing an id from half a block is
     the one thing this must never do.
+
+    `created` and `operation` are display-only and whitelisted: a value that
+    fails its guard becomes the empty string and the lock is still returned.
+    The asymmetry with `id` is deliberate -- `id` reaches a `force-unlock` argv,
+    so an unusable one means there is nothing safe to act on, while refusing the
+    whole lock over a cosmetic field would suppress a real lock note and block a
+    legitimate unlock. Callers must render neither field unconditionally.
     """
     lines = [_strip(ln) for ln in text.splitlines()]
     if not any(_ERROR_LINE in ln for ln in lines):
@@ -72,6 +88,9 @@ def parse(text):
         return None
     if not _ID_RE.match(found["id"]):
         return None
+    for key, ok in (("created", _CREATED_RE), ("operation", _OPERATION_RE)):
+        if not ok.match(found[key]):
+            found[key] = ""
     return found
 
 

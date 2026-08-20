@@ -92,3 +92,50 @@ def test_undecorated_output_parses_too():
         "  Created:   2026-08-20 19:46:05.0074419 +0000 UTC\n"
     )
     assert li.parse(text)["id"] == "6e191647-8a1d-d0fc-5096-9dd8d93b2fb6"
+
+
+def _with(field, value):
+    """The s3 capture with one field's value replaced."""
+    olds = {
+        "Created": "2026-08-20 19:53:19.7388258 +0000 UTC",
+        "Operation": "OperationTypePlan",
+    }
+    return _fixture("lock_error_s3.txt").replace(olds[field], value)
+
+
+S3_ID = "0f866bdc-d621-7230-876f-fa7398eff1f8"
+
+
+def test_a_real_created_value_survives_its_guard():
+    # The guard below must reject crafted values WITHOUT blanking the real
+    # format -- a blanket blank-out would silently cost every lock its age.
+    assert li.parse(_fixture("lock_error_local.txt"))["created"] == (
+        "2026-08-20 19:46:05.0074419 +0000 UTC"
+    )
+    assert li.parse(_fixture("lock_error_s3.txt"))["created"] == (
+        "2026-08-20 19:53:19.7388258 +0000 UTC"
+    )
+    assert li.parse(_fixture("lock_error_s3.txt"))["operation"] == "OperationTypePlan"
+
+
+def test_an_oversized_created_is_dropped_but_the_lock_survives():
+    # apply.txt is capped at SIZE_BUDGET (60,000 chars), so a `local-exec` line
+    # can carry a ~59,900-char Created value. The id is what the engine acts
+    # on, so the lock must survive; the unbounded value must not.
+    got = li.parse(_with("Created", "2" * 59_900))
+    assert got["created"] == ""
+    assert got["id"] == S3_ID
+
+
+def test_a_created_carrying_markdown_emphasis_is_dropped():
+    # _md_escape does not escape `*` or a backtick, and the renderer puts this
+    # value inside a **bold** span in the bot's trusted voice.
+    assert li.parse(_with("Created", "2026 **ship it** now"))["created"] == ""
+    assert li.parse(_with("Created", "2026 `code` now"))["created"] == ""
+    assert li.parse(_with("Created", "2026 **ship it** now"))["id"] == S3_ID
+
+
+def test_an_out_of_charset_operation_is_dropped_but_the_lock_survives():
+    got = li.parse(_with("Operation", "OperationType**Apply**"))
+    assert got["operation"] == ""
+    assert got["id"] == S3_ID
