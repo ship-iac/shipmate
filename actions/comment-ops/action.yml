@@ -1,5 +1,5 @@
 name: shipmate comment-ops
-description: Parse a shipmate command comment, authorize it (team membership via a short-lived App token, PR satisfies the branch ruleset's review policy + mergeable + reviewed-plan-exists), and react or reject. Outputs feed actions/dispatch.
+description: Parse a shipmate command comment, authorize it (team membership via a short-lived App token; `apply` additionally requires that the PR satisfies the branch ruleset's review policy + mergeable + reviewed-plan-exists, while `unlock` is membership-only), and react or reject. Outputs feed actions/dispatch.
 inputs:
   app-id:
     description: GitHub App id (a repo/org variable).
@@ -40,7 +40,7 @@ outputs:
     description: Parsed target environment; empty for a bare `shipmate apply` (all non-explicit environments).
     value: ${{ steps.authz.outputs.environment }}
   plan-run-id:
-    description: Plan run id holding the reviewed plan.
+    description: Plan run id holding the reviewed plan; always empty on the `unlock` route, which consumes no plan artifact.
     value: ${{ steps.authz.outputs.plan_run_id }}
   head-sha:
     description: PR head SHA.
@@ -540,7 +540,7 @@ runs:
         set -euo pipefail
         gh api -X POST "repos/$GITHUB_REPOSITORY/issues/comments/$COMMENT_ID/reactions" \
           -f content=rocket >/dev/null
-        echo "::notice title=comment-ops::command authorized (apply is dispatched by the caller's next step)"
+        echo "::notice title=comment-ops::command authorized (the caller's next step dispatches it)"
 
     # A report, not a decision — authorize already decided. It exists because
     # `reviewDecision` keeps no history: once the review lands, nothing else

@@ -42,8 +42,9 @@ visible as an audit trail. The plan
 matrix job's own `<stack> / <env>` check-run stays on the shared
 `github-actions` identity — it's the job's own auto check-run, not something
 the App creates separately.
-Authorization requires team membership, a mergeable PR that satisfies the
-branch ruleset's review policy, and a reviewed plan for the PR's current head.
+Authorizing an apply requires team membership, a mergeable PR that satisfies
+the branch ruleset's review policy, and a reviewed plan for the PR's current
+head; authorizing an unlock requires team membership alone.
 Comment-ops keeps the entire interaction surface inside the pull request
 that is already the unit of review, with an auditable history of who asked
 for what and when. See `CONTRACT.md` for the full grammar and authorization
@@ -51,7 +52,7 @@ contract, and `docs/github-app.md` for one-time App setup.
 
 ## PR comment commands
 
-Three verbs are active (`plan` and `destroy` are reserved for later):
+Four verbs are active (`plan` and `destroy` are reserved for later):
 
 - `shipmate apply [env]` — apply the reviewed plan for one environment, or
   every non-explicit environment when the environment is omitted.
@@ -59,6 +60,9 @@ Three verbs are active (`plan` and `destroy` are reserved for later):
   environments, App permissions, and warnings from this commit's workflow
   runs.
 - `shipmate help` — show this command list.
+- `shipmate unlock <env>` — release a state lock stranded by a cancelled or
+  killed apply, so the environment's stacks can apply again. Does not
+  re-apply, and does not recover a partial apply.
 
 The sticky plan comment's footer points at `shipmate help`, so the commands are
 discoverable from the pull request itself. `doctor`'s environment checks cover
@@ -66,9 +70,11 @@ the environments of the stacks a given pull request changed, and its report says
 which ones those were — it is a check on the settings that pull request touches,
 not a repository-wide audit.
 
-`help` and `doctor` are read-only; `apply` is the one verb with a full
-authorization check (approvers-team membership, a mergeable and reviewed PR, and
-a reviewed plan for the current head — see Comment-ops above). `help` answers
+`help` and `doctor` are read-only; `apply` and `unlock` are authorized. `apply`
+carries the full check (approvers-team membership, a mergeable and reviewed PR,
+and a reviewed plan for the current head — see Comment-ops above); `unlock`
+carries a narrower one, approvers-team membership alone, because it releases a
+lock rather than changing infrastructure. `help` answers
 any commenter. `doctor` does not: it names the guardrails this repository is
 missing — that `shipmate / gate` is not required on the default branch, that an
 apply environment has no approval rule, which approvers team is configured

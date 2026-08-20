@@ -506,6 +506,7 @@ themselves contain text that matches the command grammar.
 | `shipmate apply [env]` | active | optional env | apply requirements, below |
 | `shipmate doctor` | active | none | read-only, but the commenter's `author_association` must be `OWNER`, `MEMBER` or `COLLABORATOR` (a classification, not a permission check) |
 | `shipmate help` | active | none | none — read-only, open to any commenter |
+| `shipmate unlock <env>` | active | required env | team membership only — no review policy, no mergeable check, no reviewed plan |
 | `shipmate plan` | reserved | — | — |
 | `shipmate destroy` | reserved | — | — |
 
