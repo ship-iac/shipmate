@@ -70,6 +70,16 @@ VERBS = {
         "route": None,
         "desc": "Destroy an environment's stacks — not yet implemented.",
     },
+    "unlock": {
+        "status": ACTIVE,
+        "args": "<env>",
+        "route": "unlock",
+        "desc": (
+            "Release a state lock stranded by a cancelled or killed apply, so "
+            "the environment's stacks can apply again. Does not re-apply, and "
+            "does not recover a partial apply."
+        ),
+    },
 }
 
 
@@ -93,6 +103,8 @@ def _verb_error(verb, env, tag):
         return f"verb `{verb}` is reserved and not yet implemented"
     if spec["args"] == "" and (env is not None or tag is not None):
         return f"`{verb}` takes no arguments (use `shipmate {verb}`)"
+    if spec["args"].startswith("<") and env is None:
+        return f"`{verb}` requires an environment (use `shipmate {verb} <env>`)"
     if tag is not None:
         # Parsed for forward-compat, but no component honors it yet — reject
         # rather than silently apply the whole env (matches reserved-verb handling).
