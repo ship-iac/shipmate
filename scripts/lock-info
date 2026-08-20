@@ -54,6 +54,31 @@ def _strip(line):
     return _PREFIX_RE.sub("", line).strip()
 
 
+def _fields(lines):
+    """The wanted fields of the block starting at `lines`, keeping only values
+    that pass their own guard.
+
+    Stops at the first line that is not `key: value` -- the block ends there,
+    and reading past it would pick up the prose OpenTofu prints after it.
+
+    `created` and `operation` are blanked rather than dropped, so `parse`'s
+    completeness check still sees a complete block; `id` is never touched here,
+    because an unusable one makes the whole lock unusable and `parse` refuses it.
+    """
+    found = {}
+    for ln in lines:
+        m = _FIELD_RE.match(ln)
+        if not m:
+            break
+        key = _WANTED.get(m.group("key"))
+        if key is not None:
+            found[key] = m.group("value")
+    for key, ok in (("created", _CREATED_RE), ("operation", _OPERATION_RE)):
+        if key in found and not ok.match(found[key]):
+            found[key] = ""
+    return found
+
+
 def parse(text):
     """The lock identity in `text`, or None if it holds no complete lock block.
 
@@ -62,12 +87,13 @@ def parse(text):
     apply-comment, a killed process), and guessing an id from half a block is
     the one thing this must never do.
 
-    `created` and `operation` are display-only and whitelisted: a value that
-    fails its guard becomes the empty string and the lock is still returned.
-    The asymmetry with `id` is deliberate -- `id` reaches a `force-unlock` argv,
-    so an unusable one means there is nothing safe to act on, while refusing the
-    whole lock over a cosmetic field would suppress a real lock note and block a
-    legitimate unlock. Callers must render neither field unconditionally.
+    `created` and `operation` are display-only and whitelisted (`_fields`): a
+    value that fails its guard becomes the empty string and the lock is still
+    returned. The asymmetry with `id` is deliberate -- it reaches a
+    `force-unlock` argv, so an unusable one means there is nothing safe to act
+    on, while refusing the whole lock over a cosmetic field would suppress a
+    real lock note and block a legitimate unlock. Callers must render neither
+    field unconditionally.
     """
     lines = [_strip(ln) for ln in text.splitlines()]
     if not any(_ERROR_LINE in ln for ln in lines):
@@ -76,21 +102,11 @@ def parse(text):
         start = next(i for i, ln in enumerate(lines) if ln == _BLOCK_START)
     except StopIteration:
         return None
-    found = {}
-    for ln in lines[start + 1 :]:
-        m = _FIELD_RE.match(ln)
-        if not m:
-            break
-        key = _WANTED.get(m.group("key"))
-        if key is not None:
-            found[key] = m.group("value")
+    found = _fields(lines[start + 1 :])
     if set(found) != set(_WANTED.values()):
         return None
     if not _ID_RE.match(found["id"]):
         return None
-    for key, ok in (("created", _CREATED_RE), ("operation", _OPERATION_RE)):
-        if not ok.match(found[key]):
-            found[key] = ""
     return found
 
 
