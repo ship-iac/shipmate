@@ -255,7 +255,11 @@ def test_unlock_failure_prints_degrade_message():
         path_dir, python3_path, gh_path = _create_stub_commands(tmpdir)
 
         # Stub gh to exit 22 (HTTP error) and print to stderr.
-        gh_stub_content = "#!/bin/bash\necho 'gh: Unexpected inputs provided: [\"mode\"] (HTTP 422)' >&2\nexit 22\n"
+        gh_stub_content = (
+            "#!/bin/bash\n"
+            "echo 'gh: Unexpected inputs provided: [\"mode\"] (HTTP 422)' >&2\n"
+            "exit 22\n"
+        )
         Path(gh_path).write_text(gh_stub_content)
         Path(gh_path).chmod(0o755)
 
@@ -308,7 +312,11 @@ def test_apply_failure_no_degrade_message():
         path_dir, python3_path, gh_path = _create_stub_commands(tmpdir)
 
         # Stub gh to exit 22.
-        gh_stub_content = "#!/bin/bash\necho 'gh: Unexpected inputs provided: [\"mode\"] (HTTP 422)' >&2\nexit 22\n"
+        gh_stub_content = (
+            "#!/bin/bash\n"
+            "echo 'gh: Unexpected inputs provided: [\"mode\"] (HTTP 422)' >&2\n"
+            "exit 22\n"
+        )
         Path(gh_path).write_text(gh_stub_content)
         Path(gh_path).chmod(0o755)
 
