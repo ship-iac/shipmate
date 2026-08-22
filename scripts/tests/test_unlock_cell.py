@@ -118,7 +118,9 @@ def test_no_step_swallows_its_own_failure():
     """Every step here fails the cell it belongs to. `continue-on-error` on the
     init in particular would turn "the engine could not look at the lock" into a
     green cell carrying a warning nobody reads across dozens of cells."""
-    for step in action_steps(_ACTION):
+    steps = action_steps(_ACTION)
+    assert steps, "the action parsed to zero steps -- this guard would assert nothing"
+    for step in steps:
         assert "continue-on-error" not in step, f"{step.get('name')!r} swallows its failure"
 
 
