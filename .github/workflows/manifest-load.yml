@@ -19,8 +19,8 @@ name: manifest-load
 #
 # @main means this is merge-time, not PR-time, coverage: `uses:` takes no
 # expressions, so the ref cannot follow the PR head. It still runs before any
-# release tag, which is where the defect escaped. workflow_dispatch is here to
-# re-check main by hand immediately before tagging.
+# release tag, which is where the defect escaped. workflow_dispatch is here for
+# the release runbook's pre-tag check, when the push run covered an earlier tip.
 
 on:
   push:
