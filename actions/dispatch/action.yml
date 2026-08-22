@@ -99,10 +99,12 @@ runs:
         out=$(gh api -X POST "repos/$REPO/actions/workflows/$WORKFLOW/dispatches" --input body.json 2>&1) || rc=$?
         printf '%s\n' "$out"
         if [ "$rc" -ne 0 ]; then
-          # Only a 422 says "undeclared input"; a 403/404/rate limit is a different
-          # problem entirely and explaining it as version skew sends the operator
-          # to re-pin workflows that are fine.
-          if [ "$MODE" = "unlock" ] && [[ "$out" == *"HTTP 422"* ]]; then echo "::error::The consumer's apply.yml does not declare the mode input; this repository's workflows predate shipmate unlock. Re-pin the consumer workflows to a release that has it (docs/releasing.md)."; fi
+          # Only a 422 that names `mode` as unexpected is version skew. A 403,
+          # a rate limit -- or a 422 about a different input, which is how an
+          # empty required `plan_run_id` reads -- is another problem entirely,
+          # and explaining it as skew sends the operator to re-pin workflows
+          # that are fine. The raw API message is printed above either way.
+          if [ "$MODE" = "unlock" ] && [[ "$out" == *"Unexpected inputs provided"* && "$out" == *mode* ]]; then echo "::error::The consumer's apply.yml does not declare the mode input; this repository's workflows predate shipmate unlock. Re-pin the consumer workflows to a release that has it (docs/releasing.md)."; fi
           exit "$rc"
         fi
         echo "::notice title=dispatch::dispatched $WORKFLOW on $DISPATCH_REF for ${ENVIRONMENT:-all environments} (ref $REF, plan run $PLAN_RUN_ID)"

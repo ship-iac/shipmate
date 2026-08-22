@@ -406,7 +406,10 @@ on:
         default: apply
       ref: { description: PR head SHA to apply, required: true }
       pr_number: { description: PR number, required: true }
-      plan_run_id: { description: Plan run id with the reviewed plans, required: true }
+      plan_run_id:
+        description: "Plan run id with the reviewed plans. Empty for `shipmate unlock`, which applies no plan"
+        required: false
+        default: ''
 permissions:
   contents: read
   actions: read

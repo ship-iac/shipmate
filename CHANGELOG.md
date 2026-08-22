@@ -11,6 +11,28 @@ section below names the SHA the release tags.
 The version line stays `v0.x` while action inputs, check names, and the comment
 grammar are declared unstable in `README.md`.
 
+## [0.16.1] — 2026-08-22
+
+### Fixed
+
+- **`v0.16.0`'s `actions/apply-detect` manifest does not load, which breaks the
+  apply and deploy paths.** One output description was written unquoted inside a
+  `{ }` flow mapping with a comma in it, so the comma split the value and GitHub
+  refused the file: `Unexpected value 'which consumes no plan run)'`. Every job
+  using the action died at manifest load, before any step ran. Plan runs are
+  unaffected — they do not use this action — so a consumer on `v0.16.0` sees
+  green plans and a dead apply. **Re-pin to this release.** A guard now asserts
+  every action manifest's inputs and outputs carry only keys GitHub defines,
+  because `yaml.safe_load` accepts the split form and GitHub does not.
+- The consumer `apply.yml` wrapper's `plan_run_id` input must be `required:
+  false` with an empty default: `shipmate unlock` applies no plan, and GitHub
+  rejects an empty value for a required `workflow_dispatch` input as "not
+  provided", so every unlock dispatch failed with an HTTP 422 before reaching the
+  engine. `docs/getting-started.md` now shows the corrected shape.
+- The dispatch failure message no longer blames a missing `mode` input for any
+  unlock-path 422. It says that only when GitHub names `mode` as unexpected; any
+  other 422 now prints the API's own message without a misleading explanation.
+
 ## [0.16.0] — 2026-08-22
 
 Tags `4fda446`.
