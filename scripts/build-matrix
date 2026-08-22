@@ -255,8 +255,8 @@ def assert_run_env_roundtrip(stack_dir):
             )
 
 
-def compute_cells(all_stacks=False, base=""):
-    stacks_by_env, tags_by_stack = env_membership(all_stacks, base)
+def compute_cells(all_stacks=False, base="", require_env_tag=True):
+    stacks_by_env, tags_by_stack = env_membership(all_stacks, base, require_env_tag)
     if tags_by_stack:
         assert_run_env_roundtrip(sorted(tags_by_stack)[0])
     return build_matrix(sorted(stacks_by_env), stacks_by_env, tags_by_stack)

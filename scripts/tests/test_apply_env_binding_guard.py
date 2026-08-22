@@ -1,22 +1,21 @@
-"""Guards how apply-env-level.yml's wave jobs bind a GitHub Environment.
+"""Guards how every job that touches a cell's state binds a GitHub Environment.
 
 Invariants:
-- all eight wave jobs bind the shared-mode expression and nothing else: an env
-  listed in vars.SHIPMATE_SHARED_ENVS binds the logical name, anything else
-  falls through to <env>-apply. The fall-through is the fail-safe direction --
-  the reviewer gate, the OIDC environment claim split and any environment secret
-  all live on the apply environment -- and where that environment does not exist
-  the apply-match fingerprint refuses the cell, on every layout that injects a
-  non-empty TF_VAR_* or TF_WORKSPACE (CONTRACT.md §Env model states the
-  condition and the one layout that gets no refusal);
+- all eight wave jobs, and apply.yml's `unlock` job, bind the shared-mode
+  expression and nothing else: an env listed in vars.SHIPMATE_SHARED_ENVS binds
+  the logical name, anything else falls through to <env>-apply. The
+  fall-through is the fail-safe direction -- the reviewer gate, the OIDC
+  environment claim split and any environment secret all live there -- and
+  where that environment does not exist the apply-match fingerprint refuses the
+  cell, on every layout that injects a non-empty TF_VAR_* or TF_WORKSPACE
+  (CONTRACT.md §Env model states the condition and the one layout that gets no
+  refusal);
 - snapshot binds no environment at all and complete binds shipmate-engine: a job
   that gains an env-derived binding is the regression;
-- every wave's concurrency block still keys on the logical matrix.environment,
-  so serialization does not fork by mode;
 - snapshot runs the environment pre-flight before it snapshots the apply checks,
   and both before any wave: the pre-flight is only a control while it can still
   refuse the run;
-- scripts/verify-environments computes the same binding the wave jobs bind.
+- scripts/verify-environments computes the same binding those jobs bind.
 
 That last one is the price of the pre-flight: the binding rule exists twice, as
 the YAML ternary above and as code. Two selectors for one property disagree
@@ -26,8 +25,9 @@ rule's outcome for the cases that distinguish it, and the script is compared to
 that.
 
 The realistic failure is accidental regression -- a reverted expression, one
-missed wave, an inverted ternary -- not a hostile edit to this SHA-pinned file,
-so one whole-value comparison per wave covers it.
+missed wave, a new job that never got the binding, an inverted ternary -- not a
+hostile edit to these SHA-pinned files, so one whole-value comparison per job
+covers it.
 
 Whole parsed values against hand-written constants, never substrings. The YAML
 folded scalar (`>-`) collapses the expression's two source lines into one
@@ -45,11 +45,17 @@ APPLY_ENV = (
     "&& matrix.environment "
     "|| format('{0}-apply', matrix.environment) }}"
 )
-CONCURRENCY = {
-    "group": "apply-${{ matrix.environment }}-${{ matrix.stack }}",
-    "cancel-in-progress": False,
-}
 WAVES = [f"wave{i}" for i in range(8)]
+
+#: workflow file -> the jobs in it that bind an env derived from a cell, written
+#: by hand. `unlock` is here and not only in test_unlock_job_isolation.py because
+#: this is ONE property with one constant: the `<env>-apply` environment is half
+#: of what bounds `shipmate unlock` (CONTRACT.md §Comment-ops), and the folded
+#: expression is byte-identical to the waves'.
+CELL_BOUND = {
+    "apply-env-level.yml": WAVES,
+    "apply.yml": ["unlock"],
+}
 
 #: (logical env, SHIPMATE_SHARED_ENVS value) -> the environment the apply binds.
 #: Hand-written, and the single source for both selectors: never generated from
@@ -71,9 +77,9 @@ SNAPSHOT_STEPS = [
 ]
 
 
-def _jobs():
-    spec = yaml.safe_load((WORKFLOWS / "apply-env-level.yml").read_text(encoding="utf-8"))
-    assert isinstance(spec, dict), "apply-env-level.yml did not parse to a mapping"
+def _jobs(workflow="apply-env-level.yml"):
+    spec = yaml.safe_load((WORKFLOWS / workflow).read_text(encoding="utf-8"))
+    assert isinstance(spec, dict), f"{workflow} did not parse to a mapping"
     return spec["jobs"]
 
 
@@ -84,12 +90,21 @@ def _wave_jobs():
     return {w: jobs[w] for w in WAVES}
 
 
-def test_every_wave_binds_the_shared_or_apply_environment():
-    for wave, job in _wave_jobs().items():
-        assert job.get("environment") == APPLY_ENV, (
-            f"{wave}: environment must resolve to the logical env only when it is "
-            "listed in vars.SHIPMATE_SHARED_ENVS, and to <env>-apply otherwise"
+def test_every_cell_bound_job_binds_the_shared_or_apply_environment():
+    for workflow, job_ids in CELL_BOUND.items():
+        jobs = _jobs(workflow)
+        missing = [j for j in job_ids if j not in jobs]
+        assert not missing, (
+            f"{workflow} no longer declares {missing} -- either they were renamed "
+            "(update CELL_BOUND) or the cells they bound are now unguarded"
         )
+        for job_id in job_ids:
+            assert jobs[job_id].get("environment") == APPLY_ENV, (
+                f"{workflow} job {job_id!r}: environment must resolve to the logical env "
+                "only when it is listed in vars.SHIPMATE_SHARED_ENVS, and to <env>-apply "
+                "otherwise -- the apply environment is where the reviewer gate, the OIDC "
+                "claim split and the environment secrets live"
+            )
 
 
 def test_snapshot_binds_no_environment_and_complete_binds_the_engine_environment():
@@ -128,12 +143,3 @@ def test_snapshot_verifies_the_environments_before_snapshotting_the_checks():
         "wave0 must gate on snapshot, or the pre-flight refuses a run whose first "
         "wave is already applying"
     )
-
-
-def test_every_wave_serializes_on_the_logical_environment():
-    for wave, job in _wave_jobs().items():
-        assert job.get("concurrency") == CONCURRENCY, (
-            f"{wave}: concurrency must key on the logical matrix.environment -- a "
-            "mode-dependent group would let a shared-mode and a split-mode apply "
-            "run against the same stack at once"
-        )

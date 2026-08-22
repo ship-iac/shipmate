@@ -44,6 +44,9 @@ sc = _load("summary-comment")
 # states can never disagree with the work queue they report on. A second
 # predicate here would drift silently.
 ag = _load("apply-gate")
+# COUPLING: the only parser of tofu's lock output in the engine, shared with
+# actions/unlock-cell so the note and the unlock can never name different locks.
+li = _load("lock-info")
 
 # COUPLED to env-order.MAX_ENV_LEVELS (which lists the GHA slots that move with
 # it); pinned equal by test_apply_comment. A local constant rather than an
@@ -81,6 +84,9 @@ _STATUS_PHRASE = {
 
 # How many cells the unrecorded note names before it summarizes the rest.
 _UNRECORDED_NAMED = 5
+
+# Same, for the state-lock note; same reasoning (see `_lock_note`).
+_LOCK_NAMED = 5
 
 
 def _not_attempted_note(env_name):
@@ -121,6 +127,66 @@ def _unrecorded_note(rows):
         + " — the apply succeeded but the apply check is not recorded as "
         "complete (it failed, was cancelled, or a newer plan re-created it), "
         "so `shipmate / gate` stays pending. Re-plan and re-apply."
+    )
+
+
+def _lock_cell(row, lock):
+    """One cell of the state-lock note: its name, the lock id, and when the lock
+    was taken -- the last omitted entirely when lock-info refused the `Created`
+    value (unbounded runtime output), so the sentence stays grammatical."""
+    held = f", held since **{sc._md_escape(lock['created'])}**" if lock["created"] else ""
+    return (
+        f"**{sc._md_escape(row['stack_display'])} / {sc._md_escape(row['environment'])}** "
+        f"(lock **{sc._md_escape(lock['id'])}**{held})"
+    )
+
+
+def _lock_note(rows, env_name):
+    """The 'state lock held' note, naming every cell whose apply could not
+    acquire the lock.
+
+    Cell names are author-controlled, and the lock id and creation time come
+    from apply.txt -- provider and `local-exec` output a stack under review can
+    influence -- so all four are **bold** + `_md_escape`, never a backtick code
+    span, which `_md_escape` does not escape. `_md_escape` alone is not enough
+    for the lock values, which is why lock-info bounds their length and charset
+    at the source: it escapes neither `*` nor a backtick, and `apply_text` is
+    capped only in total, so one crafted `Created:` line could both break out of
+    the bold span and, since _LOCK_NAMED bounds the cell COUNT and not the
+    rendered length, push `top` past HARD_CAP and cost the whole comment.
+
+    The _LOCK_NAMED cap is the `_unrecorded_note` cap for the same reason: this
+    note rides in `top`, which the HARD_CAP table-only fallback re-emits
+    verbatim and so can never shed. A stranded lock is usually correlated
+    across the cells of one cancelled run -- precisely the run that needs the
+    comment most.
+
+    It names no run. `Who` is `user@host` on a hosted runner, so the only
+    honest attribution is that per-cell concurrency admits one apply at a time,
+    which makes the holder that cell's most recent apply run.
+    """
+    hits = []
+    for r in rows:
+        if r["status"] != "failed":
+            continue
+        lock = li.parse(r["apply_text"] or "")
+        if lock:
+            hits.append((r, lock))
+    if not hits:
+        return ""
+    named, rest = hits[:_LOCK_NAMED], len(hits) - _LOCK_NAMED
+    listed = ", ".join(_lock_cell(r, lock) for r, lock in named)
+    if rest > 0:
+        listed += f", and {rest} more (see the ❌ rows above)"
+    cmd = f"shipmate unlock {sc._md_escape(env_name)}" if env_name else "shipmate unlock <env>"
+    return (
+        "🔒 state lock held: "
+        + listed
+        + " — an earlier apply was cancelled or killed before releasing the "
+        "lock, so nothing in these cells was applied. Per-cell concurrency "
+        "admits one apply at a time, so the holder was that cell's most recent "
+        f"apply run. Release it with `{cmd}`, then re-apply — unlocking is not "
+        "recovery: if the reviewed plan is now stale, re-plan."
     )
 
 
@@ -635,13 +701,19 @@ def _failure_line(results_csv, rows, env_name):
 
 def _top_section(env_name, results_csv, rows, jobs, run_url):
     """Header, the failure line (if any) directly beneath it, then the
-    table, then the unrecorded note (if any), then the not-attempted note.
+    table, then the state-lock note (if any), then the unrecorded note (if
+    any), then the not-attempted note.
     Split out of build_comment so the latter's complexity budget (C901
     ceiling 8) isn't spent on this concatenation."""
     header = _header(env_name)
     table = build_table(rows, jobs, run_url)
     fail_line = _failure_line(results_csv, rows, env_name)
     top = "\n\n".join(s for s in (header, fail_line, table) if s)
+    lock = _lock_note(rows, env_name)
+    if lock:
+        # Above the unrecorded note and below the table it points at: a held
+        # lock is why the run failed, and nothing in those cells was applied.
+        top += "\n\n" + lock
     unrecorded = _unrecorded_note(rows)
     if unrecorded:
         # Before the not-attempted note: a stranded applied cell needs a

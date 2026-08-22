@@ -1,6 +1,7 @@
 # scripts/tests/test_apply_comment.py
 import io
 import json
+import pathlib
 import re
 
 import pytest
@@ -41,6 +42,10 @@ def _row(**kw):
 
 def _job(name, url):
     return {"name": name, "html_url": url}
+
+
+def _fixture_text(name):
+    return (pathlib.Path(__file__).parent / "fixtures" / name).read_text(encoding="utf-8")
 
 
 # --- build_rows / expected-set merge ----------------------------------------
@@ -1640,3 +1645,169 @@ def test_main_without_checks_file_renders_the_artifact_only_comment(monkeypatch,
     body = (tmp_path / "comment.md").read_text(encoding="utf-8")
     assert "| ✅ | app | dev-eu |" in body
     assert "applied but not recorded" not in body
+
+
+# --- state-lock note ---------------------------------------------------------
+
+
+def test_lock_note_names_the_cell_the_lock_and_the_release_command():
+    rows = [
+        _row(
+            status="failed",
+            stack_display="app",
+            environment="dev-eu",
+            apply_text=_fixture_text("lock_error_s3.txt"),
+        )
+    ]
+    note = ac._lock_note(rows, "dev-eu")
+    assert "app / dev-eu" in note
+    assert "0f866bdc-d621-7230-876f-fa7398eff1f8" in note
+    assert "2026-08-20 19:53:19" in note
+    assert "shipmate unlock dev-eu" in note
+
+
+def test_lock_note_is_empty_without_a_lock():
+    rows = [
+        _row(
+            status="failed",
+            stack_display="app",
+            environment="dev-eu",
+            apply_text="Error: AccessDenied\n",
+        )
+    ]
+    assert ac._lock_note(rows, "dev-eu") == ""
+
+
+def test_lock_note_ignores_a_lock_in_a_cell_that_did_not_fail():
+    # A lock report in an applied cell's output is a retry that then succeeded
+    # (or author-controlled text imitating one); nothing is stranded.
+    rows = [
+        _row(
+            status="applied",
+            stack_display="app",
+            environment="dev-eu",
+            apply_text=_fixture_text("lock_error_local.txt"),
+        )
+    ]
+    assert ac._lock_note(rows, "dev-eu") == ""
+
+
+def test_lock_note_promises_no_run_attribution():
+    rows = [
+        _row(
+            status="failed",
+            stack_display="app",
+            environment="dev-eu",
+            apply_text=_fixture_text("lock_error_s3.txt"),
+        )
+    ]
+    note = ac._lock_note(rows, "dev-eu")
+    # `Who` is useless (runner@fv-az… on a hosted runner), so lock-info never
+    # returns it and the note may not claim to name a run.
+    assert "LAPTOP" not in note and "run #" not in note
+
+
+def test_lock_note_caps_the_named_cells():
+    rows = [
+        _row(
+            status="failed",
+            stack_display=f"s{i}",
+            stack_path=f"stacks/s{i}",
+            environment="dev-eu",
+            apply_text=_fixture_text("lock_error_s3.txt"),
+        )
+        for i in range(8)
+    ]
+    note = ac._lock_note(rows, "dev-eu")
+    assert "and 3 more" in note
+    assert "s7" not in note
+
+
+def test_lock_note_escapes_author_controlled_names():
+    # Same reasoning as the unrecorded note: stack_display and environment are
+    # author-controlled, so **bold** + _md_escape, never a backtick code span
+    # (_md_escape does not escape a backtick).
+    rows = [
+        _row(
+            status="failed",
+            stack_display="x</summary><b>evil",
+            environment="e</summary>vil",
+            apply_text=_fixture_text("lock_error_s3.txt"),
+        )
+    ]
+    note = ac._lock_note(rows, "dev-eu")
+    assert "</summary>" not in note
+    assert "<b>" not in note
+    assert "&lt;/summary&gt;&lt;b&gt;evil" in note
+
+
+def _lock_text(created):
+    """The s3 lock capture with a chosen `Created:` value."""
+    return _fixture_text("lock_error_s3.txt").replace(
+        "2026-08-20 19:53:19.7388258 +0000 UTC", created
+    )
+
+
+def test_lock_note_omits_held_since_when_the_created_value_was_refused():
+    # `Created` is unbounded runtime output, so lock-info blanks a value that
+    # fails its guard rather than losing the whole lock (the id is what the
+    # engine acts on). The note must then read grammatically without it.
+    rows = [
+        _row(
+            status="failed",
+            stack_display="app",
+            environment="dev-eu",
+            apply_text=_lock_text("x</summary><b>evil **and** bold"),
+        )
+    ]
+    note = ac._lock_note(rows, "dev-eu")
+    assert "0f866bdc-d621-7230-876f-fa7398eff1f8" in note
+    assert "held since" not in note
+    assert "evil" not in note and "</summary>" not in note
+    assert "(lock **0f866bdc-d621-7230-876f-fa7398eff1f8**) — an earlier apply" in note
+
+
+def test_lock_note_cannot_blow_the_comment_cap():
+    # apply.txt is capped at SIZE_BUDGET, not per-field: a crafted `Created:`
+    # line of ~59,900 chars parses fine, and _LOCK_NAMED bounds the cell COUNT,
+    # not the rendered LENGTH. The note rides in `top`, which the HARD_CAP
+    # table-only fallback re-emits verbatim and can never shed -- so an
+    # unguarded value would cost the whole comment with 2-3 failed cells.
+    rows = [
+        _row(
+            status="failed",
+            stack_display=f"s{i}",
+            stack_path=f"stacks/s{i}",
+            environment="dev-eu",
+            apply_text=_lock_text("2" * 59_900),
+        )
+        for i in range(3)
+    ]
+    body = ac.build_comment(rows, [], RUN_URL, "pending", [], [], "dev-eu")
+    assert len(body) <= ac.sc.HARD_CAP
+    assert "state lock held" in body
+
+
+def test_lock_note_bare_form_stays_bare():
+    rows = [
+        _row(
+            status="failed",
+            stack_display="app",
+            environment="dev-eu",
+            apply_text=_fixture_text("lock_error_s3.txt"),
+        )
+    ]
+    assert "shipmate unlock <env>" in ac._lock_note(rows, "")
+
+
+def test_lock_note_rides_in_top_section():
+    rows = [
+        _row(
+            status="failed",
+            stack_display="app",
+            environment="dev-eu",
+            apply_text=_fixture_text("lock_error_s3.txt"),
+        )
+    ]
+    top = ac._top_section("dev-eu", "failure", rows, [], "http://run")
+    assert "shipmate unlock dev-eu" in top

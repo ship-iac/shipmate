@@ -506,6 +506,7 @@ themselves contain text that matches the command grammar.
 | `shipmate apply [env]` | active | optional env | apply requirements, below |
 | `shipmate doctor` | active | none | read-only, but the commenter's `author_association` must be `OWNER`, `MEMBER` or `COLLABORATOR` (a classification, not a permission check) |
 | `shipmate help` | active | none | none — read-only, open to any commenter |
+| `shipmate unlock <env>` | active | required env | team membership plus the `<env>-apply` environment — no review policy, no mergeable check, no reviewed plan (below) |
 | `shipmate plan` | reserved | — | — |
 | `shipmate destroy` | reserved | — | — |
 
@@ -593,8 +594,8 @@ call and the harvest filter is a regression. `shipmate doctor` is entirely
 read-only: it dispatches nothing and changes no setting, and writes nothing
 but its own sticky comment
 and an `eyes` reaction on the triggering comment (both read-only verbs get
-that acknowledgement as soon as the command is accepted — `rocket` stays
-reserved for an authorized `apply`; a reaction that cannot be posted is
+that acknowledgement as soon as the command is accepted — `rocket` marks an
+authorized `apply` or `unlock` instead; a reaction that cannot be posted is
 ignored), a one-line error comment when it cannot mint an App token, a
 one-line refusal when the commenter may not have the report (below), and a
 handful of untitled `::warning::` annotations on its own degrade paths — an
@@ -821,6 +822,53 @@ does buy is that relaxing the gate is a separate, deliberate act against
 repository settings — it cannot ride inside the pull request that benefits from
 it, the way a Terramate global in the branch could.
 
+`shipmate unlock <env>` releases an OpenTofu state lock stranded by a cancelled
+or killed apply. The env is **required**: a destructive verb gets no wildcard,
+so there is no bare form.
+
+It is authorized by **shipmate team** membership at comment time plus the
+`<env>-apply` environment its job binds — the same required reviewers and the
+same OIDC subject an apply of that environment binds. The other three apply
+requirements are deliberately absent: **reviewed**, because an approving review
+reviews a diff and an unlock applies none; **mergeable** and **undiverged**,
+because the case this verb exists for is a lock stranded by a cancelled
+post-merge deploy, and a merged pull request reports `mergeable: null` — which
+the apply path reads as "still computing" — so keeping them would leave exactly
+that lock permanently unreleasable.
+
+Because that environment is half of the authorization, the run refuses when it
+does not exist — the same pre-flight the apply path runs before its first wave,
+on the unlock queue. GitHub would otherwise create the environment on demand
+with no reviewers, no wait timer and no branch policy, and keep it: an unlock
+into a missing environment would retire the reviewer gate for every later apply
+of that env.
+
+Its queue is the cells in that environment whose `apply / <stack> / <env>` check
+is still **pending**, not the reviewed plan artifacts: a lock outlives the run
+that stranded it, and those artifacts may be long expired. Each queued cell runs
+`tofu init`, then a probe (`tofu plan -input=false -refresh=false`, which takes
+the lock and so prints the holder's `Lock Info:` block when one is held), then
+`tofu force-unlock -force <id>` on the id parsed from that block — and nothing
+else. Three outcomes per cell: no lock held and lock released are both green,
+while **could not be determined** fails the cell with an `::error::` and is
+never reported as "no lock held". A cell whose apply check is not pending is not
+in the queue and not reachable by this verb.
+
+It needs **no IAM change**. On an S3 backend with `use_lockfile`, releasing a
+lock is the same `s3:DeleteObject` on `…/terraform.tfstate.tflock` that taking
+one already requires, so a role that can apply an environment can already
+unlock it.
+
+It reports **in the run, not in a comment** — a comment would need
+`pull-requests: write`, which consumers do not grant `apply.yml`. The `rocket`
+reaction confirms acceptance, per-cell detail lands in each job's step summary,
+and a failure reds the run.
+
+**Unlocking is not recovery.** A cancelled apply usually advanced state, so the
+reviewed plan may now be stale and the next apply refuses under the exact-plan
+fail-safe. The order is unlock, then `shipmate apply <env>`, then a re-plan if
+that refuses (`docs/troubleshooting.md`).
+
 The GitHub App carries this permission set: `actions: write`,
 `pull_requests: write`, `contents: read`, `members: read`, `checks: write`,
 `statuses: write`, `issues: write`, `environments: read` — the last for
@@ -869,9 +917,12 @@ itself), not something a separate API call authors, so it necessarily stays
 on the `github-actions` identity regardless of App permissions.
 
 `shipmate apply` and `deploy.yml` share the same per-env, per-stack
-`apply-<env>-<stack>` concurrency group, so exactly one apply ever runs
-against a given stack × environment at a time, regardless of whether it was
-triggered by a pre-merge comment or a post-merge push.
+`apply-<env>-<stack>` concurrency group, declared with
+`cancel-in-progress: false` on every wave job (§Fan-out), so exactly one apply
+ever runs against a given stack × environment at a time, regardless of whether
+it was triggered by a pre-merge comment or a post-merge push. A second apply for
+the same cell queues behind the first rather than racing or cancelling it, and
+is then refused by the exact-plan fail-safe if the first advanced the state.
 
 ## Post-plan topology
 

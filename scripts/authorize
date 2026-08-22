@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Decide whether a `shipmate apply` comment is authorized to dispatch.
+"""Decide whether a `shipmate apply` or `shipmate unlock` comment is authorized to dispatch.
 
 Pure decision from already-fetched GitHub API JSON. Checks run in fail-fast
 order and each returns a DISTINCT, actionable reason (the reject comment). The
@@ -112,13 +112,32 @@ def decide(
     plan_run,
     environment="",
     ungated_envs=frozenset(),
+    verb="apply",
 ):
-    """Return (authorized, reason). reason is '' when authorized."""
+    """Return (authorized, reason). reason is '' when authorized.
+
+    For verb="unlock": team membership is the only requirement. The checks
+    below authorize applying a reviewed plan; unlock applies none:
+
+    - reviewDecision: an approval reviews a diff; unlock applies none. What
+      bounds unlock is team membership plus the <env>-apply environment.
+    - mergeable: measured behaviour — a merged PR reports mergeable: null,
+      which the apply path reads as "still computing" and refuses. A stranded
+      lock from a cancelled post-merge deploy is reachable only from a merged
+      PR, so keeping this check would make the followup's second routine
+      trigger unfixable.
+    - plan run / staleness: unlock consumes no plan artifact.
+    """
     if not is_member:
         return False, (
             f"not authorized: the commenter is not a member of the "
             f"required approvers team `{approvers_team}`."
         )
+    if verb == "unlock":
+        # Everything below authorizes applying a reviewed plan; unlock applies
+        # none. See the docstring for why each check is inapplicable rather
+        # than merely inconvenient.
+        return True, ""
     if not pr.get("mergeable"):
         state = pr.get("mergeable_state", "unknown")
         if state in ("", "unknown"):
@@ -166,6 +185,9 @@ def main():
     # the decision used and the value reported can never differ.
     environment = os.environ.get("SHIPMATE_ENV", "")
     ungated_envs = parse_ungated_envs(os.environ.get("SHIPMATE_UNGATED_ENVS", ""))
+    verb = os.environ.get("SHIPMATE_VERB", "apply")
+    if verb not in ("apply", "unlock"):
+        raise SystemExit(f"::error::unknown verb {verb!r}")
     ok, reason = decide(
         is_member=is_member,
         approvers_team=os.environ.get("APPROVERS_TEAM", ""),
@@ -174,6 +196,7 @@ def main():
         plan_run=plan_run,
         environment=environment,
         ungated_envs=ungated_envs,
+        verb=verb,
     )
     # The targeted path's audit trail. `reviewDecision` is a live value with no
     # history, so once the review lands nothing distinguishes an apply that
@@ -181,8 +204,11 @@ def main():
     # (a stale plan) still refuses, and a report over a refused apply is false.
     # Requires a named environment: a bare apply is reported per env by
     # apply-all-detect instead, and has no single env to name here.
+    # Requires verb="apply": the exemption is an audit record about applying
+    # without a review; unlock applies nothing, so must never produce this output.
     exempted = (
-        ok
+        verb == "apply"
+        and ok
         and review_decision == "REVIEW_REQUIRED"
         and bool(environment)
         and environment.casefold() in ungated_envs

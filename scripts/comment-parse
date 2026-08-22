@@ -3,11 +3,12 @@
 
 Grammar: `shipmate <verb> [env] [tag-filter]`. Injection-safe: the whole
 command line must match one anchored regex; nothing is ever passed to a
-shell. `apply`, `doctor` and `help` are active; `plan`/`destroy` are reserved
-(recognized, rejected with a "reserved" message so the grammar is stable as
-verbs are added).
-env is optional: a bare `shipmate apply` targets every non-explicit
-environment (env=None -> "all"); a tag-filter cannot be mistaken for an env
+shell. `apply`, `doctor`, `help` and `unlock` are active; `plan`/`destroy` are
+reserved (recognized, rejected with a "reserved" message so the grammar is
+stable as verbs are added).
+env is optional for `apply` and required for `unlock`: a bare `shipmate apply`
+targets every non-explicit environment (env=None -> "all"), while a bare
+`shipmate unlock` is rejected. A tag-filter cannot be mistaken for an env
 because ':' is outside the env charset.
 """
 
@@ -70,6 +71,16 @@ VERBS = {
         "route": None,
         "desc": "Destroy an environment's stacks — not yet implemented.",
     },
+    "unlock": {
+        "status": ACTIVE,
+        "args": "<env>",
+        "route": "unlock",
+        "desc": (
+            "Release a state lock stranded by a cancelled or killed apply, so "
+            "the environment's stacks can apply again. Does not re-apply, and "
+            "does not recover a partial apply."
+        ),
+    },
 }
 
 
@@ -93,6 +104,8 @@ def _verb_error(verb, env, tag):
         return f"verb `{verb}` is reserved and not yet implemented"
     if spec["args"] == "" and (env is not None or tag is not None):
         return f"`{verb}` takes no arguments (use `shipmate {verb}`)"
+    if spec["args"].startswith("<") and env is None:
+        return f"`{verb}` requires an environment (use `shipmate {verb} <env>`)"
     if tag is not None:
         # Parsed for forward-compat, but no component honors it yet — reject
         # rather than silently apply the whole env (matches reserved-verb handling).
@@ -170,7 +183,9 @@ def help_markdown():
             "The environment is a GitHub Environment name such as `dev-eu`. "
             "Applying requires approvers-team membership, an approving review "
             "where the branch ruleset asks for one, and a plan for the current "
-            "head commit. `doctor` and `help` are read-only; `help` answers "
+            "head commit. Unlocking requires that membership, but no review "
+            "and no plan. "
+            "`doctor` and `help` are read-only; `help` answers "
             "anyone, while `doctor` reports this repository's own settings and "
             "so answers only organization members and repository collaborators."
         ),

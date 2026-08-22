@@ -662,3 +662,94 @@ def test_authorize_step_supplies_every_env_var_authorize_reads():
     read = set(re.findall(r"os\.environ(?:\.get)?[\[(]['\"](SHIPMATE_[A-Z_]+)['\"]", src))
     assert read, "expected at least one SHIPMATE_* read in authorize"
     assert read <= set(_authorize_step()["env"])
+
+
+#: Every step the apply route gates on, with the whole `if:` expression it must
+#: carry -- hand-written, not derived from the action. `unlock` reuses these
+#: steps rather than growing a parallel set, so each one has to admit exactly
+#: the two routes: narrow one back and an unlock parses, authorizes and then
+#: silently does nothing.
+_SHARED_ROUTE_IFS = {
+    "Mint App token (members:read)": (
+        "${{ steps.parse.outputs.route == 'apply' || steps.parse.outputs.route == 'unlock' }}"
+    ),
+    "App token unavailable (App not installed?)": (
+        "${{ (steps.parse.outputs.route == 'apply' || steps.parse.outputs.route == 'unlock')"
+        " && steps.apptoken.outcome != 'success' }}"
+    ),
+    "Gather authorization inputs": (
+        "${{ (steps.parse.outputs.route == 'apply' || steps.parse.outputs.route == 'unlock')"
+        " && steps.apptoken.outcome == 'success' }}"
+    ),
+    "Authorize": (
+        "${{ (steps.parse.outputs.route == 'apply' || steps.parse.outputs.route == 'unlock')"
+        " && steps.apptoken.outcome == 'success' }}"
+    ),
+    "Reject with reason": (
+        "${{ (steps.parse.outputs.route == 'apply' || steps.parse.outputs.route == 'unlock')"
+        " && steps.apptoken.outcome == 'success' && steps.authz.outputs.authorized != 'true' }}"
+    ),
+}
+
+
+def test_the_apply_route_steps_admit_exactly_apply_and_unlock():
+    matched = {
+        s["name"]: s.get("if")
+        for s in action_steps("comment-ops")
+        if s.get("name") in _SHARED_ROUTE_IFS
+    }
+    assert matched == _SHARED_ROUTE_IFS
+
+
+def test_the_mode_output_names_the_dispatch_mode_the_route_selects():
+    """Task 7's dispatch keys off this, so a literal here sends every unlock
+    down the apply path."""
+    assert action_yaml("comment-ops")["outputs"]["mode"]["value"] == (
+        "${{ steps.parse.outputs.route == 'unlock' && 'unlock' || 'apply' }}"
+    )
+
+
+#: What both verb-carrying steps must bind SHIPMATE_VERB to, hand-written. The
+#: env-var guard above is a subset-of-KEYS check and cannot see the value: with
+#: `Authorize`'s binding hardcoded to a literal `unlock`, every `shipmate apply`
+#: authorizes on team membership alone -- no mergeable, no review policy, no
+#: reviewed plan -- and the whole suite stays green.
+_VERB_BINDING = "${{ steps.parse.outputs.route }}"
+
+
+def test_both_verb_steps_bind_shipmate_verb_to_the_parsed_route():
+    """One selector for the property, so the two occurrences cannot disagree:
+    a literal on either step, or a deleted line, fails this dict equality."""
+    bound = {
+        s["name"]: (s.get("env") or {}).get("SHIPMATE_VERB")
+        for s in action_steps("comment-ops")
+        if s.get("name") in {"Gather authorization inputs", "Authorize"}
+    }
+    assert bound == {
+        "Gather authorization inputs": _VERB_BINDING,
+        "Authorize": _VERB_BINDING,
+    }
+
+
+#: The comment-ops verb table in CONTRACT.md: the header row that opens it and
+#: the blank line that ends it. Bounded rather than whole-file, so a `shipmate
+#: <verb>` mention in the surrounding prose cannot satisfy the guard.
+_VERB_TABLE = ("| verb | status | args | authorization |", "\n\n")
+
+
+def test_the_contract_verb_table_carries_every_active_verb():
+    """CONTRACT.md calls `VERBS` "the single source of truth this table is
+    derived from", but the table is hand-maintained -- so it drifted. Derived
+    from the registry here, never a hand-written verb list, so the next verb
+    added cannot repeat it."""
+    start, end = _VERB_TABLE
+    text = (ENGINE / "CONTRACT.md").read_text(encoding="utf-8")
+    assert start in text, f"the verb table's header row, {start!r}, is gone"
+    table = text.split(start, 1)[1].split(end, 1)[0]
+    active = {v: s for v, s in cp.VERBS.items() if s["status"] == cp.ACTIVE}
+    assert active, "expected at least one active verb in the registry"
+    for verb, spec in active.items():
+        invocation = " ".join(filter(None, ("shipmate", verb, spec["args"])))
+        assert f"| `{invocation}` | active |" in table, (
+            f"CONTRACT.md's verb table has no active row for `{invocation}`"
+        )

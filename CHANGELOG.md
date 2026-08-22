@@ -11,7 +11,40 @@ section below names the SHA the release tags.
 The version line stays `v0.x` while action inputs, check names, and the comment
 grammar are declared unstable in `README.md`.
 
-## [Unreleased]
+## [0.16.0] — 2026-08-22
+
+### Added
+
+- **A stranded state lock is now visible and releasable from the pull request.**
+  A cancelled or killed apply can die holding the backend's state lock, and every
+  later apply of that cell then fails acquiring it. Two stages: the apply result
+  comment now carries a 🔒 line under its table naming each cell whose apply was
+  blocked by a lock, the lock's id and, when the backend reported a usable
+  timestamp, when it was taken; and a new verb, `shipmate unlock <env>`,
+  releases it. The environment is required — a destructive verb gets no wildcard.
+  It probes every cell in that environment whose `apply / <stack> / <env>` check
+  is still pending and force-unlocks only the id the probe read back, reporting
+  per cell in its own job rather than in a comment. A cell that cannot determine
+  its lock state fails red; it is never reported as unlocked.
+
+  **Adopting it takes two lines in your wrappers**: `mode: ${{
+  steps.authz.outputs.mode }}` on the dispatch step of `comment-ops.yml`, and a
+  `mode` input on `apply.yml` passed through to the engine's `apply.yml`
+  (`docs/getting-started.md` has both). Wire the first without the second and the
+  dispatch is rejected, with an error naming the missing `mode` input and telling
+  you to re-pin — GitHub refuses a `workflow_dispatch` carrying an input the
+  target workflow does not declare. Wire neither and nothing tells the engine the
+  command was an unlock: it dispatches as an ordinary apply with no plan run and
+  dies on the plan run id, an error that names neither unlock nor `mode`.
+  `shipmate apply` is unaffected in every case — the mode travels in the dispatch
+  body only when it is `unlock`.
+
+  Two things worth knowing before you need it. It needs **no IAM change**:
+  releasing a lock is the same `s3:DeleteObject` on the `.tflock` object that
+  taking one already requires. And **unlocking is not recovery** — a cancelled
+  apply usually advanced the state, so the reviewed plan may now be stale and the
+  next apply refuses under the exact-plan fail-safe. Unlock, re-apply, re-plan if
+  that refuses (`docs/troubleshooting.md` §"A state lock is held").
 
 ### Changed
 

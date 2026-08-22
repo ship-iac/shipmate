@@ -8,13 +8,15 @@ open. Every cell now names its own `tofu` command after `--`, so a pull request
 can change what tofu *sees* but not what tofu is *asked to do*.
 
 Asserted per cell on the parsed step bodies, not on file text: a `script run`
-mention surviving in a comment is fine, a live one is not.
+mention surviving in a comment is fine, a live one is not. Which actions are
+cells is read off the tree, so a new one cannot escape the guard by not being
+added to a list here.
 """
 
 import re
 import shlex
 
-from _loader import action_steps
+from _loader import ACTIONS, action_steps
 
 # The expected invocations, HAND-WRITTEN token by token against the flag set the
 # engine means to run -- never derived from the action files. A vector computed
@@ -62,15 +64,58 @@ _APPLY = [
 ]
 
 
+# The unlock cell's probe takes the backend's lock to discover the id of a lock
+# already held, and refreshes no provider on the way there. No -out: nothing in
+# that cell applies what it plans. The release names the id it found and carries
+# -force, because no cell has a TTY to answer the confirmation prompt.
+_PROBE = [
+    *_WRAPPER,
+    "tofu",
+    "plan",
+    "-input=false",
+    "-refresh=false",
+    "2>&1",
+    "|",
+    "tee",
+    "$RUNNER_TEMP/probe.txt",
+]
+_FORCE_UNLOCK = [*_WRAPPER, "tofu", "force-unlock", "-force", "$LOCK_ID"]
+
+
 #: Every `terramate run` each cell is expected to make, in order.
 _EXPECTED = {
     "plan-cell": [_INIT, _PLAN],
     "drift-cell": [_INIT, _PLAN],
     "apply-cell": [_INIT, _APPLY],
+    "unlock-cell": [_INIT, _PROBE, _FORCE_UNLOCK],
 }
 # One source for the cell list, so a cell added here cannot be guarded by one of
-# the tests below and silently skipped by the other.
+# the tests below and silently skipped by the other. Which cells belong in it is
+# derived from the tree (_tofu_invoking_actions), never hand-maintained here.
 _CELLS = tuple(_EXPECTED)
+
+# A live `tofu` invocation: the word at command position, so `-C "$STACK"` paths
+# and `$RUNNER_TEMP/.tofu-plugin-cache` (actions/setup) are not one.
+_TOFU_RE = re.compile(r"(?<![\w./-])tofu\s+[a-z-]")
+
+
+def _tofu_invoking_actions():
+    """Every action under `actions/` whose live shell invokes tofu.
+
+    Discovered, not listed: the vectors above are hand-written on purpose -- an
+    expectation read back out of the file it checks pins nothing -- but the SET
+    OF CELLS must not be, or a cell added later is simply one this file never
+    looks at. That is how the unlock cell first escaped this guard.
+    """
+    found = {
+        path.parent.name
+        for path in ACTIONS.glob("*/action.yml")
+        if any(_TOFU_RE.search(ln) for ln in _command_lines(path.parent.name))
+    }
+    # Non-vacuity: a broken glob or a moved tree would otherwise hand the
+    # comparison below an empty set, which matches nothing and passes nothing.
+    assert found, f"no action under {ACTIONS} invokes tofu -- this guard would assert nothing"
+    return found
 
 
 def _command_lines(cell):
@@ -92,6 +137,16 @@ def _command_lines(cell):
         if (stripped := ln.strip()) and not stripped.startswith("#")
     ]
     return "\n".join(kept).replace("\\\n", " ").splitlines()
+
+
+def test_every_tofu_invoking_action_has_an_expected_vector():
+    """The cell list is the tree's, not this file's."""
+    assert _tofu_invoking_actions() == set(_EXPECTED), (
+        "an action invokes tofu with no _EXPECTED entry (or an entry names an action "
+        "that no longer invokes tofu); add its whole hand-written invocation vector: "
+        f"unlisted={sorted(_tofu_invoking_actions() - set(_EXPECTED))}, "
+        f"listed but not invoking={sorted(set(_EXPECTED) - _tofu_invoking_actions())}"
+    )
 
 
 def test_no_cell_delegates_to_a_branch_defined_script():

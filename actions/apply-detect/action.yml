@@ -1,12 +1,17 @@
 name: shipmate apply-detect
-description: Compute the single-env apply work set (from a plan run's plan artifacts) and wave-order it. Skips already-applied cells.
+description: Compute the single-env apply work set (from a plan run's plan artifacts) and wave-order it, or in unlock mode the flat queue of cells whose apply check is still pending. Skips already-applied cells.
 inputs:
   environment:
     description: Target environment, e.g. dev-eu.
     required: true
   plan-run-id:
-    description: Plan run id holding the reviewed plan artifacts.
-    required: true
+    description: Plan run id holding the reviewed plan artifacts. Empty in unlock mode, which consumes no plan artifact.
+    required: false
+    default: ''
+  mode:
+    description: apply (default) or unlock. Anything else takes the apply path, which is the stricter of the two.
+    required: false
+    default: apply
   head-sha:
     description: PR head SHA carrying the pending apply checks.
     required: true
@@ -25,10 +30,11 @@ inputs:
     required: false
     default: ''
 outputs:
-  waves: { description: "All waves as one JSON object {wave0..wave7} (apply-env-level.yml waves_json shape)", value: "${{ steps.d.outputs.waves }}" }
+  waves: { description: "Apply mode only: all waves as one JSON object {wave0..wave7} (apply-env-level.yml waves_json shape). In unlock mode nothing is written and this resolves to the empty string, NOT {} — a consumer must not fromJSON it there; use `cells` instead.", value: "${{ steps.d.outputs.waves }}" }
+  cells: { description: "Flat JSON array of cells — the unlock queue in unlock mode, [] in apply mode. Always valid JSON, never empty: consumers fromJSON it unconditionally.", value: "${{ steps.d.outputs.cells }}" }
   empty: { description: true when no cell is pending, value: "${{ steps.d.outputs.empty }}" }
   head_sha: { description: Echoed head SHA, value: "${{ steps.d.outputs.head_sha }}" }
-  plan_run_id: { description: Echoed plan run id, value: "${{ steps.d.outputs.plan_run_id }}" }
+  plan_run_id: { description: Echoed plan run id (unset in unlock mode, which consumes no plan run), value: "${{ steps.d.outputs.plan_run_id }}" }
 runs:
   using: composite
   steps:
@@ -43,4 +49,5 @@ runs:
         SHIPMATE_APP_ID: ${{ inputs.app-id }}
         SHIPMATE_UNGATED_ENVS: ${{ inputs.ungated-envs }}
         SHIPMATE_REVIEW_DECISION: ${{ inputs.review-decision }}
+        SHIPMATE_MODE: ${{ inputs.mode }}
       run: python3 "$GITHUB_ACTION_PATH/../../scripts/apply-detect"

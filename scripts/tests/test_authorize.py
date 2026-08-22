@@ -395,3 +395,99 @@ def test_ungated_exemption_output_is_set_only_when_the_exemption_fired(
         SHIPMATE_UNGATED_ENVS=ungated,
     )
     assert parsed["ungated_exemption"] == expected
+
+
+def test_unlock_needs_only_team_membership():
+    ok, reason = az.decide(
+        is_member=True,
+        approvers_team="infra",
+        review_decision="",  # no decision at all
+        pr={"mergeable": None, "head": {"sha": "a" * 40}},  # a merged PR
+        plan_run={},  # no reviewed plan
+        environment="dev-eu",
+        verb="unlock",
+    )
+    assert (ok, reason) == (True, "")
+
+
+def test_unlock_still_refuses_a_non_member():
+    ok, reason = az.decide(
+        is_member=False,
+        approvers_team="infra",
+        review_decision="APPROVED",
+        pr={"mergeable": True, "head": {"sha": "a" * 40}},
+        plan_run={"head_sha": "a" * 40},
+        environment="dev-eu",
+        verb="unlock",
+    )
+    assert not ok and "not a member" in reason
+
+
+def test_apply_is_unchanged_by_the_verb_default():
+    # The apply path must not become laxer: same inputs as the unlock case above.
+    ok, reason = az.decide(
+        is_member=True,
+        approvers_team="infra",
+        review_decision="",
+        pr={"mergeable": None, "head": {"sha": "a" * 40}},
+        plan_run={},
+        environment="dev-eu",
+    )
+    assert not ok
+
+
+def test_unlock_with_ungated_exemption_does_not_produce_false_audit_line(tmp_path, monkeypatch):
+    # unlock with review_decision="REVIEW_REQUIRED", named env in ungated_envs,
+    # and membership=true -> authorized=true but exemption=false.
+    # (The exemption is an audit record of an *apply* without review; unlock
+    # applies nothing, so must not produce that audit line.)
+    pr_json = tmp_path / "pr.json"
+    pr_json.write_text(json.dumps(PR_OK), encoding="utf-8")
+    run_json = tmp_path / "plan_run.json"
+    run_json.write_text(json.dumps(RUN_OK), encoding="utf-8")
+    out = tmp_path / "out.txt"
+    out.touch()
+    for key, value in {
+        "IS_MEMBER": "true",
+        "APPROVERS_TEAM": "infra",
+        "PR_JSON": str(pr_json),
+        "PLAN_RUN_JSON": str(run_json),
+        "GITHUB_OUTPUT": str(out),
+        "REVIEW_DECISION": "REVIEW_REQUIRED",
+        "SHIPMATE_ENV": "dev-eu",
+        "SHIPMATE_UNGATED_ENVS": "dev-eu",
+        "SHIPMATE_VERB": "unlock",
+    }.items():
+        monkeypatch.setenv(key, value)
+    az.main()
+    text = out.read_text(encoding="utf-8")
+    assert "authorized=true" in text
+    assert "ungated_exemption=false" in text
+
+
+def test_apply_with_ungated_exemption_still_produces_audit_line(tmp_path, monkeypatch):
+    # apply (not unlock) with review_decision="REVIEW_REQUIRED", named env in
+    # ungated_envs, and membership=true -> authorized=true and exemption=true.
+    # The fix must not disable the exemption for apply.
+    pr_json = tmp_path / "pr.json"
+    pr_json.write_text(json.dumps(PR_OK), encoding="utf-8")
+    run_json = tmp_path / "plan_run.json"
+    run_json.write_text(json.dumps(RUN_OK), encoding="utf-8")
+    out = tmp_path / "out.txt"
+    out.touch()
+    for key, value in {
+        "IS_MEMBER": "true",
+        "APPROVERS_TEAM": "infra",
+        "PR_JSON": str(pr_json),
+        "PLAN_RUN_JSON": str(run_json),
+        "GITHUB_OUTPUT": str(out),
+        "REVIEW_DECISION": "REVIEW_REQUIRED",
+        "SHIPMATE_ENV": "dev-eu",
+        "SHIPMATE_UNGATED_ENVS": "dev-eu",
+        "SHIPMATE_VERB": "apply",
+    }.items():
+        monkeypatch.setenv(key, value)
+    az.main()
+    text = out.read_text(encoding="utf-8")
+    assert "authorized=true" in text
+    assert "ungated_exemption=true" in text

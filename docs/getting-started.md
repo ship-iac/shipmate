@@ -369,6 +369,7 @@ jobs:
           app-id: ${{ vars.SHIPMATE_APP_ID }}
           private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
           environment: ${{ steps.authz.outputs.environment }}
+          mode: ${{ steps.authz.outputs.mode }}
           ref: ${{ steps.authz.outputs.head-sha }}
           pr-number: ${{ github.event.issue.number }}
           plan-run-id: ${{ steps.authz.outputs.plan-run-id }}
@@ -399,6 +400,10 @@ on:
         description: Target environment (empty = bare `shipmate apply`, all non-explicit environments)
         required: false
         default: ''
+      mode:
+        description: apply (default) or unlock — unlock releases a stranded state lock instead of applying
+        required: false
+        default: apply
       ref: { description: PR head SHA to apply, required: true }
       pr_number: { description: PR number, required: true }
       plan_run_id: { description: Plan run id with the reviewed plans, required: true }
@@ -417,6 +422,7 @@ jobs:
       SHIPMATE_PLAN_PASSPHRASE: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
     with:
       environment: ${{ inputs.environment }}
+      mode: ${{ inputs.mode }}
       ref: ${{ inputs.ref }}
       pr_number: ${{ inputs.pr_number }}
       plan_run_id: ${{ inputs.plan_run_id }}
@@ -434,6 +440,11 @@ jobs:
       plan_run_id: ${{ inputs.plan_run_id }}
       state_suffix: ""
 ```
+
+`mode` carries `shipmate unlock <env>` — it reaches only the `targeted` job,
+since unlock is always single-env. Leave it out and `unlock` is accepted at
+comment time and then dispatched as an ordinary apply with no plan run, failing
+with an error that names neither unlock nor `mode`.
 
 `deploy.yml` applies, on push to the default branch, every reviewed plan whose
 apply check is still pending — so it no-ops when everything was applied

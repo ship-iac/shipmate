@@ -144,7 +144,7 @@ def test_pure_garbage_shipmate_line_still_errors():
 def test_registry_shape():
     for verb, spec in cp.VERBS.items():
         assert spec["status"] in (cp.ACTIVE, cp.RESERVED), verb
-        assert spec["args"] in ("", "[env]"), verb
+        assert spec["args"] in ("", "[env]", "<env>"), verb
         assert spec["desc"].strip(), verb
         if spec["status"] == cp.ACTIVE:
             assert spec["route"], verb
@@ -242,3 +242,24 @@ def test_main_help_markdown_flag(monkeypatch, capsys):
     monkeypatch.delenv("GITHUB_OUTPUT", raising=False)
     cp.main()
     assert capsys.readouterr().out.startswith(cp.HELP_MARKER)
+
+
+def test_unlock_parses_with_an_env():
+    r = cp.parse("shipmate unlock dev-eu")
+    assert (r["valid"], r["route"], r["env"]) == (True, "unlock", "dev-eu")
+
+
+def test_unlock_without_an_env_is_rejected():
+    r = cp.parse("shipmate unlock")
+    assert r["is_command"] and not r["valid"]
+    assert "requires an environment" in r["error"]
+
+
+def test_unlock_appears_in_the_help_output():
+    md = cp.help_markdown()
+    assert "shipmate unlock <env>" in md
+
+
+def test_unlock_rejects_a_tag_filter():
+    r = cp.parse("shipmate unlock dev-eu workload:app")
+    assert not r["valid"]
