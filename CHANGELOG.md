@@ -13,6 +13,8 @@ grammar are declared unstable in `README.md`.
 
 ## [0.16.0] — 2026-08-22
 
+Tags `4fda446`.
+
 ### Added
 
 - **A stranded state lock is now visible and releasable from the pull request.**
