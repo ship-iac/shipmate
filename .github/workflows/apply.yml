@@ -256,7 +256,7 @@ jobs:
         with:
           role-to-assume: ${{ matrix.workload_var != '' && vars[format('AWS_ROLE_ARN_{0}', matrix.workload_var)] || vars.AWS_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
-      - uses: ship-iac/shipmate/actions/unlock-cell@e370ae88a3fa8f174b6f51e43967ce2cdf0eacdd
+      - uses: ship-iac/shipmate/actions/unlock-cell@674c5f68a60b3b338e4994a068d42284b9c84fc7
         with:
           stack: ${{ matrix.stack }}
           stack-name: ${{ matrix.stack }}
@@ -303,7 +303,7 @@ jobs:
           private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
       - name: Post apply result comment
         if: ${{ inputs.mode != 'unlock' }}
-        uses: ship-iac/shipmate/actions/apply-summary@23ec9dbd5a3baecf8315f8c2f1fd7e68bd815d84
+        uses: ship-iac/shipmate/actions/apply-summary@674c5f68a60b3b338e4994a068d42284b9c84fc7
         with:
           pr-number: ${{ inputs.pr_number }}
           head-sha: ${{ inputs.ref }}
