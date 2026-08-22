@@ -147,3 +147,51 @@ def test_the_wrapper_snippets_are_still_being_found():
         ("docs/getting-started.md", "deploy.yml"),
         ("docs/getting-started.md", "summary.yml"),
     ], f"documented engine reusable-workflow calls changed: {found}"
+
+
+def _dispatch_inputs(doc):
+    """(input name, spec) per `workflow_dispatch` input in a fence.
+
+    `on:` is YAML 1.1's `y`/`yes`/`on` family, so `yaml.safe_load` gives the key
+    back as `True`. Reading only the string spelling would silently find nothing.
+    """
+    on = doc.get("on", doc.get(True)) if isinstance(doc, dict) else None
+    wd = on.get("workflow_dispatch") if isinstance(on, dict) else None
+    for name, spec in ((wd.get("inputs") if isinstance(wd, dict) else None) or {}).items():
+        yield name, spec if isinstance(spec, dict) else {}
+
+
+def test_no_documented_wrapper_input_is_required():
+    """Every documented `workflow_dispatch` input is optional with a default.
+
+    The wrappers are dispatched only by `actions/dispatch` from a body the engine
+    builds -- no human fills a form -- so `required: true` protects no caller.
+    What it does do is turn a value the engine sent empty on purpose into an
+    HTTP 422 before the workflow starts: GitHub reads an empty value for a
+    required `workflow_dispatch` input as "not provided". Every `shipmate unlock`
+    dispatch failed that way, because unlock applies no plan and so carries no
+    `plan_run_id`. The engine validates instead, where the mode is known.
+
+    Whole-vector comparison against a hand-written constant, for the reason
+    `CLAUDE.md` gives: a "no input is required" predicate is also satisfied by a
+    selector that finds nothing, and a per-input assertion cannot see an input
+    that was deleted. Adding an input here is a deliberate edit that must state
+    its shape, which is the point -- `required` is what a new input drifts to.
+
+    Out of reach: a fence that shows an input block as a *fragment*, with no
+    `on:` above it -- `docs/upgrading.md`'s migration snippet is one. Those are
+    illustrative; the copyable wrapper in `getting-started.md` is what consumers
+    paste, and it is what this pins.
+    """
+    found = sorted(
+        (page.relative_to(ENGINE).as_posix(), name, spec.get("required"), spec.get("default"))
+        for page, _, body in _FENCES
+        for name, spec in _dispatch_inputs(yaml.safe_load(body))
+    )
+    assert found == [
+        ("docs/getting-started.md", "environment", False, ""),
+        ("docs/getting-started.md", "mode", False, "apply"),
+        ("docs/getting-started.md", "plan_run_id", False, ""),
+        ("docs/getting-started.md", "pr_number", False, ""),
+        ("docs/getting-started.md", "ref", False, ""),
+    ], f"documented workflow_dispatch inputs changed: {found}"

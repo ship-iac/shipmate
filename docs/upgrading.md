@@ -159,6 +159,41 @@ names. The entries below `0.2.0` predate the first tagged release, or
 `CHANGELOG.md` does not pin one; they are kept for repositories moving from a
 very old pin.
 
+### 0.16.1 — make every `apply.yml` wrapper input optional before using `unlock`
+
+**Re-pinning alone is not enough if you use `shipmate unlock`.** In your
+`.github/workflows/apply.yml`, declare every `workflow_dispatch` input
+`required: false` with an explicit default:
+
+```yaml
+      ref:
+        description: PR head SHA to apply
+        required: false
+        default: ''
+      pr_number:
+        description: PR number
+        required: false
+        default: ''
+      plan_run_id:
+        description: Plan run id with the reviewed plans. Empty for `shipmate unlock`, which applies no plan
+        required: false
+        default: ''
+```
+
+`plan_run_id` is the one that breaks: `shipmate unlock` applies no plan, so the
+engine dispatches it with an empty run id, and **GitHub reads an empty value for
+a `required: true` `workflow_dispatch` input as "not provided"** — HTTP 422
+before the workflow starts, naming an input you never typed. Every unlock
+dispatch fails that way until this edit lands. `ref` and `pr_number` are the same
+class and are changed here for the same reason: the wrapper is dispatched only by
+the engine, from a body the engine builds, so `required` protects no caller and
+`apply-detect` is what validates these values. Nothing breaks if you leave those
+two required today.
+
+Nothing else in `0.16.1`/`0.16.2` needs consumer action beyond re-pinning — both
+are engine-side fixes (an action manifest GitHub could not parse, and a lock
+parser blind to the ANSI colour OpenTofu emits on a runner).
+
 ### 0.14.0 — check `explicit_envs` for suffixed entries, then re-pin
 
 **Re-pinning is enough, with one exception.** Grep your Terramate globals for

@@ -404,8 +404,14 @@ on:
         description: apply (default) or unlock — unlock releases a stranded state lock instead of applying
         required: false
         default: apply
-      ref: { description: PR head SHA to apply, required: true }
-      pr_number: { description: PR number, required: true }
+      ref:
+        description: PR head SHA to apply
+        required: false
+        default: ''
+      pr_number:
+        description: PR number
+        required: false
+        default: ''
       plan_run_id:
         description: "Plan run id with the reviewed plans. Empty for `shipmate unlock`, which applies no plan"
         required: false
@@ -448,6 +454,23 @@ jobs:
 since unlock is always single-env. Leave it out and `unlock` is accepted at
 comment time and then dispatched as an ordinary apply with no plan run, failing
 with an error that names neither unlock nor `mode`.
+
+**Every input is `required: false` with an explicit default, and that is
+deliberate.** This wrapper is dispatched only by `actions/dispatch`, minting an
+App token, from a body the engine builds — no human ever fills a form here, so
+`required: true` protects no real caller. What it does do is convert a value the
+engine sent empty *on purpose* into a platform-level rejection: **GitHub treats
+an empty value for a `required: true` `workflow_dispatch` input as "not
+provided"** and answers HTTP 422 before the workflow starts, naming an input the
+operator never typed. That is how every `shipmate unlock` dispatch failed until
+`plan_run_id` became optional — unlock applies no plan, so it carries no run id.
+
+The engine is the validator, and it is the only layer with enough context to be
+one: `apply-detect` runs `validate_head_sha`, `validate_plan_run_id` and
+`validate_env`, and it knows which values are legitimately empty in which mode.
+Its errors are annotations on the run naming the actual value. Keep new inputs
+optional for the same reason — `required` is the default a new input drifts back
+to, and it reopens this exactly.
 
 `deploy.yml` applies, on push to the default branch, every reviewed plan whose
 apply check is still pending — so it no-ops when everything was applied
