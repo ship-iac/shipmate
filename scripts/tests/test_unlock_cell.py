@@ -51,9 +51,7 @@ _EXPECTED_RUNS = [
 _RELEASE_IF = "${{ steps.probe.outputs.held == 'true' }}"
 
 _NO_LOCK = "::notice::no state lock held for app / dev-eu"
-_UNDETERMINED = (
-    "::warning::could not determine whether a lock is held for app / dev-eu — see the log"
-)
+_UNDETERMINED = "::error::could not determine whether a lock is held for app / dev-eu — see the log"
 
 
 def _step(step_id):
@@ -117,7 +115,7 @@ def test_stack_and_lock_id_arrive_through_env():
 def test_no_step_swallows_its_own_failure():
     """Every step here fails the cell it belongs to. `continue-on-error` on the
     init in particular would turn "the engine could not look at the lock" into a
-    green cell carrying a warning nobody reads across dozens of cells."""
+    green cell carrying an annotation nobody reads across dozens of cells."""
     steps = action_steps(_ACTION)
     assert steps, "the action parsed to zero steps -- this guard would assert nothing"
     for step in steps:

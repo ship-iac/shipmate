@@ -75,7 +75,7 @@ runs:
         if [ "$PROBE_STATUS" = "0" ]; then
           echo "::notice::no state lock held for $STACK_NAME / $ENV"
         else
-          echo "::warning::could not determine whether a lock is held for $STACK_NAME / $ENV — see the log"
+          echo "::error::could not determine whether a lock is held for $STACK_NAME / $ENV — see the log"
           exit 1
         fi
 
