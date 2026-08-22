@@ -10,8 +10,9 @@ Measured against OpenTofu v1.12.4 on both the local backend and S3 with
 `use_lockfile = true`: the `Error acquiring the state lock` line and the whole
 `Lock Info:` block are identical across backends, and only the `Error message:`
 line differs — so nothing here reads that line. The block arrives inside
-OpenTofu's `|`-prefixed diagnostic box even with no TTY, and values are
-space-padded after the colon.
+OpenTofu's `|`-prefixed diagnostic box even with no TTY, values are space-padded
+after the colon, and on a GitHub Actions runner every one of those lines is
+ANSI-coloured (see `_ANSI_RE`).
 
 Fail-closed by construction: anything short of a complete block with an
 in-charset `ID` returns None, which every caller reads as "do not unlock".
@@ -28,6 +29,22 @@ import sys
 
 _ERROR_LINE = "Error acquiring the state lock"
 _BLOCK_START = "Lock Info:"
+
+# OpenTofu colours its diagnostics whenever the sink looks capable, and a GitHub
+# Actions runner does, so a live cell emits `ESC[31m│ESC[0m ESC[0mLock Info:`
+# rather than `│ Lock Info:`. Colour comes off before anything else here: every
+# pattern below anchors at the start of the line, which is exactly where an
+# escape sequence sits.
+#
+# The apply-comment path never exposed this. It strips ANSI in `load_cells`
+# before this parser is reached, and the captures used as fixtures had been put
+# through a colour-stripping filter as they were taken -- so the first output
+# this parser ever met with colour still in it was a real unlock run against S3.
+_ANSI_RE = re.compile(
+    r"\x1b\[[0-?]*[ -/]*[@-~]"  # CSI
+    r"|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)"  # OSC
+    r"|\x1b[@-_]"  # two-character escape
+)
 
 # The box prefix OpenTofu renders diagnostics with, plus one optional space.
 _PREFIX_RE = re.compile(r"^[│|]\s?")
@@ -51,7 +68,7 @@ _OPERATION_RE = re.compile(r"^[A-Za-z]{1,32}$")
 
 
 def _strip(line):
-    return _PREFIX_RE.sub("", line).strip()
+    return _PREFIX_RE.sub("", _ANSI_RE.sub("", line)).strip()
 
 
 def _fields(lines):

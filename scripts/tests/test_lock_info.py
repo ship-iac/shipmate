@@ -139,3 +139,29 @@ def test_an_out_of_charset_operation_is_dropped_but_the_lock_survives():
     got = li.parse(_with("Operation", "OperationType**Apply**"))
     assert got["operation"] == ""
     assert got["id"] == S3_ID
+
+
+def test_parses_real_ansi_coloured_ci_output():
+    """OpenTofu colours its diagnostics on a runner, and the parser must cope.
+
+    This fixture is the verbatim probe output of a real `shipmate unlock sbx`
+    run against the S3 backend, escape sequences intact. Before the ANSI strip,
+    `parse` returned None on it -- the acquisition line still matched as a
+    substring, but `Lock Info:` never compared equal because `ESC[31m|ESC[0m`
+    sits in front of it. The cell then reported the lock state as
+    undetermined and went red while a lock it could have released was sitting
+    right there in its own output.
+
+    Mutation: drop `_ANSI_RE.sub` from `_strip` and this reddens while the two
+    colour-free captures stay green.
+    """
+    got = li.parse(_fixture("lock_error_s3_ansi.txt"))
+    assert got == {
+        "id": "2c655069-36ee-1bd8-0847-d0467ebe8307",
+        "path": (
+            "repo-examples-shipmate-state/repo-example-stacks-aws/sbx/eu-west-1"
+            "/sandbox/box/terraform.tfstate"
+        ),
+        "operation": "OperationTypePlan",
+        "created": "2026-08-22 14:19:20.313637 +0000 UTC",
+    }

@@ -1,0 +1,21 @@
+[31m│[0m [0m[1m[31mError: [0m[0m[1mError acquiring the state lock[0m
+[31m│[0m [0m
+[31m│[0m [0m[0mError message: operation error S3: PutObject, https response error
+[31m│[0m [0mStatusCode: 412, RequestID: FBKH1RB15AFTVG50, HostID:
+[31m│[0m [0mqA3bXfbDcS0rvUMQh6xwZtAYuG6hSazal92uATLni6Puh47KaWNPZS2Y0NygsSVSI2IMF7KVuxkqUG4zQKS/TO3WDEUqzfKu,
+[31m│[0m [0mapi error PreconditionFailed: At least one of the pre-conditions you
+[31m│[0m [0mspecified did not hold
+[31m│[0m [0mLock Info:
+[31m│[0m [0m  ID:        2c655069-36ee-1bd8-0847-d0467ebe8307
+[31m│[0m [0m  Path:      repo-examples-shipmate-state/repo-example-stacks-aws/sbx/eu-west-1/sandbox/box/terraform.tfstate
+[31m│[0m [0m  Operation: OperationTypePlan
+[31m│[0m [0m  Who:       LAPTOP\kenp8@Laptop
+[31m│[0m [0m  Version:   1.12.4
+[31m│[0m [0m  Created:   2026-08-22 14:19:20.313637 +0000 UTC
+[31m│[0m [0m  Info:      
+[31m│[0m [0m
+[31m│[0m [0m
+[31m│[0m [0mOpenTofu acquires a state lock to protect the state from being written
+[31m│[0m [0mby multiple users at the same time. Please resolve the issue above and try
+[31m│[0m [0magain. For most commands, you can disable locking with the "-lock=false"
+[31m│[0m [0mflag, but this is not recommended.
