@@ -28,12 +28,15 @@ grammar are declared unstable in `README.md`.
 
   **Adopting it takes two lines in your wrappers**: `mode: ${{
   steps.authz.outputs.mode }}` on the dispatch step of `comment-ops.yml`, and a
-  `mode` input on `apply.yml` passed through to the engine's `apply.yml`. Until
-  both are there, `shipmate unlock` is accepted and then fails its dispatch with
-  an error naming the missing `mode` input and telling you to re-pin: GitHub
-  rejects a `workflow_dispatch` carrying an input the target workflow does not
-  declare. `shipmate apply` is unaffected either way — the mode travels in the
-  dispatch body only when it is `unlock`.
+  `mode` input on `apply.yml` passed through to the engine's `apply.yml`
+  (`docs/getting-started.md` has both). Wire the first without the second and the
+  dispatch is rejected, with an error naming the missing `mode` input and telling
+  you to re-pin — GitHub refuses a `workflow_dispatch` carrying an input the
+  target workflow does not declare. Wire neither and nothing tells the engine the
+  command was an unlock: it dispatches as an ordinary apply with no plan run and
+  dies on the plan run id, an error that names neither unlock nor `mode`.
+  `shipmate apply` is unaffected in every case — the mode travels in the dispatch
+  body only when it is `unlock`.
 
   Two things worth knowing before you need it. It needs **no IAM change**:
   releasing a lock is the same `s3:DeleteObject` on the `.tflock` object that

@@ -44,7 +44,8 @@ matrix job's own `<stack> / <env>` check-run stays on the shared
 the App creates separately.
 Authorizing an apply requires team membership, a mergeable PR that satisfies
 the branch ruleset's review policy, and a reviewed plan for the PR's current
-head; authorizing an unlock requires team membership alone.
+head; authorizing an unlock requires team membership plus the `<env>-apply`
+environment its job binds.
 Comment-ops keeps the entire interaction surface inside the pull request
 that is already the unit of review, with an auditable history of who asked
 for what and when. See `CONTRACT.md` for the full grammar and authorization
@@ -73,8 +74,9 @@ not a repository-wide audit.
 `help` and `doctor` are read-only; `apply` and `unlock` are authorized. `apply`
 carries the full check (approvers-team membership, a mergeable and reviewed PR,
 and a reviewed plan for the current head — see Comment-ops above); `unlock`
-carries a narrower one, approvers-team membership alone, because it releases a
-lock rather than changing infrastructure. `help` answers
+carries a narrower one — approvers-team membership and the `<env>-apply`
+environment, but no review and no plan — because it releases a lock rather than
+changing infrastructure. `help` answers
 any commenter. `doctor` does not: it names the guardrails this repository is
 missing — that `shipmate / gate` is not required on the default branch, that an
 apply environment has no approval rule, which approvers team is configured
