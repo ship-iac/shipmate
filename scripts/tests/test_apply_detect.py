@@ -1,8 +1,8 @@
 import json
 
 import pytest
+from _detect_fixtures import APP_ID, completed_names
 from _detect_fixtures import check_run as _check
-from _detect_fixtures import completed_names
 from _loader import load_script
 
 ad = load_script("apply-detect")
@@ -500,16 +500,30 @@ def _boom_on_plan_path(monkeypatch):
         monkeypatch.setattr(ad, name, _boom)
 
 
-def _stub_unlock_tree(monkeypatch, cells, completed=()):
-    """Stub the tree walk; returns the kwargs `compute_cells` was called with."""
+_DEV_EU_PENDING_CHECKS = [
+    _check(name=f"apply / {stack} / dev-eu", status="in_progress", conclusion=None)
+    for stack in ("stacks/app", "stacks/dns", "stacks/db")
+]
+
+
+def _stub_unlock_tree(monkeypatch, cells, checks=None):
+    """Stub the tree walk and the check-run listing; returns the kwargs
+    `compute_cells` was called with.
+
+    `checks` are stubbed as the raw JSONL `gh` emits, not as a set of names, so
+    the queue's membership rule itself is under test rather than assumed: a
+    construction that asks the wrong question of the same listing reddens here.
+    Default: every dev-eu cell has a pending check."""
     seen = {}
 
     def _compute(all_stacks=False, base="", require_env_tag=True):
         seen.update(all_stacks=all_stacks, base=base, require_env_tag=require_env_tag)
         return cells
 
+    runs = _DEV_EU_PENDING_CHECKS if checks is None else checks
+    monkeypatch.setattr(ad.bm, "_run", lambda args: "\n".join(json.dumps(r) for r in runs))
+    monkeypatch.setenv("SHIPMATE_APP_ID", APP_ID)
     monkeypatch.setattr(ad.bm, "compute_cells", _compute)
-    monkeypatch.setattr(ad, "completed_apply_names", lambda repo, head: set(completed))
     return seen
 
 
@@ -526,19 +540,65 @@ def _parsed(out):
 
 
 def test_unlock_queue_is_the_pending_cells_of_the_target_env(monkeypatch, tmp_path):
-    # Two pending in dev-eu, one completed there, one cell in another env.
+    # stacks/app: a pending check -> queued. stacks/dns: a completed check ->
+    # not queued. stacks/db: NO check at all -> not queued either; every queued
+    # cell takes a real state lock and may force-break one, so a stack this pull
+    # request never planned must not be in range. Plus a foreign-App pending
+    # check on stacks/db, which must not enrol it.
     out = _unlock_env(monkeypatch, tmp_path)
     _boom_on_plan_path(monkeypatch)
-    seen = _stub_unlock_tree(monkeypatch, _DEV_EU_CELLS, ["apply / stacks/dns / dev-eu"])
+    seen = _stub_unlock_tree(
+        monkeypatch,
+        _DEV_EU_CELLS,
+        [
+            _check(name="apply / stacks/app / dev-eu", status="in_progress", conclusion=None),
+            _check(name="apply / stacks/dns / dev-eu"),
+            _check(
+                name="apply / stacks/db / dev-eu",
+                status="in_progress",
+                conclusion=None,
+                app={"id": 15368},
+            ),
+        ],
+    )
     ad.main()
     # all_stacks=True is the point: a cell whose plan artifacts expired long ago
     # is exactly the cell that can hold a stranded lock.
     assert seen == {"all_stacks": True, "base": "", "require_env_tag": False}
     assert json.loads(_parsed(out)["cells"]) == [
         {"stack": "stacks/app", "environment": "dev-eu", "workload": "app", "workload_var": "APP"},
-        {"stack": "stacks/db", "environment": "dev-eu", "workload": "app", "workload_var": "APP"},
     ]
     assert _parsed(out)["empty"] == "false"
+
+
+def test_unlock_empty_queue_warns_that_nothing_was_probed(monkeypatch, tmp_path, capsys):
+    # An empty queue is legitimate — and, after the queue narrowed to the cells
+    # that HAVE a pending check, the normal outcome for the case the runbook
+    # names. It must not be a silent green run.
+    out = _unlock_env(monkeypatch, tmp_path)
+    _boom_on_plan_path(monkeypatch)
+    _stub_unlock_tree(monkeypatch, _DEV_EU_CELLS, [_check(name="apply / stacks/app / dev-eu")])
+    ad.main()
+    assert _parsed(out)["empty"] == "true"
+    assert json.loads(_parsed(out)["cells"]) == []
+    assert (
+        "::warning::no cell in dev-eu has a pending apply check, so no lock was "
+        "probed; a lock on a cell whose check already completed, or on a stack "
+        "applied out of band, is released out of band — see the state-lock "
+        "section of docs/troubleshooting.md." in capsys.readouterr().out.splitlines()
+    )
+
+
+def test_unlock_non_empty_queue_does_not_warn(monkeypatch, tmp_path, capsys):
+    # The other half: the warning is about an empty queue, not decoration on
+    # every unlock run.
+    _unlock_env(monkeypatch, tmp_path)
+    _boom_on_plan_path(monkeypatch)
+    _stub_unlock_tree(monkeypatch, _DEV_EU_CELLS)
+    ad.main()
+    out = capsys.readouterr().out
+    assert "cells=3 pending=3" in out  # not vacuous: there IS a queue
+    assert "::warning::" not in out
 
 
 def test_unlock_emits_no_wave_array_with_any_member(monkeypatch, tmp_path):
@@ -593,11 +653,19 @@ def test_unlock_absent_mode_takes_the_stricter_apply_path(monkeypatch, tmp_path,
 def test_unlock_notice_names_the_mode(monkeypatch, tmp_path, capsys):
     _unlock_env(monkeypatch, tmp_path)
     _boom_on_plan_path(monkeypatch)
-    _stub_unlock_tree(monkeypatch, _DEV_EU_CELLS, ["apply / stacks/dns / dev-eu"])
+    _stub_unlock_tree(
+        monkeypatch,
+        _DEV_EU_CELLS,
+        [
+            _check(name="apply / stacks/app / dev-eu", status="in_progress", conclusion=None),
+            _check(name="apply / stacks/dns / dev-eu"),
+            _check(name="apply / stacks/db / dev-eu", status="queued", conclusion=None),
+        ],
+    )
     ad.main()
     assert (
         f"::notice title=apply-detect::mode=unlock env=dev-eu head={'a' * 40} "
-        "cells=3 completed=1 pending=2" in capsys.readouterr().out.splitlines()
+        "cells=3 pending=2" in capsys.readouterr().out.splitlines()
     )
 
 
@@ -636,7 +704,9 @@ def test_unlock_tolerates_an_untagged_stack_elsewhere_in_the_tree(monkeypatch, t
     # precisely when the pipeline is already degraded enough to strand a lock.
     out = _unlock_env(monkeypatch, tmp_path)
     _boom_on_plan_path(monkeypatch)
-    monkeypatch.setattr(ad, "completed_apply_names", lambda repo, head: set())
+    monkeypatch.setattr(
+        ad, "pending_apply_names", lambda repo, head: {"apply / stacks/app / dev-eu"}
+    )
     monkeypatch.setattr(
         ad.bm, "_list_stacks", lambda all_stacks, base: ["stacks/app", "stacks/orphan"]
     )
