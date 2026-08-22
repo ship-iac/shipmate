@@ -2,15 +2,18 @@
 validation before API call, and graceful degradation when the consumer's
 apply.yml does not yet declare the mode input.
 
-Three parts:
+Four parts:
 - Body building: mode is included in dispatch inputs only when "unlock"; when
   unset or "apply", no mode key appears. Tested via subprocess execution of the
-  python heredoc.
-- Validation: a mode value that is neither empty, "apply", nor "unlock" is
-  rejected before any API call (before the gh invocation), with a clear message.
-- Degrade message: when an unlock dispatch fails (422 from a consumer that does
-  not yet declare mode), the failure prints an actionable message naming the
-  issue and pointing to the release docs.
+  python heredoc only (not the full script).
+- Validation before API call: a mode value that is neither empty, "apply", nor
+  "unlock" is rejected before any API call (tested against extracted python +
+  case validation in isolation).
+- Degrade message on unlock failure: when an unlock dispatch fails with the real
+  gh command, the failure prints an actionable message. Tested by executing the
+  full shipped script with stubbed gh/python3 on PATH.
+- Apply path stays green: when an apply dispatch fails, the raw error is printed
+  with no degrade message. Tested by executing the full shipped script.
 """
 
 import json
@@ -58,16 +61,14 @@ def _build_dispatch_body(mode="", environment=""):
     """
     code = _extract_python_heredoc()
     env = os.environ.copy()
-    env.update(
-        {
-            "DISPATCH_REF": "main",
-            "REF": "abc123def456",
-            "PR_NUMBER": "42",
-            "PLAN_RUN_ID": "12345",
-            "ENVIRONMENT": environment,
-            "MODE": mode,
-        }
-    )
+    env.update({
+        "DISPATCH_REF": "main",
+        "REF": "abc123def456",
+        "PR_NUMBER": "42",
+        "PLAN_RUN_ID": "12345",
+        "ENVIRONMENT": environment,
+        "MODE": mode,
+    })
 
     result = subprocess.run(
         [__import__("sys").executable, "-c", code],
@@ -208,38 +209,255 @@ def test_invalid_mode_rejected_before_api_call():
         )
 
 
-def test_valid_modes_pass_case_validation():
-    """Valid mode values (empty, 'apply', 'unlock') pass the case validation.
+def _extract_dispatch_run_block():
+    """Extract the full run: block from the workflow_dispatch apply step.
 
-    Tests the case statement in isolation to verify it accepts all valid modes
-    and rejects invalid ones. Skips full integration test that needs python3.
+    Returns the raw bash script exactly as written in the action.
+    """
+    step = _dispatch_step()
+    run = step.get("run", "")
+    assert run.strip(), "dispatch step has no run block"
+    return run
+
+
+def _create_stub_commands(tmpdir):
+    """Create stub gh and python3 commands on PATH for testing.
+
+    Returns (path, python3_path, gh_path) tuple.
+    """
+    python3_path = Path(tmpdir) / "python3"
+    # Use python from sys.executable instead of /usr/bin/python3
+    python3_path.write_text(
+        f"#!/bin/bash\n"
+        f'exec "{__import__("sys").executable}" "$@"\n'
+    )
+    python3_path.chmod(0o755)
+
+    gh_path = Path(tmpdir) / "gh"
+    gh_path.write_text("#!/bin/bash\necho '{}'\n")  # Default: success
+    gh_path.chmod(0o755)
+
+    return str(tmpdir), str(python3_path), str(gh_path)
+
+
+def test_unlock_failure_prints_degrade_message():
+    """When unlock dispatch fails (422), the degrade message prints.
+
+    Executes the shipped run block with a stubbed gh that exits 22 (HTTP 422).
+    Mutation: remove the unlock scoping so message prints unconditionally.
     """
     bash = usable_bash()
     if not bash:
         pytest.skip("bash not available on this platform")
 
-    # Test just the case validation logic in isolation.
-    case_validation = """
-    case "${MODE:-}" in ''|apply|unlock) echo "valid"; exit 0 ;; *) echo "invalid"; exit 1 ;; esac
-    """
+    run_block = _extract_dispatch_run_block()
 
-    for mode in ("", "apply", "unlock"):
+    with tempfile.TemporaryDirectory() as tmpdir:
+        path_dir, python3_path, gh_path = _create_stub_commands(tmpdir)
+
+        # Stub gh to exit 22 (HTTP error) and print to stderr.
+        gh_stub_content = (
+            "#!/bin/bash\n"
+            "echo 'HTTP 422: Unprocessable Entity' >&2\n"
+            "exit 22\n"
+        )
+        Path(gh_path).write_text(gh_stub_content)
+        Path(gh_path).chmod(0o755)
+
         env = os.environ.copy()
-        env["MODE"] = mode
+        env["PATH"] = f"{path_dir}:{env.get('PATH', '')}"
+        env["GH_TOKEN"] = "test_token"  # noqa: S105
+        env["REPO"] = "org/repo"
+        env["WORKFLOW"] = "apply.yml"
+        env["DISPATCH_REF"] = "main"
+        env["ENVIRONMENT"] = ""
+        env["MODE"] = "unlock"
+        env["REF"] = "abc123"
+        env["PR_NUMBER"] = "42"
+        env["PLAN_RUN_ID"] = "12345"
 
         result = subprocess.run(
-            [bash, "-c", case_validation],
+            [bash, "-c", run_block],
             env=env,
             capture_output=True,
             text=True,
+            cwd=tmpdir,
             timeout=30,
         )
 
-        combined_output = result.stdout + result.stderr
+        output = result.stdout + result.stderr
+        # Must fail
+        assert result.returncode != 0, (
+            f"unlock failure should exit non-zero, got {result.returncode}"
+        )
+        # Must include raw gh stderr
+        assert "HTTP 422" in output, f"raw gh output missing: {output}"
+        # Must include degrade message
+        assert (
+            "does not declare the mode input" in output
+        ), f"degrade message missing: {output}"
+
+
+def test_apply_failure_no_degrade_message():
+    """When apply dispatch fails, no degrade message prints.
+
+    Executes the shipped run block with gh exiting 22; MODE=apply should not
+    trigger the unlock-specific message.
+    Mutation: remove the unlock scoping so message prints unconditionally.
+    """
+    bash = usable_bash()
+    if not bash:
+        pytest.skip("bash not available on this platform")
+
+    run_block = _extract_dispatch_run_block()
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        path_dir, python3_path, gh_path = _create_stub_commands(tmpdir)
+
+        # Stub gh to exit 22.
+        gh_stub_content = (
+            "#!/bin/bash\n"
+            "echo 'HTTP 422: Unprocessable Entity' >&2\n"
+            "exit 22\n"
+        )
+        Path(gh_path).write_text(gh_stub_content)
+        Path(gh_path).chmod(0o755)
+
+        env = os.environ.copy()
+        env["PATH"] = f"{path_dir}:{env.get('PATH', '')}"
+        env["GH_TOKEN"] = "test_token"  # noqa: S105
+        env["REPO"] = "org/repo"
+        env["WORKFLOW"] = "apply.yml"
+        env["DISPATCH_REF"] = "main"
+        env["ENVIRONMENT"] = ""
+        env["MODE"] = "apply"
+        env["REF"] = "abc123"
+        env["PR_NUMBER"] = "42"
+        env["PLAN_RUN_ID"] = "12345"
+
+        result = subprocess.run(
+            [bash, "-c", run_block],
+            env=env,
+            capture_output=True,
+            text=True,
+            cwd=tmpdir,
+            timeout=30,
+        )
+
+        output = result.stdout + result.stderr
+        # Must fail
+        assert result.returncode != 0
+        # Must include raw gh stderr
+        assert "HTTP 422" in output
+        # Must NOT include degrade message (unlock-specific)
+        assert (
+            "does not declare the mode input" not in output
+        ), f"degrade message should not appear on apply path: {output}"
+
+
+def test_dispatch_success_exits_zero():
+    """When gh succeeds, the script exits 0.
+
+    Mutation: make the wrapper return non-zero on success.
+    """
+    bash = usable_bash()
+    if not bash:
+        pytest.skip("bash not available on this platform")
+
+    run_block = _extract_dispatch_run_block()
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        path_dir, python3_path, gh_path = _create_stub_commands(tmpdir)
+
+        # Stub gh to succeed.
+        Path(gh_path).write_text("#!/bin/bash\necho '{}'\nexit 0\n")
+        Path(gh_path).chmod(0o755)
+
+        env = os.environ.copy()
+        env["PATH"] = f"{path_dir}:{env.get('PATH', '')}"
+        env["GH_TOKEN"] = "test_token"  # noqa: S105
+        env["REPO"] = "org/repo"
+        env["WORKFLOW"] = "apply.yml"
+        env["DISPATCH_REF"] = "main"
+        env["ENVIRONMENT"] = ""
+        env["MODE"] = "unlock"
+        env["REF"] = "abc123"
+        env["PR_NUMBER"] = "42"
+        env["PLAN_RUN_ID"] = "12345"
+
+        result = subprocess.run(
+            [bash, "-c", run_block],
+            env=env,
+            capture_output=True,
+            text=True,
+            cwd=tmpdir,
+            timeout=30,
+        )
+
         assert result.returncode == 0, (
-            f"mode={mode!r} should pass validation, "
-            f"but got exit {result.returncode}: {combined_output}"
+            f"success should exit 0, got {result.returncode}: {result.stderr}"
         )
-        assert "valid" in result.stdout, (
-            f"mode={mode!r} validation should output 'valid', got: {result.stdout}"
-        )
+
+
+def test_real_case_accepts_valid_modes():
+    """The real shipped case validation accepts valid modes.
+
+    Executes the full script with each valid mode and verifies the body builder
+    is reached (by checking the body.json created by python).
+    Mutation: narrow the case pattern to ''|apply) to break unlock.
+    """
+    bash = usable_bash()
+    if not bash:
+        pytest.skip("bash not available on this platform")
+
+    run_block = _extract_dispatch_run_block()
+
+    for mode, expected_mode_in_body in [("", False), ("apply", False), ("unlock", True)]:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path_dir, python3_path, gh_path = _create_stub_commands(tmpdir)
+
+            # Stub gh to output success; body.json was already built by python.
+            gh_stub_content = "#!/bin/bash\necho '{}'\n"
+            Path(gh_path).write_text(gh_stub_content)
+            Path(gh_path).chmod(0o755)
+
+            env = os.environ.copy()
+            env["PATH"] = f"{path_dir}:{env.get('PATH', '')}"
+            env["GH_TOKEN"] = "test_token"  # noqa: S105
+            env["REPO"] = "org/repo"
+            env["WORKFLOW"] = "apply.yml"
+            env["DISPATCH_REF"] = "main"
+            env["ENVIRONMENT"] = ""
+            env["MODE"] = mode
+            env["REF"] = "abc123"
+            env["PR_NUMBER"] = "42"
+            env["PLAN_RUN_ID"] = "12345"
+
+            result = subprocess.run(
+                [bash, "-c", run_block],
+                env=env,
+                capture_output=True,
+                text=True,
+                cwd=tmpdir,
+                timeout=30,
+            )
+
+            # Script should succeed
+            assert result.returncode == 0, (
+                f"mode={mode!r} should pass validation and reach gh, "
+                f"but got exit {result.returncode}: {result.stderr}"
+            )
+
+            # Verify body.json was created
+            body_file = Path(tmpdir) / "body.json"
+            assert body_file.exists(), f"body.json not created for mode={mode!r}"
+
+            body = json.loads(body_file.read_text())
+            if expected_mode_in_body:
+                assert body.get("inputs", {}).get("mode") == "unlock", (
+                    f"mode={mode!r} should include mode in inputs, got {body}"
+                )
+            else:
+                assert "mode" not in body.get("inputs", {}), (
+                    f"mode={mode!r} should not include mode in inputs, got {body}"
+                )
