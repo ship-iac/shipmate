@@ -14,6 +14,9 @@ details a reader is likely to tidy away --
     them, App tokens, a live PR, terramate/tofu.
 
 So compare the whole step list to one built here, rather than checking a part.
+The trigger is compared the same way: `@main` is only the right tree on a push
+to `main`, so a workflow retriggered anywhere else (a PR, where the ref is
+stale) or nowhere at all would leave 19 correct steps that never run.
 """
 
 import glob
@@ -31,6 +34,11 @@ def test_manifest_load_workflow_lists_every_action_as_a_skipped_remote_step():
     assert len(actions) > 15, f"expected the full action set, found {actions}"
 
     doc = yaml.safe_load(open(WORKFLOW, encoding="utf-8"))
+    # `on:` is YAML 1.1's true, hence the doc.get(True) fallback.
+    assert doc.get("on", doc.get(True)) == {
+        "push": {"branches": ["main"]},
+        "workflow_dispatch": None,
+    }
     assert list(doc["jobs"]) == ["load"], "one job; the expectation below is that job's steps"
 
     expected = [{"if": False, "uses": f"ship-iac/shipmate/actions/{name}@main"} for name in actions]

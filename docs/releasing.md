@@ -239,14 +239,17 @@ in this repository can see that pair. It also resolves and parses the engine
 reusable workflow at the new SHA, because that happens when the run graph is
 built.
 
-It cannot reach a composite action's manifest. The engine's actions are reached
-through `./actions/...`, and a local manifest loads only when its **step** runs;
-`detect` runs only behind `guard`, and `guard` rejects any actor not ending in
-`[bot]` — correctly, since a direct human dispatch is what it exists to refuse.
-So `v0.16.0`'s unparseable `apply-detect/action.yml` survives this exercise.
-Catching that class is engine CI's job, not a sample's: `## Manifest load` above
-does it on every push to `main`, one commit before a tag. Nor does it cover the comment leg — parse, authorize, route —
-which by construction runs the sample's default-branch workflows and so is only
+It cannot reach a composite action's manifest — not because those refs are
+local (the engine's reusable workflows reach every action at a **remote** SHA
+pin, which is exactly why `v0.16.0` died in `Set up job`), but because the job
+holding them never starts: `detect` runs only behind `guard`, and `guard`
+rejects any actor not ending in `[bot]` — correctly, since a direct human
+dispatch is what it exists to refuse. A skipped job sets nothing up, so nothing
+fetches or parses its actions. `v0.16.0`'s unparseable `apply-detect/action.yml`
+survives this exercise. Catching that class is engine CI's job, not a sample's:
+`## Manifest load` above does it on every push to `main`, one commit before a
+tag. Nor does it cover the comment leg — parse, authorize, route — which by
+construction runs the sample's default-branch workflows and so is only
 exercised after the re-pin.
 
 Smoke proves the dispatch wiring resolves; acceptance proves the behaviour is
