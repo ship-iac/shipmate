@@ -1,0 +1,8 @@
+# manifest-load.yml's `if: false` is the point of the workflow, not a mistake:
+# GitHub parses a *remote* action's manifest while setting the job up, before any
+# step's `if:` is evaluated, so a skipped step still proves the manifest loads --
+# without running the action. See docs/releasing.md § Manifest load.
+paths:
+  .github/workflows/manifest-load.yml:
+    ignore:
+      - 'constant expression "false" in condition'

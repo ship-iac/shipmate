@@ -22,7 +22,8 @@ jobs:
       - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
 
       # Lint the workflow files (and shellcheck their run: blocks). actionlint
-      # only covers .github/workflows/, not composite actions/*/action.yml.
+      # only covers .github/workflows/, not composite actions/*/action.yml --
+      # those are parsed by GitHub itself in manifest-load.yml (push to main).
       # Download script pinned at the release tag; it verifies the binary checksum.
       - name: actionlint
         run: |

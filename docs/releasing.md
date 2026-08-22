@@ -126,6 +126,48 @@ Because this workflow reports **no status on PR heads**, it must **never** be
 added to this repo's required status checks — a required check that never
 reports deadlocks every PR.
 
+## Manifest load
+
+`.github/workflows/manifest-load.yml` lets GitHub parse every action manifest,
+because GitHub is what parses them in production and `yaml.safe_load` is more
+permissive. An unquoted description containing a comma inside a `{ }` flow
+mapping splits — in flow context a comma is a separator — so PyYAML yields an
+extra key named for the tail of the sentence and accepts the file, while
+`GitHub.DistributedTask.ObjectTemplating` refuses it outright. `v0.16.0` shipped
+that and every apply and deploy job died in `Set up job`, before its first step.
+
+The workflow is one job of 19 steps, each `if: false` and each `uses:` one action
+at the **remote** ref `ship-iac/shipmate/actions/<name>@main`. Both halves are
+load-bearing, measured 2026-08-22:
+
+| step form | `if: false` | comma-split manifest |
+| --- | --- | --- |
+| `ship-iac/shipmate/actions/x@<ref>` | yes | **fails in `Set up job`** |
+| `./actions/x` | yes | passes — never parsed |
+| either form | no | fails, and the action runs |
+
+The runner downloads and parses *remote* action manifests while setting the job
+up, before any step's `if:` is evaluated; a *local* `./actions/x` manifest is only
+read when its step executes. So the remote ref plus `if: false` buys the
+production parse without running anything — no action needs inputs, an App token,
+a live PR or `terramate`/`tofu`. The whole job takes about six seconds.
+`continue-on-error` is not an alternative: it masks precisely the manifest-load
+failure being hunted.
+
+Two limits, both deliberate:
+
+- **Merge-time, not PR-time.** `uses:` takes no expressions, so the ref cannot
+  follow a PR head, and `@main` is the only ref that stays correct. Like `## The
+  guard` above this runs on **push to main**, so it must never be a required
+  status check. It still runs before any tag is cut, which is where `v0.16.0`
+  escaped. Use `workflow_dispatch` to re-check `main` by hand immediately before
+  tagging.
+- **Coverage is asserted locally.** The workflow is silent about actions it does
+  not list, so `scripts/tests/test_manifest_load_workflow_covers_every_action.py`
+  compares its whole step list against the `actions/*/` tree — a new action with
+  no step, a step that lost `if: false`, and a step rewritten to a local ref each
+  fail there.
+
 ## Publishing the release
 
 After the internal-pin cascade converges and `internal-pins` is green on `main`,
@@ -197,13 +239,13 @@ in this repository can see that pair. It also resolves and parses the engine
 reusable workflow at the new SHA, because that happens when the run graph is
 built.
 
-It cannot reach a composite action's manifest. Those load when their **step**
-runs, `detect` runs only behind `guard`, and `guard` rejects any actor not ending
-in `[bot]` — correctly, since a direct human dispatch is what it exists to
-refuse. So `v0.16.0`'s unparseable `apply-detect/action.yml` survives this
-exercise; catching that class one commit before it ships is engine CI's job (a
-workflow that `uses:` each action so GitHub's own parser reads all 19 manifests),
-not a sample's. Nor does it cover the comment leg — parse, authorize, route —
+It cannot reach a composite action's manifest. The engine's actions are reached
+through `./actions/...`, and a local manifest loads only when its **step** runs;
+`detect` runs only behind `guard`, and `guard` rejects any actor not ending in
+`[bot]` — correctly, since a direct human dispatch is what it exists to refuse.
+So `v0.16.0`'s unparseable `apply-detect/action.yml` survives this exercise.
+Catching that class is engine CI's job, not a sample's: `## Manifest load` above
+does it on every push to `main`, one commit before a tag. Nor does it cover the comment leg — parse, authorize, route —
 which by construction runs the sample's default-branch workflows and so is only
 exercised after the re-pin.
 

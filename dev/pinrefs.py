@@ -157,10 +157,22 @@ def release_baseline():
 
 _YAML = (".yml", ".yaml")
 
+#: Pin-bearing in shape only. manifest-load.yml references every engine action at
+#: the floating ``@main`` on purpose -- GitHub parses a remote action's manifest
+#: while setting the job up, which is the whole check, and a SHA there would
+#: validate an old tree's manifests instead of this one's while dragging all 19
+#: actions' script closures into the staleness cascade. An entry here is only
+#: safe with another selector holding its refs in shape: this one's is
+#: ``scripts/tests/test_manifest_load_workflow_covers_every_action.py``, which
+#: compares the whole step list, so a pin added to that file cannot hide.
+_NOT_A_PIN_SOURCE = (".github/workflows/manifest-load.yml",)
+
 
 def _is_source(path):
     """True for the two shapes that can carry an internal pin: a top-level
     workflow, or a composite action's own action.yml."""
+    if path in _NOT_A_PIN_SOURCE:
+        return False
     if path.count("/") != 2:
         return False
     if path.startswith(".github/workflows/") and path.endswith(_YAML):
