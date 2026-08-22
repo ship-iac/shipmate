@@ -61,14 +61,16 @@ def _build_dispatch_body(mode="", environment=""):
     """
     code = _extract_python_heredoc()
     env = os.environ.copy()
-    env.update({
-        "DISPATCH_REF": "main",
-        "REF": "abc123def456",
-        "PR_NUMBER": "42",
-        "PLAN_RUN_ID": "12345",
-        "ENVIRONMENT": environment,
-        "MODE": mode,
-    })
+    env.update(
+        {
+            "DISPATCH_REF": "main",
+            "REF": "abc123def456",
+            "PR_NUMBER": "42",
+            "PLAN_RUN_ID": "12345",
+            "ENVIRONMENT": environment,
+            "MODE": mode,
+        }
+    )
 
     result = subprocess.run(
         [__import__("sys").executable, "-c", code],
@@ -227,10 +229,7 @@ def _create_stub_commands(tmpdir):
     """
     python3_path = Path(tmpdir) / "python3"
     # Use python from sys.executable instead of /usr/bin/python3
-    python3_path.write_text(
-        f"#!/bin/bash\n"
-        f'exec "{__import__("sys").executable}" "$@"\n'
-    )
+    python3_path.write_text(f'#!/bin/bash\nexec "{__import__("sys").executable}" "$@"\n')
     python3_path.chmod(0o755)
 
     gh_path = Path(tmpdir) / "gh"
@@ -256,11 +255,7 @@ def test_unlock_failure_prints_degrade_message():
         path_dir, python3_path, gh_path = _create_stub_commands(tmpdir)
 
         # Stub gh to exit 22 (HTTP error) and print to stderr.
-        gh_stub_content = (
-            "#!/bin/bash\n"
-            "echo 'HTTP 422: Unprocessable Entity' >&2\n"
-            "exit 22\n"
-        )
+        gh_stub_content = "#!/bin/bash\necho 'HTTP 422: Unprocessable Entity' >&2\nexit 22\n"
         Path(gh_path).write_text(gh_stub_content)
         Path(gh_path).chmod(0o755)
 
@@ -293,9 +288,7 @@ def test_unlock_failure_prints_degrade_message():
         # Must include raw gh stderr
         assert "HTTP 422" in output, f"raw gh output missing: {output}"
         # Must include degrade message
-        assert (
-            "does not declare the mode input" in output
-        ), f"degrade message missing: {output}"
+        assert "does not declare the mode input" in output, f"degrade message missing: {output}"
 
 
 def test_apply_failure_no_degrade_message():
@@ -315,11 +308,7 @@ def test_apply_failure_no_degrade_message():
         path_dir, python3_path, gh_path = _create_stub_commands(tmpdir)
 
         # Stub gh to exit 22.
-        gh_stub_content = (
-            "#!/bin/bash\n"
-            "echo 'HTTP 422: Unprocessable Entity' >&2\n"
-            "exit 22\n"
-        )
+        gh_stub_content = "#!/bin/bash\necho 'HTTP 422: Unprocessable Entity' >&2\nexit 22\n"
         Path(gh_path).write_text(gh_stub_content)
         Path(gh_path).chmod(0o755)
 
@@ -350,9 +339,9 @@ def test_apply_failure_no_degrade_message():
         # Must include raw gh stderr
         assert "HTTP 422" in output
         # Must NOT include degrade message (unlock-specific)
-        assert (
-            "does not declare the mode input" not in output
-        ), f"degrade message should not appear on apply path: {output}"
+        assert "does not declare the mode input" not in output, (
+            f"degrade message should not appear on apply path: {output}"
+        )
 
 
 def test_dispatch_success_exits_zero():
