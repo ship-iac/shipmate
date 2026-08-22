@@ -11,6 +11,21 @@ section below names the SHA the release tags.
 The version line stays `v0.x` while action inputs, check names, and the comment
 grammar are declared unstable in `README.md`.
 
+## [0.16.2] — 2026-08-22
+
+### Fixed
+
+- **`shipmate unlock` could not recognise a lock it was looking straight at.**
+  OpenTofu colours its diagnostics on a runner, so a live cell reads
+  `ESC[31m|ESC[0m ESC[0mLock Info:`; `scripts/lock-info` stripped the box prefix
+  but not the escape sequences, so the block never matched and the cell reported
+  the lock state as **undetermined** and went red — correctly refusing to claim
+  "no lock held", but leaving a releasable lock in place. The apply result
+  comment was unaffected: that path strips colour before this parser runs. The
+  fixtures missed it because the captures they were built from had been put
+  through a colour-stripping filter as they were taken; the new fixture is the
+  verbatim probe output of a real unlock run, escape sequences intact.
+
 ## [0.16.1] — 2026-08-22
 
 ### Fixed
