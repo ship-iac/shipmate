@@ -173,17 +173,42 @@ the release commit, from one sample:
    python dev/repin_consumer.py --repo ../repo-example-stacks-aws --sha <release-sha> --label vX.Y.Z
    ```
 
-2. Drive the new verb or path **once, in its cheapest shape**. For `unlock` that
-   was: comment the verb at an environment with nothing stranded, and check the
-   run reaches the cell and the action loads. No stranded lock, no state, no
-   acceptance criteria — the only question is *does the wiring resolve*.
+2. Drive the wrapper **directly at that ref**, with the body `actions/dispatch`
+   would build — including the values it deliberately sends empty:
+
+   ```bash
+   gh workflow run apply.yml --repo ship-iac/repo-example-stacks-aws --ref smoke/vX.Y.Z \
+     -f mode=unlock -f environment=sbx -f ref=<40-char-sha> -f pr_number=<n> -f plan_run_id=
+   ```
+
+   **Not by commenting the verb.** An `issue_comment` workflow always runs from
+   the repository's default branch, and the documented `comment-ops.yml` passes
+   `dispatch-ref: ${{ github.event.repository.default_branch }}` — so a comment
+   drives the default branch's `comment-ops.yml` and dispatches the default
+   branch's `apply.yml`, still on the *old* pin. The scratch branch is never
+   read, and the smoke goes green without touching the new code.
 3. Throw the branch away and cut the release as below.
 
-Smoke proves the wiring resolves; acceptance proves the behaviour is right. Two
-of `v0.16.0`'s three defects fail that exercise immediately. The dispatch leg in
-particular **needs a consumer**: the 422 came from the consumer wrapper's input
-declaration meeting the engine's dispatch body, and nothing in this repository
-can see that pair.
+**What this catches, and what it cannot.** It catches the class that genuinely
+needs a consumer: the wrapper's `workflow_dispatch` input declarations meeting
+the body the engine sends. An empty `-f plan_run_id=` against a `required: true`
+input is rejected as "not provided" right here, with no job started, and nothing
+in this repository can see that pair. It also resolves and parses the engine
+reusable workflow at the new SHA, because that happens when the run graph is
+built.
+
+It cannot reach a composite action's manifest. Those load when their **step**
+runs, `detect` runs only behind `guard`, and `guard` rejects any actor not ending
+in `[bot]` — correctly, since a direct human dispatch is what it exists to
+refuse. So `v0.16.0`'s unparseable `apply-detect/action.yml` survives this
+exercise; catching that class one commit before it ships is engine CI's job (a
+workflow that `uses:` each action so GitHub's own parser reads all 19 manifests),
+not a sample's. Nor does it cover the comment leg — parse, authorize, route —
+which by construction runs the sample's default-branch workflows and so is only
+exercised after the re-pin.
+
+Smoke proves the dispatch wiring resolves; acceptance proves the behaviour is
+right.
 
 Then cut the release:
 
