@@ -252,9 +252,7 @@ Re-plan first; the two recoveries are not interchangeable.
 
 A cancelled run has one further failure mode a bare retry cannot clear: it can
 die holding the state lock, and every later apply of that cell then fails
-acquiring it. The apply result comment names each such cell, the held lock's id
-and when it was taken, and the command that releases it — releasing the lock is
-not recovery either, so if the reviewed plan has gone stale, re-plan.
+acquiring it. See "A state lock is held", below.
 
 **No supported route aims an apply at a superseded plan**, which is why this error
 normally means the state moved rather than that the wrong plan was chosen.
@@ -339,6 +337,40 @@ your own `plan.yml` / `drift.yml`, which the engine cannot read), an environment
 that exists but is empty or mis-scoped (the fingerprint and `shipmate doctor`
 cover content), and an environment deleted between the pre-flight and the wave
 that binds it.
+
+### A state lock is held
+
+Every apply of the cell fails acquiring the lock, and the apply result comment
+carries a 🔒 line under its table naming each such cell, the held lock's id, when
+it was taken and the command that releases it. Per-cell concurrency admits one
+apply at a time, so the holder was that cell's own most recent apply run — one
+that was cancelled or killed before it could release.
+
+Comment `shipmate unlock <env>`. The environment is required; there is no bare
+form. It authorizes on approvers-team membership and the `<env>-apply`
+environment, not on a review — so a lock stranded after the pull request merged
+is still releasable ([`../CONTRACT.md`](../CONTRACT.md) §Comment-ops has the
+contract). Every cell in that environment with a pending
+`apply / <stack> / <env>` check is probed; each reports in its own job, and a
+cell that cannot determine its lock state fails red rather than reporting the
+lock absent.
+
+Then re-apply. **Unlocking is not recovery**: a cancelled apply usually advanced
+the state, so `shipmate apply <env>` may now be refused by the exact-plan
+fail-safe above — re-plan and apply the fresh plan. The lock is released either
+way; the plan is a separate question.
+
+Two locks this verb does not reach:
+
+- **A cell with no pending apply check** — a stack applied out of band, or one
+  whose check already completed. It is not in the queue, so release it the way
+  it was locked: `tofu force-unlock <id>` in that stack's directory, with the
+  backend's credentials, having confirmed the id against the error the next
+  apply prints.
+- **A lock a human is holding right now**, running OpenTofu by hand against the
+  same state. That is the lock unlock must not break, and it is why nothing here
+  waits on a lock or releases one it did not probe: check with whoever is
+  running it before forcing anything.
 
 ### `shipmate / gate` never goes green
 

@@ -8,7 +8,7 @@ inputs:
     description: GitHub App private key (from the shipmate-engine environment secret).
     required: true
   approvers-team:
-    description: GitHub team slug whose members may apply.
+    description: GitHub team slug whose members may apply and unlock.
     required: true
   comment-body:
     description: The PR comment body (author-controlled; never interpolated into a shell).
@@ -142,7 +142,7 @@ runs:
       run: |
         set -euo pipefail
         # `eyes` is the conventional "working on it" for a read-only command —
-        # `rocket` stays reserved for an authorized apply. `|| true`: the
+        # `rocket` marks an authorized apply or unlock instead. `|| true`: the
         # reaction is cosmetic (the comment may already be deleted, or
         # reactions disabled), and losing it must not fail the command.
         gh api -X POST "repos/$GITHUB_REPOSITORY/issues/comments/$COMMENT_ID/reactions" \
