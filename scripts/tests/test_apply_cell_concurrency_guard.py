@@ -39,7 +39,13 @@ CONCURRENCY = {
 
 #: workflow file -> the jobs in it that apply a cell, hand-written. Every one of
 #: them must carry `CONCURRENCY` exactly.
-SERIALIZED = {"apply-env-level.yml": [f"wave{i}" for i in range(8)]}
+SERIALIZED = {
+    "apply-env-level.yml": [f"wave{i}" for i in range(8)],
+    # Not a cell that applies, but one that force-unlocks a cell's state --
+    # which is exactly why it shares the queue: a live apply for that cell makes
+    # the unlock wait behind it, so the lock it finds is either gone or orphaned.
+    "apply.yml": ["unlock"],
+}
 
 
 def _jobs(workflow):

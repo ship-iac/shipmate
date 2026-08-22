@@ -61,6 +61,9 @@ DETECT_NEEDS = {"apply.yml": ["guard", "review"], "apply-all.yml": ["guard", "re
 DOWNSTREAM_NEEDS = {
     "apply.yml": {
         "apply": ["guard", "review", "detect"],
+        # Same list for the same reason -- and deliberately absent from
+        # `summary`'s: an unlock posts no comment and refreshes no gate.
+        "unlock": ["guard", "review", "detect"],
         "summary": ["guard", "review", "detect", "apply"],
     },
     "apply-all.yml": {
