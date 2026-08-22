@@ -256,7 +256,7 @@ jobs:
           app-id: ${{ vars.SHIPMATE_APP_ID }}
           private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
       - name: Post apply result comment
-        uses: ship-iac/shipmate/actions/apply-summary@23ec9dbd5a3baecf8315f8c2f1fd7e68bd815d84
+        uses: ship-iac/shipmate/actions/apply-summary@674c5f68a60b3b338e4994a068d42284b9c84fc7
         with:
           pr-number: ${{ inputs.pr_number }}
           head-sha: ${{ inputs.ref }}
