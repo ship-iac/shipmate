@@ -149,6 +149,67 @@ re-pin, so it belongs in the tree they pin, not in a commit that arrives after
 it. A commit cannot name its own SHA, so the section's SHA line is backfilled by
 the first commit after the tag.
 
+### Smoke the live path before the tag
+
+The runbook's ordering is right — release first, samples after — but it also
+means **the first time anything runs the new engine code for real is after the
+tag exists.** For a feature whose whole surface is a live Actions path, the
+release is therefore always cut on unexercised code. `v0.16.0` was tagged with an
+action manifest GitHub could not parse (apply and deploy dead), a dispatch that
+could not reach the engine at all (empty `required: true` input, HTTP 422), and a
+parser blind to the ANSI colour OpenTofu emits on a runner. All three are
+boundary behaviours no unit test reaches, and each surfaced in the first minutes
+of live use — three patch releases, each with its own pin cascade.
+
+So before cutting the tag, run the **thinnest live exercise** of the new path, on
+the release commit, from one sample:
+
+1. Re-pin **one** sample to the release commit on a **scratch branch**, never its
+   default branch — a re-pin on `main` with no release cut yet is exactly the
+   backwards staleness the section above warns about.
+
+   ```bash
+   git -C ../repo-example-stacks-aws checkout -b smoke/vX.Y.Z
+   python dev/repin_consumer.py --repo ../repo-example-stacks-aws --sha <release-sha> --label vX.Y.Z
+   ```
+
+2. Drive the wrapper **directly at that ref**, with the body `actions/dispatch`
+   would build — including the values it deliberately sends empty:
+
+   ```bash
+   gh workflow run apply.yml --repo ship-iac/repo-example-stacks-aws --ref smoke/vX.Y.Z \
+     -f mode=unlock -f environment=sbx -f ref=<40-char-sha> -f pr_number=<n> -f plan_run_id=
+   ```
+
+   **Not by commenting the verb.** An `issue_comment` workflow always runs from
+   the repository's default branch, and the documented `comment-ops.yml` passes
+   `dispatch-ref: ${{ github.event.repository.default_branch }}` — so a comment
+   drives the default branch's `comment-ops.yml` and dispatches the default
+   branch's `apply.yml`, still on the *old* pin. The scratch branch is never
+   read, and the smoke goes green without touching the new code.
+3. Throw the branch away and cut the release as below.
+
+**What this catches, and what it cannot.** It catches the class that genuinely
+needs a consumer: the wrapper's `workflow_dispatch` input declarations meeting
+the body the engine sends. An empty `-f plan_run_id=` against a `required: true`
+input is rejected as "not provided" right here, with no job started, and nothing
+in this repository can see that pair. It also resolves and parses the engine
+reusable workflow at the new SHA, because that happens when the run graph is
+built.
+
+It cannot reach a composite action's manifest. Those load when their **step**
+runs, `detect` runs only behind `guard`, and `guard` rejects any actor not ending
+in `[bot]` — correctly, since a direct human dispatch is what it exists to
+refuse. So `v0.16.0`'s unparseable `apply-detect/action.yml` survives this
+exercise; catching that class one commit before it ships is engine CI's job (a
+workflow that `uses:` each action so GitHub's own parser reads all 19 manifests),
+not a sample's. Nor does it cover the comment leg — parse, authorize, route —
+which by construction runs the sample's default-branch workflows and so is only
+exercised after the re-pin.
+
+Smoke proves the dispatch wiring resolves; acceptance proves the behaviour is
+right.
+
 Then cut the release:
 
 First confirm the target is safe to pin. An intermediate commit of the cascade
