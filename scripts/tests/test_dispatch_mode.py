@@ -344,6 +344,53 @@ def test_apply_failure_no_degrade_message():
         )
 
 
+def test_unlock_non_422_failure_prints_no_degrade_message():
+    """A 403 is not version skew: the raw output prints, the skew message does not.
+
+    Mutation: drop the `[[ "$out" == *"HTTP 422"* ]]` half of the condition and
+    this reddens, while the two tests above stay green.
+    """
+    bash = usable_bash()
+    if not bash:
+        pytest.skip("bash not available on this platform")
+
+    run_block = _extract_dispatch_run_block()
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        path_dir, python3_path, gh_path = _create_stub_commands(tmpdir)
+
+        Path(gh_path).write_text("#!/bin/bash\necho 'HTTP 403: Forbidden' >&2\nexit 1\n")
+        Path(gh_path).chmod(0o755)
+
+        env = os.environ.copy()
+        env["PATH"] = f"{path_dir}:{env.get('PATH', '')}"
+        env["GH_TOKEN"] = "test_token"  # noqa: S105
+        env["REPO"] = "org/repo"
+        env["WORKFLOW"] = "apply.yml"
+        env["DISPATCH_REF"] = "main"
+        env["ENVIRONMENT"] = ""
+        env["MODE"] = "unlock"
+        env["REF"] = "abc123"
+        env["PR_NUMBER"] = "42"
+        env["PLAN_RUN_ID"] = "12345"
+
+        result = subprocess.run(
+            [bash, "-c", run_block],
+            env=env,
+            capture_output=True,
+            text=True,
+            cwd=tmpdir,
+            timeout=30,
+        )
+
+        output = result.stdout + result.stderr
+        assert result.returncode == 1, f"gh's exit status must survive, got {result.returncode}"
+        assert "HTTP 403: Forbidden" in output, f"raw gh output missing: {output}"
+        assert "does not declare the mode input" not in output, (
+            f"a 403 is not an undeclared input: {output}"
+        )
+
+
 def test_dispatch_success_exits_zero():
     """When gh succeeds, the script exits 0.
 

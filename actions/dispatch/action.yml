@@ -96,9 +96,13 @@ runs:
         print(json.dumps({"ref": os.environ["DISPATCH_REF"], "inputs": inputs}))
         PY
         rc=0
-        gh api -X POST "repos/$REPO/actions/workflows/$WORKFLOW/dispatches" --input body.json || rc=$?
+        out=$(gh api -X POST "repos/$REPO/actions/workflows/$WORKFLOW/dispatches" --input body.json 2>&1) || rc=$?
+        printf '%s\n' "$out"
         if [ "$rc" -ne 0 ]; then
-          if [ "$MODE" = "unlock" ]; then echo "::error::The consumer's apply.yml does not declare the mode input; this repository's workflows predate shipmate unlock. Re-pin the consumer workflows to a release that has it (docs/releasing.md)."; fi
+          # Only a 422 says "undeclared input"; a 403/404/rate limit is a different
+          # problem entirely and explaining it as version skew sends the operator
+          # to re-pin workflows that are fine.
+          if [ "$MODE" = "unlock" ] && [[ "$out" == *"HTTP 422"* ]]; then echo "::error::The consumer's apply.yml does not declare the mode input; this repository's workflows predate shipmate unlock. Re-pin the consumer workflows to a release that has it (docs/releasing.md)."; fi
           exit "$rc"
         fi
         echo "::notice title=dispatch::dispatched $WORKFLOW on $DISPATCH_REF for ${ENVIRONMENT:-all environments} (ref $REF, plan run $PLAN_RUN_ID)"
