@@ -34,7 +34,7 @@ outputs:
   cells: { description: "Flat JSON array of cells — the unlock queue in unlock mode, [] in apply mode. Always valid JSON, never empty: consumers fromJSON it unconditionally.", value: "${{ steps.d.outputs.cells }}" }
   empty: { description: true when no cell is pending, value: "${{ steps.d.outputs.empty }}" }
   head_sha: { description: Echoed head SHA, value: "${{ steps.d.outputs.head_sha }}" }
-  plan_run_id: { description: Echoed plan run id (unset in unlock mode, which consumes no plan run), value: "${{ steps.d.outputs.plan_run_id }}" }
+  plan_run_id: { description: "Echoed plan run id; empty in unlock mode, which consumes no plan run", value: "${{ steps.d.outputs.plan_run_id }}" }
 runs:
   using: composite
   steps:

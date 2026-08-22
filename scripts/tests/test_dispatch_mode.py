@@ -255,7 +255,7 @@ def test_unlock_failure_prints_degrade_message():
         path_dir, python3_path, gh_path = _create_stub_commands(tmpdir)
 
         # Stub gh to exit 22 (HTTP error) and print to stderr.
-        gh_stub_content = "#!/bin/bash\necho 'HTTP 422: Unprocessable Entity' >&2\nexit 22\n"
+        gh_stub_content = "#!/bin/bash\necho 'gh: Unexpected inputs provided: [\"mode\"] (HTTP 422)' >&2\nexit 22\n"
         Path(gh_path).write_text(gh_stub_content)
         Path(gh_path).chmod(0o755)
 
@@ -308,7 +308,7 @@ def test_apply_failure_no_degrade_message():
         path_dir, python3_path, gh_path = _create_stub_commands(tmpdir)
 
         # Stub gh to exit 22.
-        gh_stub_content = "#!/bin/bash\necho 'HTTP 422: Unprocessable Entity' >&2\nexit 22\n"
+        gh_stub_content = "#!/bin/bash\necho 'gh: Unexpected inputs provided: [\"mode\"] (HTTP 422)' >&2\nexit 22\n"
         Path(gh_path).write_text(gh_stub_content)
         Path(gh_path).chmod(0o755)
 
@@ -497,3 +497,61 @@ def test_real_case_accepts_valid_modes():
                 assert "mode" not in body.get("inputs", {}), (
                     f"mode={mode!r} should not include mode in inputs, got {body}"
                 )
+
+
+def test_a_422_about_another_input_is_not_reported_as_mode_skew():
+    """A 422 naming an input other than `mode` is not version skew.
+
+    The v0.16.0 E2E hit exactly this: the consumer wrapper declared
+    `plan_run_id` as required, unlock dispatches it empty, and GitHub answered
+    `Required input 'plan_run_id' not provided (HTTP 422)`. The old condition
+    matched any 422 and told the operator to re-pin workflows that were already
+    current, hiding the real cause printed one line above.
+
+    Mutation: widen the condition back to any `HTTP 422` and this reddens.
+    """
+    bash = usable_bash()
+    if not bash:
+        pytest.skip("bash not available on this platform")
+
+    run_block = _extract_dispatch_run_block()
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        path_dir, python3_path, gh_path = _create_stub_commands(tmpdir)
+
+        Path(gh_path).write_text(
+            "#!/bin/bash\n"
+            "echo \"gh: Required input 'plan_run_id' not provided (HTTP 422)\" >&2\n"
+            "exit 22\n"
+        )
+        Path(gh_path).chmod(0o755)
+
+        env = os.environ.copy()
+        env["PATH"] = f"{path_dir}:{env.get('PATH', '')}"
+        env["GH_TOKEN"] = "test_token"  # noqa: S105
+        env["REPO"] = "org/repo"
+        env["WORKFLOW"] = "apply.yml"
+        env["DISPATCH_REF"] = "main"
+        env["ENVIRONMENT"] = ""
+        env["MODE"] = "unlock"
+        env["REF"] = "abc123"
+        env["PR_NUMBER"] = "42"
+        env["PLAN_RUN_ID"] = "12345"
+
+        result = subprocess.run(
+            [bash, "-c", run_block],
+            env=env,
+            capture_output=True,
+            text=True,
+            cwd=tmpdir,
+            timeout=30,
+        )
+
+        output = result.stdout + result.stderr
+        assert result.returncode == 22, f"gh's exit status must survive, got {result.returncode}"
+        assert "Required input 'plan_run_id' not provided" in output, (
+            f"the API's own message must still print: {output}"
+        )
+        assert "does not declare the mode input" not in output, (
+            f"a 422 about plan_run_id is not mode skew: {output}"
+        )
