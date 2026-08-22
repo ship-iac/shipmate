@@ -504,8 +504,8 @@ def _stub_unlock_tree(monkeypatch, cells, completed=()):
     """Stub the tree walk; returns the kwargs `compute_cells` was called with."""
     seen = {}
 
-    def _compute(all_stacks=False, base=""):
-        seen.update(all_stacks=all_stacks, base=base)
+    def _compute(all_stacks=False, base="", require_env_tag=True):
+        seen.update(all_stacks=all_stacks, base=base, require_env_tag=require_env_tag)
         return cells
 
     monkeypatch.setattr(ad.bm, "compute_cells", _compute)
@@ -533,7 +533,7 @@ def test_unlock_queue_is_the_pending_cells_of_the_target_env(monkeypatch, tmp_pa
     ad.main()
     # all_stacks=True is the point: a cell whose plan artifacts expired long ago
     # is exactly the cell that can hold a stranded lock.
-    assert seen == {"all_stacks": True, "base": ""}
+    assert seen == {"all_stacks": True, "base": "", "require_env_tag": False}
     assert json.loads(_parsed(out)["cells"]) == [
         {"stack": "stacks/app", "environment": "dev-eu", "workload": "app", "workload_var": "APP"},
         {"stack": "stacks/db", "environment": "dev-eu", "workload": "app", "workload_var": "APP"},
@@ -628,3 +628,49 @@ def test_apply_mode_writes_the_whole_output_file_verbatim(monkeypatch, tmp_path)
         "head_sha=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n"
         "plan_run_id=42\n"
     )
+
+
+def test_unlock_tolerates_an_untagged_stack_elsewhere_in_the_tree(monkeypatch, tmp_path):
+    # Through the REAL env_membership: require_env_tag=True would abort on
+    # `stacks/orphan` and make unlock unavailable for EVERY environment --
+    # precisely when the pipeline is already degraded enough to strand a lock.
+    out = _unlock_env(monkeypatch, tmp_path)
+    _boom_on_plan_path(monkeypatch)
+    monkeypatch.setattr(ad, "completed_apply_names", lambda repo, head: set())
+    monkeypatch.setattr(
+        ad.bm, "_list_stacks", lambda all_stacks, base: ["stacks/app", "stacks/orphan"]
+    )
+    monkeypatch.setattr(
+        ad.bm, "_tags", lambda s: ["env/dev-eu", "workload/app"] if s == "stacks/app" else []
+    )
+    monkeypatch.setattr(ad.bm, "assert_run_env_roundtrip", lambda stack_dir: None)
+    ad.main()
+    assert json.loads(_parsed(out)["cells"]) == [
+        {"stack": "stacks/app", "environment": "dev-eu", "workload": "app", "workload_var": "APP"}
+    ]
+
+
+def test_apply_mode_verifies_its_plan_run(monkeypatch, tmp_path):
+    # Nothing else pins that the apply path verifies its plan run at all: every
+    # other apply test stubs verify_plan_run to a no-op, so deleting the call
+    # left the whole suite green -- with it gone a dispatched apply would apply a
+    # foreign or stale run's reviewed plans.
+    called = []
+    _unlock_env(
+        monkeypatch,
+        tmp_path,
+        SHIPMATE_MODE="apply",
+        SHIPMATE_PLAN_RUN_ID="42",
+        SHIPMATE_REVIEW_DECISION="APPROVED",
+    )
+
+    def _verified(repo, run_id, head):
+        called.append((repo, run_id, head))
+
+    monkeypatch.setattr(ad, "verify_plan_run", _verified)
+    monkeypatch.setattr(ad, "run_graph_deps", lambda: {"stacks/app": set()})
+    monkeypatch.setattr(ad, "_artifact_names", lambda *a: ["plan.dev-eu.stacks-app"])
+    monkeypatch.setattr(ad, "completed_apply_names", lambda *a: set())
+    monkeypatch.setattr(ad.bm, "_tags", lambda stack: ["env/dev-eu", "workload/app"])
+    ad.main()
+    assert called == [("acme/iac", "42", "a" * 40)]

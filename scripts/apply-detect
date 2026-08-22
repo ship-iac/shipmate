@@ -251,12 +251,22 @@ def run_unlock(repo, env, head):
     no plan to protect, and it must reach a cell whose plan artifacts expired
     long ago. Deliberate, not an oversight.
 
+    `require_env_tag=False` for the same reason the bare-apply path passes it: an
+    untagged stack contributes no cell anyway, and unlock is the RECOVERY verb —
+    reached when the pipeline is already degraded, which is exactly when a
+    half-finished stack may be sitting in the tree. Failing loud there would make
+    unlock unavailable for every environment precisely when it is needed.
+
     `refuse_unreviewed` is skipped because an approval reviews a diff and unlock
     applies none — the run-time half of the decision `scripts/authorize` already
     made at comment time. `cells` is written in BOTH modes (`[]` on the apply
     path) because the unlock job's `strategy.matrix.include` is
     `fromJSON(cells)` and `fromJSON('')` is an error."""
-    cells = [c for c in bm.compute_cells(all_stacks=True) if c["environment"] == env]
+    cells = [
+        c
+        for c in bm.compute_cells(all_stacks=True, require_env_tag=False)
+        if c["environment"] == env
+    ]
     pending = filter_pending(cells, completed_apply_names(repo, head))
     print(
         f"::notice title=apply-detect::mode=unlock env={env} head={head} "
