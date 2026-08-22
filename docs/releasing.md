@@ -149,6 +149,42 @@ re-pin, so it belongs in the tree they pin, not in a commit that arrives after
 it. A commit cannot name its own SHA, so the section's SHA line is backfilled by
 the first commit after the tag.
 
+### Smoke the live path before the tag
+
+The runbook's ordering is right — release first, samples after — but it also
+means **the first time anything runs the new engine code for real is after the
+tag exists.** For a feature whose whole surface is a live Actions path, the
+release is therefore always cut on unexercised code. `v0.16.0` was tagged with an
+action manifest GitHub could not parse (apply and deploy dead), a dispatch that
+could not reach the engine at all (empty `required: true` input, HTTP 422), and a
+parser blind to the ANSI colour OpenTofu emits on a runner. All three are
+boundary behaviours no unit test reaches, and each surfaced in the first minutes
+of live use — three patch releases, each with its own pin cascade.
+
+So before cutting the tag, run the **thinnest live exercise** of the new path, on
+the release commit, from one sample:
+
+1. Re-pin **one** sample to the release commit on a **scratch branch**, never its
+   default branch — a re-pin on `main` with no release cut yet is exactly the
+   backwards staleness the section above warns about.
+
+   ```bash
+   git -C ../repo-example-stacks-aws checkout -b smoke/vX.Y.Z
+   python dev/repin_consumer.py --repo ../repo-example-stacks-aws --sha <release-sha> --label vX.Y.Z
+   ```
+
+2. Drive the new verb or path **once, in its cheapest shape**. For `unlock` that
+   was: comment the verb at an environment with nothing stranded, and check the
+   run reaches the cell and the action loads. No stranded lock, no state, no
+   acceptance criteria — the only question is *does the wiring resolve*.
+3. Throw the branch away and cut the release as below.
+
+Smoke proves the wiring resolves; acceptance proves the behaviour is right. Two
+of `v0.16.0`'s three defects fail that exercise immediately. The dispatch leg in
+particular **needs a consumer**: the 422 came from the consumer wrapper's input
+declaration meeting the engine's dispatch body, and nothing in this repository
+can see that pair.
+
 Then cut the release:
 
 First confirm the target is safe to pin. An intermediate commit of the cascade

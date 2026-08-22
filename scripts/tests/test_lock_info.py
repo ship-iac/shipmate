@@ -1,4 +1,11 @@
-"""scripts/lock-info: parse OpenTofu's state-lock acquisition failure."""
+"""scripts/lock-info: parse OpenTofu's state-lock acquisition failure.
+
+Fixture provenance, because it decides whether the bytes carry colour:
+`lock_error_local.txt` and `lock_error_s3.txt` were captured through an
+ANSI strip and cover the non-TTY shape only -- they are not verbatim runner
+output. `lock_error_s3_ansi.txt` is a live `shipmate unlock sbx` run on a
+runner, escape bytes intact, and is the only one that proves the strip.
+"""
 
 import pathlib
 
