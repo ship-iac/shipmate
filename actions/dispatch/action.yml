@@ -11,6 +11,10 @@ inputs:
     description: Target environment, e.g. dev-eu. Empty = bare `shipmate apply` (all non-explicit environments).
     required: false
     default: ''
+  mode:
+    description: apply (default) or unlock. Included in the dispatch body only when 'unlock' — a consumer apply.yml that predates this input declares no such input, and a workflow_dispatch carrying an undeclared input is rejected (422).
+    required: false
+    default: ''
   ref:
     description: PR head SHA to check out and apply.
     required: true
@@ -64,6 +68,7 @@ runs:
         WORKFLOW: ${{ inputs.workflow }}
         DISPATCH_REF: ${{ inputs.dispatch-ref }}
         ENVIRONMENT: ${{ inputs.environment }}
+        MODE: ${{ inputs.mode }}
         REF: ${{ inputs.ref }}
         PR_NUMBER: ${{ inputs.pr-number }}
         PLAN_RUN_ID: ${{ inputs.plan-run-id }}
@@ -71,6 +76,7 @@ runs:
         set -euo pipefail
         if [ -z "$WORKFLOW" ]; then WORKFLOW=apply.yml; fi
         [[ "$WORKFLOW" =~ ^[A-Za-z0-9._-]+$ ]] || { echo "::error::workflow must match ^[A-Za-z0-9._-]+$ (got: $WORKFLOW)"; exit 1; }
+        case "${MODE:-}" in ''|apply|unlock) ;; *) echo "::error::mode must be apply or unlock (got: $MODE)"; exit 1 ;; esac
         python3 - > body.json <<'PY'
         import json, os
         inputs = {
@@ -84,7 +90,15 @@ runs:
         # workflow_dispatch with an undeclared input is rejected (422).
         if os.environ.get("ENVIRONMENT"):
             inputs["environment"] = os.environ["ENVIRONMENT"]
+        mode = os.environ.get("MODE", "")
+        if mode == "unlock":
+            inputs["mode"] = mode
         print(json.dumps({"ref": os.environ["DISPATCH_REF"], "inputs": inputs}))
         PY
-        gh api -X POST "repos/$REPO/actions/workflows/$WORKFLOW/dispatches" --input body.json
+        rc=0
+        gh api -X POST "repos/$REPO/actions/workflows/$WORKFLOW/dispatches" --input body.json || rc=$?
+        if [ "$rc" -ne 0 ]; then
+          if [ "$MODE" = "unlock" ]; then echo "::error::The consumer's apply.yml does not declare the mode input; this repository's workflows predate shipmate unlock. Re-pin the consumer workflows to a release that has it (docs/releasing.md)."; fi
+          exit "$rc"
+        fi
         echo "::notice title=dispatch::dispatched $WORKFLOW on $DISPATCH_REF for ${ENVIRONMENT:-all environments} (ref $REF, plan run $PLAN_RUN_ID)"
