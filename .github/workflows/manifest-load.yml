@@ -1,0 +1,74 @@
+name: manifest-load
+
+# Let GitHub parse the action manifests, since GitHub is what parses them in
+# production. `yaml.safe_load` is more permissive than
+# GitHub.DistributedTask.ObjectTemplating: an unquoted description containing a
+# comma inside a { } flow mapping splits into a bogus key, PyYAML accepts it and
+# GitHub refuses the whole file. v0.16.0 shipped exactly that and every apply and
+# deploy job died in "Set up job", before its first step.
+#
+# Two details make this cheap, and both are load-bearing -- see
+# docs/releasing.md § Manifest load:
+#   * the ref is *remote* (ship-iac/shipmate/...@main), not ./actions/... . The
+#     runner downloads and parses remote action manifests during "Set up job";
+#     local ./ manifests are only read when the step executes.
+#   * `if: false` therefore still parses the manifest but never runs the action,
+#     so no action needs inputs, credentials or a live PR.
+# Measured 2026-08-22: the pair is discriminating -- a comma-split manifest under
+# `if: false` fails at Set up job with the production error.
+#
+# @main means this is merge-time, not PR-time, coverage: `uses:` takes no
+# expressions, so the ref cannot follow the PR head. It still runs before any
+# release tag, which is where the defect escaped. workflow_dispatch is here to
+# re-check main by hand immediately before tagging.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  load:
+    runs-on: ubuntu-latest
+    steps:
+      - if: false
+        uses: ship-iac/shipmate/actions/apply-all-detect@main
+      - if: false
+        uses: ship-iac/shipmate/actions/apply-cell@main
+      - if: false
+        uses: ship-iac/shipmate/actions/apply-complete@main
+      - if: false
+        uses: ship-iac/shipmate/actions/apply-detect@main
+      - if: false
+        uses: ship-iac/shipmate/actions/apply-snapshot@main
+      - if: false
+        uses: ship-iac/shipmate/actions/apply-summary@main
+      - if: false
+        uses: ship-iac/shipmate/actions/build-matrix@main
+      - if: false
+        uses: ship-iac/shipmate/actions/comment-ops@main
+      - if: false
+        uses: ship-iac/shipmate/actions/deploy-detect@main
+      - if: false
+        uses: ship-iac/shipmate/actions/dispatch@main
+      - if: false
+        uses: ship-iac/shipmate/actions/drift-cell@main
+      - if: false
+        uses: ship-iac/shipmate/actions/drift-issues@main
+      - if: false
+        uses: ship-iac/shipmate/actions/gate-refresh@main
+      - if: false
+        uses: ship-iac/shipmate/actions/plan-cell@main
+      - if: false
+        uses: ship-iac/shipmate/actions/setup@main
+      - if: false
+        uses: ship-iac/shipmate/actions/state@main
+      - if: false
+        uses: ship-iac/shipmate/actions/summary@main
+      - if: false
+        uses: ship-iac/shipmate/actions/unlock-cell@main
+      - if: false
+        uses: ship-iac/shipmate/actions/verify-environments@main

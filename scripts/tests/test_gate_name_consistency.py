@@ -374,13 +374,22 @@ def _reusable_caller_offense(wf_name, job_name, job, workflow_docs):
     return None
 
 
+def _never_runs(step):
+    """`if: false` -- a step GitHub always skips, so it threads nothing at
+    runtime. manifest-load.yml is built entirely of them: they exist so the
+    runner parses each action's manifest while setting the job up, which happens
+    before any `if:` is evaluated, and they deliberately carry no `with:`.
+    """
+    return step.get("if") is False
+
+
 def _credentialed_step_offenses(wf_name, job_name, job):
     """Check every credentialed-action step in one non-reusable job; return
     a list of offense strings (empty if all such steps pass both creds)."""
     offenses = []
     for step in job.get("steps") or []:
         uses = step.get("uses") or ""
-        if not any(action in uses for action in CREDENTIALED_ACTIONS):
+        if _never_runs(step) or not any(action in uses for action in CREDENTIALED_ACTIONS):
             continue
         with_ = step.get("with") or {}
         missing = [k for k in ("app-id", "private-key") if k not in with_]
@@ -440,7 +449,7 @@ def _detect_step_offenses(wf_name, job_name, job):
     offenses = []
     for step in job.get("steps") or []:
         uses = step.get("uses") or ""
-        if not any(action in uses for action in DETECT_ACTIONS):
+        if _never_runs(step) or not any(action in uses for action in DETECT_ACTIONS):
             continue
         with_ = step.get("with") or {}
         if "app-id" not in with_:
