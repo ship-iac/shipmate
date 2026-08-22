@@ -256,7 +256,7 @@ jobs:
         with:
           role-to-assume: ${{ matrix.workload_var != '' && vars[format('AWS_ROLE_ARN_{0}', matrix.workload_var)] || vars.AWS_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
-      - uses: ship-iac/shipmate/actions/unlock-cell@04c91b06750404c2d50706f266369d74758dfa9a
+      - uses: ship-iac/shipmate/actions/unlock-cell@e370ae88a3fa8f174b6f51e43967ce2cdf0eacdd
         with:
           stack: ${{ matrix.stack }}
           stack-name: ${{ matrix.stack }}
