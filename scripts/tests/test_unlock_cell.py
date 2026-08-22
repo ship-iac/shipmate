@@ -16,8 +16,9 @@ here is load-bearing:
 
 Two guards execute the shipped shell bodies rather than reading them: the
 three-state report (no lock / could-not-determine, which must never collapse
-into one message) and the conditional rendering of `lock_created` /
-`lock_operation`, which `scripts/lock-info` may legitimately return empty.
+into one message, and which succeeds only on the first of those) and the
+conditional rendering of `lock_created` / `lock_operation`, which
+`scripts/lock-info` may legitimately return empty.
 
 Every constant here is hand-written and never derived from action.yml -- an
 expectation read back out of the file under test passes whatever that file says.
@@ -113,10 +114,12 @@ def test_stack_and_lock_id_arrive_through_env():
         assert "${{" not in step.get("run", ""), f"{step.get('name')!r} interpolates into its run"
 
 
-def test_the_init_failure_lands_in_the_report_not_a_bare_red_cell():
-    """A failed init must reach the could-not-determine warning below, which
-    only happens if the init step does not fail the cell outright."""
-    assert _step("init").get("continue-on-error") is True
+def test_no_step_swallows_its_own_failure():
+    """Every step here fails the cell it belongs to. `continue-on-error` on the
+    init in particular would turn "the engine could not look at the lock" into a
+    green cell carrying a warning nobody reads across dozens of cells."""
+    for step in action_steps(_ACTION):
+        assert "continue-on-error" not in step, f"{step.get('name')!r} swallows its failure"
 
 
 def _run_body(tmp_path, step_id, env, *, terramate_body="return 0"):
@@ -161,7 +164,8 @@ def test_a_failed_probe_with_no_lock_reports_undetermined_never_no_lock(tmp_path
     """The distinction that must not collapse: telling an operator "no lock
     held" when the truth is "could not look" reads as a clean cell."""
     r, _ = _run_body(tmp_path, "report", {**_REPORT_ENV, "PROBE_STATUS": "1"})
-    assert r.returncode == 0, f"stdout={r.stdout!r} stderr={r.stderr!r}"
+    # ...and it fails the cell: not looking is not a success.
+    assert r.returncode != 0, f"stdout={r.stdout!r} stderr={r.stderr!r}"
     assert r.stdout.strip() == _UNDETERMINED
     assert "no state lock held" not in r.stdout
 

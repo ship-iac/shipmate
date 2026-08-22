@@ -16,11 +16,8 @@ runs:
     - name: Init
       id: init
       shell: bash
-      continue-on-error: true
-      # continue-on-error, unlike every other cell's init: a failed init leaves
-      # the lock UNKNOWN, not absent, and the report step below says exactly
-      # that. Failing here instead would replace that sentence with a red cell
-      # whose only content is init's own diagnostics.
+      # A failed init leaves the lock UNKNOWN, not absent, and unknown is not a
+      # success -- so this fails the cell, like every other cell's init.
       env:
         STACK: ${{ inputs.stack }}
       run: |
@@ -62,11 +59,13 @@ runs:
       # Two ways to get here, and they are not the same fact. A clean probe
       # proves no lock is held -- which is also every local-backend cell, where
       # a lock dies with the process that took it, so this action is
-      # structurally a graceful no-op there. A failed probe with no parsable
-      # lock (a config error, a failed init, any other tofu failure) proves
-      # nothing at all, and must never be reported as "no lock held": an
-      # operator reading that would take the cell for clean while it may still
-      # be locked.
+      # structurally a graceful no-op there, and that path succeeds.
+      # A failed probe with no parsable lock (a config error, a failed init, any
+      # other tofu failure) proves nothing at all. It must never be reported as
+      # "no lock held" -- an operator reading that would take the cell for clean
+      # while it may still be locked -- and it fails the cell: the engine
+      # failing to look is not a success, and an annotation on a green run
+      # across dozens of cells is easy to miss.
       env:
         STACK_NAME: ${{ inputs.stack-name }}
         ENV: ${{ inputs.env }}
@@ -77,6 +76,7 @@ runs:
           echo "::notice::no state lock held for $STACK_NAME / $ENV"
         else
           echo "::warning::could not determine whether a lock is held for $STACK_NAME / $ENV — see the log"
+          exit 1
         fi
 
     - name: Release the state lock
