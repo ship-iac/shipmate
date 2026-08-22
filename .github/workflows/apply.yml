@@ -144,6 +144,24 @@ jobs:
           # review signal never arrived, and empty refuses the run.
           ungated-envs: ${{ vars.SHIPMATE_UNGATED_ENVS }}
           review-decision: ${{ needs.review.outputs.decision }}
+      # The apply path runs this pre-flight in apply-env-level's `snapshot` job,
+      # before any wave binds an environment; the unlock job binds the SAME
+      # `<env>-apply` and so needs the same refusal. GitHub creates a missing
+      # environment on demand with no reviewers, no wait timer and no branch
+      # policy -- and the created environment then satisfies the apply path's own
+      # pre-flight, so an unlock into a missing environment would silently retire
+      # the reviewer gate for every later apply of that env. A failure here fails
+      # `detect`, which the unlock job's `!failure()` reads as "do not run".
+      # The single flat queue is wrapped as one wave: the script's input shape is
+      # the waves object, and it refuses an empty cell set by design -- hence the
+      # `!= '[]'` clause rather than letting it decide.
+      - name: Verify the unlock-path environment exists
+        if: ${{ inputs.mode == 'unlock' && steps.d.outputs.cells != '[]' }}
+        uses: ship-iac/shipmate/actions/verify-environments@9c0354a97cd97e07967dac2c7e36f524cdc18700
+        with:
+          waves-json: ${{ format('{{"wave0":{0}}}', steps.d.outputs.cells) }}
+          shared-envs: ${{ vars.SHIPMATE_SHARED_ENVS }}
+          github-token: ${{ github.token }}
 
   # A targeted apply is single-env by design, so its pending wave set is exactly
   # one env-level's wave matrix — run it through the same engine the deploy and

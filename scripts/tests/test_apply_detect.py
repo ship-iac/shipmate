@@ -507,8 +507,12 @@ _DEV_EU_PENDING_CHECKS = [
 
 
 def _stub_unlock_tree(monkeypatch, cells, checks=None):
-    """Stub the tree walk and the check-run listing; returns the kwargs
-    `compute_cells` was called with.
+    """Stub the tag walk and the check-run listing; returns the kwargs
+    `env_membership` was called with.
+
+    Only the walk is stubbed — the REAL `build_matrix` turns its output into
+    cells, so the matrix-limit and reserved-path guards it carries stay on the
+    unlock path instead of being stubbed out of it.
 
     `checks` are stubbed as the raw JSONL `gh` emits, not as a set of names, so
     the queue's membership rule itself is under test rather than assumed: a
@@ -516,14 +520,21 @@ def _stub_unlock_tree(monkeypatch, cells, checks=None):
     Default: every dev-eu cell has a pending check."""
     seen = {}
 
-    def _compute(all_stacks=False, base="", require_env_tag=True):
+    def _membership(all_stacks=False, base="", require_env_tag=True):
         seen.update(all_stacks=all_stacks, base=base, require_env_tag=require_env_tag)
-        return cells
+        stacks_by_env, tags_by_stack = {}, {}
+        for c in cells:
+            stacks_by_env.setdefault(c["environment"], []).append(c["stack"])
+            tags = tags_by_stack.setdefault(c["stack"], [])
+            for tag in (f"env/{c['environment']}", f"workload/{c['workload']}"):
+                if tag not in tags:
+                    tags.append(tag)
+        return stacks_by_env, tags_by_stack
 
     runs = _DEV_EU_PENDING_CHECKS if checks is None else checks
     monkeypatch.setattr(ad.bm, "_run", lambda args: "\n".join(json.dumps(r) for r in runs))
     monkeypatch.setenv("SHIPMATE_APP_ID", APP_ID)
-    monkeypatch.setattr(ad.bm, "compute_cells", _compute)
+    monkeypatch.setattr(ad.bm, "env_membership", _membership)
     return seen
 
 
@@ -599,6 +610,35 @@ def test_unlock_non_empty_queue_does_not_warn(monkeypatch, tmp_path, capsys):
     out = capsys.readouterr().out
     assert "cells=3 pending=3" in out  # not vacuous: there IS a queue
     assert "::warning::" not in out
+
+
+def test_unlock_is_not_capped_by_the_whole_tree_matrix_limit(monkeypatch, tmp_path):
+    # build_matrix refuses a cell set above the GHA matrix limit, and over a
+    # whole-tree walk that ceiling counts every stack x every environment. Built
+    # for all envs and filtered afterwards, a repository past the limit could
+    # never unlock ANY environment however short its queue -- and the refusal
+    # would tell the operator to split a pull request that does not exist. Only
+    # the target env's cells are built, so the ceiling bounds what the matrix
+    # will actually hold.
+    out = _unlock_env(monkeypatch, tmp_path)
+    _boom_on_plan_path(monkeypatch)
+    _stub_unlock_tree(
+        monkeypatch,
+        [
+            {
+                "stack": "stacks/app",
+                "environment": f"env-{i}",
+                "workload": "app",
+                "workload_var": "APP",
+            }
+            for i in range(ad.bm.MATRIX_LIMIT + 10)
+        ]
+        + [_DEV_EU_CELLS[0]],
+    )
+    ad.main()
+    assert json.loads(_parsed(out)["cells"]) == [
+        {"stack": "stacks/app", "environment": "dev-eu", "workload": "app", "workload_var": "APP"}
+    ]
 
 
 def test_unlock_emits_no_wave_array_with_any_member(monkeypatch, tmp_path):
@@ -713,7 +753,6 @@ def test_unlock_tolerates_an_untagged_stack_elsewhere_in_the_tree(monkeypatch, t
     monkeypatch.setattr(
         ad.bm, "_tags", lambda s: ["env/dev-eu", "workload/app"] if s == "stacks/app" else []
     )
-    monkeypatch.setattr(ad.bm, "assert_run_env_roundtrip", lambda stack_dir: None)
     ad.main()
     assert json.loads(_parsed(out)["cells"]) == [
         {"stack": "stacks/app", "environment": "dev-eu", "workload": "app", "workload_var": "APP"}

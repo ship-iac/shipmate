@@ -836,6 +836,13 @@ post-merge deploy, and a merged pull request reports `mergeable: null` — which
 the apply path reads as "still computing" — so keeping them would leave exactly
 that lock permanently unreleasable.
 
+Because that environment is half of the authorization, the run refuses when it
+does not exist — the same pre-flight the apply path runs before its first wave,
+on the unlock queue. GitHub would otherwise create the environment on demand
+with no reviewers, no wait timer and no branch policy, and keep it: an unlock
+into a missing environment would retire the reviewer gate for every later apply
+of that env.
+
 Its queue is the cells in that environment whose `apply / <stack> / <env>` check
 is still **pending**, not the reviewed plan artifacts: a lock outlives the run
 that stranded it, and those artifacts may be long expired. Each queued cell runs

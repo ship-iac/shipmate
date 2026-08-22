@@ -19,7 +19,13 @@ fail-open, so each is pinned WHOLE against a hand-written constant:
 - both `summary` steps' `if:` -- unlock completes no apply check, so a gate
   refresh is a no-op and an apply-result comment has no cells to report;
 - `mode`'s declared default, which is what makes every existing apply dispatch
-  (which sends no mode at all) keep taking the apply path.
+  (which sends no mode at all) keep taking the apply path;
+- `detect`'s unlock-path environment pre-flight. The unlock job binds
+  `<env>-apply`, which is half of what bounds this verb -- and GitHub creates a
+  missing environment on demand with no reviewers and no branch policy, then
+  keeps it, so an unlock into a missing environment would retire the reviewer
+  gate for every later apply of that env. The apply path gets this refusal from
+  apply-env-level's `snapshot` job; unlock has no snapshot, so it gets it here.
 
 Two properties this file deliberately does NOT re-pin, to keep one selector per
 property:
@@ -70,6 +76,18 @@ APPLY_IF = (
 
 #: The whole `if:` both `summary` steps carry.
 SUMMARY_STEP_IF = "${{ inputs.mode != 'unlock' }}"
+
+#: The whole `with:` and `if:` of `detect`'s unlock-path environment pre-flight.
+#: The queue is one flat array and the script's input shape is the waves object,
+#: hence the single-wave wrapper; `!= '[]'` is load-bearing because the script
+#: refuses an empty cell set by design.
+PREFLIGHT_ACTION = "ship-iac/shipmate/actions/verify-environments"
+PREFLIGHT_IF = "${{ inputs.mode == 'unlock' && steps.d.outputs.cells != '[]' }}"
+PREFLIGHT_WITH = {
+    "waves-json": "${{ format('{{\"wave0\":{0}}}', steps.d.outputs.cells) }}",
+    "shared-envs": "${{ vars.SHIPMATE_SHARED_ENVS }}",
+    "github-token": "${{ github.token }}",
+}
 
 #: The engine actions the unlock job's steps may call. Apply-family actions are
 #: named so the failure message says which one leaked in.
@@ -155,4 +173,28 @@ def test_mode_defaults_to_apply():
     assert mode == {"required": False, "type": "string", "default": "apply"}, (
         f"the mode input is declared {mode!r} -- every existing apply dispatch sends no "
         "mode at all, so any other default turns them into unlocks or rejects them"
+    )
+
+
+def test_detect_refuses_an_unlock_into_a_missing_environment():
+    steps = _job("detect")["steps"]
+    preflight = [s for s in steps if PREFLIGHT_ACTION in str(s.get("uses", ""))]
+    assert len(preflight) == 1, (
+        f"{WORKFLOW}'s detect job declares {len(preflight)} {PREFLIGHT_ACTION} steps, not 1 -- "
+        "without it an unlock binding an environment nobody created gets one auto-created "
+        "with no reviewers, which then satisfies the apply path's own pre-flight forever"
+    )
+    step = preflight[0]
+    assert step.get("if") == PREFLIGHT_IF, (
+        f"the pre-flight's `if:` is {step.get('if')!r}, not {PREFLIGHT_IF!r} -- it must run for "
+        "every unlock with a queue, and the script refuses an empty cell set by design"
+    )
+    assert step.get("with") == PREFLIGHT_WITH, (
+        f"the pre-flight's inputs are {step.get('with')!r}, not {PREFLIGHT_WITH!r} -- a queue "
+        "wrapped into the wrong shape, or a shared-envs value that is not the repository "
+        "variable, checks environments the unlock job does not bind"
+    )
+    assert step.get("continue-on-error") in (None, False), (
+        "the pre-flight is continue-on-error: it would name the missing environment and let "
+        "the unlock bind (and so create) it anyway"
     )
