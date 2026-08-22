@@ -19,8 +19,9 @@ grammar are declared unstable in `README.md`.
   A cancelled or killed apply can die holding the backend's state lock, and every
   later apply of that cell then fails acquiring it. Two stages: the apply result
   comment now carries a 🔒 line under its table naming each cell whose apply was
-  blocked by a lock, the lock's id and when it was taken; and a new verb,
-  `shipmate unlock <env>`, releases it. The environment is required — a destructive verb gets no wildcard.
+  blocked by a lock, the lock's id and, when the backend reported a usable
+  timestamp, when it was taken; and a new verb, `shipmate unlock <env>`,
+  releases it. The environment is required — a destructive verb gets no wildcard.
   It probes every cell in that environment whose `apply / <stack> / <env>` check
   is still pending and force-unlocks only the id the probe read back, reporting
   per cell in its own job rather than in a comment. A cell that cannot determine

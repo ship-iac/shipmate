@@ -341,10 +341,11 @@ that binds it.
 ### A state lock is held
 
 Every apply of the cell fails acquiring the lock, and the apply result comment
-carries a 🔒 line under its table naming each such cell, the held lock's id, when
-it was taken and the command that releases it. Per-cell concurrency admits one
-apply at a time, so the holder was that cell's own most recent apply run — one
-that was cancelled or killed before it could release.
+carries a 🔒 line under its table naming each such cell, the held lock's id, the
+command that releases it, and — when the backend reported a usable timestamp —
+when it was taken. Per-cell concurrency admits one apply at a time, so the
+holder was that cell's own most recent apply run — one that was cancelled or
+killed before it could release.
 
 Comment `shipmate unlock <env>`. The environment is required; there is no bare
 form. It authorizes on approvers-team membership and the `<env>-apply`
