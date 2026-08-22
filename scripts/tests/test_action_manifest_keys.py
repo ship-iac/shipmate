@@ -14,6 +14,14 @@ action dies at manifest load, before any step runs. That shipped in v0.16.0 and
 broke the apply and deploy paths for anyone who re-pinned; plan runs were
 unaffected, which is why no other guard saw it.
 
+This is a **stand-in**, not the property its old filename claimed
+(`test_action_manifests_parse_as_github_parses.py`): it still parses with
+PyYAML, so it covers one known divergence from GitHub's parser and not the
+class. actionlint cannot replace it -- it parses any file argument as a
+*workflow*, so every composite `action.yml` fails identically on the missing
+`on:`/`jobs:` and the good and shipped-broken manifests are indistinguishable.
+The real replacement is a manifest-load smoke run, and it deletes this file.
+
 Checking the key set is what catches it: a comma-split description always leaves
 a key that is not one of GitHub's. The keys come from GitHub's metadata syntax
 for composite actions -- `deprecationMessage` is valid on an input, `value` on an
