@@ -288,11 +288,13 @@ the pre-flight and still injects nothing. Two ways to arrive there:
   `dev-eu` only: the second entry is ` dev-us` and the comparison is exact, so
   that env silently stays split. Same symptom, different cause.
 
-### `plan-cell needs the expected-head input`, or `the plan would describe a tree nobody reviewed`
+### `plan-cell needs the expected-head input`, or `The plan would describe a tree nobody reviewed`
 
 A plan cell fails on its very first step, before `terramate` runs, so the cell
-produces no plan and no `<stack> / <env>` check goes green — and with cells
-missing, no `shipmate / gate`.
+produces no plan and its `<stack> / <env>` check does not go green. The failing
+plan job leaves `shipmate / gate` held **red** with `plan incomplete (plan job:
+failure)` — a hold, not an absence (§`shipmate / gate` never goes green, "The
+gate is deliberately held") — so nothing merges until the plan cells pass.
 
 Both are wiring errors in your `.github/workflows/plan.yml`, and each names its
 own fix:

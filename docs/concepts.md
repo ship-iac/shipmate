@@ -206,7 +206,8 @@ workflow over shipmate actions.
   skip-propagation guard (`if: !failure() && !cancelled() && waveN != '[]'`)
   lets empty middle waves pass through without blocking successors.
   `actions/apply-cell` downloads the reviewed `.otplan` from the plan run,
-  verifies the fingerprint, applies **that exact plan** (never re-plans; stale
+  verifies the fingerprint and the commit the plan was produced from, applies
+  **that exact plan** (never re-plans; stale
   state → fail-safe), and completes the apply check. A stack already applied
   (pre-merge, or a no-change re-plan) has a completed check → deploy
   **no-ops** it.

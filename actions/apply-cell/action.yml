@@ -264,7 +264,7 @@ runs:
             ("DOWNLOAD_OUTCOME", "reviewed plan artifact missing or expired — re-run plan"),
             (
                 "PLANNED_HEAD_OUTCOME",
-                "reviewed plan was produced from a different commit — re-plan",
+                "reviewed plan is missing or was produced from a different commit — re-plan",
             ),
             ("DECRYPT_OUTCOME", "plan artifact could not be decrypted — passphrase/config mismatch"),
             (

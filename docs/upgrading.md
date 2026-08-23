@@ -173,9 +173,18 @@ moves your pins:
 
 The same SHA the `plan` job's checkout already names.
 [`getting-started.md`](getting-started.md) §Required — plan has the whole step.
-A wrapper that re-pins without this edit has **every** plan cell refuse on its
-next pull request, naming the missing input — no plan, no `shipmate / gate`, no
-merge. That is the cheap failure; the two below are the ones worth planning for.
+
+**The pin bump and this edit must land in the same commit.** A wrapper that
+re-pins without it has **every** plan cell refuse on its next pull request,
+naming the missing input, and the gate holds red (`plan incomplete`) so nothing
+merges. That is not fix-forward: the re-pin's own pull request planned green
+because `pull_request_target` runs the **base** branch's `plan.yml`, still at the
+old pin — so once it merges, the default branch carries the new pin without the
+input, and the pull request that would *add* the input is itself planned by that
+broken base wrapper. Recovery then needs a ruleset bypass or temporarily
+un-requiring `shipmate / gate`. Landing both in one commit avoids the whole
+sequence; it is the one failure here that no later pull request can clear on
+its own.
 
 **Drain pending applies before the re-pin merges.** A reviewed plan produced
 before this release carries no recorded commit, and an apply refuses such a plan

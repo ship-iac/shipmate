@@ -96,7 +96,10 @@ def test_download_failure_blocks_with_its_own_reason(monkeypatch, tmp_path):
 def test_planned_head_failure_blocks_with_its_own_reason(monkeypatch, tmp_path):
     cell = _run_compose(monkeypatch, tmp_path, planned_head="failure")
     assert cell["result"] == "blocked"
-    assert cell["reason"] == "reviewed plan was produced from a different commit — re-plan"
+    assert (
+        cell["reason"]
+        == "reviewed plan is missing or was produced from a different commit — re-plan"
+    )
 
 
 def test_decrypt_failure_blocks_with_its_own_reason(monkeypatch, tmp_path):

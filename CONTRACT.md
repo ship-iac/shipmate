@@ -701,8 +701,10 @@ its own actionable rejection reason:
 `undiverged` is only the comment-time half of shipmate's **exact-plan** rule.
 The cell that applies re-verifies the reviewed `.otplan` against current state,
 against the TF_VAR fingerprint recorded at plan time, and against the commit the
-plan was produced from (§Apply-match fingerprint), and refuses with "saved plan
-is stale" rather than re-planning.
+plan was produced from (§Apply-match fingerprint). Each refuses in its own
+words — OpenTofu's "saved plan is stale" for the state case, "current env does
+not match the reviewed plan's fingerprint" and "the reviewed plan was produced
+from …" for the other two — and none of them re-plans.
 The pair is therefore strictly stronger than a base-divergence check: a plan
 the base branch never moved under, but that state moved under, is refused too.
 
@@ -1468,8 +1470,9 @@ check out, and ships the observed commit as `planned-head.txt` inside
 immediately before upload rather than when it is read: between the two,
 `terramate` executes author-controlled HCL and provider binaries, which can
 rewrite a file at repo root but not an emitted step output. `apply-cell` moves
-the record out of the consumer's checkout into `$RUNNER_TEMP`, for the reason
-the fingerprint is moved, and compares it against its own `git rev-parse HEAD`
+the record out of the consumer's checkout into `$RUNNER_TEMP` before reading it
+— the action runs inside the consumer's own checkout and must leave no stray
+file at its repo root — and compares it against its own `git rev-parse HEAD`
 before the decrypt, the state restore and the apply — a plan of another tree is
 refused at the cheapest point. A record that disagrees with the checkout is
 refused, and so is an **absent** record: it predates the release that binds a
