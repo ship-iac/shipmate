@@ -7,7 +7,7 @@ a neighbouring fail-safe's reason -- instead of its own.
 
 Everything here is derived from action.yml itself (step order, ids, the
 Compose step's env: mappings, the heredoc's FAILSAFES list) rather than a
-hand-maintained list of the four current ids -- a hardcoded list would itself
+hand-maintained list of the five current ids -- a hardcoded list would itself
 be the kind of thing that silently goes stale.
 """
 
