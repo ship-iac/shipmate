@@ -11,6 +11,66 @@ section below names the SHA the release tags.
 The version line stays `v0.x` while action inputs, check names, and the comment
 grammar are declared unstable in `README.md`.
 
+## [0.18.0] — 2026-08-23
+
+**Re-pinning alone is not enough.** The fork refusal and the draft skip now
+decide on values your `plan.yml` states rather than on the event payload, so add
+three `with:` lines in the same change that moves your pins:
+`head-repo: ${{ github.event.pull_request.head.repo.full_name }}` on the
+`build-matrix` step of `detect`, and that same line plus
+`is-draft: ${{ github.event.pull_request.draft }}` on the `summary` job's call of
+the engine's `summary.yml` (`docs/getting-started.md` §Required — plan). A drift
+wrapper adds `no-pull-request: "true"` to its `build-matrix` step instead. Miss
+the first and `detect` fails loudly on every pull request; miss the other two and
+the summary job is skipped, which writes no gate at all — recovery needs a
+one-time ruleset bypass (`docs/upgrading.md` §0.18.0).
+
+### Changed
+
+- **The fork refusal keys on the head repository the wrapper states, and refuses
+  by default.** `actions/build-matrix` takes a new optional `head-repo` input and
+  no longer reads `GITHUB_EVENT_NAME` or the event payload for this decision. An
+  empty or absent value is a refusal, not a pass, so a plan wrapper that forgets
+  the input turns pull requests away instead of planning a fork; the one opt-out,
+  `no-pull-request: "true"`, states that the run has no pull request at all and
+  belongs only in a workflow that has none (nightly drift). The event name could
+  not carry the distinction any longer: the drift path already triggers on both
+  `schedule` and `workflow_dispatch`, so a dispatched plan and a manual drift run
+  are the same event. The refusal message is unchanged in kind — loud, naming the
+  stated head repository — and no input permits a fork.
+
+- **The trusted summary job decides on inputs, not on `github.event.*`.** The
+  engine's reusable `summary.yml` takes `head-repo` and `is-draft`, both optional
+  with an empty default, and its job `if:` refuses an empty one: the caller
+  states the two facts, the callee compares them, and an omitted input is a
+  refusal — so a consumer wrapper can fail the decision closed but cannot weaken
+  it. The cost of omitting one is a **skipped** job: no gate status, no plan
+  comment, and nothing on the run page saying why the pull request cannot merge.
+  That is the deliberate trade against minting an App-authored gate over a head
+  repository the engine was never told about (`CONTRACT.md` §Post-plan topology).
+
+- **`shipmate doctor` gained an eleventh probe, over the caller's own wiring.**
+  It reads the `plan.yml` at the commit under examination and reports a
+  `summary.yml` call whose `head-repo` / `is-draft` is absent *or constant* — a
+  literal `false`, or the running repository, states the safe answer for every
+  run, fork pull requests and drafts included, and nothing else in the system can
+  see it. Its fork-trigger probe additionally reports every occurrence of
+  `allow-unsafe-pr-checkout` set to anything but `false`: `actions/checkout`
+  refuses to check out a fork's head under `pull_request_target` by default, and
+  that refusal is the outermost guard on this path (`docs/hardening.md`
+  §"Contributors without push access", which now documents the ordering).
+
+### Fixed
+
+- **A `pull_request_target` plan run whose event payload carries no head commit
+  is now refused rather than skipped.** That payload is the only source of the
+  head SHA `build-matrix` compares its checkout against, so an unset or
+  unreadable `GITHUB_EVENT_PATH` left the check unmade — and unmade is the
+  direction that greens a gate over a pull request nobody planned. It previously
+  leaned on the fork guard having already rejected an unreadable payload, which
+  is no longer how that guard works. A genuine `pull_request_target` event always
+  carries the field, so no legitimate run pays for this.
+
 ## [0.17.0] — 2026-08-23
 
 **Re-pinning alone is not enough.** `plan-cell` takes a new **required**

@@ -68,6 +68,7 @@ jobs:
         with:
           base-sha: ""
           all-stacks: "true"
+          no-pull-request: "true"
   drift:
     needs: detect
     if: ${{ needs.detect.outputs.empty == 'false' && github.ref == format('refs/heads/{0}', needs.detect.outputs.default_branch) }}
@@ -123,6 +124,17 @@ jobs:
           private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
           slack-webhook: ${{ vars.SLACK_WEBHOOK }}
 ```
+
+**`no-pull-request: "true"` is what makes the nightly run allowed at all.**
+`build-matrix` refuses by default a run that does not state its head repository
+— that is the fork refusal on the plan path
+([`hardening.md`](hardening.md) §"Contributors without push access") — and it
+keys on the stated value rather than on the event name, because a
+`workflow_dispatch` of this workflow and a dispatched plan are the same event. A
+drift run has no pull request to state, and this input is how it says so. It
+belongs **only** in a workflow with no pull-request context at all: in a plan
+wrapper it would turn the fork refusal off for every pull request. Omit it here
+and the nightly goes red on `head-repo`.
 
 **A local-backend repository must add `state-path` to the `drift-cell` step.**
 The fence above is the AWS sample's, and a remote backend needs none. On a local

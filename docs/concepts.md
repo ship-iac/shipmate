@@ -147,13 +147,16 @@ full picture below:
   `detect` also
   **refuses fork pull requests**: a plan would run the fork's own
   Terramate/OpenTofu code on your runners with your plan environment's
-  variables, so the branch has to live in the repository. There is no input to
-  allow them.
+  variables, so the branch has to live in the repository. The wrapper states the
+  pull request's head repository (`head-repo`) and `build-matrix` refuses by
+  default — an unstated head repository is refused too. No input allows a fork;
+  the one opt-out says the run has no pull request at all, for nightly drift.
 - **`summary`** — `uses:` the engine's reusable
   `.github/workflows/summary.yml`, passing `SHIPMATE_APP_PRIVATE_KEY` by name
   (never `secrets: inherit` — `docs/getting-started.md`) plus the pull
   request number, the head SHA, the two other jobs' results and the planned cell
-  count. The credentialed work happens inside that callee, in a single job bound
+  count, plus the two facts that callee decides on — the head repository and
+  the draft flag. The credentialed work happens inside that callee, in a single job bound
   to the fixed `shipmate-engine` GitHub Environment (`docs/github-app.md`) with
   **no checkout of its own**: it downloads this run's cell summaries and calls
   `actions/summary`, which creates the matching
@@ -161,7 +164,9 @@ full picture below:
   upserts one sticky PR comment (a stack × env table) and the aggregate
   **`shipmate / gate`** commit status, which stays non-green while any apply is
   pending or any plan cell failed. That job declines outright — before its first
-  step — on a fork pull request or a draft.
+  step — on a fork pull request or a draft, and on a caller that stated neither:
+  an omitted input is read as a refusal, so the wrapper can fail the job closed
+  but never open it.
 
 Fork pull requests do not get that far anyway:
 `detect` refuses them (see above), so a fork's plan fails fast rather than

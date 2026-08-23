@@ -159,6 +159,71 @@ names. The entries below `0.2.0` predate the first tagged release, or
 `CHANGELOG.md` does not pin one; they are kept for repositories moving from a
 very old pin.
 
+### 0.18.0 — the wrappers state the head repository and the draft flag
+
+**Re-pinning alone is not enough.** The fork refusal and the draft skip no
+longer read the event payload; they decide on values your wrappers state. Three
+lines in `.github/workflows/plan.yml`, in the same change that moves your pins —
+on the `build-matrix` step of `detect`:
+
+```yaml
+        with:
+          head-repo: ${{ github.event.pull_request.head.repo.full_name }}
+```
+
+and on the `summary` job's call of the engine's `summary.yml`:
+
+```yaml
+    with:
+      head-repo: ${{ github.event.pull_request.head.repo.full_name }}
+      is-draft: ${{ github.event.pull_request.draft }}
+```
+
+[`getting-started.md`](getting-started.md) §Required — plan has both in place.
+**Pass those expressions, not constants**: a literal `is-draft: false` claims
+"not a draft" for every run, and `head-repo: ${{ github.repository }}` passes the
+fork check for every pull request, fork ones included. `shipmate doctor` reports
+either, and the absent case too.
+
+**If you run the optional nightly drift workflow**, add `no-pull-request: "true"`
+to its `build-matrix` step ([`drift.md`](drift.md)). A drift run has no pull
+request to state a head repository for, and this is how it says so.
+
+**The pin bump and these edits must land in the same commit**, and the three
+failure modes look nothing alike:
+
+- **No `head-repo` on `build-matrix`** — `detect` **fails**, on every pull
+  request, with a message naming the input. Loud, and it holds the gate red.
+- **No `head-repo` / `is-draft` on the `summary` call** — the summary job is
+  **skipped**. There is no `shipmate / gate` status at all, so nothing merges,
+  and nothing on the run page explains it. That is deliberate: the alternative
+  was minting an App-authored gate over a head repository the engine was never
+  told about. `shipmate doctor` reports exactly this wiring, and
+  [`troubleshooting.md`](troubleshooting.md) §"`shipmate / gate` never goes
+  green" lists it first among the causes.
+- **No `no-pull-request` on a drift wrapper** — the nightly turns red on
+  `head-repo`.
+
+**None of this shows up on the re-pin's own pull request**, for the same reason
+as in `0.17.0`: `pull_request_target` runs the **base** branch's `plan.yml`, so
+that run still uses the old pin. Once it merges, the default branch carries the
+new pin without the inputs and every pull request after it is affected.
+
+**Recovery needs a one-time bypass** — unlike `0.17.0`, no ordinary pull request
+clears this. Both failure modes bite regardless of what the pull request touches:
+`build-matrix` refuses before it enumerates a single stack, so the "wrapper-only
+pull request plans nothing and greens the gate" escape does not exist, and a
+skipped summary job writes no gate at all. The fixing pull request runs the base
+branch's broken wrapper and so cannot gate itself. Merge that one with an
+administrative bypass (an org-admin `bypass_actor` on the ruleset, or a
+temporary `enforcement: evaluate`) and restore enforcement immediately
+afterwards; every pull request after it gates normally. Landing the pins and the
+edits in one commit is what avoids needing it.
+
+Nothing else in this release needs consumer action: no environment to create or
+rename, no permission to add, and no change to the apply, deploy or comment-ops
+wrappers.
+
 ### 0.17.0 — name the planned commit, and drain pending applies before re-pinning
 
 **Re-pinning alone is not enough.** `plan-cell` now takes a **required**

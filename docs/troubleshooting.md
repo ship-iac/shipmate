@@ -441,7 +441,17 @@ Two locks this verb does not reach:
 
 ### `shipmate / gate` never goes green
 
-Three distinct causes, in the order worth checking.
+Four distinct causes, in the order worth checking.
+
+**No gate status was written at all**, as opposed to a red or held one. The
+trusted summary job decides on two inputs the `plan.yml` wrapper states —
+`head-repo` and `is-draft` — and reads an absent or empty one as a refusal, so a
+wrapper that calls the engine's `summary.yml` without both is *skipped*: no gate,
+no plan comment, and nothing on the run page saying why. The pull request cannot
+merge, which is the intended direction, but the cause is only visible in the
+wrapper. Add both lines (`docs/getting-started.md` §Required — plan,
+`docs/upgrading.md` §0.18.0); `shipmate doctor` reports this wiring, including a
+constant value that would pass the check for every run.
 
 **A pending apply check nothing will complete.** `gate-refresh` greens the gate
 only when every shipmate-App-authored check on that commit whose name begins
@@ -564,10 +574,18 @@ are not secrets, and they are not withheld from a fork's run. No
 `shipmate / gate` status is ever written for a fork head either, so the pull
 request could not merge whatever the plan said. The refusal is loud rather than
 an empty matrix, so an outside contributor is not left waiting on a gate that
-cannot arrive, and it keys on the event being a pull request while treating an
-undeterminable head repository as a fork.
+cannot arrive.
 
-There is no input that allows it. Push the branch to this repository
+It keys on the `head-repo` input the wrapper passes, and it **refuses by
+default**: a run that states no head repository is refused too, with a message
+naming the input. So the same failure has a second cause — a `plan.yml` that
+re-pinned the engine without adding
+`head-repo: ${{ github.event.pull_request.head.repo.full_name }}` to its
+`build-matrix` step fails every pull request this way, fork or not
+(`docs/upgrading.md` §0.18.0). A nightly drift wrapper says it has no pull
+request at all with `no-pull-request: "true"` instead (`docs/drift.md`).
+
+No input allows a fork. Push the branch to this repository
 (`gh pr checkout`, then push) and open the pull request there.
 
 ### An apply check never completes after a successful apply

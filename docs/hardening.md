@@ -30,7 +30,8 @@ ships — nothing in the engine can prevent it. The settings below close the
 apply-environment path and limit who can reach even the residual one.
 
 Fork pull requests are outside this, and are refused outright — the engine will
-not plan a pull request whose head repository is not this repository (see
+not plan a pull request unless the wrapper states a head repository equal to
+this repository, and it refuses by default when the wrapper states nothing (see
 "Contributors without push access").
 
 **`pull_request_target` is how the engine reaches the App key, so the question
@@ -725,9 +726,15 @@ secrets by name; §16's key placement does not change.
 ## Contributors without push access
 
 **Fork pull requests are refused outright.** `actions/build-matrix` fails the
-step when the triggering pull-request event's head repository is not this
-repository, and there is no input, variable or setting that turns that off — it
-is a rule of the engine, not a configurable. A fork's plan is refused before any
+step unless the wrapper's `head-repo` input states a head repository equal to
+this repository — and it **refuses by default**, so a wrapper that states
+nothing is refused rather than planned. No input, variable or setting permits a
+fork: the one opt-out, `no-pull-request: "true"`, says the run has no pull
+request at all and belongs only in a workflow that has none (nightly drift,
+[`drift.md`](drift.md)). Setting it in a plan wrapper is the one consumer edit
+that would turn this refusal off for every pull request — so don't, and note
+that the value is the wrapper's own default-branch YAML, which a pull request
+author cannot edit. A fork's plan is refused before any
 stack is enumerated and before any `tofu` process starts. It is not refused
 before `detect`'s own `terramate` steps: in the reference `plan.yml`,
 `terramate fmt --check` and `terramate generate --detailed-exit-code` precede
@@ -735,17 +742,27 @@ before `detect`'s own `terramate` steps: in the reference `plan.yml`,
 globals, `tm_*` functions and generate blocks included. Moving the refusal ahead
 of them means reordering your own `plan.yml`.
 
-That refusal is now the **only** thing keeping a fork out of a plan cell.
+**Two things keep a fork out of a plan cell, in this order.** First,
+`actions/checkout` itself refuses to check out a fork's head under
+`pull_request_target` — measured on a current release (2026-08-23) — unless the
+workflow passes `allow-unsafe-pr-checkout: true`. That is a third party's
+default, and it is the outermost guard on this path: `shipmate doctor` warns on
+every occurrence of that input set to anything but `false`, including a `${{ }}`
+value, which is unknown rather than false. Second, and independently,
+`build-matrix`'s refusal in `detect` plus the `plan` job's `needs: detect`.
+shipmate's own guard is the layer that has to hold when a consumer sets that
+input, pins an older `actions/checkout`, or swaps the checkout step for
+something else — which is why the engine does not rely on the first one.
+
 `pull_request_target` does not sandbox a fork's run: nothing is withheld from
 it, so a plan cell reached by a fork would read the plan environment's
 variables *and its secrets* (the reference `plan.yml` passes
 `secrets.SHIPMATE_PLAN_PASSPHRASE` into `actions/plan-cell`) while executing the
 pull request's own Terramate/OpenTofu code. Under the old `pull_request`
 trigger, GitHub withholding secrets from a fork was a second, independently
-enforced layer; that layer is gone. Defense in depth went from two layers to
-one, and the one is `build-matrix`'s refusal in `detect` plus the `plan` job's
-`needs: detect`. Keep both — dropping the `needs:` edge, or moving `plan` off
-`detect`'s matrix, re-opens the whole surface to anyone who can fork.
+enforced layer; that layer is gone. Keep both of the layers that remain —
+dropping the `needs:` edge, moving `plan` off `detect`'s matrix, or turning the
+checkout's own refusal off, each re-opens the surface to anyone who can fork.
 
 `detect` and `plan` still hold no App key — the key lives only in
 `shipmate-engine`, which those jobs do not bind. For an infrastructure
@@ -755,12 +772,18 @@ who can open a pull request *from a branch in the repository*.
 **The App key is now inside a workflow a fork pull request can start**, because
 the plan workflow runs on `pull_request_target` and that trigger fires for a
 fork. Two things keep it out of reach, and they are both structural rather than
-conventions. The trusted `summary` job declines when
-`github.event.pull_request.head.repo.full_name` is not `github.repository` — a
-job-level `if:`, so the job never starts, no deployment is created and the
-environment is never entered. And that job has no checkout, so even admitted it
-would run nothing the fork wrote. Both live in engine-owned, SHA-pinned YAML
-(`CONTRACT.md` §Post-plan topology); a consumer cannot drop either.
+conventions. The trusted `summary` job declines unless the head repository the
+caller states — its `head-repo` input — equals `github.repository`, and an
+absent or empty value is a refusal, not a pass: a job-level `if:`, so the job
+never starts, no deployment is created and the environment is never entered. And
+that job has no checkout, so even admitted it would run nothing the fork wrote.
+The comparison lives in engine-owned, SHA-pinned YAML (`CONTRACT.md`
+§Post-plan topology); the wrapper only supplies the value it compares, so a
+consumer can fail it closed but cannot loosen it. What a consumer *can* get
+wrong is wiring a constant there — `head-repo: ${{ github.repository }}` passes
+for every pull request, fork ones included — which is why `shipmate doctor`
+checks the expression and not just the key
+([`getting-started.md`](getting-started.md) §Required — plan).
 
 The refusal in `detect` is loud (a red step) rather than a quiet empty matrix,
 because a fork pull request could not merge either way: with the `summary` job
