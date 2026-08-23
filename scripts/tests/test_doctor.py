@@ -2751,6 +2751,22 @@ def test_no_pull_request_set_to_false_in_the_plan_wrapper_is_silent(monkeypatch)
     assert doctor._summary_wiring_warnings(_ctx()) == []
 
 
+def test_a_key_merely_ending_in_no_pull_request_is_not_reported(monkeypatch):
+    """The twin of `test_a_key_merely_ending_in_the_input_name_is_not_reported`:
+    the key anchor -- a line start, `{` or `,` -- is what makes this the input
+    and not a longer key ending in the same characters, which is a different
+    input entirely and names a line the reader cannot find."""
+    responses = _fork_responses(
+        {
+            "plan.yml": _both_wired(
+                [f"head-repo: {_HEAD_REPO_EXPR}", 'shipmate-no-pull-request: "true"']
+            )
+        }
+    )
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    assert doctor._summary_wiring_warnings(_ctx()) == []
+
+
 def test_drift_yml_may_carry_no_pull_request(monkeypatch):
     """The asymmetry this whole check has to preserve: docs/drift.md REQUIRES
     `no-pull-request: "true"` on the nightly's `build-matrix` step, and states no

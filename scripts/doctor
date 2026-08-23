@@ -1271,12 +1271,12 @@ _WIRING_KEY = {
 # directory is not a misconfiguration to warn about.
 SUMMARY_WIRING_UNREADABLE = (
     NOTICE,
-    f"could not read `{_WORKFLOWS_DIR}` — the summary call's wiring not verified.",
+    f"could not read `{_WORKFLOWS_DIR}` — the plan wrapper's fork and draft wiring not verified.",
 )
 SUMMARY_WIRING_NO_COMMIT = (
     NOTICE,
-    "the summary call's wiring not verified — the commit under examination could not "
-    "be determined.",
+    "the plan wrapper's fork and draft wiring not verified — the commit under examination "
+    "could not be determined.",
 )
 
 
@@ -1300,10 +1300,12 @@ def _call_region(text, pattern):
     ignore the suite.
 
     For a step written `- uses: …` the enclosing key is `steps:`, so the region
-    is that job's whole step list rather than the one step. A superset can only
-    hide a finding, never invent one, and no other step of a plan wrapper takes
-    a `head-repo`; the documented and sample shape (`- id: matrix` then `uses:`)
-    resolves to the step itself."""
+    is that job's whole step list rather than the one step. That superset hides a
+    finding rather than inventing one only for as long as no sibling step in the
+    same job carries a `head-repo:` line of its own — no engine action other
+    than `build-matrix` takes that input, and a sibling that did carry one would
+    satisfy this check for a step wired wrong. The documented and sample shape
+    (`- id: matrix` then `uses:`) resolves to the step itself and is unaffected."""
     lines = _stripped_text(text).splitlines()
     for i, line in enumerate(lines):
         if not pattern.search(line):
