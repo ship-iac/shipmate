@@ -150,12 +150,13 @@ def test_every_failsafes_entry_maps_back_to_a_current_idd_step_in_range():
         )
 
 
-def test_current_failsafe_set_is_exactly_the_four_known_ids():
+def test_current_failsafe_set_is_exactly_the_five_known_ids():
     # Not a substitute for the structural guards above (this one intentionally
-    # would need updating the moment a fifth fail-safe is added) -- a tripwire
+    # would need updating the moment a sixth fail-safe is added) -- a tripwire
     # so that addition is noticed here too, not just in the structural checks.
     assert set(_ids_between_slug_and_apply()) - NOT_A_FAILSAFE == {
         "download",
+        "planned-head",
         "decrypt",
         "fingerprint",
         "restore-state",
