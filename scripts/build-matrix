@@ -13,8 +13,6 @@ import subprocess
 import sys
 
 #: The two pull-request events `plan_workflow_error` requires a plan workflow on.
-#: Under `pull_request_target` the plan job runs at the base ref with the plan
-#: environment's variables.
 _PR_EVENTS = ("pull_request", "pull_request_target")
 
 MATRIX_LIMIT = 256
@@ -264,9 +262,10 @@ def compute_cells(all_stacks=False, base="", require_env_tag=True):
 def _event_payload(path):
     """The triggering event's payload, or {} when it cannot be read.
 
-    Its readers (`head_checkout_error`, `plan_workflow_error`) both treat an
-    unreadable payload as nothing to check: the fork refusal does not read the
-    event at all, so a lost GITHUB_EVENT_PATH cannot open that hole."""
+    Its only reader, `head_checkout_error`, REFUSES a `pull_request_target` run
+    whose payload it could not read: that payload is the only source of the head
+    SHA, so an unreadable one is a check that could not be made, never a check
+    that passed."""
     if not path:
         return {}
     try:
@@ -314,7 +313,7 @@ def fork_pr_error(repository, head_repo, no_pull_request):
         return (
             "::error::this run did not state its head repository — the `head-repo` input of "
             "shipmate's `build-matrix` action must be the pull request's head repository full "
-            "name (`owner/repo`), so the fork refusal below can be decided. See "
+            "name (`owner/repo`), so this run can be checked against a fork head. See "
             "`docs/getting-started.md` for the wiring. A workflow with no pull request at all "
             "(nightly drift) passes `no-pull-request: true` instead."
         )
@@ -349,15 +348,25 @@ def head_checkout_error(event_name, payload):
     `pull_request` consumer. The silent base checkout only exists under
     `pull_request_target`.
 
-    A payload with no head SHA is skipped rather than refused: an unreadable
-    event is not evidence of a base checkout, and the run it belongs to has
-    already had to state its head repository to get this far.
+    A `pull_request_target` payload with no head SHA is REFUSED, not skipped:
+    the payload is the only source of that SHA, so an unreadable or absent
+    GITHUB_EVENT_PATH leaves this check unmade rather than passed -- and unmade
+    is the direction that greens a gate over a pull request nobody planned. A
+    genuine `pull_request_target` event always carries the field, so refusing
+    costs no legitimate run.
     """
     if event_name != "pull_request_target":
         return ""
     head_sha = ((payload.get("pull_request") or {}).get("head") or {}).get("sha") or ""
     if not head_sha:
-        return ""
+        return (
+            "::error::this run's event payload carries no pull request head commit — a "
+            "`pull_request_target` event always does, so GITHUB_EVENT_PATH was unset or "
+            "unreadable and there is nothing to check this checkout against. Without that "
+            "check a base checkout plans the base against itself, reports no changes, and "
+            "the gate greens with nothing queued to apply. Re-run the workflow; if it "
+            "persists, the runner's event file is gone."
+        )
     checked_out = _run(["git", "rev-parse", "HEAD"]).strip()
     if checked_out == head_sha:
         return ""

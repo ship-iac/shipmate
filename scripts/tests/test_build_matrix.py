@@ -447,8 +447,9 @@ def test_an_unknown_this_repository_refuses_a_stated_head_repository():
 
 
 def test_event_payload_degrades_to_empty_dict(tmp_path):
-    # Each of these reaches `head_checkout_error` / `plan_workflow_error` as {},
-    # which they skip; the fork refusal does not read the event at all.
+    # Each of these reaches `head_checkout_error` as {}, which refuses a
+    # `pull_request_target` run rather than skipping it; the fork refusal does
+    # not read the event at all.
     assert bm._event_payload("") == {}
     assert bm._event_payload(str(tmp_path / "absent.json")) == {}
     bad = tmp_path / "bad.json"
@@ -661,9 +662,38 @@ def test_head_checkout_check_is_skipped_off_pull_request_target(monkeypatch):
         assert bm.head_checkout_error(event, _head_payload("cafe1234")) == ""
 
 
-def test_head_checkout_check_is_skipped_when_the_payload_has_no_head_sha(monkeypatch):
+def test_head_checkout_of_an_unreadable_payload_is_refused(monkeypatch):
+    # FLIPPED from a skip: the payload is the only source of the head SHA, so an
+    # unreadable one leaves this check unmade. Skipping it let a base checkout
+    # plan the base against itself, green the gate and queue no applies -- the
+    # one direction that does not recover. The message is asserted, not just the
+    # refusal: it has to be distinguishable from the mismatch refusal below.
     monkeypatch.setattr(bm, "_run", lambda args: pytest.fail("probed with no head sha"))
-    assert bm.head_checkout_error("pull_request_target", {}) == ""
+    for payload in ({}, {"pull_request": {"head": {}}}, {"pull_request": None}):
+        err = bm.head_checkout_error("pull_request_target", payload)
+        assert err.startswith("::error::")
+        assert "carries no pull request head commit" in err
+        assert "GITHUB_EVENT_PATH" in err
+
+
+def test_main_refuses_a_pull_request_target_with_no_event_payload(monkeypatch, tmp_path):
+    # The wiring this backstop exists for: a correct `head-repo` gets past the
+    # fork refusal, and GITHUB_EVENT_PATH is gone.
+    called = []
+    monkeypatch.setattr(bm, "_run", lambda args: pytest.fail("probed with no head sha"))
+    with pytest.raises(SystemExit) as excinfo:
+        _run_main(
+            monkeypatch,
+            tmp_path,
+            {
+                "GITHUB_EVENT_NAME": "pull_request_target",
+                "GITHUB_REPOSITORY": "acme/iac",
+                "SHIPMATE_HEAD_REPO": "acme/iac",
+            },
+            called=called,
+        )
+    assert "carries no pull request head commit" in str(excinfo.value)
+    assert called == []
 
 
 def test_plan_workflow_at_the_contract_path_is_planned(tmp_path):
