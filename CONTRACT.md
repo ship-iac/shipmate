@@ -699,9 +699,10 @@ its own actionable rejection reason:
   means new commits landed since — stale, re-plan required).
 
 `undiverged` is only the comment-time half of shipmate's **exact-plan** rule.
-The cell that applies re-verifies the reviewed `.otplan` against current state
-and against the TF_VAR fingerprint recorded at plan time (§Apply-match
-fingerprint), and refuses with "saved plan is stale" rather than re-planning.
+The cell that applies re-verifies the reviewed `.otplan` against current state,
+against the TF_VAR fingerprint recorded at plan time, and against the commit the
+plan was produced from (§Apply-match fingerprint), and refuses with "saved plan
+is stale" rather than re-planning.
 The pair is therefore strictly stronger than a base-divergence check: a plan
 the base branch never moved under, but that state moved under, is refused too.
 
@@ -1458,6 +1459,24 @@ fingerprint identically and an apply could match the wrong environment's
 reviewed plan. plan-cell and apply-cell use a byte-identical algorithm
 (`scripts/plan-classify`). On mismatch, apply fails safe and reports differing
 variable **names** only — never values.
+
+The same shape carries the **planned commit**. `plan-cell` reads
+`git rev-parse HEAD` as its first step — before any repository content
+executes — refuses an `expected-head` input that is empty or that it did not
+check out, and ships the observed commit as `planned-head.txt` inside
+`plan.<env>.<slug>`. The file is materialised from the captured step output
+immediately before upload rather than when it is read: between the two,
+`terramate` executes author-controlled HCL and provider binaries, which can
+rewrite a file at repo root but not an emitted step output. `apply-cell` moves
+the record out of the consumer's checkout into `$RUNNER_TEMP`, for the reason
+the fingerprint is moved, and compares it against its own `git rev-parse HEAD`
+before the decrypt, the state restore and the apply — a plan of another tree is
+refused at the cheapest point. A record that disagrees with the checkout is
+refused, and so is an **absent** record: it predates the release that binds a
+plan to its tree, there is nothing to compare, and the remedy is a re-plan. This
+is additive to the run-level head check the apply path already performs against
+the plan run, not a replacement for it — that check bounds which plan run may be
+applied, this one binds each individual plan to the tree it was produced from.
 
 ## Secrets in published output
 
