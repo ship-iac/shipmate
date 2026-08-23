@@ -1074,7 +1074,16 @@ FORK_TRIGGER_NO_COMMIT = (
 # `pull_request_target` unless this input turns the refusal off, which makes it
 # the single most consequential line a consumer can add: that third party's
 # default is the outermost guard on this path.
-_UNSAFE_CHECKOUT = re.compile(r"^[ \t]*allow-unsafe-pr-checkout[ \t]*:(?P<value>.*)$", re.M)
+#
+# Matched at a line start OR after `{`/`,`: flow style is a house idiom here —
+# `docs/drift.md` and all four sample repositories write
+# `with: { fetch-depth: 0 }`, so a one-line checkout step is what a consumer
+# copying those pages produces. The value stops at `,`/`}` for the same reason:
+# a flow-style `false` must read as `false` and not as `false }`, which would
+# report the safest shape a consumer can write.
+_UNSAFE_CHECKOUT = re.compile(
+    r"(?:^|[{,])[ \t]*allow-unsafe-pr-checkout[ \t]*:(?P<value>[^,}\n]*)", re.M
+)
 
 
 #: `on` at column 0 only, optionally quoted: a workflow's `on:` is a top-level
@@ -1158,9 +1167,13 @@ def _unsafe_checkout_warnings(text, name):
 
     EVERY occurrence is examined, not the first: a plan wrapper checks out in
     more than one job, and one job's explicit `false` — the shape this very
-    finding asks for — must not silence another job's `true`."""
+    finding asks for — must not silence another job's `true`.
+
+    The value is compared case-insensitively: `False` and `FALSE` are the same
+    legal YAML boolean as `false`, and a finding on a correct repository trains
+    readers to ignore the whole suite."""
     values = [
-        m.group("value").strip().strip("\"'")
+        m.group("value").strip().strip("\"'").lower()
         for m in _UNSAFE_CHECKOUT.finditer(_stripped_text(text))
     ]
     if all(v == "false" for v in values):
@@ -1236,6 +1249,13 @@ SUMMARY_WIRING = {
     "is-draft": "${{ github.event.pull_request.draft }}",
 }
 _SUMMARY_CALL = re.compile(r"/\.github/workflows/summary\.yml@")
+# Line-anchored, unlike `_UNSAFE_CHECKOUT`: flow style is deliberately NOT
+# recognised here. The values these keys must carry end in `}}`, so the `,`/`}`
+# terminator that makes a flow mapping readable would truncate the block-style
+# expression the documented wrapper uses and report *that* as unwired — a false
+# positive on the one shape every consumer has. A flow-style summary call (seven
+# long expressions on one line) reads as unwired instead: noisy, but the finding
+# names both inputs and the exact expressions to pass.
 _WIRING_KEY = {
     key: re.compile(rf"^[ \t]*{key}[ \t]*:(?P<value>.*)$", re.M) for key in SUMMARY_WIRING
 }

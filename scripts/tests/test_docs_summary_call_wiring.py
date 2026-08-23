@@ -19,7 +19,7 @@ import re
 import textwrap
 
 import yaml
-from _loader import ENGINE
+from _loader import ENGINE, WORKFLOWS
 
 _FENCE = re.compile(r"^(?P<indent>[ \t]*)```yaml[ \t]*$\n(?P<body>.*?)^\1```", re.M | re.S)
 
@@ -51,6 +51,7 @@ _EXPECTED_DRIFT_MATRIX_WITH = {
     "no-pull-request": "true",
 }
 
+_SUMMARY_WF = WORKFLOWS / "summary.yml"
 _PLAN_PAGE = ENGINE / "docs" / "getting-started.md"
 _DRIFT_PAGE = ENGINE / "docs" / "drift.md"
 
@@ -103,6 +104,32 @@ def test_documented_summary_call_states_the_facts_it_decides_on():
         assert call.get("with") == _EXPECTED_SUMMARY_WITH, (
             f"docs/getting-started.md job `{job}` must pass exactly "
             f"{_EXPECTED_SUMMARY_WITH} to the engine's summary.yml; got {call.get('with')!r}"
+        )
+
+
+def test_the_documented_call_passes_exactly_the_inputs_the_workflow_declares():
+    """Three files hand-write these input names: this page's snippet, the
+    workflow's `workflow_call` declarations, and `scripts/doctor`'s wiring
+    constant. A rename that updates one leaves the others stale with a green
+    suite -- a documented wrapper whose summary job silently skips, or a probe
+    looking for a key nobody passes.
+
+    Both sides are derived here, which is not the `CLAUDE.md` hand-written-constant
+    rule being broken: that rule pins a *value* against a constant, and the two
+    expected mappings above do exactly that. This pins *agreement between two
+    files*, neither of which is the constant for the other. Both sides are
+    asserted non-empty, so a selector that matches nothing fails instead of
+    passing vacuously."""
+    declared = yaml.safe_load(_SUMMARY_WF.read_text(encoding="utf-8"))
+    # `doc[True]`: PyYAML parses the bare key `on:` as the boolean True.
+    names = sorted(declared[True]["workflow_call"]["inputs"])
+    calls = dict(_summary_calls(_PLAN_PAGE))
+    assert names and calls
+    for job, call in calls.items():
+        passed = sorted(call.get("with") or {})
+        assert passed and passed == names, (
+            f"docs/getting-started.md job `{job}` passes {passed} to the engine's "
+            f"summary.yml, which declares {names}"
         )
 
 

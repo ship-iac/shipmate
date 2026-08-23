@@ -2359,12 +2359,67 @@ def test_unsafe_pr_checkout_set_to_false_is_silent(monkeypatch):
     assert doctor._fork_trigger_warnings(_ctx()) == []
 
 
+def test_a_capitalised_false_is_silent(monkeypatch):
+    """`False` and `FALSE` are the same legal YAML boolean as `false`, so both are
+    the safe configuration -- and a case-sensitive comparison reports them. A
+    probe that fires on a correct repository trains readers to ignore the suite.
+    `build-matrix`'s fork refusal normalizes with `.strip().lower()` for exactly
+    this reason; one release must not hold two guards that disagree about it."""
+    responses = _fork_responses(
+        {
+            "plan.yml": "on:\n  pull_request_target:\njobs:\n  x:\n    steps:\n"
+            "      - with:\n          allow-unsafe-pr-checkout: False\n",
+            "label.yml": "on:\n  pull_request:\njobs:\n  x:\n    steps:\n"
+            "      - with:\n          allow-unsafe-pr-checkout: FALSE\n",
+        }
+    )
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    assert doctor._fork_trigger_warnings(_ctx()) == []
+
+
+def test_flow_style_unsafe_pr_checkout_is_warned(monkeypatch):
+    """A line-anchored key misses this, and it is not exotic authoring: the
+    engine's own `docs/drift.md` fence and all four sample repositories write
+    `with: { fetch-depth: 0 }`, so a flow-style checkout step is what a consumer
+    copying those pages produces. Missing it is fail-open on the outermost guard
+    of the whole plan path."""
+    responses = _fork_responses(
+        {
+            "plan.yml": "on:\n  pull_request_target:\njobs:\n  x:\n    steps:\n"
+            "      - uses: actions/checkout@v7\n"
+            "        with: { fetch-depth: 0, allow-unsafe-pr-checkout: true }\n",
+        }
+    )
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    out = doctor._fork_trigger_warnings(_ctx())
+    assert len(out) == 1
+    assert out[0][0] == doctor.WARNING
+    assert "allow-unsafe-pr-checkout" in out[0][1]
+
+
+def test_a_flow_style_false_is_silent(monkeypatch):
+    """The other half of recognising flow style: the value must stop at `,`/`}`,
+    or a flow-style `false` reads as `false }` and the safest shape a consumer
+    can write is reported."""
+    responses = _fork_responses(
+        {
+            "plan.yml": "on:\n  pull_request_target:\njobs:\n  x:\n    steps:\n"
+            "      - uses: actions/checkout@v7\n"
+            "        with: { allow-unsafe-pr-checkout: false, fetch-depth: 0 }\n",
+            "label.yml": "on:\n  pull_request:\njobs:\n  x:\n    steps:\n"
+            "      - with: { fetch-depth: 0, allow-unsafe-pr-checkout: false }\n",
+        }
+    )
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    assert doctor._fork_trigger_warnings(_ctx()) == []
+
+
 def test_commented_out_unsafe_pr_checkout_is_silent(monkeypatch):
     """The line a careful repository writes *because* it does not have one.
     Reporting it would train readers to ignore the finding.
 
     Two independent things keep it quiet -- the comment strip empties the line,
-    and the pattern's line anchor rejects a key with a `#` in front of it -- so
+    and the pattern's key anchor rejects a key with `set ` in front of it -- so
     only removing BOTH turns this red. Each is pinned on its own by
     `test_a_trailing_comment_after_a_false_value_is_silent` (the strip) and
     `test_a_key_merely_ending_in_the_input_name_is_not_reported` (the anchor)."""
@@ -2420,9 +2475,9 @@ def test_a_false_in_one_job_does_not_silence_a_true_in_another(monkeypatch):
 
 
 def test_a_key_merely_ending_in_the_input_name_is_not_reported(monkeypatch):
-    """The line anchor is what makes this the input and not a longer key that
-    happens to end in the same characters -- a different input entirely, and
-    reporting it names a line the reader cannot find."""
+    """The key anchor -- a line start, `{` or `,` -- is what makes this the input
+    and not a longer key that happens to end in the same characters: a different
+    input entirely, and reporting it names a line the reader cannot find."""
     responses = _fork_responses(
         {
             "plan.yml": "on:\n  pull_request_target:\njobs:\n  x:\n    steps:\n"
