@@ -7,7 +7,7 @@ Three modes, selected via SHIPMATE_DOCTOR_MODE:
   actions/summary right after a plan run. NEVER fails the run: a probe
   error becomes a 'could not verify' note — doctor guards onboarding, it
   must not take down the plan path.
-- report: render the sticky PR comment on demand — the ten live probes'
+- report: render the sticky PR comment on demand — the eleven live probes'
   findings plus a harvest of the warnings GitHub already recorded as
   annotations on this commit's workflow check runs.
 - check-ids: reduce a check-runs JSONL listing to the (id, name) pairs worth
@@ -30,6 +30,8 @@ Probes:
 - secrets held by each declared plan environment.
 - engine action-pin freshness in the consumer's workflow files.
 - `pull_request_target` triggers in the consumer's workflow files.
+- the normalized inputs the consumer's `plan.yml` passes to the engine's
+  reusable summary workflow.
 - approvers team resolvability in the repo's org.
 - GitHub App installation permission drift.
 """
@@ -1068,6 +1070,12 @@ FORK_TRIGGER_NO_COMMIT = (
     "could not be determined.",
 )
 
+# `actions/checkout` refuses to check out a fork's head under
+# `pull_request_target` unless this input turns the refusal off, which makes it
+# the single most consequential line a consumer can add: that third party's
+# default is the outermost guard on this path.
+_UNSAFE_CHECKOUT = re.compile(r"^[ \t]*allow-unsafe-pr-checkout[ \t]*:(?P<value>.*)$", re.M)
+
 
 #: `on` at column 0 only, optionally quoted: a workflow's `on:` is a top-level
 #: key, so an indented one belongs to something else. `_on_block` matches rather
@@ -1084,6 +1092,11 @@ def _strip_comment(line):
         if ch == "#" and (i == 0 or line[i - 1] in " \t"):
             return line[:i]
     return line
+
+
+def _stripped_text(text):
+    """`text` with every YAML comment removed, line structure intact."""
+    return "\n".join(_strip_comment(ln) for ln in text.splitlines())
 
 
 def _on_block(text):
@@ -1134,6 +1147,30 @@ def declares_pull_request_target(text):
     return any(_PR_TARGET.search(ln) for ln in _event_lines(inline, block))
 
 
+def _unsafe_checkout_warnings(text, name):
+    """`allow-unsafe-pr-checkout` set to anything but a literal false.
+
+    Comments are stripped first, for the same reason
+    `declares_pull_request_target` strips them: `# never set
+    allow-unsafe-pr-checkout: true` is what a careful repository writes
+    *because* it does not have one. A `${{ }}` value is unknown, not false, so
+    it is reported — it may evaluate true."""
+    m = _UNSAFE_CHECKOUT.search(_stripped_text(text))
+    if m is None or m.group("value").strip().strip("\"'") == "false":
+        return []
+    return [
+        (
+            WARNING,
+            f"`{name}` sets `allow-unsafe-pr-checkout` to something other than `false` — "
+            "`actions/checkout` refuses to check out a fork's head under "
+            "`pull_request_target` by default, and that refusal is the outermost guard on "
+            "this path. Turning it off runs a pull request author's code in a job that may "
+            "hold this repository's secrets. Remove the input or set it to `false` "
+            "(see docs/hardening.md).",
+        )
+    ]
+
+
 def _fork_trigger_warnings(ctx):
     """`pull_request_target` runs at the **base** ref, so it is handed the
     repository's secrets — and the base ref is exactly what `shipmate-engine`'s
@@ -1152,15 +1189,18 @@ def _fork_trigger_warnings(ctx):
         return [FORK_TRIGGER_NO_COMMIT]
 
     def finding(text, name):
+        # Before the `plan.yml` exemption below, not after: `plan.yml` is
+        # exactly the file where a fork checkout would be turned on.
+        out = _unsafe_checkout_warnings(text, name)
         # The engine's own plan workflow is on this trigger by design: the job
         # holding the App key is the engine's reusable summary workflow, which
         # checks out nothing. Exact name — a `custom-plan.yml` is a consumer
         # file and gets the warning.
         if name == "plan.yml":
-            return []
+            return out
         if not declares_pull_request_target(text):
-            return []
-        return [
+            return out
+        return out + [
             (
                 WARNING,
                 f"`{name}` triggers on `pull_request_target` — that trigger runs at "
@@ -1177,6 +1217,122 @@ def _fork_trigger_warnings(ctx):
         ]
 
     return _scan_workflow_texts(ctx, ref, finding, FORK_TRIGGER_UNREADABLE)
+
+
+# The two inputs the engine's reusable summary workflow decides on, with the
+# expression each must carry. Values, not just keys: a wrapper that wires
+# `head-repo: ${{ github.repository }}` — or `is-draft: false` — states the safe
+# answer for every run, fork pull requests and drafts included, and nothing else
+# in the system can see it.
+SUMMARY_WIRING = {
+    "head-repo": "${{ github.event.pull_request.head.repo.full_name }}",
+    "is-draft": "${{ github.event.pull_request.draft }}",
+}
+_SUMMARY_CALL = re.compile(r"/\.github/workflows/summary\.yml@")
+_WIRING_KEY = {
+    key: re.compile(rf"^[ \t]*{key}[ \t]*:(?P<value>.*)$", re.M) for key in SUMMARY_WIRING
+}
+# Same degrade posture and reason as PIN_UNREADABLE: an unreadable workflow
+# directory is not a misconfiguration to warn about.
+SUMMARY_WIRING_UNREADABLE = (
+    NOTICE,
+    f"could not read `{_WORKFLOWS_DIR}` — the summary call's wiring not verified.",
+)
+SUMMARY_WIRING_NO_COMMIT = (
+    NOTICE,
+    "the summary call's wiring not verified — the commit under examination could not "
+    "be determined.",
+)
+
+
+def _summary_call_region(text):
+    """The comment-stripped lines from the `uses:` line calling the engine's
+    reusable summary workflow to the next key at its own indentation (or EOF),
+    or None when the file makes no such call.
+
+    Scoped rather than whole-file deliberately: a correctly wired `plan.yml`
+    carries `head-repo:` twice — once on the `build-matrix` step in `detect`,
+    once on this call — and a whole-file search is satisfied by the wrong
+    occurrence while the call that decides the gate carries nothing.
+
+    KNOWN GAP: the scan runs forward only, so a `with:` block written *above*
+    its job's `uses:` line is not seen and the call reads as unwired. Legal
+    YAML, but no shipped wrapper is written that way, and the finding is
+    advisory."""
+    lines = _stripped_text(text).splitlines()
+    for i, line in enumerate(lines):
+        if not _SUMMARY_CALL.search(line):
+            continue
+        depth = len(line) - len(line.lstrip())
+        region = [line]
+        for nxt in lines[i + 1 :]:
+            if nxt.strip() and len(nxt) - len(nxt.lstrip()) < depth:
+                break
+            region.append(nxt)
+        return "\n".join(region)
+    return None
+
+
+def _summary_wiring_warnings(ctx):
+    """The gate and the plan comment are authored by the engine's reusable
+    summary workflow, whose job refuses an empty or unexpected `head-repo` /
+    `is-draft`. A consumer wrapper that omits one — or wires a constant — is
+    invisible: the omitting case SKIPS the job, so there is no gate status, the
+    pull request cannot merge, and nothing on the run page says why; the
+    constant case passes the guard for every pull request, fork ones included.
+    The engine's own `if:` is SHA-pinned and reviewed; the consumer's `with:`
+    block is not.
+
+    Reads the consumer's workflow files at the commit under examination, the
+    same way and for the same reason as the pin and fork-trigger probes
+    (`_contents_ref`): a pull request that *fixes* the wiring must not still be
+    reported for it."""
+    ref = _contents_ref(ctx)
+    if ref is None:
+        return [SUMMARY_WIRING_NO_COMMIT]
+
+    def finding(text, name):
+        # Exact name, like the fork-trigger exemption: the wrapper shipped in
+        # docs/getting-started.md is `plan.yml`, and a workflow that calls the
+        # summary workflow under another name is not the shape this reports on.
+        if name != "plan.yml":
+            return []
+        region = _summary_call_region(text)
+        if region is None:
+            return []
+        bad = [
+            key
+            for key, expr in SUMMARY_WIRING.items()
+            if _wired_value(region, key) != "".join(expr.split())
+        ]
+        if not bad:
+            return []
+        wanted = ", ".join(f"`{key}: {SUMMARY_WIRING[key]}`" for key in bad)
+        return [
+            (
+                WARNING,
+                f"`{name}`'s call of the engine's `summary.yml` does not pass {wanted} — the "
+                "summary job decides on those two inputs and refuses an empty or unexpected "
+                "value, so it is SKIPPED: no gate status, no plan comment, and nothing on the "
+                "run page saying why the pull request cannot merge. Each must be the pull "
+                "request's own value; a constant (the running repository, a literal `false`) "
+                "states the safe answer for every run, fork pull requests and drafts included.",
+            )
+        ]
+
+    return _scan_workflow_texts(ctx, ref, finding, SUMMARY_WIRING_UNREADABLE)
+
+
+def _wired_value(region, key):
+    """`key`'s value in `region`, whitespace removed and one layer of YAML
+    quoting stripped, or None when the key is absent. Whitespace-insensitive
+    because `${{github.repository}}` and `${{ github.repository }}` are the same
+    expression, and formatters quote values (the reason the pin probe's anchor
+    tolerates quotes too)."""
+    m = _WIRING_KEY[key].search(region)
+    if m is None:
+        return None
+    return "".join(m.group("value").strip().strip("\"'").split())
 
 
 def _one_line(s, limit=200):
@@ -1236,6 +1392,7 @@ PROBES = (
     _plan_env_secret_warnings,
     _pin_warnings,
     _fork_trigger_warnings,
+    _summary_wiring_warnings,
     _team_warnings,
     _app_permission_warnings,
 )
