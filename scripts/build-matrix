@@ -12,10 +12,9 @@ import os
 import subprocess
 import sys
 
-#: The two pull-request events `fork_pr_error` refuses a fork on. Under
-#: `pull_request_target` the plan job runs at the base ref with the plan
-#: environment's variables, so a fork head reaching it would run the fork's own
-#: Terramate/OpenTofu code with them.
+#: The two pull-request events `plan_workflow_error` requires a plan workflow on.
+#: Under `pull_request_target` the plan job runs at the base ref with the plan
+#: environment's variables.
 _PR_EVENTS = ("pull_request", "pull_request_target")
 
 MATRIX_LIMIT = 256
@@ -265,9 +264,9 @@ def compute_cells(all_stacks=False, base="", require_env_tag=True):
 def _event_payload(path):
     """The triggering event's payload, or {} when it cannot be read.
 
-    Unreadable is not "same repository": `fork_pr_error` treats a payload it
-    cannot interpret as a fork, so a lost GITHUB_EVENT_PATH refuses the run
-    rather than planning fork code by accident."""
+    Its readers (`head_checkout_error`, `plan_workflow_error`) both treat an
+    unreadable payload as nothing to check: the fork refusal does not read the
+    event at all, so a lost GITHUB_EVENT_PATH cannot open that hole."""
     if not path:
         return {}
     try:
@@ -278,38 +277,52 @@ def _event_payload(path):
     return payload if isinstance(payload, dict) else {}
 
 
-def fork_pr_error(event_name, repository, payload):
-    """The `::error::` line rejecting a fork pull request, or "" when this run
-    may be planned.
+def fork_pr_error(repository, head_repo, no_pull_request):
+    """The `::error::` line rejecting a run this script may not plan, or "" when
+    it may.
 
     A fork's run is handed no secrets, but the plan cell still runs
     `terramate`/`tofu` over the fork's own HCL on the consumer's runners with
     whatever the plan environment exposes as *variables* -- which are not
     secrets and are not withheld. Fork pull requests are not supported at all.
 
-    Loud rather than an empty matrix: `summary.yml` refuses a fork head, so a
-    green "nothing to plan" would leave an outside contributor waiting on a gate
-    that structurally cannot arrive.
+    Loud rather than an empty matrix: `summary.yml` refuses a head repository it
+    was not told about, so a green "nothing to plan" would leave an outside
+    contributor waiting on a gate that structurally cannot arrive.
 
-    Keyed on the EVENT being a pull request, never on a missing head repository:
-    the drift path runs with no pull-request context, where `head.repo` is
-    absent by construction, and keying on the field would kill nightly drift
-    silently. Both PR events count -- `pull_request_target` especially, the one
-    that runs at the base ref with the repository's secrets.
+    REFUSES BY DEFAULT, keyed on the head repository the WRAPPER states -- not
+    on the event name. `github.event_name` cannot express the distinction: the
+    drift path already triggers on `schedule` and `workflow_dispatch`, so a
+    dispatched plan would be indistinguishable from a manual drift run. A
+    caller with no pull-request context (drift) says so explicitly with
+    `no-pull-request`; anything else that omits `head-repo` is refused. The
+    direction is chosen on failure mode -- a forgotten input on a plan wrapper
+    still refuses forks, while a forgotten opt-out on a drift wrapper turns the
+    nightly red.
 
-    Within a PR event an undeterminable head repository is REJECTED: a
-    same-repository pull request always carries `head.repo.full_name`, so
-    "unknown" only ever means a run this script cannot vouch for."""
-    if event_name not in _PR_EVENTS:
+    The stated value is trustworthy against the threat this guards: the caller
+    is the consumer's own default-branch workflow, which a pull-request author
+    cannot edit. The residual risk is consumer misconfiguration, which is what
+    doctor's wiring probe reports."""
+    # Case- and whitespace-insensitive: a `no-pull-request: True` would otherwise
+    # redden a nightly for a YAML capitalisation, and honouring it is no fork
+    # exposure -- only this repository's default-branch workflow can set it.
+    if no_pull_request.strip().lower() == "true":
         return ""
-    head = ((payload.get("pull_request") or {}).get("head") or {}).get("repo") or {}
-    full_name = head.get("full_name") or ""
-    if repository and full_name == repository:
+    head_repo = head_repo.strip()
+    if not head_repo:
+        return (
+            "::error::this run did not state its head repository — the `head-repo` input of "
+            "shipmate's `build-matrix` action must be the pull request's head repository full "
+            "name (`owner/repo`), so the fork refusal below can be decided. See "
+            "`docs/getting-started.md` for the wiring. A workflow with no pull request at all "
+            "(nightly drift) passes `no-pull-request: true` instead."
+        )
+    if repository and head_repo == repository:
         return ""
-    origin = f"`{full_name}`" if full_name else "could not be determined"
     return (
-        f"::error::fork pull requests are not supported — this run's head repository "
-        f"({origin}) is not `{repository or 'this repository'}`. Planning it would run "
+        f"::error::fork pull requests are not supported — this run's stated head repository "
+        f"(`{head_repo}`) is not `{repository or 'this repository'}`. Planning it would run "
         "the pull request's own Terramate/OpenTofu code on your runners with your plan "
         "environment's variables, and no `shipmate / gate` status is ever written for a "
         "fork head, so the pull request could not merge either way. Push the branch to "
@@ -328,16 +341,17 @@ def head_checkout_error(event_name, payload):
     plan job is skipped and the gate greens over a pull request nobody planned —
     with no pending apply checks, so the post-merge deploy has an empty queue.
 
-    Keyed on the EVENT, like `fork_pr_error` — but on `pull_request_target`
-    alone, not both PR events. Under `pull_request` the default checkout is
+    Keyed on the EVENT, on `pull_request_target` alone and not both PR events.
+    Under `pull_request` the default checkout is
     `refs/pull/<n>/merge`, whose HEAD is a merge commit that is neither the head
     SHA nor the base: it structurally contains the pull request's content, and
     comparing it against the head SHA would refuse every correctly wired
     `pull_request` consumer. The silent base checkout only exists under
     `pull_request_target`.
 
-    A payload with no head SHA is skipped rather than refused — `fork_pr_error`
-    has already rejected any PR payload this script could not read.
+    A payload with no head SHA is skipped rather than refused: an unreadable
+    event is not evidence of a base checkout, and the run it belongs to has
+    already had to state its head repository to get this far.
     """
     if event_name != "pull_request_target":
         return ""
@@ -387,7 +401,11 @@ def main():
     # `or`, so the fork refusal precedes the two consumer-wiring checks: a fork
     # head must be turned away before this script shells out or reads its tree.
     rejection = (
-        fork_pr_error(event_name, os.environ.get("GITHUB_REPOSITORY", ""), payload)
+        fork_pr_error(
+            os.environ.get("GITHUB_REPOSITORY", ""),
+            os.environ.get("SHIPMATE_HEAD_REPO", ""),
+            os.environ.get("SHIPMATE_NO_PULL_REQUEST", ""),
+        )
         or head_checkout_error(event_name, payload)
         or plan_workflow_error(event_name)
     )
