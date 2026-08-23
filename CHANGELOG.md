@@ -13,6 +13,8 @@ grammar are declared unstable in `README.md`.
 
 ## [0.18.0] — 2026-08-23
 
+Tags `468429a`.
+
 **Re-pinning alone is not enough.** The fork refusal and the draft skip now
 decide on values your `plan.yml` states rather than on the event payload, so add
 three `with:` lines in the same change that moves your pins:
@@ -80,6 +82,8 @@ one-time ruleset bypass (`docs/upgrading.md` §0.18.0).
 
 ## [0.17.0] — 2026-08-23
 
+Tags `5f4a022`.
+
 **Re-pinning alone is not enough.** `plan-cell` takes a new **required**
 `expected-head` input, so a wrapper that bumps its pins without adding it has
 every plan cell refuse on its next pull request. Add
@@ -119,6 +123,8 @@ applies pending** (`docs/upgrading.md` §0.17.0).
 
 ## [0.16.2] — 2026-08-22
 
+Tags `69da4e4`.
+
 ### Fixed
 
 - **`shipmate unlock` could not recognise a lock it was looking straight at.**
@@ -133,6 +139,8 @@ applies pending** (`docs/upgrading.md` §0.17.0).
   verbatim probe output of a real unlock run, escape sequences intact.
 
 ## [0.16.1] — 2026-08-22
+
+Tags `da5a5ff`.
 
 ### Fixed
 
