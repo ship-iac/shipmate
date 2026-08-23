@@ -183,12 +183,16 @@ and on the `summary` job's call of the engine's `summary.yml`:
 **Pass those expressions, not constants**: a literal `is-draft: false` claims
 "not a draft" for every run, and `head-repo: ${{ github.repository }}` passes the
 fork check for every pull request, fork ones included. `shipmate doctor` reports
-either on the `summary` call, and the absent case too; it does not read the
-`build-matrix` step's own `head-repo`.
+either — absent or wrong — on the `summary` call, and reports the `build-matrix`
+step's own `head-repo` the same way. It reads only a file named `plan.yml`, so a
+plan wrapper under another name is checked by review or not at all, and it has
+nothing to say about `is-draft` on `build-matrix`, which takes no such input.
 
 **If you run the optional nightly drift workflow**, add `no-pull-request: "true"`
 to its `build-matrix` step ([`drift.md`](drift.md)). A drift run has no pull
-request to state a head repository for, and this is how it says so.
+request to state a head repository for, and this is how it says so. It belongs
+in that file only: `doctor` reports a `no-pull-request` in `plan.yml`, because
+there it turns the fork refusal off for every pull request.
 
 **The pin bump and these edits must land in the same commit**, and the three
 failure modes look nothing alike:
