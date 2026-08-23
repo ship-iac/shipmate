@@ -44,8 +44,9 @@ applies pending** (`docs/upgrading.md` §Unreleased).
   **A plan produced before this release cannot be applied after it.** Such an
   artifact carries no `planned-head.txt`, and the absent record is refused rather
   than tolerated — there is nothing to compare, so tolerating it would be the
-  fail-open reading. Pre-merge the remedy is a re-plan (push, or re-run the plan
-  workflow). Post-merge there is no pull request left to push to, so the remedy
+  fail-open reading. Pre-merge the remedy is a re-plan: push to the pull request. A
+  *re-run* of the old plan run is not one — it replays the workflow file of the
+  commit that triggered it, so it plans on the pre-re-pin engine pin. Post-merge there is no pull request left to push to, so the remedy
   is a follow-up pull request touching those stacks; draining pending applies
   before the re-pin merges is what avoids meeting it at all.
 

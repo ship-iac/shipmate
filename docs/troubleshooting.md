@@ -334,8 +334,10 @@ remedy differs:
 - **There is no record at all.** The plan predates the release that binds a plan
   to the tree it was produced from, so there is nothing to compare and the
   absent record is refused rather than tolerated. **A push does not always fix
-  this one.** Pre-merge it does: push to the pull request (or re-run the plan
-  workflow) and the fresh plan carries a record. But the post-merge deploy path
+  this one.** Pre-merge it does: push to the pull request and the fresh plan
+  carries a record — a *re-run* of the old plan run does not, because a re-run
+  replays the workflow file of the commit that triggered it, so it produces
+  another old-format plan from the pre-re-pin engine pin. But the post-merge deploy path
   can meet an old-format artifact for a cell that was still pending when the
   re-pin merged, and there is no pull request left to push to — the remedy there
   is a follow-up pull request touching those stacks. The way to avoid meeting it

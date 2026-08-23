@@ -192,8 +192,10 @@ everything in between.
 **Drain pending applies before the re-pin merges.** A reviewed plan produced
 before this release carries no recorded commit, and an apply refuses such a plan
 rather than tolerating it — there is nothing to compare it against. Pre-merge
-that costs a re-plan: push to the pull request, or re-run the plan workflow, and
-apply the fresh plan. **The post-merge deploy path is the one a push cannot
+that costs a re-plan: push to the pull request and apply the fresh plan.
+Re-running the old plan run does not help — a re-run replays the workflow file
+of the commit that triggered it, so it plans on the pre-re-pin engine pin and
+produces another record-less artifact. **The post-merge deploy path is the one a push cannot
 fix.** A cell whose `apply / <stack> / <env>` check was still pending when the
 re-pin merged holds an old-format plan, its pull request is already merged, and
 there is no pull request left to push to — the remedy there is a follow-up pull
