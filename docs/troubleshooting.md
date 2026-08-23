@@ -305,7 +305,7 @@ own fix:
   `expected-head: ${{ github.event.pull_request.head.sha }}` to the `plan-cell`
   step ([`getting-started.md`](getting-started.md) §Required — plan). This is the
   first thing a repository meets after re-pinning to the release that introduced
-  the input ([`upgrading.md`](upgrading.md) §Unreleased).
+  the input ([`upgrading.md`](upgrading.md) §0.17.0).
 - **The commit checked out is not the commit the run says it is planning.** The
   plan path is `pull_request_target`, which checks out the **base** branch by
   default, so `detect` and `plan` must name
@@ -342,7 +342,7 @@ remedy differs:
   re-pin merged, and there is no pull request left to push to — the remedy there
   is a follow-up pull request touching those stacks. The way to avoid meeting it
   at all is to land the re-pin with nothing pending
-  ([`upgrading.md`](upgrading.md) §Unreleased).
+  ([`upgrading.md`](upgrading.md) §0.17.0).
 
 This check is per cell and additive: the apply path's existing run-level
 verification of the plan run's head is unchanged, and a repository sees this
