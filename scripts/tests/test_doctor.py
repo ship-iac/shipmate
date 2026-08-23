@@ -2394,6 +2394,31 @@ def test_a_trailing_comment_after_a_false_value_is_silent(monkeypatch):
     assert doctor._fork_trigger_warnings(_ctx()) == []
 
 
+def test_a_false_in_one_job_does_not_silence_a_true_in_another(monkeypatch):
+    """A plan wrapper checks out in more than one job, and this probe's own
+    finding asks for an explicit `false` -- so the two occurrences coexist in
+    one file routinely. Examining only the first read the `false` and returned
+    nothing, which is fail-open on the outermost guard of the whole plan path.
+
+    One FILE with both occurrences: `test_unsafe_pr_checkout_set_to_false_is_
+    silent` uses two files with one occurrence each, which is why it could not
+    see this."""
+    responses = _fork_responses(
+        {
+            "plan.yml": "on:\n  pull_request_target:\njobs:\n"
+            "  detect:\n    steps:\n      - with:\n"
+            "          allow-unsafe-pr-checkout: false\n"
+            "  plan:\n    steps:\n      - with:\n"
+            "          allow-unsafe-pr-checkout: true\n",
+        }
+    )
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    out = doctor._fork_trigger_warnings(_ctx())
+    assert len(out) == 1
+    assert out[0][0] == doctor.WARNING
+    assert "allow-unsafe-pr-checkout" in out[0][1]
+
+
 def test_a_key_merely_ending_in_the_input_name_is_not_reported(monkeypatch):
     """The line anchor is what makes this the input and not a longer key that
     happens to end in the same characters -- a different input entirely, and
@@ -2415,12 +2440,13 @@ _HEAD_REPO_EXPR = "${{ github.event.pull_request.head.repo.full_name }}"
 _IS_DRAFT_EXPR = "${{ github.event.pull_request.draft }}"
 
 
-def _plan_calling_summary(*with_lines, detect_head_repo=False):
+def _plan_calling_summary(*with_lines, detect_head_repo=False, with_first=False):
     """A consumer `plan.yml` whose summary job passes exactly `with_lines`.
 
     `detect_head_repo` adds the OTHER legitimate `head-repo`, on the
     `build-matrix` step of an EARLIER job -- the occurrence a whole-file search
-    is satisfied by."""
+    is satisfied by. `with_first` writes the `with:` block ABOVE the job's
+    `uses:` line, which is legal YAML a forward-only scan cannot see."""
     detect = (
         "  detect:\n"
         "    steps:\n"
@@ -2430,12 +2456,10 @@ def _plan_calling_summary(*with_lines, detect_head_repo=False):
         if detect_head_repo
         else ""
     )
-    return (
-        "on:\n  pull_request_target:\njobs:\n"
-        f"{detect}"
-        "  summary:\n"
-        f"    uses: {_ENGINE_REPO}/.github/workflows/summary.yml@{_SHA}\n"
-        "    with:\n" + "".join(f"      {ln}\n" for ln in with_lines)
+    uses = f"    uses: {_ENGINE_REPO}/.github/workflows/summary.yml@{_SHA}\n"
+    block = "    with:\n" + "".join(f"      {ln}\n" for ln in with_lines)
+    return f"on:\n  pull_request_target:\njobs:\n{detect}  summary:\n" + (
+        block + uses if with_first else uses + block
     )
 
 
@@ -2484,6 +2508,44 @@ def test_a_head_repo_on_the_build_matrix_step_does_not_satisfy_the_summary_call(
     assert f"`head-repo: {_HEAD_REPO_EXPR}`" in out[0][1]
 
 
+def test_a_with_block_above_the_uses_line_is_silent(monkeypatch):
+    """Key order in a YAML mapping carries no meaning, so a wrapper writing
+    `with:` above `uses:` is correctly wired. Scanning forward from the `uses:`
+    line reported it as passing neither input -- a probe firing on a healthy
+    repository, which is what teaches readers to ignore the suite."""
+    responses = _fork_responses(
+        {
+            "plan.yml": _plan_calling_summary(
+                f"head-repo: {_HEAD_REPO_EXPR}",
+                f"is-draft: {_IS_DRAFT_EXPR}",
+                with_first=True,
+            )
+        }
+    )
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    assert doctor._summary_wiring_warnings(_ctx()) == []
+
+
+def test_the_build_matrix_head_repo_cannot_satisfy_the_call_in_either_ordering(monkeypatch):
+    """The region is the summary job's own block however that job is written,
+    so the `build-matrix` step's `head-repo` in an earlier job is outside it in
+    both key orderings. Widening the region to the whole file greens both."""
+    for with_first in (False, True):
+        responses = _fork_responses(
+            {
+                "plan.yml": _plan_calling_summary(
+                    f"is-draft: {_IS_DRAFT_EXPR}",
+                    detect_head_repo=True,
+                    with_first=with_first,
+                )
+            }
+        )
+        monkeypatch.setattr(doctor, "_gh_json", responses.__getitem__)
+        out = doctor._summary_wiring_warnings(_ctx())
+        assert len(out) == 1, with_first
+        assert f"`head-repo: {_HEAD_REPO_EXPR}`" in out[0][1], with_first
+
+
 def test_a_constant_head_repo_is_reported(monkeypatch):
     """The one remaining fail-open: a `head-repo` wired to the running
     repository equals it for EVERY pull request, fork ones included, so the
@@ -2500,6 +2562,28 @@ def test_a_constant_head_repo_is_reported(monkeypatch):
     out = doctor._summary_wiring_warnings(_ctx())
     assert len(out) == 1
     assert f"`head-repo: {_HEAD_REPO_EXPR}`" in out[0][1]
+
+
+def test_the_wiring_finding_covers_the_wrong_value_case(monkeypatch):
+    """A present-but-wrong `head-repo` IS passed, so a finding opening "does not
+    pass `head-repo: …`" is literally false about the case the value check was
+    added for -- and the opening clause is the one a reader skims. Compared
+    against a hand-written constant, whole clause."""
+    responses = _fork_responses(
+        {
+            "plan.yml": _plan_calling_summary(
+                "head-repo: ${{ github.repository }}", f"is-draft: {_IS_DRAFT_EXPR}"
+            )
+        }
+    )
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    out = doctor._summary_wiring_warnings(_ctx())
+    assert len(out) == 1
+    assert out[0][1].startswith(
+        "`plan.yml`'s call of the engine's `summary.yml` must pass "
+        "`head-repo: ${{ github.event.pull_request.head.repo.full_name }}`, and does not: "
+        "the input is absent, or carries a different value."
+    )
 
 
 def test_a_literal_is_draft_is_reported(monkeypatch):

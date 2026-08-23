@@ -1154,9 +1154,16 @@ def _unsafe_checkout_warnings(text, name):
     `declares_pull_request_target` strips them: `# never set
     allow-unsafe-pr-checkout: true` is what a careful repository writes
     *because* it does not have one. A `${{ }}` value is unknown, not false, so
-    it is reported — it may evaluate true."""
-    m = _UNSAFE_CHECKOUT.search(_stripped_text(text))
-    if m is None or m.group("value").strip().strip("\"'") == "false":
+    it is reported — it may evaluate true.
+
+    EVERY occurrence is examined, not the first: a plan wrapper checks out in
+    more than one job, and one job's explicit `false` — the shape this very
+    finding asks for — must not silence another job's `true`."""
+    values = [
+        m.group("value").strip().strip("\"'")
+        for m in _UNSAFE_CHECKOUT.finditer(_stripped_text(text))
+    ]
+    if all(v == "false" for v in values):
         return []
     return [
         (
@@ -1246,26 +1253,37 @@ SUMMARY_WIRING_NO_COMMIT = (
 
 
 def _summary_call_region(text):
-    """The comment-stripped lines from the `uses:` line calling the engine's
-    reusable summary workflow to the next key at its own indentation (or EOF),
-    or None when the file makes no such call.
+    """The comment-stripped lines of the job block whose `uses:` calls the
+    engine's reusable summary workflow, or None when the file makes no such
+    call.
 
-    Scoped rather than whole-file deliberately: a correctly wired `plan.yml`
-    carries `head-repo:` twice — once on the `build-matrix` step in `detect`,
-    once on this call — and a whole-file search is satisfied by the wrong
-    occurrence while the call that decides the gate carries nothing.
+    Scoped to that one job rather than the whole file deliberately: a correctly
+    wired `plan.yml` carries `head-repo:` twice — once on the `build-matrix`
+    step in `detect`, once on this call — and a whole-file search is satisfied
+    by the wrong occurrence while the call that decides the gate carries
+    nothing.
 
-    KNOWN GAP: the scan runs forward only, so a `with:` block written *above*
-    its job's `uses:` line is not seen and the call reads as unwired. Legal
-    YAML, but no shipped wrapper is written that way, and the finding is
-    advisory."""
+    The block is found by walking BACK from the `uses:` line to the enclosing
+    key (the first shallower line) and then forward to the next line at that
+    key's level or above. Forward-only from `uses:` would miss a `with:` block
+    written above it in the same job, and report a visibly correct wrapper as
+    unwired — a probe that fires on a healthy repository trains readers to
+    ignore the suite."""
     lines = _stripped_text(text).splitlines()
     for i, line in enumerate(lines):
         if not _SUMMARY_CALL.search(line):
             continue
         depth = len(line) - len(line.lstrip())
-        region = [line]
-        for nxt in lines[i + 1 :]:
+        start = next(
+            (
+                j
+                for j in range(i - 1, -1, -1)
+                if lines[j].strip() and len(lines[j]) - len(lines[j].lstrip()) < depth
+            ),
+            i,
+        )
+        region = [lines[start]]
+        for nxt in lines[start + 1 :]:
             if nxt.strip() and len(nxt) - len(nxt.lstrip()) < depth:
                 break
             region.append(nxt)
@@ -1311,7 +1329,8 @@ def _summary_wiring_warnings(ctx):
         return [
             (
                 WARNING,
-                f"`{name}`'s call of the engine's `summary.yml` does not pass {wanted} — the "
+                f"`{name}`'s call of the engine's `summary.yml` must pass {wanted}, and does "
+                "not: the input is absent, or carries a different value. The "
                 "summary job decides on those two inputs and refuses an empty or unexpected "
                 "value, so it is SKIPPED: no gate status, no plan comment, and nothing on the "
                 "run page saying why the pull request cannot merge. Each must be the pull "

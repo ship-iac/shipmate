@@ -72,6 +72,12 @@ under examination, so the pull request that bumps a stale pin is not itself
 reported stale, and restricted to pins of the engine's own repository, which
 the probe learns at runtime from the running action rather than from any
 hardcoded slug — another org's shared action is not shipmate's to report on),
+whether the `plan.yml` wrapper's call of the engine's reusable summary workflow
+passes the head-repository and draft inputs that workflow decides on (an omitted
+one skips the summary job, so no gate status is written and nothing on the run
+page says why the pull request cannot merge; a constant — the running repository,
+a literal `false` — states the safe answer for every run, fork pull requests and
+drafts included, so the value is checked and not just the key),
 whether the configured approvers team resolves in the org, and
 whether the shipmate App installation still grants the manifest's full
 permission set — with the warning and failure annotations GitHub already

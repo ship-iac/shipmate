@@ -536,6 +536,9 @@ protection shape, plan-environment secrets, the `shipmate-engine`
 environment's own existence and default-branch scoping, `pull_request_target`
 triggers in the consumer's workflow files other than `plan.yml`, which uses
 that trigger by design, engine action-pin freshness,
+the head-repository and draft inputs the consumer's `plan.yml` passes to the
+engine's reusable summary workflow — absent or constant, they cost a skipped
+summary job or a guard that passes for every pull request —
 approvers-team resolvability, and App installation permission
 drift — see `docs/branch-protection.md`) with a harvest of the warning and
 failure annotations GitHub already recorded on this commit's workflow runs
