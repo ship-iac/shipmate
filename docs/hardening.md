@@ -734,7 +734,9 @@ request at all and belongs only in a workflow that has none (nightly drift,
 [`drift.md`](drift.md)). Setting it in a plan wrapper is the one consumer edit
 that would turn this refusal off for every pull request — so don't, and note
 that the value is the wrapper's own default-branch YAML, which a pull request
-author cannot edit. A fork's plan is refused before any
+author cannot edit. `shipmate doctor` reports both consumer mistakes on this
+step: a `head-repo` that is absent or a constant, and a `no-pull-request`
+anywhere in `plan.yml`. A fork's plan is refused before any
 stack is enumerated and before any `tofu` process starts. It is not refused
 before `detect`'s own `terramate` steps: in the reference `plan.yml`,
 `terramate fmt --check` and `terramate generate --detailed-exit-code` precede

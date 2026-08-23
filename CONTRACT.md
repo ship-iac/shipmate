@@ -536,9 +536,11 @@ protection shape, plan-environment secrets, the `shipmate-engine`
 environment's own existence and default-branch scoping, `pull_request_target`
 triggers in the consumer's workflow files other than `plan.yml`, which uses
 that trigger by design, engine action-pin freshness,
-the head-repository and draft inputs the consumer's `plan.yml` passes to the
-engine's reusable summary workflow — absent or constant, they cost a skipped
-summary job or a guard that passes for every pull request —
+the fork and draft wiring of the consumer's `plan.yml` — the head-repository
+and draft inputs it passes to the engine's reusable summary workflow, the
+head-repository input on its own `build-matrix` step, and a `no-pull-request`
+anywhere in that file; absent or constant, they cost a skipped summary job or a
+fork refusal that passes for every pull request —
 approvers-team resolvability, and App installation permission
 drift — see `docs/branch-protection.md`) with a harvest of the warning and
 failure annotations GitHub already recorded on this commit's workflow runs
@@ -1042,10 +1044,10 @@ The three jobs:
   same reason: it authors the drift Issues under an App token, and a
   scheduled or manually dispatched run evaluates at the default branch.
 
-Nothing matches on the plan workflow's `name:` any more, and no check inspects
-consumer workflow YAML for this wiring. (Doctor still reads those files for two
-unrelated probes — stale engine pins and `pull_request_target` triggers — and
-neither can observe whether the gate will be written.)
+Nothing matches on the plan workflow's `name:` any more. Doctor reads those
+files for three probes — stale engine pins, `pull_request_target` triggers, and
+the plan wrapper's fork and draft wiring; the last of those is the one that
+observes whether the gate will be written, and it reports rather than fails.
 
 The **file path is still load-bearing**, and nothing diagnoses a rename as the
 cause:

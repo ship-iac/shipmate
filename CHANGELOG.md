@@ -50,15 +50,22 @@ one-time ruleset bypass (`docs/upgrading.md` §0.18.0).
   repository the engine was never told about (`CONTRACT.md` §Post-plan topology).
 
 - **`shipmate doctor` gained an eleventh probe, over the caller's own wiring.**
-  It reads the `plan.yml` at the commit under examination and reports a
-  `summary.yml` call whose `head-repo` / `is-draft` is absent *or constant* — a
+  It reads the `plan.yml` at the commit under examination and reports both sides
+  of that file's wiring, absent *or constant*: the `summary.yml` call's
+  `head-repo` / `is-draft`, and the `build-matrix` step's own `head-repo`. A
   literal `false`, or the running repository, states the safe answer for every
   run, fork pull requests and drafts included, and nothing else in the system can
-  see it. Its fork-trigger probe additionally reports every occurrence of
-  `allow-unsafe-pr-checkout` set to anything but `false`: `actions/checkout`
-  refuses to check out a fork's head under `pull_request_target` by default, and
-  that refusal is the outermost guard on this path (`docs/hardening.md`
-  §"Contributors without push access", which now documents the ordering).
+  see it — on the `build-matrix` step that is the fork refusal itself, so it also
+  reports a `no-pull-request` anywhere in `plan.yml`, the one opt-out from that
+  refusal, which belongs only in a workflow with no pull request (drift). Its
+  fork-trigger probe additionally reports every occurrence of
+  `allow-unsafe-pr-checkout` set to anything but `false`: that input turns off
+  `actions/checkout`'s own refusal to check out a fork's head, the outermost
+  guard on this path — under `pull_request_target` the job may hold this
+  repository's secrets, and under `pull_request` a fork's code still runs on your
+  runners with everything the job's environment exposes as variables
+  (`docs/hardening.md` §"Contributors without push access", which now documents
+  the ordering).
 
 ### Fixed
 
