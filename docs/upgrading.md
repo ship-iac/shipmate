@@ -159,6 +159,63 @@ names. The entries below `0.2.0` predate the first tagged release, or
 `CHANGELOG.md` does not pin one; they are kept for repositories moving from a
 very old pin.
 
+### Unreleased — name the planned commit, and drain pending applies before re-pinning
+
+**Re-pinning alone is not enough.** `plan-cell` now takes a **required**
+`expected-head` input — the commit the run is planning — so add it to the
+`plan-cell` step of your `.github/workflows/plan.yml` in the same change that
+moves your pins:
+
+```yaml
+        with:
+          expected-head: ${{ github.event.pull_request.head.sha }}
+```
+
+The same SHA the `plan` job's checkout already names.
+[`getting-started.md`](getting-started.md) §Required — plan has the whole step.
+
+**The pin bump and this edit must land in the same commit.** A wrapper that
+re-pins without it has **every** plan cell refuse on its next pull request,
+naming the missing input, and the gate holds red (`plan incomplete`) so nothing
+merges. The trap is that this does not show up on the re-pin itself: its own
+pull request planned green because `pull_request_target` runs the **base**
+branch's `plan.yml`, still at the old pin — so once it merges, the default
+branch carries the new pin without the input, and every stack-touching pull
+request is refused until a wrapper edit lands.
+
+Recovery needs no bypass: a pull request that edits only `plan.yml` touches no
+stack, so `build-matrix` reports an empty matrix, the plan job is
+skipped, and the gate greens on zero planned cells — one ordinary wrapper-only
+pull request clears it. Landing both in one commit is what avoids refusing
+everything in between.
+
+**Drain pending applies before the re-pin merges.** A reviewed plan produced
+before this release carries no recorded commit, and an apply refuses such a plan
+rather than tolerating it — there is nothing to compare it against. Pre-merge
+that costs a re-plan: push to the pull request and apply the fresh plan.
+Re-running the old plan run does not help — a re-run replays the workflow file
+of the commit that triggered it, so it plans on the pre-re-pin engine pin and
+produces another record-less artifact. **The post-merge deploy path is the one a push cannot
+fix.** A cell whose `apply / <stack> / <env>` check was still pending when the
+re-pin merged holds an old-format plan, its pull request is already merged, and
+there is no pull request left to push to — the remedy there is a follow-up pull
+request touching those stacks, which plans them afresh and applies on its own
+merge. The refusal is correct in both cases; the way to avoid meeting it at all
+is to land the re-pin with nothing pending.
+
+**A wrapper that does not name the head SHA on its checkout now fails loudly.**
+`plan-cell` refuses when the commit it has checked out is not the one the run
+says it is planning. Since `0.10.0` the plan path is `pull_request_target`,
+which checks out the **base** branch unless the checkout names
+`ref: ${{ github.event.pull_request.head.sha }}` — a wrapper missing that line
+used to report a clean plan for a pull request it never read, and is refused
+from this release on. Fix the checkout, not the `expected-head` value.
+
+Nothing else in this release needs consumer action: no environment to create or
+rename, no permission to add, and no change to the apply or comment-ops
+wrappers. The run-level head check the apply path already performed is
+unchanged — the new per-cell check is additive.
+
 ### 0.16.1 — make every `apply.yml` wrapper input optional before using `unlock`
 
 **Re-pinning alone is not enough if you use `shipmate unlock`.** In your

@@ -288,6 +288,66 @@ the pre-flight and still injects nothing. Two ways to arrive there:
   `dev-eu` only: the second entry is ` dev-us` and the comparison is exact, so
   that env silently stays split. Same symptom, different cause.
 
+### `plan-cell needs the expected-head input`, or `The plan would describe a tree nobody reviewed`
+
+A plan cell fails on its very first step, before `terramate` runs, so the cell
+produces no plan and its `<stack> / <env>` check does not go green. The failing
+plan job leaves `shipmate / gate` held **red** with `plan incomplete (plan job:
+failure)` — a hold, not an absence (§`shipmate / gate` never goes green, "The
+gate is deliberately held") — so nothing merges until the plan cells pass.
+
+Both are wiring errors in your `.github/workflows/plan.yml`, and each names its
+own fix:
+
+- **`expected-head` is missing or empty.** `plan-cell` requires it — the commit
+  the run is planning — and refuses rather than publishing a plan whose
+  provenance nobody can verify. Add
+  `expected-head: ${{ github.event.pull_request.head.sha }}` to the `plan-cell`
+  step ([`getting-started.md`](getting-started.md) §Required — plan). This is the
+  first thing a repository meets after re-pinning to the release that introduced
+  the input ([`upgrading.md`](upgrading.md) §Unreleased).
+- **The commit checked out is not the commit the run says it is planning.** The
+  plan path is `pull_request_target`, which checks out the **base** branch by
+  default, so `detect` and `plan` must name
+  `ref: ${{ github.event.pull_request.head.sha }}` on their checkout. Without it
+  the cell plans the base and would report a clean plan for a pull request it
+  never read; that is now a refusal instead. Fix the **checkout** — passing the
+  base SHA as `expected-head` to make the comparison agree is the one wrong
+  reading of this error, and it restores exactly the hazard the check exists to
+  close.
+
+### `this reviewed plan records no planned commit`, or `the reviewed plan was produced from`
+
+An apply cell fails before the decrypt, the state restore and the apply, and its
+`apply / <stack> / <env>` check stays pending. The cell summary names the
+blocked reason.
+
+The reviewed `.otplan` carries the commit it was produced from
+([`../CONTRACT.md`](../CONTRACT.md) §Apply-match fingerprint), and the applying
+cell compares it against its own checkout. Two ways that ends here, and the
+remedy differs:
+
+- **The record disagrees with the checkout.** The error names both commits. The
+  plan describes a tree this job does not have, so it is refused rather than
+  applied or silently re-planned — as with a stale plan, there is no force. The
+  fix is a re-plan and an apply of the fresh plan.
+- **There is no record at all.** The plan predates the release that binds a plan
+  to the tree it was produced from, so there is nothing to compare and the
+  absent record is refused rather than tolerated. **A push does not always fix
+  this one.** Pre-merge it does: push to the pull request and the fresh plan
+  carries a record — a *re-run* of the old plan run does not, because a re-run
+  replays the workflow file of the commit that triggered it, so it produces
+  another old-format plan from the pre-re-pin engine pin. But the post-merge deploy path
+  can meet an old-format artifact for a cell that was still pending when the
+  re-pin merged, and there is no pull request left to push to — the remedy there
+  is a follow-up pull request touching those stacks. The way to avoid meeting it
+  at all is to land the re-pin with nothing pending
+  ([`upgrading.md`](upgrading.md) §Unreleased).
+
+This check is per cell and additive: the apply path's existing run-level
+verification of the plan run's head is unchanged, and a repository sees this
+error only for a plan the run-level check accepted.
+
 ### `this apply would bind GitHub Environment(s) that do not exist`
 
 The apply run stopped in its `snapshot` job, before any wave, and the error names

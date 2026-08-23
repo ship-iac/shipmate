@@ -208,6 +208,7 @@ jobs:
           stack: ${{ matrix.stack }}
           stack-name: ${{ matrix.stack }}
           env: ${{ matrix.environment }}
+          expected-head: ${{ github.event.pull_request.head.sha }}
           plan-passphrase: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
 
   # Everything trusted happens inside the engine's reusable workflow: one job,
@@ -238,6 +239,12 @@ addition above is AWS-specific: this sample's `plan` job grants `id-token: write
 solely so `configure-aws-credentials` can assume the read-only plan role. A
 consumer with no plan-time cloud credentials drops both that grant and the
 credentials step.
+
+`expected-head` is required. plan-cell records the commit each plan was
+produced from and apply-cell refuses a plan produced from a different tree, so
+the plan step must name the commit it is planning — the same SHA the checkout
+above uses. A wrapper that omits it fails its first plan rather than publishing
+a plan whose provenance nobody can verify.
 
 `SHIPMATE_PLAN_PASSPHRASE` is optional — unset, plan artifacts are stored
 unencrypted. If you set it, it must be a **repository** secret, not an

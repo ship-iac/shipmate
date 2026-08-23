@@ -49,6 +49,7 @@ def _run_compose(
     tmp_path,
     *,
     download="skipped",
+    planned_head="skipped",
     decrypt="skipped",
     fingerprint="skipped",
     restore="skipped",
@@ -64,6 +65,7 @@ def _run_compose(
     monkeypatch.setenv("STACK_NAME", stack_name)
     monkeypatch.setenv("ENV", env)
     monkeypatch.setenv("DOWNLOAD_OUTCOME", download)
+    monkeypatch.setenv("PLANNED_HEAD_OUTCOME", planned_head)
     monkeypatch.setenv("DECRYPT_OUTCOME", decrypt)
     monkeypatch.setenv("FINGERPRINT_OUTCOME", fingerprint)
     monkeypatch.setenv("RESTORE_OUTCOME", restore)
@@ -82,13 +84,22 @@ def _run_compose(
     return json.loads(cell_path.read_text(encoding="utf-8"))
 
 
-# --- the four fail-safes, checked in pipeline order --------------------------
+# --- the five fail-safes, checked in pipeline order -------------------------
 
 
 def test_download_failure_blocks_with_its_own_reason(monkeypatch, tmp_path):
     cell = _run_compose(monkeypatch, tmp_path, download="failure")
     assert cell["result"] == "blocked"
     assert cell["reason"] == "reviewed plan artifact missing or expired — re-run plan"
+
+
+def test_planned_head_failure_blocks_with_its_own_reason(monkeypatch, tmp_path):
+    cell = _run_compose(monkeypatch, tmp_path, planned_head="failure")
+    assert cell["result"] == "blocked"
+    assert (
+        cell["reason"]
+        == "reviewed plan records no commit or was produced from a different one — re-plan"
+    )
 
 
 def test_decrypt_failure_blocks_with_its_own_reason(monkeypatch, tmp_path):
@@ -117,6 +128,7 @@ def test_apply_success_is_applied_with_empty_reason(monkeypatch, tmp_path):
         monkeypatch,
         tmp_path,
         download="success",
+        planned_head="success",
         decrypt="success",
         fingerprint="success",
         restore="success",
@@ -135,6 +147,7 @@ def test_remote_backend_skipped_restore_is_applied_with_empty_reason(monkeypatch
         monkeypatch,
         tmp_path,
         download="success",
+        planned_head="success",
         decrypt="success",
         fingerprint="success",
         restore="skipped",
@@ -149,6 +162,7 @@ def test_apply_failure_is_failed_with_empty_reason(monkeypatch, tmp_path):
         monkeypatch,
         tmp_path,
         download="success",
+        planned_head="success",
         decrypt="success",
         fingerprint="success",
         restore="success",
@@ -163,6 +177,7 @@ def test_apply_cancelled_is_failed_with_empty_reason(monkeypatch, tmp_path):
         monkeypatch,
         tmp_path,
         download="success",
+        planned_head="success",
         decrypt="success",
         fingerprint="success",
         restore="success",
@@ -186,6 +201,7 @@ def test_unrelated_step_failed_between_fingerprint_and_restore_reads_as_generic_
         monkeypatch,
         tmp_path,
         download="success",
+        planned_head="success",
         decrypt="success",
         fingerprint="success",
         restore="skipped",
@@ -227,6 +243,7 @@ def test_two_failsafes_failing_together_the_earlier_in_pipeline_order_wins(monke
         {"download": "failure"},
         {
             "download": "success",
+            "planned_head": "success",
             "decrypt": "success",
             "fingerprint": "success",
             "restore": "success",
@@ -234,6 +251,7 @@ def test_two_failsafes_failing_together_the_earlier_in_pipeline_order_wins(monke
         },
         {
             "download": "success",
+            "planned_head": "success",
             "decrypt": "success",
             "fingerprint": "success",
             "restore": "success",

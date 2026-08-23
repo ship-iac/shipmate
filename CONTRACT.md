@@ -699,10 +699,13 @@ its own actionable rejection reason:
   means new commits landed since — stale, re-plan required).
 
 `undiverged` is only the comment-time half of shipmate's **exact-plan** rule.
-The cell that applies re-verifies the reviewed `.otplan` against current state
-and against the TF_VAR fingerprint recorded at plan time (§Apply-match
-fingerprint), and refuses with "saved plan is stale" rather than re-planning.
-The pair is therefore strictly stronger than a base-divergence check: a plan
+The cell that applies re-verifies the reviewed `.otplan` against current state,
+against the TF_VAR fingerprint recorded at plan time, and against the commit the
+plan was produced from (§Apply-match fingerprint). Each refuses in its own
+words — OpenTofu's "saved plan is stale" for the state case, "current env does
+not match the reviewed plan's fingerprint" and "the reviewed plan was produced
+from …" for the other two — and none of them re-plans.
+Together they are strictly stronger than a base-divergence check: a plan
 the base branch never moved under, but that state moved under, is refused too.
 
 Review policy is read from GitHub's own `reviewDecision` — the verdict the
@@ -1459,6 +1462,25 @@ reviewed plan. plan-cell and apply-cell use a byte-identical algorithm
 (`scripts/plan-classify`). On mismatch, apply fails safe and reports differing
 variable **names** only — never values.
 
+The same shape carries the **planned commit**. `plan-cell` reads
+`git rev-parse HEAD` as its first step — before any repository content
+executes — refuses an `expected-head` input that is empty or that it did not
+check out, and ships the observed commit as `planned-head.txt` inside
+`plan.<env>.<slug>`. The file is materialised from the captured step output
+immediately before upload rather than when it is read: between the two,
+`terramate` executes author-controlled HCL and provider binaries, which can
+rewrite a file at repo root but not an emitted step output. `apply-cell` moves
+the record out of the consumer's checkout into `$RUNNER_TEMP` before reading it
+— the action runs inside the consumer's own checkout and must leave no stray
+file at its repo root — and compares it against its own `git rev-parse HEAD`
+before the decrypt, the state restore and the apply — a plan of another tree is
+refused at the cheapest point. A record that disagrees with the checkout is
+refused, and so is an **absent** record: it predates the release that binds a
+plan to its tree, there is nothing to compare, and the remedy is a re-plan. This
+is additive to the run-level head check the apply path already performs against
+the plan run, not a replacement for it — that check bounds which plan run may be
+applied, this one binds each individual plan to the tree it was produced from.
+
 ## Secrets in published output
 
 Both text surfaces shipmate publishes — the rendered plan `plan.txt` in the
@@ -1537,8 +1559,8 @@ produced, which is any branch; `docs/hardening.md` #7–9 says to treat it so.
   at decrypt (AES-CTR is unauthenticated and decrypts to garbage without error);
   the exact-plan invariant catches it — `tofu apply` rejects the garbage plan and
   the apply check stays pending.
-- **Scope: the machine plan file only.** `fingerprint.txt` is a hash and stays
-  plain. The rendered plan `plan.txt` — in the `cell-summary` artifact, the PR
+- **Scope: the machine plan file only.** `fingerprint.txt` and
+  `planned-head.txt` are a hash and a commit sha, and stay plain. The rendered plan `plan.txt` — in the `cell-summary` artifact, the PR
   sticky comment, and the job step summary — **stays plaintext**: it is the
   deliberately-public reviewer view, as is `apply.txt`. Encryption protects the
   machine plan at rest and nothing else; redaction in the published text comes
@@ -1626,9 +1648,9 @@ TF_VAR fingerprint).
 
 **Consumer gitignore requirement.** A consuming repository **must gitignore** the
 per-run machine artifacts shipmate materializes in its working tree — the
-reviewed plan (`*.otplan`), the fingerprint (`fingerprint.txt`), OpenTofu's
-working directory in each stack (`.terraform/`), and the flavor's state path when
-it has one (a remote backend materializes none — see State backend, above). The
+reviewed plan (`*.otplan`), the fingerprint (`fingerprint.txt`), the planned
+commit record (`planned-head.txt`), OpenTofu's working directory in each stack
+(`.terraform/`), and the flavor's state path when it has one (a remote backend materializes none — see State backend, above). The
 reason is not a safeguard: shipmate writes into the consumer's own checkout, none
 of those belong in a commit, and a `terramate run` of the consumer's own that
 omits `--no-recursive` refuses on them (`git-untracked` *does* fire there).

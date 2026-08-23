@@ -65,6 +65,31 @@ runs:
         fi
         echo "::endgroup::"
 
+    - name: Verify the plan was produced from this commit
+      id: planned-head
+      shell: bash
+      env:
+        ENV: ${{ inputs.env }}
+        STACK_NAME: ${{ inputs.stack-name }}
+      # Before the decrypt, the state restore and the apply: a plan of another
+      # tree is refused at the cheapest point. The record is moved OUT of the
+      # repo tree for the same reason the fingerprint is -- the action runs in
+      # the consumer's checkout and must not leave a stray file at repo root.
+      run: |
+        set -euo pipefail
+        if [ ! -f planned-head.txt ]; then
+          echo "::error::apply aborted for $ENV/$STACK_NAME: this reviewed plan records no planned commit, so it predates the release that binds a plan to the tree it was produced from. Re-plan the affected stacks in a new pull request."
+          exit 1
+        fi
+        record="$RUNNER_TEMP/planned-head.txt"
+        mv planned-head.txt "$record"
+        planned=$(cat "$record")
+        observed=$(git rev-parse HEAD)
+        if [ "$planned" != "$observed" ]; then
+          echo "::error::apply aborted for $ENV/$STACK_NAME: the reviewed plan was produced from $planned but this job has $observed checked out — re-plan."
+          exit 1
+        fi
+
     - name: Decrypt reviewed plan artifact (fail-safe on config/plaintext mismatch)
       id: decrypt
       shell: bash
@@ -217,6 +242,7 @@ runs:
         STACK_NAME: ${{ inputs.stack-name }}
         ENV: ${{ inputs.env }}
         DOWNLOAD_OUTCOME: ${{ steps.download.outcome }}
+        PLANNED_HEAD_OUTCOME: ${{ steps.planned-head.outcome }}
         DECRYPT_OUTCOME: ${{ steps.decrypt.outcome }}
         FINGERPRINT_OUTCOME: ${{ steps.fingerprint.outcome }}
         RESTORE_OUTCOME: ${{ steps.restore-state.outcome }}
@@ -236,6 +262,10 @@ runs:
         # blocked reason.
         FAILSAFES = [
             ("DOWNLOAD_OUTCOME", "reviewed plan artifact missing or expired — re-run plan"),
+            (
+                "PLANNED_HEAD_OUTCOME",
+                "reviewed plan records no commit or was produced from a different one — re-plan",
+            ),
             ("DECRYPT_OUTCOME", "plan artifact could not be decrypted — passphrase/config mismatch"),
             (
                 "FINGERPRINT_OUTCOME",

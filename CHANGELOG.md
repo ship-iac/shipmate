@@ -11,6 +11,45 @@ section below names the SHA the release tags.
 The version line stays `v0.x` while action inputs, check names, and the comment
 grammar are declared unstable in `README.md`.
 
+## [Unreleased]
+
+**Re-pinning alone is not enough.** `plan-cell` takes a new **required**
+`expected-head` input, so a wrapper that bumps its pins without adding it has
+every plan cell refuse on its next pull request. Add
+`expected-head: ${{ github.event.pull_request.head.sha }}` to the `plan-cell`
+step of your `plan.yml` in the same change that moves the pins
+(`docs/getting-started.md` §Required — plan), and land the re-pin with **no
+applies pending** (`docs/upgrading.md` §Unreleased).
+
+### Added
+
+- **A reviewed plan now carries the commit it was produced from, and an apply
+  refuses a plan produced from a different tree.** `plan-cell` reads
+  `git rev-parse HEAD` as its first step — before any repository content
+  executes — refuses an `expected-head` that is empty or that it did not check
+  out, and ships the observed commit as `planned-head.txt` inside
+  `plan.<env>.<slug>`. `apply-cell` compares that record against its own
+  checkout before the decrypt, the state restore and the apply, and refuses when
+  the two disagree or when no record is present at all. The refusal is
+  attributable in the cell summary, so a blocked apply names its cause rather
+  than going red without one (`CONTRACT.md` §Apply-match fingerprint,
+  `docs/troubleshooting.md`).
+
+  This closes a hazard the plan path previously only warned about in prose: a
+  `pull_request_target` wrapper that does not name the head SHA on its checkout
+  plans the **base** branch and reports a clean plan for code it never read. The
+  run-level head check the apply path already performed is unchanged — the new
+  per-cell check is additive, not a replacement.
+
+  **A plan produced before this release cannot be applied after it.** Such an
+  artifact carries no `planned-head.txt`, and the absent record is refused rather
+  than tolerated — there is nothing to compare, so tolerating it would be the
+  fail-open reading. Pre-merge the remedy is a re-plan: push to the pull request. A
+  *re-run* of the old plan run is not one — it replays the workflow file of the
+  commit that triggered it, so it plans on the pre-re-pin engine pin. Post-merge there is no pull request left to push to, so the remedy
+  is a follow-up pull request touching those stacks; draining pending applies
+  before the re-pin merges is what avoids meeting it at all.
+
 ## [0.16.2] — 2026-08-22
 
 ### Fixed

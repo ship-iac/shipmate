@@ -7,7 +7,7 @@ a neighbouring fail-safe's reason -- instead of its own.
 
 Everything here is derived from action.yml itself (step order, ids, the
 Compose step's env: mappings, the heredoc's FAILSAFES list) rather than a
-hand-maintained list of the four current ids -- a hardcoded list would itself
+hand-maintained list of the five current ids -- a hardcoded list would itself
 be the kind of thing that silently goes stale.
 """
 
@@ -150,12 +150,13 @@ def test_every_failsafes_entry_maps_back_to_a_current_idd_step_in_range():
         )
 
 
-def test_current_failsafe_set_is_exactly_the_four_known_ids():
+def test_current_failsafe_set_is_exactly_the_five_known_ids():
     # Not a substitute for the structural guards above (this one intentionally
-    # would need updating the moment a fifth fail-safe is added) -- a tripwire
+    # would need updating the moment a sixth fail-safe is added) -- a tripwire
     # so that addition is noticed here too, not just in the structural checks.
     assert set(_ids_between_slug_and_apply()) - NOT_A_FAILSAFE == {
         "download",
+        "planned-head",
         "decrypt",
         "fingerprint",
         "restore-state",

@@ -10,6 +10,9 @@ inputs:
   env:
     description: Environment name, e.g. dev-eu.
     required: true
+  expected-head:
+    description: The commit this run is planning, e.g. the pull request's head SHA. Empty is refused — a plan whose provenance is unrecorded cannot be applied.
+    required: true
   retention-days:
     description: Plan artifact retention (days); caps how long the plan artifact stays downloadable. Empty = the repository default.
     required: false
@@ -21,6 +24,30 @@ inputs:
 runs:
   using: composite
   steps:
+    - name: Record the planned commit
+      id: planned
+      shell: bash
+      env:
+        EXPECTED_HEAD: ${{ inputs.expected-head }}
+      # First step on purpose. `Plan` below runs author-controlled HCL and
+      # provider binaries through terramate, so a rev-parse after it reports
+      # whatever git state that content left behind. The value is emitted as a
+      # step output rather than written to a file here: a file at repo root
+      # would be rewritable by the code `Plan` executes, an emitted output is
+      # not.
+      run: |
+        set -euo pipefail
+        if [ -z "${EXPECTED_HEAD:-}" ]; then
+          echo "::error::plan-cell needs the expected-head input — the commit this run is planning, usually the pull request's head SHA. Add it to the plan-cell step of your plan workflow (docs/getting-started.md). Refusing rather than publishing a plan whose provenance is unrecorded."
+          exit 1
+        fi
+        observed=$(git rev-parse HEAD)
+        if [ "$observed" != "$EXPECTED_HEAD" ]; then
+          echo "::error::plan-cell has $observed checked out but this run reports $EXPECTED_HEAD as the commit it is planning. The plan would describe a tree nobody reviewed — name the head SHA on the checkout step."
+          exit 1
+        fi
+        echo "head=$observed" >> "$GITHUB_OUTPUT"
+
     - name: Plan
       shell: bash
       env:
@@ -109,6 +136,23 @@ runs:
           fi
         } >> "$GITHUB_STEP_SUMMARY"
 
+    - name: Record the planned commit in the artifact
+      id: record-head
+      shell: bash
+      env:
+        PLANNED_HEAD: ${{ steps.planned.outputs.head }}
+      # Written here, not in the step that captured it: between the two,
+      # `Plan` executes repository content that could rewrite a file at repo
+      # root. The output cannot be rewritten, so the file is materialised from
+      # it at the last possible moment.
+      run: |
+        set -euo pipefail
+        if [ -z "${PLANNED_HEAD:-}" ]; then
+          echo "::error::the planned commit was not captured; refusing to publish a plan with no provenance."
+          exit 1
+        fi
+        printf '%s\n' "$PLANNED_HEAD" > planned-head.txt
+
     - name: Upload plan artifact
       uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
       with:
@@ -116,6 +160,7 @@ runs:
         path: |
           ${{ inputs.stack }}/stack.otplan
           fingerprint.txt
+          planned-head.txt
         retention-days: ${{ inputs.retention-days }}
 
     - name: Write cell summary
