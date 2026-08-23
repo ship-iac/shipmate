@@ -11,7 +11,7 @@ section below names the SHA the release tags.
 The version line stays `v0.x` while action inputs, check names, and the comment
 grammar are declared unstable in `README.md`.
 
-## [Unreleased]
+## [0.17.0] — 2026-08-23
 
 **Re-pinning alone is not enough.** `plan-cell` takes a new **required**
 `expected-head` input, so a wrapper that bumps its pins without adding it has
@@ -19,7 +19,7 @@ every plan cell refuse on its next pull request. Add
 `expected-head: ${{ github.event.pull_request.head.sha }}` to the `plan-cell`
 step of your `plan.yml` in the same change that moves the pins
 (`docs/getting-started.md` §Required — plan), and land the re-pin with **no
-applies pending** (`docs/upgrading.md` §Unreleased).
+applies pending** (`docs/upgrading.md` §0.17.0).
 
 ### Added
 

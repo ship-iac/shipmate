@@ -159,7 +159,7 @@ names. The entries below `0.2.0` predate the first tagged release, or
 `CHANGELOG.md` does not pin one; they are kept for repositories moving from a
 very old pin.
 
-### Unreleased — name the planned commit, and drain pending applies before re-pinning
+### 0.17.0 — name the planned commit, and drain pending applies before re-pinning
 
 **Re-pinning alone is not enough.** `plan-cell` now takes a **required**
 `expected-head` input — the commit the run is planning — so add it to the
