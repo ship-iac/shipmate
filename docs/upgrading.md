@@ -251,14 +251,13 @@ branch's `plan.yml`, still at the old pin — so once it merges, the default
 branch carries the new pin without the input, and every stack-touching pull
 request is refused until a wrapper edit lands.
 
-Recovery needs no bypass — **provided the wrapper already carries the `0.18.0`
-inputs**; without them `build-matrix` refuses before it enumerates anything and
-this escape does not exist (§0.18.0). With them: a pull request that edits only
-`plan.yml` touches no
-stack, so `build-matrix` reports an empty matrix, the plan job is
-skipped, and the gate greens on zero planned cells — one ordinary wrapper-only
-pull request clears it. Landing both in one commit is what avoids refusing
-everything in between.
+Recovery needs no bypass: a pull request that edits only `plan.yml` touches no
+stack, so `build-matrix` reports an empty matrix, the plan job is skipped, and
+the gate greens on zero planned cells — one ordinary wrapper-only pull request
+clears it. **If the same change also moves you to `0.18.0` or later**, that
+escape needs the `0.18.0` inputs as well: without them `build-matrix` refuses
+before it enumerates anything, so there is no empty matrix to green (§0.18.0).
+Landing both in one commit is what avoids refusing everything in between.
 
 **Drain pending applies before the re-pin merges.** A reviewed plan produced
 before this release carries no recorded commit, and an apply refuses such a plan
