@@ -132,7 +132,7 @@ jobs:
           terramate-version: ${{ vars.TERRAMATE_VERSION }}
           tofu-version: ${{ vars.TOFU_VERSION }}
       - id: d
-        uses: ship-iac/shipmate/actions/apply-all-detect@23ec9dbd5a3baecf8315f8c2f1fd7e68bd815d84
+        uses: ship-iac/shipmate/actions/apply-all-detect@9030ae70ec341358ea4610cc599500078d074e3e
         with:
           plan-run-id: ${{ inputs.plan_run_id }}
           head-sha: ${{ inputs.ref }}
