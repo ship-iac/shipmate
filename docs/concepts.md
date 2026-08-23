@@ -207,10 +207,9 @@ workflow over shipmate actions.
   lets empty middle waves pass through without blocking successors.
   `actions/apply-cell` downloads the reviewed `.otplan` from the plan run,
   verifies the fingerprint and the commit the plan was produced from, applies
-  **that exact plan** (never re-plans; stale
-  state → fail-safe), and completes the apply check. A stack already applied
-  (pre-merge, or a no-change re-plan) has a completed check → deploy
-  **no-ops** it.
+  **that exact plan** (never re-plans; stale state → fail-safe), and completes
+  the apply check. A stack already applied (pre-merge, or a no-change re-plan)
+  has a completed check → deploy **no-ops** it.
 - **`drift.yml`** (nightly cron) fans out over **all** stacks × envs and
   plans each with `actions/drift-cell`, which holds no App credential and
   only uploads a drift-summary artifact. A separate `issues` job, bound to

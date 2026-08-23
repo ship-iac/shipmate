@@ -98,7 +98,7 @@ def test_planned_head_failure_blocks_with_its_own_reason(monkeypatch, tmp_path):
     assert cell["result"] == "blocked"
     assert (
         cell["reason"]
-        == "reviewed plan is missing or was produced from a different commit — re-plan"
+        == "reviewed plan records no commit or was produced from a different one — re-plan"
     )
 
 
