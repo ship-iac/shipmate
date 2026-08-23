@@ -1063,7 +1063,9 @@ none of them names the rename.
 
 A consumer that omits the `summary`
 job gets no `shipmate / gate` status at all, so the pull request cannot merge —
-the failure is visible and fail-closed.
+fail-closed, but **silent**: nothing on the run page says why
+(`docs/troubleshooting.md` §"`shipmate / gate` never goes green", first cause,
+which covers the same absence reached by omitting an input instead of the job).
 
 Both trust **decisions** live on the callee's job `if:`, in engine-owned,
 SHA-pinned YAML. The facts they decide on arrive as inputs the caller states:

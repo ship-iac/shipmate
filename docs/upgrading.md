@@ -209,8 +209,11 @@ as in `0.17.0`: `pull_request_target` runs the **base** branch's `plan.yml`, so
 that run still uses the old pin. Once it merges, the default branch carries the
 new pin without the inputs and every pull request after it is affected.
 
-**Recovery needs a one-time bypass** — unlike `0.17.0`, no ordinary pull request
-clears this. Both failure modes bite regardless of what the pull request touches:
+**Recovery needs a one-time bypass**, if you require `shipmate / gate` as a
+branch-protection check — the ruleset shape
+[`branch-protection.md`](branch-protection.md) prescribes. Under it, unlike
+`0.17.0`, no ordinary pull request clears this. (A repository that never made
+the gate required merges the fix like any other change and needs no bypass.) Both failure modes bite regardless of what the pull request touches:
 `build-matrix` refuses before it enumerates a single stack, so the "wrapper-only
 pull request plans nothing and greens the gate" escape does not exist, and a
 skipped summary job writes no gate at all. The fixing pull request runs the base
@@ -248,7 +251,10 @@ branch's `plan.yml`, still at the old pin — so once it merges, the default
 branch carries the new pin without the input, and every stack-touching pull
 request is refused until a wrapper edit lands.
 
-Recovery needs no bypass: a pull request that edits only `plan.yml` touches no
+Recovery needs no bypass — **provided the wrapper already carries the `0.18.0`
+inputs**; without them `build-matrix` refuses before it enumerates anything and
+this escape does not exist (§0.18.0). With them: a pull request that edits only
+`plan.yml` touches no
 stack, so `build-matrix` reports an empty matrix, the plan job is
 skipped, and the gate greens on zero planned cells — one ordinary wrapper-only
 pull request clears it. Landing both in one commit is what avoids refusing
@@ -555,7 +561,8 @@ explicitly — without it they plan the base branch and report a clean plan for 
 pull request they never read. The consumer's own `summary.yml` is deleted; the
 engine's is a `workflow_call` workflow whose single job binds `shipmate-engine`,
 checks out nothing, and carries both trust conditions (the fork refusal and the
-draft skip) where a consumer cannot drop them.
+draft skip) where a consumer cannot drop them. As of `0.18.0` the caller states
+the two facts those conditions compare — see §0.18.0 for the current shape.
 [`getting-started.md`](getting-started.md) §Required — plan has the current
 shape, and [`../CONTRACT.md`](../CONTRACT.md) §Post-plan topology is the written
 form.

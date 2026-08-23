@@ -744,8 +744,10 @@ of them means reordering your own `plan.yml`.
 
 **Two things keep a fork out of a plan cell, in this order.** First,
 `actions/checkout` itself refuses to check out a fork's head under
-`pull_request_target` — measured on a current release (2026-08-23) — unless the
-workflow passes `allow-unsafe-pr-checkout: true`. That is a third party's
+`pull_request_target` — measured on a current release (2026-08-23), against a
+wrapper naming `ref: ${{ github.event.pull_request.head.sha }}` on its checkout,
+which is the shape the reference `plan.yml` uses — unless the workflow passes
+`allow-unsafe-pr-checkout: true`. That is a third party's
 default, and it is the outermost guard on this path: `shipmate doctor` warns on
 every occurrence of that input set to anything but `false`, including a `${{ }}`
 value, which is unknown rather than false. Second, and independently,

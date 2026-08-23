@@ -164,8 +164,8 @@ full picture below:
   upserts one sticky PR comment (a stack × env table) and the aggregate
   **`shipmate / gate`** commit status, which stays non-green while any apply is
   pending or any plan cell failed. That job declines outright — before its first
-  step — on a fork pull request or a draft, and on a caller that stated neither:
-  an omitted input is read as a refusal, so the wrapper can fail the job closed
+  step — on a fork pull request or a draft, and on a caller that left **either**
+  fact unstated: an omitted input is read as a refusal, so the wrapper can fail the job closed
   but never open it.
 
 Fork pull requests do not get that far anyway:

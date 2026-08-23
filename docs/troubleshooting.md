@@ -446,7 +446,7 @@ Four distinct causes, in the order worth checking.
 **No gate status was written at all**, as opposed to a red or held one. The
 trusted summary job decides on two inputs the `plan.yml` wrapper states —
 `head-repo` and `is-draft` — and reads an absent or empty one as a refusal, so a
-wrapper that calls the engine's `summary.yml` without both is *skipped*: no gate,
+wrapper that calls the engine's `summary.yml` missing **either** is *skipped*: no gate,
 no plan comment, and nothing on the run page saying why. The pull request cannot
 merge, which is the intended direction, but the cause is only visible in the
 wrapper. Add both lines (`docs/getting-started.md` §Required — plan,
@@ -566,7 +566,8 @@ edit — plans nothing. This is expected, not a fault.
 
 ### Fork pull request refused
 
-`detect` fails with `fork pull requests are not supported`.
+`detect` fails with `fork pull requests are not supported`, or with
+`this run did not state its head repository`.
 
 Planning a fork head would run the pull request's own Terramate/OpenTofu code on
 your runners with whatever the plan environment exposes as **variables** — those

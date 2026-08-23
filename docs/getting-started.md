@@ -248,9 +248,10 @@ credentials step.
 
 `head-repo` and `is-draft` are the two facts the engine's trusted job decides
 on, and the wrapper is what states them: `build-matrix` refuses to plan a run
-that does not state its head repository, and the `summary` job compares both
-against the running repository before it mints an App token. An omitted or empty
-value is read as a **refusal**, in both places — so this wrapper can only fail
+that does not state its head repository, and the `summary` job requires the
+stated head repository to equal the running repository *and* the stated draft
+flag to be `false` before it mints an App token. An omitted or empty value is
+read as a **refusal**, in both places — so this wrapper can only fail
 the decision closed, never weaken it. The two costs look nothing alike. Omit
 `head-repo` on `build-matrix` and `detect` fails loudly, naming the input. Omit
 either input on the `summary` call and the summary job is **skipped**: no
