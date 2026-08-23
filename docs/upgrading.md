@@ -183,7 +183,8 @@ and on the `summary` job's call of the engine's `summary.yml`:
 **Pass those expressions, not constants**: a literal `is-draft: false` claims
 "not a draft" for every run, and `head-repo: ${{ github.repository }}` passes the
 fork check for every pull request, fork ones included. `shipmate doctor` reports
-either, and the absent case too.
+either on the `summary` call, and the absent case too; it does not read the
+`build-matrix` step's own `head-repo`.
 
 **If you run the optional nightly drift workflow**, add `no-pull-request: "true"`
 to its `build-matrix` step ([`drift.md`](drift.md)). A drift run has no pull

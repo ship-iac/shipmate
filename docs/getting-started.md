@@ -264,8 +264,10 @@ wiring so the silent case is not silent for long.
 `is-draft: false` states "not a draft" for every run, drafts included, and
 `head-repo: ${{ github.repository }}` passes the fork check for every pull
 request, fork ones included — the guard then holds nothing, and only this
-snippet's expressions make it real. `doctor` reports either as a
-misconfiguration.
+snippet's expressions make it real. `doctor` reports either **on the `summary`
+call**. It does not read the `build-matrix` step's own `head-repo`, so a
+constant there — or a `no-pull-request: "true"`, which belongs only in a drift
+wrapper — is caught by review or not at all.
 
 `expected-head` is required. plan-cell records the commit each plan was
 produced from and apply-cell refuses a plan produced from a different tree, so
