@@ -530,12 +530,17 @@ only labels the output as shipmate's own.
 `shipmate doctor` posts a consolidated, sticky report — one comment per pull
 request, identified by the HTML marker `<!-- shipmate:doctor -->` (distinct
 from the plan comment's `<!-- shipmate:summary -->`) and upserted in place the
-same way. It combines ten live settings probes (gate ruleset,
+same way. It combines eleven live settings probes (gate ruleset,
 default-branch `pull_request` rule, environment existence, environment
 protection shape, plan-environment secrets, the `shipmate-engine`
 environment's own existence and default-branch scoping, `pull_request_target`
 triggers in the consumer's workflow files other than `plan.yml`, which uses
 that trigger by design, engine action-pin freshness,
+the fork and draft wiring of the consumer's `plan.yml` — the head-repository
+and draft inputs it passes to the engine's reusable summary workflow, the
+head-repository input on its own `build-matrix` step, and a `no-pull-request`
+anywhere in that file; absent or constant, they cost a skipped summary job or a
+fork refusal that passes for every pull request —
 approvers-team resolvability, and App installation permission
 drift — see `docs/branch-protection.md`) with a harvest of the warning and
 failure annotations GitHub already recorded on this commit's workflow runs
@@ -547,7 +552,7 @@ when the report was rendered, it says so and asks for the command again once
 they have, and if the harvest itself could not be read in full it says that
 too — the two are separate statements, since a run that has not finished has
 recorded nothing yet while a run that could not be read may have recorded
-plenty. Only eight of the ten
+plenty. Only nine of the eleven
 probes can produce a finding from the plan path's own `annotate`-mode
 invocation: the approvers-team probe needs the `SHIPMATE_TEAM` environment
 variable, which the plan path does not supply, so it silently returns
@@ -993,26 +998,35 @@ The three jobs:
   also refuses a checkout with no `.github/workflows/plan.yml` — that path is
   matched literally by the reviewed-plan lookups and a renamed plan workflow
   wedges every later apply. `actions/build-matrix` fails `detect`
-  outright when the event's head repository is not the running repository:
-  **fork pull requests are not planned**, with no input to permit them. A
-  fork's plan would execute the pull request's own Terramate/OpenTofu code with
-  everything the plan environment holds — `pull_request_target` withholds
+  outright unless the run **states** a head repository equal to the running
+  repository: **fork pull requests are not planned**, and no input permits one.
+  A fork's plan would execute the pull request's own Terramate/OpenTofu code
+  with everything the plan environment holds — `pull_request_target` withholds
   nothing from a fork's run, its *secrets* included, so this refusal plus
-  `plan`'s `needs: detect` is the only layer keeping a fork out
-  (`docs/hardening.md` §16). No `shipmate / gate` is ever written for a fork
-  head, so the refusal is loud rather than an empty matrix. The guard keys on
-  the event being a pull-request event (`pull_request` or
-  `pull_request_target`); the drift path (`all-stacks`, `schedule`)
-  is unaffected.
+  `plan`'s `needs: detect` is what keeps a fork out of a plan cell once
+  `actions/checkout`'s own refusal to check out a fork head under that trigger
+  has been turned off or replaced (`docs/hardening.md` §16). No
+  `shipmate / gate` is ever written for a fork head, so the refusal is loud
+  rather than an empty matrix. The guard keys on the `head-repo` input the
+  wrapper passes, never on the event name: it **refuses by default**, so an
+  omitted or empty value is a refusal rather than a pass, and a wrapper that
+  forgets the input fails loudly instead of planning a fork. The event name
+  could not express the distinction — the drift path already triggers on both
+  `schedule` and `workflow_dispatch`, so a dispatched plan would be
+  indistinguishable from a manual drift run. The drift path (`all-stacks`) is
+  unaffected because it states that it has **no** pull request
+  (`no-pull-request: "true"`), which is the only opt-out and belongs in no plan
+  wrapper.
 - **`plan.yml`**'s `summary` job (consumer, a call to the engine's reusable
   `.github/workflows/summary.yml`) — it downloads this same run's cell
   summaries and calls `actions/summary` under an App token minted inside
   `shipmate-engine`. This is what creates the pending
   `apply / <stack> / <env>` checks, the sticky plan comment, and the
   `shipmate / gate` status. `pull_request_target` evaluates at the base branch
-  ref, which is what satisfies the environment's policy. The caller passes five
+  ref, which is what satisfies the environment's policy. The caller passes seven
   inputs — `pr-number`, `head-sha`, `detect-result`, `plan-result`,
-  `planned-cells` — all from the event payload and the two `needs:` results;
+  `planned-cells`, and the two the job's own `if:` decides on, `head-repo` and
+  `is-draft` — all from the event payload and the two `needs:` results;
   nothing is recovered from artifacts or from a second API lookup.
 - **`apply.yml` / `apply-all.yml` / `apply-env-level.yml` / `deploy.yml`**
   (consumer, `workflow_dispatch` via comment-ops, or `push` to the default
@@ -1030,10 +1044,10 @@ The three jobs:
   same reason: it authors the drift Issues under an App token, and a
   scheduled or manually dispatched run evaluates at the default branch.
 
-Nothing matches on the plan workflow's `name:` any more, and no check inspects
-consumer workflow YAML for this wiring. (Doctor still reads those files for two
-unrelated probes — stale engine pins and `pull_request_target` triggers — and
-neither can observe whether the gate will be written.)
+Nothing matches on the plan workflow's `name:` any more. Doctor reads those
+files for three probes — stale engine pins, `pull_request_target` triggers, and
+the plan wrapper's fork and draft wiring; the last of those is the one that
+observes whether the gate will be written, and it reports rather than fails.
 
 The **file path is still load-bearing**, and nothing diagnoses a rename as the
 cause:
@@ -1051,26 +1065,43 @@ none of them names the rename.
 
 A consumer that omits the `summary`
 job gets no `shipmate / gate` status at all, so the pull request cannot merge —
-the failure is visible and fail-closed.
+fail-closed, but **silent**: nothing on the run page says why
+(`docs/troubleshooting.md` §"`shipmate / gate` never goes green", first cause,
+which covers the same absence reached by omitting an input instead of the job).
 
-Both trust conditions live on the **callee's** job `if:`, in engine-owned,
-SHA-pinned YAML, and neither is duplicated into the consumer's file:
+Both trust **decisions** live on the callee's job `if:`, in engine-owned,
+SHA-pinned YAML. The facts they decide on arrive as inputs the caller states:
 
 ```
-github.event.pull_request.head.repo.full_name == github.repository &&
-github.event.pull_request.draft == false
+inputs.head-repo != '' &&
+inputs.head-repo == github.repository &&
+inputs.is-draft == 'false'
 ```
 
-They sit there rather than in the caller because a consumer who kept the job and
-dropped a clause would hand a fork pull request an App-authored gate — fail-open
-and unobserved. It is a job-level `if:`, not a step-level check, so a skipped
-job creates no deployment and never enters the environment. Reached from any
-other event, `github.event.pull_request` is empty and the expression is false.
+So the two halves are split on purpose. The caller states the head repository
+and the draft flag (`head-repo`, `is-draft` — `docs/getting-started.md`); the
+callee compares them, and an **omitted or empty input is a refusal**. A caller
+can therefore only fail the decision closed, never weaken it: dropping an input
+skips the job — no gate, so nothing merges — rather than handing a fork pull
+request an App-authored gate. The comparison sits in the callee because a
+consumer who kept the job and rewrote its `if:` would be fail-open and
+unobserved. It is a job-level `if:`, not a step-level check, so a skipped job
+creates no deployment and never enters the environment.
 
-The caller's `summary` job carries **no** security-relevant condition. It keeps
-only `if: ${{ !cancelled() }}` and deliberately does not require `detect` or
-`plan` to have succeeded: a failed detect or plan must still produce a red gate
-with an explanation, because no gate at all is a pull request nobody can
+The callee reads inputs rather than `github.event.*` because a reusable
+workflow's job-level `if:` can call nothing and read only YAML contexts, and
+reading the payload there is what let this guard and `build-matrix` — which
+keyed on the event name — disagree about what a non-pull-request trigger means.
+The residual is consumer misconfiguration: a constant `head-repo:
+${{ github.repository }}` or a literal `is-draft: false` states the safe answer
+for every run, fork pull requests and drafts included. Nothing else in the
+system can see that, which is why `shipmate doctor` probes the caller's wiring
+for the expressions themselves and not merely for the keys.
+
+The caller's `summary` job therefore carries the two facts but no decision of
+its own. Beyond them it keeps only `if: ${{ !cancelled() }}` and deliberately
+does not require `detect` or `plan` to have succeeded: a failed detect or plan
+must still produce a red gate with an explanation, because no gate at all is a pull request nobody can
 diagnose. `detect` and `plan` keep their own `draft == false` condition, which is
 a cost control (it stops a draft burning runners), not a security property.
 

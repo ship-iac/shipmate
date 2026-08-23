@@ -12,7 +12,7 @@ findings as workflow annotations titled `shipmate doctor`
 (`::warning title=shipmate doctor::<text>` / `::notice title=shipmate
 doctor::<text>`) — read-only, never blocking. Comment `shipmate doctor` on a
 pull request for a consolidated report: a sticky comment (marker `<!--
-shipmate:doctor -->`, upserted in place like the plan comment) combining ten
+shipmate:doctor -->`, upserted in place like the plan comment) combining eleven
 live probes — a missing or mis-pinned `shipmate / gate` rule on the default
 branch (no active ruleset requiring it, or one that doesn't pin
 `integration_id` to the shipmate App, or that isn't strict),
@@ -72,12 +72,21 @@ under examination, so the pull request that bumps a stale pin is not itself
 reported stale, and restricted to pins of the engine's own repository, which
 the probe learns at runtime from the running action rather than from any
 hardcoded slug — another org's shared action is not shipmate's to report on),
+whether the `plan.yml` wrapper states the facts the two normalized guards decide
+on — the head-repository and draft inputs on its call of the engine's reusable
+summary workflow, the head-repository input on its own `build-matrix` step, and
+no `no-pull-request` anywhere in the file (an omitted summary input skips the
+summary job, so no gate status is written and nothing on the run page says why
+the pull request cannot merge; a constant — the running repository, a literal
+`false` — states the safe answer for every run, fork pull requests and drafts
+included, so the value is checked and not just the key, and on the `build-matrix`
+step that constant is the fork refusal passing every pull request),
 whether the configured approvers team resolves in the org, and
 whether the shipmate App installation still grants the manifest's full
 permission set — with the warning and failure annotations GitHub already
 recorded on this commit's workflow runs (shipmate's own and any other
 Actions workflow run on that commit; third-party-app-authored check runs are
-excluded). Only eight of the ten probes can produce a finding from the plan
+excluded). Only nine of the eleven probes can produce a finding from the plan
 path's own `annotate`-mode run (`actions/summary`): the approvers-team probe
 needs the `SHIPMATE_TEAM` environment variable, which the plan path does
 not supply, and
@@ -435,7 +444,17 @@ Two locks this verb does not reach:
 
 ### `shipmate / gate` never goes green
 
-Three distinct causes, in the order worth checking.
+Four distinct causes, in the order worth checking.
+
+**No gate status was written at all**, as opposed to a red or held one. The
+trusted summary job decides on two inputs the `plan.yml` wrapper states —
+`head-repo` and `is-draft` — and reads an absent or empty one as a refusal, so a
+wrapper that calls the engine's `summary.yml` missing **either** is *skipped*: no gate,
+no plan comment, and nothing on the run page saying why. The pull request cannot
+merge, which is the intended direction, but the cause is only visible in the
+wrapper. Add both lines (`docs/getting-started.md` §Required — plan,
+`docs/upgrading.md` §0.18.0); `shipmate doctor` reports this wiring, including a
+constant value that would pass the check for every run.
 
 **A pending apply check nothing will complete.** `gate-refresh` greens the gate
 only when every shipmate-App-authored check on that commit whose name begins
@@ -550,7 +569,8 @@ edit — plans nothing. This is expected, not a fault.
 
 ### Fork pull request refused
 
-`detect` fails with `fork pull requests are not supported`.
+`detect` fails with `fork pull requests are not supported`, or with
+`this run did not state its head repository`.
 
 Planning a fork head would run the pull request's own Terramate/OpenTofu code on
 your runners with whatever the plan environment exposes as **variables** — those
@@ -558,10 +578,18 @@ are not secrets, and they are not withheld from a fork's run. No
 `shipmate / gate` status is ever written for a fork head either, so the pull
 request could not merge whatever the plan said. The refusal is loud rather than
 an empty matrix, so an outside contributor is not left waiting on a gate that
-cannot arrive, and it keys on the event being a pull request while treating an
-undeterminable head repository as a fork.
+cannot arrive.
 
-There is no input that allows it. Push the branch to this repository
+It keys on the `head-repo` input the wrapper passes, and it **refuses by
+default**: a run that states no head repository is refused too, with a message
+naming the input. So the same failure has a second cause — a `plan.yml` that
+re-pinned the engine without adding
+`head-repo: ${{ github.event.pull_request.head.repo.full_name }}` to its
+`build-matrix` step fails every pull request this way, fork or not
+(`docs/upgrading.md` §0.18.0). A nightly drift wrapper says it has no pull
+request at all with `no-pull-request: "true"` instead (`docs/drift.md`).
+
+No input allows a fork. Push the branch to this repository
 (`gh pr checkout`, then push) and open the pull request there.
 
 ### An apply check never completes after a successful apply

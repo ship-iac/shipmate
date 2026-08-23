@@ -20,19 +20,26 @@ WF = WORKFLOWS / "summary.yml"
 # Hand-written, NOT derived from the workflow. A constant lifted out of the file
 # it checks passes whatever the file says.
 EXPECTED_IF = (
-    "github.event.pull_request.head.repo.full_name == github.repository && "
-    "github.event.pull_request.draft == false"
+    "inputs.head-repo != '' && inputs.head-repo == github.repository && inputs.is-draft == 'false'"
 )
 # The whole declaration per input, not just the names. A `default:` added here
 # is what makes a caller that stops passing the input silent: `planned-cells`
 # would arrive as '0', `cell_count` as 0, and the gate would green over a run
 # that planned cells. `required: false` does the same by another route.
+#
+# `head-repo` and `is-draft` are the deliberate inverse, which is why they carry
+# the default the other five refuse. `required: true` buys a startup error on
+# the caller's run: no job, no log, no gate, and no way for the engine to state
+# the reason. `required: false` + `default: ""` + an `if:` that rejects empty
+# buys a skipped job -- the same refusal, said out loud.
 EXPECTED_INPUTS = {
     "pr-number": {"required": True, "type": "string"},
     "head-sha": {"required": True, "type": "string"},
     "detect-result": {"required": True, "type": "string"},
     "plan-result": {"required": True, "type": "string"},
     "planned-cells": {"required": True, "type": "string"},
+    "head-repo": {"required": False, "default": "", "type": "string"},
+    "is-draft": {"required": False, "default": "", "type": "string"},
 }
 # The whole job, as an ordered list of what each step runs. Subsumes "no
 # checkout": a checkout step, a `run:` step, or any extra step at all changes
@@ -62,10 +69,12 @@ def _summary_job():
 def test_the_trusted_job_refuses_forks_and_drafts():
     """The whole `if:`, compared as one value.
 
-    Both clauses are load-bearing and neither can live in the consumer's file:
-    with the wiring checks gone, nothing inspects consumer YAML, so a consumer
-    who dropped either clause would hand a fork an App-authored gate and nothing
-    anywhere would notice.
+    All three clauses are load-bearing, and the decision cannot move to the
+    consumer's file: nothing inspects consumer YAML, so a consumer who dropped a
+    clause would hand a fork an App-authored gate and nothing anywhere would
+    notice. What the consumer does supply is the facts -- a head repository and a
+    draft flag -- and the empty-string clause is what makes an omitted fact a
+    refusal instead of a pass.
     """
     job, _ = _summary_job()
     assert " ".join(job["if"].split()) == EXPECTED_IF

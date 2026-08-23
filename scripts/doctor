@@ -7,7 +7,7 @@ Three modes, selected via SHIPMATE_DOCTOR_MODE:
   actions/summary right after a plan run. NEVER fails the run: a probe
   error becomes a 'could not verify' note — doctor guards onboarding, it
   must not take down the plan path.
-- report: render the sticky PR comment on demand — the ten live probes'
+- report: render the sticky PR comment on demand — the eleven live probes'
   findings plus a harvest of the warnings GitHub already recorded as
   annotations on this commit's workflow check runs.
 - check-ids: reduce a check-runs JSONL listing to the (id, name) pairs worth
@@ -30,6 +30,9 @@ Probes:
 - secrets held by each declared plan environment.
 - engine action-pin freshness in the consumer's workflow files.
 - `pull_request_target` triggers in the consumer's workflow files.
+- the fork and draft wiring in the consumer's `plan.yml`: the inputs its
+  summary call passes, and its `build-matrix` step's own `head-repo` and
+  `no-pull-request`.
 - approvers team resolvability in the repo's org.
 - GitHub App installation permission drift.
 """
@@ -1068,6 +1071,21 @@ FORK_TRIGGER_NO_COMMIT = (
     "could not be determined.",
 )
 
+# `actions/checkout` refuses to check out a fork's head under
+# `pull_request_target` unless this input turns the refusal off, which makes it
+# the single most consequential line a consumer can add: that third party's
+# default is the outermost guard on this path.
+#
+# Matched at a line start OR after `{`/`,`: flow style is a house idiom here —
+# `docs/drift.md` and all four sample repositories write
+# `with: { fetch-depth: 0 }`, so a one-line checkout step is what a consumer
+# copying those pages produces. The value stops at `,`/`}` for the same reason:
+# a flow-style `false` must read as `false` and not as `false }`, which would
+# report the safest shape a consumer can write.
+_UNSAFE_CHECKOUT = re.compile(
+    r"(?:^|[{,])[ \t]*allow-unsafe-pr-checkout[ \t]*:(?P<value>[^,}\n]*)", re.M
+)
+
 
 #: `on` at column 0 only, optionally quoted: a workflow's `on:` is a top-level
 #: key, so an indented one belongs to something else. `_on_block` matches rather
@@ -1084,6 +1102,11 @@ def _strip_comment(line):
         if ch == "#" and (i == 0 or line[i - 1] in " \t"):
             return line[:i]
     return line
+
+
+def _stripped_text(text):
+    """`text` with every YAML comment removed, line structure intact."""
+    return "\n".join(_strip_comment(ln) for ln in text.splitlines())
 
 
 def _on_block(text):
@@ -1134,6 +1157,44 @@ def declares_pull_request_target(text):
     return any(_PR_TARGET.search(ln) for ln in _event_lines(inline, block))
 
 
+def _unsafe_checkout_warnings(text, name):
+    """`allow-unsafe-pr-checkout` set to anything but a literal false.
+
+    Comments are stripped first, for the same reason
+    `declares_pull_request_target` strips them: `# never set
+    allow-unsafe-pr-checkout: true` is what a careful repository writes
+    *because* it does not have one. A `${{ }}` value is unknown, not false, so
+    it is reported — it may evaluate true.
+
+    EVERY occurrence is examined, not the first: a plan wrapper checks out in
+    more than one job, and one job's explicit `false` — the shape this very
+    finding asks for — must not silence another job's `true`.
+
+    The value is compared case-insensitively: `False` and `FALSE` are the same
+    legal YAML boolean as `false`, and a finding on a correct repository trains
+    readers to ignore the whole suite."""
+    values = [
+        m.group("value").strip().strip("\"'").lower()
+        for m in _UNSAFE_CHECKOUT.finditer(_stripped_text(text))
+    ]
+    if all(v == "false" for v in values):
+        return []
+    return [
+        (
+            WARNING,
+            f"`{name}` sets `allow-unsafe-pr-checkout` to something other than `false` — "
+            "that input turns off `actions/checkout`'s own refusal to check out a fork's "
+            "head, which is the outermost guard on shipmate's plan path. Under "
+            "`pull_request_target` the job runs at the base ref and may hold this "
+            "repository's secrets, so the checked-out code runs alongside them. Under "
+            "`pull_request` a fork's run is handed no secrets, and the input is still "
+            "reported: it holds nothing back the day this workflow gains a "
+            "`pull_request_target` trigger. Remove the input or set it to `false` "
+            "(see docs/hardening.md).",
+        )
+    ]
+
+
 def _fork_trigger_warnings(ctx):
     """`pull_request_target` runs at the **base** ref, so it is handed the
     repository's secrets — and the base ref is exactly what `shipmate-engine`'s
@@ -1152,15 +1213,18 @@ def _fork_trigger_warnings(ctx):
         return [FORK_TRIGGER_NO_COMMIT]
 
     def finding(text, name):
+        # Before the `plan.yml` exemption below, not after: `plan.yml` is
+        # exactly the file where a fork checkout would be turned on.
+        out = _unsafe_checkout_warnings(text, name)
         # The engine's own plan workflow is on this trigger by design: the job
         # holding the App key is the engine's reusable summary workflow, which
         # checks out nothing. Exact name — a `custom-plan.yml` is a consumer
         # file and gets the warning.
         if name == "plan.yml":
-            return []
+            return out
         if not declares_pull_request_target(text):
-            return []
-        return [
+            return out
+        return out + [
             (
                 WARNING,
                 f"`{name}` triggers on `pull_request_target` — that trigger runs at "
@@ -1177,6 +1241,221 @@ def _fork_trigger_warnings(ctx):
         ]
 
     return _scan_workflow_texts(ctx, ref, finding, FORK_TRIGGER_UNREADABLE)
+
+
+# The two inputs the engine's reusable summary workflow decides on, with the
+# expression each must carry. Values, not just keys: a wrapper that wires
+# `head-repo: ${{ github.repository }}` — or `is-draft: false` — states the safe
+# answer for every run, fork pull requests and drafts included, and nothing else
+# in the system can see it.
+SUMMARY_WIRING = {
+    "head-repo": "${{ github.event.pull_request.head.repo.full_name }}",
+    "is-draft": "${{ github.event.pull_request.draft }}",
+}
+_SUMMARY_CALL = re.compile(r"/\.github/workflows/summary\.yml@")
+_BUILD_MATRIX_CALL = re.compile(r"/actions/build-matrix@")
+# Flow-style tolerant, like `_UNSAFE_CHECKOUT` and unlike `_WIRING_KEY` below:
+# this value is a short literal, so the `,`/`}` terminator truncates nothing.
+_NO_PULL_REQUEST = re.compile(r"(?:^|[{,])[ \t]*no-pull-request[ \t]*:(?P<value>[^,}\n]*)", re.M)
+# Line-anchored, unlike `_UNSAFE_CHECKOUT`: flow style is deliberately NOT
+# recognised here. The values these keys must carry end in `}}`, so the `,`/`}`
+# terminator that makes a flow mapping readable would truncate the block-style
+# expression the documented wrapper uses and report *that* as unwired — a false
+# positive on the one shape every consumer has. A flow-style summary call (seven
+# long expressions on one line) reads as unwired instead: noisy, but the finding
+# names both inputs and the exact expressions to pass.
+_WIRING_KEY = {
+    key: re.compile(rf"^[ \t]*{key}[ \t]*:(?P<value>.*)$", re.M) for key in SUMMARY_WIRING
+}
+# Same degrade posture and reason as PIN_UNREADABLE: an unreadable workflow
+# directory is not a misconfiguration to warn about.
+SUMMARY_WIRING_UNREADABLE = (
+    NOTICE,
+    f"could not read `{_WORKFLOWS_DIR}` — the plan wrapper's fork and draft wiring not verified.",
+)
+SUMMARY_WIRING_NO_COMMIT = (
+    NOTICE,
+    "the plan wrapper's fork and draft wiring not verified — the commit under examination "
+    "could not be determined.",
+)
+
+
+def _call_region(text, pattern):
+    """The comment-stripped lines of the block enclosing the `uses:` line
+    `pattern` matches, or None when the file has no such line. Used for both
+    calls this probe judges: the summary workflow's, and the `build-matrix`
+    step's.
+
+    Scoped to one block rather than the whole file deliberately: a correctly
+    wired `plan.yml` carries `head-repo:` twice — once on the `build-matrix`
+    step in `detect`, once on the summary call — and a whole-file search is
+    satisfied by the wrong occurrence while the call that decides the gate
+    carries nothing.
+
+    The block is found by walking BACK from the `uses:` line to the enclosing
+    key (the first shallower line) and then forward to the next line at that
+    key's level or above. Forward-only from `uses:` would miss a `with:` block
+    written above it in the same job, and report a visibly correct wrapper as
+    unwired — a probe that fires on a healthy repository trains readers to
+    ignore the suite.
+
+    For a step written `- uses: …` the enclosing key is `steps:`, so the region
+    is that job's whole step list rather than the one step. That superset hides a
+    finding rather than inventing one only for as long as no sibling step in the
+    same job carries a `head-repo:` line of its own — no engine action other
+    than `build-matrix` takes that input, and a sibling that did carry one would
+    satisfy this check for a step wired wrong. The documented and sample shape
+    (`- id: matrix` then `uses:`) resolves to the step itself and is unaffected."""
+    lines = _stripped_text(text).splitlines()
+    for i, line in enumerate(lines):
+        if not pattern.search(line):
+            continue
+        depth = len(line) - len(line.lstrip())
+        start = next(
+            (
+                j
+                for j in range(i - 1, -1, -1)
+                if lines[j].strip() and len(lines[j]) - len(lines[j].lstrip()) < depth
+            ),
+            i,
+        )
+        region = [lines[start]]
+        for nxt in lines[start + 1 :]:
+            if nxt.strip() and len(nxt) - len(nxt.lstrip()) < depth:
+                break
+            region.append(nxt)
+        return "\n".join(region)
+    return None
+
+
+def _summary_wiring_warnings(ctx):
+    """The gate and the plan comment are authored by the engine's reusable
+    summary workflow, whose job refuses an empty or unexpected `head-repo` /
+    `is-draft`. A consumer wrapper that omits one — or wires a constant — is
+    invisible: the omitting case SKIPS the job, so there is no gate status, the
+    pull request cannot merge, and nothing on the run page says why; the
+    constant case passes the guard for every pull request, fork ones included.
+    The engine's own `if:` is SHA-pinned and reviewed; the consumer's `with:`
+    block is not.
+
+    The same file's `build-matrix` step is read for the same reason
+    (`_build_matrix_finding`), and it is the half that matters more: a wrong
+    value there passes the fork refusal itself.
+
+    Reads the consumer's workflow files at the commit under examination, the
+    same way and for the same reason as the pin and fork-trigger probes
+    (`_contents_ref`): a pull request that *fixes* the wiring must not still be
+    reported for it."""
+    ref = _contents_ref(ctx)
+    if ref is None:
+        return [SUMMARY_WIRING_NO_COMMIT]
+
+    def finding(text, name):
+        # Exact name, like the fork-trigger exemption: the wrapper shipped in
+        # docs/getting-started.md is `plan.yml`, and a workflow that calls the
+        # summary workflow under another name is not the shape this reports on.
+        # The build-matrix half below sits behind this filter too, and must:
+        # `drift.yml` is REQUIRED to carry `no-pull-request: "true"` and states
+        # no head repository, so judging any other file reports the shape
+        # docs/drift.md documents.
+        if name != "plan.yml":
+            return []
+        return _summary_call_finding(text, name) + _build_matrix_finding(text, name)
+
+    return _scan_workflow_texts(ctx, ref, finding, SUMMARY_WIRING_UNREADABLE)
+
+
+def _summary_call_finding(text, name):
+    """The two inputs `plan.yml`'s summary call must pass, or []."""
+    region = _call_region(text, _SUMMARY_CALL)
+    if region is None:
+        return []
+    bad = [
+        key
+        for key, expr in SUMMARY_WIRING.items()
+        if _wired_value(region, key) != "".join(expr.split())
+    ]
+    if not bad:
+        return []
+    wanted = ", ".join(f"`{key}: {SUMMARY_WIRING[key]}`" for key in bad)
+    return [
+        (
+            WARNING,
+            f"`{name}`'s call of the engine's `summary.yml` must pass {wanted}, and does "
+            "not: the input is absent, or carries a different value. The "
+            "summary job decides on those two inputs and refuses an empty or unexpected "
+            "value, so it is SKIPPED: no gate status, no plan comment, and nothing on the "
+            "run page saying why the pull request cannot merge. Each must be the pull "
+            "request's own value; a constant (the running repository, a literal `false`) "
+            "states the safe answer for every run, fork pull requests and drafts included.",
+        )
+    ]
+
+
+def _build_matrix_finding(text, name):
+    """The same file's `build-matrix` step: its own `head-repo`, and a
+    `no-pull-request` anywhere in the file.
+
+    Not covered by the summary call's half, and the consequences are not
+    alike. A constant `head-repo` on the summary call costs a gate job; on this
+    step it passes the fork refusal for EVERY pull request, and a fork's plan
+    runs the pull request's own Terramate/OpenTofu on the consumer's runners
+    with whatever the plan environment exposes as variables. `no-pull-request`
+    is the same hole with one word: it is the refusal's only opt-out.
+
+    Both halves are one probe over one file — the reader's question is "is my
+    plan wrapper wired?", and splitting it in two asks it twice."""
+    out = []
+    region = _call_region(text, _BUILD_MATRIX_CALL)
+    expr = SUMMARY_WIRING["head-repo"]
+    if region is not None and _wired_value(region, "head-repo") != "".join(expr.split()):
+        out.append(
+            (
+                WARNING,
+                f"`{name}`'s `build-matrix` step must pass `head-repo: {expr}`, and does not: "
+                "the input is absent, or carries a different value. That step is where a fork's "
+                "pull request is refused, and it decides on this one value: a constant (the "
+                "running repository) equals it for every pull request, fork ones included, so "
+                "the refusal holds nothing and a fork's plan runs its own Terramate/OpenTofu "
+                "on your runners with everything the plan environment exposes as variables. An "
+                "absent value refuses every pull request instead, failing `detect` loudly "
+                "(see docs/hardening.md).",
+            )
+        )
+    # Every occurrence, and anything but a literal false, for the two reasons
+    # `_unsafe_checkout_warnings` gives: one job's explicit `false` must not
+    # silence another's `true`, and a `${{ }}` value is unknown, not false. An
+    # empty value is what the action reads as no opt-out at all.
+    values = [
+        m.group("value").strip().strip("\"'").lower()
+        for m in _NO_PULL_REQUEST.finditer(_stripped_text(text))
+    ]
+    if any(v not in ("", "false") for v in values):
+        out.append(
+            (
+                WARNING,
+                f"`{name}` sets `no-pull-request` to something other than `false` — that input "
+                "is the single opt-out from `build-matrix`'s fork refusal, and it says the run "
+                "has no pull request at all, so it belongs only in a workflow that has none "
+                "(nightly drift). In a plan wrapper it turns the refusal off for every pull "
+                "request, and a fork's plan then runs its own Terramate/OpenTofu on your "
+                "runners with everything the plan environment exposes as variables. Remove the "
+                "input (see docs/hardening.md).",
+            )
+        )
+    return out
+
+
+def _wired_value(region, key):
+    """`key`'s value in `region`, whitespace removed and one layer of YAML
+    quoting stripped, or None when the key is absent. Whitespace-insensitive
+    because `${{github.repository}}` and `${{ github.repository }}` are the same
+    expression, and formatters quote values (the reason the pin probe's anchor
+    tolerates quotes too)."""
+    m = _WIRING_KEY[key].search(region)
+    if m is None:
+        return None
+    return "".join(m.group("value").strip().strip("\"'").split())
 
 
 def _one_line(s, limit=200):
@@ -1236,6 +1515,7 @@ PROBES = (
     _plan_env_secret_warnings,
     _pin_warnings,
     _fork_trigger_warnings,
+    _summary_wiring_warnings,
     _team_warnings,
     _app_permission_warnings,
 )

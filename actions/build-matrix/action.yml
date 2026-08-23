@@ -8,6 +8,18 @@ inputs:
     description: When 'true', enumerate every stack (drift) instead of only changed.
     required: false
     default: "false"
+  head-repo:
+    description: >-
+      The pull request's head repository full name (owner/repo). Empty is refused: a run that
+      does not state its head repository cannot be checked for being a fork.
+    required: false
+    default: ""
+  no-pull-request:
+    description: >-
+      Set to 'true' only in a workflow with no pull-request context at all (nightly drift), which
+      is what skips the head-repository check. Never set it in a plan wrapper.
+    required: false
+    default: "false"
 outputs:
   matrix:
     description: 'JSON {"include":[{stack,environment,workload,workload_var},...]} for the plan matrix.'
@@ -27,4 +39,6 @@ runs:
       env:
         SHIPMATE_BASE_SHA: ${{ inputs.base-sha }}
         SHIPMATE_ALL_STACKS: ${{ inputs.all-stacks }}
+        SHIPMATE_HEAD_REPO: ${{ inputs.head-repo }}
+        SHIPMATE_NO_PULL_REQUEST: ${{ inputs.no-pull-request }}
       run: python3 "$GITHUB_ACTION_PATH/../../scripts/build-matrix"

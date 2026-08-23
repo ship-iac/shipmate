@@ -17,6 +17,14 @@ on:
       planned-cells:
         required: true
         type: string
+      head-repo:
+        required: false
+        default: ""
+        type: string
+      is-draft:
+        required: false
+        default: ""
+        type: string
     secrets:
       # `required: false` — see apply.yml's note. This workflow's only job binds
       # `environment: shipmate-engine`, so a required declaration happens to be
@@ -28,14 +36,19 @@ on:
       SHIPMATE_APP_PRIVATE_KEY: { required: false }
 jobs:
   summary:
-    # Both clauses live here rather than in the caller because no check inspects
-    # the caller's YAML for this. A consumer who kept this job and dropped
-    # a clause would hand a fork pull request an App-authored gate — fail-open,
-    # and invisible. On the job, not on a step: a skipped job creates no
-    # deployment and never enters the environment.
+    # The decision lives here, but the facts arrive as inputs the caller states:
+    # a reusable workflow's job-level `if:` can read only YAML contexts, so it
+    # cannot call a script, and reading the event payload directly is what made
+    # this guard and `build-matrix` — which keyed on the event name — disagree
+    # about what a non-pull-request trigger means. Empty means refuse: a caller
+    # that omits an input gets a skipped job rather than an App-authored gate
+    # over fork content. On the job, not on a step: a skipped job creates no
+    # deployment and never enters the environment, whereas a first-step check
+    # would already hold the App key in scope.
     if: >-
-      github.event.pull_request.head.repo.full_name == github.repository &&
-      github.event.pull_request.draft == false
+      inputs.head-repo != '' &&
+      inputs.head-repo == github.repository &&
+      inputs.is-draft == 'false'
     runs-on: ubuntu-latest
     environment: shipmate-engine
     permissions:

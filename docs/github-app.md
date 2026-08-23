@@ -360,9 +360,10 @@ the actual work here:
   different GitHub App — posting a status under the same context, which
   without the pin would satisfy the required check outright.
 - The `summary` workflow's job `if:` is load-bearing rather than
-  belt-and-braces: it refuses when
-  `github.event.pull_request.head.repo.full_name` differs from
-  `github.repository`, and again when the pull request is a draft. Under
+  belt-and-braces: it refuses when the head repository the caller states
+  (`head-repo`) differs from `github.repository`, when the caller states the
+  pull request is a draft, and when either input is absent or empty — an
+  unstated fact is a refusal, so a caller can only fail this closed. Under
   `pull_request_target` a fork's pull request *does* reach the base ref, so
   nothing else would stop that job; and the environment admits a draft's run,
   which without the second clause would write a gate over a plan that never

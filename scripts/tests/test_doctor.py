@@ -1,11 +1,18 @@
 import io
 import json
 import os
+import re
+import textwrap
 
 import pytest
 from _loader import ACTIONS, ENGINE, SCRIPTS, load_script
 
 doctor = load_script("doctor")
+
+# The ```yaml fences of a docs page, dedented by their own indent -- the same
+# selector test_docs_summary_call_wiring.py uses, for the one test below that
+# runs a probe over the wrapper the page tells consumers to paste.
+_YAML_FENCE = re.compile(r"^(?P<indent>[ \t]*)```yaml[ \t]*$\n(?P<body>.*?)^\1```", re.M | re.S)
 
 _REPO = "o/r"
 _APP_ID = "999"
@@ -218,17 +225,18 @@ def _env(name, rules=(), branch_policy=None):
 
 def _quiet_new_probes():
     """Healthy responses for the env-protection, engine-environment,
-    plan-env-secret, pin-freshness and fork-trigger probes, so tests exercising
-    the older gate/environment probes via the top-level `warnings()` don't pick
-    up incidental noise from these five.
+    plan-env-secret, pin-freshness, fork-trigger and summary-wiring probes, so
+    tests exercising the older gate/environment probes via the top-level
+    `warnings()` don't pick up incidental noise from these six.
 
-    The last two read the same workflow listing. `_QUIET_PLAN`'s `uses:` line is
-    an engine pin, so the pin probe has something to read and needs the
-    release endpoints to agree with it -- the pinned SHA and the SHA the release
-    lookup returns are the same `_SHA`, or it reports staleness. That same file
-    is on `pull_request_target` and named `plan.yml`, which is what keeps the
-    fork-trigger probe quiet: it is the exemption, not the absence of the
-    trigger. The plan-env
+    The last three read the same workflow listing. `_QUIET_PLAN`'s `uses:` lines
+    are engine pins, so the pin probe has something to read and needs the
+    release endpoints to agree with them -- the pinned SHA and the SHA the
+    release lookup returns are the same `_SHA`, or it reports staleness. That
+    same file is on `pull_request_target` and named `plan.yml`, which is what
+    keeps the fork-trigger probe quiet: it is the exemption, not the absence of
+    the trigger. Its summary call carries both normalized inputs, which keeps
+    the summary-wiring probe quiet. The plan-env
     secret probe reads one listing per plan env; an empty one keeps the healthy
     path quiet."""
     return {
@@ -1071,13 +1079,26 @@ _OTHER_SHA = "b" * 40
 # carrying a fresh engine pin for the pin probe. Defined here rather
 # than next to that fixture because interpolating `_SHA` happens at import time,
 # while the fixture's own body is only evaluated when a test calls it.
+#
+# `head-repo` appears TWICE, as it does in a correctly wired wrapper: once on
+# the `build-matrix` step, once on the summary call. Without the first
+# occurrence a wiring probe that searches the whole file instead of the summary
+# call's own region passes this fixture while missing the finding it exists for.
 _QUIET_PLAN = (
     "name: shipmate · plan\n"
     "on:\n"
     "  pull_request_target:\n"
     "jobs:\n"
+    "  detect:\n"
+    "    steps:\n"
+    f"      - uses: {_ENGINE_REPO}/actions/build-matrix@{_SHA}\n"
+    "        with:\n"
+    "          head-repo: ${{ github.event.pull_request.head.repo.full_name }}\n"
     "  summary:\n"
     f"    uses: {_ENGINE_REPO}/.github/workflows/summary.yml@{_SHA}\n"
+    "    with:\n"
+    "      head-repo: ${{ github.event.pull_request.head.repo.full_name }}\n"
+    "      is-draft: ${{ github.event.pull_request.draft }}\n"
 )
 
 
@@ -2278,6 +2299,559 @@ def test_fork_trigger_probe_is_registered(monkeypatch):
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
     out = doctor.warnings(_ctx())
     assert any("pull_request_target" in t for _, t in out)
+
+
+def test_unsafe_pr_checkout_in_plan_yml_is_warned(monkeypatch):
+    """`plan.yml` is exempt from the trigger finding, but it is exactly the file
+    where a fork checkout would be turned on -- so this check must run BEFORE
+    that exemption. Below it, the one workflow that matters reports nothing."""
+    responses = _fork_responses(
+        {
+            "plan.yml": "on:\n  pull_request_target:\njobs:\n  detect:\n"
+            "    steps:\n      - uses: actions/checkout@v7\n"
+            "        with:\n          allow-unsafe-pr-checkout: true\n"
+        }
+    )
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    out = doctor._fork_trigger_warnings(_ctx())
+    assert len(out) == 1
+    assert out[0][0] == doctor.WARNING
+    assert "allow-unsafe-pr-checkout" in out[0][1]
+    assert "plan.yml" in out[0][1]
+
+
+def test_unsafe_pr_checkout_in_another_workflow_is_warned(monkeypatch):
+    # No `pull_request_target` here, so the trigger finding cannot account for
+    # the warning: it is this check or nothing. The detection is deliberately
+    # trigger-blind, so the message has to be true of a `pull_request`-only
+    # file too -- under that trigger a fork's run is handed no secrets, and a
+    # message asserting a secret-holding job is simply wrong about it.
+    responses = _fork_responses(
+        {
+            "label.yml": "on:\n  pull_request:\njobs:\n  x:\n    steps:\n"
+            "      - uses: actions/checkout@v7\n"
+            '        with:\n          allow-unsafe-pr-checkout: "true"\n'
+        }
+    )
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    out = doctor._fork_trigger_warnings(_ctx())
+    assert len(out) == 1
+    assert out[0][0] == doctor.WARNING
+    assert "allow-unsafe-pr-checkout" in out[0][1]
+    assert "`pull_request`" in out[0][1]
+
+
+def test_unsafe_pr_checkout_as_an_expression_is_warned(monkeypatch):
+    # Unknown, not false: it may evaluate true, and doctor cannot evaluate it.
+    responses = _fork_responses(
+        {
+            "label.yml": "on:\n  pull_request:\njobs:\n  x:\n    steps:\n"
+            "      - with:\n          allow-unsafe-pr-checkout: ${{ vars.UNSAFE }}\n"
+        }
+    )
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    out = doctor._fork_trigger_warnings(_ctx())
+    assert len(out) == 1
+    assert "allow-unsafe-pr-checkout" in out[0][1]
+
+
+def test_unsafe_pr_checkout_set_to_false_is_silent(monkeypatch):
+    # The input written out and explicitly disabled is the safe default made
+    # visible. Reporting the key regardless of its value would fire on it.
+    responses = _fork_responses(
+        {
+            "plan.yml": "on:\n  pull_request_target:\njobs:\n  x:\n    steps:\n"
+            "      - with:\n          allow-unsafe-pr-checkout: false\n",
+            "label.yml": "on:\n  pull_request:\njobs:\n  x:\n    steps:\n"
+            "      - with:\n          allow-unsafe-pr-checkout: 'false'\n",
+        }
+    )
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    assert doctor._fork_trigger_warnings(_ctx()) == []
+
+
+def test_a_capitalised_false_is_silent(monkeypatch):
+    """`False` and `FALSE` are the same legal YAML boolean as `false`, so both are
+    the safe configuration -- and a case-sensitive comparison reports them. A
+    probe that fires on a correct repository trains readers to ignore the suite.
+    `build-matrix`'s fork refusal normalizes with `.strip().lower()` for exactly
+    this reason; one release must not hold two guards that disagree about it."""
+    responses = _fork_responses(
+        {
+            "plan.yml": "on:\n  pull_request_target:\njobs:\n  x:\n    steps:\n"
+            "      - with:\n          allow-unsafe-pr-checkout: False\n",
+            "label.yml": "on:\n  pull_request:\njobs:\n  x:\n    steps:\n"
+            "      - with:\n          allow-unsafe-pr-checkout: FALSE\n",
+        }
+    )
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    assert doctor._fork_trigger_warnings(_ctx()) == []
+
+
+def test_flow_style_unsafe_pr_checkout_is_warned(monkeypatch):
+    """A line-anchored key misses this, and it is not exotic authoring: the
+    engine's own `docs/drift.md` fence and all four sample repositories write
+    `with: { fetch-depth: 0 }`, so a flow-style checkout step is what a consumer
+    copying those pages produces. Missing it is fail-open on the outermost guard
+    of the whole plan path."""
+    responses = _fork_responses(
+        {
+            "plan.yml": "on:\n  pull_request_target:\njobs:\n  x:\n    steps:\n"
+            "      - uses: actions/checkout@v7\n"
+            "        with: { fetch-depth: 0, allow-unsafe-pr-checkout: true }\n",
+        }
+    )
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    out = doctor._fork_trigger_warnings(_ctx())
+    assert len(out) == 1
+    assert out[0][0] == doctor.WARNING
+    assert "allow-unsafe-pr-checkout" in out[0][1]
+
+
+def test_a_flow_style_false_is_silent(monkeypatch):
+    """The other half of recognising flow style: the value must stop at `,`/`}`,
+    or a flow-style `false` reads as `false }` and the safest shape a consumer
+    can write is reported."""
+    responses = _fork_responses(
+        {
+            "plan.yml": "on:\n  pull_request_target:\njobs:\n  x:\n    steps:\n"
+            "      - uses: actions/checkout@v7\n"
+            "        with: { allow-unsafe-pr-checkout: false, fetch-depth: 0 }\n",
+            "label.yml": "on:\n  pull_request:\njobs:\n  x:\n    steps:\n"
+            "      - with: { fetch-depth: 0, allow-unsafe-pr-checkout: false }\n",
+        }
+    )
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    assert doctor._fork_trigger_warnings(_ctx()) == []
+
+
+def test_commented_out_unsafe_pr_checkout_is_silent(monkeypatch):
+    """The line a careful repository writes *because* it does not have one.
+    Reporting it would train readers to ignore the finding.
+
+    Two independent things keep it quiet -- the comment strip empties the line,
+    and the pattern's key anchor rejects a key with `set ` in front of it -- so
+    only removing BOTH turns this red. Each is pinned on its own by
+    `test_a_trailing_comment_after_a_false_value_is_silent` (the strip) and
+    `test_a_key_merely_ending_in_the_input_name_is_not_reported` (the anchor)."""
+    responses = _fork_responses(
+        {
+            "plan.yml": "on:\n  pull_request_target:\njobs:\n  x:\n    steps:\n"
+            "      # never set allow-unsafe-pr-checkout: true\n"
+            "      - uses: actions/checkout@v7\n",
+        }
+    )
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    assert doctor._fork_trigger_warnings(_ctx()) == []
+
+
+def test_a_trailing_comment_after_a_false_value_is_silent(monkeypatch):
+    """The comment strip is what makes the value comparison read `false` rather
+    than `false  # deliberate`, which is not the literal and would be reported
+    -- a false positive on the safest shape a consumer can write."""
+    responses = _fork_responses(
+        {
+            "plan.yml": "on:\n  pull_request_target:\njobs:\n  x:\n    steps:\n"
+            "      - with:\n"
+            "          allow-unsafe-pr-checkout: false  # deliberate, never true\n",
+        }
+    )
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    assert doctor._fork_trigger_warnings(_ctx()) == []
+
+
+def test_a_false_in_one_job_does_not_silence_a_true_in_another(monkeypatch):
+    """A plan wrapper checks out in more than one job, and this probe's own
+    finding asks for an explicit `false` -- so the two occurrences coexist in
+    one file routinely. Examining only the first read the `false` and returned
+    nothing, which is fail-open on the outermost guard of the whole plan path.
+
+    One FILE with both occurrences: `test_unsafe_pr_checkout_set_to_false_is_
+    silent` uses two files with one occurrence each, which is why it could not
+    see this."""
+    responses = _fork_responses(
+        {
+            "plan.yml": "on:\n  pull_request_target:\njobs:\n"
+            "  detect:\n    steps:\n      - with:\n"
+            "          allow-unsafe-pr-checkout: false\n"
+            "  plan:\n    steps:\n      - with:\n"
+            "          allow-unsafe-pr-checkout: true\n",
+        }
+    )
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    out = doctor._fork_trigger_warnings(_ctx())
+    assert len(out) == 1
+    assert out[0][0] == doctor.WARNING
+    assert "allow-unsafe-pr-checkout" in out[0][1]
+
+
+def test_a_key_merely_ending_in_the_input_name_is_not_reported(monkeypatch):
+    """The key anchor -- a line start, `{` or `,` -- is what makes this the input
+    and not a longer key that happens to end in the same characters: a different
+    input entirely, and reporting it names a line the reader cannot find."""
+    responses = _fork_responses(
+        {
+            "plan.yml": "on:\n  pull_request_target:\njobs:\n  x:\n    steps:\n"
+            "      - with:\n          no-allow-unsafe-pr-checkout: true\n",
+        }
+    )
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    assert doctor._fork_trigger_warnings(_ctx()) == []
+
+
+# Hand-written, not derived from `doctor` or from `_QUIET_PLAN`: these are the
+# two expressions a correctly wired wrapper passes, and the finding must name
+# them.
+_HEAD_REPO_EXPR = "${{ github.event.pull_request.head.repo.full_name }}"
+_IS_DRAFT_EXPR = "${{ github.event.pull_request.draft }}"
+
+
+def _plan_calling_summary(*with_lines, detect_head_repo=False, with_first=False, matrix_with=None):
+    """A consumer `plan.yml` whose summary job passes exactly `with_lines`.
+
+    `detect_head_repo` adds the OTHER legitimate `head-repo`, on the
+    `build-matrix` step of an EARLIER job -- the occurrence a whole-file search
+    is satisfied by. `matrix_with` writes that step's `with:` lines verbatim
+    instead, for the checks on the step's own wiring (an empty sequence writes
+    the step with no `with:` block at all). `with_first` writes the summary
+    job's `with:` block ABOVE its `uses:` line, which is legal YAML a
+    forward-only scan cannot see."""
+    matrix = [f"head-repo: {_HEAD_REPO_EXPR}"] if detect_head_repo else matrix_with
+    detect = (
+        "  detect:\n"
+        "    steps:\n"
+        f"      - uses: {_ENGINE_REPO}/actions/build-matrix@{_SHA}\n"
+        + ("        with:\n" if matrix else "")
+        + "".join(f"          {ln}\n" for ln in matrix)
+        if matrix is not None
+        else ""
+    )
+    uses = f"    uses: {_ENGINE_REPO}/.github/workflows/summary.yml@{_SHA}\n"
+    block = "    with:\n" + "".join(f"      {ln}\n" for ln in with_lines)
+    return f"on:\n  pull_request_target:\njobs:\n{detect}  summary:\n" + (
+        block + uses if with_first else uses + block
+    )
+
+
+def test_summary_call_missing_head_repo_is_warned(monkeypatch):
+    responses = _fork_responses({"plan.yml": _plan_calling_summary(f"is-draft: {_IS_DRAFT_EXPR}")})
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    out = doctor._summary_wiring_warnings(_ctx())
+    assert len(out) == 1
+    assert out[0][0] == doctor.WARNING
+    assert f"`head-repo: {_HEAD_REPO_EXPR}`" in out[0][1]
+    assert "is-draft" not in out[0][1]
+
+
+def test_summary_call_missing_is_draft_is_warned(monkeypatch):
+    """The probe must check BOTH inputs. Checking only `head-repo` leaves an
+    omitted `is-draft` -- equally a skipped job, equally silent -- unreported."""
+    responses = _fork_responses(
+        {"plan.yml": _plan_calling_summary(f"head-repo: {_HEAD_REPO_EXPR}")}
+    )
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    out = doctor._summary_wiring_warnings(_ctx())
+    assert len(out) == 1
+    assert f"`is-draft: {_IS_DRAFT_EXPR}`" in out[0][1]
+    assert "head-repo" not in out[0][1]
+
+
+def test_a_correctly_wired_summary_call_is_silent(monkeypatch):
+    # `_QUIET_PLAN` itself: the shipped shape, both inputs, and the second
+    # `head-repo` on the build-matrix step.
+    responses = _fork_responses({"plan.yml": _QUIET_PLAN})
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    assert doctor._summary_wiring_warnings(_ctx()) == []
+
+
+def test_a_head_repo_on_the_build_matrix_step_does_not_satisfy_the_summary_call(monkeypatch):
+    """A correctly wired `plan.yml` carries `head-repo` twice. A probe that
+    searches the whole file is satisfied by the `build-matrix` occurrence while
+    the call that decides the gate carries nothing -- silence at exactly the
+    finding this probe exists for."""
+    responses = _fork_responses(
+        {"plan.yml": _plan_calling_summary(f"is-draft: {_IS_DRAFT_EXPR}", detect_head_repo=True)}
+    )
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    out = doctor._summary_wiring_warnings(_ctx())
+    assert len(out) == 1
+    assert f"`head-repo: {_HEAD_REPO_EXPR}`" in out[0][1]
+
+
+def test_a_with_block_above_the_uses_line_is_silent(monkeypatch):
+    """Key order in a YAML mapping carries no meaning, so a wrapper writing
+    `with:` above `uses:` is correctly wired. Scanning forward from the `uses:`
+    line reported it as passing neither input -- a probe firing on a healthy
+    repository, which is what teaches readers to ignore the suite."""
+    responses = _fork_responses(
+        {
+            "plan.yml": _plan_calling_summary(
+                f"head-repo: {_HEAD_REPO_EXPR}",
+                f"is-draft: {_IS_DRAFT_EXPR}",
+                with_first=True,
+            )
+        }
+    )
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    assert doctor._summary_wiring_warnings(_ctx()) == []
+
+
+def test_the_build_matrix_head_repo_cannot_satisfy_the_call_in_either_ordering(monkeypatch):
+    """The region is the summary job's own block however that job is written,
+    so the `build-matrix` step's `head-repo` in an earlier job is outside it in
+    both key orderings. Widening the region to the whole file greens both."""
+    for with_first in (False, True):
+        responses = _fork_responses(
+            {
+                "plan.yml": _plan_calling_summary(
+                    f"is-draft: {_IS_DRAFT_EXPR}",
+                    detect_head_repo=True,
+                    with_first=with_first,
+                )
+            }
+        )
+        monkeypatch.setattr(doctor, "_gh_json", responses.__getitem__)
+        out = doctor._summary_wiring_warnings(_ctx())
+        assert len(out) == 1, with_first
+        assert f"`head-repo: {_HEAD_REPO_EXPR}`" in out[0][1], with_first
+
+
+def test_a_constant_head_repo_is_reported(monkeypatch):
+    """The one remaining fail-open: a `head-repo` wired to the running
+    repository equals it for EVERY pull request, fork ones included, so the
+    engine's guard passes and nothing else in the system can see it. A
+    presence-only check leaves it undetectable."""
+    responses = _fork_responses(
+        {
+            "plan.yml": _plan_calling_summary(
+                "head-repo: ${{ github.repository }}", f"is-draft: {_IS_DRAFT_EXPR}"
+            )
+        }
+    )
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    out = doctor._summary_wiring_warnings(_ctx())
+    assert len(out) == 1
+    assert f"`head-repo: {_HEAD_REPO_EXPR}`" in out[0][1]
+
+
+def test_the_wiring_finding_covers_the_wrong_value_case(monkeypatch):
+    """A present-but-wrong `head-repo` IS passed, so a finding opening "does not
+    pass `head-repo: …`" is literally false about the case the value check was
+    added for -- and the opening clause is the one a reader skims. Compared
+    against a hand-written constant, whole clause."""
+    responses = _fork_responses(
+        {
+            "plan.yml": _plan_calling_summary(
+                "head-repo: ${{ github.repository }}", f"is-draft: {_IS_DRAFT_EXPR}"
+            )
+        }
+    )
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    out = doctor._summary_wiring_warnings(_ctx())
+    assert len(out) == 1
+    assert out[0][1].startswith(
+        "`plan.yml`'s call of the engine's `summary.yml` must pass "
+        "`head-repo: ${{ github.event.pull_request.head.repo.full_name }}`, and does not: "
+        "the input is absent, or carries a different value."
+    )
+
+
+def test_a_literal_is_draft_is_reported(monkeypatch):
+    # `is-draft: false` states "never a draft" for every run, drafts included.
+    responses = _fork_responses(
+        {"plan.yml": _plan_calling_summary(f"head-repo: {_HEAD_REPO_EXPR}", "is-draft: false")}
+    )
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    out = doctor._summary_wiring_warnings(_ctx())
+    assert len(out) == 1
+    assert f"`is-draft: {_IS_DRAFT_EXPR}`" in out[0][1]
+
+
+def test_the_same_expression_written_without_inner_spaces_is_silent(monkeypatch):
+    # The same expression, and formatters quote values -- the reason the pin
+    # probe's anchor tolerates quotes too.
+    responses = _fork_responses(
+        {
+            "plan.yml": _plan_calling_summary(
+                'head-repo: "${{github.event.pull_request.head.repo.full_name}}"',
+                "is-draft: ${{github.event.pull_request.draft}}",
+            )
+        }
+    )
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    assert doctor._summary_wiring_warnings(_ctx()) == []
+
+
+def _both_wired(matrix_with):
+    """A `plan.yml` with a correctly wired summary call and `matrix_with` on its
+    `build-matrix` step, so any finding is the step's."""
+    return _plan_calling_summary(
+        f"head-repo: {_HEAD_REPO_EXPR}",
+        f"is-draft: {_IS_DRAFT_EXPR}",
+        matrix_with=matrix_with,
+    )
+
+
+def test_a_constant_head_repo_on_the_build_matrix_step_is_reported(monkeypatch):
+    """The consequence asymmetry: a constant on the summary call costs a gate
+    job, while the same constant here equals the running repository for EVERY
+    pull request, so `build-matrix`'s fork refusal -- the layer docs/hardening.md
+    says has to hold -- passes a fork's own Terramate/OpenTofu onto the
+    consumer's runners. "A missing input is loud" covers the absent case only."""
+    responses = _fork_responses({"plan.yml": _both_wired(["head-repo: ${{ github.repository }}"])})
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    out = doctor._summary_wiring_warnings(_ctx())
+    assert len(out) == 1
+    assert out[0][0] == doctor.WARNING
+    assert out[0][1].startswith(
+        "`plan.yml`'s `build-matrix` step must pass "
+        "`head-repo: ${{ github.event.pull_request.head.repo.full_name }}`, and does not: "
+        "the input is absent, or carries a different value."
+    )
+
+
+def test_an_absent_head_repo_on_the_build_matrix_step_is_reported(monkeypatch):
+    responses = _fork_responses({"plan.yml": _both_wired([])})
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    out = doctor._summary_wiring_warnings(_ctx())
+    assert len(out) == 1
+    assert f"`head-repo: {_HEAD_REPO_EXPR}`" in out[0][1]
+    assert "`build-matrix` step" in out[0][1]
+
+
+def test_a_correct_head_repo_on_the_build_matrix_step_is_silent(monkeypatch):
+    responses = _fork_responses({"plan.yml": _both_wired([f"head-repo: {_HEAD_REPO_EXPR}"])})
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    assert doctor._summary_wiring_warnings(_ctx()) == []
+
+
+def test_no_pull_request_in_the_plan_wrapper_is_reported(monkeypatch):
+    """`no-pull-request: "true"` is the single opt-out from the fork refusal.
+    docs/hardening.md calls it the one consumer edit that turns that refusal off
+    for every pull request, and nothing in the system reported it."""
+    responses = _fork_responses(
+        {"plan.yml": _both_wired([f"head-repo: {_HEAD_REPO_EXPR}", 'no-pull-request: "true"'])}
+    )
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    out = doctor._summary_wiring_warnings(_ctx())
+    assert len(out) == 1
+    assert out[0][0] == doctor.WARNING
+    assert out[0][1].startswith(
+        "`plan.yml` sets `no-pull-request` to something other than `false` —"
+    )
+
+
+def test_no_pull_request_set_to_false_in_the_plan_wrapper_is_silent(monkeypatch):
+    # `false` is what the action reads as no opt-out, so it is the shape this
+    # finding asks for -- reporting it fires on a correct repository.
+    responses = _fork_responses(
+        {"plan.yml": _both_wired([f"head-repo: {_HEAD_REPO_EXPR}", "no-pull-request: false"])}
+    )
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    assert doctor._summary_wiring_warnings(_ctx()) == []
+
+
+def test_a_key_merely_ending_in_no_pull_request_is_not_reported(monkeypatch):
+    """The twin of `test_a_key_merely_ending_in_the_input_name_is_not_reported`:
+    the key anchor -- a line start, `{` or `,` -- is what makes this the input
+    and not a longer key ending in the same characters, which is a different
+    input entirely and names a line the reader cannot find."""
+    responses = _fork_responses(
+        {
+            "plan.yml": _both_wired(
+                [f"head-repo: {_HEAD_REPO_EXPR}", 'shipmate-no-pull-request: "true"']
+            )
+        }
+    )
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    assert doctor._summary_wiring_warnings(_ctx()) == []
+
+
+def test_drift_yml_may_carry_no_pull_request(monkeypatch):
+    """The asymmetry this whole check has to preserve: docs/drift.md REQUIRES
+    `no-pull-request: "true"` on the nightly's `build-matrix` step, and states no
+    head repository at all. Selecting files by anything looser than the exact
+    name `plan.yml` reports the documented nightly."""
+    drift = (
+        "on:\n  schedule:\n    - cron: 0 3 * * *\njobs:\n  detect:\n    steps:\n"
+        f"      - uses: {_ENGINE_REPO}/actions/build-matrix@{_SHA}\n"
+        '        with:\n          base-sha: ""\n          all-stacks: "true"\n'
+        '          no-pull-request: "true"\n'
+    )
+    responses = _fork_responses({"drift.yml": drift})
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    assert doctor._summary_wiring_warnings(_ctx()) == []
+
+
+def test_the_documented_plan_wrapper_produces_no_finding(monkeypatch):
+    """The oracle for false positives: the wrapper consumers paste, verbatim
+    from the page, through the whole probe. A probe that fires on the documented
+    shape trains readers to ignore the advisory suite, which costs more than the
+    gap it closes. The fence count is asserted first, so a page edit that moves
+    the wrapper out of this selector's reach fails here instead of passing
+    vacuously."""
+    page = (ENGINE / "docs" / "getting-started.md").read_text(encoding="utf-8")
+    fences = [
+        textwrap.dedent(m.group("body"))
+        for m in _YAML_FENCE.finditer(page)
+        if "/.github/workflows/summary.yml@" in m.group("body")
+    ]
+    assert len(fences) == 1, f"documented summary-call fences: {len(fences)}"
+    responses = _fork_responses({"plan.yml": fences[0]})
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    assert doctor._summary_wiring_warnings(_ctx()) == []
+
+
+def test_summary_wiring_skips_workflows_other_than_plan_yml(monkeypatch):
+    """`drift.yml` never calls the summary workflow, and a file that does under
+    another name is not the shape this reports on. Without the name filter this
+    fixture -- a summary call carrying neither input -- is reported."""
+    responses = _fork_responses({"drift.yml": _plan_calling_summary("pr-number: 1")})
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    assert doctor._summary_wiring_warnings(_ctx()) == []
+
+
+def test_a_plan_yml_with_no_summary_call_is_silent(monkeypatch):
+    responses = _fork_responses({"plan.yml": "on:\n  pull_request_target:\njobs:\n  x:\n"})
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    assert doctor._summary_wiring_warnings(_ctx()) == []
+
+
+def test_summary_wiring_without_a_commit_is_a_note_not_a_read(monkeypatch):
+    # Same reasoning as the pin and fork-trigger probes: a default-branch read
+    # would report the wiring broken on the very pull request that fixes it.
+    def gh(path):
+        pytest.fail(f"the summary-wiring probe read the API with no commit: {path}")
+
+    monkeypatch.setattr(doctor, "_gh_json", gh)
+    out = doctor._summary_wiring_warnings(_ctx(head_sha=""))
+    assert out == [doctor.SUMMARY_WIRING_NO_COMMIT]
+    assert out[0][0] == doctor.NOTICE
+
+
+def test_summary_wiring_unreadable_directory_degrades_to_a_note(monkeypatch):
+    def gh(path):
+        raise SystemExit(f"::error::command failed (1): gh api {path}")
+
+    monkeypatch.setattr(doctor, "_gh_json", gh)
+    out = doctor._summary_wiring_warnings(_ctx())
+    assert out == [doctor.SUMMARY_WIRING_UNREADABLE]
+    assert out[0][0] == doctor.NOTICE
+
+
+def test_summary_wiring_probe_is_registered(monkeypatch):
+    """An unregistered probe runs nowhere while its own unit tests stay green --
+    assert it actually executes as part of `warnings()`."""
+    assert doctor._summary_wiring_warnings in doctor.PROBES
+    responses = {
+        f"repos/{_REPO}/rules/branches/{_BRANCH}?per_page=100": _gate_rule(),
+        f"repos/{_REPO}/environments?per_page=100": _environments("dev-eu-plan", "dev-eu-apply"),
+        **_quiet_new_probes(),
+        f"{_WF_DIR}/plan.yml{_REF}": _wf_file(_plan_calling_summary(f"is-draft: {_IS_DRAFT_EXPR}")),
+    }
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    out = doctor.warnings(_ctx())
+    assert any(f"`head-repo: {_HEAD_REPO_EXPR}`" in t for _, t in out)
 
 
 def _rules_only(*rules):

@@ -401,52 +401,55 @@ def test_compute_cells_skips_the_probe_with_no_stacks(monkeypatch):
     assert calls == []
 
 
-def _payload(head_repo):
-    """A `pull_request` event payload whose head repo is `head_repo`; None
-    models the shape GitHub sends once the fork has been deleted."""
-    repo = {"full_name": head_repo} if head_repo is not None else None
-    return {"pull_request": {"head": {"repo": repo}}}
+def test_a_stated_head_repository_equal_to_this_repository_is_planned():
+    assert bm.fork_pr_error("acme/iac", "acme/iac", "false") == ""
 
 
-def test_fork_pull_request_is_rejected():
-    err = bm.fork_pr_error("pull_request", "acme/iac", _payload("outsider/iac"))
+def test_a_stated_foreign_head_repository_is_refused_naming_both():
+    err = bm.fork_pr_error("acme/iac", "outsider/iac", "false")
     assert err.startswith("::error::")
     assert "outsider/iac" in err
+    assert "acme/iac" in err
 
 
-def test_fork_pull_request_target_is_rejected():
-    # `pull_request_target` runs at the base ref *with* the repository's secrets
-    # while acting on pull-request-author-controlled content, so it is the one
-    # pull-request event where failing open is worst. Same payload shape.
-    err = bm.fork_pr_error("pull_request_target", "acme/iac", _payload("outsider/iac"))
+def test_an_unstated_head_repository_is_refused_naming_the_input():
+    # Pinning the MESSAGE, not merely the refusal: letting an empty value fall
+    # through to the equality check refuses too -- with the fork wording, which
+    # tells a consumer who forgot the input to push their branch to where it
+    # already is.
+    err = bm.fork_pr_error("acme/iac", "   ", "false")
     assert err.startswith("::error::")
-    assert "outsider/iac" in err
+    assert "head-repo" in err
+    assert "no-pull-request" in err
+    assert "docs/getting-started.md" in err
+    assert "fork pull requests are not supported" not in err
 
 
-def test_same_repository_pull_request_is_planned():
-    assert bm.fork_pr_error("pull_request", "acme/iac", _payload("acme/iac")) == ""
+def test_the_opt_out_plans_whatever_the_head_repository():
+    for head in ("", "   ", "acme/iac", "outsider/iac"):
+        assert bm.fork_pr_error("acme/iac", head, "true") == ""
+    # A consumer's `no-pull-request: True` must not redden a nightly over a YAML
+    # capitalisation; only this repository's default-branch workflow can set it.
+    assert bm.fork_pr_error("acme/iac", "", " True ") == ""
 
 
-def test_non_pull_request_events_are_never_rejected():
-    # The drift path calls build-matrix with all-stacks on `schedule` /
-    # `workflow_dispatch` and no pull request context, so `head.repo` is absent
-    # exactly as it is for a deleted fork. Keying the guard on that field
-    # instead of on the event would kill nightly drift silently.
-    for event in ("schedule", "workflow_dispatch", "push", ""):
-        assert bm.fork_pr_error(event, "acme/iac", {}) == ""
-        assert bm.fork_pr_error(event, "acme/iac", _payload(None)) == ""
+def test_only_the_opt_out_skips_the_head_repository_check():
+    # The manifest default is the non-empty string "false", so anything that
+    # treats a non-empty value as the opt-out would plan every unstated run.
+    for value in ("false", "False", " false ", "yes", "1", "", "no-pull-request"):
+        assert bm.fork_pr_error("acme/iac", "", value).startswith("::error::")
 
 
-def test_undeterminable_head_repository_is_rejected():
-    # Within a pull request event: `head.repo` is null once the fork was
-    # deleted, and the payload is {} when GITHUB_EVENT_PATH could not be read.
-    # Neither is evidence of a same-repository pull request.
-    assert bm.fork_pr_error("pull_request", "acme/iac", _payload(None)).startswith("::error::")
-    assert bm.fork_pr_error("pull_request", "acme/iac", {}).startswith("::error::")
+def test_an_unknown_this_repository_refuses_a_stated_head_repository():
+    # GITHUB_REPOSITORY unset is not reachable on a runner; if it ever is, the
+    # empty string must not compare equal to whatever was stated.
+    assert "fork pull requests are not supported" in bm.fork_pr_error("", "acme/iac", "false")
 
 
 def test_event_payload_degrades_to_empty_dict(tmp_path):
-    # Each of these reaches fork_pr_error as {}, which is rejected above.
+    # Each of these reaches `head_checkout_error` as {}, which refuses a
+    # `pull_request_target` run rather than skipping it; the fork refusal does
+    # not read the event at all.
     assert bm._event_payload("") == {}
     assert bm._event_payload(str(tmp_path / "absent.json")) == {}
     bad = tmp_path / "bad.json"
@@ -479,6 +482,8 @@ def _run_main(
         "GITHUB_EVENT_NAME",
         "GITHUB_REPOSITORY",
         "GITHUB_EVENT_PATH",
+        "SHIPMATE_HEAD_REPO",
+        "SHIPMATE_NO_PULL_REQUEST",
     ):
         monkeypatch.delenv(k, raising=False)
     for k, v in env.items():
@@ -495,12 +500,6 @@ def _run_main(
     return parsed, called
 
 
-def _event_file(tmp_path, head_repo):
-    path = tmp_path / "event.json"
-    path.write_text(json.dumps(_payload(head_repo)), encoding="utf-8")
-    return str(path)
-
-
 def test_main_fails_the_step_for_a_fork_and_does_not_enumerate(monkeypatch, tmp_path):
     # SystemExit, not an empty matrix: no gate is ever written for a fork head,
     # so a green "nothing to plan" would leave the contributor waiting on a
@@ -513,25 +512,69 @@ def test_main_fails_the_step_for_a_fork_and_does_not_enumerate(monkeypatch, tmp_
             {
                 "GITHUB_EVENT_NAME": "pull_request",
                 "GITHUB_REPOSITORY": "acme/iac",
-                "GITHUB_EVENT_PATH": _event_file(tmp_path, "outsider/iac"),
+                "SHIPMATE_HEAD_REPO": "outsider/iac",
             },
             called=called,
         )
-    assert str(excinfo.value).startswith("::error::")
+    assert "fork pull requests are not supported" in str(excinfo.value)
+    assert called == []
+
+
+def test_main_passes_the_three_environment_values_to_the_guard(monkeypatch, tmp_path):
+    # Three distinct values, so a reordered call site is red rather than merely
+    # differently spelled.
+    seen = []
+    monkeypatch.setattr(bm, "fork_pr_error", lambda *args: seen.append(args) or "")
+    _run_main(
+        monkeypatch,
+        tmp_path,
+        {
+            "GITHUB_EVENT_NAME": "pull_request",
+            "GITHUB_REPOSITORY": "acme/iac",
+            "SHIPMATE_HEAD_REPO": "outsider/iac",
+            "SHIPMATE_NO_PULL_REQUEST": "true",
+        },
+    )
+    assert seen == [("acme/iac", "outsider/iac", "true")]
+
+
+def test_main_refuses_the_fork_before_the_consumer_wiring_checks(monkeypatch, tmp_path):
+    # Both guards fire on this run, so the assertion pins the ORDER: a run this
+    # script cannot vouch for is turned away before it shells out to git.
+    called = []
+    monkeypatch.setattr(bm, "_run", lambda args: "basebase\n")
+    event = tmp_path / "head-event.json"
+    event.write_text(json.dumps({"pull_request": {"head": {"sha": "cafe1234"}}}), encoding="utf-8")
+    with pytest.raises(SystemExit) as excinfo:
+        _run_main(
+            monkeypatch,
+            tmp_path,
+            {
+                "GITHUB_EVENT_NAME": "pull_request_target",
+                "GITHUB_REPOSITORY": "acme/iac",
+                "SHIPMATE_HEAD_REPO": "outsider/iac",
+                "GITHUB_EVENT_PATH": str(event),
+            },
+            called=called,
+        )
     assert "fork pull requests are not supported" in str(excinfo.value)
     assert called == []
 
 
 def test_main_refuses_a_pull_request_when_the_repository_is_unknown(monkeypatch, tmp_path):
-    # `if repository and full_name == repository` fails closed on purpose: with
-    # GITHUB_REPOSITORY empty, dropping that clause makes an undeterminable head
+    # `if repository and head_repo == repository` fails closed on purpose: with
+    # GITHUB_REPOSITORY empty, dropping that clause makes every stated head
     # repository compare equal to the empty string and the run gets planned.
     called = []
     with pytest.raises(SystemExit) as excinfo:
         _run_main(
             monkeypatch,
             tmp_path,
-            {"GITHUB_EVENT_NAME": "pull_request", "GITHUB_REPOSITORY": ""},
+            {
+                "GITHUB_EVENT_NAME": "pull_request",
+                "GITHUB_REPOSITORY": "",
+                "SHIPMATE_HEAD_REPO": "acme/iac",
+            },
             called=called,
         )
     assert "fork pull requests are not supported" in str(excinfo.value)
@@ -546,7 +589,8 @@ def test_main_does_not_enumerate_stacks_for_a_fork(monkeypatch, tmp_path):
     monkeypatch.setattr(bm, "compute_cells", boom)
     monkeypatch.setenv("GITHUB_EVENT_NAME", "pull_request")
     monkeypatch.setenv("GITHUB_REPOSITORY", "acme/iac")
-    monkeypatch.setenv("GITHUB_EVENT_PATH", _event_file(tmp_path, "outsider/iac"))
+    monkeypatch.setenv("SHIPMATE_HEAD_REPO", "outsider/iac")
+    monkeypatch.delenv("SHIPMATE_NO_PULL_REQUEST", raising=False)
     monkeypatch.setenv("GITHUB_OUTPUT", str(tmp_path / "out.txt"))
     # The assertion names the rejection so this guard cannot pass on somebody
     # else's SystemExit.
@@ -562,7 +606,7 @@ def test_main_plans_a_same_repository_pull_request(monkeypatch, tmp_path):
         {
             "GITHUB_EVENT_NAME": "pull_request",
             "GITHUB_REPOSITORY": "acme/iac",
-            "GITHUB_EVENT_PATH": _event_file(tmp_path, "acme/iac"),
+            "SHIPMATE_HEAD_REPO": "acme/iac",
         },
     )
     assert outputs["empty"] == "false"
@@ -570,12 +614,14 @@ def test_main_plans_a_same_repository_pull_request(monkeypatch, tmp_path):
 
 
 def test_main_drift_run_is_unaffected(monkeypatch, tmp_path):
-    # all-stacks, no pull request context: every stack must still be enumerated.
+    # all-stacks, no pull request context: every stack must still be enumerated
+    # off the opt-out alone, with no head repository stated.
     outputs, called = _run_main(
         monkeypatch,
         tmp_path,
         {
             "SHIPMATE_ALL_STACKS": "true",
+            "SHIPMATE_NO_PULL_REQUEST": "true",
             "GITHUB_EVENT_NAME": "schedule",
             "GITHUB_REPOSITORY": "acme/iac",
         },
@@ -616,9 +662,38 @@ def test_head_checkout_check_is_skipped_off_pull_request_target(monkeypatch):
         assert bm.head_checkout_error(event, _head_payload("cafe1234")) == ""
 
 
-def test_head_checkout_check_is_skipped_when_the_payload_has_no_head_sha(monkeypatch):
+def test_head_checkout_of_an_unreadable_payload_is_refused(monkeypatch):
+    # FLIPPED from a skip: the payload is the only source of the head SHA, so an
+    # unreadable one leaves this check unmade. Skipping it let a base checkout
+    # plan the base against itself, green the gate and queue no applies -- the
+    # one direction that does not recover. The message is asserted, not just the
+    # refusal: it has to be distinguishable from the mismatch refusal below.
     monkeypatch.setattr(bm, "_run", lambda args: pytest.fail("probed with no head sha"))
-    assert bm.head_checkout_error("pull_request_target", {}) == ""
+    for payload in ({}, {"pull_request": {"head": {}}}, {"pull_request": None}):
+        err = bm.head_checkout_error("pull_request_target", payload)
+        assert err.startswith("::error::")
+        assert "carries no pull request head commit" in err
+        assert "GITHUB_EVENT_PATH" in err
+
+
+def test_main_refuses_a_pull_request_target_with_no_event_payload(monkeypatch, tmp_path):
+    # The wiring this backstop exists for: a correct `head-repo` gets past the
+    # fork refusal, and GITHUB_EVENT_PATH is gone.
+    called = []
+    monkeypatch.setattr(bm, "_run", lambda args: pytest.fail("probed with no head sha"))
+    with pytest.raises(SystemExit) as excinfo:
+        _run_main(
+            monkeypatch,
+            tmp_path,
+            {
+                "GITHUB_EVENT_NAME": "pull_request_target",
+                "GITHUB_REPOSITORY": "acme/iac",
+                "SHIPMATE_HEAD_REPO": "acme/iac",
+            },
+            called=called,
+        )
+    assert "carries no pull request head commit" in str(excinfo.value)
+    assert called == []
 
 
 def test_plan_workflow_at_the_contract_path_is_planned(tmp_path):
@@ -659,6 +734,7 @@ def test_main_refuses_a_base_checkout(monkeypatch, tmp_path):
             {
                 "GITHUB_EVENT_NAME": "pull_request_target",
                 "GITHUB_REPOSITORY": "acme/iac",
+                "SHIPMATE_HEAD_REPO": "acme/iac",
                 "GITHUB_EVENT_PATH": str(event),
             },
             called=called,
@@ -676,7 +752,7 @@ def test_main_refuses_a_missing_plan_workflow(monkeypatch, tmp_path):
             {
                 "GITHUB_EVENT_NAME": "pull_request",
                 "GITHUB_REPOSITORY": "acme/iac",
-                "GITHUB_EVENT_PATH": _event_file(tmp_path, "acme/iac"),
+                "SHIPMATE_HEAD_REPO": "acme/iac",
             },
             called=called,
             plan_workflow=False,
@@ -685,14 +761,38 @@ def test_main_refuses_a_missing_plan_workflow(monkeypatch, tmp_path):
     assert called == []
 
 
-def test_build_matrix_action_declares_no_fork_input():
-    # The refusal is a business rule, not a configurable: an input here would
-    # be a way to turn it off.
-    import yaml
-    from _loader import ACTIONS
+def test_build_matrix_action_declares_its_inputs():
+    # Neither new input is a way to turn the refusal off: `head-repo` is what it
+    # is keyed on and an empty value refuses, while `no-pull-request` only states
+    # that there is no pull request at all. Both are settable only by this
+    # repository's own default-branch workflow, which a pull-request author
+    # cannot edit -- and the direction is chosen so a forgotten input refuses
+    # (plan wrapper) or reddens the nightly (drift), never plans a fork.
+    # Hand-written, name -> default; descriptions are prose and not pinned.
+    from _loader import action_yaml
 
-    doc = yaml.safe_load((ACTIONS / "build-matrix/action.yml").read_text(encoding="utf-8"))
-    assert set(doc["inputs"]) == {"base-sha", "all-stacks"}
+    doc = action_yaml("build-matrix")
+    assert {name: spec.get("default") for name, spec in doc["inputs"].items()} == {
+        "base-sha": None,
+        "all-stacks": "false",
+        "head-repo": "",
+        "no-pull-request": "false",
+    }
+
+
+def test_build_matrix_action_hands_the_script_the_names_it_reads():
+    # The whole `env:` block against a hand-written constant: the script reads
+    # SHIPMATE_HEAD_REPO / SHIPMATE_NO_PULL_REQUEST by name, so a renamed key
+    # here leaves every plan run unstated -- refused, but only in production.
+    from _loader import action_steps
+
+    (step,) = [s for s in action_steps("build-matrix") if s.get("id") == "build"]
+    assert step["env"] == {
+        "SHIPMATE_BASE_SHA": "${{ inputs.base-sha }}",
+        "SHIPMATE_ALL_STACKS": "${{ inputs.all-stacks }}",
+        "SHIPMATE_HEAD_REPO": "${{ inputs.head-repo }}",
+        "SHIPMATE_NO_PULL_REQUEST": "${{ inputs.no-pull-request }}",
+    }
 
 
 def test_build_matrix_action_declares_the_outputs_the_gate_reads():

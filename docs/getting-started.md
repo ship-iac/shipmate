@@ -174,6 +174,7 @@ jobs:
         uses: ship-iac/shipmate/actions/build-matrix@<engine-sha>  # see the latest release
         with:
           base-sha: ${{ github.event.pull_request.base.sha }}
+          head-repo: ${{ github.event.pull_request.head.repo.full_name }}
 
   plan:
     needs: detect
@@ -212,10 +213,13 @@ jobs:
           plan-passphrase: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
 
   # Everything trusted happens inside the engine's reusable workflow: one job,
-  # `environment: shipmate-engine`, no checkout, and both trust conditions (the
-  # fork refusal and the draft skip) on its own `if:`. `permissions` is not
-  # optional — a callee's permissions are capped by this job's, and granting
-  # less kills the run at startup with no job and no log.
+  # `environment: shipmate-engine`, no checkout, and both trust decisions (the
+  # fork refusal and the draft skip) on its own `if:`. This caller only *states*
+  # the two facts they decide on — `head-repo` and `is-draft` below — and an
+  # omitted or empty one is read as a refusal, so this block can fail the job
+  # closed but never open. `permissions` is not optional — a callee's
+  # permissions are capped by this job's, and granting less kills the run at
+  # startup with no job and no log.
   summary:
     needs: [detect, plan]
     if: ${{ !cancelled() }}
@@ -230,6 +234,8 @@ jobs:
       detect-result: ${{ needs.detect.result }}
       plan-result: ${{ needs.plan.result }}
       planned-cells: ${{ needs.detect.outputs.count }}
+      head-repo: ${{ github.event.pull_request.head.repo.full_name }}
+      is-draft: ${{ github.event.pull_request.draft }}
 ```
 
 Permissions on this path are narrow: the top level and each job grant
@@ -239,6 +245,32 @@ addition above is AWS-specific: this sample's `plan` job grants `id-token: write
 solely so `configure-aws-credentials` can assume the read-only plan role. A
 consumer with no plan-time cloud credentials drops both that grant and the
 credentials step.
+
+`head-repo` and `is-draft` are the two facts the engine's trusted job decides
+on, and the wrapper is what states them: `build-matrix` refuses to plan a run
+that does not state its head repository, and the `summary` job requires the
+stated head repository to equal the running repository *and* the stated draft
+flag to be `false` before it mints an App token. An omitted or empty value is
+read as a **refusal**, in both places — so this wrapper can only fail
+the decision closed, never weaken it. The two costs look nothing alike. Omit
+`head-repo` on `build-matrix` and `detect` fails loudly, naming the input. Omit
+either input on the `summary` call and the summary job is **skipped**: no
+`shipmate / gate` status, so nothing merges, and nothing on the run page says
+why. That is the trade the engine chose over minting an App-authored gate for a
+head repository it was never told about, and `shipmate doctor` reports this
+wiring so the silent case is not silent for long.
+
+**Pass the pull request's own values, not constants.** A literal
+`is-draft: false` states "not a draft" for every run, drafts included, and
+`head-repo: ${{ github.repository }}` passes the fork check for every pull
+request, fork ones included — the guard then holds nothing, and only this
+snippet's expressions make it real. `doctor` reports either on the `summary`
+call, absent or wrong; it reports the `build-matrix` step's own `head-repo` the
+same way, and reports a `no-pull-request` anywhere in this file, which belongs
+only in a drift wrapper ([`drift.md`](drift.md)). What it still cannot see: it
+reads only a file named `plan.yml`, so a plan wrapper under another name is
+checked by review or not at all, and `is-draft` has no counterpart on
+`build-matrix` — that step takes no such input.
 
 `expected-head` is required. plan-cell records the commit each plan was
 produced from and apply-cell refuses a plan produced from a different tree, so
