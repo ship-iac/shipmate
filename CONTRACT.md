@@ -1479,9 +1479,10 @@ degrade to the workflow-run URL on no match.
 
 ## Apply-match fingerprint
 
-Each plan stores a fingerprint (`fingerprint.txt`, artifact `external_id` on the
-apply check): `sha256` over the sorted JSON of every **non-empty** `TF_VAR_*`
-environment variable (name→value) **plus `TF_WORKSPACE` when it is set**.
+Each plan stores a fingerprint (`fingerprint.txt` in the artifact; on the apply
+check, the `external_id` JSON record holds it alongside the id of the plan run
+that produced the cell): `sha256` over the sorted JSON of every **non-empty**
+`TF_VAR_*` environment variable (name→value) **plus `TF_WORKSPACE` when it is set**.
 Ephemeral credential vars (`AWS_*`, etc.) are excluded. A set-but-empty
 `TF_VAR_*` is excluded from the payload, so it now hashes identically to that
 variable being absent altogether — a flavor that injects nothing and a flavor

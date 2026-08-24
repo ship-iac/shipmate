@@ -8,6 +8,12 @@ from _loader import load_script
 pc = load_script("pending-checks")
 
 HEAD = "a" * 40
+RUN_ID = "32668143791"
+
+
+@pytest.fixture(autouse=True)
+def _plan_run(monkeypatch):
+    monkeypatch.setenv("GITHUB_RUN_ID", RUN_ID)
 
 
 def _write_cell(tmp_path, env, slug, **cell):
@@ -28,11 +34,14 @@ def test_changed_cell_yields_queued_body(tmp_path):
         fingerprint="f" * 64,
     )
     (body,) = pc.bodies(str(tmp_path), HEAD)
+    assert json.loads(body.pop("external_id")) == {
+        "fingerprint": "f" * 64,
+        "plan_run": RUN_ID,
+    }
     assert body == {
         "name": "apply / stacks/app / dev-eu",
         "head_sha": HEAD,
         "status": "queued",
-        "external_id": "f" * 64,
         "output": {
             "title": "apply pending",
             "summary": "Waiting to be applied. Merge after apply completes "
@@ -56,7 +65,10 @@ def test_unchanged_cell_yields_completed_neutral_body(tmp_path):
     assert body["status"] == "completed"
     assert body["conclusion"] == "neutral"
     assert body["output"]["title"] == "no changes"
-    assert body["external_id"] == "0" * 64
+    assert json.loads(body["external_id"]) == {
+        "fingerprint": "0" * 64,
+        "plan_run": RUN_ID,
+    }
 
 
 def test_missing_fingerprint_fails_loud(tmp_path):
@@ -70,6 +82,25 @@ def test_missing_fingerprint_fails_loud(tmp_path):
         changed=True,
     )
     with pytest.raises(SystemExit, match="fingerprint"):
+        pc.bodies(str(tmp_path), HEAD)
+
+
+def test_unusable_plan_run_id_fails_loud(tmp_path, monkeypatch):
+    _write_cell(
+        tmp_path,
+        "dev-eu",
+        "stacks-app",
+        stack="app",
+        stack_path="stacks/app",
+        environment="dev-eu",
+        changed=True,
+        fingerprint="f" * 64,
+    )
+    monkeypatch.delenv("GITHUB_RUN_ID")
+    with pytest.raises(SystemExit, match="GITHUB_RUN_ID"):
+        pc.bodies(str(tmp_path), HEAD)
+    monkeypatch.setenv("GITHUB_RUN_ID", "not-a-run-id")
+    with pytest.raises(SystemExit, match="GITHUB_RUN_ID"):
         pc.bodies(str(tmp_path), HEAD)
 
 
