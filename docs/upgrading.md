@@ -193,8 +193,8 @@ itself. Nothing on any API or CLI surface names the offending input. The
 `workflow_dispatch` declaration left behind on its own is milder: `required:
 false` with a default is inert (the engine sends no such value), and `required:
 true` is refused at dispatch time with an HTTP 422 that at least names the input.
-Remove both, in the same commit as the pin bump — `docs/releasing.md`'s cascade
-rule, since the callee and the caller must agree at load time.
+Remove both, in the same commit as the pin bump — re-pinning alone is not
+enough, since the callee and the caller must agree at load time.
 
 **`comment-ops.yml` — this is the half that only warns, which is exactly why it
 gets missed.** On the `actions/dispatch` step:
@@ -249,11 +249,12 @@ that lost one cell used to cost the whole report its environment probes; now it
 reports on the cells that produced summaries.
 
 **If the wrapper edits are missed.** Observed: the dead run's shape above
-(startup_failure, no jobs, no checks, no log), and `shipmate doctor` reporting
-the declaration and the forward as separate warnings on every plan run — so a
-re-pin pull request that missed the `apply.yml` edit is told before it merges,
-provided the file carries that exact name and its `on:` block is not written in
-fully inline flow style. Derived, not observed: recovery needs no ruleset bypass.
+(startup_failure, no jobs, no checks, no log). Verified in tests, not yet seen
+on a live repository: `shipmate doctor` reporting the declaration and the
+forward as separate warnings on every plan run — so a re-pin pull request that
+missed the `apply.yml` edit is told before it merges, provided the file carries
+that exact name and its `on:` block is not written in fully inline flow style.
+Derived, not observed: recovery needs no ruleset bypass.
 An `apply.yml`-only pull request touches no stack, so `build-matrix` reports an
 empty matrix, the plan job is skipped and the gate greens on zero planned cells —
 §0.17.0's escape, which applies here because the broken file is reached only by a

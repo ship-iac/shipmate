@@ -126,7 +126,7 @@ def _run_step(tmp_path, *, record=None, observed=_PLANNED):
         text=True,
         # Explicit, not the locale default: the step's messages carry em dashes,
         # and a cp1252 console would decode them to replacement characters and
-        # make the whole-message assertion below unfailable on the real text.
+        # make the whole-message assertion below unable to ever pass on the real text.
         encoding="utf-8",
         timeout=30,
     ), work
