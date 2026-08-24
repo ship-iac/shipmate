@@ -998,9 +998,8 @@ The three jobs:
   plan the base branch and report a clean plan for a pull request they never
   read. `actions/build-matrix` refuses that: on `pull_request_target` it
   compares the event's head SHA against the commit it is running on, and it
-  also refuses a checkout with no `.github/workflows/plan.yml` — that path is
-  matched literally by comment-ops' doctor lookup, and a renamed plan workflow
-  silently degrades every later `shipmate doctor`. `actions/build-matrix` fails `detect`
+  also refuses a checkout with no `.github/workflows/plan.yml` — the one path
+  this contract lets the plan workflow live at. `actions/build-matrix` fails `detect`
   outright unless the run **states** a head repository equal to the running
   repository: **fork pull requests are not planned**, and no input permits one.
   A fork's plan would execute the pull request's own Terramate/OpenTofu code
@@ -1053,13 +1052,12 @@ the plan wrapper's fork and draft wiring; the last of those is the one that
 observes whether the gate will be written, and it reports rather than fails.
 
 The **file path is still load-bearing**, and nothing diagnoses a rename as the
-cause: `actions/comment-ops` matches
-`actions/workflows/plan.yml/runs` once — for doctor's cell-summary fetch.
-Doctor's `pull_request_target` probe exempts the plan workflow by exact name.
-Rename the file and doctor skips its environment
-probes, and the renamed file starts drawing doctor's own
-`pull_request_target` warning. Each symptom surfaces on its own — comment-ops
-annotates the skipped probes — but none of them names the rename.
+cause: `actions/build-matrix` refuses a checkout that has no
+`.github/workflows/plan.yml`, and doctor's `pull_request_target` probe exempts
+the plan workflow by exact name. Rename the file and planning is refused from
+that commit on, and the renamed file starts drawing doctor's own
+`pull_request_target` warning. Each symptom surfaces on its own — the refusal
+names the path it looked for — but none of them names the rename.
 
 No apply path matches on it any more: a dispatched, bare or post-merge apply
 reads each cell's plan run from that cell's own apply check, so a renamed plan

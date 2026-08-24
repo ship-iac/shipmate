@@ -244,11 +244,12 @@ def test_the_check_runs_projection_carries_every_field_this_step_answers_from_it
 
 
 def test_a_check_run_in_that_shape_yields_its_plan_run():
-    """The projection is a jq expression no test can execute, so pin the shape
-    it produces where that shape is consumed. A projection that drops
-    `external_id`, or the nested `app` object the App filter reads, leaves the
-    mapping empty for every name — and doctor then reports that this commit
-    carries no plan records at all, having asked for them and dropped them."""
+    """Why the constant above contains `app: {id: .app.id}` and not only the
+    flattened pair doctor's reducer reads: `plan_runs_by_name` filters on the
+    NESTED id, so a projection carrying just `external_id` maps every name to
+    nothing. This test cannot see the projection — it is a hand-written line and
+    reddens on the reader, not on projection drift; the whole-value comparison
+    above is what pins the file."""
     line = json.dumps(
         {
             "id": 7,
@@ -302,6 +303,14 @@ def test_the_render_step_reads_the_harvest_pending_flag_the_reduction_wrote():
     covered behaviourally by
     test_doctor.py::test_check_ids_mode_writes_the_harvest_pending_step_output."""
     assert "SHIPMATE_HARVEST_PENDING: ${{ steps.gatherdoc.outputs.harvest_pending }}" in _ACTION
+
+
+def test_the_render_step_reads_the_id_set_the_gather_step_published():
+    """A typo in this reference (`outputs.plan_run_id`) is an empty string, and
+    doctor then reports that the commit carries no plan records — the silent
+    degrade the plural rename exists to make loud. The derived env-var guard
+    above only checks that the NAME appears somewhere in the action."""
+    assert "SHIPMATE_PLAN_RUN_IDS: ${{ steps.gatherdoc.outputs.plan_run_ids }}" in _ACTION
 
 
 def test_harvest_flag_is_set_inside_the_loop_and_written_once_after_it():

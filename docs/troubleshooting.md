@@ -125,8 +125,9 @@ given pull request changed; the declared set comes from that commit's plan
 matrix. So the report's all-clear line names the environments it actually probed
 instead of implying the repository's environments are all sound, and a clean
 secret probe says nothing about an environment this pull request did not touch.
-The declared set needs a plan run that **succeeded**, so one failed cell in a
-fan-out withholds it and the report says so. **One check is exempt and reported
+The declared set is the cell summaries of the plan runs this commit's own apply
+checks record, so a run whose summaries cannot be downloaded is warned about and
+its environments are simply absent from the set. **One check is exempt and reported
 anyway: the ambiguous-naming warning** (a bare `<env>` beside `<env>-plan` or
 `<env>-apply`), which compares environment names against each other and needs no
 declared set — it therefore covers every logical environment in the repository,

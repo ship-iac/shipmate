@@ -325,7 +325,9 @@ runs:
         done <<< "$run_ids"
         # Then keep, per cell, only the copy from the run that cell's own newest
         # apply check names -- the replanned cell's older copy would otherwise
-        # report an environment this head no longer declares.
+        # report an environment this head no longer declares. A cell no record
+        # names is KEPT and warned about: dropping it would narrow the declared
+        # set silently, which is the failure these warnings exist to prevent.
         if ! python3 - <<'PY'
         import json, pathlib
         runs = json.load(open("plan_runs.json", encoding="utf-8"))
@@ -335,7 +337,9 @@ runs:
                 name = f"apply / {cell['stack_path']} / {cell['environment']}"
             except (OSError, ValueError, KeyError, TypeError):
                 continue
-            if runs.get(name) != cj.relative_to("doctor-cells").parts[0]:
+            if name not in runs:
+                print(f"::warning::no apply check on this commit records a plan run for {name}; doctor reports its environment from the summary it downloaded")
+            elif runs[name] != cj.relative_to("doctor-cells").parts[0]:
                 cj.unlink()
         PY
         then

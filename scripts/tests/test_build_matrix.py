@@ -703,8 +703,8 @@ def test_plan_workflow_at_the_contract_path_is_planned(tmp_path):
 
 
 def test_a_renamed_plan_workflow_is_refused(tmp_path):
-    # One lookup matches `.github/workflows/plan.yml` byte-for-byte, comment-ops'
-    # doctor fetch; a rename merges green and breaks it from that commit on.
+    # This refusal is what makes the path load-bearing: no lookup matches it
+    # literally any more, so a rename would otherwise merge green.
     (tmp_path / ".github" / "workflows").mkdir(parents=True)
     (tmp_path / ".github" / "workflows" / "shipmate-plan.yml").write_text("", encoding="utf-8")
     err = bm.plan_workflow_error("pull_request", str(tmp_path))

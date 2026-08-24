@@ -37,12 +37,15 @@ def _cells_block():
 bash_only = pytest.mark.skipif(usable_bash() is None, reason="no working bash on PATH")
 
 _APP_ID = "4326562"
-#: The same cell planned twice on this head (the newer check names run 1290),
-#: plus a cell only the older run planned.
+#: (check name, check-run id, `external_id` record). The same cell planned
+#: twice on this head (the newer check names run 1290), a cell only the older
+#: run planned, and one whose newest check carries a legacy bare-hex record --
+#: no plan run to name, so the mapping cannot place its summary.
 _CHECK_RUNS = [
-    ("apply / stacks/app / dev-eu", 1, "1281"),
-    ("apply / stacks/app / dev-eu", 2, "1290"),
-    ("apply / stacks/db / dev-us", 3, "1281"),
+    ("apply / stacks/app / dev-eu", 1, json.dumps({"fingerprint": "a" * 64, "plan_run": "1281"})),
+    ("apply / stacks/app / dev-eu", 2, json.dumps({"fingerprint": "a" * 64, "plan_run": "1290"})),
+    ("apply / stacks/db / dev-us", 3, json.dumps({"fingerprint": "a" * 64, "plan_run": "1281"})),
+    ("apply / stacks/cache / dev-ap", 4, "b" * 64),
 ]
 #: What each run's `cell-summary.<env>.<slug>` artifact holds. The two copies of
 #: the replanned cell differ only in the plan they describe, exactly as two runs
@@ -51,15 +54,23 @@ _ARTIFACTS = {
     "1281": [
         ("cell-summary.dev-eu.stacks-app", "stacks/app", "dev-eu", 1),
         ("cell-summary.dev-us.stacks-db", "stacks/db", "dev-us", 7),
+        ("cell-summary.dev-ap.stacks-cache", "stacks/cache", "dev-ap", 3),
     ],
     "1290": [("cell-summary.dev-eu.stacks-app", "stacks/app", "dev-eu", 2)],
 }
 
 
-def _run_block(tmp_path):
-    """The surviving cell summaries, as {artifact name: (run dir, add count)},
-    after running the block with `gh run download` stubbed to the fixture."""
+def _run_block(tmp_path, undownloadable=()):
+    """(surviving summaries, step output) after running the block with
+    `gh run download` stubbed to the fixture. Each surviving summary is
+    `(artifact name, run directory, add count)`, sorted -- a mapping keyed on
+    the artifact name would collapse two runs' copies of one cell into the
+    one the glob happened to yield last, and pin nothing about the prune.
+    Runs named in `undownloadable` have no artifacts, which is what the stub
+    (and the real `gh`) reports as a failed download."""
     for run, artifacts in _ARTIFACTS.items():
+        if run in undownloadable:
+            continue
         for name, stack_path, env, add in artifacts:
             d = tmp_path / "artifacts" / run / name
             d.mkdir(parents=True)
@@ -75,14 +86,14 @@ def _run_block(tmp_path):
                     "name": name,
                     "status": "completed",
                     "started_at": "2026-08-24T00:00:00Z",
-                    "external_id": json.dumps({"fingerprint": "a" * 64, "plan_run": run}),
+                    "external_id": record,
                     "app": {"id": int(_APP_ID)},
                     "app_slug": "shipmate",
                     "app_id": int(_APP_ID),
                 }
             )
             + "\n"
-            for name, cid, run in _CHECK_RUNS
+            for name, cid, record in _CHECK_RUNS
         ),
         encoding="utf-8",
         newline="\n",
@@ -118,10 +129,14 @@ def _run_block(tmp_path):
         timeout=60,
     )
     assert r.returncode == 0, f"step died: {r.stdout!r} {r.stderr!r}"
-    return {
-        cj.parent.name: (cj.parent.parent.name, json.loads(cj.read_text(encoding="utf-8"))["add"])
+    return sorted(
+        (
+            cj.parent.name,
+            cj.parent.parent.name,
+            json.loads(cj.read_text(encoding="utf-8"))["add"],
+        )
         for cj in (tmp_path / "doctor-cells").glob("*/**/cell.json")
-    }
+    ), r.stdout
 
 
 @bash_only
@@ -130,15 +145,39 @@ def test_every_plan_run_the_head_recorded_is_downloaded(tmp_path):
     environment: downloading only one run's summaries hides every environment
     only that run planned, and doctor then probes a subset of the truth while
     reporting no problem with the rest."""
-    assert set(_run_block(tmp_path)) == {
-        "cell-summary.dev-eu.stacks-app",
-        "cell-summary.dev-us.stacks-db",
-    }
+    assert _run_block(tmp_path)[0] == [
+        ("cell-summary.dev-ap.stacks-cache", "1281", 3),
+        ("cell-summary.dev-eu.stacks-app", "1290", 2),
+        ("cell-summary.dev-us.stacks-db", "1281", 7),
+    ]
 
 
 @bash_only
 def test_a_replanned_cell_resolves_to_the_run_its_newest_check_names(tmp_path):
     """Two runs' copies of one cell carry the same artifact name, so the copy
     doctor reports has to be chosen rather than left to extraction order: the
-    run named by that cell's own newest apply check wins."""
-    assert _run_block(tmp_path)["cell-summary.dev-eu.stacks-app"] == ("1290", 2)
+    run named by that cell's own newest apply check wins, and the superseded
+    copy is gone rather than merely outranked by glob order."""
+    cells = [c for c in _run_block(tmp_path)[0] if c[0] == "cell-summary.dev-eu.stacks-app"]
+    assert cells == [("cell-summary.dev-eu.stacks-app", "1290", 2)]
+
+
+@bash_only
+def test_a_cell_no_record_names_is_kept_and_warned_about(tmp_path):
+    """A cell whose newest apply check carries a legacy record has no plan run
+    to be placed by, so the prune cannot tell a superseded copy from an
+    unplaceable one. Dropping it would narrow the declared environment set of a
+    diagnostics command silently -- the failure its warnings exist to prevent."""
+    cells, out = _run_block(tmp_path)
+    assert ("cell-summary.dev-ap.stacks-cache", "1281", 3) in cells
+    assert "::warning::no apply check on this commit records a plan run for " in out
+
+
+@bash_only
+def test_a_run_whose_summaries_cannot_be_downloaded_is_a_warning_not_a_failure(tmp_path):
+    """doctor degrades rather than fails: a diagnostics command that dies over
+    one missing artifact reports nothing at all, so the run is warned about and
+    every other run's environments still reach the probes."""
+    cells, out = _run_block(tmp_path, undownloadable=("1281",))
+    assert cells == [("cell-summary.dev-eu.stacks-app", "1290", 2)]
+    assert "::warning::the cell summaries of plan run 1281 could not be downloaded" in out
