@@ -1,3 +1,4 @@
+import io
 import json
 
 import pytest
@@ -392,3 +393,30 @@ def test_plan_runs_only_apply_prefixed_names():
     assert ag.plan_runs_by_name([apply_line, plan_line], "999") == {
         "apply / stacks/app / dev-eu": "111"
     }
+
+
+def test_plan_runs_mode_prints_the_mapping_and_writes_no_verdict(monkeypatch, capsys):
+    # comment-ops' reviewed-plan lookup is this mode. GITHUB_OUTPUT is
+    # deliberately unset: a gate verdict written here would be a decision the
+    # caller never asked for, and would abort on the missing variable instead.
+    record = json.dumps({"fingerprint": "a" * 64, "plan_run": "777"})
+    stdin = io.StringIO(
+        _ext("apply / stacks/app / dev-eu", 1, record)
+        + "\n"
+        + _ext("apply / stacks/api / dev-eu", 2, LEGACY_HEX)
+    )
+    monkeypatch.setattr(ag.sys, "argv", ["apply-gate", "--plan-runs"])
+    monkeypatch.setattr(ag.sys, "stdin", stdin)
+    monkeypatch.setenv("SHIPMATE_APP_ID", "999")
+    monkeypatch.delenv("GITHUB_OUTPUT", raising=False)
+    ag.main()
+    assert json.loads(capsys.readouterr().out) == {"apply / stacks/app / dev-eu": "777"}
+
+
+def test_an_unrecognized_argument_fails_loud(monkeypatch):
+    # A typo'd flag must not fall through to the verdict path, which would write
+    # a gate decision where the caller asked for the mapping.
+    monkeypatch.setattr(ag.sys, "argv", ["apply-gate", "--plan-run"])
+    with pytest.raises(SystemExit) as exc:
+        ag.main()
+    assert "--plan-run" in str(exc.value)

@@ -2,8 +2,10 @@
 """Decide whether every `apply / <stack> / <env>` check on a commit is done.
 
 Reads check-runs as JSON Lines on stdin (one check-run object per line, as
-emitted by `gh api --paginate ... --jq '.check_runs[]'`) and writes a single
-verdict to GITHUB_OUTPUT:
+emitted by `gh api --paginate ... --jq '.check_runs[]'`). With `--plan-runs` it
+prints the `plan_runs_by_name` mapping on stdout for comment-ops' reviewed-plan
+lookup and decides nothing; otherwise it writes a single verdict to
+GITHUB_OUTPUT:
 
 - `complete`   — every apply check's latest run is completed with a good
                  conclusion (success, or neutral for no-change cells); the
@@ -145,7 +147,16 @@ def verdict(check_runs):
 
 
 def main():
-    runs = from_app(parse_jsonl(sys.stdin), os.environ["SHIPMATE_APP_ID"])
+    mode = sys.argv[1:]
+    # Compared whole, not by membership: a typo'd flag must not fall through and
+    # write a gate verdict where the caller asked for the mapping.
+    if mode and mode != ["--plan-runs"]:
+        raise SystemExit(f"::error::unknown argument(s) {mode}")
+    app_id = os.environ["SHIPMATE_APP_ID"]
+    if mode:
+        print(json.dumps(plan_runs_by_name(sys.stdin, app_id)))
+        return
+    runs = from_app(parse_jsonl(sys.stdin), app_id)
     v = verdict(runs)
     with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
         fh.write(f"verdict={v}\n")

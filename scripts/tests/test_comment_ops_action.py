@@ -652,6 +652,11 @@ def test_the_gather_step_reads_the_plan_runs_from_the_heads_own_check_runs():
     body = _code(_gather_step()["run"])
     assert '"repos/$GITHUB_REPOSITORY/commits/$head/check-runs?filter=all&per_page=100"' in body
     assert "workflows/plan.yml" not in body
+    # The mapping comes from apply-gate's `--plan-runs` mode: without the flag the
+    # same invocation writes a gate verdict and leaves plan_run.json empty.
+    assert (
+        '| python3 "$GITHUB_ACTION_PATH/../../scripts/apply-gate" --plan-runs > plan_run.json'
+    ) in body
 
 
 def test_the_gather_step_receives_the_app_id_the_plan_run_lookup_scopes_on():
@@ -752,8 +757,8 @@ def test_the_apply_route_steps_admit_exactly_apply_and_unlock():
 
 
 def test_the_mode_output_names_the_dispatch_mode_the_route_selects():
-    """Task 7's dispatch keys off this, so a literal here sends every unlock
-    down the apply path."""
+    """The caller's dispatch step keys off this output, so a literal here sends
+    every unlock down the apply path."""
     assert action_yaml("comment-ops")["outputs"]["mode"]["value"] == (
         "${{ steps.parse.outputs.route == 'unlock' && 'unlock' || 'apply' }}"
     )

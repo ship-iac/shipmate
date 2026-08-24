@@ -442,6 +442,8 @@ runs:
         # The reviewed-plan lookup below reads the head's check runs. `checks` is
         # declared `write` in app/manifest.json, so read is a subset of what the
         # installation already granted -- no re-approval, no consumer change.
+        # An unlock does not use this scope (it runs no lookup); one mint serves
+        # both routes rather than a third existing for one permission.
         permission-checks: read
 
     - name: App token unavailable (App not installed?)
@@ -518,20 +520,8 @@ runs:
           head=$(python3 -c "import json;print(json.load(open('pr.json'))['head']['sha'])")
           GH_TOKEN="$APP_TOKEN" gh api --paginate \
             "repos/$GITHUB_REPOSITORY/commits/$head/check-runs?filter=all&per_page=100" \
-            --jq '.check_runs[]' > check-runs.jsonl
-          SHIPMATE_APPLY_GATE="$GITHUB_ACTION_PATH/../../scripts/apply-gate" python3 - <<'PY' > plan_run.json
-        import importlib.util
-        import json
-        import os
-        from importlib.machinery import SourceFileLoader
-
-        loader = SourceFileLoader("apply_gate", os.environ["SHIPMATE_APPLY_GATE"])
-        spec = importlib.util.spec_from_loader(loader.name, loader)
-        ag = importlib.util.module_from_spec(spec)
-        loader.exec_module(ag)
-        with open("check-runs.jsonl", encoding="utf-8") as fh:
-            print(json.dumps(ag.plan_runs_by_name(fh, os.environ["SHIPMATE_APP_ID"])))
-        PY
+            --jq '.check_runs[]' \
+            | python3 "$GITHUB_ACTION_PATH/../../scripts/apply-gate" --plan-runs > plan_run.json
         else
           echo '{}' > plan_run.json
         fi
