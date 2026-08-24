@@ -35,9 +35,14 @@ def _source(name):
 
 
 def test_the_consuming_detects_reach_completed_applies_through_the_scoped_query():
-    # apply-detect owns the query and reads the predicate at its own call site
-    # (test_the_query_owner_scopes_the_predicate_to_the_app); these two must
-    # arrive through it.
+    # apply-detect owns the query, but whether its own main() actually routes
+    # through completed_apply_names is not pinned here or by
+    # test_the_query_owner_scopes_the_predicate_to_the_app -- a substring match
+    # can't tell a call site from a definition in the same module. That's
+    # pinned behaviourally, by
+    # test_apply_detect.test_a_forged_completed_check_does_not_mark_a_cell_applied.
+    # Deleting that test removes the only guard standing between apply-detect's
+    # main() and a forged same-name check counting as applied.
     for name in _CONSUMERS:
         text = _source(name)
         assert _SCOPED_CALL in text, f"{name} no longer calls completed_apply_names"
@@ -56,6 +61,13 @@ def test_only_the_query_owner_calls_the_unscoped_predicates():
 
 
 def test_the_query_owner_scopes_the_predicate_to_the_app():
+    # This only pins that "app_done_names(" and the SHIPMATE_APP_ID read appear
+    # somewhere in apply-detect's source -- it cannot tell whether main() is the
+    # caller, because completed_apply_names' own definition satisfies the same
+    # substring. Rewriting main() to bypass completed_apply_names (e.g. calling
+    # ag.done_names directly) would leave this test green; only
+    # test_apply_detect.test_a_forged_completed_check_does_not_mark_a_cell_applied
+    # would catch it. Do not read this test as covering that call-site property.
     text = _source("apply-detect")
     assert "app_done_names(" in text, (
         "apply-detect must use apply-gate's App-scoped predicate; done_names alone "
