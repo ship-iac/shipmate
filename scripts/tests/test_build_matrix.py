@@ -703,8 +703,9 @@ def test_plan_workflow_at_the_contract_path_is_planned(tmp_path):
 
 
 def test_a_renamed_plan_workflow_is_refused(tmp_path):
-    # Four lookups match `.github/workflows/plan.yml` byte-for-byte; a rename
-    # merges green and wedges every apply from that commit on.
+    # Three lookups match `.github/workflows/plan.yml` byte-for-byte (comment-ops'
+    # two, deploy-detect's one); a rename merges green and breaks all three from
+    # that commit on.
     (tmp_path / ".github" / "workflows").mkdir(parents=True)
     (tmp_path / ".github" / "workflows" / "shipmate-plan.yml").write_text("", encoding="utf-8")
     err = bm.plan_workflow_error("pull_request", str(tmp_path))

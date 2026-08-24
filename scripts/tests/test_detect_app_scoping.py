@@ -5,9 +5,14 @@ Both halves are structural, and neither is observable from a unit test of the
 helper: `completed_apply_names` can be correct while a detect's `main()` calls
 something else, and the `SHIPMATE_APP_ID` wiring lives in YAML that no script
 now mentions (the env read moved into `apply-detect` when the query was
-single-sourced). A forged same-name check counted as done drops that stack from
-the wave matrix and the deploy reports success, so both need a guard that fails
-on the edit rather than on the next merge.
+single-sourced). A substring check cannot make that first half fail for
+`apply-detect`, which both defines the query and reads the predicate directly:
+its `main()` is pinned behaviourally instead, by
+test_apply_detect.test_a_forged_completed_check_does_not_mark_a_cell_applied.
+
+A forged same-name check counted as done drops that stack from the wave matrix
+and the deploy reports success, so both need a guard that fails on the edit
+rather than on the next merge.
 """
 
 import re
@@ -20,6 +25,7 @@ DETECTS = ("apply-detect", "deploy-detect", "apply-all-detect")
 # The App-scoped query, and the two unscoped predicates that must not be reached
 # for it directly: `done_names` ignores authorship entirely, and `app_done_names`
 # is `completed_apply_names`'s own internal call.
+_CONSUMERS = ("deploy-detect", "apply-all-detect")
 _SCOPED_CALL = "completed_apply_names("
 _UNSCOPED_CALLS = (r"\bag\.done_names\(", r"\bag\.app_done_names\(")
 
@@ -28,8 +34,11 @@ def _source(name):
     return (SCRIPTS / name).read_text(encoding="utf-8")
 
 
-def test_every_detect_reaches_completed_applies_through_the_scoped_query():
-    for name in DETECTS:
+def test_the_consuming_detects_reach_completed_applies_through_the_scoped_query():
+    # apply-detect owns the query and reads the predicate at its own call site
+    # (test_the_query_owner_scopes_the_predicate_to_the_app); these two must
+    # arrive through it.
+    for name in _CONSUMERS:
         text = _source(name)
         assert _SCOPED_CALL in text, f"{name} no longer calls completed_apply_names"
 

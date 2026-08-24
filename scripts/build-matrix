@@ -17,9 +17,10 @@ _PR_EVENTS = ("pull_request", "pull_request_target")
 
 MATRIX_LIMIT = 256
 
-#: Where the plan workflow must live. `plan_workflow_error` below is what
-#: enforces this path; run-id discovery reads each apply check's record, never a
-#: workflow path.
+#: Where the plan workflow must live. Three lookups still match this path
+#: literally: comment-ops' doctor lookup, comment-ops' reviewed-plan lookup, and
+#: `deploy-detect`'s post-merge one. A dispatched apply no longer does — it reads
+#: each cell's plan run from that cell's apply check.
 PLAN_WORKFLOW = ".github/workflows/plan.yml"
 
 #: Stack paths whose verb-less plan check name would land inside a namespace

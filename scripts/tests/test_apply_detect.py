@@ -80,8 +80,8 @@ def test_a_cell_whose_check_names_no_plan_run_refuses():
         ad.with_plan_runs(_TWO_CELLS, {"apply / stacks/app / dev-eu": "111"})
     assert str(exc_info.value) == (
         "::error::apply aborted: no plan run recorded for apply / stacks/dns / dev-eu — the "
-        "apply check records no plan run, so it predates the release that binds an apply to "
-        "the run that planned it. Re-plan the affected stacks in a new pull request."
+        "apply check names no plan run to apply from (a check written before this engine "
+        "version records none). Re-plan these stacks on this pull request, then apply again."
     )
 
 
@@ -227,6 +227,60 @@ def test_apply_path_makes_no_run_lookup_at_all(monkeypatch, tmp_path):
     ad.main()
     assert len(json.loads(_parsed(out)["waves"])["wave0"]) == 1  # not vacuous
     assert urls == [f"repos/acme/iac/commits/{'a' * 40}/check-runs?filter=all&per_page=100"]
+
+
+def test_a_forged_completed_check_does_not_mark_a_cell_applied(monkeypatch, tmp_path):
+    # A completed+success check of the same name from another identity
+    # (github-actions, app id 15368) must not count the cell as applied. It is
+    # also the NEWER run of that name, so only the App filter keeps the cell in.
+    out = _apply_env(monkeypatch, tmp_path)
+    _stub_apply(
+        monkeypatch,
+        {"stacks/app": set()},
+        [
+            _apply_check("stacks/app"),
+            _check(name="apply / stacks/app / dev-eu", id=2, app={"id": 15368}),
+        ],
+    )
+    ad.main()
+    assert [c["stack"] for c in json.loads(_parsed(out)["waves"])["wave0"]] == ["stacks/app"]
+
+
+def test_a_record_less_completed_check_does_not_block_the_rest(monkeypatch, tmp_path):
+    # The upgrade shape: `stacks/dns` was applied by an older engine version, so
+    # its completed check carries a legacy bare-hex record naming no plan run.
+    # Only cells still to be applied need one -- refusing over an already-applied
+    # cell would strand every pull request open across the upgrade.
+    out = _apply_env(monkeypatch, tmp_path)
+    _stub_apply(
+        monkeypatch,
+        {"stacks/app": set(), "stacks/dns": set()},
+        [
+            _apply_check("stacks/app", plan_run="42"),
+            _check(name="apply / stacks/dns / dev-eu", external_id="b" * 64),
+        ],
+    )
+    ad.main()
+    assert [c["stack"] for c in json.loads(_parsed(out)["waves"])["wave0"]] == ["stacks/app"]
+
+
+def test_a_failed_apply_check_stays_re_appliable(monkeypatch, tmp_path):
+    # completed with a failing conclusion: done being RUN, but not applied. Such
+    # a cell is not "pending" and must still be in the workset -- membership by
+    # pending-ness alone would silently drop the one cell an operator is
+    # retrying.
+    out = _apply_env(monkeypatch, tmp_path)
+    _stub_apply(
+        monkeypatch,
+        {"stacks/app": set()},
+        [
+            _check(
+                name="apply / stacks/app / dev-eu", conclusion="failure", external_id=_record("42")
+            )
+        ],
+    )
+    ad.main()
+    assert [c["stack"] for c in json.loads(_parsed(out)["waves"])["wave0"]] == ["stacks/app"]
 
 
 def test_main_emits_the_dag_shape_notice(monkeypatch, tmp_path, capsys):

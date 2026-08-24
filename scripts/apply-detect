@@ -96,8 +96,9 @@ def with_plan_runs(cells, plan_runs):
     if missing:
         raise SystemExit(
             f"::error::apply aborted: no plan run recorded for {', '.join(missing)} — the "
-            "apply check records no plan run, so it predates the release that binds an apply "
-            "to the run that planned it. Re-plan the affected stacks in a new pull request."
+            "apply check names no plan run to apply from (a check written before this engine "
+            "version records none). Re-plan these stacks on this pull request, then apply "
+            "again."
         )
     return [{**c, "plan_run_id": run} for c, run in named]
 
