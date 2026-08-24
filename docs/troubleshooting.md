@@ -361,9 +361,10 @@ remedy differs:
   at all is to land the re-pin with nothing pending
   ([`upgrading.md`](upgrading.md) §0.17.0).
 
-This check is per cell and additive: the apply path's existing run-level
-verification of the plan run's head is unchanged, and a repository sees this
-error only for a plan the run-level check accepted.
+This check is per cell and additive: the apply path's plan-run binding — each
+cell's plan run read from an App-authored apply check on that same head — is
+unchanged, and a repository sees this error only for a plan run that binding
+accepted.
 
 ### `this apply would bind GitHub Environment(s) that do not exist`
 

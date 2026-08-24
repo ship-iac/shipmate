@@ -1516,9 +1516,10 @@ refused, and so is an **absent** record: there is nothing to compare, so it is
 refused rather than tolerated. Most often such a plan predates the release that
 binds a plan to its tree, though a mismatched engine revision produces the same
 absence; either way the remedy is a re-plan. This
-is additive to the run-level head check the apply path already performs against
-the plan run, not a replacement for it — that check bounds which plan run may be
-applied, this one binds each individual plan to the tree it was produced from.
+is additive to the plan-run binding the apply path already carries: each cell's
+plan run is read from an App-authored apply check on that same head, so no plan
+run from another head can be named. That binding bounds which plan run may be
+applied; this one binds each individual plan to the tree it was produced from.
 
 ## Secrets in published output
 
