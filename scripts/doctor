@@ -7,7 +7,7 @@ Three modes, selected via SHIPMATE_DOCTOR_MODE:
   actions/summary right after a plan run. NEVER fails the run: a probe
   error becomes a 'could not verify' note — doctor guards onboarding, it
   must not take down the plan path.
-- report: render the sticky PR comment on demand — the eleven live probes'
+- report: render the sticky PR comment on demand — the twelve live probes'
   findings plus a harvest of the warnings GitHub already recorded as
   annotations on this commit's workflow check runs.
 - check-ids: reduce a check-runs JSONL listing to the (id, name) pairs worth
@@ -33,6 +33,8 @@ Probes:
 - the fork and draft wiring in the consumer's `plan.yml`: the inputs its
   summary call passes, and its `build-matrix` step's own `head-repo` and
   `no-pull-request`.
+- a retired `plan_run_id` input still declared or forwarded by the consumer's
+  `apply.yml`.
 - approvers team resolvability in the repo's org.
 - GitHub App installation permission drift.
 """
@@ -1458,6 +1460,99 @@ def _wired_value(region, key):
     return "".join(m.group("value").strip().strip("\"'").split())
 
 
+#: Both spellings, line-anchored: a `workflow_call`/`workflow_dispatch` input is
+#: declared as `plan_run_id`, an action input passed as `plan-run-id`, and a
+#: wrapper carrying either is carrying the retired rail. Line-anchored means a
+#: fully inline flow `on: { workflow_dispatch: { inputs: { plan_run_id: … } } }`
+#: is NOT seen — a gap that stays silent rather than reporting a healthy file.
+_PLAN_RUN_ID_KEY = re.compile(r"^[ \t]*plan[-_]run[-_]id[ \t]*:", re.M)
+# Same degrade posture and reason as PIN_UNREADABLE.
+PLAN_RUN_ID_UNREADABLE = (
+    NOTICE,
+    f"could not read `{_WORKFLOWS_DIR}` — the apply wrapper's retired `plan_run_id` "
+    "input not verified.",
+)
+PLAN_RUN_ID_NO_COMMIT = (
+    NOTICE,
+    "the apply wrapper's retired `plan_run_id` input not verified — the commit under "
+    "examination could not be determined.",
+)
+
+
+def _plan_run_id_warnings(ctx):
+    """The engine retired the `plan_run_id` rail: the plan run id now travels
+    per apply cell, so no engine workflow or action outside `apply-cell` takes
+    one. A wrapper that still declares or forwards it is the one shape of this
+    breakage a consumer owns, and the forwarding half is invisible from outside
+    (see `_plan_run_id_finding`).
+
+    Reads the consumer's workflow files at the commit under examination, the
+    same way and for the same reason as the pin, fork-trigger and summary-wiring
+    probes (`_contents_ref`): a pull request that *removes* the input must not
+    still be reported for it."""
+    ref = _contents_ref(ctx)
+    if ref is None:
+        return [PLAN_RUN_ID_NO_COMMIT]
+
+    def finding(text, name):
+        # Exact name, like the summary-wiring exemption above: the wrapper
+        # shipped in docs/getting-started.md is `apply.yml`, and it is the file
+        # that calls the engine's reusable apply workflows. The filter lives
+        # here rather than in `_plan_run_id_finding` so that a direct call of
+        # that function with another file's name still reports — a direct call
+        # bypasses the exemption, and silence there reads as a false positive
+        # that is not one.
+        if name != "apply.yml":
+            return []
+        return _plan_run_id_finding(text, name)
+
+    return _scan_workflow_texts(ctx, ref, finding, PLAN_RUN_ID_UNREADABLE)
+
+
+def _plan_run_id_finding(text, name):
+    """The retired input declared, forwarded, or both.
+
+    The two halves are told apart by the `on:` block: a `workflow_dispatch`
+    input is declared inside it, and every other occurrence is a `with:` line
+    forwarding the value on. Counting rather than partitioning keeps this to the
+    one existing helper — every occurrence the whole file has that the `on:`
+    block does not is a forward.
+
+    They are reported separately because the consequences are not alike. A
+    declaration alone is dead weight: the engine sends no such value, so nothing
+    fills it in. A forward to the engine's reusable `apply.yml`/`apply-all.yml`
+    is a LOAD-TIME rejection of the whole run — no job, no log, no annotation
+    naming the input — which is the hardest failure in this system to diagnose
+    from the outside."""
+    inline, block = _on_block(text)
+    declared = 0 if inline is None else len(_PLAN_RUN_ID_KEY.findall("\n".join(block)))
+    forwarded = len(_PLAN_RUN_ID_KEY.findall(_stripped_text(text))) - declared
+    out = []
+    if declared:
+        out.append(
+            (
+                WARNING,
+                f"`{name}` still declares a `plan_run_id` input — the engine retired that "
+                "input and dispatches no such value, so nothing ever fills it in. Remove the "
+                "declaration, and any `with:` line forwarding it.",
+            )
+        )
+    if forwarded:
+        out.append(
+            (
+                WARNING,
+                f"`{name}` still passes `plan_run_id` on — the engine retired that input, so "
+                "nothing it calls accepts one. Passed to the engine's reusable `apply.yml` or "
+                "`apply-all.yml`, GitHub rejects the run when it LOADS the workflow: the run "
+                "appears with no job, no log and nothing naming the unexpected input, which is "
+                "the hardest failure here to diagnose from the outside. Passed to a composite "
+                "action it is only a warning and the run continues. Remove the `with:` line — "
+                "the plan run id now travels with each apply cell and needs no wiring.",
+            )
+        )
+    return out
+
+
 def _one_line(s, limit=200):
     flat = " ".join(s.split())
     return flat if len(flat) <= limit else flat[: limit - 1] + "…"
@@ -1516,6 +1611,7 @@ PROBES = (
     _pin_warnings,
     _fork_trigger_warnings,
     _summary_wiring_warnings,
+    _plan_run_id_warnings,
     _team_warnings,
     _app_permission_warnings,
 )

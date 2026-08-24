@@ -12,7 +12,7 @@ findings as workflow annotations titled `shipmate doctor`
 (`::warning title=shipmate doctor::<text>` / `::notice title=shipmate
 doctor::<text>`) — read-only, never blocking. Comment `shipmate doctor` on a
 pull request for a consolidated report: a sticky comment (marker `<!--
-shipmate:doctor -->`, upserted in place like the plan comment) combining eleven
+shipmate:doctor -->`, upserted in place like the plan comment) combining twelve
 live probes — a missing or mis-pinned `shipmate / gate` rule on the default
 branch (no active ruleset requiring it, or one that doesn't pin
 `integration_id` to the shipmate App, or that isn't strict),
@@ -81,12 +81,18 @@ the pull request cannot merge; a constant — the running repository, a literal
 `false` — states the safe answer for every run, fork pull requests and drafts
 included, so the value is checked and not just the key, and on the `build-matrix`
 step that constant is the fork refusal passing every pull request),
+whether the `apply.yml` wrapper still declares or forwards the retired
+`plan_run_id` input (the engine dispatches no such value and nothing it calls
+accepts one; a `with:` line forwarding it to the engine's reusable `apply.yml`
+or `apply-all.yml` makes GitHub reject the run as it LOADS the workflow — no
+job, no log, nothing naming the input — while the same line on a composite
+action is only a warning),
 whether the configured approvers team resolves in the org, and
 whether the shipmate App installation still grants the manifest's full
 permission set — with the warning and failure annotations GitHub already
 recorded on this commit's workflow runs (shipmate's own and any other
 Actions workflow run on that commit; third-party-app-authored check runs are
-excluded). Only nine of the eleven probes can produce a finding from the plan
+excluded). Only ten of the twelve probes can produce a finding from the plan
 path's own `annotate`-mode run (`actions/summary`): the approvers-team probe
 needs the `SHIPMATE_TEAM` environment variable, which the plan path does
 not supply, and

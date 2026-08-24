@@ -169,8 +169,9 @@ def test_no_documented_wrapper_input_is_required():
     What it does do is turn a value the engine sent empty on purpose into an
     HTTP 422 before the workflow starts: GitHub reads an empty value for a
     required `workflow_dispatch` input as "not provided". Every `shipmate unlock`
-    dispatch failed that way, because unlock applies no plan and so carries no
-    `plan_run_id`. The engine validates instead, where the mode is known.
+    dispatch failed that way while the wrapper still declared the plan-run input
+    the engine has since retired, since unlock applies no plan and so carried no
+    run id. The engine validates instead, where the mode is known.
 
     Whole-vector comparison against a hand-written constant, for the reason
     `CLAUDE.md` gives: a "no input is required" predicate is also satisfied by a
@@ -191,7 +192,6 @@ def test_no_documented_wrapper_input_is_required():
     assert found == [
         ("docs/getting-started.md", "environment", False, ""),
         ("docs/getting-started.md", "mode", False, "apply"),
-        ("docs/getting-started.md", "plan_run_id", False, ""),
         ("docs/getting-started.md", "pr_number", False, ""),
         ("docs/getting-started.md", "ref", False, ""),
     ], f"documented workflow_dispatch inputs changed: {found}"

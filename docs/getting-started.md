@@ -411,7 +411,6 @@ jobs:
           mode: ${{ steps.authz.outputs.mode }}
           ref: ${{ steps.authz.outputs.head-sha }}
           pr-number: ${{ github.event.issue.number }}
-          plan-run-id: ${{ steps.authz.outputs.plan-run-id }}
           dispatch-ref: ${{ github.event.repository.default_branch }}
           repository: ${{ github.repository }}
 ```
@@ -451,10 +450,6 @@ on:
         description: PR number
         required: false
         default: ''
-      plan_run_id:
-        description: "Plan run id with the reviewed plans. Empty for `shipmate unlock`, which applies no plan"
-        required: false
-        default: ''
 permissions:
   contents: read
   actions: read
@@ -473,7 +468,6 @@ jobs:
       mode: ${{ inputs.mode }}
       ref: ${{ inputs.ref }}
       pr_number: ${{ inputs.pr_number }}
-      plan_run_id: ${{ inputs.plan_run_id }}
       state_suffix: ""
   all:
     if: ${{ inputs.environment == '' }}
@@ -485,7 +479,6 @@ jobs:
     with:
       ref: ${{ inputs.ref }}
       pr_number: ${{ inputs.pr_number }}
-      plan_run_id: ${{ inputs.plan_run_id }}
       state_suffix: ""
 ```
 
@@ -501,12 +494,13 @@ App token, from a body the engine builds — no human ever fills a form here, so
 engine sent empty *on purpose* into a platform-level rejection: **GitHub treats
 an empty value for a `required: true` `workflow_dispatch` input as "not
 provided"** and answers HTTP 422 before the workflow starts, naming an input the
-operator never typed. That is how every `shipmate unlock` dispatch failed until
-`plan_run_id` became optional — unlock applies no plan, so it carries no run id.
+operator never typed. That is how every `shipmate unlock` dispatch failed while
+this wrapper still declared the plan-run input the engine has since retired:
+unlock applies no plan, so the engine sent that value empty.
 
 The engine is the validator, and it is the only layer with enough context to be
-one: `apply-detect` runs `validate_head_sha`, `validate_plan_run_id` and
-`validate_env`, and it knows which values are legitimately empty in which mode.
+one: `apply-detect` runs `validate_head_sha` and `validate_env`, and it knows
+which values are legitimately empty in which mode.
 Its errors are annotations on the run naming the actual value. Keep new inputs
 optional for the same reason — `required` is the default a new input drifts back
 to, and it reopens this exactly.

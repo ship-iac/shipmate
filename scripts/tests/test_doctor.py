@@ -227,7 +227,9 @@ def _quiet_new_probes():
     """Healthy responses for the env-protection, engine-environment,
     plan-env-secret, pin-freshness, fork-trigger and summary-wiring probes, so
     tests exercising the older gate/environment probes via the top-level
-    `warnings()` don't pick up incidental noise from these six.
+    `warnings()` don't pick up incidental noise from these six. The retired-input
+    probe needs no response here: the listing below names no `apply.yml`, which is
+    the only file it judges.
 
     The last three read the same workflow listing. `_QUIET_PLAN`'s `uses:` lines
     are engine pins, so the pin probe has something to read and needs the
@@ -2863,6 +2865,138 @@ def test_summary_wiring_probe_is_registered(monkeypatch):
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
     out = doctor.warnings(_ctx())
     assert any(f"`head-repo: {_HEAD_REPO_EXPR}`" in t for _, t in out)
+
+
+# The three apply-wrapper shapes the retired-input probe judges. The
+# declaration is written flow-style, the shape three of the four sample repos
+# carry, so the line-anchored key must match it there too.
+_APPLY_DECLARING_IT = (
+    "name: shipmate · apply\n"
+    "on:\n"
+    "  workflow_dispatch:\n"
+    "    inputs:\n"
+    "      ref: { description: PR head SHA to apply, required: false, default: '' }\n"
+    "      plan_run_id: { description: Plan run id with the reviewed plans, required: true }\n"
+    "jobs:\n"
+    "  targeted:\n"
+    f"    uses: {_ENGINE_REPO}/.github/workflows/apply.yml@{_SHA}\n"
+    "    with:\n"
+    "      ref: ${{ inputs.ref }}\n"
+)
+_APPLY_FORWARDING_IT = (
+    "name: shipmate · apply\n"
+    "on:\n"
+    "  workflow_dispatch:\n"
+    "jobs:\n"
+    "  targeted:\n"
+    "    steps:\n"
+    f"      - uses: {_ENGINE_REPO}/actions/dispatch@{_SHA}\n"
+    "        with:\n"
+    "          plan-run-id: ${{ steps.authz.outputs.plan-run-id }}\n"
+)
+_APPLY_CLEAN = (
+    "name: shipmate · apply\n"
+    "on:\n"
+    "  workflow_dispatch:\n"
+    "    inputs:\n"
+    "      ref: { description: PR head SHA to apply, required: false, default: '' }\n"
+    "jobs:\n"
+    "  targeted:\n"
+    f"    uses: {_ENGINE_REPO}/.github/workflows/apply.yml@{_SHA}\n"
+    "    with:\n"
+    "      ref: ${{ inputs.ref }}\n"
+)
+
+
+# Hand-written, whole: the findings are compared in full rather than by
+# substring, so a reworded message is a deliberate edit here and not a silent
+# one. Never derived from `scripts/doctor`.
+_DECLARED_TEXT = (
+    "`apply.yml` still declares a `plan_run_id` input — the engine retired that input "
+    "and dispatches no such value, so nothing ever fills it in. Remove the declaration, "
+    "and any `with:` line forwarding it."
+)
+_FORWARDED_TEXT = (
+    "`apply.yml` still passes `plan_run_id` on — the engine retired that input, so nothing "
+    "it calls accepts one. Passed to the engine's reusable `apply.yml` or `apply-all.yml`, "
+    "GitHub rejects the run when it LOADS the workflow: the run appears with no job, no log "
+    "and nothing naming the unexpected input, which is the hardest failure here to diagnose "
+    "from the outside. Passed to a composite action it is only a warning and the run "
+    "continues. Remove the `with:` line — the plan run id now travels with each apply cell "
+    "and needs no wiring."
+)
+
+
+def test_a_declared_plan_run_id_input_is_reported(monkeypatch):
+    responses = _fork_responses({"apply.yml": _APPLY_DECLARING_IT})
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    out = doctor._plan_run_id_warnings(_ctx())
+    assert out == [(doctor.WARNING, _DECLARED_TEXT)]
+
+
+def test_a_forwarded_plan_run_id_is_reported(monkeypatch):
+    """The half that matters: an input a `workflow_call` does not declare is
+    rejected as the run LOADS, so there is no job and no log to read. A probe
+    reporting only the declaration leaves that failure undiagnosed."""
+    responses = _fork_responses({"apply.yml": _APPLY_FORWARDING_IT})
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    out = doctor._plan_run_id_warnings(_ctx())
+    assert out == [(doctor.WARNING, _FORWARDED_TEXT)]
+
+
+def test_a_clean_apply_wrapper_is_silent(monkeypatch):
+    responses = _fork_responses({"apply.yml": _APPLY_CLEAN})
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    assert doctor._plan_run_id_warnings(_ctx()) == []
+
+
+def test_the_apply_yml_filter_lives_in_the_dispatcher(monkeypatch):
+    """A direct call of the finding function reports whatever file it is handed:
+    the caller bypassed the exemption, and silence there reads as a false
+    positive that is not one. Only the dispatcher skips another file's name."""
+    assert doctor._plan_run_id_finding(_APPLY_DECLARING_IT, "deploy.yml") == [
+        (doctor.WARNING, _DECLARED_TEXT.replace("`apply.yml`", "`deploy.yml`"))
+    ]
+    responses = _fork_responses({"deploy.yml": _APPLY_DECLARING_IT})
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    assert doctor._plan_run_id_warnings(_ctx()) == []
+
+
+def test_the_documented_apply_wrapper_produces_no_finding(monkeypatch):
+    """The oracle for false positives, and for the page: the wrapper consumers
+    paste, verbatim, through the whole probe. The fence count is asserted first,
+    so a page edit that moves the wrapper out of this selector's reach fails
+    here instead of passing vacuously."""
+    page = (ENGINE / "docs" / "getting-started.md").read_text(encoding="utf-8")
+    fences = [
+        textwrap.dedent(m.group("body"))
+        for m in _YAML_FENCE.finditer(page)
+        if "/.github/workflows/apply-all.yml@" in m.group("body")
+    ]
+    assert len(fences) == 1, f"documented apply-wrapper fences: {len(fences)}"
+    responses = _fork_responses({"apply.yml": fences[0]})
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    assert doctor._plan_run_id_warnings(_ctx()) == []
+
+
+def test_the_probe_registry_is_exactly_this(monkeypatch):
+    """The whole registry against a hand-written list, not its length: a length
+    assertion cannot say WHICH entry changed, so a probe swapped for another
+    passes it. Order is the order findings are reported in."""
+    assert doctor.PROBES == (
+        doctor._gate_rule_warnings,
+        doctor._review_rule_warnings,
+        doctor._environment_warnings,
+        doctor._env_protection_warnings,
+        doctor._engine_environment_warnings,
+        doctor._plan_env_secret_warnings,
+        doctor._pin_warnings,
+        doctor._fork_trigger_warnings,
+        doctor._summary_wiring_warnings,
+        doctor._plan_run_id_warnings,
+        doctor._team_warnings,
+        doctor._app_permission_warnings,
+    )
 
 
 def _rules_only(*rules):
