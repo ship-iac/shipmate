@@ -107,20 +107,6 @@ def filter_pending(cells, completed_names):
     return [c for c in cells if _check_name(c["stack"], c["environment"]) not in completed_names]
 
 
-def _artifact_names(repo, run_id):
-    data = bm._run(
-        [
-            "gh",
-            "api",
-            "--paginate",
-            "--jq",
-            ".artifacts[].name",
-            f"repos/{repo}/actions/runs/{run_id}/artifacts?per_page=100",
-        ]
-    )
-    return [ln.strip() for ln in data.splitlines() if ln.strip()]
-
-
 def _check_run_lines(repo, head_sha):
     """The commit's check-runs as JSONL lines, for the two name queries below."""
     return bm._run(

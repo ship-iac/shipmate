@@ -481,9 +481,9 @@ untagged one fails the **whole run** rather than being skipped. Which stacks
 are inspected differs by path: the **changed** set on the plan and deploy
 paths, so untagged stacks elsewhere in the tree do not fail a plan run until
 one of them changes; every stack on the drift path, which is therefore the
-repo-wide backstop that catches the rest; and none on the artifact-sourced
+repo-wide backstop that catches the rest; and none on the checks-sourced
 bare-apply `detect`, which exempts the check deliberately — an untagged stack
-produces no plan artifact and so contributes no cell anyway, and an unrelated
+carries no apply check and so contributes no cell anyway, and an unrelated
 one must not abort an apply. Failing the whole run rather than the one stack is
 deliberate too: a silently skipped stack plans and applies nothing while the
 gate goes green over it, which is the one failure this contract will not trade

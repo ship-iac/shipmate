@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """apply-all.yml detect: the bare `shipmate apply` work set -> env-levels -> waves.
 
-The pre-merge equivalent of deploy-detect, sourced like apply-detect: cells
-come from the reviewed plan artifacts of ONE verified plan run (never a
-re-plan), the pending `apply / <stack> / <env>` checks are the work queue, and
-`global.shipmate.env_order` buckets pending cells into env-levels exactly as
+The pre-merge equivalent of deploy-detect, sourced like apply-detect: cells are
+the tree's stacks whose `apply / <stack> / <env>` check is on the head, each
+applying from the plan run its own check records, and
+`global.shipmate.env_order` buckets the pending ones into env-levels exactly as
 on the merge-deploy path. Env membership comes from stack tags
-(build-matrix.env_membership) so artifact and check names are only ever
-constructed forward, never reverse-parsed.
+(build-matrix.env_membership) so check names are only ever constructed forward,
+never reverse-parsed.
 
 Three exclusions distinguish the bare form from deploy:
 - envs listed in `global.shipmate.explicit_envs` (typically prod) are removed
@@ -46,19 +46,25 @@ bm = _load("build-matrix")
 wv = _load("waves")
 eo = _load("env-order")
 az = _load("authorize")
-# No apply-gate alias -- see deploy-detect and test_detect_app_scoping.
+# No apply-gate alias -- see deploy-detect and test_detect_app_scoping. The one
+# apply-gate function this path needs is reached through `ad`, so there is no
+# second route to the done predicate and no second apply-gate instance.
 
 
-def cells_from_artifacts(artifact_names, stacks_by_env, tags_by_stack):
-    """All-envs workset: per env (from tags, never from artifact-name
-    parsing), forward-match `plan.<env>.<slug>` exactly like the single-env
-    path — including its slug-collision, dotted-env and workload handling."""
+def cells_from_checks(check_names, stacks_by_env, tags_by_stack):
+    """All-envs workset: per env (from tags, never from a parse of a check
+    name), the tree's candidates whose forward-constructed check name is on the
+    head — exactly the single-env path's matching and workload handling, run
+    over every env.
+
+    `validate_env` still gates each env name: apply-cell downloads
+    `plan.<env>.<slug>`, so a dotted env would still render two distinct cells
+    to one artifact name."""
     cells = []
     for env in sorted(stacks_by_env):
         ad.validate_env(env)
-        cells.extend(
-            ad.workset_from_artifacts(artifact_names, env, stacks_by_env[env], tags_by_stack)
-        )
+        paths = ad.paths_with_checks(env, stacks_by_env[env], check_names)
+        cells.extend(ad.cells_for_env(env, paths, tags_by_stack))
     return cells
 
 
@@ -90,17 +96,20 @@ def review_held(pending_envs, ungated, decision):
 
 def main():
     repo = os.environ["GITHUB_REPOSITORY"]
-    plan_run_id = os.environ["SHIPMATE_PLAN_RUN_ID"]
     head = os.environ["SHIPMATE_HEAD_SHA"]
 
     ad.validate_head_sha(head)
-    ad.validate_plan_run_id(plan_run_id)
-    ad.verify_plan_run(repo, plan_run_id, head)
 
     stacks_by_env, tags_by_stack = bm.env_membership(all_stacks=True, require_env_tag=False)
-    names = ad._artifact_names(repo, plan_run_id)
-    cells = cells_from_artifacts(names, stacks_by_env, tags_by_stack)
+    app_id = os.environ["SHIPMATE_APP_ID"]
+    lines = ad._check_run_lines(repo, head)
+    cells = cells_from_checks(ad.apply_check_names(lines, app_id), stacks_by_env, tags_by_stack)
 
+    # A second fetch of the same listing, unlike apply-detect's single one: the
+    # done predicate must arrive through completed_apply_names, which owns the
+    # App scoping (test_detect_app_scoping). Benign here — apply_check_names is
+    # status-agnostic, so a check completing between the two fetches only moves
+    # its cell from pending to done.
     completed = ad.completed_apply_names(repo, head)
     pending = ad.filter_pending(cells, completed)
 
@@ -114,7 +123,14 @@ def main():
     # review" -- two causes, two outputs, or the comment names the wrong fix.
     excluded = sorted(set(excluded) - set(held))
     dropped = set(excluded) | set(skipped) | set(held)
-    runnable = [c for c in pending if c["environment"] not in dropped]
+    # The plan runs attach to `runnable`, not to `pending`: an excluded or held
+    # env's checks deliberately stay pending for a later targeted apply, and
+    # refusing this run over a record-less cell it was never going to apply
+    # would strand the envs that CAN apply. That apply refuses on its own.
+    runnable = ad.with_plan_runs(
+        [c for c in pending if c["environment"] not in dropped],
+        ad.ag.plan_runs_by_name(lines, app_id),
+    )
     # From `runnable`, never from `pending & ungated`: a listed env can still be
     # excluded or skipped, and claiming it applied is worse than saying nothing.
     applied_ungated = (
@@ -130,7 +146,7 @@ def main():
 
     level_counts = [sum(len(w[f"wave{i}"]) for i in range(wv.MAX_WAVES)) for w in per_level]
     print(
-        f"::notice title=apply-all-detect::plan_run={plan_run_id} head={head} "
+        f"::notice title=apply-all-detect::head={head} "
         f"cells={len(cells)} pending={len(pending)} envlevels={level_counts} "
         f"excluded_explicit={excluded} skipped_after_explicit={skipped} "
         f"review_held={held} applied_ungated={applied_ungated} "
@@ -142,7 +158,6 @@ def main():
     with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
         eo.write_env_level_waves(fh, per_level)
         fh.write(f"head_sha={head}\n")
-        fh.write(f"plan_run_id={plan_run_id}\n")
         fh.write(f"excluded_envs={json.dumps(excluded)}\n")
         fh.write(f"skipped_envs={json.dumps(skipped)}\n")
         fh.write(f"review_held_envs={json.dumps(held)}\n")
