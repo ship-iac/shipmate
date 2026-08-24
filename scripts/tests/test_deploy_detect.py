@@ -1,7 +1,7 @@
 import json
 
 import pytest
-from _detect_fixtures import APP_ID, completed_names
+from _detect_fixtures import APP_ID, _apply_check, completed_names
 from _detect_fixtures import check_run as _check
 from _loader import load_script
 
@@ -149,22 +149,6 @@ def test_merged_head_gives_up_after_attempts_exhausted_all_empty(monkeypatch):
     monkeypatch.setattr(dd.time, "sleep", lambda s: None)
     assert dd._merged_head("o/r", "merge123", _attempts=3, _sleep=0) == "merge123"
     assert calls["n"] == 3
-
-
-def _record(plan_run):
-    """An `external_id` record as pending-checks writes it."""
-    return json.dumps({"fingerprint": "a" * 64, "plan_run": plan_run})
-
-
-def _apply_check(stack, env="dev-eu", plan_run="123456", **kw):
-    """A pending App-authored apply check carrying its plan-run record."""
-    return _check(
-        name=f"apply / {stack} / {env}",
-        status="queued",
-        conclusion=None,
-        external_id=_record(plan_run),
-        **kw,
-    )
 
 
 def _cell(stack, env="dev-eu"):

@@ -53,8 +53,8 @@ def test_the_detects_reach_completed_applies_through_the_scoped_query():
 
 
 def test_only_the_query_owner_calls_the_unscoped_predicates():
-    # apply-detect owns the single call to apply-gate; the other two must not
-    # grow a second route to the predicate, scoped or otherwise.
+    # apply-detect owns the single call to apply-gate's done predicate; the
+    # other two must not grow a second route to it, scoped or otherwise.
     for name in ("deploy-detect", "apply-all-detect"):
         text = _source(name)
         for pattern in _UNSCOPED_CALLS:

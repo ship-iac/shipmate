@@ -1,29 +1,13 @@
 import json
 
 import pytest
-from _detect_fixtures import APP_ID, check_run
+from _detect_fixtures import APP_ID, _apply_check, _record, check_run
 from _loader import load_script
 
 aad = load_script("apply-all-detect")
 
 HEAD = "a" * 40
 CHECK_RUNS_URL = f"repos/o/r/commits/{HEAD}/check-runs?filter=all&per_page=100"
-
-
-def _record(plan_run):
-    """An `external_id` record as pending-checks writes it."""
-    return json.dumps({"fingerprint": "a" * 64, "plan_run": plan_run})
-
-
-def _apply_check(stack, env, plan_run="123456", **kw):
-    """A pending App-authored apply check carrying its plan-run record."""
-    return check_run(
-        name=f"apply / {stack} / {env}",
-        status="queued",
-        conclusion=None,
-        external_id=_record(plan_run),
-        **kw,
-    )
 
 
 def test_cells_are_the_tree_candidates_whose_check_is_on_the_head_in_every_env():

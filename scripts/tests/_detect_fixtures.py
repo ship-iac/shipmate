@@ -27,6 +27,22 @@ def check_run(**kw):
     return base
 
 
+def _record(plan_run):
+    """An `external_id` record as pending-checks writes it."""
+    return json.dumps({"fingerprint": "a" * 64, "plan_run": plan_run})
+
+
+def _apply_check(stack, env="dev-eu", plan_run="123456", **kw):
+    """A pending App-authored apply check carrying its plan-run record."""
+    return check_run(
+        name=f"apply / {stack} / {env}",
+        status="queued",
+        conclusion=None,
+        external_id=_record(plan_run),
+        **kw,
+    )
+
+
 def completed_names(apply_detect, monkeypatch, checks, app_id=APP_ID):
     """The "already applied" set `apply_detect` reports for `checks`, with only
     the `gh` call stubbed.

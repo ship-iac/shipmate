@@ -1,16 +1,11 @@
 import json
 
 import pytest
-from _detect_fixtures import APP_ID, completed_names
+from _detect_fixtures import APP_ID, _apply_check, _record, completed_names
 from _detect_fixtures import check_run as _check
 from _loader import load_script
 
 ad = load_script("apply-detect")
-
-
-def _record(plan_run):
-    """An `external_id` record as pending-checks writes it."""
-    return json.dumps({"fingerprint": "a" * 64, "plan_run": plan_run})
 
 
 def test_workset_is_the_graph_paths_whose_apply_check_is_present():
@@ -110,8 +105,8 @@ def test_completed_failure_apply_stays_pending(monkeypatch):
 
 def test_foreign_app_completed_check_stays_pending(monkeypatch):
     # A completed+success check authored by another identity (github-actions,
-    # app id 15368) must not count as done once SHIPMATE_APP_ID scopes the
-    # query to the shipmate App (999).
+    # app id 15368) must not count as done: the App id (999 here) reaches the
+    # predicate as an argument, not by the query reading SHIPMATE_APP_ID itself.
     cells = [{"stack": "stacks/app", "environment": "dev-eu"}]
     done = _completed(monkeypatch, [_check(app={"id": 15368})])
     assert ad.filter_pending(cells, done) == cells
@@ -147,17 +142,6 @@ def test_dag_shape_notice_reports_a_layered_graph():
     }
     assert ad.dag_shape_notice(deps) == (
         "::notice::4 stacks, 4 after edges, 3 wave levels; 2 stacks would apply concurrently"
-    )
-
-
-def _apply_check(stack, env="dev-eu", plan_run="123456", **kw):
-    """A pending App-authored apply check carrying its plan-run record."""
-    return _check(
-        name=f"apply / {stack} / {env}",
-        status="queued",
-        conclusion=None,
-        external_id=_record(plan_run),
-        **kw,
     )
 
 
