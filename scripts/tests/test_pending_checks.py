@@ -81,8 +81,29 @@ def test_missing_fingerprint_fails_loud(tmp_path):
         environment="dev-eu",
         changed=True,
     )
-    with pytest.raises(SystemExit, match="fingerprint"):
+    with pytest.raises(SystemExit, match="has no 'fingerprint' key"):
         pc.bodies(str(tmp_path), HEAD)
+
+
+def test_plan_run_comes_from_the_environment(tmp_path, monkeypatch):
+    # A distinct value, so the assertion cannot be satisfied by a `plan_run`
+    # hardcoded to the fixture's RUN_ID.
+    _write_cell(
+        tmp_path,
+        "dev-eu",
+        "stacks-app",
+        stack="app",
+        stack_path="stacks/app",
+        environment="dev-eu",
+        changed=True,
+        fingerprint="f" * 64,
+    )
+    monkeypatch.setenv("GITHUB_RUN_ID", "409181227")
+    (body,) = pc.bodies(str(tmp_path), HEAD)
+    assert json.loads(body["external_id"]) == {
+        "fingerprint": "f" * 64,
+        "plan_run": "409181227",
+    }
 
 
 def test_unusable_plan_run_id_fails_loud(tmp_path, monkeypatch):
