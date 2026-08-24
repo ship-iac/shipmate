@@ -276,8 +276,8 @@ both dispatched apply workflows refuse in their `guard` job any dispatch whose
 actor is not a `[bot]` — a hand-run one fails with `apply must be dispatched by
 the shipmate App via comment-ops, not by a direct workflow_dispatch` — and
 comment-ops
-resolves the newest successful plan run for the pull request's **current** head,
-refusing the command when that head has none. These fail-safes are defence in
+reads the plan run each `apply / <stack> / <env>` check on the pull request's
+**current** head records, refusing the command when that head names none. These fail-safes are defence in
 depth behind that control, not the only thing behind it.
 
 **If the mismatch names *every* `TF_VAR_*` and it started right after an
@@ -347,9 +347,10 @@ remedy differs:
   plan describes a tree this job does not have, so it is refused rather than
   applied or silently re-planned — as with a stale plan, there is no force. The
   fix is a re-plan and an apply of the fresh plan.
-- **There is no record at all.** The plan predates the release that binds a plan
-  to the tree it was produced from, so there is nothing to compare and the
-  absent record is refused rather than tolerated. **A push does not always fix
+- **There is no record at all.** There is nothing to compare, so the absent
+  record is refused rather than tolerated. Most often the plan predates the
+  release that binds a plan to the tree it was produced from, though a
+  mismatched engine revision produces the same absence. **A push does not always fix
   this one.** Pre-merge it does: push to the pull request and the fresh plan
   carries a record — a *re-run* of the old plan run does not, because a re-run
   replays the workflow file of the commit that triggered it, so it produces

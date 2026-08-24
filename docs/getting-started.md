@@ -122,10 +122,12 @@ load-bearing: `pull_request_target` runs at the *base* ref, so without it the ru
 plans the base branch and reports a clean plan for code it never read.
 
 **The filenames are load-bearing too.** `actions/build-matrix` refuses to plan a
-repository that has no `.github/workflows/plan.yml`, and the apply path refuses a
-plan run whose workflow path is not `plan.yml` — the name is matched literally.
-`apply.yml` is the name `actions/dispatch` targets by default, so an apply
-wrapper called anything else is dispatched by nothing and `shipmate apply`
+repository that has no `.github/workflows/plan.yml` — no apply path matches that
+path any more (each cell reads its plan run from its own apply check), but
+`shipmate doctor` keys its plan-wrapper probes on the filename, so a plan
+workflow under another name loses them silently and the refusal is what stops it
+happening. `apply.yml` is the name `actions/dispatch` targets by default, so an
+apply wrapper called anything else is dispatched by nothing and `shipmate apply`
 silently reaches no workflow. Create both under exactly those names.
 
 The fences on this page are transcribed from the sample repositories, which pin
@@ -483,9 +485,15 @@ jobs:
 ```
 
 `mode` carries `shipmate unlock <env>` — it reaches only the `targeted` job,
-since unlock is always single-env. Leave it out and `unlock` is accepted at
-comment time and then dispatched as an ordinary apply with no plan run, failing
-with an error that names neither unlock nor `mode`.
+since unlock is always single-env. The two ways to leave it out fail
+differently. **Omit the `workflow_dispatch` input** and `unlock` is accepted at
+comment time and then refused by the platform: `actions/dispatch` puts `mode` in
+the body only for an unlock, GitHub answers HTTP 422 "Unexpected inputs
+provided" for an input the wrapper does not declare, and the dispatch step
+recognises that pair and names `mode`. **Omit only the `with:` pass-through** and
+nothing fails at all — the engine's `apply.yml` declares `mode` optional with
+default `apply`, so the comment quietly applies the reviewed plan instead of
+releasing the lock.
 
 **Every input is `required: false` with an explicit default, and that is
 deliberate.** This wrapper is dispatched only by `actions/dispatch`, minting an

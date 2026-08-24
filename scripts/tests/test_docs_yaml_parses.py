@@ -16,7 +16,7 @@ import textwrap
 
 import pytest
 import yaml
-from _loader import ENGINE, ENGINE_CALL_SECRETS
+from _loader import ENGINE, ENGINE_CALL_SECRETS, WORKFLOWS
 
 # ponytail: catches syntax rot from a bad paste, not semantic drift away from the
 # sample repos -- proving a documented workflow still runs is the sample repos' CI.
@@ -147,6 +147,62 @@ def test_the_wrapper_snippets_are_still_being_found():
         ("docs/getting-started.md", "deploy.yml"),
         ("docs/getting-started.md", "summary.yml"),
     ], f"documented engine reusable-workflow calls changed: {found}"
+
+
+def _workflow_call_inputs(target):
+    """{name: spec} for the engine callee's declared `workflow_call` inputs.
+
+    Read from the callee itself: this guard's job is to compare two files that
+    must agree, so one side has to come from the file it is checking. The
+    hand-written side is the documented wrapper.
+    """
+    doc = yaml.safe_load((WORKFLOWS / target).read_text(encoding="utf-8"))
+    on = doc.get("on", doc.get(True))
+    return (on["workflow_call"].get("inputs") or {}) if isinstance(on, dict) else {}
+
+
+@pytest.mark.parametrize(
+    ("page", "line", "body"),
+    _FENCES,
+    ids=[f"{page.name}:{line}" for page, line, _ in _FENCES],
+)
+def test_documented_wrapper_passes_exactly_the_declared_engine_inputs(page, line, body):
+    """Every `with:` key a documented wrapper passes to an engine reusable
+    workflow is declared there, and every `required: true` input is passed.
+
+    Not ordinary doc staleness. An undeclared input on a *reusable workflow* is
+    a load-time rejection: the run dies at startup with no job, no check-run and
+    no retrievable log, only a workflow-validation error on the run itself. (The
+    same line on a composite action is merely ignored with a warning, which is
+    why nothing here ever needed to notice.) So a consumer pasting the
+    documented wrapper after an input is retired gets a dead pipeline, and until
+    this guard existed no test in this repository would have said so.
+
+    The requiredness half is the mirror image and equally fatal at call time.
+    """
+    for job_name, target, job in _engine_workflow_calls(yaml.safe_load(body)):
+        where = f"{page.relative_to(ENGINE).as_posix()}:{line} job `{job_name}`"
+        assert (WORKFLOWS / target).is_file(), (
+            f"{where} calls `{target}`, which this engine does not ship -- the pasted "
+            "wrapper cannot resolve it"
+        )
+        declared = _workflow_call_inputs(target)
+        passed = job.get("with") or {}
+        undeclared = sorted(set(passed) - set(declared))
+        assert not undeclared, (
+            f"{where} passes {undeclared} to `{target}`, which declares no such "
+            "workflow_call input -- GitHub rejects the run as it LOADS, so a consumer "
+            "pasting this wrapper gets no job and no log"
+        )
+        unpassed = sorted(
+            n
+            for n, spec in declared.items()
+            if isinstance(spec, dict) and spec.get("required") and n not in passed
+        )
+        assert not unpassed, (
+            f"{where} omits {unpassed}, which `{target}` declares required -- the call "
+            "is rejected before any job starts"
+        )
 
 
 def _dispatch_inputs(doc):

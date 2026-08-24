@@ -341,9 +341,9 @@ never used.
   and fails the run when any of them comes back changed: the plan matrix's
   `detect` job, the post-merge deploy's own detect, and the nightly drift run.
   Repo-wide config, so one stack answers for the tree. The dispatched and bare
-  `shipmate apply` detects reconstruct their cells from plan artifacts instead
-  and never reach this probe — by then the plan run that would have caught it
-  has already happened.
+  `shipmate apply` detects reconstruct their cells from the head's own apply
+  checks instead and never reach this probe — by then the plan run that would
+  have caught it has already happened.
 
 ## State backend
 
@@ -1056,11 +1056,13 @@ observes whether the gate will be written, and it reports rather than fails.
 
 The **file path is still load-bearing**, and nothing diagnoses a rename as the
 cause: `actions/build-matrix` refuses a checkout that has no
-`.github/workflows/plan.yml`, and doctor's `pull_request_target` probe exempts
-the plan workflow by exact name. Rename the file and planning is refused from
-that commit on, and the renamed file starts drawing doctor's own
-`pull_request_target` warning. Each symptom surfaces on its own — the refusal
-names the path it looked for — but none of them names the rename.
+`.github/workflows/plan.yml`, and doctor keys on that exact name both for its
+`pull_request_target` exemption and for the plan-wrapper wiring probes (the
+head-repository and draft inputs), which report nothing on a file called
+anything else. Rename the file and planning is refused from that commit on, and
+the renamed file starts drawing doctor's own `pull_request_target` warning. Each
+symptom surfaces on its own — the refusal names the path it looked for — but
+none of them names the rename.
 
 No apply path matches on it any more: a dispatched, bare or post-merge apply
 reads each cell's plan run from that cell's own apply check, so a renamed plan
@@ -1510,8 +1512,10 @@ the record out of the consumer's checkout into `$RUNNER_TEMP` before reading it
 file at its repo root — and compares it against its own `git rev-parse HEAD`
 before the decrypt, the state restore and the apply — a plan of another tree is
 refused at the cheapest point. A record that disagrees with the checkout is
-refused, and so is an **absent** record: it predates the release that binds a
-plan to its tree, there is nothing to compare, and the remedy is a re-plan. This
+refused, and so is an **absent** record: there is nothing to compare, so it is
+refused rather than tolerated. Most often such a plan predates the release that
+binds a plan to its tree, though a mismatched engine revision produces the same
+absence; either way the remedy is a re-plan. This
 is additive to the run-level head check the apply path already performs against
 the plan run, not a replacement for it — that check bounds which plan run may be
 applied, this one binds each individual plan to the tree it was produced from.

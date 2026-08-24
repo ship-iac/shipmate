@@ -14,8 +14,8 @@ RUNS_OK = {"apply / stacks/app / dev-eu": "555"}
 #: The refusal when the head names no plan run at all, hand-written: it is the
 #: sentence a commenter reads on a PR, not an implementation detail.
 NO_PLAN_REASON = (
-    "no reviewed plan for the current PR head — no successful "
-    "plan run to apply. Push or re-run plan, then re-plan."
+    "no reviewed plan for the current PR head — no apply check on it names a "
+    "plan run. Plan this head (push, or re-run plan), then `shipmate apply` again."
 )
 UNGATED_DEV = frozenset({"dev-eu"})
 

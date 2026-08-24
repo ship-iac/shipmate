@@ -75,8 +75,11 @@ def test_a_cell_whose_check_names_no_plan_run_refuses():
         ad.with_plan_runs(_TWO_CELLS, {"apply / stacks/app / dev-eu": "111"})
     assert str(exc_info.value) == (
         "::error::apply aborted: no plan run recorded for apply / stacks/dns / dev-eu — the "
-        "apply check names no plan run to apply from (a check written before this engine "
-        "version records none). Re-plan these stacks on this pull request, then apply again."
+        "apply check names no plan run to apply from — most likely a check written "
+        "before this engine version, and post-merge possibly no apply check for that "
+        "cell at all. Re-plan these stacks on their pull request, then apply again; if "
+        "that pull request has already merged, a new pull request touching them plans "
+        "and applies them afresh."
     )
 
 

@@ -17,9 +17,10 @@ _PR_EVENTS = ("pull_request", "pull_request_target")
 
 MATRIX_LIMIT = 256
 
-#: Where the plan workflow must live. No lookup matches this path literally any
-#: more — every apply, deploy and doctor path reads a cell's plan run from that
-#: cell's own apply check.
+#: Where the plan workflow must live. No plan-run lookup matches this path
+#: literally any more — every apply, deploy and doctor path reads a cell's plan
+#: run from that cell's own apply check — but `shipmate doctor` still keys its
+#: plan-wrapper probes on the filename.
 PLAN_WORKFLOW = ".github/workflows/plan.yml"
 
 #: Stack paths whose verb-less plan check name would land inside a namespace
@@ -418,11 +419,11 @@ def plan_workflow_error(event_name, root="."):
         return ""
     return (
         f"::error::this repository has no `{PLAN_WORKFLOW}` — that exact path is matched "
-        "literally by everything downstream of a plan, so from this commit on: "
-        "comment-ops finds no plan run and reports the reviewed plan stale forever, "
-        "`shipmate doctor` loses this run's cell summaries and skips its environment "
-        "probes, and the post-merge deploy resolves no plan run so its applies have no "
-        f"artifacts. Move the plan workflow back to `{PLAN_WORKFLOW}`."
+        "literally by `shipmate doctor`, which keys its plan-wrapper probes on the "
+        "filename: a plan workflow under any other name silently loses the "
+        "head-repository and draft wiring checks, and draws doctor's own "
+        "`pull_request_target` warning instead. Planning is refused here rather than "
+        f"degrading those diagnostics quietly. Move the plan workflow back to `{PLAN_WORKFLOW}`."
     )
 
 

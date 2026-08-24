@@ -703,13 +703,22 @@ def test_plan_workflow_at_the_contract_path_is_planned(tmp_path):
 
 
 def test_a_renamed_plan_workflow_is_refused(tmp_path):
-    # This refusal is what makes the path load-bearing: no lookup matches it
-    # literally any more, so a rename would otherwise merge green.
+    # This refusal is what makes the path load-bearing: no plan-run lookup
+    # matches it literally any more, so a rename would otherwise merge green
+    # while doctor's filename-keyed probes went quiet. Whole message, written by
+    # hand: the consequences it names are the ones still true after the plan run
+    # id moved onto each apply check, and a clause about plan-run discovery
+    # coming back here would be a user-facing falsehood.
     (tmp_path / ".github" / "workflows").mkdir(parents=True)
     (tmp_path / ".github" / "workflows" / "shipmate-plan.yml").write_text("", encoding="utf-8")
-    err = bm.plan_workflow_error("pull_request", str(tmp_path))
-    assert err.startswith("::error::")
-    assert ".github/workflows/plan.yml" in err
+    assert bm.plan_workflow_error("pull_request", str(tmp_path)) == (
+        "::error::this repository has no `.github/workflows/plan.yml` — that exact path is "
+        "matched literally by `shipmate doctor`, which keys its plan-wrapper probes on the "
+        "filename: a plan workflow under any other name silently loses the head-repository "
+        "and draft wiring checks, and draws doctor's own `pull_request_target` warning "
+        "instead. Planning is refused here rather than degrading those diagnostics quietly. "
+        "Move the plan workflow back to `.github/workflows/plan.yml`."
+    )
 
 
 def test_plan_workflow_check_is_skipped_off_a_pull_request(tmp_path):

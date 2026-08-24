@@ -157,8 +157,8 @@ def decide(
         return False, review_reason
     if not plan_runs:
         return False, (
-            "no reviewed plan for the current PR head — no successful "
-            "plan run to apply. Push or re-run plan, then re-plan."
+            "no reviewed plan for the current PR head — no apply check on it names a "
+            "plan run. Plan this head (push, or re-run plan), then `shipmate apply` again."
         )
     return True, ""
 

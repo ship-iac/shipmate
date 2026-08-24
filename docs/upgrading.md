@@ -159,6 +159,110 @@ names. The entries below `0.2.0` predate the first tagged release, or
 `CHANGELOG.md` does not pin one; they are kept for repositories moving from a
 very old pin.
 
+### 0.19.0 — the plan run travels on each apply check; retire `plan_run_id` from your wrappers
+
+**Re-pinning alone is not enough, and the edit touches two files.** Every
+`apply / <stack> / <env>` check now records the plan run its plan came from, so
+each apply, deploy and `shipmate doctor` lookup reads that run **per cell**
+instead of being handed one run id for the whole command. The `plan_run_id` rail
+that carried it is gone from the engine, and a wrapper still carrying it breaks
+in two quite different ways depending on which file it sits in.
+
+**`apply.yml` (and a split `apply-all.yml`) — this is the half that kills the
+run.** Delete the `plan_run_id` `workflow_dispatch` input and the `with:` lines
+that forward it:
+
+```yaml
+  targeted:
+    uses: <owner>/shipmate/.github/workflows/apply.yml@<engine-sha>
+    with:
+      environment: ${{ inputs.environment }}
+      mode: ${{ inputs.mode }}
+      ref: ${{ inputs.ref }}
+      pr_number: ${{ inputs.pr_number }}
+      plan_run_id: ${{ inputs.plan_run_id }}   # <- delete this line
+      state_suffix: ""
+```
+
+The **forwarding line is the fatal one**. The engine's `apply.yml` and
+`apply-all.yml` are *reusable workflows*, and a `with:` key a reusable workflow
+does not declare is rejected as GitHub **loads** the run — measured on a live run
+2026-08-24: `conclusion: startup_failure`, zero jobs, no check runs on the
+commit, and no retrievable log, only a workflow-validation error on the run
+itself. Nothing on any API or CLI surface names the offending input. The
+`workflow_dispatch` declaration left behind on its own is milder: `required:
+false` with a default is inert (the engine sends no such value), and `required:
+true` is refused at dispatch time with an HTTP 422 that at least names the input.
+Remove both, in the same commit as the pin bump — `docs/releasing.md`'s cascade
+rule, since the callee and the caller must agree at load time.
+
+**`comment-ops.yml` — this is the half that only warns, which is exactly why it
+gets missed.** On the `actions/dispatch` step:
+
+```yaml
+    steps:
+      - if: ${{ steps.authz.outputs.authorized == 'true' }}
+        uses: <owner>/shipmate/actions/dispatch@<engine-sha>
+        with:
+          environment: ${{ steps.authz.outputs.environment }}
+          mode: ${{ steps.authz.outputs.mode }}
+          ref: ${{ steps.authz.outputs.head-sha }}
+          plan-run-id: ${{ steps.authz.outputs.plan-run-id }}   # <- delete this line
+          pr-number: ${{ github.event.issue.number }}
+```
+
+Both ends of that line are gone: `authorize` no longer writes the `plan-run-id`
+output and `dispatch` no longer declares the input, so it resolves empty into an
+input that does not exist. `dispatch` is a **composite action**, and GitHub
+answers an undeclared action input with `Unexpected input(s)` and runs the step
+anyway. **Fix only `apply.yml` and you get a working pipeline carrying a
+permanent, unexplained warning on every `shipmate apply`** — and nothing tells
+you where it comes from. `shipmate doctor` gained a probe for the retired input
+this release, but it reads a file named exactly `apply.yml`: it does not report
+`comment-ops.yml`, and it does not report a split layout's `apply-all.yml`.
+
+**Drain pending applies before the re-pin merges.** Same instruction §0.17.0
+gives, for the same reason: a reviewed plan produced before this release has
+apply checks carrying a bare fingerprint and no plan run, and an apply refuses
+such a cell rather than guessing which run planned it. Pre-merge that costs a
+re-plan — push to the pull request and apply the fresh plan. A cell still pending
+when the re-pin merges is refused by the post-merge deploy instead, and the
+remedy there is a follow-up pull request touching those stacks. Landing the
+re-pin with nothing pending is what avoids meeting it at all.
+
+**A partially failed plan run's healthy cells are now individually applicable,
+pre-merge.** Previously the apply path resolved its plan run from the plan
+workflow's `status=success` runs, so one failed cell made the *whole* run
+invisible and every cell of it refused, including the ones that planned
+perfectly. Records live on the checks now, so each healthy cell applies from the
+run that planned it while the failed one stays unappliable. This is deliberate,
+not a side effect. What still refuses is unchanged: a cell whose apply check
+records no plan run cannot be applied, `apply-cell` refuses a missing or expired
+plan artifact, the reviewed-plan-to-tree binding (§0.17.0) is untouched, and
+`shipmate / gate` stays **red** while any planned cell is incomplete — so a
+partial plan still merges nothing.
+
+**`shipmate doctor` reads a partially failed run's cell summaries too**, for the
+same reason and by the same change: it takes the plan runs named by this commit's
+apply checks rather than the newest successful run of the plan workflow. A run
+that lost one cell used to cost the whole report its environment probes; now it
+reports on the cells that produced summaries.
+
+**If the wrapper edits are missed.** Observed: the dead run's shape above
+(startup_failure, no jobs, no checks, no log), and `shipmate doctor` reporting
+the declaration and the forward as separate warnings on every plan run — so a
+re-pin pull request that missed the `apply.yml` edit is told before it merges,
+provided the file carries that exact name and its `on:` block is not written in
+fully inline flow style. Derived, not observed: recovery needs no ruleset bypass.
+An `apply.yml`-only pull request touches no stack, so `build-matrix` reports an
+empty matrix, the plan job is skipped and the gate greens on zero planned cells —
+§0.17.0's escape, which applies here because the broken file is reached only by a
+dispatch and never by the plan path. Also derived: a run that dies at load
+creates no check runs, so the pending `apply / <stack> / <env>` checks stay
+pending and the gate stays red — fail-closed, nothing merges on a broken wrapper.
+Neither has been exercised on a live repository; §0.18.0's bypass requirement was
+stated as fact on the same kind of reasoning and is not repeated here.
+
 ### 0.18.0 — the wrappers state the head repository and the draft flag
 
 **Re-pinning alone is not enough.** The fork refusal and the draft skip no
@@ -311,6 +415,11 @@ unchanged — the new per-cell check is additive.
         required: false
         default: ''
 ```
+
+**Moving to `0.19.0` or later? Do not add `plan_run_id` at all** — that input is
+retired, and a wrapper forwarding it to the engine's reusable workflows now kills
+the run as GitHub loads it (§0.19.0). The rest of this entry still applies to
+`ref`, `pr_number` and `mode`.
 
 `plan_run_id` is the one that breaks: `shipmate unlock` applies no plan, so the
 engine dispatches it with an empty run id, and **GitHub reads an empty value for

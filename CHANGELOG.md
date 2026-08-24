@@ -11,6 +11,58 @@ section below names the SHA the release tags.
 The version line stays `v0.x` while action inputs, check names, and the comment
 grammar are declared unstable in `README.md`.
 
+## [Unreleased] — 0.19.0
+
+**Re-pinning alone is not enough, and the edit touches two consumer files.**
+Delete the `plan_run_id` `workflow_dispatch` input and its `with:` pass-throughs
+from `apply.yml` (and a split `apply-all.yml`), and the
+`plan-run-id: ${{ steps.authz.outputs.plan-run-id }}` line from `comment-ops.yml`'s
+`actions/dispatch` step, in the same change that moves your pins. The two fail
+nothing alike: forwarding the retired input to a **reusable workflow** is a
+load-time rejection — the run dies at startup with no job, no check run and no
+log — while the same line on a **composite action** is only an `Unexpected
+input(s)` warning and the run continues. Fix only the first and the pipeline
+works while every `shipmate apply` carries an unexplained warning
+(`docs/upgrading.md` §0.19.0).
+
+### Changed
+
+- **The plan run id travels on each apply check, not through the wrappers.**
+  Every `apply / <stack> / <env>` check now records the plan run its plan came
+  from in its `external_id`, alongside the apply-match fingerprint, and the
+  dispatched, bare and post-merge apply paths each read that run **per cell**.
+  The `plan_run_id` rail — a dispatch input threaded through the consumer's
+  wrapper, the engine's reusable apply workflows and comment-ops' `authorize`
+  output — is gone. One run id for a whole command could only ever be right when
+  one run planned every cell, which stops being true the moment a single plan
+  cell is re-run.
+
+- **A partially failed plan run's healthy cells are now individually
+  applicable, pre-merge.** The apply path resolved its plan run from the plan
+  workflow's `status=success` runs, so one failed cell made the whole run
+  invisible and every cell of it refused, the ones that planned perfectly
+  included. Deliberate, and bounded: a cell whose check records no plan run still
+  cannot be applied, `apply-cell` still refuses a missing or expired artifact, the
+  plan-to-tree binding is unchanged, and `shipmate / gate` stays red while any
+  planned cell is incomplete — so a partial plan still merges nothing.
+
+- **`shipmate doctor` reads a partially failed run's cell summaries too**, by the
+  same change: it takes the plan runs this commit's apply checks name rather than
+  the newest successful run of the plan workflow. A run that lost one cell used to
+  cost the whole report its environment probes.
+
+- **`shipmate doctor` reports a wrapper that still declares or forwards
+  `plan_run_id`**, as two separate findings — the declaration is dead weight, the
+  forward is the load-time kill. It reads a file named exactly `apply.yml`, so it
+  has nothing to say about `comment-ops.yml` or a split layout's `apply-all.yml`.
+
+- **Three refusals were re-worded to what is still true.** The missing-plan-workflow
+  refusal named three downstream consequences this release removes and now names
+  the one that remains (doctor keys its plan-wrapper probes on the filename); the
+  absent-plan-run refusal shared by all three detects now states a remedy that
+  exists post-merge as well; and `apply-cell`'s absent-record refusal states its
+  presumed cause as a likelihood rather than a fact.
+
 ## [0.18.0] — 2026-08-23
 
 Tags `468429a`.

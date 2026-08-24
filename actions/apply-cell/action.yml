@@ -78,7 +78,7 @@ runs:
       run: |
         set -euo pipefail
         if [ ! -f planned-head.txt ]; then
-          echo "::error::apply aborted for $ENV/$STACK_NAME: this reviewed plan records no planned commit, so it predates the release that binds a plan to the tree it was produced from. Re-plan the affected stacks in a new pull request."
+          echo "::error::apply aborted for $ENV/$STACK_NAME: this reviewed plan records no planned commit, so there is nothing to compare against this checkout — most likely the plan predates the release that binds a plan to the tree it was produced from, though a mismatched engine revision produces the same absence. Re-plan this stack on its pull request and apply the fresh plan; if that pull request has already merged, a new pull request touching the stack plans and applies it afresh."
           exit 1
         fi
         record="$RUNNER_TEMP/planned-head.txt"

@@ -223,11 +223,11 @@ the release commit, from one sample:
    ```
 
 2. Drive the wrapper **directly at that ref**, with the body `actions/dispatch`
-   would build — including the values it deliberately sends empty:
+   would build — exactly those keys, and no others:
 
    ```bash
    gh workflow run apply.yml --repo ship-iac/repo-example-stacks-aws --ref smoke/vX.Y.Z \
-     -f mode=unlock -f environment=sbx -f ref=<40-char-sha> -f pr_number=<n> -f plan_run_id=
+     -f mode=unlock -f environment=sbx -f ref=<40-char-sha> -f pr_number=<n>
    ```
 
    **Not by commenting the verb.** An `issue_comment` workflow always runs from
@@ -240,11 +240,13 @@ the release commit, from one sample:
 
 **What this catches, and what it cannot.** It catches the class that genuinely
 needs a consumer: the wrapper's `workflow_dispatch` input declarations meeting
-the body the engine sends. An empty `-f plan_run_id=` against a `required: true`
-input is rejected as "not provided" right here, with no job started, and nothing
-in this repository can see that pair. It also resolves and parses the engine
-reusable workflow at the new SHA, because that happens when the run graph is
-built.
+the body the engine sends. Either half of that pair is rejected right here, with
+no job started, and nothing in this repository can see it — an input the engine
+sends that the wrapper does not declare (`mode`, against a wrapper predating
+`unlock`) is a 422 "Unexpected inputs provided", and a `required: true` wrapper
+input the engine no longer sends is a 422 "not provided". It also resolves and
+parses the engine reusable workflow at the new SHA, because that happens when the
+run graph is built.
 
 It cannot reach a composite action's manifest — not because those refs are
 local (the engine's reusable workflows reach every action at a **remote** SHA
