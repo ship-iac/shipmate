@@ -1,9 +1,6 @@
 name: shipmate apply-all-detect
-description: Compute the bare `shipmate apply` work set (all non-explicit envs, from a plan run's plan artifacts), bucket it into env-levels, and wave-order each level. Skips already-applied cells; explicit envs stay pending.
+description: Compute the bare `shipmate apply` work set (all non-explicit envs, from the head's apply checks), bucket it into env-levels, and wave-order each level. Skips already-applied cells; explicit envs stay pending.
 inputs:
-  plan-run-id:
-    description: Plan run id holding the reviewed plan artifacts.
-    required: true
   head-sha:
     description: PR head SHA carrying the pending apply checks.
     required: true
@@ -31,7 +28,6 @@ outputs:
   envlevel2_empty: { description: "'true' when env-level 2 has no cell in any wave.", value: "${{ steps.d.outputs.envlevel2_empty }}" }
   envlevel3_empty: { description: "'true' when env-level 3 has no cell in any wave.", value: "${{ steps.d.outputs.envlevel3_empty }}" }
   head_sha: { description: Echoed head SHA, value: "${{ steps.d.outputs.head_sha }}" }
-  plan_run_id: { description: Echoed plan run id, value: "${{ steps.d.outputs.plan_run_id }}" }
   excluded_envs: { description: JSON list of explicit envs left pending (target them with `shipmate apply <env>`), value: "${{ steps.d.outputs.excluded_envs }}" }
   skipped_envs: { description: "JSON list of envs skipped because they are ordered after an env not applying this run (held for review, or excluded as explicit)", value: "${{ steps.d.outputs.skipped_envs }}" }
   review_held_envs: { description: JSON list of envs held because the PR is not reviewed, value: "${{ steps.d.outputs.review_held_envs }}" }
@@ -44,7 +40,6 @@ runs:
       shell: bash
       env:
         GH_TOKEN: ${{ inputs.github-token }}
-        SHIPMATE_PLAN_RUN_ID: ${{ inputs.plan-run-id }}
         SHIPMATE_HEAD_SHA: ${{ inputs.head-sha }}
         SHIPMATE_APP_ID: ${{ inputs.app-id }}
         SHIPMATE_UNGATED_ENVS: ${{ inputs.ungated-envs }}

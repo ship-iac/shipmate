@@ -5,7 +5,6 @@ on:
       environment: { required: true, type: string }
       ref: { required: true, type: string }
       pr_number: { required: true, type: string }
-      plan_run_id: { required: true, type: string }
       state_suffix: { required: true, type: string }
       # Absent on every apply dispatch (comment-ops only sends it for unlock),
       # so the default is what keeps those on the apply path.
@@ -31,9 +30,9 @@ jobs:
   # Its own job, not a first step of `detect`: `summary` must refuse a rejected
   # dispatch (it mints the App key and comments on the dispatcher-supplied PR
   # number) while still posting the failure comment and refreshing the gate
-  # when `detect` genuinely fails -- an env_order cycle, a bad plan run id.
-  # Keying `summary` on this job separates
-  # the two: `needs.guard.result == 'success'` is false only for an
+  # when `detect` genuinely fails -- an env_order cycle, a cell whose apply
+  # check records no plan run. Keying `summary` on this job separates the two:
+  # `needs.guard.result == 'success'` is false only for an
   # unauthorised dispatch. No secrets, no environment, no checkout.
   guard:
     runs-on: ubuntu-latest
@@ -123,7 +122,6 @@ jobs:
       cells: ${{ steps.d.outputs.cells }}
       empty: ${{ steps.d.outputs.empty }}
       head_sha: ${{ steps.d.outputs.head_sha }}
-      plan_run_id: ${{ steps.d.outputs.plan_run_id }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { fetch-depth: 0, ref: "${{ inputs.ref }}" }
@@ -136,7 +134,6 @@ jobs:
         with:
           environment: ${{ inputs.environment }}
           mode: ${{ inputs.mode }}
-          plan-run-id: ${{ inputs.plan_run_id }}
           head-sha: ${{ inputs.ref }}
           github-token: ${{ github.token }}
           app-id: ${{ vars.SHIPMATE_APP_ID }}
@@ -184,7 +181,6 @@ jobs:
     with:
       waves_json: ${{ needs.detect.outputs.waves }}
       head_sha: ${{ needs.detect.outputs.head_sha }}
-      plan_run_id: ${{ needs.detect.outputs.plan_run_id }}
       state_suffix: ${{ inputs.state_suffix }}
     # Named, never `inherit`: these two files sit in one organization but the RUN
     # belongs to the consumer, and `inherit` is evaluated against the run -- so a
@@ -273,8 +269,8 @@ jobs:
     # the bot-actor rejection failed; `needs.guard.result == 'success'` closes
     # that. Keyed on `guard` and NOT on `detect`: `always()` is needed so
     # results/gate-refresh post when apply failed or was cancelled, and a
-    # genuine `detect` failure (a bad plan run id) must still get the developer
-    # a failure comment and a gate refresh.
+    # genuine `detect` failure (a cell recording no plan run) must still get
+    # the developer a failure comment and a gate refresh.
     if: ${{ always() && needs.guard.result == 'success' }}
     runs-on: ubuntu-latest
     # Both steps below mint the App key (via secrets.SHIPMATE_APP_PRIVATE_KEY),

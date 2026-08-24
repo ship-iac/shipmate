@@ -38,9 +38,6 @@ outputs:
   head_sha:
     description: PR head SHA for the merged commit.
     value: "${{ steps.detect.outputs.head_sha }}"
-  plan_run_id:
-    description: Plan workflow run id holding the reviewed plan artifacts.
-    value: "${{ steps.detect.outputs.plan_run_id }}"
 runs:
   using: composite
   steps:

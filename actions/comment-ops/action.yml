@@ -39,9 +39,6 @@ outputs:
   environment:
     description: Parsed target environment; empty for a bare `shipmate apply` (all non-explicit environments).
     value: ${{ steps.authz.outputs.environment }}
-  plan-run-id:
-    description: Plan run id holding the reviewed plan; always empty on the `unlock` route, which consumes no plan artifact.
-    value: ${{ steps.authz.outputs.plan_run_id }}
   head-sha:
     description: PR head SHA.
     value: ${{ steps.authz.outputs.head_sha }}
