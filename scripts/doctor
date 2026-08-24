@@ -1521,11 +1521,16 @@ def _plan_run_id_finding(text, name):
     They are reported separately because the consequences are not alike. A
     declaration alone is dead weight: the engine sends no such value, so nothing
     fills it in. A forward to the engine's reusable `apply.yml`/`apply-all.yml`
-    is a LOAD-TIME rejection of the whole run — no job, no log, no annotation
-    naming the input — which is the hardest failure in this system to diagnose
-    from the outside."""
-    inline, block = _on_block(text)
-    declared = 0 if inline is None else len(_PLAN_RUN_ID_KEY.findall("\n".join(block)))
+    is a LOAD-TIME rejection of the whole run: no jobs, no logs, only a
+    workflow-validation error on the run itself — which is the hardest failure in
+    this system to diagnose from the outside. Only that much is claimed, and it
+    was MEASURED: `docs/releasing.md` establishes the load-time rejection for an
+    undeclared SECRET and says an undeclared ACTION input is silently ignored, so
+    the workflow-call case was checked rather than inferred — `conclusion:
+    startup_failure`, `jobs` reporting `total_count: 0`, no check runs on the
+    commit, and `gh run view --log` answering that the log is not found."""
+    _, block = _on_block(text)
+    declared = len(_PLAN_RUN_ID_KEY.findall("\n".join(block)))
     forwarded = len(_PLAN_RUN_ID_KEY.findall(_stripped_text(text))) - declared
     out = []
     if declared:
@@ -1544,9 +1549,10 @@ def _plan_run_id_finding(text, name):
                 f"`{name}` still passes `plan_run_id` on — the engine retired that input, so "
                 "nothing it calls accepts one. Passed to the engine's reusable `apply.yml` or "
                 "`apply-all.yml`, GitHub rejects the run when it LOADS the workflow: the run "
-                "appears with no job, no log and nothing naming the unexpected input, which is "
-                "the hardest failure here to diagnose from the outside. Passed to a composite "
-                "action it is only a warning and the run continues. Remove the `with:` line — "
+                "has no jobs and no logs, only a workflow-validation error on the run itself, "
+                "which is the hardest failure here to diagnose from the outside. Passed to a "
+                "composite action it is only a warning and the run continues. Remove the "
+                "`with:` line — "
                 "the plan run id now travels with each apply cell and needs no wiring.",
             )
         )

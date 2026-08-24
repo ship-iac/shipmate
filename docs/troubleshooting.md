@@ -84,9 +84,9 @@ step that constant is the fork refusal passing every pull request),
 whether the `apply.yml` wrapper still declares or forwards the retired
 `plan_run_id` input (the engine dispatches no such value and nothing it calls
 accepts one; a `with:` line forwarding it to the engine's reusable `apply.yml`
-or `apply-all.yml` makes GitHub reject the run as it LOADS the workflow — no
-job, no log, nothing naming the input — while the same line on a composite
-action is only a warning),
+or `apply-all.yml` makes GitHub reject the run as it LOADS the workflow — the
+run has no jobs and no logs, only a workflow-validation error on the run itself
+— while the same line on a composite action is only a warning),
 whether the configured approvers team resolves in the org, and
 whether the shipmate App installation still grants the manifest's full
 permission set — with the warning and failure annotations GitHub already

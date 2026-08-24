@@ -2919,9 +2919,9 @@ _DECLARED_TEXT = (
 _FORWARDED_TEXT = (
     "`apply.yml` still passes `plan_run_id` on — the engine retired that input, so nothing "
     "it calls accepts one. Passed to the engine's reusable `apply.yml` or `apply-all.yml`, "
-    "GitHub rejects the run when it LOADS the workflow: the run appears with no job, no log "
-    "and nothing naming the unexpected input, which is the hardest failure here to diagnose "
-    "from the outside. Passed to a composite action it is only a warning and the run "
+    "GitHub rejects the run when it LOADS the workflow: the run has no jobs and no logs, only "
+    "a workflow-validation error on the run itself, which is the hardest failure here to "
+    "diagnose from the outside. Passed to a composite action it is only a warning and the run "
     "continues. Remove the `with:` line — the plan run id now travels with each apply cell "
     "and needs no wiring."
 )
@@ -2977,6 +2977,30 @@ def test_the_documented_apply_wrapper_produces_no_finding(monkeypatch):
     responses = _fork_responses({"apply.yml": fences[0]})
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
     assert doctor._plan_run_id_warnings(_ctx()) == []
+
+
+def test_plan_run_id_without_a_commit_is_a_note_not_a_read(monkeypatch):
+    # Same reasoning as the pin, fork-trigger and summary-wiring probes: a
+    # default-branch read would report the retired input on the very pull request
+    # that removes it. The `gh` stub pins that no read happens at all, so a
+    # weaker read cannot be silently substituted for the skip.
+    def gh(path):
+        pytest.fail(f"the retired-input probe read the API with no commit: {path}")
+
+    monkeypatch.setattr(doctor, "_gh_json", gh)
+    out = doctor._plan_run_id_warnings(_ctx(head_sha=""))
+    assert out == [doctor.PLAN_RUN_ID_NO_COMMIT]
+    assert out[0][0] == doctor.NOTICE
+
+
+def test_plan_run_id_unreadable_directory_degrades_to_a_note(monkeypatch):
+    def gh(path):
+        raise SystemExit(f"::error::command failed (1): gh api {path}")
+
+    monkeypatch.setattr(doctor, "_gh_json", gh)
+    out = doctor._plan_run_id_warnings(_ctx())
+    assert out == [doctor.PLAN_RUN_ID_UNREADABLE]
+    assert out[0][0] == doctor.NOTICE
 
 
 def test_the_probe_registry_is_exactly_this(monkeypatch):
