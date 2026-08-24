@@ -7,8 +7,9 @@ Two separate outcomes have to be told apart:
 - an **unauthorised dispatch** must not reach `summary`, which mints the App
   key and comments on the dispatcher-supplied pull request number; and
 - a **genuine `detect` failure** -- a matrix over the 256-cell cap, an
-  env_order cycle, a bad plan run id -- must still reach `summary`, or the
-  developer gets no failure comment and no gate refresh at all.
+  env_order cycle, a cell whose apply check records no plan run -- must still
+  reach `summary`, or the developer gets no failure comment and no gate
+  refresh at all.
 
 `if: always() && needs.detect.result == 'success'` silenced both. Keying
 `summary` on `guard` instead separates them, and every fan-out job carries

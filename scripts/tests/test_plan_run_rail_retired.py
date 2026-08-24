@@ -65,7 +65,7 @@ def _inputs(spec):
 
 
 def test_no_engine_workflow_declares_a_plan_run_id_input():
-    found = {p.name: _inputs(_workflow(p)) for p in sorted(WORKFLOWS.glob("*.yml"))}
+    found = {p.name: _inputs(_workflow(p)) for p in sorted(WORKFLOWS.glob("*.y*ml"))}
     assert found == EXPECTED_INPUTS, f"engine workflow inputs changed: {found}"
 
 
