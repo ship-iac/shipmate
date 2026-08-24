@@ -814,10 +814,13 @@ def test_rejects_stack_paths_that_slug_to_one_artifact_name():
     # `a/b` and `a-b` both slug to `a-b`, so both cells' plan artifact is
     # `plan.dev-eu.a-b` and an apply downloads whichever landed last.
     stacks = ["a/b", "a-b"]
-    with pytest.raises(
-        SystemExit, match=r"a-b, a/b all map to the plan artifact 'plan\.dev-eu\.a-b'"
-    ):
+    with pytest.raises(SystemExit) as exc_info:
         bm.build_matrix(["dev-eu"], {"dev-eu": stacks}, {s: ["env/dev-eu"] for s in stacks})
+    assert str(exc_info.value) == (
+        "::error::a-b, a/b all map to the plan artifact 'plan.dev-eu.a-b': distinct "
+        "stack paths sharing one artifact name would make an apply download another "
+        "stack's plan. Rename one so the path->'-' slug is unique."
+    )
 
 
 def test_same_slug_in_different_envs_is_allowed():
