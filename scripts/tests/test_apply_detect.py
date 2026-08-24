@@ -8,65 +8,81 @@ from _loader import load_script
 ad = load_script("apply-detect")
 
 
-def test_workset_matches_plan_artifacts_for_env():
-    names = [
-        "plan.dev-eu.stacks-app",
-        "plan.dev-eu.stacks-dns",
-        "plan.dev-us.stacks-app",  # other env — excluded
-        "cell-summary.dev-eu.stacks-app",
-    ]  # not a plan artifact — excluded
+def _record(plan_run):
+    """An `external_id` record as pending-checks writes it."""
+    return json.dumps({"fingerprint": "a" * 64, "plan_run": plan_run})
+
+
+def test_workset_is_the_graph_paths_whose_apply_check_is_present():
+    # Membership is the head's apply checks, not one run's artifact names: a
+    # stack planned into an artifact but carrying no check is not applied, and a
+    # check for another env is not this env's work.
+    names = {
+        "apply / stacks/app / dev-eu",
+        "apply / stacks/dns / dev-eu",
+        "apply / stacks/platform / dev-us",
+        "plan / stacks/platform / dev-eu",
+    }
     graph_paths = ["stacks/app", "stacks/dns", "stacks/platform"]
-    cells = ad.workset_from_artifacts(names, "dev-eu", graph_paths, {})
-    stacks = sorted(c["stack"] for c in cells)
-    assert stacks == ["stacks/app", "stacks/dns"]
-    assert all(c["environment"] == "dev-eu" for c in cells)
+    assert ad.paths_with_checks("dev-eu", graph_paths, names) == ["stacks/app", "stacks/dns"]
 
 
-def test_workset_attaches_workload_var_from_the_tags():
-    # A stack in the artifacts but absent from the tag map gets "" -- the map is
-    # built from a separate terramate query and must never be able to raise here.
-    names = ["plan.dev-eu.stacks-app", "plan.dev-eu.stacks-dns", "plan.dev-eu.stacks-platform"]
-    cells = ad.workset_from_artifacts(
-        names,
+def test_workset_forward_constructs_the_name_and_never_parses_it():
+    # Both paths must resolve. `components/app` contains the '/' that makes a
+    # split-on-'/' parse wrong, and `a / b` is ambiguous under any rsplit of
+    # `apply / a / b / dev-eu` -- is the stack "a" or "a / b"? Forward
+    # construction never has to decide, so neither path can be misresolved.
+    graph_paths = ["components/app", "a / b", "stacks/unplanned"]
+    names = {"apply / components/app / dev-eu", "apply / a / b / dev-eu"}
+    assert ad.paths_with_checks("dev-eu", graph_paths, names) == ["components/app", "a / b"]
+
+
+def test_cells_take_workload_var_from_the_tags():
+    # Never from the check name: the name carries no workload, and a cell that
+    # invented one from its path would assume the wrong environment role. A
+    # stack missing from the map carries "" -- the map comes from a separate
+    # terramate query and must never be able to raise here.
+    cells = ad.cells_for_env(
         "dev-eu",
-        ["stacks/app", "stacks/dns", "stacks/platform"],
+        ["stacks/app", "stacks/dns"],
         {"stacks/app": ["env/dev-eu", "workload/net-edge"], "stacks/dns": ["env/dev-eu"]},
     )
     assert cells == [
         {"stack": "stacks/app", "environment": "dev-eu", "workload_var": "NET_EDGE"},
         {"stack": "stacks/dns", "environment": "dev-eu", "workload_var": ""},
-        {"stack": "stacks/platform", "environment": "dev-eu", "workload_var": ""},
     ]
 
 
-def test_workset_ignores_slug_with_wrong_env_suffix():
-    names = ["plan.dev-eu-apply.stacks-app"]  # not the plain env
-    cells = ad.workset_from_artifacts(names, "dev-eu", ["stacks/app"], {})
-    assert cells == []
+_TWO_CELLS = [
+    {"stack": "stacks/app", "environment": "dev-eu", "workload_var": ""},
+    {"stack": "stacks/dns", "environment": "dev-eu", "workload_var": ""},
+]
 
 
-def test_workset_env_suffix_no_cross_match():
-    # env "eu" must NOT match "dev-eu" artifacts (forward-construct, no reverse split)
-    names = ["plan.dev-eu.stacks-app"]
-    assert ad.workset_from_artifacts(names, "eu", ["stacks/app"], {}) == []
+def test_each_cell_carries_the_plan_run_its_own_check_names():
+    # The recovery shape: one cell re-planned by a later run while its sibling is
+    # still named by the first. Each must apply from the run that planned it.
+    out = ad.with_plan_runs(
+        _TWO_CELLS,
+        {"apply / stacks/app / dev-eu": "111", "apply / stacks/dns / dev-eu": "222"},
+    )
+    assert out == [
+        {"stack": "stacks/app", "environment": "dev-eu", "workload_var": "", "plan_run_id": "111"},
+        {"stack": "stacks/dns", "environment": "dev-eu", "workload_var": "", "plan_run_id": "222"},
+    ]
 
 
-def test_old_delimiter_collision_no_longer_forward_matches():
-    # The L9 collision: (stacks/app, dev-eu) planned; apply-detect runs for env
-    # "eu" with a graph path "stacks/app-dev". Under the old `plan-<slug>-<env>`
-    # scheme both rendered `plan-stacks-app-dev-eu`, so env "eu" wrongly enrolled
-    # stacks/app-dev. Under `plan.<env>.<slug>` the artifact is
-    # `plan.dev-eu.stacks-app` and env "eu" constructs `plan.eu.stacks-app-dev`
-    # -> no match.
-    names = ["plan.dev-eu.stacks-app"]
-    assert ad.workset_from_artifacts(names, "eu", ["stacks/app-dev"], {}) == []
-
-
-def test_workset_slug_collision_fails_loud():
-    # two distinct paths slug identically -> ambiguous artifact match -> fail loud
-    names = ["plan.dev-eu.stacks-a-b"]
-    with pytest.raises(SystemExit):
-        ad.workset_from_artifacts(names, "dev-eu", ["stacks/a/b", "stacks-a/b"], {})
+def test_a_cell_whose_check_names_no_plan_run_refuses():
+    # Not skipped and not defaulted: falling back to a run lookup keyed on a
+    # plan run's head_sha is the platform dependency this path exists to drop,
+    # and a silent default applies a cell from nowhere.
+    with pytest.raises(SystemExit) as exc_info:
+        ad.with_plan_runs(_TWO_CELLS, {"apply / stacks/app / dev-eu": "111"})
+    assert str(exc_info.value) == (
+        "::error::apply aborted: no plan run recorded for apply / stacks/dns / dev-eu — the "
+        "apply check records no plan run, so it predates the release that binds an apply to "
+        "the run that planned it. Re-plan the affected stacks in a new pull request."
+    )
 
 
 def test_filter_pending_drops_completed():
@@ -134,91 +150,97 @@ def test_dag_shape_notice_reports_a_layered_graph():
     )
 
 
-def test_main_emits_the_dag_shape_notice(monkeypatch, tmp_path, capsys):
-    # The line is worth nothing unprinted: this executes the real entry point.
-    deps = {"stacks/a": set(), "stacks/b": {"stacks/a"}}
-    monkeypatch.setattr(ad, "verify_plan_run", lambda repo, run_id, head: None)
-    monkeypatch.setattr(ad, "run_graph_deps", lambda: deps)
-    monkeypatch.setattr(ad, "_artifact_names", lambda repo, run_id: ["plan.dev-eu.stacks-a"])
-    monkeypatch.setattr(ad, "completed_apply_names", lambda repo, head: set())
-    # Every terramate call main() makes must be stubbed: CI installs uv alone,
-    # so a real invocation passes on a developer machine and fails there.
-    monkeypatch.setattr(ad.bm, "_tags", lambda stack: ["env/dev-eu"])
-    for name, value in {
+def _apply_check(stack, env="dev-eu", plan_run="123456", **kw):
+    """A pending App-authored apply check carrying its plan-run record."""
+    return _check(
+        name=f"apply / {stack} / {env}",
+        status="queued",
+        conclusion=None,
+        external_id=_record(plan_run),
+        **kw,
+    )
+
+
+def _apply_env(monkeypatch, tmp_path, **overrides):
+    """Env for an apply-mode main() run; returns the GITHUB_OUTPUT path."""
+    out = tmp_path / "out.txt"
+    env = {
         "GITHUB_REPOSITORY": "acme/iac",
         "SHIPMATE_ENV": "dev-eu",
-        "SHIPMATE_PLAN_RUN_ID": "123456",
-        "SHIPMATE_HEAD_SHA": "0123456789abcdef0123456789abcdef01234567",
-        "GITHUB_OUTPUT": str(tmp_path / "out.txt"),
-        # An absent decision refuses the run; this test is about the notice.
+        "SHIPMATE_HEAD_SHA": "a" * 40,
+        "GITHUB_OUTPUT": str(out),
+        "SHIPMATE_APP_ID": APP_ID,
         "SHIPMATE_REVIEW_DECISION": "APPROVED",
-    }.items():
+    }
+    env.update(overrides)
+    for name in ("SHIPMATE_UNGATED_ENVS", "SHIPMATE_MODE"):
+        monkeypatch.delenv(name, raising=False)
+    for name, value in env.items():
         monkeypatch.setenv(name, value)
-    monkeypatch.delenv("SHIPMATE_UNGATED_ENVS", raising=False)
+    return out
+
+
+def _stub_apply(monkeypatch, deps, checks):
+    """Stub the apply path's IO: the run-graph, the check-run listing and the
+    per-stack tag query. Every terramate call must be stubbed -- CI installs uv
+    alone, so a real invocation passes on a developer machine and fails there.
+
+    Returns the list of `gh api` paths main() requested, so a re-added run
+    lookup shows up as an extra entry rather than as a silent success."""
+    urls = []
+
+    def _run(args):
+        assert args[0] == "gh", args
+        urls.append(args[-1])
+        return "\n".join(json.dumps(c) for c in checks)
+
+    monkeypatch.setattr(ad, "run_graph_deps", lambda: deps)
+    monkeypatch.setattr(ad.bm, "_run", _run)
+    monkeypatch.setattr(ad.bm, "_tags", lambda stack: ["env/dev-eu", "workload/app"])
+    return urls
+
+
+def test_workset_never_resolves_a_slug_back_to_a_stack_path():
+    # `a/b` and `a-b` slug identically. Only `a-b` carries an apply check, so
+    # only `a-b` is in the workset. A pull request ADDING `a-b` beside an
+    # unchanged `a/b` never shows the pair to build-matrix's plan-time collision
+    # guard -- `a/b` is not in `terramate list --changed` -- so this is the whole
+    # protection: nothing here resolves a name back to a path.
+    assert ad.paths_with_checks("dev-eu", ["a/b", "a-b"], {"apply / a-b / dev-eu"}) == ["a-b"]
+
+
+def test_apply_path_never_enrols_a_slug_alike_stack(monkeypatch, tmp_path):
+    # The same property through the real entry point: a second construction that
+    # slugged its way from a check name back to a path would enrol `a/b` here.
+    out = _apply_env(monkeypatch, tmp_path)
+    _stub_apply(monkeypatch, {"a/b": set(), "a-b": set()}, [_apply_check("a-b")])
+    ad.main()
+    assert [c["stack"] for c in json.loads(_parsed(out)["waves"])["wave0"]] == ["a-b"]
+
+
+def test_apply_path_makes_no_run_lookup_at_all(monkeypatch, tmp_path):
+    # No site keys an apply on a plan run's head_sha any more. Whole-list
+    # comparison against a hand-written constant, so ANY added gh api call --
+    # a run lookup, an artifact listing -- reddens here.
+    out = _apply_env(monkeypatch, tmp_path)
+    urls = _stub_apply(monkeypatch, {"stacks/app": set()}, [_apply_check("stacks/app")])
+    ad.main()
+    assert len(json.loads(_parsed(out)["waves"])["wave0"]) == 1  # not vacuous
+    assert urls == [f"repos/acme/iac/commits/{'a' * 40}/check-runs?filter=all&per_page=100"]
+
+
+def test_main_emits_the_dag_shape_notice(monkeypatch, tmp_path, capsys):
+    # The line is worth nothing unprinted: this executes the real entry point.
+    # An absent decision refuses the run; this test is about the notice.
+    _apply_env(monkeypatch, tmp_path)
+    _stub_apply(
+        monkeypatch, {"stacks/a": set(), "stacks/b": {"stacks/a"}}, [_apply_check("stacks/a")]
+    )
     ad.main()
     assert (
         "::notice::2 stacks, 1 after edges, 2 wave levels; 1 stacks would apply concurrently"
         in capsys.readouterr().out.splitlines()
     )
-
-
-def test_verify_plan_run_rejects_mismatched_head_sha(monkeypatch):
-    monkeypatch.setattr(
-        ad,
-        "_gh_json",
-        lambda path: {
-            "head_sha": "aaa",
-            "conclusion": "success",
-            "path": ".github/workflows/plan.yml",
-        },
-    )
-    with pytest.raises(SystemExit):
-        ad.verify_plan_run("o/r", "123", "bbb")
-
-
-def test_verify_plan_run_rejects_non_success_conclusion(monkeypatch):
-    monkeypatch.setattr(
-        ad,
-        "_gh_json",
-        lambda path: {
-            "head_sha": "bbb",
-            "conclusion": "failure",
-            "path": ".github/workflows/plan.yml",
-        },
-    )
-    with pytest.raises(SystemExit):
-        ad.verify_plan_run("o/r", "123", "bbb")
-
-
-def test_verify_plan_run_rejects_wrong_workflow_path(monkeypatch):
-    monkeypatch.setattr(
-        ad,
-        "_gh_json",
-        lambda path: {
-            "head_sha": "bbb",
-            "conclusion": "success",
-            "path": ".github/workflows/deploy.yml",
-        },
-    )
-    with pytest.raises(SystemExit):
-        ad.verify_plan_run("o/r", "123", "bbb")
-
-
-def test_verify_plan_run_rejects_lookalike_workflow_name(monkeypatch):
-    # "evil-plan.yml" / "not-plan.yml" end with the substring "plan.yml"
-    # but are not THE plan.yml at the repo root of workflows -- endswith on
-    # the raw string is bypassable by a same-named-suffix workflow.
-    monkeypatch.setattr(
-        ad,
-        "_gh_json",
-        lambda path: {
-            "head_sha": "bbb",
-            "conclusion": "success",
-            "path": ".github/workflows/evil-plan.yml",
-        },
-    )
-    with pytest.raises(SystemExit):
-        ad.verify_plan_run("o/r", "123", "bbb")
 
 
 def test_validate_head_sha_rejects_short():
@@ -245,20 +267,6 @@ def test_validate_head_sha_accepts_valid():
     ad.validate_head_sha("0123456789abcdef0123456789abcdef01234567")  # must not raise
 
 
-def test_validate_plan_run_id_rejects_non_numeric():
-    with pytest.raises(SystemExit):
-        ad.validate_plan_run_id("123/actions/runs/456")
-
-
-def test_validate_plan_run_id_rejects_empty():
-    with pytest.raises(SystemExit):
-        ad.validate_plan_run_id("")
-
-
-def test_validate_plan_run_id_accepts_valid():
-    ad.validate_plan_run_id("123456")  # must not raise
-
-
 def test_validate_env_rejects_dot():
     # A '.' in env would break plan.<env>.<slug> disambiguation (env-first only
     # works because env has no '.') — fail loud at the trust boundary.
@@ -277,19 +285,6 @@ def test_validate_env_rejects_empty():
 def test_validate_env_accepts_normal():
     ad.validate_env("dev-eu")  # hyphenated env is fine
     ad.validate_env("eu")  # must not raise
-
-
-def test_verify_plan_run_passes_when_all_match(monkeypatch):
-    monkeypatch.setattr(
-        ad,
-        "_gh_json",
-        lambda path: {
-            "head_sha": "bbb",
-            "conclusion": "success",
-            "path": ".github/workflows/plan.yml",
-        },
-    )
-    ad.verify_plan_run("o/r", "123", "bbb")  # must not raise
 
 
 def test_duplicate_run_newer_queued_stays_pending():
@@ -322,22 +317,12 @@ def test_main_wires_the_tag_map_into_the_cells(tmp_path, monkeypatch):
     # alone -- evaluating `stacks/unrelated` would let a stack this apply never
     # touches block an approved plan.
     out = tmp_path / "out"
-    for k, v in {
-        "GITHUB_REPOSITORY": "o/r",
-        "SHIPMATE_ENV": "dev-eu",
-        "SHIPMATE_PLAN_RUN_ID": "42",
-        "SHIPMATE_HEAD_SHA": "a" * 40,
-        "GITHUB_OUTPUT": str(out),
-        "SHIPMATE_REVIEW_DECISION": "APPROVED",
-    }.items():
-        monkeypatch.setenv(k, v)
-    monkeypatch.delenv("SHIPMATE_UNGATED_ENVS", raising=False)
-    monkeypatch.setattr(ad, "verify_plan_run", lambda *a: None)
-    monkeypatch.setattr(
-        ad, "run_graph_deps", lambda: {"stacks/app": set(), "stacks/unrelated": set()}
+    out = _apply_env(monkeypatch, tmp_path)
+    _stub_apply(
+        monkeypatch,
+        {"stacks/app": set(), "stacks/unrelated": set()},
+        [_apply_check("stacks/app", plan_run="42")],
     )
-    monkeypatch.setattr(ad, "_artifact_names", lambda *a: ["plan.dev-eu.stacks-app"])
-    monkeypatch.setattr(ad, "completed_apply_names", lambda *a: set())
     evaluated = []
     monkeypatch.setattr(
         ad.bm,
@@ -347,7 +332,12 @@ def test_main_wires_the_tag_map_into_the_cells(tmp_path, monkeypatch):
     ad.main()
     parsed = dict(ln.split("=", 1) for ln in out.read_text(encoding="utf-8").splitlines())
     assert json.loads(parsed["waves"])["wave0"] == [
-        {"stack": "stacks/app", "environment": "dev-eu", "workload_var": "NET_EDGE"}
+        {
+            "stack": "stacks/app",
+            "environment": "dev-eu",
+            "workload_var": "NET_EDGE",
+            "plan_run_id": "42",
+        }
     ]
     assert evaluated == ["stacks/app"]
 
@@ -413,27 +403,23 @@ def test_refuse_unreviewed_rejects_a_malformed_variable_entry():
         ad.refuse_unreviewed("dev-eu", "dev-eu-apply", "REVIEW_REQUIRED")
 
 
-def test_main_refuses_before_it_touches_the_plan_run(monkeypatch, tmp_path):
+def _boom_on_the_workset(monkeypatch):
+    """Every call the workset needs fails loudly: the run must die before any
+    API call and before any terramate call."""
+
+    def _boom(*a, **kw):
+        raise AssertionError("main() built its workset on an unauthorized apply")
+
+    for name in ("run_graph_deps", "_check_run_lines"):
+        monkeypatch.setattr(ad, name, _boom)
+
+
+def test_main_refuses_before_it_reads_any_check(monkeypatch, tmp_path):
     # The refusal is the first thing after input validation: the run dies
     # before any API call, before any wave, and the apply checks -- and so the
     # gate -- stay pending.
-    def _boom(*a, **kw):
-        raise AssertionError("main() reached the plan-run lookup on an unreviewed apply")
-
-    monkeypatch.setattr(ad, "verify_plan_run", _boom)
-    monkeypatch.setattr(ad, "run_graph_deps", _boom)
-    monkeypatch.setattr(ad, "_artifact_names", _boom)
-    monkeypatch.setattr(ad, "completed_apply_names", _boom)
-    for name, value in {
-        "GITHUB_REPOSITORY": "acme/iac",
-        "SHIPMATE_ENV": "dev-eu",
-        "SHIPMATE_PLAN_RUN_ID": "123456",
-        "SHIPMATE_HEAD_SHA": "0123456789abcdef0123456789abcdef01234567",
-        "GITHUB_OUTPUT": str(tmp_path / "out.txt"),
-        "SHIPMATE_REVIEW_DECISION": "REVIEW_REQUIRED",
-    }.items():
-        monkeypatch.setenv(name, value)
-    monkeypatch.delenv("SHIPMATE_UNGATED_ENVS", raising=False)
+    _apply_env(monkeypatch, tmp_path, SHIPMATE_REVIEW_DECISION="REVIEW_REQUIRED")
+    _boom_on_the_workset(monkeypatch)
     with pytest.raises(SystemExit) as exc_info:
         ad.main()
     assert str(exc_info.value).startswith("::error::not authorized")
@@ -444,21 +430,9 @@ def test_main_refuses_when_the_decision_variable_is_absent(monkeypatch, tmp_path
     # whole fail-closed behaviour when the review job's output never reaches
     # the action, and every other main() test sets the variable -- so without
     # this case the default could be flipped to "APPROVED" unnoticed.
-    def _boom(*a, **kw):
-        raise AssertionError("main() proceeded with no review decision at all")
-
-    monkeypatch.setattr(ad, "verify_plan_run", _boom)
-    monkeypatch.setattr(ad, "run_graph_deps", _boom)
-    for name, value in {
-        "GITHUB_REPOSITORY": "acme/iac",
-        "SHIPMATE_ENV": "dev-eu",
-        "SHIPMATE_PLAN_RUN_ID": "123456",
-        "SHIPMATE_HEAD_SHA": "0123456789abcdef0123456789abcdef01234567",
-        "GITHUB_OUTPUT": str(tmp_path / "out.txt"),
-    }.items():
-        monkeypatch.setenv(name, value)
-    for name in ("SHIPMATE_REVIEW_DECISION", "SHIPMATE_UNGATED_ENVS"):
-        monkeypatch.delenv(name, raising=False)
+    _apply_env(monkeypatch, tmp_path)
+    monkeypatch.delenv("SHIPMATE_REVIEW_DECISION")
+    _boom_on_the_workset(monkeypatch)
     with pytest.raises(SystemExit) as exc_info:
         ad.main()
     assert str(exc_info.value).startswith("::error::not authorized")
@@ -472,8 +446,7 @@ def test_main_refuses_when_the_decision_variable_is_absent(monkeypatch, tmp_path
 def _unlock_env(monkeypatch, tmp_path, **overrides):
     """Env for a main() run, unlock unless `SHIPMATE_MODE` is overridden.
 
-    Returns the GITHUB_OUTPUT path. `SHIPMATE_PLAN_RUN_ID` is absent by design —
-    the unlock path must never read it."""
+    Returns the GITHUB_OUTPUT path."""
     out = tmp_path / "out"
     env = {
         "GITHUB_REPOSITORY": "acme/iac",
@@ -483,7 +456,7 @@ def _unlock_env(monkeypatch, tmp_path, **overrides):
         "GITHUB_OUTPUT": str(out),
     }
     env.update(overrides)
-    for name in ("SHIPMATE_PLAN_RUN_ID", "SHIPMATE_UNGATED_ENVS", "SHIPMATE_REVIEW_DECISION"):
+    for name in ("SHIPMATE_UNGATED_ENVS", "SHIPMATE_REVIEW_DECISION"):
         monkeypatch.delenv(name, raising=False)
     for name, value in env.items():
         monkeypatch.setenv(name, value)
@@ -491,12 +464,16 @@ def _unlock_env(monkeypatch, tmp_path, **overrides):
 
 
 def _boom_on_plan_path(monkeypatch):
-    """Every plan-artifact-dependent call fails loudly: unlock must reach none."""
+    """Every apply-workset call fails loudly: unlock must reach none of them.
+
+    `_check_run_lines` is deliberately NOT boomed — the unlock queue reads the
+    same listing through `pending_apply_names`; what unlock must never reach is
+    the workset built from it, and the plan run each cell would apply from."""
 
     def _boom(*a, **kw):
-        raise AssertionError("unlock mode reached the plan-artifact path")
+        raise AssertionError("unlock mode reached the apply workset")
 
-    for name in ("verify_plan_run", "_artifact_names", "workset_from_artifacts"):
+    for name in ("run_graph_deps", "paths_with_checks", "cells_for_env", "with_plan_runs"):
         monkeypatch.setattr(ad, name, _boom)
 
 
@@ -654,16 +631,6 @@ def test_unlock_emits_no_wave_array_with_any_member(monkeypatch, tmp_path):
     assert wave_keys == []
 
 
-def test_unlock_needs_no_plan_run_and_never_verifies_one(monkeypatch, tmp_path):
-    # An empty plan_run_id is legitimate here, and `verify_plan_run` is not
-    # merely tolerated — it must not be called at all (_boom_on_plan_path).
-    out = _unlock_env(monkeypatch, tmp_path, SHIPMATE_PLAN_RUN_ID="")
-    _boom_on_plan_path(monkeypatch)
-    _stub_unlock_tree(monkeypatch, _DEV_EU_CELLS)
-    ad.main()
-    assert len(json.loads(_parsed(out)["cells"])) == 3
-
-
 def test_unlock_does_not_refuse_an_unreviewed_pr(monkeypatch, tmp_path):
     # An approval reviews a diff and unlock applies none; `scripts/authorize`
     # made the same call at comment time. The apply-mode half of this
@@ -684,7 +651,7 @@ def test_unlock_does_not_refuse_an_unreviewed_pr(monkeypatch, tmp_path):
 def test_unlock_absent_mode_takes_the_stricter_apply_path(monkeypatch, tmp_path, mode):
     # Same review_decision="" the unlock test accepts; anything that is not
     # exactly "unlock" must refuse, so an absent or garbled mode fails CLOSED.
-    _unlock_env(monkeypatch, tmp_path, SHIPMATE_MODE=mode, SHIPMATE_PLAN_RUN_ID="1")
+    _unlock_env(monkeypatch, tmp_path, SHIPMATE_MODE=mode)
     with pytest.raises(SystemExit) as exc_info:
         ad.main()
     assert str(exc_info.value).startswith("::error::not authorized")
@@ -714,27 +681,16 @@ def test_apply_mode_writes_the_whole_output_file_verbatim(monkeypatch, tmp_path)
     # job's strategy.matrix.include is fromJSON(cells), and fromJSON('') errors.
     # Whole-file comparison against a hand-written constant, so an added,
     # dropped or reordered key on the apply path is caught here too.
-    out = _unlock_env(
-        monkeypatch,
-        tmp_path,
-        SHIPMATE_MODE="apply",
-        SHIPMATE_PLAN_RUN_ID="42",
-        SHIPMATE_REVIEW_DECISION="APPROVED",
-    )
-    monkeypatch.setattr(ad, "verify_plan_run", lambda *a: None)
-    monkeypatch.setattr(ad, "run_graph_deps", lambda: {"stacks/app": set()})
-    monkeypatch.setattr(ad, "_artifact_names", lambda *a: ["plan.dev-eu.stacks-app"])
-    monkeypatch.setattr(ad, "completed_apply_names", lambda *a: set())
-    monkeypatch.setattr(ad.bm, "_tags", lambda stack: ["env/dev-eu", "workload/app"])
+    out = _apply_env(monkeypatch, tmp_path)
+    _stub_apply(monkeypatch, {"stacks/app": set()}, [_apply_check("stacks/app", plan_run="42")])
     ad.main()
     assert out.read_text(encoding="utf-8") == (
         'waves={"wave0": [{"stack": "stacks/app", "environment": "dev-eu", '
-        '"workload_var": "APP"}], "wave1": [], "wave2": [], "wave3": [], "wave4": [], '
-        '"wave5": [], "wave6": [], "wave7": []}\n'
+        '"workload_var": "APP", "plan_run_id": "42"}], "wave1": [], "wave2": [], '
+        '"wave3": [], "wave4": [], "wave5": [], "wave6": [], "wave7": []}\n'
         "empty=false\n"
         "cells=[]\n"
         "head_sha=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n"
-        "plan_run_id=42\n"
     )
 
 
@@ -757,29 +713,3 @@ def test_unlock_tolerates_an_untagged_stack_elsewhere_in_the_tree(monkeypatch, t
     assert json.loads(_parsed(out)["cells"]) == [
         {"stack": "stacks/app", "environment": "dev-eu", "workload": "app", "workload_var": "APP"}
     ]
-
-
-def test_apply_mode_verifies_its_plan_run(monkeypatch, tmp_path):
-    # Nothing else pins that the apply path verifies its plan run at all: every
-    # other apply test stubs verify_plan_run to a no-op, so deleting the call
-    # left the whole suite green -- with it gone a dispatched apply would apply a
-    # foreign or stale run's reviewed plans.
-    called = []
-    _unlock_env(
-        monkeypatch,
-        tmp_path,
-        SHIPMATE_MODE="apply",
-        SHIPMATE_PLAN_RUN_ID="42",
-        SHIPMATE_REVIEW_DECISION="APPROVED",
-    )
-
-    def _verified(repo, run_id, head):
-        called.append((repo, run_id, head))
-
-    monkeypatch.setattr(ad, "verify_plan_run", _verified)
-    monkeypatch.setattr(ad, "run_graph_deps", lambda: {"stacks/app": set()})
-    monkeypatch.setattr(ad, "_artifact_names", lambda *a: ["plan.dev-eu.stacks-app"])
-    monkeypatch.setattr(ad, "completed_apply_names", lambda *a: set())
-    monkeypatch.setattr(ad.bm, "_tags", lambda stack: ["env/dev-eu", "workload/app"])
-    ad.main()
-    assert called == [("acme/iac", "42", "a" * 40)]

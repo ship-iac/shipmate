@@ -5,11 +5,10 @@ The dispatched workflow is the consumer's apply wrapper; the engine's own
 `apply.yml` is `workflow_call` and is what that wrapper calls.
 
 Unlike deploy-detect (merge-driven, all envs), the work set here is scoped to
-ONE environment and sourced from a specific plan run's plan artifacts:
-`plan.<env>.<slug>` artifacts present in SHIPMATE_PLAN_RUN_ID name exactly the
-stacks that were planned for this env. We map each present slug back to a stack
-PATH via the run-graph (path->slug is one-way; we slug each graph node forward
-and match), drop cells whose apply check already completed (idempotent no-op),
+ONE environment and sourced from the head's own apply checks: a run-graph stack
+belongs to this run when `apply / <path> / <env>` is among the App-authored
+checks on the head, and the plan run it applies from is the one that check
+records. We drop cells whose apply check already completed (idempotent no-op),
 then wave-order. A targeted `shipmate apply <env>` is single-env and explicit by
 design — it never blocks on other environments; region-level sequencing across
 envs is handled separately on the apply-all path.
@@ -30,7 +29,6 @@ from importlib.machinery import SourceFileLoader
 _D = pathlib.Path(__file__).resolve().parent
 
 _SHA_RE = re.compile(r"^[0-9a-f]{40}$")
-_RUN_ID_RE = re.compile(r"^[0-9]+$")
 
 
 def _load(fname):
@@ -47,76 +45,65 @@ ag = _load("apply-gate")
 az = _load("authorize")
 
 
-def _slug(path):
-    return path.replace("/", "-")
+def _check_name(stack, env):
+    return f"apply / {stack} / {env}"
 
 
-def workset_paths(artifact_names, env, graph_paths):
-    """Graph stacks whose exact `plan.<env>.<slug>` artifact is present."""
-    names = set(artifact_names)
-    return [p for p in graph_paths if f"plan.{env}.{_slug(p)}" in names]
+def paths_with_checks(env, candidate_paths, check_names):
+    """The candidates whose `apply / <path> / <env>` check is on the head.
+
+    Forward-construct the expected name per candidate path, never reverse-parse
+    it: a stack path contains '/', so `apply / components/app / dev-eu` cannot be
+    split back into its parts without inventing a convention — and a convention
+    is a second reader of the name grammar. `pending-checks` builds these names
+    from the stack PATH, so the exact path is what comes back; nothing here
+    resolves a slug, which is what let two paths slugging alike apply each
+    other's plan."""
+    return [p for p in candidate_paths if _check_name(p, env) in check_names]
 
 
-def workset_from_artifacts(artifact_names, env, graph_paths, tags_by_stack):
-    """Cells for `env` = graph stacks whose exact `plan.<env>.<slug>` artifact is
-    present in the plan run. Forward-construct the expected name per graph path,
-    never reverse-parse it (`validate_env` guards what makes that safe).
-    path->slug is many-to-one, so fail loud if two paths collide.
+def cells_for_env(env, paths, tags_by_stack):
+    """Wave cells for `paths` in `env`.
 
-    `workload_var` comes from the tags, never from the artifact name: the slug
-    grammar is what keeps artifact names collision-free and nothing may be added
-    to it. A stack missing from the map carries "" and applies with the
-    environment's generic role; the map itself is REQUIRED, so a caller that
+    `workload_var` comes from the tags, never from the check name — the name
+    carries no workload. A stack missing from the map carries "" and applies with
+    the environment's generic role; the map itself is REQUIRED, so a caller that
     stops deriving it raises here instead of silently applying every cell with
     the generic role."""
-    cells = [
+    return [
         {
             "stack": p,
             "environment": env,
             "workload_var": bm.workload_var(bm.workload_of(tags_by_stack.get(p, []))),
         }
-        for p in workset_paths(artifact_names, env, graph_paths)
+        for p in paths
     ]
-    slugs = [_slug(c["stack"]) for c in cells]
-    dupes = sorted({s for s in slugs if slugs.count(s) > 1})
-    if dupes:
+
+
+def with_plan_runs(cells, plan_runs):
+    """Each cell gains the plan run id ITS OWN check records, so a cell recovered
+    by a re-run plan job downloads from the run that re-planned it while its
+    siblings stay on the original.
+
+    A cell whose newest check records no usable run refuses. The alternative —
+    falling back to a lookup keyed on a plan run's head_sha — is the platform
+    dependency this path exists to drop, and a default would apply a cell from
+    nowhere. Only cells still to be applied reach here: a cell applied by an
+    older engine version carries a record-less check on that head forever, and
+    refusing over one already-completed apply would strand every upgraded PR."""
+    named = [(c, plan_runs.get(_check_name(c["stack"], c["environment"]))) for c in cells]
+    missing = [_check_name(c["stack"], c["environment"]) for c, run in named if not run]
+    if missing:
         raise SystemExit(
-            f"::error::stack path slug collision {dupes}: distinct stack paths map "
-            "to the same artifact slug; rename so the path->'-' slug is unique."
+            f"::error::apply aborted: no plan run recorded for {', '.join(missing)} — the "
+            "apply check records no plan run, so it predates the release that binds an apply "
+            "to the run that planned it. Re-plan the affected stacks in a new pull request."
         )
-    return cells
+    return [{**c, "plan_run_id": run} for c, run in named]
 
 
 def filter_pending(cells, completed_names):
-    return [c for c in cells if f"apply / {c['stack']} / {c['environment']}" not in completed_names]
-
-
-_gh_json = bm.gh_json
-
-
-def verify_plan_run(repo, run_id, head_sha):
-    """Provenance gate for a dispatched apply: comment-ops' `authorize` already
-    binds head<->run on the comment path, but a direct `workflow_dispatch` (or a
-    hand-edited one) skips that binding entirely. This check is therefore the
-    trust boundary for dispatched applies -- without it, a mismatched
-    run/head pair would apply another run's reviewed plans and green-tick the
-    wrong PR's checks."""
-    run = _gh_json(f"repos/{repo}/actions/runs/{run_id}")
-    if run.get("head_sha") != head_sha:
-        raise SystemExit(
-            f"::error::plan run {run_id} head_sha mismatch: expected {head_sha}, "
-            f"got {run.get('head_sha')}"
-        )
-    if run.get("conclusion") != "success":
-        raise SystemExit(
-            f"::error::plan run {run_id} conclusion is {run.get('conclusion')!r}, "
-            "expected 'success'"
-        )
-    path = run.get("path") or ""
-    if not path.endswith("/plan.yml"):
-        raise SystemExit(
-            f"::error::plan run {run_id} is not a plan.yml run: workflow path is {path!r}"
-        )
+    return [c for c in cells if _check_name(c["stack"], c["environment"]) not in completed_names]
 
 
 def _artifact_names(repo, run_id):
@@ -148,6 +135,16 @@ def _check_run_lines(repo, head_sha):
             f"repos/{repo}/commits/{head_sha}/check-runs?filter=all&per_page=100",
         ]
     ).splitlines()
+
+
+def apply_check_names(check_run_lines, app_id):
+    """Every App-authored apply check name on the head, whatever the newest run's
+    status — the apply workset's membership authority.
+
+    Not `pending_apply_names`: a completed run with a failing conclusion is not
+    pending, but its cell must stay re-appliable, so the done cells are dropped
+    by `filter_pending` (apply-gate's success/neutral predicate) instead."""
+    return set(ag.latest_by_name(ag.from_app(ag.parse_jsonl(check_run_lines), app_id)))
 
 
 def completed_apply_names(repo, head_sha):
@@ -210,13 +207,6 @@ def validate_head_sha(value):
         )
 
 
-def validate_plan_run_id(value):
-    """Guard against a malformed SHIPMATE_PLAN_RUN_ID retargeting the gh api URLs
-    built from it. Safe to echo — not a secret."""
-    if not _RUN_ID_RE.fullmatch(value):
-        raise SystemExit(f"::error::SHIPMATE_PLAN_RUN_ID must be a numeric run id (got: {value!r})")
-
-
 def validate_env(value):
     """The `plan.<env>.<slug>` artifact name is unambiguous only because an env
     name never contains '.' — with env first, the first '.' after the `plan.`
@@ -266,10 +256,10 @@ def run_unlock(repo, env, head):
     must not be in range. The tree walk still supplies the cells because a
     check-run name carries no `workload_var`.
 
-    Not sourced from plan artifacts: a lock outlives the run that stranded it and
-    those artifacts may be long expired, and unlock consumes no plan. The pending
-    apply checks ARE the queue, the same authority deploy-detect uses. This is
-    also why an empty SHIPMATE_PLAN_RUN_ID is legitimate here.
+    Unlike the apply path it needs no plan run at all: a lock outlives the run
+    that stranded it, those plan artifacts may be long expired, and unlock
+    consumes no plan. The pending apply checks ARE the queue, the same authority
+    deploy-detect uses.
 
     `all_stacks=True` evaluates tags across the whole tree, which the apply path
     deliberately avoids (one unrelated stack's unresolvable expression would
@@ -302,7 +292,7 @@ def run_unlock(repo, env, head):
     stacks_by_env, tags_by_stack = bm.env_membership(all_stacks=True, require_env_tag=False)
     cells = bm.build_matrix([env], stacks_by_env, tags_by_stack)
     names = pending_apply_names(repo, head)
-    pending = [c for c in cells if f"apply / {c['stack']} / {c['environment']}" in names]
+    pending = [c for c in cells if _check_name(c["stack"], c["environment"]) in names]
     print(
         f"::notice title=apply-detect::mode=unlock env={env} head={head} "
         f"cells={len(cells)} pending={len(pending)}"
@@ -332,34 +322,39 @@ def main():
     if os.environ.get("SHIPMATE_MODE", "") == "unlock":
         return run_unlock(repo, env, head)
 
-    plan_run_id = os.environ["SHIPMATE_PLAN_RUN_ID"]
-    validate_plan_run_id(plan_run_id)
     refuse_unreviewed(
         env,
         os.environ.get("SHIPMATE_UNGATED_ENVS", ""),
         os.environ.get("SHIPMATE_REVIEW_DECISION", ""),
     )
 
-    verify_plan_run(repo, plan_run_id, head)
-
     deps = run_graph_deps()
-    graph_paths = list(deps.keys())
 
-    names = _artifact_names(repo, plan_run_id)
-    # Tags only for the workset: this path reconstructs its cells from the plan
-    # artifacts plus the run-graph, and evaluating the whole tree would let one
+    app_id = os.environ["SHIPMATE_APP_ID"]
+    # One listing answers all three questions — which cells this run applies,
+    # which plan run each applies from, and which are already done — so a check
+    # completing mid-run cannot make the three disagree.
+    lines = _check_run_lines(repo, head)
+    names = apply_check_names(lines, app_id)
+    # The run ids are read only from records our App wrote (plan_runs_by_name's
+    # from_app filter). That App authorship is what binds a run id to the plan
+    # workflow; there is no workflow-path check to re-add here.
+    plan_runs = ag.plan_runs_by_name(lines, app_id)
+    completed = ag.app_done_names(lines, app_id)
+
+    # Tags only for the workset: this path reconstructs its cells from the head's
+    # apply checks plus the run-graph, and evaluating the whole tree would let one
     # unrelated stack's unresolvable expression block an approved plan.
-    paths = workset_paths(names, env, graph_paths)
-    cells = workset_from_artifacts(names, env, paths, {p: bm._tags(p) for p in paths})
+    paths = paths_with_checks(env, list(deps.keys()), names)
+    cells = cells_for_env(env, paths, {p: bm._tags(p) for p in paths})
 
-    completed = completed_apply_names(repo, head)
-    pending = filter_pending(cells, completed)
+    pending = with_plan_runs(filter_pending(cells, completed), plan_runs)
 
     waves = wv.assign_waves(wv.levels(deps), pending)
     wv.guard_max_waves(waves)
     print(dag_shape_notice(deps))
     print(
-        f"::notice title=apply-detect::env={env} plan_run={plan_run_id} head={head} "
+        f"::notice title=apply-detect::env={env} head={head} "
         f"cells={len(cells)} completed={len(completed)} pending={len(pending)} "
         f"waves={[len(w) for w in waves]} empty={not any(waves)}"
     )
@@ -368,7 +363,6 @@ def main():
         # Always written, in both modes: the unlock job fromJSONs it.
         fh.write("cells=[]\n")
         fh.write(f"head_sha={head}\n")
-        fh.write(f"plan_run_id={plan_run_id}\n")
 
 
 if __name__ == "__main__":
