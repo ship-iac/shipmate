@@ -17,10 +17,10 @@ _PR_EVENTS = ("pull_request", "pull_request_target")
 
 MATRIX_LIMIT = 256
 
-#: Where the plan workflow must live. Two lookups still match this path
-#: literally, both in comment-ops: its doctor lookup and its reviewed-plan
-#: lookup. No apply or deploy path does any more — each reads a cell's plan run
-#: from that cell's own apply check.
+#: Where the plan workflow must live. One lookup still matches this path
+#: literally: comment-ops' doctor lookup. No apply or deploy path does any more,
+#: and neither does the reviewed-plan lookup behind `shipmate apply` — each
+#: reads a cell's plan run from that cell's own apply check.
 PLAN_WORKFLOW = ".github/workflows/plan.yml"
 
 #: Stack paths whose verb-less plan check name would land inside a namespace

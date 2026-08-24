@@ -3,11 +3,12 @@
 
 Pure decision from already-fetched GitHub API JSON. Checks run in fail-fast
 order and each returns a DISTINCT, actionable reason (the reject comment). The
-'comment head SHA == plan run SHA' rule is enforced here: the reviewed plan is
-looked up by the PR's current head, so a plan for an older head (or none at all)
-means new commits landed since the last plan -> stale -> re-plan. Review policy
-is delegated to the branch ruleset via GitHub's `reviewDecision`, not re-derived
-here: only the explicit pass values `NONE` (comment-ops' sentinel for a null
+reviewed plan is the plan run each apply check on the PR's current head records,
+so a head nobody has planned names no plan run at all -> re-plan; a head that
+moved on carries no apply checks yet, and each cell re-verifies the commit its
+plan came from before applying it. Review policy is delegated to the branch
+ruleset via GitHub's `reviewDecision`, not re-derived here: only the explicit
+pass values `NONE` (comment-ops' sentinel for a null
 decision — no review required by the ruleset) and `APPROVED` authorize; any
 other value — including an absent/empty one — fails closed, except that
 `REVIEW_REQUIRED` also authorizes for an environment listed in
@@ -109,7 +110,7 @@ def decide(
     approvers_team,
     review_decision,
     pr,
-    plan_run,
+    plan_runs,
     environment="",
     ungated_envs=frozenset(),
     verb="apply",
@@ -126,7 +127,7 @@ def decide(
       lock from a cancelled post-merge deploy is reachable only from a merged
       PR, so keeping this check would make the followup's second routine
       trigger unfixable.
-    - plan run / staleness: unlock consumes no plan artifact.
+    - plan runs: unlock consumes no plan artifact.
     """
     if not is_member:
         return False, (
@@ -154,16 +155,10 @@ def decide(
     review_reason = _review_reason(review_decision, environment, ungated_envs)
     if review_reason:
         return False, review_reason
-    if not plan_run:
+    if not plan_runs:
         return False, (
             "no reviewed plan for the current PR head — no successful "
             "plan run to apply. Push or re-run plan, then re-plan."
-        )
-    if plan_run.get("head_sha") != pr["head"]["sha"]:
-        return False, (
-            f"stale: the latest reviewed plan is for {plan_run.get('head_sha')} "
-            f"but the PR head is now {pr['head']['sha']}; re-plan "
-            f"(push or `shipmate plan`) before applying."
         )
     return True, ""
 
@@ -178,7 +173,10 @@ def _read_json(var, default):
 
 def main():
     pr = _read_json("PR_JSON", {})
-    plan_run = _read_json("PLAN_RUN_JSON", {})
+    # {check name: plan run id} for the head's App-authored apply checks. Read
+    # from that head's own check-runs, so no entry can be for another head and
+    # there is nothing left to compare a head SHA against.
+    plan_runs = _read_json("PLAN_RUN_JSON", {})
     is_member = os.environ.get("IS_MEMBER", "false") == "true"
     review_decision = os.environ.get("REVIEW_DECISION", "")
     # One read, used for both the decision and the reported output — the value
@@ -193,7 +191,7 @@ def main():
         approvers_team=os.environ.get("APPROVERS_TEAM", ""),
         review_decision=review_decision,
         pr=pr,
-        plan_run=plan_run,
+        plan_runs=plan_runs,
         environment=environment,
         ungated_envs=ungated_envs,
         verb=verb,
@@ -201,7 +199,7 @@ def main():
     # The targeted path's audit trail. `reviewDecision` is a live value with no
     # history, so once the review lands nothing distinguishes an apply that
     # waited for it from one that did not. Requires `ok`: a later requirement
-    # (a stale plan) still refuses, and a report over a refused apply is false.
+    # (no reviewed plan) still refuses, and a report over a refused apply is false.
     # Requires a named environment: a bare apply is reported per env by
     # apply-all-detect instead, and has no single env to name here.
     # Requires verb="apply": the exemption is an audit record about applying
@@ -218,7 +216,6 @@ def main():
         fh.write(f"ungated_exemption={'true' if exempted else 'false'}\n")
         fh.write(f"reason={reason}\n")
         fh.write(f"environment={environment}\n")
-        fh.write(f"plan_run_id={plan_run.get('id', '')}\n")
         fh.write(f"head_sha={pr.get('head', {}).get('sha', '')}\n")
     print(f"::notice title=authorize::authorized={ok} reason={reason or 'ok'}")
 

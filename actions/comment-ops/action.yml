@@ -426,7 +426,7 @@ runs:
           gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -F body=@doctor.md >/dev/null
         fi
 
-    - name: Mint App token (members:read)
+    - name: Mint App token (members:read, checks:read)
       id: apptoken
       if: ${{ steps.parse.outputs.route == 'apply' || steps.parse.outputs.route == 'unlock' }}
       # Don't hard-fail the job if the token can't be minted (e.g. the App isn't
@@ -439,6 +439,10 @@ runs:
         owner: ${{ github.repository_owner }}
         repositories: ${{ github.event.repository.name }}
         permission-members: read
+        # The reviewed-plan lookup below reads the head's check runs. `checks` is
+        # declared `write` in app/manifest.json, so read is a subset of what the
+        # installation already granted -- no re-approval, no consumer change.
+        permission-checks: read
 
     - name: App token unavailable (App not installed?)
       if: ${{ (steps.parse.outputs.route == 'apply' || steps.parse.outputs.route == 'unlock') && steps.apptoken.outcome != 'success' }}
@@ -448,7 +452,7 @@ runs:
         PR_NUMBER: ${{ inputs.pr-number }}
       run: |
         set -euo pipefail
-        gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -f body=":x: shipmate: could not mint a GitHub App token — is the shipmate App installed on this repository (with members:read)? Ask an org admin to install it, then retry." >/dev/null
+        gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -f body=":x: shipmate: could not mint a GitHub App token — is the shipmate App installed on this repository (with members:read and checks:read)? Ask an org admin to install it, then retry." >/dev/null
 
     - name: Gather authorization inputs
       id: gather
@@ -462,6 +466,7 @@ runs:
         USER: ${{ inputs.comment-user }}
         PR_NUMBER: ${{ inputs.pr-number }}
         SHIPMATE_VERB: ${{ steps.parse.outputs.route }}
+        SHIPMATE_APP_ID: ${{ inputs.app-id }}
       run: |
         set -euo pipefail
         # PR (retry until mergeable is computed; GitHub computes it async).
@@ -502,15 +507,31 @@ runs:
         else
           echo "is_member=false" >> "$GITHUB_OUTPUT"
         fi
-        # Successful plan run for the CURRENT head (the reviewed-plan lookup).
+        # The reviewed plan runs for the CURRENT head: every App-authored apply
+        # check on the head records the plan run its plan came from, so a record
+        # read here is for this head by construction -- no plan-workflow lookup,
+        # and no head SHA left to compare. An empty mapping means nothing has
+        # planned this head, which authorize refuses.
         # An unlock consumes no plan artifact and must not depend on a plan
         # run existing; authorize ignores the file for unlock, so leave it {}.
         if [ "$SHIPMATE_VERB" != unlock ]; then
           head=$(python3 -c "import json;print(json.load(open('pr.json'))['head']['sha'])")
-          gh api "repos/$GITHUB_REPOSITORY/actions/workflows/plan.yml/runs?head_sha=$head&status=success" \
-            --jq '{id: (.workflow_runs[0].id // ""), head_sha: (.workflow_runs[0].head_sha // "")}' > plan_run.json
-          # Empty id -> no plan run; normalize to {} so authorize treats it as stale.
-          python3 -c "import json;d=json.load(open('plan_run.json'));open('plan_run.json','w').write(json.dumps(d if d.get('id') else {}))"
+          GH_TOKEN="$APP_TOKEN" gh api --paginate \
+            "repos/$GITHUB_REPOSITORY/commits/$head/check-runs?filter=all&per_page=100" \
+            --jq '.check_runs[]' > check-runs.jsonl
+          SHIPMATE_APPLY_GATE="$GITHUB_ACTION_PATH/../../scripts/apply-gate" python3 - <<'PY' > plan_run.json
+        import importlib.util
+        import json
+        import os
+        from importlib.machinery import SourceFileLoader
+
+        loader = SourceFileLoader("apply_gate", os.environ["SHIPMATE_APPLY_GATE"])
+        spec = importlib.util.spec_from_loader(loader.name, loader)
+        ag = importlib.util.module_from_spec(spec)
+        loader.exec_module(ag)
+        with open("check-runs.jsonl", encoding="utf-8") as fh:
+            print(json.dumps(ag.plan_runs_by_name(fh, os.environ["SHIPMATE_APP_ID"])))
+        PY
         else
           echo '{}' > plan_run.json
         fi

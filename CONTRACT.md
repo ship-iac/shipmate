@@ -698,10 +698,12 @@ its own actionable rejection reason:
   an absent or empty decision — fails closed with a wiring-error reason. An
   environment listed in the `SHIPMATE_UNGATED_ENVS` repository variable is
   exempt from this requirement, and from no other (below);
-- **undiverged**: a reviewed plan exists for the pull request's **current**
-  head SHA (the most recent successful plan run — the automatic plan run on
-  pull-request open, autoplan — whose head matches; a plan for an older head
-  means new commits landed since — stale, re-plan required).
+- **undiverged**: at least one `apply / <stack> / <env>` check on the pull
+  request's **current** head names the plan run its plan came from (each check
+  records that run at plan time). The records are read from that head's own
+  check runs, so no plan run reached here can belong to another head and none is
+  compared against one: a head new commits landed on carries no apply checks
+  yet, names no plan run, and is refused — re-plan required.
 
 `undiverged` is only the comment-time half of shipmate's **exact-plan** rule.
 The cell that applies re-verifies the reviewed `.otplan` against current state,
@@ -996,8 +998,8 @@ The three jobs:
   read. `actions/build-matrix` refuses that: on `pull_request_target` it
   compares the event's head SHA against the commit it is running on, and it
   also refuses a checkout with no `.github/workflows/plan.yml` — that path is
-  matched literally by the reviewed-plan lookups and a renamed plan workflow
-  wedges every later apply. `actions/build-matrix` fails `detect`
+  matched literally by comment-ops' doctor lookup, and a renamed plan workflow
+  silently degrades every later `shipmate doctor`. `actions/build-matrix` fails `detect`
   outright unless the run **states** a head repository equal to the running
   repository: **fork pull requests are not planned**, and no input permits one.
   A fork's plan would execute the pull request's own Terramate/OpenTofu code
@@ -1051,10 +1053,9 @@ observes whether the gate will be written, and it reports rather than fails.
 
 The **file path is still load-bearing**, and nothing diagnoses a rename as the
 cause: `actions/comment-ops` matches
-`actions/workflows/plan.yml/runs` twice — for the reviewed-plan lookup behind
-`shipmate apply` and for doctor's cell-summary fetch. Doctor's
-`pull_request_target` probe exempts the plan workflow by exact name. Rename the
-file and `shipmate apply` finds no reviewed plan, doctor skips its environment
+`actions/workflows/plan.yml/runs` once — for doctor's cell-summary fetch.
+Doctor's `pull_request_target` probe exempts the plan workflow by exact name.
+Rename the file and doctor skips its environment
 probes, and the renamed file starts drawing doctor's own
 `pull_request_target` warning. Each symptom surfaces on its own — comment-ops
 annotates the skipped probes — but none of them names the rename.

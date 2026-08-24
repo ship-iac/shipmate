@@ -610,6 +610,56 @@ def _authorize_step():
     return step
 
 
+def _gather_step():
+    step = next(s for s in action_steps("comment-ops") if s.get("id") == "gather")
+    assert step.get("run"), "the gather step runs no shell"
+    return step
+
+
+def test_the_authorize_step_reads_the_files_the_gather_step_writes(tmp_path, monkeypatch):
+    """`env:` key -> `os.environ` key -> file path, run rather than eyeballed. A
+    rename on either side leaves authorize reading a file nobody writes, and
+    `_read_json`'s missing-file default then refuses every apply -- or, for the
+    PR, reads an empty mapping as an unmergeable pull request."""
+    env = _authorize_step()["env"]
+    body = _gather_step()["run"]
+    for key, content in (
+        ("PR_JSON", '{"mergeable": true, "mergeable_state": "clean", "head": {"sha": "abc123"}}'),
+        ("PLAN_RUN_JSON", '{"apply / stacks/app / dev-eu": "555"}'),
+    ):
+        path = env[key]
+        assert f"> {path}\n" in body, f"the gather step writes no {path}"
+        (tmp_path / path).write_text(content, encoding="utf-8")
+        monkeypatch.setenv(key, path)
+    monkeypatch.chdir(tmp_path)
+    for key, value in {
+        "IS_MEMBER": "true",
+        "APPROVERS_TEAM": "deployers",
+        "REVIEW_DECISION": "NONE",
+        "GITHUB_OUTPUT": "out.txt",
+    }.items():
+        monkeypatch.setenv(key, value)
+    load_script("authorize").main()
+    assert "authorized=true" in (tmp_path / "out.txt").read_text(encoding="utf-8")
+
+
+def test_the_gather_step_reads_the_plan_runs_from_the_heads_own_check_runs():
+    """The reviewed-plan lookup is the head's own apply checks, each of which
+    records the plan run its plan came from. The plan-workflow lookup it replaced
+    resolved one run for the whole command and had to compare that run's head
+    against the PR's -- a comparison this listing makes unnecessary and, being
+    keyed on the head already, unfalsifiable."""
+    body = _code(_gather_step()["run"])
+    assert '"repos/$GITHUB_REPOSITORY/commits/$head/check-runs?filter=all&per_page=100"' in body
+    assert "workflows/plan.yml" not in body
+
+
+def test_the_gather_step_receives_the_app_id_the_plan_run_lookup_scopes_on():
+    """Only our App's apply checks may name a plan run: a same-name check from
+    any other identity must not decide what a `shipmate apply` applies."""
+    assert _gather_step()["env"]["SHIPMATE_APP_ID"] == "${{ inputs.app-id }}"
+
+
 def test_authorize_step_receives_the_ungated_envs_input():
     assert _authorize_step()["env"]["SHIPMATE_UNGATED_ENVS"] == "${{ inputs.ungated-envs }}"
 
@@ -670,7 +720,7 @@ def test_authorize_step_supplies_every_env_var_authorize_reads():
 #: the two routes: narrow one back and an unlock parses, authorizes and then
 #: silently does nothing.
 _SHARED_ROUTE_IFS = {
-    "Mint App token (members:read)": (
+    "Mint App token (members:read, checks:read)": (
         "${{ steps.parse.outputs.route == 'apply' || steps.parse.outputs.route == 'unlock' }}"
     ),
     "App token unavailable (App not installed?)": (
