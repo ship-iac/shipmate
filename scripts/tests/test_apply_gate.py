@@ -318,6 +318,8 @@ def _ext(name, id, external_id, app_id=999, started_at="2026-07-18T10:00:00Z"):
     return json.dumps(run)
 
 
+# Must contain letters: an all-digit "hex" string parses as a JSON int, so it
+# exercises the non-dict guard instead of the JSONDecodeError path this pins.
 LEGACY_HEX = "a3f" + "b" * 61
 
 
@@ -359,6 +361,8 @@ def test_plan_runs_legacy_bare_hex_external_id_is_absent():
     assert ag.plan_runs_by_name([line], "999") == {}
 
 
+# "1" * 64 is the only case that reaches the isinstance(record, dict) guard --
+# it parses as a JSON int, not a dict. Keep it.
 @pytest.mark.parametrize("external_id", [None, "", "not json at all", "1" * 64])
 def test_plan_runs_unusable_external_id_is_absent(external_id):
     line = _ext("apply / stacks/app / dev-eu", 1, external_id)
