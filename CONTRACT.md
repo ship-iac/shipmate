@@ -1050,18 +1050,18 @@ the plan wrapper's fork and draft wiring; the last of those is the one that
 observes whether the gate will be written, and it reports rather than fails.
 
 The **file path is still load-bearing**, and nothing diagnoses a rename as the
-cause:
-`scripts/apply-detect`'s provenance gate refuses a dispatched apply whose plan
-run did not come from a `plan.yml`, `scripts/deploy-detect` resolves the
-post-merge plan run through
-`actions/workflows/plan.yml/runs`, and `actions/comment-ops` uses that same
-endpoint twice — for the reviewed-plan lookup behind `shipmate apply` and for
-doctor's cell-summary fetch. Doctor's `pull_request_target` probe exempts the
-plan workflow by exact name. Rename the file and applies are refused as stale,
-doctor skips its environment probes, a post-merge deploy finds no plan run, and
-the renamed file starts drawing doctor's own `pull_request_target` warning. Each
-symptom surfaces on its own — comment-ops annotates the skipped probes — but
-none of them names the rename.
+cause: `actions/comment-ops` matches
+`actions/workflows/plan.yml/runs` twice — for the reviewed-plan lookup behind
+`shipmate apply` and for doctor's cell-summary fetch. Doctor's
+`pull_request_target` probe exempts the plan workflow by exact name. Rename the
+file and `shipmate apply` finds no reviewed plan, doctor skips its environment
+probes, and the renamed file starts drawing doctor's own
+`pull_request_target` warning. Each symptom surfaces on its own — comment-ops
+annotates the skipped probes — but none of them names the rename.
+
+No apply path matches on it any more: a dispatched, bare or post-merge apply
+reads each cell's plan run from that cell's own apply check, so a renamed plan
+workflow no longer strands work already planned.
 
 A consumer that omits the `summary`
 job gets no `shipmate / gate` status at all, so the pull request cannot merge —

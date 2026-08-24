@@ -1,7 +1,7 @@
 import json
 
 import pytest
-from _detect_fixtures import APP_ID, check_run, completed_names
+from _detect_fixtures import APP_ID, check_run
 from _loader import load_script
 
 aad = load_script("apply-all-detect")
@@ -126,20 +126,32 @@ def test_partition_applied_explicit_env_blocks_nothing():
     assert excluded == [] and skipped == []
 
 
-def test_foreign_app_completed_check_stays_pending(monkeypatch):
-    # A completed+success check authored by another identity (github-actions,
-    # app id 15368) must not count as done for the bare-apply queue.
-    cells = [{"stack": "stacks/app", "environment": "dev-eu"}]
-    done = completed_names(aad.ad, monkeypatch, [check_run(app={"id": 15368})])
-    assert aad.ad.filter_pending(cells, done) == cells
+def test_a_forged_completed_check_does_not_mark_a_cell_applied(tmp_path, monkeypatch):
+    # A completed+success check of the same name from another identity
+    # (github-actions, app id 15368) must not count the cell as applied. It is
+    # also the NEWER run of that name, so only the App filter keeps the cell in --
+    # and main() is what feeds that filter its app id, so this is the behavioural
+    # pin on the threading test_detect_app_scoping can only see structurally.
+    parsed = _run_main(
+        tmp_path,
+        monkeypatch,
+        envs=["dev-eu"],
+        decision="APPROVED",
+        checks=[
+            _apply_check("stacks/app", "dev-eu"),
+            check_run(name="apply / stacks/app / dev-eu", id=2, app={"id": 15368}),
+        ],
+    )
+    assert [c["stack"] for c in _wave_cells(parsed)] == ["stacks/app"]
 
 
 def test_reuses_single_sourced_helpers():
-    # Workset matching, cell construction, the plan-run attachment, the pending
-    # filter, env-level bucketing and the done predicate must come from the
-    # shared implementations, not private copies. env-level bucketing and the
-    # GITHUB_OUTPUT writer live in env-order (shared with deploy-detect), so this
-    # script no longer loads deploy-detect at all.
+    # The `is not None` halves pin only that these functions still EXIST in the
+    # modules this script reaches them through -- not that main() calls them
+    # rather than a private copy. What pins that is the `not hasattr` halves
+    # below (no second route can exist) plus the behavioural main() tests above.
+    # env-level bucketing and the GITHUB_OUTPUT writer live in env-order (shared
+    # with deploy-detect), so this script no longer loads deploy-detect at all.
     assert aad.ad.paths_with_checks is not None
     assert aad.ad.cells_for_env is not None
     assert aad.ad.with_plan_runs is not None
@@ -294,12 +306,14 @@ def test_main_wires_the_tag_map_into_the_cells(tmp_path, monkeypatch):
 def test_main_reads_the_head_listing_and_makes_no_artifact_lookup(tmp_path, monkeypatch):
     # No site keys a bare apply on a plan run's artifacts any more. Whole-list
     # comparison against a hand-written constant, so ANY added gh api call --
-    # an artifact listing, a workflow-runs lookup -- reddens here. Two entries:
-    # the workset listing, and completed_apply_names' own App-scoped fetch.
+    # an artifact listing, a workflow-runs lookup, a second read of this same
+    # listing -- reddens here. ONE entry: the workset, the done predicate and the
+    # plan runs are all read off a single fetch, so nothing can disagree about a
+    # check that changed mid-run.
     urls = []
     parsed = _run_main(tmp_path, monkeypatch, envs=["dev-eu"], decision="APPROVED", urls=urls)
     assert len(_wave_cells(parsed)) == 1  # not vacuous
-    assert urls == [CHECK_RUNS_URL, CHECK_RUNS_URL]
+    assert urls == [CHECK_RUNS_URL]
 
 
 def test_main_never_enrols_a_slug_alike_stack(tmp_path, monkeypatch):

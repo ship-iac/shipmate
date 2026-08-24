@@ -16,6 +16,12 @@ envs is handled separately on the apply-all path.
 Before any of that, the PR's review decision — read server-side by the `review`
 job, narrowed by `SHIPMATE_UNGATED_ENVS` — must authorize this environment, or
 the run refuses.
+
+`completed_apply_names` lives here and this module's `main` calls it, so
+test_detect_app_scoping's textual guard covers all three detects — but for this
+one it proves nothing by itself: a substring cannot tell a call site from the
+definition in the same file. The stronger pin on this `main` stays the
+behavioural test_a_forged_completed_check_does_not_mark_a_cell_applied.
 """
 
 import importlib.util
@@ -134,13 +140,19 @@ def apply_check_names(check_run_lines, app_id):
     return set(ag.latest_by_name(ag.from_app(ag.parse_jsonl(check_run_lines), app_id)))
 
 
-def completed_apply_names(repo, head_sha):
-    """App-authored apply checks already completed on `head_sha`, shared by all
-    three detects so they judge the identical "already applied" set.
+def completed_apply_names(check_run_lines, app_id):
+    """App-authored apply checks already completed in `check_run_lines`, shared by
+    all three detects so they judge the identical "already applied" set.
+
+    Pure like `apply_check_names`, and for the same reason: every detect asks
+    several questions of one listing, so the caller owns the fetch. Fetching here
+    as well would give a caller two reads of one listing, and a re-plan landing
+    between them re-opens a name the first read saw completed while its cell keeps
+    the first read's plan-run record.
 
     Only App-authored checks count: a forged same-name check from any other
     identity must not mark work done (see apply-gate.app_done_names)."""
-    return ag.app_done_names(_check_run_lines(repo, head_sha), os.environ["SHIPMATE_APP_ID"])
+    return ag.app_done_names(check_run_lines, app_id)
 
 
 def pending_apply_names(repo, head_sha):
@@ -327,7 +339,7 @@ def main():
     # from_app filter). That App authorship is what binds a run id to the plan
     # workflow; there is no workflow-path check to re-add here.
     plan_runs = ag.plan_runs_by_name(lines, app_id)
-    completed = ag.app_done_names(lines, app_id)
+    completed = completed_apply_names(lines, app_id)
 
     # Tags only for the workset: this path reconstructs its cells from the head's
     # apply checks plus the run-graph, and evaluating the whole tree would let one

@@ -17,10 +17,10 @@ _PR_EVENTS = ("pull_request", "pull_request_target")
 
 MATRIX_LIMIT = 256
 
-#: Where the plan workflow must live. Three lookups still match this path
-#: literally: comment-ops' doctor lookup, comment-ops' reviewed-plan lookup, and
-#: `deploy-detect`'s post-merge one. A dispatched apply no longer does — it reads
-#: each cell's plan run from that cell's apply check.
+#: Where the plan workflow must live. Two lookups still match this path
+#: literally, both in comment-ops: its doctor lookup and its reviewed-plan
+#: lookup. No apply or deploy path does any more — each reads a cell's plan run
+#: from that cell's own apply check.
 PLAN_WORKFLOW = ".github/workflows/plan.yml"
 
 #: Stack paths whose verb-less plan check name would land inside a namespace

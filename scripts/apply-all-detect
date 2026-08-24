@@ -105,13 +105,7 @@ def main():
     lines = ad._check_run_lines(repo, head)
     cells = cells_from_checks(ad.apply_check_names(lines, app_id), stacks_by_env, tags_by_stack)
 
-    # A second fetch of the same listing, unlike apply-detect's single one: the
-    # done predicate must arrive through completed_apply_names, which owns the
-    # App scoping (test_detect_app_scoping). Benign here — apply_check_names is
-    # status-agnostic, so a check completing between the two fetches only moves
-    # its cell from pending to done.
-    completed = ad.completed_apply_names(repo, head)
-    pending = ad.filter_pending(cells, completed)
+    pending = ad.filter_pending(cells, ad.completed_apply_names(lines, app_id))
 
     order = eo.read_env_order()
     pending_envs = {c["environment"] for c in pending}
