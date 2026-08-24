@@ -808,3 +808,24 @@ def test_build_matrix_action_declares_the_outputs_the_gate_reads():
         "empty": "${{ steps.build.outputs.empty }}",
         "count": "${{ steps.build.outputs.count }}",
     }
+
+
+def test_rejects_stack_paths_that_slug_to_one_artifact_name():
+    # `a/b` and `a-b` both slug to `a-b`, so both cells' plan artifact is
+    # `plan.dev-eu.a-b` and an apply downloads whichever landed last.
+    stacks = ["a/b", "a-b"]
+    with pytest.raises(
+        SystemExit, match=r"a-b, a/b all map to the plan artifact 'plan\.dev-eu\.a-b'"
+    ):
+        bm.build_matrix(["dev-eu"], {"dev-eu": stacks}, {s: ["env/dev-eu"] for s in stacks})
+
+
+def test_same_slug_in_different_envs_is_allowed():
+    # The env is part of the artifact name: `plan.dev-eu.a-b` and
+    # `plan.prod-eu.a-b` are distinct, so there is nothing to collide.
+    cells = bm.build_matrix(
+        ["dev-eu", "prod-eu"],
+        {"dev-eu": ["a/b"], "prod-eu": ["a-b"]},
+        {"a/b": ["env/dev-eu"], "a-b": ["env/prod-eu"]},
+    )
+    assert [c["stack"] for c in cells] == ["a/b", "a-b"]

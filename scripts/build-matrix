@@ -81,6 +81,30 @@ def guard_workload_var_collisions(cells):
             )
 
 
+def guard_slug_collisions(cells):
+    """A plan artifact is `plan.<env>.<path with '/' replaced by '-'>`, so `a/b`
+    and `a-b` in one environment produce ONE artifact name and an apply
+    downloads the wrong stack's plan. Refused here, at matrix construction,
+    because that is before any artifact exists -- the plan run refuses up front
+    instead of an apply discovering the clash after a plan already ran.
+
+    Per environment, not across the matrix: the env is part of the artifact
+    name, so the same slug under two different envs collides with nothing."""
+    for env in sorted({c["environment"] for c in cells}):
+        by_slug = {}
+        for c in cells:
+            if c["environment"] == env:
+                by_slug.setdefault(c["stack"].replace("/", "-"), set()).add(c["stack"])
+        for slug, paths in sorted(by_slug.items()):
+            if len(paths) > 1:
+                raise SystemExit(
+                    f"::error::{', '.join(sorted(paths))} all map to the plan artifact "
+                    f"'plan.{env}.{slug}': distinct stack paths sharing one artifact name would "
+                    "make an apply download another stack's plan. Rename one so the "
+                    "path->'-' slug is unique."
+                )
+
+
 def build_matrix(envs, stacks_by_env, tags_by_stack):
     cells = []
     for env in envs:
@@ -99,6 +123,7 @@ def build_matrix(envs, stacks_by_env, tags_by_stack):
         if any(c["stack"] == reserved for c in cells):
             raise SystemExit(message)
     guard_workload_var_collisions(cells)
+    guard_slug_collisions(cells)
     if len(cells) > MATRIX_LIMIT:
         raise MatrixTooLarge(
             f"{len(cells)} plan cells exceeds the GitHub Actions matrix limit of {MATRIX_LIMIT}. "
