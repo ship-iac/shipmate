@@ -254,25 +254,12 @@ runs:
           echo "::warning::could not read the PR head SHA; doctor reports settings probes only"
           {
             echo "head_sha="
-            echo "run_id="
+            echo "plan_run_ids="
             echo "harvest_failed=true"
           } >> "$GITHUB_OUTPUT"
           exit 0
         fi
         echo "head_sha=$head" >> "$GITHUB_OUTPUT"
-        # Declared environment set: the cell summaries of the latest successful
-        # plan run for this head. Absent -> doctor says so and skips those probes.
-        # -R is required: this job has no checkout, so gh cannot infer the
-        # repo from a git remote and `gh run download` would fail every time.
-        mkdir -p doctor-cells
-        run_id=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/plan.yml/runs?head_sha=$head&status=success" \
-                   --jq '.workflow_runs[0].id // ""' || echo "")
-        if [ -n "$run_id" ] && gh run download "$run_id" -R "$GITHUB_REPOSITORY" -p 'cell-summary.*' -D doctor-cells; then
-          echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
-        else
-          echo "run_id=" >> "$GITHUB_OUTPUT"
-          echo "::warning::no plan-run cell summaries for $head; doctor skips the environment probes"
-        fi
         # Harvest: latest shipmate-authored check-run per name (check-ids mode
         # filters on app slug/id), then its annotations. Degrades to an empty
         # harvest rather than failing the command. harvest_failed is written
@@ -286,7 +273,7 @@ runs:
         harvest_failed=false
         if GH_TOKEN="$APP_TOKEN" gh api --paginate \
              "repos/$GITHUB_REPOSITORY/commits/$head/check-runs?filter=all&per_page=100" \
-             --jq '.check_runs[] | {id, name, status, started_at, app_slug: .app.slug, app_id: .app.id}' > check-runs.jsonl; then
+             --jq '.check_runs[] | {id, name, status, started_at, external_id, app: {id: .app.id}, app_slug: .app.slug, app_id: .app.id}' > check-runs.jsonl; then
           # check-ids mode also writes the `harvest_pending` step output (true
           # when any shipmate-relevant check run on this commit has not
           # completed) -- it is the one step that already reads every check run,
@@ -314,6 +301,47 @@ runs:
           fi
         done < check-ids.tsv
         echo "harvest_failed=$harvest_failed" >> "$GITHUB_OUTPUT"
+        # Declared environment set: the cell summaries of the plan runs this
+        # head's own apply checks name -- read from the listing above, so a
+        # renamed plan workflow cannot silently empty the environment probes.
+        # No records -> doctor says so and skips those probes.
+        if ! python3 "$GITHUB_ACTION_PATH/../../scripts/apply-gate" --plan-runs \
+             < check-runs.jsonl > plan_runs.json; then
+          echo '{}' > plan_runs.json
+          echo "::warning::the plan records on this commit's apply checks could not be read; doctor skips the environment probes"
+        fi
+        run_ids=$(python3 -c 'import json,sys; print("\n".join(sorted(set(json.load(sys.stdin).values()))))' \
+                    < plan_runs.json || echo "")
+        # -R is required: this job has no checkout, so gh cannot infer the repo
+        # from a git remote and `gh run download` would fail every time. One
+        # directory per run, never a shared one: a cell replanned in a later run
+        # carries the same artifact name in both, and a shared directory would
+        # let extraction order decide which plan doctor reports on.
+        mkdir -p doctor-cells
+        while read -r rid; do
+          [ -n "$rid" ] || continue
+          gh run download "$rid" -R "$GITHUB_REPOSITORY" -p 'cell-summary.*' -D "doctor-cells/$rid" \
+            || echo "::warning::the cell summaries of plan run $rid could not be downloaded; doctor's environment probes may be incomplete"
+        done <<< "$run_ids"
+        # Then keep, per cell, only the copy from the run that cell's own newest
+        # apply check names -- the replanned cell's older copy would otherwise
+        # report an environment this head no longer declares.
+        if ! python3 - <<'PY'
+        import json, pathlib
+        runs = json.load(open("plan_runs.json", encoding="utf-8"))
+        for cj in pathlib.Path("doctor-cells").glob("*/**/cell.json"):
+            try:
+                cell = json.loads(cj.read_text(encoding="utf-8"))
+                name = f"apply / {cell['stack_path']} / {cell['environment']}"
+            except (OSError, ValueError, KeyError, TypeError):
+                continue
+            if runs.get(name) != cj.relative_to("doctor-cells").parts[0]:
+                cj.unlink()
+        PY
+        then
+          echo "::warning::the downloaded cell summaries could not be reconciled with this commit's plan records; doctor's environment probes may report a superseded plan"
+        fi
+        echo "plan_run_ids=$(printf '%s' "$run_ids" | tr '\n' ' ')" >> "$GITHUB_OUTPUT"
 
     - name: Doctor — render and upsert the sticky comment
       if: ${{ steps.parse.outputs.route == 'doctor' && steps.guard.outputs.privileged_association == 'true' && steps.doctortoken.outcome == 'success' }}
@@ -330,7 +358,7 @@ runs:
         SHIPMATE_CELLS_DIR: doctor-cells
         SHIPMATE_TEAM: ${{ inputs.approvers-team }}
         SHIPMATE_HEAD_SHA: ${{ steps.gatherdoc.outputs.head_sha }}
-        SHIPMATE_PLAN_RUN_ID: ${{ steps.gatherdoc.outputs.run_id }}
+        SHIPMATE_PLAN_RUN_IDS: ${{ steps.gatherdoc.outputs.plan_run_ids }}
         # The engine's own owner/repo, so the pin probe reports on shipmate's
         # pins and not on some other org's shared action the consumer also uses.
         # `github.action_repository` is the slug of the running action, resolved

@@ -203,7 +203,7 @@ def test_summary_doctor_step_reads_the_head_sha_it_was_given():
 
 def test_unreadable_head_sha_marks_the_harvest_failed_before_exiting():
     """The read-only degrade path for an unreadable PR head SHA must record
-    harvest_failed=true (and head_sha/run_id) to GITHUB_OUTPUT before it
+    harvest_failed=true (and head_sha/plan_run_ids) to GITHUB_OUTPUT before it
     exits -- otherwise the render step reads an empty SHIPMATE_HARVEST_FAILED
     and the sticky comment falsely claims the warning harvest ran clean.
 
@@ -215,7 +215,7 @@ def test_unreadable_head_sha_marks_the_harvest_failed_before_exiting():
     assert block.count("exit 0") == 1
     degrade = block.split('if [[ ! "$head"', 1)[1].split("exit 0", 1)[0]
     assert "head_sha=" in degrade
-    assert "run_id=" in degrade
+    assert "plan_run_ids=" in degrade
     assert "harvest_failed=true" in degrade
 
 
@@ -232,15 +232,61 @@ def test_harvest_failed_env_falls_back_to_true_when_gatherdoc_did_not_run():
     )
 
 
-def test_the_check_runs_projection_carries_the_status_the_pending_flag_needs():
-    """`check-ids` mode decides the harvest-pending flag from this projection,
-    so `status` must be in it — without the field every run reads as unfinished
-    (`.get("status") != "completed"`), and the report would tell every commenter
-    to come back later, forever."""
-    block = _ACTION.split("id: gatherdoc", 1)[1].split("- name:", 1)[0]
-    projection = block.split("--jq '.check_runs[]", 1)[1].split("\n", 1)[0]
-    assert "status" in projection
-    assert "started_at" in projection  # still ranked by start time, not id
+def test_the_check_runs_projection_carries_every_field_this_step_answers_from_it():
+    """One listing answers every question doctor asks about this head, so its
+    projection has to carry all of them: `status` for the harvest-pending flag
+    (without it every run reads as unfinished and the report tells every
+    commenter to come back later, forever), `started_at` for check-ids' ranking,
+    `external_id` for the plan record each apply check carries, and the nested
+    `app` object apply-gate's fail-closed App filter reads — the flattened
+    `app_slug`/`app_id` pair beside it is what doctor's own reducer reads."""
+    assert _projection(_gatherdoc_step()["run"]) == _CHECK_RUNS_PROJECTION
+
+
+def test_a_check_run_in_that_shape_yields_its_plan_run():
+    """The projection is a jq expression no test can execute, so pin the shape
+    it produces where that shape is consumed. A projection that drops
+    `external_id`, or the nested `app` object the App filter reads, leaves the
+    mapping empty for every name — and doctor then reports that this commit
+    carries no plan records at all, having asked for them and dropped them."""
+    line = json.dumps(
+        {
+            "id": 7,
+            "name": "apply / stacks/app / dev-eu",
+            "status": "completed",
+            "started_at": "2026-08-24T00:00:00Z",
+            "external_id": json.dumps({"fingerprint": "a" * 64, "plan_run": "1281"}),
+            "app": {"id": 4326562},
+            "app_slug": "shipmate",
+            "app_id": 4326562,
+        }
+    )
+    mapping = load_script("apply-gate").plan_runs_by_name([line], "4326562")
+    assert mapping == {"apply / stacks/app / dev-eu": "1281"}
+
+
+def test_the_plan_records_are_read_from_the_listing_before_any_cell_download():
+    """The runs to download from are derived from the listing, so the listing
+    has to be fetched first — and read through apply-gate's `--plan-runs` mode,
+    the one reader of the `external_id` record."""
+    body = _code(_gatherdoc_step()["run"])
+    assert body.index("> check-runs.jsonl") < body.index("gh run download")
+
+
+def test_the_doctor_lookup_reads_the_record_through_the_one_reader():
+    """`plan_runs_by_name`, behind apply-gate's `--plan-runs` mode, is the only
+    reader of the `external_id` record; a second reader here would be a second
+    definition of what a usable record is."""
+    body = _code(_gatherdoc_step()["run"])
+    assert '"$GITHUB_ACTION_PATH/../../scripts/apply-gate" --plan-runs' in body
+
+
+def test_the_doctor_lookup_asks_the_plan_workflow_for_nothing():
+    """doctor read the cell summaries of the newest successful run of
+    `.github/workflows/plan.yml`, which a consumer is free to rename and which
+    says nothing about whether that run planned this head. The head's own apply
+    checks name their plan runs, so no workflow-path lookup is left."""
+    assert "workflows/plan.yml" not in _code(_gatherdoc_step()["run"])
 
 
 def test_the_render_step_reads_the_harvest_pending_flag_the_reduction_wrote():
@@ -434,10 +480,31 @@ def _code(block):
     return "\n".join(ln for ln in block.splitlines() if not ln.strip().startswith("#"))
 
 
+#: The gatherdoc listing's whole jq projection, hand-written.
+_CHECK_RUNS_PROJECTION = (
+    ".check_runs[] | {id, name, status, started_at, external_id, "
+    "app: {id: .app.id}, app_slug: .app.slug, app_id: .app.id}"
+)
+
+
+def _gatherdoc_step():
+    step = next(s for s in action_steps("comment-ops") if s.get("id") == "gatherdoc")
+    assert step.get("run"), "the gatherdoc step runs no shell"
+    return step
+
+
+def _projection(body):
+    """The check-runs listing's jq expression. One line carries it; the step's
+    other `--jq` reads the head SHA."""
+    lines = [ln for ln in body.splitlines() if "--jq '.check_runs[]" in ln]
+    assert len(lines) == 1, f"{len(lines)} check-runs projections in the step"
+    return lines[0].split("--jq '", 1)[1].rsplit("'", 1)[0]
+
+
 def _report_ctx():
     return {
         "head_sha": "f" * 40,
-        "plan_run_id": "1",
+        "plan_run_ids": ["1"],
         "envs": {"dev-eu"},
         "harvest_failed": False,
         "harvest_pending": False,

@@ -604,7 +604,8 @@ authorized `apply` or `unlock` instead; a reaction that cannot be posted is
 ignored), a one-line error comment when it cannot mint an App token, a
 one-line refusal when the commenter may not have the report (below), and a
 handful of untitled `::warning::` annotations on its own degrade paths — an
-unreadable PR head SHA, no plan-run cell summaries for this commit, a failed
+unreadable PR head SHA, unreadable plan records on this commit's apply checks,
+a plan run whose cell summaries could not be downloaded or reconciled, a failed
 check-runs listing or reduction, a failed per-check annotations fetch, and a
 failed listing of the pull request's comments, on which the report is skipped
 for that run rather than posted as a second sticky comment. Those annotations

@@ -1603,7 +1603,9 @@ def ctx_from_env():
         # the engine's own slug, resolved by GitHub at runtime. Empty when the
         # action runs from a local path instead of a pinned slug.
         "engine_repo": os.environ.get("SHIPMATE_ENGINE_REPO", ""),
-        "plan_run_id": os.environ.get("SHIPMATE_PLAN_RUN_ID", ""),
+        # A set, not one id: each cell's plan run comes from that cell's own
+        # apply check, so one head's cells can come from several plan runs.
+        "plan_run_ids": os.environ.get("SHIPMATE_PLAN_RUN_IDS", "").split(),
         "annotations_dir": os.environ.get("SHIPMATE_ANNOTATIONS_DIR", "ann"),
         "check_ids_path": os.environ.get("SHIPMATE_CHECK_IDS", "check-ids.tsv"),
         "harvest_failed": os.environ.get("SHIPMATE_HARVEST_FAILED") == "true",
@@ -1733,15 +1735,18 @@ def _provenance(ctx):
     probes did with it.
 
     Environment-probe coverage is stated only by `_environment_warnings`, keyed
-    on `envs_available`, because the two signals can disagree: a `gh run
-    download` that extracts cells but exits non-zero leaves `envs_available`
-    true with no `plan_run_id`. A preamble keyed on the run id would then claim
-    the probes were skipped while they actually produced findings."""
+    on `envs_available`, because the two signals can disagree: the id set names
+    the plan runs this head's apply checks recorded, whether or not their cell
+    summaries could then be downloaded, so a non-empty set is no evidence that
+    any environment was probed. A preamble keyed on it would claim a coverage
+    the probes never had."""
     head = ctx["head_sha"][:7] or "(unknown commit)"
-    if ctx["plan_run_id"]:
-        run_id = _one_line(ctx["plan_run_id"], 40)
-        return f"_Commit `{head}`; cell summaries from plan run {run_id}._"
-    return f"_Commit `{head}`; no plan run identified for this commit._"
+    runs = ctx["plan_run_ids"]
+    if runs:
+        named = _one_line(", ".join(runs), 120)
+        plural = "s" if len(runs) > 1 else ""
+        return f"_Commit `{head}`; cell summaries from plan run{plural} {named}._"
+    return f"_Commit `{head}`; no plan records on this commit's apply checks._"
 
 
 def _all_clear_line(ctx):
