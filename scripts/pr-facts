@@ -1,0 +1,160 @@
+#!/usr/bin/env python3
+"""Resolve the pull-request facts the plan path decides on, for either trigger.
+
+One producer for six values -- head SHA, head repository, base SHA, pull-request
+number, draft flag, and whether a human named this run -- so the fork refusal,
+the draft skip, the checkout ref and the plan's recorded provenance cannot read
+two different answers to the same question.
+
+Payload-preferred. Under `pull_request` / `pull_request_target` every value comes
+from GITHUB_EVENT_PATH: the autoplan path spends no API call and cannot disagree
+with the event that started it (the API answers with the head as it is NOW,
+which on a rapid re-push is a different commit). A `workflow_dispatch` payload
+carries no pull request, so the `pr_number` it does carry is resolved through the
+API instead.
+
+Nothing here reads a head SHA or a head repository from a dispatch input. The
+number is the only thing a dispatcher states, and a number cannot lie about its
+own head repository -- `build-matrix`'s fork refusal keys on the head repository
+this script emits, and a caller holding `actions: write` must not be able to
+state it.
+"""
+
+import importlib.util
+import os
+import pathlib
+import re
+from importlib.machinery import SourceFileLoader
+
+_D = pathlib.Path(__file__).resolve().parent
+
+
+def _load(fname):
+    loader = SourceFileLoader(fname.replace("-", "_"), str(_D / fname))
+    spec = importlib.util.spec_from_loader(loader.name, loader)
+    mod = importlib.util.module_from_spec(spec)
+    loader.exec_module(mod)
+    return mod
+
+
+bm = _load("build-matrix")
+
+# The one `gh api` definition, aliased rather than copied: a private
+# `json.loads(_run(...))` here would swallow gh's stderr differently from every
+# other caller.
+_gh_json = bm.gh_json
+
+#: A pull-request number as GitHub numbers them. Bounded and anchored: this
+#: value is interpolated into an API path.
+_NUMBER = re.compile(r"[1-9][0-9]{0,9}")
+
+#: The output keys, in the order they are written. Named once so the action's
+#: outputs and this list cannot drift apart silently.
+KEYS = ("head_sha", "head_repo", "base_sha", "pr_number", "is_draft", "on_demand")
+
+_DELETED_FORK = (
+    "::error::this pull request's head repository no longer exists — a deleted fork — so "
+    "there is nothing to check the fork refusal against, and planning it would run code "
+    "from a repository that is gone. Close the pull request, or push the branch to this "
+    "repository and open it here."
+)
+
+
+def _bool(value):
+    """A GitHub JSON boolean as the string the guards compare against."""
+    return "true" if value is True else "false"
+
+
+def _facts(pr, on_demand):
+    """The six facts from a pull-request object -- payload or API, same shape.
+
+    Refuses rather than emitting an empty value for anything nothing else can
+    supply: an absent head SHA leaves the checkout on the base and the matrix
+    empty, which is the direction that greens a gate over a pull request nobody
+    planned.
+    """
+    head = pr.get("head") or {}
+    repo = head.get("repo") or {}
+    facts = {
+        "head_sha": head.get("sha") or "",
+        "head_repo": repo.get("full_name") or "",
+        "base_sha": (pr.get("base") or {}).get("sha") or "",
+        "pr_number": str(pr.get("number") or ""),
+        "is_draft": _bool(pr.get("draft")),
+        "on_demand": on_demand,
+    }
+    if not facts["head_repo"]:
+        raise SystemExit(_DELETED_FORK)
+    missing = [key for key in ("head_sha", "base_sha", "pr_number") if not facts[key]]
+    if missing:
+        raise SystemExit(
+            "::error::this run's pull request is missing " + ", ".join(missing) + " — every "
+            "pull request has them, so the event payload was unreadable or the API answered a "
+            "partial object. Nothing else names the commit to plan: without it the checkout "
+            "stays on the base, the matrix comes out empty, and the gate greens with nothing "
+            "queued to apply. Re-run the workflow."
+        )
+    return facts
+
+
+def from_payload(pr):
+    """The facts for a pull-request event, from its own payload."""
+    return _facts(pr, "false")
+
+
+def from_api(number, repository):
+    """The facts for a dispatched plan, read from the API by number.
+
+    `state` is checked here rather than downstream: planning a closed pull
+    request would author fresh pending apply checks on a head the deploy path has
+    already been through, and `deploy-detect`'s work queue IS the pending apply
+    checks -- a re-run of that deploy would apply them again.
+    """
+    if not _NUMBER.fullmatch(number):
+        raise SystemExit(
+            f"::error::the plan workflow's pr_number input must be a pull-request number "
+            f"(got: {number!r}). A dispatched plan sends it; a hand-dispatched run has to "
+            "name it."
+        )
+    if not repository:
+        raise SystemExit(
+            "::error::GITHUB_REPOSITORY is unset, so this run cannot look up its own pull "
+            "request. Re-run the workflow."
+        )
+    pr = _gh_json(f"repos/{repository}/pulls/{number}")
+    state = pr.get("state")
+    if state != "open":
+        raise SystemExit(
+            f"::error::pull request #{number} is {state or 'in an unknown state'}, not open — "
+            "there is nothing to plan. Planning a closed pull request would queue apply "
+            "checks on a head the deploy path has already been through."
+        )
+    return _facts(pr, "true")
+
+
+def main():
+    payload = bm._event_payload(os.environ.get("GITHUB_EVENT_PATH", ""))
+    pr = payload.get("pull_request")
+    if isinstance(pr, dict) and pr:
+        facts = from_payload(pr)
+    else:
+        number = str((payload.get("inputs") or {}).get("pr_number") or "").strip()
+        if not number:
+            raise SystemExit(
+                "::error::this run has neither a pull request nor a pr_number input, so there "
+                "is nothing to plan. A pull-request event supplies the first and a dispatched "
+                "plan the second — declare a `pr_number` input on the plan workflow's "
+                "workflow_dispatch trigger (see `docs/getting-started.md`)."
+            )
+        facts = from_api(number, os.environ.get("GITHUB_REPOSITORY", ""))
+    with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
+        for key in KEYS:
+            fh.write(f"{key}={facts[key]}\n")
+    print(
+        f"pull request #{facts['pr_number']} at {facts['head_sha']} "
+        f"({facts['head_repo']}), draft={facts['is_draft']}, on-demand={facts['on_demand']}"
+    )
+
+
+if __name__ == "__main__":
+    main()

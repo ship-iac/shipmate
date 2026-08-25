@@ -57,6 +57,7 @@ extend-include = [
     "scripts/pending-checks",
     "scripts/plan-classify",
     "scripts/plan-crypt",
+    "scripts/pr-facts",
     "scripts/register-app",
     "scripts/summary-comment",
     "scripts/verify-environments",

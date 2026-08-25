@@ -154,8 +154,9 @@ def _run(args, env=None, check=True):
 
 def gh_json(path):
     """`gh api <path>` -> parsed JSON, through _run so a nonzero exit surfaces
-    the tool's stderr then raises ::error:: from a single definition. Shared by
-    apply-detect and deploy-detect (each aliases it as `_gh_json`)."""
+    the tool's stderr then raises ::error:: from a single definition. Callers
+    alias it as `_gh_json` rather than repeating the `json.loads(_run(...))`
+    pair."""
     return json.loads(_run(["gh", "api", path]))
 
 
@@ -288,10 +289,11 @@ def compute_cells(all_stacks=False, base="", require_env_tag=True):
 def _event_payload(path):
     """The triggering event's payload, or {} when it cannot be read.
 
-    Its only reader, `head_checkout_error`, REFUSES a `pull_request_target` run
-    whose payload it could not read: that payload is the only source of the head
-    SHA, so an unreadable one is a check that could not be made, never a check
-    that passed."""
+    `head_checkout_error` REFUSES a `pull_request_target` run whose payload it
+    could not read: that payload is the only source of the head SHA, so an
+    unreadable one is a check that could not be made, never a check that passed.
+    Every reader shares this one parser, so no two of them can disagree about
+    what the event said."""
     if not path:
         return {}
     try:

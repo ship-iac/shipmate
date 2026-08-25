@@ -1,0 +1,37 @@
+name: shipmate pr-facts
+description: >-
+  Resolve the pull request's facts — head SHA, head repository, base SHA, number, draft flag —
+  for either plan trigger: from the event payload on a pull-request event, from the API by the
+  dispatched pr_number otherwise. Every later job reads these outputs instead of the event
+  payload, so the fork refusal, the draft skip and the checkout ref cannot read two different
+  answers to one question. Needs `pull-requests: read` on the job (the dispatch leg only).
+outputs:
+  head-sha:
+    description: The pull request's head commit. Name it as every checkout's `ref:` and as plan-cell's `expected-head`.
+    value: ${{ steps.facts.outputs.head_sha }}
+  head-repo:
+    description: The head repository's full name (owner/repo). What build-matrix's fork refusal and the summary workflow's guard decide on.
+    value: ${{ steps.facts.outputs.head_repo }}
+  base-sha:
+    description: The pull request's base commit, for change detection.
+    value: ${{ steps.facts.outputs.base_sha }}
+  pr-number:
+    description: The pull request's number.
+    value: ${{ steps.facts.outputs.pr_number }}
+  is-draft:
+    description: '"true" when the pull request is a draft. Autoplan skips a draft; an explicitly requested plan does not.'
+    value: ${{ steps.facts.outputs.is_draft }}
+  on-demand:
+    description: '"true" when a human named this plan (the workflow_dispatch leg), "false" for a pull-request event. It is what lets an explicit plan override the draft skip.'
+    value: ${{ steps.facts.outputs.on_demand }}
+runs:
+  using: composite
+  steps:
+    - name: Resolve pull-request facts
+      id: facts
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        set -euo pipefail
+        python3 "$GITHUB_ACTION_PATH/../../scripts/pr-facts"
