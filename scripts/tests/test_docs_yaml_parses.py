@@ -235,6 +235,11 @@ def test_the_documented_wrapper_inputs_are_exactly_these():
     makes a hand-dispatched plan name the pull request it plans rather than start
     a run with nothing to resolve.
 
+    Keyed by the fence's own workflow `name:`, not by the page alone: two
+    wrappers on one page declare a `pr_number`, and without the name an exact
+    requiredness swap between them sorts to the same vector and stays green --
+    which is the drift below.
+
     Whole-vector comparison against a hand-written constant, for the reason
     `CLAUDE.md` gives: a "no input is required" predicate is also satisfied by a
     selector that finds nothing, and a per-input assertion cannot see an input
@@ -247,14 +252,16 @@ def test_the_documented_wrapper_inputs_are_exactly_these():
     paste, and it is what this pins.
     """
     found = sorted(
-        (page.relative_to(ENGINE).as_posix(), name, spec.get("required"), spec.get("default"))
+        (page.relative_to(ENGINE).as_posix(), doc.get("name"), name, *shape)
         for page, _, body in _FENCES
-        for name, spec in _dispatch_inputs(yaml.safe_load(body))
+        for doc in [yaml.safe_load(body)]
+        for name, spec in _dispatch_inputs(doc)
+        for shape in [(spec.get("required"), spec.get("default"))]
     )
     assert found == [
-        ("docs/getting-started.md", "environment", False, ""),
-        ("docs/getting-started.md", "mode", False, "apply"),
-        ("docs/getting-started.md", "pr_number", False, ""),
-        ("docs/getting-started.md", "pr_number", True, None),
-        ("docs/getting-started.md", "ref", False, ""),
+        ("docs/getting-started.md", "shipmate · apply", "environment", False, ""),
+        ("docs/getting-started.md", "shipmate · apply", "mode", False, "apply"),
+        ("docs/getting-started.md", "shipmate · apply", "pr_number", False, ""),
+        ("docs/getting-started.md", "shipmate · apply", "ref", False, ""),
+        ("docs/getting-started.md", "shipmate · plan", "pr_number", True, None),
     ], f"documented workflow_dispatch inputs changed: {found}"

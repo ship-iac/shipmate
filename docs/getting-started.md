@@ -125,8 +125,9 @@ the dispatch ref — and a dispatched run carries no pull request in its event
 payload at all. That is what the `facts` job is for: it resolves the pull
 request's facts once, from the event payload on a pull-request event and from
 the API by the dispatched `pr_number` otherwise, and every job below reads them
-from it. The `ref` on the two checkouts is load-bearing: without it the run
-plans the base branch and reports a clean plan for code it never read.
+from it. The `ref` on the two checkouts is load-bearing: without it each
+trigger checks out what it named above and reports a clean plan for code it
+never read.
 
 **The filenames are load-bearing too.** `actions/build-matrix` refuses to plan a
 repository that has no `.github/workflows/plan.yml` — no apply path matches that
@@ -153,7 +154,8 @@ on:
         description: Pull request number to plan
         required: true
 concurrency:
-  # `github.event.inputs` is payload data, defined for either trigger.
+  # `github.event.inputs` is readable under either trigger, unlike the
+  # `inputs` context.
   group: plan-${{ github.event.pull_request.number || github.event.inputs.pr_number }}
   cancel-in-progress: true
 permissions:
@@ -283,10 +285,12 @@ jobs:
 
 Permissions on this path are narrow: the top level grants `contents: read`, and
 the `summary` caller grants only that — the trusted work inside it runs on a
-freshly minted App token, not on `GITHUB_TOKEN`. Two jobs add one grant each.
-`facts` grants `pull-requests: read`, which only its dispatch leg spends: a
-pull-request event answers out of its own payload, and a dispatched run has to
-look the pull request up by number. The other is AWS-specific: this sample's
+freshly minted App token, not on `GITHUB_TOKEN`. `detect` and `plan` grant
+`contents: read`. A job's `permissions:` block replaces the workflow default
+rather than extending it, so `facts` trades that grant away for the
+`pull-requests: read` only its dispatch leg spends: a pull-request event answers
+out of its own payload, and a dispatched run has to look the pull request up by
+number. The one addition is AWS-specific: this sample's
 `plan` job grants `id-token: write` solely so `configure-aws-credentials` can
 assume the read-only plan role. A consumer with no plan-time cloud credentials
 drops both that grant and the credentials step.
@@ -553,8 +557,12 @@ The engine is the validator, and it is the only layer with enough context to be
 one: `apply-detect` runs `validate_head_sha` and `validate_env`, and it knows
 which values are legitimately empty in which mode.
 Its errors are annotations on the run naming the actual value. Keep new inputs
-optional for the same reason — `required` is the default a new input drifts back
-to, and it reopens this exactly.
+on *this* wrapper optional for the same reason — `required` is the default a new
+input drifts back to, and it reopens this exactly. The plan wrapper's `pr_number`
+is the one documented `required: true` input and shows what the rule is actually
+about: that dispatch has a single mode carrying a single input the engine always
+fills, so there is no empty value for GitHub to reject, and requiring it is what
+makes a hand-dispatched plan name the pull request it plans.
 
 `deploy.yml` applies, on push to the default branch, every reviewed plan whose
 apply check is still pending — so it no-ops when everything was applied
