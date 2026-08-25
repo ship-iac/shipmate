@@ -506,13 +506,27 @@ themselves contain text that matches the command grammar.
 | `shipmate apply [env]` | active | optional env | apply requirements, below |
 | `shipmate doctor` | active | none | read-only, but the commenter's `author_association` must be `OWNER`, `MEMBER` or `COLLABORATOR` (a classification, not a permission check) |
 | `shipmate help` | active | none | none — read-only, open to any commenter |
+| `shipmate plan` | active | none | changes no infrastructure, but the commenter's `author_association` must be `OWNER`, `MEMBER` or `COLLABORATOR` (a classification, not a permission check) — the same tier as `doctor` |
 | `shipmate unlock <env>` | active | required env | team membership plus the `<env>-apply` environment — no review policy, no mergeable check, no reviewed plan (below) |
-| `shipmate plan` | reserved | — | — |
 | `shipmate destroy` | reserved | — | — |
 
-`plan` and `destroy` are recognized and rejected with a "reserved" message, so
-the grammar does not need to change shape when those verbs are implemented. A
-verb documented as taking no arguments (`doctor`, `help`) rejects an env or
+`shipmate plan` plans the pull request's changed stacks on demand, authoring
+exactly what a push-triggered plan authors and nothing more: the sticky plan
+comment, the per-cell plan checks, the plan artifacts an apply consumes, and
+`shipmate / gate` (§Plan comment; a dispatched run's cell checks reach the pull
+request head as App-authored mirrors, described with the App identities below).
+It takes **no arguments** — there is one
+plan of record per head commit, and a run holding a single environment's
+artifacts would leave every other environment's workset empty at the next
+apply, so an env or tag-filter alongside it is rejected. Unlike autoplan it
+plans a **draft** pull request. Re-issuing
+it re-plans rather than reporting the existing plan current: the new run's plan
+replaces the plan of record for the current head, and doing so is safe because a
+plan changes nothing but shipmate's own comment, checks and artifacts.
+
+`destroy` is recognized and rejected with a "reserved" message, so the grammar
+does not need to change shape when that verb is implemented. A
+verb documented as taking no arguments (`doctor`, `help`, `plan`) rejects an env or
 tag-filter given alongside it with an explicit "takes no arguments" error
 rather than silently ignoring the extra token; a tag-filter given to any verb
 is likewise rejected as not yet supported rather than silently applied to the

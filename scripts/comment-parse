@@ -3,7 +3,7 @@
 
 Grammar: `shipmate <verb> [env] [tag-filter]`. Injection-safe: the whole
 command line must match one anchored regex; nothing is ever passed to a
-shell. `apply`, `doctor`, `help` and `unlock` are active; `plan`/`destroy` are
+shell. `apply`, `doctor`, `help`, `plan` and `unlock` are active; `destroy` is
 reserved (recognized, rejected with a "reserved" message so the grammar is
 stable as verbs are added).
 env is optional for `apply` and required for `unlock`: a bare `shipmate apply`
@@ -60,10 +60,14 @@ VERBS = {
         "desc": "Show this command list.",
     },
     "plan": {
-        "status": RESERVED,
-        "args": "[env]",
-        "route": None,
-        "desc": "Re-plan on demand — not yet implemented.",
+        "status": ACTIVE,
+        "args": "",
+        "route": "plan",
+        "desc": (
+            "Plan this pull request's changed stacks on demand — the same plan a push "
+            "produces, including on a draft. Re-planning is safe and replaces the plan of "
+            "record for the current head."
+        ),
     },
     "destroy": {
         "status": RESERVED,

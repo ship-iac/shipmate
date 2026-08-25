@@ -56,7 +56,7 @@ contract, and `docs/github-app.md` for one-time App setup.
 
 ## PR comment commands
 
-Four verbs are active (`plan` and `destroy` are reserved for later):
+Five verbs are active (`destroy` is reserved for later):
 
 - `shipmate apply [env]` — apply the reviewed plan for one environment, or
   every non-explicit environment when the environment is omitted.
@@ -64,6 +64,9 @@ Four verbs are active (`plan` and `destroy` are reserved for later):
   environments, App permissions, and warnings from this commit's workflow
   runs.
 - `shipmate help` — show this command list.
+- `shipmate plan` — plan this pull request's changed stacks on demand, the
+  same plan a push produces, including on a draft. Takes no environment: there
+  is one plan of record per head commit. Re-planning is safe and replaces it.
 - `shipmate unlock <env>` — release a state lock stranded by a cancelled or
   killed apply, so the environment's stacks can apply again. Does not
   re-apply, and does not recover a partial apply.
@@ -74,7 +77,8 @@ the environments of the stacks a given pull request changed, and its report says
 which ones those were — it is a check on the settings that pull request touches,
 not a repository-wide audit.
 
-`help` and `doctor` are read-only; `apply` and `unlock` are authorized. `apply`
+`help` and `doctor` are read-only; `plan` changes no infrastructure but answers
+the same commenters `doctor` does; `apply` and `unlock` are authorized. `apply`
 carries the full check (approvers-team membership, a mergeable and reviewed PR,
 and a reviewed plan for the current head — see Comment-ops above); `unlock`
 carries a narrower one — approvers-team membership and the `<env>-apply`
