@@ -21,9 +21,6 @@ inputs:
   pr-number:
     description: PR number the apply belongs to.
     required: true
-  plan-run-id:
-    description: Plan run id holding the reviewed plan artifacts.
-    required: true
   workflow:
     description: Workflow file to dispatch. Default apply.yml (the merged wrapper). A split apply.yml/apply-all.yml layout needs the file picked per comment — targeted vs bare — which this static input cannot do, so whichever file it names, the other verb is dispatched at the wrong workflow and rejected (422) over the `environment` input one declares and the other does not. Merge the wrappers instead; the split layout is the escape hatch, not the path.
     required: false
@@ -71,7 +68,6 @@ runs:
         MODE: ${{ inputs.mode }}
         REF: ${{ inputs.ref }}
         PR_NUMBER: ${{ inputs.pr-number }}
-        PLAN_RUN_ID: ${{ inputs.plan-run-id }}
       run: |
         set -euo pipefail
         if [ -z "$WORKFLOW" ]; then WORKFLOW=apply.yml; fi
@@ -82,7 +78,6 @@ runs:
         inputs = {
             "ref": os.environ["REF"],
             "pr_number": os.environ["PR_NUMBER"],
-            "plan_run_id": os.environ["PLAN_RUN_ID"],
         }
         # The `environment` key is included only when set: the merged apply.yml
         # wrapper declares it optional (empty = bare `shipmate apply`), and a
@@ -100,11 +95,11 @@ runs:
         printf '%s\n' "$out"
         if [ "$rc" -ne 0 ]; then
           # Only a 422 that names `mode` as unexpected is version skew. A 403,
-          # a rate limit -- or a 422 about a different input, which is how an
-          # empty required `plan_run_id` reads -- is another problem entirely,
-          # and explaining it as skew sends the operator to re-pin workflows
-          # that are fine. The raw API message is printed above either way.
+          # a rate limit -- or a 422 about a different input -- is another
+          # problem entirely, and explaining it as skew sends the operator to
+          # re-pin workflows that are fine. The raw API message is printed above
+          # either way.
           if [ "$MODE" = "unlock" ] && [[ "$out" == *"Unexpected inputs provided"* && "$out" == *mode* ]]; then echo "::error::The consumer's apply.yml does not declare the mode input; this repository's workflows predate shipmate unlock. Re-pin the consumer workflows to a release that has it (docs/releasing.md)."; fi
           exit "$rc"
         fi
-        echo "::notice title=dispatch::dispatched $WORKFLOW on $DISPATCH_REF for ${ENVIRONMENT:-all environments} (ref $REF, plan run $PLAN_RUN_ID)"
+        echo "::notice title=dispatch::dispatched $WORKFLOW on $DISPATCH_REF for ${ENVIRONMENT:-all environments} (ref $REF)"

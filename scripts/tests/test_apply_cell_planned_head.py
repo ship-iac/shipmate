@@ -13,8 +13,10 @@ after mutating real infrastructure -- hence the ordering guard here. And the
 refusal must be attributable in the cell summary, so a blocked apply names
 its cause instead of reporting a bare failure.
 
-An *absent* record is refused too, not tolerated: the artifact predates the
-release that records provenance, and there is nothing to compare.
+An *absent* record is refused too, not tolerated: there is nothing to compare,
+and the likeliest cause -- an artifact predating the release that records
+provenance -- is stated as a likelihood, since a mismatched engine revision
+produces the same absence.
 """
 
 import ast
@@ -122,18 +124,30 @@ def _run_step(tmp_path, *, record=None, observed=_PLANNED):
         env=env,
         capture_output=True,
         text=True,
+        # Explicit, not the locale default: the step's messages carry em dashes,
+        # and a cp1252 console would decode them to replacement characters and
+        # make the whole-message assertion below unable to ever pass on the real text.
+        encoding="utf-8",
         timeout=30,
     ), work
 
 
 @pytest.mark.skipif(_BASH is None, reason="bash not installed")
 def test_an_absent_record_aborts_and_says_to_re_plan(tmp_path):
+    # Whole message, written by hand: the two faults this pins against are a
+    # presumed cause asserted as fact and a remedy that only exists pre-merge.
+    # A substring check on either half leaves the other free to regress.
     r, _ = _run_step(tmp_path, record=None)
     assert r.returncode != 0, f"stdout={r.stdout!r} stderr={r.stderr!r}"
     out = r.stdout + r.stderr
-    assert "::error::" in out
-    assert "records no planned commit" in out
-    assert "Re-plan the affected stacks in a new pull request." in out
+    assert out.strip() == (
+        "::error::apply aborted for dev-eu/app: this reviewed plan records no planned "
+        "commit, so there is nothing to compare against this checkout — most likely "
+        "the plan predates the release that binds a plan to the tree it was produced from, "
+        "though a mismatched engine revision produces the same absence. Re-plan this stack "
+        "on its pull request and apply the fresh plan; if that pull request has already "
+        "merged, a new pull request touching the stack plans and applies it afresh."
+    )
 
 
 @pytest.mark.skipif(_BASH is None, reason="bash not installed")

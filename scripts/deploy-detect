@@ -3,7 +3,13 @@
 
 Exact-plan / fail-safe model: the work set is the merged PR's changed stacks
 whose apply check is still pending (completed = applied pre-merge, or
-no-change). No 'last deployed ref' diff — pending checks ARE the queue.
+no-change). No 'last deployed ref' diff — pending checks ARE the queue, and
+each cell applies from the plan run its own apply check records.
+
+This is the path with no comment, no dispatch inputs and no operator watching, so
+a pending cell whose check records no plan run refuses the whole run — a default
+would apply it from nowhere and a skip would leave its check pending with nothing
+said.
 """
 
 import importlib.util
@@ -71,30 +77,38 @@ def main():
     merge_sha = os.environ["GITHUB_SHA"]
     head = _merged_head(repo, merge_sha)
     cells = bm.compute_cells(all_stacks=False, base=os.environ.get("SHIPMATE_BASE_SHA", ""))
-    completed = ad.completed_apply_names(repo, head)
-    pending = filter_pending(cells, completed)
+    app_id = os.environ["SHIPMATE_APP_ID"]
+    # One listing answers both questions — which cells are already applied, and
+    # which plan run each remaining one applies from. Two reads disagree when a
+    # re-plan lands between them: the name leaves `completed` on the second read
+    # and its cell re-enters the queue carrying the first read's record.
+    lines = ad._check_run_lines(repo, head)
+    completed = ad.completed_apply_names(lines, app_id)
+    # AFTER the pending filter, as on both pre-merge paths: a cell applied by an
+    # older engine version carries a record-less check on that head forever, and
+    # refusing over one already-applied cell would strand every pull request
+    # merged across the upgrade. Every pending cell here is also runnable — this
+    # path holds nothing back, unlike the bare-apply one's explicit and held envs.
+    pending = ad.with_plan_runs(
+        filter_pending(cells, completed), ad.ag.plan_runs_by_name(lines, app_id)
+    )
     deps = ad.run_graph_deps()
     order = eo.read_env_order()
     levels = eo.env_levels(order, {c["environment"] for c in pending})
     eo.guard_max_env_levels(levels)
     per_level = eo.waves_by_env_level(pending, deps, levels)
-    runs = _gh_json(
-        f"repos/{repo}/actions/workflows/plan.yml/runs?head_sha={head}&status=success"
-    ).get("workflow_runs", [])
-    plan_run = runs[0]["id"] if runs else ""
     level_counts = [sum(len(waves[f"wave{i}"]) for i in range(wv.MAX_WAVES)) for waves in per_level]
     print(ad.dag_shape_notice(deps))
     print(
         f"::notice title=deploy-detect::base={os.environ.get('SHIPMATE_BASE_SHA', '')} "
         f"head={head} cells={len(cells)} completed={len(completed)} pending={len(pending)} "
-        f"envlevels={level_counts} plan_run={plan_run} empty={not any(level_counts)}"
+        f"envlevels={level_counts} empty={not any(level_counts)}"
     )
     # Output names must be hyphen-free: `steps.d.outputs.head-sha` parses the '-'
     # as subtraction, breaking the composite action's outputs block. Underscores.
     with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
         eo.write_env_level_waves(fh, per_level)
         fh.write(f"head_sha={head}\n")
-        fh.write(f"plan_run_id={plan_run}\n")
 
 
 if __name__ == "__main__":

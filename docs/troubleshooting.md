@@ -12,7 +12,7 @@ findings as workflow annotations titled `shipmate doctor`
 (`::warning title=shipmate doctor::<text>` / `::notice title=shipmate
 doctor::<text>`) — read-only, never blocking. Comment `shipmate doctor` on a
 pull request for a consolidated report: a sticky comment (marker `<!--
-shipmate:doctor -->`, upserted in place like the plan comment) combining eleven
+shipmate:doctor -->`, upserted in place like the plan comment) combining twelve
 live probes — a missing or mis-pinned `shipmate / gate` rule on the default
 branch (no active ruleset requiring it, or one that doesn't pin
 `integration_id` to the shipmate App, or that isn't strict),
@@ -81,12 +81,18 @@ the pull request cannot merge; a constant — the running repository, a literal
 `false` — states the safe answer for every run, fork pull requests and drafts
 included, so the value is checked and not just the key, and on the `build-matrix`
 step that constant is the fork refusal passing every pull request),
+whether the `apply.yml` wrapper still declares or forwards the retired
+`plan_run_id` input (the engine dispatches no such value and nothing it calls
+accepts one; a `with:` line forwarding it to the engine's reusable `apply.yml`
+or `apply-all.yml` makes GitHub reject the run as it LOADS the workflow — the
+run has no jobs and no logs, only a workflow-validation error on the run itself
+— while the same line on a composite action is only a warning),
 whether the configured approvers team resolves in the org, and
 whether the shipmate App installation still grants the manifest's full
 permission set — with the warning and failure annotations GitHub already
 recorded on this commit's workflow runs (shipmate's own and any other
 Actions workflow run on that commit; third-party-app-authored check runs are
-excluded). Only nine of the eleven probes can produce a finding from the plan
+excluded). Only ten of the twelve probes can produce a finding from the plan
 path's own `annotate`-mode run (`actions/summary`): the approvers-team probe
 needs the `SHIPMATE_TEAM` environment variable, which the plan path does
 not supply, and
@@ -125,8 +131,9 @@ given pull request changed; the declared set comes from that commit's plan
 matrix. So the report's all-clear line names the environments it actually probed
 instead of implying the repository's environments are all sound, and a clean
 secret probe says nothing about an environment this pull request did not touch.
-The declared set needs a plan run that **succeeded**, so one failed cell in a
-fan-out withholds it and the report says so. **One check is exempt and reported
+The declared set is the cell summaries of the plan runs this commit's own apply
+checks record, so a run whose summaries cannot be downloaded is warned about and
+its environments are simply absent from the set. **One check is exempt and reported
 anyway: the ambiguous-naming warning** (a bare `<env>` beside `<env>-plan` or
 `<env>-apply`), which compares environment names against each other and needs no
 declared set — it therefore covers every logical environment in the repository,
@@ -269,8 +276,8 @@ both dispatched apply workflows refuse in their `guard` job any dispatch whose
 actor is not a `[bot]` — a hand-run one fails with `apply must be dispatched by
 the shipmate App via comment-ops, not by a direct workflow_dispatch` — and
 comment-ops
-resolves the newest successful plan run for the pull request's **current** head,
-refusing the command when that head has none. These fail-safes are defence in
+reads the plan run each `apply / <stack> / <env>` check on the pull request's
+**current** head records, refusing the command when that head names none. These fail-safes are defence in
 depth behind that control, not the only thing behind it.
 
 **If the mismatch names *every* `TF_VAR_*` and it started right after an
@@ -340,9 +347,10 @@ remedy differs:
   plan describes a tree this job does not have, so it is refused rather than
   applied or silently re-planned — as with a stale plan, there is no force. The
   fix is a re-plan and an apply of the fresh plan.
-- **There is no record at all.** The plan predates the release that binds a plan
-  to the tree it was produced from, so there is nothing to compare and the
-  absent record is refused rather than tolerated. **A push does not always fix
+- **There is no record at all.** There is nothing to compare, so the absent
+  record is refused rather than tolerated. Most often the plan predates the
+  release that binds a plan to the tree it was produced from, though a
+  mismatched engine revision produces the same absence. **A push does not always fix
   this one.** Pre-merge it does: push to the pull request and the fresh plan
   carries a record — a *re-run* of the old plan run does not, because a re-run
   replays the workflow file of the commit that triggered it, so it produces
@@ -353,9 +361,10 @@ remedy differs:
   at all is to land the re-pin with nothing pending
   ([`upgrading.md`](upgrading.md) §0.17.0).
 
-This check is per cell and additive: the apply path's existing run-level
-verification of the plan run's head is unchanged, and a repository sees this
-error only for a plan the run-level check accepted.
+This check is per cell and additive: the apply path's plan-run binding — each
+cell's plan run read from an App-authored apply check on that same head — is
+unchanged, and a repository sees this error only for a plan run that binding
+accepted.
 
 ### `this apply would bind GitHub Environment(s) that do not exist`
 

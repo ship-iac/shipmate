@@ -7,7 +7,17 @@ from _loader import load_script
 az = load_script("authorize")
 
 PR_OK = {"mergeable": True, "mergeable_state": "clean", "head": {"sha": "abc123"}}
-RUN_OK = {"id": 555, "head_sha": "abc123"}
+#: What the gather step hands over: the plan run each App-authored apply check on
+#: the PR head records. No head SHA anywhere -- a record read from that head's own
+#: check-runs is for that head by construction.
+RUNS_OK = {"apply / stacks/app / dev-eu": "555"}
+#: The refusal when the head names no plan run at all, hand-written: it is the
+#: sentence a commenter reads on a PR, not an implementation detail.
+NO_PLAN_REASON = (
+    "no reviewed plan for the current PR head — no apply check on it names a "
+    "plan run. Plan this head (push; a re-run alone will not clear a plan from "
+    "before an engine re-pin), then `shipmate apply` again."
+)
 UNGATED_DEV = frozenset({"dev-eu"})
 
 
@@ -17,7 +27,7 @@ def _decide(**kw):
         approvers_team="deployers",
         review_decision="NONE",
         pr=PR_OK,
-        plan_run=RUN_OK,
+        plan_runs=RUNS_OK,
     )
     base.update(kw)
     return az.decide(**base)
@@ -102,7 +112,7 @@ def test_main_reads_review_decision_env(tmp_path, monkeypatch):
     pr_json = tmp_path / "pr.json"
     pr_json.write_text(json.dumps(PR_OK), encoding="utf-8")
     run_json = tmp_path / "plan_run.json"
-    run_json.write_text(json.dumps(RUN_OK), encoding="utf-8")
+    run_json.write_text(json.dumps(RUNS_OK), encoding="utf-8")
     out = tmp_path / "out.txt"
     out.touch()
     for key, value in {
@@ -129,19 +139,17 @@ def test_action_wires_review_decision():
     assert "REVIEW_DECISION: ${{ steps.gather.outputs.review_decision }}" in action
 
 
-def test_no_reviewed_plan_rejected_as_stale():
-    ok, reason = _decide(plan_run={})
-    assert not ok and "re-plan" in reason
-    assert "no reviewed plan" in reason or "no successful plan" in reason
+def test_a_head_whose_apply_checks_name_a_plan_run_authorizes():
+    # The absence branch is the only plan-run condition left, so a mapping that
+    # carries no head SHA at all must authorize: reinstating a comparison against
+    # the PR head refuses every apply, since there is nothing to compare.
+    ok, reason = _decide(plan_runs={"apply / stacks/app / dev-eu": "555"})
+    assert (ok, reason) == (True, "")
 
 
-def test_stale_head_sha_rejected():
-    # a reviewed plan exists but for an older head than the PR's current head
-    ok, reason = _decide(
-        plan_run={"id": 9, "head_sha": "OLD"},
-        pr={"mergeable": True, "mergeable_state": "clean", "head": {"sha": "NEW"}},
-    )
-    assert not ok and "stale" in reason and "re-plan" in reason
+def test_no_apply_check_naming_a_plan_run_refuses_with_the_shipped_sentence():
+    ok, reason = _decide(plan_runs={})
+    assert (ok, reason) == (False, NO_PLAN_REASON)
 
 
 def test_mergeable_null_reports_still_computing_not_conflict():
@@ -280,10 +288,8 @@ def test_exemption_does_not_reach_the_other_checks():
         pr={"mergeable": False, "mergeable_state": "dirty", "head": {"sha": "abc123"}}, **exempt
     )
     assert not ok and "not mergeable" in reason
-    ok, reason = _decide(plan_run={}, **exempt)
+    ok, reason = _decide(plan_runs={}, **exempt)
     assert not ok and "no reviewed plan" in reason
-    ok, reason = _decide(plan_run={"id": 9, "head_sha": "OLD"}, **exempt)
-    assert not ok and "stale" in reason
 
 
 def test_main_reads_ungated_envs_and_environment(tmp_path, monkeypatch):
@@ -293,7 +299,7 @@ def test_main_reads_ungated_envs_and_environment(tmp_path, monkeypatch):
     pr_json = tmp_path / "pr.json"
     pr_json.write_text(json.dumps(PR_OK), encoding="utf-8")
     run_json = tmp_path / "plan_run.json"
-    run_json.write_text(json.dumps(RUN_OK), encoding="utf-8")
+    run_json.write_text(json.dumps(RUNS_OK), encoding="utf-8")
     out = tmp_path / "out.txt"
     out.touch()
     for key, value in {
@@ -315,11 +321,11 @@ def test_main_reads_ungated_envs_and_environment(tmp_path, monkeypatch):
     assert "environment=prod-eu" in text
 
 
-def _main_output(tmp_path, monkeypatch, *, pr=PR_OK, plan_run=RUN_OK, **env):
+def _main_output(tmp_path, monkeypatch, *, pr=PR_OK, plan_runs=RUNS_OK, **env):
     pr_json = tmp_path / "pr.json"
     pr_json.write_text(json.dumps(pr), encoding="utf-8")
     run_json = tmp_path / "plan_run.json"
-    run_json.write_text(json.dumps(plan_run), encoding="utf-8")
+    run_json.write_text(json.dumps(plan_runs), encoding="utf-8")
     out = tmp_path / "out.txt"
     out.touch()
     base = {
@@ -342,13 +348,13 @@ def _main_output(tmp_path, monkeypatch, *, pr=PR_OK, plan_run=RUN_OK, **env):
 
 
 def test_ungated_exemption_is_not_reported_when_a_later_requirement_refused(tmp_path, monkeypatch):
-    # The exemption passed the review check and the apply was still refused
-    # (stale plan, checked after it). The report claims permission to apply, so
-    # it must not post over a refusal.
+    # The exemption passed the review check and the apply was still refused (no
+    # plan run on the head, checked after it). The report claims permission to
+    # apply, so it must not post over a refusal.
     parsed = _main_output(
         tmp_path,
         monkeypatch,
-        plan_run={"id": 555, "head_sha": "older"},
+        plan_runs={},
         REVIEW_DECISION="REVIEW_REQUIRED",
         SHIPMATE_ENV="dev-eu",
         SHIPMATE_UNGATED_ENVS="dev-eu",
@@ -403,7 +409,7 @@ def test_unlock_needs_only_team_membership():
         approvers_team="infra",
         review_decision="",  # no decision at all
         pr={"mergeable": None, "head": {"sha": "a" * 40}},  # a merged PR
-        plan_run={},  # no reviewed plan
+        plan_runs={},  # no reviewed plan
         environment="dev-eu",
         verb="unlock",
     )
@@ -416,7 +422,7 @@ def test_unlock_still_refuses_a_non_member():
         approvers_team="infra",
         review_decision="APPROVED",
         pr={"mergeable": True, "head": {"sha": "a" * 40}},
-        plan_run={"head_sha": "a" * 40},
+        plan_runs=RUNS_OK,
         environment="dev-eu",
         verb="unlock",
     )
@@ -430,7 +436,7 @@ def test_apply_is_unchanged_by_the_verb_default():
         approvers_team="infra",
         review_decision="",
         pr={"mergeable": None, "head": {"sha": "a" * 40}},
-        plan_run={},
+        plan_runs={},
         environment="dev-eu",
     )
     assert not ok
@@ -444,7 +450,7 @@ def test_unlock_with_ungated_exemption_does_not_produce_false_audit_line(tmp_pat
     pr_json = tmp_path / "pr.json"
     pr_json.write_text(json.dumps(PR_OK), encoding="utf-8")
     run_json = tmp_path / "plan_run.json"
-    run_json.write_text(json.dumps(RUN_OK), encoding="utf-8")
+    run_json.write_text(json.dumps(RUNS_OK), encoding="utf-8")
     out = tmp_path / "out.txt"
     out.touch()
     for key, value in {
@@ -472,7 +478,7 @@ def test_apply_with_ungated_exemption_still_produces_audit_line(tmp_path, monkey
     pr_json = tmp_path / "pr.json"
     pr_json.write_text(json.dumps(PR_OK), encoding="utf-8")
     run_json = tmp_path / "plan_run.json"
-    run_json.write_text(json.dumps(RUN_OK), encoding="utf-8")
+    run_json.write_text(json.dumps(RUNS_OK), encoding="utf-8")
     out = tmp_path / "out.txt"
     out.touch()
     for key, value in {
@@ -491,3 +497,10 @@ def test_apply_with_ungated_exemption_still_produces_audit_line(tmp_path, monkey
     text = out.read_text(encoding="utf-8")
     assert "authorized=true" in text
     assert "ungated_exemption=true" in text
+
+
+def test_no_plan_run_id_output(tmp_path, monkeypatch):
+    # Each cell now applies from the run its own apply check records, so a single
+    # run id for the whole command is not merely unused: a consumer wiring it
+    # would apply cells from a run that never planned them.
+    assert "plan_run_id" not in _main_output(tmp_path, monkeypatch)

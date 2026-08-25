@@ -122,10 +122,12 @@ load-bearing: `pull_request_target` runs at the *base* ref, so without it the ru
 plans the base branch and reports a clean plan for code it never read.
 
 **The filenames are load-bearing too.** `actions/build-matrix` refuses to plan a
-repository that has no `.github/workflows/plan.yml`, and the apply path refuses a
-plan run whose workflow path is not `plan.yml` — the name is matched literally.
-`apply.yml` is the name `actions/dispatch` targets by default, so an apply
-wrapper called anything else is dispatched by nothing and `shipmate apply`
+repository that has no `.github/workflows/plan.yml` — no apply path matches that
+path any more (each cell reads its plan run from its own apply check), but
+`shipmate doctor` keys its plan-wrapper probes on the filename, so a plan
+workflow under another name loses them silently and the refusal is what stops it
+happening. `apply.yml` is the name `actions/dispatch` targets by default, so an
+apply wrapper called anything else is dispatched by nothing and `shipmate apply`
 silently reaches no workflow. Create both under exactly those names.
 
 The fences on this page are transcribed from the sample repositories, which pin
@@ -411,7 +413,6 @@ jobs:
           mode: ${{ steps.authz.outputs.mode }}
           ref: ${{ steps.authz.outputs.head-sha }}
           pr-number: ${{ github.event.issue.number }}
-          plan-run-id: ${{ steps.authz.outputs.plan-run-id }}
           dispatch-ref: ${{ github.event.repository.default_branch }}
           repository: ${{ github.repository }}
 ```
@@ -451,10 +452,6 @@ on:
         description: PR number
         required: false
         default: ''
-      plan_run_id:
-        description: "Plan run id with the reviewed plans. Empty for `shipmate unlock`, which applies no plan"
-        required: false
-        default: ''
 permissions:
   contents: read
   actions: read
@@ -473,7 +470,6 @@ jobs:
       mode: ${{ inputs.mode }}
       ref: ${{ inputs.ref }}
       pr_number: ${{ inputs.pr_number }}
-      plan_run_id: ${{ inputs.plan_run_id }}
       state_suffix: ""
   all:
     if: ${{ inputs.environment == '' }}
@@ -485,14 +481,19 @@ jobs:
     with:
       ref: ${{ inputs.ref }}
       pr_number: ${{ inputs.pr_number }}
-      plan_run_id: ${{ inputs.plan_run_id }}
       state_suffix: ""
 ```
 
 `mode` carries `shipmate unlock <env>` — it reaches only the `targeted` job,
-since unlock is always single-env. Leave it out and `unlock` is accepted at
-comment time and then dispatched as an ordinary apply with no plan run, failing
-with an error that names neither unlock nor `mode`.
+since unlock is always single-env. The two ways to leave it out fail
+differently. **Omit the `workflow_dispatch` input** and `unlock` is accepted at
+comment time and then refused by the platform: `actions/dispatch` puts `mode` in
+the body only for an unlock, GitHub answers HTTP 422 "Unexpected inputs
+provided" for an input the wrapper does not declare, and the dispatch step
+recognises that pair and names `mode`. **Omit only the `with:` pass-through** and
+nothing fails at all — the engine's `apply.yml` declares `mode` optional with
+default `apply`, so the comment quietly applies the reviewed plan instead of
+releasing the lock.
 
 **Every input is `required: false` with an explicit default, and that is
 deliberate.** This wrapper is dispatched only by `actions/dispatch`, minting an
@@ -501,12 +502,13 @@ App token, from a body the engine builds — no human ever fills a form here, so
 engine sent empty *on purpose* into a platform-level rejection: **GitHub treats
 an empty value for a `required: true` `workflow_dispatch` input as "not
 provided"** and answers HTTP 422 before the workflow starts, naming an input the
-operator never typed. That is how every `shipmate unlock` dispatch failed until
-`plan_run_id` became optional — unlock applies no plan, so it carries no run id.
+operator never typed. That is how every `shipmate unlock` dispatch failed while
+this wrapper still declared the plan-run input the engine has since retired:
+unlock applies no plan, so the engine sent that value empty.
 
 The engine is the validator, and it is the only layer with enough context to be
-one: `apply-detect` runs `validate_head_sha`, `validate_plan_run_id` and
-`validate_env`, and it knows which values are legitimately empty in which mode.
+one: `apply-detect` runs `validate_head_sha` and `validate_env`, and it knows
+which values are legitimately empty in which mode.
 Its errors are annotations on the run naming the actual value. Keep new inputs
 optional for the same reason — `required` is the default a new input drifts back
 to, and it reopens this exactly.

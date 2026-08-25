@@ -341,9 +341,9 @@ never used.
   and fails the run when any of them comes back changed: the plan matrix's
   `detect` job, the post-merge deploy's own detect, and the nightly drift run.
   Repo-wide config, so one stack answers for the tree. The dispatched and bare
-  `shipmate apply` detects reconstruct their cells from plan artifacts instead
-  and never reach this probe — by then the plan run that would have caught it
-  has already happened.
+  `shipmate apply` detects reconstruct their cells from the head's own apply
+  checks instead and never reach this probe — by then the plan run that would
+  have caught it has already happened.
 
 ## State backend
 
@@ -481,9 +481,9 @@ untagged one fails the **whole run** rather than being skipped. Which stacks
 are inspected differs by path: the **changed** set on the plan and deploy
 paths, so untagged stacks elsewhere in the tree do not fail a plan run until
 one of them changes; every stack on the drift path, which is therefore the
-repo-wide backstop that catches the rest; and none on the artifact-sourced
+repo-wide backstop that catches the rest; and none on the checks-sourced
 bare-apply `detect`, which exempts the check deliberately — an untagged stack
-produces no plan artifact and so contributes no cell anyway, and an unrelated
+carries no apply check and so contributes no cell anyway, and an unrelated
 one must not abort an apply. Failing the whole run rather than the one stack is
 deliberate too: a silently skipped stack plans and applies nothing while the
 gate goes green over it, which is the one failure this contract will not trade
@@ -530,7 +530,7 @@ only labels the output as shipmate's own.
 `shipmate doctor` posts a consolidated, sticky report — one comment per pull
 request, identified by the HTML marker `<!-- shipmate:doctor -->` (distinct
 from the plan comment's `<!-- shipmate:summary -->`) and upserted in place the
-same way. It combines eleven live settings probes (gate ruleset,
+same way. It combines twelve live settings probes (gate ruleset,
 default-branch `pull_request` rule, environment existence, environment
 protection shape, plan-environment secrets, the `shipmate-engine`
 environment's own existence and default-branch scoping, `pull_request_target`
@@ -541,6 +541,9 @@ and draft inputs it passes to the engine's reusable summary workflow, the
 head-repository input on its own `build-matrix` step, and a `no-pull-request`
 anywhere in that file; absent or constant, they cost a skipped summary job or a
 fork refusal that passes for every pull request —
+a retired `plan_run_id` input still declared or forwarded by the consumer's
+`apply.yml` (a forward to a reusable workflow is rejected as the run LOADS, so
+there is no job and no log to read),
 approvers-team resolvability, and App installation permission
 drift — see `docs/branch-protection.md`) with a harvest of the warning and
 failure annotations GitHub already recorded on this commit's workflow runs
@@ -552,7 +555,7 @@ when the report was rendered, it says so and asks for the command again once
 they have, and if the harvest itself could not be read in full it says that
 too — the two are separate statements, since a run that has not finished has
 recorded nothing yet while a run that could not be read may have recorded
-plenty. Only nine of the eleven
+plenty. Only ten of the twelve
 probes can produce a finding from the plan path's own `annotate`-mode
 invocation: the approvers-team probe needs the `SHIPMATE_TEAM` environment
 variable, which the plan path does not supply, so it silently returns
@@ -604,7 +607,8 @@ authorized `apply` or `unlock` instead; a reaction that cannot be posted is
 ignored), a one-line error comment when it cannot mint an App token, a
 one-line refusal when the commenter may not have the report (below), and a
 handful of untitled `::warning::` annotations on its own degrade paths — an
-unreadable PR head SHA, no plan-run cell summaries for this commit, a failed
+unreadable PR head SHA, unreadable plan records on this commit's apply checks,
+a plan run whose cell summaries could not be downloaded or reconciled, a failed
 check-runs listing or reduction, a failed per-check annotations fetch, and a
 failed listing of the pull request's comments, on which the report is skipped
 for that run rather than posted as a second sticky comment. Those annotations
@@ -698,10 +702,12 @@ its own actionable rejection reason:
   an absent or empty decision — fails closed with a wiring-error reason. An
   environment listed in the `SHIPMATE_UNGATED_ENVS` repository variable is
   exempt from this requirement, and from no other (below);
-- **undiverged**: a reviewed plan exists for the pull request's **current**
-  head SHA (the most recent successful plan run — the automatic plan run on
-  pull-request open, autoplan — whose head matches; a plan for an older head
-  means new commits landed since — stale, re-plan required).
+- **undiverged**: at least one `apply / <stack> / <env>` check on the pull
+  request's **current** head names the plan run its plan came from (each check
+  records that run at plan time). The records are read from that head's own
+  check runs, so no plan run reached here can belong to another head and none is
+  compared against one: a head new commits landed on carries no apply checks
+  yet, names no plan run, and is refused — re-plan required.
 
 `undiverged` is only the comment-time half of shipmate's **exact-plan** rule.
 The cell that applies re-verifies the reviewed `.otplan` against current state,
@@ -995,9 +1001,8 @@ The three jobs:
   plan the base branch and report a clean plan for a pull request they never
   read. `actions/build-matrix` refuses that: on `pull_request_target` it
   compares the event's head SHA against the commit it is running on, and it
-  also refuses a checkout with no `.github/workflows/plan.yml` — that path is
-  matched literally by the reviewed-plan lookups and a renamed plan workflow
-  wedges every later apply. `actions/build-matrix` fails `detect`
+  also refuses a checkout with no `.github/workflows/plan.yml` — the one path
+  this contract lets the plan workflow live at. `actions/build-matrix` fails `detect`
   outright unless the run **states** a head repository equal to the running
   repository: **fork pull requests are not planned**, and no input permits one.
   A fork's plan would execute the pull request's own Terramate/OpenTofu code
@@ -1050,18 +1055,18 @@ the plan wrapper's fork and draft wiring; the last of those is the one that
 observes whether the gate will be written, and it reports rather than fails.
 
 The **file path is still load-bearing**, and nothing diagnoses a rename as the
-cause:
-`scripts/apply-detect`'s provenance gate refuses a dispatched apply whose plan
-run did not come from a `plan.yml`, `scripts/deploy-detect` resolves the
-post-merge plan run through
-`actions/workflows/plan.yml/runs`, and `actions/comment-ops` uses that same
-endpoint twice — for the reviewed-plan lookup behind `shipmate apply` and for
-doctor's cell-summary fetch. Doctor's `pull_request_target` probe exempts the
-plan workflow by exact name. Rename the file and applies are refused as stale,
-doctor skips its environment probes, a post-merge deploy finds no plan run, and
+cause: `actions/build-matrix` refuses a checkout that has no
+`.github/workflows/plan.yml`, and doctor keys on that exact name both for its
+`pull_request_target` exemption and for the plan-wrapper wiring probes (the
+head-repository and draft inputs), which report nothing on a file called
+anything else. Rename the file and planning is refused from that commit on, and
 the renamed file starts drawing doctor's own `pull_request_target` warning. Each
-symptom surfaces on its own — comment-ops annotates the skipped probes — but
+symptom surfaces on its own — the refusal names the path it looked for — but
 none of them names the rename.
+
+No apply path matches on it any more: a dispatched, bare or post-merge apply
+reads each cell's plan run from that cell's own apply check, so a renamed plan
+workflow no longer strands work already planned.
 
 A consumer that omits the `summary`
 job gets no `shipmate / gate` status at all, so the pull request cannot merge —
@@ -1212,9 +1217,10 @@ verbatim as:
 
 where `<env>` is the environment name and `<slug>` is the Terramate stack
 **path** with every `/` replaced by `-` (e.g. `stacks/app` → `stacks-app`, so
-`(stacks/app, dev-eu)` → `plan.dev-eu.stacks-app`). plan-cell creates it,
-apply-cell downloads it, and apply-detect matches it — all three **construct**
-the name forward from the `(env, slug)` pair; **no component reverse-parses it**.
+`(stacks/app, dev-eu)` → `plan.dev-eu.stacks-app`). plan-cell creates it and
+apply-cell downloads it — both **construct** the name forward from the
+`(env, slug)` pair; **no component reverse-parses it**. No detect matches on it
+at all: the apply workset comes from the head's own apply checks.
 
 The delimiter is `.` and the environment comes first on purpose. Terramate tag
 values (the source of every env name) cannot contain `.`, so the first `.`
@@ -1226,13 +1232,17 @@ unambiguous across all `(slug, env)` pairs — unlike the earlier
 wave. A slug may itself contain `.` (a path character); that is harmless
 because the name is only ever built forward, never split. Two distinct stack
 paths that slug to the same value still collide by construction and fail loud
-in apply-detect (rename so the path→`-` slug is unique).
+in `build-matrix`, at matrix construction — before any artifact exists, so the
+plan run refuses up front rather than an apply discovering the clash afterwards
+(rename so the path→`-` slug is unique). Every path that builds a matrix
+carries it: the plan and deploy paths over their changed set, the drift path
+over the whole tree, and `shipmate unlock` over the target environment.
 
 This naming contract is breaking for any in-flight plan artifacts: land the
 change when no applies are mid-flight. It also spans two consumer workflow
 files pinned independently — `plan.yml` pins `plan-cell` (the uploader) and
 `apply.yml` pins the engine's reusable apply workflows, which pin
-`apply-cell`/`apply-detect` (the downloader/matcher) internally. Bump both
+`apply-cell` (the downloader) internally. Bump both
 pins **together** when adopting a build that changes this name: a partial
 bump (uploader on the new name, downloader on the old, or vice versa) makes
 every apply fail its reviewed-plan download fail-safe until the pins agree.
@@ -1479,9 +1489,10 @@ degrade to the workflow-run URL on no match.
 
 ## Apply-match fingerprint
 
-Each plan stores a fingerprint (`fingerprint.txt`, artifact `external_id` on the
-apply check): `sha256` over the sorted JSON of every **non-empty** `TF_VAR_*`
-environment variable (name→value) **plus `TF_WORKSPACE` when it is set**.
+Each plan stores a fingerprint (`fingerprint.txt` in the artifact; on the apply
+check, the `external_id` JSON record holds it alongside the id of the plan run
+that produced the cell): `sha256` over the sorted JSON of every **non-empty**
+`TF_VAR_*` environment variable (name→value) **plus `TF_WORKSPACE` when it is set**.
 Ephemeral credential vars (`AWS_*`, etc.) are excluded. A set-but-empty
 `TF_VAR_*` is excluded from the payload, so it now hashes identically to that
 variable being absent altogether — a flavor that injects nothing and a flavor
@@ -1506,11 +1517,14 @@ the record out of the consumer's checkout into `$RUNNER_TEMP` before reading it
 file at its repo root — and compares it against its own `git rev-parse HEAD`
 before the decrypt, the state restore and the apply — a plan of another tree is
 refused at the cheapest point. A record that disagrees with the checkout is
-refused, and so is an **absent** record: it predates the release that binds a
-plan to its tree, there is nothing to compare, and the remedy is a re-plan. This
-is additive to the run-level head check the apply path already performs against
-the plan run, not a replacement for it — that check bounds which plan run may be
-applied, this one binds each individual plan to the tree it was produced from.
+refused, and so is an **absent** record: there is nothing to compare, so it is
+refused rather than tolerated. Most often such a plan predates the release that
+binds a plan to its tree, though a mismatched engine revision produces the same
+absence; either way the remedy is a re-plan. This
+is additive to the plan-run binding the apply path already carries: each cell's
+plan run is read from an App-authored apply check on that same head, so no plan
+run from another head can be named. That binding bounds which plan run may be
+applied; this one binds each individual plan to the tree it was produced from.
 
 ## Secrets in published output
 

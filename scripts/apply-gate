@@ -2,8 +2,10 @@
 """Decide whether every `apply / <stack> / <env>` check on a commit is done.
 
 Reads check-runs as JSON Lines on stdin (one check-run object per line, as
-emitted by `gh api --paginate ... --jq '.check_runs[]'`) and writes a single
-verdict to GITHUB_OUTPUT:
+emitted by `gh api --paginate ... --jq '.check_runs[]'`). With `--plan-runs` it
+prints the `plan_runs_by_name` mapping on stdout for comment-ops' reviewed-plan
+lookup and decides nothing; otherwise it writes a single verdict to
+GITHUB_OUTPUT:
 
 - `complete`   — every apply check's latest run is completed with a good
                  conclusion (success, or neutral for no-change cells); the
@@ -26,6 +28,7 @@ queued duplicate below an older completed run).
 
 import json
 import os
+import re
 import sys
 
 APPLY_PREFIX = "apply / "
@@ -110,6 +113,30 @@ def app_done_names(check_run_lines, app_id):
     return done_names(from_app(parse_jsonl(check_run_lines), app_id))
 
 
+def plan_runs_by_name(check_run_lines, app_id):
+    """Map each App-authored apply check name to the plan run id that produced
+    its plan, read from the check-run's `external_id` record written by
+    pending-checks. Reuses app_done_names' primitives -- parse_jsonl, the
+    fail-closed from_app filter, and latest_by_name's newest-by-id grouping --
+    so only the newest App-authored run per name is consulted.
+
+    A name is absent when that newest run carries no usable record: a legacy
+    bare-hex external_id from an older engine version, a null/empty/non-JSON
+    one, or a record without a decimal-digit `plan_run`. Absence is not an
+    error here -- no JSONDecodeError escapes -- and each caller decides per
+    cell what a missing plan run means."""
+    out = {}
+    for name, run in latest_by_name(from_app(parse_jsonl(check_run_lines), app_id)).items():
+        try:
+            record = json.loads(run.get("external_id") or "")
+        except json.JSONDecodeError:
+            continue
+        plan_run = record.get("plan_run") if isinstance(record, dict) else None
+        if isinstance(plan_run, str) and re.fullmatch(r"[0-9]+", plan_run):
+            out[name] = plan_run
+    return out
+
+
 def verdict(check_runs):
     latest = latest_by_name(check_runs)
     if not latest:
@@ -120,7 +147,16 @@ def verdict(check_runs):
 
 
 def main():
-    runs = from_app(parse_jsonl(sys.stdin), os.environ["SHIPMATE_APP_ID"])
+    mode = sys.argv[1:]
+    # Compared whole, not by membership: a typo'd flag must not fall through and
+    # write a gate verdict where the caller asked for the mapping.
+    if mode and mode != ["--plan-runs"]:
+        raise SystemExit(f"::error::unknown argument(s) {mode}")
+    app_id = os.environ["SHIPMATE_APP_ID"]
+    if mode:
+        print(json.dumps(plan_runs_by_name(sys.stdin, app_id)))
+        return
+    runs = from_app(parse_jsonl(sys.stdin), app_id)
     v = verdict(runs)
     with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
         fh.write(f"verdict={v}\n")

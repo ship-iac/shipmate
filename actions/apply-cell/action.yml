@@ -53,7 +53,7 @@ runs:
       run: |
         set -euo pipefail
         if [ -z "$RUN_ID" ]; then
-          echo "::error::no successful plan run for this head SHA — no reviewed plan to apply for $ENV/$STACK_NAME. Re-run plan."
+          echo "::error::apply aborted for $ENV/$STACK_NAME: the plan-run-id input reached this action empty. Each cell's plan run comes from its own apply check, and the detects refuse a cell whose check records none — so an empty value here is the matrix wiring dropping it rather than a missing plan, most likely an engine reference pinned at a different revision than the rest. Re-pin every engine reference to one commit."
           exit 1
         fi
         [[ "$RUN_ID" =~ ^[0-9]+$ ]] || { echo "::error::plan-run-id must be numeric (got: $RUN_ID)"; exit 1; }
@@ -78,7 +78,7 @@ runs:
       run: |
         set -euo pipefail
         if [ ! -f planned-head.txt ]; then
-          echo "::error::apply aborted for $ENV/$STACK_NAME: this reviewed plan records no planned commit, so it predates the release that binds a plan to the tree it was produced from. Re-plan the affected stacks in a new pull request."
+          echo "::error::apply aborted for $ENV/$STACK_NAME: this reviewed plan records no planned commit, so there is nothing to compare against this checkout — most likely the plan predates the release that binds a plan to the tree it was produced from, though a mismatched engine revision produces the same absence. Re-plan this stack on its pull request and apply the fresh plan; if that pull request has already merged, a new pull request touching the stack plans and applies it afresh."
           exit 1
         fi
         record="$RUNNER_TEMP/planned-head.txt"

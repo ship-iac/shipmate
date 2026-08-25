@@ -703,13 +703,22 @@ def test_plan_workflow_at_the_contract_path_is_planned(tmp_path):
 
 
 def test_a_renamed_plan_workflow_is_refused(tmp_path):
-    # Four lookups match `.github/workflows/plan.yml` byte-for-byte; a rename
-    # merges green and wedges every apply from that commit on.
+    # This refusal is what makes the path load-bearing: no plan-run lookup
+    # matches it literally any more, so a rename would otherwise merge green
+    # while doctor's filename-keyed probes went quiet. Whole message, written by
+    # hand: the consequences it names are the ones still true after the plan run
+    # id moved onto each apply check, and a clause about plan-run discovery
+    # coming back here would be a user-facing falsehood.
     (tmp_path / ".github" / "workflows").mkdir(parents=True)
     (tmp_path / ".github" / "workflows" / "shipmate-plan.yml").write_text("", encoding="utf-8")
-    err = bm.plan_workflow_error("pull_request", str(tmp_path))
-    assert err.startswith("::error::")
-    assert ".github/workflows/plan.yml" in err
+    assert bm.plan_workflow_error("pull_request", str(tmp_path)) == (
+        "::error::this repository has no `.github/workflows/plan.yml` — that exact path is "
+        "matched literally by `shipmate doctor`, which keys its plan-wrapper probes on the "
+        "filename: a plan workflow under any other name silently loses the head-repository "
+        "and draft wiring checks, and draws doctor's own `pull_request_target` warning "
+        "instead. Planning is refused here rather than degrading those diagnostics quietly. "
+        "Move the plan workflow back to `.github/workflows/plan.yml`."
+    )
 
 
 def test_plan_workflow_check_is_skipped_off_a_pull_request(tmp_path):
@@ -808,3 +817,27 @@ def test_build_matrix_action_declares_the_outputs_the_gate_reads():
         "empty": "${{ steps.build.outputs.empty }}",
         "count": "${{ steps.build.outputs.count }}",
     }
+
+
+def test_rejects_stack_paths_that_slug_to_one_artifact_name():
+    # `a/b` and `a-b` both slug to `a-b`, so both cells' plan artifact is
+    # `plan.dev-eu.a-b` and an apply downloads whichever landed last.
+    stacks = ["a/b", "a-b"]
+    with pytest.raises(SystemExit) as exc_info:
+        bm.build_matrix(["dev-eu"], {"dev-eu": stacks}, {s: ["env/dev-eu"] for s in stacks})
+    assert str(exc_info.value) == (
+        "::error::a-b, a/b all map to the plan artifact 'plan.dev-eu.a-b': distinct "
+        "stack paths sharing one artifact name would make an apply download another "
+        "stack's plan. Rename one so the path->'-' slug is unique."
+    )
+
+
+def test_same_slug_in_different_envs_is_allowed():
+    # The env is part of the artifact name: `plan.dev-eu.a-b` and
+    # `plan.prod-eu.a-b` are distinct, so there is nothing to collide.
+    cells = bm.build_matrix(
+        ["dev-eu", "prod-eu"],
+        {"dev-eu": ["a/b"], "prod-eu": ["a-b"]},
+        {"a/b": ["env/dev-eu"], "a-b": ["env/prod-eu"]},
+    )
+    assert [c["stack"] for c in cells] == ["a/b", "a-b"]

@@ -66,7 +66,6 @@ def _build_dispatch_body(mode="", environment=""):
             "DISPATCH_REF": "main",
             "REF": "abc123def456",
             "PR_NUMBER": "42",
-            "PLAN_RUN_ID": "12345",
             "ENVIRONMENT": environment,
             "MODE": mode,
         }
@@ -118,6 +117,17 @@ def test_dispatch_body_includes_mode_when_mode_unlock():
     )
 
 
+def test_dispatch_body_has_no_plan_run_id_key():
+    """The dispatch body carries no plan run id: each cell reads its own.
+
+    Mutation: re-add `"plan_run_id": os.environ["PLAN_RUN_ID"]` to the body.
+    """
+    inputs = _build_dispatch_body()
+    assert "plan_run_id" not in inputs, (
+        f"the plan run id is per cell now, but the dispatch body carries: {inputs}"
+    )
+
+
 def test_dispatch_body_includes_environment_when_set():
     """Sanity check: environment is still included when set (regression pin)."""
     inputs = _build_dispatch_body(mode="", environment="dev-eu")
@@ -144,7 +154,6 @@ def test_dispatch_step_env_mapping_is_complete():
         "MODE",
         "REF",
         "PR_NUMBER",
-        "PLAN_RUN_ID",
     }
     actual_env_vars = set(env.keys())
 
@@ -189,7 +198,6 @@ def test_invalid_mode_rejected_before_api_call():
         env["MODE"] = "bogus"  # Invalid mode
         env["REF"] = "abc123"
         env["PR_NUMBER"] = "42"
-        env["PLAN_RUN_ID"] = "12345"
 
         result = subprocess.run(
             [bash, "-c", run],
@@ -273,7 +281,6 @@ def test_unlock_failure_prints_degrade_message():
         env["MODE"] = "unlock"
         env["REF"] = "abc123"
         env["PR_NUMBER"] = "42"
-        env["PLAN_RUN_ID"] = "12345"
 
         result = subprocess.run(
             [bash, "-c", run_block],
@@ -330,7 +337,6 @@ def test_apply_failure_no_degrade_message():
         env["MODE"] = "apply"
         env["REF"] = "abc123"
         env["PR_NUMBER"] = "42"
-        env["PLAN_RUN_ID"] = "12345"
 
         result = subprocess.run(
             [bash, "-c", run_block],
@@ -380,7 +386,6 @@ def test_unlock_non_422_failure_prints_no_degrade_message():
         env["MODE"] = "unlock"
         env["REF"] = "abc123"
         env["PR_NUMBER"] = "42"
-        env["PLAN_RUN_ID"] = "12345"
 
         result = subprocess.run(
             [bash, "-c", run_block],
@@ -427,7 +432,6 @@ def test_dispatch_success_exits_zero():
         env["MODE"] = "unlock"
         env["REF"] = "abc123"
         env["PR_NUMBER"] = "42"
-        env["PLAN_RUN_ID"] = "12345"
 
         result = subprocess.run(
             [bash, "-c", run_block],
@@ -475,7 +479,6 @@ def test_real_case_accepts_valid_modes():
             env["MODE"] = mode
             env["REF"] = "abc123"
             env["PR_NUMBER"] = "42"
-            env["PLAN_RUN_ID"] = "12345"
 
             result = subprocess.run(
                 [bash, "-c", run_block],
@@ -514,7 +517,9 @@ def test_a_422_about_another_input_is_not_reported_as_mode_skew():
     `plan_run_id` as required, unlock dispatches it empty, and GitHub answered
     `Required input 'plan_run_id' not provided (HTTP 422)`. The old condition
     matched any 422 and told the operator to re-pin workflows that were already
-    current, hiding the real cause printed one line above.
+    current, hiding the real cause printed one line above. That input is retired
+    engine-side, so this 422 is now what an un-repinned consumer wrapper looks
+    like -- still not mode skew.
 
     Mutation: widen the condition back to any `HTTP 422` and this reddens.
     """
@@ -544,7 +549,6 @@ def test_a_422_about_another_input_is_not_reported_as_mode_skew():
         env["MODE"] = "unlock"
         env["REF"] = "abc123"
         env["PR_NUMBER"] = "42"
-        env["PLAN_RUN_ID"] = "12345"
 
         result = subprocess.run(
             [bash, "-c", run_block],

@@ -4,19 +4,29 @@
 Relocated from plan-cell: the summary job creates ALL pending apply checks
 with ONE App installation token, so the App private key never enters the
 plan matrix cells (they execute PR-head code) and a 256-cell run mints one
-token, not 256. Body semantics are byte-identical to the old plan-cell step:
-changed cells get a queued "apply pending" check, no-change cells a
-completed/neutral "no changes" check; external_id carries the TF_VAR
-fingerprint either way. The check name uses the stack PATH so deploy-detect
-(which only has the path) reconstructs it exactly.
+token, not 256. Body semantics match the old plan-cell step apart from
+external_id: changed cells get a queued "apply pending" check, no-change cells
+a completed/neutral "no changes" check. external_id is new -- a JSON record of
+the TF_VAR fingerprint and the id of the plan run that produced the cell, on
+either branch, where plan-cell wrote the bare fingerprint. The check name uses
+the stack PATH so deploy-detect (which only has the path) reconstructs it
+exactly.
 """
 
 import json
 import os
 import pathlib
+import re
 
 
 def bodies(cells_dir, head_sha):
+    plan_run = os.environ.get("GITHUB_RUN_ID", "")
+    if not re.fullmatch(r"[0-9]+", plan_run):
+        raise SystemExit(
+            "::error::GITHUB_RUN_ID is unset or not a decimal run id — every apply "
+            "check must record the plan run that produced its cell, or apply can "
+            "never find the reviewed plan."
+        )
     out = []
     # Recursive, not `cell-summary.*/cell.json`: `actions/download-artifact`
     # drops the per-artifact subdirectory when exactly one artifact matches the
@@ -34,7 +44,7 @@ def bodies(cells_dir, head_sha):
             "name": f"apply / {cell['stack_path']} / {cell['environment']}",
             "head_sha": head_sha,
             "status": "queued",
-            "external_id": cell["fingerprint"],
+            "external_id": json.dumps({"fingerprint": cell["fingerprint"], "plan_run": plan_run}),
             "output": {
                 "title": "apply pending",
                 "summary": "Waiting to be applied. Merge after apply completes "

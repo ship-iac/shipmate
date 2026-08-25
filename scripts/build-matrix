@@ -17,9 +17,10 @@ _PR_EVENTS = ("pull_request", "pull_request_target")
 
 MATRIX_LIMIT = 256
 
-#: Where the plan workflow must live. Four lookups match this path literally:
-#: `apply-detect`'s reviewed-plan provenance gate, comment-ops' two plan-run
-#: lookups, and `deploy-detect`'s post-merge plan-run lookup.
+#: Where the plan workflow must live. No plan-run lookup matches this path
+#: literally any more — every apply, deploy and doctor path reads a cell's plan
+#: run from that cell's own apply check — but `shipmate doctor` still keys its
+#: plan-wrapper probes on the filename.
 PLAN_WORKFLOW = ".github/workflows/plan.yml"
 
 #: Stack paths whose verb-less plan check name would land inside a namespace
@@ -81,6 +82,30 @@ def guard_workload_var_collisions(cells):
             )
 
 
+def guard_slug_collisions(cells):
+    """A plan artifact is `plan.<env>.<path with '/' replaced by '-'>`, so `a/b`
+    and `a-b` in one environment produce ONE artifact name and an apply
+    downloads the wrong stack's plan. Refused here, at matrix construction,
+    because that is before any artifact exists -- the plan run refuses up front
+    instead of an apply discovering the clash after a plan already ran.
+
+    Per environment, not across the matrix: the env is part of the artifact
+    name, so the same slug under two different envs collides with nothing."""
+    for env in sorted({c["environment"] for c in cells}):
+        by_slug = {}
+        for c in cells:
+            if c["environment"] == env:
+                by_slug.setdefault(c["stack"].replace("/", "-"), set()).add(c["stack"])
+        for slug, paths in sorted(by_slug.items()):
+            if len(paths) > 1:
+                raise SystemExit(
+                    f"::error::{', '.join(sorted(paths))} all map to the plan artifact "
+                    f"'plan.{env}.{slug}': distinct stack paths sharing one artifact name would "
+                    "make an apply download another stack's plan. Rename one so the "
+                    "path->'-' slug is unique."
+                )
+
+
 def build_matrix(envs, stacks_by_env, tags_by_stack):
     cells = []
     for env in envs:
@@ -99,6 +124,7 @@ def build_matrix(envs, stacks_by_env, tags_by_stack):
         if any(c["stack"] == reserved for c in cells):
             raise SystemExit(message)
     guard_workload_var_collisions(cells)
+    guard_slug_collisions(cells)
     if len(cells) > MATRIX_LIMIT:
         raise MatrixTooLarge(
             f"{len(cells)} plan cells exceeds the GitHub Actions matrix limit of {MATRIX_LIMIT}. "
@@ -393,12 +419,11 @@ def plan_workflow_error(event_name, root="."):
         return ""
     return (
         f"::error::this repository has no `{PLAN_WORKFLOW}` — that exact path is matched "
-        "literally by everything downstream of a plan, so from this commit on: every "
-        "dispatched `shipmate apply` is refused by the reviewed-plan provenance gate, "
-        "comment-ops finds no plan run and reports the reviewed plan stale forever, "
-        "`shipmate doctor` loses this run's cell summaries and skips its environment "
-        "probes, and the post-merge deploy resolves no plan run so its applies have no "
-        f"artifacts. Move the plan workflow back to `{PLAN_WORKFLOW}`."
+        "literally by `shipmate doctor`, which keys its plan-wrapper probes on the "
+        "filename: a plan workflow under any other name silently loses the "
+        "head-repository and draft wiring checks, and draws doctor's own "
+        "`pull_request_target` warning instead. Planning is refused here rather than "
+        f"degrading those diagnostics quietly. Move the plan workflow back to `{PLAN_WORKFLOW}`."
     )
 
 

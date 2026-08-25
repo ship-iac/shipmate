@@ -203,7 +203,7 @@ def test_summary_doctor_step_reads_the_head_sha_it_was_given():
 
 def test_unreadable_head_sha_marks_the_harvest_failed_before_exiting():
     """The read-only degrade path for an unreadable PR head SHA must record
-    harvest_failed=true (and head_sha/run_id) to GITHUB_OUTPUT before it
+    harvest_failed=true (and head_sha/plan_run_ids) to GITHUB_OUTPUT before it
     exits -- otherwise the render step reads an empty SHIPMATE_HARVEST_FAILED
     and the sticky comment falsely claims the warning harvest ran clean.
 
@@ -215,7 +215,7 @@ def test_unreadable_head_sha_marks_the_harvest_failed_before_exiting():
     assert block.count("exit 0") == 1
     degrade = block.split('if [[ ! "$head"', 1)[1].split("exit 0", 1)[0]
     assert "head_sha=" in degrade
-    assert "run_id=" in degrade
+    assert "plan_run_ids=" in degrade
     assert "harvest_failed=true" in degrade
 
 
@@ -232,15 +232,62 @@ def test_harvest_failed_env_falls_back_to_true_when_gatherdoc_did_not_run():
     )
 
 
-def test_the_check_runs_projection_carries_the_status_the_pending_flag_needs():
-    """`check-ids` mode decides the harvest-pending flag from this projection,
-    so `status` must be in it — without the field every run reads as unfinished
-    (`.get("status") != "completed"`), and the report would tell every commenter
-    to come back later, forever."""
-    block = _ACTION.split("id: gatherdoc", 1)[1].split("- name:", 1)[0]
-    projection = block.split("--jq '.check_runs[]", 1)[1].split("\n", 1)[0]
-    assert "status" in projection
-    assert "started_at" in projection  # still ranked by start time, not id
+def test_the_check_runs_projection_carries_every_field_this_step_answers_from_it():
+    """One listing answers every question doctor asks about this head, so its
+    projection has to carry all of them: `status` for the harvest-pending flag
+    (without it every run reads as unfinished and the report tells every
+    commenter to come back later, forever), `started_at` for check-ids' ranking,
+    `external_id` for the plan record each apply check carries, and the nested
+    `app` object apply-gate's fail-closed App filter reads — the flattened
+    `app_slug`/`app_id` pair beside it is what doctor's own reducer reads."""
+    assert _projection(_gatherdoc_step()["run"]) == _CHECK_RUNS_PROJECTION
+
+
+def test_a_check_run_in_that_shape_yields_its_plan_run():
+    """Why the constant above contains `app: {id: .app.id}` and not only the
+    flattened pair doctor's reducer reads: `plan_runs_by_name` filters on the
+    NESTED id, so a projection carrying just `external_id` maps every name to
+    nothing. This test cannot see the projection — it is a hand-written line and
+    reddens on the reader, not on projection drift; the whole-value comparison
+    above is what pins the file."""
+    line = json.dumps(
+        {
+            "id": 7,
+            "name": "apply / stacks/app / dev-eu",
+            "status": "completed",
+            "started_at": "2026-08-24T00:00:00Z",
+            "external_id": json.dumps({"fingerprint": "a" * 64, "plan_run": "1281"}),
+            "app": {"id": 4326562},
+            "app_slug": "shipmate",
+            "app_id": 4326562,
+        }
+    )
+    mapping = load_script("apply-gate").plan_runs_by_name([line], "4326562")
+    assert mapping == {"apply / stacks/app / dev-eu": "1281"}
+
+
+def test_the_plan_records_are_read_from_the_listing_before_any_cell_download():
+    """The runs to download from are derived from the listing, so the listing
+    has to be fetched first — and read through apply-gate's `--plan-runs` mode,
+    the one reader of the `external_id` record."""
+    body = _code(_gatherdoc_step()["run"])
+    assert body.index("> check-runs.jsonl") < body.index("gh run download")
+
+
+def test_the_doctor_lookup_reads_the_record_through_the_one_reader():
+    """`plan_runs_by_name`, behind apply-gate's `--plan-runs` mode, is the only
+    reader of the `external_id` record; a second reader here would be a second
+    definition of what a usable record is."""
+    body = _code(_gatherdoc_step()["run"])
+    assert '"$GITHUB_ACTION_PATH/../../scripts/apply-gate" --plan-runs' in body
+
+
+def test_the_doctor_lookup_asks_the_plan_workflow_for_nothing():
+    """doctor read the cell summaries of the newest successful run of
+    `.github/workflows/plan.yml`, which a consumer is free to rename and which
+    says nothing about whether that run planned this head. The head's own apply
+    checks name their plan runs, so no workflow-path lookup is left."""
+    assert "workflows/plan.yml" not in _code(_gatherdoc_step()["run"])
 
 
 def test_the_render_step_reads_the_harvest_pending_flag_the_reduction_wrote():
@@ -256,6 +303,14 @@ def test_the_render_step_reads_the_harvest_pending_flag_the_reduction_wrote():
     covered behaviourally by
     test_doctor.py::test_check_ids_mode_writes_the_harvest_pending_step_output."""
     assert "SHIPMATE_HARVEST_PENDING: ${{ steps.gatherdoc.outputs.harvest_pending }}" in _ACTION
+
+
+def test_the_render_step_reads_the_id_set_the_gather_step_published():
+    """A typo in this reference (`outputs.plan_run_id`) is an empty string, and
+    doctor then reports that the commit carries no plan records — the silent
+    degrade the plural rename exists to make loud. The derived env-var guard
+    above only checks that the NAME appears somewhere in the action."""
+    assert "SHIPMATE_PLAN_RUN_IDS: ${{ steps.gatherdoc.outputs.plan_run_ids }}" in _ACTION
 
 
 def test_harvest_flag_is_set_inside_the_loop_and_written_once_after_it():
@@ -434,10 +489,31 @@ def _code(block):
     return "\n".join(ln for ln in block.splitlines() if not ln.strip().startswith("#"))
 
 
+#: The gatherdoc listing's whole jq projection, hand-written.
+_CHECK_RUNS_PROJECTION = (
+    ".check_runs[] | {id, name, status, started_at, external_id, "
+    "app: {id: .app.id}, app_slug: .app.slug, app_id: .app.id}"
+)
+
+
+def _gatherdoc_step():
+    step = next(s for s in action_steps("comment-ops") if s.get("id") == "gatherdoc")
+    assert step.get("run"), "the gatherdoc step runs no shell"
+    return step
+
+
+def _projection(body):
+    """The check-runs listing's jq expression. One line carries it; the step's
+    other `--jq` reads the head SHA."""
+    lines = [ln for ln in body.splitlines() if "--jq '.check_runs[]" in ln]
+    assert len(lines) == 1, f"{len(lines)} check-runs projections in the step"
+    return lines[0].split("--jq '", 1)[1].rsplit("'", 1)[0]
+
+
 def _report_ctx():
     return {
         "head_sha": "f" * 40,
-        "plan_run_id": "1",
+        "plan_run_ids": ["1"],
         "envs": {"dev-eu"},
         "harvest_failed": False,
         "harvest_pending": False,
@@ -610,6 +686,61 @@ def _authorize_step():
     return step
 
 
+def _gather_step():
+    step = next(s for s in action_steps("comment-ops") if s.get("id") == "gather")
+    assert step.get("run"), "the gather step runs no shell"
+    return step
+
+
+def test_the_authorize_step_reads_the_files_the_gather_step_writes(tmp_path, monkeypatch):
+    """`env:` key -> `os.environ` key -> file path, run rather than eyeballed. A
+    rename on either side leaves authorize reading a file nobody writes, and
+    `_read_json`'s missing-file default then refuses every apply -- or, for the
+    PR, reads an empty mapping as an unmergeable pull request."""
+    env = _authorize_step()["env"]
+    body = _gather_step()["run"]
+    for key, content in (
+        ("PR_JSON", '{"mergeable": true, "mergeable_state": "clean", "head": {"sha": "abc123"}}'),
+        ("PLAN_RUN_JSON", '{"apply / stacks/app / dev-eu": "555"}'),
+    ):
+        path = env[key]
+        assert f"> {path}\n" in body, f"the gather step writes no {path}"
+        (tmp_path / path).write_text(content, encoding="utf-8")
+        monkeypatch.setenv(key, path)
+    monkeypatch.chdir(tmp_path)
+    for key, value in {
+        "IS_MEMBER": "true",
+        "APPROVERS_TEAM": "deployers",
+        "REVIEW_DECISION": "NONE",
+        "GITHUB_OUTPUT": "out.txt",
+    }.items():
+        monkeypatch.setenv(key, value)
+    load_script("authorize").main()
+    assert "authorized=true" in (tmp_path / "out.txt").read_text(encoding="utf-8")
+
+
+def test_the_gather_step_reads_the_plan_runs_from_the_heads_own_check_runs():
+    """The reviewed-plan lookup is the head's own apply checks, each of which
+    records the plan run its plan came from. The plan-workflow lookup it replaced
+    resolved one run for the whole command and had to compare that run's head
+    against the PR's -- a comparison this listing makes unnecessary and, being
+    keyed on the head already, unfalsifiable."""
+    body = _code(_gather_step()["run"])
+    assert '"repos/$GITHUB_REPOSITORY/commits/$head/check-runs?filter=all&per_page=100"' in body
+    assert "workflows/plan.yml" not in body
+    # The mapping comes from apply-gate's `--plan-runs` mode: without the flag the
+    # same invocation writes a gate verdict and leaves plan_run.json empty.
+    assert (
+        '| python3 "$GITHUB_ACTION_PATH/../../scripts/apply-gate" --plan-runs > plan_run.json'
+    ) in body
+
+
+def test_the_gather_step_receives_the_app_id_the_plan_run_lookup_scopes_on():
+    """Only our App's apply checks may name a plan run: a same-name check from
+    any other identity must not decide what a `shipmate apply` applies."""
+    assert _gather_step()["env"]["SHIPMATE_APP_ID"] == "${{ inputs.app-id }}"
+
+
 def test_authorize_step_receives_the_ungated_envs_input():
     assert _authorize_step()["env"]["SHIPMATE_UNGATED_ENVS"] == "${{ inputs.ungated-envs }}"
 
@@ -670,7 +801,7 @@ def test_authorize_step_supplies_every_env_var_authorize_reads():
 #: the two routes: narrow one back and an unlock parses, authorizes and then
 #: silently does nothing.
 _SHARED_ROUTE_IFS = {
-    "Mint App token (members:read)": (
+    "Mint App token (members:read, checks:read)": (
         "${{ steps.parse.outputs.route == 'apply' || steps.parse.outputs.route == 'unlock' }}"
     ),
     "App token unavailable (App not installed?)": (
@@ -702,8 +833,8 @@ def test_the_apply_route_steps_admit_exactly_apply_and_unlock():
 
 
 def test_the_mode_output_names_the_dispatch_mode_the_route_selects():
-    """Task 7's dispatch keys off this, so a literal here sends every unlock
-    down the apply path."""
+    """The caller's dispatch step keys off this output, so a literal here sends
+    every unlock down the apply path."""
     assert action_yaml("comment-ops")["outputs"]["mode"]["value"] == (
         "${{ steps.parse.outputs.route == 'unlock' && 'unlock' || 'apply' }}"
     )

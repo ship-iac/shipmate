@@ -1,3 +1,4 @@
+import io
 import json
 
 import pytest
@@ -309,3 +310,113 @@ def test_app_done_names_excludes_foreign_app_completed():
     names = ag.app_done_names([ours, foreign], "999")
     assert names == {"apply / stacks/app / dev-eu"}
     assert "apply / stacks/app / dev-us" not in names
+
+
+def _ext(name, id, external_id, app_id=999, started_at="2026-07-18T10:00:00Z"):
+    run = _run_obj(name, id=id, app_id=app_id)
+    run["external_id"] = external_id
+    run["started_at"] = started_at
+    return json.dumps(run)
+
+
+# Must contain letters: an all-digit "hex" string parses as a JSON int, so it
+# exercises the non-dict guard instead of the JSONDecodeError path this pins.
+LEGACY_HEX = "a3f" + "b" * 61
+
+
+def test_plan_runs_newest_app_run_supplies_the_id():
+    # id order and started_at order deliberately disagree: the higher id wins
+    # even though it started earlier, because latest_by_name orders by id.
+    older = _ext(
+        "apply / stacks/app / dev-eu",
+        1,
+        json.dumps({"fingerprint": "a" * 64, "plan_run": "111"}),
+        started_at="2026-07-18T12:00:00Z",
+    )
+    newer = _ext(
+        "apply / stacks/app / dev-eu",
+        2,
+        json.dumps({"fingerprint": "b" * 64, "plan_run": "222"}),
+        started_at="2026-07-18T09:00:00Z",
+    )
+    assert ag.plan_runs_by_name([older, newer], "999") == {"apply / stacks/app / dev-eu": "222"}
+
+
+def test_plan_runs_ignores_foreign_app_even_when_newest():
+    ours = _ext(
+        "apply / stacks/app / dev-eu", 1, json.dumps({"fingerprint": "a" * 64, "plan_run": "111"})
+    )
+    foreign = _ext(
+        "apply / stacks/app / dev-eu",
+        2,
+        json.dumps({"fingerprint": "b" * 64, "plan_run": "222"}),
+        app_id=15368,
+    )
+    assert ag.plan_runs_by_name([ours, foreign], "999") == {"apply / stacks/app / dev-eu": "111"}
+
+
+def test_plan_runs_legacy_bare_hex_external_id_is_absent():
+    # Records written by an engine version before external_id carried JSON are
+    # a bare 64-hex fingerprint: absent, never a JSONDecodeError traceback.
+    line = _ext("apply / stacks/app / dev-eu", 1, LEGACY_HEX)
+    assert ag.plan_runs_by_name([line], "999") == {}
+
+
+# "1" * 64 is the only case that reaches the isinstance(record, dict) guard --
+# it parses as a JSON int, not a dict. Keep it.
+@pytest.mark.parametrize("external_id", [None, "", "not json at all", "1" * 64])
+def test_plan_runs_unusable_external_id_is_absent(external_id):
+    line = _ext("apply / stacks/app / dev-eu", 1, external_id)
+    assert ag.plan_runs_by_name([line], "999") == {}
+
+
+@pytest.mark.parametrize(
+    "record",
+    [
+        {"fingerprint": "a" * 64},
+        {"fingerprint": "a" * 64, "plan_run": "12x4"},
+        {"fingerprint": "a" * 64, "plan_run": ""},
+        {"fingerprint": "a" * 64, "plan_run": 1234},
+    ],
+)
+def test_plan_runs_bad_plan_run_value_is_absent(record):
+    line = _ext("apply / stacks/app / dev-eu", 1, json.dumps(record))
+    assert ag.plan_runs_by_name([line], "999") == {}
+
+
+def test_plan_runs_only_apply_prefixed_names():
+    # latest_by_name's default prefix must not be overridden: a plan check with
+    # a well-formed record contributes nothing.
+    record = json.dumps({"fingerprint": "a" * 64, "plan_run": "111"})
+    apply_line = _ext("apply / stacks/app / dev-eu", 1, record)
+    plan_line = _ext("stacks/app / dev-eu", 2, record)
+    assert ag.plan_runs_by_name([apply_line, plan_line], "999") == {
+        "apply / stacks/app / dev-eu": "111"
+    }
+
+
+def test_plan_runs_mode_prints_the_mapping_and_writes_no_verdict(monkeypatch, capsys):
+    # comment-ops' reviewed-plan lookup is this mode. GITHUB_OUTPUT is
+    # deliberately unset: a gate verdict written here would be a decision the
+    # caller never asked for, and would abort on the missing variable instead.
+    record = json.dumps({"fingerprint": "a" * 64, "plan_run": "777"})
+    stdin = io.StringIO(
+        _ext("apply / stacks/app / dev-eu", 1, record)
+        + "\n"
+        + _ext("apply / stacks/api / dev-eu", 2, LEGACY_HEX)
+    )
+    monkeypatch.setattr(ag.sys, "argv", ["apply-gate", "--plan-runs"])
+    monkeypatch.setattr(ag.sys, "stdin", stdin)
+    monkeypatch.setenv("SHIPMATE_APP_ID", "999")
+    monkeypatch.delenv("GITHUB_OUTPUT", raising=False)
+    ag.main()
+    assert json.loads(capsys.readouterr().out) == {"apply / stacks/app / dev-eu": "777"}
+
+
+def test_an_unrecognized_argument_fails_loud(monkeypatch):
+    # A typo'd flag must not fall through to the verdict path, which would write
+    # a gate decision where the caller asked for the mapping.
+    monkeypatch.setattr(ag.sys, "argv", ["apply-gate", "--plan-run"])
+    with pytest.raises(SystemExit) as exc:
+        ag.main()
+    assert "--plan-run" in str(exc.value)

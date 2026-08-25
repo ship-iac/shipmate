@@ -35,7 +35,6 @@ jobs:
       envlevel2_empty: ${{ steps.d.outputs.envlevel2_empty }}
       envlevel3_empty: ${{ steps.d.outputs.envlevel3_empty }}
       head_sha: ${{ steps.d.outputs.head_sha }}
-      plan_run_id: ${{ steps.d.outputs.plan_run_id }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { fetch-depth: 0 }
@@ -62,7 +61,6 @@ jobs:
     with:
       waves_json: ${{ needs.detect.outputs.envlevel0_waves }}
       head_sha: ${{ needs.detect.outputs.head_sha }}
-      plan_run_id: ${{ needs.detect.outputs.plan_run_id }}
       state_suffix: ${{ inputs.state_suffix }}
     # Named, never `inherit`: these two files sit in one organization but the RUN
     # belongs to the consumer, and `inherit` is evaluated against the run -- so a
@@ -86,7 +84,6 @@ jobs:
     with:
       waves_json: ${{ needs.detect.outputs.envlevel1_waves }}
       head_sha: ${{ needs.detect.outputs.head_sha }}
-      plan_run_id: ${{ needs.detect.outputs.plan_run_id }}
       state_suffix: ${{ inputs.state_suffix }}
     secrets:
       SHIPMATE_APP_PRIVATE_KEY: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
@@ -102,7 +99,6 @@ jobs:
     with:
       waves_json: ${{ needs.detect.outputs.envlevel2_waves }}
       head_sha: ${{ needs.detect.outputs.head_sha }}
-      plan_run_id: ${{ needs.detect.outputs.plan_run_id }}
       state_suffix: ${{ inputs.state_suffix }}
     secrets:
       SHIPMATE_APP_PRIVATE_KEY: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
@@ -118,7 +114,6 @@ jobs:
     with:
       waves_json: ${{ needs.detect.outputs.envlevel3_waves }}
       head_sha: ${{ needs.detect.outputs.head_sha }}
-      plan_run_id: ${{ needs.detect.outputs.plan_run_id }}
       state_suffix: ${{ inputs.state_suffix }}
     secrets:
       SHIPMATE_APP_PRIVATE_KEY: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}

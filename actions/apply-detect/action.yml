@@ -1,13 +1,9 @@
 name: shipmate apply-detect
-description: Compute the single-env apply work set (from a plan run's plan artifacts) and wave-order it, or in unlock mode the flat queue of cells whose apply check is still pending. Skips already-applied cells.
+description: Compute the single-env apply work set (from the head's apply checks) and wave-order it, or in unlock mode the flat queue of cells whose apply check is still pending. Skips already-applied cells.
 inputs:
   environment:
     description: Target environment, e.g. dev-eu.
     required: true
-  plan-run-id:
-    description: Plan run id holding the reviewed plan artifacts. Empty in unlock mode, which consumes no plan artifact.
-    required: false
-    default: ''
   mode:
     description: apply (default) or unlock. Anything else takes the apply path, which is the stricter of the two.
     required: false
@@ -34,7 +30,6 @@ outputs:
   cells: { description: "Flat JSON array of cells — the unlock queue in unlock mode, [] in apply mode. Always valid JSON, never empty: consumers fromJSON it unconditionally.", value: "${{ steps.d.outputs.cells }}" }
   empty: { description: true when no cell is pending, value: "${{ steps.d.outputs.empty }}" }
   head_sha: { description: Echoed head SHA, value: "${{ steps.d.outputs.head_sha }}" }
-  plan_run_id: { description: "Echoed plan run id; empty in unlock mode, which consumes no plan run", value: "${{ steps.d.outputs.plan_run_id }}" }
 runs:
   using: composite
   steps:
@@ -44,7 +39,6 @@ runs:
       env:
         GH_TOKEN: ${{ inputs.github-token }}
         SHIPMATE_ENV: ${{ inputs.environment }}
-        SHIPMATE_PLAN_RUN_ID: ${{ inputs.plan-run-id }}
         SHIPMATE_HEAD_SHA: ${{ inputs.head-sha }}
         SHIPMATE_APP_ID: ${{ inputs.app-id }}
         SHIPMATE_UNGATED_ENVS: ${{ inputs.ungated-envs }}

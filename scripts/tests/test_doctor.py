@@ -38,7 +38,7 @@ def _ctx(**over):
         "app_permissions_checked": False,
         "app_permission_error": "",
         "head_sha": _HEAD,
-        "plan_run_id": "1281",
+        "plan_run_ids": ["1281"],
         "annotations_dir": "ann",
         "check_ids_path": "check-ids.tsv",
         "harvest_failed": False,
@@ -227,7 +227,9 @@ def _quiet_new_probes():
     """Healthy responses for the env-protection, engine-environment,
     plan-env-secret, pin-freshness, fork-trigger and summary-wiring probes, so
     tests exercising the older gate/environment probes via the top-level
-    `warnings()` don't pick up incidental noise from these six.
+    `warnings()` don't pick up incidental noise from these six. The retired-input
+    probe needs no response here: the listing below names no `apply.yml`, which is
+    the only file it judges.
 
     The last three read the same workflow listing. `_QUIET_PLAN`'s `uses:` lines
     are engine pins, so the pin probe has something to read and needs the
@@ -1752,22 +1754,23 @@ def test_skipped_environment_probes_are_stated_exactly_once(monkeypatch):
     repeat it nor disagree about it."""
     monkeypatch.setattr(doctor, "_gh_json", _existence("dev-eu-plan", "dev-eu-apply"))
     findings = doctor._environment_warnings(_ctx(envs=set(), envs_available=False))
-    body = doctor.render_report(findings, [], _ctx(envs_available=False, plan_run_id=""))
+    body = doctor.render_report(findings, [], _ctx(envs_available=False, plan_run_ids=[]))
     assert "environment probes were skipped" in body
     assert body.count("environment probes were skipped") == 1
 
 
-def test_provenance_claims_nothing_about_probes_when_the_run_id_was_cleared():
-    """`gh run download` can extract the cell summaries and still exit non-zero;
-    comment-ops then clears `run_id` while doctor-cells stays populated, so
-    `envs_available` is True with an empty `plan_run_id`. A preamble keyed on the
-    run id would claim the environment probes were skipped while they ran and
-    produced the finding rendered right below it."""
-    findings = [(doctor.WARNING, "GitHub Environment `dev-eu-apply` does not exist")]
-    body = doctor.render_report(findings, [], _ctx(envs_available=True, plan_run_id=""))
-    assert "probes were skipped" not in body
-    assert "dev-eu-apply" in body
-    assert _HEAD[:7] in body  # the preamble still says what was examined
+def test_provenance_and_probe_coverage_can_disagree_without_contradicting(monkeypatch):
+    """The id set is written from the plan records on the head's apply checks
+    whether or not those runs' cell summaries could be downloaded, so a
+    non-empty set with no declared environments is a live state. The preamble
+    must then still name the runs that were read, and the coverage claim must
+    still come from `envs_available` alone -- a preamble that inferred coverage
+    from the id set would contradict the very next line."""
+    monkeypatch.setattr(doctor, "_gh_json", _existence("dev-eu-plan", "dev-eu-apply"))
+    findings = doctor._environment_warnings(_ctx(envs=set(), envs_available=False))
+    body = doctor.render_report(findings, [], _ctx(envs_available=False, plan_run_ids=["1281"]))
+    assert "cell summaries from plan run 1281" in body
+    assert "environment probes were skipped" in body
 
 
 def test_report_escapes_a_hostile_settings_finding():
@@ -1794,30 +1797,40 @@ def test_findings_only_fallback_escapes_a_hostile_settings_finding():
     assert "<!-- shipmate:summary -->" not in body
 
 
-def test_provenance_run_id_branch_states_the_run_without_a_coverage_claim():
-    """The run-id branch must name the run that was read and claim nothing about
-    what the probes did with it. `envs_available` and `plan_run_id` can disagree
-    (a `gh run download` that extracts files and still exits non-zero clears the
-    run id while the cells directory is populated), so any probe-coverage claim
-    keyed on the run id can contradict the findings rendered below it -- that
-    claim belongs only to `_environment_warnings`' NOTICE, keyed on
-    `envs_available`. Pinned on the current stem, so restoring wording that
-    implies the declared environment set came from this run fails here."""
-    text = doctor._provenance(_ctx(plan_run_id="1281"))
-    assert "1281" in text
-    assert "cell summaries from plan run" in text
-    assert "declared environments" not in text
-    assert "probe" not in text
+def test_provenance_names_every_run_the_head_recorded():
+    """One head's cells can be planned across several runs -- a cell replanned
+    after a push is recorded by its own newest apply check -- so the preamble
+    names the whole set. Naming only the first would attribute the report to a
+    plan run half of it did not come from."""
+    text = doctor._provenance(_ctx(plan_run_ids=["1281", "1290"]))
+    assert text == f"_Commit `{_HEAD[:7]}`; cell summaries from plan runs 1281, 1290._"
+
+
+def test_provenance_states_the_run_without_a_coverage_claim():
+    """The run branch must name what was read and claim nothing about what the
+    probes did with it: that claim belongs only to `_environment_warnings`'
+    NOTICE, keyed on `envs_available`. Pinned on the current stem, so restoring
+    wording that implies the declared environment set came from these runs, or
+    that mentions the probes at all, fails here."""
+    text = doctor._provenance(_ctx(plan_run_ids=["1281"]))
+    assert text == f"_Commit `{_HEAD[:7]}`; cell summaries from plan run 1281._"
+
+
+def test_provenance_says_so_when_the_head_recorded_no_plan_run():
+    """No apply check on this head carries a plan record -- nothing was planned
+    yet, or every record is from an older engine version. Naming the absence is
+    the whole degrade path: doctor still reports its settings probes."""
+    text = doctor._provenance(_ctx(plan_run_ids=[]))
+    assert text == f"_Commit `{_HEAD[:7]}`; no plan records on this commit's apply checks._"
 
 
 def test_provenance_one_lines_an_overlong_plan_run_id():
-    # plan_run_id is interpolated verbatim otherwise -- an unbounded value
-    # there would make the preamble itself unbounded, defeating the whole
-    # report's size budget regardless of the harvest/findings truncation.
-    ctx = _ctx(plan_run_id="9" * 100)
-    text = doctor._provenance(ctx)
-    assert ("9" * 39 + "…") in text
-    assert ("9" * 40) not in text
+    # The ids are interpolated verbatim otherwise -- an unbounded value there
+    # would make the preamble itself unbounded, defeating the whole report's
+    # size budget regardless of the harvest/findings truncation.
+    text = doctor._provenance(_ctx(plan_run_ids=["9" * 200]))
+    assert ("9" * 119 + "…") in text
+    assert ("9" * 120) not in text
 
 
 def test_load_annotations_joins_names_and_tolerates_missing_files(tmp_path):
@@ -2852,6 +2865,162 @@ def test_summary_wiring_probe_is_registered(monkeypatch):
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
     out = doctor.warnings(_ctx())
     assert any(f"`head-repo: {_HEAD_REPO_EXPR}`" in t for _, t in out)
+
+
+# The three apply-wrapper shapes the retired-input probe judges. The
+# declaration is written flow-style, the shape three of the four sample repos
+# carry, so the line-anchored key must match it there too.
+_APPLY_DECLARING_IT = (
+    "name: shipmate · apply\n"
+    "on:\n"
+    "  workflow_dispatch:\n"
+    "    inputs:\n"
+    "      ref: { description: PR head SHA to apply, required: false, default: '' }\n"
+    "      plan_run_id: { description: Plan run id with the reviewed plans, required: true }\n"
+    "jobs:\n"
+    "  targeted:\n"
+    f"    uses: {_ENGINE_REPO}/.github/workflows/apply.yml@{_SHA}\n"
+    "    with:\n"
+    "      ref: ${{ inputs.ref }}\n"
+)
+_APPLY_FORWARDING_IT = (
+    "name: shipmate · apply\n"
+    "on:\n"
+    "  workflow_dispatch:\n"
+    "jobs:\n"
+    "  targeted:\n"
+    "    steps:\n"
+    f"      - uses: {_ENGINE_REPO}/actions/dispatch@{_SHA}\n"
+    "        with:\n"
+    "          plan-run-id: ${{ steps.authz.outputs.plan-run-id }}\n"
+)
+_APPLY_CLEAN = (
+    "name: shipmate · apply\n"
+    "on:\n"
+    "  workflow_dispatch:\n"
+    "    inputs:\n"
+    "      ref: { description: PR head SHA to apply, required: false, default: '' }\n"
+    "jobs:\n"
+    "  targeted:\n"
+    f"    uses: {_ENGINE_REPO}/.github/workflows/apply.yml@{_SHA}\n"
+    "    with:\n"
+    "      ref: ${{ inputs.ref }}\n"
+)
+
+
+# Hand-written, whole: the findings are compared in full rather than by
+# substring, so a reworded message is a deliberate edit here and not a silent
+# one. Never derived from `scripts/doctor`.
+_DECLARED_TEXT = (
+    "`apply.yml` still declares a `plan_run_id` input — the engine retired that input "
+    "and dispatches no such value, so nothing ever fills it in. Remove the declaration, "
+    "and any `with:` line forwarding it."
+)
+_FORWARDED_TEXT = (
+    "`apply.yml` still passes `plan_run_id` on — the engine retired that input, so nothing "
+    "it calls accepts one. Passed to the engine's reusable `apply.yml` or `apply-all.yml`, "
+    "GitHub rejects the run when it LOADS the workflow: the run has no jobs and no logs, only "
+    "a workflow-validation error on the run itself, which is the hardest failure here to "
+    "diagnose from the outside. Passed to a composite action it is only a warning and the run "
+    "continues. Remove the `with:` line — the plan run id now travels with each apply cell "
+    "and needs no wiring."
+)
+
+
+def test_a_declared_plan_run_id_input_is_reported(monkeypatch):
+    responses = _fork_responses({"apply.yml": _APPLY_DECLARING_IT})
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    out = doctor._plan_run_id_warnings(_ctx())
+    assert out == [(doctor.WARNING, _DECLARED_TEXT)]
+
+
+def test_a_forwarded_plan_run_id_is_reported(monkeypatch):
+    """The half that matters: an input a `workflow_call` does not declare is
+    rejected as the run LOADS, so there is no job and no log to read. A probe
+    reporting only the declaration leaves that failure undiagnosed."""
+    responses = _fork_responses({"apply.yml": _APPLY_FORWARDING_IT})
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    out = doctor._plan_run_id_warnings(_ctx())
+    assert out == [(doctor.WARNING, _FORWARDED_TEXT)]
+
+
+def test_a_clean_apply_wrapper_is_silent(monkeypatch):
+    responses = _fork_responses({"apply.yml": _APPLY_CLEAN})
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    assert doctor._plan_run_id_warnings(_ctx()) == []
+
+
+def test_the_apply_yml_filter_lives_in_the_dispatcher(monkeypatch):
+    """A direct call of the finding function reports whatever file it is handed:
+    the caller bypassed the exemption, and silence there reads as a false
+    positive that is not one. Only the dispatcher skips another file's name."""
+    assert doctor._plan_run_id_finding(_APPLY_DECLARING_IT, "deploy.yml") == [
+        (doctor.WARNING, _DECLARED_TEXT.replace("`apply.yml`", "`deploy.yml`"))
+    ]
+    responses = _fork_responses({"deploy.yml": _APPLY_DECLARING_IT})
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    assert doctor._plan_run_id_warnings(_ctx()) == []
+
+
+def test_the_documented_apply_wrapper_produces_no_finding(monkeypatch):
+    """The oracle for false positives, and for the page: the wrapper consumers
+    paste, verbatim, through the whole probe. The fence count is asserted first,
+    so a page edit that moves the wrapper out of this selector's reach fails
+    here instead of passing vacuously."""
+    page = (ENGINE / "docs" / "getting-started.md").read_text(encoding="utf-8")
+    fences = [
+        textwrap.dedent(m.group("body"))
+        for m in _YAML_FENCE.finditer(page)
+        if "/.github/workflows/apply-all.yml@" in m.group("body")
+    ]
+    assert len(fences) == 1, f"documented apply-wrapper fences: {len(fences)}"
+    responses = _fork_responses({"apply.yml": fences[0]})
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    assert doctor._plan_run_id_warnings(_ctx()) == []
+
+
+def test_plan_run_id_without_a_commit_is_a_note_not_a_read(monkeypatch):
+    # Same reasoning as the pin, fork-trigger and summary-wiring probes: a
+    # default-branch read would report the retired input on the very pull request
+    # that removes it. The `gh` stub pins that no read happens at all, so a
+    # weaker read cannot be silently substituted for the skip.
+    def gh(path):
+        pytest.fail(f"the retired-input probe read the API with no commit: {path}")
+
+    monkeypatch.setattr(doctor, "_gh_json", gh)
+    out = doctor._plan_run_id_warnings(_ctx(head_sha=""))
+    assert out == [doctor.PLAN_RUN_ID_NO_COMMIT]
+    assert out[0][0] == doctor.NOTICE
+
+
+def test_plan_run_id_unreadable_directory_degrades_to_a_note(monkeypatch):
+    def gh(path):
+        raise SystemExit(f"::error::command failed (1): gh api {path}")
+
+    monkeypatch.setattr(doctor, "_gh_json", gh)
+    out = doctor._plan_run_id_warnings(_ctx())
+    assert out == [doctor.PLAN_RUN_ID_UNREADABLE]
+    assert out[0][0] == doctor.NOTICE
+
+
+def test_the_probe_registry_is_exactly_this(monkeypatch):
+    """The whole registry against a hand-written list, not its length: a length
+    assertion cannot say WHICH entry changed, so a probe swapped for another
+    passes it. Order is the order findings are reported in."""
+    assert doctor.PROBES == (
+        doctor._gate_rule_warnings,
+        doctor._review_rule_warnings,
+        doctor._environment_warnings,
+        doctor._env_protection_warnings,
+        doctor._engine_environment_warnings,
+        doctor._plan_env_secret_warnings,
+        doctor._pin_warnings,
+        doctor._fork_trigger_warnings,
+        doctor._summary_wiring_warnings,
+        doctor._plan_run_id_warnings,
+        doctor._team_warnings,
+        doctor._app_permission_warnings,
+    )
 
 
 def _rules_only(*rules):
