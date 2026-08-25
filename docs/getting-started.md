@@ -311,11 +311,12 @@ closed, never weaken it. The fork half is the exception that yields to nothing:
 `on-demand` widens the draft skip only.
 
 The costs look nothing alike. Omit `head-repo` or `head-sha` on `build-matrix`
-and `detect` fails loudly, naming the input. Omit `head-repo` or `is-draft` on
-the `summary` call and the summary job is **skipped**: no `shipmate / gate`
-status, so nothing merges, and nothing on the run page says why. Omit
-`on-demand` and an ordinary pull request is unaffected, which is what makes it
-the quietest of the three: `shipmate plan` on a draft then plans, uploads its
+and `detect` fails loudly, naming the input. Omit `head-repo` on the `summary`
+call and that job is **skipped** on every trigger; omit `is-draft` and it is
+skipped on every autoplan run, an explicitly requested plan being the one that
+still gates. Either way: no `shipmate / gate` status, so nothing merges, and
+nothing on the run page says why. Omit `on-demand` and an ordinary pull request
+is unaffected, which is what makes it the quietest of the three: `shipmate plan` on a draft then plans, uploads its
 artifacts, and is skipped at the summary — no gate, no plan comment, no apply
 checks for the work it just did. A skipped job is the
 trade the engine chose over minting an App-authored gate for a head repository

@@ -53,8 +53,9 @@ jobs:
     # exposure over fork-authored content. The draft clause does yield, because
     # skipping a draft is autoplan's economy, not a trust decision — and
     # `shipmate plan` on a draft is a collaborator asking for exactly that plan.
-    # `on-demand` is stated by the same producer as the other two facts, so the
-    # override cannot be claimed by a caller reading somewhere else. The
+    # `on-demand` is stated by the same producer as the other two facts — a
+    # caller that states it from anywhere else is a wiring defect
+    # `shipmate doctor` reports, not one this guard can see. The
     # parentheses are load-bearing: `&&` binds tighter than `||`, so dropping
     # them would let `on-demand` alone satisfy the whole guard, fork included.
     if: >-

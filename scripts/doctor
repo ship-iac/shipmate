@@ -1278,9 +1278,9 @@ _NO_PULL_REQUEST = re.compile(r"(?:^|[{,])[ \t]*no-pull-request[ \t]*:(?P<value>
 # recognised here. The values these keys must carry end in `}}`, so the `,`/`}`
 # terminator that makes a flow mapping readable would truncate the block-style
 # expression the documented wrapper uses and report *that* as unwired — a false
-# positive on the one shape every consumer has. A flow-style summary call (seven
-# long expressions on one line) reads as unwired instead: noisy, but the finding
-# names both inputs and the exact expressions to pass.
+# positive on the one shape every consumer has. A flow-style summary call (eight
+# long expressions on one line) reads as unwired instead: noisy, but the
+# findings name every unwired input and the exact expressions to pass.
 _WIRING_KEY = {
     key: re.compile(rf"^[ \t]*{key}[ \t]*:(?P<value>.*)$", re.M)
     for key in SUMMARY_WIRING | BUILD_MATRIX_WIRING
@@ -1416,9 +1416,11 @@ def _summary_call_finding(text, name):
                 WARNING,
                 f"`{name}`'s call of the engine's `summary.yml` must pass {wanted}, and does "
                 "not: the input is absent, or carries a different value. The "
-                "summary job decides on those two inputs and refuses an empty or unexpected "
-                "value, so it is SKIPPED: no gate status, no plan comment, and nothing on the "
-                "run page saying why the pull request cannot merge. Each must be the pull "
+                "summary job decides on those inputs and refuses an empty or unexpected "
+                "value, so it is SKIPPED — on every autoplan run, and on an explicitly "
+                "requested plan too unless the only fact missing is the draft flag: no gate "
+                "status, no plan comment, and nothing on the run page saying why the pull "
+                "request cannot merge. Each must be the pull "
                 "request's own value; a constant (the running repository, a literal `false`) "
                 "states the safe answer for every run, fork pull requests and drafts included.",
             )
