@@ -288,8 +288,11 @@ def run_unlock(repo, env, head):
     never unlock ANY environment, however short the queue, and the refusal would
     tell the operator to split a pull request that does not exist. Building only
     the target env's cells bounds the check to what the matrix will actually
-    hold, and keeps the reserved-path and workload-collision guards `build_matrix`
-    also carries.
+    hold, and keeps the reserved-path, workload-collision and slug-collision
+    guards `build_matrix` also carries. None of those three can affect an unlock —
+    it consumes no plan artifact — so each is a refusal inherited from the reuse,
+    and the slug one can make a repository with a latent colliding pair unable to
+    unlock at all.
 
     `refuse_unreviewed` is skipped because an approval reviews a diff and unlock
     applies none — the run-time half of the decision `scripts/authorize` already

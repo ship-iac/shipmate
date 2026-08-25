@@ -1217,9 +1217,10 @@ verbatim as:
 
 where `<env>` is the environment name and `<slug>` is the Terramate stack
 **path** with every `/` replaced by `-` (e.g. `stacks/app` → `stacks-app`, so
-`(stacks/app, dev-eu)` → `plan.dev-eu.stacks-app`). plan-cell creates it,
-apply-cell downloads it, and apply-detect matches it — all three **construct**
-the name forward from the `(env, slug)` pair; **no component reverse-parses it**.
+`(stacks/app, dev-eu)` → `plan.dev-eu.stacks-app`). plan-cell creates it and
+apply-cell downloads it — both **construct** the name forward from the
+`(env, slug)` pair; **no component reverse-parses it**. No detect matches on it
+at all: the apply workset comes from the head's own apply checks.
 
 The delimiter is `.` and the environment comes first on purpose. Terramate tag
 values (the source of every env name) cannot contain `.`, so the first `.`
@@ -1231,13 +1232,17 @@ unambiguous across all `(slug, env)` pairs — unlike the earlier
 wave. A slug may itself contain `.` (a path character); that is harmless
 because the name is only ever built forward, never split. Two distinct stack
 paths that slug to the same value still collide by construction and fail loud
-in apply-detect (rename so the path→`-` slug is unique).
+in `build-matrix`, at matrix construction — before any artifact exists, so the
+plan run refuses up front rather than an apply discovering the clash afterwards
+(rename so the path→`-` slug is unique). Every path that builds a matrix
+carries it: the plan and deploy paths over their changed set, the drift path
+over the whole tree, and `shipmate unlock` over the target environment.
 
 This naming contract is breaking for any in-flight plan artifacts: land the
 change when no applies are mid-flight. It also spans two consumer workflow
 files pinned independently — `plan.yml` pins `plan-cell` (the uploader) and
 `apply.yml` pins the engine's reusable apply workflows, which pin
-`apply-cell`/`apply-detect` (the downloader/matcher) internally. Bump both
+`apply-cell` (the downloader) internally. Bump both
 pins **together** when adopting a build that changes this name: a partial
 bump (uploader on the new name, downloader on the old, or vice versa) makes
 every apply fail its reviewed-plan download fail-safe until the pins agree.

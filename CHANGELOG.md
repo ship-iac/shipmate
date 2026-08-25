@@ -56,6 +56,24 @@ works while every `shipmate apply` carries an unexplained warning
   forward is the load-time kill. It reads a file named exactly `apply.yml`, so it
   has nothing to say about `comment-ops.yml` or a split layout's `apply-all.yml`.
 
+- **The stack-path slug collision now refuses at matrix construction, and every
+  matrix-building path carries it.** `apply-detect` used to raise when two stack
+  paths in one environment slugged to the same `plan.<env>.<slug>` artifact name,
+  which meant discovering the clash only once a plan had already run. The refusal
+  moved into `build-matrix`, so it fires before any artifact exists — but it now
+  also reaches two paths the old one never did. **A repository with a latent
+  colliding pair** (`net/edge` beside `net-edge`, both tagged into one env, never
+  changed together in a single pull request) **kept planning quietly and now sees
+  its nightly drift run refuse**, since the drift path builds the whole tree in
+  one matrix. That refusal is warranted rather than collateral: `drift-cell`
+  uploads `drift-summary.<env>.<slug>` with `overwrite: true`, so a colliding
+  pair was silently overwriting one of the two stacks' drift results — the
+  refusal surfaces a loss that was already happening. `shipmate unlock <env>`
+  also refuses, because the unlock queue reuses `build-matrix` for its
+  matrix-limit and reserved-path checks even though it consumes no plan artifact
+  and so cannot be harmed by the collision; that one is inherited, not intended.
+  Rename one path so the path→`-` slug is unique; there is no opt-out.
+
 - **Three refusals were re-worded to what is still true.** The missing-plan-workflow
   refusal named three downstream consequences this release removes and now names
   the one that remains (doctor keys its plan-wrapper probes on the filename); the
