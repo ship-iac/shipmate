@@ -11,7 +11,7 @@ section below names the SHA the release tags.
 The version line stays `v0.x` while action inputs, check names, and the comment
 grammar are declared unstable in `README.md`.
 
-## [Unreleased] — 0.19.0
+## [0.19.0] — 2026-08-25
 
 **Re-pinning alone is not enough, and the edit touches two consumer files.**
 Delete the `plan_run_id` `workflow_dispatch` input and its `with:` pass-throughs
