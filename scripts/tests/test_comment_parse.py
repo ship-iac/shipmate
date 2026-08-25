@@ -46,6 +46,16 @@ def test_plan_rejects_an_env():
     assert r["route"] is None
 
 
+def test_doctor_rejects_an_env():
+    r = cp.parse("shipmate doctor dev-eu")
+    assert not r["valid"] and "takes no arguments" in r["error"]
+
+
+def test_help_rejects_an_env():
+    r = cp.parse("shipmate help dev-eu")
+    assert not r["valid"] and "takes no arguments" in r["error"]
+
+
 def test_plan_rejects_an_env_with_a_tag_filter():
     # Reached through the no-arguments branch, not the tag branch: with
     # `args: ""` a tag is already an argument.

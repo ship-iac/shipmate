@@ -77,8 +77,8 @@ the environments of the stacks a given pull request changed, and its report says
 which ones those were — it is a check on the settings that pull request touches,
 not a repository-wide audit.
 
-`help` and `doctor` are read-only; `plan` changes no infrastructure but answers
-the same commenters `doctor` does; `apply` and `unlock` are authorized. `apply`
+`help` and `doctor` are read-only, and `plan` changes no infrastructure but is
+open to the same commenters `doctor` is; `apply` and `unlock` are authorized. `apply`
 carries the full check (approvers-team membership, a mergeable and reviewed PR,
 and a reviewed plan for the current head — see Comment-ops above); `unlock`
 carries a narrower one — approvers-team membership and the `<env>-apply`

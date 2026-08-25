@@ -515,14 +515,14 @@ exactly what a push-triggered plan authors and nothing more: the sticky plan
 comment, the per-cell plan checks, the plan artifacts an apply consumes, and
 `shipmate / gate` (§Plan comment; a dispatched run's cell checks reach the pull
 request head as App-authored mirrors, described with the App identities below).
-It takes **no arguments** — there is one
-plan of record per head commit, and a run holding a single environment's
-artifacts would leave every other environment's workset empty at the next
-apply, so an env or tag-filter alongside it is rejected. Unlike autoplan it
-plans a **draft** pull request. Re-issuing
-it re-plans rather than reporting the existing plan current: the new run's plan
-replaces the plan of record for the current head, and doing so is safe because a
-plan changes nothing but shipmate's own comment, checks and artifacts.
+It takes **no arguments** — there is one plan of record per head commit, and a
+run holding a single environment's artifacts would leave every other
+environment's workset empty at the next apply, so an env or tag-filter
+alongside it is rejected. Unlike autoplan it plans a **draft** pull request.
+Re-issuing it re-plans rather than reporting the existing plan current: the new
+run's plan replaces the plan of record for the current head, and doing so is
+safe because a plan changes nothing but shipmate's own comment, checks and
+artifacts.
 
 `destroy` is recognized and rejected with a "reserved" message, so the grammar
 does not need to change shape when that verb is implemented. A
