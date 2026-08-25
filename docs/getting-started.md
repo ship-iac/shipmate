@@ -126,8 +126,11 @@ payload at all. That is what the `facts` job is for: it resolves the pull
 request's facts once, from the event payload on a pull-request event and from
 the API by the dispatched `pr_number` otherwise, and every job below reads them
 from it. The `ref` on the two checkouts is load-bearing: without it each
-trigger checks out what it named above and reports a clean plan for code it
-never read.
+trigger checks out what it named above and would report a clean plan for code it
+never read. Both jobs **refuse** that instead of reporting it — `build-matrix`
+compares the checkout against the `head-sha` it is passed and fails `detect`,
+and `plan-cell` does the same against `expected-head` — so a wrapper missing
+the `ref` fails loudly on its first run rather than merging green.
 
 **The filenames are load-bearing too.** `actions/build-matrix` refuses to plan a
 repository that has no `.github/workflows/plan.yml` — no apply path matches that
@@ -201,8 +204,8 @@ jobs:
       # Both triggers check out something else by default — the base branch
       # under `pull_request_target`, the dispatch ref under `workflow_dispatch`.
       # Naming the head SHA is what makes this a plan of the pull request;
-      # without it the run plans the base branch and reports a clean plan for
-      # code it never read.
+      # without it `build-matrix` refuses the run, because the alternative is a
+      # clean plan for code it never read.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.facts.outputs.head-sha }}
@@ -220,6 +223,7 @@ jobs:
         with:
           base-sha: ${{ needs.facts.outputs.base-sha }}
           head-repo: ${{ needs.facts.outputs.head-repo }}
+          head-sha: ${{ needs.facts.outputs.head-sha }}
 
   plan:
     needs: [facts, detect]
@@ -295,14 +299,16 @@ number. The one addition is AWS-specific: this sample's
 assume the read-only plan role. A consumer with no plan-time cloud credentials
 drops both that grant and the credentials step.
 
-`head-repo` and `is-draft` are the two facts the engine's trusted job decides
-on, and the wrapper is what states them: `build-matrix` refuses to plan a run
-that does not state its head repository, and the `summary` job requires the
-stated head repository to equal the running repository *and* the stated draft
-flag to be `false` before it mints an App token. An omitted or empty value is
-read as a **refusal**, in both places — so this wrapper can only fail
-the decision closed, never weaken it. The two costs look nothing alike. Omit
-`head-repo` on `build-matrix` and `detect` fails loudly, naming the input. Omit
+Every fact these guards decide on is stated by the wrapper, never read from the
+event by the guard itself. `build-matrix` refuses to plan a run that does not
+state its head repository (the fork refusal) or the commit it is planning (the
+checkout check); the `summary` job requires the stated head repository to equal
+the running repository *and* the stated draft flag to be `false` before it mints
+an App token. An omitted or empty value is read as a **refusal** in all of them —
+so this wrapper can only fail the decision closed, never weaken it.
+
+The two costs look nothing alike. Omit `head-repo` or `head-sha` on
+`build-matrix` and `detect` fails loudly, naming the input. Omit
 either input on the `summary` call and the summary job is **skipped**: no
 `shipmate / gate` status, so nothing merges, and nothing on the run page says
 why. That is the trade the engine chose over minting an App-authored gate for a
@@ -314,12 +320,13 @@ wiring so the silent case is not silent for long.
 `head-repo: ${{ github.repository }}` passes the fork check for every pull
 request, fork ones included — the guard then holds nothing, and only this
 snippet's expressions make it real. `doctor` reports either on the `summary`
-call, absent or wrong; it reports the `build-matrix` step's own `head-repo` the
-same way, and reports a `no-pull-request` anywhere in this file, which belongs
-only in a drift wrapper ([`drift.md`](drift.md)). What it still cannot see: it
-reads only a file named `plan.yml`, so a plan wrapper under another name is
-checked by review or not at all, and `is-draft` has no counterpart on
-`build-matrix` — that step takes no such input.
+call, absent or wrong; it reports the `build-matrix` step's own `head-repo` and
+`head-sha` the same way, one finding each, and reports a `no-pull-request`
+anywhere in this file, which belongs only in a drift wrapper
+([`drift.md`](drift.md)). What it still cannot see: it reads only a file named
+`plan.yml`, so a plan wrapper under another name is checked by review or not at
+all, and `is-draft` has no counterpart on `build-matrix` — that step takes no
+such input.
 
 `expected-head` is required. plan-cell records the commit each plan was
 produced from and apply-cell refuses a plan produced from a different tree, so

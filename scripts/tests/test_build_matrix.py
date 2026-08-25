@@ -1,4 +1,3 @@
-import json
 import subprocess
 
 import pytest
@@ -447,9 +446,9 @@ def test_an_unknown_this_repository_refuses_a_stated_head_repository():
 
 
 def test_event_payload_degrades_to_empty_dict(tmp_path):
-    # Each of these reaches `head_checkout_error` as {}, which refuses a
-    # `pull_request_target` run rather than skipping it; the fork refusal does
-    # not read the event at all.
+    # `scripts/pr-facts` is the reader: each of these reaches it as {}, which has
+    # neither a pull request nor a `pr_number` and so refuses rather than
+    # emitting empty facts. Neither guard in this module reads the event.
     assert bm._event_payload("") == {}
     assert bm._event_payload(str(tmp_path / "absent.json")) == {}
     bad = tmp_path / "bad.json"
@@ -461,12 +460,23 @@ def test_event_payload_degrades_to_empty_dict(tmp_path):
 
 
 def _run_main(
-    monkeypatch, tmp_path, env, cells=(("stacks/app", "dev-eu"),), called=None, plan_workflow=True
+    monkeypatch,
+    tmp_path,
+    env,
+    cells=(("stacks/app", "dev-eu"),),
+    called=None,
+    plan_workflow=True,
+    head_sha=None,
 ):
     """main() with GITHUB_OUTPUT redirected, returning (parsed outputs, calls)
     where calls records compute_cells' arguments -- so a rejection is
     observable as the stack enumeration never having run. Pass `called` to keep
-    that record readable when main() raises and there is no return value."""
+    that record readable when main() raises and there is no return value.
+
+    `head_sha` states that commit AND makes `git rev-parse HEAD` answer it, which
+    is what a run past the head-checkout refusal looks like; without it the run
+    states no head and is refused, so every test that wants to reach the matrix
+    passes one."""
     out = tmp_path / "out.txt"
     out.write_text("", encoding="utf-8")
     monkeypatch.setenv("GITHUB_OUTPUT", str(out))
@@ -483,9 +493,13 @@ def _run_main(
         "GITHUB_REPOSITORY",
         "GITHUB_EVENT_PATH",
         "SHIPMATE_HEAD_REPO",
+        "SHIPMATE_HEAD_SHA",
         "SHIPMATE_NO_PULL_REQUEST",
     ):
         monkeypatch.delenv(k, raising=False)
+    if head_sha is not None:
+        monkeypatch.setenv("SHIPMATE_HEAD_SHA", head_sha)
+        monkeypatch.setattr(bm, "_run", lambda args: f"{head_sha}\n")
     for k, v in env.items():
         monkeypatch.setenv(k, v)
     called = [] if called is None else called
@@ -539,12 +553,12 @@ def test_main_passes_the_three_environment_values_to_the_guard(monkeypatch, tmp_
 
 
 def test_main_refuses_the_fork_before_the_consumer_wiring_checks(monkeypatch, tmp_path):
-    # Both guards fire on this run, so the assertion pins the ORDER: a run this
-    # script cannot vouch for is turned away before it shells out to git.
+    # Both guards would fire on this run -- a fork head, and a checkout that is
+    # not the stated one -- so the assertion pins the ORDER: a run this script
+    # cannot vouch for is turned away before it shells out to git on the fork's
+    # tree, which is why `_run` fails rather than answering.
     called = []
-    monkeypatch.setattr(bm, "_run", lambda args: "basebase\n")
-    event = tmp_path / "head-event.json"
-    event.write_text(json.dumps({"pull_request": {"head": {"sha": "cafe1234"}}}), encoding="utf-8")
+    monkeypatch.setattr(bm, "_run", lambda args: pytest.fail("git ran on a fork's tree"))
     with pytest.raises(SystemExit) as excinfo:
         _run_main(
             monkeypatch,
@@ -553,7 +567,7 @@ def test_main_refuses_the_fork_before_the_consumer_wiring_checks(monkeypatch, tm
                 "GITHUB_EVENT_NAME": "pull_request_target",
                 "GITHUB_REPOSITORY": "acme/iac",
                 "SHIPMATE_HEAD_REPO": "outsider/iac",
-                "GITHUB_EVENT_PATH": str(event),
+                "SHIPMATE_HEAD_SHA": "cafe1234",
             },
             called=called,
         )
@@ -608,6 +622,7 @@ def test_main_plans_a_same_repository_pull_request(monkeypatch, tmp_path):
             "GITHUB_REPOSITORY": "acme/iac",
             "SHIPMATE_HEAD_REPO": "acme/iac",
         },
+        head_sha="cafe1234",
     )
     assert outputs["empty"] == "false"
     assert called == [(False, "")]
@@ -630,57 +645,62 @@ def test_main_drift_run_is_unaffected(monkeypatch, tmp_path):
     assert called == [(True, "")]
 
 
-def _head_payload(sha):
-    return {"pull_request": {"head": {"sha": sha}}}
-
-
-def test_head_checkout_matching_the_pull_request_head_is_planned(monkeypatch):
+def test_a_stated_head_equal_to_the_checkout_is_planned(monkeypatch):
     monkeypatch.setattr(bm, "_run", lambda args: "cafe1234\n")
-    assert bm.head_checkout_error("pull_request_target", _head_payload("cafe1234")) == ""
+    assert bm.head_checkout_error("cafe1234", "false") == ""
 
 
-def test_head_checkout_of_the_base_is_refused(monkeypatch):
-    # The pull_request_target default: actions/checkout took the base branch, so
-    # terramate would diff the base against itself and report nothing changed.
+def test_a_checkout_that_is_not_the_stated_head_is_refused_naming_both(monkeypatch):
+    # What both plan triggers leave checked out by default: the base branch under
+    # `pull_request_target`, the dispatch ref under `workflow_dispatch`. Either
+    # way terramate diffs the wrong tree against the base and reports nothing
+    # changed. Both SHAs are asserted because the message is the only place a
+    # consumer sees which tree was planned and which one should have been.
     monkeypatch.setattr(bm, "_run", lambda args: "basebase\n")
-    err = bm.head_checkout_error("pull_request_target", _head_payload("cafe1234"))
+    err = bm.head_checkout_error("cafe1234", "false")
     assert err.startswith("::error::")
-    assert "ref: ${{ github.event.pull_request.head.sha }}" in err
     assert "cafe1234" in err and "basebase" in err
+    assert "nothing queued to apply" in err
 
 
-def test_head_checkout_check_is_skipped_off_pull_request_target(monkeypatch):
-    # The drift path has no pull-request context and no reason to be at any
-    # particular commit; `git rev-parse` must not even run. `pull_request` is in
-    # the same list on purpose: its default checkout is `refs/pull/<n>/merge`, a
-    # merge commit that equals neither SHA, so comparing it would refuse every
-    # correctly wired consumer still on that trigger.
-    monkeypatch.setattr(
-        bm, "_run", lambda args: pytest.fail("head checkout was probed off pull_request_target")
-    )
-    for event in ("pull_request", "schedule", "workflow_dispatch", "push", ""):
-        assert bm.head_checkout_error(event, _head_payload("cafe1234")) == ""
-
-
-def test_head_checkout_of_an_unreadable_payload_is_refused(monkeypatch):
-    # FLIPPED from a skip: the payload is the only source of the head SHA, so an
-    # unreadable one leaves this check unmade. Skipping it let a base checkout
-    # plan the base against itself, green the gate and queue no applies -- the
-    # one direction that does not recover. The message is asserted, not just the
-    # refusal: it has to be distinguishable from the mismatch refusal below.
-    monkeypatch.setattr(bm, "_run", lambda args: pytest.fail("probed with no head sha"))
-    for payload in ({}, {"pull_request": {"head": {}}}, {"pull_request": None}):
-        err = bm.head_checkout_error("pull_request_target", payload)
+def test_an_unstated_head_is_refused_naming_the_input(monkeypatch):
+    # REFUSED, not skipped, and without probing git: the stated head is the only
+    # thing this check has to compare against, so an omitted `head-sha` leaves it
+    # unmade -- the direction that plans the base, greens the gate and queues no
+    # applies. The message is asserted, not just the refusal: it must name the
+    # input and the drift opt-out rather than reading as the mismatch above.
+    monkeypatch.setattr(bm, "_run", lambda args: pytest.fail("probed with no stated head"))
+    for head in ("", "   "):
+        err = bm.head_checkout_error(head, "false")
         assert err.startswith("::error::")
-        assert "carries no pull request head commit" in err
-        assert "GITHUB_EVENT_PATH" in err
+        assert "head-sha" in err
+        assert "no-pull-request" in err
+        assert "checked out" not in err
 
 
-def test_main_refuses_a_pull_request_target_with_no_event_payload(monkeypatch, tmp_path):
+def test_the_opt_out_skips_the_head_checkout_check(monkeypatch):
+    # The drift path has no pull-request context and no reason to be at any
+    # particular commit; `git rev-parse` must not even run. Case- and
+    # whitespace-insensitive for the same reason as the fork refusal's opt-out: a
+    # `no-pull-request: True` must not redden a nightly over YAML capitalisation.
+    monkeypatch.setattr(bm, "_run", lambda args: pytest.fail("head checkout was probed"))
+    for value in ("true", "True", " TRUE "):
+        for head in ("", "cafe1234"):
+            assert bm.head_checkout_error(head, value) == ""
+
+
+def test_only_the_opt_out_skips_the_head_checkout_check():
+    # The manifest default is the non-empty string "false", so anything that
+    # treats a non-empty value as the opt-out would leave every run unchecked.
+    for value in ("false", "False", " false ", "yes", "1", "", "no-pull-request"):
+        assert bm.head_checkout_error("", value).startswith("::error::")
+
+
+def test_main_refuses_a_run_that_states_no_head(monkeypatch, tmp_path):
     # The wiring this backstop exists for: a correct `head-repo` gets past the
-    # fork refusal, and GITHUB_EVENT_PATH is gone.
+    # fork refusal, and the wrapper never wired `head-sha`.
     called = []
-    monkeypatch.setattr(bm, "_run", lambda args: pytest.fail("probed with no head sha"))
+    monkeypatch.setattr(bm, "_run", lambda args: pytest.fail("probed with no stated head"))
     with pytest.raises(SystemExit) as excinfo:
         _run_main(
             monkeypatch,
@@ -692,7 +712,52 @@ def test_main_refuses_a_pull_request_target_with_no_event_payload(monkeypatch, t
             },
             called=called,
         )
-    assert "carries no pull request head commit" in str(excinfo.value)
+    assert "did not state the commit it is planning" in str(excinfo.value)
+    assert called == []
+
+
+def test_main_refuses_a_dispatched_run_whose_checkout_is_not_the_stated_head(monkeypatch, tmp_path):
+    # The leg the event-keyed version made NO check on: `actions/checkout` takes
+    # the dispatch ref here, so a wrapper that adds the trigger and forgets `ref:`
+    # planned the default branch against the base, came out empty, skipped the
+    # plan job and greened the gate with nothing queued to apply. Held at main(),
+    # not only in the guard: re-keying the guard is worthless if the call site
+    # keeps deciding by event name.
+    called = []
+    monkeypatch.setattr(bm, "_run", lambda args: "defaultbranch\n")
+    with pytest.raises(SystemExit) as excinfo:
+        _run_main(
+            monkeypatch,
+            tmp_path,
+            {
+                "GITHUB_EVENT_NAME": "workflow_dispatch",
+                "GITHUB_REPOSITORY": "acme/iac",
+                "SHIPMATE_HEAD_REPO": "acme/iac",
+                "SHIPMATE_HEAD_SHA": "cafe1234",
+            },
+            called=called,
+        )
+    assert "which is not the commit it is planning (cafe1234)" in str(excinfo.value)
+    assert called == []
+
+
+def test_main_refuses_a_dispatched_run_that_states_no_head(monkeypatch, tmp_path):
+    # The same leg, unstated rather than mismatching: a wrapper that adds the
+    # trigger and never wires `head-sha` is refused too, without probing git.
+    called = []
+    monkeypatch.setattr(bm, "_run", lambda args: pytest.fail("probed with no stated head"))
+    with pytest.raises(SystemExit) as excinfo:
+        _run_main(
+            monkeypatch,
+            tmp_path,
+            {
+                "GITHUB_EVENT_NAME": "workflow_dispatch",
+                "GITHUB_REPOSITORY": "acme/iac",
+                "SHIPMATE_HEAD_REPO": "acme/iac",
+            },
+            called=called,
+        )
+    assert "did not state the commit it is planning" in str(excinfo.value)
     assert called == []
 
 
@@ -729,13 +794,6 @@ def test_plan_workflow_check_is_skipped_off_a_pull_request(tmp_path):
 def test_main_refuses_a_base_checkout(monkeypatch, tmp_path):
     called = []
     monkeypatch.setattr(bm, "_run", lambda args: "basebase\n")
-    event = tmp_path / "head-event.json"
-    event.write_text(
-        json.dumps(
-            {"pull_request": {"head": {"sha": "cafe1234", "repo": {"full_name": "acme/iac"}}}}
-        ),
-        encoding="utf-8",
-    )
     with pytest.raises(SystemExit) as excinfo:
         _run_main(
             monkeypatch,
@@ -744,11 +802,11 @@ def test_main_refuses_a_base_checkout(monkeypatch, tmp_path):
                 "GITHUB_EVENT_NAME": "pull_request_target",
                 "GITHUB_REPOSITORY": "acme/iac",
                 "SHIPMATE_HEAD_REPO": "acme/iac",
-                "GITHUB_EVENT_PATH": str(event),
+                "SHIPMATE_HEAD_SHA": "cafe1234",
             },
             called=called,
         )
-    assert "ref: ${{ github.event.pull_request.head.sha }}" in str(excinfo.value)
+    assert "which is not the commit it is planning (cafe1234)" in str(excinfo.value)
     assert called == []
 
 
@@ -765,15 +823,17 @@ def test_main_refuses_a_missing_plan_workflow(monkeypatch, tmp_path):
             },
             called=called,
             plan_workflow=False,
+            head_sha="cafe1234",
         )
     assert ".github/workflows/plan.yml" in str(excinfo.value)
     assert called == []
 
 
 def test_build_matrix_action_declares_its_inputs():
-    # Neither new input is a way to turn the refusal off: `head-repo` is what it
-    # is keyed on and an empty value refuses, while `no-pull-request` only states
-    # that there is no pull request at all. Both are settable only by this
+    # No input here is a way to turn a refusal off: `head-repo` and `head-sha`
+    # are what the two refusals are keyed on and an empty value refuses either,
+    # while `no-pull-request` only states
+    # that there is no pull request at all. All are settable only by this
     # repository's own default-branch workflow, which a pull-request author
     # cannot edit -- and the direction is chosen so a forgotten input refuses
     # (plan wrapper) or reddens the nightly (drift), never plans a fork.
@@ -785,14 +845,16 @@ def test_build_matrix_action_declares_its_inputs():
         "base-sha": None,
         "all-stacks": "false",
         "head-repo": "",
+        "head-sha": "",
         "no-pull-request": "false",
     }
 
 
 def test_build_matrix_action_hands_the_script_the_names_it_reads():
     # The whole `env:` block against a hand-written constant: the script reads
-    # SHIPMATE_HEAD_REPO / SHIPMATE_NO_PULL_REQUEST by name, so a renamed key
-    # here leaves every plan run unstated -- refused, but only in production.
+    # SHIPMATE_HEAD_REPO / SHIPMATE_HEAD_SHA / SHIPMATE_NO_PULL_REQUEST by name,
+    # so a renamed key here leaves every plan run unstated -- refused, but only
+    # in production.
     from _loader import action_steps
 
     (step,) = [s for s in action_steps("build-matrix") if s.get("id") == "build"]
@@ -800,6 +862,7 @@ def test_build_matrix_action_hands_the_script_the_names_it_reads():
         "SHIPMATE_BASE_SHA": "${{ inputs.base-sha }}",
         "SHIPMATE_ALL_STACKS": "${{ inputs.all-stacks }}",
         "SHIPMATE_HEAD_REPO": "${{ inputs.head-repo }}",
+        "SHIPMATE_HEAD_SHA": "${{ inputs.head-sha }}",
         "SHIPMATE_NO_PULL_REQUEST": "${{ inputs.no-pull-request }}",
     }
 

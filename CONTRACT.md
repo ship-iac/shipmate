@@ -996,13 +996,15 @@ The three jobs:
   App token. `detect` binds no environment; `plan` binds only the plan
   environment for the cell it is planning, never one holding an App credential.
   `pull_request_target` checks out the
-  **base** by default, so both jobs must name
-  `ref: ${{ github.event.pull_request.head.sha }}` explicitly; without it they
-  plan the base branch and report a clean plan for a pull request they never
-  read. `actions/build-matrix` refuses that: on `pull_request_target` it
-  compares the event's head SHA against the commit it is running on, and it
-  also refuses a checkout with no `.github/workflows/plan.yml` — the one path
-  this contract lets the plan workflow live at. `actions/build-matrix` fails `detect`
+  **base** by default, so both jobs must name the pull request's head commit on
+  their checkout's `ref:` explicitly — the reference `plan.yml` reads it from
+  `actions/pr-facts`, which resolves it under either plan trigger; without it
+  they plan the base branch and report a clean plan for a pull request they never
+  read. `actions/build-matrix` refuses that: on every trigger it compares the
+  head SHA the run **states** against the commit it is running on. On a
+  pull-request event it also refuses a checkout with no
+  `.github/workflows/plan.yml` — the one path this contract lets the plan
+  workflow live at. `actions/build-matrix` fails `detect`
   outright unless the run **states** a head repository equal to the running
   repository: **fork pull requests are not planned**, and no input permits one.
   A fork's plan would execute the pull request's own Terramate/OpenTofu code

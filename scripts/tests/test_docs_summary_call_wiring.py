@@ -45,6 +45,7 @@ _EXPECTED_SUMMARY_WITH = {
 _EXPECTED_PLAN_MATRIX_WITH = {
     "base-sha": "${{ needs.facts.outputs.base-sha }}",
     "head-repo": _HEAD_REPO,
+    "head-sha": "${{ needs.facts.outputs.head-sha }}",
 }
 
 _EXPECTED_DRIFT_MATRIX_WITH = {
@@ -151,7 +152,20 @@ def test_doctors_wiring_constant_expects_what_the_page_documents():
     )
 
 
-def test_documented_plan_build_matrix_states_the_head_repository():
+def test_doctors_build_matrix_constant_expects_what_the_page_documents():
+    """Same failure mode as the summary constant above, on the step's own two
+    inputs: `doctor.BUILD_MATRIX_WIRING` is a hand-written copy of what this page
+    documents, and a documented expression that leaves it behind makes the probe
+    WARN on every correctly wired repository."""
+    assert doctor.BUILD_MATRIX_WIRING == {
+        key: _EXPECTED_PLAN_MATRIX_WITH[key] for key in ("head-repo", "head-sha")
+    }, (
+        "scripts/doctor's BUILD_MATRIX_WIRING drifted from the documented wrapper: "
+        f"{doctor.BUILD_MATRIX_WIRING}"
+    )
+
+
+def test_documented_plan_build_matrix_states_the_head_repository_and_commit():
     for job, step in _build_matrix_steps(_PLAN_PAGE):
         assert step.get("with") == _EXPECTED_PLAN_MATRIX_WITH, (
             f"docs/getting-started.md job `{job}` must pass exactly "

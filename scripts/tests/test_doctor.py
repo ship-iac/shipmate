@@ -1086,6 +1086,7 @@ _OTHER_SHA = "b" * 40
 # the `build-matrix` step, once on the summary call. Without the first
 # occurrence a wiring probe that searches the whole file instead of the summary
 # call's own region passes this fixture while missing the finding it exists for.
+# `head-sha` is the step's second expectation and appears only there.
 _QUIET_PLAN = (
     "name: shipmate · plan\n"
     "on:\n"
@@ -1096,6 +1097,7 @@ _QUIET_PLAN = (
     f"      - uses: {_ENGINE_REPO}/actions/build-matrix@{_SHA}\n"
     "        with:\n"
     "          head-repo: ${{ needs.facts.outputs.head-repo }}\n"
+    "          head-sha: ${{ needs.facts.outputs.head-sha }}\n"
     "  summary:\n"
     f"    uses: {_ENGINE_REPO}/.github/workflows/summary.yml@{_SHA}\n"
     "    with:\n"
@@ -2513,23 +2515,29 @@ def test_a_key_merely_ending_in_the_input_name_is_not_reported(monkeypatch):
 
 
 # Hand-written, not derived from `doctor` or from `_QUIET_PLAN`: these are the
-# two expressions a correctly wired wrapper passes, and the finding must name
-# them.
+# expressions a correctly wired wrapper passes, and the finding must name them.
 _HEAD_REPO_EXPR = "${{ needs.facts.outputs.head-repo }}"
 _IS_DRAFT_EXPR = "${{ needs.facts.outputs.is-draft }}"
+_HEAD_SHA_EXPR = "${{ needs.facts.outputs.head-sha }}"
 
 
 def _plan_calling_summary(*with_lines, detect_head_repo=False, with_first=False, matrix_with=None):
     """A consumer `plan.yml` whose summary job passes exactly `with_lines`.
 
-    `detect_head_repo` adds the OTHER legitimate `head-repo`, on the
-    `build-matrix` step of an EARLIER job -- the occurrence a whole-file search
-    is satisfied by. `matrix_with` writes that step's `with:` lines verbatim
+    `detect_head_repo` adds the OTHER legitimate `head-repo`, on a correctly
+    wired `build-matrix` step of an EARLIER job -- the occurrence a whole-file
+    search is satisfied by. That step's own `head-sha` comes with it, so any
+    finding these fixtures produce is the summary call's rather than the step's.
+    `matrix_with` writes that step's `with:` lines verbatim
     instead, for the checks on the step's own wiring (an empty sequence writes
     the step with no `with:` block at all). `with_first` writes the summary
     job's `with:` block ABOVE its `uses:` line, which is legal YAML a
     forward-only scan cannot see."""
-    matrix = [f"head-repo: {_HEAD_REPO_EXPR}"] if detect_head_repo else matrix_with
+    matrix = (
+        [f"head-repo: {_HEAD_REPO_EXPR}", f"head-sha: {_HEAD_SHA_EXPR}"]
+        if detect_head_repo
+        else matrix_with
+    )
     detect = (
         "  detect:\n"
         "    steps:\n"
@@ -2711,7 +2719,13 @@ def test_a_constant_head_repo_on_the_build_matrix_step_is_reported(monkeypatch):
     pull request, so `build-matrix`'s fork refusal -- the layer docs/hardening.md
     says has to hold -- passes a fork's own Terramate/OpenTofu onto the
     consumer's runners. "A missing input is loud" covers the absent case only."""
-    responses = _fork_responses({"plan.yml": _both_wired(["head-repo: ${{ github.repository }}"])})
+    responses = _fork_responses(
+        {
+            "plan.yml": _both_wired(
+                ["head-repo: ${{ github.repository }}", f"head-sha: {_HEAD_SHA_EXPR}"]
+            )
+        }
+    )
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
     out = doctor._summary_wiring_warnings(_ctx())
     assert len(out) == 1
@@ -2723,17 +2737,45 @@ def test_a_constant_head_repo_on_the_build_matrix_step_is_reported(monkeypatch):
     )
 
 
-def test_an_absent_head_repo_on_the_build_matrix_step_is_reported(monkeypatch):
-    responses = _fork_responses({"plan.yml": _both_wired([])})
+def test_a_constant_head_sha_on_the_build_matrix_step_is_reported(monkeypatch):
+    """The step's second expectation, and a different hole from the one above: a
+    `head-sha` wired to `github.sha` is the base branch under
+    `pull_request_target`, so the checkout check compares the wrong tree against
+    itself, the matrix comes out empty and the gate greens with nothing queued to
+    apply. Reported as its own finding, because the remedy is not the fork one."""
+    responses = _fork_responses(
+        {"plan.yml": _both_wired([f"head-repo: {_HEAD_REPO_EXPR}", "head-sha: ${{ github.sha }}"])}
+    )
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
     out = doctor._summary_wiring_warnings(_ctx())
     assert len(out) == 1
+    assert out[0][0] == doctor.WARNING
+    assert out[0][1].startswith(
+        "`plan.yml`'s `build-matrix` step must pass "
+        "`head-sha: ${{ needs.facts.outputs.head-sha }}`, and does not: "
+        "the input is absent, or carries a different value."
+    )
+
+
+def test_both_absent_inputs_on_the_build_matrix_step_are_reported_separately(monkeypatch):
+    """A step with no `with:` block at all is missing both, and the two holes are
+    not alike -- a fork planned on the consumer's runners, versus a plan of the
+    wrong tree that greens the gate. One finding each, so the reader is told
+    which remedy is theirs; a single "the step is miswired" finding names one."""
+    responses = _fork_responses({"plan.yml": _both_wired([])})
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    out = doctor._summary_wiring_warnings(_ctx())
+    assert len(out) == 2
+    assert all("`build-matrix` step" in text for _, text in out)
     assert f"`head-repo: {_HEAD_REPO_EXPR}`" in out[0][1]
-    assert "`build-matrix` step" in out[0][1]
+    assert f"`head-sha: {_HEAD_SHA_EXPR}`" in out[1][1]
+    assert "head-sha" not in out[0][1] and "head-repo" not in out[1][1]
 
 
-def test_a_correct_head_repo_on_the_build_matrix_step_is_silent(monkeypatch):
-    responses = _fork_responses({"plan.yml": _both_wired([f"head-repo: {_HEAD_REPO_EXPR}"])})
+def test_a_correctly_wired_build_matrix_step_is_silent(monkeypatch):
+    responses = _fork_responses(
+        {"plan.yml": _both_wired([f"head-repo: {_HEAD_REPO_EXPR}", f"head-sha: {_HEAD_SHA_EXPR}"])}
+    )
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
     assert doctor._summary_wiring_warnings(_ctx()) == []
 
@@ -2743,7 +2785,15 @@ def test_no_pull_request_in_the_plan_wrapper_is_reported(monkeypatch):
     docs/hardening.md calls it the one consumer edit that turns that refusal off
     for every pull request, and nothing in the system reported it."""
     responses = _fork_responses(
-        {"plan.yml": _both_wired([f"head-repo: {_HEAD_REPO_EXPR}", 'no-pull-request: "true"'])}
+        {
+            "plan.yml": _both_wired(
+                [
+                    f"head-repo: {_HEAD_REPO_EXPR}",
+                    f"head-sha: {_HEAD_SHA_EXPR}",
+                    'no-pull-request: "true"',
+                ]
+            )
+        }
     )
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
     out = doctor._summary_wiring_warnings(_ctx())
@@ -2758,7 +2808,15 @@ def test_no_pull_request_set_to_false_in_the_plan_wrapper_is_silent(monkeypatch)
     # `false` is what the action reads as no opt-out, so it is the shape this
     # finding asks for -- reporting it fires on a correct repository.
     responses = _fork_responses(
-        {"plan.yml": _both_wired([f"head-repo: {_HEAD_REPO_EXPR}", "no-pull-request: false"])}
+        {
+            "plan.yml": _both_wired(
+                [
+                    f"head-repo: {_HEAD_REPO_EXPR}",
+                    f"head-sha: {_HEAD_SHA_EXPR}",
+                    "no-pull-request: false",
+                ]
+            )
+        }
     )
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
     assert doctor._summary_wiring_warnings(_ctx()) == []
@@ -2772,7 +2830,11 @@ def test_a_key_merely_ending_in_no_pull_request_is_not_reported(monkeypatch):
     responses = _fork_responses(
         {
             "plan.yml": _both_wired(
-                [f"head-repo: {_HEAD_REPO_EXPR}", 'shipmate-no-pull-request: "true"']
+                [
+                    f"head-repo: {_HEAD_REPO_EXPR}",
+                    f"head-sha: {_HEAD_SHA_EXPR}",
+                    'shipmate-no-pull-request: "true"',
+                ]
             )
         }
     )
