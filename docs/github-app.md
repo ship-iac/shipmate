@@ -272,7 +272,10 @@ every consumer repo, not just once for the org.
   issues. The plan matrix job's own `<stack> / <env>` auto check-run stays
   on the `github-actions` identity — it's the job's own check-run, not
   something a separate API call creates, so there's nothing for the App to
-  author there.
+  author there. On an on-demand plan the App does author a copy of it: a
+  dispatched run's job checks attach to the ref it was dispatched on, so
+  they are mirrored onto the pull request head (`checks: write`, already
+  granted for the apply checks).
 - No webhook events (`default_events: []`, `hook_attributes.active: false`) —
   comment-ops is triggered by `on: issue_comment` in the consumer repo's own
   workflow, not by the App receiving a webhook.

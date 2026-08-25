@@ -56,6 +56,7 @@ EXPECTED_SUMMARY_WITH = {
     "detect-result": "${{ inputs.detect-result }}",
     "plan-result": "${{ inputs.plan-result }}",
     "planned-cells": "${{ inputs.planned-cells }}",
+    "on-demand": "${{ inputs.on-demand }}",
     "app-id": "${{ vars.SHIPMATE_APP_ID }}",
     "private-key": "${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}",
 }

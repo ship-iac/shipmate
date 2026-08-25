@@ -928,7 +928,18 @@ crosses a workflow-run boundary:
 The plan matrix job's own `<stack> / <env>` auto check-run is the one
 exception: it's the job's own check-run (GitHub creates it for the job
 itself), not something a separate API call authors, so it necessarily stays
-on the `github-actions` identity regardless of App permissions.
+on the `github-actions` identity regardless of App permissions. An on-demand
+plan carries an App-authored *copy* of it: GitHub attaches a dispatched run's
+job checks to the commit of the ref it was dispatched on, never to the pull
+request head, so `actions/summary` mirrors that run's own completed checks —
+the cells plus `shipmate / facts` and `shipmate / detect` — onto the head as
+App-authored check-runs holding a fixed line and a link back to the original,
+whose step summary keeps the plan text. They exist so the pull request shows the
+cells, a failed one above all — and because the sticky comment resolves each
+row's plan link across the checks on the head, which is why the mirror runs
+before the comment is built. No gate or apply queue reads them: neither the
+cell names nor `shipmate / facts` / `shipmate / detect` fall inside the
+`apply / ` namespace those select on.
 
 `shipmate apply` and `deploy.yml` share the same per-env, per-stack
 `apply-<env>-<stack>` concurrency group, declared with

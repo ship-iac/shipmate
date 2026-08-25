@@ -54,6 +54,7 @@ extend-include = [
     "scripts/env-order",
     "scripts/gate-state",
     "scripts/lock-info",
+    "scripts/mirror-checks",
     "scripts/pending-checks",
     "scripts/plan-classify",
     "scripts/plan-crypt",

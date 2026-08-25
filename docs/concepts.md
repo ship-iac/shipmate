@@ -41,7 +41,10 @@ output for every attempted cell, so a failure-then-retry sequence stays
 visible as an audit trail. The plan
 matrix job's own `<stack> / <env>` check-run stays on the shared
 `github-actions` identity — it's the job's own auto check-run, not something
-the App creates separately.
+the App creates separately. An on-demand plan is the exception: a dispatched
+run's job checks land on the ref it was dispatched on, so the summary job
+mirrors that run's own completed checks onto the pull request head as
+App-authored copies linking back to the originals.
 Authorizing an apply requires team membership, a mergeable PR that satisfies
 the branch ruleset's review policy, and a reviewed plan for the PR's current
 head; authorizing an unlock requires team membership plus the `<env>-apply`

@@ -318,7 +318,11 @@ still gates. Either way: no `shipmate / gate` status, so nothing merges, and
 nothing on the run page says why. Omit `on-demand` and an ordinary pull request
 is unaffected, which is what makes it the quietest of the three: `shipmate plan` on a draft then plans, uploads its
 artifacts, and is skipped at the summary — no gate, no plan comment, no apply
-checks for the work it just did. A skipped job is the
+checks for the work it just did. On a ready pull request `shipmate plan` gets all
+three, but its per-cell checks stay on the ref the run was dispatched on, so the
+pull request shows no `<stack> / <env>` rows and no failed cell.
+
+A skipped job is the
 trade the engine chose over minting an App-authored gate for a head repository
 it was never told about, and `shipmate doctor` reports this wiring so the silent
 cases are not silent for long.
