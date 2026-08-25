@@ -522,7 +522,11 @@ alongside it is rejected. Unlike autoplan it plans a **draft** pull request.
 Re-issuing it re-plans rather than reporting the existing plan current: the new
 run's plan replaces the plan of record for the current head, and doing so is
 safe because a plan changes nothing but shipmate's own comment, checks and
-artifacts.
+artifacts. A commenter without the standing the table above names gets a
+single-line refusal stating `plan`'s own reason — that it runs this
+repository's Terramate/OpenTofu on its runners — and nothing is dispatched:
+the standing is the same once-evaluated boolean the `doctor` gate below
+describes, and the plan route mints no App token of its own.
 
 `destroy` is recognized and rejected with a "reserved" message, so the grammar
 does not need to change shape when that verb is implemented. A
@@ -615,11 +619,12 @@ machine-read, not a formatting choice, and a mismatch between the annotate
 call and the harvest filter is a regression. `shipmate doctor` is entirely
 read-only: it dispatches nothing and changes no setting, and writes nothing
 but its own sticky comment
-and an `eyes` reaction on the triggering comment (both read-only verbs get
-that acknowledgement as soon as the command is accepted — `rocket` marks an
-authorized `apply` or `unlock` instead; a reaction that cannot be posted is
-ignored), a one-line error comment when it cannot mint an App token, a
-one-line refusal when the commenter may not have the report (below), and a
+and an `eyes` reaction on the triggering comment (`doctor`, `help` and `plan`
+all get that acknowledgement as soon as the command is accepted — `rocket`
+marks an authorized dispatch, whether `apply`, `unlock` or `plan`, instead; a
+reaction that cannot be posted is ignored), a one-line error comment when it
+cannot mint an App token, a one-line refusal when the commenter may not have
+the report (below), and a
 handful of untitled `::warning::` annotations on its own degrade paths — an
 unreadable PR head SHA, unreadable plan records on this commit's apply checks,
 a plan run whose cell summaries could not be downloaded or reconciled, a failed
