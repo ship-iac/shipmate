@@ -13,6 +13,8 @@ grammar are declared unstable in `README.md`.
 
 ## [0.19.0] — 2026-08-25
 
+Tags `270c03b`.
+
 **Re-pinning alone is not enough, and the edit touches two consumer files.**
 Delete the `plan_run_id` `workflow_dispatch` input and its `with:` pass-throughs
 from `apply.yml` (and a split `apply-all.yml`), and the
