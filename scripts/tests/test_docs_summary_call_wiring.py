@@ -2,9 +2,11 @@
 
 The fork refusal and the draft skip read inputs the wrapper passes, so the
 snippets consumers paste are what makes those guards real. Omitting `head-repo`
-on `build-matrix` fails `detect` loudly; omitting either input on the `summary`
-call SKIPS that job, which writes no gate at all and says nothing on the run
-page -- a snippet missing them documents a wrapper that cannot merge anything.
+on `build-matrix` fails `detect` loudly; omitting `head-repo` or `is-draft` on the
+`summary` call SKIPS that job, which writes no gate at all and says nothing on
+the run page -- a snippet missing them documents a wrapper that cannot merge
+anything; omitting `on-demand` documents one whose `shipmate plan` on a draft
+plans and then gates nothing.
 `drift.md`'s `no-pull-request` is the same class: without it the documented
 nightly is refused.
 
@@ -40,6 +42,7 @@ _EXPECTED_SUMMARY_WITH = {
     "planned-cells": "${{ needs.detect.outputs.count }}",
     "head-repo": _HEAD_REPO,
     "is-draft": "${{ needs.facts.outputs.is-draft }}",
+    "on-demand": "${{ needs.facts.outputs.on-demand }}",
 }
 
 _EXPECTED_PLAN_MATRIX_WITH = {
@@ -138,14 +141,14 @@ def test_the_documented_call_passes_exactly_the_inputs_the_workflow_declares():
 
 def test_doctors_wiring_constant_expects_what_the_page_documents():
     """The third file this module's docstring names. `doctor.SUMMARY_WIRING` is a
-    hand-written copy of these two expressions and is compared against a
+    hand-written copy of these three expressions and is compared against a
     consumer's real `plan.yml`, so a change to the documented expression that
     leaves it behind makes the probe WARN on every correctly wired repository --
     a finding on a healthy repo, which is what teaches readers to ignore the
     suite. Nothing else pins the two together: `test_doctor.py`'s fixtures are
     written from `SUMMARY_WIRING`'s own side."""
     assert doctor.SUMMARY_WIRING == {
-        key: _EXPECTED_SUMMARY_WITH[key] for key in ("head-repo", "is-draft")
+        key: _EXPECTED_SUMMARY_WITH[key] for key in ("head-repo", "is-draft", "on-demand")
     }, (
         "scripts/doctor's SUMMARY_WIRING drifted from the documented wrapper: "
         f"{doctor.SUMMARY_WIRING}"

@@ -264,11 +264,11 @@ jobs:
   # Everything trusted happens inside the engine's reusable workflow: one job,
   # `environment: shipmate-engine`, no checkout, and both trust decisions (the
   # fork refusal and the draft skip) on its own `if:`. This caller only *states*
-  # the two facts they decide on — `head-repo` and `is-draft` below — and an
-  # omitted or empty one is read as a refusal, so this block can fail the job
-  # closed but never open. `permissions` is not optional — a callee's
-  # permissions are capped by this job's, and granting less kills the run at
-  # startup with no job and no log.
+  # the three facts they decide on — `head-repo`, `is-draft` and `on-demand`
+  # below — and an omitted or empty one is read as a refusal, so this block can
+  # fail the job closed but never open. `permissions` is not optional — a
+  # callee's permissions are capped by this job's, and granting less kills the
+  # run at startup with no job and no log.
   summary:
     needs: [facts, detect, plan]
     if: ${{ !cancelled() }}
@@ -285,6 +285,7 @@ jobs:
       planned-cells: ${{ needs.detect.outputs.count }}
       head-repo: ${{ needs.facts.outputs.head-repo }}
       is-draft: ${{ needs.facts.outputs.is-draft }}
+      on-demand: ${{ needs.facts.outputs.on-demand }}
 ```
 
 Permissions on this path are narrow: the top level grants `contents: read`, and
@@ -303,26 +304,33 @@ Every fact these guards decide on is stated by the wrapper, never read from the
 event by the guard itself. `build-matrix` refuses to plan a run that does not
 state its head repository (the fork refusal) or the commit it is planning (the
 checkout check); the `summary` job requires the stated head repository to equal
-the running repository *and* the stated draft flag to be `false` before it mints
-an App token. An omitted or empty value is read as a **refusal** in all of them —
-so this wrapper can only fail the decision closed, never weaken it.
+the running repository *and* the pull request to be no draft, unless the run was
+named on demand, before it mints an App token. An omitted or empty value is read
+as a **refusal** in all of them — so this wrapper can only fail the decision
+closed, never weaken it. The fork half is the exception that yields to nothing:
+`on-demand` widens the draft skip only.
 
-The two costs look nothing alike. Omit `head-repo` or `head-sha` on
-`build-matrix` and `detect` fails loudly, naming the input. Omit
-either input on the `summary` call and the summary job is **skipped**: no
-`shipmate / gate` status, so nothing merges, and nothing on the run page says
-why. That is the trade the engine chose over minting an App-authored gate for a
-head repository it was never told about, and `shipmate doctor` reports this
-wiring so the silent case is not silent for long.
+The costs look nothing alike. Omit `head-repo` or `head-sha` on `build-matrix`
+and `detect` fails loudly, naming the input. Omit `head-repo` or `is-draft` on
+the `summary` call and the summary job is **skipped**: no `shipmate / gate`
+status, so nothing merges, and nothing on the run page says why. Omit
+`on-demand` and an ordinary pull request is unaffected, which is what makes it
+the quietest of the three: `shipmate plan` on a draft then plans, uploads its
+artifacts, and is skipped at the summary — no gate, no plan comment, no apply
+checks for the work it just did. A skipped job is the
+trade the engine chose over minting an App-authored gate for a head repository
+it was never told about, and `shipmate doctor` reports this wiring so the silent
+cases are not silent for long.
 
 **Pass the pull request's own values, not constants.** A literal
-`is-draft: false` states "not a draft" for every run, drafts included, and
+`is-draft: false` states "not a draft" for every run, drafts included;
 `head-repo: ${{ github.repository }}` passes the fork check for every pull
-request, fork ones included — the guard then holds nothing, and only this
-snippet's expressions make it real. `doctor` reports either on the `summary`
-call, absent or wrong; it reports the `build-matrix` step's own `head-repo` and
-`head-sha` the same way, one finding each, and reports a `no-pull-request`
-anywhere in this file, which belongs only in a drift wrapper
+request, fork ones included; and `on-demand: true` claims a person named every
+run, so every draft gets a gate — the guards then hold nothing, and only this
+snippet's expressions make them real. `doctor` reports each of the three on the
+`summary` call, absent or wrong; it reports the `build-matrix` step's own
+`head-repo` and `head-sha` the same way, one finding each, and reports a
+`no-pull-request` anywhere in this file, which belongs only in a drift wrapper
 ([`drift.md`](drift.md)). What it still cannot see: it reads only a file named
 `plan.yml`, so a plan wrapper under another name is checked by review or not at
 all, and `is-draft` has no counterpart on `build-matrix` — that step takes no

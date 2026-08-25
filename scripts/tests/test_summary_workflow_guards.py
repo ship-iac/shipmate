@@ -1,4 +1,4 @@
-"""The trusted summary job must refuse forks and drafts, and execute nothing.
+"""The trusted summary job must refuse forks and unrequested drafts, and execute nothing.
 
 It runs on `pull_request_target` (via the consumer's plan workflow) holding the
 App key, so the two things that keep it safe are its `if:` and the fact that it
@@ -20,15 +20,16 @@ WF = WORKFLOWS / "summary.yml"
 # Hand-written, NOT derived from the workflow. A constant lifted out of the file
 # it checks passes whatever the file says.
 EXPECTED_IF = (
-    "inputs.head-repo != '' && inputs.head-repo == github.repository && inputs.is-draft == 'false'"
+    "inputs.head-repo != '' && inputs.head-repo == github.repository && "
+    "(inputs.is-draft == 'false' || inputs.on-demand == 'true')"
 )
 # The whole declaration per input, not just the names. A `default:` added here
 # is what makes a caller that stops passing the input silent: `planned-cells`
 # would arrive as '0', `cell_count` as 0, and the gate would green over a run
 # that planned cells. `required: false` does the same by another route.
 #
-# `head-repo` and `is-draft` are the deliberate inverse, which is why they carry
-# the default the other five refuse. `required: true` buys a startup error on
+# `head-repo`, `is-draft` and `on-demand` are the deliberate inverse, which is
+# why they carry the default the other five refuse. `required: true` buys a startup error on
 # the caller's run: no job, no log, no gate, and no way for the engine to state
 # the reason. `required: false` + `default: ""` + an `if:` that rejects empty
 # buys a skipped job -- the same refusal, said out loud.
@@ -40,6 +41,7 @@ EXPECTED_INPUTS = {
     "planned-cells": {"required": True, "type": "string"},
     "head-repo": {"required": False, "default": "", "type": "string"},
     "is-draft": {"required": False, "default": "", "type": "string"},
+    "on-demand": {"required": False, "default": "", "type": "string"},
 }
 # The whole job, as an ordered list of what each step runs. Subsumes "no
 # checkout": a checkout step, a `run:` step, or any extra step at all changes
@@ -66,15 +68,18 @@ def _summary_job():
     return next(iter(jobs.values())), doc
 
 
-def test_the_trusted_job_refuses_forks_and_drafts():
+def test_the_trusted_job_refuses_forks_and_unrequested_drafts():
     """The whole `if:`, compared as one value.
 
-    All three clauses are load-bearing, and the decision cannot move to the
-    consumer's file: nothing inspects consumer YAML, so a consumer who dropped a
-    clause would hand a fork an App-authored gate and nothing anywhere would
-    notice. What the consumer does supply is the facts -- a head repository and a
-    draft flag -- and the empty-string clause is what makes an omitted fact a
-    refusal instead of a pass.
+    Every clause is load-bearing, including the parentheses -- `&&` binds tighter
+    than `||`, so losing them makes `on-demand` alone satisfy the guard. The
+    decision cannot move to the consumer's file: nothing inspects consumer YAML,
+    so a consumer who dropped a clause would hand a fork an App-authored gate and
+    nothing anywhere would notice. What the consumer does supply is the facts --
+    a head repository, a draft flag and whether a person named this run -- and
+    the empty-string clause is what makes an omitted fact a refusal instead of a
+    pass. Only the draft clause yields to `on-demand`: the fork clause guards the
+    App key over fork-authored content and yields to no trigger.
     """
     job, _ = _summary_job()
     assert " ".join(job["if"].split()) == EXPECTED_IF

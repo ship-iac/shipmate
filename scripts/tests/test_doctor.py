@@ -1103,6 +1103,7 @@ _QUIET_PLAN = (
     "    with:\n"
     "      head-repo: ${{ needs.facts.outputs.head-repo }}\n"
     "      is-draft: ${{ needs.facts.outputs.is-draft }}\n"
+    "      on-demand: ${{ needs.facts.outputs.on-demand }}\n"
 )
 
 
@@ -2519,10 +2520,22 @@ def test_a_key_merely_ending_in_the_input_name_is_not_reported(monkeypatch):
 _HEAD_REPO_EXPR = "${{ needs.facts.outputs.head-repo }}"
 _IS_DRAFT_EXPR = "${{ needs.facts.outputs.is-draft }}"
 _HEAD_SHA_EXPR = "${{ needs.facts.outputs.head-sha }}"
+_ON_DEMAND_EXPR = "${{ needs.facts.outputs.on-demand }}"
 
 
-def _plan_calling_summary(*with_lines, detect_head_repo=False, with_first=False, matrix_with=None):
-    """A consumer `plan.yml` whose summary job passes exactly `with_lines`.
+def _plan_calling_summary(
+    *with_lines,
+    detect_head_repo=False,
+    with_first=False,
+    matrix_with=None,
+    on_demand=_ON_DEMAND_EXPR,
+):
+    """A consumer `plan.yml` whose summary job passes `with_lines`, plus a
+    correctly wired `on-demand: on_demand` unless `on_demand` is None.
+
+    `on-demand` is wired by default so a fixture that omits one of the other
+    inputs produces that input's finding alone; `on_demand=None` (absent) and a
+    constant value are what the on-demand finding's own tests pass.
 
     `detect_head_repo` adds the OTHER legitimate `head-repo`, on a correctly
     wired `build-matrix` step of an EARLIER job -- the occurrence a whole-file
@@ -2548,7 +2561,8 @@ def _plan_calling_summary(*with_lines, detect_head_repo=False, with_first=False,
         else ""
     )
     uses = f"    uses: {_ENGINE_REPO}/.github/workflows/summary.yml@{_SHA}\n"
-    block = "    with:\n" + "".join(f"      {ln}\n" for ln in with_lines)
+    lines = list(with_lines) + ([] if on_demand is None else [f"on-demand: {on_demand}"])
+    block = "    with:\n" + "".join(f"      {ln}\n" for ln in lines)
     return f"on:\n  pull_request_target:\njobs:\n{detect}  summary:\n" + (
         block + uses if with_first else uses + block
     )
@@ -2578,7 +2592,7 @@ def test_summary_call_missing_is_draft_is_warned(monkeypatch):
 
 
 def test_a_correctly_wired_summary_call_is_silent(monkeypatch):
-    # `_QUIET_PLAN` itself: the shipped shape, both inputs, and the second
+    # `_QUIET_PLAN` itself: the shipped shape, all three inputs, and the second
     # `head-repo` on the build-matrix step.
     responses = _fork_responses({"plan.yml": _QUIET_PLAN})
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
@@ -2686,6 +2700,66 @@ def test_a_literal_is_draft_is_reported(monkeypatch):
     out = doctor._summary_wiring_warnings(_ctx())
     assert len(out) == 1
     assert f"`is-draft: {_IS_DRAFT_EXPR}`" in out[0][1]
+
+
+def test_summary_call_missing_on_demand_is_warned(monkeypatch):
+    """Its own finding, with its own consequence. Folding it into the skip
+    finding would tell a reader whose pull requests all gate correctly that the
+    job is skipped -- and the cost it does pay (a `shipmate plan` on a draft
+    that plans everything and then gates nothing) is named nowhere."""
+    responses = _fork_responses(
+        {
+            "plan.yml": _plan_calling_summary(
+                f"head-repo: {_HEAD_REPO_EXPR}",
+                f"is-draft: {_IS_DRAFT_EXPR}",
+                on_demand=None,
+            )
+        }
+    )
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    out = doctor._summary_wiring_warnings(_ctx())
+    assert len(out) == 1
+    assert out[0][0] == doctor.WARNING
+    assert f"`on-demand: {_ON_DEMAND_EXPR}`" in out[0][1]
+    # The distinct sentence, not the skip finding's: this input costs an
+    # ordinary pull request nothing, so borrowing "SKIPPED" here is a false
+    # report about the repository the reader is looking at.
+    assert "SKIPPED" not in out[0][1]
+    assert "draft skip" in out[0][1]
+
+
+def test_a_constant_on_demand_is_reported(monkeypatch):
+    """`on-demand: true` claims a person named every run, so every draft gets a
+    gate -- noise on every draft, and the fork clause is the only guard left. A
+    presence-only check cannot see it."""
+    responses = _fork_responses(
+        {
+            "plan.yml": _plan_calling_summary(
+                f"head-repo: {_HEAD_REPO_EXPR}",
+                f"is-draft: {_IS_DRAFT_EXPR}",
+                on_demand="true",
+            )
+        }
+    )
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    out = doctor._summary_wiring_warnings(_ctx())
+    assert len(out) == 1
+    assert f"`on-demand: {_ON_DEMAND_EXPR}`" in out[0][1]
+
+
+def test_a_wrapper_missing_two_facts_gets_both_findings(monkeypatch):
+    """The skip finding names its own missing inputs and the on-demand finding
+    names its own. One finding covering all three would have to state one
+    consequence for two different ones."""
+    responses = _fork_responses(
+        {"plan.yml": _plan_calling_summary(f"head-repo: {_HEAD_REPO_EXPR}", on_demand=None)}
+    )
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    out = doctor._summary_wiring_warnings(_ctx())
+    assert len(out) == 2
+    assert f"`is-draft: {_IS_DRAFT_EXPR}`" in out[0][1]
+    assert "on-demand" not in out[0][1]
+    assert f"`on-demand: {_ON_DEMAND_EXPR}`" in out[1][1]
 
 
 def test_the_same_expression_written_without_inner_spaces_is_silent(monkeypatch):
