@@ -217,17 +217,23 @@ def _dispatch_inputs(doc):
         yield name, spec if isinstance(spec, dict) else {}
 
 
-def test_no_documented_wrapper_input_is_required():
-    """Every documented `workflow_dispatch` input is optional with a default.
+def test_the_documented_wrapper_inputs_are_exactly_these():
+    """The whole vector of documented `workflow_dispatch` inputs, requiredness
+    and default included.
 
-    The wrappers are dispatched only by `actions/dispatch` from a body the engine
-    builds -- no human fills a form -- so `required: true` protects no caller.
-    What it does do is turn a value the engine sent empty on purpose into an
-    HTTP 422 before the workflow starts: GitHub reads an empty value for a
+    An input a dispatch body may send empty is optional with a default. The apply
+    wrapper is dispatched only by `actions/dispatch` from a body the engine
+    builds -- no human fills a form -- so `required: true` protects no caller
+    there. What it does do is turn a value the engine sent empty on purpose into
+    an HTTP 422 before the workflow starts: GitHub reads an empty value for a
     required `workflow_dispatch` input as "not provided". Every `shipmate unlock`
     dispatch failed that way while the wrapper still declared the plan-run input
     the engine has since retired, since unlock applies no plan and so carried no
-    run id. The engine validates instead, where the mode is known.
+    run id. The engine validates instead, where the mode is known. The plan
+    wrapper's `pr_number` is the one required input and states why: that dispatch
+    carries exactly one input and always fills it, and `required: true` is what
+    makes a hand-dispatched plan name the pull request it plans rather than start
+    a run with nothing to resolve.
 
     Whole-vector comparison against a hand-written constant, for the reason
     `CLAUDE.md` gives: a "no input is required" predicate is also satisfied by a
@@ -249,5 +255,6 @@ def test_no_documented_wrapper_input_is_required():
         ("docs/getting-started.md", "environment", False, ""),
         ("docs/getting-started.md", "mode", False, "apply"),
         ("docs/getting-started.md", "pr_number", False, ""),
+        ("docs/getting-started.md", "pr_number", True, None),
         ("docs/getting-started.md", "ref", False, ""),
     ], f"documented workflow_dispatch inputs changed: {found}"

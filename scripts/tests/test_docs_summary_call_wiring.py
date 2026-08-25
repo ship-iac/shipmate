@@ -30,20 +30,20 @@ _FENCE = re.compile(r"^(?P<indent>[ \t]*)```yaml[ \t]*$\n(?P<body>.*?)^\1```", r
 _SUMMARY_CALL = "/shipmate/.github/workflows/summary.yml@"
 _BUILD_MATRIX = "/shipmate/actions/build-matrix@"
 
-_HEAD_REPO = "${{ github.event.pull_request.head.repo.full_name }}"
+_HEAD_REPO = "${{ needs.facts.outputs.head-repo }}"
 
 _EXPECTED_SUMMARY_WITH = {
-    "pr-number": "${{ github.event.pull_request.number }}",
-    "head-sha": "${{ github.event.pull_request.head.sha }}",
+    "pr-number": "${{ needs.facts.outputs.pr-number }}",
+    "head-sha": "${{ needs.facts.outputs.head-sha }}",
     "detect-result": "${{ needs.detect.result }}",
     "plan-result": "${{ needs.plan.result }}",
     "planned-cells": "${{ needs.detect.outputs.count }}",
     "head-repo": _HEAD_REPO,
-    "is-draft": "${{ github.event.pull_request.draft }}",
+    "is-draft": "${{ needs.facts.outputs.is-draft }}",
 }
 
 _EXPECTED_PLAN_MATRIX_WITH = {
-    "base-sha": "${{ github.event.pull_request.base.sha }}",
+    "base-sha": "${{ needs.facts.outputs.base-sha }}",
     "head-repo": _HEAD_REPO,
 }
 

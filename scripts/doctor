@@ -1249,10 +1249,13 @@ def _fork_trigger_warnings(ctx):
 # expression each must carry. Values, not just keys: a wrapper that wires
 # `head-repo: ${{ github.repository }}` — or `is-draft: false` — states the safe
 # answer for every run, fork pull requests and drafts included, and nothing else
-# in the system can see it.
+# in the system can see it. The expressions read the `facts` job rather than the
+# event payload for a second reason: the payload carries no pull request on the
+# dispatched plan leg, and a fact read from anywhere but that one producer has a
+# second producer — two producers of one fact disagree eventually.
 SUMMARY_WIRING = {
-    "head-repo": "${{ github.event.pull_request.head.repo.full_name }}",
-    "is-draft": "${{ github.event.pull_request.draft }}",
+    "head-repo": "${{ needs.facts.outputs.head-repo }}",
+    "is-draft": "${{ needs.facts.outputs.is-draft }}",
 }
 _SUMMARY_CALL = re.compile(r"/\.github/workflows/summary\.yml@")
 _BUILD_MATRIX_CALL = re.compile(r"/actions/build-matrix@")
@@ -1289,8 +1292,9 @@ def _call_region(text, pattern):
     step's.
 
     Scoped to one block rather than the whole file deliberately: a correctly
-    wired `plan.yml` carries `head-repo:` twice — once on the `build-matrix`
-    step in `detect`, once on the summary call — and a whole-file search is
+    wired `plan.yml` carries `head-repo:` three times — once as the
+    `facts` job's output, once on the `build-matrix` step in `detect`, once on
+    the summary call — and a whole-file search is
     satisfied by the wrong occurrence while the call that decides the gate
     carries nothing.
 

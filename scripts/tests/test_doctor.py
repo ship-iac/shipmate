@@ -1095,12 +1095,12 @@ _QUIET_PLAN = (
     "    steps:\n"
     f"      - uses: {_ENGINE_REPO}/actions/build-matrix@{_SHA}\n"
     "        with:\n"
-    "          head-repo: ${{ github.event.pull_request.head.repo.full_name }}\n"
+    "          head-repo: ${{ needs.facts.outputs.head-repo }}\n"
     "  summary:\n"
     f"    uses: {_ENGINE_REPO}/.github/workflows/summary.yml@{_SHA}\n"
     "    with:\n"
-    "      head-repo: ${{ github.event.pull_request.head.repo.full_name }}\n"
-    "      is-draft: ${{ github.event.pull_request.draft }}\n"
+    "      head-repo: ${{ needs.facts.outputs.head-repo }}\n"
+    "      is-draft: ${{ needs.facts.outputs.is-draft }}\n"
 )
 
 
@@ -2515,8 +2515,8 @@ def test_a_key_merely_ending_in_the_input_name_is_not_reported(monkeypatch):
 # Hand-written, not derived from `doctor` or from `_QUIET_PLAN`: these are the
 # two expressions a correctly wired wrapper passes, and the finding must name
 # them.
-_HEAD_REPO_EXPR = "${{ github.event.pull_request.head.repo.full_name }}"
-_IS_DRAFT_EXPR = "${{ github.event.pull_request.draft }}"
+_HEAD_REPO_EXPR = "${{ needs.facts.outputs.head-repo }}"
+_IS_DRAFT_EXPR = "${{ needs.facts.outputs.is-draft }}"
 
 
 def _plan_calling_summary(*with_lines, detect_head_repo=False, with_first=False, matrix_with=None):
@@ -2664,7 +2664,7 @@ def test_the_wiring_finding_covers_the_wrong_value_case(monkeypatch):
     assert len(out) == 1
     assert out[0][1].startswith(
         "`plan.yml`'s call of the engine's `summary.yml` must pass "
-        "`head-repo: ${{ github.event.pull_request.head.repo.full_name }}`, and does not: "
+        "`head-repo: ${{ needs.facts.outputs.head-repo }}`, and does not: "
         "the input is absent, or carries a different value."
     )
 
@@ -2686,8 +2686,8 @@ def test_the_same_expression_written_without_inner_spaces_is_silent(monkeypatch)
     responses = _fork_responses(
         {
             "plan.yml": _plan_calling_summary(
-                'head-repo: "${{github.event.pull_request.head.repo.full_name}}"',
-                "is-draft: ${{github.event.pull_request.draft}}",
+                'head-repo: "${{needs.facts.outputs.head-repo}}"',
+                "is-draft: ${{needs.facts.outputs.is-draft}}",
             )
         }
     )
@@ -2718,7 +2718,7 @@ def test_a_constant_head_repo_on_the_build_matrix_step_is_reported(monkeypatch):
     assert out[0][0] == doctor.WARNING
     assert out[0][1].startswith(
         "`plan.yml`'s `build-matrix` step must pass "
-        "`head-repo: ${{ github.event.pull_request.head.repo.full_name }}`, and does not: "
+        "`head-repo: ${{ needs.facts.outputs.head-repo }}`, and does not: "
         "the input is absent, or carries a different value."
     )
 

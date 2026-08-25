@@ -116,9 +116,16 @@ rules from Settings → Environments → `<name>` (or the API):
 
 ### The plan workflow
 
-`plan.yml` is three jobs — `detect`, `plan`, `summary` — not a thin wrapper. The
-`ref: ${{ github.event.pull_request.head.sha }}` on the two checkouts is
-load-bearing: `pull_request_target` runs at the *base* ref, so without it the run
+`plan.yml` is four jobs — `facts`, `detect`, `plan`, `summary` — not a thin
+wrapper, and it answers to two triggers: `pull_request_target` for the automatic
+plan on every push to a pull request, and `workflow_dispatch` for the plan a
+reviewer asks for by comment. Neither trigger checks out the pull request's head
+by default — `pull_request_target` runs at the *base* ref, a dispatched run at
+the dispatch ref — and a dispatched run carries no pull request in its event
+payload at all. That is what the `facts` job is for: it resolves the pull
+request's facts once, from the event payload on a pull-request event and from
+the API by the dispatched `pr_number` otherwise, and every job below reads them
+from it. The `ref` on the two checkouts is load-bearing: without it the run
 plans the base branch and reports a clean plan for code it never read.
 
 **The filenames are load-bearing too.** `actions/build-matrix` refuses to plan a
@@ -140,15 +147,47 @@ name: shipmate · plan
 on:
   pull_request_target:
     types: [opened, synchronize, reopened, ready_for_review]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Pull request number to plan
+        required: true
 concurrency:
-  group: plan-${{ github.event.pull_request.number }}
+  # `github.event.inputs` is payload data, defined for either trigger.
+  group: plan-${{ github.event.pull_request.number || github.event.inputs.pr_number }}
   cancel-in-progress: true
 permissions:
   contents: read
 jobs:
+  # `name:` is not decoration: this job's check-run shows on every pull request,
+  # and an on-demand plan mirrors it onto the head, so it needs a name a reviewer
+  # can place — inside the `shipmate / ` namespace with `shipmate / detect`.
+  # One producer for every pull-request fact below. Its own job, not `detect`'s
+  # first step: `detect` can fail (a fmt check, stale codegen), and the summary
+  # job must still be told which head to gate — a summary call with an empty
+  # `head-repo` is refused, which would turn a failing gate into no gate at all.
+  facts:
+    name: shipmate / facts
+    runs-on: ubuntu-slim
+    permissions:
+      pull-requests: read
+    outputs:
+      head-sha: ${{ steps.facts.outputs.head-sha }}
+      head-repo: ${{ steps.facts.outputs.head-repo }}
+      base-sha: ${{ steps.facts.outputs.base-sha }}
+      pr-number: ${{ steps.facts.outputs.pr-number }}
+      is-draft: ${{ steps.facts.outputs.is-draft }}
+      on-demand: ${{ steps.facts.outputs.on-demand }}
+    steps:
+      - id: facts
+        uses: ship-iac/shipmate/actions/pr-facts@<engine-sha>  # see the latest release
+
   detect:
     name: shipmate / detect
-    if: github.event.pull_request.draft == false
+    needs: facts
+    # Autoplan skips drafts; `shipmate plan` on a draft is an explicit request
+    # and plans it.
+    if: needs.facts.outputs.is-draft == 'false' || needs.facts.outputs.on-demand == 'true'
     runs-on: ubuntu-slim
     permissions:
       contents: read
@@ -157,12 +196,14 @@ jobs:
       empty: ${{ steps.matrix.outputs.empty }}
       count: ${{ steps.matrix.outputs.count }}
     steps:
-      # `pull_request_target` checks out the BASE by default. Naming the head
-      # SHA is what makes this a plan of the pull request; without it the run
-      # plans the base branch and reports a clean plan for code it never read.
+      # Both triggers check out something else by default — the base branch
+      # under `pull_request_target`, the dispatch ref under `workflow_dispatch`.
+      # Naming the head SHA is what makes this a plan of the pull request;
+      # without it the run plans the base branch and reports a clean plan for
+      # code it never read.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: ${{ needs.facts.outputs.head-sha }}
           fetch-depth: 0
       - uses: ship-iac/shipmate/actions/setup@<engine-sha>  # see the latest release
         with:
@@ -175,11 +216,11 @@ jobs:
       - id: matrix
         uses: ship-iac/shipmate/actions/build-matrix@<engine-sha>  # see the latest release
         with:
-          base-sha: ${{ github.event.pull_request.base.sha }}
-          head-repo: ${{ github.event.pull_request.head.repo.full_name }}
+          base-sha: ${{ needs.facts.outputs.base-sha }}
+          head-repo: ${{ needs.facts.outputs.head-repo }}
 
   plan:
-    needs: detect
+    needs: [facts, detect]
     if: needs.detect.outputs.empty == 'false'
     runs-on: ubuntu-slim
     permissions:
@@ -196,7 +237,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: ${{ needs.facts.outputs.head-sha }}
           fetch-depth: 0
       - uses: ship-iac/shipmate/actions/setup@<engine-sha>  # see the latest release
         with:
@@ -211,7 +252,7 @@ jobs:
           stack: ${{ matrix.stack }}
           stack-name: ${{ matrix.stack }}
           env: ${{ matrix.environment }}
-          expected-head: ${{ github.event.pull_request.head.sha }}
+          expected-head: ${{ needs.facts.outputs.head-sha }}
           plan-passphrase: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
 
   # Everything trusted happens inside the engine's reusable workflow: one job,
@@ -223,7 +264,7 @@ jobs:
   # permissions are capped by this job's, and granting less kills the run at
   # startup with no job and no log.
   summary:
-    needs: [detect, plan]
+    needs: [facts, detect, plan]
     if: ${{ !cancelled() }}
     uses: ship-iac/shipmate/.github/workflows/summary.yml@<engine-sha>  # see the latest release
     permissions:
@@ -231,22 +272,24 @@ jobs:
     secrets:
       SHIPMATE_APP_PRIVATE_KEY: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
     with:
-      pr-number: ${{ github.event.pull_request.number }}
-      head-sha: ${{ github.event.pull_request.head.sha }}
+      pr-number: ${{ needs.facts.outputs.pr-number }}
+      head-sha: ${{ needs.facts.outputs.head-sha }}
       detect-result: ${{ needs.detect.result }}
       plan-result: ${{ needs.plan.result }}
       planned-cells: ${{ needs.detect.outputs.count }}
-      head-repo: ${{ github.event.pull_request.head.repo.full_name }}
-      is-draft: ${{ github.event.pull_request.draft }}
+      head-repo: ${{ needs.facts.outputs.head-repo }}
+      is-draft: ${{ needs.facts.outputs.is-draft }}
 ```
 
-Permissions on this path are narrow: the top level and each job grant
-`contents: read`, and the `summary` caller grants only that — the trusted work
-inside it runs on a freshly minted App token, not on `GITHUB_TOKEN`. The one
-addition above is AWS-specific: this sample's `plan` job grants `id-token: write`
-solely so `configure-aws-credentials` can assume the read-only plan role. A
-consumer with no plan-time cloud credentials drops both that grant and the
-credentials step.
+Permissions on this path are narrow: the top level grants `contents: read`, and
+the `summary` caller grants only that — the trusted work inside it runs on a
+freshly minted App token, not on `GITHUB_TOKEN`. Two jobs add one grant each.
+`facts` grants `pull-requests: read`, which only its dispatch leg spends: a
+pull-request event answers out of its own payload, and a dispatched run has to
+look the pull request up by number. The other is AWS-specific: this sample's
+`plan` job grants `id-token: write` solely so `configure-aws-credentials` can
+assume the read-only plan role. A consumer with no plan-time cloud credentials
+drops both that grant and the credentials step.
 
 `head-repo` and `is-draft` are the two facts the engine's trusted job decides
 on, and the wrapper is what states them: `build-matrix` refuses to plan a run
