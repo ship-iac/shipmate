@@ -6,9 +6,9 @@ Five parts:
 - Body building: mode is included in dispatch inputs only when "unlock"; when
   unset or "apply", no mode key appears. Tested via subprocess execution of the
   python heredoc only (not the full script).
-- Validation before API call: a mode value that is neither empty, "apply", nor
-  "unlock" is rejected before any API call (tested against extracted python +
-  case validation in isolation).
+- Validation before API call: a mode value that is none of empty, "apply",
+  "unlock" or "plan" is rejected before any API call (tested against extracted
+  python + case validation in isolation).
 - Degrade message on unlock failure: when an unlock dispatch fails with the real
   gh command, the failure prints an actionable message. Tested by executing the
   full shipped script with stubbed gh/python3 on PATH.
@@ -365,8 +365,10 @@ def test_apply_failure_no_degrade_message():
 def test_unlock_non_422_failure_prints_no_degrade_message():
     """A 403 is not version skew: the raw output prints, the skew message does not.
 
-    Mutation: drop the `[[ "$out" == *"Unexpected inputs provided"* ]]` half of
-    the condition and this reddens, while the two tests above stay green.
+    Mutation: drop the whole `[[ ... ]]` message-text condition, so any unlock
+    failure is reported as skew, and this reddens while the two tests above stay
+    green. Neither half alone reddens it: a 403 names neither `mode` nor
+    `Unexpected inputs provided`.
     """
     bash = usable_bash()
     if not bash:

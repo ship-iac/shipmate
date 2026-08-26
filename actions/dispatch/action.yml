@@ -19,7 +19,7 @@ inputs:
     description: PR head SHA to check out and apply. Empty and unused on the plan route, whose dispatched run resolves the head from the pull request itself.
     required: true
   pr-number:
-    description: PR number the apply belongs to.
+    description: PR number the dispatched run belongs to — the plan body carries it alone.
     required: true
   workflow:
     description: Workflow file to dispatch. Default apply.yml (the merged wrapper). A split apply.yml/apply-all.yml layout needs the file picked per comment — targeted vs bare — which this static input cannot do, so whichever file it names, the other verb is dispatched at the wrong workflow and rejected (422) over the `environment` input one declares and the other does not. Merge the wrappers instead; the split layout is the escape hatch, not the path. Default plan.yml when mode is plan, apply.yml otherwise.
@@ -110,6 +110,9 @@ runs:
           if [ "$MODE" = "unlock" ] && [[ "$out" == *"Unexpected inputs provided"* && "$out" == *mode* ]]; then echo "::error::The consumer's apply.yml does not declare the mode input; this repository's workflows predate shipmate unlock. Re-pin the consumer workflows to a release that has it (docs/releasing.md)."; fi
           # Measured: dispatching a workflow with no such trigger answers
           # `Workflow does not have 'workflow_dispatch' trigger (HTTP 422)`.
+          # No input name is ANDed in as the unlock branch does: the plan body
+          # carries one input, so an unexpected-input 422 there can only be
+          # about pr_number, which is what the message already says.
           if [ "$MODE" = "plan" ] && [[ "$out" == *"Unexpected inputs provided"* || "$out" == *workflow_dispatch* ]]; then echo "::error::This repository's plan.yml does not accept a dispatched plan — it predates the plan verb, or declares no pr_number input. Re-pin the consumer workflows to a release that has it (docs/releasing.md)."; fi
           exit "$rc"
         fi
