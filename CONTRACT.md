@@ -974,7 +974,11 @@ cells, a failed one above all — and because the sticky comment resolves each
 row's plan link across the checks on the head, which is why the mirror runs
 before the comment is built. No gate or apply queue reads them: neither the
 cell names nor `shipmate / facts` / `shipmate / detect` fall inside the
-`apply / ` namespace those select on.
+`apply / ` namespace those select on. `shipmate doctor`'s annotation harvest is
+the one other reader, and it skips them for the same reason: outside that
+namespace it takes only the `github-actions` rows, because a mirrored copy
+shares a name with the autoplan check it was copied from and carries none of
+its annotations.
 
 `shipmate apply` and `deploy.yml` share the same per-env, per-stack
 `apply-<env>-<stack>` concurrency group, declared with

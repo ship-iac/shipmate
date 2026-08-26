@@ -1522,6 +1522,31 @@ def test_latest_check_ids_keeps_newest_shipmate_run_per_name():
     ]
 
 
+def test_mirrored_app_check_does_not_displace_the_annotation_bearing_one():
+    """An on-demand plan's App-authored mirror of `<stack> / <env>` carries no
+    annotations, so it must not win the newest-per-name ranking over the
+    autoplan's `github-actions` check -- while the App's own `apply / ` rows
+    stay harvested."""
+    autoplan = (
+        '{"id": 1, "name": "app / dev-eu", "started_at": "2026-07-26T10:00:00Z", '
+        '"app_slug": "github-actions", "app_id": 15368}'
+    )
+    # Later than the autoplan's: the mirror is created after it, and this keeps
+    # the guard independent of whether GitHub populates started_at on a create.
+    mirror = (
+        '{"id": 2, "name": "app / dev-eu", "started_at": "2026-07-26T11:00:00Z", '
+        '"app_slug": "shipmate", "app_id": 999}'
+    )
+    apply_check = (
+        '{"id": 3, "name": "apply / app / dev-eu", "started_at": "2026-07-26T11:30:00Z", '
+        '"app_slug": "shipmate", "app_id": 999}'
+    )
+    assert doctor.latest_check_ids([autoplan, mirror, apply_check], app_id="999") == [
+        (1, "app / dev-eu"),
+        (3, "apply / app / dev-eu"),
+    ]
+
+
 def test_harvest_drops_notices_and_doctors_own_annotations():
     anns = [
         _ann(level="notice"),

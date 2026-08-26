@@ -64,6 +64,7 @@ def _load(fname):
 bm = _load("build-matrix")
 _gh_json = bm.gh_json
 sc = _load("summary-comment")
+ag = _load("apply-gate")
 _md_escape = sc._md_escape
 
 GATE = "shipmate / gate"
@@ -1922,7 +1923,8 @@ def _parse_check_run(line, app_id):
 
 def latest_check_ids(lines, app_id=""):
     """[(id, name)] -- newest run per check name among shipmate-relevant
-    authors. Ranks by `started_at`, not check-run `id` (unlike
+    authors, App-authored rows outside the `apply / ` namespace excluded.
+    Ranks by `started_at`, not check-run `id` (unlike
     apply-gate.latest_by_name): a queued run has no `started_at` and no
     annotations to harvest, so ranking it BELOW a completed run is wanted."""
     newest = {}
@@ -1931,6 +1933,12 @@ def latest_check_ids(lines, app_id=""):
         if run is None:
             continue
         name = run.get("name") or ""
+        # An on-demand plan's mirrored cell checks share a name with the
+        # autoplan's annotation-bearing ones and are created later, so ranking
+        # them together loses the annotations: the mirror carries none. Only
+        # the apply checks are wanted from the App.
+        if run.get("app_slug") not in _HARVEST_APP_SLUGS and not name.startswith(ag.APPLY_PREFIX):
+            continue
         prev = newest.get(name)
         if prev is None or (run.get("started_at") or "") >= (prev.get("started_at") or ""):
             newest[name] = run
