@@ -69,12 +69,14 @@ runs:
         else
           echo "skip=false" >> "$GITHUB_OUTPUT"
         fi
-        # Access gate for the `doctor` route, computed once here and consumed by
-        # every step on that route. The report is a map of the guardrails a
-        # repository is *missing*, so on a repository with public pull requests
-        # it must not answer an arbitrary account. The allowlist is written
-        # exactly once — repeated per-step in five `if:` conditions is precisely
-        # how such a gate drifts open.
+        # Access gate for the `doctor` and `plan` routes, computed once here and
+        # consumed by every step on both. doctor's report is a map of the
+        # guardrails a repository is *missing*, and a plan spends this
+        # repository's runners on its own code, so on a repository with public
+        # pull requests neither may answer an arbitrary account. The allowlist is
+        # written exactly once — repeated per-step in every route's `if:` is
+        # precisely how such a gate drifts open. Two routes read it now: narrowing
+        # or widening it for one moves the other's gate with it.
         # This is GitHub's own classification of the author's relationship to
         # the repository, NOT a permission check, and the output name says so:
         # a collaborator holding only the Read role, and an organization member

@@ -473,8 +473,10 @@ Four distinct causes, in the order worth checking.
 
 **No gate status was written at all**, as opposed to a red or held one. The
 trusted summary job decides on three inputs the `plan.yml` wrapper states —
-`head-repo`, `is-draft` and `on-demand` — and reads an absent or empty one as a
-refusal. A wrapper that calls the engine's `summary.yml` without `head-repo` has
+`head-repo`, `is-draft` and `on-demand` — and reads an absent or empty
+`head-repo` or `is-draft` as a refusal (an absent `on-demand` reads as `false`,
+which is plain autoplan behaviour). A wrapper that calls the engine's
+`summary.yml` without `head-repo` has
 its summary job *skipped* on every run; without `is-draft`, on every automatic
 plan (a commented `shipmate plan` still gates); either way: no gate, no plan
 comment, and nothing on the run page saying why. The pull request cannot

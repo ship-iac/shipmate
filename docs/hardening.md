@@ -816,7 +816,7 @@ for every pull request, fork ones included — which is why `shipmate doctor`
 checks the expression and not just the key
 ([`getting-started.md`](getting-started.md) §Required — plan).
 
-**The third trigger changes none of that.** A commented `shipmate plan`
+**The third trigger keeps every fact out of a dispatcher's hands.** A commented `shipmate plan`
 `workflow_dispatch`es the same `plan.yml`, and a dispatch reaches strictly less
 than a pull-request event does: the body carries **one** input, the pull
 request's number, and `plan.yml` declares no other, so GitHub refuses a dispatch
@@ -827,11 +827,25 @@ deliberate: the fork refusal keys on the head repository, so a caller holding
 `actions: write` — comment-ops mints an App token to dispatch, and any workflow
 file may grant itself that scope — must not be able to *state* one. A number
 cannot lie about its own head repository, and a number naming a fork's pull
-request resolves to that fork and is refused exactly as the autoplan leg would
-be. What the dispatch leg does add is `pull-requests: read` on the one job that
-looks the pull request up, and an authorization step ahead of it: only a comment
-from an `OWNER`, `MEMBER` or `COLLABORATOR` is dispatched at all
+request resolves to that fork, which the `build-matrix` step refuses in `detect`
+exactly as it refuses one on the autoplan leg. What the dispatch leg does add is
+`pull-requests: read` on the one job that looks the pull request up, and an
+authorization step ahead of it: only a comment from an `OWNER`, `MEMBER` or
+`COLLABORATOR` is dispatched at all
 ([`../CONTRACT.md`](../CONTRACT.md) §Comment-ops).
+
+**The outer of the two fork guards does not reach this leg.** The
+`actions/checkout` refusal above was measured under `pull_request_target`, and a
+dispatched run carries no pull-request context for it to key on — so on this leg
+the fork's head is expected to check out, and `detect`'s `terramate fmt --check`
+and `terramate generate` evaluate (and generate from) fork-authored HCL before
+the `build-matrix` step turns the fork away. What that costs is bounded: `detect`
+holds `contents: read` and no App key, binds no environment, runs no `tofu`, and
+only an `OWNER`, `MEMBER` or `COLLABORATOR` can start it at all. It is still the
+autoplan's outermost guard reaching one step less far, so probe checkout's
+behaviour on this trigger before treating the two legs as identical. Moving the
+`build-matrix` step ahead of the two terramate steps would close it — the fork
+refusal is decided before that script shells out or reads the tree.
 
 The refusal in `detect` is loud (a red step) rather than a quiet empty matrix,
 because a fork pull request could not merge either way: with the `summary` job

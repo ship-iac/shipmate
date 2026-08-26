@@ -268,7 +268,8 @@ jobs:
   # the three facts they decide on — `head-repo`, `is-draft` and `on-demand`
   # below — and it can only fail those decisions closed, never open: an omitted
   # `head-repo` refuses every run, an omitted `is-draft` every autoplan run, and
-  # an omitted `on-demand` gives up only the requested plan of a draft.
+  # an omitted `on-demand` gives up the requested plan of a draft and the mirror
+  # of a requested plan's per-cell checks onto the head.
   # `permissions` is not optional — a callee's permissions are capped by this
   # job's, and granting less kills the run at startup with no job and no log.
   summary:
@@ -442,7 +443,10 @@ rules from Settings → Environments → `<name>` (or the API):
 > fail loud rather than apply with no state at all.
 
 `comment-ops.yml` turns a `shipmate <verb>` pull request comment into an
-authorized `workflow_dispatch` of `apply.yml`.
+authorized `workflow_dispatch` — of `apply.yml` for `apply` and `unlock`, of
+`plan.yml` for `plan`. Which one is picked comes from the `mode` output the
+dispatch step forwards below, so dropping that line sends a `shipmate plan` to
+the apply wrapper ([`upgrading.md`](upgrading.md) §0.20.0).
 
 ```yaml
 name: comment-ops

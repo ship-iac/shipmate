@@ -1252,8 +1252,8 @@ def _fork_trigger_warnings(ctx):
 # expression each must carry. Values, not just keys: a wrapper that wires
 # `head-repo: ${{ github.repository }}` — or `is-draft: false` — states the safe
 # answer for every run, fork pull requests and drafts included, and nothing else
-# in the system can see it. `on-demand` is the odd one: omitting it costs a
-# normal pull request nothing, which is why it is the input a wrapper keeps
+# in the system can see it. `on-demand` is the odd one: omitting it costs an
+# automatic plan nothing, which is why it is the input a wrapper keeps
 # missing. The expressions read the `facts` job rather than the
 # event payload for a second reason: the payload carries no pull request on the
 # dispatched plan leg, and a fact read from anywhere but that one producer has a
@@ -1361,9 +1361,9 @@ def _summary_wiring_warnings(ctx):
     invisible: the omitting case SKIPS the job, so there is no gate status, the
     pull request cannot merge, and nothing on the run page says why; the
     constant case passes the guard for every pull request, fork ones included.
-    An omitted `on-demand` skips nothing for an ordinary pull request — it drops
-    the draft override alone, so only `shipmate plan` on a draft pays, and it
-    pays after doing the whole plan.
+    An omitted `on-demand` skips nothing for an automatic plan — it drops the
+    draft override and the check mirror, so only a commented `shipmate plan`
+    pays, and it pays after doing the whole plan.
     The engine's own `if:` is SHA-pinned and reviewed; the consumer's `with:`
     block is not.
 
@@ -1398,9 +1398,10 @@ def _summary_call_finding(text, name):
     """The three inputs `plan.yml`'s summary call must pass, or [].
 
     `on-demand` is reported separately because its cost is not the others':
-    those two skip the job for every pull request, this one only drops the
-    draft override. A reader told "the job is skipped" about a repository whose
-    pull requests all gate correctly stops reading."""
+    those two skip the job for every pull request, this one drops the draft
+    override and the mirror of a dispatched run's per-cell checks. A reader told
+    "the job is skipped" about a repository whose pull requests all gate
+    correctly stops reading."""
     region = _call_region(text, _SUMMARY_CALL)
     if region is None:
         return []
@@ -1435,12 +1436,15 @@ def _summary_call_finding(text, name):
                 WARNING,
                 f"`{name}`'s call of the engine's `summary.yml` must pass `on-demand: {expr}`, "
                 "and does not: the input is absent, or carries a different value. This one "
-                "costs an ordinary pull request nothing — it is what lets an explicitly "
-                "requested plan override the draft skip, so without it `shipmate plan` on a "
-                "draft plans every stack, uploads its artifacts, and then produces no gate "
-                "status, no plan comment and no apply checks for the work it just did. A "
-                "constant `true` claims every run was named by a person, which gates every "
-                "draft.",
+                "costs an automatic plan nothing and a commented `shipmate plan` two things. It "
+                "is what lets a requested plan override the draft skip, so without it a "
+                "`shipmate plan` on a draft plans every stack, uploads its artifacts, and then "
+                "produces no gate status, no plan comment and no apply checks for the work it "
+                "just did; and on "
+                "any pull request its per-cell `<stack> / <env>` checks stay on the ref the run "
+                "was dispatched on, so the pull request shows none of them — the failed cell "
+                "included. A constant `true` claims every run was named by a person, which "
+                "gates every draft.",
             )
         )
     return out
