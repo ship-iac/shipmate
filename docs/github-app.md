@@ -373,11 +373,13 @@ the actual work here:
   belt-and-braces: it refuses when the head repository the caller states
   (`head-repo`) differs from `github.repository`, when the caller states the
   pull request is a draft that nobody explicitly asked to plan (`is-draft`
-  without `on-demand`), and when `head-repo` or `is-draft` is absent or empty —
-  an unstated fact is a refusal there, so a caller can only fail this closed. The
-  fork clause yields to no trigger; only the draft clause is widened by a
-  requested plan, and an absent `on-demand` reads as `false`, which is plain
-  autoplan behaviour rather than a refusal. Under
+  without `on-demand`), and the two inputs sit either side of the guard's
+  parentheses: `head-repo` is outside them, so an absent or empty value refuses
+  **unconditionally** and no trigger rescues it; `is-draft` and `on-demand` are
+  the two sides of one disjunct, so an absent `is-draft` refuses **every autoplan
+  run** and is rescued by a requested plan exactly as an explicit draft is. A
+  caller can therefore only fail this closed — an absent `on-demand` reads as
+  `false`, which is plain autoplan behaviour rather than a refusal. Under
   `pull_request_target` a fork's pull request *does* reach the base ref, so
   nothing else would stop that job; and the environment admits a draft's run,
   whose plan jobs an autoplan skips, so without the second clause it would write

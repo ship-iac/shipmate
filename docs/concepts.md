@@ -185,10 +185,11 @@ full picture below:
   **`shipmate / gate`** commit status, which stays non-green while any apply is
   pending or any plan cell failed. That job declines outright — before its first
   step — on a fork pull request, on a draft nobody asked to plan, and on a
-  caller that left the head repository or the draft flag unstated: an omitted
-  input is read as a refusal, so the wrapper can fail the job closed
-  but never open it (an omitted `on-demand` costs only the requested draft plan
-  it would have admitted, and the mirror below). On an `on-demand` run it also **mirrors** this run's own
+  caller that left the head repository unstated (every run, no trigger rescues
+  it) or the draft flag unstated (every autoplan run; a requested plan is
+  admitted anyway): an omitted input is never read as permission, so the wrapper
+  can fail the job closed but never open it (an omitted `on-demand` costs only
+  the requested draft plan it would have admitted, and the mirror below). On an `on-demand` run it also **mirrors** this run's own
   completed per-cell plan checks onto the head commit: a dispatched run's job
   check-runs attach to the dispatch ref, so without the mirror the pull request
   shows none of them — not even a failed cell, which is the state
