@@ -7,7 +7,7 @@ Three modes, selected via SHIPMATE_DOCTOR_MODE:
   actions/summary right after a plan run. NEVER fails the run: a probe
   error becomes a 'could not verify' note — doctor guards onboarding, it
   must not take down the plan path.
-- report: render the sticky PR comment on demand — the twelve live probes'
+- report: render the sticky PR comment on demand — the thirteen live probes'
   findings plus a harvest of the warnings GitHub already recorded as
   annotations on this commit's workflow check runs.
 - check-ids: reduce a check-runs JSONL listing to the (id, name) pairs worth
@@ -31,10 +31,12 @@ Probes:
 - engine action-pin freshness in the consumer's workflow files.
 - `pull_request_target` triggers in the consumer's workflow files.
 - the fork and draft wiring in the consumer's `plan.yml`: the inputs its
-  summary call passes, and its `build-matrix` step's own `head-repo` and
-  `no-pull-request`.
+  summary call passes, and its `build-matrix` step's own `head-repo`, `head-sha`
+  and `no-pull-request`.
 - a retired `plan_run_id` input still declared or forwarded by the consumer's
   `apply.yml`.
+- the dispatch wiring of the consumer's `plan.yml`: the `workflow_dispatch`
+  trigger `shipmate plan` needs, its `pr_number` input, and a `pr-facts` step.
 - approvers team resolvability in the repo's org.
 - GitHub App installation permission drift.
 """
@@ -62,6 +64,7 @@ def _load(fname):
 bm = _load("build-matrix")
 _gh_json = bm.gh_json
 sc = _load("summary-comment")
+ag = _load("apply-gate")
 _md_escape = sc._md_escape
 
 GATE = "shipmate / gate"
@@ -1245,14 +1248,29 @@ def _fork_trigger_warnings(ctx):
     return _scan_workflow_texts(ctx, ref, finding, FORK_TRIGGER_UNREADABLE)
 
 
-# The two inputs the engine's reusable summary workflow decides on, with the
+# The three inputs the engine's reusable summary workflow decides on, with the
 # expression each must carry. Values, not just keys: a wrapper that wires
 # `head-repo: ${{ github.repository }}` — or `is-draft: false` — states the safe
 # answer for every run, fork pull requests and drafts included, and nothing else
-# in the system can see it.
+# in the system can see it. `on-demand` is the odd one: omitting it costs an
+# automatic plan nothing, which is why it is the input a wrapper keeps
+# missing. The expressions read the `facts` job rather than the
+# event payload for a second reason: the payload carries no pull request on the
+# dispatched plan leg, and a fact read from anywhere but that one producer has a
+# second producer — two producers of one fact disagree eventually.
 SUMMARY_WIRING = {
-    "head-repo": "${{ github.event.pull_request.head.repo.full_name }}",
-    "is-draft": "${{ github.event.pull_request.draft }}",
+    "head-repo": "${{ needs.facts.outputs.head-repo }}",
+    "is-draft": "${{ needs.facts.outputs.is-draft }}",
+    "on-demand": "${{ needs.facts.outputs.on-demand }}",
+}
+#: What `plan.yml`'s `build-matrix` step must pass. Separate from SUMMARY_WIRING
+#: because the two sites read the facts from different places: the step is inside
+#: `detect` and reads `needs.facts.outputs.*` like the summary call, but it takes
+#: `head-sha`, which `SUMMARY_WIRING` does not police, and a shared constant
+#: would make one site's expectation silently govern the other.
+BUILD_MATRIX_WIRING = {
+    "head-repo": "${{ needs.facts.outputs.head-repo }}",
+    "head-sha": "${{ needs.facts.outputs.head-sha }}",
 }
 _SUMMARY_CALL = re.compile(r"/\.github/workflows/summary\.yml@")
 _BUILD_MATRIX_CALL = re.compile(r"/actions/build-matrix@")
@@ -1263,11 +1281,12 @@ _NO_PULL_REQUEST = re.compile(r"(?:^|[{,])[ \t]*no-pull-request[ \t]*:(?P<value>
 # recognised here. The values these keys must carry end in `}}`, so the `,`/`}`
 # terminator that makes a flow mapping readable would truncate the block-style
 # expression the documented wrapper uses and report *that* as unwired — a false
-# positive on the one shape every consumer has. A flow-style summary call (seven
-# long expressions on one line) reads as unwired instead: noisy, but the finding
-# names both inputs and the exact expressions to pass.
+# positive on the one shape every consumer has. A flow-style summary call (eight
+# long expressions on one line) reads as unwired instead: noisy, but the
+# findings name every unwired input and the exact expressions to pass.
 _WIRING_KEY = {
-    key: re.compile(rf"^[ \t]*{key}[ \t]*:(?P<value>.*)$", re.M) for key in SUMMARY_WIRING
+    key: re.compile(rf"^[ \t]*{key}[ \t]*:(?P<value>.*)$", re.M)
+    for key in SUMMARY_WIRING | BUILD_MATRIX_WIRING
 }
 # Same degrade posture and reason as PIN_UNREADABLE: an unreadable workflow
 # directory is not a misconfiguration to warn about.
@@ -1289,8 +1308,9 @@ def _call_region(text, pattern):
     step's.
 
     Scoped to one block rather than the whole file deliberately: a correctly
-    wired `plan.yml` carries `head-repo:` twice — once on the `build-matrix`
-    step in `detect`, once on the summary call — and a whole-file search is
+    wired `plan.yml` carries `head-repo:` three times — once as the
+    `facts` job's output, once on the `build-matrix` step in `detect`, once on
+    the summary call — and a whole-file search is
     satisfied by the wrong occurrence while the call that decides the gate
     carries nothing.
 
@@ -1304,10 +1324,13 @@ def _call_region(text, pattern):
     For a step written `- uses: …` the enclosing key is `steps:`, so the region
     is that job's whole step list rather than the one step. That superset hides a
     finding rather than inventing one only for as long as no sibling step in the
-    same job carries a `head-repo:` line of its own — no engine action other
-    than `build-matrix` takes that input, and a sibling that did carry one would
-    satisfy this check for a step wired wrong. The documented and sample shape
-    (`- id: matrix` then `uses:`) resolves to the step itself and is unaffected."""
+    same job carries a `head-repo:` or `head-sha:` line of its own. No engine
+    action other than `build-matrix` takes `head-repo`; seven others take
+    `head-sha`, but all of them are apply-, gate- or summary-path actions and none
+    belongs in `detect`, whose steps are the checkout, `setup`, the two terramate
+    checks and this one. A sibling that did carry either line would satisfy this
+    check for a step wired wrong. The documented and sample shape (`- id: matrix`
+    then `uses:`) resolves to the step itself and is unaffected."""
     lines = _stripped_text(text).splitlines()
     for i, line in enumerate(lines):
         if not pattern.search(line):
@@ -1333,10 +1356,14 @@ def _call_region(text, pattern):
 def _summary_wiring_warnings(ctx):
     """The gate and the plan comment are authored by the engine's reusable
     summary workflow, whose job refuses an empty or unexpected `head-repo` /
-    `is-draft`. A consumer wrapper that omits one — or wires a constant — is
+    `is-draft`, and reads `on-demand` to decide whether a draft was asked for. A
+    consumer wrapper that omits one — or wires a constant — is
     invisible: the omitting case SKIPS the job, so there is no gate status, the
     pull request cannot merge, and nothing on the run page says why; the
     constant case passes the guard for every pull request, fork ones included.
+    An omitted `on-demand` skips nothing for an automatic plan — it drops the
+    draft override and the check mirror, so only a commented `shipmate plan`
+    pays, and it pays after doing the whole plan.
     The engine's own `if:` is SHA-pinned and reviewed; the consumer's `with:`
     block is not.
 
@@ -1368,53 +1395,88 @@ def _summary_wiring_warnings(ctx):
 
 
 def _summary_call_finding(text, name):
-    """The two inputs `plan.yml`'s summary call must pass, or []."""
+    """The three inputs `plan.yml`'s summary call must pass, or [].
+
+    `on-demand` is reported separately because its cost is not the others':
+    those two skip the job for every pull request, this one drops the draft
+    override and the mirror of a dispatched run's per-cell checks. A reader told
+    "the job is skipped" about a repository whose pull requests all gate
+    correctly stops reading."""
     region = _call_region(text, _SUMMARY_CALL)
     if region is None:
         return []
-    bad = [
-        key
-        for key, expr in SUMMARY_WIRING.items()
-        if _wired_value(region, key) != "".join(expr.split())
-    ]
-    if not bad:
-        return []
-    wanted = ", ".join(f"`{key}: {SUMMARY_WIRING[key]}`" for key in bad)
-    return [
-        (
-            WARNING,
-            f"`{name}`'s call of the engine's `summary.yml` must pass {wanted}, and does "
-            "not: the input is absent, or carries a different value. The "
-            "summary job decides on those two inputs and refuses an empty or unexpected "
-            "value, so it is SKIPPED: no gate status, no plan comment, and nothing on the "
-            "run page saying why the pull request cannot merge. Each must be the pull "
-            "request's own value; a constant (the running repository, a literal `false`) "
-            "states the safe answer for every run, fork pull requests and drafts included.",
+
+    def unwired(key):
+        return _wired_value(region, key) != "".join(SUMMARY_WIRING[key].split())
+
+    out = []
+    # Anything but `on-demand`, so a fourth input added to SUMMARY_WIRING is
+    # reported by this finding rather than by none.
+    bad = [key for key in SUMMARY_WIRING if key != "on-demand" and unwired(key)]
+    if bad:
+        wanted = ", ".join(f"`{key}: {SUMMARY_WIRING[key]}`" for key in bad)
+        out.append(
+            (
+                WARNING,
+                f"`{name}`'s call of the engine's `summary.yml` must pass {wanted}, and does "
+                "not: the input is absent, or carries a different value. The "
+                "summary job decides on those inputs and refuses an empty or unexpected "
+                "value, so it is SKIPPED — on every autoplan run, and on an explicitly "
+                "requested plan too unless the only fact missing is the draft flag: no gate "
+                "status, no plan comment, and nothing on the run page saying why the pull "
+                "request cannot merge. Each must be the pull "
+                "request's own value; a constant (the running repository, a literal `false`) "
+                "states the safe answer for every run, fork pull requests and drafts included.",
+            )
         )
-    ]
+    if unwired("on-demand"):
+        expr = SUMMARY_WIRING["on-demand"]
+        out.append(
+            (
+                WARNING,
+                f"`{name}`'s call of the engine's `summary.yml` must pass `on-demand: {expr}`, "
+                "and does not: the input is absent, or carries a different value. This one "
+                "costs an automatic plan nothing and a commented `shipmate plan` two things. It "
+                "is what lets a requested plan override the draft skip, so without it a "
+                "`shipmate plan` on a draft plans every stack, uploads its artifacts, and then "
+                "produces no gate status, no plan comment and no apply checks for the work it "
+                "just did; and on "
+                "any pull request its per-cell `<stack> / <env>` checks stay on the ref the run "
+                "was dispatched on, so the pull request shows none of them — the failed cell "
+                "included. A constant `true` claims every run was named by a person, which "
+                "gates every draft.",
+            )
+        )
+    return out
 
 
 def _build_matrix_finding(text, name):
-    """The same file's `build-matrix` step: its own `head-repo`, and a
-    `no-pull-request` anywhere in the file.
+    """The same file's `build-matrix` step: its own `head-repo` and `head-sha`,
+    and a `no-pull-request` anywhere in the file.
+
+    One finding per input, because the two holes are not alike: a wrong
+    `head-repo` plans a fork, a wrong `head-sha` plans whatever tree the trigger
+    left checked out and reports no changes, and a reader told only "the step is
+    miswired" cannot tell which remedy is theirs.
 
     Not covered by the summary call's half, and the consequences are not
     alike. A constant `head-repo` on the summary call costs a gate job; on this
     step it passes the fork refusal for EVERY pull request, and a fork's plan
     runs the pull request's own Terramate/OpenTofu on the consumer's runners
     with whatever the plan environment exposes as variables. `no-pull-request`
-    is the same hole with one word: it is the refusal's only opt-out.
+    is the same hole with one word: it is the only opt-out from both refusals.
 
     Both halves are one probe over one file — the reader's question is "is my
     plan wrapper wired?", and splitting it in two asks it twice."""
     out = []
     region = _call_region(text, _BUILD_MATRIX_CALL)
-    expr = SUMMARY_WIRING["head-repo"]
-    if region is not None and _wired_value(region, "head-repo") != "".join(expr.split()):
+    head_repo_expr = BUILD_MATRIX_WIRING["head-repo"]
+    if region is not None and _wired_value(region, "head-repo") != "".join(head_repo_expr.split()):
         out.append(
             (
                 WARNING,
-                f"`{name}`'s `build-matrix` step must pass `head-repo: {expr}`, and does not: "
+                f"`{name}`'s `build-matrix` step must pass `head-repo: {head_repo_expr}`, and "
+                "does not: "
                 "the input is absent, or carries a different value. That step is where a fork's "
                 "pull request is refused, and it decides on this one value: a constant (the "
                 "running repository) equals it for every pull request, fork ones included, so "
@@ -1422,6 +1484,21 @@ def _build_matrix_finding(text, name):
                 "on your runners with everything the plan environment exposes as variables. An "
                 "absent value refuses every pull request instead, failing `detect` loudly "
                 "(see docs/hardening.md).",
+            )
+        )
+    head_sha_expr = BUILD_MATRIX_WIRING["head-sha"]
+    if region is not None and _wired_value(region, "head-sha") != "".join(head_sha_expr.split()):
+        out.append(
+            (
+                WARNING,
+                f"`{name}`'s `build-matrix` step must pass `head-sha: {head_sha_expr}`, and "
+                "does not: "
+                "the input is absent, or carries a different value. That is the commit the run "
+                "says it is planning, and the step checks the checkout against it: neither plan "
+                "trigger checks out the head by default, so a constant or a stale value lets "
+                "the run plan the base branch or the dispatch ref, report no changes, and green "
+                "`shipmate / gate` with nothing queued to apply. An absent value refuses every "
+                "pull request instead, failing `detect` loudly (see docs/hardening.md).",
             )
         )
     # Every occurrence, and anything but a literal false, for the two reasons
@@ -1559,6 +1636,117 @@ def _plan_run_id_finding(text, name):
     return out
 
 
+#: The dispatch leg of a plan wrapper. NOT line-anchored like `_PLAN_RUN_ID_KEY`,
+#: and the polarity is the reason: there a match IS the finding, so a shape the
+#: anchor misses stays silent, while here ABSENCE is the finding and the same
+#: miss reports a correctly wired file as declaring no trigger at all.
+#: `on: { workflow_dispatch:
+#: { inputs: { pr_number: … } } }` is legal YAML, and an anchor fails after `{ `
+#: however much of the flow mapping is fed in. A preceding brace, comma or
+#: whitespace stands in for the line start — safe only because both keys are
+#: searched inside the `on:` block alone: unanchored over a whole file, `versi` +
+#: `on:` is the retargeting `_ON_KEY` documents.
+_DISPATCH_TRIGGER = re.compile(r"[\s{,]workflow_dispatch[ \t]*:")
+_PR_NUMBER_INPUT = re.compile(r"[\s{,]pr_number[ \t]*:")
+_PR_FACTS_CALL = re.compile(r"/actions/pr-facts@")
+# Same degrade posture and reason as PIN_UNREADABLE.
+DISPATCH_WIRING_UNREADABLE = (
+    NOTICE,
+    f"could not read `{_WORKFLOWS_DIR}` — the plan wrapper's dispatch wiring not verified.",
+)
+DISPATCH_WIRING_NO_COMMIT = (
+    NOTICE,
+    "the plan wrapper's dispatch wiring not verified — the commit under examination could "
+    "not be determined.",
+)
+
+
+def _dispatch_wiring_warnings(ctx):
+    """`shipmate plan` dispatches the consumer's own `plan.yml`, and every way
+    that wrapper can be unready for it is invisible until someone comments.
+
+    Reads the consumer's workflow files at the commit under examination, the
+    same way and for the same reason as the pin, fork-trigger and summary-wiring
+    probes (`_contents_ref`): a pull request that *adds* the trigger must not
+    still be reported for lacking it."""
+    ref = _contents_ref(ctx)
+    if ref is None:
+        return [DISPATCH_WIRING_NO_COMMIT]
+
+    def finding(text, name):
+        # Exact name, like the retired-input probe's: `plan.yml` is the file
+        # `actions/dispatch` targets for `mode: plan`, and the filter lives here
+        # rather than in `_dispatch_wiring_finding` so that a direct call of that
+        # function with another file's name still reports.
+        if name != "plan.yml":
+            return []
+        return _dispatch_wiring_finding(text, name)
+
+    return _scan_workflow_texts(ctx, ref, finding, DISPATCH_WIRING_UNREADABLE)
+
+
+def _dispatch_wiring_finding(text, name):
+    """The three ways a plan wrapper cannot serve a dispatched plan.
+
+    The trigger and its input are looked for inside the `on:` block
+    (`_on_block`), inline remainder included, and not in the whole file: a `with:`
+    line forwarding `pr_number` on is not a declaration of it, and a
+    `workflow_dispatch:` line under `jobs:` — no such key exists, but a stray line
+    matches a whole-file regex — must not satisfy the trigger. That scoping is
+    also what lets the two keys be matched unanchored, which is what sees a
+    flow-style `on:` value.
+
+    Three findings rather than one, because the remedies differ and so do the
+    refusals. Both of the first two end in a dispatch-time HTTP 422 with no run
+    created, but they are told apart by the message GitHub answers with
+    (`Workflow does not have 'workflow_dispatch' trigger` versus `Unexpected
+    inputs provided`) — the pair `actions/dispatch` recognises. The third is not
+    a refusal at all: the wrapper accepts the dispatch and then has no source
+    for the pull request's facts."""
+    inline, block = _on_block(text)
+    on_text = "\n".join([inline or "", *block])
+    out = []
+    if not _DISPATCH_TRIGGER.search(on_text):
+        out.append(
+            (
+                WARNING,
+                f"`{name}` declares no `workflow_dispatch` trigger — a commented `shipmate "
+                "plan` is authorized, reacted to with a rocket, and then dispatches nothing: "
+                "GitHub answers the dispatch with `Workflow does not have 'workflow_dispatch' "
+                "trigger`, no run is created, and the error lands on the comment-handling run "
+                "where nobody on the pull request sees it. Add the trigger, with a `pr_number` "
+                "input (docs/getting-started.md).",
+            )
+        )
+    elif not _PR_NUMBER_INPUT.search(on_text):
+        out.append(
+            (
+                WARNING,
+                f"`{name}`'s `workflow_dispatch` trigger declares no `pr_number` input — that "
+                "is the one input `shipmate plan` sends, and GitHub refuses a dispatch body "
+                "naming an input the workflow does not declare: `Unexpected inputs provided`, "
+                "no run created, the error on the comment-handling run rather than the pull "
+                "request. Declare `pr_number` under the trigger's `inputs:` "
+                "(docs/getting-started.md).",
+            )
+        )
+    if not _PR_FACTS_CALL.search(_stripped_text(text)):
+        out.append(
+            (
+                WARNING,
+                f"`{name}` has no `actions/pr-facts` step — a dispatched run carries no pull "
+                "request in its event payload and checks out the dispatch ref, so that step is "
+                "the only thing that resolves which pull request, head and repository the run "
+                "is for. Without it there is no head SHA to hand `build-matrix`, so on a "
+                "current engine pin that step refuses EVERY pull request and `detect` fails "
+                "loudly — the autoplan too, not only the dispatched leg — rather than planning "
+                "the wrong tree quietly. Add the step and feed the jobs below from it "
+                "(docs/getting-started.md).",
+            )
+        )
+    return out
+
+
 def _one_line(s, limit=200):
     flat = " ".join(s.split())
     return flat if len(flat) <= limit else flat[: limit - 1] + "…"
@@ -1618,6 +1806,7 @@ PROBES = (
     _fork_trigger_warnings,
     _summary_wiring_warnings,
     _plan_run_id_warnings,
+    _dispatch_wiring_warnings,
     _team_warnings,
     _app_permission_warnings,
 )
@@ -1738,7 +1927,8 @@ def _parse_check_run(line, app_id):
 
 def latest_check_ids(lines, app_id=""):
     """[(id, name)] -- newest run per check name among shipmate-relevant
-    authors. Ranks by `started_at`, not check-run `id` (unlike
+    authors, App-authored rows outside the `apply / ` namespace excluded.
+    Ranks by `started_at`, not check-run `id` (unlike
     apply-gate.latest_by_name): a queued run has no `started_at` and no
     annotations to harvest, so ranking it BELOW a completed run is wanted."""
     newest = {}
@@ -1747,6 +1937,12 @@ def latest_check_ids(lines, app_id=""):
         if run is None:
             continue
         name = run.get("name") or ""
+        # An on-demand plan's mirrored cell checks share a name with the
+        # autoplan's annotation-bearing ones and are created later, so ranking
+        # them together loses the annotations: the mirror carries none. Only
+        # the apply checks are wanted from the App.
+        if run.get("app_slug") not in _HARVEST_APP_SLUGS and not name.startswith(ag.APPLY_PREFIX):
+            continue
         prev = newest.get(name)
         if prev is None or (run.get("started_at") or "") >= (prev.get("started_at") or ""):
             newest[name] = run

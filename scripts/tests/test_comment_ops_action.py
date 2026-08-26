@@ -27,6 +27,9 @@ _GATE = "steps.guard.outputs.privileged_association"
 # use for what the gate checks. Deliberately not "write access": a Read-role
 # collaborator and an org member with no repository access both pass this gate.
 _CLAIM = "organization members and repository collaborators"
+# The doctor rejection's own sentence. `_CLAIM` alone no longer selects it: the
+# plan rejection makes the same promise, in its own words, about its own gate.
+_DOCTOR_REASON = r"\`doctor\` reports this repository's settings"
 # Markers of a step that handles doctor's machinery or performs one of its
 # disclosure-bearing settings reads, regardless of how the step is conditioned.
 _DOCTOR_TOUCHES = (
@@ -171,25 +174,30 @@ def _step(marker):
     return matches[0]
 
 
-def test_read_only_routes_are_acknowledged_with_a_reaction():
-    """`doctor` spends 30-60s in API calls before its comment appears. Without
-    an acknowledgement on the triggering comment the commenter's next move is to
-    comment again, so both read-only routes react -- and a failed reaction
-    (comment deleted, reactions disabled) must not fail the command."""
+def test_the_routes_that_change_no_infrastructure_are_acknowledged_with_a_reaction():
+    """`doctor` spends 30-60s in API calls before its comment appears, and a
+    `plan` is a dispatched run that takes as long to surface. Without an
+    acknowledgement on the triggering comment the commenter's next move is to
+    comment again, so every route that changes no infrastructure reacts -- and a
+    failed reaction (comment deleted, reactions disabled) must not fail the
+    command."""
     block = _step("content=eyes")
     assert "steps.parse.outputs.route == 'doctor'" in block
     assert "steps.parse.outputs.route == 'help'" in block
+    assert "steps.parse.outputs.route == 'plan'" in block
     # On the invocation itself, not just somewhere in the block: the step's own
     # comment explains the `|| true`, so a bare substring check for it stays
     # green when the operator is deleted from the `gh api` line.
     assert "-f content=eyes >/dev/null || true" in block
 
 
-def test_the_rocket_reaction_stays_on_an_authorized_apply():
-    # `eyes` = accepted a read-only command, `rocket` = an apply was authorized
-    # and is being dispatched. The two must not collapse into one signal.
+def test_the_rocket_reaction_stays_on_an_authorized_dispatch():
+    # `eyes` = accepted a command that changes no infrastructure, `rocket` = a
+    # dispatch was authorized. The two must not collapse into one signal. It
+    # reads the combined verdict, not the apply route's own step: keyed on
+    # `authz` it stays silent on every authorized plan.
     block = _step("content=rocket")
-    assert "steps.authz.outputs.authorized == 'true'" in block
+    assert "steps.verdict.outputs.authorized == 'true'" in block
 
 
 def test_summary_doctor_step_reads_the_head_sha_it_was_given():
@@ -451,7 +459,8 @@ def test_a_rejected_doctor_commenter_is_told_with_the_workflow_token():
     """Silence is indistinguishable from a broken engine. The rejection must
     also not depend on the App (which may not be installed) and must disclose
     no probe results."""
-    block = _step(_CLAIM)
+    block = _step(_DOCTOR_REASON)
+    assert _CLAIM in block
     assert "inputs.github-token" in block
     assert f"{_GATE} != 'true'" in block
     assert "app-id" not in block
@@ -834,9 +843,10 @@ def test_the_apply_route_steps_admit_exactly_apply_and_unlock():
 
 def test_the_mode_output_names_the_dispatch_mode_the_route_selects():
     """The caller's dispatch step keys off this output, so a literal here sends
-    every unlock down the apply path."""
+    every unlock and every plan down the apply path."""
     assert action_yaml("comment-ops")["outputs"]["mode"]["value"] == (
-        "${{ steps.parse.outputs.route == 'unlock' && 'unlock' || 'apply' }}"
+        "${{ steps.parse.outputs.route == 'unlock' && 'unlock'"
+        " || steps.parse.outputs.route == 'plan' && 'plan' || 'apply' }}"
     )
 
 
@@ -884,3 +894,168 @@ def test_the_contract_verb_table_carries_every_active_verb():
         assert f"| `{invocation}` | active |" in table, (
             f"CONTRACT.md's verb table has no active row for `{invocation}`"
         )
+
+
+#: Every step of the action, in order, hand-written. One constant for the whole
+#: shape: it carries the plan route's placement, and the verdict step's --
+#: `Combine the route verdicts` must sit after `Authorize`, which it reads, and
+#: before `React on accept`, which reads it. A step inserted, dropped or
+#: reordered fails here rather than in whichever positional guard happened to
+#: care.
+_STEP_NAMES = [
+    "Ignore bot-authored comments, classify the commenter",
+    "Parse command",
+    "Reject malformed / reserved command",
+    "Post help",
+    "Acknowledge a command that changes no infrastructure",
+    "Authorize plan",
+    "Reject an unauthorized plan",
+    "Doctor \u2014 reject a commenter without a privileged association",
+    "Mint App token for doctor",
+    "Doctor \u2014 App token unavailable",
+    "Doctor \u2014 probe the manifest's full permission set",
+    "Doctor \u2014 mint an environments-scoped token for the plan-env secret probe",
+    "Doctor \u2014 gather head SHA, declared environments, annotations",
+    "Doctor \u2014 render and upsert the sticky comment",
+    "Mint App token (members:read, checks:read)",
+    "App token unavailable (App not installed?)",
+    "Gather authorization inputs",
+    "Authorize",
+    "Combine the route verdicts",
+    "React on accept",
+    "Report the review exemption",
+    "Reject with reason",
+]
+
+
+def test_the_action_runs_exactly_these_steps_in_this_order():
+    assert [s.get("name") for s in action_steps("comment-ops")] == _STEP_NAMES
+
+
+def _by_id(step_id):
+    step = next(s for s in action_steps("comment-ops") if s.get("id") == step_id)
+    assert step.get("run"), f"the {step_id} step runs no shell"
+    return step
+
+
+#: `planauthz`' whole `run` body, hand-written. The whole body, because the
+#: property is that plan's tier is the guard step's single classification and
+#: *nothing else*: a second `case` on the association, an extra login test, an
+#: unconditional pass -- each of them changes this string.
+_PLANAUTHZ_RUN = """set -euo pipefail
+if [ "${PRIVILEGED:-}" = "true" ]; then
+  echo "authorized=true" >> "$GITHUB_OUTPUT"
+else
+  echo "authorized=false" >> "$GITHUB_OUTPUT"
+fi
+"""
+
+#: The plan rejection's whole body, hand-written. It states plan's own reason:
+#: doctor's gate exists because its report maps the guardrails a repository is
+#: missing, and plan reports no configuration at all -- copying doctor's
+#: sentence here would be an active falsehood.
+_PLAN_REJECT_RUN = (
+    "set -euo pipefail\n"
+    'gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -f '
+    "body=\":x: shipmate: \\`plan\\` runs this repository's Terramate/OpenTofu on its "
+    'runners, so it answers only organization members and repository collaborators." '
+    ">/dev/null\n"
+)
+
+
+def test_the_plan_route_is_gated_on_the_association_the_help_footer_promises():
+    """The shipped help footer tells every commenter that `plan` answers only
+    organization members and repository collaborators. Three claims, coupled
+    here so none can drift from the others:
+
+    * the footer says it, of `plan` specifically;
+    * `plan`'s own authorization step keys on the guard step's single
+      classification of the author and on nothing else -- not team membership,
+      not the commenter's login, and not a second `case` of its own;
+    * a commenter without that standing is told so, in plan's own words.
+
+    Without the second claim the footer's promise is enforced by nothing: the
+    phrase alone is already in the action, in doctor's refusal, so a plan route
+    wired with no gate at all leaves every phrase-level assertion green."""
+    footer = cp.help_markdown().rsplit("\n", 1)[-1]
+    promise = next(s for s in footer.split(";") if _CLAIM in s)
+    assert "`plan`" in promise, promise
+
+    planauthz = _by_id("planauthz")
+    assert planauthz["if"] == "${{ steps.parse.outputs.route == 'plan' }}"
+    assert planauthz["env"] == {"PRIVILEGED": "${{ " + _GATE + " }}"}
+    assert planauthz["run"] == _PLANAUTHZ_RUN
+
+    reject = next(
+        s for s in action_steps("comment-ops") if s.get("name") == "Reject an unauthorized plan"
+    )
+    assert reject["if"] == (
+        "${{ steps.parse.outputs.route == 'plan' && steps.planauthz.outputs.authorized != 'true' }}"
+    )
+    assert reject["env"] == {
+        "GH_TOKEN": "${{ inputs.github-token }}",
+        "PR_NUMBER": "${{ inputs.pr-number }}",
+    }
+    assert reject["run"] == _PLAN_REJECT_RUN
+
+
+def test_no_step_on_the_plan_route_touches_the_app_key():
+    """A plan needs no App token: the caller's own dispatch step mints for the
+    dispatch, and the route runs no membership or check-runs lookup. A plan step
+    that quietly acquired one would widen the private key's blast radius to a
+    route nothing else about this action watches.
+
+    Parsed steps, so a commented-out mint reads as absent, as it does at
+    runtime; every step naming the route, so the shared acknowledgement is
+    included rather than excused."""
+    on_plan = [
+        s for s in action_steps("comment-ops") if "outputs.route == 'plan'" in (s.get("if") or "")
+    ]
+    assert len(on_plan) == 3, [s.get("name") for s in on_plan]
+    for step in on_plan:
+        text = json.dumps(step)
+        assert "inputs.private-key" not in text, step.get("name")
+        assert "steps.apptoken" not in text, step.get("name")
+
+
+#: The verdict step's whole `run` body and `env:` block, hand-written. Both
+#: routes have to reach it: dropping either branch silently unauthorizes a whole
+#: verb while the reaction, the caller's dispatch condition and this action's
+#: `authorized` output all keep agreeing with each other.
+_VERDICT_ENV = {
+    "APPLY_AUTHORIZED": "${{ steps.authz.outputs.authorized }}",
+    "PLAN_AUTHORIZED": "${{ steps.planauthz.outputs.authorized }}",
+}
+_VERDICT_RUN = """set -euo pipefail
+if [ "${APPLY_AUTHORIZED:-}" = "true" ] || [ "${PLAN_AUTHORIZED:-}" = "true" ]; then
+  echo "authorized=true" >> "$GITHUB_OUTPUT"
+else
+  echo "authorized=false" >> "$GITHUB_OUTPUT"
+fi
+"""
+
+
+def test_one_verdict_answers_for_every_route_and_is_never_skipped():
+    """Two readers of two different authorization steps is how one policy
+    diverges, so the reaction and the composite's `authorized` output read a
+    single combined step.
+
+    It carries no `if:` on purpose: a skipped step writes no output, so any
+    condition at all leaves some route with no verdict -- and an empty output is
+    falsy, which reads as "not authorized" for a command that was."""
+    verdict = _by_id("verdict")
+    assert "if" not in verdict, verdict.get("if")
+    assert verdict["env"] == _VERDICT_ENV
+    assert verdict["run"] == _VERDICT_RUN
+    assert action_yaml("comment-ops")["outputs"]["authorized"]["value"] == (
+        "${{ steps.verdict.outputs.authorized }}"
+    )
+    # Every in-step reader of the verdict runs after it. The step-list constant
+    # above pins the order; this pins that the readers are the steps it assumes.
+    names = [s.get("name") for s in action_steps("comment-ops")]
+    readers = [
+        s.get("name") for s in action_steps("comment-ops") if "steps.verdict." in json.dumps(s)
+    ]
+    assert readers == ["React on accept"], readers
+    for reader in readers:
+        assert names.index(reader) > names.index("Combine the route verdicts")

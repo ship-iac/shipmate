@@ -35,10 +35,33 @@ def test_command_on_first_matching_line_of_multiline():
     assert r["valid"] and r["env"] == "dev-us"
 
 
-def test_reserved_verb_plan_is_rejected():
+def test_plan_rejects_an_env():
+    # `plan` takes no arguments on purpose: there is one plan of record per head,
+    # and a run holding one environment's artifacts leaves every other
+    # environment's workset empty at the next apply. Declaring `args: "[env]"`
+    # would accept this line and ship exactly that.
     r = cp.parse("shipmate plan dev-eu")
     assert r["is_command"] and not r["valid"] and r["verb"] == "plan"
-    assert "reserved" in r["error"]
+    assert "takes no arguments" in r["error"]
+    assert r["route"] is None
+
+
+def test_doctor_rejects_an_env():
+    r = cp.parse("shipmate doctor dev-eu")
+    assert not r["valid"] and "takes no arguments" in r["error"]
+
+
+def test_help_rejects_an_env():
+    r = cp.parse("shipmate help dev-eu")
+    assert not r["valid"] and "takes no arguments" in r["error"]
+
+
+def test_plan_rejects_an_env_with_a_tag_filter():
+    # Reached through the no-arguments branch, not the tag branch: with
+    # `args: ""` a tag is already an argument.
+    r = cp.parse("shipmate plan dev-eu workload:app")
+    assert r["is_command"] and not r["valid"]
+    assert "takes no arguments" in r["error"]
 
 
 def test_reserved_verb_destroy_is_rejected():
@@ -79,8 +102,21 @@ def test_bare_apply_with_tag_filter_rejected():
 
 
 def test_bare_reserved_verb_rejected():
-    r = cp.parse("shipmate plan")
+    r = cp.parse("shipmate destroy")
     assert r["is_command"] and not r["valid"] and "reserved" in r["error"]
+
+
+def test_bare_plan_is_valid():
+    r = cp.parse("shipmate plan")
+    assert r == {
+        "is_command": True,
+        "valid": True,
+        "verb": "plan",
+        "env": None,
+        "tag_filter": None,
+        "route": "plan",
+        "error": None,
+    }
 
 
 def test_bare_unknown_verb_rejected():
@@ -156,7 +192,7 @@ def test_route_per_verb():
     assert cp.parse("shipmate apply dev-eu")["route"] == "apply"
     assert cp.parse("shipmate doctor")["route"] == "doctor"
     assert cp.parse("shipmate help")["route"] == "help"
-    assert cp.parse("shipmate plan")["route"] is None
+    assert cp.parse("shipmate plan")["route"] == "plan"
     assert cp.parse("nothing to see here")["route"] is None
 
 
@@ -253,6 +289,12 @@ def test_unlock_without_an_env_is_rejected():
     r = cp.parse("shipmate unlock")
     assert r["is_command"] and not r["valid"]
     assert "requires an environment" in r["error"]
+
+
+def test_plan_appears_in_the_help_output_as_active():
+    """`plan` renders as a no-argument command, backticked, with an empty status
+    column -- the rendering active verbs get."""
+    assert "| `shipmate plan` |  |" in cp.help_markdown()
 
 
 def test_unlock_appears_in_the_help_output():

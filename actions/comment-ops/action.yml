@@ -1,5 +1,5 @@
 name: shipmate comment-ops
-description: Parse a shipmate command comment, authorize it (team membership via a short-lived App token; `apply` additionally requires that the PR satisfies the branch ruleset's review policy + mergeable + reviewed-plan-exists, while `unlock` is membership-only), and react or reject. Outputs feed actions/dispatch.
+description: Parse a shipmate command comment, authorize it (team membership via a short-lived App token; `apply` additionally requires that the PR satisfies the branch ruleset's review policy + mergeable + reviewed-plan-exists, while `unlock` is membership-only; `plan` needs no App token and sits at `doctor`'s tier), and react or reject. Outputs feed actions/dispatch.
 inputs:
   app-id:
     description: GitHub App id (a repo/org variable).
@@ -32,19 +32,21 @@ inputs:
 outputs:
   authorized:
     description: true when the command is valid and authorized.
-    value: ${{ steps.authz.outputs.authorized }}
+    value: ${{ steps.verdict.outputs.authorized }}
   is-command:
     description: true when the comment is a shipmate command at all.
     value: ${{ steps.parse.outputs.is_command }}
   environment:
-    description: Parsed target environment; empty for a bare `shipmate apply` (all non-explicit environments).
+    description: Parsed target environment; empty for a bare `shipmate apply` (all non-explicit environments) and on the plan route, whose dispatched run carries no environment.
     value: ${{ steps.authz.outputs.environment }}
   head-sha:
-    description: PR head SHA.
+    description: PR head SHA; empty on the plan route, whose dispatched run resolves the head from the pull request itself.
     value: ${{ steps.authz.outputs.head_sha }}
   mode:
-    description: apply (default) or unlock — the dispatch mode the parsed verb selects.
-    value: ${{ steps.parse.outputs.route == 'unlock' && 'unlock' || 'apply' }}
+    description: apply (default), unlock or plan — the dispatch mode the parsed verb selects.
+    # Groups as `((a && x) || (b && y)) || z`, and an unmatched branch yields the
+    # falsy `''` — so a route that is neither unlock nor plan lands on apply.
+    value: ${{ steps.parse.outputs.route == 'unlock' && 'unlock' || steps.parse.outputs.route == 'plan' && 'plan' || 'apply' }}
 runs:
   using: composite
   steps:
@@ -67,12 +69,14 @@ runs:
         else
           echo "skip=false" >> "$GITHUB_OUTPUT"
         fi
-        # Access gate for the `doctor` route, computed once here and consumed by
-        # every step on that route. The report is a map of the guardrails a
-        # repository is *missing*, so on a repository with public pull requests
-        # it must not answer an arbitrary account. The allowlist is written
-        # exactly once — repeated per-step in five `if:` conditions is precisely
-        # how such a gate drifts open.
+        # Access gate for the `doctor` and `plan` routes, computed once here and
+        # consumed by every step on both. doctor's report is a map of the
+        # guardrails a repository is *missing*, and a plan spends this
+        # repository's runners on its own code, so on a repository with public
+        # pull requests neither may answer an arbitrary account. The allowlist is
+        # written exactly once — repeated per-step in every route's `if:` is
+        # precisely how such a gate drifts open. Two routes read it now: narrowing
+        # or widening it for one moves the other's gate with it.
         # This is GitHub's own classification of the author's relationship to
         # the repository, NOT a permission check, and the output name says so:
         # a collaborator holding only the Read role, and an organization member
@@ -127,23 +131,58 @@ runs:
         python3 "$GITHUB_ACTION_PATH/../../scripts/comment-parse" --help-markdown > help.md
         gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -F body=@help.md >/dev/null
 
-    - name: Acknowledge a read-only command
-      # Ahead of every doctor step below, which spend 30-60s in API calls
-      # before the report comment appears; with no acknowledgement the
-      # commenter's next move is to comment again.
-      if: ${{ steps.parse.outputs.route == 'doctor' || steps.parse.outputs.route == 'help' }}
+    - name: Acknowledge a command that changes no infrastructure
+      # Two of the three routes it covers are slow to show a result: doctor
+      # spends 30-60s in API calls before its report comment appears, and a plan
+      # is a dispatched run that takes as long to surface. With no
+      # acknowledgement the commenter's next move is to comment again.
+      if: ${{ steps.parse.outputs.route == 'doctor' || steps.parse.outputs.route == 'help' || steps.parse.outputs.route == 'plan' }}
       shell: bash
       env:
         GH_TOKEN: ${{ inputs.github-token }}
         COMMENT_ID: ${{ inputs.comment-id }}
       run: |
         set -euo pipefail
-        # `eyes` is the conventional "working on it" for a read-only command —
-        # `rocket` marks an authorized apply or unlock instead. `|| true`: the
-        # reaction is cosmetic (the comment may already be deleted, or
-        # reactions disabled), and losing it must not fail the command.
+        # `eyes` is the conventional "working on it" for a command that changes
+        # no infrastructure — `rocket` marks an authorized dispatch instead.
+        # `|| true`: the reaction is cosmetic (the comment may already be
+        # deleted, or reactions disabled), and losing it must not fail the
+        # command.
         gh api -X POST "repos/$GITHUB_REPOSITORY/issues/comments/$COMMENT_ID/reactions" \
           -f content=eyes >/dev/null || true
+
+    - name: Authorize plan
+      id: planauthz
+      # The plan verb sits at `doctor`'s tier: the same collaborator standing,
+      # classified once in the guard step above. No App token, no review, no
+      # plan lookup — a plan applies nothing, and the commenter chooses only
+      # WHEN a plan runs. WHAT gets planned comes from the pull request itself,
+      # never from this comment.
+      if: ${{ steps.parse.outputs.route == 'plan' }}
+      shell: bash
+      env:
+        PRIVILEGED: ${{ steps.guard.outputs.privileged_association }}
+      run: |
+        set -euo pipefail
+        if [ "${PRIVILEGED:-}" = "true" ]; then
+          echo "authorized=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "authorized=false" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Reject an unauthorized plan
+      # GITHUB_TOKEN, not the App: the plan route mints nothing, so this must
+      # answer wherever the route itself can run. The reason is plan's own, not
+      # doctor's — a plan discloses no settings; it spends this repository's
+      # runners on this repository's code.
+      if: ${{ steps.parse.outputs.route == 'plan' && steps.planauthz.outputs.authorized != 'true' }}
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        PR_NUMBER: ${{ inputs.pr-number }}
+      run: |
+        set -euo pipefail
+        gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -f body=":x: shipmate: \`plan\` runs this repository's Terramate/OpenTofu on its runners, so it answers only organization members and repository collaborators." >/dev/null
 
     - name: Doctor — reject a commenter without a privileged association
       # Silence would be indistinguishable from a broken engine, so say why.
@@ -570,8 +609,28 @@ runs:
         SHIPMATE_VERB: ${{ steps.parse.outputs.route }}
       run: python3 "$GITHUB_ACTION_PATH/../../scripts/authorize"
 
+    - name: Combine the route verdicts
+      id: verdict
+      # One value for every route, so the reaction, the caller's dispatch
+      # condition and this action's `authorized` output cannot disagree. Exactly
+      # one authorization step runs — their `if:`s name disjoint routes — and the
+      # other's output is empty. No `if:` here: a skipped step writes no output,
+      # and then no route has a verdict at all. Routes that dispatch nothing
+      # (help, doctor, a non-command) land on false.
+      shell: bash
+      env:
+        APPLY_AUTHORIZED: ${{ steps.authz.outputs.authorized }}
+        PLAN_AUTHORIZED: ${{ steps.planauthz.outputs.authorized }}
+      run: |
+        set -euo pipefail
+        if [ "${APPLY_AUTHORIZED:-}" = "true" ] || [ "${PLAN_AUTHORIZED:-}" = "true" ]; then
+          echo "authorized=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "authorized=false" >> "$GITHUB_OUTPUT"
+        fi
+
     - name: React on accept
-      if: ${{ steps.authz.outputs.authorized == 'true' }}
+      if: ${{ steps.verdict.outputs.authorized == 'true' }}
       shell: bash
       env:
         GH_TOKEN: ${{ inputs.github-token }}

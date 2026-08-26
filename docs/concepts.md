@@ -41,10 +41,13 @@ output for every attempted cell, so a failure-then-retry sequence stays
 visible as an audit trail. The plan
 matrix job's own `<stack> / <env>` check-run stays on the shared
 `github-actions` identity — it's the job's own auto check-run, not something
-the App creates separately.
-Authorizing an apply requires team membership, a mergeable PR that satisfies
-the branch ruleset's review policy, and a reviewed plan for the PR's current
-head; authorizing an unlock requires team membership plus the `<env>-apply`
+the App creates separately. An on-demand plan is the exception: a dispatched
+run's job checks land on the ref it was dispatched on, so the summary job
+mirrors that run's own completed checks onto the pull request head as
+App-authored copies linking back to the originals.
+Authorizing an apply requires team membership, a non-draft, mergeable PR that
+satisfies the branch ruleset's review policy, and a reviewed plan for the PR's
+current head; authorizing an unlock requires team membership plus the `<env>-apply`
 environment its job binds.
 Comment-ops keeps the entire interaction surface inside the pull request
 that is already the unit of review, with an auditable history of who asked
@@ -53,7 +56,7 @@ contract, and `docs/github-app.md` for one-time App setup.
 
 ## PR comment commands
 
-Four verbs are active (`plan` and `destroy` are reserved for later):
+Five verbs are active (`destroy` is reserved for later):
 
 - `shipmate apply [env]` — apply the reviewed plan for one environment, or
   every non-explicit environment when the environment is omitted.
@@ -61,6 +64,9 @@ Four verbs are active (`plan` and `destroy` are reserved for later):
   environments, App permissions, and warnings from this commit's workflow
   runs.
 - `shipmate help` — show this command list.
+- `shipmate plan` — plan this pull request's changed stacks on demand, the
+  same plan a push produces, including on a draft. Takes no environment: there
+  is one plan of record per head commit. Re-planning is safe and replaces it.
 - `shipmate unlock <env>` — release a state lock stranded by a cancelled or
   killed apply, so the environment's stacks can apply again. Does not
   re-apply, and does not recover a partial apply.
@@ -71,13 +77,14 @@ the environments of the stacks a given pull request changed, and its report says
 which ones those were — it is a check on the settings that pull request touches,
 not a repository-wide audit.
 
-`help` and `doctor` are read-only; `apply` and `unlock` are authorized. `apply`
-carries the full check (approvers-team membership, a mergeable and reviewed PR,
-and a reviewed plan for the current head — see Comment-ops above); `unlock`
-carries a narrower one — approvers-team membership and the `<env>-apply`
-environment, but no review and no plan — because it releases a lock rather than
-changing infrastructure. `help` answers
-any commenter. `doctor` does not: it names the guardrails this repository is
+`help` and `doctor` are read-only, and `plan` changes no infrastructure but is
+open to the same commenters `doctor` is; `apply` and `unlock` are authorized. `apply`
+carries the full check (approvers-team membership, a non-draft, mergeable and
+reviewed PR, and a reviewed plan for the current head — see Comment-ops above);
+`unlock` carries a narrower one — approvers-team membership and the
+`<env>-apply` environment, but no draft check, no review and no plan —
+because it releases a lock rather than changing infrastructure. `help`
+answers any commenter. `doctor` does not: it names the guardrails this repository is
 missing — that `shipmate / gate` is not required on the default branch, that an
 apply environment has no approval rule, which approvers team is configured
 and whether it resolves — so the engine runs it only for a commenter GitHub
@@ -119,18 +126,30 @@ of its CI configuration.
 The `plan.yml` workflow (the same shape across repo layouts — what differs is
 the `plan` job's per-flavor `env:` block, `TF_VAR_*` or `TF_WORKSPACE` or
 nothing, and whether it carries a cloud credentials step at all; see the
-`repo-example-*` samples) runs on every pull request and has **three jobs**:
-`detect`, `plan`, and `summary`. It triggers on `pull_request_target`, which
-runs at the base ref — that is what lets the trusted `summary` job reach the App
-key, and `detect` and `plan` therefore have to name
-`ref: ${{ github.event.pull_request.head.sha }}` on their checkout explicitly or
-they plan the base branch instead. Give `detect` the
+`repo-example-*` samples) has **four jobs**: `facts`, `detect`, `plan`, and
+`summary`, and answers to two triggers — `pull_request_target` for the automatic
+plan on every push to a pull request, and `workflow_dispatch` for the plan a
+commented `shipmate plan` asks for. Both run at a ref the trusted `summary`
+job's environment policy admits (the base ref under `pull_request_target`, the
+dispatch ref under `workflow_dispatch`), which is what lets that job reach the
+App key; neither checks out the pull request's head, so `detect` and `plan` have
+to name `ref: ${{ needs.facts.outputs.head-sha }}` on their checkout explicitly
+or the run is refused for planning a tree the pull request never named. Give
+`detect` the
 display name `shipmate / detect`, since its check run is created by GitHub
 Actions (a job's check run always is) and a bare `detect` in the checks list
 says nothing about which tool produced it. See [`CONTRACT.md`](../CONTRACT.md)
 §Check names for the `shipmate / ` namespace and §Post-plan topology for the
 full picture below:
 
+- **`facts`** — `actions/pr-facts`, the single producer of every pull-request
+  fact the jobs below decide on: the head SHA and head repository, the base SHA,
+  the pull request's number, its draft flag, and whether a human named this run
+  (`on-demand`). A pull-request event answers out of its own payload; a
+  dispatched run carries no pull request at all and looks it up by the number it
+  was dispatched with — which is why this one job spends `pull-requests: read`
+  and the others do not. Its own job rather than `detect`'s first step: `detect`
+  can fail, and the `summary` job must still be told which head to gate.
 - **`detect`** — `terramate fmt --check`, a stale-codegen check
   (`terramate generate --detailed-exit-code`), and `actions/build-matrix`,
   which computes the plan matrix from the *changed* stacks × their `env/*`
@@ -155,8 +174,9 @@ full picture below:
   `.github/workflows/summary.yml`, passing `SHIPMATE_APP_PRIVATE_KEY` by name
   (never `secrets: inherit` — `docs/getting-started.md`) plus the pull
   request number, the head SHA, the two other jobs' results and the planned cell
-  count, plus the two facts that callee decides on — the head repository and
-  the draft flag. The credentialed work happens inside that callee, in a single job bound
+  count, plus the three facts that callee decides on — the head repository, the
+  draft flag, and whether a human named this run.
+  The credentialed work happens inside that callee, in a single job bound
   to the fixed `shipmate-engine` GitHub Environment (`docs/github-app.md`) with
   **no checkout of its own**: it downloads this run's cell summaries and calls
   `actions/summary`, which creates the matching
@@ -164,9 +184,16 @@ full picture below:
   upserts one sticky PR comment (a stack × env table) and the aggregate
   **`shipmate / gate`** commit status, which stays non-green while any apply is
   pending or any plan cell failed. That job declines outright — before its first
-  step — on a fork pull request or a draft, and on a caller that left **either**
-  fact unstated: an omitted input is read as a refusal, so the wrapper can fail the job closed
-  but never open it.
+  step — on a fork pull request, on a draft nobody asked to plan, and on a
+  caller that left the head repository unstated (every run, no trigger rescues
+  it) or the draft flag unstated (every autoplan run; a requested plan is
+  admitted anyway): an omitted input is never read as permission, so the wrapper
+  can fail the job closed but never open it (an omitted `on-demand` costs only
+  the requested draft plan it would have admitted, and the mirror below). On an `on-demand` run it also **mirrors** this run's own
+  completed per-cell plan checks onto the head commit: a dispatched run's job
+  check-runs attach to the dispatch ref, so without the mirror the pull request
+  shows none of them — not even a failed cell, which is the state
+  `shipmate plan` exists to recover from.
 
 Fork pull requests do not get that far anyway:
 `detect` refuses them (see above), so a fork's plan fails fast rather than

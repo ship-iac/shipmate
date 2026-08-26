@@ -2,9 +2,11 @@
 
 The fork refusal and the draft skip read inputs the wrapper passes, so the
 snippets consumers paste are what makes those guards real. Omitting `head-repo`
-on `build-matrix` fails `detect` loudly; omitting either input on the `summary`
-call SKIPS that job, which writes no gate at all and says nothing on the run
-page -- a snippet missing them documents a wrapper that cannot merge anything.
+on `build-matrix` fails `detect` loudly; omitting `head-repo` or `is-draft` on the
+`summary` call SKIPS that job, which writes no gate at all and says nothing on
+the run page -- a snippet missing them documents a wrapper that cannot merge
+anything; omitting `on-demand` documents one whose `shipmate plan` on a draft
+plans and then gates nothing.
 `drift.md`'s `no-pull-request` is the same class: without it the documented
 nightly is refused.
 
@@ -30,21 +32,23 @@ _FENCE = re.compile(r"^(?P<indent>[ \t]*)```yaml[ \t]*$\n(?P<body>.*?)^\1```", r
 _SUMMARY_CALL = "/shipmate/.github/workflows/summary.yml@"
 _BUILD_MATRIX = "/shipmate/actions/build-matrix@"
 
-_HEAD_REPO = "${{ github.event.pull_request.head.repo.full_name }}"
+_HEAD_REPO = "${{ needs.facts.outputs.head-repo }}"
 
 _EXPECTED_SUMMARY_WITH = {
-    "pr-number": "${{ github.event.pull_request.number }}",
-    "head-sha": "${{ github.event.pull_request.head.sha }}",
+    "pr-number": "${{ needs.facts.outputs.pr-number }}",
+    "head-sha": "${{ needs.facts.outputs.head-sha }}",
     "detect-result": "${{ needs.detect.result }}",
     "plan-result": "${{ needs.plan.result }}",
     "planned-cells": "${{ needs.detect.outputs.count }}",
     "head-repo": _HEAD_REPO,
-    "is-draft": "${{ github.event.pull_request.draft }}",
+    "is-draft": "${{ needs.facts.outputs.is-draft }}",
+    "on-demand": "${{ needs.facts.outputs.on-demand }}",
 }
 
 _EXPECTED_PLAN_MATRIX_WITH = {
-    "base-sha": "${{ github.event.pull_request.base.sha }}",
+    "base-sha": "${{ needs.facts.outputs.base-sha }}",
     "head-repo": _HEAD_REPO,
+    "head-sha": "${{ needs.facts.outputs.head-sha }}",
 }
 
 _EXPECTED_DRIFT_MATRIX_WITH = {
@@ -137,21 +141,34 @@ def test_the_documented_call_passes_exactly_the_inputs_the_workflow_declares():
 
 def test_doctors_wiring_constant_expects_what_the_page_documents():
     """The third file this module's docstring names. `doctor.SUMMARY_WIRING` is a
-    hand-written copy of these two expressions and is compared against a
+    hand-written copy of these three expressions and is compared against a
     consumer's real `plan.yml`, so a change to the documented expression that
     leaves it behind makes the probe WARN on every correctly wired repository --
     a finding on a healthy repo, which is what teaches readers to ignore the
     suite. Nothing else pins the two together: `test_doctor.py`'s fixtures are
     written from `SUMMARY_WIRING`'s own side."""
     assert doctor.SUMMARY_WIRING == {
-        key: _EXPECTED_SUMMARY_WITH[key] for key in ("head-repo", "is-draft")
+        key: _EXPECTED_SUMMARY_WITH[key] for key in ("head-repo", "is-draft", "on-demand")
     }, (
         "scripts/doctor's SUMMARY_WIRING drifted from the documented wrapper: "
         f"{doctor.SUMMARY_WIRING}"
     )
 
 
-def test_documented_plan_build_matrix_states_the_head_repository():
+def test_doctors_build_matrix_constant_expects_what_the_page_documents():
+    """Same failure mode as the summary constant above, on the step's own two
+    inputs: `doctor.BUILD_MATRIX_WIRING` is a hand-written copy of what this page
+    documents, and a documented expression that leaves it behind makes the probe
+    WARN on every correctly wired repository."""
+    assert doctor.BUILD_MATRIX_WIRING == {
+        key: _EXPECTED_PLAN_MATRIX_WITH[key] for key in ("head-repo", "head-sha")
+    }, (
+        "scripts/doctor's BUILD_MATRIX_WIRING drifted from the documented wrapper: "
+        f"{doctor.BUILD_MATRIX_WIRING}"
+    )
+
+
+def test_documented_plan_build_matrix_states_the_head_repository_and_commit():
     for job, step in _build_matrix_steps(_PLAN_PAGE):
         assert step.get("with") == _EXPECTED_PLAN_MATRIX_WITH, (
             f"docs/getting-started.md job `{job}` must pass exactly "

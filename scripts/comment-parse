@@ -3,7 +3,7 @@
 
 Grammar: `shipmate <verb> [env] [tag-filter]`. Injection-safe: the whole
 command line must match one anchored regex; nothing is ever passed to a
-shell. `apply`, `doctor`, `help` and `unlock` are active; `plan`/`destroy` are
+shell. `apply`, `doctor`, `help`, `plan` and `unlock` are active; `destroy` is
 reserved (recognized, rejected with a "reserved" message so the grammar is
 stable as verbs are added).
 env is optional for `apply` and required for `unlock`: a bare `shipmate apply`
@@ -60,10 +60,14 @@ VERBS = {
         "desc": "Show this command list.",
     },
     "plan": {
-        "status": RESERVED,
-        "args": "[env]",
-        "route": None,
-        "desc": "Re-plan on demand — not yet implemented.",
+        "status": ACTIVE,
+        "args": "",
+        "route": "plan",
+        "desc": (
+            "Plan this pull request's changed stacks on demand — the same plan a push "
+            "produces, including on a draft. Re-planning is safe and replaces the plan of "
+            "record for the current head."
+        ),
     },
     "destroy": {
         "status": RESERVED,
@@ -182,12 +186,15 @@ def help_markdown():
         (
             "The environment is a GitHub Environment name such as `dev-eu`. "
             "Applying requires approvers-team membership, an approving review "
-            "where the branch ruleset asks for one, and a plan for the current "
-            "head commit. Unlocking requires that membership, but no review "
-            "and no plan. "
-            "`doctor` and `help` are read-only; `help` answers "
-            "anyone, while `doctor` reports this repository's own settings and "
-            "so answers only organization members and repository collaborators."
+            "where the branch ruleset asks for one, a plan for the current "
+            "head commit, and a pull request that is not a draft. Unlocking "
+            "requires that membership, but no review, no plan and no such "
+            "readiness. "
+            "`doctor` and `help` are read-only, and `plan` changes no "
+            "infrastructure. `help` answers anyone; `doctor` reports this "
+            "repository's own settings, and it and `plan` answer only "
+            "organization members and repository collaborators — GitHub's "
+            "classification of the comment's author, not a check of write access."
         ),
     ]
     return "\n".join(lines)

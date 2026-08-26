@@ -28,6 +28,7 @@ EXPECTED_INPUTS = {
             "head-repo",
             "head-sha",
             "is-draft",
+            "on-demand",
             "plan-result",
             "planned-cells",
             "pr-number",

@@ -116,18 +116,30 @@ rules from Settings → Environments → `<name>` (or the API):
 
 ### The plan workflow
 
-`plan.yml` is three jobs — `detect`, `plan`, `summary` — not a thin wrapper. The
-`ref: ${{ github.event.pull_request.head.sha }}` on the two checkouts is
-load-bearing: `pull_request_target` runs at the *base* ref, so without it the run
-plans the base branch and reports a clean plan for code it never read.
+`plan.yml` is four jobs — `facts`, `detect`, `plan`, `summary` — not a thin
+wrapper, and it answers to two triggers: `pull_request_target` for the automatic
+plan on every push to a pull request, and `workflow_dispatch` for the plan a
+reviewer asks for by comment. Neither trigger checks out the pull request's head
+by default — `pull_request_target` runs at the *base* ref, a dispatched run at
+the dispatch ref — and a dispatched run carries no pull request in its event
+payload at all. That is what the `facts` job is for: it resolves the pull
+request's facts once, from the event payload on a pull-request event and from
+the API by the dispatched `pr_number` otherwise, and every job below reads them
+from it. The `ref` on the two checkouts is load-bearing: without it each
+trigger checks out what it named above and would report a clean plan for code it
+never read. Both jobs **refuse** that instead of reporting it — `build-matrix`
+compares the checkout against the `head-sha` it is passed and fails `detect`,
+and `plan-cell` does the same against `expected-head` — so a wrapper missing
+the `ref` fails loudly on its first run rather than merging green.
 
 **The filenames are load-bearing too.** `actions/build-matrix` refuses to plan a
 repository that has no `.github/workflows/plan.yml` — no apply path matches that
 path any more (each cell reads its plan run from its own apply check), but
 `shipmate doctor` keys its plan-wrapper probes on the filename, so a plan
 workflow under another name loses them silently and the refusal is what stops it
-happening. `apply.yml` is the name `actions/dispatch` targets by default, so an
-apply wrapper called anything else is dispatched by nothing and `shipmate apply`
+happening. Both are also the names `actions/dispatch` targets by default —
+`plan.yml` for a commented `shipmate plan`, `apply.yml` for apply and unlock —
+so a wrapper called anything else is dispatched by nothing and the command
 silently reaches no workflow. Create both under exactly those names.
 
 The fences on this page are transcribed from the sample repositories, which pin
@@ -140,15 +152,48 @@ name: shipmate · plan
 on:
   pull_request_target:
     types: [opened, synchronize, reopened, ready_for_review]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Pull request number to plan
+        required: true
 concurrency:
-  group: plan-${{ github.event.pull_request.number }}
+  # `github.event.inputs` is readable under either trigger, unlike the
+  # `inputs` context.
+  group: plan-${{ github.event.pull_request.number || github.event.inputs.pr_number }}
   cancel-in-progress: true
 permissions:
   contents: read
 jobs:
+  # `name:` is not decoration: this job's check-run shows on every pull request,
+  # and an on-demand plan mirrors it onto the head, so it needs a name a reviewer
+  # can place — inside the `shipmate / ` namespace with `shipmate / detect`.
+  # One producer for every pull-request fact below. Its own job, not `detect`'s
+  # first step: `detect` can fail (a fmt check, stale codegen), and the summary
+  # job must still be told which head to gate — a summary call with an empty
+  # `head-repo` is refused, which would turn a failing gate into no gate at all.
+  facts:
+    name: shipmate / facts
+    runs-on: ubuntu-slim
+    permissions:
+      pull-requests: read
+    outputs:
+      head-sha: ${{ steps.facts.outputs.head-sha }}
+      head-repo: ${{ steps.facts.outputs.head-repo }}
+      base-sha: ${{ steps.facts.outputs.base-sha }}
+      pr-number: ${{ steps.facts.outputs.pr-number }}
+      is-draft: ${{ steps.facts.outputs.is-draft }}
+      on-demand: ${{ steps.facts.outputs.on-demand }}
+    steps:
+      - id: facts
+        uses: ship-iac/shipmate/actions/pr-facts@<engine-sha>  # see the latest release
+
   detect:
     name: shipmate / detect
-    if: github.event.pull_request.draft == false
+    needs: facts
+    # Autoplan skips drafts; `shipmate plan` on a draft is an explicit request
+    # and plans it.
+    if: needs.facts.outputs.is-draft == 'false' || needs.facts.outputs.on-demand == 'true'
     runs-on: ubuntu-slim
     permissions:
       contents: read
@@ -157,29 +202,37 @@ jobs:
       empty: ${{ steps.matrix.outputs.empty }}
       count: ${{ steps.matrix.outputs.count }}
     steps:
-      # `pull_request_target` checks out the BASE by default. Naming the head
-      # SHA is what makes this a plan of the pull request; without it the run
-      # plans the base branch and reports a clean plan for code it never read.
+      # Both triggers check out something else by default — the base branch
+      # under `pull_request_target`, the dispatch ref under `workflow_dispatch`.
+      # Naming the head SHA is what makes this a plan of the pull request;
+      # without it `build-matrix` refuses the run, because the alternative is a
+      # clean plan for code it never read.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: ${{ needs.facts.outputs.head-sha }}
           fetch-depth: 0
       - uses: ship-iac/shipmate/actions/setup@<engine-sha>  # see the latest release
         with:
           terramate-version: ${{ vars.TERRAMATE_VERSION }}
           tofu-version: ${{ vars.TOFU_VERSION }}
+      # Before the two terramate steps, not after: this step is where a fork's
+      # pull request is refused, and `terramate fmt`/`generate` evaluate the
+      # checked-out HCL. Under `pull_request_target` `actions/checkout` refuses a
+      # fork head itself, so the order only shows on the dispatch leg — which has
+      # no pull-request context for that outer refusal to key on.
+      - id: matrix
+        uses: ship-iac/shipmate/actions/build-matrix@<engine-sha>  # see the latest release
+        with:
+          base-sha: ${{ needs.facts.outputs.base-sha }}
+          head-repo: ${{ needs.facts.outputs.head-repo }}
+          head-sha: ${{ needs.facts.outputs.head-sha }}
       - name: fmt check
         run: terramate fmt --check
       - name: stale codegen check
         run: terramate generate --detailed-exit-code
-      - id: matrix
-        uses: ship-iac/shipmate/actions/build-matrix@<engine-sha>  # see the latest release
-        with:
-          base-sha: ${{ github.event.pull_request.base.sha }}
-          head-repo: ${{ github.event.pull_request.head.repo.full_name }}
 
   plan:
-    needs: detect
+    needs: [facts, detect]
     if: needs.detect.outputs.empty == 'false'
     runs-on: ubuntu-slim
     permissions:
@@ -196,7 +249,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: ${{ needs.facts.outputs.head-sha }}
           fetch-depth: 0
       - uses: ship-iac/shipmate/actions/setup@<engine-sha>  # see the latest release
         with:
@@ -211,19 +264,21 @@ jobs:
           stack: ${{ matrix.stack }}
           stack-name: ${{ matrix.stack }}
           env: ${{ matrix.environment }}
-          expected-head: ${{ github.event.pull_request.head.sha }}
+          expected-head: ${{ needs.facts.outputs.head-sha }}
           plan-passphrase: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
 
   # Everything trusted happens inside the engine's reusable workflow: one job,
   # `environment: shipmate-engine`, no checkout, and both trust decisions (the
   # fork refusal and the draft skip) on its own `if:`. This caller only *states*
-  # the two facts they decide on — `head-repo` and `is-draft` below — and an
-  # omitted or empty one is read as a refusal, so this block can fail the job
-  # closed but never open. `permissions` is not optional — a callee's
-  # permissions are capped by this job's, and granting less kills the run at
-  # startup with no job and no log.
+  # the three facts they decide on — `head-repo`, `is-draft` and `on-demand`
+  # below — and it can only fail those decisions closed, never open: an omitted
+  # `head-repo` refuses every run, an omitted `is-draft` every autoplan run, and
+  # an omitted `on-demand` gives up the requested plan of a draft and the mirror
+  # of a requested plan's per-cell checks onto the head.
+  # `permissions` is not optional — a callee's permissions are capped by this
+  # job's, and granting less kills the run at startup with no job and no log.
   summary:
-    needs: [detect, plan]
+    needs: [facts, detect, plan]
     if: ${{ !cancelled() }}
     uses: ship-iac/shipmate/.github/workflows/summary.yml@<engine-sha>  # see the latest release
     permissions:
@@ -231,48 +286,69 @@ jobs:
     secrets:
       SHIPMATE_APP_PRIVATE_KEY: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
     with:
-      pr-number: ${{ github.event.pull_request.number }}
-      head-sha: ${{ github.event.pull_request.head.sha }}
+      pr-number: ${{ needs.facts.outputs.pr-number }}
+      head-sha: ${{ needs.facts.outputs.head-sha }}
       detect-result: ${{ needs.detect.result }}
       plan-result: ${{ needs.plan.result }}
       planned-cells: ${{ needs.detect.outputs.count }}
-      head-repo: ${{ github.event.pull_request.head.repo.full_name }}
-      is-draft: ${{ github.event.pull_request.draft }}
+      head-repo: ${{ needs.facts.outputs.head-repo }}
+      is-draft: ${{ needs.facts.outputs.is-draft }}
+      on-demand: ${{ needs.facts.outputs.on-demand }}
 ```
 
-Permissions on this path are narrow: the top level and each job grant
-`contents: read`, and the `summary` caller grants only that — the trusted work
-inside it runs on a freshly minted App token, not on `GITHUB_TOKEN`. The one
-addition above is AWS-specific: this sample's `plan` job grants `id-token: write`
-solely so `configure-aws-credentials` can assume the read-only plan role. A
-consumer with no plan-time cloud credentials drops both that grant and the
-credentials step.
+Permissions on this path are narrow: the top level grants `contents: read`, and
+the `summary` caller grants only that — the trusted work inside it runs on a
+freshly minted App token, not on `GITHUB_TOKEN`. `detect` and `plan` grant
+`contents: read`. A job's `permissions:` block replaces the workflow default
+rather than extending it, so `facts` trades that grant away for the
+`pull-requests: read` only its dispatch leg spends: a pull-request event answers
+out of its own payload, and a dispatched run has to look the pull request up by
+number. The one addition is AWS-specific: this sample's
+`plan` job grants `id-token: write` solely so `configure-aws-credentials` can
+assume the read-only plan role. A consumer with no plan-time cloud credentials
+drops both that grant and the credentials step.
 
-`head-repo` and `is-draft` are the two facts the engine's trusted job decides
-on, and the wrapper is what states them: `build-matrix` refuses to plan a run
-that does not state its head repository, and the `summary` job requires the
-stated head repository to equal the running repository *and* the stated draft
-flag to be `false` before it mints an App token. An omitted or empty value is
-read as a **refusal**, in both places — so this wrapper can only fail
-the decision closed, never weaken it. The two costs look nothing alike. Omit
-`head-repo` on `build-matrix` and `detect` fails loudly, naming the input. Omit
-either input on the `summary` call and the summary job is **skipped**: no
-`shipmate / gate` status, so nothing merges, and nothing on the run page says
-why. That is the trade the engine chose over minting an App-authored gate for a
-head repository it was never told about, and `shipmate doctor` reports this
-wiring so the silent case is not silent for long.
+Every fact these guards decide on is stated by the wrapper, never read from the
+event by the guard itself. `build-matrix` refuses to plan a run that does not
+state its head repository (the fork refusal) or the commit it is planning (the
+checkout check); the `summary` job requires the stated head repository to equal
+the running repository *and* the pull request to be no draft, unless the run was
+named on demand, before it mints an App token. An omitted or empty value is read
+as a **refusal** by each of those guards, `on-demand` excepted — it can only
+widen the draft skip, so leaving it out gives up a requested plan of a draft
+rather than refusing anything. Either way this wrapper can only fail a decision
+closed, never weaken it, and the fork half yields to nothing at all.
+
+The costs look nothing alike. Omit `head-repo` or `head-sha` on `build-matrix`
+and `detect` fails loudly, naming the input. Omit `head-repo` on the `summary`
+call and that job is **skipped** on every trigger; omit `is-draft` and it is
+skipped on every autoplan run, an explicitly requested plan being the one that
+still gates. Either way: no `shipmate / gate` status, so nothing merges, and
+nothing on the run page says why. Omit `on-demand` and an ordinary pull request
+is unaffected, which is what makes it the quietest of the three: `shipmate plan` on a draft then plans, uploads its
+artifacts, and is skipped at the summary — no gate, no plan comment, no apply
+checks for the work it just did. On a ready pull request `shipmate plan` gets all
+three, but its per-cell checks stay on the ref the run was dispatched on, so the
+pull request shows no `<stack> / <env>` rows and no failed cell.
+
+A skipped job is the
+trade the engine chose over minting an App-authored gate for a head repository
+it was never told about, and `shipmate doctor` reports this wiring so the silent
+cases are not silent for long.
 
 **Pass the pull request's own values, not constants.** A literal
-`is-draft: false` states "not a draft" for every run, drafts included, and
+`is-draft: false` states "not a draft" for every run, drafts included;
 `head-repo: ${{ github.repository }}` passes the fork check for every pull
-request, fork ones included — the guard then holds nothing, and only this
-snippet's expressions make it real. `doctor` reports either on the `summary`
-call, absent or wrong; it reports the `build-matrix` step's own `head-repo` the
-same way, and reports a `no-pull-request` anywhere in this file, which belongs
-only in a drift wrapper ([`drift.md`](drift.md)). What it still cannot see: it
-reads only a file named `plan.yml`, so a plan wrapper under another name is
-checked by review or not at all, and `is-draft` has no counterpart on
-`build-matrix` — that step takes no such input.
+request, fork ones included; and `on-demand: true` claims a person named every
+run, so every draft gets a gate — the guards then hold nothing, and only this
+snippet's expressions make them real. `doctor` reports each of the three on the
+`summary` call, absent or wrong; it reports the `build-matrix` step's own
+`head-repo` and `head-sha` the same way, one finding each, and reports a
+`no-pull-request` anywhere in this file, which belongs only in a drift wrapper
+([`drift.md`](drift.md)). What it still cannot see: it reads only a file named
+`plan.yml`, so a plan wrapper under another name is checked by review or not at
+all, and `is-draft` has no counterpart on `build-matrix` — that step takes no
+such input.
 
 `expected-head` is required. plan-cell records the commit each plan was
 produced from and apply-cell refuses a plan produced from a different tree, so
@@ -297,7 +373,8 @@ branch.
 `SHIPMATE_APPROVERS_TEAM` (set per repository in
 [`github-app.md`](github-app.md) §6), on a pull request that is mergeable and
 satisfies the branch ruleset's review policy, and only against a plan for the
-pull request's **current** head — the four apply requirements in
+pull request's **current** head, and only on a pull request that is not a
+draft — the five apply requirements in
 [`../CONTRACT.md`](../CONTRACT.md) §Comment-ops
 ([`concepts.md`](concepts.md) §Comment-ops for the shape). A refused comment
 names which requirement failed.
@@ -371,7 +448,10 @@ rules from Settings → Environments → `<name>` (or the API):
 > fail loud rather than apply with no state at all.
 
 `comment-ops.yml` turns a `shipmate <verb>` pull request comment into an
-authorized `workflow_dispatch` of `apply.yml`.
+authorized `workflow_dispatch` — of `apply.yml` for `apply` and `unlock`, of
+`plan.yml` for `plan`. Which one is picked comes from the `mode` output the
+dispatch step forwards below, so dropping that line sends a `shipmate plan` to
+the apply wrapper ([`upgrading.md`](upgrading.md) §0.20.0).
 
 ```yaml
 name: comment-ops
@@ -510,8 +590,12 @@ The engine is the validator, and it is the only layer with enough context to be
 one: `apply-detect` runs `validate_head_sha` and `validate_env`, and it knows
 which values are legitimately empty in which mode.
 Its errors are annotations on the run naming the actual value. Keep new inputs
-optional for the same reason — `required` is the default a new input drifts back
-to, and it reopens this exactly.
+on *this* wrapper optional for the same reason — `required` is the default a new
+input drifts back to, and it reopens this exactly. The plan wrapper's `pr_number`
+is the one documented `required: true` input and shows what the rule is actually
+about: that dispatch has a single mode carrying a single input the engine always
+fills, so there is no empty value for GitHub to reject, and requiring it is what
+makes a hand-dispatched plan name the pull request it plans.
 
 `deploy.yml` applies, on push to the default branch, every reviewed plan whose
 apply check is still pending — so it no-ops when everything was applied

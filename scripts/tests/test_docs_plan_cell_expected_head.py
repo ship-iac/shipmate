@@ -30,7 +30,7 @@ _EXPECTED_WITH = {
     "stack": "${{ matrix.stack }}",
     "stack-name": "${{ matrix.stack }}",
     "env": "${{ matrix.environment }}",
-    "expected-head": "${{ github.event.pull_request.head.sha }}",
+    "expected-head": "${{ needs.facts.outputs.head-sha }}",
     "plan-passphrase": "${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}",
 }
 

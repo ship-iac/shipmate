@@ -14,10 +14,18 @@ inputs:
       does not state its head repository cannot be checked for being a fork.
     required: false
     default: ""
+  head-sha:
+    description: >-
+      The pull request's head commit — the commit this run is planning. Wire it to the
+      `head-sha` output of shipmate's `pr-facts` action. Empty is refused: a run that does not
+      state the commit it is planning cannot have its checkout checked, and a checkout left on
+      the base or the dispatch ref plans a different tree and reports no changes.
+    required: false
+    default: ""
   no-pull-request:
     description: >-
       Set to 'true' only in a workflow with no pull-request context at all (nightly drift), which
-      is what skips the head-repository check. Never set it in a plan wrapper.
+      is what skips the head-repository and head-commit checks. Never set it in a plan wrapper.
     required: false
     default: "false"
 outputs:
@@ -40,5 +48,6 @@ runs:
         SHIPMATE_BASE_SHA: ${{ inputs.base-sha }}
         SHIPMATE_ALL_STACKS: ${{ inputs.all-stacks }}
         SHIPMATE_HEAD_REPO: ${{ inputs.head-repo }}
+        SHIPMATE_HEAD_SHA: ${{ inputs.head-sha }}
         SHIPMATE_NO_PULL_REQUEST: ${{ inputs.no-pull-request }}
       run: python3 "$GITHUB_ACTION_PATH/../../scripts/build-matrix"

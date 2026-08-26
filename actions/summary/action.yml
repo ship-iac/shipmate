@@ -1,5 +1,5 @@
 name: shipmate summary
-description: Mint a shipmate App installation token and, as the App, create the pending apply checks, upsert the sticky plan comment, and create/refresh the shipmate / gate check.
+description: Mint a shipmate App installation token and, as the App, create the pending apply checks, mirror an on-demand plan's own per-cell checks onto the pull request head, upsert the sticky plan comment, and create/refresh the shipmate / gate check.
 inputs:
   pr-number:
     description: Pull request number.
@@ -20,6 +20,15 @@ inputs:
   planned-cells:
     description: How many cells detect planned (its `count` output). Compared against the cell summaries this job parses; any disagreement holds the gate.
     required: true
+  on-demand:
+    description: >-
+      '"true"' when a human named this plan (the plan workflow's workflow_dispatch leg). Such a
+      run's own per-cell checks are attached to the ref it was dispatched on, not to the pull
+      request head, so they are mirrored onto the head here. Empty or "false" mirrors nothing —
+      under a pull-request event those checks are already on the head, and a second copy would
+      put two producers behind one check name.
+    required: false
+    default: ""
   app-id:
     description: shipmate App id (a repo/org variable, not a secret).
     required: true
@@ -91,6 +100,44 @@ runs:
           [ -z "$body" ] && continue
           printf '%s' "$body" | gh api "repos/$GITHUB_REPOSITORY/check-runs" --input - >/dev/null
         done < bodies.jsonl
+
+    - name: Mirror this run's per-cell plan checks onto the head
+      if: ${{ inputs.on-demand == 'true' }}
+      shell: bash
+      env:
+        GH_TOKEN: ${{ steps.token.outputs.token }}
+        SHIPMATE_HEAD_SHA: ${{ inputs.head-sha }}
+      run: |
+        set -euo pipefail
+        [[ "$SHIPMATE_HEAD_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::head-sha must be a 40-char lowercase hex SHA (got: $SHIPMATE_HEAD_SHA)"; exit 1; }
+        # GITHUB_SHA is this run's own commit — the ref it was dispatched on —
+        # which is where GitHub attached the plan jobs' checks.
+        # Degrades rather than fails: the gate is written by a later step, and a
+        # step that only decides what a reviewer SEES must not cost the gate.
+        # The pull request still carries the App-authored apply checks and the
+        # sticky comment either way. Deliberately not extended to anything the
+        # gate depends on.
+        if ! gh api --paginate \
+          "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/check-runs?filter=all&per_page=100" \
+          --jq '.check_runs[]' > run-checks.jsonl; then
+          echo "::warning::could not list this run's own check runs; the per-cell plan checks were not mirrored onto the pull request head"
+          exit 0
+        fi
+        if ! python3 "$GITHUB_ACTION_PATH/../../scripts/mirror-checks" < run-checks.jsonl > mirror.jsonl; then
+          echo "::warning::could not build the mirrored per-cell checks; the pull request shows none for this run"
+          exit 0
+        fi
+        while IFS= read -r body; do
+          [ -z "$body" ] && continue
+          if ! printf '%s' "$body" | gh api "repos/$GITHUB_REPOSITORY/check-runs" --input - >/dev/null; then
+            # Every remaining body is still attempted: the listing is unordered,
+            # so bailing out here drops an arbitrary suffix — which can be
+            # exactly the failed cell this mirror exists to show.
+            name=${body#*\"name\": \"}
+            echo "::warning::could not mirror the check \"${name%%\"*}\" onto the pull request head; the pull request shows only some of this run's plan checks"
+            continue
+          fi
+        done < mirror.jsonl
 
     - name: Build comment + gate state
       id: build

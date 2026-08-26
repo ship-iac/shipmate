@@ -12,7 +12,7 @@ findings as workflow annotations titled `shipmate doctor`
 (`::warning title=shipmate doctor::<text>` / `::notice title=shipmate
 doctor::<text>`) — read-only, never blocking. Comment `shipmate doctor` on a
 pull request for a consolidated report: a sticky comment (marker `<!--
-shipmate:doctor -->`, upserted in place like the plan comment) combining twelve
+shipmate:doctor -->`, upserted in place like the plan comment) combining thirteen
 live probes — a missing or mis-pinned `shipmate / gate` rule on the default
 branch (no active ruleset requiring it, or one that doesn't pin
 `integration_id` to the shipmate App, or that isn't strict),
@@ -72,27 +72,37 @@ under examination, so the pull request that bumps a stale pin is not itself
 reported stale, and restricted to pins of the engine's own repository, which
 the probe learns at runtime from the running action rather than from any
 hardcoded slug — another org's shared action is not shipmate's to report on),
-whether the `plan.yml` wrapper states the facts the two normalized guards decide
-on — the head-repository and draft inputs on its call of the engine's reusable
-summary workflow, the head-repository input on its own `build-matrix` step, and
-no `no-pull-request` anywhere in the file (an omitted summary input skips the
+whether the `plan.yml` wrapper states the facts the engine's guards decide
+on — the head-repository, draft and on-demand inputs on its call of the engine's
+reusable summary workflow, the head-repository and head-SHA inputs on its own
+`build-matrix` step, and
+no `no-pull-request` anywhere in the file (an omitted `head-repo` or `is-draft`
+on the summary call skips the
 summary job, so no gate status is written and nothing on the run page says why
 the pull request cannot merge; a constant — the running repository, a literal
 `false` — states the safe answer for every run, fork pull requests and drafts
 included, so the value is checked and not just the key, and on the `build-matrix`
-step that constant is the fork refusal passing every pull request),
+step that constant is the fork refusal passing every pull request, or a run
+planning whatever the trigger checked out),
 whether the `apply.yml` wrapper still declares or forwards the retired
 `plan_run_id` input (the engine dispatches no such value and nothing it calls
 accepts one; a `with:` line forwarding it to the engine's reusable `apply.yml`
 or `apply-all.yml` makes GitHub reject the run as it LOADS the workflow — the
 run has no jobs and no logs, only a workflow-validation error on the run itself
 — while the same line on a composite action is only a warning),
+whether the `plan.yml` wrapper can serve a dispatched plan at all — the
+`workflow_dispatch` trigger a commented `shipmate plan` dispatches, the `pr_number`
+input that dispatch body carries, and a `pr-facts` step (the first two are refused
+at dispatch time with an HTTP 422 and no run created, so the failure lands on the
+comment-handling run rather than the pull request; without the third a dispatched
+run has nothing resolving which pull request it is for, since its event payload
+carries none),
 whether the configured approvers team resolves in the org, and
 whether the shipmate App installation still grants the manifest's full
 permission set — with the warning and failure annotations GitHub already
 recorded on this commit's workflow runs (shipmate's own and any other
 Actions workflow run on that commit; third-party-app-authored check runs are
-excluded). Only ten of the twelve probes can produce a finding from the plan
+excluded). Only eleven of the thirteen probes can produce a finding from the plan
 path's own `annotate`-mode run (`actions/summary`): the approvers-team probe
 needs the `SHIPMATE_TEAM` environment variable, which the plan path does
 not supply, and
@@ -318,19 +328,25 @@ own fix:
 - **`expected-head` is missing or empty.** `plan-cell` requires it — the commit
   the run is planning — and refuses rather than publishing a plan whose
   provenance nobody can verify. Add
-  `expected-head: ${{ github.event.pull_request.head.sha }}` to the `plan-cell`
+  `expected-head: ${{ needs.facts.outputs.head-sha }}` to the `plan-cell`
   step ([`getting-started.md`](getting-started.md) §Required — plan). This is the
   first thing a repository meets after re-pinning to the release that introduced
   the input ([`upgrading.md`](upgrading.md) §0.17.0).
-- **The commit checked out is not the commit the run says it is planning.** The
-  plan path is `pull_request_target`, which checks out the **base** branch by
-  default, so `detect` and `plan` must name
-  `ref: ${{ github.event.pull_request.head.sha }}` on their checkout. Without it
+- **The commit checked out is not the commit the run says it is planning.**
+  Neither plan trigger checks out the pull request's head — `pull_request_target`
+  takes the **base** branch, `workflow_dispatch` the dispatch ref — so `detect`
+  and `plan` must name
+  `ref: ${{ needs.facts.outputs.head-sha }}` on their checkout. Without it
   the cell plans the base and would report a clean plan for a pull request it
   never read; that is now a refusal instead. Fix the **checkout** — passing the
   base SHA as `expected-head` to make the comparison agree is the one wrong
   reading of this error, and it restores exactly the hazard the check exists to
-  close.
+  close. `build-matrix` holds the same line one job earlier, in `detect`, and
+  states its half of it two ways: `this run checked out <sha>, which is not the
+  commit it is planning` when the `ref:` is missing, and `this run did not state
+  the commit it is planning` when the step's own `head-sha` input is absent
+  ([`upgrading.md`](upgrading.md) §0.20.0). Neither is optional and neither has a
+  quiet mode — a run that cannot name its head is refused, not planned.
 
 ### `this reviewed plan records no planned commit`, or `the reviewed plan was produced from`
 
@@ -456,13 +472,20 @@ Two locks this verb does not reach:
 Four distinct causes, in the order worth checking.
 
 **No gate status was written at all**, as opposed to a red or held one. The
-trusted summary job decides on two inputs the `plan.yml` wrapper states —
-`head-repo` and `is-draft` — and reads an absent or empty one as a refusal, so a
-wrapper that calls the engine's `summary.yml` missing **either** is *skipped*: no gate,
-no plan comment, and nothing on the run page saying why. The pull request cannot
+trusted summary job decides on three inputs the `plan.yml` wrapper states —
+`head-repo`, `is-draft` and `on-demand` — and reads an absent or empty
+`head-repo` or `is-draft` as a refusal (an absent `on-demand` reads as `false`,
+which is plain autoplan behaviour). A wrapper that calls the engine's
+`summary.yml` without `head-repo` has
+its summary job *skipped* on every run; without `is-draft`, on every automatic
+plan (a commented `shipmate plan` still gates); either way: no gate, no plan
+comment, and nothing on the run page saying why. The pull request cannot
 merge, which is the intended direction, but the cause is only visible in the
-wrapper. Add both lines (`docs/getting-started.md` §Required — plan,
-`docs/upgrading.md` §0.18.0); `shipmate doctor` reports this wiring, including a
+wrapper. Add all three lines (`docs/getting-started.md` §Required — plan,
+`docs/upgrading.md` §0.20.0). Omitting `on-demand` is the quiet one: every
+ordinary pull request is unaffected, and only a `shipmate plan` on a **draft**
+loses its gate — it plans, uploads its artifacts, and is skipped at the summary,
+so nothing it just did is published. `shipmate doctor` reports this wiring, including a
 constant value that would pass the check for every run.
 
 **A pending apply check nothing will complete.** `gate-refresh` greens the gate
@@ -593,9 +616,10 @@ It keys on the `head-repo` input the wrapper passes, and it **refuses by
 default**: a run that states no head repository is refused too, with a message
 naming the input. So the same failure has a second cause — a `plan.yml` that
 re-pinned the engine without adding
-`head-repo: ${{ github.event.pull_request.head.repo.full_name }}` to its
+`head-repo: ${{ needs.facts.outputs.head-repo }}` to its
 `build-matrix` step fails every pull request this way, fork or not
-(`docs/upgrading.md` §0.18.0). A nightly drift wrapper says it has no pull
+(`docs/upgrading.md` §0.20.0, and §0.18.0 for the release that first required
+the input). A nightly drift wrapper says it has no pull
 request at all with `no-pull-request: "true"` instead (`docs/drift.md`).
 
 No input allows a fork. Push the branch to this repository

@@ -19,6 +19,17 @@ NO_PLAN_REASON = (
     "before an engine re-pin), then `shipmate apply` again."
 )
 UNGATED_DEV = frozenset({"dev-eu"})
+#: The refusal an apply on a draft gets, hand-written: it is the sentence a
+#: commenter reads on a PR.
+DRAFT_REASON = (
+    "not authorized: this pull request is a draft. A draft can be planned but not "
+    "applied — mark it ready for review, then comment the apply again."
+)
+#: The membership refusal for `_decide`'s default team, hand-written for the
+#: same reason.
+MEMBER_REASON = (
+    "not authorized: the commenter is not a member of the required approvers team `deployers`."
+)
 
 
 def _decide(**kw):
@@ -401,6 +412,45 @@ def test_ungated_exemption_output_is_set_only_when_the_exemption_fired(
         SHIPMATE_UNGATED_ENVS=ungated,
     )
     assert parsed["ungated_exemption"] == expected
+
+
+def test_apply_on_a_draft_is_refused_with_the_remedy():
+    ok, reason = _decide(pr={**PR_OK, "draft": True})
+    assert (ok, reason) == (False, DRAFT_REASON)
+
+
+def test_apply_on_a_non_draft_is_unaffected():
+    ok, reason = _decide(pr={**PR_OK, "draft": False})
+    assert (ok, reason) == (True, "")
+
+
+def test_draft_refusal_runs_after_the_membership_check():
+    # A non-member on a draft is told about membership: the reason a commenter
+    # can act on first, and the fail-fast order every check here relies on.
+    ok, reason = _decide(is_member=False, pr={**PR_OK, "draft": True})
+    assert (ok, reason) == (False, MEMBER_REASON)
+
+
+def test_draft_refusal_runs_before_the_mergeable_check():
+    # A draft with conflicts reports mergeable_state "dirty" -- keying on that
+    # field, or ordering the draft check after it, hides the draft.
+    ok, reason = _decide(
+        pr={"mergeable": False, "mergeable_state": "dirty", "draft": True, "head": {"sha": "abc"}}
+    )
+    assert (ok, reason) == (False, DRAFT_REASON)
+
+
+def test_unlock_on_a_draft_is_still_authorized():
+    ok, reason = az.decide(
+        is_member=True,
+        approvers_team="infra",
+        review_decision="",
+        pr={"mergeable": None, "draft": True, "head": {"sha": "a" * 40}},
+        plan_runs={},
+        environment="dev-eu",
+        verb="unlock",
+    )
+    assert (ok, reason) == (True, "")
 
 
 def test_unlock_needs_only_team_membership():

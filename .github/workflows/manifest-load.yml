@@ -63,6 +63,8 @@ jobs:
       - if: false
         uses: ship-iac/shipmate/actions/plan-cell@main
       - if: false
+        uses: ship-iac/shipmate/actions/pr-facts@main
+      - if: false
         uses: ship-iac/shipmate/actions/setup@main
       - if: false
         uses: ship-iac/shipmate/actions/state@main
