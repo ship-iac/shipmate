@@ -215,16 +215,21 @@ jobs:
         with:
           terramate-version: ${{ vars.TERRAMATE_VERSION }}
           tofu-version: ${{ vars.TOFU_VERSION }}
-      - name: fmt check
-        run: terramate fmt --check
-      - name: stale codegen check
-        run: terramate generate --detailed-exit-code
+      # Before the two terramate steps, not after: this step is where a fork's
+      # pull request is refused, and `terramate fmt`/`generate` evaluate the
+      # checked-out HCL. Under `pull_request_target` `actions/checkout` refuses a
+      # fork head itself, so the order only shows on the dispatch leg — which has
+      # no pull-request context for that outer refusal to key on.
       - id: matrix
         uses: ship-iac/shipmate/actions/build-matrix@<engine-sha>  # see the latest release
         with:
           base-sha: ${{ needs.facts.outputs.base-sha }}
           head-repo: ${{ needs.facts.outputs.head-repo }}
           head-sha: ${{ needs.facts.outputs.head-sha }}
+      - name: fmt check
+        run: terramate fmt --check
+      - name: stale codegen check
+        run: terramate generate --detailed-exit-code
 
   plan:
     needs: [facts, detect]

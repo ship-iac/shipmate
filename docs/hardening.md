@@ -834,18 +834,20 @@ authorization step ahead of it: only a comment from an `OWNER`, `MEMBER` or
 `COLLABORATOR` is dispatched at all
 ([`../CONTRACT.md`](../CONTRACT.md) §Comment-ops).
 
-**The outer of the two fork guards does not reach this leg.** The
-`actions/checkout` refusal above was measured under `pull_request_target`, and a
-dispatched run carries no pull-request context for it to key on — so on this leg
-the fork's head is expected to check out, and `detect`'s `terramate fmt --check`
-and `terramate generate` evaluate (and generate from) fork-authored HCL before
-the `build-matrix` step turns the fork away. What that costs is bounded: `detect`
-holds `contents: read` and no App key, binds no environment, runs no `tofu`, and
-only an `OWNER`, `MEMBER` or `COLLABORATOR` can start it at all. It is still the
-autoplan's outermost guard reaching one step less far, so probe checkout's
-behaviour on this trigger before treating the two legs as identical. Moving the
-`build-matrix` step ahead of the two terramate steps would close it — the fork
-refusal is decided before that script shells out or reads the tree.
+**The outer of the two fork guards does not reach this leg, which is why step
+order matters here.** The `actions/checkout` refusal above was measured under
+`pull_request_target`; a dispatched run carries no pull-request context for it to
+key on, so on this leg the fork's head is expected to check out and the inner
+refusal in `build-matrix` is the only one left. The reference `detect` therefore
+runs that step **before** `terramate fmt --check` and `terramate generate`, so a
+fork is turned away before either evaluates the tree it wrote. Keep that order:
+reversed, the two terramate steps evaluate (and generate from) fork-authored HCL
+first. What the reversed order would cost is bounded — `detect` holds
+`contents: read` and no App key, binds no environment, runs no `tofu`, and only
+an `OWNER`, `MEMBER` or `COLLABORATOR` can start the run at all — but the outer
+guard reaching one step less far is exactly the kind of difference worth not
+having. Checkout's own behaviour on this trigger is unprobed; do not treat the
+two legs as identical until it is.
 
 The refusal in `detect` is loud (a red step) rather than a quiet empty matrix,
 because a fork pull request could not merge either way: with the `summary` job
