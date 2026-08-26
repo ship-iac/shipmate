@@ -266,10 +266,11 @@ jobs:
   # `environment: shipmate-engine`, no checkout, and both trust decisions (the
   # fork refusal and the draft skip) on its own `if:`. This caller only *states*
   # the three facts they decide on — `head-repo`, `is-draft` and `on-demand`
-  # below — and an omitted or empty one is read as a refusal, so this block can
-  # fail the job closed but never open. `permissions` is not optional — a
-  # callee's permissions are capped by this job's, and granting less kills the
-  # run at startup with no job and no log.
+  # below — and it can only fail those decisions closed, never open: an omitted
+  # `head-repo` refuses every run, an omitted `is-draft` every autoplan run, and
+  # an omitted `on-demand` gives up only the requested plan of a draft.
+  # `permissions` is not optional — a callee's permissions are capped by this
+  # job's, and granting less kills the run at startup with no job and no log.
   summary:
     needs: [facts, detect, plan]
     if: ${{ !cancelled() }}
@@ -307,9 +308,10 @@ state its head repository (the fork refusal) or the commit it is planning (the
 checkout check); the `summary` job requires the stated head repository to equal
 the running repository *and* the pull request to be no draft, unless the run was
 named on demand, before it mints an App token. An omitted or empty value is read
-as a **refusal** in all of them — so this wrapper can only fail the decision
-closed, never weaken it. The fork half is the exception that yields to nothing:
-`on-demand` widens the draft skip only.
+as a **refusal** by each of those guards, `on-demand` excepted — it can only
+widen the draft skip, so leaving it out gives up a requested plan of a draft
+rather than refusing anything. Either way this wrapper can only fail a decision
+closed, never weaken it, and the fork half yields to nothing at all.
 
 The costs look nothing alike. Omit `head-repo` or `head-sha` on `build-matrix`
 and `detect` fails loudly, naming the input. Omit `head-repo` on the `summary`

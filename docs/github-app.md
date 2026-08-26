@@ -373,7 +373,7 @@ the actual work here:
   belt-and-braces: it refuses when the head repository the caller states
   (`head-repo`) differs from `github.repository`, when the caller states the
   pull request is a draft that nobody explicitly asked to plan (`is-draft`
-  without `on-demand`), and the two inputs sit either side of the guard's
+  without `on-demand`), and the three inputs fall on two sides of the guard's
   parentheses: `head-repo` is outside them, so an absent or empty value refuses
   **unconditionally** and no trigger rescues it; `is-draft` and `on-demand` are
   the two sides of one disjunct, so an absent `is-draft` refuses **every autoplan
