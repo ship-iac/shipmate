@@ -2,7 +2,7 @@
 validation before API call, and graceful degradation when the consumer's
 apply.yml does not yet declare the mode input.
 
-Four parts:
+Five parts:
 - Body building: mode is included in dispatch inputs only when "unlock"; when
   unset or "apply", no mode key appears. Tested via subprocess execution of the
   python heredoc only (not the full script).
@@ -14,16 +14,20 @@ Four parts:
   full shipped script with stubbed gh/python3 on PATH.
 - Apply path stays green: when an apply dispatch fails, the raw error is printed
   with no degrade message. Tested by executing the full shipped script.
+- The plan mode: which workflow it targets, that its body carries the PR number
+  alone, that apply and unlock bodies are untouched by it, that comment-ops'
+  mode enumeration stays inside the accepted set, and its own skew message.
 """
 
 import json
 import os
+import re
 import subprocess
 import tempfile
 from pathlib import Path
 
 import pytest
-from _loader import action_steps, usable_bash
+from _loader import action_steps, action_yaml, usable_bash
 
 DISPATCH_ACTION = "dispatch"
 
@@ -214,7 +218,7 @@ def test_invalid_mode_rejected_before_api_call():
             "gh stub was invoked; validation should have rejected before API call"
         )
         output = result.stdout + result.stderr
-        assert "::error::mode must be apply or unlock (got: bogus)" in output, (
+        assert "::error::mode must be apply, unlock or plan (got: bogus)" in output, (
             f"expected error message not found in output: {output}"
         )
 
@@ -361,8 +365,8 @@ def test_apply_failure_no_degrade_message():
 def test_unlock_non_422_failure_prints_no_degrade_message():
     """A 403 is not version skew: the raw output prints, the skew message does not.
 
-    Mutation: drop the `[[ "$out" == *"HTTP 422"* ]]` half of the condition and
-    this reddens, while the two tests above stay green.
+    Mutation: drop the `[[ "$out" == *"Unexpected inputs provided"* ]]` half of
+    the condition and this reddens, while the two tests above stay green.
     """
     bash = usable_bash()
     if not bash:
@@ -566,4 +570,236 @@ def test_a_422_about_another_input_is_not_reported_as_mode_skew():
         )
         assert "does not declare the mode input" not in output, (
             f"a 422 about plan_run_id is not mode skew: {output}"
+        )
+
+
+def _build_dispatch_whole_body(mode="", environment=""):
+    """The whole parsed dispatch body, not just its inputs mapping."""
+    code = _extract_python_heredoc()
+    env = os.environ.copy()
+    env.update(
+        {
+            "DISPATCH_REF": "main",
+            "REF": "abc123def456",
+            "PR_NUMBER": "42",
+            "ENVIRONMENT": environment,
+            "MODE": mode,
+        }
+    )
+    result = subprocess.run(
+        [__import__("sys").executable, "-c", code],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 0, f"python body builder failed: {result.stderr}"
+    return json.loads(result.stdout)
+
+
+def test_plan_body_is_the_dispatch_ref_and_pr_number_alone():
+    """A plan body is exactly {ref: dispatch ref, inputs: {pr_number}}.
+
+    plan.yml declares one input, so every extra key is a production 422; and the
+    top-level ref is the dispatch ref, never the head SHA — a plan states no head.
+
+    Mutations: add `ref`, `environment` or `mode` to the plan inputs; swap the
+    top-level ref for the head SHA.
+    """
+    body = _build_dispatch_whole_body(mode="plan", environment="dev-eu")
+    assert body == {"ref": "main", "inputs": {"pr_number": "42"}}, (
+        f"plan body must carry the PR number alone, on the dispatch ref: {body}"
+    )
+
+
+def test_apply_and_unlock_bodies_are_unchanged_by_the_plan_branch():
+    """apply and unlock still carry ref + pr_number, environment when set, and
+    mode only for unlock.
+
+    Mutation: reuse the plan branch for apply.
+    """
+    assert _build_dispatch_whole_body(mode="") == {
+        "ref": "main",
+        "inputs": {"ref": "abc123def456", "pr_number": "42"},
+    }
+    assert _build_dispatch_whole_body(mode="apply", environment="dev-eu") == {
+        "ref": "main",
+        "inputs": {"ref": "abc123def456", "pr_number": "42", "environment": "dev-eu"},
+    }
+    assert _build_dispatch_whole_body(mode="unlock", environment="dev-eu") == {
+        "ref": "main",
+        "inputs": {
+            "ref": "abc123def456",
+            "pr_number": "42",
+            "environment": "dev-eu",
+            "mode": "unlock",
+        },
+    }
+
+
+RECORDING_GH_STUB = "#!/bin/bash\nprintf '%s\\n' \"$@\" > argv.txt\necho '{}'\n"
+
+
+def _run_dispatch(tmpdir, mode, workflow="", gh_stub=RECORDING_GH_STUB):
+    """Run the shipped step with a gh stub that records its argv.
+
+    Returns (CompletedProcess, recorded argv text).
+    """
+    path_dir, _, gh_path = _create_stub_commands(tmpdir)
+    Path(gh_path).write_text(gh_stub)
+    Path(gh_path).chmod(0o755)
+
+    env = os.environ.copy()
+    env["PATH"] = f"{path_dir}:{env.get('PATH', '')}"
+    env["GH_TOKEN"] = "test_token"  # noqa: S105
+    env["REPO"] = "org/repo"
+    env["WORKFLOW"] = workflow
+    env["DISPATCH_REF"] = "main"
+    env["ENVIRONMENT"] = ""
+    env["MODE"] = mode
+    env["REF"] = "abc123"
+    env["PR_NUMBER"] = "42"
+
+    result = subprocess.run(
+        [usable_bash(), "-c", _extract_dispatch_run_block()],
+        env=env,
+        capture_output=True,
+        text=True,
+        cwd=tmpdir,
+        timeout=30,
+    )
+    argv_file = Path(tmpdir) / "argv.txt"
+    return result, (argv_file.read_text() if argv_file.exists() else "")
+
+
+def test_plan_with_no_workflow_input_dispatches_plan_yml():
+    """mode=plan with no workflow input dispatches plan.yml, not apply.yml.
+
+    Mutation: drop the plan branch of the workflow default.
+    """
+    if not usable_bash():
+        pytest.skip("bash not available on this platform")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        result, argv = _run_dispatch(tmpdir, mode="plan")
+        assert result.returncode == 0, f"plan dispatch failed: {result.stdout}{result.stderr}"
+        assert "repos/org/repo/actions/workflows/plan.yml/dispatches" in argv, (
+            f"plan must be dispatched at plan.yml, gh saw: {argv!r}"
+        )
+
+
+def test_apply_with_no_workflow_input_still_dispatches_apply_yml():
+    """mode=apply with no workflow input still dispatches apply.yml.
+
+    Mutation: default to plan.yml unconditionally.
+    """
+    if not usable_bash():
+        pytest.skip("bash not available on this platform")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        result, argv = _run_dispatch(tmpdir, mode="apply")
+        assert result.returncode == 0, f"apply dispatch failed: {result.stdout}{result.stderr}"
+        assert "repos/org/repo/actions/workflows/apply.yml/dispatches" in argv, (
+            f"apply must be dispatched at apply.yml, gh saw: {argv!r}"
+        )
+
+
+def test_explicit_workflow_input_wins_for_plan():
+    """An explicit workflow input beats the plan default — the escape hatch.
+
+    Mutation: let the plan branch overwrite a non-empty WORKFLOW.
+    """
+    if not usable_bash():
+        pytest.skip("bash not available on this platform")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        result, argv = _run_dispatch(tmpdir, mode="plan", workflow="house-plan.yml")
+        assert result.returncode == 0, f"plan dispatch failed: {result.stdout}{result.stderr}"
+        assert "repos/org/repo/actions/workflows/house-plan.yml/dispatches" in argv, (
+            f"the explicit workflow input must win, gh saw: {argv!r}"
+        )
+
+
+def test_every_mode_comment_ops_emits_is_accepted_here():
+    """comment-ops' mode enumeration and this action's `case` list cannot drift.
+
+    Nothing else couples them: a mode comment-ops emits that the case rejects
+    fails only at runtime, with the whole suite green.
+
+    Mutation: remove `plan` (or `unlock`) from the case list.
+    """
+    if not usable_bash():
+        pytest.skip("bash not available on this platform")
+
+    # Every literal the expression *yields* sits behind `&&` or `||`; the ones
+    # it compares a route against sit behind `==`.
+    value = action_yaml("comment-ops")["outputs"]["mode"]["value"]
+    modes = set(re.findall(r"(?:&&|\|\|)\s*'([a-z-]+)'", value))
+    assert modes == {"apply", "unlock", "plan"}, (
+        f"comment-ops emits modes {sorted(modes)}; extend the case list deliberately"
+    )
+
+    for mode in sorted(modes):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result, _ = _run_dispatch(tmpdir, mode=mode)
+            output = result.stdout + result.stderr
+            assert result.returncode == 0, f"mode={mode!r} was rejected: {output}"
+            assert "::error::mode must be" not in output, (
+                f"mode={mode!r} is emitted by comment-ops but rejected here: {output}"
+            )
+
+
+def test_plan_422_prints_the_repin_message():
+    """A plan 422 naming the missing surface prints the re-pin message.
+
+    Measured: GitHub answers `Workflow does not have 'workflow_dispatch' trigger
+    (HTTP 422)` for a workflow with no such trigger.
+
+    Mutation: invert the mode half of the condition.
+    """
+    if not usable_bash():
+        pytest.skip("bash not available on this platform")
+    stub = (
+        "#!/bin/bash\n"
+        "echo \"gh: Workflow does not have 'workflow_dispatch' trigger (HTTP 422)\" >&2\n"
+        "exit 22\n"
+    )
+    with tempfile.TemporaryDirectory() as tmpdir:
+        result, _ = _run_dispatch(tmpdir, mode="plan", gh_stub=stub)
+        output = result.stdout + result.stderr
+        assert result.returncode == 22, f"gh's exit status must survive: {result.returncode}"
+        assert "Workflow does not have" in output, f"raw gh output missing: {output}"
+        assert "does not accept a dispatched plan" in output, f"re-pin message missing: {output}"
+
+
+def test_plan_403_prints_no_repin_message():
+    """A plan 403 is not version skew: the raw output prints, the message does not.
+
+    Mutation: drop the message-text half of the plan condition.
+    """
+    if not usable_bash():
+        pytest.skip("bash not available on this platform")
+    stub = "#!/bin/bash\necho 'HTTP 403: Forbidden' >&2\nexit 1\n"
+    with tempfile.TemporaryDirectory() as tmpdir:
+        result, _ = _run_dispatch(tmpdir, mode="plan", gh_stub=stub)
+        output = result.stdout + result.stderr
+        assert result.returncode == 1, f"gh's exit status must survive: {result.returncode}"
+        assert "HTTP 403: Forbidden" in output, f"raw gh output missing: {output}"
+        assert "does not accept a dispatched plan" not in output, (
+            f"a 403 is not version skew: {output}"
+        )
+
+
+def test_the_plan_notice_states_neither_an_environment_nor_a_ref():
+    """A plan has neither, so its success notice claims neither.
+
+    Mutation: unbranch the notice, leaving the apply wording for every mode.
+    """
+    if not usable_bash():
+        pytest.skip("bash not available on this platform")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        result, _ = _run_dispatch(tmpdir, mode="plan")
+        output = result.stdout + result.stderr
+        assert "::notice title=dispatch::dispatched plan.yml on main for PR #42" in output, (
+            f"the plan notice must name the workflow, the dispatch ref and the PR: {output}"
+        )
+        assert "all environments" not in output and "(ref " not in output, (
+            f"a plan carries no environment and no ref: {output}"
         )

@@ -137,8 +137,9 @@ repository that has no `.github/workflows/plan.yml` — no apply path matches th
 path any more (each cell reads its plan run from its own apply check), but
 `shipmate doctor` keys its plan-wrapper probes on the filename, so a plan
 workflow under another name loses them silently and the refusal is what stops it
-happening. `apply.yml` is the name `actions/dispatch` targets by default, so an
-apply wrapper called anything else is dispatched by nothing and `shipmate apply`
+happening. Both are also the names `actions/dispatch` targets by default —
+`plan.yml` for a commented `shipmate plan`, `apply.yml` for apply and unlock —
+so a wrapper called anything else is dispatched by nothing and the command
 silently reaches no workflow. Create both under exactly those names.
 
 The fences on this page are transcribed from the sample repositories, which pin
