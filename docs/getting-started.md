@@ -365,7 +365,8 @@ branch.
 `SHIPMATE_APPROVERS_TEAM` (set per repository in
 [`github-app.md`](github-app.md) §6), on a pull request that is mergeable and
 satisfies the branch ruleset's review policy, and only against a plan for the
-pull request's **current** head — the four apply requirements in
+pull request's **current** head, and only on a pull request that is not a
+draft — the five apply requirements in
 [`../CONTRACT.md`](../CONTRACT.md) §Comment-ops
 ([`concepts.md`](concepts.md) §Comment-ops for the shape). A refused comment
 names which requirement failed.

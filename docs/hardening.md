@@ -282,8 +282,8 @@ without the other:
 - **`SHIPMATE_UNGATED_ENVS`** (repository variable) exempts the environments it
   names from *the code review before apply* — and from nothing else. The
   ruleset still requires the review before the **merge**, `CHANGES_REQUESTED`
-  still refuses, and the approvers-team, mergeable and exact-plan requirements
-  are untouched (CONTRACT.md §Comment-ops). Environments it does not name are
+  still refuses, and the approvers-team, not-a-draft, mergeable and exact-plan
+  requirements are untouched (CONTRACT.md §Comment-ops). Environments it does not name are
   held out of a bare `shipmate apply` and refused on a targeted one, their apply
   checks left pending, so the gate keeps blocking the merge until they are
   applied with a review in hand. Both engine apply workflows read the variable

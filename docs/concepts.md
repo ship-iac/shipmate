@@ -45,9 +45,9 @@ the App creates separately. An on-demand plan is the exception: a dispatched
 run's job checks land on the ref it was dispatched on, so the summary job
 mirrors that run's own completed checks onto the pull request head as
 App-authored copies linking back to the originals.
-Authorizing an apply requires team membership, a mergeable PR that satisfies
-the branch ruleset's review policy, and a reviewed plan for the PR's current
-head; authorizing an unlock requires team membership plus the `<env>-apply`
+Authorizing an apply requires team membership, a non-draft, mergeable PR that
+satisfies the branch ruleset's review policy, and a reviewed plan for the PR's
+current head; authorizing an unlock requires team membership plus the `<env>-apply`
 environment its job binds.
 Comment-ops keeps the entire interaction surface inside the pull request
 that is already the unit of review, with an auditable history of who asked
@@ -79,10 +79,10 @@ not a repository-wide audit.
 
 `help` and `doctor` are read-only, and `plan` changes no infrastructure but is
 open to the same commenters `doctor` is; `apply` and `unlock` are authorized. `apply`
-carries the full check (approvers-team membership, a mergeable and reviewed PR,
-and a reviewed plan for the current head — see Comment-ops above); `unlock`
-carries a narrower one — approvers-team membership and the `<env>-apply`
-environment, but no review and no plan — because it releases a lock rather than
+carries the full check (approvers-team membership, a non-draft, mergeable and
+reviewed PR, and a reviewed plan for the current head — see Comment-ops above);
+`unlock` carries a narrower one — approvers-team membership and the
+`<env>-apply` environment, but no draft check, no review and no plan — because it releases a lock rather than
 changing infrastructure. `help` answers
 any commenter. `doctor` does not: it names the guardrails this repository is
 missing — that `shipmate / gate` is not required on the default branch, that an

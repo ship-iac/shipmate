@@ -507,7 +507,7 @@ themselves contain text that matches the command grammar.
 | `shipmate doctor` | active | none | read-only, but the commenter's `author_association` must be `OWNER`, `MEMBER` or `COLLABORATOR` (a classification, not a permission check) |
 | `shipmate help` | active | none | none — read-only, open to any commenter |
 | `shipmate plan` | active | none | changes no infrastructure, but the commenter's `author_association` must be `OWNER`, `MEMBER` or `COLLABORATOR` (a classification, not a permission check) — the same tier as `doctor` |
-| `shipmate unlock <env>` | active | required env | team membership plus the `<env>-apply` environment — no review policy, no mergeable check, no reviewed plan (below) |
+| `shipmate unlock <env>` | active | required env | team membership plus the `<env>-apply` environment — no review policy, no mergeable check, no draft check, no reviewed plan (below) |
 | `shipmate destroy` | reserved | — | — |
 
 `shipmate plan` plans the pull request's changed stacks on demand, authoring
@@ -518,7 +518,7 @@ request head as App-authored mirrors, described with the App identities below).
 It takes **no arguments** — there is one plan of record per head commit, and a
 run holding a single environment's artifacts would leave every other
 environment's workset empty at the next apply, so an env or tag-filter
-alongside it is rejected. Unlike autoplan it plans a **draft** pull request.
+alongside it is rejected. Unlike autoplan it plans a **draft** pull request — a plan a draft can hold but not apply, since the apply requirements below refuse a draft.
 Re-issuing it re-plans rather than reporting the existing plan current: the new
 run's plan replaces the plan of record for the current head, and doing so is
 safe because a plan changes nothing but shipmate's own comment, checks and
@@ -710,6 +710,12 @@ its own actionable rejection reason:
 - **shipmate team**: the commenter is a member of the configured approvers
   team (checked via a short-lived GitHub App installation token,
   `members:read`);
+- **not a draft**: the pull request is not a draft. `shipmate plan` plans a
+  draft on request, so a draft head can carry apply checks with plan runs on
+  them; a draft says the change is not ready for review, and applying it is
+  what that must not permit. Keyed on the pull request's `draft` flag, not on
+  `mergeable_state` — that field has one slot and reports `dirty` for a draft
+  with conflicts;
 - **mergeable**: the pull request is mergeable;
 - **reviewed**: the pull request satisfies the branch ruleset's review policy
   — GitHub's `reviewDecision` is `APPROVED`, or is null (no review required by
@@ -861,9 +867,11 @@ so there is no bare form.
 
 It is authorized by **shipmate team** membership at comment time plus the
 `<env>-apply` environment its job binds — the same required reviewers and the
-same OIDC subject an apply of that environment binds. The other three apply
+same OIDC subject an apply of that environment binds. The other four apply
 requirements are deliberately absent: **reviewed**, because an approving review
-reviews a diff and an unlock applies none; **mergeable** and **undiverged**,
+reviews a diff and an unlock applies none; **not a draft**, because a draft says
+the change is not ready for review, which bounds applying it and not releasing
+its lock; **mergeable** and **undiverged**,
 because the case this verb exists for is a lock stranded by a cancelled
 post-merge deploy, and a merged pull request reports `mergeable: null` — which
 the apply path reads as "still computing" — so keeping them would leave exactly
