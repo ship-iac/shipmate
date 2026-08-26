@@ -3274,9 +3274,11 @@ def test_a_flow_style_on_value_is_silent(monkeypatch):
     """The whole `on:` value as one flow mapping, with no line start in front of
     either key. The documented fence is block style and cannot cover this: with a
     line-anchored regex both keys go unseen, and because ABSENCE is this probe's
-    finding, that reports two warnings about a correctly wired wrapper. `on:` is
-    written with no space after the colon so the brace lands at index 0, where a
-    one-character lookbehind has nothing to match either."""
+    finding, that reports a correctly wired wrapper as declaring no
+    `workflow_dispatch` trigger — one stray warning, not two, since the
+    `pr_number` finding is that one's `elif`. `on:` is written with no space after
+    the colon, so the brace immediately precedes the first key and is itself the
+    delimiter the one-character lookbehind needs."""
     text = (
         "name: shipmate · plan\n"
         "on:{ pull_request_target: , workflow_dispatch: { inputs: { pr_number: "
