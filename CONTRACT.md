@@ -518,7 +518,9 @@ request head as App-authored mirrors, described with the App identities below).
 It takes **no arguments** — there is one plan of record per head commit, and a
 run holding a single environment's artifacts would leave every other
 environment's workset empty at the next apply, so an env or tag-filter
-alongside it is rejected. Unlike autoplan it plans a **draft** pull request — a plan a draft can hold but not apply, since the apply requirements below refuse a draft.
+alongside it is rejected. Unlike autoplan it plans a **draft** pull request —
+a plan a draft can hold but not apply, since the apply requirements below
+refuse a draft.
 Re-issuing it re-plans rather than reporting the existing plan current: the new
 run's plan replaces the plan of record for the current head, and doing so is
 safe because a plan changes nothing but shipmate's own comment, checks and

@@ -82,9 +82,9 @@ open to the same commenters `doctor` is; `apply` and `unlock` are authorized. `a
 carries the full check (approvers-team membership, a non-draft, mergeable and
 reviewed PR, and a reviewed plan for the current head — see Comment-ops above);
 `unlock` carries a narrower one — approvers-team membership and the
-`<env>-apply` environment, but no draft check, no review and no plan — because it releases a lock rather than
-changing infrastructure. `help` answers
-any commenter. `doctor` does not: it names the guardrails this repository is
+`<env>-apply` environment, but no draft check, no review and no plan —
+because it releases a lock rather than changing infrastructure. `help`
+answers any commenter. `doctor` does not: it names the guardrails this repository is
 missing — that `shipmate / gate` is not required on the default branch, that an
 apply environment has no approval rule, which approvers team is configured
 and whether it resolves — so the engine runs it only for a commenter GitHub

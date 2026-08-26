@@ -25,6 +25,11 @@ DRAFT_REASON = (
     "not authorized: this pull request is a draft. A draft can be planned but not "
     "applied — mark it ready for review, then comment the apply again."
 )
+#: The membership refusal for `_decide`'s default team, hand-written for the
+#: same reason.
+MEMBER_REASON = (
+    "not authorized: the commenter is not a member of the required approvers team `deployers`."
+)
 
 
 def _decide(**kw):
@@ -411,7 +416,7 @@ def test_ungated_exemption_output_is_set_only_when_the_exemption_fired(
 
 def test_apply_on_a_draft_is_refused_with_the_remedy():
     ok, reason = _decide(pr={**PR_OK, "draft": True})
-    assert not ok and reason == DRAFT_REASON
+    assert (ok, reason) == (False, DRAFT_REASON)
 
 
 def test_apply_on_a_non_draft_is_unaffected():
@@ -423,7 +428,7 @@ def test_draft_refusal_runs_after_the_membership_check():
     # A non-member on a draft is told about membership: the reason a commenter
     # can act on first, and the fail-fast order every check here relies on.
     ok, reason = _decide(is_member=False, pr={**PR_OK, "draft": True})
-    assert not ok and "not a member" in reason and reason != DRAFT_REASON
+    assert (ok, reason) == (False, MEMBER_REASON)
 
 
 def test_draft_refusal_runs_before_the_mergeable_check():
@@ -432,7 +437,7 @@ def test_draft_refusal_runs_before_the_mergeable_check():
     ok, reason = _decide(
         pr={"mergeable": False, "mergeable_state": "dirty", "draft": True, "head": {"sha": "abc"}}
     )
-    assert not ok and reason == DRAFT_REASON
+    assert (ok, reason) == (False, DRAFT_REASON)
 
 
 def test_unlock_on_a_draft_is_still_authorized():
