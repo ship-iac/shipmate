@@ -200,7 +200,7 @@ it, so this grant goes on the job:
 ```yaml
 facts:
   name: shipmate / facts
-  runs-on: ubuntu-latest
+  runs-on: ubuntu-slim
   permissions:
     pull-requests: read
   outputs:
@@ -296,7 +296,13 @@ pull request, never the copy on its head. Nor can the dispatch leg be smoke-test
 from a branch — `issue_comment` resolves its workflow from the repository's
 **default** branch, so the comment that dispatches and the file it dispatches
 both only start working once the edit is merged. If you require
-`shipmate / gate`, the recovery path is §0.18.0's, and landing the pins and these edits in one commit is what avoids needing it.
+`shipmate / gate`, the recovery path is §0.18.0's.
+
+**The pin bump and these edits must land in the same commit.** The other order
+fails **quietly**: a wrapper passing `on-demand` to a `summary.yml` still at the
+old pin declares no such input, and an undeclared reusable-workflow input is a
+load-time rejection: the run ends as `startup_failure` with no job and no
+retrievable log.
 
 Nothing else in this release needs consumer action: no environment to create or
 rename, no repository variable to set, and no change to the apply, deploy,
