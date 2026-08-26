@@ -36,8 +36,11 @@ this repository, and it refuses by default when the wrapper states nothing (see
 
 **`pull_request_target` is how the engine reaches the App key, so the question
 is never the trigger but the shape.** The plan workflow runs on
-`pull_request_target`, which evaluates at the **base** ref — the one ref
-`shipmate-engine`'s default-branch-only policy trusts. That is deliberate: it is
+`pull_request_target`, which evaluates at the **base** ref — a ref
+`shipmate-engine`'s default-branch-only policy trusts. (Its second trigger, the
+`workflow_dispatch` a commented `shipmate plan` sends, evaluates at the
+default branch itself and raises the same question with the same answer; see
+"Contributors without push access".) That is deliberate: it is
 what lets the plan run's trusted `summary` job mint an App token and write the
 `shipmate / gate` status. What makes it safe is a property of that job, not of
 the trigger: **it executes no repository content at all.** It is a call to the
@@ -723,6 +726,28 @@ delivers nothing **and** suppresses the value the callee's `environment:` would
 otherwise supply. A consumer outside the engine's organization must pass the
 secrets by name; §16's key placement does not change.
 
+## The commit a plan run states
+
+A plan is only worth gating on if it planned the pull request's own head, and
+**no plan trigger checks that head out by itself**: `pull_request_target` takes
+the base branch, `workflow_dispatch` takes the ref it was dispatched on. So the
+wrapper *states* the commit it is planning — `head-sha` on the `build-matrix`
+step, `expected-head` on each `plan-cell` — and both steps compare the statement
+against the tree they are actually standing in, failing the run when the two
+differ. `shipmate doctor` reports a `build-matrix` step whose `head-sha` is
+absent or is not the expression the reference wrapper uses.
+
+Both **refuse by default**: a run that states no commit at all is refused, not
+planned (the one exception is `no-pull-request: "true"`, for a nightly drift
+workflow that has no pull request to state anything about). The direction is the
+point. A wrapper that forgot the `ref:` used to plan the base branch, report no
+changes for a pull request it had never read, and green `shipmate / gate` with
+nothing queued to apply — a silent, reviewable-looking pass over unreviewed
+code. That is now a red `detect` naming the input.
+
+The stated commit is not something a commenter or a dispatcher supplies: it comes
+from `actions/pr-facts`, which reads the pull request itself. See below for why.
+
 ## Contributors without push access
 
 **Fork pull requests are refused outright.** `actions/build-matrix` fails the
@@ -747,8 +772,10 @@ of them means reordering your own `plan.yml`.
 **Two things keep a fork out of a plan cell, in this order.** First,
 `actions/checkout` itself refuses to check out a fork's head under
 `pull_request_target` — measured on a current release (2026-08-23), against a
-wrapper naming `ref: ${{ github.event.pull_request.head.sha }}` on its checkout,
-which is the shape the reference `plan.yml` uses — unless the workflow passes
+wrapper naming the pull request's head SHA on its checkout `ref:`, which is what
+the reference `plan.yml` does (it now reads that SHA from `actions/pr-facts`
+rather than from the event payload; the refusal keys on the commit, not on where
+the wrapper found it) — unless the workflow passes
 `allow-unsafe-pr-checkout: true`. That is a third party's
 default, and it is the outermost guard on this path: `shipmate doctor` warns on
 every occurrence of that input set to anything but `false`, including a `${{ }}`
@@ -788,6 +815,23 @@ wrong is wiring a constant there — `head-repo: ${{ github.repository }}` passe
 for every pull request, fork ones included — which is why `shipmate doctor`
 checks the expression and not just the key
 ([`getting-started.md`](getting-started.md) §Required — plan).
+
+**The third trigger changes none of that.** A commented `shipmate plan`
+`workflow_dispatch`es the same `plan.yml`, and a dispatch reaches strictly less
+than a pull-request event does: the body carries **one** input, the pull
+request's number, and `plan.yml` declares no other, so GitHub refuses a dispatch
+that names anything else (HTTP 422, no run). Everything the guards decide on —
+the head SHA, the head repository, the draft flag — is then **derived** from that
+number by `actions/pr-facts`, which asks the API for the pull request. That is
+deliberate: the fork refusal keys on the head repository, so a caller holding
+`actions: write` — comment-ops mints an App token to dispatch, and any workflow
+file may grant itself that scope — must not be able to *state* one. A number
+cannot lie about its own head repository, and a number naming a fork's pull
+request resolves to that fork and is refused exactly as the autoplan leg would
+be. What the dispatch leg does add is `pull-requests: read` on the one job that
+looks the pull request up, and an authorization step ahead of it: only a comment
+from an `OWNER`, `MEMBER` or `COLLABORATOR` is dispatched at all
+([`../CONTRACT.md`](../CONTRACT.md) §Comment-ops).
 
 The refusal in `detect` is loud (a red step) rather than a quiet empty matrix,
 because a fork pull request could not merge either way: with the `summary` job

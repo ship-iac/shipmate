@@ -329,7 +329,10 @@ the actual work here:
   repository that shares one environment between plan and apply). What makes that inert is that `pull_request_target`
   runs the **base** copy of `plan.yml`, and in the base copy the only place
   `secrets.SHIPMATE_APP_PRIVATE_KEY` is named is inside the called reusable
-  workflow — a branch author cannot add a secret reference.
+  workflow — a branch author cannot add a secret reference. A dispatched
+  `shipmate plan` is the same shape one ref along: every job evaluates at the
+  ref the dispatch named (the default branch) and runs that copy of the file,
+  never the pull request's own.
 
   **The constraint that follows: no job in `plan.yml` other than the `summary`
   call may reference a `shipmate-engine` secret.** Adding one hands it to a plan
@@ -338,9 +341,13 @@ the actual work here:
   inferred, such a job is refused before its first step, because a branch ref
   matches no pattern the policy names.
 - **The jobs that can reach the key all run at the default-branch ref.** The
-  plan workflow triggers on `pull_request_target`, which evaluates at the base
-  branch ref rather than the pull request head, so its trusted `summary` job —
-  the engine's reusable `.github/workflows/summary.yml` — satisfies the policy.
+  plan workflow's automatic trigger is `pull_request_target`, which evaluates at
+  the base branch ref rather than the pull request head, so its trusted `summary`
+  job — the engine's reusable `.github/workflows/summary.yml` — satisfies the
+  policy. Its second trigger, the `workflow_dispatch` a commented
+  `shipmate plan` sends, is dispatched on the default branch and satisfies the
+  policy the way `push` does; the dispatch body states a pull request **number**
+  and nothing else, so no ref a commenter picks decides which workflow file runs.
   It reads the key from this environment, which resolves in the *calling*
   repository, so the caller passes the secret by name and holds nothing itself
   (that is also what makes a consumer in another organization work). The apply and
@@ -365,12 +372,17 @@ the actual work here:
 - The `summary` workflow's job `if:` is load-bearing rather than
   belt-and-braces: it refuses when the head repository the caller states
   (`head-repo`) differs from `github.repository`, when the caller states the
-  pull request is a draft, and when either input is absent or empty — an
-  unstated fact is a refusal, so a caller can only fail this closed. Under
+  pull request is a draft that nobody explicitly asked to plan (`is-draft`
+  without `on-demand`), and when any of those inputs is absent or empty — an
+  unstated fact is a refusal, so a caller can only fail this closed. The fork
+  clause yields to no trigger; only the draft clause is widened by a requested
+  plan. Under
   `pull_request_target` a fork's pull request *does* reach the base ref, so
   nothing else would stop that job; and the environment admits a draft's run,
-  which without the second clause would write a gate over a plan that never
-  ran. Being on the job, a refusal creates no deployment at all.
+  whose plan jobs an autoplan skips, so without the second clause it would write
+  a gate over a plan that never ran (a *requested* plan of a draft does run, and
+  `on-demand` is how the caller says so). Being on the job, a refusal creates no
+  deployment at all.
 
 What none of this defends against is a change to the trusted workflow files
 themselves (`summary.yml`, `apply.yml`, and the rest) landing on the default

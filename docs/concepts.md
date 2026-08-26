@@ -126,18 +126,30 @@ of its CI configuration.
 The `plan.yml` workflow (the same shape across repo layouts — what differs is
 the `plan` job's per-flavor `env:` block, `TF_VAR_*` or `TF_WORKSPACE` or
 nothing, and whether it carries a cloud credentials step at all; see the
-`repo-example-*` samples) runs on every pull request and has **three jobs**:
-`detect`, `plan`, and `summary`. It triggers on `pull_request_target`, which
-runs at the base ref — that is what lets the trusted `summary` job reach the App
-key, and `detect` and `plan` therefore have to name
-`ref: ${{ github.event.pull_request.head.sha }}` on their checkout explicitly or
-they plan the base branch instead. Give `detect` the
+`repo-example-*` samples) has **four jobs**: `facts`, `detect`, `plan`, and
+`summary`, and answers to two triggers — `pull_request_target` for the automatic
+plan on every push to a pull request, and `workflow_dispatch` for the plan a
+commented `shipmate plan` asks for. Both run at a ref the trusted `summary`
+job's environment policy admits (the base ref under `pull_request_target`, the
+dispatch ref under `workflow_dispatch`), which is what lets that job reach the
+App key; neither checks out the pull request's head, so `detect` and `plan` have
+to name `ref: ${{ needs.facts.outputs.head-sha }}` on their checkout explicitly
+or the run is refused for planning a tree the pull request never named. Give
+`detect` the
 display name `shipmate / detect`, since its check run is created by GitHub
 Actions (a job's check run always is) and a bare `detect` in the checks list
 says nothing about which tool produced it. See [`CONTRACT.md`](../CONTRACT.md)
 §Check names for the `shipmate / ` namespace and §Post-plan topology for the
 full picture below:
 
+- **`facts`** — `actions/pr-facts`, the single producer of every pull-request
+  fact the jobs below decide on: the head SHA and head repository, the base SHA,
+  the pull request's number, its draft flag, and whether a human named this run
+  (`on-demand`). A pull-request event answers out of its own payload; a
+  dispatched run carries no pull request at all and looks it up by the number it
+  was dispatched with — which is why this one job spends `pull-requests: read`
+  and the others do not. Its own job rather than `detect`'s first step: `detect`
+  can fail, and the `summary` job must still be told which head to gate.
 - **`detect`** — `terramate fmt --check`, a stale-codegen check
   (`terramate generate --detailed-exit-code`), and `actions/build-matrix`,
   which computes the plan matrix from the *changed* stacks × their `env/*`
@@ -162,8 +174,9 @@ full picture below:
   `.github/workflows/summary.yml`, passing `SHIPMATE_APP_PRIVATE_KEY` by name
   (never `secrets: inherit` — `docs/getting-started.md`) plus the pull
   request number, the head SHA, the two other jobs' results and the planned cell
-  count, plus the two facts that callee decides on — the head repository and
-  the draft flag. The credentialed work happens inside that callee, in a single job bound
+  count, plus the three facts that callee decides on — the head repository, the
+  draft flag, and whether a human named this run.
+  The credentialed work happens inside that callee, in a single job bound
   to the fixed `shipmate-engine` GitHub Environment (`docs/github-app.md`) with
   **no checkout of its own**: it downloads this run's cell summaries and calls
   `actions/summary`, which creates the matching
@@ -171,9 +184,15 @@ full picture below:
   upserts one sticky PR comment (a stack × env table) and the aggregate
   **`shipmate / gate`** commit status, which stays non-green while any apply is
   pending or any plan cell failed. That job declines outright — before its first
-  step — on a fork pull request or a draft, and on a caller that left **either**
-  fact unstated: an omitted input is read as a refusal, so the wrapper can fail the job closed
-  but never open it.
+  step — on a fork pull request, on a draft nobody asked to plan, and on a
+  caller that left the head repository or the draft flag unstated: an omitted
+  input is read as a refusal, so the wrapper can fail the job closed
+  but never open it (an omitted `on-demand` refuses only the requested draft
+  plan it would have admitted). On an `on-demand` run it also **mirrors** this run's own
+  completed per-cell plan checks onto the head commit: a dispatched run's job
+  check-runs attach to the dispatch ref, so without the mirror the pull request
+  shows none of them — not even a failed cell, which is the state
+  `shipmate plan` exists to recover from.
 
 Fork pull requests do not get that far anyway:
 `detect` refuses them (see above), so a fork's plan fails fast rather than

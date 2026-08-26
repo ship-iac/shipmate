@@ -159,6 +159,145 @@ names. The entries below `0.2.0` predate the first tagged release, or
 `CHANGELOG.md` does not pin one; they are kept for repositories moving from a
 very old pin.
 
+### 0.20.0 — `shipmate plan` becomes a comment verb, and `plan.yml` states its own facts
+
+**Re-pinning alone is not enough, and every edit is in
+`.github/workflows/plan.yml`.** The plan path answers to a second trigger — a
+commented `shipmate plan`, dispatched at that file — and it no longer reads the
+event payload, because a dispatched run has no pull request in it. One job
+resolves every pull-request fact and the rest read it from there.
+[`getting-started.md`](getting-started.md) §The plan workflow is the whole file
+with these edits in place; work through them in this order.
+
+**1. Add the trigger and its one input**, beside the `pull_request_target:` your
+`on:` block already has. The dispatch body carries `pr_number` and nothing else,
+so that is the only input to declare:
+
+```yaml
+workflow_dispatch:
+  inputs:
+    pr_number:
+      description: Pull request number to plan
+      required: true
+```
+
+If your `concurrency.group` reads `github.event.pull_request.number`, give it the
+dispatch case too — `github.event.inputs.pr_number` is readable under either
+trigger, unlike the `inputs` context:
+
+```yaml
+concurrency:
+  group: plan-${{ github.event.pull_request.number || github.event.inputs.pr_number }}
+  cancel-in-progress: true
+```
+
+**2. Add the `facts` job.** It is `actions/pr-facts` alone, and it is the one job
+on this path that needs `pull-requests: read` — a pull-request event answers out
+of its own payload, a dispatched run has to look the pull request up by number.
+A job's `permissions:` block replaces the workflow default rather than extending
+it, so this grant goes on the job:
+
+```yaml
+facts:
+  name: shipmate / facts
+  runs-on: ubuntu-latest
+  permissions:
+    pull-requests: read
+  outputs:
+    head-sha: ${{ steps.facts.outputs.head-sha }}
+    head-repo: ${{ steps.facts.outputs.head-repo }}
+    base-sha: ${{ steps.facts.outputs.base-sha }}
+    pr-number: ${{ steps.facts.outputs.pr-number }}
+    is-draft: ${{ steps.facts.outputs.is-draft }}
+    on-demand: ${{ steps.facts.outputs.on-demand }}
+  steps:
+    - id: facts
+      uses: <owner>/shipmate/actions/pr-facts@<engine-sha>
+```
+
+Its own job rather than `detect`'s first step: `detect` can fail on a fmt check
+or stale codegen, and the `summary` job must still be told which head to gate.
+Add `needs: facts` to `detect` (and `needs: [facts, detect]` to `plan`, `needs:
+[facts, detect, plan]` to `summary`).
+
+**3. Replace every `github.event.pull_request.*` reference** in the file with the
+matching `needs.facts.outputs.*` — the `ref:` on both checkouts, `head-repo` on
+`build-matrix`, `expected-head` on `plan-cell`, and `pr-number` / `head-sha` /
+`head-repo` / `is-draft` on the `summary` call. Under `workflow_dispatch` those
+payload expressions render **empty**, and every guard here reads an empty value
+as a refusal, so leaving one behind means a dispatched plan refuses instead of
+planning.
+
+**4. Pass `head-sha` on the `build-matrix` step.** New input, and **not
+optional** — the step compares the commit it has checked out against the one the
+run states, and refuses a run that states nothing:
+
+```yaml
+with:
+  base-sha: ${{ needs.facts.outputs.base-sha }}
+  head-repo: ${{ needs.facts.outputs.head-repo }}
+  head-sha: ${{ needs.facts.outputs.head-sha }}
+```
+
+**5. Pass `on-demand` on the `summary` call**, beside `head-repo` and `is-draft`:
+
+```yaml
+with:
+  on-demand: ${{ needs.facts.outputs.on-demand }}
+```
+
+It says a human named this plan, and it is what lets a `shipmate plan` on a
+**draft** produce a gate and a plan comment — the autoplan still skips drafts.
+It also puts a dispatched run's per-cell plan checks on the pull request's head:
+a dispatched run's own job check-runs attach to the ref it was dispatched on, so
+without it the pull request shows none of them, a failed cell included.
+
+**The two halves fail differently, and only one of them is loud.**
+
+- **Trigger half missing** (no `workflow_dispatch`, or no `pr_number` under it) —
+  the automatic plan is entirely unaffected. Only the new verb breaks: GitHub
+  refuses the dispatch with an HTTP 422 (`Workflow does not have
+  'workflow_dispatch' trigger`, or `Unexpected inputs provided`), **no run is
+  created**, and the error lands on the comment-handling run where nobody on the
+  pull request is looking. The commenter sees a rocket reaction and then nothing.
+  `shipmate doctor` reports both, and a third case with no refusal at all: a
+  wrapper that is dispatchable but has no `pr-facts` step, which accepts the
+  dispatch and then has nothing resolving which pull request it is for.
+- **Facts half missing** (`head-sha` absent on `build-matrix`) — **every** pull
+  request fails, the automatic plan included, with a red `detect` naming the
+  input. Loud, and it holds the gate red rather than greening it.
+
+**Check one line outside `plan.yml`.** `actions/dispatch` picks the workflow
+from its `mode` input — `plan.yml` when the mode is `plan`, `apply.yml`
+otherwise — so a `comment-ops.yml` that does not forward
+`mode: ${{ steps.authz.outputs.mode }}` to that step sends a `shipmate plan`
+comment to the **apply** wrapper. That line has been in the reference
+`comment-ops.yml` since `0.16.1`, added there for `unlock`; this release is what
+makes its absence reachable from a comment that changes nothing.
+
+**One shape stops passing that used to.** A wrapper on the older
+`on: pull_request` trigger that named no `ref:` at all and planned the default
+merge ref is now **refused**: the checkout comparison used to exempt
+`pull_request`, whose default checkout is `refs/pull/<n>/merge` and so never
+equals the pull request's head, and that exemption is gone — the comparison is
+against the head the wrapper states, and `pr-facts` states the payload head under
+both pull-request events. Name `ref: ${{ needs.facts.outputs.head-sha }}` on
+every checkout like every other consumer. A merge-ref plan was never the reviewed
+artifact anyway: what applies is the plan of the head commit the gate is written
+for.
+
+**None of this shows up on the re-pin's own pull request**, for the same reason
+as `0.18.0`: a `pull_request_target` run uses a plan workflow from outside the
+pull request, never the copy on its head. Nor can the dispatch leg be smoke-tested
+from a branch — `issue_comment` and `pull_request_target` both resolve their
+workflow from the repository's **default** branch, so `shipmate plan` only starts
+working once the edit is merged. If you require `shipmate / gate`, the recovery path is §0.18.0's, and
+landing the pins and these edits in one commit is what avoids needing it.
+
+Nothing else in this release needs consumer action: no environment to create or
+rename, no repository variable to set, and no change to the apply, deploy,
+comment-ops or drift wrappers.
+
 ### 0.19.0 — the plan run travels on each apply check; retire `plan_run_id` from your wrappers
 
 **Re-pinning alone is not enough, and the edit touches two files.** Every
@@ -284,7 +423,15 @@ and on the `summary` job's call of the engine's `summary.yml`:
       is-draft: ${{ github.event.pull_request.draft }}
 ```
 
-[`getting-started.md`](getting-started.md) §Required — plan has both in place.
+**Moving from a pin older than this one, land §0.20.0's shape instead**: as of
+`0.20.0` these values come from a `facts` job rather than the event payload
+(`needs.facts.outputs.head-repo`, `needs.facts.outputs.is-draft`), the summary
+call takes a third input, and `build-matrix` takes `head-sha` as well. The
+fences above are what *this* release required; the requirement that the wrapper
+state the facts at all is unchanged, and
+[`getting-started.md`](getting-started.md) §Required — plan always carries the
+current shape.
+
 **Pass those expressions, not constants**: a literal `is-draft: false` claims
 "not a draft" for every run, and `head-repo: ${{ github.repository }}` passes the
 fork check for every pull request, fork ones included. `shipmate doctor` reports
@@ -349,7 +496,8 @@ moves your pins:
           expected-head: ${{ github.event.pull_request.head.sha }}
 ```
 
-The same SHA the `plan` job's checkout already names.
+The same SHA the `plan` job's checkout already names — as of `0.20.0` that is
+`${{ needs.facts.outputs.head-sha }}` on both (§0.20.0).
 [`getting-started.md`](getting-started.md) §Required — plan has the whole step.
 
 **The pin bump and this edit must land in the same commit.** A wrapper that
@@ -386,10 +534,13 @@ is to land the re-pin with nothing pending.
 **A wrapper that does not name the head SHA on its checkout now fails loudly.**
 `plan-cell` refuses when the commit it has checked out is not the one the run
 says it is planning. Since `0.10.0` the plan path is `pull_request_target`,
-which checks out the **base** branch unless the checkout names
-`ref: ${{ github.event.pull_request.head.sha }}` — a wrapper missing that line
+which checks out the **base** branch unless the checkout names the pull
+request's head SHA — a wrapper missing that line
 used to report a clean plan for a pull request it never read, and is refused
-from this release on. Fix the checkout, not the `expected-head` value.
+from this release on. Fix the checkout, not the `expected-head` value. (As of
+`0.20.0` both that `ref:` and `expected-head` read
+`needs.facts.outputs.head-sha`, and `build-matrix` holds the same line one job
+earlier — see §0.20.0.)
 
 Nothing else in this release needs consumer action: no environment to create or
 rename, no permission to add, and no change to the apply or comment-ops
@@ -670,13 +821,14 @@ five inputs (`pr-number`, `head-sha`, `detect-result`,
 permissions are capped by the calling job's, and granting less kills the whole
 run at startup with no job, no log and no annotation to explain it. Because
 `pull_request_target` checks out the base by default, `detect` and `plan` must
-name `ref: ${{ github.event.pull_request.head.sha }}` on their checkout
+name the pull request's head SHA on their checkout's `ref:`
 explicitly — without it they plan the base branch and report a clean plan for a
-pull request they never read. The consumer's own `summary.yml` is deleted; the
+pull request they never read (refused outright since `0.17.0`). The consumer's own `summary.yml` is deleted; the
 engine's is a `workflow_call` workflow whose single job binds `shipmate-engine`,
 checks out nothing, and carries both trust conditions (the fork refusal and the
 draft skip) where a consumer cannot drop them. As of `0.18.0` the caller states
-the two facts those conditions compare — see §0.18.0 for the current shape.
+the facts those conditions compare, and as of `0.20.0` there are three of them,
+produced by a fourth job — see §0.20.0 for the current shape.
 [`getting-started.md`](getting-started.md) §Required — plan has the current
 shape, and [`../CONTRACT.md`](../CONTRACT.md) §Post-plan topology is the written
 form.

@@ -19,8 +19,9 @@ MATRIX_LIMIT = 256
 
 #: Where the plan workflow must live. No plan-run lookup matches this path
 #: literally any more — every apply, deploy and doctor path reads a cell's plan
-#: run from that cell's own apply check — but `shipmate doctor` still keys its
-#: plan-wrapper probes on the filename.
+#: run from that cell's own apply check — but two surfaces still match the
+#: filename: `shipmate doctor` keys its plan-wrapper probes on it, and
+#: `actions/dispatch` sends a commented `shipmate plan` to it by name.
 PLAN_WORKFLOW = ".github/workflows/plan.yml"
 
 #: Stack paths whose verb-less plan check name would land inside a namespace
@@ -420,9 +421,11 @@ def plan_workflow_error(event_name, root="."):
     return (
         f"::error::this repository has no `{PLAN_WORKFLOW}` — that exact path is matched "
         "literally by `shipmate doctor`, which keys its plan-wrapper probes on the "
+        "filename, and by a commented `shipmate plan`, which is dispatched at that "
         "filename: a plan workflow under any other name silently loses the "
-        "head-repository and draft wiring checks, and draws doctor's own "
-        "`pull_request_target` warning instead. Planning is refused here rather than "
+        "head-repository, head-commit and draft wiring checks, draws doctor's own "
+        "`pull_request_target` warning instead, and is reached by no `shipmate plan` at "
+        "all. Planning is refused here rather than "
         f"degrading those diagnostics quietly. Move the plan workflow back to `{PLAN_WORKFLOW}`."
     )
 

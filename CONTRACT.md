@@ -556,11 +556,12 @@ protection shape, plan-environment secrets, the `shipmate-engine`
 environment's own existence and default-branch scoping, `pull_request_target`
 triggers in the consumer's workflow files other than `plan.yml`, which uses
 that trigger by design, engine action-pin freshness,
-the fork and draft wiring of the consumer's `plan.yml` — the head-repository
-and draft inputs it passes to the engine's reusable summary workflow, the
-head-repository input on its own `build-matrix` step, and a `no-pull-request`
-anywhere in that file; absent or constant, they cost a skipped summary job or a
-fork refusal that passes for every pull request —
+the fork and draft wiring of the consumer's `plan.yml` — the head-repository,
+draft and on-demand inputs it passes to the engine's reusable summary workflow,
+the head-repository and head-SHA inputs on its own `build-matrix` step, and a
+`no-pull-request` anywhere in that file; absent or constant, they cost a skipped
+summary job, a fork refusal that passes for every pull request, or a plan of a
+tree the pull request never named —
 a retired `plan_run_id` input still declared or forwarded by the consumer's
 `apply.yml` (a forward to a reusable workflow is rejected as the run LOADS, so
 there is no job and no log to read),
@@ -985,9 +986,12 @@ is then refused by the exact-plan fail-safe if the first advanced the state.
 
 ## Post-plan topology
 
-The consumer's plan workflow is **one file on `pull_request_target` with three
-jobs**. `detect` and `plan` are untrusted: they check out the pull request's own
-head and hold no App credential. `summary` is a `uses:` of the engine's reusable
+The consumer's plan workflow is **one file with two triggers and four jobs** —
+`pull_request_target` for the automatic plan and `workflow_dispatch` for a
+commented `shipmate plan`; `facts`, `detect`, `plan`, `summary`. `facts` is
+`actions/pr-facts`, the single producer of every pull-request fact the other
+three decide on. `detect` and `plan` are untrusted: they check out the pull
+request's own head and hold no App credential. `summary` is a `uses:` of the engine's reusable
 `.github/workflows/summary.yml` passing `SHIPMATE_APP_PRIVATE_KEY` by name
 (never `secrets: inherit`), and everything trusted
 happens inside that callee — one job, `environment: shipmate-engine`, no
@@ -1020,23 +1024,42 @@ say why, and the plan jobs never start either. Copy the reference `summary` job
 whole rather than trimming its `permissions:` block.
 
 Under `pull_request_target` a plan run's `head_sha` and `head_branch` are the
-**pull request's** head commit and branch, not the base branch's — every
-plan-run lookup in the engine (`?head_sha=<pr head>`) depends on that. What *is*
+**pull request's** head commit and branch, not the base branch's — which is why
+each `plan` matrix job's own `<stack> / <env>` check-run lands on the pull
+request, with nothing in the engine placing it there. What *is*
 base-branch under this trigger is the checkout: `GITHUB_SHA` and `GITHUB_REF`
 name the base, which is why the `detect` and `plan` jobs must pass
-`ref: ${{ github.event.pull_request.head.sha }}` explicitly. The two are
+`ref: ${{ needs.facts.outputs.head-sha }}` explicitly. The two are
 routinely confused; they are opposite sides of the same trigger.
 
+A **dispatched** plan has neither side: its `head_sha` is a commit on the ref it
+was dispatched on (the default branch), and the runs API carries no field naming
+that ref at all. So the checkout's `ref:` is what makes it a plan of the pull
+request there too, and every check-run its own jobs create attaches to the
+dispatch ref rather than to the pull request — which is why the `summary` callee
+**mirrors** the completed per-cell plan checks onto the head commit when the
+caller states `on-demand`.
+
 **Requirement: no job in `plan.yml` other than the `summary` call may reference
-a `shipmate-engine` secret.** Under `pull_request_target` every job in this file
-runs at a ref the environment's policy admits, and the `plan` job's
-`environment:` is chosen by branch-authored `env/*` tags — so the base-owned
-workflow file naming no such secret outside the callee is what keeps the key out
-of branch reach. `docs/github-app.md` §Key-exposure boundary has the reasoning.
+a `shipmate-engine` secret.** Under either trigger every job in this file
+runs at a ref the environment's policy admits — the base ref, or the ref the
+plan was dispatched on — and the `plan` job's
+`environment:` is chosen by branch-authored `env/*` tags — so that copy of the
+workflow file (the base branch's, or the default branch's under a dispatch —
+never the pull request's own) naming no such secret outside the callee is what
+keeps the key out of branch reach. `docs/github-app.md` §Key-exposure boundary has the reasoning.
 
-The three jobs:
+The four jobs:
 
-- **`plan.yml`**'s `detect` and `plan` jobs (consumer, `pull_request_target`) —
+- **`plan.yml`**'s `facts` job (consumer, either trigger) — `actions/pr-facts`
+  alone. It authors nothing and mints no App token; it holds
+  `pull-requests: read`, the one grant on this path a pull-request event does
+  not need, because a dispatched run's payload carries no pull request and the
+  number it was dispatched with is the only thing it can look one up by.
+  Nothing else in the file reads the event payload, and nothing anywhere reads a
+  head SHA or a head repository from a dispatch input: the number is all a
+  dispatcher states, and a number cannot lie about its own head repository.
+- **`plan.yml`**'s `detect` and `plan` jobs (consumer, either trigger) —
   they upload plan artifacts and cell summaries; they author nothing and mint no
   App token. `detect` binds no environment; `plan` binds only the plan
   environment for the cell it is planning, never one holding an App credential.
@@ -1074,12 +1097,15 @@ The three jobs:
   summaries and calls `actions/summary` under an App token minted inside
   `shipmate-engine`. This is what creates the pending
   `apply / <stack> / <env>` checks, the sticky plan comment, and the
-  `shipmate / gate` status. `pull_request_target` evaluates at the base branch
-  ref, which is what satisfies the environment's policy. The caller passes seven
+  `shipmate / gate` status, and — on an `on-demand` run — the mirror of this
+  run's per-cell plan checks onto the pull request's head.
+  `pull_request_target` evaluates at the base branch ref and a dispatched run at
+  the ref it was dispatched on, either of which satisfies the environment's
+  policy. The caller passes eight
   inputs — `pr-number`, `head-sha`, `detect-result`, `plan-result`,
-  `planned-cells`, and the two the job's own `if:` decides on, `head-repo` and
-  `is-draft` — all from the event payload and the two `needs:` results;
-  nothing is recovered from artifacts or from a second API lookup.
+  `planned-cells`, and the three the job's own `if:` decides on, `head-repo`,
+  `is-draft` and `on-demand` — all from the `facts` job and the two `needs:`
+  results; nothing is recovered from artifacts or from a second API lookup.
 - **`apply.yml` / `apply-all.yml` / `apply-env-level.yml` / `deploy.yml`**
   (consumer, `workflow_dispatch` via comment-ops, or `push` to the default
   branch) — the jobs that mint an App token (completing apply checks,
@@ -1097,15 +1123,19 @@ The three jobs:
   scheduled or manually dispatched run evaluates at the default branch.
 
 Nothing matches on the plan workflow's `name:` any more. Doctor reads those
-files for three probes — stale engine pins, `pull_request_target` triggers, and
-the plan wrapper's fork and draft wiring; the last of those is the one that
-observes whether the gate will be written, and it reports rather than fails.
+files for four probes — stale engine pins, `pull_request_target` triggers, the
+plan wrapper's fork and draft wiring, and its dispatch wiring; the last two
+observe whether the gate will be written and whether `shipmate plan` reaches
+anything at all, and they report rather than fail.
 
 The **file path is still load-bearing**, and nothing diagnoses a rename as the
 cause: `actions/build-matrix` refuses a checkout that has no
-`.github/workflows/plan.yml`, and doctor keys on that exact name both for its
-`pull_request_target` exemption and for the plan-wrapper wiring probes (the
-head-repository and draft inputs), which report nothing on a file called
+`.github/workflows/plan.yml`; `actions/dispatch` sends a commented
+`shipmate plan` to that literal filename, so a renamed wrapper is dispatched
+nowhere and the API's refusal reaches only the comment-handling run; and doctor keys
+on the exact name for its `pull_request_target` exemption and for the
+plan-wrapper wiring probes (the head-repository, head-SHA and draft inputs, and
+the dispatch wiring), which report nothing on a file called
 anything else. Rename the file and planning is refused from that commit on, and
 the renamed file starts drawing doctor's own `pull_request_target` warning. Each
 symptom surfaces on its own — the refusal names the path it looked for — but
@@ -1127,15 +1157,25 @@ SHA-pinned YAML. The facts they decide on arrive as inputs the caller states:
 ```
 inputs.head-repo != '' &&
 inputs.head-repo == github.repository &&
-inputs.is-draft == 'false'
+(inputs.is-draft == 'false' || inputs.on-demand == 'true')
 ```
 
-So the two halves are split on purpose. The caller states the head repository
-and the draft flag (`head-repo`, `is-draft` — `docs/getting-started.md`); the
+The parentheses are load-bearing: `&&` binds tighter than `||`, so without them
+`on-demand` alone would satisfy the whole guard, fork included. The fork clause
+yields to nothing; the draft clause yields to `on-demand`, because skipping a
+draft is autoplan's economy rather than a trust decision, and a commented
+`shipmate plan` on a draft is a collaborator asking for exactly that plan.
+
+So the two halves are split on purpose. The caller states the head repository,
+the draft flag and whether a human named the run (`head-repo`, `is-draft`,
+`on-demand` — `docs/getting-started.md`); the
 callee compares them, and an **omitted or empty input is a refusal**. A caller
-can therefore only fail the decision closed, never weaken it: dropping an input
-skips the job — no gate, so nothing merges — rather than handing a fork pull
-request an App-authored gate. The comparison sits in the callee because a
+can therefore only fail the decision closed, never weaken it, and the three
+costs differ: an omitted `head-repo` skips the job on every run, an omitted
+`is-draft` on every autoplan run — no gate, so nothing merges — rather than
+handing a fork pull request an App-authored gate; an omitted `on-demand` costs
+only what it widens, a requested plan of a draft, which is skipped exactly as it
+was before that input existed. The comparison sits in the callee because a
 consumer who kept the job and rewrote its `if:` would be fail-open and
 unobserved. It is a job-level `if:`, not a step-level check, so a skipped job
 creates no deployment and never enters the environment.
@@ -1145,17 +1185,19 @@ workflow's job-level `if:` can call nothing and read only YAML contexts, and
 reading the payload there is what let this guard and `build-matrix` — which
 keyed on the event name — disagree about what a non-pull-request trigger means.
 The residual is consumer misconfiguration: a constant `head-repo:
-${{ github.repository }}` or a literal `is-draft: false` states the safe answer
+${{ github.repository }}`, a literal `is-draft: false` or a literal
+`on-demand: true` states the safe answer
 for every run, fork pull requests and drafts included. Nothing else in the
 system can see that, which is why `shipmate doctor` probes the caller's wiring
 for the expressions themselves and not merely for the keys.
 
-The caller's `summary` job therefore carries the two facts but no decision of
+The caller's `summary` job therefore carries the three facts but no decision of
 its own. Beyond them it keeps only `if: ${{ !cancelled() }}` and deliberately
 does not require `detect` or `plan` to have succeeded: a failed detect or plan
 must still produce a red gate with an explanation, because no gate at all is a pull request nobody can
-diagnose. `detect` and `plan` keep their own `draft == false` condition, which is
-a cost control (it stops a draft burning runners), not a security property.
+diagnose. `detect` and `plan` keep their own condition — not a draft, *or*
+named on demand — which is a cost control (it stops a draft burning runners),
+not a security property, and is why a requested plan runs on a draft at all.
 
 Binding the callee's job to the `shipmate-engine` environment rather than
 trusting the trigger alone closes two paths a trigger check alone would not:

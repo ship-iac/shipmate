@@ -779,9 +779,11 @@ def test_a_renamed_plan_workflow_is_refused(tmp_path):
     assert bm.plan_workflow_error("pull_request", str(tmp_path)) == (
         "::error::this repository has no `.github/workflows/plan.yml` — that exact path is "
         "matched literally by `shipmate doctor`, which keys its plan-wrapper probes on the "
-        "filename: a plan workflow under any other name silently loses the head-repository "
-        "and draft wiring checks, and draws doctor's own `pull_request_target` warning "
-        "instead. Planning is refused here rather than degrading those diagnostics quietly. "
+        "filename, and by a commented `shipmate plan`, which is dispatched at that filename: "
+        "a plan workflow under any other name silently loses the head-repository, head-commit "
+        "and draft wiring checks, draws doctor's own `pull_request_target` warning instead, "
+        "and is reached by no `shipmate plan` at all. Planning is refused here rather than "
+        "degrading those diagnostics quietly. "
         "Move the plan workflow back to `.github/workflows/plan.yml`."
     )
 
