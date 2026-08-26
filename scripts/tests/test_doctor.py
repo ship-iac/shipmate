@@ -3276,9 +3276,9 @@ def test_a_flow_style_on_value_is_silent(monkeypatch):
     line-anchored regex both keys go unseen, and because ABSENCE is this probe's
     finding, that reports a correctly wired wrapper as declaring no
     `workflow_dispatch` trigger — one stray warning, not two, since the
-    `pr_number` finding is that one's `elif`. `on:` is written with no space after
-    the colon, so the brace immediately precedes the first key and is itself the
-    delimiter the one-character lookbehind needs."""
+    `pr_number` finding is that one's `elif`. Both keys sit inside the flow
+    mapping with whitespace in front of them, which is what the one-character
+    lookbehind matches; index 0 is unreachable for a searched key here."""
     text = (
         "name: shipmate · plan\n"
         "on:{ pull_request_target: , workflow_dispatch: { inputs: { pr_number: "

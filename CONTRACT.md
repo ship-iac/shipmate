@@ -1033,10 +1033,10 @@ name the base, which is why the `detect` and `plan` jobs must pass
 routinely confused; they are opposite sides of the same trigger.
 
 A **dispatched** plan has neither side: its `head_sha` is a commit on the ref it
-was dispatched on (the default branch), and the runs API carries no field naming
-that ref at all. So the checkout's `ref:` is what makes it a plan of the pull
-request there too, and every check-run its own jobs create attaches to the
-dispatch ref rather than to the pull request — which is why the `summary` callee
+was dispatched on (the default branch), and nothing on the run identifies the
+pull request it was dispatched for. So the checkout's `ref:` is what makes it a
+plan of the pull request there too, and every check-run its own jobs create
+attaches to the dispatch ref rather than to the pull request — which is why the `summary` callee
 **mirrors** the completed per-cell plan checks onto the head commit when the
 caller states `on-demand`.
 
@@ -1123,8 +1123,9 @@ The four jobs:
   scheduled or manually dispatched run evaluates at the default branch.
 
 Nothing matches on the plan workflow's `name:` any more. Doctor reads those
-files for four probes — stale engine pins, `pull_request_target` triggers, the
-plan wrapper's fork and draft wiring, and its dispatch wiring; the last two
+files for five probes — stale engine pins, `pull_request_target` triggers, a
+retired `plan_run_id` input in `apply.yml`, and the plan wrapper's fork and draft
+wiring plus its dispatch wiring; the last two
 observe whether the gate will be written and whether `shipmate plan` reaches
 anything at all, and they report rather than fail.
 

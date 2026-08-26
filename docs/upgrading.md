@@ -220,7 +220,7 @@ or stale codegen, and the `summary` job must still be told which head to gate.
 Add `needs: facts` to `detect` (and `needs: [facts, detect]` to `plan`, `needs:
 [facts, detect, plan]` to `summary`).
 
-**3. Replace every `github.event.pull_request.*` reference** in the file with the
+**3. Replace every `github.event.pull_request.*` reference in the jobs** with the
 matching `needs.facts.outputs.*` — the `ref:` on both checkouts, `head-repo` on
 `build-matrix`, `expected-head` on `plan-cell`, and `pr-number` / `head-sha` /
 `head-repo` / `is-draft` on the `summary` call. Under `workflow_dispatch` those
@@ -267,13 +267,17 @@ without it the pull request shows none of them, a failed cell included.
   request fails, the automatic plan included, with a red `detect` naming the
   input. Loud, and it holds the gate red rather than greening it.
 
-**Check one line outside `plan.yml`.** `actions/dispatch` picks the workflow
-from its `mode` input — `plan.yml` when the mode is `plan`, `apply.yml`
-otherwise — so a `comment-ops.yml` that does not forward
+**Check one line outside `plan.yml`.** With its `workflow` input empty,
+`actions/dispatch` picks the workflow from `mode` — `plan.yml` when the mode is
+`plan`, `apply.yml` otherwise — so a `comment-ops.yml` that does not forward
 `mode: ${{ steps.authz.outputs.mode }}` to that step sends a `shipmate plan`
 comment to the **apply** wrapper. That line has been in the reference
-`comment-ops.yml` since `0.16.1`, added there for `unlock`; this release is what
-makes its absence reachable from a comment that changes nothing.
+`comment-ops.yml` since `0.16.0`, added there for `unlock`
+([`../CHANGELOG.md`](../CHANGELOG.md) §0.16.0); this release is what makes its
+absence reachable from a comment that changes nothing. A `workflow:` value
+overrides the mode, so a split-layout consumer pinning `workflow: apply.yml`
+misroutes `shipmate plan` even with `mode` forwarded — merge the wrappers and
+leave `workflow` unset.
 
 **One shape stops passing that used to.** A wrapper on the older
 `on: pull_request` trigger that named no `ref:` at all and planned the default
@@ -289,10 +293,10 @@ for.
 **None of this shows up on the re-pin's own pull request**, for the same reason
 as `0.18.0`: a `pull_request_target` run uses a plan workflow from outside the
 pull request, never the copy on its head. Nor can the dispatch leg be smoke-tested
-from a branch — `issue_comment` and `pull_request_target` both resolve their
-workflow from the repository's **default** branch, so `shipmate plan` only starts
-working once the edit is merged. If you require `shipmate / gate`, the recovery path is §0.18.0's, and
-landing the pins and these edits in one commit is what avoids needing it.
+from a branch — `issue_comment` resolves its workflow from the repository's
+**default** branch, so the comment that dispatches and the file it dispatches
+both only start working once the edit is merged. If you require
+`shipmate / gate`, the recovery path is §0.18.0's, and landing the pins and these edits in one commit is what avoids needing it.
 
 Nothing else in this release needs consumer action: no environment to create or
 rename, no repository variable to set, and no change to the apply, deploy,
