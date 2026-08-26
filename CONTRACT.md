@@ -750,7 +750,7 @@ second copy of the rule: whatever the ruleset requires (approval counts,
 code-owner review, last-push approval) is what the apply path waits for, and
 there is no owners parser here to disagree with it.
 
-A bare `shipmate apply` is authorized once at comment time, by the same four
+A bare `shipmate apply` is authorized once at comment time, by the same five
 apply requirements. Comment time is never the whole review decision: both apply
 paths re-read `reviewDecision` server-side before anything applies (below), so
 an approval dismissed between the comment and the dispatch holds. Both forms
@@ -769,8 +769,8 @@ SHIPMATE_UNGATED_ENVS = dev-eu,dev-us
 
 It exempts **one** requirement, `reviewed`, and only its `REVIEW_REQUIRED`
 value. Everything else still decides, on a listed environment exactly as on any
-other: **shipmate team** membership, **mergeable**, **undiverged** and the
-exact-plan rule are unchanged; a `CHANGES_REQUESTED` review still refuses,
+other: **shipmate team** membership, **not a draft**, **mergeable**,
+**undiverged** and the exact-plan rule are unchanged; a `CHANGES_REQUESTED` review still refuses,
 because an explicit human "no" is not an absent review; and an unknown or
 absent decision still fails closed. Nor does it touch the `<env>-apply`
 environment's required reviewers — that is a different control, gating the
