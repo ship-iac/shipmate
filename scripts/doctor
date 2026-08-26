@@ -7,7 +7,7 @@ Three modes, selected via SHIPMATE_DOCTOR_MODE:
   actions/summary right after a plan run. NEVER fails the run: a probe
   error becomes a 'could not verify' note — doctor guards onboarding, it
   must not take down the plan path.
-- report: render the sticky PR comment on demand — the twelve live probes'
+- report: render the sticky PR comment on demand — the thirteen live probes'
   findings plus a harvest of the warnings GitHub already recorded as
   annotations on this commit's workflow check runs.
 - check-ids: reduce a check-runs JSONL listing to the (id, name) pairs worth
@@ -35,6 +35,8 @@ Probes:
   `no-pull-request`.
 - a retired `plan_run_id` input still declared or forwarded by the consumer's
   `apply.yml`.
+- the dispatch wiring of the consumer's `plan.yml`: the `workflow_dispatch`
+  trigger `shipmate plan` needs, its `pr_number` input, and a `pr-facts` step.
 - approvers team resolvability in the repo's org.
 - GitHub App installation permission drift.
 """
@@ -1629,6 +1631,119 @@ def _plan_run_id_finding(text, name):
     return out
 
 
+#: The dispatch leg of a plan wrapper. NOT line-anchored like `_PLAN_RUN_ID_KEY`,
+#: and the polarity is the reason: there a match IS the finding, so a shape the
+#: anchor misses stays silent, while here ABSENCE is the finding and the same
+#: miss warns three times about a correctly wired file. `on: { workflow_dispatch:
+#: { inputs: { pr_number: … } } }` is legal YAML, and an anchor fails after `{ `
+#: however much of the flow mapping is fed in. A preceding brace, comma or
+#: whitespace stands in for the line start — safe only because both keys are
+#: searched inside the `on:` block alone: unanchored over a whole file, `versi` +
+#: `on:` is the retargeting `_ON_KEY` documents.
+_DISPATCH_TRIGGER = re.compile(r"[\s{,]workflow_dispatch[ \t]*:")
+_PR_NUMBER_INPUT = re.compile(r"[\s{,]pr_number[ \t]*:")
+_PR_FACTS_CALL = re.compile(r"/actions/pr-facts@")
+# Same degrade posture and reason as PIN_UNREADABLE.
+DISPATCH_WIRING_UNREADABLE = (
+    NOTICE,
+    f"could not read `{_WORKFLOWS_DIR}` — the plan wrapper's dispatch wiring not verified.",
+)
+DISPATCH_WIRING_NO_COMMIT = (
+    NOTICE,
+    "the plan wrapper's dispatch wiring not verified — the commit under examination could "
+    "not be determined.",
+)
+
+
+def _dispatch_wiring_warnings(ctx):
+    """`shipmate plan` dispatches the consumer's own `plan.yml`, and every way
+    that wrapper can be unready for it is invisible until someone comments.
+
+    Reads the consumer's workflow files at the commit under examination, the
+    same way and for the same reason as the pin, fork-trigger and summary-wiring
+    probes (`_contents_ref`): a pull request that *adds* the trigger must not
+    still be reported for lacking it."""
+    ref = _contents_ref(ctx)
+    if ref is None:
+        return [DISPATCH_WIRING_NO_COMMIT]
+
+    def finding(text, name):
+        # Exact name, like the retired-input probe's: `plan.yml` is the file
+        # `actions/dispatch` targets for `mode: plan`, and the filter lives here
+        # rather than in `_dispatch_wiring_finding` so that a direct call of that
+        # function with another file's name still reports.
+        if name != "plan.yml":
+            return []
+        return _dispatch_wiring_finding(text, name)
+
+    return _scan_workflow_texts(ctx, ref, finding, DISPATCH_WIRING_UNREADABLE)
+
+
+def _dispatch_wiring_finding(text, name):
+    """The three ways a plan wrapper cannot serve a dispatched plan.
+
+    The trigger and its input are looked for inside the `on:` block
+    (`_on_block`), inline remainder included, and not in the whole file: a `with:`
+    line forwarding `pr_number` on is not a declaration of it, and a
+    `workflow_dispatch:` line under `jobs:` — no such key exists, but a stray line
+    matches a whole-file regex — must not satisfy the trigger. That scoping is
+    also what lets the two keys be matched unanchored, which is what sees a
+    flow-style `on:` value.
+
+    Three findings rather than one, because the remedies differ and so do the
+    refusals. Both of the first two end in a dispatch-time HTTP 422 with no run
+    created, but they are told apart by the message GitHub answers with
+    (`Workflow does not have 'workflow_dispatch' trigger` versus `Unexpected
+    inputs provided`) — the pair `actions/dispatch` recognises. The third is not
+    a refusal at all: the wrapper accepts the dispatch and then has no source
+    for the pull request's facts."""
+    inline, block = _on_block(text)
+    # Leading empty element so the first character of `inline` has a delimiter in
+    # front of it: `on:{workflow_dispatch: …}` is legal and puts the brace at
+    # index 0, where the regexes' one-character lookbehind has nothing to match.
+    on_text = "\n".join(["", inline or "", *block])
+    out = []
+    if not _DISPATCH_TRIGGER.search(on_text):
+        out.append(
+            (
+                WARNING,
+                f"`{name}` declares no `workflow_dispatch` trigger — a commented `shipmate "
+                "plan` is authorized, reacted to with a rocket, and then dispatches nothing: "
+                "GitHub answers the dispatch with `Workflow does not have 'workflow_dispatch' "
+                "trigger`, no run is created, and the error lands on the comment-handling run "
+                "where nobody on the pull request sees it. Add the trigger, with a `pr_number` "
+                "input (docs/getting-started.md).",
+            )
+        )
+    elif not _PR_NUMBER_INPUT.search(on_text):
+        out.append(
+            (
+                WARNING,
+                f"`{name}`'s `workflow_dispatch` trigger declares no `pr_number` input — that "
+                "is the one input `shipmate plan` sends, and GitHub refuses a dispatch body "
+                "naming an input the workflow does not declare: `Unexpected inputs provided`, "
+                "no run created, the error on the comment-handling run rather than the pull "
+                "request. Declare `pr_number` under the trigger's `inputs:` "
+                "(docs/getting-started.md).",
+            )
+        )
+    if not _PR_FACTS_CALL.search(_stripped_text(text)):
+        out.append(
+            (
+                WARNING,
+                f"`{name}` has no `actions/pr-facts` step — a dispatched run carries no pull "
+                "request in its event payload and checks out the dispatch ref, so that step is "
+                "the only thing that resolves which pull request, head and repository the run "
+                "is for. Without it there is no head SHA to hand `build-matrix`, so on a "
+                "current engine pin that step refuses EVERY pull request and `detect` fails "
+                "loudly — the autoplan too, not only the dispatched leg — rather than planning "
+                "the wrong tree quietly. Add the step and feed the jobs below from it "
+                "(docs/getting-started.md).",
+            )
+        )
+    return out
+
+
 def _one_line(s, limit=200):
     flat = " ".join(s.split())
     return flat if len(flat) <= limit else flat[: limit - 1] + "…"
@@ -1688,6 +1803,7 @@ PROBES = (
     _fork_trigger_warnings,
     _summary_wiring_warnings,
     _plan_run_id_warnings,
+    _dispatch_wiring_warnings,
     _team_warnings,
     _app_permission_warnings,
 )

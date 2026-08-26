@@ -12,7 +12,7 @@ findings as workflow annotations titled `shipmate doctor`
 (`::warning title=shipmate doctor::<text>` / `::notice title=shipmate
 doctor::<text>`) — read-only, never blocking. Comment `shipmate doctor` on a
 pull request for a consolidated report: a sticky comment (marker `<!--
-shipmate:doctor -->`, upserted in place like the plan comment) combining twelve
+shipmate:doctor -->`, upserted in place like the plan comment) combining thirteen
 live probes — a missing or mis-pinned `shipmate / gate` rule on the default
 branch (no active ruleset requiring it, or one that doesn't pin
 `integration_id` to the shipmate App, or that isn't strict),
@@ -87,12 +87,19 @@ accepts one; a `with:` line forwarding it to the engine's reusable `apply.yml`
 or `apply-all.yml` makes GitHub reject the run as it LOADS the workflow — the
 run has no jobs and no logs, only a workflow-validation error on the run itself
 — while the same line on a composite action is only a warning),
+whether the `plan.yml` wrapper can serve a dispatched plan at all — the
+`workflow_dispatch` trigger a commented `shipmate plan` dispatches, the `pr_number`
+input that dispatch body carries, and a `pr-facts` step (the first two are refused
+at dispatch time with an HTTP 422 and no run created, so the failure lands on the
+comment-handling run rather than the pull request; without the third a dispatched
+run has nothing resolving which pull request it is for, since its event payload
+carries none),
 whether the configured approvers team resolves in the org, and
 whether the shipmate App installation still grants the manifest's full
 permission set — with the warning and failure annotations GitHub already
 recorded on this commit's workflow runs (shipmate's own and any other
 Actions workflow run on that commit; third-party-app-authored check runs are
-excluded). Only ten of the twelve probes can produce a finding from the plan
+excluded). Only eleven of the thirteen probes can produce a finding from the plan
 path's own `annotate`-mode run (`actions/summary`): the approvers-team probe
 needs the `SHIPMATE_TEAM` environment variable, which the plan path does
 not supply, and
