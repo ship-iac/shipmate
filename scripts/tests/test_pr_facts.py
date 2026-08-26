@@ -20,6 +20,7 @@ pf = load_script("pr-facts")
 
 _PAYLOAD_PR = {
     "number": 7,
+    "state": "open",
     "draft": False,
     "head": {"sha": "a" * 40, "repo": {"full_name": "own/repo"}},
     "base": {"sha": "b" * 40},

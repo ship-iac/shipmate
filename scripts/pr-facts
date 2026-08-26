@@ -72,6 +72,11 @@ def _facts(pr, on_demand):
     supply: an absent head SHA leaves the checkout on the base and the matrix
     empty, which is the direction that greens a gate over a pull request nobody
     planned.
+
+    `state` is checked here, on both legs: planning a closed pull request would
+    author fresh pending apply checks on a head the deploy path has already been
+    through, and `deploy-detect`'s work queue IS the pending apply checks -- a
+    re-run of that deploy would apply them again.
     """
     head = pr.get("head") or {}
     repo = head.get("repo") or {}
@@ -94,6 +99,13 @@ def _facts(pr, on_demand):
             "stays on the base, the matrix comes out empty, and the gate greens with nothing "
             "queued to apply. Re-run the workflow."
         )
+    state = pr.get("state")
+    if state != "open":
+        raise SystemExit(
+            f"::error::pull request #{facts['pr_number']} is {state or 'in an unknown state'}, "
+            "not open — there is nothing to plan. Planning a closed pull request would queue "
+            "apply checks on a head the deploy path has already been through."
+        )
     return facts
 
 
@@ -103,13 +115,7 @@ def from_payload(pr):
 
 
 def from_api(number, repository):
-    """The facts for a dispatched plan, read from the API by number.
-
-    `state` is checked here rather than downstream: planning a closed pull
-    request would author fresh pending apply checks on a head the deploy path has
-    already been through, and `deploy-detect`'s work queue IS the pending apply
-    checks -- a re-run of that deploy would apply them again.
-    """
+    """The facts for a dispatched plan, read from the API by number."""
     if not _NUMBER.fullmatch(number):
         raise SystemExit(
             f"::error::the plan workflow's pr_number input must be a pull-request number "
@@ -121,15 +127,7 @@ def from_api(number, repository):
             "::error::GITHUB_REPOSITORY is unset, so this run cannot look up its own pull "
             "request. Re-run the workflow."
         )
-    pr = _gh_json(f"repos/{repository}/pulls/{number}")
-    state = pr.get("state")
-    if state != "open":
-        raise SystemExit(
-            f"::error::pull request #{number} is {state or 'in an unknown state'}, not open — "
-            "there is nothing to plan. Planning a closed pull request would queue apply "
-            "checks on a head the deploy path has already been through."
-        )
-    return _facts(pr, "true")
+    return _facts(_gh_json(f"repos/{repository}/pulls/{number}"), "true")
 
 
 def main():
