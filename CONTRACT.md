@@ -1174,8 +1174,9 @@ can therefore only fail the decision closed, never weaken it, and the three
 costs differ: an omitted `head-repo` skips the job on every run, an omitted
 `is-draft` on every autoplan run — no gate, so nothing merges — rather than
 handing a fork pull request an App-authored gate; an omitted `on-demand` costs
-only what it widens, a requested plan of a draft, which is skipped exactly as it
-was before that input existed. The comparison sits in the callee because a
+what it widens — a requested plan of a draft is skipped exactly as it was before
+that input existed, and a dispatched plan's per-cell checks are no longer
+mirrored onto the head. The comparison sits in the callee because a
 consumer who kept the job and rewrote its `if:` would be fail-open and
 unobserved. It is a job-level `if:`, not a step-level check, so a skipped job
 creates no deployment and never enters the environment.

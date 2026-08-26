@@ -187,8 +187,8 @@ full picture below:
   step — on a fork pull request, on a draft nobody asked to plan, and on a
   caller that left the head repository or the draft flag unstated: an omitted
   input is read as a refusal, so the wrapper can fail the job closed
-  but never open it (an omitted `on-demand` refuses only the requested draft
-  plan it would have admitted). On an `on-demand` run it also **mirrors** this run's own
+  but never open it (an omitted `on-demand` costs only the requested draft plan
+  it would have admitted, and the mirror below). On an `on-demand` run it also **mirrors** this run's own
   completed per-cell plan checks onto the head commit: a dispatched run's job
   check-runs attach to the dispatch ref, so without the mirror the pull request
   shows none of them — not even a failed cell, which is the state
