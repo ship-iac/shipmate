@@ -130,7 +130,7 @@ jobs:
           terramate-version: ${{ vars.TERRAMATE_VERSION }}
           tofu-version: ${{ vars.TOFU_VERSION }}
       - id: d
-        uses: ship-iac/shipmate/actions/apply-all-detect@94d9d252bbc37a291b2077911ce0c2531c2c9c2f
+        uses: ship-iac/shipmate/actions/apply-all-detect@610ea95367fd101dc7c86aae18614dae23b389f4
         with:
           head-sha: ${{ inputs.ref }}
           github-token: ${{ github.token }}
