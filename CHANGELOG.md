@@ -13,7 +13,7 @@ grammar are declared unstable in `README.md`.
 
 ## [0.20.0] — 2026-08-27
 
-Tags `<backfilled>`.
+Tags `dbcc4c5`.
 
 **Re-pinning alone is not enough: the pin bump and the wrapper edits must land in
 one commit.** `plan.yml` gains a `workflow_dispatch` trigger with a `pr_number`
