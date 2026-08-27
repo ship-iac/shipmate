@@ -11,6 +11,78 @@ section below names the SHA the release tags.
 The version line stays `v0.x` while action inputs, check names, and the comment
 grammar are declared unstable in `README.md`.
 
+## [0.20.0] — 2026-08-27
+
+Tags `<backfilled>`.
+
+**Re-pinning alone is not enough: the pin bump and the wrapper edits must land in
+one commit.** `plan.yml` gains a `workflow_dispatch` trigger with a `pr_number`
+input, a `facts` job calling the new `actions/pr-facts`, `head-sha` on its
+`build-matrix` step, and `on-demand` on its `summary` call — and every
+`github.event.pull_request.*` reference inside the jobs becomes
+`needs.facts.outputs.*`. Split across two commits it fails both ways: the new
+wrapper against the old pin passes `on-demand` to a `summary.yml` that declares
+no such input, which is a **load-time rejection** — no job, no check run, no
+retrievable log — while the old wrapper against the new pin states no `head-sha`,
+which `build-matrix` refuses on every plan including the autoplan. The refusal is
+the loud direction; the load-time rejection is the quiet one
+(`docs/upgrading.md` §0.20.0).
+
+### Added
+
+- **`shipmate plan` is a verb.** A collaborator can comment `shipmate plan` on a
+  pull request and get the same plan a push produces — same provenance, same
+  per-cell checks, same gate. Plan was previously the only thing this engine did
+  that had no name: the most-exercised operation in the system, the object every
+  other verb refers to, and absent from `shipmate help`. It now takes **no
+  arguments**: there is one plan of record per head commit, because a run holding
+  one environment's artifacts leaves every other environment's workset empty at
+  the next apply.
+
+- **A plan can be requested on a draft pull request.** Autoplan still skips
+  drafts — that is its economy — but an explicit `shipmate plan` is someone asking
+  for exactly that plan, so it runs. Applying a draft is refused in the same
+  release that makes it reachable: planning a draft authors apply checks on a
+  draft head for the first time, and a conflict-free draft reports
+  `mergeable: true`, so the refusal is deliberate rather than incidental.
+
+- **`actions/pr-facts`, one producer for every pull-request fact the plan path
+  decides on.** Payload-preferred: a pull-request event reads its own event
+  payload, so the autoplan leg spends no API call and cannot disagree with the
+  event that started it; a dispatch resolves the same facts from the pull-request
+  number. Nothing head-related is ever read from a dispatch input — the fork
+  refusal keys on the head repository, and a caller holding `actions: write` must
+  not be able to state one. A number cannot lie about its own head repository.
+
+- **A dispatched plan's per-cell checks are mirrored onto the pull-request
+  head.** GitHub attaches a dispatched run's job check-runs to the ref that was
+  dispatched, so without this a `shipmate plan` showed the pull request none of
+  its `<stack> / <env>` rows — including a failed cell, which is the state the
+  verb exists to recover from.
+
+- **A thirteenth `shipmate doctor` probe** reports a plan wrapper that cannot be
+  dispatched. A missing trigger or a missing `pr_number` input fails at dispatch
+  time with no run created, which is invisible from the pull request: the
+  commenter gets a reaction and then nothing.
+
+### Changed
+
+- **`build-matrix` refuses a checkout that is not the commit the run states it is
+  planning, on every trigger.** The guard previously keyed on the event payload
+  and made no check at all outside `pull_request_target`. Both plan triggers check
+  out something else by default — the base branch, or the dispatch ref — so a
+  wrapper that omits `ref:` planned the wrong tree, reported no changes, and
+  greened the gate with nothing queued to apply. It now compares against a
+  wrapper-stated `head-sha` and **refuses by default**; `no-pull-request` remains
+  the only opt-out, for a workflow with no pull request at all (nightly drift).
+
+- **`detect` refuses a fork before `terramate` reads its tree.** The reference
+  wrapper runs the `build-matrix` step ahead of `fmt --check` and
+  `generate --detailed-exit-code`. Under `pull_request_target` `actions/checkout`
+  turns a fork head away itself, but a dispatched run carries no pull-request
+  context for that outer refusal to key on, so on that leg the inner refusal is
+  the only one left and it has to decide first.
+
 ## [0.19.0] — 2026-08-25
 
 Tags `270c03b`.
