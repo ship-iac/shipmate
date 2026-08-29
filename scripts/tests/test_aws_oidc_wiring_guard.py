@@ -4,9 +4,10 @@ Invariants:
 - every wave job in apply-env-level.yml carries id-token: write, exactly one
   credentials step gated on the workload role or vars.AWS_ROLE_ARN, placed
   BEFORE the apply-cell step, and the empty-suffix state-path expression;
-- apply-env-level.yml declares a workflow-level `permissions: {}` floor, and the
-  snapshot and complete jobs declare exactly the scopes they need -- neither
-  gets id-token (neither touches the cloud, and complete holds the App key);
+- apply-env-level.yml and unlock.yml declare a workflow-level `permissions: {}`
+  floor, and apply-env-level's snapshot and complete jobs declare exactly the
+  scopes they need -- neither gets id-token (neither touches the cloud, and
+  complete holds the App key);
 - state_suffix stays required with no default on all four apply-path workflows,
   so omitting it is a workflow-resolution error rather than a silent no-state
   apply.
@@ -14,6 +15,7 @@ Invariants:
 Whole parsed values, never substrings (an inverted gate must fail here).
 """
 
+import pytest
 import yaml
 from _loader import WORKFLOWS
 
@@ -57,10 +59,11 @@ def test_every_wave_job_grants_id_token_write():
         assert perms.get("id-token") == "write", f"{wave}: permissions must include id-token: write"
 
 
-def test_workflow_level_permissions_are_an_empty_floor():
-    spec = _load("apply-env-level.yml")
+@pytest.mark.parametrize("name", ["apply-env-level.yml", "unlock.yml"])
+def test_workflow_level_permissions_are_an_empty_floor(name):
+    spec = _load(name)
     assert spec.get("permissions") == {}, (
-        "apply-env-level.yml must declare a workflow-level `permissions: {}` floor "
+        f"{name} must declare a workflow-level `permissions: {{}}` floor "
         "-- without it a job that loses its own block inherits everything the "
         f"caller granted, id-token: write included; got {spec.get('permissions')!r}"
     )

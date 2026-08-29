@@ -408,11 +408,11 @@ workloads with a role each.
 
 With no role variable set the credentials step is skipped and the job holds no
 cloud credential at all, which is how the sample repos run credential-free.
-This is wired on the **apply path only**: every wave job of
-`apply-env-level.yml` requests `id-token: write` and runs
-`aws-actions/configure-aws-credentials`, gated on one of those roles being set,
-before its apply-cell step, reading the variables from the apply Environment it
-is bound to. The `snapshot` and `complete` jobs deliberately get
+This is wired on the **apply and unlock paths only**: every wave job of
+`apply-env-level.yml`, and `unlock.yml`'s unlock job, requests `id-token: write`
+and runs `aws-actions/configure-aws-credentials`, gated on one of those roles
+being set, before its cell step, reading the variables from the apply
+Environment it is bound to. The `snapshot` and `complete` jobs deliberately get
 no token. Plan cells have no credentials step.
 
 On the apply path the engine passes through whatever role the apply Environment
@@ -446,8 +446,8 @@ the apply-match fingerprint by construction — it hashes only non-empty
 `TF_VAR_*` plus `TF_WORKSPACE` (see Apply-match fingerprint, below).
 
 **This is a breaking change for existing consumers, cloud or not.** GitHub caps
-a called workflow's permissions at each `uses:` boundary, so a consumer wrapper
-that calls the engine's apply-path reusable workflows must grant
+a called workflow's permissions at each `uses:` boundary, so every consumer
+`apply.yml`, `unlock.yml` and `deploy.yml` wrapper — not `plan.yml` — must grant
 `id-token: write` **on the call-site job** — and, if the wrapper declares a
 top-level `permissions:` block, there too. This applies to a consumer that uses
 no cloud credentials whatsoever: without the grant the run fails at
@@ -510,6 +510,15 @@ themselves contain text that matches the command grammar.
 | `shipmate unlock <env>` | active | required env | team membership plus the `<env>-apply` environment — no review policy, no mergeable check, no draft check, no reviewed plan (below) |
 | `shipmate destroy` | reserved | — | — |
 
+Each dispatching verb has its own consumer workflow file, and `actions/dispatch`
+picks the file from the verb: `shipmate plan` → `.github/workflows/plan.yml`,
+`shipmate apply` → `apply.yml`, `shipmate unlock` → `unlock.yml`. `plan.yml`
+alone carries two triggers — `pull_request_target` for the autoplan and
+`workflow_dispatch` for the commented form; the other two are dispatch-only.
+`doctor` and `help` dispatch nothing: both are answered inside the comment-ops
+run itself. A verb whose file the repository does not carry fails at dispatch
+time on that comment-handling run, and no other verb is affected.
+
 `shipmate plan` plans the pull request's changed stacks on demand, authoring
 exactly what a push-triggered plan authors and nothing more: the sticky plan
 comment, the per-cell plan checks, the plan artifacts an apply consumes, and
@@ -550,7 +559,7 @@ only labels the output as shipmate's own.
 `shipmate doctor` posts a consolidated, sticky report — one comment per pull
 request, identified by the HTML marker `<!-- shipmate:doctor -->` (distinct
 from the plan comment's `<!-- shipmate:summary -->`) and upserted in place the
-same way. It combines thirteen live settings probes (gate ruleset,
+same way. It combines fourteen live settings probes (gate ruleset,
 default-branch `pull_request` rule, environment existence, environment
 protection shape, plan-environment secrets, the `shipmate-engine`
 environment's own existence and default-branch scoping, `pull_request_target`
@@ -565,6 +574,9 @@ tree the pull request never named —
 a retired `plan_run_id` input still declared or forwarded by the consumer's
 `apply.yml` (a forward to a reusable workflow is rejected as the run LOADS, so
 there is no job and no log to read),
+a retired `mode` input on the same wrapper — declared under `on:`, or forwarded
+to the engine's reusable apply workflows, where the same load-time rejection
+applies — only those two placements are read as the retired rail,
 the dispatch wiring of the consumer's `plan.yml` — the `workflow_dispatch` trigger
 a commented `shipmate plan` dispatches, the `pr_number` input that dispatch sends,
 and a `pr-facts` step to resolve the pull request a dispatched run has no payload
@@ -581,7 +593,7 @@ when the report was rendered, it says so and asks for the command again once
 they have, and if the harvest itself could not be read in full it says that
 too — the two are separate statements, since a run that has not finished has
 recorded nothing yet while a run that could not be read may have recorded
-plenty. Only eleven of the thirteen
+plenty. Only twelve of the fourteen
 probes can produce a finding from the plan path's own `annotate`-mode
 invocation: the approvers-team probe needs the `SHIPMATE_TEAM` environment
 variable, which the plan path does not supply, so it silently returns
@@ -909,7 +921,7 @@ one already requires, so a role that can apply an environment can already
 unlock it.
 
 It reports **in the run, not in a comment** — a comment would need
-`pull-requests: write`, which consumers do not grant `apply.yml`. The `rocket`
+`pull-requests: write`, which consumers do not grant `unlock.yml`. The `rocket`
 reaction confirms acceptance, per-cell detail lands in each job's step summary,
 and a failure reds the run.
 
@@ -1849,14 +1861,17 @@ The engine ships the merge-deploy path as the reusable workflow
 bare-apply path as `.github/workflows/apply-all.yml` (detect → env-levels
 0..3 via `apply-env-level.yml` → gate refresh + result comment), and the
 targeted path as `.github/workflows/apply.yml` (single-env detect → one
-`apply-env-level.yml` call → gate refresh + result comment). A
-consuming repo carries two thin wrappers: `deploy.yml` (`on: push` to the
-default branch; passes only its flavor's `state_suffix`, which it sets to `''`
-on a remote backend) and `apply.yml` (`workflow_dispatch`; its
-optional `environment` input routes to the targeted or bare engine workflow).
-Both wrappers **must** grant `id-token: write` on the calling job, added in the
-same pull request that repins past the change introducing it (see AWS OIDC,
-above).
+`apply-env-level.yml` call → gate refresh + result comment), and the unlock path
+as `.github/workflows/unlock.yml` (guard → single-env detect → one flat unlock
+matrix; it takes `environment` and `ref` only, and declares no secrets). A
+consuming repo carries three thin wrappers on this side: `deploy.yml`
+(`on: push` to the default branch; passes only its flavor's `state_suffix`,
+which it sets to `''` on a remote backend), `apply.yml` (`workflow_dispatch`;
+its optional `environment` input routes to the targeted or bare engine workflow)
+and `unlock.yml` (`workflow_dispatch`; one call, no `state_suffix` and no
+`secrets:` block). All three **must** grant `id-token: write` on the calling
+job, added in the same pull request that repins past the change introducing it
+(see AWS OIDC, above).
 
 ## OpenTofu note
 

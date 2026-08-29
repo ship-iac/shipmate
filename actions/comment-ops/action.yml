@@ -42,11 +42,9 @@ outputs:
   head-sha:
     description: PR head SHA; empty on the plan route, whose dispatched run resolves the head from the pull request itself.
     value: ${{ steps.authz.outputs.head_sha }}
-  mode:
-    description: apply (default), unlock or plan — the dispatch mode the parsed verb selects.
-    # Groups as `((a && x) || (b && y)) || z`, and an unmatched branch yields the
-    # falsy `''` — so a route that is neither unlock nor plan lands on apply.
-    value: ${{ steps.parse.outputs.route == 'unlock' && 'unlock' || steps.parse.outputs.route == 'plan' && 'plan' || 'apply' }}
+  verb:
+    description: The parsed verb, forwarded to actions/dispatch — plan, apply or unlock, one consumer workflow file each. The `doctor` and `help` routes are answered in place and never reach a dispatch.
+    value: ${{ steps.parse.outputs.route }}
 runs:
   using: composite
   steps:

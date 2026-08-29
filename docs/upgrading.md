@@ -159,6 +159,51 @@ names. The entries below `0.2.0` predate the first tagged release, or
 `CHANGELOG.md` does not pin one; they are kept for repositories moving from a
 very old pin.
 
+### 0.21.0 — one workflow file per verb: `unlock.yml` arrives, `apply.yml` drops `mode`
+
+**Re-pinning alone is not enough.** Each dispatching verb now has its own
+consumer workflow file and `actions/dispatch` picks the file from the verb
+([`../CONTRACT.md`](../CONTRACT.md) §Comment-ops), so `shipmate unlock` no longer
+rides the apply wrapper. Three edits, all shown in place in
+[`getting-started.md`](getting-started.md).
+
+**1. Add `.github/workflows/unlock.yml`.** It calls the engine's `unlock.yml`
+with `environment` and `ref`, grants `id-token: write` on the calling job, and
+passes **no `secrets:` block** — unlock reads no plan artifact, so there is no
+passphrase to forward, and mapping a secret the callee does not declare is a
+load-time rejection. Skip the file and every other verb keeps working;
+`shipmate unlock <env>` alone stops, refused at dispatch time with a 404 that
+the dispatch step turns into an error naming the missing wrapper — on the
+comment-handling run, where the pull request shows only the rocket reaction.
+
+**2. Delete `mode` from `apply.yml`** — both the `workflow_dispatch` input
+declaration and the `mode: ${{ inputs.mode }}` line forwarding it to the engine's
+reusable `apply.yml`. The forward is the fatal half: the engine no longer
+declares that input, and an undeclared reusable-workflow input is rejected as the
+run LOADS — `startup_failure`, no job, no check run, no retrievable log. The
+declaration alone is only dead weight. `shipmate doctor` reports both placements.
+
+**3. Forward the verb in `comment-ops.yml`.** On the `actions/dispatch` step,
+`verb: ${{ steps.authz.outputs.verb }}` replaces
+`mode: ${{ steps.authz.outputs.mode }}`. Delete any `workflow:` line too — that
+override input is gone. `verb` has no default and is refused when empty, so a
+step forwarding nothing refuses the dispatch outright rather than guessing a
+wrapper.
+
+**All three edits and the pin bump land in one pull request, per repository.** A
+wrapper and its pinned engine disagreeing for even one commit breaks in both
+directions, and only one of them is loud. Old wrapper against the new engine: the
+surviving `mode:` forward is the load-time rejection above. New wrapper against
+an old pinned engine: `verb` reaches an `actions/dispatch` that declares no such
+input, which a composite action merely warns about and ignores — leaving that
+action on its own empty `mode`, which routes **every** comment at `apply.yml`, so
+a `shipmate unlock` applies the reviewed plan instead of releasing the lock.
+
+Nothing else needs consumer action: `unlock.yml` binds the same `<env>-apply`
+environment the verb always bound, so there is no environment to create or
+rename, no repository variable to set, and no change to `plan.yml`, `deploy.yml`
+or `drift.yml`.
+
 ### 0.20.0 — `shipmate plan` becomes a comment verb, and `plan.yml` states its own facts
 
 **Re-pinning alone is not enough, and every edit is in
@@ -267,17 +312,16 @@ without it the pull request shows none of them, a failed cell included.
   request fails, the automatic plan included, with a red `detect` naming the
   input. Loud, and it holds the gate red rather than greening it.
 
-**Check one line outside `plan.yml`.** With its `workflow` input empty,
-`actions/dispatch` picks the workflow from `mode` — `plan.yml` when the mode is
-`plan`, `apply.yml` otherwise — so a `comment-ops.yml` that does not forward
-`mode: ${{ steps.authz.outputs.mode }}` to that step sends a `shipmate plan`
-comment to the **apply** wrapper. That line has been in the reference
-`comment-ops.yml` since `0.16.0`, added there for `unlock`
+**Check one line outside `plan.yml`.** On this release's `mode` rail,
+`actions/dispatch` picks the workflow from `mode`, so a `comment-ops.yml` not
+forwarding `mode: ${{ steps.authz.outputs.mode }}` to that step sends a
+`shipmate plan` to the **apply** wrapper. The forwarded line has been in
+the reference `comment-ops.yml` since `0.16.0`, added there for `unlock`
 ([`../CHANGELOG.md`](../CHANGELOG.md) §0.16.0); this release is what makes its
-absence reachable from a comment that changes nothing. A `workflow:` value
-overrides the mode, so a split-layout consumer pinning `workflow: apply.yml`
-misroutes `shipmate plan` even with `mode` forwarded — merge the wrappers and
-leave `workflow` unset.
+absence reachable from a comment that changes nothing. If you are upgrading past
+`0.21.0`, take the line from §0.21.0 above and skip the `mode` wiring this
+section described — that rail, and the `workflow:` override that could pin it to
+one file, are both gone.
 
 **One shape stops passing that used to.** A wrapper on the older
 `on: pull_request` trigger that named no `ref:` at all and planned the default
@@ -580,8 +624,9 @@ unchanged — the new per-cell check is additive.
 
 **Moving to `0.19.0` or later? Do not add `plan_run_id` at all** — that input is
 retired, and a wrapper forwarding it to the engine's reusable workflows now kills
-the run as GitHub loads it (§0.19.0). The rest of this entry still applies to
-`ref`, `pr_number` and `mode`.
+the run as GitHub loads it (§0.19.0). **Nor `mode`** — `0.21.0` retired that
+input too and gave unlock its own wrapper (§0.21.0). The rest of this entry still
+applies to `ref` and `pr_number`.
 
 `plan_run_id` is the one that breaks: `shipmate unlock` applies no plan, so the
 engine dispatches it with an empty run id, and **GitHub reads an empty value for

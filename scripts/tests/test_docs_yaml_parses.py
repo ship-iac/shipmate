@@ -146,6 +146,7 @@ def test_the_wrapper_snippets_are_still_being_found():
         ("docs/getting-started.md", "apply.yml"),
         ("docs/getting-started.md", "deploy.yml"),
         ("docs/getting-started.md", "summary.yml"),
+        ("docs/getting-started.md", "unlock.yml"),
     ], f"documented engine reusable-workflow calls changed: {found}"
 
 
@@ -229,7 +230,7 @@ def test_the_documented_wrapper_inputs_are_exactly_these():
     required `workflow_dispatch` input as "not provided". Every `shipmate unlock`
     dispatch failed that way while the wrapper still declared the plan-run input
     the engine has since retired, since unlock applies no plan and so carried no
-    run id. The engine validates instead, where the mode is known. The plan
+    run id. The engine validates instead, where the verb is known. The plan
     wrapper's `pr_number` is the one required input and states why: that dispatch
     carries exactly one input and always fills it, and `required: true` is what
     makes a hand-dispatched plan name the pull request it plans rather than start
@@ -260,8 +261,9 @@ def test_the_documented_wrapper_inputs_are_exactly_these():
     )
     assert found == [
         ("docs/getting-started.md", "shipmate · apply", "environment", False, ""),
-        ("docs/getting-started.md", "shipmate · apply", "mode", False, "apply"),
         ("docs/getting-started.md", "shipmate · apply", "pr_number", False, ""),
         ("docs/getting-started.md", "shipmate · apply", "ref", False, ""),
         ("docs/getting-started.md", "shipmate · plan", "pr_number", True, None),
+        ("docs/getting-started.md", "shipmate · unlock", "environment", False, ""),
+        ("docs/getting-started.md", "shipmate · unlock", "ref", False, ""),
     ], f"documented workflow_dispatch inputs changed: {found}"

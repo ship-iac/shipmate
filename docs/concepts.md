@@ -263,9 +263,9 @@ configuration must fail loud rather than apply with no state at all.
 Credentials are opt-in per GitHub Environment
 through two variables, `AWS_ROLE_ARN` and `AWS_REGION` — unset, and no cloud
 credential ever enters the job, which is how the sample repos run
-credential-free. Because the apply jobs now request `id-token: write`, and
-GitHub caps a called workflow's permissions at each `uses:` boundary, **every
-consumer wrapper that calls the apply-path workflows must grant
+credential-free. Because the apply and unlock jobs request `id-token: write`,
+and GitHub caps a called workflow's permissions at each `uses:` boundary,
+**every consumer `apply.yml`, `unlock.yml` and `deploy.yml` wrapper must grant
 `id-token: write` on the calling job — including consumers using no cloud
 credentials at all.** See [`CONTRACT.md`](../CONTRACT.md) §State backend and
 §AWS OIDC for the semantics.

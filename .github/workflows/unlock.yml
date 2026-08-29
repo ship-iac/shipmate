@@ -1,0 +1,129 @@
+name: unlock
+on:
+  workflow_call:
+    inputs:
+      environment: { required: true, type: string }
+      ref: { required: true, type: string }
+# Floor, not a default to inherit from: every job below declares its own block,
+# and this makes a job that loses its block get nothing rather than everything
+# the caller granted -- which includes id-token: write.
+permissions: {}
+jobs:
+  # `gh workflow run unlock.yml` by a human with write access would otherwise
+  # skip every requirement in scripts/authorize. A human cannot make
+  # github.actor a bot login, so this rejects any human dispatch -- though it
+  # admits any bot actor with actions:write, not only this App.
+  guard:
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Reject dispatches that did not come from a bot actor
+        if: ${{ !endsWith(github.actor, '[bot]') }}
+        run: |
+          echo "::error::unlock must be dispatched by the shipmate App via comment-ops, not by a direct workflow_dispatch"
+          exit 1
+
+  detect:
+    needs: [guard]
+    runs-on: ubuntu-latest
+    permissions: { contents: read, checks: read, actions: read }
+    outputs:
+      cells: ${{ steps.d.outputs.cells }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { fetch-depth: 0, ref: "${{ inputs.ref }}" }
+      - uses: ship-iac/shipmate/actions/setup@21d05c37ca0199767059abfecd28242460b86a0c
+        with:
+          terramate-version: ${{ vars.TERRAMATE_VERSION }}
+          tofu-version: ${{ vars.TOFU_VERSION }}
+      - id: d
+        uses: ship-iac/shipmate/actions/apply-detect@610ea95367fd101dc7c86aae18614dae23b389f4
+        with:
+          environment: ${{ inputs.environment }}
+          # A literal, not an input: this file is the verb. `run_unlock` reads
+          # neither the review decision nor the ungated-env list -- an approval
+          # reviews a diff and unlock applies none -- so neither is passed.
+          mode: unlock
+          head-sha: ${{ inputs.ref }}
+          github-token: ${{ github.token }}
+          app-id: ${{ vars.SHIPMATE_APP_ID }}
+      # The apply path runs this pre-flight in apply-env-level's `snapshot` job,
+      # before any wave binds an environment; the unlock job binds the SAME
+      # `<env>-apply` and so needs the same refusal. GitHub creates a missing
+      # environment on demand with no reviewers, no wait timer and no branch
+      # policy -- and the created environment then satisfies the apply path's own
+      # pre-flight, so an unlock into a missing environment would silently retire
+      # the reviewer gate for every later apply of that env. A failure here fails
+      # `detect`, which the unlock job's `!failure()` reads as "do not run".
+      # The single flat queue is wrapped as one wave: the script's input shape is
+      # the waves object, and it refuses an empty cell set by design -- hence the
+      # `!= '[]'` clause rather than letting it decide.
+      - name: Verify the unlock-path environment exists
+        if: ${{ steps.d.outputs.cells != '[]' }}
+        uses: ship-iac/shipmate/actions/verify-environments@9c0354a97cd97e07967dac2c7e36f524cdc18700
+        with:
+          waves-json: ${{ format('{{"wave0":{0}}}', steps.d.outputs.cells) }}
+          shared-envs: ${{ vars.SHIPMATE_SHARED_ENVS }}
+          github-token: ${{ github.token }}
+
+  # Nothing here is wave-ordered -- releasing a lock has no dependencies -- so
+  # the matrix is flat.
+  #
+  # The concurrency group is byte-identical to the wave jobs' in
+  # apply-env-level.yml (guarded by scripts/tests/test_apply_cell_concurrency_guard.py
+  # and scripts/tests/test_verb_path_isolation.py), and that identity is the
+  # whole point: a live apply for this cell makes the unlock queue behind it, so
+  # by the time it runs the lock is either gone or genuinely orphaned.
+  #
+  # No PR comment, deliberately -- do not "fix" this. Posting one needs
+  # pull-requests: write, which the consumer wrapper does not grant to this
+  # workflow, and widening a consumer's token to make a message prettier is the
+  # wrong trade. Acceptance is already acknowledged by comment-ops' reaction,
+  # per-cell detail lands in each job's step summary, and a failure reds the run
+  # and notifies the actor.
+  unlock:
+    # `guard` is in `needs` as well as `detect`: a rejected dispatch leaves
+    # `detect` skipped, and a skipped `detect` reads its outputs as empty
+    # strings -- which `!= '[]'` reads as a queue.
+    needs: [guard, detect]
+    if: ${{ !failure() && !cancelled() && needs.detect.outputs.cells != '[]' }}
+    runs-on: ubuntu-latest
+    permissions: { contents: read, actions: read, id-token: write }
+    strategy:
+      # One cell that cannot determine its lock state must not stop its siblings
+      # from releasing theirs.
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.detect.outputs.cells) }}
+    environment: >-
+      ${{ contains(format(',{0},', vars.SHIPMATE_SHARED_ENVS), format(',{0},', matrix.environment))
+      && matrix.environment || format('{0}-apply', matrix.environment) }}
+    concurrency:
+      group: apply-${{ matrix.environment }}-${{ matrix.stack }}
+      cancel-in-progress: false
+    name: unlock / ${{ matrix.stack }} / ${{ matrix.environment }}
+    env:
+      TF_VAR_env: ${{ vars.TF_VAR_env }}
+      TF_VAR_region: ${{ vars.TF_VAR_region }}
+      TF_WORKSPACE: ${{ vars.TF_WORKSPACE }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { fetch-depth: 0, ref: "${{ inputs.ref }}" }
+      - uses: ship-iac/shipmate/actions/setup@21d05c37ca0199767059abfecd28242460b86a0c
+        with:
+          terramate-version: ${{ vars.TERRAMATE_VERSION }}
+          tofu-version: ${{ vars.TOFU_VERSION }}
+      # A consumer opts into AWS OIDC per environment (plan/apply roles may
+      # differ per env/account), and AWS_ROLE_ARN_<WORKLOAD> wins over
+      # AWS_ROLE_ARN so one environment can serve several workloads.
+      - name: Configure cloud credentials (AWS OIDC)
+        if: ${{ (matrix.workload_var != '' && vars[format('AWS_ROLE_ARN_{0}', matrix.workload_var)]) != '' || vars.AWS_ROLE_ARN != '' }}
+        uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
+        with:
+          role-to-assume: ${{ matrix.workload_var != '' && vars[format('AWS_ROLE_ARN_{0}', matrix.workload_var)] || vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+      - uses: ship-iac/shipmate/actions/unlock-cell@674c5f68a60b3b338e4994a068d42284b9c84fc7
+        with:
+          stack: ${{ matrix.stack }}
+          stack-name: ${{ matrix.stack }}
+          env: ${{ matrix.environment }}

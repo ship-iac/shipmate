@@ -1,5 +1,5 @@
 name: shipmate dispatch
-description: Mint a short-lived GitHub App installation token and workflow_dispatch the consumer wrapper the mode selects — apply.yml for apply and unlock (its optional `environment` input selects a targeted env; empty means bare `shipmate apply`), plan.yml for plan. Passes IDs only (dispatch inputs are size-limited); also passes mode (apply, unlock or plan) to control dispatch behavior.
+description: Mint a short-lived GitHub App installation token and workflow_dispatch the consumer wrapper the verb names — plan.yml, apply.yml or unlock.yml, one file per verb. Passes IDs only (dispatch inputs are size-limited); each verb's body carries exactly the inputs its wrapper declares.
 inputs:
   app-id:
     description: GitHub App id (a repo/org variable, not a secret).
@@ -8,23 +8,18 @@ inputs:
     description: GitHub App private key (from the shipmate-engine environment secret).
     required: true
   environment:
-    description: Target environment, e.g. dev-eu. Empty = bare `shipmate apply` (all non-explicit environments), and empty on the plan route, whose dispatched run carries no environment.
+    description: Target environment, e.g. dev-eu. Carried by unlock always, by apply only when non-empty — an empty environment IS the bare `shipmate apply` (all non-explicit environments). Unused on the plan route, whose dispatched run carries no environment.
     required: false
     default: ''
-  mode:
-    description: apply (default), unlock or plan. Included in the dispatch body only when 'unlock' — a consumer apply.yml that predates this input declares no such input, and a workflow_dispatch carrying an undeclared input is rejected (422). 'plan' targets plan.yml, whose body carries the PR number alone for the same reason.
-    required: false
-    default: ''
+  verb:
+    description: Which workflow to dispatch — plan, apply or unlock, one consumer file each. No default — a guessed verb dispatches one verb's body at another verb's workflow, and the pull request never sees the rejection. `actions/comment-ops` exposes this as its `verb` output.
+    required: true
   ref:
     description: PR head SHA to check out and apply. Empty and unused on the plan route, whose dispatched run resolves the head from the pull request itself.
     required: true
   pr-number:
-    description: PR number the dispatched run belongs to — the plan body carries it alone.
+    description: PR number the dispatched run belongs to — the plan body carries it alone, and the unlock body not at all.
     required: true
-  workflow:
-    description: Workflow file to dispatch. Default apply.yml (the merged wrapper). A split apply.yml/apply-all.yml layout needs the file picked per comment — targeted vs bare — which this static input cannot do, so whichever file it names, the other verb is dispatched at the wrong workflow and rejected (422) over the `environment` input one declares and the other does not. Merge the wrappers instead; the split layout is the escape hatch, not the path. Default plan.yml when mode is plan, apply.yml otherwise.
-    required: false
-    default: ''
   dispatch-ref:
     description: Branch whose workflow file runs (usually the default branch).
     required: true
@@ -62,61 +57,78 @@ runs:
       env:
         GH_TOKEN: ${{ steps.token.outputs.token }}
         REPO: ${{ inputs.repository }}
-        WORKFLOW: ${{ inputs.workflow }}
         DISPATCH_REF: ${{ inputs.dispatch-ref }}
         ENVIRONMENT: ${{ inputs.environment }}
-        MODE: ${{ inputs.mode }}
+        VERB: ${{ inputs.verb }}
         REF: ${{ inputs.ref }}
         PR_NUMBER: ${{ inputs.pr-number }}
       run: |
         set -euo pipefail
-        if [ -z "$WORKFLOW" ]; then
-          if [ "${MODE:-}" = plan ]; then WORKFLOW=plan.yml; else WORKFLOW=apply.yml; fi
+        # A composite action's `required: true` is not enforced by GitHub, so a
+        # caller that omits the input arrives here with the empty string. Refuse
+        # rather than default: a default dispatches one verb's body at another
+        # verb's workflow, and that rejection lands on this run, where nobody on
+        # the pull request is looking.
+        if [ -z "${VERB:-}" ]; then
+          echo "::error::The calling workflow did not pass a verb to shipmate/actions/dispatch, so there is no workflow to dispatch. Wire that step's verb input to the verb output of the comment-ops step above it (docs/getting-started.md)."
+          exit 1
         fi
+        case "$VERB" in
+          plan) WORKFLOW=plan.yml ;;
+          apply) WORKFLOW=apply.yml ;;
+          unlock) WORKFLOW=unlock.yml ;;
+          *) echo "::error::verb must be plan, apply or unlock (got: $VERB)"; exit 1 ;;
+        esac
         [[ "$WORKFLOW" =~ ^[A-Za-z0-9._-]+$ ]] || { echo "::error::workflow must match ^[A-Za-z0-9._-]+$ (got: $WORKFLOW)"; exit 1; }
-        case "${MODE:-}" in ''|apply|unlock|plan) ;; *) echo "::error::mode must be apply, unlock or plan (got: $MODE)"; exit 1 ;; esac
         python3 - > body.json <<'PY'
         import json, os
-        mode = os.environ.get("MODE", "")
-        if mode == "plan":
+        verb = os.environ["VERB"]
+        if verb == "plan":
             # plan.yml declares exactly one input, pr_number. `ref` is not among
             # them: the dispatched run resolves the head from the pull request
             # itself, so nothing a dispatcher states decides what is planned.
             inputs = {"pr_number": os.environ["PR_NUMBER"]}
+        elif verb == "unlock":
+            # Releasing a stranded lock applies no plan and comments on no pull
+            # request, so unlock.yml declares neither a pr_number nor anything
+            # else only the apply body needs.
+            inputs = {"ref": os.environ["REF"], "environment": os.environ["ENVIRONMENT"]}
         else:
             inputs = {
                 "ref": os.environ["REF"],
                 "pr_number": os.environ["PR_NUMBER"],
             }
-            # The `environment` key is included only when set: the merged apply.yml
-            # wrapper declares it optional (empty = bare `shipmate apply`), and a
-            # split-layout apply-all.yml declares no such input at all — a
-            # workflow_dispatch with an undeclared input is rejected (422).
+            # The `environment` key is included only when set: apply.yml declares
+            # it optional (empty = bare `shipmate apply`), and GitHub reads an
+            # empty value for a required workflow_dispatch input as not provided.
             if os.environ.get("ENVIRONMENT"):
                 inputs["environment"] = os.environ["ENVIRONMENT"]
-            if mode == "unlock":
-                inputs["mode"] = mode
         print(json.dumps({"ref": os.environ["DISPATCH_REF"], "inputs": inputs}))
         PY
         rc=0
         out=$(gh api -X POST "repos/$REPO/actions/workflows/$WORKFLOW/dispatches" --input body.json 2>&1) || rc=$?
         printf '%s\n' "$out"
         if [ "$rc" -ne 0 ]; then
-          # Only a 422 that names `mode` as unexpected is version skew. A 403,
-          # a rate limit -- or a 422 about a different input -- is another
-          # problem entirely, and explaining it as skew sends the operator to
-          # re-pin workflows that are fine. The raw API message is printed above
-          # either way.
-          if [ "$MODE" = "unlock" ] && [[ "$out" == *"Unexpected inputs provided"* && "$out" == *mode* ]]; then echo "::error::The consumer's apply.yml does not declare the mode input; this repository's workflows predate shipmate unlock. Re-pin the consumer workflows to a release that has it (docs/releasing.md)."; fi
-          # Measured: dispatching a workflow with no such trigger answers
-          # `Workflow does not have 'workflow_dispatch' trigger (HTTP 422)`.
-          # No input name is ANDed in as the unlock branch does: the plan body
-          # carries one input, so an unexpected-input 422 there can only be
+          # Only a failure that actually names the missing surface is version
+          # skew. A 403, a rate limit -- or a 422 about a different input -- is
+          # another problem entirely, and explaining it as skew sends the
+          # operator to edit workflows that are fine. The raw API message is
+          # printed above either way.
+          # Neither remedy is a re-pin: both shapes are a consumer file the
+          # upgrade guide says to author or edit by hand, and a pin bump alone
+          # leaves them exactly as they were.
+          # Measured: a workflow file that does not exist answers 404, and one
+          # with no such trigger answers `Workflow does not have
+          # 'workflow_dispatch' trigger (HTTP 422)` -- the two shapes a consumer
+          # predating the unlock wrapper produces.
+          if [ "$VERB" = "unlock" ] && [[ "$out" == *"HTTP 404"* || "$out" == *workflow_dispatch* ]]; then echo "::error::This repository has no unlock.yml wrapper, or it declares no workflow_dispatch trigger; its workflows predate shipmate unlock. Add .github/workflows/unlock.yml to this repository — docs/upgrading.md section 0.21.0 step 1 has the file; re-pinning cannot create it."; fi
+          # No input name is ANDed in as a body-shape check would be: the plan
+          # body carries one input, so an unexpected-input 422 there can only be
           # about pr_number, which is what the message already says.
-          if [ "$MODE" = "plan" ] && [[ "$out" == *"Unexpected inputs provided"* || "$out" == *workflow_dispatch* ]]; then echo "::error::This repository's plan.yml does not accept a dispatched plan — it predates the plan verb, or declares no pr_number input. Re-pin the consumer workflows to a release that has it (docs/releasing.md)."; fi
+          if [ "$VERB" = "plan" ] && [[ "$out" == *"Unexpected inputs provided"* || "$out" == *workflow_dispatch* ]]; then echo "::error::This repository's plan.yml does not accept a dispatched plan — it predates the plan verb, or declares no pr_number input. Edit .github/workflows/plan.yml in this repository — docs/upgrading.md section 0.20.0 lists the edits; re-pinning alone does not make them."; fi
           exit "$rc"
         fi
-        if [ "${MODE:-}" = plan ]; then
+        if [ "$VERB" = plan ]; then
           echo "::notice title=dispatch::dispatched $WORKFLOW on $DISPATCH_REF for PR #$PR_NUMBER"
         else
           echo "::notice title=dispatch::dispatched $WORKFLOW on $DISPATCH_REF for ${ENVIRONMENT:-all environments} (ref $REF)"

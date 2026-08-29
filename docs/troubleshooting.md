@@ -12,7 +12,7 @@ findings as workflow annotations titled `shipmate doctor`
 (`::warning title=shipmate doctor::<text>` / `::notice title=shipmate
 doctor::<text>`) — read-only, never blocking. Comment `shipmate doctor` on a
 pull request for a consolidated report: a sticky comment (marker `<!--
-shipmate:doctor -->`, upserted in place like the plan comment) combining thirteen
+shipmate:doctor -->`, upserted in place like the plan comment) combining fourteen
 live probes — a missing or mis-pinned `shipmate / gate` rule on the default
 branch (no active ruleset requiring it, or one that doesn't pin
 `integration_id` to the shipmate App, or that isn't strict),
@@ -90,6 +90,12 @@ accepts one; a `with:` line forwarding it to the engine's reusable `apply.yml`
 or `apply-all.yml` makes GitHub reject the run as it LOADS the workflow — the
 run has no jobs and no logs, only a workflow-validation error on the run itself
 — while the same line on a composite action is only a warning),
+whether that same wrapper still carries the retired `mode` input, which
+`shipmate unlock` no longer uses now that it dispatches its own `unlock.yml`
+(declared under `on:` it is dead weight; forwarded to the engine's reusable
+`apply.yml` or `apply-all.yml` it is the same load-time rejection — those two
+placements are what the probe reads, so an ordinary `mode:` elsewhere in the
+file, such as an `actions/state` step's, is not reported),
 whether the `plan.yml` wrapper can serve a dispatched plan at all — the
 `workflow_dispatch` trigger a commented `shipmate plan` dispatches, the `pr_number`
 input that dispatch body carries, and a `pr-facts` step (the first two are refused
@@ -102,7 +108,7 @@ whether the shipmate App installation still grants the manifest's full
 permission set — with the warning and failure annotations GitHub already
 recorded on this commit's workflow runs (shipmate's own and any other
 Actions workflow run on that commit; third-party-app-authored check runs are
-excluded). Only eleven of the thirteen probes can produce a finding from the plan
+excluded). Only twelve of the fourteen probes can produce a finding from the plan
 path's own `annotate`-mode run (`actions/summary`): the approvers-team probe
 needs the `SHIPMATE_TEAM` environment variable, which the plan path does
 not supply, and
@@ -442,7 +448,11 @@ holder was that cell's own most recent apply run — one that was cancelled or
 killed before it could release.
 
 Comment `shipmate unlock <env>`. The environment is required; there is no bare
-form. It authorizes on approvers-team membership and the `<env>-apply`
+form. It dispatches your repository's own `.github/workflows/unlock.yml`
+([`upgrading.md`](upgrading.md) §0.21.0 has the wrapper); wrappers predating that
+file get no run at all — the dispatch is refused with a 404, the comment-handling
+run carries an error saying so, and the pull request shows only the rocket
+reaction. It authorizes on approvers-team membership and the `<env>-apply`
 environment, not on a review — so a lock stranded after the pull request merged
 is still releasable ([`../CONTRACT.md`](../CONTRACT.md) §Comment-ops has the
 contract). Every cell in that environment with a pending

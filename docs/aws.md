@@ -50,11 +50,13 @@ rather than one conditional attribute because Terramate 0.17.1 has no
 `tm_unset()`, and a bare `unset` emits `assume_role = unset`, which survives
 `fmt` and `validate` and dies at `init`.
 
-Because the backend owns the state, the apply-path wrappers pass
-`state_suffix: ""`. That is the explicitly-empty mode of
+Because the backend owns the state, the `apply.yml` and `deploy.yml` wrappers
+pass `state_suffix: ""`. That is the explicitly-empty mode of
 [`../CONTRACT.md`](../CONTRACT.md) §State backend: both `actions/state` steps are
 skipped entirely and shipmate never handles a state file. The input declares no
 default, so omitting it is a workflow-resolution error rather than a third mode.
+`unlock.yml` is the exception: it declares no such input, because it releases
+locks and applies nothing, and passing one is a load-time rejection.
 
 ## Named profiles must be conditional
 
@@ -166,12 +168,13 @@ nothing in the engine to guard it. The role's trust policy is the real bound.
 
 ## Where the credentials step goes
 
-**On the apply path the consumer writes no credentials step.** The engine's
-`apply-env-level.yml` runs `aws-actions/configure-aws-credentials` in every wave
-job itself — after `actions/setup`, before `apply-cell`, gated on either role
-being set — reading the variables from the apply environment the job is bound to
-(`<env>-apply`, or the bare `<env>` in shared mode). The wrapper's only obligation is
-`id-token: write` on the calling job (see
+**On the apply and unlock paths the consumer writes no credentials step.** The
+engine's `apply-env-level.yml` runs `aws-actions/configure-aws-credentials` in
+every wave job itself — after `actions/setup`, before `apply-cell`, gated on
+either role being set — reading the variables from the apply environment the job
+is bound to (`<env>-apply`, or the bare `<env>` in shared mode); `unlock.yml`'s
+unlock job carries the same step in the same position. The wrapper's only
+obligation is `id-token: write` on the calling job (see
 [`getting-started.md`](getting-started.md) §Required — apply).
 
 The plan-side role lives on the `<env>-plan` environment. In **shared mode** — a

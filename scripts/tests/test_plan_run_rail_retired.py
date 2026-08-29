@@ -17,7 +17,7 @@ from _loader import WORKFLOWS
 EXPECTED_INPUTS = {
     "apply-all.yml": {"workflow_call": ["pr_number", "ref", "state_suffix"]},
     "apply-env-level.yml": {"workflow_call": ["head_sha", "state_suffix", "waves_json"]},
-    "apply.yml": {"workflow_call": ["environment", "mode", "pr_number", "ref", "state_suffix"]},
+    "apply.yml": {"workflow_call": ["environment", "pr_number", "ref", "state_suffix"]},
     "ci.yml": {},
     "deploy.yml": {"workflow_call": ["state_suffix"]},
     "internal-pins.yml": {},
@@ -34,6 +34,7 @@ EXPECTED_INPUTS = {
             "pr-number",
         ]
     },
+    "unlock.yml": {"workflow_call": ["environment", "ref"]},
 }
 
 # The wave fan-out `apply-env-level.yml` pre-declares. Hand-written so a deleted

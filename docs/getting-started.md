@@ -137,10 +137,11 @@ repository that has no `.github/workflows/plan.yml` — no apply path matches th
 path any more (each cell reads its plan run from its own apply check), but
 `shipmate doctor` keys its plan-wrapper probes on the filename, so a plan
 workflow under another name loses them silently and the refusal is what stops it
-happening. Both are also the names `actions/dispatch` targets by default —
-`plan.yml` for a commented `shipmate plan`, `apply.yml` for apply and unlock —
-so a wrapper called anything else is dispatched by nothing and the command
-silently reaches no workflow. Create both under exactly those names.
+happening. `actions/dispatch` targets filenames too, one per verb — `plan.yml`
+for a commented `shipmate plan`, `apply.yml` for `shipmate apply`, `unlock.yml`
+for `shipmate unlock` — so a wrapper called anything else is dispatched by
+nothing and the command silently reaches no workflow. Create all three under
+exactly those names.
 
 The fences on this page are transcribed from the sample repositories, which pin
 `runs-on: ubuntu-slim`. Use whichever runner label your own plan offers —
@@ -430,13 +431,14 @@ rules from Settings → Environments → `<name>` (or the API):
 > at all.** GitHub caps a called workflow's permissions at each `uses:`
 > boundary, and the apply-path workflows request it, so without the grant the
 > run fails at workflow-resolution time. If the wrapper declares a top-level
-> `permissions:` block, it needs the grant there too. This applies to `apply.yml`
-> and `deploy.yml` wrappers, **not** to `plan.yml`.
+> `permissions:` block, it needs the grant there too. This applies to the
+> `apply.yml`, `unlock.yml` and `deploy.yml` wrappers, **not** to `plan.yml`.
 >
 > **`state_suffix` is required but may be `""`.** It is a `required: true` input
-> of every apply-path reusable workflow — `apply.yml`, `apply-all.yml`,
-> `deploy.yml` and the `apply-env-level.yml` they call — and of none of the plan
-> path. `""` — what the fences below paste, because this page's worked example
+> of the applying workflows — `apply.yml`, `apply-all.yml`, `deploy.yml` and the
+> `apply-env-level.yml` they call — and of none of the plan path. Nor of
+> `unlock.yml`, which declares no such input: it releases locks and applies
+> nothing, and passing one is a load-time rejection with no job and no log. `""` — what the fences below paste, because this page's worked example
 > is S3 — means a remote backend owns the state, and the engine's state
 > restore/save steps are skipped. A **local backend** materialized in the working
 > tree passes instead the path segment under each stack directory where its state
@@ -448,10 +450,10 @@ rules from Settings → Environments → `<name>` (or the API):
 > fail loud rather than apply with no state at all.
 
 `comment-ops.yml` turns a `shipmate <verb>` pull request comment into an
-authorized `workflow_dispatch` — of `apply.yml` for `apply` and `unlock`, of
-`plan.yml` for `plan`. Which one is picked comes from the `mode` output the
-dispatch step forwards below, so dropping that line sends a `shipmate plan` to
-the apply wrapper ([`upgrading.md`](upgrading.md) §0.20.0).
+authorized `workflow_dispatch` — one wrapper file per verb: `plan.yml` for
+`plan`, `apply.yml` for `apply`, `unlock.yml` for `unlock`. Which one is picked
+comes from the `verb` output the dispatch step forwards below, and dropping that
+line refuses the dispatch outright rather than guessing a wrapper.
 
 ```yaml
 name: comment-ops
@@ -490,7 +492,7 @@ jobs:
           app-id: ${{ vars.SHIPMATE_APP_ID }}
           private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
           environment: ${{ steps.authz.outputs.environment }}
-          mode: ${{ steps.authz.outputs.mode }}
+          verb: ${{ steps.authz.outputs.verb }}
           ref: ${{ steps.authz.outputs.head-sha }}
           pr-number: ${{ github.event.issue.number }}
           dispatch-ref: ${{ github.event.repository.default_branch }}
@@ -520,10 +522,6 @@ on:
         description: Target environment (empty = bare `shipmate apply`, all non-explicit environments)
         required: false
         default: ''
-      mode:
-        description: apply (default) or unlock — unlock releases a stranded state lock instead of applying
-        required: false
-        default: apply
       ref:
         description: PR head SHA to apply
         required: false
@@ -547,7 +545,6 @@ jobs:
       SHIPMATE_PLAN_PASSPHRASE: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
     with:
       environment: ${{ inputs.environment }}
-      mode: ${{ inputs.mode }}
       ref: ${{ inputs.ref }}
       pr_number: ${{ inputs.pr_number }}
       state_suffix: ""
@@ -564,16 +561,8 @@ jobs:
       state_suffix: ""
 ```
 
-`mode` carries `shipmate unlock <env>` — it reaches only the `targeted` job,
-since unlock is always single-env. The two ways to leave it out fail
-differently. **Omit the `workflow_dispatch` input** and `unlock` is accepted at
-comment time and then refused by the platform: `actions/dispatch` puts `mode` in
-the body only for an unlock, GitHub answers HTTP 422 "Unexpected inputs
-provided" for an input the wrapper does not declare, and the dispatch step
-recognises that pair and names `mode`. **Omit only the `with:` pass-through** and
-nothing fails at all — the engine's `apply.yml` declares `mode` optional with
-default `apply`, so the comment quietly applies the reviewed plan instead of
-releasing the lock.
+The verb names the file: `shipmate unlock <env>` dispatches `unlock.yml` below,
+not this wrapper, so nothing here carries it.
 
 **Every input is `required: false` with an explicit default, and that is
 deliberate.** This wrapper is dispatched only by `actions/dispatch`, minting an
@@ -588,14 +577,49 @@ unlock applies no plan, so the engine sent that value empty.
 
 The engine is the validator, and it is the only layer with enough context to be
 one: `apply-detect` runs `validate_head_sha` and `validate_env`, and it knows
-which values are legitimately empty in which mode.
+which values are legitimately empty.
 Its errors are annotations on the run naming the actual value. Keep new inputs
 on *this* wrapper optional for the same reason — `required` is the default a new
 input drifts back to, and it reopens this exactly. The plan wrapper's `pr_number`
 is the one documented `required: true` input and shows what the rule is actually
-about: that dispatch has a single mode carrying a single input the engine always
-fills, so there is no empty value for GitHub to reject, and requiring it is what
-makes a hand-dispatched plan name the pull request it plans.
+about: that dispatch carries a single input the engine always fills, so there is
+no empty value for GitHub to reject, and requiring it is what
+makes a hand-dispatched plan name the pull request it plans. The unlock wrapper
+below is dispatched the same way and follows the same rule.
+
+`unlock.yml` is where `shipmate unlock <env>` lands. It calls the engine's
+`unlock.yml`, which takes `environment` and `ref` and **no secrets** — releasing
+a lock reads no plan artifact, so there is no passphrase to forward, and mapping
+a secret the callee does not declare is a load-time rejection with no job and no
+log. A repository without this file keeps every other verb; `shipmate unlock`
+alone stops working, and it fails at dispatch time against a workflow file that
+is not there.
+
+```yaml
+name: shipmate · unlock
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Target environment whose stranded state locks to release
+        required: false
+        default: ''
+      ref:
+        description: PR head SHA to check out
+        required: false
+        default: ''
+permissions:
+  contents: read
+  actions: read
+  id-token: write
+jobs:
+  unlock:
+    uses: ship-iac/shipmate/.github/workflows/unlock.yml@<engine-sha>  # see the latest release
+    permissions: { contents: read, checks: read, actions: read, id-token: write }
+    with:
+      environment: ${{ inputs.environment }}
+      ref: ${{ inputs.ref }}
+```
 
 `deploy.yml` applies, on push to the default branch, every reviewed plan whose
 apply check is still pending — so it no-ops when everything was applied
@@ -630,7 +654,8 @@ jobs:
 
 ### Why the wrappers name their secrets
 
-Every snippet above passes secrets by name and none uses `secrets: inherit`.
+Every snippet above that passes secrets at all passes them by name, and none uses
+`secrets: inherit`.
 Two reasons, and the second one is a hard failure:
 
 - `inherit` hands the engine every secret your repository can see, not the two
@@ -646,8 +671,9 @@ Two reasons, and the second one is a hard failure:
   `apply / <stack> / <env>` checks, no sticky comment.
 
 Pass only what each callee **declares**: `summary.yml` declares
-`SHIPMATE_APP_PRIVATE_KEY` alone, while `apply.yml`, `apply-all.yml` and
-`deploy.yml` declare the passphrase too. Naming a secret the callee does not
+`SHIPMATE_APP_PRIVATE_KEY` alone, `apply.yml`, `apply-all.yml` and `deploy.yml`
+declare the passphrase too, and `unlock.yml` declares none at all — its wrapper
+writes no `secrets:` block. Naming a secret the callee does not
 declare is a load-time error that kills the run with no job and no log.
 
 ### Consumers outside the engine's organization

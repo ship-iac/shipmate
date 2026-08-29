@@ -370,7 +370,9 @@ def main():
     )
     with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
         wv.write_waves(fh, waves)
-        # Always written, in both modes: the unlock job fromJSONs it.
+        # Written on both branches so the output shape is one shape. No caller
+        # reads it here -- unlock.yml's matrix is the only consumer, and it never
+        # takes this branch.
         fh.write("cells=[]\n")
         fh.write(f"head_sha={head}\n")
 

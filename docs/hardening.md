@@ -87,7 +87,7 @@ name. See "Contributors without push access" for the trade-off that follows.
 | 16 | `shipmate-engine` Environment exists, deployment branch policy restricted to the default branch | Environment | Repository-secret App key readable by any branch |
 | 17 | Deployment branch policy restricted to the default branch on every `<env>-apply` | Environment | Branch-authored workflow claiming apply-environment secrets directly |
 | 18 | `AWS_ROLE_ARN` + `AWS_REGION` as variables on **each** `<env>-apply` you want cloud access from — never at repository or organization level | Environment variables | Opting in per environment; set at repo/org level they apply to every apply environment at once (§7–9) |
-| 19 | `id-token: write` on the call-site job of every consumer wrapper that calls the engine's apply-path workflows | Consumer workflow YAML | Nothing — it is **required**: GitHub caps a called workflow's permissions at each `uses:` boundary, so without it every apply run fails at workflow-resolution time, cloud or not |
+| 19 | `id-token: write` on the call-site job of every consumer `apply.yml`, `unlock.yml` and `deploy.yml` wrapper — **not** `plan.yml` | Consumer workflow YAML | Nothing — it is **required**: GitHub caps a called workflow's permissions at each `uses:` boundary, so without it every apply and unlock run fails at workflow-resolution time, cloud or not |
 
 Rows 6, 7, 17 and 18 name `<env>-apply`, which is the apply environment in the
 default **split** naming (`<env>-plan` + `<env>-apply`). A logical env listed in
