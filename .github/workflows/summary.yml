@@ -81,7 +81,7 @@ jobs:
           pattern: cell-summary.*
           path: cells
 
-      - uses: ship-iac/shipmate/actions/summary@610ea95367fd101dc7c86aae18614dae23b389f4 # pinned to a commit on main
+      - uses: ship-iac/shipmate/actions/summary@db5e833dfcf6c95b9c52f34d30de41e7891fffb0 # pinned to a commit on main
         with:
           pr-number: ${{ inputs.pr-number }}
           head-sha: ${{ inputs.head-sha }}
