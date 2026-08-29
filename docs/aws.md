@@ -50,11 +50,13 @@ rather than one conditional attribute because Terramate 0.17.1 has no
 `tm_unset()`, and a bare `unset` emits `assume_role = unset`, which survives
 `fmt` and `validate` and dies at `init`.
 
-Because the backend owns the state, the apply-path wrappers pass
-`state_suffix: ""`. That is the explicitly-empty mode of
+Because the backend owns the state, the `apply.yml` and `deploy.yml` wrappers
+pass `state_suffix: ""`. That is the explicitly-empty mode of
 [`../CONTRACT.md`](../CONTRACT.md) §State backend: both `actions/state` steps are
 skipped entirely and shipmate never handles a state file. The input declares no
 default, so omitting it is a workflow-resolution error rather than a third mode.
+`unlock.yml` is the exception: it declares no such input, because it releases
+locks and applies nothing, and passing one is a load-time rejection.
 
 ## Named profiles must be conditional
 

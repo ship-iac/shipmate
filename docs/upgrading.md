@@ -312,9 +312,10 @@ without it the pull request shows none of them, a failed cell included.
   request fails, the automatic plan included, with a red `detect` naming the
   input. Loud, and it holds the gate red rather than greening it.
 
-**Check one line outside `plan.yml`.** `actions/dispatch` picks the workflow it
-sends the comment to, and a `comment-ops.yml` forwarding nothing to that step
-sends a `shipmate plan` to the **apply** wrapper. The forwarded line has been in
+**Check one line outside `plan.yml`.** On this release's `mode` rail,
+`actions/dispatch` picks the workflow from `mode`, so a `comment-ops.yml` not
+forwarding `mode: ${{ steps.authz.outputs.mode }}` to that step sends a
+`shipmate plan` to the **apply** wrapper. The forwarded line has been in
 the reference `comment-ops.yml` since `0.16.0`, added there for `unlock`
 ([`../CHANGELOG.md`](../CHANGELOG.md) §0.16.0); this release is what makes its
 absence reachable from a comment that changes nothing. If you are upgrading past
