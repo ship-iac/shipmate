@@ -419,14 +419,14 @@ def plan_workflow_error(event_name, root="."):
     if os.path.isfile(os.path.join(root, PLAN_WORKFLOW)):
         return ""
     return (
-        f"::error::this repository has no `{PLAN_WORKFLOW}` — that exact path is matched "
-        "literally by `shipmate doctor`, which keys its plan-wrapper probes on the "
-        "filename, and by a commented `shipmate plan`, which is dispatched at that "
-        "filename: a plan workflow under any other name silently loses the "
-        "head-repository, head-commit and draft wiring checks, draws doctor's own "
-        "`pull_request_target` warning instead, and is reached by no `shipmate plan` at "
-        "all. Planning is refused here rather than "
-        f"degrading those diagnostics quietly. Move the plan workflow back to `{PLAN_WORKFLOW}`."
+        f"::error::this repository has no `{PLAN_WORKFLOW}` — the one path `CONTRACT.md` "
+        "lets the plan workflow live at, and this refusal is what enforces it. That exact "
+        "filename is matched literally by `shipmate doctor`, which keys its plan-wrapper "
+        "probes on it, and by `actions/dispatch`, which picks the workflow file from the "
+        "verb — `shipmate plan` dispatches this filename and no other. A plan workflow "
+        "under any other name silently loses the head-repository, head-commit and draft "
+        "wiring checks, draws doctor's own `pull_request_target` warning instead, and is "
+        f"reached by no `shipmate plan` at all. Move the plan workflow back to `{PLAN_WORKFLOW}`."
     )
 
 

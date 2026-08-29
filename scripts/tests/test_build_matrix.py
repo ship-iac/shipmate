@@ -772,18 +772,20 @@ def test_a_renamed_plan_workflow_is_refused(tmp_path):
     # matches it literally any more, so a rename would otherwise merge green
     # while doctor's filename-keyed probes went quiet. Whole message, written by
     # hand: the consequences it names are the ones still true after the plan run
-    # id moved onto each apply check, and a clause about plan-run discovery
+    # id moved onto each apply check and after `actions/dispatch` began picking
+    # the workflow file from the verb, and a clause about plan-run discovery
     # coming back here would be a user-facing falsehood.
     (tmp_path / ".github" / "workflows").mkdir(parents=True)
     (tmp_path / ".github" / "workflows" / "shipmate-plan.yml").write_text("", encoding="utf-8")
     assert bm.plan_workflow_error("pull_request", str(tmp_path)) == (
-        "::error::this repository has no `.github/workflows/plan.yml` — that exact path is "
-        "matched literally by `shipmate doctor`, which keys its plan-wrapper probes on the "
-        "filename, and by a commented `shipmate plan`, which is dispatched at that filename: "
-        "a plan workflow under any other name silently loses the head-repository, head-commit "
-        "and draft wiring checks, draws doctor's own `pull_request_target` warning instead, "
-        "and is reached by no `shipmate plan` at all. Planning is refused here rather than "
-        "degrading those diagnostics quietly. "
+        "::error::this repository has no `.github/workflows/plan.yml` — the one path "
+        "`CONTRACT.md` lets the plan workflow live at, and this refusal is what enforces it. "
+        "That exact filename is matched literally by `shipmate doctor`, which keys its "
+        "plan-wrapper probes on it, and by `actions/dispatch`, which picks the workflow file "
+        "from the verb — `shipmate plan` dispatches this filename and no other. A plan "
+        "workflow under any other name silently loses the head-repository, head-commit and "
+        "draft wiring checks, draws doctor's own `pull_request_target` warning instead, and "
+        "is reached by no `shipmate plan` at all. "
         "Move the plan workflow back to `.github/workflows/plan.yml`."
     )
 
