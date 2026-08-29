@@ -448,10 +448,10 @@ rules from Settings → Environments → `<name>` (or the API):
 > fail loud rather than apply with no state at all.
 
 `comment-ops.yml` turns a `shipmate <verb>` pull request comment into an
-authorized `workflow_dispatch` — of `apply.yml` for `apply` and `unlock`, of
-`plan.yml` for `plan`. Which one is picked comes from the `mode` output the
-dispatch step forwards below, so dropping that line sends a `shipmate plan` to
-the apply wrapper ([`upgrading.md`](upgrading.md) §0.20.0).
+authorized `workflow_dispatch` — one wrapper file per verb: `plan.yml` for
+`plan`, `apply.yml` for `apply`, `unlock.yml` for `unlock`. Which one is picked
+comes from the `verb` output the dispatch step forwards below, and dropping that
+line refuses the dispatch outright rather than guessing a wrapper.
 
 ```yaml
 name: comment-ops
@@ -490,7 +490,7 @@ jobs:
           app-id: ${{ vars.SHIPMATE_APP_ID }}
           private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
           environment: ${{ steps.authz.outputs.environment }}
-          mode: ${{ steps.authz.outputs.mode }}
+          verb: ${{ steps.authz.outputs.verb }}
           ref: ${{ steps.authz.outputs.head-sha }}
           pr-number: ${{ github.event.issue.number }}
           dispatch-ref: ${{ github.event.repository.default_branch }}

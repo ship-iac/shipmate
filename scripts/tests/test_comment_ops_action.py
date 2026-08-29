@@ -841,13 +841,8 @@ def test_the_apply_route_steps_admit_exactly_apply_and_unlock():
     assert matched == _SHARED_ROUTE_IFS
 
 
-def test_the_mode_output_names_the_dispatch_mode_the_route_selects():
-    """The caller's dispatch step keys off this output, so a literal here sends
-    every unlock and every plan down the apply path."""
-    assert action_yaml("comment-ops")["outputs"]["mode"]["value"] == (
-        "${{ steps.parse.outputs.route == 'unlock' && 'unlock'"
-        " || steps.parse.outputs.route == 'plan' && 'plan' || 'apply' }}"
-    )
+# The `verb` output's whole value is pinned in test_dispatch_verb.py, beside the
+# `case` list that consumes it: one selector, one comparison.
 
 
 #: What both verb-carrying steps must bind SHIPMATE_VERB to, hand-written. The

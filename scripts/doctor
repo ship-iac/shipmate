@@ -1675,7 +1675,7 @@ def _dispatch_wiring_warnings(ctx):
 
     def finding(text, name):
         # Exact name, like the retired-input probe's: `plan.yml` is the file
-        # `actions/dispatch` targets for `mode: plan`, and the filter lives here
+        # `actions/dispatch` targets for `verb: plan`, and the filter lives here
         # rather than in `_dispatch_wiring_finding` so that a direct call of that
         # function with another file's name still reports.
         if name != "plan.yml":

@@ -242,8 +242,7 @@ the release commit, from one sample:
 needs a consumer: the wrapper's `workflow_dispatch` input declarations meeting
 the body the engine sends. Either half of that pair is rejected right here, with
 no job started, and nothing in this repository can see it — an input the engine
-sends that the wrapper does not declare (`mode`, against a wrapper predating
-`unlock`) is a 422 "Unexpected inputs provided", and a `required: true` wrapper
+sends that the wrapper does not declare is a 422 "Unexpected inputs provided", and a `required: true` wrapper
 input the engine no longer sends is a 422 "not provided". It also resolves and
 parses the engine reusable workflow at the new SHA, because that happens when the
 run graph is built.
