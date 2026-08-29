@@ -550,7 +550,7 @@ only labels the output as shipmate's own.
 `shipmate doctor` posts a consolidated, sticky report — one comment per pull
 request, identified by the HTML marker `<!-- shipmate:doctor -->` (distinct
 from the plan comment's `<!-- shipmate:summary -->`) and upserted in place the
-same way. It combines thirteen live settings probes (gate ruleset,
+same way. It combines fourteen live settings probes (gate ruleset,
 default-branch `pull_request` rule, environment existence, environment
 protection shape, plan-environment secrets, the `shipmate-engine`
 environment's own existence and default-branch scoping, `pull_request_target`
@@ -565,6 +565,10 @@ tree the pull request never named —
 a retired `plan_run_id` input still declared or forwarded by the consumer's
 `apply.yml` (a forward to a reusable workflow is rejected as the run LOADS, so
 there is no job and no log to read),
+a retired `mode` input on the same wrapper — declared under `on:`, or forwarded
+to the engine's reusable apply workflows, where the same load-time rejection
+applies; every other `mode:` in the file is somebody else's input and is not
+reported,
 the dispatch wiring of the consumer's `plan.yml` — the `workflow_dispatch` trigger
 a commented `shipmate plan` dispatches, the `pr_number` input that dispatch sends,
 and a `pr-facts` step to resolve the pull request a dispatched run has no payload
@@ -581,7 +585,7 @@ when the report was rendered, it says so and asks for the command again once
 they have, and if the harvest itself could not be read in full it says that
 too — the two are separate statements, since a run that has not finished has
 recorded nothing yet while a run that could not be read may have recorded
-plenty. Only eleven of the thirteen
+plenty. Only twelve of the fourteen
 probes can produce a finding from the plan path's own `annotate`-mode
 invocation: the approvers-team probe needs the `SHIPMATE_TEAM` environment
 variable, which the plan path does not supply, so it silently returns

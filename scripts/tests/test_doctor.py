@@ -228,8 +228,8 @@ def _quiet_new_probes():
     plan-env-secret, pin-freshness, fork-trigger, summary-wiring and
     dispatch-wiring probes, so tests exercising the older gate/environment probes
     via the top-level `warnings()` don't pick up incidental noise from these
-    seven. The retired-input probe needs no response here: the listing below names
-    no `apply.yml`, which is the only file it judges.
+    seven. The two retired-input probes need no response here: the listing below
+    names no `apply.yml`, which is the only file either judges.
 
     The last four read the same workflow listing. `_QUIET_PLAN`'s `uses:` lines
     are engine pins, so the pin probe has something to read and needs the
@@ -3176,6 +3176,173 @@ def test_plan_run_id_unreadable_directory_degrades_to_a_note(monkeypatch):
     assert out[0][0] == doctor.NOTICE
 
 
+# The four apply-wrapper shapes the retired-`mode` probe judges, written as the
+# page that documented them wrote them: `mode` was a block-style
+# `workflow_dispatch` input and a `with:` line on the `targeted` job.
+_MODE_ON_BLOCK = (
+    "name: shipmate · apply\n"
+    "on:\n"
+    "  workflow_dispatch:\n"
+    "    inputs:\n"
+    "      environment: { description: Target environment, required: false, default: '' }\n"
+    "      mode:\n"
+    "        description: apply (default) or unlock\n"
+    "        required: false\n"
+    "        default: apply\n"
+    "      ref: { description: PR head SHA to apply, required: false, default: '' }\n"
+)
+_CLEAN_ON_BLOCK = (
+    "name: shipmate · apply\n"
+    "on:\n"
+    "  workflow_dispatch:\n"
+    "    inputs:\n"
+    "      environment: { description: Target environment, required: false, default: '' }\n"
+    "      ref: { description: PR head SHA to apply, required: false, default: '' }\n"
+)
+_TARGETED_JOB = (
+    "jobs:\n"
+    "  targeted:\n"
+    "    if: ${{ inputs.environment != '' }}\n"
+    f"    uses: {_ENGINE_REPO}/.github/workflows/apply.yml@{_SHA}\n"
+    "    with:\n"
+    "      environment: ${{ inputs.environment }}\n"
+    "      ref: ${{ inputs.ref }}\n"
+)
+_TARGETED_JOB_FORWARDING_MODE = (
+    "jobs:\n"
+    "  targeted:\n"
+    "    if: ${{ inputs.environment != '' }}\n"
+    f"    uses: {_ENGINE_REPO}/.github/workflows/apply.yml@{_SHA}\n"
+    "    with:\n"
+    "      environment: ${{ inputs.environment }}\n"
+    "      mode: ${{ inputs.mode }}\n"
+    "      ref: ${{ inputs.ref }}\n"
+)
+_APPLY_DECLARING_MODE = _MODE_ON_BLOCK + _TARGETED_JOB
+_APPLY_FORWARDING_MODE = _CLEAN_ON_BLOCK + _TARGETED_JOB_FORWARDING_MODE
+_APPLY_CARRYING_BOTH = _MODE_ON_BLOCK + _TARGETED_JOB_FORWARDING_MODE
+# The negative: `mode` is generic YAML, unlike `plan_run_id`. This wrapper calls
+# the engine's reusable apply workflow cleanly AND runs `actions/state`, whose
+# own input is spelled `mode` — a file-wide scan reports it.
+_APPLY_WITH_UNRELATED_MODE = (
+    _CLEAN_ON_BLOCK + _TARGETED_JOB + "  archive:\n"
+    "    steps:\n"
+    f"      - uses: {_ENGINE_REPO}/actions/state@{_SHA}\n"
+    "        with:\n"
+    "          mode: restore\n"
+)
+
+
+# Hand-written, whole, and never derived from `scripts/doctor`: the findings are
+# compared in full, so a reworded message is a deliberate edit here.
+_MODE_DECLARED_TEXT = (
+    "`apply.yml` still declares a `mode` input — the engine retired that input and "
+    "dispatches no such value, so nothing ever fills it in. `shipmate unlock` now "
+    "dispatches its own `unlock.yml`. Remove the declaration, and any `with:` line "
+    "forwarding it."
+)
+_MODE_FORWARDED_TEXT = (
+    "`apply.yml` still passes `mode` on to the engine's reusable `apply.yml` or "
+    "`apply-all.yml` — the engine retired that input, so neither declares one, and "
+    "GitHub rejects the run when it LOADS the workflow: the run has no jobs and no logs, "
+    "only a workflow-validation error on the run itself, which is the hardest failure "
+    "here to diagnose from the outside. Remove the `with:` line — `shipmate unlock` now "
+    "dispatches its own `unlock.yml` and carries no mode."
+)
+
+
+def test_a_declared_mode_input_is_reported(monkeypatch):
+    responses = _fork_responses({"apply.yml": _APPLY_DECLARING_MODE})
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    assert doctor._mode_input_warnings(_ctx()) == [(doctor.WARNING, _MODE_DECLARED_TEXT)]
+
+
+def test_a_forwarded_mode_is_reported(monkeypatch):
+    """The half that matters: the engine's reusable `apply.yml` no longer
+    declares `mode`, and an input a `workflow_call` does not declare is rejected
+    as the run LOADS — no job, no log to read."""
+    responses = _fork_responses({"apply.yml": _APPLY_FORWARDING_MODE})
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    assert doctor._mode_input_warnings(_ctx()) == [(doctor.WARNING, _MODE_FORWARDED_TEXT)]
+
+
+def test_a_wrapper_carrying_both_halves_is_reported_twice(monkeypatch):
+    """The two halves are independent findings with independent remedies: a
+    declaration is dead weight, a forward kills the run at load time."""
+    responses = _fork_responses({"apply.yml": _APPLY_CARRYING_BOTH})
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    assert doctor._mode_input_warnings(_ctx()) == [
+        (doctor.WARNING, _MODE_DECLARED_TEXT),
+        (doctor.WARNING, _MODE_FORWARDED_TEXT),
+    ]
+
+
+def test_an_unrelated_mode_key_is_not_reported(monkeypatch):
+    """The property `plan_run_id` never needed. `mode` is generic YAML —
+    `actions/state` takes `mode: restore`, `actions/summary` a `comment_mode` —
+    so only a `workflow_dispatch` declaration and a `with:` forward on a call to
+    the engine's reusable apply workflows count. A wrapper with a state step and
+    a clean engine call is healthy, and reporting it would train readers to
+    ignore the whole suite."""
+    responses = _fork_responses({"apply.yml": _APPLY_WITH_UNRELATED_MODE})
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    assert doctor._mode_input_warnings(_ctx()) == []
+
+
+def test_the_apply_yml_filter_lives_in_the_mode_dispatcher(monkeypatch):
+    """As with the `plan_run_id` probe: a direct call of the finding function
+    reports whatever file it is handed, because the caller bypassed the
+    exemption and silence there reads as a false positive that is not one. Only
+    the dispatcher skips another file's name."""
+    assert doctor._mode_input_finding(_APPLY_DECLARING_MODE, "deploy.yml") == [
+        (doctor.WARNING, _MODE_DECLARED_TEXT.replace("`apply.yml`", "`deploy.yml`"))
+    ]
+    responses = _fork_responses({"deploy.yml": _APPLY_DECLARING_MODE})
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    assert doctor._mode_input_warnings(_ctx()) == []
+
+
+def test_the_documented_apply_wrapper_carries_no_mode(monkeypatch):
+    """The oracle for false positives, and for the page: the wrapper consumers
+    paste, verbatim, through the whole probe. The fence count is asserted first,
+    so a page edit that moves the wrapper out of this selector's reach fails
+    here instead of passing vacuously."""
+    page = (ENGINE / "docs" / "getting-started.md").read_text(encoding="utf-8")
+    fences = [
+        textwrap.dedent(m.group("body"))
+        for m in _YAML_FENCE.finditer(page)
+        if "/.github/workflows/apply-all.yml@" in m.group("body")
+    ]
+    assert len(fences) == 1, f"documented apply-wrapper fences: {len(fences)}"
+    responses = _fork_responses({"apply.yml": fences[0]})
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    assert doctor._mode_input_warnings(_ctx()) == []
+
+
+def test_mode_input_without_a_commit_is_a_note_not_a_read(monkeypatch):
+    # Same reasoning as the pin, fork-trigger, summary-wiring and retired-input
+    # probes: a default-branch read would report `mode` on the very pull request
+    # that removes it. The `gh` stub pins that no read happens at all, so a
+    # weaker read cannot be silently substituted for the skip.
+    def gh(path):
+        pytest.fail(f"the retired-`mode` probe read the API with no commit: {path}")
+
+    monkeypatch.setattr(doctor, "_gh_json", gh)
+    out = doctor._mode_input_warnings(_ctx(head_sha=""))
+    assert out == [doctor.MODE_INPUT_NO_COMMIT]
+    assert out[0][0] == doctor.NOTICE
+
+
+def test_mode_input_unreadable_directory_degrades_to_a_note(monkeypatch):
+    def gh(path):
+        raise SystemExit(f"::error::command failed (1): gh api {path}")
+
+    monkeypatch.setattr(doctor, "_gh_json", gh)
+    out = doctor._mode_input_warnings(_ctx())
+    assert out == [doctor.MODE_INPUT_UNREADABLE]
+    assert out[0][0] == doctor.NOTICE
+
+
 # The four plan-wrapper shapes the dispatch-wiring probe judges. Each bad one
 # isolates ONE finding: the two that carry the trigger also carry `pr-facts`,
 # and the one missing `pr-facts` is otherwise correctly dispatchable.
@@ -3416,6 +3583,7 @@ def test_the_probe_registry_is_exactly_this(monkeypatch):
         doctor._fork_trigger_warnings,
         doctor._summary_wiring_warnings,
         doctor._plan_run_id_warnings,
+        doctor._mode_input_warnings,
         doctor._dispatch_wiring_warnings,
         doctor._team_warnings,
         doctor._app_permission_warnings,

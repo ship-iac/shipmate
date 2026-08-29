@@ -7,7 +7,7 @@ Three modes, selected via SHIPMATE_DOCTOR_MODE:
   actions/summary right after a plan run. NEVER fails the run: a probe
   error becomes a 'could not verify' note — doctor guards onboarding, it
   must not take down the plan path.
-- report: render the sticky PR comment on demand — the thirteen live probes'
+- report: render the sticky PR comment on demand — the fourteen live probes'
   findings plus a harvest of the warnings GitHub already recorded as
   annotations on this commit's workflow check runs.
 - check-ids: reduce a check-runs JSONL listing to the (id, name) pairs worth
@@ -35,6 +35,8 @@ Probes:
   and `no-pull-request`.
 - a retired `plan_run_id` input still declared or forwarded by the consumer's
   `apply.yml`.
+- a retired `mode` input still declared by the consumer's `apply.yml`, or
+  forwarded from it to the engine's reusable apply workflows.
 - the dispatch wiring of the consumer's `plan.yml`: the `workflow_dispatch`
   trigger `shipmate plan` needs, its `pr_number` input, and a `pr-facts` step.
 - approvers team resolvability in the repo's org.
@@ -1636,6 +1638,124 @@ def _plan_run_id_finding(text, name):
     return out
 
 
+#: Line-anchored, like `_PLAN_RUN_ID_KEY` and with the same known gap: a fully
+#: inline flow `on: { workflow_dispatch: { inputs: { mode: … } } }` is not seen,
+#: which stays silent rather than reporting a healthy file. Unlike that key,
+#: `mode` is generic YAML — `actions/state` takes `mode: restore`, `apply-cell`'s
+#: state steps and `actions/summary`'s `comment_mode` are unrelated — so where
+#: the key is found is the whole finding, and it is only ever searched inside the
+#: `on:` block or inside a job that calls the engine's reusable apply workflows.
+_MODE_KEY = re.compile(r"^[ \t]*mode[ \t]*:", re.M)
+#: A job calling the engine's reusable apply workflows. Matched on the path
+#: rather than on `ctx["engine_repo"]`: the caller already narrows this probe to
+#: the consumer's own `apply.yml`, and a wrapper naming somebody else's
+#: `.github/workflows/apply.yml` there is not a shape that exists.
+_APPLY_CALL = re.compile(r"^[ \t]*uses[ \t]*:.*/\.github/workflows/apply(?:-all)?\.yml@")
+# Same degrade posture and reason as PIN_UNREADABLE.
+MODE_INPUT_UNREADABLE = (
+    NOTICE,
+    f"could not read `{_WORKFLOWS_DIR}` — the apply wrapper's retired `mode` input not verified.",
+)
+MODE_INPUT_NO_COMMIT = (
+    NOTICE,
+    "the apply wrapper's retired `mode` input not verified — the commit under examination "
+    "could not be determined.",
+)
+
+
+def _mode_input_warnings(ctx):
+    """The engine retired the `mode` rail: `shipmate unlock` dispatches its own
+    `unlock.yml`, so the reusable `apply.yml`/`apply-all.yml` declare no such
+    input. A wrapper that still declares or forwards it is the one shape of this
+    breakage a consumer owns, and the forwarding half is invisible from outside
+    (see `_mode_input_finding`).
+
+    Reads the consumer's workflow files at the commit under examination, the
+    same way and for the same reason as the pin, fork-trigger, summary-wiring and
+    `plan_run_id` probes (`_contents_ref`): a pull request that *removes* the
+    input must not still be reported for it."""
+    ref = _contents_ref(ctx)
+    if ref is None:
+        return [MODE_INPUT_NO_COMMIT]
+
+    def finding(text, name):
+        # Exact name, and here rather than in `_mode_input_finding`, for the
+        # reasons the `plan_run_id` probe's identical filter states.
+        if name != "apply.yml":
+            return []
+        return _mode_input_finding(text, name)
+
+    return _scan_workflow_texts(ctx, ref, finding, MODE_INPUT_UNREADABLE)
+
+
+def _apply_call_regions(lines):
+    """The line ranges of every job whose `uses:` names the engine's reusable
+    apply workflows. A job's own keys sit at that `uses:` line's indent, so the
+    job runs from the nearest shallower line above to the nearest one below —
+    both directions, because `with:` may be written before `uses:`."""
+
+    def shallower(ln, n):
+        return ln.strip() and len(ln) - len(ln.lstrip()) < n
+
+    for i, line in enumerate(lines):
+        if not _APPLY_CALL.match(line):
+            continue
+        n = len(line) - len(line.lstrip())
+        start = next((j + 1 for j in range(i - 1, -1, -1) if shallower(lines[j], n)), 0)
+        end = next((j for j in range(i + 1, len(lines)) if shallower(lines[j], n)), len(lines))
+        yield start, end
+
+
+def _mode_input_finding(text, name):
+    """The retired input declared, forwarded, or both.
+
+    Unlike the `plan_run_id` sibling, the two halves are counted independently
+    rather than by subtracting the declarations from a file-wide scan: `mode` is
+    a name other things legitimately use, and a file-wide scan reports an
+    `actions/state` step for `mode: restore`. A declaration is a `mode:` key
+    inside the `on:` block, where no GitHub event has such a key; a forward is
+    one inside a job calling the engine's reusable apply workflows, where the
+    only keys are that call's own.
+
+    They are reported separately because the consequences are not alike. A
+    declaration alone is dead weight: nothing dispatches such a value, so nothing
+    fills it in. A forward is a LOAD-TIME rejection of the whole run: no jobs, no
+    logs, only a workflow-validation error on the run itself — which is the
+    hardest failure in this system to diagnose from the outside. That asymmetry
+    between an undeclared workflow-call input and an undeclared action input is
+    the measured one at `docs/releasing.md`."""
+    lines = _stripped_text(text).splitlines()
+    _, block = _on_block(text)
+    declared = _MODE_KEY.findall("\n".join(block))
+    forwarded = [
+        m for s, e in _apply_call_regions(lines) for m in _MODE_KEY.findall("\n".join(lines[s:e]))
+    ]
+    out = []
+    if declared:
+        out.append(
+            (
+                WARNING,
+                f"`{name}` still declares a `mode` input — the engine retired that input and "
+                "dispatches no such value, so nothing ever fills it in. `shipmate unlock` now "
+                "dispatches its own `unlock.yml`. Remove the declaration, and any `with:` line "
+                "forwarding it.",
+            )
+        )
+    if forwarded:
+        out.append(
+            (
+                WARNING,
+                f"`{name}` still passes `mode` on to the engine's reusable `apply.yml` or "
+                "`apply-all.yml` — the engine retired that input, so neither declares one, and "
+                "GitHub rejects the run when it LOADS the workflow: the run has no jobs and no "
+                "logs, only a workflow-validation error on the run itself, which is the hardest "
+                "failure here to diagnose from the outside. Remove the `with:` line — `shipmate "
+                "unlock` now dispatches its own `unlock.yml` and carries no mode.",
+            )
+        )
+    return out
+
+
 #: The dispatch leg of a plan wrapper. NOT line-anchored like `_PLAN_RUN_ID_KEY`,
 #: and the polarity is the reason: there a match IS the finding, so a shape the
 #: anchor misses stays silent, while here ABSENCE is the finding and the same
@@ -1806,6 +1926,7 @@ PROBES = (
     _fork_trigger_warnings,
     _summary_wiring_warnings,
     _plan_run_id_warnings,
+    _mode_input_warnings,
     _dispatch_wiring_warnings,
     _team_warnings,
     _app_permission_warnings,
