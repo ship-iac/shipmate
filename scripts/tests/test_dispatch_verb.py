@@ -7,7 +7,8 @@ Five parts, the shape this file has always had:
 - Validation before the API call: an empty verb and a verb outside
   {plan, apply, unlock} are both refused before `gh` runs.
 - Degrade messages: an unlock or plan failure that matches the skew shape gets
-  the re-pin explanation; a 403, and a 422 about another input, do not.
+  the skew explanation and its remedy; a 403, and a 422 about another input, do
+  not.
 - Apply path stays green: an apply failure prints the raw error alone.
 - The routing surface: verb -> filename, the env: mapping, the absence of a
   `workflow` input, the filename regex, and comment-ops' `verb` output.
@@ -413,8 +414,9 @@ def test_dispatch_success_exits_zero():
 # --- Degrade messages --------------------------------------------------------
 #
 # Only a failure that actually matches the skew shape gets the skew explanation:
-# a 403 or a rate limit explained as skew sends the operator to re-pin workflows
-# that are fine.
+# a 403 or a rate limit explained as skew sends the operator editing workflows
+# that are fine. Each message's remedy is pinned too: neither failure is fixed by
+# a re-pin, and a message that says otherwise has shipped here before.
 
 _NO_TRIGGER_STUB = (
     "#!/bin/bash\n"
@@ -423,20 +425,26 @@ _NO_TRIGGER_STUB = (
 )
 _NOT_FOUND_STUB = "#!/bin/bash\necho 'gh: Not Found (HTTP 404)' >&2\nexit 1\n"
 _FORBIDDEN_STUB = "#!/bin/bash\necho 'HTTP 403: Forbidden' >&2\nexit 1\n"
-_UNLOCK_REPIN = "has no unlock.yml"
-_PLAN_REPIN = "does not accept a dispatched plan"
+_UNLOCK_SKEW = "has no unlock.yml"
+_PLAN_SKEW = "does not accept a dispatched plan"
+# The remedy half. The consumer authors `unlock.yml` and edits `plan.yml` by
+# hand; a pin bump does neither, and `docs/releasing.md` is the maintainer's
+# runbook, not the page that tells them.
+_UNLOCK_REMEDY = "docs/upgrading.md section 0.21.0"
+_PLAN_REMEDY = "docs/upgrading.md section 0.20.0"
 
 
 @pytest.mark.parametrize("stub", [_NOT_FOUND_STUB, _NO_TRIGGER_STUB])
-def test_unlock_against_a_repo_with_no_unlock_wrapper_prints_the_repin_message(stub):
-    """Both shapes a missing unlock.yml produces get the re-pin message.
+def test_unlock_against_a_repo_with_no_unlock_wrapper_prints_the_missing_wrapper_message(stub):
+    """Both shapes a missing unlock.yml produces get the missing-wrapper message.
 
     Measured: a workflow file that does not exist answers 404; one with no such
     trigger answers `Workflow does not have 'workflow_dispatch' trigger
     (HTTP 422)`.
 
     Mutation: drop either half of the message-text condition and the other
-    shape stops being explained.
+    shape stops being explained; point the remedy at `docs/releasing.md` and the
+    remedy assertion reddens.
     """
     if not usable_bash():
         pytest.skip("bash not available on this platform")
@@ -445,10 +453,11 @@ def test_unlock_against_a_repo_with_no_unlock_wrapper_prints_the_repin_message(s
         output = result.stdout + result.stderr
         assert result.returncode != 0, f"an unlock failure must exit non-zero: {output}"
         assert "HTTP 4" in output, f"raw gh output missing: {output}"
-        assert _UNLOCK_REPIN in output, f"re-pin message missing: {output}"
+        assert _UNLOCK_SKEW in output, f"missing-wrapper message missing: {output}"
+        assert _UNLOCK_REMEDY in output, f"remedy must name the upgrade guide: {output}"
 
 
-def test_unlock_403_prints_no_repin_message():
+def test_unlock_403_prints_no_skew_message():
     """A 403 is not version skew: the raw output prints, the message does not.
 
     Mutation: drop the whole `[[ ... ]]` message-text condition, so any unlock
@@ -464,7 +473,7 @@ def test_unlock_403_prints_no_repin_message():
         output = result.stdout + result.stderr
         assert result.returncode == 1, f"gh's exit status must survive, got {result.returncode}"
         assert "HTTP 403: Forbidden" in output, f"raw gh output missing: {output}"
-        assert _UNLOCK_REPIN not in output, f"a 403 is not a missing wrapper: {output}"
+        assert _UNLOCK_SKEW not in output, f"a 403 is not a missing wrapper: {output}"
 
 
 def test_an_apply_failure_prints_no_degrade_message():
@@ -479,7 +488,7 @@ def test_an_apply_failure_prints_no_degrade_message():
         output = result.stdout + result.stderr
         assert result.returncode == 22, f"gh's exit status must survive: {result.returncode}"
         assert "HTTP 422" in output, f"raw gh output missing: {output}"
-        assert _UNLOCK_REPIN not in output and _PLAN_REPIN not in output, (
+        assert _UNLOCK_SKEW not in output and _PLAN_SKEW not in output, (
             f"no degrade message belongs on the apply path: {output}"
         )
 
@@ -490,7 +499,7 @@ def test_a_422_about_another_input_is_not_reported_as_skew():
     The v0.16.0 E2E hit this class: the consumer wrapper declared `plan_run_id`
     as required, the dispatch sent it empty, and GitHub answered `Required input
     'plan_run_id' not provided (HTTP 422)`. A condition matching any 422 told
-    the operator to re-pin workflows that were already current, hiding the real
+    the operator editing workflows that were already current, hiding the real
     cause printed one line above.
 
     Mutation: widen the unlock condition to any `HTTP 422` and this reddens.
@@ -509,15 +518,16 @@ def test_a_422_about_another_input_is_not_reported_as_skew():
         assert "Required input 'plan_run_id' not provided" in output, (
             f"the API's own message must still print: {output}"
         )
-        assert _UNLOCK_REPIN not in output, (
+        assert _UNLOCK_SKEW not in output, (
             f"a 422 about plan_run_id is not a missing wrapper: {output}"
         )
 
 
-def test_plan_422_prints_the_repin_message():
-    """A plan 422 naming the missing surface prints the re-pin message.
+def test_plan_422_prints_the_skew_message():
+    """A plan 422 naming the missing surface prints the skew message and remedy.
 
-    Mutation: invert the verb half of the condition.
+    Mutation: invert the verb half of the condition; point the remedy at
+    `docs/releasing.md` and the remedy assertion reddens.
     """
     if not usable_bash():
         pytest.skip("bash not available on this platform")
@@ -526,10 +536,11 @@ def test_plan_422_prints_the_repin_message():
         output = result.stdout + result.stderr
         assert result.returncode == 22, f"gh's exit status must survive: {result.returncode}"
         assert "Workflow does not have" in output, f"raw gh output missing: {output}"
-        assert _PLAN_REPIN in output, f"re-pin message missing: {output}"
+        assert _PLAN_SKEW in output, f"skew message missing: {output}"
+        assert _PLAN_REMEDY in output, f"remedy must name the upgrade guide: {output}"
 
 
-def test_plan_403_prints_no_repin_message():
+def test_plan_403_prints_no_skew_message():
     """A plan 403 is not version skew: the raw output prints, the message does not.
 
     Mutation: drop the message-text half of the plan condition.
@@ -541,7 +552,7 @@ def test_plan_403_prints_no_repin_message():
         output = result.stdout + result.stderr
         assert result.returncode == 1, f"gh's exit status must survive: {result.returncode}"
         assert "HTTP 403: Forbidden" in output, f"raw gh output missing: {output}"
-        assert _PLAN_REPIN not in output, f"a 403 is not version skew: {output}"
+        assert _PLAN_SKEW not in output, f"a 403 is not version skew: {output}"
 
 
 def test_the_plan_notice_states_neither_an_environment_nor_a_ref():

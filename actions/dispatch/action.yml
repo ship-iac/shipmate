@@ -112,17 +112,20 @@ runs:
           # Only a failure that actually names the missing surface is version
           # skew. A 403, a rate limit -- or a 422 about a different input -- is
           # another problem entirely, and explaining it as skew sends the
-          # operator to re-pin workflows that are fine. The raw API message is
+          # operator editing workflows that are fine. The raw API message is
           # printed above either way.
+          # Neither remedy is a re-pin: both shapes are a consumer file the
+          # upgrade guide says to author or edit by hand, and a pin bump alone
+          # leaves them exactly as they were.
           # Measured: a workflow file that does not exist answers 404, and one
           # with no such trigger answers `Workflow does not have
           # 'workflow_dispatch' trigger (HTTP 422)` -- the two shapes a consumer
           # predating the unlock wrapper produces.
-          if [ "$VERB" = "unlock" ] && [[ "$out" == *"HTTP 404"* || "$out" == *workflow_dispatch* ]]; then echo "::error::This repository has no unlock.yml wrapper, or it declares no workflow_dispatch trigger; its workflows predate shipmate unlock. Re-pin the consumer workflows to a release that has it (docs/releasing.md)."; fi
+          if [ "$VERB" = "unlock" ] && [[ "$out" == *"HTTP 404"* || "$out" == *workflow_dispatch* ]]; then echo "::error::This repository has no unlock.yml wrapper, or it declares no workflow_dispatch trigger; its workflows predate shipmate unlock. Add .github/workflows/unlock.yml to this repository — docs/upgrading.md section 0.21.0 step 1 has the file; re-pinning cannot create it."; fi
           # No input name is ANDed in as a body-shape check would be: the plan
           # body carries one input, so an unexpected-input 422 there can only be
           # about pr_number, which is what the message already says.
-          if [ "$VERB" = "plan" ] && [[ "$out" == *"Unexpected inputs provided"* || "$out" == *workflow_dispatch* ]]; then echo "::error::This repository's plan.yml does not accept a dispatched plan — it predates the plan verb, or declares no pr_number input. Re-pin the consumer workflows to a release that has it (docs/releasing.md)."; fi
+          if [ "$VERB" = "plan" ] && [[ "$out" == *"Unexpected inputs provided"* || "$out" == *workflow_dispatch* ]]; then echo "::error::This repository's plan.yml does not accept a dispatched plan — it predates the plan verb, or declares no pr_number input. Edit .github/workflows/plan.yml in this repository — docs/upgrading.md section 0.20.0 lists the edits; re-pinning alone does not make them."; fi
           exit "$rc"
         fi
         if [ "$VERB" = plan ]; then

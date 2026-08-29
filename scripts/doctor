@@ -1638,9 +1638,15 @@ def _plan_run_id_finding(text, name):
     return out
 
 
-#: Line-anchored, like `_PLAN_RUN_ID_KEY` and with the same known gap: a fully
-#: inline flow `on: { workflow_dispatch: { inputs: { mode: … } } }` is not seen,
-#: which stays silent rather than reporting a healthy file. Unlike that key,
+#: Line-anchored, like `_PLAN_RUN_ID_KEY` and with the same known gap, which
+#: applies to BOTH halves: a fully inline flow mapping — `on: { workflow_dispatch:
+#: { inputs: { mode: … } } }`, or `with: { environment: …, mode: …, … }` on the
+#: apply call — is not seen. Both stay silent rather than reporting a healthy
+#: file, but the forward's silence is the costly one: the consumer re-pins, the
+#: run dies as GitHub LOADS it with `startup_failure`, no job and no log, and
+#: this probe said nothing about the one shape it exists to pre-warn about. The
+#: threat model it is written for is a wrapper copied from the block-style
+#: fences on our own pages and then drifting, so the anchor stays. Unlike that key,
 #: `mode` is generic YAML — `actions/state` takes `mode: restore`, `apply-cell`'s
 #: state steps and `actions/summary`'s `comment_mode` are unrelated — so where
 #: the key is found is the whole finding, and it is only ever searched inside the
