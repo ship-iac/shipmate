@@ -408,11 +408,11 @@ workloads with a role each.
 
 With no role variable set the credentials step is skipped and the job holds no
 cloud credential at all, which is how the sample repos run credential-free.
-This is wired on the **apply path only**: every wave job of
-`apply-env-level.yml` requests `id-token: write` and runs
-`aws-actions/configure-aws-credentials`, gated on one of those roles being set,
-before its apply-cell step, reading the variables from the apply Environment it
-is bound to. The `snapshot` and `complete` jobs deliberately get
+This is wired on the **apply and unlock paths only**: every wave job of
+`apply-env-level.yml`, and `unlock.yml`'s unlock job, requests `id-token: write`
+and runs `aws-actions/configure-aws-credentials`, gated on one of those roles
+being set, before its cell step, reading the variables from the apply
+Environment it is bound to. The `snapshot` and `complete` jobs deliberately get
 no token. Plan cells have no credentials step.
 
 On the apply path the engine passes through whatever role the apply Environment
@@ -446,8 +446,8 @@ the apply-match fingerprint by construction — it hashes only non-empty
 `TF_VAR_*` plus `TF_WORKSPACE` (see Apply-match fingerprint, below).
 
 **This is a breaking change for existing consumers, cloud or not.** GitHub caps
-a called workflow's permissions at each `uses:` boundary, so a consumer wrapper
-that calls the engine's apply-path reusable workflows must grant
+a called workflow's permissions at each `uses:` boundary, so every consumer
+`apply.yml`, `unlock.yml` and `deploy.yml` wrapper — not `plan.yml` — must grant
 `id-token: write` **on the call-site job** — and, if the wrapper declares a
 top-level `permissions:` block, there too. This applies to a consumer that uses
 no cloud credentials whatsoever: without the grant the run fails at

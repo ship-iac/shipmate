@@ -168,12 +168,13 @@ nothing in the engine to guard it. The role's trust policy is the real bound.
 
 ## Where the credentials step goes
 
-**On the apply path the consumer writes no credentials step.** The engine's
-`apply-env-level.yml` runs `aws-actions/configure-aws-credentials` in every wave
-job itself — after `actions/setup`, before `apply-cell`, gated on either role
-being set — reading the variables from the apply environment the job is bound to
-(`<env>-apply`, or the bare `<env>` in shared mode). The wrapper's only obligation is
-`id-token: write` on the calling job (see
+**On the apply and unlock paths the consumer writes no credentials step.** The
+engine's `apply-env-level.yml` runs `aws-actions/configure-aws-credentials` in
+every wave job itself — after `actions/setup`, before `apply-cell`, gated on
+either role being set — reading the variables from the apply environment the job
+is bound to (`<env>-apply`, or the bare `<env>` in shared mode); `unlock.yml`'s
+unlock job carries the same step in the same position. The wrapper's only
+obligation is `id-token: write` on the calling job (see
 [`getting-started.md`](getting-started.md) §Required — apply).
 
 The plan-side role lives on the `<env>-plan` environment. In **shared mode** — a
