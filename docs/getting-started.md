@@ -137,11 +137,11 @@ repository that has no `.github/workflows/plan.yml` — no apply path matches th
 path any more (each cell reads its plan run from its own apply check), but
 `shipmate doctor` keys its plan-wrapper probes on the filename, so a plan
 workflow under another name loses them silently and the refusal is what stops it
-happening. All three are also names `actions/dispatch` targets — the verb names
-the file: `plan.yml` for a commented `shipmate plan`, `apply.yml` for
-`shipmate apply`, `unlock.yml` for `shipmate unlock` — so a wrapper called
-anything else is dispatched by nothing and the command silently reaches no
-workflow. Create all three under exactly those names.
+happening. `actions/dispatch` targets filenames too, one per verb — `plan.yml`
+for a commented `shipmate plan`, `apply.yml` for `shipmate apply`, `unlock.yml`
+for `shipmate unlock` — so a wrapper called anything else is dispatched by
+nothing and the command silently reaches no workflow. Create all three under
+exactly those names.
 
 The fences on this page are transcribed from the sample repositories, which pin
 `runs-on: ubuntu-slim`. Use whichever runner label your own plan offers —
@@ -431,13 +431,14 @@ rules from Settings → Environments → `<name>` (or the API):
 > at all.** GitHub caps a called workflow's permissions at each `uses:`
 > boundary, and the apply-path workflows request it, so without the grant the
 > run fails at workflow-resolution time. If the wrapper declares a top-level
-> `permissions:` block, it needs the grant there too. This applies to `apply.yml`
-> and `deploy.yml` wrappers, **not** to `plan.yml`.
+> `permissions:` block, it needs the grant there too. This applies to the
+> `apply.yml`, `unlock.yml` and `deploy.yml` wrappers, **not** to `plan.yml`.
 >
 > **`state_suffix` is required but may be `""`.** It is a `required: true` input
-> of every apply-path reusable workflow — `apply.yml`, `apply-all.yml`,
-> `deploy.yml` and the `apply-env-level.yml` they call — and of none of the plan
-> path. `""` — what the fences below paste, because this page's worked example
+> of the applying workflows — `apply.yml`, `apply-all.yml`, `deploy.yml` and the
+> `apply-env-level.yml` they call — and of none of the plan path. Nor of
+> `unlock.yml`, which declares no such input: it releases locks and applies
+> nothing, and passing one is a load-time rejection with no job and no log. `""` — what the fences below paste, because this page's worked example
 > is S3 — means a remote backend owns the state, and the engine's state
 > restore/save steps are skipped. A **local backend** materialized in the working
 > tree passes instead the path segment under each stack directory where its state
@@ -653,7 +654,8 @@ jobs:
 
 ### Why the wrappers name their secrets
 
-Every snippet above passes secrets by name and none uses `secrets: inherit`.
+Every snippet above that passes secrets at all passes them by name, and none uses
+`secrets: inherit`.
 Two reasons, and the second one is a hard failure:
 
 - `inherit` hands the engine every secret your repository can see, not the two
@@ -669,8 +671,9 @@ Two reasons, and the second one is a hard failure:
   `apply / <stack> / <env>` checks, no sticky comment.
 
 Pass only what each callee **declares**: `summary.yml` declares
-`SHIPMATE_APP_PRIVATE_KEY` alone, while `apply.yml`, `apply-all.yml` and
-`deploy.yml` declare the passphrase too. Naming a secret the callee does not
+`SHIPMATE_APP_PRIVATE_KEY` alone, `apply.yml`, `apply-all.yml` and `deploy.yml`
+declare the passphrase too, and `unlock.yml` declares none at all — its wrapper
+writes no `secrets:` block. Naming a secret the callee does not
 declare is a load-time error that kills the run with no job and no log.
 
 ### Consumers outside the engine's organization

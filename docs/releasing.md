@@ -226,14 +226,20 @@ the release commit, from one sample:
    would build — exactly those keys, and no others:
 
    ```bash
-   gh workflow run unlock.yml --repo ship-iac/repo-example-stacks-aws --ref smoke/vX.Y.Z \
-     -f environment=sbx -f ref=<40-char-sha>
+   gh workflow run apply.yml --repo ship-iac/repo-example-stacks-aws --ref smoke/vX.Y.Z \
+     -f environment=sbx -f ref=<40-char-sha> -f pr_number=<n>
    ```
 
-   Pick the wrapper the release actually changed — the command above smokes
-   the unlock path, whose dispatch body is exactly those two keys. A wrapper
-   the release introduces is written on the scratch branch too, alongside the
-   re-pin: there is nothing to drive otherwise.
+   **Drive a wrapper the release *changed*, never one it introduces.** A
+   `workflow_dispatch` runs a workflow only if the file exists on the
+   repository's **default** branch — the same resolution constraint as the
+   paragraph below — so `--ref` picks which branch's copy runs, not whether the
+   file is dispatchable at all. A wrapper the release *adds* is on the scratch
+   branch only, and dispatching it answers a 404 indistinguishable from the
+   failure this exercise exists to detect; it gets its first live exercise after
+   the tag, like every other new path. The command above drives the wrapper this
+   release changed — `apply.yml`, with exactly the keys `actions/dispatch` sends
+   for that verb.
 
    **Not by commenting the verb.** An `issue_comment` workflow always runs from
    the repository's default branch, and the documented `comment-ops.yml` passes
