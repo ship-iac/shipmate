@@ -13,7 +13,7 @@ grammar are declared unstable in `README.md`.
 
 ## [0.21.0] — 2026-08-29
 
-Tags `<backfilled>`.
+Tags `11b31b5`.
 
 **Three wrapper changes, and they must land in the same commit as the pin bump.**
 Author `.github/workflows/unlock.yml`, delete the `mode` input and its `with:`
