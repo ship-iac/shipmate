@@ -97,6 +97,19 @@ UNLOCK_STEP_ACTIONS = {
     ],
 }
 
+#: `run:` steps per unlock job, hand-written. The `uses:` list above cannot see a
+#: shell step, and `tofu apply` pasted into the unlock job would run with the
+#: `<env>-apply` binding, id-token: write and an already-assumed apply role. The
+#: apply side takes no mirror of this: `apply.yml` legitimately runs shell, so a
+#: `tofu force-unlock` pasted there stays a blind spot rather than a second
+#: selector here.
+UNLOCK_RUN_STEPS = {"guard": 1, "detect": 0, "unlock": 0}
+
+#: The whole `outputs:` mapping of unlock's `detect`. `UNLOCK_STRATEGY` pins the
+#: consumer end of this wire; without this the producer end can be re-aimed at
+#: `waves` (the empty string here), which fans the job out and dies at fromJSON.
+DETECT_OUTPUTS = {"cells": "${{ steps.d.outputs.cells }}"}
+
 #: Named so a failure says which one leaked in.
 APPLY_FAMILY = ("apply-cell", "apply-complete", "gate-refresh", "apply-summary")
 APPLY_FAMILY_WORKFLOW = ".github/workflows/apply-env-level.yml"
@@ -175,6 +188,10 @@ def _uses(job):
     return [str(s["uses"]) for s in (job.get("steps") or []) if s.get("uses")]
 
 
+def _runs(job):
+    return [s for s in (job.get("steps") or []) if s.get("run")]
+
+
 def test_the_apply_workflow_declares_no_mode_rail():
     got = _inputs(APPLY)
     assert got == APPLY_INPUTS, (
@@ -247,6 +264,12 @@ def test_the_unlock_workflow_applies_nothing():
     }
     named = {k: v for k, v in named.items() if v}
     assert not named, f"{UNLOCK} calls apply-family actions {named}"
+    runs = {job_id: len(_runs(job)) for job_id, job in jobs.items()}
+    assert runs == UNLOCK_RUN_STEPS, (
+        f"{UNLOCK}'s jobs carry {runs!r} `run:` steps, not {UNLOCK_RUN_STEPS!r} -- a shell "
+        "step is invisible to the `uses:` comparison above, and a `tofu apply` in the "
+        "unlock job would run with the apply environment bound and its role assumed"
+    )
     callers = {
         job_id: job["uses"]
         for job_id, job in jobs.items()
@@ -255,6 +278,15 @@ def test_the_unlock_workflow_applies_nothing():
     assert not callers, (
         f"{UNLOCK} calls the apply wave engine from {callers} -- that workflow applies "
         "every cell it is handed"
+    )
+
+
+def test_the_unlock_detect_publishes_the_queue_and_nothing_else():
+    got = _job(UNLOCK, "detect").get("outputs")
+    assert got == DETECT_OUTPUTS, (
+        f"unlock's detect publishes {got!r}, not {DETECT_OUTPUTS!r} -- the matrix reads "
+        "`cells`, and a producer re-aimed at `waves` hands it the empty string, which "
+        "`!= '[]'` reads as a queue and fromJSON then kills"
     )
 
 
