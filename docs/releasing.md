@@ -226,24 +226,31 @@ the release commit, from one sample:
    would build — exactly those keys, and no others:
 
    ```bash
-   gh workflow run apply.yml --repo ship-iac/repo-example-stacks-aws --ref smoke/vX.Y.Z \
-     -f mode=unlock -f environment=sbx -f ref=<40-char-sha> -f pr_number=<n>
+   gh workflow run unlock.yml --repo ship-iac/repo-example-stacks-aws --ref smoke/vX.Y.Z \
+     -f environment=sbx -f ref=<40-char-sha>
    ```
+
+   Pick the wrapper the release actually changed — the command above smokes
+   the unlock path, whose dispatch body is exactly those two keys. A wrapper
+   the release introduces is written on the scratch branch too, alongside the
+   re-pin: there is nothing to drive otherwise.
 
    **Not by commenting the verb.** An `issue_comment` workflow always runs from
    the repository's default branch, and the documented `comment-ops.yml` passes
    `dispatch-ref: ${{ github.event.repository.default_branch }}` — so a comment
    drives the default branch's `comment-ops.yml` and dispatches the default
-   branch's `apply.yml`, still on the *old* pin. The scratch branch is never
-   read, and the smoke goes green without touching the new code.
+   branch's copy of the verb's wrapper, still on the *old* pin. The scratch
+   branch is never read, and the smoke goes green without touching the new
+   code.
 3. Throw the branch away and cut the release as below.
 
 **What this catches, and what it cannot.** It catches the class that genuinely
 needs a consumer: the wrapper's `workflow_dispatch` input declarations meeting
 the body the engine sends. Either half of that pair is rejected right here, with
 no job started, and nothing in this repository can see it — an input the engine
-sends that the wrapper does not declare is a 422 "Unexpected inputs provided", and a `required: true` wrapper
-input the engine no longer sends is a 422 "not provided". It also resolves and
+sends that the wrapper does not declare is a 422 "Unexpected inputs provided",
+and a `required: true` wrapper input the engine no longer sends is a 422 "not
+provided". It also resolves and
 parses the engine reusable workflow at the new SHA, because that happens when the
 run graph is built.
 

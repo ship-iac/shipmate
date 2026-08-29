@@ -510,6 +510,15 @@ themselves contain text that matches the command grammar.
 | `shipmate unlock <env>` | active | required env | team membership plus the `<env>-apply` environment — no review policy, no mergeable check, no draft check, no reviewed plan (below) |
 | `shipmate destroy` | reserved | — | — |
 
+Each dispatching verb has its own consumer workflow file, and `actions/dispatch`
+picks the file from the verb: `shipmate plan` → `.github/workflows/plan.yml`,
+`shipmate apply` → `apply.yml`, `shipmate unlock` → `unlock.yml`. `plan.yml`
+alone carries two triggers — `pull_request_target` for the autoplan and
+`workflow_dispatch` for the commented form; the other two are dispatch-only.
+`doctor` and `help` dispatch nothing: both are answered inside the comment-ops
+run itself. A verb whose file the repository does not carry fails at dispatch
+time on that comment-handling run, and no other verb is affected.
+
 `shipmate plan` plans the pull request's changed stacks on demand, authoring
 exactly what a push-triggered plan authors and nothing more: the sticky plan
 comment, the per-cell plan checks, the plan artifacts an apply consumes, and
@@ -912,7 +921,7 @@ one already requires, so a role that can apply an environment can already
 unlock it.
 
 It reports **in the run, not in a comment** — a comment would need
-`pull-requests: write`, which consumers do not grant `apply.yml`. The `rocket`
+`pull-requests: write`, which consumers do not grant `unlock.yml`. The `rocket`
 reaction confirms acceptance, per-cell detail lands in each job's step summary,
 and a failure reds the run.
 
@@ -1852,14 +1861,17 @@ The engine ships the merge-deploy path as the reusable workflow
 bare-apply path as `.github/workflows/apply-all.yml` (detect → env-levels
 0..3 via `apply-env-level.yml` → gate refresh + result comment), and the
 targeted path as `.github/workflows/apply.yml` (single-env detect → one
-`apply-env-level.yml` call → gate refresh + result comment). A
-consuming repo carries two thin wrappers: `deploy.yml` (`on: push` to the
-default branch; passes only its flavor's `state_suffix`, which it sets to `''`
-on a remote backend) and `apply.yml` (`workflow_dispatch`; its
-optional `environment` input routes to the targeted or bare engine workflow).
-Both wrappers **must** grant `id-token: write` on the calling job, added in the
-same pull request that repins past the change introducing it (see AWS OIDC,
-above).
+`apply-env-level.yml` call → gate refresh + result comment), and the unlock path
+as `.github/workflows/unlock.yml` (guard → single-env detect → one flat unlock
+matrix; it takes `environment` and `ref` only, and declares no secrets). A
+consuming repo carries three thin wrappers on this side: `deploy.yml`
+(`on: push` to the default branch; passes only its flavor's `state_suffix`,
+which it sets to `''` on a remote backend), `apply.yml` (`workflow_dispatch`;
+its optional `environment` input routes to the targeted or bare engine workflow)
+and `unlock.yml` (`workflow_dispatch`; one call, no `state_suffix` and no
+`secrets:` block). All three **must** grant `id-token: write` on the calling
+job, added in the same pull request that repins past the change introducing it
+(see AWS OIDC, above).
 
 ## OpenTofu note
 

@@ -76,6 +76,9 @@ ENGINE_CALL_SECRETS = {
     "apply-all.yml": _APP_KEY_AND_PASSPHRASE,
     "deploy.yml": _APP_KEY_AND_PASSPHRASE,
     "apply-env-level.yml": _APP_KEY_AND_PASSPHRASE,
+    # `None`, not `{}`: unlock reads no plan artifact and mints no App token, so
+    # its wrapper writes no `secrets:` block at all.
+    "unlock.yml": None,
 }
 
 

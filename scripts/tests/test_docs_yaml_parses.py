@@ -146,6 +146,7 @@ def test_the_wrapper_snippets_are_still_being_found():
         ("docs/getting-started.md", "apply.yml"),
         ("docs/getting-started.md", "deploy.yml"),
         ("docs/getting-started.md", "summary.yml"),
+        ("docs/getting-started.md", "unlock.yml"),
     ], f"documented engine reusable-workflow calls changed: {found}"
 
 
@@ -263,4 +264,6 @@ def test_the_documented_wrapper_inputs_are_exactly_these():
         ("docs/getting-started.md", "shipmate · apply", "pr_number", False, ""),
         ("docs/getting-started.md", "shipmate · apply", "ref", False, ""),
         ("docs/getting-started.md", "shipmate · plan", "pr_number", True, None),
+        ("docs/getting-started.md", "shipmate · unlock", "environment", False, ""),
+        ("docs/getting-started.md", "shipmate · unlock", "ref", False, ""),
     ], f"documented workflow_dispatch inputs changed: {found}"

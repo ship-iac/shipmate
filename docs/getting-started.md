@@ -137,10 +137,11 @@ repository that has no `.github/workflows/plan.yml` — no apply path matches th
 path any more (each cell reads its plan run from its own apply check), but
 `shipmate doctor` keys its plan-wrapper probes on the filename, so a plan
 workflow under another name loses them silently and the refusal is what stops it
-happening. Both are also names `actions/dispatch` targets — `plan.yml` for a
-commented `shipmate plan`, `apply.yml` for `shipmate apply` — so a wrapper
-called anything else is dispatched by nothing and the command
-silently reaches no workflow. Create both under exactly those names.
+happening. All three are also names `actions/dispatch` targets — the verb names
+the file: `plan.yml` for a commented `shipmate plan`, `apply.yml` for
+`shipmate apply`, `unlock.yml` for `shipmate unlock` — so a wrapper called
+anything else is dispatched by nothing and the command silently reaches no
+workflow. Create all three under exactly those names.
 
 The fences on this page are transcribed from the sample repositories, which pin
 `runs-on: ubuntu-slim`. Use whichever runner label your own plan offers —
@@ -559,8 +560,8 @@ jobs:
       state_suffix: ""
 ```
 
-The verb names the file: `shipmate unlock <env>` dispatches `unlock.yml`, not
-this wrapper, so nothing here carries it.
+The verb names the file: `shipmate unlock <env>` dispatches `unlock.yml` below,
+not this wrapper, so nothing here carries it.
 
 **Every input is `required: false` with an explicit default, and that is
 deliberate.** This wrapper is dispatched only by `actions/dispatch`, minting an
@@ -580,9 +581,44 @@ Its errors are annotations on the run naming the actual value. Keep new inputs
 on *this* wrapper optional for the same reason — `required` is the default a new
 input drifts back to, and it reopens this exactly. The plan wrapper's `pr_number`
 is the one documented `required: true` input and shows what the rule is actually
-about: that dispatch has a single mode carrying a single input the engine always
-fills, so there is no empty value for GitHub to reject, and requiring it is what
-makes a hand-dispatched plan name the pull request it plans.
+about: that dispatch carries a single input the engine always fills, so there is
+no empty value for GitHub to reject, and requiring it is what
+makes a hand-dispatched plan name the pull request it plans. The unlock wrapper
+below is dispatched the same way and follows the same rule.
+
+`unlock.yml` is where `shipmate unlock <env>` lands. It calls the engine's
+`unlock.yml`, which takes `environment` and `ref` and **no secrets** — releasing
+a lock reads no plan artifact, so there is no passphrase to forward, and mapping
+a secret the callee does not declare is a load-time rejection with no job and no
+log. A repository without this file keeps every other verb; `shipmate unlock`
+alone stops working, and it fails at dispatch time against a workflow file that
+is not there.
+
+```yaml
+name: shipmate · unlock
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Target environment whose stranded state locks to release
+        required: false
+        default: ''
+      ref:
+        description: PR head SHA to check out
+        required: false
+        default: ''
+permissions:
+  contents: read
+  actions: read
+  id-token: write
+jobs:
+  unlock:
+    uses: ship-iac/shipmate/.github/workflows/unlock.yml@<engine-sha>  # see the latest release
+    permissions: { contents: read, checks: read, actions: read, id-token: write }
+    with:
+      environment: ${{ inputs.environment }}
+      ref: ${{ inputs.ref }}
+```
 
 `deploy.yml` applies, on push to the default branch, every reviewed plan whose
 apply check is still pending — so it no-ops when everything was applied
