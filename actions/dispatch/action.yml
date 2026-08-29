@@ -112,7 +112,7 @@ runs:
           # Only a failure that actually names the missing surface is version
           # skew. A 403, a rate limit -- or a 422 about a different input -- is
           # another problem entirely, and explaining it as skew sends the
-          # operator editing workflows that are fine. The raw API message is
+          # operator to edit workflows that are fine. The raw API message is
           # printed above either way.
           # Neither remedy is a re-pin: both shapes are a consumer file the
           # upgrade guide says to author or edit by hand, and a pin bump alone

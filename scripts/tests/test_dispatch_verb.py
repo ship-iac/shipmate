@@ -414,7 +414,7 @@ def test_dispatch_success_exits_zero():
 # --- Degrade messages --------------------------------------------------------
 #
 # Only a failure that actually matches the skew shape gets the skew explanation:
-# a 403 or a rate limit explained as skew sends the operator editing workflows
+# a 403 or a rate limit explained as skew sends the operator to edit workflows
 # that are fine. Each message's remedy is pinned too: neither failure is fixed by
 # a re-pin, and a message that says otherwise has shipped here before.
 
@@ -499,7 +499,7 @@ def test_a_422_about_another_input_is_not_reported_as_skew():
     The v0.16.0 E2E hit this class: the consumer wrapper declared `plan_run_id`
     as required, the dispatch sent it empty, and GitHub answered `Required input
     'plan_run_id' not provided (HTTP 422)`. A condition matching any 422 told
-    the operator editing workflows that were already current, hiding the real
+    the operator to edit workflows that were already current, hiding the real
     cause printed one line above.
 
     Mutation: widen the unlock condition to any `HTTP 422` and this reddens.
