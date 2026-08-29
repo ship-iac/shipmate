@@ -520,10 +520,6 @@ on:
         description: Target environment (empty = bare `shipmate apply`, all non-explicit environments)
         required: false
         default: ''
-      mode:
-        description: apply (default) or unlock — unlock releases a stranded state lock instead of applying
-        required: false
-        default: apply
       ref:
         description: PR head SHA to apply
         required: false
@@ -547,7 +543,6 @@ jobs:
       SHIPMATE_PLAN_PASSPHRASE: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
     with:
       environment: ${{ inputs.environment }}
-      mode: ${{ inputs.mode }}
       ref: ${{ inputs.ref }}
       pr_number: ${{ inputs.pr_number }}
       state_suffix: ""
@@ -564,16 +559,8 @@ jobs:
       state_suffix: ""
 ```
 
-`mode` carries `shipmate unlock <env>` — it reaches only the `targeted` job,
-since unlock is always single-env. The two ways to leave it out fail
-differently. **Omit the `workflow_dispatch` input** and `unlock` is accepted at
-comment time and then refused by the platform: `actions/dispatch` puts `mode` in
-the body only for an unlock, GitHub answers HTTP 422 "Unexpected inputs
-provided" for an input the wrapper does not declare, and the dispatch step
-recognises that pair and names `mode`. **Omit only the `with:` pass-through** and
-nothing fails at all — the engine's `apply.yml` declares `mode` optional with
-default `apply`, so the comment quietly applies the reviewed plan instead of
-releasing the lock.
+The verb names the file: `shipmate unlock <env>` dispatches `unlock.yml`, not
+this wrapper, so nothing here carries it.
 
 **Every input is `required: false` with an explicit default, and that is
 deliberate.** This wrapper is dispatched only by `actions/dispatch`, minting an
@@ -588,7 +575,7 @@ unlock applies no plan, so the engine sent that value empty.
 
 The engine is the validator, and it is the only layer with enough context to be
 one: `apply-detect` runs `validate_head_sha` and `validate_env`, and it knows
-which values are legitimately empty in which mode.
+which values are legitimately empty.
 Its errors are annotations on the run naming the actual value. Keep new inputs
 on *this* wrapper optional for the same reason — `required` is the default a new
 input drifts back to, and it reopens this exactly. The plan wrapper's `pr_number`

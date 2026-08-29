@@ -1,7 +1,7 @@
 """Guards how every job that touches a cell's state binds a GitHub Environment.
 
 Invariants:
-- all eight wave jobs, and apply.yml's `unlock` job, bind the shared-mode
+- all eight wave jobs, and unlock.yml's `unlock` job, bind the shared-mode
   expression and nothing else: an env listed in vars.SHIPMATE_SHARED_ENVS binds
   the logical name, anything else falls through to <env>-apply. The
   fall-through is the fail-safe direction -- the reviewer gate, the OIDC
@@ -48,13 +48,13 @@ APPLY_ENV = (
 WAVES = [f"wave{i}" for i in range(8)]
 
 #: workflow file -> the jobs in it that bind an env derived from a cell, written
-#: by hand. `unlock` is here and not only in test_unlock_job_isolation.py because
+#: by hand. `unlock` is here and not only in test_verb_path_isolation.py because
 #: this is ONE property with one constant: the `<env>-apply` environment is half
 #: of what bounds `shipmate unlock` (CONTRACT.md §Comment-ops), and the folded
 #: expression is byte-identical to the waves'.
 CELL_BOUND = {
     "apply-env-level.yml": WAVES,
-    "apply.yml": ["unlock"],
+    "unlock.yml": ["unlock"],
 }
 
 #: (logical env, SHIPMATE_SHARED_ENVS value) -> the environment the apply binds.

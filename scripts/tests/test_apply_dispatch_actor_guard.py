@@ -1,5 +1,6 @@
-"""Only a bot actor may dispatch an apply; a human with write access must not
-bypass authorize by hand-rolling `gh workflow run apply.yml`/`apply-all.yml`.
+"""Only a bot actor may dispatch a verb; a human with write access must not
+bypass authorize by hand-rolling `gh workflow run apply.yml`/`apply-all.yml`/
+`unlock.yml`.
 
 The rejection is its own tiny job (`guard`), not a first step of `detect`.
 Two separate outcomes have to be told apart:
@@ -33,8 +34,8 @@ from _loader import WORKFLOWS
 
 GUARD_JOB = "guard"
 GUARD_IF = "${{ !endsWith(github.actor, '[bot]') }}"
-# The rejected-verb differs per workflow ("apply" vs "apply-all"), so the
-# error line is keyed by filename rather than a single shared constant.
+# The rejected verb differs per workflow, so the error line is keyed by
+# filename rather than a single shared constant.
 GUARD_ERROR_LINE = {
     "apply.yml": (
         "::error::apply must be dispatched by the shipmate App via comment-ops, "
@@ -44,12 +45,21 @@ GUARD_ERROR_LINE = {
         "::error::apply-all must be dispatched by the shipmate App via comment-ops, "
         "not by a direct workflow_dispatch"
     ),
+    "unlock.yml": (
+        "::error::unlock must be dispatched by the shipmate App via comment-ops, "
+        "not by a direct workflow_dispatch"
+    ),
 }
-#: The whole `needs:` list each apply path's `detect` carries. Both wait on the
-#: `review` job that reads the pull request's review decision server-side.
-#: Compared whole, so neither `guard` dropping out nor an unreviewed extra
-#: dependency can slip in.
-DETECT_NEEDS = {"apply.yml": ["guard", "review"], "apply-all.yml": ["guard", "review"]}
+#: The whole `needs:` list each dispatched workflow's `detect` carries. Both
+#: apply paths wait on the `review` job that reads the pull request's review
+#: decision server-side; `unlock.yml` carries no such job, because an approval
+#: reviews a diff and unlock applies none. Compared whole, so neither `guard`
+#: dropping out nor an unreviewed extra dependency can slip in.
+DETECT_NEEDS = {
+    "apply.yml": ["guard", "review"],
+    "apply-all.yml": ["guard", "review"],
+    "unlock.yml": ["guard"],
+}
 #: The whole `needs:` list of every job downstream of `detect`, per file. Every
 #: job that can fail BEFORE `detect` has to appear, or its failure never reaches
 #: this job's `!failure()`: `detect` is skipped, its outputs read as empty
@@ -62,9 +72,6 @@ DETECT_NEEDS = {"apply.yml": ["guard", "review"], "apply-all.yml": ["guard", "re
 DOWNSTREAM_NEEDS = {
     "apply.yml": {
         "apply": ["guard", "review", "detect"],
-        # Same list for the same reason -- and deliberately absent from
-        # `summary`'s: an unlock posts no comment and refreshes no gate.
-        "unlock": ["guard", "review", "detect"],
         "summary": ["guard", "review", "detect", "apply"],
     },
     "apply-all.yml": {
@@ -82,8 +89,15 @@ DOWNSTREAM_NEEDS = {
             "envlevel3",
         ],
     },
+    # No `summary` job at all: an unlock posts no comment and refreshes no gate,
+    # which is why nothing here mints the App key.
+    "unlock.yml": {"unlock": ["guard", "detect"]},
 }
 SUMMARY_IF = "${{ always() && needs.guard.result == 'success' }}"
+#: Every workflow `actions/dispatch` can target that carries the bot-actor
+#: rejection. `APPLY_PATHS` is the subset that also posts a result comment, and
+#: so has a `summary` job for the last test to read.
+DISPATCH_PATHS = ("apply.yml", "apply-all.yml", "unlock.yml")
 APPLY_PATHS = ("apply.yml", "apply-all.yml")
 
 
@@ -97,11 +111,11 @@ def _needs(job):
     return [needs] if isinstance(needs, str) else list(needs)
 
 
-def test_apply_paths_reject_dispatches_missing_a_bot_actor():
+def test_dispatched_workflows_reject_dispatches_missing_a_bot_actor():
     # The rejection must be the guard job's one and only step, so nothing at
     # all can run in that job before it -- the reason it is not a step of
     # `detect`, where `actions/checkout` of the dispatcher-supplied ref sits.
-    for name in APPLY_PATHS:
+    for name in DISPATCH_PATHS:
         job = _jobs(name)[GUARD_JOB]
         steps = job["steps"]
         assert len(steps) == 1, f"{name}: {GUARD_JOB} must carry exactly one step, got {len(steps)}"
@@ -121,7 +135,7 @@ def test_apply_paths_reject_dispatches_missing_a_bot_actor():
 def test_guard_job_holds_no_credentials_and_runs_no_repository_code():
     # It gates the App key; it must not be able to reach one, name the
     # environment that holds one, or execute the dispatcher's ref.
-    for name in APPLY_PATHS:
+    for name in DISPATCH_PATHS:
         job = _jobs(name)[GUARD_JOB]
         assert job.get("permissions") == {}, (
             f"{name}: {GUARD_JOB} must grant no token permissions, got {job.get('permissions')!r}"
@@ -133,12 +147,12 @@ def test_guard_job_holds_no_credentials_and_runs_no_repository_code():
             assert "secrets." not in str(step.get("run", ""))
 
 
-def test_every_apply_fan_out_job_carries_the_guard_in_its_needs():
+def test_every_fan_out_job_carries_the_guard_in_its_needs():
     # A rejected dispatch leaves `detect` skipped, and a skipped `detect`'s
     # outputs are empty strings -- which `needs.detect.outputs.*_empty !=
     # 'true'` reads as "not empty". `guard` in `needs` is what makes the
     # rejection visible to each job's `!failure()` clause.
-    for name in APPLY_PATHS:
+    for name in DISPATCH_PATHS:
         jobs = _jobs(name)
         assert _needs(jobs["detect"]) == DETECT_NEEDS[name], (
             f"{name}: detect must need exactly {DETECT_NEEDS[name]!r}, "
@@ -152,7 +166,7 @@ def test_every_apply_fan_out_job_carries_the_guard_in_its_needs():
             )
 
 
-def test_every_apply_fan_out_job_needs_every_job_that_runs_before_detect():
+def test_every_fan_out_job_needs_every_job_that_runs_before_detect():
     for name, expected_by_job in DOWNSTREAM_NEEDS.items():
         jobs = _jobs(name)
         # Discovery decides the scope: a job added downstream of `detect` and

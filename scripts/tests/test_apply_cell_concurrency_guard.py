@@ -44,7 +44,9 @@ SERIALIZED = {
     # Not a cell that applies, but one that force-unlocks a cell's state --
     # which is exactly why it shares the queue: a live apply for that cell makes
     # the unlock wait behind it, so the lock it finds is either gone or orphaned.
-    "apply.yml": ["unlock"],
+    # In its own workflow file since the verbs were split; the group did not move
+    # with it, and must not.
+    "unlock.yml": ["unlock"],
 }
 
 
