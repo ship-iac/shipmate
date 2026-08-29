@@ -222,6 +222,13 @@ the release commit, from one sample:
    python dev/repin_consumer.py --repo ../repo-example-stacks-aws --sha <release-sha> --label vX.Y.Z
    ```
 
+   **`repin_consumer.py` rewrites pins and nothing else**, so when a release
+   changes a wrapper's declared input contract, make those body edits on the
+   scratch branch too — a new pin under an old wrapper body is the load-time
+   rejection described below, not a smoke result. `docs/upgrading.md`'s section
+   for the release names them; for this one it is deleting the retired `mode`
+   input and its `with:` line from `apply.yml`.
+
 2. Drive the wrapper **directly at that ref**, with the body `actions/dispatch`
    would build — exactly those keys, and no others:
 
