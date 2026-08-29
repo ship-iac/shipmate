@@ -93,8 +93,9 @@ run has no jobs and no logs, only a workflow-validation error on the run itself
 whether that same wrapper still carries the retired `mode` input, which
 `shipmate unlock` no longer uses now that it dispatches its own `unlock.yml`
 (declared under `on:` it is dead weight; forwarded to the engine's reusable
-`apply.yml` or `apply-all.yml` it is the same load-time rejection — a `mode:`
-anywhere else in the file, such as an `actions/state` step, is not reported),
+`apply.yml` or `apply-all.yml` it is the same load-time rejection — those two
+placements are what the probe reads, so an ordinary `mode:` elsewhere in the
+file, such as an `actions/state` step's, is not reported),
 whether the `plan.yml` wrapper can serve a dispatched plan at all — the
 `workflow_dispatch` trigger a commented `shipmate plan` dispatches, the `pr_number`
 input that dispatch body carries, and a `pr-facts` step (the first two are refused

@@ -567,8 +567,7 @@ a retired `plan_run_id` input still declared or forwarded by the consumer's
 there is no job and no log to read),
 a retired `mode` input on the same wrapper — declared under `on:`, or forwarded
 to the engine's reusable apply workflows, where the same load-time rejection
-applies; every other `mode:` in the file is somebody else's input and is not
-reported,
+applies — only those two placements are read as the retired rail,
 the dispatch wiring of the consumer's `plan.yml` — the `workflow_dispatch` trigger
 a commented `shipmate plan` dispatches, the `pr_number` input that dispatch sends,
 and a `pr-facts` step to resolve the pull request a dispatched run has no payload

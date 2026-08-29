@@ -1647,9 +1647,11 @@ def _plan_run_id_finding(text, name):
 #: `on:` block or inside a job that calls the engine's reusable apply workflows.
 _MODE_KEY = re.compile(r"^[ \t]*mode[ \t]*:", re.M)
 #: A job calling the engine's reusable apply workflows. Matched on the path
-#: rather than on `ctx["engine_repo"]`: the caller already narrows this probe to
-#: the consumer's own `apply.yml`, and a wrapper naming somebody else's
-#: `.github/workflows/apply.yml` there is not a shape that exists.
+#: rather than on `ctx["engine_repo"]`, which is an ACCEPTED cost, not a claim
+#: about what a consumer can write: a forward on a call to another org's own
+#: `.github/workflows/apply.yml` is reported too. Scoping it would need the
+#: engine slug and therefore a third degrade path, for a shape the caller has
+#: already narrowed to the consumer's own `apply.yml`.
 _APPLY_CALL = re.compile(r"^[ \t]*uses[ \t]*:.*/\.github/workflows/apply(?:-all)?\.yml@")
 # Same degrade posture and reason as PIN_UNREADABLE.
 MODE_INPUT_UNREADABLE = (
@@ -1723,7 +1725,7 @@ def _mode_input_finding(text, name):
     logs, only a workflow-validation error on the run itself — which is the
     hardest failure in this system to diagnose from the outside. That asymmetry
     between an undeclared workflow-call input and an undeclared action input is
-    the measured one at `docs/releasing.md`."""
+    the measured one at `docs/upgrading.md`."""
     lines = _stripped_text(text).splitlines()
     _, block = _on_block(text)
     declared = _MODE_KEY.findall("\n".join(block))

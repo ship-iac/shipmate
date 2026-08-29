@@ -3218,6 +3218,24 @@ _TARGETED_JOB_FORWARDING_MODE = (
     "      mode: ${{ inputs.mode }}\n"
     "      ref: ${{ inputs.ref }}\n"
 )
+_APPLY_ALL_JOB_FORWARDING_MODE = (
+    "  all:\n"
+    "    if: ${{ inputs.environment == '' }}\n"
+    f"    uses: {_ENGINE_REPO}/.github/workflows/apply-all.yml@{_SHA}\n"
+    "    with:\n"
+    "      mode: ${{ inputs.mode }}\n"
+    "      ref: ${{ inputs.ref }}\n"
+)
+# `with:` above `uses:`: key order in a YAML mapping carries no meaning.
+_TARGETED_JOB_WITH_FIRST = (
+    "jobs:\n"
+    "  targeted:\n"
+    "    with:\n"
+    "      environment: ${{ inputs.environment }}\n"
+    "      mode: ${{ inputs.mode }}\n"
+    "      ref: ${{ inputs.ref }}\n"
+    f"    uses: {_ENGINE_REPO}/.github/workflows/apply.yml@{_SHA}\n"
+)
 _APPLY_DECLARING_MODE = _MODE_ON_BLOCK + _TARGETED_JOB
 _APPLY_FORWARDING_MODE = _CLEAN_ON_BLOCK + _TARGETED_JOB_FORWARDING_MODE
 _APPLY_CARRYING_BOTH = _MODE_ON_BLOCK + _TARGETED_JOB_FORWARDING_MODE
@@ -3287,6 +3305,30 @@ def test_an_unrelated_mode_key_is_not_reported(monkeypatch):
     responses = _fork_responses({"apply.yml": _APPLY_WITH_UNRELATED_MODE})
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
     assert doctor._mode_input_warnings(_ctx()) == []
+
+
+def test_a_forward_on_the_apply_all_call_is_reported(monkeypatch):
+    """`apply-all.yml` never declared `mode` at all, so the bare-apply job is
+    where a migration copying the targeted job's `with:` block lands — and the
+    shipped message, `CONTRACT.md` and `docs/troubleshooting.md` all promise to
+    cover it. A region matcher spelled `apply\\.yml@` reads this wrapper as
+    clean."""
+    responses = _fork_responses(
+        {"apply.yml": _CLEAN_ON_BLOCK + _TARGETED_JOB + _APPLY_ALL_JOB_FORWARDING_MODE}
+    )
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    assert doctor._mode_input_warnings(_ctx()) == [(doctor.WARNING, _MODE_FORWARDED_TEXT)]
+
+
+def test_a_with_block_above_the_uses_line_is_still_a_forward(monkeypatch):
+    """Key order in a YAML mapping carries no meaning, so the region around an
+    apply call runs in both directions from its `uses:` line — the same property
+    `test_a_with_block_above_the_uses_line_is_silent` pins for the summary-wiring
+    probe, in the opposite polarity. Scanning forward only reads this wrapper as
+    clean: silence at exactly the load-time rejection this probe exists for."""
+    responses = _fork_responses({"apply.yml": _CLEAN_ON_BLOCK + _TARGETED_JOB_WITH_FIRST})
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    assert doctor._mode_input_warnings(_ctx()) == [(doctor.WARNING, _MODE_FORWARDED_TEXT)]
 
 
 def test_the_apply_yml_filter_lives_in_the_mode_dispatcher(monkeypatch):
