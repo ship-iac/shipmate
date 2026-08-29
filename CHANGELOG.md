@@ -11,6 +11,66 @@ section below names the SHA the release tags.
 The version line stays `v0.x` while action inputs, check names, and the comment
 grammar are declared unstable in `README.md`.
 
+## [0.21.0] — 2026-08-29
+
+Tags `<backfilled>`.
+
+**Three wrapper changes, and they must land in the same commit as the pin bump.**
+Author `.github/workflows/unlock.yml`, delete the `mode` input and its `with:`
+line from `apply.yml`, and forward `verb:` instead of `mode:` in
+`comment-ops.yml` (`docs/upgrading.md` §0.21.0 has the files). Split across two
+commits it fails both ways, and both ways are quiet: a new wrapper set against
+the old pin routes **every** verb at `apply.yml` — the old `actions/dispatch`
+defaults an absent `mode` to the apply wrapper, so `shipmate unlock` applies the
+reviewed plan instead of releasing a lock — while an old `comment-ops.yml`
+against the new pin forwards nothing and every verb is refused.
+
+### Changed
+
+- **One entry point per verb.** A comment's verb now selects a consumer
+  **workflow file** — `plan.yml`, `apply.yml`, `unlock.yml` — and the value stops
+  there. `actions/comment-ops` exposes the parsed route as `verb`;
+  `actions/dispatch` maps it to a filename, refuses an empty one, and puts no
+  verb in the dispatch body. A consumer's `.github/workflows/` directory now
+  reads as the verb list.
+
+  This retires the `mode` rail, which threaded one value across seven hops in
+  three repositories so that one wrapper could serve two verbs. The rail's cost
+  was not theoretical: a missing `with:` line on one of those hops left
+  `shipmate plan` dead on three repositories for two days, routed to the apply
+  wrapper and refused with an HTTP 422 that no pull request ever showed. The
+  replacement makes that failure loud instead of adding a probe for it — an
+  absent `verb` is refused by name, and a verb naming a wrapper the repository
+  does not have answers a 404 that says which file to author.
+
+- **`shipmate unlock` no longer runs on the apply path.** The new reusable
+  `.github/workflows/unlock.yml` takes `{environment, ref}`, declares no secrets
+  and no `state_suffix`, and carries neither a review job nor a summary job:
+  unlock consumes no reviewed plan, and it completes no apply check to refresh a
+  gate over. What it keeps is what makes it safe — the bot-actor guard, the
+  `<env>-apply` environment binding, the environment pre-flight, and a
+  serialization group byte-identical to the wave jobs', so an unlock queues
+  behind a live apply of the same cell rather than racing it.
+
+  The engine's `apply.yml` loses the `mode` input, the unlock job, the unlock
+  pre-flight and three `inputs.mode != 'unlock'` conditions. Each of those
+  conditions was one deletion away from an unlock that also applied; the split is
+  now structural rather than conditional, and pinned in both directions.
+
+- **`plan_workflow_error` states what it enforces.** The refusal and its trigger
+  are unchanged; the message now names the `CONTRACT.md` path it enforces instead
+  of describing runtime consequences that per-cell plan-run discovery had already
+  removed. `actions/dispatch` selects the plan workflow by filename, so a plan
+  workflow living elsewhere cannot be dispatched either.
+
+### Added
+
+- **`shipmate doctor` reports a consumer `apply.yml` that still carries `mode`.**
+  Declaring it is dead weight — nothing fills it in. Forwarding it to the
+  engine's reusable `apply.yml` is worse and quieter: a load-time rejection of
+  the whole run, with no job, no check run and no retrievable log. The probe
+  tells the two apart and names the remedy for each.
+
 ## [0.20.0] — 2026-08-27
 
 Tags `dbcc4c5`.
