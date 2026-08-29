@@ -762,12 +762,14 @@ that the value is the wrapper's own default-branch YAML, which a pull request
 author cannot edit. `shipmate doctor` reports both consumer mistakes on this
 step: a `head-repo` that is absent or a constant, and a `no-pull-request`
 anywhere in `plan.yml`. A fork's plan is refused before any
-stack is enumerated and before any `tofu` process starts. It is not refused
-before `detect`'s own `terramate` steps: in the reference `plan.yml`,
-`terramate fmt --check` and `terramate generate --detailed-exit-code` precede
-`actions/build-matrix`, so they still evaluate the fork's Terramate HCL —
-globals, `tm_*` functions and generate blocks included. Moving the refusal ahead
-of them means reordering your own `plan.yml`.
+stack is enumerated and before any `tofu` process starts — and, in the
+reference `plan.yml`, before `detect`'s own `terramate` steps: the
+`actions/build-matrix` step precedes `terramate fmt --check` and
+`terramate generate --detailed-exit-code`, so neither evaluates the fork's
+Terramate HCL — globals, `tm_*` functions and generate blocks included.
+Measured on the dispatch leg, 2026-08-29: `build-matrix` failed and both
+terramate steps were skipped. That order is yours to keep; reversing it in your
+own `plan.yml` puts the two terramate steps in front of the refusal.
 
 **Two things keep a fork out of a plan cell, in this order.** First,
 `actions/checkout` itself refuses to check out a fork's head under
@@ -783,7 +785,10 @@ value, which is unknown rather than false. Second, and independently,
 `build-matrix`'s refusal in `detect` plus the `plan` job's `needs: detect`.
 shipmate's own guard is the layer that has to hold when a consumer sets that
 input, pins an older `actions/checkout`, or swaps the checkout step for
-something else — which is why the engine does not rely on the first one.
+something else — which is why the engine does not rely on the first one. It has
+been seen to hold: against a real fork's pull request on the dispatch leg
+(2026-08-29), where the first guard does not apply, `build-matrix` failed
+`detect` with its fork refusal and the trusted `summary` job never started.
 
 `pull_request_target` does not sandbox a fork's run: nothing is withheld from
 it, so a plan cell reached by a fork would read the plan environment's
@@ -837,8 +842,10 @@ authorization step ahead of it: only a comment from an `OWNER`, `MEMBER` or
 **The outer of the two fork guards does not reach this leg, which is why step
 order matters here.** The `actions/checkout` refusal above was measured under
 `pull_request_target`; a dispatched run carries no pull-request context for it to
-key on, so on this leg the fork's head is expected to check out and the inner
-refusal in `build-matrix` is the only one left. The reference `detect` therefore
+key on, so on this leg the fork's head checks out and the inner refusal in
+`build-matrix` is the only one left — measured 2026-08-29: a dispatched plan
+naming a real fork's pull request checked that fork's head out and then failed
+in `build-matrix`. The reference `detect` therefore
 runs that step **before** `terramate fmt --check` and `terramate generate`, so a
 fork is turned away before either evaluates the tree it wrote. Keep that order:
 reversed, the two terramate steps evaluate (and generate from) fork-authored HCL
@@ -846,8 +853,9 @@ first. What the reversed order would cost is bounded — `detect` holds
 `contents: read` and no App key, binds no environment, runs no `tofu`, and only
 an `OWNER`, `MEMBER` or `COLLABORATOR` can start the run at all — but the outer
 guard reaching one step less far is exactly the kind of difference worth not
-having. Checkout's own behaviour on this trigger is unprobed; do not treat the
-two legs as identical until it is.
+having. The two legs are **not** identical, and that is the measured shape: on
+the autoplan leg `actions/checkout` refused and `build-matrix` never ran; on the
+dispatch leg the checkout succeeded and `build-matrix` did the refusing.
 
 The refusal in `detect` is loud (a red step) rather than a quiet empty matrix,
 because a fork pull request could not merge either way: with the `summary` job

@@ -150,10 +150,11 @@ full picture below:
   was dispatched with — which is why this one job spends `pull-requests: read`
   and the others do not. Its own job rather than `detect`'s first step: `detect`
   can fail, and the `summary` job must still be told which head to gate.
-- **`detect`** — `terramate fmt --check`, a stale-codegen check
-  (`terramate generate --detailed-exit-code`), and `actions/build-matrix`,
-  which computes the plan matrix from the *changed* stacks × their `env/*`
-  tags. Environment membership comes purely from stack tags — no environment
+- **`detect`** — `actions/build-matrix`, which computes the plan matrix from the
+  *changed* stacks × their `env/*` tags, and then `terramate fmt --check` and a
+  stale-codegen check (`terramate generate --detailed-exit-code`). That order is
+  the fork refusal's: `build-matrix` turns a fork's head away before either
+  terramate step reads the tree it wrote ([hardening](hardening.md)). Environment membership comes purely from stack tags — no environment
   names in YAML, no GitHub API/token needed.
 - **`plan`** — one matrix job per stack × environment, bound to that GitHub
   Environment (which injects `TF_VAR_*` / `TF_WORKSPACE` / nothing, per
