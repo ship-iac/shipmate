@@ -4,6 +4,10 @@ on:
     inputs:
       environment: { required: true, type: string }
       ref: { required: true, type: string }
+# Floor, not a default to inherit from: every job below declares its own block,
+# and this makes a job that loses its block get nothing rather than everything
+# the caller granted -- which includes id-token: write.
+permissions: {}
 jobs:
   # `gh workflow run unlock.yml` by a human with write access would otherwise
   # skip every requirement in scripts/authorize. A human cannot make
