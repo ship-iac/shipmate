@@ -599,32 +599,41 @@ Settings → Actions → General:
 - **Require actions to be pinned to a full-length commit SHA**: makes the
   platform enforce what this engine already asks of you, so a `uses:` naming a
   tag or a branch is refused during "Set up job" instead of being caught in
-  review. Local `./path` actions and reusable workflows referenced by tag are
-  exempt; an `owner/repo/path@ref` reference is **not**, even when `owner/repo`
-  is the repository running the workflow. On a repository that already pins by
-  SHA this costs nothing — it is the engine's own repository that cannot enable
-  it, for the reason in `docs/releasing.md` § Manifest load.
+  review. GitHub documents exemptions for local `./path` actions and for
+  reusable workflows referenced by tag; an `owner/repo/path@ref` reference is
+  **not** exempt — measured here, even when `owner/repo` is the repository
+  running the workflow. On a repository that already pins by SHA this costs
+  nothing — it is the engine's own repository that cannot enable it, for the
+  reason in `docs/releasing.md` § Manifest load.
 
 **None of the settings in this section is probed by `shipmate doctor`, and none
-can be.** Reading them needs `administration: read`. The shipmate App's
-installation token is refused with `Resource not accessible by integration`; an
-installation token cannot request a permission the App manifest does not
-declare, so granting it would mean a manifest bump plus a re-approval by every
-installation; and the workflow `permissions:` key has no `administration` scope
-at any value, so `GITHUB_TOKEN` cannot substitute. No token available inside a
-workflow run can read them. Check them by hand instead, with a
-repository-admin credential:
+can be.** The shipmate App's installation token is refused with `Resource not
+accessible by integration`; a mint that adds the `administration: read` these
+endpoints are documented to need is itself refused, with `The permissions
+requested are not granted to this installation.`, because an installation token
+cannot request a permission the App manifest does not declare — granting it
+would mean a manifest bump plus a re-approval by every installation; and the
+workflow `permissions:` key has no `administration` scope at any value, so
+`GITHUB_TOKEN` cannot substitute. No token a workflow run can obtain from the
+platform reads them (a repository-admin PAT stored as a secret would, but an
+audit credential carrying more authority than the thing it audits is not a
+hardening step). Check them by hand instead, with a repository-admin credential:
 
 ```bash
 gh api repos/OWNER/REPO/actions/permissions/workflow
 gh api repos/OWNER/REPO/actions/permissions/fork-pr-contributor-approval
 gh api repos/OWNER/REPO/actions/permissions
+gh api repos/OWNER/REPO/actions/permissions/selected-actions
 ```
 
 The first reports `default_workflow_permissions` and
 `can_approve_pull_request_reviews` (row 10); the second `approval_policy`, whose
 strictest value is `all_external_contributors` (row 11); the third
-`sha_pinning_required` (row 20) alongside `allowed_actions` (row 12).
+`sha_pinning_required` (row 20) alongside the `allowed_actions` *mode* — `all`,
+`local_only` or `selected`; and the fourth the allowed-actions list itself
+(row 12), which answers `409 Conflict` with `All actions and workflows are
+allowed on this repository` whenever the mode is anything but `selected` — an
+answer for row 12 in its own right.
 
 ## 13–14. The App
 

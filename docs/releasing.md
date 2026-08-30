@@ -173,11 +173,14 @@ Three limits, all deliberate:
   on, this job fails in `Set up job` with `The action
   ship-iac/shipmate/actions/apply-all-detect@main is not allowed in
   ship-iac/shipmate because all actions must be pinned to a full-length commit
-  SHA`. The exemptions cover `./path` actions and reusable workflows referenced
-  by tag, and the error names the same repository as owner and as consumer — so
-  a self-referencing `owner/repo/path@ref` is not exempt, and `uses:` takes no
-  expressions, so the ref cannot be a SHA that follows `main`. There is no form
-  that keeps both the check and the setting; consumer repositories enable it
+  SHA`. GitHub documents exemptions for `./path` actions and for reusable
+  workflows referenced by tag; neither covers this run, whose error names the
+  same repository as owner and as consumer — so a self-referencing
+  `owner/repo/path@ref` is not exempt. And `uses:` takes no expressions, so the
+  ref cannot be a SHA that follows `main`. For this workflow
+  in this repository no form keeps both the check and the setting — short of
+  moving `manifest-load.yml` to a repository that does not enable it, at the
+  cost of a second repository; consumer repositories enable it
   (`docs/hardening.md` row 20) and this one does not.
 
 ## Publishing the release
