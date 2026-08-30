@@ -268,6 +268,15 @@ shipmate's own sample repository a `17 3 * * *` nightly has started at 04:05Z,
 *days*, and assume neither that two crons an hour apart produce runs an hour
 apart nor that one slice has finished before the next is due.
 
+**A fully spread schedule retires the whole-tree slug check.** `build-matrix`
+refuses two stack paths in one environment that slug alike (`net/edge` and
+`net-edge` both render `plan.<env>.net-edge`) over the cells a run produces, and
+the unscoped nightly is what makes that check repo-wide
+([`../CONTRACT.md`](../CONTRACT.md) §Plan artifacts). Slices alone catch such a
+pair in no sweep at all: the first plan run that changes both still refuses, so
+nothing applies under the wrong plan, but the warning arrives in a pull request
+instead of a nightly. Keep the unscoped `drift.yml` on a weekly cron to keep it.
+
 ### An ad-hoc scoped sweep
 
 This shape is for the unscoped `drift.yml`. Under its `on:`, replace

@@ -176,6 +176,27 @@ def test_documented_plan_build_matrix_states_the_head_repository_and_commit():
         )
 
 
+def _scoping_with_fragments(page):
+    """The `with:`-only fences: `build-matrix` call blocks a reader pastes over
+    the nightly's, carrying no `uses:` and so invisible to `_build_matrix_steps`."""
+    return [doc["with"] for doc in _fence_docs(page) if list(doc) == ["with"]]
+
+
+def test_documented_scoped_sweep_fragments_keep_the_drift_wiring():
+    """The `tags:` recipes are the only documented `build-matrix` calls no
+    `uses:`-keyed selector reaches. Dropping `no-pull-request` from one of them
+    documents a sweep `build-matrix` refuses outright -- the same class as the
+    nightly's own block below, and nothing else reads these fences."""
+    found = _scoping_with_fragments(_DRIFT_PAGE)
+    assert len(found) == 2, f"docs/drift.md's `with:` fragments changed: {found}"
+    for block in found:
+        assert block.get("tags"), f"a scoped-sweep fragment states no `tags`: {block}"
+        assert {k: v for k, v in block.items() if k != "tags"} == _EXPECTED_DRIFT_MATRIX_WITH, (
+            "docs/drift.md's scoped-sweep `with:` fragment must pass "
+            f"{_EXPECTED_DRIFT_MATRIX_WITH} plus `tags`; got {block!r}"
+        )
+
+
 def test_documented_drift_build_matrix_opts_out_of_the_pull_request_check():
     for job, step in _build_matrix_steps(_DRIFT_PAGE):
         assert step.get("with") == _EXPECTED_DRIFT_MATRIX_WITH, (
