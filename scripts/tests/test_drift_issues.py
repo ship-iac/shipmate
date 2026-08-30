@@ -64,6 +64,17 @@ def test_title_and_body_carry_the_counts_and_run_link():
     assert "`app`" in body and "`dev-eu`" in body
 
 
+def test_body_is_exactly_the_expected_text():
+    """The whole Issue body, including an auto-close promise a scoped sweep keeps."""
+    cell = _cell(drifted=True, add=1, change=2, destroy=3)
+    assert di._body(cell, "https://example.invalid/run/1") == (
+        "Drift detected in `app` @ `dev-eu`: +1 ~2 -3. "
+        "[Drift run](https://example.invalid/run/1) "
+        "-- plan output is in that run's log. "
+        "Auto-closed on the next clean drift run that covers this stack and environment."
+    )
+
+
 # ---- upsert_or_close --------------------------------------------------------
 
 

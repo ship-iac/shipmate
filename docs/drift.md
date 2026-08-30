@@ -9,9 +9,9 @@ A nightly cron fans out over **all** stacks × environments — not the changed 
 filter ([Scoping a sweep](#scoping-a-sweep)). A separate `issues` job then turns
 those results into GitHub Issues: one labelled `drift` Issue per drifted stack ×
 environment, titled `drift: <env> / <stack>`, updated in place while the drift
-persists and closed with a "Drift resolved" comment on the next clean run. The
-lookup is over **open** Issues only, so drift that returns later opens a fresh
-Issue rather than reopening the closed one.
+persists and closed with a "Drift resolved" comment on the next clean run that
+covers it. The lookup is over **open** Issues only, so drift that returns later
+opens a fresh Issue rather than reopening the closed one.
 
 A cell whose plan attempt did not succeed is not treated as clean: `drift-cell`
 records `plan_ok: false`, and `actions/drift-issues` skips that cell entirely,

@@ -248,7 +248,8 @@ workflow over shipmate actions.
   only uploads a drift-summary artifact. A separate `issues` job, bound to
   `shipmate-engine`, downloads those artifacts and opens one labeled GitHub
   Issue per drifted stack × env via `actions/drift-issues` — auto-closed on
-  the next clean run. Optional Slack. Setup is in [drift.md](drift.md).
+  the next clean run that covers it. Optional Slack. Setup is in
+  [drift.md](drift.md).
 - **Generalization:** deploy + drift run unchanged across all three layouts
   (`repo-example-{stacks,folders,workspaces}`) — same pinned shipmate SHA, only
   the per-flavor state path (deploy wrapper's `state_suffix`) and, for drift,

@@ -112,7 +112,8 @@ def _body(cell, run_url):
     return (
         f"Drift detected in `{cell['stack_name']}` @ `{cell['environment']}`: "
         f"+{cell['add']} ~{cell['change']} -{cell['destroy']}. [Drift run]({run_url}) "
-        "-- plan output is in that run's log. Auto-closed on the next clean drift run."
+        "-- plan output is in that run's log. "
+        "Auto-closed on the next clean drift run that covers this stack and environment."
     )
 
 
