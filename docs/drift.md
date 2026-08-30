@@ -211,7 +211,7 @@ operator here. `,` is OR, `:` is AND, and `:` binds tighter, so
 
 A cell is matched against its stack's tags with every `env/*` tag other than
 its own removed. `env/dev-eu` therefore selects the dev-eu **cells**: a stack
-tagged both `env/dev-eu` and `env/prod-eu` contributes its dev-eu cell to a
+tagged both `env/dev-eu` and `env/prod-eu` contributes its dev-eu cell to an
 `env/dev-eu` sweep, not both of them.
 
 **It narrows cells, not the stacks that are inspected.** Every stack is still
@@ -257,9 +257,8 @@ with:
   tags: "env/dev-eu"
 ```
 
-One cron and one literal query per file, rather than one file mapping the firing
-schedule to a query: the run's own workflow name is then its slice — in the
-Actions list, in a re-run, and in a notification.
+One cron and one literal query per file: the run's own workflow name is then its
+slice — in the Actions list, in a re-run, and in a notification.
 
 **Do not design the spread around the minute a cron names.** GitHub Actions
 delays `schedule` triggers under load, by hours rather than minutes: on this
