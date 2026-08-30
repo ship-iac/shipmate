@@ -1147,6 +1147,24 @@ def test_slug_collision_among_filtered_out_cells_does_not_abort():
     assert [c["stack"] for c in cells] == ["a/b"]
 
 
+def test_reserved_stack_path_among_filtered_out_cells_does_not_abort():
+    """A stack path of exactly `apply` aborts only if it is in the run.
+
+    Fails when the filter runs after the reserved loop: a scoped sweep that
+    never covers that stack aborts on it.
+    """
+    cells = bm.build_matrix(
+        ["dev-eu"],
+        {"dev-eu": ["apply", "stacks/a"]},
+        {
+            "apply": ["env/dev-eu", "workload/drop"],
+            "stacks/a": ["env/dev-eu", "workload/keep"],
+        },
+        tags="workload/keep",
+    )
+    assert [c["stack"] for c in cells] == ["stacks/a"]
+
+
 def test_workload_var_collision_among_filtered_out_cells_does_not_abort():
     """Two workloads collapse onto one AWS_ROLE_ARN_* only if both are in the run.
 
