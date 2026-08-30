@@ -239,7 +239,19 @@ the release commit, from one sample:
    **`repin_consumer.py` rewrites pins and nothing else**, so when a release
    changes a wrapper's declared input contract, make those body edits on the
    scratch branch too — a new pin under an old wrapper body is the load-time
-   rejection described below, not a smoke result. `docs/upgrading.md`'s section
+   rejection described below, not a smoke result.
+
+   The same gap has a second form the tool cannot reach at all: a consumer's
+   **allowed-actions list is a repository setting**, not a file. Under
+   `docs/hardening.md` row 12 a consumer restricts `allowed_actions` to a named
+   pattern list, and those patterns end `@*` — so a version bump is absorbed,
+   but a third-party action this release *adds or renames* is not. The first run
+   after the re-pin then stops in `Set up job` naming it.
+   `scripts/tests/test_third_party_actions_consumers_must_allow.py` reddens when
+   the engine's third-party set changes, so you find out while committing rather
+   than from a consumer. When it does: add the pattern to `docs/hardening.md`'s
+   list, and say so in `docs/upgrading.md`'s section for the release — it is a
+   setting the consumer has to change by hand before they re-pin. `docs/upgrading.md`'s section
    for the release names them; for this one it is deleting the retired `mode`
    input and its `with:` line from `apply.yml`.
 
