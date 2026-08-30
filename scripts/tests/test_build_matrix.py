@@ -908,3 +908,272 @@ def test_same_slug_in_different_envs_is_allowed():
         {"a/b": ["env/dev-eu"], "a-b": ["env/prod-eu"]},
     )
     assert [c["stack"] for c in cells] == ["a/b", "a-b"]
+
+
+_UNKNOWN_TERM_ERROR = (
+    "::error::the `tags` filter names tag(s) no stack carries: {terms}. "
+    "Tags are matched in their ON-DISK form -- 'env/dev-eu', not 'env:dev-eu', because "
+    "Terramate forbids ':' in a tag value and ':' in this filter means AND. A typo that "
+    "quietly matched nothing would disable that slice's drift for good."
+)
+
+_EMPTY_TERM_ERROR = (
+    "::error::the `tags` filter has an empty term: '{query}'. Terms are separated "
+    "by ',' (OR) and ':' (AND), and each must be a tag in its on-disk form -- "
+    "'env/dev-eu,env/dev-us' or 'env/dev-eu:workload/app'."
+)
+
+
+def test_tag_filter_matches_a_cell_against_its_own_env_only():
+    """A stack in two envs, filtered by one of them, yields that env's cell alone.
+
+    Fails when `_cell_tags` returns the raw `tags_by_stack` entry: the prod-eu
+    cell then carries `env/dev-eu` too and both cells survive.
+    """
+    cells = bm.build_matrix(
+        ["dev-eu", "prod-eu"],
+        {"dev-eu": ["stacks/app"], "prod-eu": ["stacks/app"]},
+        {"stacks/app": ["env/dev-eu", "env/prod-eu"]},
+        tags="env/dev-eu",
+    )
+    assert cells == [
+        {"stack": "stacks/app", "environment": "dev-eu", "workload": "", "workload_var": ""}
+    ]
+
+
+def test_tag_filter_on_a_non_env_tag_keeps_every_env_of_that_stack():
+    """`workload/app` is not narrowed by the cell's env, so both cells survive.
+
+    Fails when `_cell_tags` keeps only the cell's own `env/*` tag and drops
+    every other tag: nothing then carries `workload/app` and the filter aborts.
+    """
+    cells = bm.build_matrix(
+        ["dev-eu", "prod-eu"],
+        {"dev-eu": ["stacks/app"], "prod-eu": ["stacks/app"]},
+        {"stacks/app": ["env/dev-eu", "env/prod-eu", "workload/app"]},
+        tags="workload/app",
+    )
+    assert [(c["environment"], c["stack"]) for c in cells] == [
+        ("dev-eu", "stacks/app"),
+        ("prod-eu", "stacks/app"),
+    ]
+
+
+def test_colon_binds_tighter_than_comma():
+    """`a:b,c` is `(a AND b) OR c`, not `a OR (b AND c)`.
+
+    Fails when the query is split on ':' outermost and ',' within: the clauses
+    become `[{a}, {b, c}]`, which keeps the a-only stack and drops the c-only one.
+    """
+    cells = bm.build_matrix(
+        ["dev-eu", "prod-eu"],
+        {"dev-eu": ["stacks/bare", "stacks/app"], "prod-eu": ["stacks/other"]},
+        {
+            "stacks/bare": ["env/dev-eu"],
+            "stacks/app": ["env/dev-eu", "workload/app"],
+            "stacks/other": ["env/prod-eu"],
+        },
+        tags="env/dev-eu:workload/app,env/prod-eu",
+    )
+    assert [(c["environment"], c["stack"]) for c in cells] == [
+        ("dev-eu", "stacks/app"),
+        ("prod-eu", "stacks/other"),
+    ]
+
+
+def test_comma_is_or_across_clauses():
+    """A cell matching either clause is kept.
+
+    Fails when `all` replaces `any` over the clauses: no stack carries both
+    workloads, so the filter matches nothing and aborts.
+    """
+    cells = bm.build_matrix(
+        ["dev-eu"],
+        {"dev-eu": ["stacks/a", "stacks/b"]},
+        {
+            "stacks/a": ["env/dev-eu", "workload/a"],
+            "stacks/b": ["env/dev-eu", "workload/b"],
+        },
+        tags="workload/a,workload/b",
+    )
+    assert [c["stack"] for c in cells] == ["stacks/a", "stacks/b"]
+
+
+def test_colon_is_and_within_a_clause():
+    """A two-term clause keeps only a stack carrying both terms.
+
+    Fails when the clause is tested by intersection rather than subset: the
+    stack carrying `workload/app` alone then matches too.
+    """
+    cells = bm.build_matrix(
+        ["dev-eu"],
+        {"dev-eu": ["stacks/both", "stacks/one"]},
+        {
+            "stacks/both": ["env/dev-eu", "workload/app", "team/core"],
+            "stacks/one": ["env/dev-eu", "workload/app"],
+        },
+        tags="workload/app:team/core",
+    )
+    assert [c["stack"] for c in cells] == ["stacks/both"]
+
+
+def test_unknown_tag_is_refused_by_name():
+    """A term no stack carries aborts, naming the term.
+
+    Fails when the unknown term only warns and the run continues: the known
+    term still matches, so cells come back instead of SystemExit.
+    """
+    with pytest.raises(SystemExit) as exc_info:
+        bm.build_matrix(
+            ["dev-eu"],
+            {"dev-eu": ["stacks/app"]},
+            {"stacks/app": ["env/dev-eu", "workload/app"]},
+            tags="env/dev-eu,workload/nope",
+        )
+    assert str(exc_info.value) == _UNKNOWN_TERM_ERROR.format(terms="workload/nope")
+
+
+def test_conceptual_tag_form_is_refused_as_two_unknown_terms():
+    """`env:dev-eu` is the documentation form; on disk the tag is `env/dev-eu`.
+
+    Fails when ':' is translated to '/' before validation: the typo then
+    silently works instead of naming both halves as unknown.
+    """
+    with pytest.raises(SystemExit) as exc_info:
+        bm.build_matrix(
+            ["dev-eu"],
+            {"dev-eu": ["stacks/app"]},
+            {"stacks/app": ["env/dev-eu"]},
+            tags="env:dev-eu",
+        )
+    assert str(exc_info.value) == _UNKNOWN_TERM_ERROR.format(terms="dev-eu, env")
+
+
+@pytest.mark.parametrize("query", ["env/dev-eu,", "env/dev-eu::workload/app", "env/dev-eu,   "])
+def test_empty_term_is_refused(query):
+    """A trailing comma, a doubled separator and a whitespace-only clause abort.
+
+    Fails when empty terms are dropped before matching: an empty clause is a
+    subset of every cell's tags, so the query silently matches everything.
+    """
+    with pytest.raises(SystemExit) as exc_info:
+        bm.build_matrix(
+            ["dev-eu"],
+            {"dev-eu": ["stacks/app"]},
+            {"stacks/app": ["env/dev-eu", "workload/app"]},
+            tags=query,
+        )
+    assert str(exc_info.value) == _EMPTY_TERM_ERROR.format(query=query)
+
+
+def test_known_terms_that_co_occur_nowhere_are_refused():
+    """Every term exists, but no cell carries the conjunction -- abort rather
+    than hand back an empty matrix that reads as a quiet, healthy night.
+
+    Fails when the zero-cell result returns `[]` instead of raising.
+    """
+    with pytest.raises(SystemExit) as exc_info:
+        bm.build_matrix(
+            ["dev-eu", "prod-eu"],
+            {"dev-eu": ["stacks/db"], "prod-eu": ["stacks/app"]},
+            {
+                "stacks/db": ["env/dev-eu", "workload/db"],
+                "stacks/app": ["env/prod-eu", "workload/app"],
+            },
+            tags="env/dev-eu:workload/app",
+        )
+    assert str(exc_info.value) == (
+        "::error::the `tags` filter 'env/dev-eu:workload/app' matched no stack x environment "
+        "cell. Every term is a tag some stack carries, so this is a conjunction that "
+        "co-occurs nowhere (':' means AND, ',' means OR)."
+    )
+
+
+@pytest.mark.parametrize("query", ["", "   "])
+def test_an_empty_query_is_no_filter_at_all(query):
+    """An absent `tags` input is not an empty term.
+
+    Fails when an empty query falls through to the parser: it would abort with
+    the empty-term error instead of returning the unfiltered cells.
+    """
+    args = (
+        ["dev-eu"],
+        {"dev-eu": ["stacks/app", "stacks/db"]},
+        {"stacks/app": ["env/dev-eu"], "stacks/db": ["env/dev-eu"]},
+    )
+    assert bm.build_matrix(*args, tags=query) == bm.build_matrix(*args)
+
+
+def test_matrix_limit_measures_the_filtered_set(monkeypatch):
+    """The ceiling counts the cells this run will actually produce.
+
+    Fails when the filter runs after the guards: the unfiltered two cells then
+    trip the patched limit of one.
+    """
+    monkeypatch.setattr(bm, "MATRIX_LIMIT", 1)
+    cells = bm.build_matrix(
+        ["dev-eu"],
+        {"dev-eu": ["stacks/a", "stacks/b"]},
+        {
+            "stacks/a": ["env/dev-eu", "workload/a"],
+            "stacks/b": ["env/dev-eu", "workload/b"],
+        },
+        tags="workload/a",
+    )
+    assert [c["stack"] for c in cells] == ["stacks/a"]
+
+
+def test_slug_collision_among_filtered_out_cells_does_not_abort():
+    """`a/b` and `a-b` share one artifact name only if both are in the run.
+
+    Fails when the filter runs after the guards: the collision aborts a run
+    that never plans the second stack.
+    """
+    cells = bm.build_matrix(
+        ["dev-eu"],
+        {"dev-eu": ["a/b", "a-b"]},
+        {"a/b": ["env/dev-eu", "workload/keep"], "a-b": ["env/dev-eu", "workload/drop"]},
+        tags="workload/keep",
+    )
+    assert [c["stack"] for c in cells] == ["a/b"]
+
+
+def test_workload_var_collision_among_filtered_out_cells_does_not_abort():
+    """Two workloads collapse onto one AWS_ROLE_ARN_* only if both are in the run.
+
+    Fails when the filter runs after the guards: the collision aborts a run
+    that never applies the second workload.
+    """
+    cells = bm.build_matrix(
+        ["dev-eu"],
+        {"dev-eu": ["stacks/a", "stacks/b"]},
+        {
+            "stacks/a": ["env/dev-eu", "workload/net-edge"],
+            "stacks/b": ["env/dev-eu", "workload/net_edge"],
+        },
+        tags="workload/net-edge",
+    )
+    assert [c["workload_var"] for c in cells] == ["NET_EDGE"]
+
+
+def test_existing_build_matrix_callers_pass_no_tags():
+    """`apply-detect` calls `build_matrix` with three positional arguments.
+
+    Fails when `tags` is made positional-required on `build_matrix`.
+    """
+    assert bm.build_matrix(
+        ["dev-eu"], {"dev-eu": ["stacks/app"]}, {"stacks/app": ["env/dev-eu"]}
+    ) == [{"stack": "stacks/app", "environment": "dev-eu", "workload": "", "workload_var": ""}]
+
+
+def test_existing_compute_cells_callers_pass_no_tags(monkeypatch):
+    """`deploy-detect` calls `compute_cells` without a `tags` argument.
+
+    Fails when `tags` is made positional-required on `compute_cells`.
+    """
+    monkeypatch.setattr(bm, "_list_stacks", lambda all_stacks, base: ["stacks/app"])
+    monkeypatch.setattr(bm, "_tags", lambda s: ["env/dev-eu"])
+    monkeypatch.setattr(bm, "assert_run_env_roundtrip", lambda stack_dir: None)
+    assert bm.compute_cells(all_stacks=False, base="abc123") == [
+        {"stack": "stacks/app", "environment": "dev-eu", "workload": "", "workload_var": ""}
+    ]

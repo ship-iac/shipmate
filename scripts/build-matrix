@@ -107,7 +107,66 @@ def guard_slug_collisions(cells):
                 )
 
 
-def build_matrix(envs, stacks_by_env, tags_by_stack):
+def _parse_tag_query(query):
+    """`a:b,c` -> [{'a', 'b'}, {'c'}]: comma-separated OR-clauses, each an
+    AND of colon-separated terms. Terramate forbids ':' inside a tag value, so
+    a ':' here can only be the operator.
+
+    An empty term is refused rather than dropped: a trailing comma or a doubled
+    separator is a typo, and both silent readings of it -- matches everything,
+    matches nothing -- are wrong in a direction the consumer cannot see."""
+    clauses = []
+    for clause in query.split(","):
+        terms = {t.strip() for t in clause.split(":")}
+        if "" in terms:
+            raise SystemExit(
+                f"::error::the `tags` filter has an empty term: '{query}'. Terms are separated "
+                "by ',' (OR) and ':' (AND), and each must be a tag in its on-disk form -- "
+                "'env/dev-eu,env/dev-us' or 'env/dev-eu:workload/app'."
+            )
+        clauses.append(terms)
+    return clauses
+
+
+def _cell_tags(cell, tags_by_stack):
+    """The tag set a `tags` filter matches this cell against: the stack's tags
+    with every `env/*` tag other than this cell's own removed.
+
+    A stack carrying several env tags becomes one cell per env, so matching the
+    raw stack tags would keep the `prod-eu` cell of a `dev-eu`-filtered run."""
+    own = "env/" + cell["environment"]
+    return {t for t in tags_by_stack.get(cell["stack"], []) if not t.startswith("env/") or t == own}
+
+
+def filter_cells(cells, tags_by_stack, query):
+    """`cells` narrowed to those matching `query`, or all of them when it is
+    empty. Fails loud three ways rather than returning nothing: an empty term,
+    a term no stack carries, and a query that matches no cell. A drift sweep
+    that silently covered nothing would skip the drift and issues jobs and look
+    exactly like a healthy quiet night, every night."""
+    if not query.strip():
+        return cells
+    clauses = _parse_tag_query(query)
+    observed = {t for tags in tags_by_stack.values() for t in tags}
+    unknown = sorted({t for clause in clauses for t in clause} - observed)
+    if unknown:
+        raise SystemExit(
+            f"::error::the `tags` filter names tag(s) no stack carries: {', '.join(unknown)}. "
+            "Tags are matched in their ON-DISK form -- 'env/dev-eu', not 'env:dev-eu', because "
+            "Terramate forbids ':' in a tag value and ':' in this filter means AND. A typo that "
+            "quietly matched nothing would disable that slice's drift for good."
+        )
+    kept = [c for c in cells if any(clause <= _cell_tags(c, tags_by_stack) for clause in clauses)]
+    if not kept:
+        raise SystemExit(
+            f"::error::the `tags` filter '{query}' matched no stack x environment cell. Every "
+            "term is a tag some stack carries, so this is a conjunction that co-occurs nowhere "
+            "(':' means AND, ',' means OR)."
+        )
+    return kept
+
+
+def build_matrix(envs, stacks_by_env, tags_by_stack, tags=""):
     cells = []
     for env in envs:
         for stack in stacks_by_env.get(env, []):
@@ -121,6 +180,7 @@ def build_matrix(envs, stacks_by_env, tags_by_stack):
                 }
             )
     cells.sort(key=lambda c: (c["environment"], c["stack"]))
+    cells = filter_cells(cells, tags_by_stack, tags)
     for reserved, message in RESERVED_STACK_PATHS.items():
         if any(c["stack"] == reserved for c in cells):
             raise SystemExit(message)
@@ -280,11 +340,11 @@ def assert_run_env_roundtrip(stack_dir):
             )
 
 
-def compute_cells(all_stacks=False, base="", require_env_tag=True):
+def compute_cells(all_stacks=False, base="", require_env_tag=True, tags=""):
     stacks_by_env, tags_by_stack = env_membership(all_stacks, base, require_env_tag)
     if tags_by_stack:
         assert_run_env_roundtrip(sorted(tags_by_stack)[0])
-    return build_matrix(sorted(stacks_by_env), stacks_by_env, tags_by_stack)
+    return build_matrix(sorted(stacks_by_env), stacks_by_env, tags_by_stack, tags)
 
 
 def _event_payload(path):
