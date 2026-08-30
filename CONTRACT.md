@@ -491,6 +491,11 @@ for convenience. The failure names every untagged stack it found, so an
 incremental migration is worked down from that list rather than one re-run per
 stack.
 
+The drift path's optional `tags` filter does not retire that backstop: it
+narrows the **cells** a run covers, not the set of stacks it inspects, and the
+`env/<name>` requirement is enforced over every stack before any filtering.
+`docs/drift.md` §Scoping a sweep has the query grammar.
+
 ## Comment-ops
 
 `shipmate <verb> [env] [tag-filter]` in a PR comment drives shipmate's

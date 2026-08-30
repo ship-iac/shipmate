@@ -5,7 +5,8 @@ you want to know that real infrastructure has moved away from the code, and read
 [What it costs](#what-it-costs) before you do.
 
 A nightly cron fans out over **all** stacks × environments — not the changed set
-— and plans each one. A separate `issues` job then turns those results into
+— and plans each one, or over a slice of them when the run states a `tags`
+filter ([Scoping a sweep](#scoping-a-sweep)). A separate `issues` job then turns those results into
 GitHub Issues: one labelled `drift` Issue per drifted stack × environment,
 titled `drift: <env> / <stack>`, updated in place while the drift persists and
 closed with a "Drift resolved" comment on the next clean run. The lookup is over
@@ -194,5 +195,98 @@ cells.
 matrix is every stack × environment in the repository, every night — runner
 minutes scale with the **full** matrix, not the changed set. Each cell is a
 `tofu init` plus a `tofu plan` against real state, which also means real backend
-and provider API traffic on that schedule. The knobs are the cron expression and
-how many environments you tag stacks into; there is no partial-matrix input.
+and provider API traffic on that schedule. The knobs are the cron expression, how many
+environments you tag stacks into, and the `tags` filter, which narrows one run
+to a slice of the matrix — [Scoping a sweep](#scoping-a-sweep).
+
+## Scoping a sweep
+
+`build-matrix` takes an optional `tags` query that narrows the cells one run
+covers. Empty — the default, and the workflow above — covers every cell.
+
+Tags are matched in their **on-disk** form: `env/dev-eu`, not `env:dev-eu`.
+Terramate forbids `:` inside a tag value, which is what frees `:` to be an
+operator here. `,` is OR, `:` is AND, and `:` binds tighter, so
+`env/dev-eu:workload/app,env/dev-us` is *(dev-eu AND app) OR dev-us*.
+
+A cell is matched against its stack's tags with every `env/*` tag other than
+its own removed. `env/dev-eu` therefore selects the dev-eu **cells**: a stack
+tagged both `env/dev-eu` and `env/prod-eu` contributes its dev-eu cell to a
+`env/dev-eu` sweep, not both of them.
+
+**It narrows cells, not the stacks that are inspected.** Every stack is still
+listed and still has to carry an `env/*` tag; a scoped sweep fails on an
+untagged stack exactly as an unscoped one does, so the repo-wide backstop
+([`../CONTRACT.md`](../CONTRACT.md) §Tag grammar) survives being scoped.
+
+**Three things fail the run rather than quietly narrowing it:** an empty term
+(a trailing comma or a doubled separator), a term no stack carries, and a query
+that matches no cell. A sweep that silently covered nothing would skip the
+`drift` and `issues` jobs and look exactly like a healthy quiet night — every
+night, for as long as the typo lives.
+
+**The input is refused outside a `no-pull-request: "true"` workflow**, whatever
+`all-stacks` says. In a plan wrapper a filter would drop changed stacks from the
+matrix: a dropped stack gets no plan cell and so no apply check, `shipmate /
+gate` greens over it, and the change merges and never applies.
+
+**Issues close per cell, on the run that covers that cell.** `drift-issues` acts
+only on the cells this run produced and never sweeps open `drift` Issues for
+absence, so an Issue belonging to a cell outside this run's slice is left
+untouched. Under a spread sweep, resolved drift is closed by the slice that owns
+it, on that slice's next run.
+
+### Spreading a sweep across the week
+
+One workflow file per slice — `drift-<slice>.yml` — each a copy of the workflow
+above with three things changed: the `name:`, the single `cron:`, and one added
+`tags:` line on the `build-matrix` step.
+
+```yaml
+name: shipmate · drift · dev-eu
+on:
+  schedule:
+    - cron: "17 3 * * 1"
+```
+
+```yaml
+with:
+  base-sha: ""
+  all-stacks: "true"
+  no-pull-request: "true"
+  tags: "env/dev-eu"
+```
+
+One cron and one literal query per file, rather than one file mapping the firing
+schedule to a query: the run's own workflow name is then its slice — in the
+Actions list, in a re-run, and in a notification.
+
+**Do not design the spread around the minute a cron names.** GitHub Actions
+delays `schedule` triggers under load, by hours rather than minutes: on this
+project a `17 3 * * *` nightly has started at 04:05Z, 09:18Z, 10:11Z, 14:18Z and
+15:28Z on different days. Spread slices across *days*, and assume neither that
+two crons an hour apart produce runs an hour apart nor that one slice has
+finished before the next is due.
+
+### An ad-hoc scoped sweep
+
+Under `on:`, replace the workflow's `workflow_dispatch: {}` with a `tags` input
+and forward it in place of the step's literal value. The input's default is empty, so a
+dispatch that leaves it blank sweeps every cell:
+
+```yaml
+workflow_dispatch:
+  inputs:
+    tags:
+      description: "Optional tag query, e.g. env/dev-eu:workload/app"
+      required: false
+      default: ""
+```
+
+```yaml
+with:
+  base-sha: ""
+  all-stacks: "true"
+  no-pull-request: "true"
+  tags: ${{ inputs.tags }}
+```
