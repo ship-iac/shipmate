@@ -243,12 +243,13 @@ workflow over shipmate actions.
   **that exact plan** (never re-plans; stale state → fail-safe), and completes
   the apply check. A stack already applied (pre-merge, or a no-change re-plan)
   has a completed check → deploy **no-ops** it.
-- **`drift.yml`** (nightly cron) fans out over **all** stacks × envs and
-  plans each with `actions/drift-cell`, which holds no App credential and
-  only uploads a drift-summary artifact. A separate `issues` job, bound to
-  `shipmate-engine`, downloads those artifacts and opens one labeled GitHub
-  Issue per drifted stack × env via `actions/drift-issues` — auto-closed on
-  the next clean run. Optional Slack. Setup is in [drift.md](drift.md).
+- **`drift.yml`** (nightly cron) fans out over **all** stacks × envs, or a
+  slice of them, and plans each with `actions/drift-cell`, which holds no App
+  credential and only uploads a drift-summary artifact. A separate `issues` job,
+  bound to `shipmate-engine`, downloads those artifacts and opens one labeled
+  GitHub Issue per drifted stack × env via `actions/drift-issues` — auto-closed
+  on the next clean run that covers it. Optional Slack. Setup is in
+  [drift.md](drift.md).
 - **Generalization:** deploy + drift run unchanged across all three layouts
   (`repo-example-{stacks,folders,workspaces}`) — same pinned shipmate SHA, only
   the per-flavor state path (deploy wrapper's `state_suffix`) and, for drift,

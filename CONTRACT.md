@@ -491,6 +491,11 @@ for convenience. The failure names every untagged stack it found, so an
 incremental migration is worked down from that list rather than one re-run per
 stack.
 
+The drift path's optional `tags` filter does not retire that backstop: it
+narrows the **cells** a run covers, not the set of stacks it inspects, and the
+`env/<name>` requirement is enforced over every stack before any filtering.
+`docs/drift.md` §Scoping a sweep has the query grammar.
+
 ## Comment-ops
 
 `shipmate <verb> [env] [tag-filter]` in a PR comment drives shipmate's
@@ -1343,7 +1348,11 @@ in `build-matrix`, at matrix construction — before any artifact exists, so the
 plan run refuses up front rather than an apply discovering the clash afterwards
 (rename so the path→`-` slug is unique). Every path that builds a matrix
 carries it: the plan and deploy paths over their changed set, the drift path
-over the whole tree, and `shipmate unlock` over the target environment.
+over the whole tree, and `shipmate unlock` over the target environment. Unlike
+the `env/<name>` backstop, this one is not repo-wide under a `tags` filter: the
+guard runs over the cells the run will produce, so two stacks that slug alike
+but fall in different slices are caught by no scoped sweep. An unscoped drift
+run stays the whole-tree check for that.
 
 This naming contract is breaking for any in-flight plan artifacts: land the
 change when no applies are mid-flight. It also spans two consumer workflow

@@ -107,7 +107,66 @@ def guard_slug_collisions(cells):
                 )
 
 
-def build_matrix(envs, stacks_by_env, tags_by_stack):
+def _parse_tag_query(query):
+    """`a:b,c` -> [{'a', 'b'}, {'c'}]: comma-separated OR-clauses, each an
+    AND of colon-separated terms. Terramate forbids ':' inside a tag value, so
+    a ':' here can only be the operator.
+
+    An empty term is refused rather than dropped: a trailing comma or a doubled
+    separator is a typo, and both silent readings of it -- matches everything,
+    matches nothing -- are wrong in a direction the consumer cannot see."""
+    clauses = []
+    for clause in query.split(","):
+        terms = {t.strip() for t in clause.split(":")}
+        if "" in terms:
+            raise SystemExit(
+                f"::error::the `tags` filter has an empty term: '{query}'. Terms are separated "
+                "by ',' (OR) and ':' (AND), and each must be a tag in its on-disk form -- "
+                "'env/dev-eu,env/dev-us' or 'env/dev-eu:workload/app'."
+            )
+        clauses.append(terms)
+    return clauses
+
+
+def _cell_tags(cell, tags_by_stack):
+    """The tag set a `tags` filter matches this cell against: the stack's tags
+    with every `env/*` tag other than this cell's own removed.
+
+    A stack carrying several env tags becomes one cell per env, so matching the
+    raw stack tags would keep the `prod-eu` cell of a `dev-eu`-filtered run."""
+    own = "env/" + cell["environment"]
+    return {t for t in tags_by_stack.get(cell["stack"], []) if not t.startswith("env/") or t == own}
+
+
+def filter_cells(cells, tags_by_stack, query):
+    """`cells` narrowed to those matching `query`, or all of them when it is
+    empty. Fails loud three ways rather than returning nothing: an empty term,
+    a term no stack carries, and a query that matches no cell. A drift sweep
+    that silently covered nothing would skip the drift and issues jobs and look
+    exactly like a healthy quiet night, every night."""
+    if not query.strip():
+        return cells
+    clauses = _parse_tag_query(query)
+    observed = {t for tags in tags_by_stack.values() for t in tags}
+    unknown = sorted({t for clause in clauses for t in clause} - observed)
+    if unknown:
+        raise SystemExit(
+            f"::error::the `tags` filter names tag(s) no stack carries: {', '.join(unknown)}. "
+            "Tags are matched in their ON-DISK form -- 'env/dev-eu', not 'env:dev-eu', because "
+            "Terramate forbids ':' in a tag value and ':' in this filter means AND. A typo that "
+            "quietly matched nothing would disable that slice's drift for good."
+        )
+    kept = [c for c in cells if any(clause <= _cell_tags(c, tags_by_stack) for clause in clauses)]
+    if not kept:
+        raise SystemExit(
+            f"::error::the `tags` filter '{query}' matched no stack x environment cell. Every "
+            "term is a tag some stack carries, so this is a conjunction that co-occurs nowhere "
+            "(':' means AND, ',' means OR)."
+        )
+    return kept
+
+
+def build_matrix(envs, stacks_by_env, tags_by_stack, tags=""):
     cells = []
     for env in envs:
         for stack in stacks_by_env.get(env, []):
@@ -121,6 +180,7 @@ def build_matrix(envs, stacks_by_env, tags_by_stack):
                 }
             )
     cells.sort(key=lambda c: (c["environment"], c["stack"]))
+    cells = filter_cells(cells, tags_by_stack, tags)
     for reserved, message in RESERVED_STACK_PATHS.items():
         if any(c["stack"] == reserved for c in cells):
             raise SystemExit(message)
@@ -280,11 +340,11 @@ def assert_run_env_roundtrip(stack_dir):
             )
 
 
-def compute_cells(all_stacks=False, base="", require_env_tag=True):
+def compute_cells(all_stacks=False, base="", require_env_tag=True, tags=""):
     stacks_by_env, tags_by_stack = env_membership(all_stacks, base, require_env_tag)
     if tags_by_stack:
         assert_run_env_roundtrip(sorted(tags_by_stack)[0])
-    return build_matrix(sorted(stacks_by_env), stacks_by_env, tags_by_stack)
+    return build_matrix(sorted(stacks_by_env), stacks_by_env, tags_by_stack, tags)
 
 
 def _event_payload(path):
@@ -430,10 +490,36 @@ def plan_workflow_error(event_name, root="."):
     )
 
 
+def tag_filter_error(tags, no_pull_request):
+    """The `::error::` line refusing a `tags` filter outside a run with no pull
+    request, or "" when it may be honoured.
+
+    Keyed on `no-pull-request` alone, and NOT exempted by `all-stacks`: a plan
+    wrapper that sets both would drop changed stacks from the matrix, and a
+    dropped stack gets no plan cell, so no apply check is created, `count` and
+    the summary's cell count still agree, the gate greens, and the reviewed
+    change merges and never applies. `all-stacks` on its own only over-plans,
+    which is the safe direction; combined with a filter it stops being safe.
+    One marker, one meaning -- `no-pull-request` is the input already documented
+    as never belonging in a plan wrapper."""
+    if not tags.strip():
+        return ""
+    if no_pull_request.strip().lower() == "true":
+        return ""
+    return (
+        "::error::the `tags` filter is only for a workflow with no pull request at all "
+        "(nightly drift), and this run did not pass `no-pull-request: true`. In a plan "
+        "wrapper it would drop changed stacks from the matrix: a dropped stack gets no plan "
+        "cell and no apply check, `shipmate / gate` greens over it, and the change merges "
+        "and never applies. Remove the input from the plan wrapper."
+    )
+
+
 def main():
     all_stacks = os.environ.get("SHIPMATE_ALL_STACKS", "") == "true"
     base = os.environ.get("SHIPMATE_BASE_SHA", "")
     event_name = os.environ.get("GITHUB_EVENT_NAME", "")
+    tags = os.environ.get("SHIPMATE_TAGS", "")
     # `or`, so the fork refusal precedes the two consumer-wiring checks: a fork
     # head must be turned away before this script shells out or reads its tree.
     rejection = (
@@ -447,10 +533,11 @@ def main():
             os.environ.get("SHIPMATE_NO_PULL_REQUEST", ""),
         )
         or plan_workflow_error(event_name)
+        or tag_filter_error(tags, os.environ.get("SHIPMATE_NO_PULL_REQUEST", ""))
     )
     if rejection:
         raise SystemExit(rejection)
-    cells = compute_cells(all_stacks, base)
+    cells = compute_cells(all_stacks, base, tags=tags)
     with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
         fh.write(f"matrix={json.dumps({'include': cells})}\n")
         fh.write(f"empty={'true' if not cells else 'false'}\n")
