@@ -13,7 +13,7 @@ grammar are declared unstable in `README.md`.
 
 ## [0.22.0] — 2026-08-31
 
-Tags `<backfilled>`.
+Tags `cda2a93`.
 
 **No wrapper change is required.** `tags` is optional and defaults to empty,
 which is today's behaviour exactly, so a repository that does not want to scope
