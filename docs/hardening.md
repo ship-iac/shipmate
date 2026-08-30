@@ -80,7 +80,7 @@ name. See "Contributors without push access" for the trade-off that follows.
 | 9 | OIDC with an `environment:` claim condition instead of static keys | Cloud IdP | Long-lived credential theft — and, since the engine's apply jobs mint OIDC tokens unconditionally, this claim condition is the **only** bound on which role an apply job can assume (see §7–9). In shared mode it separates nothing: both tokens carry the same `environment:` claim |
 | 10 | Default `GITHUB_TOKEN` = read-only; Actions may not approve PRs | Settings → Actions | Token privilege creep |
 | 11 | Require approval for all outside collaborators' workflow runs | Settings → Actions | Drive-by fork execution |
-| 12 | Allowed-actions list (this engine + pinned third parties) | Settings → Actions | Supply chain |
+| 12 | Allowed-actions list (this engine + the third-party actions the engine itself pulls in, not just the ones your own workflows name) | Settings → Actions | Supply chain |
 | 13 | One App per trust domain; key as a per-repository `shipmate-engine` environment secret | App registration | Cross-repo blast radius |
 | 14 | Rotate the App key when push access is revoked | Runbook | Ex-member with a copied PEM |
 | 15 | Shorten Actions retention | Settings → Actions | `shipmate doctor` report disclosure |
@@ -591,11 +591,44 @@ Settings → Actions → General:
   the reason shipmate's own `plan.yml` may use `pull_request_target` while a
   labeler workflow may not. `shipmate doctor` names any *other* workflow file
   declaring the trigger; `plan.yml` is exempt by exact name.
-- **Allowed actions**: allow the engine (`<owner>/shipmate/*`) plus the pinned
-  third-party actions the workflows use — which now includes
-  `aws-actions/configure-aws-credentials`, on the apply path, even for a consumer
-  that never sets `AWS_ROLE_ARN` (the step is gated, the `uses:` is not). This is
-  supply-chain hygiene; it does not constrain `run:` steps.
+- **Allowed actions**: mode `selected`, with GitHub-owned actions allowed,
+  verified-creator actions not, and these patterns:
+
+  ```
+  <owner>/shipmate/*@*
+  astral-sh/setup-uv@*
+  opentofu/setup-opentofu@*
+  terramate-io/terramate-action@*
+  aws-actions/configure-aws-credentials@*
+  ```
+
+  The list must cover what the **engine** pulls in, not what your own workflows
+  name. shipmate's composite actions execute inside your job, so their `uses:`
+  refs are resolved against your repository's list: a consumer whose own YAML
+  names only `actions/checkout` and `actions/download-artifact` still needs the
+  three third-party actions above, plus
+  `aws-actions/configure-aws-credentials` on the apply path even when
+  `AWS_ROLE_ARN` is never set (the step is gated, the `uses:` is not). Allowing
+  GitHub-owned actions covers the engine's other transitive dependencies
+  (`actions/cache`, `actions/create-github-app-token`,
+  `actions/upload-artifact`); enumerating only the refs visible in your own
+  files produces a list that fails at "Set up job" the first time an engine
+  action runs.
+
+  `<owner>/shipmate/*@*` covers every shape the engine is referenced in — worth
+  stating because GitHub does not document whether a pattern reaches an action
+  stored in a *subdirectory*, which is what every shipmate action is
+  (`<owner>/shipmate/actions/setup@<sha>`). Measured under that single pattern:
+  a subdirectory action, a reusable-workflow call
+  (`<owner>/shipmate/.github/workflows/unlock.yml@<sha>`), and the engine
+  repository referencing its own actions at `@main`, all resolved.
+
+  The cost is that this list is a **second place pins live**: an action the
+  engine adds or renames in a pin bump has to be added here too, in every
+  repository, or the next run stops at "Set up job" — loudly, naming the action
+  it refused.
+
+  This is supply-chain hygiene; it does not constrain `run:` steps.
 - **Require actions to be pinned to a full-length commit SHA**: makes the
   platform enforce what this engine already asks of you, so a `uses:` naming a
   tag or a branch is refused during "Set up job" instead of being caught in
@@ -631,9 +664,10 @@ The first reports `default_workflow_permissions` and
 strictest value is `all_external_contributors` (row 11); the third
 `sha_pinning_required` (row 20) alongside the `allowed_actions` *mode* — `all`,
 `local_only` or `selected`; and the fourth the allowed-actions list itself
-(row 12), which answers `409 Conflict` with `All actions and workflows are
-allowed on this repository` whenever the mode is anything but `selected` — an
-answer for row 12 in its own right.
+(row 12) — `github_owned_allowed`, `verified_allowed` and `patterns_allowed` —
+once the mode is `selected`. While it is anything else that endpoint answers
+`409 Conflict` with `All actions and workflows are allowed on this repository`,
+which is an answer for row 12 in its own right.
 
 ## 13–14. The App
 
