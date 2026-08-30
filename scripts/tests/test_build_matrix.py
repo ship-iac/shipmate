@@ -506,7 +506,7 @@ def _run_main(
         monkeypatch.setenv(k, v)
     called = [] if called is None else called
 
-    def fake_compute(all_stacks=False, base="", tags=""):
+    def fake_compute(all_stacks=False, base="", require_env_tag=True, tags=""):
         called.append((all_stacks, base, tags))
         return [{"stack": s, "environment": e, "workload": ""} for s, e in cells]
 
