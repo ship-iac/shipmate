@@ -6,12 +6,12 @@ you want to know that real infrastructure has moved away from the code, and read
 
 A nightly cron fans out over **all** stacks × environments — not the changed set
 — and plans each one, or over a slice of them when the run states a `tags`
-filter ([Scoping a sweep](#scoping-a-sweep)). A separate `issues` job then turns those results into
-GitHub Issues: one labelled `drift` Issue per drifted stack × environment,
-titled `drift: <env> / <stack>`, updated in place while the drift persists and
-closed with a "Drift resolved" comment on the next clean run. The lookup is over
-**open** Issues only, so drift that returns later opens a fresh Issue rather
-than reopening the closed one.
+filter ([Scoping a sweep](#scoping-a-sweep)). A separate `issues` job then turns
+those results into GitHub Issues: one labelled `drift` Issue per drifted stack ×
+environment, titled `drift: <env> / <stack>`, updated in place while the drift
+persists and closed with a "Drift resolved" comment on the next clean run. The
+lookup is over **open** Issues only, so drift that returns later opens a fresh
+Issue rather than reopening the closed one.
 
 A cell whose plan attempt did not succeed is not treated as clean: `drift-cell`
 records `plan_ok: false`, and `actions/drift-issues` skips that cell entirely,
@@ -195,9 +195,9 @@ cells.
 matrix is every stack × environment in the repository, every night — runner
 minutes scale with the **full** matrix, not the changed set. Each cell is a
 `tofu init` plus a `tofu plan` against real state, which also means real backend
-and provider API traffic on that schedule. The knobs are the cron expression, how many
-environments you tag stacks into, and the `tags` filter, which narrows one run
-to a slice of the matrix — [Scoping a sweep](#scoping-a-sweep).
+and provider API traffic on that schedule. The knobs are the cron expression,
+how many environments you tag stacks into, and the `tags` filter, which narrows
+one run to a slice of the matrix — [Scoping a sweep](#scoping-a-sweep).
 
 ## Scoping a sweep
 
@@ -247,6 +247,7 @@ name: shipmate · drift · dev-eu
 on:
   schedule:
     - cron: "17 3 * * 1"
+  workflow_dispatch: {}
 ```
 
 ```yaml
@@ -261,16 +262,17 @@ One cron and one literal query per file: the run's own workflow name is then its
 slice — in the Actions list, in a re-run, and in a notification.
 
 **Do not design the spread around the minute a cron names.** GitHub Actions
-delays `schedule` triggers under load, by hours rather than minutes: on this
-project a `17 3 * * *` nightly has started at 04:05Z, 09:18Z, 10:11Z, 14:18Z and
-15:28Z on different days. Spread slices across *days*, and assume neither that
-two crons an hour apart produce runs an hour apart nor that one slice has
-finished before the next is due.
+delays `schedule` triggers under load, by hours rather than minutes: in
+shipmate's own sample repository a `17 3 * * *` nightly has started at 04:05Z,
+09:18Z, 10:11Z, 14:18Z and 15:28Z on different days. Spread slices across
+*days*, and assume neither that two crons an hour apart produce runs an hour
+apart nor that one slice has finished before the next is due.
 
 ### An ad-hoc scoped sweep
 
-Under `on:`, replace the workflow's `workflow_dispatch: {}` with a `tags` input
-and forward it in place of the step's literal value. The input's default is empty, so a
+This shape is for the unscoped `drift.yml`. Under its `on:`, replace
+`workflow_dispatch: {}` with a `tags` input, and add a `tags:` line to its
+`build-matrix` step forwarding that input. The input's default is empty, so a
 dispatch that leaves it blank sweeps every cell:
 
 ```yaml
@@ -289,3 +291,6 @@ with:
   no-pull-request: "true"
   tags: ${{ inputs.tags }}
 ```
+
+A `drift-<slice>.yml` keeps its literal `tags:` value instead — its scope is the
+slice it is named for, and its manual trigger re-runs that slice.
