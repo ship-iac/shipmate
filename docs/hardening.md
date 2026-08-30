@@ -88,6 +88,7 @@ name. See "Contributors without push access" for the trade-off that follows.
 | 17 | Deployment branch policy restricted to the default branch on every `<env>-apply` | Environment | Branch-authored workflow claiming apply-environment secrets directly |
 | 18 | `AWS_ROLE_ARN` + `AWS_REGION` as variables on **each** `<env>-apply` you want cloud access from — never at repository or organization level | Environment variables | Opting in per environment; set at repo/org level they apply to every apply environment at once (§7–9) |
 | 19 | `id-token: write` on the call-site job of every consumer `apply.yml`, `unlock.yml` and `deploy.yml` wrapper — **not** `plan.yml` | Consumer workflow YAML | Nothing — it is **required**: GitHub caps a called workflow's permissions at each `uses:` boundary, so without it every apply and unlock run fails at workflow-resolution time, cloud or not |
+| 20 | Require actions to be pinned to a full-length commit SHA | Settings → Actions | A tag or branch ref moving under a workflow that was pinned only by convention |
 
 Rows 6, 7, 17 and 18 name `<env>-apply`, which is the apply environment in the
 default **split** naming (`<env>-plan` + `<env>-apply`). A logical env listed in
@@ -576,7 +577,7 @@ control.
   permission the App manifest does not declare. Control 2 restricts a branch;
   this restricts none of it — do not carry that protection over by assumption.
 
-## 10–12. Actions settings
+## 10–12 and 20. Actions settings
 
 Settings → Actions → General:
 
@@ -595,6 +596,44 @@ Settings → Actions → General:
   `aws-actions/configure-aws-credentials`, on the apply path, even for a consumer
   that never sets `AWS_ROLE_ARN` (the step is gated, the `uses:` is not). This is
   supply-chain hygiene; it does not constrain `run:` steps.
+- **Require actions to be pinned to a full-length commit SHA**: makes the
+  platform enforce what this engine already asks of you, so a `uses:` naming a
+  tag or a branch is refused during "Set up job" instead of being caught in
+  review. GitHub documents exemptions for local `./path` actions and for
+  reusable workflows referenced by tag; an `owner/repo/path@ref` reference is
+  **not** exempt — measured here, even when `owner/repo` is the repository
+  running the workflow. On a repository that already pins by SHA this costs
+  nothing — it is the engine's own repository that cannot enable it, for the
+  reason in `docs/releasing.md` § Manifest load.
+
+**None of the settings in this section is probed by `shipmate doctor`, and none
+can be.** The shipmate App's installation token is refused with `Resource not
+accessible by integration`; a mint that adds the `administration: read` these
+endpoints are documented to need is itself refused, with `The permissions
+requested are not granted to this installation.`, because an installation token
+cannot request a permission the App manifest does not declare — granting it
+would mean a manifest bump plus a re-approval by every installation; and the
+workflow `permissions:` key has no `administration` scope at any value, so
+`GITHUB_TOKEN` cannot substitute. No token a workflow run can obtain from the
+platform reads them (a repository-admin PAT stored as a secret would, but an
+audit credential carrying more authority than the thing it audits is not a
+hardening step). Check them by hand instead, with a repository-admin credential:
+
+```bash
+gh api repos/OWNER/REPO/actions/permissions/workflow
+gh api repos/OWNER/REPO/actions/permissions/fork-pr-contributor-approval
+gh api repos/OWNER/REPO/actions/permissions
+gh api repos/OWNER/REPO/actions/permissions/selected-actions
+```
+
+The first reports `default_workflow_permissions` and
+`can_approve_pull_request_reviews` (row 10); the second `approval_policy`, whose
+strictest value is `all_external_contributors` (row 11); the third
+`sha_pinning_required` (row 20) alongside the `allowed_actions` *mode* — `all`,
+`local_only` or `selected`; and the fourth the allowed-actions list itself
+(row 12), which answers `409 Conflict` with `All actions and workflows are
+allowed on this repository` whenever the mode is anything but `selected` — an
+answer for row 12 in its own right.
 
 ## 13–14. The App
 

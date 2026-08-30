@@ -136,7 +136,7 @@ extra key named for the tail of the sentence and accepts the file, while
 `GitHub.DistributedTask.ObjectTemplating` refuses it outright. `v0.16.0` shipped
 that and every apply and deploy job died in `Set up job`, before its first step.
 
-The workflow is one job of 19 steps, each `if: false` and each `uses:` one action
+The workflow is one job of 20 steps, each `if: false` and each `uses:` one action
 at the **remote** ref `ship-iac/shipmate/actions/<name>@main`. Both halves are
 load-bearing, measured 2026-08-22:
 
@@ -154,7 +154,7 @@ a live PR or `terramate`/`tofu`. The whole job takes about six seconds.
 `continue-on-error` is not an alternative: it masks precisely the manifest-load
 failure being hunted.
 
-Two limits, both deliberate:
+Three limits, all deliberate:
 
 - **Merge-time, not PR-time.** `uses:` takes no expressions, so the ref cannot
   follow a PR head, and `@main` is the only ref that stays correct. Like `## The
@@ -168,6 +168,20 @@ Two limits, both deliberate:
   compares its whole step list against the `actions/*/` tree — a new action with
   no step, a step that lost `if: false`, and a step rewritten to a local ref each
   fail there.
+- **The engine repository cannot enable SHA-pinning enforcement.** Measured
+  2026-08-30: with "require actions to be pinned to a full-length commit SHA"
+  on, this job fails in `Set up job` with `The action
+  ship-iac/shipmate/actions/apply-all-detect@main is not allowed in
+  ship-iac/shipmate because all actions must be pinned to a full-length commit
+  SHA`. GitHub documents exemptions for `./path` actions and for reusable
+  workflows referenced by tag; neither covers this run, whose error names the
+  same repository as owner and as consumer — so a self-referencing
+  `owner/repo/path@ref` is not exempt. And `uses:` takes no expressions, so the
+  ref cannot be a SHA that follows `main`. For this workflow
+  in this repository no form keeps both the check and the setting — short of
+  moving `manifest-load.yml` to a repository that does not enable it, at the
+  cost of a second repository; consumer repositories enable it
+  (`docs/hardening.md` row 20) and this one does not.
 
 ## Publishing the release
 
