@@ -1,3 +1,4 @@
+import json
 import subprocess
 
 import pytest
@@ -495,6 +496,7 @@ def _run_main(
         "SHIPMATE_HEAD_REPO",
         "SHIPMATE_HEAD_SHA",
         "SHIPMATE_NO_PULL_REQUEST",
+        "SHIPMATE_TAGS",
     ):
         monkeypatch.delenv(k, raising=False)
     if head_sha is not None:
@@ -504,8 +506,8 @@ def _run_main(
         monkeypatch.setenv(k, v)
     called = [] if called is None else called
 
-    def fake_compute(all_stacks=False, base=""):
-        called.append((all_stacks, base))
+    def fake_compute(all_stacks=False, base="", tags=""):
+        called.append((all_stacks, base, tags))
         return [{"stack": s, "environment": e, "workload": ""} for s, e in cells]
 
     monkeypatch.setattr(bm, "compute_cells", fake_compute)
@@ -625,7 +627,7 @@ def test_main_plans_a_same_repository_pull_request(monkeypatch, tmp_path):
         head_sha="cafe1234",
     )
     assert outputs["empty"] == "false"
-    assert called == [(False, "")]
+    assert called == [(False, "", "")]
 
 
 def test_main_drift_run_is_unaffected(monkeypatch, tmp_path):
@@ -642,7 +644,7 @@ def test_main_drift_run_is_unaffected(monkeypatch, tmp_path):
         },
     )
     assert outputs["empty"] == "false"
-    assert called == [(True, "")]
+    assert called == [(True, "", "")]
 
 
 def test_a_stated_head_equal_to_the_checkout_is_planned(monkeypatch):
@@ -840,7 +842,9 @@ def test_build_matrix_action_declares_its_inputs():
     # that there is no pull request at all. All are settable only by this
     # repository's own default-branch workflow, which a pull-request author
     # cannot edit -- and the direction is chosen so a forgotten input refuses
-    # (plan wrapper) or reddens the nightly (drift), never plans a fork.
+    # (plan wrapper) or reddens the nightly (drift), never plans a fork. `tags`
+    # is not an exception: it is refused unless the run states it has no pull
+    # request at all.
     # Hand-written, name -> default; descriptions are prose and not pinned.
     from _loader import action_yaml
 
@@ -851,6 +855,7 @@ def test_build_matrix_action_declares_its_inputs():
         "head-repo": "",
         "head-sha": "",
         "no-pull-request": "false",
+        "tags": "",
     }
 
 
@@ -868,6 +873,7 @@ def test_build_matrix_action_hands_the_script_the_names_it_reads():
         "SHIPMATE_HEAD_REPO": "${{ inputs.head-repo }}",
         "SHIPMATE_HEAD_SHA": "${{ inputs.head-sha }}",
         "SHIPMATE_NO_PULL_REQUEST": "${{ inputs.no-pull-request }}",
+        "SHIPMATE_TAGS": "${{ inputs.tags }}",
     }
 
 
@@ -1053,8 +1059,11 @@ def test_conceptual_tag_form_is_refused_as_two_unknown_terms():
 def test_empty_term_is_refused(query):
     """A trailing comma, a doubled separator and a whitespace-only clause abort.
 
-    Fails when empty terms are dropped before matching: an empty clause is a
-    subset of every cell's tags, so the query silently matches everything.
+    Fails when empty terms are dropped before matching. Both readings of the
+    typo are silent: dropping it from `env/dev-eu,` leaves an empty clause,
+    which is a subset of every cell's tags and matches everything, while
+    dropping it from `env/dev-eu::workload/app` repairs the clause into the
+    valid, narrower `{env/dev-eu, workload/app}`.
     """
     with pytest.raises(SystemExit) as exc_info:
         bm.build_matrix(
@@ -1177,3 +1186,134 @@ def test_existing_compute_cells_callers_pass_no_tags(monkeypatch):
     assert bm.compute_cells(all_stacks=False, base="abc123") == [
         {"stack": "stacks/app", "environment": "dev-eu", "workload": "", "workload_var": ""}
     ]
+
+
+def test_main_refuses_a_tag_filter_on_a_plan_run_and_does_not_enumerate(monkeypatch, tmp_path):
+    """A `tags` value with no `no-pull-request` aborts before the stacks are listed.
+
+    Fails when the refusal returns "" for a non-empty query: the run plans a
+    narrowed matrix instead, and `called` records the enumeration.
+    """
+    called = []
+    with pytest.raises(SystemExit) as exc_info:
+        _run_main(
+            monkeypatch,
+            tmp_path,
+            {
+                "GITHUB_EVENT_NAME": "pull_request",
+                "GITHUB_REPOSITORY": "acme/iac",
+                "SHIPMATE_HEAD_REPO": "acme/iac",
+                "SHIPMATE_TAGS": "env/dev-eu",
+            },
+            called=called,
+            head_sha="cafe1234",
+        )
+    assert "the `tags` filter is only for a workflow with no pull request" in str(exc_info.value)
+    assert called == []
+
+
+def test_all_stacks_does_not_exempt_the_tag_filter_refusal(monkeypatch, tmp_path):
+    """`all-stacks: true` plus `tags` on a plan run is still refused.
+
+    Fails when `all_stacks` is added to the exemption: a plan wrapper setting
+    both would drop changed stacks from the matrix, so they get no plan cell and
+    no apply check, `shipmate / gate` greens, and the change merges unapplied.
+    """
+    called = []
+    with pytest.raises(SystemExit) as exc_info:
+        _run_main(
+            monkeypatch,
+            tmp_path,
+            {
+                "GITHUB_EVENT_NAME": "pull_request",
+                "GITHUB_REPOSITORY": "acme/iac",
+                "SHIPMATE_HEAD_REPO": "acme/iac",
+                "SHIPMATE_ALL_STACKS": "true",
+                "SHIPMATE_TAGS": "env/dev-eu",
+            },
+            called=called,
+            head_sha="cafe1234",
+        )
+    assert "the `tags` filter is only for a workflow with no pull request" in str(exc_info.value)
+    assert called == []
+
+
+def test_the_tag_filter_refusal_is_keyed_on_the_value():
+    """A composite action's `required:`/`default:` is not enforced by GitHub
+    Actions, so the refusal reads the value: any non-empty query outside a
+    no-pull-request run is refused, and an absent input arrives as "" and is no
+    filter at all.
+
+    Fails when the manifest is relied on instead and the runtime check is
+    deleted: `tag_filter_error` is gone and every case below errors.
+    """
+    for no_pull_request in ("", "false"):
+        assert bm.tag_filter_error("env/dev-eu", no_pull_request).startswith("::error::")
+        assert bm.tag_filter_error("", no_pull_request) == ""
+        assert bm.tag_filter_error("   ", no_pull_request) == ""
+    assert bm.tag_filter_error("env/dev-eu", "true") == ""
+
+
+def test_main_with_no_tags_input_filters_nothing(monkeypatch, tmp_path):
+    """An unset `SHIPMATE_TAGS` reaches `compute_cells` as the empty query.
+
+    Fails when the absent variable is read as anything but "": `compute_cells`
+    would then be handed a query it refuses as an empty term.
+    """
+    outputs, called = _run_main(
+        monkeypatch,
+        tmp_path,
+        {
+            "GITHUB_EVENT_NAME": "pull_request",
+            "GITHUB_REPOSITORY": "acme/iac",
+            "SHIPMATE_HEAD_REPO": "acme/iac",
+        },
+        head_sha="cafe1234",
+    )
+    assert outputs["empty"] == "false"
+    assert called == [(False, "", "")]
+
+
+def test_a_drift_run_passes_the_query_through_verbatim(monkeypatch, tmp_path):
+    """`compute_cells` is handed the query exactly as the input stated it.
+
+    Fails when main() hard-codes the argument, and when it normalises the query
+    on the way -- the surrounding and inner whitespace here is the parser's to
+    strip, and a second reading of the grammar here is a second grammar.
+    """
+    _, called = _run_main(
+        monkeypatch,
+        tmp_path,
+        {
+            "GITHUB_EVENT_NAME": "schedule",
+            "GITHUB_REPOSITORY": "acme/iac",
+            "SHIPMATE_ALL_STACKS": "true",
+            "SHIPMATE_NO_PULL_REQUEST": "true",
+            "SHIPMATE_TAGS": " env/dev-eu ,workload/app",
+        },
+    )
+    assert called == [(True, "", " env/dev-eu ,workload/app")]
+
+
+@pytest.mark.parametrize("cells", [(("stacks/app", "dev-eu"), ("stacks/db", "dev-eu")), ()])
+def test_the_three_outputs_agree_on_one_cell_list(monkeypatch, tmp_path, cells):
+    """`count`, `matrix` and `empty` all describe the same cells.
+
+    Fails when `count` is computed from anything but the list written to
+    `matrix`: the trusted summary job checks its evidence against `count`, so a
+    count above the cells actually planned would hold the gate on a cell no
+    plan run ever produced.
+    """
+    outputs, _ = _run_main(
+        monkeypatch,
+        tmp_path,
+        {
+            "GITHUB_EVENT_NAME": "schedule",
+            "GITHUB_REPOSITORY": "acme/iac",
+            "SHIPMATE_NO_PULL_REQUEST": "true",
+        },
+        cells=cells,
+    )
+    assert outputs["count"] == str(len(cells))
+    assert len(json.loads(outputs["matrix"])["include"]) == len(cells)
+    assert outputs["empty"] == ("true" if not cells else "false")

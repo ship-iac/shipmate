@@ -490,10 +490,36 @@ def plan_workflow_error(event_name, root="."):
     )
 
 
+def tag_filter_error(tags, no_pull_request):
+    """The `::error::` line refusing a `tags` filter outside a run with no pull
+    request, or "" when it may be honoured.
+
+    Keyed on `no-pull-request` alone, and NOT exempted by `all-stacks`: a plan
+    wrapper that sets both would drop changed stacks from the matrix, and a
+    dropped stack gets no plan cell, so no apply check is created, `count` and
+    the summary's cell count still agree, the gate greens, and the reviewed
+    change merges and never applies. `all-stacks` on its own only over-plans,
+    which is the safe direction; combined with a filter it stops being safe.
+    One marker, one meaning -- `no-pull-request` is the input already documented
+    as never belonging in a plan wrapper."""
+    if not tags.strip():
+        return ""
+    if no_pull_request.strip().lower() == "true":
+        return ""
+    return (
+        "::error::the `tags` filter is only for a workflow with no pull request at all "
+        "(nightly drift), and this run did not pass `no-pull-request: true`. In a plan "
+        "wrapper it would drop changed stacks from the matrix: a dropped stack gets no plan "
+        "cell and no apply check, `shipmate / gate` greens over it, and the change merges "
+        "and never applies. Remove the input from the plan wrapper."
+    )
+
+
 def main():
     all_stacks = os.environ.get("SHIPMATE_ALL_STACKS", "") == "true"
     base = os.environ.get("SHIPMATE_BASE_SHA", "")
     event_name = os.environ.get("GITHUB_EVENT_NAME", "")
+    tags = os.environ.get("SHIPMATE_TAGS", "")
     # `or`, so the fork refusal precedes the two consumer-wiring checks: a fork
     # head must be turned away before this script shells out or reads its tree.
     rejection = (
@@ -507,10 +533,11 @@ def main():
             os.environ.get("SHIPMATE_NO_PULL_REQUEST", ""),
         )
         or plan_workflow_error(event_name)
+        or tag_filter_error(tags, os.environ.get("SHIPMATE_NO_PULL_REQUEST", ""))
     )
     if rejection:
         raise SystemExit(rejection)
-    cells = compute_cells(all_stacks, base)
+    cells = compute_cells(all_stacks, base, tags=tags)
     with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
         fh.write(f"matrix={json.dumps({'include': cells})}\n")
         fh.write(f"empty={'true' if not cells else 'false'}\n")
