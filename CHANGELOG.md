@@ -11,6 +11,70 @@ section below names the SHA the release tags.
 The version line stays `v0.x` while action inputs, check names, and the comment
 grammar are declared unstable in `README.md`.
 
+## [0.22.0] — 2026-08-31
+
+Tags `<backfilled>`.
+
+**No wrapper change is required.** `tags` is optional and defaults to empty,
+which is today's behaviour exactly, so a repository that does not want to scope
+its sweep needs only the pin bump. To actually spread a sweep,
+`docs/drift.md` §Spreading a sweep across the week has the shape and
+`docs/upgrading.md` §0.22.0 the summary.
+
+### Added
+
+- **`actions/build-matrix` takes a `tags` query, so a drift sweep can cover a
+  slice of the repository instead of every cell.** A repository's only choices
+  were every stack × environment nightly or no drift at all; at around a hundred
+  cells one nightly sweep is roughly a Team plan's whole monthly allowance
+  before any plan or apply runs. The lever is spreading the sweep — by
+  environment, by workload, or by any tag a repository already uses.
+
+  `,` is OR, `:` is AND, in the on-disk tag form: `env/dev-eu,env/dev-us` is
+  either environment, `env/dev-eu:workload/app` is both, and `a:b,c` parses as
+  `(a AND b) OR c`. Terramate forbids `:` inside a tag value, so a `:` in a
+  query can only be the operator.
+
+  The query narrows **cells**, not the stacks Terramate is asked to list. Cells
+  are stack × env-tags, so a stack tagged both `env/dev-eu` and `env/prod-eu`
+  would survive a stack-level filter and still fan out to both environments;
+  each cell is instead matched against its stack's tags with every `env/*` tag
+  other than its own removed. Keeping the stack list whole is also what
+  preserves the repo-wide backstop: `env_membership` still inspects every stack
+  and still fails the run on one carrying no `env/*` tag, whether or not that
+  stack is in tonight's slice.
+
+  All three outputs — `matrix`, `empty` and `count` — come from that one
+  narrowed list, so they cannot disagree. Filtering the matrix downstream
+  instead leaves `empty` and `count` describing a set the run no longer has.
+
+  It fails closed four ways. The input is **refused unless
+  `no-pull-request: true`**, and `all-stacks: true` does not exempt it —
+  narrowing a plan run would leave changed stacks with no plan cell and no apply
+  check, greening `shipmate / gate` over a change that then merges and never
+  applies. An empty term, a term no stack carries, and a query matching no cell
+  each fail the run: a typo must not quietly disable a slice's drift forever,
+  and a sweep that covers nothing must not look like a healthy quiet night. The
+  256-cell limit and the reserved-path, slug and workload-variable collision
+  guards all see the narrowed set.
+
+### Changed
+
+- **The drift Issue body no longer promises a close it cannot keep.** It said
+  `Auto-closed on the next clean drift run`, which a scoped sweep makes untrue —
+  the Issue closes on the next clean run **that covers that cell**, which for a
+  weekly slice may be days away. That sentence and its siblings in `docs/` now
+  say so. Nothing about *when* an Issue closes changed; `drift-issues` was
+  already per-cell and has never swept open Issues for absence, so a scoped run
+  leaves an uncovered cell's Issue untouched rather than closing it.
+
+  One consequence worth knowing before you spread a sweep: `guard_slug_collisions`
+  runs over the run's own cells, so a fully spread schedule has no run that sees
+  the whole tree, and two stacks whose paths slug to one artifact name in
+  different slices are first reported by a plan run rather than by a sweep.
+  `CONTRACT.md` §Plan artifacts and `docs/drift.md` both name the remedy — keep
+  one unscoped run on a longer cron.
+
 ## [0.21.0] — 2026-08-29
 
 Tags `11b31b5`.
