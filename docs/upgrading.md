@@ -159,6 +159,35 @@ names. The entries below `0.2.0` predate the first tagged release, or
 `CHANGELOG.md` does not pin one; they are kept for repositories moving from a
 very old pin.
 
+### 0.22.0 — optional: scope the nightly drift sweep
+
+**Re-pinning is enough.** `actions/build-matrix`'s new `tags` input is optional
+and defaults to empty, which covers every cell exactly as before, so a
+repository that wants its nightly sweep unchanged needs no edit at all.
+
+Take the feature only if the nightly's cost is a problem. `tags` narrows a run
+to the cells whose stack carries the tags you name — `,` is OR, `:` is AND, in
+the on-disk form (`env/dev-eu,env/dev-us`), matched against each cell's own
+environment rather than the stack's whole env-tag set.
+[`drift.md`](drift.md) §Spreading a sweep across the week has the shape: one
+`drift-<slice>.yml` per slice, each with its own cron and one literal `tags:`
+value.
+
+Two things to know before you spread a schedule, both in `drift.md`:
+
+- **The input is refused outside a `no-pull-request: true` workflow.** It is for
+  drift, not for plans. Narrowing a plan run would leave changed stacks with no
+  plan cell and no apply check, and `shipmate / gate` would go green over a
+  change that then merges and never applies.
+- **A fully spread schedule has no run that sees the whole tree**, so the
+  artifact-name collision check that `build-matrix` performs no longer spans
+  slices; two stacks whose paths slug to the same name in different slices are
+  first reported by a plan run. Keeping one unscoped sweep on a longer cron
+  restores it.
+
+A typo cannot fail quietly: a tag no stack carries, an empty term, and a query
+matching no cell each fail the run rather than sweeping nothing.
+
 ### 0.21.0 — one workflow file per verb: `unlock.yml` arrives, `apply.yml` drops `mode`
 
 **Re-pinning alone is not enough.** Each dispatching verb now has its own
