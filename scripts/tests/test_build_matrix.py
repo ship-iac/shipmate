@@ -1257,8 +1257,8 @@ def test_the_tag_filter_refusal_is_keyed_on_the_value():
 def test_main_with_no_tags_input_filters_nothing(monkeypatch, tmp_path):
     """An unset `SHIPMATE_TAGS` reaches `compute_cells` as the empty query.
 
-    Fails when the absent variable is read as anything but "": `compute_cells`
-    would then be handed a query it refuses as an empty term.
+    Fails when the absent variable is read as anything but "": the recorded
+    `compute_cells` call then carries a query this run never stated.
     """
     outputs, called = _run_main(
         monkeypatch,
