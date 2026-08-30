@@ -712,11 +712,11 @@ gate's state table, and the upgrade notes. Configure it from there.
 
 ### Drift detection
 
-A nightly `drift.yml` plans every stack × environment against real state, then
-opens, updates and closes drift Issues from what those cells report. It is a
-consumer-owned workflow whose credentialed jobs run only at the default-branch
-ref, and it needs the `shipmate-engine` environment from the plan tier. The
-workflow and its costs are in [`drift.md`](drift.md).
+A nightly `drift.yml` plans every stack × environment — or a slice of them —
+against real state, then opens, updates and closes drift Issues from what those
+cells report. It is a consumer-owned workflow whose credentialed jobs run only
+at the default-branch ref, and it needs the `shipmate-engine` environment from
+the plan tier. The workflow and its costs are in [`drift.md`](drift.md).
 
 ### Recipe: automerge after apply
 
