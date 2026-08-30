@@ -25,7 +25,8 @@ Actions themselves should be reported to those projects.
 ## Hardening guidance
 
 - Pin every shipmate action **by full commit SHA** (see `CONTRACT.md`) so
-  upstream changes cannot reach your pipelines unreviewed.
+  upstream changes cannot reach your pipelines unreviewed. GitHub can enforce
+  this for you — `docs/hardening.md` row 20.
 - shipmate is pre-1.0: action inputs, check names, and the tag and comment
   grammars may change between commits. Pin by commit SHA and review each bump
   rather than taking it unread.
