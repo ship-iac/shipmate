@@ -112,11 +112,10 @@ def test_nested_apply_stack_is_allowed():
 
 
 def test_rejects_stack_path_exactly_shipmate():
-    # `shipmate` renders a plan check `shipmate / <env>`, inside the reserved
-    # `shipmate / ` namespace (`shipmate / gate`, and a consumer's own
-    # non-fan-out job names). summary-comment resolves plan links by an exact
-    # `<stack> / <env>` lookup over every check run on the head SHA, so for an
-    # env named after one of those the row's link resolves to the wrong check.
+    """`shipmate` renders a plan check `shipmate / <env>`, inside the reserved `shipmate / `
+    namespace (`shipmate / gate`, and a consumer's own non-fan-out job names).
+    summary-comment resolves plan links by an exact `<stack> / <env>` lookup over every
+    check run on the head SHA, so the row's link resolves to the wrong check."""
     with pytest.raises(SystemExit, match="may not be exactly 'shipmate'"):
         bm.build_matrix(["dev-eu"], {"dev-eu": ["shipmate"]}, {"shipmate": ["env/dev-eu"]})
 
@@ -174,8 +173,8 @@ def test_compute_cells_fans_out_multi_env(monkeypatch):
 
 
 def test_compute_cells_raises_on_untagged_stack(monkeypatch):
-    # A stack with no env/* tag would silently vanish from plan/apply/drift
-    # -- compute_cells must fail loud instead (scripts/build-matrix lines ~76-84).
+    # A stack with no env/* tag would silently vanish from plan, apply and drift, so
+    # compute_cells fails loud instead.
     monkeypatch.setattr(
         bm, "_list_stacks", lambda all_stacks, base: ["stacks/app", "stacks/orphan"]
     )
@@ -223,17 +222,16 @@ def test_env_membership_fails_loud_on_untagged_stack(monkeypatch):
 
 
 def test_env_membership_require_env_tag_false_ignores_untagged(monkeypatch):
-    # The artifact-sourced bare-apply path passes require_env_tag=False: an
-    # untagged stack anywhere in the repo must NOT abort membership — it simply
-    # produces no plan.<env>.<slug> artifact and contributes no cell. The tagged
-    # stacks still bucket normally; the untagged one just vanishes from the map.
+    # The artifact-sourced bare-apply path passes require_env_tag=False: an untagged stack
+    # anywhere in the repo must not abort membership. It produces no plan.<env>.<slug>
+    # artifact and no cell, so it vanishes from the map while tagged stacks still bucket.
     stacks = ["stacks/app", "stacks/orphan"]
     monkeypatch.setattr(bm, "_list_stacks", lambda all_stacks, base: stacks)
     tags = {"stacks/app": ["env/dev-eu"], "stacks/orphan": ["workload/util"]}
     monkeypatch.setattr(bm, "_tags", lambda s: tags[s])
     stacks_by_env, tags_by_stack = bm.env_membership(all_stacks=True, require_env_tag=False)
     assert stacks_by_env == {"dev-eu": ["stacks/app"]}
-    assert tags_by_stack == tags  # orphan still reported in tags, just not bucketed
+    assert tags_by_stack == tags  # The orphan is still reported in tags, not bucketed.
 
 
 def _stub_terramate(monkeypatch, stacks, env_lines, calls=None):
@@ -251,10 +249,10 @@ def _stub_terramate(monkeypatch, stacks, env_lines, calls=None):
             if calls is not None:
                 calls.append((args, env))
             return subprocess.CompletedProcess(args, 0, env_lines, "")
-        # `raise` rather than a bare `pytest.fail(...)` call so the function has no
-        # implicit fall-through beside its three value returns. Same exception the
-        # call raises, and `Failed` is a BaseException, so a broad `except Exception`
-        # in the code under test still cannot swallow it.
+        # `raise` rather than a bare `pytest.fail(...)` call, so the function has no
+        # implicit fall-through beside its three value returns. Same exception the call
+        # raises, and `Failed` is a BaseException, so a broad `except Exception` in the
+        # code under test cannot swallow it.
         raise pytest.fail.Exception(f"unexpected command: {args}")
 
     monkeypatch.setattr(bm, "_run", fake_run)
@@ -348,10 +346,9 @@ def test_compute_cells_refuses_a_rewritten_tf_workspace(monkeypatch):
 
 
 def test_compute_cells_refuses_a_variable_terramate_run_never_reported(monkeypatch):
-    # Dropped, not rewritten: `run.env` can also unset. An absent variable is
-    # the same defect as a changed one — the cell would run under whatever the
-    # tool decided rather than what CI injected — so "not reported" must not
-    # read as "fine".
+    # Dropped, not rewritten: `run.env` can also unset. An absent variable is the same
+    # defect as a changed one, the cell running under whatever the tool decided rather than
+    # what CI injected, so "not reported" must not read as "fine".
     _stub_terramate(
         monkeypatch,
         ["stacks/app"],
@@ -363,14 +360,14 @@ def test_compute_cells_refuses_a_variable_terramate_run_never_reported(monkeypat
 
 
 def test_compute_cells_warns_and_continues_when_the_probe_cannot_run(monkeypatch, capsys):
-    # detect binds no GitHub Environment, so a `run.env` that merely READS a
-    # variable the plan/apply Environment supplies cannot evaluate here while
-    # every plan cell evaluates it fine. Raising would fail every pull request
-    # in such a repository at `detect`, with no plan cells and no gate.
-    # Stubbed at `subprocess.run`, not at `_run`: the fact under test is that
-    # the probe asks _run NOT to raise, and a stubbed _run cannot show that.
+    """detect binds no GitHub Environment, so a `run.env` that only reads a variable the
+    plan/apply Environment supplies cannot evaluate here while every plan cell evaluates it
+    fine. Raising would fail every pull request in such a repository at `detect`, with no
+    plan cells and no gate."""
     monkeypatch.setattr(bm, "_list_stacks", lambda all_stacks, base: ["stacks/app"])
     monkeypatch.setattr(bm, "_tags", lambda s: ["env/dev-eu"])
+    # Stubbed at `subprocess.run`, not at `_run`: the fact under test is that the probe
+    # asks _run not to raise, and a stubbed _run cannot show that.
     monkeypatch.setattr(
         bm.subprocess,
         "run",
@@ -413,10 +410,9 @@ def test_a_stated_foreign_head_repository_is_refused_naming_both():
 
 
 def test_an_unstated_head_repository_is_refused_naming_the_input():
-    # Pinning the MESSAGE, not merely the refusal: letting an empty value fall
-    # through to the equality check refuses too -- with the fork wording, which
-    # tells a consumer who forgot the input to push their branch to where it
-    # already is.
+    # Pinning the message, not the refusal: letting an empty value fall through to the
+    # equality check refuses too, with the fork wording, which tells a consumer who forgot
+    # the input to push their branch to where it already is.
     err = bm.fork_pr_error("acme/iac", "   ", "false")
     assert err.startswith("::error::")
     assert "head-repo" in err
@@ -469,15 +465,13 @@ def _run_main(
     plan_workflow=True,
     head_sha=None,
 ):
-    """main() with GITHUB_OUTPUT redirected, returning (parsed outputs, calls)
-    where calls records compute_cells' arguments -- so a rejection is
-    observable as the stack enumeration never having run. Pass `called` to keep
-    that record readable when main() raises and there is no return value.
+    """main() with GITHUB_OUTPUT redirected, returning (parsed outputs, calls) where calls
+    records compute_cells' arguments, so a rejection is observable as the stack enumeration
+    never having run. Pass `called` to keep that record readable when main() raises.
 
-    `head_sha` states that commit AND makes `git rev-parse HEAD` answer it, which
-    is what a run past the head-checkout refusal looks like; without it the run
-    states no head and is refused, so every test that wants to reach the matrix
-    passes one."""
+    `head_sha` states that commit AND makes `git rev-parse HEAD` answer it, which is what a
+    run past the head-checkout refusal looks like; without it the run states no head and is
+    refused, so every test that wants to reach the matrix passes one."""
     out = tmp_path / "out.txt"
     out.write_text("", encoding="utf-8")
     monkeypatch.setenv("GITHUB_OUTPUT", str(out))
@@ -555,10 +549,9 @@ def test_main_passes_the_three_environment_values_to_the_guard(monkeypatch, tmp_
 
 
 def test_main_refuses_the_fork_before_the_consumer_wiring_checks(monkeypatch, tmp_path):
-    # Both guards would fire on this run -- a fork head, and a checkout that is
-    # not the stated one -- so the assertion pins the ORDER: a run this script
-    # cannot vouch for is turned away before it shells out to git on the fork's
-    # tree, which is why `_run` fails rather than answering.
+    # Both guards would fire on this run -- a fork head, and a checkout that is not the
+    # stated one -- so the assertion pins the order: a run this script cannot vouch for is
+    # turned away before it shells out to git on the fork's tree, so `_run` fails.
     called = []
     monkeypatch.setattr(bm, "_run", lambda args: pytest.fail("git ran on a fork's tree"))
     with pytest.raises(SystemExit) as excinfo:
@@ -653,11 +646,10 @@ def test_a_stated_head_equal_to_the_checkout_is_planned(monkeypatch):
 
 
 def test_a_checkout_that_is_not_the_stated_head_is_refused_naming_both(monkeypatch):
-    # What both plan triggers leave checked out by default: the base branch under
-    # `pull_request_target`, the dispatch ref under `workflow_dispatch`. Either
-    # way terramate diffs the wrong tree against the base and reports nothing
-    # changed. Both SHAs are asserted because the message is the only place a
-    # consumer sees which tree was planned and which one should have been.
+    """What both plan triggers leave checked out by default: the base branch under
+    `pull_request_target`, the dispatch ref under `workflow_dispatch`. Either way terramate
+    diffs the wrong tree against the base and reports nothing changed. Both SHAs are asserted
+    because the message is the only place naming the tree planned and the one that should be."""
     monkeypatch.setattr(bm, "_run", lambda args: "basebase\n")
     err = bm.head_checkout_error("cafe1234", "false")
     assert err.startswith("::error::")
@@ -666,11 +658,10 @@ def test_a_checkout_that_is_not_the_stated_head_is_refused_naming_both(monkeypat
 
 
 def test_an_unstated_head_is_refused_naming_the_input(monkeypatch):
-    # REFUSED, not skipped, and without probing git: the stated head is the only
-    # thing this check has to compare against, so an omitted `head-sha` leaves it
-    # unmade -- the direction that plans the base, greens the gate and queues no
-    # applies. The message is asserted, not just the refusal: it must name the
-    # input and the drift opt-out rather than reading as the mismatch above.
+    """Refused, not skipped, and without probing git: the stated head is the only thing this
+    check compares against, so an omitted `head-sha` leaves it unmade -- the direction that
+    plans the base, greens the gate and queues no applies. The message is asserted, not the
+    refusal alone: it names the input and the drift opt-out, never the mismatch wording."""
     monkeypatch.setattr(bm, "_run", lambda args: pytest.fail("probed with no stated head"))
     for head in ("", "   "):
         err = bm.head_checkout_error(head, "false")
@@ -681,10 +672,10 @@ def test_an_unstated_head_is_refused_naming_the_input(monkeypatch):
 
 
 def test_the_opt_out_skips_the_head_checkout_check(monkeypatch):
-    # The drift path has no pull-request context and no reason to be at any
-    # particular commit; `git rev-parse` must not even run. Case- and
-    # whitespace-insensitive for the same reason as the fork refusal's opt-out: a
-    # `no-pull-request: True` must not redden a nightly over YAML capitalisation.
+    # The drift path has no pull-request context and no reason to be at any particular
+    # commit, so `git rev-parse` must not even run. Case- and whitespace-insensitive for the
+    # same reason as the fork refusal's opt-out: `no-pull-request: True` must not redden a
+    # nightly over YAML capitalisation.
     monkeypatch.setattr(bm, "_run", lambda args: pytest.fail("head checkout was probed"))
     for value in ("true", "True", " TRUE "):
         for head in ("", "cafe1234"):
@@ -719,12 +710,10 @@ def test_main_refuses_a_run_that_states_no_head(monkeypatch, tmp_path):
 
 
 def test_main_refuses_a_dispatched_run_whose_checkout_is_not_the_stated_head(monkeypatch, tmp_path):
-    # The leg the event-keyed version made NO check on: `actions/checkout` takes
-    # the dispatch ref here, so a wrapper that adds the trigger and forgets `ref:`
-    # planned the default branch against the base, came out empty, skipped the
-    # plan job and greened the gate with nothing queued to apply. Held at main(),
-    # not only in the guard: re-keying the guard is worthless if the call site
-    # keeps deciding by event name.
+    """The leg the event-keyed version made no check on: `actions/checkout` takes the dispatch
+    ref here, so a wrapper that adds the trigger and forgets `ref:` plans the default branch
+    against the base, comes out empty, skips the plan job and greens the gate with nothing
+    queued. Held at main(): re-keying the guard cannot help if the call site keys on events."""
     called = []
     monkeypatch.setattr(bm, "_run", lambda args: "defaultbranch\n")
     with pytest.raises(SystemExit) as excinfo:
@@ -770,13 +759,11 @@ def test_plan_workflow_at_the_contract_path_is_planned(tmp_path):
 
 
 def test_a_renamed_plan_workflow_is_refused(tmp_path):
-    # This refusal is what makes the path load-bearing: no plan-run lookup
-    # matches it literally any more, so a rename would otherwise merge green
-    # while doctor's filename-keyed probes went quiet. Whole message, written by
-    # hand: the consequences it names are the ones still true after the plan run
-    # id moved onto each apply check and after `actions/dispatch` began picking
-    # the workflow file from the verb, and a clause about plan-run discovery
-    # coming back here would be a user-facing falsehood.
+    """This refusal makes the path load-bearing: no plan-run lookup matches it literally any
+    more, so a rename would merge green while doctor's filename-keyed probes went quiet. The
+    whole message is hand-written, and names only consequences still true now that the plan
+    run id rides on each apply check and `actions/dispatch` picks the workflow file from the
+    verb; a clause about plan-run discovery coming back here would be a falsehood."""
     (tmp_path / ".github" / "workflows").mkdir(parents=True)
     (tmp_path / ".github" / "workflows" / "shipmate-plan.yml").write_text("", encoding="utf-8")
     assert bm.plan_workflow_error("pull_request", str(tmp_path)) == (
@@ -836,16 +823,14 @@ def test_main_refuses_a_missing_plan_workflow(monkeypatch, tmp_path):
 
 
 def test_build_matrix_action_declares_its_inputs():
-    # No input here is a way to turn a refusal off: `head-repo` and `head-sha`
-    # are what the two refusals are keyed on and an empty value refuses either,
-    # while `no-pull-request` only states
-    # that there is no pull request at all. All are settable only by this
-    # repository's own default-branch workflow, which a pull-request author
-    # cannot edit -- and the direction is chosen so a forgotten input refuses
-    # (plan wrapper) or reddens the nightly (drift), never plans a fork. `tags`
-    # is not an exception: it is refused unless the run states it has no pull
-    # request at all.
-    # Hand-written, name -> default; descriptions are prose and not pinned.
+    """No input here can turn a refusal off: `head-repo` and `head-sha` are what the two
+    refusals key on and an empty value refuses either, while `no-pull-request` only states
+    that there is no pull request at all, and `tags` is refused unless the run states that
+    too. All are settable only by this repository's own default-branch workflow, which a
+    pull-request author cannot edit, and the direction is chosen so a forgotten input
+    refuses (plan wrapper) or reddens the nightly (drift), never plans a fork.
+
+    Hand-written, name -> default; descriptions are prose and not pinned."""
     from _loader import action_yaml
 
     doc = action_yaml("build-matrix")
@@ -860,10 +845,9 @@ def test_build_matrix_action_declares_its_inputs():
 
 
 def test_build_matrix_action_hands_the_script_the_names_it_reads():
-    # The whole `env:` block against a hand-written constant: the script reads
-    # SHIPMATE_HEAD_REPO / SHIPMATE_HEAD_SHA / SHIPMATE_NO_PULL_REQUEST by name,
-    # so a renamed key here leaves every plan run unstated -- refused, but only
-    # in production.
+    """The whole `env:` block against a hand-written constant: the script reads
+    SHIPMATE_HEAD_REPO, SHIPMATE_HEAD_SHA and SHIPMATE_NO_PULL_REQUEST by name, so a renamed
+    key here leaves every plan run unstated -- refused, but only in production."""
     from _loader import action_steps
 
     (step,) = [s for s in action_steps("build-matrix") if s.get("id") == "build"]
@@ -1059,12 +1043,10 @@ def test_conceptual_tag_form_is_refused_as_two_unknown_terms():
 def test_empty_term_is_refused(query):
     """A trailing comma, a doubled separator and a whitespace-only clause abort.
 
-    Fails when empty terms are dropped before matching. Both readings of the
-    typo are silent: dropping it from `env/dev-eu,` leaves an empty clause,
-    which is a subset of every cell's tags and matches everything, while
-    dropping it from `env/dev-eu::workload/app` repairs the clause into the
-    valid, narrower `{env/dev-eu, workload/app}`.
-    """
+    Fails when empty terms are dropped before matching, silently either way: dropping one
+    from `env/dev-eu,` leaves an empty clause, a subset of every cell's tags that matches
+    everything, while dropping one from `env/dev-eu::workload/app` repairs the clause into
+    the valid, narrower `{env/dev-eu, workload/app}`."""
     with pytest.raises(SystemExit) as exc_info:
         bm.build_matrix(
             ["dev-eu"],
@@ -1257,14 +1239,12 @@ def test_all_stacks_does_not_exempt_the_tag_filter_refusal(monkeypatch, tmp_path
 
 
 def test_the_tag_filter_refusal_is_keyed_on_the_value():
-    """A composite action's `required:`/`default:` is not enforced by GitHub
-    Actions, so the refusal reads the value: any non-empty query outside a
-    no-pull-request run is refused, and an absent input arrives as "" and is no
-    filter at all.
+    """A composite action's `required:`/`default:` is not enforced by GitHub Actions, so the
+    refusal reads the value: any non-empty query outside a no-pull-request run is refused,
+    and an absent input arrives as "" and is no filter at all.
 
-    Fails when the manifest is relied on instead and the runtime check is
-    deleted: `tag_filter_error` is gone and every case below errors.
-    """
+    Fails when the manifest is relied on instead and the runtime check deleted:
+    `tag_filter_error` is gone and every case below errors."""
     for no_pull_request in ("", "false"):
         assert bm.tag_filter_error("env/dev-eu", no_pull_request).startswith("::error::")
         assert bm.tag_filter_error("", no_pull_request) == ""
@@ -1318,11 +1298,9 @@ def test_a_drift_run_passes_the_query_through_verbatim(monkeypatch, tmp_path):
 def test_the_three_outputs_agree_on_one_cell_list(monkeypatch, tmp_path, cells):
     """`count`, `matrix` and `empty` all describe the same cells.
 
-    Fails when `count` is computed from anything but the list written to
-    `matrix`: the trusted summary job checks its evidence against `count`, so a
-    count above the cells actually planned would hold the gate on a cell no
-    plan run ever produced.
-    """
+    Fails when `count` is computed from anything but the list written to `matrix`: the
+    trusted summary job checks its evidence against `count`, so a count above the cells
+    planned would hold the gate on a cell no plan run ever produced."""
     outputs, _ = _run_main(
         monkeypatch,
         tmp_path,

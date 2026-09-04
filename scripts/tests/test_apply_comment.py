@@ -1,4 +1,3 @@
-# scripts/tests/test_apply_comment.py
 import io
 import json
 import pathlib
@@ -48,9 +47,6 @@ def _fixture_text(name):
     return (pathlib.Path(__file__).parent / "fixtures" / name).read_text(encoding="utf-8")
 
 
-# --- build_rows / expected-set merge ----------------------------------------
-
-
 def test_build_rows_statuses_and_not_attempted_for_missing_artifact():
     expected = {("dev-eu", "stacks/app"), ("dev-eu", "stacks/missing")}
     downloaded = [
@@ -66,7 +62,7 @@ def test_build_rows_statuses_and_not_attempted_for_missing_artifact():
     assert by_key[("dev-us", "stacks/db")]["status"] == "failed"
     missing = by_key[("dev-eu", "stacks/missing")]
     assert missing["status"] == "not_attempted"
-    assert missing["stack_display"] == "stacks/missing"  # no display name available
+    assert missing["stack_display"] == "stacks/missing"  # The cell reported no name.
 
 
 def test_build_rows_downloaded_cell_outside_expected_set_still_rendered():
@@ -136,7 +132,7 @@ def test_summary_line_escapes_evil_stack_display_name():
     line = ac._summary_line(row)
     assert "</summary><b>evil" not in line
     assert "&lt;/summary&gt;&lt;b&gt;evil" in line
-    assert line.endswith("</summary>")  # the tag itself is still the real one
+    assert line.endswith("</summary>")  # The tag itself is still the real one.
 
 
 def test_build_table_and_summary_escape_markdown_link_syntax_in_stack_name():
@@ -147,9 +143,6 @@ def test_build_table_and_summary_escape_markdown_link_syntax_in_stack_name():
     line = ac._summary_line(rows[0])
     assert "&#91;x&#93;(https://evil)" in line
     assert "[x](https://evil)" not in line
-
-
-# --- blocked-reason rendering ------------------------------------------------
 
 
 def test_blocked_cell_renders_reason_with_no_fence():
@@ -173,9 +166,6 @@ def test_blocked_reason_is_md_escaped():
     assert "&lt;/summary&gt;" in line
 
 
-# --- degradation --------------------------------------------------------------
-
-
 def test_render_apply_section_full_in_plain_fence():
     row = _row()
     s = ac.render_apply_section(row, "hello world", RUN_URL, 10_000)
@@ -195,7 +185,7 @@ def test_render_apply_section_truncates_at_line_boundary_with_log_link():
 
 
 def test_render_apply_section_link_only_when_first_line_exceeds_room():
-    text = "x" * 5_000  # no newline to cut at
+    text = "x" * 5_000  # There is no newline to cut at.
     row = _row()
     s = ac.render_apply_section(row, text, RUN_URL, 3_000)
     assert "```" not in s
@@ -211,10 +201,9 @@ def test_render_apply_section_link_only_when_apply_text_missing():
 
 
 def test_link_only_distinguishes_missing_output_from_output_too_large():
-    # Two different reasons reach _link_only and they must not share a
-    # sentence. Output that exists but does not fit is "too large"; output that
-    # never arrived (a promoted not_attempted row, or a cell.json with no
-    # apply.txt) is unavailable, and calling that "too large" is simply false.
+    """Two reasons reach `_link_only` and may not share a sentence: output that exists but does not
+    fit is "too large", while output that never arrived (a promoted not_attempted row, or a
+    cell.json with no apply.txt) is unavailable, and calling that "too large" is false."""
     missing = ac._link_only(_row(apply_text=None), RUN_URL)
     assert "Apply output unavailable for this cell" in missing
     assert "too large" not in missing
@@ -225,14 +214,10 @@ def test_link_only_distinguishes_missing_output_from_output_too_large():
 
 
 def test_build_comment_reserves_link_only_space_for_every_cell():
-    # An early giant apply.txt must not starve a later cell of its link. The
-    # giant body MUST contain newlines: a single unbroken line (no "\n")
-    # degrades straight to link-only (tiny, ~200 chars) regardless of
-    # whether the reserve logic exists at all, so it can never actually
-    # exercise -- or disprove -- the reserve (verified: with the reserve
-    # deleted entirely, this exact fixture with a no-newline giant still
-    # yields a body under SIZE_BUDGET with every section present -- see the
-    # fix report's probe output).
+    """An early giant apply.txt may not starve a later cell of its link. The giant body must contain
+    newlines: an unbroken line degrades to link-only (~200 chars) with or without the reserve, so it
+    can neither exercise nor disprove it -- with the reserve deleted, that fixture still fit
+    SIZE_BUDGET with every section present."""
     giant_text = "\n".join("X" * 80 for _ in range(3_000))
     rows = [
         _row(stack_display="giant", stack_path="stacks/giant", apply_text=giant_text),
@@ -246,37 +231,29 @@ def test_build_comment_reserves_link_only_space_for_every_cell():
                 apply_text="\n".join(f"line {j}" for j in range(200)),
             )
         )
-        # Distinct, zero-padded (no prefix collisions between e.g. job/s01 and
-        # job/s10) per-cell job URLs, so "the URL appears" can only be
-        # satisfied by that cell's OWN section, not a neighbor's.
+        # Distinct, zero-padded per-cell job URLs (no prefix collision between job/s01
+        # and job/s10), so "the URL appears" can only be satisfied by that cell's own
+        # section, not a neighbour's.
         jobs.append(_job(f"apply / stacks/s{i:02} / dev-eu", f"https://gh/job/s{i:02}"))
     body = ac.build_comment(rows, jobs, RUN_URL, "pending", [], [], "dev-eu")
     assert len(body) <= ac.sc.SIZE_BUDGET
     for i in range(20):
         url = f"https://gh/job/s{i:02}"
-        # Each later cell actually got its own <details> section (not merely
-        # a table-row mention, which is present regardless of the reserve
-        # logic) -- proves the up-front reserve left it room for at least a
-        # section, rather than the giant early cell starving it.
+        # Each later cell got its own <details> section, not merely a table-row mention
+        # (present regardless of the reserve): the up-front reserve left it room for a
+        # section rather than the giant early cell starving it.
         assert f"<summary>✅ s{i:02} / dev-eu — applied</summary>" in body
-        # ...AND that section itself carries the cell's own log link (not
-        # just the table row's mention of it) -- the whole point of the
-        # reserve. Under this budget every one of these degrades to
-        # link-only/truncated, both of which cite the job URL, so a genuine
-        # per-cell section produces >=2 occurrences (table + section); a
-        # cell that lost its section entirely would have only the table's 1.
+        # The cell's own log link, not the table row's mention of it alone -- the point of
+        # the reserve. Every cell here degrades to link-only or truncated, both citing the
+        # job URL, so a real section yields >=2 occurrences (table + section), a lost one 1.
         assert body.count(url) >= 2
 
 
 def test_build_comment_reserves_blocked_one_liners_up_front():
-    # A run with many blocked cells (expired plan artifacts) plus a few large
-    # attempted cells: pre-fix, only applied/failed link-onlys were counted
-    # in the up-front reserve, so an early giant applied cell's section was
-    # sized as if the blocked one-liners cost nothing -- they were appended
-    # afterward, uncounted, and could push the body over HARD_CAP, at which
-    # point the table-only fallback silently discarded every blocked reason
-    # (the only place a 🚫 row's cause appears). Every blocked reason must
-    # survive intact.
+    """Every blocked reason survives a run of many blocked cells (expired plan artifacts) plus a few
+    large applied ones. Counting only applied/failed link-onlys in the reserve leaves the blocked
+    one-liners uncounted, so they push the body past HARD_CAP into the table-only fallback, which
+    discards the only place a blocked row's cause appears."""
     reason = "reviewed plan artifact missing or expired -- re-run plan"
     blocked_rows = [
         _row(
@@ -296,55 +273,45 @@ def test_build_comment_reserves_blocked_one_liners_up_front():
     rows = applied_rows + blocked_rows
     body = ac.build_comment(rows, [], RUN_URL, "pending", [], [], "dev-eu")
     assert len(body) <= ac.sc.HARD_CAP
-    # No fallback wipe: the hard-cap fallback's marker text must be absent,
-    # and every one of the 200 blocked rows must carry its own copy of the
-    # reason (a fallback would drop all of them at once; a starved-but-not-
-    # quite-fallback scenario could drop only some).
+    # No fallback wipe: the fallback's marker text must be absent and each of the 200
+    # blocked rows must carry its own copy of the reason. A fallback drops all of them at
+    # once; a starved-but-not-quite-fallback render could drop only some.
     assert "use each row's log link" not in body
     assert body.count(reason) == 200
 
 
-# --- fence-escape attempt ------------------------------------------------------
-
-
 def _fence_delimiter_lines(rendered):
-    """All-backtick lines actually emitted in `rendered` -- the real fence
-    delimiters, read from the output itself rather than re-derived from the
-    helper the renderer is supposed to have called. A renderer that hardcodes
-    a 3-backtick fence (ignoring the computed length entirely) must fail an
-    assertion built from this, not just an assertion built from the helper."""
+    """All-backtick lines emitted in `rendered` -- the real fence delimiters, read from the output
+    rather than re-derived from the helper the renderer is supposed to have called. A renderer that
+    hardcodes a 3-backtick fence, ignoring the computed length, must fail an assertion built from
+    this rather than one built from the helper."""
     return [ln for ln in rendered.splitlines() if ln and set(ln) == {"`"}]
 
 
 def test_fence_escape_attempt_cannot_break_out_of_fence():
-    # Trailing non-backtick chars ("x"/"y") keep every body LINE from being
-    # pure backticks itself (which would otherwise masquerade as a third
-    # "delimiter" line to _fence_delimiter_lines) while leaving the longest
-    # contiguous backtick RUN at 50 either way.
+    # Trailing non-backtick characters keep every body line from being pure backticks --
+    # which would masquerade as a third delimiter line to `_fence_delimiter_lines` --
+    # while leaving the longest contiguous backtick run at 50 either way.
     evil = "````` " + "`" * 50 + "x\nrm -rf /\n" + "`" * 50 + "y"
     row = _row(apply_text=evil)
     s = ac.render_apply_section(row, evil, RUN_URL, 10_000)
     longest_run_in_evil = max(len(m) for m in re.findall(r"`+", evil))
     fence_lines = _fence_delimiter_lines(s)
-    assert len(fence_lines) == 2  # opening + closing delimiter
+    assert len(fence_lines) == 2
     assert fence_lines[0] == fence_lines[1]
-    # The delimiter actually emitted must be strictly longer than the longest
-    # backtick run in the body -- checked against the RENDERED fence line,
-    # not merely against a length computed off to the side.
+    # The delimiter emitted must be strictly longer than the longest backtick run in the
+    # body, checked against the rendered fence line rather than a length computed off to
+    # the side.
     assert len(fence_lines[0]) > longest_run_in_evil
-    # The section still closes with </details> — no early close from the
-    # injected backtick run.
+    # The section still closes with </details>: no early close from the injected run.
     assert s.endswith("</details>")
 
 
 def test_fence_escape_attempt_truncated_path_reuses_full_bodys_fence():
-    # The backtick run lives near the START of the text; tail-oriented
-    # degradation keeps the END and cuts the front away, but the fence
-    # surrounding the KEPT (backtick-free) slice must still be sized against
-    # the WHOLE original body (computed once, up front) -- not recomputed
-    # against the backtick-free slice, which would only need the minimum
-    # 3-backtick fence and would reopen the fence-escape hole the moment a
-    # later, less-truncated render includes the backtick run again.
+    """The backtick run sits near the start, and tail-oriented degradation keeps the end, so the
+    fence around the kept backtick-free slice must still be sized against the whole original body,
+    computed once up front. Recomputed against the slice it would need only the minimum 3-backtick
+    fence, reopening the hole for a less-truncated render."""
     lines = [f"line {i}" for i in range(3_000)]
     evil = "`" * 60 + "z\nbefore the backticks\n" + "\n".join(lines)
     longest_run_in_evil = max(len(m) for m in re.findall(r"`+", evil))
@@ -355,12 +322,9 @@ def test_fence_escape_attempt_truncated_path_reuses_full_bodys_fence():
     assert len(fence_lines) == 2
     assert fence_lines[0] == fence_lines[1]
     assert len(fence_lines[0]) > longest_run_in_evil
-    # The 60-backtick run itself was truncated away -- the kept body never
-    # reaches it (proving this is a real cut, not a coincidence).
+    # The 60-backtick run was truncated away: the kept body never reaches it, so this is
+    # a real cut rather than a coincidence.
     assert "`" * 60 not in s.replace(fence_lines[0], "")
-
-
-# --- resources-line parsing ----------------------------------------------------
 
 
 def test_resources_present():
@@ -388,20 +352,18 @@ def test_resources_takes_last_matching_line():
 
 
 def test_resources_regex_ignores_lookalike_author_text_digits_only_capture():
-    # Author-controlled text cannot inject non-digit content into the captured
-    # groups — a line missing real digits in those positions simply fails to
-    # match rather than smuggling arbitrary text into the table cell.
+    # Author-controlled text cannot inject non-digit content into the captured groups: a
+    # line missing real digits in those positions fails to match rather than smuggling
+    # arbitrary text into the table cell.
     text = "Apply complete! Resources: <script>alert(1)</script> added, 0 changed, 0 destroyed."
     assert ac._resources(text) == ""
 
 
 def test_resources_ignores_embedded_lookalike_in_later_output_line():
-    # OpenTofu prints the `Outputs:` block AFTER the "Apply complete!" line;
-    # an output value that happens to CONTAIN the literal string (embedded
-    # mid-line, not starting the line) must not be mistaken for -- and, being
-    # textually last, must not override -- the real line. Anchoring
-    # (^...$, re.M) is what defeats this: an unanchored regex would match the
-    # embedded copy too and, being last, would incorrectly win.
+    """OpenTofu prints the `Outputs:` block after the "Apply complete!" line, so an output value
+    containing that literal string mid-line may not be mistaken for the real line nor, being
+    textually last, override it. Line anchoring (`^...$`, `re.M`) defeats it: an unanchored regex
+    matches the embedded copy and, being last, wins."""
     text = (
         "Apply complete! Resources: 1 added, 0 changed, 0 destroyed.\n"
         "\n"
@@ -409,9 +371,6 @@ def test_resources_ignores_embedded_lookalike_in_later_output_line():
         'fake = "Apply complete! Resources: 99 added, 99 changed, 99 destroyed."\n'
     )
     assert ac._resources(text) == "+1 ~0 -0"
-
-
-# --- validation, loud ----------------------------------------------------------
 
 
 def test_load_cells_fails_loud_on_missing_schema_key(tmp_path):
@@ -443,9 +402,8 @@ def test_load_cells_fails_loud_on_out_of_enum_result(tmp_path):
 
 
 def test_read_tail_drops_partial_leading_line(tmp_path):
-    # Every line kept in the tail must be a genuine, complete line from the
-    # source -- proof that a mid-line seek point is dropped rather than
-    # emitted as a fragment.
+    # Every line kept in the tail must be a complete line from the source: proof that a
+    # mid-line seek point is dropped rather than emitted as a fragment.
     p = tmp_path / "apply.txt"
     lines = [f"line {i}" for i in range(10_000)]
     p.write_text("\n".join(lines), encoding="utf-8", newline="\n")
@@ -460,12 +418,12 @@ def test_read_tail_keeps_the_end_not_the_start(tmp_path):
     p.write_text("A" * 200_000 + "\nTAILMARKER\n", encoding="utf-8", newline="\n")
     tail = ac._read_tail(p, 1_000)
     assert "TAILMARKER" in tail
-    assert "A" * 500 not in tail  # the head is gone
+    assert "A" * 500 not in tail
 
 
 def test_read_tail_small_file_is_returned_whole_no_leading_drop(tmp_path):
-    # A file smaller than the budget needs no truncation at all -- its first
-    # line must survive intact (nothing to "drop" when nothing was cut).
+    # A file smaller than the budget needs no truncation, so its first line survives
+    # intact: nothing to drop when nothing was cut.
     p = tmp_path / "apply.txt"
     p.write_text("first line\nsecond line\n", encoding="utf-8", newline="\n")
     tail = ac._read_tail(p, 10_000)
@@ -477,14 +435,14 @@ def test_read_tail_tolerates_non_utf8_byte(tmp_path):
     # UnicodeDecodeError -- it must decode to a replacement character.
     p = tmp_path / "apply.txt"
     p.write_bytes(b"before\n\xff\nafter\n")
-    tail = ac._read_tail(p, 10_000)  # must not raise
+    tail = ac._read_tail(p, 10_000)
     assert "before" in tail
     assert "after" in tail
 
 
 def test_load_cells_preserves_trailing_error_in_huge_failed_apply(tmp_path):
-    # Finding scenario: a long failed apply whose fatal diagnostic is the
-    # very last line. Head-first reading/truncation used to drop it entirely.
+    # A long failed apply whose fatal diagnostic is the very last line: head-first
+    # reading or truncation drops it entirely.
     d = tmp_path / "apply-summary.dev-eu.stacks-app"
     d.mkdir()
     (d / "cell.json").write_text(json.dumps(_cell(result="failed")))
@@ -521,16 +479,15 @@ def test_load_cells_tolerates_non_utf8_byte_in_apply_txt(tmp_path):
         b"Apply complete! Resources: 1 added, 0 changed, 0 destroyed.\n"
         b"trailer with a bad byte: \xff\n"
     )
-    cells = ac.load_cells(str(tmp_path))  # must not raise UnicodeDecodeError
+    cells = ac.load_cells(str(tmp_path))  # A UnicodeDecodeError here is the failure.
     _, loaded_text = cells[0]
     assert loaded_text is not None
     assert "Apply complete!" in loaded_text
 
 
 def test_load_cells_strips_ansi_from_realistic_apply_output(tmp_path):
-    # Finding scenario, reproduced verbatim: `tofu init`/`apply` stdout+stderr
-    # teed raw (no -no-color) carries SGR colour codes that must not survive
-    # into the rendered comment as literal garbage inside the fence.
+    # `tofu init`/`apply` stdout+stderr teed raw (no -no-color) carries SGR colour codes,
+    # which must not survive into the rendered comment as literal garbage in the fence.
     d = tmp_path / "apply-summary.dev-eu.stacks-auth"
     d.mkdir()
     (d / "cell.json").write_text(json.dumps(_cell(result="applied")))
@@ -552,28 +509,16 @@ def test_load_cells_strips_ansi_from_realistic_apply_output(tmp_path):
 
 
 def test_load_cells_ansi_strip_happens_before_fence_is_computed(tmp_path):
-    # A backtick run split by a colour escape (backtick, ESC[0m, backtick) is
-    # two separate 1-backtick runs in the raw bytes, but becomes a single
-    # 2-backtick run once the escape between them is stripped. If the fence
-    # were computed on the UNstripped text (only 1-backtick runs -> a
-    # 3-backtick fence), the stripped body's now-2-backtick run would still
-    # fit safely under a 3-backtick fence -- so this alone proves too little.
-    # Push it further: pad the raw text with backtick runs of length 3 (fence
-    # would need to be 4 backticks against the raw view) positioned so that,
-    # once stripped, they multiply out. Simplest robust proof: use 50
-    # backticks either side of the escape sequence, so unstripped the longest
-    # run is 50 (fence = 51) while stripped it is exactly 100 (fence must be
-    # 101) -- if the fence were computed pre-strip (51 backticks) it would be
-    # STRICTLY SHORTER than the post-strip 100-backtick run, i.e. the fence
-    # would fail to be a real delimiter (the body would contain a run at
-    # least as long as the fence itself).
+    """The fence is computed after the ANSI strip. 50 backticks either side of an escape are two
+    runs of 50 raw and one run of 100 stripped, so a pre-strip fence of 51 would be strictly shorter
+    than the run it must delimit. A 2-backtick merge alone proves too little: it still fits under
+    the minimum 3-backtick fence."""
     d = tmp_path / "apply-summary.dev-eu.stacks-auth"
     d.mkdir()
     (d / "cell.json").write_text(json.dumps(_cell(result="applied")))
-    # The trailing "x" keeps the merged run's line from being a PURE-backtick
-    # line itself (which would otherwise masquerade as a third "delimiter"
-    # line to _fence_delimiter_lines, same caveat as the existing fence-escape
-    # tests below).
+    # The trailing "x" keeps the merged run's line from being a pure-backtick line, which
+    # would masquerade as a third delimiter line to `_fence_delimiter_lines` -- the same
+    # caveat as test_fence_escape_attempt_cannot_break_out_of_fence.
     text = (
         "`" * 50
         + "\x1b[0m"
@@ -585,7 +530,7 @@ def test_load_cells_ansi_strip_happens_before_fence_is_computed(tmp_path):
     _, loaded_text = cells[0]
     assert "\x1b" not in loaded_text
     longest_run = max(len(m) for m in re.findall(r"`+", loaded_text))
-    assert longest_run == 100  # the merge actually happened
+    assert longest_run == 100  # The merge actually happened.
     row = _row(status="applied", apply_text=loaded_text)
     section = ac.render_apply_section(row, loaded_text, RUN_URL, 10_000)
     fence_lines = _fence_delimiter_lines(section)
@@ -595,11 +540,10 @@ def test_load_cells_ansi_strip_happens_before_fence_is_computed(tmp_path):
 
 
 def test_resources_parses_colour_wrapped_apply_complete_line():
-    # tofu commonly wraps the whole "Apply complete!" line in an SGR pair
-    # (bold on ... bold off) -- an escape at either end of the line must not
-    # defeat the line-anchored (^...$, re.MULTILINE) regex. _resources is
-    # exercised directly on already-stripped text (as load_cells produces),
-    # proving the anchor itself is robust once the colour codes are gone.
+    """tofu wraps the whole "Apply complete!" line in an SGR pair, so an escape at either end may
+    not defeat the line-anchored (`^...$`, `re.MULTILINE`) regex. `_resources` runs on
+    already-stripped text, as `load_cells` produces, which pins the anchor itself once the colour
+    codes are gone."""
     text = ac._strip_ansi(
         "\x1b[1mApply complete! Resources: 3 added, 1 changed, 2 destroyed.\x1b[0m\n"
     )
@@ -607,9 +551,8 @@ def test_resources_parses_colour_wrapped_apply_complete_line():
 
 
 def test_strip_ansi_covers_csi_two_char_and_osc_forms():
-    # CSI (SGR), a bare two-character escape (ESC + byte in @-_), and an
-    # OSC sequence terminated by BEL, then the same OSC form terminated by
-    # ST (ESC \) instead -- all three forms named in the finding.
+    # CSI (SGR), a bare two-character escape (ESC + byte in @-_), an OSC sequence
+    # terminated by BEL, and the same OSC form terminated by ST (ESC \).
     csi = "before\x1b[36;1mcolour\x1b[0mafter"
     two_char = "before\x1bMreset-ish\x1bDafter"
     osc_bel = "before\x1b]0;window title\x07after"
@@ -650,9 +593,6 @@ def test_load_cells_reads_apply_text_only_when_present(tmp_path):
     assert texts["stacks/db"] is None
 
 
-# --- short-forms ----------------------------------------------------------------
-
-
 def test_short_form_detect_failed_targeted():
     body = ac._short_form("success,failure", "dev-eu", "pending", RUN_URL, [], [])
     assert body.startswith(":x: shipmate: `shipmate apply dev-eu` failed.")
@@ -671,8 +611,8 @@ def test_short_form_nothing_pending_all_environments():
 
 
 def test_short_form_all_held_does_not_claim_success_or_nothing_pending():
-    # The headline path of the review gate: every env held, every job-level
-    # result benign. A green head here contradicts the Held sentence beneath it.
+    # The headline path of the review gate: every env held, every job-level result
+    # benign. A green head here contradicts the Held sentence beneath it.
     body = ac._short_form("success,skipped", "", "pending", RUN_URL, [], [], ["prod"])
     assert body.startswith(
         ":no_entry_sign: shipmate: `shipmate apply` (all environments) "
@@ -683,14 +623,10 @@ def test_short_form_all_held_does_not_claim_success_or_nothing_pending():
 
 
 def test_short_form_includes_excluded_and_skipped_lines_all_environments():
-    # Regression guard: today's live apply-all.yml one-liner appends these
-    # sentences unconditionally, including in the nothing-pending branch --
-    # this is the actionable case where the ONLY reason nothing is pending is
-    # an excluded explicit env (apply-all-detect derives `excluded` from
-    # pending cells' envs and removes them from `runnable`, so an
-    # explicit-only-pending repo is simultaneously all-levels-empty AND
-    # carries a non-empty excluded_envs). Dropping the sentence here would be
-    # actively false: it would claim nothing is pending when work is.
+    """The excluded and skipped sentences are appended unconditionally, the nothing-pending branch
+    included: apply-all-detect derives `excluded` from pending cells' envs and drops them from
+    `runnable`, so an explicit-only-pending repository is all-levels-empty and carries a non-empty
+    `excluded_envs` at once, and the sentence is the only sign of it."""
     body = ac._short_form("success,skipped", "", "complete", RUN_URL, ["prod"], ["staging"])
     assert (
         "Explicit environment(s) left pending: `prod` — run `shipmate apply prod` to apply them."
@@ -702,17 +638,17 @@ def test_short_form_includes_excluded_and_skipped_lines_all_environments():
 
 
 def test_short_form_omits_excluded_skipped_for_targeted_env():
-    # The targeted (single-env) form never carries excluded/skipped envs --
-    # that's an apply-all-only concept.
+    # The targeted (single-env) form never carries excluded or skipped envs: an
+    # apply-all-only concept.
     body = ac._short_form("success,skipped", "dev-eu", "complete", RUN_URL, ["prod"], ["staging"])
     assert "Explicit environment" not in body
     assert "Skipped" not in body
 
 
 def test_env_disposition_lines_escape_evil_env_names():
-    # excluded/skipped env names are author-controlled (Terramate tags /
-    # GitHub Environment names), same as every other display value in this
-    # file -- these sentences must not be the one place that guarantee lapses.
+    # Excluded and skipped env names are author-controlled (Terramate tags, GitHub
+    # Environment names), like every other display value here; these sentences must not
+    # be the one place that guarantee lapses.
     evil = "x</summary><b>evil"
     lines = ac._env_disposition_lines([evil], [evil])
     joined = " ".join(lines)
@@ -747,30 +683,26 @@ _UNGATED_SENTENCE = (
 
 
 def test_held_line_names_review_and_never_a_targeted_apply_command():
-    # A held env can also be an explicit env, in which case the review alone
-    # does not release it -- so this sentence must not name a command at all.
-    # `shipmate apply prod` would additionally be a command that refuses.
+    # A held env can also be an explicit env, where the review alone does not release it,
+    # so this sentence must not name a command at all. `shipmate apply prod` would
+    # additionally be a command that refuses.
     (line,) = ac._env_disposition_lines([], [], ["prod"], [])
     assert line == _HELD_SENTENCE
     assert "shipmate apply prod" not in line
 
 
 def test_applied_ungated_line_states_no_review_and_names_the_variable():
-    """The audit sentence, pinned whole.
-
-    `reviewDecision` keeps no history, so once the review lands nothing else in
-    the run distinguishes an apply that waited for it from one that did not.
-    Whole-value, because the property is also that no clause claims the named
-    envs COMPLETED: detect derives the set from `runnable`, before any wave
-    runs, so a failed wave leaves an env named here that never applied.
-    """
+    """The audit sentence, pinned whole. `reviewDecision` keeps no history, so once the review lands
+    nothing else in the run distinguishes an apply that waited for it from one that did not.
+    Whole-value also because no clause may claim the named envs COMPLETED: detect derives the set
+    from `runnable`, so a failed wave leaves a named env unapplied."""
     (line,) = ac._env_disposition_lines([], [], [], ["dev-eu"])
     assert line == _UNGATED_SENTENCE
 
 
 def test_short_form_carries_held_and_ungated_sentences():
-    # The short form is what a nothing-tabulated run renders, and the audit
-    # sentence is exactly the one that must not be droppable.
+    # The short form is what a nothing-tabulated run renders, and the audit sentence is
+    # the one that must not be droppable.
     body = ac._short_form("success,skipped", "", "complete", RUN_URL, [], [], ["prod"], ["dev-eu"])
     assert _HELD_SENTENCE in body
     assert _UNGATED_SENTENCE in body
@@ -828,7 +760,7 @@ def test_main_renders_both_sentences_in_the_short_form(monkeypatch, tmp_path):
 def test_main_renders_both_sentences_in_the_table_form(monkeypatch, tmp_path):
     waves = json.dumps({"wave0": [{"stack": "stacks/app", "environment": "dev-eu"}]})
     body = _render_held_ungated(monkeypatch, tmp_path, waves)
-    assert "| ⏭️ |" in body  # sanity: the table path, not the short form
+    assert "| ⏭️ |" in body  # Sanity: the table path, not the short form.
     assert _HELD_SENTENCE in body
     assert _UNGATED_SENTENCE in body
 
@@ -853,26 +785,20 @@ def test_build_comment_uses_short_form_when_no_rows_and_no_expected(monkeypatch,
     )
 
 
-# --- HARD_CAP overflow -----------------------------------------------------------
-
-
 def test_build_comment_hard_cap_fallback_keeps_table_drops_details():
-    # 400 short-named rows: enough that even every cell degraded to link-only
-    # still overflows HARD_CAP (verified: 300 rows stays just under the cap
-    # without needing the fallback at all -- 400 is the margin that actually
-    # exercises it), while the table alone (short 4-char stack names) stays
-    # comfortably within it.
+    """400 short-named rows overflow HARD_CAP even with every cell degraded to link-only; 300 rows
+    stays under the cap without needing the fallback at all. The table alone, with 4-char stack
+    names, stays within it."""
     rows = [
         _row(stack_display=f"s{i:03}", stack_path=f"stacks/s{i:03}", apply_text="x" * 500)
         for i in range(400)
     ]
     body = ac.build_comment(rows, [], RUN_URL, "pending", [], [], "dev-eu")
     assert len(body) <= ac.sc.HARD_CAP
-    assert "s399" in body  # table row always present
-    # The table-only fallback's specific wording, not merely "too large" --
-    # _link_only's per-cell fallback text ("Output too large for this
-    # comment") ALSO contains "too large", so that check alone can't tell the
-    # two paths apart. No <details> section may survive this fallback.
+    assert "s399" in body  # The table row is always present.
+    # The table-only fallback's own wording, not merely "too large": `_link_only`'s
+    # per-cell text ("Output too large for this comment") also contains "too large". No
+    # <details> section may survive this fallback.
     assert "use each row's log link" in body
     assert "<details>" not in body
 
@@ -891,9 +817,6 @@ def test_build_comment_fails_loud_when_even_table_overflows():
         ac.build_comment(rows, [], RUN_URL, "pending", [], [], "dev-eu")
 
 
-# --- per-cell log link ------------------------------------------------------------
-
-
 def test_job_url_suffix_match_against_caller_prefixed_job_name():
     row = _row(environment="dev-eu", stack_path="stacks/app")
     jobs = [_job("wave0 (matrix) / apply / stacks/app / dev-eu", "https://gh/job/1")]
@@ -907,15 +830,12 @@ def test_job_url_falls_back_to_run_url_when_no_job_matches():
 
 
 def test_job_url_does_not_false_match_on_bare_endswith():
-    # A job named "...reapply / stacks/app / dev-eu" must NOT match the target
-    # "apply / stacks/app / dev-eu" via a naive str.endswith — only a
-    # `/`-boundary-respecting suffix counts.
+    # A job named "...reapply / stacks/app / dev-eu" must not match the target
+    # "apply / stacks/app / dev-eu" through a naive str.endswith; only a `/`-boundary
+    # suffix counts.
     row = _row(environment="dev-eu", stack_path="stacks/app")
     jobs = [_job("reapply / stacks/app / dev-eu", "https://gh/job/should-not-match")]
     assert ac._job_url(row, jobs, RUN_URL) == RUN_URL
-
-
-# --- footer -----------------------------------------------------------------------
 
 
 def test_footer_excluded_and_skipped_only_for_all_environments_form():
@@ -927,9 +847,6 @@ def test_footer_excluded_and_skipped_only_for_all_environments_form():
         in footer_all
     )
     assert "Skipped (ordered after an environment not applying this run): `staging`." in footer_all
-
-
-# --- not-attempted note names the targeted env -------------------------------
 
 
 def test_not_attempted_note_targeted_form_names_the_env():
@@ -953,9 +870,8 @@ def test_not_attempted_note_escapes_evil_env_name():
 
 
 def test_build_comment_not_attempted_note_in_targeted_run_names_the_env():
-    # Reproduced end to end: a targeted `shipmate apply prod` run with a
-    # not-attempted cell must not tell the reader to retry with the bare
-    # form, which cannot retry an explicit env.
+    # A targeted `shipmate apply prod` run with a not-attempted cell must not tell the
+    # reader to retry with the bare form, which cannot retry an explicit env.
     rows = [_row(status="not_attempted", environment="prod", apply_text=None)]
     comment = ac.build_comment(rows, [], RUN_URL, "pending", [], [], "prod")
     assert "retry with `shipmate apply prod`" in comment
@@ -966,9 +882,6 @@ def test_build_comment_not_attempted_note_in_bare_run_stays_bare():
     rows = [_row(status="not_attempted", environment="dev-eu", apply_text=None)]
     comment = ac.build_comment(rows, [], RUN_URL, "pending", [], [], "")
     assert "retry with `shipmate apply`._" in comment
-
-
-# --- job-level SHIPMATE_RESULTS failure surfaces on the table path too -------
 
 
 def test_failure_line_present_when_results_failed_and_no_row_shows_it():
@@ -991,7 +904,7 @@ def test_failure_line_absent_when_results_clean():
 
 
 def test_failure_line_absent_when_a_row_already_shows_failed_or_blocked():
-    # No double-signaling: a run with a real ❌/🚫 row already carries the
+    # No double-signaling: a run with a real failed or blocked row already carries the
     # failure in the table itself.
     failed_rows = [_row(status="failed")]
     assert ac._failure_line("success,failure", failed_rows, "prod") == ""
@@ -1000,15 +913,13 @@ def test_failure_line_absent_when_a_row_already_shows_failed_or_blocked():
 
 
 def test_build_comment_surfaces_results_failure_with_no_cell_reports():
-    # Reproduces an apply run that dies before any cell reports:
-    # SHIPMATE_ENVIRONMENT set, a non-empty expected cell set, no artifacts
-    # downloaded (the apply job died before any cell reported), SHIPMATE_RESULTS
-    # carries a failure token. Pre-fix this rendered with no ❌ and no "failed"
-    # anywhere.
+    """An apply run that dies before any cell reports: an environment set, a non-empty expected cell
+    set, no artifacts downloaded, and a failure token in SHIPMATE_RESULTS. Without the failure line
+    it renders with no failure marker and no "failed" anywhere."""
     rows = ac.build_rows({("prod", "stacks/app"), ("prod", "stacks/db")}, [])
     body = ac.build_comment(rows, [], RUN_URL, "pending", [], [], "prod", "success,failure")
     assert ":x: shipmate: `shipmate apply prod` failed." in body
-    assert all(r["status"] == "not_attempted" for r in rows)  # the scenario's own precondition
+    assert all(r["status"] == "not_attempted" for r in rows)  # The scenario's precondition.
 
 
 def test_build_comment_no_failure_line_when_results_clean_and_nothing_attempted():
@@ -1030,10 +941,9 @@ def test_build_comment_failure_line_sits_between_header_and_table():
     "results_csv", ["", "success", "success,skipped", "success,failure", "failure", "cancelled"]
 )
 def test_results_failed_tokenizer_shared_by_short_form_and_failure_line(results_csv):
-    # Anti-divergence guard: the table path's failure line
-    # and the short form must use ONE shared tokenizer, so a given
-    # SHIPMATE_RESULTS string can never read as "failed" on one path and
-    # "not failed" on the other.
+    # Anti-divergence guard: the table path's failure line and the short form must use one
+    # shared tokenizer, so a given SHIPMATE_RESULTS string can never read as "failed" on
+    # one path and "not failed" on the other.
     failed = ac._results_failed(results_csv)
     short = ac._short_form(results_csv, "", "pending", RUN_URL, [], [])
     assert short.startswith(":x:") == failed
@@ -1042,24 +952,21 @@ def test_results_failed_tokenizer_shared_by_short_form_and_failure_line(results_
 
 
 def test_results_failed_blank_token_counts_as_failure():
-    # Restores the semantics of the shell tokenizer this replaced
-    # (`tr ',' '\n' | grep -qvE '^(success|skipped)$'`): an empty line never
-    # matches that alternation, so a blank segment reads as failure.
-    # Filtering blank tokens out let an empty/blank result read as clean.
+    # Restores the semantics of the shell tokenizer this replaced (`tr ',' '\n' |
+    # grep -qvE '^(success|skipped)$'`): an empty line never matches that alternation, so a
+    # blank segment reads as failure. Filtering blank tokens out reads a blank as clean.
     assert ac._results_failed("") is True
-    assert ac._results_failed("success,,skipped") is True  # embedded blank segment
-    assert ac._results_failed("success,") is True  # trailing blank segment
-    assert ac._results_failed("success,skipped") is False  # sanity: no blanks, no failure
+    assert ac._results_failed("success,,skipped") is True
+    assert ac._results_failed("success,") is True
+    assert ac._results_failed("success,skipped") is False
 
 
 def test_short_form_and_failure_line_agree_blank_token_is_failure():
-    # Same anti-divergence property as the parametrized test above, exercised
-    # specifically on the blank-token case the parametrization didn't cover.
+    # The same anti-divergence property as
+    # test_results_failed_tokenizer_shared_by_short_form_and_failure_line, on the
+    # blank-token case that parametrization does not cover.
     assert ac._short_form("", "", "pending", RUN_URL, [], []).startswith(":x:")
     assert ac._failure_line("", [], "") != ""
-
-
-# --- coupling guards ----------------------------------------------------------------
 
 
 def test_cell_schema_guard_apply_cell_writes_every_required_key():
@@ -1078,8 +985,6 @@ def test_apply_summary_artifact_name_matches_contract():
     src = (_ENGINE / "actions" / "apply-cell" / "action.yml").read_text(encoding="utf-8")
     assert "apply-summary.${{ inputs.env }}.${{ steps.ids.outputs.slug }}" in src
 
-
-# --- apply-check state: three-way lookup, absence is unknown -----------------
 
 APP_ID = "12345"
 
@@ -1153,9 +1058,9 @@ def test_check_state_three_way_lookup():
 
 
 def test_apply_check_state_applied_with_pending_check_becomes_unrecorded():
-    # The finding: tofu apply succeeded, but Save state / the completion token
-    # mint / Complete the apply check failed (or the job was cancelled) after
-    # the cell summary was already composed and uploaded.
+    # tofu apply succeeded, but Save state, the completion token mint or Complete the
+    # apply check failed (or the job was cancelled) after the cell summary was composed
+    # and uploaded.
     rows = [_row(status="applied", stack_path="stacks/app")]
     ac.apply_check_state(rows, {"apply / stacks/app / dev-eu"}, set())
     assert rows[0]["status"] == "unrecorded"
@@ -1168,7 +1073,7 @@ def test_apply_check_state_not_attempted_with_done_check_becomes_applied():
     rows = [_row(status="not_attempted", stack_path="stacks/app", apply_text=None)]
     ac.apply_check_state(rows, {"apply / stacks/app / dev-eu"}, {"apply / stacks/app / dev-eu"})
     assert rows[0]["status"] == "applied"
-    assert rows[0]["apply_text"] is None  # no output to show; renders link-only
+    assert rows[0]["apply_text"] is None  # No output to show, so it renders link-only.
 
 
 def test_apply_check_state_leaves_rows_alone_when_check_state_is_unknown():
@@ -1183,10 +1088,9 @@ def test_apply_check_state_leaves_rows_alone_when_check_state_is_unknown():
 
 
 def test_apply_check_state_never_downgrades_failed_or_blocked():
-    # A red row against a green check means another run applied that cell:
-    # over-reporting, nothing stranded, and the gate remains the truth.
-    # Downgrading here would let an unrelated run's green check hide a real
-    # failure in this one.
+    # A red row against a green check means another run applied that cell: over-reporting,
+    # nothing stranded, and the gate remains the truth. Downgrading here lets an unrelated
+    # run's green check hide a real failure in this one.
     done = {"apply / stacks/app / dev-eu", "apply / stacks/db / dev-eu"}
     rows = [
         _row(status="failed", stack_path="stacks/app"),
@@ -1235,10 +1139,9 @@ def test_load_check_maps_missing_file_stays_silent(tmp_path, capsys):
 
 
 def test_load_check_maps_non_numeric_app_id_degrades_with_a_warning(tmp_path, capsys):
-    # A non-numeric SHIPMATE_APP_ID (e.g. the App's client id pasted in place
-    # of its numeric app id) makes ag.from_app's int(app_id) raise ValueError.
-    # That must cost only the check-state display axis, never the whole
-    # render step -- same degradation as a malformed checks.jsonl.
+    # A non-numeric SHIPMATE_APP_ID (the App's client id pasted in place of its numeric
+    # app id) makes ag.from_app's int(app_id) raise ValueError. That must cost only the
+    # check-state display axis, the same degradation as a malformed checks.jsonl.
     p = tmp_path / "checks.jsonl"
     p.write_text("\n".join(_jsonl(_check("apply / stacks/app / dev-eu"))), encoding="utf-8")
     assert ac.load_check_maps(str(p), "Iv1.notanumericid") == (set(), set())
@@ -1256,18 +1159,14 @@ def test_cell_json_result_enum_is_unchanged():
     assert ac._RESULTS == frozenset({"applied", "failed", "blocked"})
 
 
-# --- unrecorded rendering ----------------------------------------------------
-
-
 def test_unrecorded_note_names_the_cell_and_the_recovery():
     rows = [_row(status="unrecorded", stack_display="db", environment="prod")]
     note = ac._unrecorded_note(rows)
     assert "**db / prod**" in note
     assert "applied but not recorded" in note
-    # The cause is not "could not be completed" (implying only one possible
-    # cause) -- a duplicate apply check re-created by a later plan run on the
-    # same head SHA reads pending even though its OWN run completed, so the
-    # note must name all three reachable causes.
+    # The cause is not "could not be completed", which implies a single cause: a duplicate
+    # apply check re-created by a later plan run on the same head SHA reads pending even
+    # though its own run completed, so the note names all three reachable causes.
     assert (
         "not recorded as complete (it failed, was cancelled, or a newer plan re-created it)" in note
     )
@@ -1289,10 +1188,9 @@ def test_unrecorded_note_lists_every_affected_cell():
 
 
 def test_unrecorded_note_escapes_evil_stack_and_env_names():
-    # stack_display and environment are author-controlled (a Terramate tag /
-    # GitHub Environment name / apply-cell's stack-name input). Bold, not a
-    # backtick code span: _md_escape does not escape a backtick, so a code
-    # span would be the one place the escape could be broken out of.
+    # stack_display and environment are author-controlled (a Terramate tag, a GitHub
+    # Environment name, apply-cell's stack-name input). Bold, not a backtick code span:
+    # _md_escape does not escape a backtick, so a span could be broken out of.
     rows = [
         _row(
             status="unrecorded",
@@ -1314,8 +1212,8 @@ def test_build_table_renders_unrecorded_with_the_warning_emoji():
 
 
 def test_build_table_unrecorded_still_shows_its_resources_count():
-    # The apply genuinely ran and its output is real -- the resources column
-    # must not go blank just because the check was never completed.
+    # The apply ran and its output is real, so the resources column must not go blank
+    # because the check was never completed.
     rows = [_row(status="unrecorded", stack_display="db", environment="prod")]
     table = ac.build_table(rows, [], RUN_URL)
     assert "+1 ~0 -0" in table
@@ -1340,13 +1238,10 @@ def test_build_comment_no_unrecorded_note_when_nothing_is_unrecorded():
 
 
 def test_failure_line_present_even_when_an_unrecorded_row_already_explains_it():
-    # A ⚠️ row plus its note explains ONE cell in ONE environment; it says
-    # nothing about a different environment whose job died before any cell
-    # reported. Suppressing the generic ❌ on `unrecorded` would let that ⚠️
-    # silently swallow the only failure signal a dead-before-any-cell
-    # environment ever gets (see the mixed-environments test below), so the
-    # line must still render even in this single-row, same-environment case:
-    # the redundancy beside the ⚠️ never loses a signal.
+    """An unrecorded row plus its note explains one cell in one environment and says nothing about a
+    different environment whose job died before any cell reported. Suppressing the generic failure
+    line on `unrecorded` would swallow that environment's only failure signal, so it renders even in
+    this single-row, same-environment case."""
     rows = [_row(status="unrecorded", stack_display="db", environment="prod")]
     assert ac._failure_line("success,failure", rows, "prod") == (
         ":x: shipmate: `shipmate apply prod` failed."
@@ -1354,14 +1249,10 @@ def test_failure_line_present_even_when_an_unrecorded_row_already_explains_it():
 
 
 def test_failure_line_present_for_mixed_unrecorded_and_not_attempted_across_envs():
-    # The finding: an all-environments run where env A reports one
-    # `unrecorded` cell (its apply ran but the check never completed) while
-    # env B's job died before any cell reported at all (a denied
-    # `<env>-apply` environment, a job-level cancel) -- env B has only
-    # `not_attempted` rows, never `failed`. Pre-fix, the `unrecorded` row in
-    # env A suppressed the job-level failure line, leaving the whole bare-form
-    # comment with a ⚠️, an ⏭️ note, and no ❌ anywhere despite the run
-    # genuinely having failed.
+    """An all-environments run where env A reports one `unrecorded` cell -- its apply ran, its check
+    never completed -- while env B's job died before any cell reported (a denied `<env>-apply`
+    environment, a job-level cancel) and so has only `not_attempted` rows. An `unrecorded` row
+    suppressing the job-level failure line leaves no failure marker."""
     rows = [
         _row(status="unrecorded", stack_display="db", environment="dev-eu"),
         _row(
@@ -1377,17 +1268,16 @@ def test_failure_line_present_for_mixed_unrecorded_and_not_attempted_across_envs
 
 
 def test_build_comment_promoted_row_carries_no_stays_pending_note():
-    # not_attempted + done check -> applied: the comment must stop telling the
-    # reader to retry a cell that actually applied.
+    # not_attempted plus a done check promotes to applied, so the comment must stop
+    # telling the reader to retry a cell that applied.
     rows = [_row(status="not_attempted", stack_path="stacks/app", apply_text=None)]
     ac.apply_check_state(rows, {"apply / stacks/app / dev-eu"}, {"apply / stacks/app / dev-eu"})
     comment = ac.build_comment(rows, [], RUN_URL, "pending", [], [], "dev-eu")
     assert "| ✅ |" in comment
     assert ac._not_attempted_note("dev-eu") not in comment
-    # A link-only section, no fence -- and it must NOT claim the output was too
-    # large: nothing was ever captured for this cell, and the linked run may not
-    # even be the run that applied it (a different run may have completed the
-    # check, in which case _job_url falls back to this run's URL).
+    # A link-only section, no fence, and it must not claim the output was too large:
+    # nothing was captured for this cell, and the linked run may not be the run that
+    # applied it -- another run may have completed the check, and _job_url falls back.
     assert "Apply output unavailable for this cell" in comment
     assert "too large" not in comment
     assert "```" not in comment
@@ -1402,8 +1292,8 @@ def test_build_comment_genuinely_pending_row_keeps_the_stays_pending_note():
 
 
 def test_build_comment_unrecorded_note_precedes_the_not_attempted_note():
-    # A stranded applied cell needs a re-plan; a not-attempted one just needs a
-    # retry. The more urgent statement reads first.
+    # A stranded applied cell needs a re-plan; a not-attempted one needs a retry. The
+    # more urgent statement reads first.
     rows = [
         _row(status="unrecorded", stack_display="db", environment="prod"),
         _row(status="not_attempted", stack_display="stacks/x", environment="prod", apply_text=None),
@@ -1412,15 +1302,11 @@ def test_build_comment_unrecorded_note_precedes_the_not_attempted_note():
     assert comment.index("applied but not recorded") < comment.index("not attempted —")
 
 
-# --- review findings: note cap, shape degradation, coupling, end-to-end ------
-
-
 def test_unrecorded_note_is_capped_and_summarizes_the_rest():
-    # The note rides in `top`, the one string the HARD_CAP table-only fallback
-    # re-emits verbatim, so an uncapped note could only push the render into
-    # the fail-loud SystemExit -- costing the whole comment on exactly the run
-    # that needed it, since the usual cause of `unrecorded` rows (an expired
-    # App key, a checks-API outage) strands a whole wide matrix at once.
+    """The note rides in `top`, the one string the HARD_CAP table-only fallback re-emits verbatim,
+    so an uncapped note could only push the render into the fail-loud SystemExit -- costing the
+    whole comment on the run that needed it, since the usual cause of `unrecorded` rows (an expired
+    App key, a checks-API outage) strands a wide matrix."""
     rows = [
         _row(status="unrecorded", stack_display=f"s{i:03}", stack_path=f"stacks/s{i:03}")
         for i in range(60)
@@ -1428,7 +1314,7 @@ def test_unrecorded_note_is_capped_and_summarizes_the_rest():
     note = ac._unrecorded_note(rows)
     assert "**s000 / dev-eu**" in note
     assert f"and {60 - ac._UNRECORDED_NAMED} more" in note
-    assert "**s059 / dev-eu**" not in note  # beyond the cap, summarized instead
+    assert "**s059 / dev-eu**" not in note  # Beyond the cap, so it is summarized instead.
     assert len(note) < 1_000
 
 
@@ -1444,8 +1330,8 @@ def test_unrecorded_note_names_every_cell_when_under_the_cap():
 
 
 def test_build_comment_wide_unrecorded_run_still_produces_a_comment():
-    # End of the same finding: a whole matrix stranded at once, with long
-    # author-controlled display names, must still render rather than raise.
+    # A whole matrix stranded at once, with long author-controlled display names, must
+    # still render rather than raise.
     long_name = "s" * 180
     rows = [
         _row(
@@ -1462,15 +1348,10 @@ def test_build_comment_wide_unrecorded_run_still_produces_a_comment():
 
 
 def test_load_check_maps_malformed_shape_degrades_with_a_warning(tmp_path, capsys):
-    # Valid JSON per line, but not the check-run shape the helpers expect. Two
-    # sub-cases, and only the second one can raise:
-    #
-    #   - a scalar element inside .check_runs raises inside from_app's own
-    #     `(r.get("app") or {})`;
-    #   - a dict that survives from_app (its app id matches) but carries no
-    #     usable `name` reaches latest_by_name's `run["name"].startswith(...)`.
-    #
-    # Either way it must cost the check-state axis only, never the comment.
+    """Valid JSON per line, but not the check-run shape the helpers expect: a scalar element inside
+    `.check_runs` raises inside from_app's own `(r.get("app") or {})`, and a dict that survives
+    from_app with no usable `name` reaches latest_by_name's `run["name"].startswith(...)`. Either
+    way it costs the check-state axis only."""
     reaching = [
         '"just a string"',
         "42",
@@ -1486,10 +1367,9 @@ def test_load_check_maps_malformed_shape_degrades_with_a_warning(tmp_path, capsy
 
 
 def test_load_check_maps_drops_records_with_no_app_silently(tmp_path, capsys):
-    # A well-formed dict with no (or a foreign) `app` is not corruption: it is
-    # from_app's deliberate fail-closed filter doing its job, so it degrades to
-    # no data for that name WITHOUT a warning. Pinned so a future widening of
-    # the except clause cannot start shouting about the normal filtered case.
+    # A well-formed dict with no (or a foreign) `app` is not corruption but from_app's
+    # fail-closed filter working, so it degrades to no data for that name without a
+    # warning. Pinned so a widened except clause cannot start shouting about it.
     for payload in ({"status": "completed"}, {"name": "apply / stacks/app / dev-eu"}):
         p = tmp_path / "checks.jsonl"
         p.write_text(json.dumps(payload), encoding="utf-8")
@@ -1498,14 +1378,10 @@ def test_load_check_maps_drops_records_with_no_app_silently(tmp_path, capsys):
 
 
 def test_check_name_grammar_matches_apply_cells_construction():
-    # Coupling: apply-snapshot builds the apply check's NAME (to look up the
-    # pre-existing check ids before any wave runs -- apply-cell itself holds no
-    # App key and builds no check name any more), apply-comment forward-builds
-    # the same string to look that check up. A divergence is silent by design
-    # -- every lookup would miss, _check_state would return CHECK_UNKNOWN for
-    # every row, and the comment would quietly revert to the artifact-only
-    # rendering this feature exists to correct. Same posture as
-    # test_cell_schema_guard_apply_cell_writes_every_required_key above.
+    """Coupling: apply-snapshot builds the apply check's name -- apply-cell holds no App key and
+    builds none -- and apply-comment forward-builds that string to look the check up. A divergence
+    is silent: every lookup misses, `_check_state` returns CHECK_UNKNOWN for every row, and the
+    comment reverts to the artifact-only rendering this corrects."""
     src = (_ENGINE / "scripts" / "apply-snapshot").read_text(encoding="utf-8")
     expected = 'f"apply / {stack} / {env}"'
     assert expected in src, (
@@ -1514,44 +1390,37 @@ def test_check_name_grammar_matches_apply_cells_construction():
         "and _job_url forward-build that exact grammar to look the check up, "
         "and a mismatch makes every lookup miss silently"
     )
-    # And the reader's half, exercised rather than restated: the name
-    # _check_state builds for a known row must be that same string.
+    # And the reader's half, exercised rather than restated: the name `_check_state`
+    # builds for a known row must be that same string.
     row = _row(environment="dev-eu", stack_path="stacks/app")
     assert ac._check_state(row, {"apply / stacks/app / dev-eu"}, set()) == ac.CHECK_PENDING
 
 
 def test_env_level_count_matches_env_orders():
-    # apply-comment keeps its own copy of the constant (see the comment there),
-    # so the equality is pinned here rather than by construction.
+    # apply-comment keeps its own copy of the constant, so the equality is pinned here
+    # rather than by construction.
     assert ac.MAX_ENV_LEVELS == eo.MAX_ENV_LEVELS
 
 
 def test_wave_job_name_matches_the_apply_check_grammar():
-    # Coupling: _job_url resolves a row's per-cell log link by matching the
-    # apply check name as a `/ `-boundary suffix of the run's JOB names, which
-    # only works because every apply-env-level wave job's `name:` is byte-
-    # identical to the check name apply-cell/pending-checks build. Nothing else
-    # enforces that; a rename of either side would silently downgrade every
-    # link in the apply result comment to the workflow-run URL, which is also
-    # the documented degradation, so no test would fail on the observable.
+    """Coupling: `_job_url` resolves a row's log link by matching the apply check name as a `/
+    `-boundary suffix of the run's job names, which works only because every wave job's `name:` is
+    byte-identical to that check name. Nothing else enforces it, and a rename downgrades every link
+    to the run URL -- the documented degradation, so nothing fails."""
     src = (_ENGINE / ".github" / "workflows" / "apply-env-level.yml").read_text(encoding="utf-8")
     names = [ln.strip() for ln in src.splitlines() if ln.strip().startswith("name: apply / ")]
     expected = "name: apply / ${{ matrix.stack }} / ${{ matrix.environment }}"
-    # Width from waves.MAX_WAVES so a bump cannot leave this asserting the old
-    # count.
+    # Width from waves.MAX_WAVES, so a bump cannot leave this asserting the old count.
     max_waves = wv.MAX_WAVES
     assert names == [expected] * max_waves, (
         f"all {max_waves} wave job display names must stay byte-identical to the "
         "'apply / <stack path> / <env>' check-name grammar -- scripts/apply-comment's "
         f"_job_url matches it as a job-name suffix (got: {sorted(set(names))})"
     )
-    # Pinning the two name literals is not enough: they only agree if the wave
-    # job hands apply-cell the SAME matrix keys it renders itself from. The job
-    # already feeds two inputs off one key (`stack:` and `stack-name:`), so a
-    # later change that routed a display name through `matrix.stack` would keep
-    # both literals intact while the rendered name stopped equalling the check
-    # name apply-cell builds from these inputs.
-    # `env:` alone is the job-level env mapping, not the apply-cell input.
+    # The two literals agree only if the wave job hands apply-cell the same matrix keys it
+    # renders from: it already feeds two inputs off one key (`stack:`, `stack-name:`), so a
+    # display name routed through `matrix.stack` keeps both literals and breaks the name.
+    # Bare `env:` is the job-level env mapping, not the apply-cell input.
     wired = [
         ln.strip()
         for ln in src.splitlines()
@@ -1563,8 +1432,8 @@ def test_wave_job_name_matches_the_apply_check_grammar():
         "apply-cell builds the check name from those two inputs, so a different "
         f"source for either silently breaks the name/job-name equality (got: {sorted(set(wired))})"
     )
-    # The reader's half, exercised: a nested-display job name built from that
-    # same grammar must resolve, for the same row _check_state agrees on.
+    # The reader's half, exercised: a nested-display job name built from that grammar
+    # must resolve, for the same row `_check_state` agrees on.
     row = _row(environment="dev-eu", stack_path="stacks/app")
     jobs = [_job("post-merge / L0 / apply / stacks/app / dev-eu", "https://gh/job/1")]
     assert ac._job_url(row, jobs, RUN_URL) == "https://gh/job/1"
@@ -1595,13 +1464,10 @@ def _main_env(monkeypatch, tmp_path, cells_dir, waves_json, checks_path):
 
 
 def test_main_folds_checks_jsonl_into_the_rendered_comment(monkeypatch, tmp_path):
-    # The seam the action actually depends on, end to end: the file the scan
-    # step writes must be read, filtered to the App, and folded into
-    # comment.md. Every other check-state test calls the helpers directly, so
-    # without this a refactor that dropped apply_check_state's result (or moved
-    # the call below the `if not rows` branch) would ship a comment with no
-    # promotions and no unrecorded rows while the whole suite stayed green --
-    # and GitHub Actions cannot be run locally to catch it.
+    """The seam the action depends on, end to end, since GitHub Actions cannot run locally: the file
+    the scan step writes is read, filtered to the App, folded into comment.md. Dropping
+    `apply_check_state`'s result, or moving the call below the `if not rows` branch, ships a comment
+    with no promotions and no unrecorded rows, suite still green."""
     cells = tmp_path / "cells"
     _write_cell(cells, "dev-eu", "stacks-app", _cell(stack="app", stack_path="stacks/app"))
     checks = tmp_path / "checks.jsonl"
@@ -1634,9 +1500,8 @@ def test_main_promotes_a_missing_artifact_whose_check_is_done(monkeypatch, tmp_p
 
 
 def test_main_without_checks_file_renders_the_artifact_only_comment(monkeypatch, tmp_path):
-    # The pinned-action skew window and every scan failure land here: no
-    # checks.jsonl means no data means unknown, and the comment must read
-    # exactly as it did before this feature existed.
+    # The pinned-action skew window and every scan failure land here: no checks.jsonl
+    # means no data, which means unknown, so the comment reads as the artifact-only one.
     cells = tmp_path / "cells"
     _write_cell(cells, "dev-eu", "stacks-app", _cell(stack="app", stack_path="stacks/app"))
     waves = json.dumps({"wave0": [{"stack": "stacks/app", "environment": "dev-eu"}]})
@@ -1645,9 +1510,6 @@ def test_main_without_checks_file_renders_the_artifact_only_comment(monkeypatch,
     body = (tmp_path / "comment.md").read_text(encoding="utf-8")
     assert "| ✅ | app | dev-eu |" in body
     assert "applied but not recorded" not in body
-
-
-# --- state-lock note ---------------------------------------------------------
 
 
 def test_lock_note_names_the_cell_the_lock_and_the_release_command():
@@ -1679,8 +1541,8 @@ def test_lock_note_is_empty_without_a_lock():
 
 
 def test_lock_note_ignores_a_lock_in_a_cell_that_did_not_fail():
-    # A lock report in an applied cell's output is a retry that then succeeded
-    # (or author-controlled text imitating one); nothing is stranded.
+    # A lock report in an applied cell's output is a retry that then succeeded, or
+    # author-controlled text imitating one; nothing is stranded.
     rows = [
         _row(
             status="applied",
@@ -1702,8 +1564,8 @@ def test_lock_note_promises_no_run_attribution():
         )
     ]
     note = ac._lock_note(rows, "dev-eu")
-    # `Who` is useless (runner@fv-az… on a hosted runner), so lock-info never
-    # returns it and the note may not claim to name a run.
+    # `Who` is useless (runner@fv-az… on a hosted runner), so lock-info never returns it
+    # and the note may not claim to name a run.
     assert "LAPTOP" not in note and "run #" not in note
 
 
@@ -1725,8 +1587,8 @@ def test_lock_note_caps_the_named_cells():
 
 def test_lock_note_escapes_author_controlled_names():
     # Same reasoning as the unrecorded note: stack_display and environment are
-    # author-controlled, so **bold** + _md_escape, never a backtick code span
-    # (_md_escape does not escape a backtick).
+    # author-controlled, so bold plus _md_escape, never a backtick code span, because
+    # _md_escape does not escape a backtick.
     rows = [
         _row(
             status="failed",
@@ -1749,9 +1611,9 @@ def _lock_text(created):
 
 
 def test_lock_note_omits_held_since_when_the_created_value_was_refused():
-    # `Created` is unbounded runtime output, so lock-info blanks a value that
-    # fails its guard rather than losing the whole lock (the id is what the
-    # engine acts on). The note must then read grammatically without it.
+    # `Created` is unbounded runtime output, so lock-info blanks a value that fails its
+    # guard rather than losing the whole lock, the id being what the engine acts on. The
+    # note must then read grammatically without it.
     rows = [
         _row(
             status="failed",
@@ -1768,11 +1630,10 @@ def test_lock_note_omits_held_since_when_the_created_value_was_refused():
 
 
 def test_lock_note_cannot_blow_the_comment_cap():
-    # apply.txt is capped at SIZE_BUDGET, not per-field: a crafted `Created:`
-    # line of ~59,900 chars parses fine, and _LOCK_NAMED bounds the cell COUNT,
-    # not the rendered LENGTH. The note rides in `top`, which the HARD_CAP
-    # table-only fallback re-emits verbatim and can never shed -- so an
-    # unguarded value would cost the whole comment with 2-3 failed cells.
+    """apply.txt is capped at SIZE_BUDGET, not per field: a crafted `Created:` line of ~59,900 chars
+    parses fine, and `_LOCK_NAMED` bounds the cell count, not the rendered length. The note rides in
+    `top`, which the HARD_CAP table-only fallback re-emits verbatim and can never shed, so an
+    unguarded value costs the comment at 2-3 cells."""
     rows = [
         _row(
             status="failed",
