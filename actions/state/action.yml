@@ -12,9 +12,9 @@ inputs:
     required: true
   path:
     description: >-
-      State path to cache. No default: pass the flavor's actual backend
-      location (e.g. stacks ".state", folders "<leaf>/terraform.tfstate",
-      workspaces "terraform.tfstate.d") so state is actually persisted.
+      State path to cache. No default: pass the location the flavor's backend writes to
+      (stacks ".state", folders "<leaf>/terraform.tfstate", workspaces
+      "terraform.tfstate.d"), or nothing is persisted.
     required: true
 runs:
   using: composite

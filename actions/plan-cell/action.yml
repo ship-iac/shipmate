@@ -18,7 +18,7 @@ inputs:
     required: false
     default: "7"
   plan-passphrase:
-    description: Optional passphrase to encrypt the .otplan artifact at rest. Empty = plaintext (backward compatible).
+    description: Passphrase to encrypt the .otplan artifact at rest. Empty = plaintext (backward compatible).
     required: false
     default: ""
 runs:
@@ -29,12 +29,10 @@ runs:
       shell: bash
       env:
         EXPECTED_HEAD: ${{ inputs.expected-head }}
-      # First step on purpose. `Plan` below runs author-controlled HCL and
-      # provider binaries through terramate, so a rev-parse after it reports
-      # whatever git state that content left behind. The value is emitted as a
-      # step output rather than written to a file here: a file at repo root
-      # would be rewritable by the code `Plan` executes, an emitted output is
-      # not.
+      # First step on purpose: `Plan` runs author-controlled HCL and provider binaries through
+      # terramate, so a rev-parse after it reports whatever git state that content left behind.
+      # The value is emitted as a step output rather than written to a file, because a file at
+      # repo root would be rewritable by the code `Plan` executes and an output is not.
       run: |
         set -euo pipefail
         if [ -z "${EXPECTED_HEAD:-}" ]; then
@@ -52,34 +50,34 @@ runs:
       shell: bash
       env:
         STACK: ${{ inputs.stack }}
-      # The engine owns the tofu command line: a pull request cannot redefine
-      # what "plan" means. terramate stays in the path for stack cwd and the
-      # safeguard policy only.
-      # `init` sits above the group marker: its output is setup noise, not plan
-      # output. errexit is lifted for the plan itself so the group is closed on
-      # a failing plan too -- tofu's error text is the one thing a reader needs
-      # here, and an unclosed `::group::` collapses it.
-      # Restored local-backend workspace state arrives without the `.terraform`
-      # record that marks the backend initialised, so `init` reads it as legacy
-      # state awaiting migration and `-input=false` turns that question into a
-      # hard error. Hide it across the init and put it back either way: under
-      # `-reconfigure` a migration is never intended, and non-interactively it
-      # could never have been answered. errexit is lifted only so the restore
-      # runs on a failed init; the explicit exit keeps that failure fatal.
+      # The engine owns the tofu command line: a pull request cannot redefine what "plan" means.
+      # terramate stays in the path for the stack cwd and the safeguard policy only.
       run: |
         set -euo pipefail
+        # Restored local-backend workspace state carries no `.terraform` record marking the
+        # backend initialised, so `init` reads it as legacy state awaiting migration and
+        # `-input=false` turns that question into a hard error.
         ws="$STACK/terraform.tfstate.d"
         hidden=$(mktemp -du "$RUNNER_TEMP/tfstate.d.XXXXXX")
+        # The workspace state is hidden across the init and put back either way: under
+        # `-reconfigure` a migration is never intended, and non-interactively it could never
+        # have been answered.
         if [ -d "$ws" ]; then mv "$ws" "$hidden"; fi
+        # errexit is lifted only so the workspace restore runs even on a failed init.
         set +e
+        # `init` sits above the group marker: its output is setup noise, not plan output.
         terramate run --disable-safeguards=git-out-of-sync --no-recursive -C "$STACK" -- tofu init -input=false -reconfigure
         init_status=$?
         set -e
         # init recreates $ws empty; drop that so the real state replaces it
         # rather than being moved inside it.
         if [ -d "$hidden" ]; then rm -rf "$ws"; mv "$hidden" "$ws"; fi
+        # Fatal: nothing is planned against state the engine could not initialise.
         [ "$init_status" -eq 0 ] || exit "$init_status"
         echo "::group::terramate plan: $STACK"
+        # errexit is lifted for the plan itself so the group is closed on a failing plan too --
+        # tofu's error text is the one thing a reader needs here, and an unclosed `::group::`
+        # collapses it.
         set +e
         terramate run --disable-safeguards=git-out-of-sync --no-recursive -C "$STACK" -- tofu plan -input=false -lock=false -out=stack.otplan
         status=$?
@@ -141,10 +139,9 @@ runs:
       shell: bash
       env:
         PLANNED_HEAD: ${{ steps.planned.outputs.head }}
-      # Written here, not in the step that captured it: between the two,
-      # `Plan` executes repository content that could rewrite a file at repo
-      # root. The output cannot be rewritten, so the file is materialised from
-      # it at the last possible moment.
+      # Written here, not in the step that captured it: between the two, `Plan` executes
+      # repository content that could rewrite a file at repo root. The output cannot be
+      # rewritten, so the file is materialised from it at the last possible moment.
       run: |
         set -euo pipefail
         if [ -z "${PLANNED_HEAD:-}" ]; then

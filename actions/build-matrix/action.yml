@@ -24,13 +24,13 @@ inputs:
     default: ""
   no-pull-request:
     description: >-
-      Set to 'true' only in a workflow with no pull-request context at all (nightly drift), which
-      is what skips the head-repository and head-commit checks. Never set it in a plan wrapper.
+      Set to 'true' only in a workflow with no pull-request context (nightly drift). It skips
+      the head-repository and head-commit checks. Never set it in a plan wrapper.
     required: false
     default: "false"
   tags:
     description: >-
-      Optional Terramate tag query narrowing the cells this run covers, in the on-disk tag
+      Terramate tag query narrowing the cells this run covers, in the on-disk tag
       form: ',' is OR and ':' is AND, so 'env/dev-eu,env/dev-us' is either environment and
       'env/dev-eu:workload/app' is both. Empty (the default) covers every cell. Allowed only
       alongside no-pull-request (nightly drift), because narrowing a plan run would leave

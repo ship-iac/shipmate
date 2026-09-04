@@ -19,10 +19,10 @@ runs:
         GH_TOKEN: ${{ inputs.github-token }}
         SHIPMATE_WAVES_JSON: ${{ inputs.waves-json }}
         SHIPMATE_SHARED_ENVS: ${{ inputs.shared-envs }}
-      # Unpaginated on purpose: the script refuses a listing whose total_count
-      # exceeds what it read, because a missing page is indistinguishable from a
-      # missing environment. A failed listing exits non-zero here rather than
-      # warning — a check that did not happen must not let the applies through.
+      # Unpaginated on purpose: the script refuses a listing whose total_count exceeds what it
+      # read, because a missing page is indistinguishable from a missing environment. A failed
+      # listing exits non-zero rather than warning: a check that did not happen must not let the
+      # applies through.
       run: |
         set -euo pipefail
         gh api "repos/$GITHUB_REPOSITORY/environments?per_page=100" \

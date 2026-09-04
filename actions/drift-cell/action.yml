@@ -1,5 +1,5 @@
 name: shipmate drift-cell
-description: Plan one stack x env; hand a drift-summary cell artifact to a trusted trailing job. Never re-plans an Issue itself and holds no App key — a plan environment must stay policy-free for planning to work, so a job naming one is reachable from a feature branch.
+description: Plan one stack x env; hand a drift-summary cell artifact to a trusted trailing job. Opens no Issue itself and holds no App key — a plan environment must stay policy-free for planning to work, so a job naming one is reachable from a feature branch.
 inputs:
   stack:
     description: Stack path, e.g. stacks/app.
@@ -42,55 +42,47 @@ runs:
       shell: bash
       env:
         STACK: ${{ inputs.stack }}
-      # `init` sits above the group marker: its output is setup noise, not plan
-      # output. errexit is lifted for the plan itself so the group is closed on
-      # a failing plan too -- tofu's error text is the one thing a reader needs
-      # here, and an unclosed `::group::` collapses it. The explicit exit keeps
-      # a failed plan from falling through to the classify steps below.
-      # Restored local-backend workspace state arrives without the `.terraform`
-      # record that marks the backend initialised, so `init` reads it as legacy
-      # state awaiting migration and `-input=false` turns that question into a
-      # hard error. Hide it across the init and put it back either way: under
-      # `-reconfigure` a migration is never intended, and non-interactively it
-      # could never have been answered. errexit is lifted only so the restore
-      # runs on a failed init; the explicit exit keeps that failure fatal.
       run: |
         set -euo pipefail
+        # Restored local-backend workspace state carries no `.terraform` record marking the
+        # backend initialised, so `init` reads it as legacy state awaiting migration and
+        # `-input=false` turns that question into a hard error.
         ws="$STACK/terraform.tfstate.d"
         hidden=$(mktemp -du "$RUNNER_TEMP/tfstate.d.XXXXXX")
+        # The workspace state is hidden across the init and put back either way: under
+        # `-reconfigure` a migration is never intended, and non-interactively it could never
+        # have been answered.
         if [ -d "$ws" ]; then mv "$ws" "$hidden"; fi
+        # errexit is lifted only so the workspace restore runs even on a failed init.
         set +e
+        # `init` sits above the group marker: its output is setup noise, not plan output.
         terramate run --disable-safeguards=git-out-of-sync --no-recursive -C "$STACK" -- tofu init -input=false -reconfigure
         init_status=$?
         set -e
         # init recreates $ws empty; drop that so the real state replaces it
         # rather than being moved inside it.
         if [ -d "$hidden" ]; then rm -rf "$ws"; mv "$hidden" "$ws"; fi
+        # Fatal: nothing is planned against state the engine could not initialise.
         [ "$init_status" -eq 0 ] || exit "$init_status"
         echo "::group::terramate plan: $STACK"
+        # errexit is lifted for the plan itself so the group is closed on a failing plan too --
+        # tofu's error text is the one thing a reader needs here, and an unclosed `::group::`
+        # collapses it.
         set +e
         terramate run --disable-safeguards=git-out-of-sync --no-recursive -C "$STACK" -- tofu plan -input=false -lock=false -out=stack.otplan
         status=$?
         set -e
         echo "::endgroup::"
+        # The explicit exit keeps a failed plan from falling through to the `tofu show` and
+        # plan-classify lines that follow.
         [ "$status" -eq 0 ] || exit "$status"
         tofu -chdir="$STACK" show -json stack.otplan > plan.json
         python3 "$GITHUB_ACTION_PATH/../../scripts/plan-classify" plan.json
 
     - name: Compose cell summary
-      # Runs even when a prior step failed (state restore, or the plan itself)
-      # -- the aggregator needs a result for every attempted-or-blocked cell,
-      # and drift-issues must never silently auto-close an existing Issue for
-      # a stack x env whose plan attempt itself did not succeed. plan_ok is
-      # false whenever `steps.plan` did not conclude with success (including
-      # 'skipped', when an earlier step failed); drift-issues treats a
-      # plan_ok=false cell as unknown and leaves its Issue state untouched,
-      # rather than reading a missing/blank DRIFTED output as "clean".
-      # NOT continue-on-error, unlike apply-cell's namesake: this cell.json is
-      # the ONLY channel by which this cell's drift reaches the trailing
-      # `issues` job. Lose it and drift-issues' glob simply does not see the
-      # cell -- no Issue, no Slack, and a green nightly run over real drift.
-      # Writes cell.json to $RUNNER_TEMP, not the repo tree.
+      # always(): a state restore or the plan itself may have failed, and the aggregator needs
+      # a result for every attempted-or-blocked cell. drift-issues must never silently auto-close
+      # an existing Issue for a stack x env whose plan attempt itself did not succeed.
       if: always()
       shell: bash
       env:
@@ -107,6 +99,9 @@ runs:
         python3 - <<'PY'
         import json, os
 
+        # plan_ok is false whenever `Plan + classify drift` did not conclude with success,
+        # 'skipped' included. drift-issues treats such a cell as unknown and leaves its Issue
+        # state untouched, rather than reading a missing or blank DRIFTED output as "clean".
         plan_ok = os.environ["PLAN_OUTCOME"] == "success"
         cell = {
             "stack": os.environ["STACK"],
@@ -124,15 +119,14 @@ runs:
         PY
 
     - name: Upload drift summary
-      # NOT continue-on-error, unlike apply-cell's namesake (whose artifact is
-      # only comment data): this upload is the sole path by which this cell's
-      # drift becomes visible at all, so losing it must fail the cell rather
-      # than leave a green run and an unreported drift.
-      # overwrite: true so a job re-run in the same workflow run cannot 409 on
-      # the pre-existing artifact name.
+      # NOT continue-on-error, unlike apply-cell's namesake, whose artifact is only comment
+      # data: this upload is the ONLY channel by which this cell's drift becomes visible at all.
+      # Lose it and drift-issues' glob does not see the cell -- no Issue, no Slack, and a green
+      # nightly run over real drift.
       if: always()
       uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
       with:
         name: drift-summary.${{ inputs.env }}.${{ steps.ids.outputs.slug }}
         path: ${{ runner.temp }}/cell.json
+        # A job re-run in the same workflow run would otherwise 409 on the pre-existing name.
         overwrite: true
