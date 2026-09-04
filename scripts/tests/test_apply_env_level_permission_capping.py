@@ -1,15 +1,13 @@
-"""A reusable workflow's jobs cannot request a `GITHUB_TOKEN` scope above what
-the *calling* job granted -- permissions only ever narrow across a `uses:`
-boundary, never widen. `apply-env-level.yml`'s `snapshot` job requests
-`checks: read`; every caller job that `uses:` it must grant at least that, or
-GitHub fails the run at workflow-resolution time and every `shipmate apply`
-and post-merge `deploy` breaks before a single wave runs.
+"""A reusable workflow's jobs cannot request a `GITHUB_TOKEN` scope above what the calling job
+granted: permissions only ever narrow across a `uses:` boundary, never widen.
+`apply-env-level.yml`'s `snapshot` job requests `checks: read`, so every caller job that `uses:`
+it must grant at least that. Otherwise GitHub fails the run at workflow-resolution time, and
+every `shipmate apply` and post-merge `deploy` breaks before a single wave runs.
 
-Source-derived, not a hardcoded list of caller sites: this reads the union of
-every job's `permissions:` inside `apply-env-level.yml` itself and checks it
-against each caller found by scanning every engine workflow for a `uses:`
-pointing at it, so a future job added to the callee (or a new caller) is
-covered automatically instead of silently falling outside a stale list.
+Source-derived, not a hardcoded list of caller sites. It reads the union of every job's
+`permissions:` inside `apply-env-level.yml` and checks it against each caller found by scanning
+every engine workflow for a `uses:` pointing at it, so a job added to the callee, or a new
+caller, is covered instead of silently falling outside a stale list.
 """
 
 import re
@@ -20,9 +18,9 @@ from _loader import WORKFLOWS
 CALLEE = "apply-env-level.yml"
 _CALLEE_REF = re.compile(r"apply-env-level\.yml(?:@|$)")
 
-# GitHub's permission scale for a single scope: absence/`none` grants nothing,
-# `read` and `write` are strictly ordered above it. A caller must grant a
-# level >= what the callee's jobs collectively require for every scope.
+# GitHub's permission scale for a single scope: absence and `none` grant nothing, `read` and
+# `write` are strictly ordered above it. For every scope, a caller must grant a level at least
+# what the callee's jobs collectively require.
 _RANK = {"none": 0, "read": 1, "write": 2}
 
 
@@ -35,8 +33,8 @@ def _workflow(name):
 
 
 def _callee_permission_union():
-    """The union, per scope, of every job's `permissions:` inside the callee --
-    the ceiling a caller must clear so every one of the callee's jobs can run."""
+    """The union, per scope, of every job's `permissions:` inside the callee: the ceiling a
+    caller must clear for every one of the callee's jobs to run."""
     jobs = _workflow(CALLEE)["jobs"]
     union = {}
     for job in jobs.values():
@@ -47,8 +45,8 @@ def _callee_permission_union():
 
 
 def _callers():
-    """(workflow filename, job id, job dict) for every job in every engine
-    workflow whose `uses:` targets the callee."""
+    """(workflow filename, job id, job dict) per job in any engine workflow whose `uses:` targets
+    the callee."""
     found = []
     for path in sorted(WORKFLOWS.glob("*.yml")):
         if path.name == CALLEE:
@@ -62,7 +60,8 @@ def _callers():
 
 
 def test_apply_env_level_has_at_least_one_caller():
-    # Otherwise the guard below would vacuously pass over an empty list.
+    # Otherwise test_every_caller_grants_at_least_the_callees_permission_union would pass
+    # vacuously over an empty list.
     assert _callers(), f"no engine workflow calls {CALLEE} -- guard is vacuous"
 
 

@@ -1,23 +1,21 @@
 """The non-`ship-iac` actions the engine uses must stay on the allowed-actions list.
 
-Every repository that runs shipmate is set to `allowed_actions: selected` with a
-named pattern list (`docs/hardening.md`, "Actions settings"). That list names the
-engine plus the third-party actions below. Adding a *new* third-party action here
-is therefore not a local change: until every consumer's list names it too, their
-next run dies in `Set up job`, and the engine's own suite stays green while it
-happens.
+Every repository that runs shipmate is set to `allowed_actions: selected` with a named pattern
+list (`docs/hardening.md`, "Actions settings"). That list names the engine plus the third-party
+actions in `THIRD_PARTY`. Adding a new third-party action here is therefore not a local change:
+until every consumer's list names it too, their next run dies in `Set up job`, and the engine's
+own suite stays green while it happens.
 
-Version bumps are free -- the patterns end `@*` -- so the set is compared by
-action path, without refs. Hand-written, never derived from the files it checks:
-a derived vector passes whatever the tree says.
+Version bumps are free, the patterns ending `@*`, so the set is compared by action path without
+refs. Hand-written, never derived from the files it checks: a derived vector passes whatever the
+tree says.
 """
 
 import yaml
 from _loader import ACTIONS, WORKFLOWS
 
-#: What `docs/hardening.md` and every consumer repository's allowed-actions list
-#: name. Changing this constant alone does not make a new action work -- see the
-#: failure message.
+#: What `docs/hardening.md` and every consumer repository's allowed-actions list name. Changing
+#: this constant alone does not make a new action work; the failure message says what does.
 THIRD_PARTY = {
     "actions/cache",
     "actions/cache/restore",
@@ -36,9 +34,8 @@ THIRD_PARTY = {
 def _uses(node):
     """Every `uses:` value anywhere in a parsed YAML document.
 
-    Parsed, not grepped: `uses:` values carry trailing version comments that a
-    line regex drops, and the literal text `uses: write` appears inside
-    `permission-statuses: write`.
+    Parsed, not grepped: `uses:` values carry trailing version comments that a line regex drops,
+    and the literal text `uses: write` appears inside `permission-statuses: write`.
     """
     if isinstance(node, dict):
         for key, value in node.items():

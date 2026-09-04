@@ -1,4 +1,3 @@
-# scripts/tests/test_plan_crypt.py
 import pytest
 from _loader import load_script
 

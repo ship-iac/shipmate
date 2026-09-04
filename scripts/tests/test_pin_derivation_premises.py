@@ -8,24 +8,22 @@ working tree, so all of them are safe to gate a PR -- and a guard that can only
 go red after the offending change has already landed on main is not blocking
 anything. That is the whole reason this module exists.
 
-What it covers -- one premise per regex the guard derives from, since a claim
-about pin currency is only as good as the regex's coverage of the thing it
-counts:
+What it covers, one premise per regex the guard derives from, because a claim about pin currency
+is only as good as the regex's coverage of the thing it counts:
 
 * ``REF`` sees every internal ``ship-iac/shipmate/<path>@<sha>`` self-reference.
 * ``SCRIPT_REF`` sees every action.yml to script invocation.
 * ``LOAD_REF`` sees every script to script cross-load, as a literal
   ``_load("<name>")`` call.
 
-A reference of any kind that its regex cannot see silently shrinks the checked
-surface: the change ships, the guard reports pins current, and consumers pinned
-to that SHA run the old code -- the same class of gap that once let a
-``scripts/apply-comment``-only change ship green.
+A reference of any kind that its regex cannot see silently shrinks the checked surface: the
+change ships, the guard reports pins current, and consumers pinned to that SHA run the old code.
+That is the class of gap which once let a ``scripts/apply-comment``-only change ship green.
 
-The asserts below deliberately key off the Python token stream rather than the
-regex under test, because comparing a regex against itself asserts nothing. They
-also read code only: ``tokenize`` drops comments, and a docstring arrives as one
-opaque STRING token, so prose mentioning ``_load(`` cannot make this red.
+The asserts key off the Python token stream rather than the regex under test, because comparing a
+regex against itself asserts nothing. They also read code only: ``tokenize`` drops comments, and
+a docstring arrives as one opaque STRING token, so prose mentioning ``_load(`` cannot make this
+red.
 """
 
 import io
@@ -33,10 +31,10 @@ import tokenize
 
 import pinrefs
 
-# Cross-loading helpers as of 2026-07-29. Named explicitly so the walk cannot go
-# vacuously green: if scripts/ is reorganised (helpers moved into a subdirectory,
-# pinrefs.ROOT mis-derived), the loop would silently iterate nothing and every
-# assert below would pass without checking a single cross-load.
+#: Cross-loading helpers as of 2026-07-29. Named explicitly so the walk cannot go vacuously
+#: green: if `scripts/` is reorganised -- helpers moved into a subdirectory, pinrefs.ROOT
+#: mis-derived -- the loop would silently iterate nothing and every assert would pass without
+#: checking a single cross-load.
 KNOWN_CROSS_LOADERS = {
     "apply-all-detect",
     "apply-comment",
@@ -48,11 +46,10 @@ KNOWN_CROSS_LOADERS = {
     "summary-comment",
 }
 
-# Module-loading machinery a helper script may not reach for. The sanctioned
-# shim is SourceFileLoader inside a local `def _load`, which LOAD_REF can see;
-# every one of these loads a sibling by a route neither derivation regex reads.
-# `importlib.util.spec_from_loader` / `module_from_spec` are absent on purpose --
-# those are what the sanctioned shim itself is built from.
+#: Module-loading machinery a helper script may not reach for. The sanctioned shim is
+#: SourceFileLoader inside a local `def _load`, which LOAD_REF can see; every one of these loads
+#: a sibling by a route neither derivation regex reads. `importlib.util.spec_from_loader` and
+#: `module_from_spec` are absent on purpose: those are what the sanctioned shim is built from.
 FORBIDDEN_LOADERS = (
     "spec_from_file_location",
     "runpy",
@@ -66,9 +63,9 @@ FORBIDDEN_LOADERS = (
 def _helper_scripts():
     """The extension-less helper scripts directly under ``scripts/``.
 
-    Extension-less is the filter, not "every file": these run as GHA steps and
-    carry no suffix, whereas anything else there (``.gitkeep``, a fixture, an
-    asset) is not a helper and need not even be UTF-8 text.
+    Extension-less is the filter, not "every file": these run as GHA steps and carry no suffix,
+    whereas anything else there -- ``.gitkeep``, a fixture, an asset -- is not a helper and need
+    not even be UTF-8 text.
     """
     d = pinrefs.ROOT / "scripts"
     return sorted(
@@ -79,9 +76,8 @@ def _helper_scripts():
 def _code_tokens(text):
     """Token stream with comments dropped, so only code is examined.
 
-    Docstrings survive as single STRING tokens, which is what makes prose
-    containing ``_load(`` invisible here: it never appears as a NAME followed by
-    an OP.
+    Docstrings survive as single STRING tokens, which is what makes prose containing ``_load(``
+    invisible here: it never appears as a NAME followed by an OP.
     """
     skip = {
         tokenize.COMMENT,
@@ -103,7 +99,7 @@ def _is_op(tok, value):
 
 
 def test_the_helper_script_set_is_not_empty_and_holds_the_known_cross_loaders():
-    """Guards the walk itself, so the checks below cannot pass vacuously."""
+    """Guards the walk itself, so the premise checks cannot pass vacuously."""
     names = {p.name for p in _helper_scripts()}
     assert names, (
         f"no extension-less helper scripts found under {pinrefs.ROOT / 'scripts'} -- "
@@ -119,12 +115,10 @@ def test_the_helper_script_set_is_not_empty_and_holds_the_known_cross_loaders():
 def test_every_script_invocation_in_an_action_is_visible_to_the_derivation():
     """The action.yml to script edge: SCRIPT_REF sees every invocation.
 
-    Every claim about pin currency assumes the derivation sees each script a
-    pinned action actually runs. That was verified by hand once; an action.yml
-    invoking a script by any other spelling -- a variable, a different relative
-    path, a `cd` first -- would be invisible to SCRIPT_REF and would silently
-    shrink the checked surface. This asserts every $GITHUB_ACTION_PATH mention
-    in every action.yml is one the regex claims.
+    Every claim about pin currency assumes the derivation sees each script a pinned action runs.
+    An action.yml invoking a script by any other spelling -- a variable, a different relative
+    path, a `cd` first -- would be invisible to SCRIPT_REF and would silently shrink the checked
+    surface. Every $GITHUB_ACTION_PATH mention in every action.yml must be one the regex claims.
     """
     actions = sorted((pinrefs.ROOT / "actions").glob("*/action.yml"))
     assert actions, (
@@ -145,15 +139,13 @@ def test_every_script_invocation_in_an_action_is_visible_to_the_derivation():
 def test_every_internal_ref_in_a_pin_bearing_source_is_visible_to_ref():
     """The pin itself: REF sees every internal self-reference.
 
-    One level up from
-    ``test_every_script_invocation_in_an_action_is_visible_to_the_derivation``.
-    REF only matches a 40-lowercase-hex SHA, by design (CONTRACT.md requires
-    internal pins to be full SHAs) -- but that means a non-SHA internal pin (a
-    tag, a short SHA, an uppercase SHA) is invisible to REF, and so invisible to
-    the guard, to ``dev/pin_status.py``, and to ``dev/repin_internal.py --all``,
-    whose whole job is not being silent about a stale or malformed internal pin.
-    This asserts every ``ship-iac/shipmate/`` mention in every pin-bearing source
-    is one REF actually matched.
+    One level up from ``test_every_script_invocation_in_an_action_is_visible_to_the_derivation``.
+    REF only matches a 40-lowercase-hex SHA by design, because CONTRACT.md requires internal pins
+    to be full SHAs, but that means a non-SHA internal pin -- a tag, a short SHA, an uppercase
+    SHA -- is invisible to REF, and so invisible to the guard, to ``dev/pin_status.py``, and to
+    ``dev/repin_internal.py --all``, whose whole job is not being silent about a stale or
+    malformed internal pin. Every ``ship-iac/shipmate/`` mention in every pin-bearing source must
+    be one REF matched.
     """
     sources = pinrefs.source_paths()
     assert sources, (
@@ -174,17 +166,15 @@ def test_every_internal_ref_in_a_pin_bearing_source_is_visible_to_ref():
 def test_every_cross_load_in_a_script_is_visible_to_load_ref():
     """Every script-to-script edge is one ``LOAD_REF`` actually sees.
 
-    Three independent ways an edge can hide, each asserted separately so the
-    failure names which one happened:
+    Three independent ways an edge can hide, each asserted separately so the failure names which
+    one happened:
 
-    1. the helper reached under another name (``_L = _load``, a ``partial``, a
-       dispatch table) -- caught by requiring every ``_load`` code token to be
-       the definition or a direct call;
-    2. a call whose argument is not a plain string literal (a variable, an
-       f-string) -- caught by comparing call sites against LOAD_REF's matches;
-    3. a loader built outside ``_load`` at all -- caught by tying the
-       construction count to the number of definitions, and by refusing the
-       other import APIs outright.
+    1. the helper reached under another name -- ``_L = _load``, a ``partial``, a dispatch table --
+       caught by requiring every ``_load`` code token to be the definition or a direct call;
+    2. a call whose argument is not a plain string literal, a variable or an f-string, caught by
+       comparing call sites against LOAD_REF's matches;
+    3. a loader built outside ``_load`` at all, caught by tying the construction count to the
+       number of definitions, and by refusing the other import APIs outright.
     """
     for script in _helper_scripts():
         rel = f"scripts/{script.name}"
@@ -199,10 +189,9 @@ def test_every_cross_load_in_a_script_is_visible_to_load_ref():
             "cross-load through that name is invisible to the derivation"
         )
 
-        # A string literal containing `_load(` is indistinguishable from a real
-        # call to a regex, so LOAD_REF would read it as an edge while the token
-        # stream (where it is one opaque STRING) would not. Rather than leave the
-        # two silently disagreeing, forbid it and say so.
+        # A string literal containing `_load(` is indistinguishable from a real call to a regex,
+        # so LOAD_REF would read it as an edge while the token stream, where it is one opaque
+        # STRING, would not. Rather than leave the two silently disagreeing, forbid it.
         in_literal = [t for t in toks if t.type == tokenize.STRING and "_load(" in t.string]
         assert not in_literal, (
             f"{rel}: a string literal contains `_load(` (line {in_literal[0].start[0]}) -- "
@@ -212,8 +201,8 @@ def test_every_cross_load_in_a_script_is_visible_to_load_ref():
 
         defs = [i for i in called if i > 0 and _is_name(toks[i - 1], "def")]
         calls = len(called) - len(defs)
-        # Compared against the derivation's own view, comments included or not,
-        # so this asserts the two agree rather than re-deriving one from the other.
+        # Compared against the derivation's own view, comments included or not, so this asserts
+        # the two agree rather than re-deriving one from the other.
         matched = len(pinrefs.LOAD_REF.findall(pinrefs.strip_comments(text)))
         assert calls == matched, (
             f"{rel}: {calls} _load( call site(s) in code but LOAD_REF matched {matched} -- "

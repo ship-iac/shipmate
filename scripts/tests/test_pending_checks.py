@@ -86,8 +86,8 @@ def test_missing_fingerprint_fails_loud(tmp_path):
 
 
 def test_plan_run_comes_from_the_environment(tmp_path, monkeypatch):
-    # A distinct value, so the assertion cannot be satisfied by a `plan_run`
-    # hardcoded to the fixture's RUN_ID.
+    # A distinct value, so the assertion cannot be satisfied by a `plan_run` hardcoded to the
+    # fixture's RUN_ID.
     _write_cell(
         tmp_path,
         "dev-eu",
@@ -151,13 +151,12 @@ def test_cells_sorted_and_multiple(tmp_path):
 
 
 def test_single_cell_downloaded_flat_still_yields_a_body(tmp_path):
-    # `actions/download-artifact` extracts into `path` itself, with no
-    # per-artifact subdirectory, whenever exactly ONE artifact matches the
-    # pattern (`artifacts.length === 1 ? resolvedPath : join(resolvedPath,
-    # name)`). A one-cell plan therefore lands at `cells/cell.json`, and a
-    # glob that insists on the nested layout emits nothing -- no pending apply
-    # check, so the pre-apply snapshot refuses ("nothing to complete
-    # afterwards") and post-merge deploy-detect finds an empty work queue.
+    """`actions/download-artifact` extracts into `path` itself, with no per-artifact
+    subdirectory, whenever exactly one artifact matches the pattern
+    (`artifacts.length === 1 ? resolvedPath : join(resolvedPath, name)`). A one-cell plan
+    therefore lands at `cells/cell.json`, and a glob insisting on the nested layout emits
+    nothing: no pending apply check, so the pre-apply snapshot refuses with "nothing to complete
+    afterwards" and post-merge deploy-detect finds an empty work queue."""
     (tmp_path / "cell.json").write_text(
         json.dumps(
             {

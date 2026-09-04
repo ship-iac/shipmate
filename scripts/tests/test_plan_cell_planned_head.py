@@ -1,25 +1,23 @@
 """actions/plan-cell must record the commit it actually planned, and the two
 steps that do it must stay where they are.
 
-A reviewed plan is trusted today because GitHub reports the plan run's head
-SHA equal to the pull request's head -- a property of the trigger, not of the
-plan. `plan-cell` therefore reads `git rev-parse HEAD` itself and carries the
-answer as `planned-head.txt` inside the plan artifact.
+A reviewed plan is trusted today because GitHub reports the plan run's head SHA equal to the
+pull request's head, which is a property of the trigger and not of the plan. `plan-cell` therefore
+reads `git rev-parse HEAD` itself and carries the answer as `planned-head.txt` inside the plan
+artifact.
 
 Both orderings guarded here are the substance of that, not house style:
 
-* `id: planned` must precede `Plan`. `Plan` runs `terramate run ... tofu plan`,
-  which executes author-controlled HCL and provider binaries; a `rev-parse`
-  after it reports whatever git state that content left behind, so the record
-  could describe a tree that was never planned.
-* `id: record-head` must follow `Plan` and read `steps.planned.outputs.head`.
-  A `planned-head.txt` written before `Plan` sits at repo root while that same
-  author-controlled content runs and is rewritable by it; a step output is not.
-  Reading `inputs.expected-head` there instead would re-derive the record from
-  the claim it is supposed to corroborate.
+* `id: planned` must precede `Plan`. `Plan` runs `terramate run ... tofu plan`, which executes
+  author-controlled HCL and provider binaries, so a `rev-parse` after it reports whatever git
+  state that content left behind and the record could describe a tree that was never planned.
+* `id: record-head` must follow `Plan` and read `steps.planned.outputs.head`. A
+  `planned-head.txt` written before `Plan` sits at repo root while that same author-controlled
+  content runs, and is rewritable by it; a step output is not. Reading `inputs.expected-head`
+  there instead would re-derive the record from the claim it is supposed to corroborate.
 
-Move either step, or point `record-head` at the input, and the artifact stops
-being evidence about the planned tree while still looking exactly like it is.
+Move either step, or point `record-head` at the input, and the artifact stops being evidence
+about the planned tree while still looking exactly like it is.
 """
 
 import os
@@ -67,18 +65,17 @@ def test_record_head_sits_between_the_plan_and_its_upload():
 
 
 def test_record_head_reads_the_captured_output_and_nothing_else():
-    # Whole-value: one hand-written constant pins both that the file comes from
-    # the captured output and that `inputs.expected-head` is not in reach here.
+    # Whole-value: one hand-written constant pins both that the file comes from the captured
+    # output and that `inputs.expected-head` is not in reach here.
     assert _steps()[_by_id("record-head")]["env"] == {
         "PLANNED_HEAD": "${{ steps.planned.outputs.head }}"
     }
 
 
 def test_the_emitted_output_is_the_observed_commit():
-    # Pinned textually rather than behaviourally on purpose: the emit line is
-    # only reached once `$observed` and `$EXPECTED_HEAD` have compared equal, so
-    # emitting the input instead is indistinguishable from outside. The whole
-    # line is compared to a hand-written constant.
+    # Pinned textually rather than behaviourally on purpose: the emit line is only reached once
+    # `$observed` and `$EXPECTED_HEAD` have compared equal, so emitting the input instead is
+    # indistinguishable from outside. The whole line is compared to a hand-written constant.
     lines = [ln.strip() for ln in _steps()[_by_id("planned")]["run"].strip().splitlines()]
     assert lines[-1] == 'echo "head=$observed" >> "$GITHUB_OUTPUT"'
 
@@ -94,9 +91,9 @@ def test_the_plan_upload_carries_the_record():
 
 
 def _run(tmp_path, script_body, env):
-    """Execute a real, unmodified `run:` body from action.yml with `git`
-    replaced by a bash function -- bash resolves a function before searching
-    PATH, so this needs no fake executable and no exec bit."""
+    """Execute a real, unmodified `run:` body from action.yml with `git` replaced by a bash
+    function. Bash resolves a function before searching PATH, so this needs no fake executable
+    and no exec bit."""
     assert _BASH is not None  # callers are skipif-gated on this; narrows the type too
     script = tmp_path / "step.sh"
     script.write_text(script_body, encoding="utf-8", newline="\n")
@@ -128,9 +125,8 @@ def test_an_empty_expected_head_is_refused_and_emits_nothing(tmp_path):
     r, written = _run_planned(tmp_path, expected_head="")
     assert r.returncode != 0, f"stdout={r.stdout!r} stderr={r.stderr!r}"
     assert "expected-head" in r.stdout, r.stdout
-    # Nothing emitted: a downstream step reading an output that was never set
-    # gets the empty string, which `record-head` refuses -- but only if this
-    # step wrote no plausible value first.
+    # Nothing emitted: a downstream step reading an output that was never set gets the empty
+    # string, which `record-head` refuses, but only if this step wrote no plausible value first.
     assert written == "", written
 
 

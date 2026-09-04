@@ -23,7 +23,7 @@ def test_parse_dot_matches_fixture_dag():
 def test_levels_are_topological():
     deps = w.parse_dot(FIXTURE)
     lv = w.levels(deps)
-    # level 0 = roots: dns AND the isolated sandbox/box (both dependency-free)
+    # level 0 is the roots: dns and the isolated sandbox/box, both dependency-free.
     assert "stacks/dns" in lv[0] and "stacks/sandbox/box" in lv[0]
     assert lv[1] == ["stacks/platform"]
     assert set(lv[2]) == {"stacks/auth", "stacks/workers"}
@@ -32,7 +32,7 @@ def test_levels_are_topological():
 
 
 def test_assign_waves_preserves_transitive_order_with_empty_middle():
-    # Only dns (level 0) and app (level 3) in the work set -> empty waves 1,2.
+    # Only dns (level 0) and app (level 3) in the work set, so waves 1 and 2 are empty.
     deps = w.parse_dot(FIXTURE)
     lv = w.levels(deps)
     cells = [
@@ -46,7 +46,7 @@ def test_assign_waves_preserves_transitive_order_with_empty_middle():
 
 
 def test_assign_waves_cross_env_edge_same_wave_index():
-    # dns@dev-us must be an earlier wave than platform@dev-eu (cross-env edge).
+    # dns@dev-us must be an earlier wave than platform@dev-eu, across the cross-env edge.
     deps = w.parse_dot(FIXTURE)
     lv = w.levels(deps)
     cells = [
@@ -59,8 +59,8 @@ def test_assign_waves_cross_env_edge_same_wave_index():
 
 
 def test_assign_waves_raises_when_levels_empty_but_workset_nonempty():
-    # An empty run-graph (failed or returned nothing) with a non-empty work set
-    # must fail loud rather than silently dropping pending applies.
+    # An empty run-graph, having failed or returned nothing, with a non-empty work set must fail
+    # loud rather than silently dropping pending applies.
     cells = [{"stack": "stacks/app", "environment": "dev-eu", "workload": ""}]
     with pytest.raises(SystemExit):
         w.assign_waves([], cells)
@@ -71,8 +71,8 @@ def test_assign_waves_allows_empty_levels_with_empty_workset():
 
 
 def test_assign_waves_raises_when_stack_missing_from_graph():
-    # A work-set stack that isn't a node in the run-graph can't be ordered --
-    # fail loud instead of KeyError-ing or dropping it silently.
+    # A work-set stack that is not a node in the run-graph cannot be ordered, so fail loud
+    # instead of raising KeyError or dropping it silently.
     deps = w.parse_dot(FIXTURE)
     lv = w.levels(deps)
     cells = [{"stack": "stacks/does-not-exist", "environment": "dev-eu", "workload": ""}]
@@ -82,29 +82,29 @@ def test_assign_waves_raises_when_stack_missing_from_graph():
 
 
 def test_guard_max_waves_allows_exactly_max_waves():
-    # Populated waves at indices 0..MAX_WAVES-1 (8 waves total) are fine.
+    # Populated waves at indices 0..MAX_WAVES-1, 8 waves in total, are fine.
     waves = [[f"cell{i}"] for i in range(w.MAX_WAVES)]
     w.guard_max_waves(waves)  # must not raise
 
 
 def test_guard_max_waves_raises_when_ninth_wave_populated():
-    # A populated wave at index MAX_WAVES (the 9th wave) has no pre-declared
-    # wave{MAX_WAVES} job -- must fail loud.
+    # A populated wave at index MAX_WAVES, the 9th, has no pre-declared wave{MAX_WAVES} job, so
+    # it must fail loud.
     waves = [[f"cell{i}"] for i in range(w.MAX_WAVES)] + [["cell8"]]
     with pytest.raises(SystemExit):
         w.guard_max_waves(waves)
 
 
 def test_guard_max_waves_ignores_empty_trailing_levels():
-    # A deep FULL graph with only low-level cells in the work set is fine --
-    # empty trailing levels beyond MAX_WAVES must not trip the guard.
+    # A deep full graph with only low-level cells in the work set is fine: empty trailing levels
+    # beyond MAX_WAVES must not trip the guard.
     waves = [["cell0"]] + [[] for _ in range(w.MAX_WAVES + 3)]
     w.guard_max_waves(waves)  # must not raise
 
 
 def test_write_waves_emits_aggregate_waves_json():
-    # apply-env-level.yml indexes fromJSON(waves_json).waveN for every N and
-    # errors on a missing key -- the aggregate must always carry all 8.
+    # apply-env-level.yml indexes fromJSON(waves_json).waveN for every N and errors on a missing
+    # key, so the aggregate must always carry all 8.
     fh = io.StringIO()
     cells = [{"stack": "stacks/dns", "environment": "dev-eu"}]
     w.write_waves(fh, [cells, []])
@@ -125,18 +125,17 @@ def test_write_waves_pads_short_and_flags_empty():
 
 
 def _linear_chain_dot(n):
-    """A dot fixture of n nodes in a straight chain s1->...->sn: n topological
-    levels, one node per level."""
+    """A dot fixture of n nodes in a straight chain s1->...->sn: n topological levels, one node
+    per level."""
     lines = ["digraph  {"]
     lines += [f'\tn{i}[label="/stacks/s{i}"];' for i in range(1, n + 1)]
     lines += [f"\tn{i}->n{i + 1};" for i in range(1, n)]
     return "\n".join(lines + ["}"])
 
 
-# Every function that reaches `pad_waves`, and the module it lives in.
-# pad_waves TRUNCATES past MAX_WAVES, so each must call guard_max_waves first
-# or a too-deep change applies nothing for the dropped cells and reports
-# success. Add a row here whenever a new caller lands.
+#: Every function that reaches `pad_waves`, and the module it lives in. pad_waves truncates past
+#: MAX_WAVES, so each must call guard_max_waves first, or a too-deep change applies nothing for
+#: the dropped cells and reports success. Add a row here whenever a new caller lands.
 _PAD_CALLERS = (("apply-detect", "main"), ("env-order", "waves_by_env_level"))
 
 
@@ -155,10 +154,9 @@ def _call_order(script, func):
 def test_every_pad_waves_caller_guards_first(script, func):
     """The guard-before-truncate ordering, pinned at the CALL SITE.
 
-    Unit-testing guard_max_waves on hand-built lists does not pin that any
-    production path still calls it: deleting the call from both callers left
-    the whole suite green. Asserted over the parsed AST, so a guard call moved
-    below the pad -- or commented out -- fails."""
+    Unit-testing guard_max_waves on hand-built lists does not pin that any production path still
+    calls it: deleting the call from both callers left the whole suite green. Asserted over the
+    parsed AST, so a guard call moved below the pad, or commented out, fails."""
     order = _call_order(script, func)
     pad = next(
         (i for i, name in enumerate(order) if name in ("pad_waves", "write_waves")),
@@ -171,8 +169,8 @@ def test_every_pad_waves_caller_guards_first(script, func):
 
 
 def test_env_level_waves_refuses_a_change_deeper_than_max_waves():
-    """The behavioural half: the guard actually fires through a real caller,
-    rather than dropping the level-8 cells into a silent no-op apply."""
+    """The behavioural half: the guard fires through a real caller, rather than dropping the
+    level-8 cells into a silent no-op apply."""
     deps = w.parse_dot(_linear_chain_dot(w.MAX_WAVES + 1))
     deep = f"stacks/s{w.MAX_WAVES + 1}"
     pending = [{"stack": deep, "environment": "dev-eu"}]

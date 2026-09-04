@@ -1,19 +1,18 @@
 """A gate held by `gate-state` must not be greened by `gate-refresh`.
 
-`gate-state`'s hold verdict lives only in the transient commit status, and
-`shipmate apply` never consults the gate (`scripts/authorize` reads
-`reviewDecision`). So a partial plan download holds the gate, the parsed cells
-apply anyway, `apply-gate` reports verdict=complete over those cells' checks --
-and, before this guard, `gate-refresh` PATCHed `shipmate / gate` to success. The
-pull request then merged with planned stacks that were never applied, and never
-would be: `deploy-detect`'s work queue IS the pending apply checks, and stacks
-whose summaries were never read have no check at all.
+`gate-state`'s hold verdict lives only in the transient commit status, and `shipmate apply` never
+consults the gate -- `scripts/authorize` reads `reviewDecision`. So a partial plan download holds
+the gate, the parsed cells apply anyway, and `apply-gate` reports verdict=complete over those
+cells' checks. Without this guard `gate-refresh` then PATCHes `shipmate / gate` to success, and
+the pull request merges with planned stacks that were never applied and never would be:
+`deploy-detect`'s work queue is the pending apply checks, and stacks whose summaries were never
+read have no check at all.
 
 Invariant: the only exit from a hold is a fresh plan run.
 
-The tests execute the real, unmodified `Complete gate` step with `gh` and
-`python3` replaced by bash functions -- bash resolves a function before
-searching PATH, so this needs no fake executables.
+The tests execute the real, unmodified `Complete gate` step with `gh` and `python3` replaced by
+bash functions. Bash resolves a function before searching PATH, so this needs no fake
+executables.
 """
 
 import os
@@ -27,7 +26,7 @@ _BASH = usable_bash()
 HEAD_SHA = "a" * 40
 
 # Dispatches on the two `gh api` calls the step makes: the pre-write gate read
-# (`/commits/<sha>/status --jq ...`) and the write (`/statuses/<sha>`).
+# (`/commits/<sha>/status --jq ...`), and the write (`/statuses/<sha>`).
 GH_STUB = """
 gh() {
   case "$*" in
@@ -70,8 +69,8 @@ def _run_step(tmp_path, gate_state):
 
 
 def test_the_gate_is_read_before_it_is_written():
-    # Structural companion to the behavioural tests: an ordering inversion
-    # would read the status the write just made.
+    # Structural companion to the behavioural tests: an ordering inversion would read the status
+    # that the write itself made.
     run = _complete_step()["run"]
     assert run.index("held=$(gh api") < run.index("/statuses/$HEAD_SHA")
 
@@ -87,9 +86,8 @@ def test_refuses_to_green_a_held_gate(tmp_path):
 
 @pytest.mark.skipif(_BASH is None, reason="bash not installed")
 def test_a_pending_gate_still_greens(tmp_path):
-    # The legitimate transition this refusal must not break: gate-state writes
-    # `pending` while applies are outstanding, and completing them is exactly
-    # what gate-refresh exists to record.
+    # The legitimate transition this refusal must not break: gate-state writes `pending` while
+    # applies are outstanding, and completing them is what gate-refresh exists to record.
     proc, wrote = _run_step(tmp_path, "pending")
     assert proc.returncode == 0, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
     assert wrote
@@ -97,8 +95,8 @@ def test_a_pending_gate_still_greens(tmp_path):
 
 @pytest.mark.skipif(_BASH is None, reason="bash not installed")
 def test_an_absent_gate_still_greens(tmp_path):
-    # `.[0].state // empty` yields an empty string when no gate status exists
-    # for the head SHA at all; that is not a hold.
+    # `.[0].state // empty` yields an empty string when no gate status exists for the head SHA
+    # at all. That is not a hold.
     proc, wrote = _run_step(tmp_path, "")
     assert proc.returncode == 0, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
     assert wrote

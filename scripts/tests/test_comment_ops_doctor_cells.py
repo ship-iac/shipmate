@@ -1,11 +1,10 @@
 """Run comment-ops' doctor cell-summary lookup over what the API can answer.
 
-`shipmate doctor`'s declared environment set is the cell summaries of the plan
-runs this head's own apply checks recorded, and one head's cells can come from
-several runs. Both ways the download can be wrong are silent: a run left out
-drops the environments only that run planned, and a cell replanned in a later
-run has the same artifact name in both, so a shared download directory reports
-whichever copy extraction order happened to leave behind.
+`shipmate doctor`'s declared environment set is the cell summaries of the plan runs this head's
+own apply checks recorded, and one head's cells can come from several runs. Both ways the
+download can be wrong are silent: a run left out drops the environments only that run planned,
+and a cell replanned in a later run has the same artifact name in both, so a shared download
+directory reports whichever copy extraction order happened to leave behind.
 """
 
 import json
@@ -37,19 +36,18 @@ def _cells_block():
 bash_only = pytest.mark.skipif(usable_bash() is None, reason="no working bash on PATH")
 
 _APP_ID = "4326562"
-#: (check name, check-run id, `external_id` record). The same cell planned
-#: twice on this head (the newer check names run 1290), a cell only the older
-#: run planned, and one whose newest check carries a legacy bare-hex record --
-#: no plan run to name, so the mapping cannot place its summary.
+#: (check name, check-run id, `external_id` record). The same cell planned twice on this head,
+#: where the newer check names run 1290; a cell only the older run planned; and one whose newest
+#: check carries a legacy bare-hex record, naming no plan run, so the mapping cannot place its
+#: summary.
 _CHECK_RUNS = [
     ("apply / stacks/app / dev-eu", 1, json.dumps({"fingerprint": "a" * 64, "plan_run": "1281"})),
     ("apply / stacks/app / dev-eu", 2, json.dumps({"fingerprint": "a" * 64, "plan_run": "1290"})),
     ("apply / stacks/db / dev-us", 3, json.dumps({"fingerprint": "a" * 64, "plan_run": "1281"})),
     ("apply / stacks/cache / dev-ap", 4, "b" * 64),
 ]
-#: What each run's `cell-summary.<env>.<slug>` artifact holds. The two copies of
-#: the replanned cell differ only in the plan they describe, exactly as two runs
-#: of the same cell do.
+#: What each run's `cell-summary.<env>.<slug>` artifact holds. The two copies of the replanned
+#: cell differ only in the plan they describe, exactly as two runs of the same cell do.
 _ARTIFACTS = {
     "1281": [
         ("cell-summary.dev-eu.stacks-app", "stacks/app", "dev-eu", 1),
@@ -61,13 +59,13 @@ _ARTIFACTS = {
 
 
 def _run_block(tmp_path, undownloadable=()):
-    """(surviving summaries, step output) after running the block with
-    `gh run download` stubbed to the fixture. Each surviving summary is
-    `(artifact name, run directory, add count)`, sorted -- a mapping keyed on
-    the artifact name would collapse two runs' copies of one cell into the
-    one the glob happened to yield last, and pin nothing about the prune.
-    Runs named in `undownloadable` have no artifacts, which is what the stub
-    (and the real `gh`) reports as a failed download."""
+    """(surviving summaries, step output) after running the block with `gh run download` stubbed
+    to the fixture.
+
+    Each surviving summary is `(artifact name, run directory, add count)`, sorted: a mapping
+    keyed on the artifact name would collapse two runs' copies of one cell into the one the glob
+    happened to yield last, and pin nothing about the prune. Runs named in `undownloadable` have
+    no artifacts, which is what the stub, and the real `gh`, reports as a failed download."""
     for run, artifacts in _ARTIFACTS.items():
         if run in undownloadable:
             continue
@@ -100,13 +98,12 @@ def _run_block(tmp_path, undownloadable=()):
     )
     harness = (
         "set -euo pipefail\n"
-        # `tr -d '\r'`: a Windows python translates a printed newline to CRLF,
-        # which a runner's python does not -- without it the id list carries a
-        # CR into the download loop here and nowhere in production. `pipefail`
-        # above keeps a failing python a failing pipeline.
+        # `tr -d '\r'`: a Windows python translates a printed newline to CRLF, which a runner's
+        # python does not, so without it the id list carries a CR into the download loop here and
+        # nowhere in production. `pipefail` above keeps a failing python a failing pipeline.
         f"python3() {{ '{pathlib.Path(sys.executable).as_posix()}' \"$@\" | tr -d '\\r' ; }}\n"
-        # `gh run download <rid> ... -D <dir>`: the real command creates the
-        # target directory and extracts every matching artifact into it.
+        # `gh run download <rid> ... -D <dir>`: the real command creates the target directory and
+        # extracts every matching artifact into it.
         'gh() { local rid="$3" dir="" ;'
         ' while [ $# -gt 0 ] ; do if [ "$1" = "-D" ] ; then dir="$2" ; fi ; shift ; done ;'
         ' [ -d "artifacts/$rid" ] || return 1 ;'

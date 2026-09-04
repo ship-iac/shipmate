@@ -14,10 +14,11 @@ compared against a hand-written constant, for the reason `CLAUDE.md` gives: an
 look, and the surviving occurrence is a real one -- the concurrency group, which
 must read payload data because `needs` is not in scope at that level.
 
-That set is read as fence *text* rather than parsed values: a payload expression
-inside a comment teaches the reader to write it back, and the concurrency key is
-a scalar whose sibling `github.event.inputs.pr_number` must not be confused with
-it. The checkout guard below is parsed, as the sibling docs guards are.
+That set is read as fence text rather than parsed values: a payload expression inside a comment
+teaches the reader to write it back, and the concurrency key is a scalar whose sibling
+`github.event.inputs.pr_number` must not be confused with it.
+test_the_documented_checkouts_name_the_head_from_the_facts_job is parsed, as the sibling docs
+guards are.
 """
 
 import re
@@ -38,9 +39,9 @@ _SUMMARY_CALL = "/shipmate/.github/workflows/summary.yml@"
 #: allowed value.
 _PAYLOAD_READ = re.compile(r"github\.event\.pull_request[\w.]*")
 
-#: `needs` is not in scope in `concurrency:`, so the group has to read payload
-#: data -- and `github.event.inputs.pr_number` beside it is a different
-#: expression, not another read of this one.
+#: `needs` is not in scope in `concurrency:`, so the group has to read payload data.
+#: `github.event.inputs.pr_number` beside it is a different expression, not another read of this
+#: one.
 _ALLOWED = ["github.event.pull_request.number"]
 
 _CHECKOUT = "actions/checkout@"
@@ -71,10 +72,11 @@ def test_the_documented_wrapper_reads_the_payload_nowhere_but_the_concurrency_gr
 
 
 def test_the_documented_checkouts_name_the_head_from_the_facts_job():
-    """The other half: the read that replaced them exists. Without this, deleting
-    a checkout `ref:` outright satisfies the guard above -- and a checkout with no
-    `ref:` is exactly what both triggers do by default, which is the base branch
-    or the dispatch ref."""
+    """The other half: the read that replaced them exists. Without this, deleting a checkout
+    `ref:` outright satisfies
+    test_the_documented_wrapper_reads_the_payload_nowhere_but_the_concurrency_group, and a
+    checkout with no `ref:` is what both triggers do by default -- the base branch, or the
+    dispatch ref."""
     doc = yaml.safe_load(textwrap.dedent(_plan_fence()))
     found = [
         (name, (step.get("with") or {}).get("ref"))

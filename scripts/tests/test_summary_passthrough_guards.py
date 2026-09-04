@@ -1,8 +1,7 @@
 """The plan workflow -> summary action -> gate-state handshake.
 
-Successor to the passthrough half of the deleted test_plan_matrix_marker.py.
-Three files have to agree on five names; nothing at runtime notices when they
-stop agreeing, and the failure is a gate decided from defaults.
+Three files have to agree on five names. Nothing at runtime notices when they stop agreeing, and
+the failure is a gate decided from defaults.
 """
 
 import ast
@@ -30,9 +29,9 @@ def _summary_action_gate_step():
 
 
 def test_the_action_hands_gate_state_exactly_these_env_vars():
-    """The whole mapping, not a membership check: an env var added here that
-    gate-state does not read, or dropped from here while gate-state still reads
-    it, both end as a gate decided from a default."""
+    """The whole mapping, not a membership check: an env var added here that gate-state does not
+    read, or dropped from here while gate-state still reads it, both end as a gate decided from a
+    default."""
     assert _summary_action_gate_step()["env"] == EXPECTED_GATE_ENV
 
 
@@ -48,11 +47,11 @@ def _is_os_environ(node):
 def _gate_state_env_reads():
     """The `SHIPMATE_*` names gate-state actually reads, from its parse tree.
 
-    Both read forms: the two required values are subscripts, so `main()` dies
-    loudly when the action stops setting them; the rest carry a default. A
-    regex over the raw source cannot tell either form from the same words in a
-    comment -- commenting out the `SHIPMATE_PENDING` read and hardcoding
-    `pending=False` left the regex version green. An `ast` walk sees only code.
+    Both read forms: the two required values are subscripts, so `main()` dies loudly when the
+    action stops setting them, and the rest carry a default. A regex over the raw source cannot
+    tell either form from the same words in a comment -- commenting out the `SHIPMATE_PENDING`
+    read and hardcoding `pending=False` left the regex version green. An `ast` walk sees only
+    code.
     """
     tree = ast.parse((SCRIPTS / "gate-state").read_text(encoding="utf-8"))
     names = set()

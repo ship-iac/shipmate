@@ -1,10 +1,9 @@
 """Lint the bash inside every composite action.
 
-actionlint (in CI) covers `.github/workflows/`, but not `actions/*/action.yml`,
-where shipmate's real shell logic lives. This test extracts each bash `run:`
-block and runs shellcheck on it, and also enforces the injection-safety
-invariant that no run block interpolates a `${{ ... }}` expression (author- and
-attacker-controlled values must reach the script through `env:`).
+actionlint, in CI, covers `.github/workflows/` but not `actions/*/action.yml`, where shipmate's
+shell logic lives. Each bash `run:` block is extracted and shellchecked. The injection-safety
+invariant is enforced here too: no run block interpolates a `${{ ... }}` expression, because
+author- and attacker-controlled values must reach the script through `env:`.
 """
 
 import shutil
@@ -14,8 +13,8 @@ import pytest
 from _loader import ACTIONS, action_steps
 
 _ACTION_FILES = sorted(ACTIONS.glob("*/action.yml"))
-# env: vars are injected by the GitHub runner, so shellcheck can't see their
-# assignment — SC2154 (referenced but not assigned) is expected, not a defect.
+# env: vars are injected by the GitHub runner, so shellcheck cannot see their assignment.
+# SC2154 (referenced but not assigned) is expected, not a defect.
 _IGNORE = "SC2154"
 
 
@@ -41,8 +40,8 @@ def test_run_blocks_shellcheck_clean(action, tmp_path):
     problems = []
     for i, run in _bash_runs(action):
         script = tmp_path / f"{action.parent.name}_{i}.sh"
-        # Normalize CRLF (a Windows working tree may carry it) so we lint the
-        # shell logic, not line endings — CI checks out LF.
+        # Normalize CRLF, which a Windows working tree may carry, so the lint covers the shell
+        # logic rather than line endings. CI checks out LF.
         body = run.replace("\r\n", "\n").replace("\r", "\n")
         script.write_text("#!/usr/bin/env bash\n" + body, encoding="utf-8", newline="\n")
         r = subprocess.run(

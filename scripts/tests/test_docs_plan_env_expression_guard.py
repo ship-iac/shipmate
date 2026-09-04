@@ -25,9 +25,9 @@ Whole-value comparisons against hand-written constants cover it, plus a
 one-match-per-page count so a moved or reworded binding fails instead of
 dropping out of coverage.
 
-`PLAN_ENV` and `STATIC_PLAN_ENV` are hand-written and the engine's value is
-derived from `PLAN_ENV` by suffix swap, never the other way round -- a constant
-read back out of the file under test passes whatever that file says.
+`PLAN_ENV` and `STATIC_PLAN_ENV` are hand-written, and the engine's value is derived from
+`PLAN_ENV` by suffix swap, never the other way round: a constant read back out of the file under
+test passes whatever that file says.
 """
 
 import re
@@ -36,8 +36,8 @@ import textwrap
 import yaml
 from _loader import ENGINE, WORKFLOWS
 
-#: Single line: the folded scalar (`>-`) collapses the two source lines with a
-#: space, which is what makes an outdent detectable here.
+#: Single line: the folded scalar (`>-`) collapses the two source lines with a space, which is
+#: what makes an outdent detectable here.
 PLAN_ENV = (
     "${{ contains(format(',{0},', vars.SHIPMATE_SHARED_ENVS), "
     "format(',{0},', matrix.environment)) "
@@ -50,8 +50,8 @@ STATIC_PLAN_ENV = "${{ matrix.environment }}-plan"
 
 _FENCE = re.compile(r"```yaml\n(.*?)```", re.S)
 PAGES = ("CONTRACT.md", "docs/upgrading.md")
-#: page -> the job whose `environment:` a consumer copies. `shipmate-engine` is
-#: the one fixed environment name and is excluded, so each page has exactly one.
+#: page -> the job whose `environment:` a consumer copies. `shipmate-engine` is the one fixed
+#: environment name and is excluded, so each page has exactly one.
 STARTER_WORKFLOWS = {"docs/getting-started.md": "plan", "docs/drift.md": "drift"}
 _ENGINE_ENV = "shipmate-engine"
 
@@ -59,9 +59,9 @@ _ENGINE_ENV = "shipmate-engine"
 def _fences(page):
     """Every ```yaml fence of `page`, parsed.
 
-    An outdented continuation line does not merely change a folded value, it can
-    stop parsing altogether -- reported against the page, since a bare
-    ScannerError names only the YAML stream.
+    An outdented continuation line does not merely change a folded value, it can stop parsing
+    altogether. Reported against the page, because a bare ScannerError names only the YAML
+    stream.
     """
     text = (ENGINE / page).read_text(encoding="utf-8")
     for body in _FENCE.findall(text):
@@ -74,7 +74,7 @@ def _fences(page):
 def _starter_binding(page):
     """The one env-bearing job of `page`'s starter workflow: (job name, binding).
 
-    Exactly one, asserted, for the same reason as `_documented_binding` below.
+    Exactly one, asserted, for the same reason as `_documented_binding`.
     """
     found = [
         (name, job["environment"])
@@ -93,8 +93,8 @@ def _starter_binding(page):
 def _documented_binding(page):
     """The one documented `environment:`-only fence of `page`, parsed.
 
-    Exactly one, asserted: a reworded or relocated fence that stops matching
-    would otherwise drop out of coverage and leave this guard green over nothing.
+    Exactly one, asserted: a reworded or relocated fence that stops matching would otherwise
+    drop out of coverage and leave this guard green over nothing.
     """
     found = []
     for doc in _fences(page):
@@ -116,9 +116,9 @@ def test_both_pages_document_the_plan_side_expression():
 
 
 def test_the_starter_workflows_bind_the_split_plan_environment():
-    """The fences a new consumer copies wholesale. Both are uniform-split, so the
-    binding is the static suffixed name -- not the bare `${{ matrix.environment }}`
-    the 0.13.0 rename retired, and not the apply-side suffix."""
+    """The fences a new consumer copies wholesale. Both are uniform-split, so the binding is the
+    static suffixed name: not the bare `${{ matrix.environment }}` the 0.13.0 rename retired, and
+    not the apply-side suffix."""
     for page, job in STARTER_WORKFLOWS.items():
         assert _starter_binding(page) == (job, STATIC_PLAN_ENV), (
             f"{page}: the `{job}` job must bind the split plan environment `{STATIC_PLAN_ENV}`"

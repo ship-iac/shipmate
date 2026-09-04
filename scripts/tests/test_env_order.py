@@ -7,9 +7,9 @@ eo = load_script("env-order")
 
 
 def test_env_order_has_no_private_run_and_reuses_build_matrix():
-    # env-order must not define its own subprocess wrapper (it swallowed
-    # stderr on failure) -- it delegates to build-matrix's _run instead,
-    # which surfaces stderr and raises `::error::` on nonzero exit.
+    # env-order must not define its own subprocess wrapper, which swallowed stderr on failure.
+    # It delegates to build-matrix's _run, which surfaces stderr and raises `::error::` on a
+    # nonzero exit.
     assert not hasattr(eo, "_run")
     assert eo.bm._run.__module__ == "build_matrix"
 
@@ -44,7 +44,7 @@ def test_diamond_partial_order():
 
 
 def test_predecessor_absent_from_envs_still_orders():
-    # dev-eu has no changed cells this run, but still constrains dev-us
+    # dev-eu has no changed cells this run, but still constrains dev-us.
     lv = eo.env_levels({"dev-us": ["dev-eu"]}, ["dev-us"])
     assert lv == {"dev-us": 1}
 
@@ -80,8 +80,8 @@ def test_read_env_order_absent_is_empty():
 
 
 def test_env_levels_rejects_string_predecessor():
-    # HCL author typo: "dev-eu" instead of ["dev-eu"] -- must not silently
-    # iterate the string char-by-char.
+    # HCL author typo, "dev-eu" instead of ["dev-eu"]: it must not silently iterate the string
+    # character by character.
     with pytest.raises(SystemExit):
         eo.env_levels({"dev-us": "dev-eu"}, ["dev-eu", "dev-us"])
 
@@ -112,9 +112,8 @@ def test_read_env_order_rejects_non_str_predecessor_element():
 
 
 def test_waves_by_env_level_buckets_and_orders():
-    # Env-level bucketing lives in env-order (shared by deploy-detect and
-    # apply-all-detect); it buckets cells by their env's level, then
-    # stack-wave-orders within each level.
+    # Env-level bucketing lives in env-order, shared by deploy-detect and apply-all-detect. It
+    # buckets cells by their env's level, then stack-wave-orders within each level.
     pending = [
         {"stack": "stacks/dns", "environment": "dev-eu"},
         {"stack": "stacks/app", "environment": "dev-eu"},
@@ -142,11 +141,9 @@ def test_waves_by_env_level_backward_compat_single_level():
 
 
 def test_write_env_level_waves_emits_waves_and_empty_flags(tmp_path):
-    # The shared GITHUB_OUTPUT writer must emit envlevelN_waves (JSON) plus an
-    # envlevelN_empty flag per level: 'false' for a level with any cell,
-    # 'true' for an empty one. Single-sourced so deploy-detect and
-    # apply-all-detect cannot drift apart on the shared apply-env-level.yml
-    # output contract.
+    # The shared GITHUB_OUTPUT writer must emit envlevelN_waves as JSON plus an envlevelN_empty
+    # flag per level: 'false' for a level with any cell, 'true' for an empty one. Single-sourced,
+    # so deploy-detect and apply-all-detect cannot drift apart on apply-env-level.yml's contract.
     cell = {"stack": "s", "environment": "dev-eu"}
     per_level = [
         {f"wave{i}": ([cell] if i == 0 else []) for i in range(8)},
@@ -183,8 +180,8 @@ def test_read_explicit_envs_absent_is_empty():
 
 
 def test_read_explicit_envs_rejects_bare_string():
-    # HCL author typo: "prod" instead of ["prod"] -- must not silently iterate
-    # the string char-by-char (mirror the env_order validation posture).
+    # HCL author typo, "prod" instead of ["prod"]: it must not silently iterate the string
+    # character by character, mirroring the env_order validation posture.
     with pytest.raises(SystemExit):
         eo.read_explicit_envs(run=lambda args: '"prod"')
 
@@ -200,18 +197,17 @@ def test_read_explicit_envs_rejects_non_str_element():
 
 
 def test_read_explicit_envs_rejects_an_environment_suffix():
-    """`explicit_envs` is matched against the bare logical env name the apply
-    checks carry, so `prod-apply` or `prod-plan` would skip nothing while looking
-    right -- and every documented environment name now carries a suffix, which is
-    what makes the mistake likely. Both suffixes fail loud, naming the offending
-    entry and the bare name to write instead."""
+    """`explicit_envs` is matched against the bare logical env name the apply checks carry, so
+    `prod-apply` or `prod-plan` would skip nothing while looking right. Every documented
+    environment name carries a suffix, which is what makes the mistake likely. Both suffixes fail
+    loud, naming the offending entry and the bare name to write instead."""
     for entry in ("prod-apply", "prod-plan"):
         with pytest.raises(SystemExit) as e:
             eo.read_explicit_envs(run=lambda args, entry=entry: json.dumps(["dev", entry]))
         assert entry in str(e.value)
         assert "'prod'" in str(e.value)
-    # The bare name is still accepted, and a logical env whose name merely
-    # contains the word is not a suffix match.
+    # The bare name is still accepted, and a logical env whose name merely contains the word is
+    # not a suffix match.
     assert eo.read_explicit_envs(run=lambda args: '["prod", "plan-eu"]') == ["prod", "plan-eu"]
 
 
@@ -221,7 +217,7 @@ def test_blocked_envs_direct_predecessor():
 
 
 def test_blocked_envs_transitive():
-    # prod -> stage -> dev; dev unavailable blocks prod through stage.
+    # prod -> stage -> dev, so dev being unavailable blocks prod through stage.
     order = {"stage": ["dev"], "prod": ["stage"]}
     assert eo.blocked_envs(order, {"dev"}, {"stage", "prod"}) == {"stage", "prod"}
 

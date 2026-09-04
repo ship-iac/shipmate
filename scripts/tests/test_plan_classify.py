@@ -1,4 +1,3 @@
-# scripts/tests/test_plan_classify.py
 from _loader import load_script
 
 pc = load_script("plan-classify")
