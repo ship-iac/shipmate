@@ -1,5 +1,5 @@
 name: shipmate drift-cell
-description: Plan one stack x env; hand a drift-summary cell artifact to a trusted trailing job. Opens no Issue itself and holds no App key — a plan environment must stay policy-free for planning to work, so a job naming one is reachable from a feature branch.
+description: Plan one stack x env; hand a drift-summary cell artifact to a trusted trailing job. Authors no Issue itself and holds no App key — a plan environment must stay policy-free for planning to work, so a job naming one is reachable from a feature branch.
 inputs:
   stack:
     description: Stack path, e.g. stacks/app.

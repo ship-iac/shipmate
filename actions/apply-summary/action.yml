@@ -125,9 +125,10 @@ runs:
         GH_TOKEN: ${{ steps.token.outputs.token }}
         HEAD_SHA: ${{ inputs.head-sha }}
       # The pending apply checks are the work queue, so the comment reads them rather than
-      # trusting the per-cell artifact alone: apply-cell composes its verdict from the apply step
-      # and uploads it, while actions/apply-complete completes the check from a later job that
-      # can fail -- so an `applied` artifact can sit against a still-pending check.
+      # trusting the per-cell artifact alone. apply-cell composes its verdict from the apply step
+      # and uploads it; actions/apply-complete then completes the check from a later job, and only
+      # for cells whose own job recorded success. A failed `Save state` in the cell, or a failed
+      # completion, leaves an `applied` artifact against a still-pending check.
       run: |
         set -euo pipefail
         [[ "$HEAD_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::head-sha must be a 40-char lowercase hex SHA (got: $HEAD_SHA)"; exit 1; }
