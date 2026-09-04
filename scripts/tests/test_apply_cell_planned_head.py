@@ -2,9 +2,9 @@
 different commit than the one the job has checked out.
 
 The exact-plan invariant only holds if the plan and the tree agree. The fingerprint step compares
-the variables a plan was produced with; nothing compares the tree. A plan produced from commit A
-and applied on a checkout of commit B applies A's diff while the reviewed check-run, the summary
-and the merge all speak of B.
+the variables a plan was produced with, not the tree. A plan produced from commit A and applied
+on a checkout of commit B applies A's diff while the reviewed check-run, the summary and the
+merge all speak of B.
 
 The comparison must happen before the decrypt, the state restore and the apply, so a wrong-tree
 plan is refused at the cheapest point rather than after mutating real infrastructure. That is the

@@ -169,8 +169,7 @@ def test_documented_wrapper_passes_exactly_the_declared_engine_inputs(page, line
     rejection: the run dies at startup with no job, no check-run and no retrievable log, only a
     workflow-validation error on the run itself. The same line on a composite action is merely
     ignored with a warning, which is why nothing here ever needed to notice. So a consumer
-    pasting the documented wrapper after an input is retired gets a dead pipeline, and nothing
-    else in this repository says so.
+    pasting the documented wrapper after an input is retired gets a dead pipeline.
 
     The requiredness half is the mirror image, and equally fatal at call time.
     """
@@ -231,7 +230,8 @@ def test_the_documented_wrapper_inputs_are_exactly_these():
     declare a `pr_number`, and without the name an exact requiredness swap between them sorts to
     the same vector and stays green.
 
-    Whole-vector comparison against a hand-written constant, for the reason `CLAUDE.md` gives: a
+    Whole-vector comparison against a hand-written constant, for the reason
+    `docs/development.md` §Guard tests must be able to fail gives: a
     "no input is required" predicate is also satisfied by a selector that finds nothing, and a
     per-input assertion cannot see an input that was deleted. Adding an input here is a
     deliberate edit that must state its shape, which is the point, because `required` is what a

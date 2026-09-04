@@ -242,6 +242,7 @@ def test_two_failsafes_failing_together_the_earlier_in_pipeline_order_wins(monke
 def test_cell_json_carries_exactly_the_five_contract_keys_all_strings(
     monkeypatch, tmp_path, kwargs
 ):
+    """The renderer's contract: `scripts/apply-comment`'s CELL_KEYS is this same five-key set."""
     cell = _run_compose(monkeypatch, tmp_path, **kwargs)
     assert set(cell.keys()) == {"stack", "stack_path", "environment", "result", "reason"}
     for key, value in cell.items():

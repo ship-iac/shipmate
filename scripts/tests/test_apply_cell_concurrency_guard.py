@@ -40,7 +40,8 @@ SERIALIZED = {
     "apply-env-level.yml": [f"wave{i}" for i in range(8)],
     # Not a cell that applies, but one that force-unlocks a cell's state, which is why it shares
     # the queue: a live apply for that cell makes the unlock wait behind it, so the lock it finds
-    # is either gone or orphaned. It lives in its own workflow file, but the group does not move.
+    # is either gone or orphaned. It lives in its own workflow file; the group did not move with
+    # it, and must not.
     "unlock.yml": ["unlock"],
 }
 

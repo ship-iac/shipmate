@@ -114,8 +114,7 @@ def test_failed_init_fails_the_step_before_the_apply(tmp_path):
         init_body="echo init boom >&2 ; return 5",
     )
     assert r.returncode == 5, f"stdout={r.stdout!r} stderr={r.stderr!r}"
-    # The apply never ran, asserted via tee's marker on stderr rather than the apply's own
-    # output: the apply is piped into tee, whose stub swallows that output into apply.txt, so
+    # The apply is piped into tee, whose stub swallows that output into apply.txt, so
     # `"applied" not in r.stdout` holds even when the pipeline did run. tee's own stderr escapes
     # the pipe, and tee runs if and only if the pipeline did.
     assert "TEE_RAN" not in r.stderr, f"apply ran despite a failed init: {r.stderr!r}"

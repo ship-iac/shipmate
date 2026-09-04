@@ -248,7 +248,7 @@ def test_run_error_never_echoes_the_argv(monkeypatch, capsys):
 
 def test_run_error_scrubs_secrets_out_of_ghs_own_stderr(monkeypatch, capsys):
     # gh quotes the URL it called, and the one-time manifest code is in that URL, so suppressing
-    # the engine's own argv is not enough. Anything the caller declares as a secret must be
+    # the tool's own argv is not enough. Anything the caller declares as a secret must be
     # scrubbed from gh's message too.
     _failing_gh(monkeypatch, "gh: HTTP 404 (POST app-manifests/CODE123/conversions)\n")
 

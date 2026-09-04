@@ -77,9 +77,8 @@ def test_refs_at_commit_reads_that_commits_tree_not_disk():
 
 
 def test_source_paths_raises_git_failure_when_ls_tree_fails(monkeypatch):
-    # A failed `git ls-tree` and a commit with genuinely no pin-bearing files both yield [],
-    # which is indistinguishable to every caller. A failing ls-tree must raise GitFailure rather
-    # than be swallowed into an empty list.
+    # A failed `git ls-tree` swallowed into [] is indistinguishable from a commit with genuinely
+    # no pin-bearing files, so a failing ls-tree must raise GitFailure rather than be swallowed.
     class _R:
         returncode = 128
         stdout = ""

@@ -183,9 +183,9 @@ def test_dependent_script_paths_for_apply_summary_contains_apply_comment():
 
 
 # The premise checks -- SCRIPT_REF, REF and LOAD_REF each seeing every reference of its kind --
-# are in scripts/tests/test_pin_derivation_premises.py, because they read only the working tree
-# and so belong in a module pull request CI runs. This module is --ignore'd there: its tests read
-# git history and are red by design on a pin-bump pull request.
+# are in scripts/tests/test_pin_derivation_premises.py, a module pull request CI runs because it
+# reads only the working tree. This one is --ignore'd there: it reads git history and is red by
+# design on a pin-bump pull request.
 
 
 def test_unverifiable_pin_fails_when_history_is_present(monkeypatch):
