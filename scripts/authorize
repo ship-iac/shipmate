@@ -27,8 +27,8 @@ import os
 import re
 
 #: Env names come from Terramate `env/<name>` tags, so the charset is comment-parse's env
-#: grammar plus `_`, a legal tag character no `shipmate apply <env>` can name. Either case,
-#: since the match itself is case-insensitive.
+#: grammar plus `_`, a legal tag character no `shipmate apply <env>` can name. Both cases are
+#: accepted, since the match itself is case-insensitive.
 _ENV_ENTRY = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*")
 
 
@@ -131,7 +131,8 @@ def decide(
     - mergeable: measured behaviour — a merged PR reports mergeable: null,
       which the apply path reads as "still computing" and refuses. A stranded
       lock from a cancelled post-merge deploy is reachable only from a merged
-      PR, so keeping this check would leave that lock impossible to release.
+      PR, so keeping this check would leave that lock impossible to release with
+      `shipmate unlock`.
     - plan runs: unlock consumes no plan artifact.
     - draft: the draft flag says the change is not ready for review, which
       bounds applying it; unlock changes no infrastructure, so readiness for
@@ -214,8 +215,9 @@ def main():
         ungated_envs=ungated_envs,
         verb=verb,
     )
-    # The targeted path's audit trail; all three conditions are required, and the module
-    # docstring says why each one is.
+    # The targeted path's audit trail. REVIEW_REQUIRED plus a listed env define the
+    # exemption; `ok`, a named environment and verb="apply" are the gates the module
+    # docstring explains.
     exempted = (
         verb == "apply"
         and ok

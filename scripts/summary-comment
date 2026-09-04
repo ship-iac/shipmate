@@ -286,9 +286,9 @@ def load_cells(cells_dir):
         txt = pathlib.Path(p).with_name("plan.txt")
         text = None
         if txt.exists():
-            # Cap the read at SIZE_BUDGET: a body that long already exceeds every section's
-            # limit (all strictly below SIZE_BUDGET), so later characters could never be
-            # emitted, and a multi-MB plan.txt is never fully read or scanned by diff_map.
+            # Cap the read at SIZE_BUDGET: a body that long exceeds every section's limit
+            # (all strictly below SIZE_BUDGET), so later characters could never be emitted,
+            # and diff_map and _fence_of never regex-scan a multi-MB plan.txt in full.
             with open(txt, encoding="utf-8") as fh:
                 text = fh.read(SIZE_BUDGET)
         out.append((cell, text))

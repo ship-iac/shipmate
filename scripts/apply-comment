@@ -47,8 +47,8 @@ ag = _load("apply-gate")
 # actions/unlock-cell so the note and the unlock can never name different locks.
 li = _load("lock-info")
 
-# COUPLED to env-order.MAX_ENV_LEVELS (which lists the GHA slots that move with
-# it); pinned equal by test_apply_comment. A local constant rather than an
+# COUPLED to env-order.MAX_ENV_LEVELS, whose module docstring lists the GHA slots that move
+# with it; pinned equal by test_apply_comment. A local constant rather than an
 # `_load("env-order")`, which would widen this renderer's pin closure.
 MAX_ENV_LEVELS = 4
 

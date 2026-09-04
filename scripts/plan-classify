@@ -14,7 +14,7 @@ import sys
 def classify(plan):
     """Classify an OpenTofu `show -json` plan dict into change counts."""
     rcs = plan.get("resource_changes") or []
-    # "no-op" = unchanged; "read" = deferred data-source read (not a real change).
+    # "no-op" means unchanged, and "read" is a deferred data-source read, not a real change.
     changed = [r for r in rcs if any(a not in ("no-op", "read") for a in r["change"]["actions"])]
     oc = plan.get("output_changes") or {}
     out_changed = any(c.get("actions", ["no-op"]) != ["no-op"] for c in oc.values())
