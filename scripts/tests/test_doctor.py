@@ -1566,10 +1566,9 @@ def test_findings_only_fallback_uses_the_same_all_clear_line():
 
 def test_harvest_incomplete_note_says_the_harvest_is_incomplete():
     """The other harvest tests assert `HARVEST_INCOMPLETE in body`, pinning the flag-to-note
-    wiring but not the note's meaning: swap the constant for an all-clear and they stay green,
-    shipping the false all-clear the flag exists to prevent. Pinned here on a stable stem --
-    the warning level, and a phrase unreadable as "everything is fine". Stem, not the whole
-    sentence, so ordinary rewording stays cheap."""
+    wiring but not the note's meaning: swap the constant for an all-clear and they stay green.
+    Pinned here on a stable stem -- the warning level, and a phrase unreadable as "everything
+    is fine" -- not the whole sentence, so ordinary rewording stays cheap."""
     assert doctor.HARVEST_INCOMPLETE.startswith("- :warning:")
     assert "could not read all" in doctor.HARVEST_INCOMPLETE
     assert ":white_check_mark:" not in doctor.HARVEST_INCOMPLETE
@@ -3217,10 +3216,9 @@ def test_a_forward_on_the_apply_all_call_is_reported(monkeypatch):
 
 def test_a_with_block_above_the_uses_line_is_still_a_forward(monkeypatch):
     """Key order in a YAML mapping carries no meaning, so the region around an apply call runs
-    in both directions from its `uses:` line -- the same property
-    `test_a_with_block_above_the_uses_line_is_silent` pins for the summary-wiring probe, in the
-    opposite polarity. Scanning forward only reads this wrapper as clean: silence at the
-    load-time rejection this probe exists for."""
+    in both directions from its `uses:` line -- `test_a_with_block_above_the_uses_line_is_silent`
+    pins the same property for the summary-wiring probe, in the opposite polarity. Scanning
+    forward only reads this wrapper as clean: silence at the load-time rejection it exists for."""
     responses = _fork_responses({"apply.yml": _CLEAN_ON_BLOCK + _TARGETED_JOB_WITH_FIRST})
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
     assert doctor._mode_input_warnings(_ctx()) == [(doctor.WARNING, _MODE_FORWARDED_TEXT)]
@@ -4191,7 +4189,7 @@ def test_gh_token_stays_unset_when_it_was_unset_before(monkeypatch):
 
 def test_declared_envs_reads_a_flat_single_artifact_download(tmp_path):
     # Same layout split `pending-checks` has to survive: with exactly one matching artifact
-    # the download lands at `<cells>/cell.json` with no per-artifact directory. Insisting on the
-    # nested layout empties the declared-env set, skipping every probe on a single-cell plan.
+    # the download lands at `<cells>/cell.json` with no per-artifact directory. Insisting on
+    # the nested layout empties the declared-env set, skipping every environment probe.
     (tmp_path / "cell.json").write_text(json.dumps({"environment": "dev-eu"}), encoding="utf-8")
     assert doctor._declared_envs(tmp_path) == {"dev-eu"}
