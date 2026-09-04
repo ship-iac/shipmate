@@ -509,10 +509,10 @@ def test_probe_generic_exception_degrades_to_note(monkeypatch):
 
 
 def test_degrade_note_names_the_probe_and_drops_the_workflow_command_prefix(monkeypatch):
-    """Renders verbatim into the sticky comment and into `::warning ...::` annotation data, so
-    echoing `bm.gh_json`'s `::error::command failed (N): gh api <path>` would put a literal
-    workflow command in the comment body, nest one inside another in annotate mode, and leak
-    the internal endpoint. Name the probe that was skipped; keep the reason."""
+    """The degrade text renders verbatim into the sticky comment and into `::warning ...::`
+    annotation data, so echoing `bm.gh_json`'s `::error::command failed (N): gh api <path>`
+    would put a literal workflow command in the comment body, nest one inside another in
+    annotate mode, and leak the internal endpoint. Name the probe skipped; keep the reason."""
     quiet = _quiet_new_probes()
 
     def gh(path):
@@ -1163,10 +1163,10 @@ def test_self_referencing_pin_ignored(monkeypatch):
 
 
 def test_pin_probe_ignores_another_orgs_shared_action(monkeypatch):
-    """Findings worded about the engine ("a moving ref lets the engine change under your
-    deploy credentials", "re-pin to pick up fixes") are true only of shipmate's own
-    repository. Another org's shared action reported as a stale engine pin, once per
-    workflow file, also exhausts GitHub's 10-warning-per-step budget, hiding the real ones."""
+    """Findings worded about the engine ("a moving ref lets the engine change under your deploy
+    credentials", "re-pin to pick up fixes") are true only of shipmate's own repository. Another
+    org's shared action reported as a stale engine pin, once per workflow file, also exhausts
+    GitHub's 10-warning-per-step annotation budget, hiding the real findings."""
     responses = {
         f"{_WF_DIR}{_REF}": _wf_listing("plan.yml"),
         f"{_WF_DIR}/plan.yml{_REF}": _wf_file(
@@ -1316,10 +1316,10 @@ def test_pin_probe_reads_the_commit_under_examination(monkeypatch):
 
 
 def test_pin_probe_does_not_read_at_all_without_a_commit_under_examination(monkeypatch):
-    """`head_sha` is empty on the comment path's degrade branch, where the pull request
-    head could not be read; the annotate path always supplies a validated 40-hex SHA.
-    Reading the default branch there reports the pin stale on the very change that fixes
-    it, since the bumping pull request carries the new SHA only on its own head."""
+    """`head_sha` is empty on the comment path's degrade branch, where the pull request head
+    could not be read; the annotate path always supplies a validated 40-hex SHA. A
+    default-branch read reports the pin stale on the very change that fixes it, since the bumping
+    pull request carries the new SHA only on its own head. Say freshness was not verified."""
 
     def gh(path):
         pytest.fail(f"the pin probe hit the API with no commit to read: {path}")
@@ -1529,10 +1529,9 @@ def test_report_all_clear():
 
 def test_all_clear_names_the_environments_the_probes_actually_covered():
     """All three environment probes -- existence, protection shape and plan-environment
-    secrets -- see only the environments of the stacks this pull request changed, since
-    the declared set comes from the plan matrix's cell summaries. A categorical "no
-    problems found" overclaims: a `prod-eu` pair broken on a dev-only pull request was
-    never looked at. Name the set instead of implying the repository is sound."""
+    secrets -- see only the environments of the stacks this pull request changed, since the
+    declared set comes from the plan matrix's cell summaries. A categorical "no problems
+    found" overclaims. Name the set instead of implying the repository is sound."""
     body = doctor.render_report([], [], _ctx(envs={"dev-eu", "dev-us"}))
     assert "no problems found by the settings probes" in body
     assert "`dev-eu`" in body and "`dev-us`" in body
@@ -1566,10 +1565,11 @@ def test_findings_only_fallback_uses_the_same_all_clear_line():
 
 
 def test_harvest_incomplete_note_says_the_harvest_is_incomplete():
-    """The other harvest tests assert `HARVEST_INCOMPLETE in body`, pinning the
-    flag-to-note wiring but not the note's meaning: swap the constant for an all-clear and
-    they stay green, shipping the false all-clear the flag exists to prevent. Pinned here
-    on a stable stem -- the warning level, and a phrase unreadable as "everything is fine"."""
+    """The other harvest tests assert `HARVEST_INCOMPLETE in body`, pinning the flag-to-note
+    wiring but not the note's meaning: swap the constant for an all-clear and they stay green,
+    shipping the false all-clear the flag exists to prevent. Pinned here on a stable stem --
+    the warning level, and a phrase unreadable as "everything is fine". Stem, not the whole
+    sentence, so ordinary rewording stays cheap."""
     assert doctor.HARVEST_INCOMPLETE.startswith("- :warning:")
     assert "could not read all" in doctor.HARVEST_INCOMPLETE
     assert ":white_check_mark:" not in doctor.HARVEST_INCOMPLETE
@@ -2078,9 +2078,9 @@ def test_plain_pull_request_trigger_is_silent(monkeypatch):
 
 
 def test_commented_out_pull_request_target_is_silent(monkeypatch):
-    # These are the lines a careful repository writes *because* it has no such trigger,
-    # and reporting them trains readers to ignore the finding. Both shapes the pattern
-    # would otherwise match are here: a trailing comment, and a key at the head of a line.
+    # These are the lines a careful repository writes *because* it has no such trigger, and
+    # reporting them trains readers to ignore the finding. Both shapes the pattern would match
+    # are here: a trailing comment, and a commented-out key at the head of a line.
     responses = _fork_responses(
         {
             "plan.yml": "on: [pull_request]  # never [pull_request_target]\n",
@@ -2390,10 +2390,11 @@ def test_a_flow_style_false_is_silent(monkeypatch):
 
 
 def test_commented_out_unsafe_pr_checkout_is_silent(monkeypatch):
-    """The line a careful repository writes *because* it does not have one; reporting it
-    trains readers to ignore the finding. Two independent things keep it quiet -- the
-    comment strip empties the line, and the key anchor rejects a key with `set ` in front
-    -- so only removing BOTH reddens this. The two tests below pin one each."""
+    """The line a careful repository writes *because* it does not have one; reporting it trains
+    readers to ignore the finding. Two independent things keep it quiet -- the comment strip
+    empties the line, and the key anchor rejects a key with `set ` in front -- so only removing
+    BOTH reddens this. `test_a_trailing_comment_after_a_false_value_is_silent` pins the strip,
+    `test_a_key_merely_ending_in_the_input_name_is_not_reported` the anchor."""
     responses = _fork_responses(
         {
             "plan.yml": "on:\n  pull_request_target:\njobs:\n  x:\n    steps:\n"
@@ -2421,10 +2422,11 @@ def test_a_trailing_comment_after_a_false_value_is_silent(monkeypatch):
 
 
 def test_a_false_in_one_job_does_not_silence_a_true_in_another(monkeypatch):
-    """A plan wrapper checks out in more than one job, and this probe's own finding asks for
-    an explicit `false`, so both occurrences coexist in one file routinely. Examining only
-    the first reads the `false` and returns nothing -- fail-open on the outermost guard of
-    the plan path. Both occurrences are in ONE file here; a two-file fixture cannot see it."""
+    """A plan wrapper checks out in more than one job, and this probe's own finding asks for an
+    explicit `false`, so both occurrences coexist in one file routinely. Examining only the
+    first reads the `false` and returns nothing -- fail-open on the outermost guard of the plan
+    path. Both occurrences are in ONE file here;
+    `test_unsafe_pr_checkout_set_to_false_is_silent` uses two files with one each."""
     responses = _fork_responses(
         {
             "plan.yml": "on:\n  pull_request_target:\njobs:\n"
@@ -2483,8 +2485,7 @@ def _plan_calling_summary(
     produce is the summary call's rather than the step's. `matrix_with` writes that step's
     `with:` lines verbatim instead, for the checks on the step's own wiring (an empty
     sequence writes the step with no `with:` block at all). `with_first` writes the summary
-    job's `with:` block ABOVE its `uses:` line, legal YAML a forward-only scan cannot
-    see."""
+    job's `with:` block ABOVE its `uses:` line, legal YAML a forward-only scan cannot see."""
     matrix = (
         [f"head-repo: {_HEAD_REPO_EXPR}", f"head-sha: {_HEAD_SHA_EXPR}"]
         if detect_head_repo
@@ -3215,10 +3216,11 @@ def test_a_forward_on_the_apply_all_call_is_reported(monkeypatch):
 
 
 def test_a_with_block_above_the_uses_line_is_still_a_forward(monkeypatch):
-    """Key order in a YAML mapping carries no meaning, so the region around an apply call
-    runs in both directions from its `uses:` line -- the same property the summary-wiring
-    probe's `with:`-above-`uses:` test pins, in the opposite polarity. Scanning forward
-    only reads this wrapper as clean: silence at the load-time rejection it exists for."""
+    """Key order in a YAML mapping carries no meaning, so the region around an apply call runs
+    in both directions from its `uses:` line -- the same property
+    `test_a_with_block_above_the_uses_line_is_silent` pins for the summary-wiring probe, in the
+    opposite polarity. Scanning forward only reads this wrapper as clean: silence at the
+    load-time rejection this probe exists for."""
     responses = _fork_responses({"apply.yml": _CLEAN_ON_BLOCK + _TARGETED_JOB_WITH_FIRST})
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
     assert doctor._mode_input_warnings(_ctx()) == [(doctor.WARNING, _MODE_FORWARDED_TEXT)]
@@ -3396,11 +3398,10 @@ def test_a_dispatchable_plan_wrapper_is_silent(monkeypatch):
 
 
 def test_a_flow_style_on_value_is_silent(monkeypatch):
-    """The whole `on:` value as one flow mapping, with no line start in front of either
-    key; the documented block-style fence cannot cover it. A line-anchored regex sees
-    neither, and because ABSENCE is this probe's finding it reports a correctly wired
-    wrapper as declaring no `workflow_dispatch` trigger. Both keys have whitespace in
-    front, which the one-character lookbehind matches; index 0 is unreachable here."""
+    """The whole `on:` value as one flow mapping, with no line start in front of either key;
+    the documented block-style fence cannot cover it. A line-anchored regex sees neither, and
+    because ABSENCE is this probe's finding it reports a correctly wired wrapper as declaring
+    no `workflow_dispatch` trigger."""
     text = (
         "name: shipmate · plan\n"
         "on:{ pull_request_target: , workflow_dispatch: { inputs: { pr_number: "
@@ -4189,8 +4190,8 @@ def test_gh_token_stays_unset_when_it_was_unset_before(monkeypatch):
 
 
 def test_declared_envs_reads_a_flat_single_artifact_download(tmp_path):
-    # Same layout split `pending-checks` has to survive: with exactly one matching
-    # artifact the download lands at `<cells>/cell.json` with no per-artifact directory.
-    # Insisting on the nested layout empties the declared-env set on a single-cell plan.
+    # Same layout split `pending-checks` has to survive: with exactly one matching artifact
+    # the download lands at `<cells>/cell.json` with no per-artifact directory. Insisting on the
+    # nested layout empties the declared-env set, skipping every probe on a single-cell plan.
     (tmp_path / "cell.json").write_text(json.dumps({"environment": "dev-eu"}), encoding="utf-8")
     assert doctor._declared_envs(tmp_path) == {"dev-eu"}
