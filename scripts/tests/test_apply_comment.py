@@ -62,7 +62,7 @@ def test_build_rows_statuses_and_not_attempted_for_missing_artifact():
     assert by_key[("dev-us", "stacks/db")]["status"] == "failed"
     missing = by_key[("dev-eu", "stacks/missing")]
     assert missing["status"] == "not_attempted"
-    assert missing["stack_display"] == "stacks/missing"  # The cell reported no name.
+    assert missing["stack_display"] == "stacks/missing"  # No artifact arrived, so no display name.
 
 
 def test_build_rows_downloaded_cell_outside_expected_set_still_rendered():
@@ -1406,7 +1406,7 @@ def test_wave_job_name_matches_the_apply_check_grammar():
     """Coupling: `_job_url` resolves a row's log link by matching the apply check name as a `/
     `-boundary suffix of the run's job names, which works only because every wave job's `name:` is
     byte-identical to that check name. Nothing else enforces it, and a rename downgrades every link
-    to the run URL -- the documented degradation, so nothing fails."""
+    to the run URL -- the documented degradation, so no test fails on it."""
     src = (_ENGINE / ".github" / "workflows" / "apply-env-level.yml").read_text(encoding="utf-8")
     names = [ln.strip() for ln in src.splitlines() if ln.strip().startswith("name: apply / ")]
     expected = "name: apply / ${{ matrix.stack }} / ${{ matrix.environment }}"
