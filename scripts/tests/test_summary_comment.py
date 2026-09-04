@@ -1,4 +1,3 @@
-# scripts/tests/test_summary_comment.py
 import io
 import json
 
@@ -21,9 +20,6 @@ def _cell(**kw):
     }
     base.update(kw)
     return base
-
-
-# --- diff_map -------------------------------------------------------------
 
 
 def test_diff_map_moves_signs_to_column_zero_preserving_indent():
@@ -54,9 +50,9 @@ def test_diff_map_does_not_touch_interior_tildes():
 
 
 def test_diff_map_is_heredoc_aware_leaves_body_lines_untouched():
-    # A heredoc's literal body (e.g. cloud-init YAML) can itself start with
-    # `-`/`~` — those are content, not plan diff markers, and must survive
-    # byte-identical. The opener line is still a real change line and maps.
+    # A heredoc's literal body, cloud-init YAML for instance, can itself start with `-` or
+    # `~`. Those are content, not plan diff markers, and must survive byte-identical. The
+    # opener line is still a real change line and maps.
     text = (
         "  + user_data = <<-EOT\n"
         "        - name: install\n"
@@ -78,9 +74,6 @@ def test_diff_map_resumes_sign_mapping_after_heredoc_terminator():
     assert out[-1] == "!   real change"
 
 
-# --- fence ----------------------------------------------------------------
-
-
 def test_fence_grows_past_backtick_runs_in_plan_text():
     text = "x = ```code```"
     fenced = sc.fence(text)
@@ -97,12 +90,9 @@ def test_fence_lang_param_plain_vs_default_diff():
     assert sc.fence("x", lang="") == "```\nx\n```"
 
 
-# --- emoji / escape ---------------------------------------------------------
-
-
 def test_emoji_verdicts():
     assert sc.emoji(_cell(changed=False, add=0)) == "🟢"
-    # A destroy count also covers replacements -- it must not render red.
+    # A destroy count also covers replacements, so it must not render red.
     assert sc.emoji(_cell(destroy=2)) == "🟡"
     assert sc.emoji(_cell()) == "🟡"
 
@@ -118,8 +108,6 @@ def test_md_escape_neutralizes_angle_brackets():
 def test_md_escape_neutralizes_markdown_link_syntax():
     assert sc._md_escape("[x](https://e)") == "&#91;x&#93;(https://e)"
 
-
-# --- table / sections -------------------------------------------------------
 
 CHECKS = {
     "stacks/app / dev-eu": {"html_url": "https://ck/app-eu"},
@@ -163,9 +151,9 @@ def test_render_section_truncates_to_limit_with_check_link():
 
 
 def test_render_section_degrades_to_link_only_when_first_line_exceeds_room():
-    # A single line longer than the truncated slice has no newline to cut at
-    # ("cut at a line boundary" per CONTRACT.md) — must degrade to link-only
-    # rather than emit a mid-line-truncated fence.
+    # A single line longer than the truncated slice has no newline to cut at ("cut at a line
+    # boundary" per CONTRACT.md), so it must degrade to link-only rather than emit a
+    # mid-line-truncated fence.
     plan = "x" * 5_000
     s = sc.render_section(_cell(), plan, "https://ck/app-eu", 3_000)
     assert "```" not in s
@@ -177,9 +165,6 @@ def test_render_section_link_only_when_limit_tiny_or_plan_missing():
     assert "```" not in tiny and "https://ck/app-eu" in tiny
     missing = sc.render_section(_cell(), None, "https://ck/app-eu", 10_000)
     assert "```" not in missing and "https://ck/app-eu" in missing
-
-
-# --- build_comment ----------------------------------------------------------
 
 
 def test_build_comment_marker_first_no_change_cells_have_no_details():
@@ -210,7 +195,7 @@ def test_build_comment_hard_cap_fallback_drops_details_never_the_table():
     ]
     body = sc.build_comment(cells, {}, RUN_URL)
     assert len(body) <= sc.HARD_CAP
-    assert "stacks/s299" in body  # table row always present
+    assert "stacks/s299" in body  # The table row is always present.
 
 
 def test_build_comment_footer_links_run():
@@ -219,25 +204,23 @@ def test_build_comment_footer_links_run():
 
 
 def test_build_comment_footer_points_at_the_comment_commands():
-    """Doctor's findings live on the run page as workflow annotations now, and
-    those carry no `file=`/`line=` so they never render on the Files tab. That
-    leaves the commands themselves undiscoverable from the pull request, which
-    the sticky comment fixes with one line pointing at `shipmate help` — a
-    pointer to the command list, not a report of doctor's output: the plan
-    comment stays free of any coupling to doctor."""
+    """Doctor's findings live on the run page as workflow annotations, and those carry no
+    `file=`/`line=` so they never render on the Files tab. That leaves the commands themselves
+    undiscoverable from the pull request, which the sticky comment fixes with one line pointing
+    at `shipmate help` -- a pointer to the command list, not a report of doctor's output, so
+    the plan comment stays free of any coupling to doctor."""
     body = sc.build_comment([], {}, RUN_URL)
     assert sc.FOOTER_HINT in body
     assert "shipmate help" in sc.FOOTER_HINT
-    # No coupling back to doctor: this line names the command list and nothing
-    # about findings, probes or the report.
+    # No coupling back to doctor: this line names the command list and nothing about findings,
+    # probes or the report.
     assert "doctor" not in sc.FOOTER_HINT
 
 
 def test_the_footer_hint_is_not_itself_a_shipmate_command():
-    """The hint ships inside a bot comment on every plan run. A line that
-    matched the command grammar would make the plan comment a shipmate command;
-    the `[bot]` loop guard would ignore it, but relying on that alone is one
-    deletion away from a retrigger loop."""
+    """The hint ships inside a bot comment on every plan run. A line matching the command
+    grammar would make the plan comment a shipmate command; the `[bot]` loop guard would ignore
+    it, but relying on that alone is one deletion away from a retrigger loop."""
     cp = load_script("comment-parse")
     for line in sc.build_comment([], {}, RUN_URL).splitlines():
         assert not cp._SHIPMATE_LINE.match(line.strip()), line
@@ -251,9 +234,6 @@ def test_build_comment_fails_loud_when_even_the_table_overflows():
     ]
     with pytest.raises(SystemExit, match="comment cap"):
         sc.build_comment(cells, {}, RUN_URL)
-
-
-# --- load_cells --------------------------------------------------------------
 
 
 def test_load_cells_reads_json_and_plan_text_sorted(tmp_path):
@@ -300,15 +280,15 @@ def test_load_cells_fails_loud_on_wrong_type_int_field(tmp_path):
 def test_load_cells_fails_loud_on_wrong_type_bool_field(tmp_path):
     d = tmp_path / "cell-summary.x.y"
     d.mkdir()
-    bad = _cell(changed="false")  # truthy string — must not pass as bool
+    bad = _cell(changed="false")  # A truthy string must not pass as a bool.
     (d / "cell.json").write_text(json.dumps(bad))
     with pytest.raises(SystemExit, match="changed"):
         sc.load_cells(str(tmp_path))
 
 
 def test_load_cells_rejects_bool_for_int_field(tmp_path):
-    # isinstance(True, int) is True; the guard must use type(v) is int so a
-    # bool masquerading as an int field still fails loud.
+    # isinstance(True, int) is True, so the guard uses type(v) is int and a bool masquerading
+    # as an int field still fails loud.
     d = tmp_path / "cell-summary.x.y"
     d.mkdir()
     bad = _cell(destroy=True)
@@ -321,48 +301,43 @@ def test_load_cells_caps_plan_text_read_at_size_budget(tmp_path):
     d = tmp_path / "cell-summary.x.y"
     d.mkdir()
     (d / "cell.json").write_text(json.dumps(_cell()))
-    line = "  + resource line padded to a fixed width for this test case\n"  # 63 chars
-    (d / "plan.txt").write_text(line * 1_112)  # > 70_000 chars, well past SIZE_BUDGET
+    line = "  + resource line padded to a fixed width for this test case\n"  # 63 chars.
+    (d / "plan.txt").write_text(line * 1_112)  # Over 70_000 chars, well past SIZE_BUDGET.
     cells = sc.load_cells(str(tmp_path))
     assert len(cells[0][1]) == sc.SIZE_BUDGET
     body = sc.build_comment(cells, {}, RUN_URL)
     assert "Truncated" in body
 
 
-# --- coupling guards ---------------------------------------------------------
-
-
 def test_cell_schema_guard_plan_cell_writes_every_required_key():
-    # Coupling: plan-cell (writer of cell.json) <-> summary-comment (reader).
-    # The writer is inline python in the action; assert every key the reader
-    # requires appears as a JSON key literal in the writer's source.
+    # Coupling: plan-cell (writer of cell.json) <-> summary-comment (reader). The writer is
+    # inline python in the action, so every key the reader requires must appear as a JSON key
+    # literal in the writer's source.
     src = (_ENGINE / "actions" / "plan-cell" / "action.yml").read_text(encoding="utf-8")
     missing = [k for k in sc.CELL_KEYS if f'"{k}"' not in src]
     assert missing == [], f"plan-cell action.yml no longer writes cell.json keys: {missing}"
 
 
 def test_cell_summary_artifact_name_is_dot_delimited_env_first():
-    # Fix for the ambiguity plan.<env>.<slug> was invented to solve: a
-    # dash-delimited cell-summary-<slug>-<env> name collides for
-    # (stacks/app-dev, eu) and (stacks/app, dev-eu). The artifact name must
-    # use the same dot-delimited, env-first grammar as the plan artifact.
+    """A dash-delimited cell-summary-<slug>-<env> name collides for (stacks/app-dev, eu) and
+    (stacks/app, dev-eu) -- the ambiguity plan.<env>.<slug> exists to solve. The artifact name
+    must use the same dot-delimited, env-first grammar as the plan artifact."""
     src = (_ENGINE / "actions" / "plan-cell" / "action.yml").read_text(encoding="utf-8")
     assert "cell-summary.${{ inputs.env }}.${{ steps.ids.outputs.slug }}" in src
 
 
 def test_cell_summary_artifact_uploads_plan_text():
-    # summary-comment renders details from plan.txt shipped inside the
-    # cell-summary artifact; the upload step's path block must include it.
+    # summary-comment renders details from plan.txt shipped inside the cell-summary artifact,
+    # so the upload step's path block must include it.
     src = (_ENGINE / "actions" / "plan-cell" / "action.yml").read_text(encoding="utf-8")
     upload = src.split("Upload cell summary", 1)[1].split("retention-days", 1)[0]
     assert "plan.txt" in upload
 
 
 def _upsert_step():
-    """The summary action's `Upsert sticky comment` step, shell comment lines
-    dropped: these assertions are about what the step *runs*, and the prose
-    explaining why an operator was removed would otherwise keep tripping a
-    substring check for that operator."""
+    """The summary action's `Upsert sticky comment` step, shell comment lines dropped: these
+    assertions are about what the step runs, and the prose explaining why an operator was
+    removed would otherwise keep tripping a substring check for that operator."""
     src = (_ENGINE / "actions" / "summary" / "action.yml").read_text(encoding="utf-8")
     steps = src.split("\n    - name:")
     matches = [s for s in steps if "body=@comment.md" in s]
@@ -371,11 +346,10 @@ def _upsert_step():
 
 
 def test_the_sticky_upsert_anchors_the_marker_at_the_body_start():
-    """`build_comment` emits MARKER as the body's first line, so the lookup
-    must anchor there. A `contains` match also selects a comment that merely
-    quotes the marker — doctor's report renders findings that interpolate
-    repository data such as workflow file names — and this step would then
-    PATCH that comment with the plan body."""
+    """`build_comment` emits MARKER as the body's first line, so the lookup must anchor there.
+    A `contains` match also selects a comment that merely quotes the marker -- doctor's report
+    renders findings that interpolate repository data such as workflow file names -- and this
+    step would then PATCH that comment with the plan body."""
     block = _upsert_step()
     assert "startswith" in block
     assert "contains" not in block
@@ -383,17 +357,15 @@ def test_the_sticky_upsert_anchors_the_marker_at_the_body_start():
 
 
 def test_the_sticky_upsert_does_not_swallow_a_comment_listing_failure():
-    """`|| true` on the id lookup turned a failed listing into an empty id and
-    fell through to the create branch, leaving the PR with two marker-bearing
-    Bot comments — and every later run PATCHing the older one, so a permanently
-    stale plan comment sat below the live one. The `|| true` only existed to
-    dodge EPIPE from `head` under `pipefail`, so the pipe goes rather than the
-    error check, and a listing failure skips the post so the next run
-    recovers. The gate status is written by a separate later step, so skipping
-    here must not fail this one."""
+    """`|| true` on the id lookup turns a failed listing into an empty id, falls through to the
+    create branch and leaves the pull request with two marker-bearing Bot comments, every later
+    run PATCHing the older one -- a permanently stale plan comment below the live one. That
+    `|| true` only existed to dodge EPIPE from `head` under `pipefail`, so the pipe goes rather
+    than the error check, and a listing failure skips the post for the next run to recover. The
+    gate status is written by a separate later step, so skipping here must not fail this one."""
     block = _upsert_step()
     assert "|| true" not in block
-    assert "| head -n1" not in block  # no pipe, so no EPIPE to swallow
+    assert "| head -n1" not in block  # No pipe, so no EPIPE to swallow.
     assert "if ! gh api" in block
     degrade = block.split("if ! gh api", 1)[1].split("fi", 1)[0]
     assert "::warning::" in degrade
@@ -403,11 +375,10 @@ def test_the_sticky_upsert_does_not_swallow_a_comment_listing_failure():
 
 
 def _guard_bodies():
-    """The `if ... ; then` bodies of the upsert step's zero-count guards, keyed
-    by their condition line. Assertions bind `exit 0` to a body, never to the
-    step as a whole: an unconditional `exit 0` anywhere below the id lookup
-    satisfies every positional check while silently stopping the sticky comment
-    from ever being written."""
+    """The `if ... ; then` bodies of the upsert step's zero-count guards, keyed by their
+    condition line. Assertions bind `exit 0` to a body, never to the step as a whole: an
+    unconditional `exit 0` anywhere below the id lookup satisfies every positional check while
+    silently stopping the sticky comment from ever being written."""
     guard = _upsert_step().split("id=$(head -n1 summary-comment-ids.txt)", 1)[1]
     bodies, cond = {}, None
     for line in guard.splitlines():
@@ -423,16 +394,15 @@ def _guard_bodies():
 
 
 def test_a_hold_mode_never_overwrites_the_sticky_comment():
-    """`gate-state` collapses every "the plan can't be trusted" case (a
-    non-success plan run, or a cell/artifact-count shortfall) into
-    `comment_mode=hold` — a single signal the upsert step reacts to before it
-    inspects anything else. Those runs must write nothing at all, so an
-    existing comment (the reviewed plan for the previous push) survives
-    instead of being PATCHed down to an empty table."""
+    """`gate-state` collapses every "the plan can't be trusted" case -- a non-success plan run,
+    or a cell/artifact-count shortfall -- into `comment_mode=hold`, one signal the upsert step
+    reacts to before it inspects anything else. Those runs must write nothing at all, so an
+    existing comment, the reviewed plan for the previous push, survives instead of being
+    PATCHed down to an empty table."""
     bodies = _guard_bodies()
     hold = next(c for c in bodies if '"$MODE" = "hold"' in c)
     assert "exit 0" in bodies[hold]
-    # No write of any kind on that path — not the PATCH, not the create.
+    # No write of any kind on that path: not the PATCH, not the create.
     assert not any("gh api" in line for line in bodies[hold])
 
     nothing_changed = next(c for c in bodies if '"$MODE" = "nothing-changed"' in c)
@@ -440,19 +410,17 @@ def test_a_hold_mode_never_overwrites_the_sticky_comment():
 
 
 def test_the_sticky_upsert_skips_creation_when_nothing_was_planned():
-    """A docs-only or pin-bump pull request should carry no shipmate comment at
-    all. The guard is create-only — conditioned on an *empty* id as well as
-    `comment_mode=nothing-changed` (gate-state's `nothing_changed` derivation,
-    not a raw cell count) — because an existing comment must still be updated
-    to the no-planned-cells body, or a pull request that planned changes and
-    then pushed them away keeps displaying the stale plan table. It also
-    yields to doctor: findings render only as run-page annotations, so the
-    comment footer is their one pull-request-visible pointer and a run with
-    findings still posts. Behaviour lives in the action's shell, so this is
-    source-derived."""
+    """A docs-only or pin-bump pull request carries no shipmate comment at all. The guard is
+    create-only, conditioned on an empty id as well as `comment_mode=nothing-changed` --
+    gate-state's `nothing_changed` derivation, not a raw cell count -- because an existing
+    comment must still be updated to the no-planned-cells body, or a pull request that planned
+    changes and then pushed them away keeps displaying the stale plan table. It also yields to
+    doctor: findings render only as run-page annotations, so the comment footer is their one
+    pull-request-visible pointer and a run with findings still posts. Behaviour lives in the
+    action's shell, so this is source-derived."""
     bodies = _guard_bodies()
     warned = next(c for c in bodies if "doctor.txt" in c)
-    assert "grep -q '^::warning' doctor.txt" in warned  # warnings, not notices
+    assert "grep -q '^::warning' doctor.txt" in warned  # Warnings, not notices.
     assert bodies[warned] == ["doctor_warned=true"]
     quiet = next(
         c
@@ -463,8 +431,8 @@ def test_the_sticky_upsert_skips_creation_when_nothing_was_planned():
     )
     assert "exit 0" in bodies[quiet]
     assert not any("gh api" in line for line in bodies[quiet])
-    # The step it yields to must still run before this one, or doctor.txt is
-    # either absent or a leftover from nothing.
+    # The step it yields to must still run before this one, or doctor.txt is either absent or
+    # a leftover from nothing.
     src = (_ENGINE / "actions" / "summary" / "action.yml").read_text(encoding="utf-8")
     names = [ln.strip() for ln in src.splitlines()]
     doctor = next(i for i, n in enumerate(names) if n.startswith("- name: Doctor"))
@@ -474,8 +442,8 @@ def test_the_sticky_upsert_skips_creation_when_nothing_was_planned():
 
 
 def _run_main(tmp_path, monkeypatch, cells, stdin=""):
-    """Drive `summary-comment`'s `main()` end to end in tmp_path and return the
-    GITHUB_OUTPUT text it appended."""
+    """Drive `summary-comment`'s `main()` end to end in tmp_path and return the GITHUB_OUTPUT
+    text it appended."""
     for i, cell in enumerate(cells):
         d = tmp_path / f"cell-summary.{cell['environment']}.s{i}"
         d.mkdir()
@@ -494,12 +462,11 @@ def _run_main(tmp_path, monkeypatch, cells, stdin=""):
 
 
 def test_main_writes_the_count_and_pending_outputs_the_action_reads(tmp_path, monkeypatch):
-    """Coupling: `count=` / `pending=` here <-> `steps.build.outputs.count` and
-    `.pending` in the summary action. A rename on this side expands to the empty
-    string on the other, where `set -u` cannot see it: the zero-count comment
-    suppression silently stops firing AND the gate's "plan jobs ran but produced
-    no cell summaries" branch stops firing, greening the gate on an
-    artifact-download failure. Assert both names from both sides."""
+    """Coupling: `count=` / `pending=` here <-> `steps.build.outputs.count` and `.pending` in
+    the summary action. A rename on this side expands to the empty string on the other, where
+    `set -u` cannot see it: the zero-count comment suppression silently stops firing, and so
+    does the gate's "plan jobs ran but produced no cell summaries" branch, greening the gate on
+    an artifact-download failure. Both names are asserted from both sides."""
     text = _run_main(tmp_path, monkeypatch, [_cell()])
     assert "count=1\n" in text
     assert "pending=true\n" in text
@@ -514,17 +481,17 @@ def test_main_writes_the_count_and_pending_outputs_the_action_reads(tmp_path, mo
 
 
 def test_main_reports_zero_count_when_no_cell_summaries_arrived(tmp_path, monkeypatch):
-    """The zero the comment suppression and the gate's artifact-download branch
-    both key on. An empty cells directory must produce `count=0`, not a crash."""
+    """The zero the comment suppression and the gate's artifact-download branch both key on. An
+    empty cells directory must produce `count=0`, not a crash."""
     text = _run_main(tmp_path, monkeypatch, [])
     assert "count=0\n" in text
     assert "pending=false\n" in text
 
 
 def test_the_gate_step_runs_after_the_upsert_step_that_may_skip():
-    """The upsert's listing-failure path `exit 0`s the step; `Create/refresh
-    gate` must be a *later step*, not code below that exit, or a comment
-    listing failure would silently stop writing the gate status."""
+    """The upsert's listing-failure path `exit 0`s the step, so `Create/refresh gate` must be a
+    later step rather than code below that exit, or a comment listing failure would silently
+    stop writing the gate status."""
     src = (_ENGINE / "actions" / "summary" / "action.yml").read_text(encoding="utf-8")
     names = [ln.strip() for ln in src.splitlines() if ln.strip().startswith("- name:")]
     upsert = next(i for i, n in enumerate(names) if "Upsert sticky comment" in n)
@@ -533,10 +500,9 @@ def test_the_gate_step_runs_after_the_upsert_step_that_may_skip():
 
 
 def test_marker_round_trip_guard_summary_action_matches_script():
-    # Coupling: the marker summary-comment embeds <-> the marker the summary
-    # action's upsert step greps for. Drift = a new comment every run instead
-    # of an edit-in-place. Assert both action sites carry the script's marker
-    # and that the build step actually invokes the script.
+    """Coupling: the marker summary-comment embeds <-> the marker the summary action's upsert
+    step greps for. Drift means a new comment every run instead of an edit-in-place, so both
+    action sites must carry the script's marker and the build step must invoke the script."""
     src = (_ENGINE / "actions" / "summary" / "action.yml").read_text(encoding="utf-8")
     assert src.count(sc.MARKER) >= 1, "upsert step no longer greps the script's marker"
     assert "scripts/summary-comment" in src, "summary action no longer calls summary-comment"
@@ -544,8 +510,8 @@ def test_marker_round_trip_guard_summary_action_matches_script():
 
 
 def test_comment_links_to_this_run(tmp_path, monkeypatch):
-    # The summary job runs inside the plan run, so this run holds the logs and
-    # the artifacts the footer promises.
+    # The summary job runs inside the plan run, so this run holds the logs and the artifacts
+    # the footer promises.
     _run_main(tmp_path, monkeypatch, [_cell()])
     body = (tmp_path / "comment.md").read_text(encoding="utf-8")
     assert "[Logs & artifacts](https://gh/o/r/actions/runs/1)" in body

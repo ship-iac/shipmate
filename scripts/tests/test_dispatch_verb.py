@@ -1,17 +1,5 @@
-"""Tests for actions/dispatch's `verb` input: the verb selects one workflow
-file and one body shape, and nothing else routes.
-
-Five parts, the shape this file has always had:
-- Body building: each verb's whole body, compared against a hand-written
-  literal. Tested via subprocess execution of the python heredoc only.
-- Validation before the API call: an empty verb and a verb outside
-  {plan, apply, unlock} are both refused before `gh` runs.
-- Degrade messages: an unlock or plan failure that matches the skew shape gets
-  the skew explanation and its remedy; a 403, and a 422 about another input, do
-  not.
-- Apply path stays green: an apply failure prints the raw error alone.
-- The routing surface: verb -> filename, the env: mapping, the absence of a
-  `workflow` input, the filename regex, and comment-ops' `verb` output.
+"""Tests for actions/dispatch's `verb` input: the verb selects one workflow file and one body
+shape, and nothing else routes.
 """
 
 import json
@@ -43,8 +31,7 @@ def _dispatch_step():
 def _extract_python_heredoc():
     """Extract the python body from the step's run field.
 
-    Fails on vacuous heredoc (empty body) — if the partition yields an empty
-    body, it would exec "" and pass vacuously.
+    Fails on an empty body, which would exec "" and pass vacuously.
     """
     run = _dispatch_step()["run"]
     _, _, rest = run.partition("<<'PY'\n")
@@ -87,21 +74,18 @@ def _build_dispatch_body(verb, environment=""):
     return json.loads(result.stdout)
 
 
-# --- Body building: one whole literal per verb -------------------------------
-#
-# Whole-body comparison, not key-by-key membership: "carries exactly these
-# inputs" and "carries no `mode` key" are the same assertion once the comparison
-# is whole, and two selectors for one property disagree eventually.
+# Whole-body comparison, not key-by-key membership: "carries exactly these inputs" and
+# "carries no `mode` key" are the same assertion once the comparison is whole, and two
+# selectors for one property disagree eventually.
 
 
 def test_plan_body_is_the_dispatch_ref_and_pr_number_alone():
-    """A plan body is exactly {ref: dispatch ref, inputs: {pr_number}}.
+    """A plan body is exactly {ref: dispatch ref, inputs: {pr_number}}. plan.yml declares one
+    input, so every extra key is a production 422; the top-level ref is the dispatch ref rather
+    than the head SHA, because a plan states no head.
 
-    plan.yml declares one input, so every extra key is a production 422; and the
-    top-level ref is the dispatch ref, never the head SHA — a plan states no head.
-
-    Mutations: add `ref`, `environment` or `mode` to the plan inputs; swap the
-    top-level ref for the head SHA.
+    Mutations: add `ref`, `environment` or `mode` to the plan inputs; swap the top-level ref
+    for the head SHA.
     """
     body = _build_dispatch_body("plan", environment="dev-eu")
     assert body == {"ref": "main", "inputs": {"pr_number": "42"}}, (
@@ -110,11 +94,9 @@ def test_plan_body_is_the_dispatch_ref_and_pr_number_alone():
 
 
 def test_apply_body_omits_the_environment_when_it_is_empty():
-    """A bare `shipmate apply` sends {ref, pr_number} and no environment key.
-
-    An empty environment IS the bare apply, and GitHub reads an empty value for a
-    required workflow_dispatch input as not provided (422) — so the key is
-    omitted rather than sent empty.
+    """A bare `shipmate apply` sends {ref, pr_number} and no environment key. An empty
+    environment is the bare apply, and GitHub reads an empty value for a required
+    workflow_dispatch input as not provided (422), so the key is omitted rather than sent empty.
 
     Mutation: drop the `if os.environ.get("ENVIRONMENT")` guard.
     """
@@ -136,10 +118,9 @@ def test_apply_body_carries_the_environment_when_it_is_set():
 
 
 def test_unlock_body_is_the_ref_and_environment_alone():
-    """An unlock body is exactly {ref, environment} — no pr_number, no mode.
-
-    unlock.yml releases a stranded lock: it applies no plan and comments on no
-    pull request, so nothing on that path reads a PR number.
+    """An unlock body is exactly {ref, environment} -- no pr_number, no mode. unlock.yml
+    releases a stranded lock: it applies no plan and comments on no pull request, so nothing on
+    that path reads a PR number.
 
     Mutations: add `pr_number` to the unlock branch; re-add `inputs["mode"]`.
     """
@@ -149,33 +130,25 @@ def test_unlock_body_is_the_ref_and_environment_alone():
     }
 
 
-# --- Validation before the API call ------------------------------------------
-
 RECORDING_GH_STUB = "#!/bin/bash\nprintf '%s\\n' \"$@\" > argv.txt\necho '{}'\n"
 
 
 def _create_stub_commands(tmpdir):
-    """Create stub gh and python3 commands on PATH for testing.
-
-    Returns (path, python3_path, gh_path) tuple.
-    """
+    """Create stub `gh` and `python3` commands on PATH; returns (dir, python3, gh)."""
     python3_path = Path(tmpdir) / "python3"
-    # Use python from sys.executable instead of /usr/bin/python3
     python3_path.write_text(f'#!/bin/bash\nexec "{__import__("sys").executable}" "$@"\n')
     python3_path.chmod(0o755)
 
     gh_path = Path(tmpdir) / "gh"
-    gh_path.write_text("#!/bin/bash\necho '{}'\n")  # Default: success
+    gh_path.write_text("#!/bin/bash\necho '{}'\n")  # The default stub succeeds.
     gh_path.chmod(0o755)
 
     return str(tmpdir), str(python3_path), str(gh_path)
 
 
 def _run_dispatch(tmpdir, verb, environment="", gh_stub=RECORDING_GH_STUB):
-    """Run the shipped step with a gh stub that records its argv.
-
-    Returns (CompletedProcess, recorded argv text).
-    """
+    """Run the shipped step with a gh stub that records its argv; returns the
+    CompletedProcess and the recorded argv text."""
     path_dir, _, gh_path = _create_stub_commands(tmpdir)
     Path(gh_path).write_text(gh_stub)
     Path(gh_path).chmod(0o755)
@@ -208,14 +181,12 @@ MARKER_GH_STUB = "#!/bin/bash\ntouch marker.txt\n"
 
 
 def test_an_empty_verb_is_refused_before_any_api_call():
-    """No verb, no dispatch — and the refusal names what the caller must wire.
+    """No verb, no dispatch, and the refusal names what the caller must wire: omitting the
+    `with:` line dispatches apply.yml with a plan body, for a 422 the pull request never shows.
 
-    The outage this closes: a consumer that omits the `with:` line dispatched
-    apply.yml with a plan body and got a 422 nothing on the pull request saw.
-
-    Mutation: delete the empty-verb refusal branch — the step then reaches
-    `gh api` (the case list rejects it, but only after the marker exists... and
-    with the case list's own `''` arm re-added, all the way through).
+    Mutation: delete the empty-verb refusal branch. The step then reaches `gh api`; the case
+    list rejects it only after the marker exists, and with its own `''` arm re-added it goes
+    all the way through.
     """
     if not usable_bash():
         pytest.skip("bash not available on this platform")
@@ -250,9 +221,6 @@ def test_an_unknown_verb_is_refused_before_any_api_call():
         )
 
 
-# --- The routing surface -----------------------------------------------------
-
-
 @pytest.mark.parametrize(("verb", "workflow"), sorted(VERB_WORKFLOW.items()))
 def test_each_verb_dispatches_its_own_workflow_file(verb, workflow):
     """One entry point per verb: plan.yml, apply.yml, unlock.yml.
@@ -270,11 +238,9 @@ def test_each_verb_dispatches_its_own_workflow_file(verb, workflow):
 
 
 def test_the_action_declares_no_workflow_input():
-    """The whole input vector, hand-written.
-
-    The retired `workflow` input overrode the filename. One static name cannot
-    serve three verbs, so it misroutes two of them — the verb→file mapping is the
-    contract now, not an overridable default.
+    """The whole input vector, hand-written. A `workflow` input overrides the filename, and one
+    static name cannot serve three verbs, so it misroutes two of them: the verb-to-file mapping
+    is the contract, not an overridable default.
 
     Mutation: re-add `workflow` (or drop `verb`, or give `verb` a default).
     """
@@ -304,12 +270,10 @@ FILENAME_REGEX_GUARD = (
 
 
 def test_the_resolved_filename_is_checked_before_it_reaches_an_api_path():
-    """The filename regex still guards the value interpolated into the API path.
-
-    Structural by necessity: the `case` now resolves `WORKFLOW` to one of three
-    literals, so no runtime input can make this check fire. It is the last line
-    between a verb value and an API path and costs one line, so it stays — and
-    only its presence is observable.
+    """The filename regex still guards the value interpolated into the API path. Structural by
+    necessity: the `case` resolves `WORKFLOW` to one of three literals, so no runtime input can
+    make this check fire. It is the last line between a verb value and an API path and costs
+    one line, so it stays, and only its presence is observable.
 
     Mutation: delete the regex check line.
     """
@@ -320,11 +284,9 @@ def test_the_resolved_filename_is_checked_before_it_reaches_an_api_path():
 
 
 def test_dispatch_step_env_mapping_is_complete():
-    """Pin the whole env: mapping of the dispatch step to ensure VERB was wired.
-
-    This catches the case where the python code is correct but VERB was never
-    added to the step's env: block in the first place — and that WORKFLOW is no
-    longer read from an input.
+    """The whole env: mapping of the dispatch step, so a python body that is correct but never
+    got VERB added to the step's env: block reddens here -- as does WORKFLOW still being read
+    from an input.
 
     Mutation: rename VERB in the env: block, or re-add WORKFLOW.
     """
@@ -362,22 +324,20 @@ def test_the_verb_output_of_comment_ops_is_the_parsed_route_alone():
 
 
 def test_every_route_comment_ops_can_dispatch_is_accepted_here():
-    """comment-parse's dispatching routes and this action's `case` cannot drift.
+    """comment-parse's dispatching routes and this action's `case` cannot drift. Nothing else
+    couples them: a route comment-ops emits that the case rejects fails only at runtime, with
+    the whole suite green. The literal below sits beside the derivation because a check
+    parametrized from the registry cannot catch a mistake in the registry.
 
-    Nothing else couples them: a route comment-ops emits that the case rejects
-    fails only at runtime, with the whole suite green. The literal below sits
-    beside the derivation on purpose — a check parametrized from the registry
-    cannot catch a mistake in the registry.
-
-    Mutations: remove `plan` (or `unlock`) from the case list; add a fourth
-    dispatching route to VERBS.
+    Mutations: remove `plan` (or `unlock`) from the case list; add a fourth dispatching route
+    to VERBS.
     """
     if not usable_bash():
         pytest.skip("bash not available on this platform")
 
     parse = load_script("comment-parse")
-    # `doctor` and `help` are answered in place; `destroy` is reserved with
-    # route None. What is left is exactly what can reach a dispatch.
+    # `doctor` and `help` are answered in place, and `destroy` is reserved with route None.
+    # What is left is exactly what can reach a dispatch.
     routes = {
         spec["route"]
         for spec in parse.VERBS.values()
@@ -411,12 +371,9 @@ def test_dispatch_success_exits_zero():
         )
 
 
-# --- Degrade messages --------------------------------------------------------
-#
-# Only a failure that actually matches the skew shape gets the skew explanation:
-# a 403 or a rate limit explained as skew sends the operator to edit workflows
-# that are fine. Each message's remedy is pinned too: neither failure is fixed by
-# a re-pin, and a message that says otherwise has shipped here before.
+# Only a failure that matches the skew shape gets the skew explanation: a 403 or a rate limit
+# explained as skew sends the operator to edit workflows that are fine. Each message's remedy
+# is pinned too, because neither failure is fixed by a re-pin.
 
 _NO_TRIGGER_STUB = (
     "#!/bin/bash\n"
@@ -427,24 +384,21 @@ _NOT_FOUND_STUB = "#!/bin/bash\necho 'gh: Not Found (HTTP 404)' >&2\nexit 1\n"
 _FORBIDDEN_STUB = "#!/bin/bash\necho 'HTTP 403: Forbidden' >&2\nexit 1\n"
 _UNLOCK_SKEW = "has no unlock.yml"
 _PLAN_SKEW = "does not accept a dispatched plan"
-# The remedy half. The consumer authors `unlock.yml` and edits `plan.yml` by
-# hand; a pin bump does neither, and `docs/releasing.md` is the maintainer's
-# runbook, not the page that tells them.
+# The remedy half. The consumer authors `unlock.yml` and edits `plan.yml` by hand, a pin bump
+# does neither, and `docs/releasing.md` is the maintainer's runbook rather than the page that
+# tells them.
 _UNLOCK_REMEDY = "docs/upgrading.md section 0.21.0"
 _PLAN_REMEDY = "docs/upgrading.md section 0.20.0"
 
 
 @pytest.mark.parametrize("stub", [_NOT_FOUND_STUB, _NO_TRIGGER_STUB])
 def test_unlock_against_a_repo_with_no_unlock_wrapper_prints_the_missing_wrapper_message(stub):
-    """Both shapes a missing unlock.yml produces get the missing-wrapper message.
+    """Both shapes a missing unlock.yml produces get the missing-wrapper message. Measured: a
+    workflow file that does not exist answers 404; one with no such trigger answers `Workflow
+    does not have 'workflow_dispatch' trigger (HTTP 422)`.
 
-    Measured: a workflow file that does not exist answers 404; one with no such
-    trigger answers `Workflow does not have 'workflow_dispatch' trigger
-    (HTTP 422)`.
-
-    Mutation: drop either half of the message-text condition and the other
-    shape stops being explained; point the remedy at `docs/releasing.md` and the
-    remedy assertion reddens.
+    Mutation: drop either half of the message-text condition and the other shape stops being
+    explained; point the remedy at `docs/releasing.md` and the remedy assertion reddens.
     """
     if not usable_bash():
         pytest.skip("bash not available on this platform")
@@ -460,9 +414,9 @@ def test_unlock_against_a_repo_with_no_unlock_wrapper_prints_the_missing_wrapper
 def test_unlock_403_prints_no_skew_message():
     """A 403 is not version skew: the raw output prints, the message does not.
 
-    Mutation: drop the whole `[[ ... ]]` message-text condition, so any unlock
-    failure is reported as skew. Neither half alone reddens it: a 403 is neither
-    a 404 nor a missing trigger.
+    Mutation: drop the whole `[[ ... ]]` message-text condition, so any unlock failure is
+    reported as skew. Neither half alone reddens it, because a 403 is neither a 404 nor a
+    missing trigger.
     """
     if not usable_bash():
         pytest.skip("bash not available on this platform")
@@ -494,12 +448,10 @@ def test_an_apply_failure_prints_no_degrade_message():
 
 
 def test_a_422_about_another_input_is_not_reported_as_skew():
-    """A 422 naming an input the wrapper does not expect is not a missing wrapper.
-
-    The v0.16.0 E2E hit this class: the consumer wrapper declared `plan_run_id`
-    as required, the dispatch sent it empty, and GitHub answered `Required input
-    'plan_run_id' not provided (HTTP 422)`. A condition matching any 422 told
-    the operator to edit workflows that were already current, hiding the real
+    """A 422 naming an input the wrapper does not expect is not a missing wrapper. The v0.16.0
+    E2E hit this class: a consumer wrapper declared `plan_run_id` required, the dispatch sent it
+    empty, and GitHub answered `Required input 'plan_run_id' not provided (HTTP 422)`. Matching
+    any 422 tells the operator to edit workflows that are already current and hides the real
     cause printed one line above.
 
     Mutation: widen the unlock condition to any `HTTP 422` and this reddens.

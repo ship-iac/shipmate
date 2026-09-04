@@ -14,8 +14,8 @@ CHECK_RUNS_URL = f"repos/acme/iac/commits/{HEAD}/check-runs?filter=all&per_page=
 def _completed(monkeypatch, checks, **kw):
     """deploy-detect's "already applied" set, through the query main() calls.
 
-    That main() *does* call it is a separate, structural claim -- pinned by
-    test_detect_app_scoping, not by this helper."""
+    That main() does call it is a separate, structural claim, pinned by
+    test_detect_app_scoping rather than by this helper."""
     return completed_names(dd.ad, monkeypatch, checks, **kw)
 
 
@@ -24,7 +24,7 @@ def test_filter_pending_drops_completed_applies():
         {"stack": "stacks/dns", "environment": "dev-eu", "workload": ""},
         {"stack": "stacks/app", "environment": "dev-eu", "workload": ""},
     ]
-    completed = {"apply / stacks/dns / dev-eu"}  # applied pre-merge -> skip
+    completed = {"apply / stacks/dns / dev-eu"}  # Applied pre-merge, so skipped.
     assert dd.filter_pending(cells, completed) == [
         {"stack": "stacks/app", "environment": "dev-eu", "workload": ""},
     ]
@@ -36,17 +36,16 @@ def test_filter_pending_keeps_all_when_none_completed():
 
 
 def test_completed_failure_apply_stays_pending(monkeypatch):
-    # A "completed" status with a failing conclusion must not count as done —
-    # deploy-detect must share apply-gate's success/neutral predicate, not just
-    # check status=="completed".
+    # A "completed" status with a failing conclusion must not count as done: deploy-detect
+    # shares apply-gate's success/neutral predicate rather than checking status=="completed".
     cells = [{"stack": "stacks/app", "environment": "dev-eu", "workload": ""}]
     done = _completed(monkeypatch, [_check(conclusion="failure")])
     assert dd.filter_pending(cells, done) == cells
 
 
 def test_duplicate_run_newer_queued_stays_pending(monkeypatch):
-    # An old completed+success run must not mask a newer queued run of the same
-    # check name (re-created check) — the latest run per name governs.
+    # An old completed+success run must not mask a newer queued run of the same check name,
+    # from a re-created check: the latest run per name governs.
     cells = [{"stack": "stacks/app", "environment": "dev-eu", "workload": ""}]
     done = _completed(
         monkeypatch,
@@ -59,7 +58,7 @@ def test_duplicate_run_newer_queued_stays_pending(monkeypatch):
 
 
 def test_merged_head_exact_match_wins(monkeypatch):
-    # Exact merge_commit_sha match should still be picked over everything else.
+    # An exact merge_commit_sha match is picked over everything else.
     pulls = [
         {
             "merge_commit_sha": "other",
@@ -77,8 +76,8 @@ def test_merged_head_exact_match_wins(monkeypatch):
 
 
 def test_merged_head_only_open_pr_falls_back_to_merge_sha(monkeypatch):
-    # Sole candidate is an OPEN (unmerged) PR that merely contains the pushed
-    # commit -> must NOT deploy that PR's plans; fall back to the merge SHA.
+    # The sole candidate is an open, unmerged pull request that merely contains the pushed
+    # commit. Its plans must not deploy, so the fallback is the merge SHA.
     pulls = [
         {"merge_commit_sha": "unrelated", "merged_at": None, "head": {"sha": "open-pr-head"}},
     ]
@@ -87,8 +86,8 @@ def test_merged_head_only_open_pr_falls_back_to_merge_sha(monkeypatch):
 
 
 def test_merged_head_mix_of_merged_and_open_picks_merged(monkeypatch):
-    # No pull matches merge_commit_sha exactly (e.g. squash merge), but one
-    # candidate is merged and one is still open -> pick the merged one.
+    # No pull matches merge_commit_sha exactly, as after a squash merge, but one candidate is
+    # merged and one is still open, so the merged one is picked.
     pulls = [
         {"merge_commit_sha": "unrelated1", "merged_at": None, "head": {"sha": "open-pr-head"}},
         {
@@ -107,9 +106,9 @@ def test_merged_head_no_pulls_returns_merge_sha(monkeypatch):
 
 
 def test_merged_head_retries_until_pulls_populated(monkeypatch):
-    # commits/{sha}/pulls can transiently return [] for a few seconds after the
-    # push (association indexing lag) -- must retry rather than giving up on
-    # the first empty response.
+    # commits/{sha}/pulls can transiently return [] for a few seconds after the push, from
+    # association indexing lag, so it must retry rather than give up on the first empty
+    # response.
     responses = [
         [],
         [],
@@ -133,12 +132,12 @@ def test_merged_head_retries_until_pulls_populated(monkeypatch):
     monkeypatch.setattr(dd.time, "sleep", lambda s: slept.append(s))
     assert dd._merged_head("o/r", "merge123", _attempts=5, _sleep=2) == "right"
     assert calls["n"] == 3
-    assert slept == [2, 2]  # slept before the 2nd and 3rd attempts only
+    assert slept == [2, 2]  # It slept before the 2nd and 3rd attempts only.
 
 
 def test_merged_head_gives_up_after_attempts_exhausted_all_empty(monkeypatch):
-    # If every attempt returns [] the retry loop must stop at _attempts and
-    # fall back to the merge SHA, not loop forever or raise.
+    # If every attempt returns [] the retry loop must stop at _attempts and fall back to the
+    # merge SHA, not loop forever or raise.
     calls = {"n": 0}
 
     def fake_gh_json(path):
@@ -156,9 +155,9 @@ def _cell(stack, env="dev-eu"):
 
 
 def _run_main(tmp_path, monkeypatch, *, cells, checks, urls=None, deps=None, order=None):
-    """main() over the merged pull request's head, every GitHub and Terramate call
-    stubbed. `_merged_head` is stubbed rather than fed, so the only `gh api` paths
-    collected into `urls` are the ones the work set itself asks for.
+    """main() over the merged pull request's head, with every GitHub and Terramate call
+    stubbed. `_merged_head` is stubbed rather than fed, so the only `gh api` paths collected
+    into `urls` are the ones the work set itself asks for.
 
     Returns the parsed GITHUB_OUTPUT."""
     out = tmp_path / "out.txt"
@@ -173,7 +172,7 @@ def _run_main(tmp_path, monkeypatch, *, cells, checks, urls=None, deps=None, ord
     jsonl = "\n".join(json.dumps(c) for c in checks)
 
     def _run(args):
-        # Every terramate call must be stubbed -- CI installs uv alone, so a real
+        # Every terramate call must be stubbed, because CI installs uv alone: a real
         # invocation passes on a developer machine and fails there.
         assert args[0] == "gh", args
         if urls is not None:
@@ -182,9 +181,9 @@ def _run_main(tmp_path, monkeypatch, *, cells, checks, urls=None, deps=None, ord
 
     monkeypatch.setattr(dd, "_merged_head", lambda repo, merge_sha: HEAD)
     monkeypatch.setattr(dd.bm, "compute_cells", lambda all_stacks, base: cells)
-    # deploy-detect and the apply-detect it loads hold separate build-matrix
-    # instances; the check-run listing is fetched through apply-detect's. Both are
-    # stubbed so a `gh api` call from either module lands in `urls`.
+    # deploy-detect and the apply-detect it loads hold separate build-matrix instances, and
+    # the check-run listing is fetched through apply-detect's. Both are stubbed so a `gh api`
+    # call from either module lands in `urls`.
     monkeypatch.setattr(dd.ad.bm, "_run", _run)
     monkeypatch.setattr(dd.bm, "_run", _run)
     monkeypatch.setattr(dd.ad, "run_graph_deps", lambda: deps or {c["stack"]: set() for c in cells})
@@ -204,13 +203,12 @@ def _wave_cells(parsed):
 
 
 def test_main_reads_the_head_listing_once_and_makes_no_plan_run_lookup(tmp_path, monkeypatch):
-    # The post-merge path no longer resolves a plan run from the plan workflow's
-    # runs, and it reads the head's check-run listing exactly once: two reads of
-    # one listing disagree when a re-plan lands between them, re-opening a name
-    # the first read saw completed while the cell still carries the first read's
-    # record. Whole-list comparison against a hand-written constant, so a
-    # reinstated `actions/workflows/plan.yml/runs` lookup AND a second fetch of
-    # the listing each redden this one assertion.
+    """The post-merge path resolves no plan run from the plan workflow's runs, and it reads the
+    head's check-run listing exactly once: two reads of one listing disagree when a re-plan
+    lands between them, re-opening a name the first read saw completed while the cell still
+    carries the first read's record. Whole-list comparison against a hand-written constant, so
+    a reinstated `actions/workflows/plan.yml/runs` lookup and a second fetch of the listing
+    each redden this one assertion."""
     urls = []
     parsed = _run_main(
         tmp_path,
@@ -219,14 +217,14 @@ def test_main_reads_the_head_listing_once_and_makes_no_plan_run_lookup(tmp_path,
         checks=[_apply_check("stacks/app")],
         urls=urls,
     )
-    assert len(_wave_cells(parsed)) == 1  # not vacuous
+    assert len(_wave_cells(parsed)) == 1  # Not vacuous: a cell exists.
     assert urls == [CHECK_RUNS_URL]
 
 
 def test_main_gives_each_cell_the_plan_run_its_own_check_names(tmp_path, monkeypatch):
-    # The recovery shape: dev-us was re-planned by a later run while dev-eu is
-    # still named by the first. Each applies from the run that planned it, so one
-    # shared id -- which is all the deleted lookup could give -- is not enough.
+    # The recovery shape: dev-us was re-planned by a later run while dev-eu is still named by
+    # the first. Each applies from the run that planned it, so one shared id -- all a
+    # plan-workflow-runs lookup can give -- is not enough.
     parsed = _run_main(
         tmp_path,
         monkeypatch,
@@ -243,9 +241,9 @@ def test_main_gives_each_cell_the_plan_run_its_own_check_names(tmp_path, monkeyp
 
 
 def test_main_refuses_a_cell_whose_check_records_no_plan_run(tmp_path, monkeypatch):
-    # The loud refusal this path most needs: nobody is watching a post-merge run,
-    # so a default would apply a cell from nowhere and a skip would leave the
-    # check pending with nothing said. The message names the cell to re-plan.
+    # The loud refusal this path most needs: nobody is watching a post-merge run, so a default
+    # would apply a cell from nowhere and a skip would leave the check pending with nothing
+    # said. The message names the cell to re-plan.
     with pytest.raises(SystemExit) as exc_info:
         _run_main(
             tmp_path,
@@ -272,10 +270,10 @@ def test_main_refuses_a_cell_whose_check_records_no_plan_run(tmp_path, monkeypat
 
 
 def test_main_lets_a_record_less_completed_check_through(tmp_path, monkeypatch):
-    # The upgrade shape: dev-us was applied pre-merge by an older engine version,
-    # so its completed check carries a legacy bare-hex record. The attachment runs
-    # AFTER the pending filter, or every pull request merged across the upgrade
-    # refuses its whole deploy over a cell that is already applied.
+    """The upgrade shape: dev-us was applied pre-merge by an older engine version, so its
+    completed check carries a legacy bare-hex record. The attachment runs after the pending
+    filter -- otherwise every pull request merged across the upgrade refuses its whole deploy
+    over a cell that is already applied."""
     parsed = _run_main(
         tmp_path,
         monkeypatch,
@@ -289,9 +287,9 @@ def test_main_lets_a_record_less_completed_check_through(tmp_path, monkeypatch):
 
 
 def test_main_notice_reports_the_no_op_evidence(tmp_path, monkeypatch, capsys):
-    # A no-op post-merge deploy is indistinguishable from a broken work set
-    # without these counts, and acceptance reads them off this one line. Whole
-    # line against a hand-written constant, so a dropped field reddens here.
+    # A no-op post-merge deploy is indistinguishable from a broken work set without these
+    # counts, and acceptance reads them off this one line. Whole line against a hand-written
+    # constant, so a dropped field reddens here.
     _run_main(
         tmp_path,
         monkeypatch,
@@ -308,11 +306,11 @@ def test_main_notice_reports_the_no_op_evidence(tmp_path, monkeypatch, capsys):
 
 
 def test_a_forged_completed_check_does_not_mark_a_cell_applied(tmp_path, monkeypatch):
-    # A completed+success check of the same name from another identity
-    # (github-actions, app id 15368) must not count the cell as applied. It is
-    # also the NEWER run of that name, so only the App filter keeps the cell in --
-    # and main() is what feeds that filter its app id, so this is the behavioural
-    # pin on the threading test_detect_app_scoping can only see structurally.
+    """A completed+success check of the same name from another identity (github-actions, app id
+    15368) must not count the cell as applied. It is also the newer run of that name, so only
+    the App filter keeps the cell in, and main() is what feeds that filter its app id -- so
+    this is the behavioural pin on the threading test_detect_app_scoping only sees
+    structurally."""
     parsed = _run_main(
         tmp_path,
         monkeypatch,
@@ -326,9 +324,9 @@ def test_a_forged_completed_check_does_not_mark_a_cell_applied(tmp_path, monkeyp
 
 
 def test_main_emits_the_dag_shape_notice(tmp_path, monkeypatch, capsys):
-    # The post-merge path is where a flat DAG applies the whole repository at
-    # once, so this is the run that most needs the line. deploy-detect has its
-    # own main(); importing apply-detect emits nothing on its own.
+    # The post-merge path is where a flat DAG applies the whole repository at once, so this is
+    # the run that most needs the line. deploy-detect has its own main(), and importing
+    # apply-detect emits nothing on its own.
     _run_main(
         tmp_path,
         monkeypatch,

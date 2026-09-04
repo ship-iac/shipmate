@@ -18,8 +18,8 @@ def test_valid_apply():
 
 
 def test_tag_filter_rejected_not_yet_supported():
-    # Parsed for forward-compat but no component honors it → reject rather than
-    # silently apply the whole env.
+    # Parsed for forward compatibility, but no component honors it, so it is rejected rather
+    # than silently applying the whole env.
     r = cp.parse("shipmate apply dev-eu workload:app")
     assert r["is_command"] and not r["valid"] and "tag-filter" in r["error"]
     assert r["verb"] == "apply" and r["env"] == "dev-eu" and r["tag_filter"] == "workload:app"
@@ -36,10 +36,11 @@ def test_command_on_first_matching_line_of_multiline():
 
 
 def test_plan_rejects_an_env():
-    # `plan` takes no arguments on purpose: there is one plan of record per head,
-    # and a run holding one environment's artifacts leaves every other
-    # environment's workset empty at the next apply. Declaring `args: "[env]"`
-    # would accept this line and ship exactly that.
+    """`plan` takes no arguments on purpose: there is one plan of record per head, and a run
+    holding one environment's artifacts leaves every other environment's workset empty at the
+    next apply.
+
+    Fails when `args` becomes `"[env]"`, which accepts this line and ships exactly that."""
     r = cp.parse("shipmate plan dev-eu")
     assert r["is_command"] and not r["valid"] and r["verb"] == "plan"
     assert "takes no arguments" in r["error"]
@@ -57,8 +58,8 @@ def test_help_rejects_an_env():
 
 
 def test_plan_rejects_an_env_with_a_tag_filter():
-    # Reached through the no-arguments branch, not the tag branch: with
-    # `args: ""` a tag is already an argument.
+    # Reached through the no-arguments branch, not the tag branch: with `args: ""` a tag is
+    # already an argument.
     r = cp.parse("shipmate plan dev-eu workload:app")
     assert r["is_command"] and not r["valid"]
     assert "takes no arguments" in r["error"]
@@ -75,7 +76,7 @@ def test_unknown_verb_is_rejected():
 
 
 def test_bare_apply_targets_all_envs():
-    # env is optional: bare `shipmate apply` = apply every non-explicit env.
+    # env is optional: a bare `shipmate apply` applies every non-explicit env.
     r = cp.parse("shipmate apply")
     assert r == {
         "is_command": True,
@@ -94,8 +95,8 @@ def test_bare_apply_with_whitespace_and_crlf():
 
 
 def test_bare_apply_with_tag_filter_rejected():
-    # A tag can't be mistaken for an env (':' is outside the env charset);
-    # bare + tag parses env=None and still rejects on the unsupported tag.
+    # A tag cannot be mistaken for an env, because ':' is outside the env charset, so bare plus
+    # tag parses env=None and still rejects on the unsupported tag.
     r = cp.parse("shipmate apply workload:app")
     assert r["is_command"] and not r["valid"] and "tag-filter" in r["error"]
     assert r["env"] is None and r["tag_filter"] == "workload:app"
@@ -146,11 +147,10 @@ def test_shipmatey_prefix_is_not_a_command():
 
 
 def test_env_uppercase_rejected():
-    # Uppercase is outside the env charset (env is lowercase-only), so the env
-    # group doesn't match -- but it DOES fit the tag charset (which allows
-    # uppercase), so this now falls through to the tag branch rather than
-    # "malformed". Pinned here as a deliberate, tested choice: the user sees a
-    # "tag-filter is not yet supported" error, not a missing/invalid-env one.
+    """Uppercase is outside the lowercase-only env charset, so the env group does not match, but
+    it does fit the tag charset, which allows uppercase, so this falls through to the tag branch
+    rather than to "malformed". Pinned as a deliberate choice: the user sees a "tag-filter is
+    not yet supported" error, not a missing or invalid env one."""
     r = cp.parse("shipmate apply DEV-EU")
     assert r["is_command"] and not r["valid"]
     assert r["env"] is None and r["tag_filter"] == "DEV-EU"
@@ -158,8 +158,8 @@ def test_env_uppercase_rejected():
 
 
 def test_earlier_shipmate_prefixed_chatter_does_not_block_later_valid_command():
-    # A prior shipmate-prefixed line that isn't a recognized command (unknown
-    # verb) must not win over a later line that is a full, valid command.
+    # A prior shipmate-prefixed line that is not a recognized command, an unknown verb here,
+    # must not win over a later line that is a full, valid command.
     r = cp.parse("shipmate is great\nshipmate apply dev-eu")
     assert r == {
         "is_command": True,
@@ -217,18 +217,18 @@ def test_unknown_verb_points_at_help():
 @pytest.mark.parametrize(
     "body",
     [
-        "shipmate Doctor",  # verb charset is lowercase-only
-        "shipmate  apply",  # double space
-        "shipmate apply dev-eu --auto",  # a token outside both optional charsets
+        "shipmate Doctor",  # The verb charset is lowercase-only.
+        "shipmate  apply",  # A double space.
+        "shipmate apply dev-eu --auto",  # A token outside both optional charsets.
         "shipmate apply dev-eu; rm -rf /",
     ],
 )
 def test_malformed_command_points_at_help(body):
-    # Everything that fails _CMD outright lands on the malformed message, and
-    # every one of these is a typo the verb list resolves -- so it carries the
-    # same `shipmate help` hint the unknown-verb path does. (`shipmate apply
-    # dev_eu` is NOT one of them: '_' is in the tag charset, so it parses as a
-    # tag-filter and gets the "not yet supported" error, pinned above.)
+    """Everything that fails _CMD outright lands on the malformed message, and every one of
+    these is a typo the verb list resolves, so it carries the same `shipmate help` hint the
+    unknown-verb path does. `shipmate apply dev_eu` is not one of them: '_' is in the tag
+    charset, so it parses as a tag-filter and gets the "not yet supported" error pinned
+    above."""
     r = cp.parse(body)
     assert r["is_command"] is True
     assert r["valid"] is False
@@ -242,25 +242,24 @@ def test_help_markdown_lists_every_verb():
     for verb, spec in cp.VERBS.items():
         assert f"shipmate {verb}" in md
         assert spec["desc"].split(".")[0] in md
-    assert "reserved" in md  # reserved verbs are shown as such, not hidden
+    assert "reserved" in md  # Reserved verbs are shown as such, not hidden.
 
 
 def test_help_has_no_bare_command_line():
-    """A bare line matching the grammar would make the help comment itself a
-    command and retrigger comment-ops on the bot's own comment."""
+    """A bare line matching the grammar would make the help comment itself a command and
+    retrigger comment-ops on the bot's own comment."""
     for line in cp.help_markdown().splitlines():
         assert cp._CMD.match(line.strip()) is None, line
-    # is_command is set by _CMD OR _SHIPMATE_LINE (^shipmate\b) -- the
-    # per-line check above only covers _CMD, so also assert the property
-    # that actually matters: parsing the whole rendered comment must not
-    # be recognized as a command at all.
+    # is_command is set by _CMD or _SHIPMATE_LINE (^shipmate\b), and the per-line check above
+    # covers only _CMD, so the property that matters is asserted too: parsing the whole rendered
+    # comment must not be recognized as a command at all.
     assert cp.parse(cp.help_markdown())["is_command"] is False
 
 
 def test_main_writes_route_output(tmp_path, monkeypatch):
     # Pins main()'s route= output line: `actions/comment-ops` branches on
-    # steps.parse.outputs.route, so a rename on either side must fail here,
-    # not fail silently green.
+    # steps.parse.outputs.route, so a rename on either side must fail here rather than pass
+    # silently green.
     out = tmp_path / "out.txt"
     out.touch()
     monkeypatch.setenv("COMMENT_BODY", "shipmate apply dev-eu")
@@ -271,9 +270,9 @@ def test_main_writes_route_output(tmp_path, monkeypatch):
 
 
 def test_main_help_markdown_flag(monkeypatch, capsys):
-    # Pins the --help-markdown CLI surface: it must print help_markdown() to
-    # stdout and return WITHOUT ever needing GITHUB_OUTPUT -- unset it to
-    # prove that path isn't touched (main() would raise KeyError otherwise).
+    # Pins the --help-markdown CLI surface: it must print help_markdown() to stdout and return
+    # without ever needing GITHUB_OUTPUT. The variable is unset to prove that path is not
+    # touched, since main() would raise KeyError otherwise.
     monkeypatch.setattr("sys.argv", ["comment-parse", "--help-markdown"])
     monkeypatch.delenv("GITHUB_OUTPUT", raising=False)
     cp.main()
@@ -292,8 +291,8 @@ def test_unlock_without_an_env_is_rejected():
 
 
 def test_plan_appears_in_the_help_output_as_active():
-    """`plan` renders as a no-argument command, backticked, with an empty status
-    column -- the rendering active verbs get."""
+    """`plan` renders as a no-argument command, backticked, with an empty status column -- the
+    rendering active verbs get."""
     assert "| `shipmate plan` |  |" in cp.help_markdown()
 
 

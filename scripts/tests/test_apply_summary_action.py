@@ -1,17 +1,23 @@
 """Guard the actions/apply-summary <-> scripts/apply-comment env-var coupling.
 
-`actions/apply-summary/action.yml`'s render step feeds `scripts/apply-comment`
-entirely through `env:` (never a `${{ }}`-interpolated shell body -- see
-test_actions_shellcheck.py's injection-safety check). Nothing else ties the two
-sides together: a typo'd `env:` key in the action, or a renamed
-`os.environ` read in the script, would silently render a wrong comment with no
-local way to catch it (Actions can't be run outside GitHub). This test derives
-the set of environment variables the script actually reads by parsing its
-source (not a second hardcoded list, which could itself drift from either
-side) and asserts it is fed byte-for-byte by the render step's `env:` block.
+`actions/apply-summary/action.yml`'s render step feeds `scripts/apply-comment` entirely through
+`env:`, never a `${{ }}`-interpolated shell body -- see test_actions_shellcheck.py's
+injection-safety check. Nothing else ties the two sides together: a typo'd `env:` key in the
+action, or a renamed `os.environ` read in the script, would silently render a wrong comment with
+no local way to catch it, because Actions cannot be run outside GitHub. This test derives the
+set of environment variables the script reads by parsing its source, rather than from a second
+hardcoded list that could itself drift from either side, and asserts it is fed byte-for-byte by
+the render step's `env:` block.
 
-Also asserts the artifact-download `pattern` lines up with the
-`apply-summary.<env>.<slug>` name `actions/apply-cell` uploads under.
+It also asserts the artifact-download `pattern` lines up with the `apply-summary.<env>.<slug>`
+name `actions/apply-cell` uploads under.
+
+GITHUB_SERVER_URL, GITHUB_REPOSITORY and GITHUB_RUN_ID are ambient: GHA sets them for every step
+of every job, composite or plain, so there is nothing for a caller to thread and no `env:` key to
+typo. The rest of the engine relies on the same availability -- actions/summary's gate-write step
+reads all three without declaring them in `env:`. They are excluded from the "fed by render step"
+assertion, but still required to come out of `_read_names()`, so a rename in the script
+(GITHUB_RUN_ID to RUN_ID, say) surfaces as a clear diff instead of vanishing from this guard.
 """
 
 import re
@@ -22,14 +28,7 @@ from _loader import ENGINE, WORKFLOWS, action_steps, action_yaml, load_script
 SCRIPT = ENGINE / "scripts" / "apply-comment"
 _APPLY_COMMENT = load_script("apply-comment")
 
-# GHA sets these three for every step of every job (composite or plain) --
-# there is nothing for a caller to thread and no `env:` key to typo. The rest
-# of the engine relies on the same ambient availability (e.g.
-# actions/summary's gate-write step reads GITHUB_SERVER_URL/REPOSITORY/RUN_ID
-# without declaring them in `env:`). Excluded from the "fed by render step"
-# assertion below -- but still required to come out of `_read_names()`, so a
-# rename in the script (e.g. GITHUB_RUN_ID -> RUN_ID) still surfaces as a
-# clear diff instead of silently vanishing from this guard.
+# Ambient in every GHA step, so excluded from the "fed by render step" assertion below.
 _AMBIENT_GHA_VARS = frozenset({"GITHUB_SERVER_URL", "GITHUB_REPOSITORY", "GITHUB_RUN_ID"})
 
 _SUBSCRIPT_RE = re.compile(r'os\.environ\[\s*f?([\'"])([A-Za-z0-9_{}]+)\1\s*\]')
@@ -39,8 +38,8 @@ _PLACEHOLDER_RE = re.compile(r"\{[^}]*\}")
 
 
 def _range_width(token):
-    """The N in a `range(N)` bound: a literal, or a module constant of
-    `scripts/apply-comment` read off the loaded module."""
+    """The N in a `range(N)` bound: a literal, or a module constant of `scripts/apply-comment`
+    read off the loaded module."""
     if token.isdigit():
         return int(token)
     width = getattr(_APPLY_COMMENT, token, None)
@@ -49,11 +48,12 @@ def _range_width(token):
 
 
 def _read_names():
-    """Every environment variable name `scripts/apply-comment` reads, derived
-    from its source. A literal name is captured as-is; a name carrying an
-    f-string placeholder (only `SHIPMATE_ENVLEVEL{i}_WAVES`, expanded over the
-    `range(...)` on the same source line) is expanded to its concrete instances
-    so the derived set is genuinely comparable to a `env:` block's keys."""
+    """Every environment variable name `scripts/apply-comment` reads, derived from its source.
+
+    A literal name is captured as-is. A name carrying an f-string placeholder -- only
+    `SHIPMATE_ENVLEVEL{i}_WAVES`, expanded over the `range(...)` on the same source line -- is
+    expanded to its concrete instances, so the derived set is comparable to an `env:` block's
+    keys."""
     names = set()
     for line in SCRIPT.read_text(encoding="utf-8").splitlines():
         raws = [m.group(2) for m in _SUBSCRIPT_RE.finditer(line)]
@@ -111,14 +111,8 @@ def test_render_step_feeds_every_env_var_the_script_reads():
     )
 
 
-# The read-set guard above compares env: KEYS only, so it cannot see two
-# values swapped between two keys. Every SHIPMATE_*_ENVS input is a JSON array
-# of env names, so a swap type-checks, renders, and names the wrong
-# environments under the wrong sentence -- "held" naming what applied
-# unreviewed, and the reverse. One whole-value comparison against a
-# hand-written mapping, never one derived from the file, per the repo's
-# assert-the-whole rule; a second selector for just the two new keys would
-# relocate the hole rather than close it.
+# Hand-written, never derived from the action; asserted whole by
+# test_render_step_env_block_matches_the_expected_mapping.
 _RENDER_ENV = {
     "CELLS": "${{ inputs.cells-dir }}",
     "SHIPMATE_ENVIRONMENT": "${{ inputs.environment }}",
@@ -139,14 +133,20 @@ _RENDER_ENV = {
 
 
 def test_render_step_env_block_matches_the_expected_mapping():
+    """One whole-value comparison of the render step's `env:` block against a hand-written
+    mapping, never one derived from the file, per the repo's assert-the-whole rule. The read-set
+    guard above compares env: keys only, so it cannot see two values swapped between two keys,
+    and every SHIPMATE_*_ENVS input is a JSON array of env names -- a swap type-checks, renders,
+    and names the wrong environments under the wrong sentence, "held" naming what applied
+    unreviewed and the reverse. A second selector for two of the keys would relocate the hole
+    rather than close it."""
     render_step = _find_step(_load_action()["runs"]["steps"], run_contains="scripts/apply-comment")
     assert (render_step.get("env") or {}) == _RENDER_ENV
 
 
 def test_render_step_never_interpolates_expr_directly():
-    """Belt-and-suspenders alongside test_actions_shellcheck.py: every
-    author-controlled value must reach the script through env:, never a
-    ${{ }} interpolated into the shell body."""
+    """A second guard alongside test_actions_shellcheck.py: every author-controlled value must
+    reach the script through env:, never a ${{ }} interpolated into the shell body."""
     steps = _load_action()["runs"]["steps"]
     render_step = _find_step(steps, run_contains="scripts/apply-comment")
     assert "${{" not in (render_step.get("run") or "")
@@ -160,8 +160,8 @@ def test_download_pattern_matches_apply_cell_upload_prefix():
     upload_apply_cell_step = _find_step(action_steps("apply-cell"), uses_contains="upload-artifact")
     assert upload_apply_cell_step is not None, "apply-cell has no upload-artifact step"
     name = (upload_apply_cell_step.get("with") or {}).get("name", "")
-    # `apply-summary.${{ inputs.env }}.${{ steps.ids.outputs.slug }}` -> the
-    # literal prefix before the first templated segment.
+    # From `apply-summary.${{ inputs.env }}.${{ steps.ids.outputs.slug }}`, take the literal
+    # prefix before the first templated segment.
     prefix = name.split("${{", 1)[0]
     assert prefix, "could not extract a literal prefix from apply-cell's artifact name"
     assert pattern == f"{prefix}*", (
@@ -171,9 +171,9 @@ def test_download_pattern_matches_apply_cell_upload_prefix():
 
 
 def test_download_step_tolerates_failure():
-    # For comment-ops the comment IS the feedback channel: a transient
-    # artifact-API 5xx/403 must not skip the token mint and the POST,
-    # leaving a developer whose apply fully succeeded with no PR comment.
+    # For comment-ops the comment is the feedback channel: a transient artifact-API 5xx or 403
+    # must not skip the token mint and the POST, leaving a developer whose apply fully succeeded
+    # with no pull-request comment.
     download_step = _find_step(_load_action()["runs"]["steps"], uses_contains="download-artifact")
     assert download_step.get("continue-on-error") is True
 
@@ -198,12 +198,11 @@ def test_download_step_failure_is_warned_not_silently_swallowed():
 
 
 def test_download_step_does_not_fail_on_zero_matches():
-    """`pattern:`-mode download-artifact does not fail when zero artifacts
-    match (verified against v7.0.0 source: the pattern branch never throws on
-    an empty result, unlike the `name:`/`artifact-ids:` single-artifact
-    modes) -- so no extra 'ignore missing' option is needed. This test
-    guards against silently switching to `name:` (single-artifact mode,
-    which DOES throw on a miss) in a future edit."""
+    """`pattern:`-mode download-artifact does not fail when zero artifacts match, verified
+    against v7.0.0 source: the pattern branch never throws on an empty result, unlike the
+    `name:` and `artifact-ids:` single-artifact modes, so no extra 'ignore missing' option is
+    needed. This guards against silently switching to `name:`, the single-artifact mode, which
+    does throw on a miss."""
     download_step = _find_step(_load_action()["runs"]["steps"], uses_contains="download-artifact")
     with_ = download_step.get("with") or {}
     assert "pattern" in with_
@@ -218,22 +217,22 @@ def test_head_sha_is_a_required_input():
     inputs = _load_action()["inputs"]
     assert "head-sha" in inputs, "apply-summary needs the head SHA to read the apply checks"
     assert inputs["head-sha"]["required"] is True
-    assert "${{" not in inputs["head-sha"]["description"]  # GHA evaluates descriptions
+    assert "${{" not in inputs["head-sha"]["description"]  # GHA evaluates descriptions.
 
 
 def test_token_mint_also_grants_checks_read():
     mint = _find_step(_steps(), uses_contains="create-github-app-token")
     with_ = mint.get("with") or {}
     assert with_.get("permission-checks") == "read"
-    # The comment POST still needs its original grant -- one mint, both uses.
+    # The comment POST still needs its own grant: one mint, both uses.
     assert with_.get("permission-pull-requests") == "write"
 
 
 def test_token_mint_precedes_the_scan_render_and_post_steps():
-    # Ordering is load-bearing: the scan step needs the token, the render step
-    # reads the file the scan step writes, and the POST step's GH_TOKEN below
-    # is the same mint -- a reorder that pushed the mint below the POST would
-    # yield an empty token and a 401 rather than a workflow error.
+    """Ordering is load-bearing: the scan step needs the token, the render step reads the file
+    the scan step writes, and the POST step's GH_TOKEN below is the same mint. A reorder that
+    pushed the mint below the POST would yield an empty token and a 401 rather than a workflow
+    error."""
     steps = _steps()
     mint = _find_step(steps, uses_contains="create-github-app-token")
     scan = _find_step(steps, run_contains="check-runs")
@@ -251,27 +250,26 @@ def test_scan_step_validates_head_sha():
 
 
 def test_scan_step_uses_filter_all_like_the_gate():
-    # A re-created check name keeps its historical runs; apply-gate judges the
-    # newest run per name, which only works if every run is fetched.
+    # A re-created check name keeps its historical runs, and apply-gate judges the newest run
+    # per name, which only works if every run is fetched.
     scan = _find_step(_steps(), run_contains="check-runs")
     assert "filter=all" in scan["run"]
 
 
 def test_scan_step_degrades_to_an_empty_file_with_a_warning():
-    # For comment-ops the comment IS the feedback channel: a checks-API blip
-    # must cost the check-state axis only, never the comment.
+    # For comment-ops the comment is the feedback channel, so a checks-API blip must cost the
+    # check-state axis only, never the comment.
     scan = _find_step(_steps(), run_contains="check-runs")
     assert ": > checks.jsonl" in scan["run"]
     assert "::warning::" in scan["run"]
 
 
 def test_scan_step_writes_the_file_the_render_step_reads():
-    # The coupling between the filename the scan step redirects to and the
-    # path the renderer reads (SHIPMATE_CHECKS) is otherwise untested -- a
-    # rename of either side would silently blank the whole check-state axis
-    # with no local test failing. Derive the expected filename from the
-    # render step's env: block (never hardcode it here) so a rename on that
-    # side reds this test too.
+    """The coupling between the filename the scan step redirects to and the path the renderer
+    reads, SHIPMATE_CHECKS, is otherwise untested: a rename of either side would silently blank
+    the whole check-state axis with no local test failing. The expected filename is derived from
+    the render step's env: block, never hardcoded here, so a rename on that side reds this
+    test too."""
     steps = _steps()
     scan = _find_step(steps, run_contains="check-runs")
     render = _find_step(steps, run_contains="scripts/apply-comment")
@@ -287,10 +285,9 @@ def test_scan_step_never_interpolates_expr_directly():
 
 
 def test_scan_step_uses_the_app_token_not_the_workflow_token():
-    # App permissions come from the installation, so no consumer's calling job
-    # has to grant checks: read (a called workflow's job permissions cannot
-    # exceed its caller's -- the workflow-token route would be a breaking
-    # change for every consumer wrapper).
+    """App permissions come from the installation, so no consumer's calling job has to grant
+    checks: read. A called workflow's job permissions cannot exceed its caller's, so the
+    workflow-token route would be a breaking change for every consumer wrapper."""
     scan = _find_step(_steps(), run_contains="check-runs")
     mint = _find_step(_steps(), uses_contains="create-github-app-token")
     assert (scan.get("env") or {}).get("GH_TOKEN") == (
@@ -310,10 +307,9 @@ def test_engine_callers_pass_head_sha_to_apply_summary():
 
 
 def test_apply_all_passes_the_held_and_ungated_outputs_to_apply_summary():
-    """apply-all.yml is the only caller carrying these (apply.yml is the
-    targeted form). Four detect outputs are JSON arrays of env names with
-    identical shape, so a crossed wire renders a plausible-looking comment
-    naming the wrong environments for the wrong reason."""
+    """apply-all.yml is the only caller carrying these, apply.yml being the targeted form. Four
+    detect outputs are JSON arrays of env names with identical shape, so a crossed wire renders
+    a plausible-looking comment naming the wrong environments for the wrong reason."""
     spec = yaml.safe_load((WORKFLOWS / "apply-all.yml").read_text(encoding="utf-8"))
     step = _find_step(spec["jobs"]["summary"]["steps"], uses_contains="actions/apply-summary")
     with_ = step.get("with") or {}

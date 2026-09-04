@@ -11,9 +11,9 @@ CHECK_RUNS_URL = f"repos/o/r/commits/{HEAD}/check-runs?filter=all&per_page=100"
 
 
 def test_cells_are_the_tree_candidates_whose_check_is_on_the_head_in_every_env():
-    # Membership is the head's apply checks across ALL envs, not one plan run's
-    # artifact names: `stacks/platform` is in the dev-eu tree but carries only a
-    # PLAN check, and `stacks/app` is work in two envs.
+    # Membership is the head's apply checks across all envs, not one plan run's artifact names:
+    # `stacks/platform` is in the dev-eu tree but carries only a plan check, and `stacks/app` is
+    # work in two envs.
     names = {
         "apply / stacks/app / dev-eu",
         "apply / stacks/dns / dev-eu",
@@ -33,9 +33,9 @@ def test_cells_are_the_tree_candidates_whose_check_is_on_the_head_in_every_env()
 
 
 def test_cells_forward_construct_the_check_name_and_never_parse_it():
-    # `components/app` contains the '/' that makes a split-on-'/' parse wrong,
-    # and `a / b` is ambiguous under any rsplit of `apply / a / b / dev-eu` --
-    # is the stack "a" or "a / b"? Forward construction never has to decide.
+    # `components/app` contains the '/' that makes a split-on-'/' parse wrong, and `a / b` is
+    # ambiguous under any rsplit of `apply / a / b / dev-eu` -- is the stack "a" or "a / b"?
+    # Forward construction never has to decide.
     stacks_by_env = {"dev-eu": ["components/app", "a / b", "stacks/unplanned"]}
     names = {"apply / components/app / dev-eu", "apply / a / b / dev-eu"}
     cells = aad.cells_from_checks(names, stacks_by_env, {})
@@ -43,8 +43,8 @@ def test_cells_forward_construct_the_check_name_and_never_parse_it():
 
 
 def test_cells_take_workload_var_from_the_tags():
-    # Never from the check name, which carries no workload. A stack missing from
-    # the map carries "" and applies with the environment's generic role.
+    # Never from the check name, which carries no workload. A stack missing from the map carries
+    # "" and applies with the environment's generic role.
     cells = aad.cells_from_checks(
         {
             "apply / stacks/app / dev-eu",
@@ -52,7 +52,7 @@ def test_cells_take_workload_var_from_the_tags():
             "apply / stacks/app / dev-us",
         },
         {"dev-eu": ["stacks/app", "stacks/dns"], "dev-us": ["stacks/app"]},
-        {"stacks/app": ["workload/net-edge"]},  # stacks/dns absent -> ""
+        {"stacks/app": ["workload/net-edge"]},  # stacks/dns is absent, so its var is "".
     )
     assert cells == [
         {"stack": "stacks/app", "environment": "dev-eu", "workload_var": "NET_EDGE"},
@@ -69,19 +69,18 @@ def test_env_without_a_check_contributes_nothing():
 
 
 def test_slug_alike_paths_never_enrol_each_other():
-    # `a/b` and `a-b` slug identically, and both are in the tree. Only `a-b`
-    # carries an apply check, so only `a-b` is work. A pull request ADDING `a-b`
-    # beside an unchanged `a/b` never shows the pair to build-matrix's plan-time
-    # collision guard, so nothing resolving a name back to a path is the whole
-    # protection -- there is no slug to collide over any more.
+    """`a/b` and `a-b` slug identically, and both are in the tree. Only `a-b` carries an apply
+    check, so only `a-b` is work. A pull request adding `a-b` beside an unchanged `a/b` never
+    shows the pair to build-matrix's plan-time collision guard, so nothing resolving a name back
+    to a path is the whole protection: there is no slug to collide over any more."""
     cells = aad.cells_from_checks({"apply / a-b / dev-eu"}, {"dev-eu": ["a/b", "a-b"]}, {})
     assert [c["stack"] for c in cells] == ["a-b"]
 
 
 def test_cells_from_checks_rejects_dotted_env():
-    # Env names come from tags here, but apply-cell still downloads
-    # `plan.<env>.<slug>`, so a dotted env would still render two distinct cells
-    # to one artifact name. Enforced at this trust boundary, as in apply-detect.
+    # Env names come from tags here, but apply-cell still downloads `plan.<env>.<slug>`, so a
+    # dotted env would still render two distinct cells to one artifact name. Enforced at this
+    # trust boundary, as in apply-detect.
     with pytest.raises(SystemExit):
         aad.cells_from_checks(set(), {"dev.eu": ["stacks/app"]}, {})
 
@@ -96,8 +95,8 @@ def test_partition_excludes_explicit_env_with_pending_work():
 
 
 def test_partition_skips_envs_ordered_after_unapplied_explicit():
-    # stage explicit + pending; prod (transitively after stage) is skipped;
-    # sbx (level 1 but independent of stage) still runs.
+    # stage is explicit and pending, so prod, transitively after stage, is skipped. sbx is at
+    # level 1 but independent of stage, so it still runs.
     order = {"stage": ["dev"], "prod": ["stage"], "sbx": ["dev"]}
     excluded, skipped = aad.partition_envs({"dev", "stage", "prod", "sbx"}, ["stage"], order)
     assert excluded == ["stage"]
@@ -105,17 +104,17 @@ def test_partition_skips_envs_ordered_after_unapplied_explicit():
 
 
 def test_partition_applied_explicit_env_blocks_nothing():
-    # prod is explicit but has NO pending cells -> not excluded, successors run.
+    # prod is explicit but has no pending cells, so it is not excluded and successors run.
     excluded, skipped = aad.partition_envs({"dev"}, ["prod"], {"after-prod": ["prod"]})
     assert excluded == [] and skipped == []
 
 
 def test_a_forged_completed_check_does_not_mark_a_cell_applied(tmp_path, monkeypatch):
-    # A completed+success check of the same name from another identity
-    # (github-actions, app id 15368) must not count the cell as applied. It is
-    # also the NEWER run of that name, so only the App filter keeps the cell in --
-    # and main() is what feeds that filter its app id, so this is the behavioural
-    # pin on the threading test_detect_app_scoping can only see structurally.
+    """A completed+success check of the same name from another identity (github-actions, app id
+    15368) must not count the cell as applied. It is also the newer run of that name, so only
+    the App filter keeps the cell in, and main() is what feeds that filter its app id -- so
+    this is the behavioural pin on the threading test_detect_app_scoping only sees
+    structurally."""
     parsed = _run_main(
         tmp_path,
         monkeypatch,
@@ -130,19 +129,18 @@ def test_a_forged_completed_check_does_not_mark_a_cell_applied(tmp_path, monkeyp
 
 
 def test_reuses_single_sourced_helpers():
-    # The `is not None` halves pin only that these functions still EXIST in the
-    # modules this script reaches them through -- not that main() calls them
-    # rather than a private copy. What pins that is the `not hasattr` halves
-    # below (no second route can exist) plus the behavioural main() tests above.
-    # env-level bucketing and the GITHUB_OUTPUT writer live in env-order (shared
-    # with deploy-detect), so this script no longer loads deploy-detect at all.
+    """The `is not None` halves pin only that these functions still exist in the modules this
+    script reaches them through, not that main() calls them rather than a private copy. What
+    pins that is the `not hasattr` halves below, which say no second route can exist, plus the
+    behavioural main() tests above. Env-level bucketing and the GITHUB_OUTPUT writer live in
+    env-order, shared with deploy-detect, so this script never loads deploy-detect."""
     assert aad.ad.paths_with_checks is not None
     assert aad.ad.cells_for_env is not None
     assert aad.ad.with_plan_runs is not None
     assert aad.eo.waves_by_env_level is not None
     assert aad.eo.write_env_level_waves is not None
-    # No local apply-gate alias -- test_detect_app_scoping pins which route
-    # main() actually takes; this only asserts the second one does not exist.
+    # No local apply-gate alias. test_detect_app_scoping pins which route main() takes, and
+    # this only asserts the second one does not exist.
     assert not hasattr(aad, "ag")
     assert not hasattr(aad, "dd")
     assert not hasattr(aad, "cells_from_artifacts")
@@ -161,9 +159,9 @@ UNGATED = frozenset({"dev-eu", "dev-us"})
         ("CHANGES_REQUESTED", ["dev-eu", "dev-us", "prod-eu"]),
         ("", ["dev-eu", "dev-us", "prod-eu"]),
         ("BANANA", ["dev-eu", "dev-us", "prod-eu"]),
-        # The review job's sentinel for a pr_number matching no pull request:
-        # GraphQL returns a null pullRequest with no errors, so the query
-        # succeeds and only this value keeps the run from applying everything.
+        # The review job's sentinel for a pr_number matching no pull request. GraphQL returns
+        # a null pullRequest with no errors, so the query succeeds and only this value keeps
+        # the run from applying everything.
         ("MISSING_PR", ["dev-eu", "dev-us", "prod-eu"]),
     ],
 )
@@ -179,10 +177,9 @@ ALL_PENDING = ["dev-eu", "dev-us", "prod-eu"]
     [
         ("NONE", []),
         ("APPROVED", []),
-        # The reversal: with nothing exempted, an unreviewed PR holds EVERY env.
-        # The empty list used to short-circuit to "hold nothing", which is what
-        # let an `ungated-envs` action input wider than the repository variable
-        # apply every pending environment unreviewed.
+        # With nothing exempted, an unreviewed pull request holds every env. An empty list
+        # short-circuiting to "hold nothing" is what lets an `ungated-envs` action input wider
+        # than the repository variable apply every pending environment unreviewed.
         ("REVIEW_REQUIRED", ALL_PENDING),
         ("CHANGES_REQUESTED", ALL_PENDING),
         ("", ALL_PENDING),
@@ -213,10 +210,10 @@ def _run_main(
     tags=None,
     urls=None,
 ):
-    """main() over the head's apply checks, everything the script reaches from
-    GitHub/Terramate stubbed. Defaults to one pending `stacks/app` check per env
-    in `envs`. Returns parsed GITHUB_OUTPUT; appends each `gh api` path
-    requested to `urls` when one is given."""
+    """main() over the head's apply checks, with everything the script reaches from GitHub or
+    Terramate stubbed. Defaults to one pending `stacks/app` check per env in `envs`. Returns
+    parsed GITHUB_OUTPUT, and appends each `gh api` path requested to `urls` when one is
+    given."""
     out = tmp_path / "out"
     for k, v in {
         "GITHUB_REPOSITORY": "o/r",
@@ -235,8 +232,8 @@ def _run_main(
     jsonl = "\n".join(json.dumps(c) for c in checks)
 
     def _run(args):
-        # Every terramate call must be stubbed -- CI installs uv alone, so a
-        # real invocation passes on a developer machine and fails there.
+        # Every terramate call must be stubbed, because CI installs uv alone: a real
+        # invocation passes on a developer machine and fails there.
         assert args[0] == "gh", args
         if urls is not None:
             urls.append(args[-1])
@@ -288,21 +285,20 @@ def test_main_wires_the_tag_map_into_the_cells(tmp_path, monkeypatch):
 
 
 def test_main_reads_the_head_listing_and_makes_no_artifact_lookup(tmp_path, monkeypatch):
-    # No site keys a bare apply on a plan run's artifacts any more. Whole-list
-    # comparison against a hand-written constant, so ANY added gh api call --
-    # an artifact listing, a workflow-runs lookup, a second read of this same
-    # listing -- reddens here. ONE entry: the workset, the done predicate and the
-    # plan runs are all read off a single fetch, so nothing can disagree about a
-    # check that changed mid-run.
+    """No site keys a bare apply on a plan run's artifacts any more. Whole-list comparison
+    against a hand-written constant, so any added gh api call -- an artifact listing, a
+    workflow-runs lookup, a second read of this same listing -- reddens here. One entry: the
+    workset, the done predicate and the plan runs are all read off a single fetch, so nothing
+    can disagree about a check that changed mid-run."""
     urls = []
     parsed = _run_main(tmp_path, monkeypatch, envs=["dev-eu"], decision="APPROVED", urls=urls)
-    assert len(_wave_cells(parsed)) == 1  # not vacuous
+    assert len(_wave_cells(parsed)) == 1  # Not vacuous: a cell exists.
     assert urls == [CHECK_RUNS_URL]
 
 
 def test_main_never_enrols_a_slug_alike_stack(tmp_path, monkeypatch):
-    # The slug property through the real entry point: `a/b` and `a-b` slug
-    # identically, both are in the dev-eu tree, and only `a-b` has a check.
+    # The slug property through the real entry point: `a/b` and `a-b` slug identically, both
+    # are in the dev-eu tree, and only `a-b` has a check.
     parsed = _run_main(
         tmp_path,
         monkeypatch,
@@ -316,9 +312,9 @@ def test_main_never_enrols_a_slug_alike_stack(tmp_path, monkeypatch):
 
 
 def test_main_gives_each_cell_the_plan_run_its_own_check_names(tmp_path, monkeypatch):
-    # The recovery shape, across envs: dev-us was re-planned by a later run while
-    # dev-eu is still named by the first. Each must apply from the run that
-    # planned it, so one shared id is not enough.
+    # The recovery shape, across envs: dev-us was re-planned by a later run while dev-eu is
+    # still named by the first. Each must apply from the run that planned it, so one shared id
+    # is not enough.
     parsed = _run_main(
         tmp_path,
         monkeypatch,
@@ -336,9 +332,9 @@ def test_main_gives_each_cell_the_plan_run_its_own_check_names(tmp_path, monkeyp
 
 
 def test_main_refuses_a_cell_whose_check_records_no_plan_run(tmp_path, monkeypatch):
-    # Not skipped and not defaulted: a legacy bare-hex record names no run, and
-    # a silent default would apply that cell from nowhere. The refusal names the
-    # cell so an operator knows what to re-plan.
+    # Not skipped and not defaulted: a legacy bare-hex record names no run, and a silent
+    # default would apply that cell from nowhere. The refusal names the cell so an operator
+    # knows what to re-plan.
     with pytest.raises(SystemExit) as exc_info:
         _run_main(
             tmp_path,
@@ -366,10 +362,10 @@ def test_main_refuses_a_cell_whose_check_records_no_plan_run(tmp_path, monkeypat
 
 
 def test_main_lets_a_record_less_completed_check_through(tmp_path, monkeypatch):
-    # The upgrade shape: dev-us was applied by an older engine version, so its
-    # completed check carries a legacy bare-hex record. Only cells still to be
-    # applied need a plan run -- the attachment runs AFTER the pending filter, or
-    # every pull request open across the upgrade is stranded.
+    """The upgrade shape: dev-us was applied by an older engine version, so its completed check
+    carries a legacy bare-hex record. Only cells still to be applied need a plan run, so the
+    attachment runs after the pending filter -- otherwise every pull request open across the
+    upgrade is stranded."""
     parsed = _run_main(
         tmp_path,
         monkeypatch,
@@ -384,9 +380,9 @@ def test_main_lets_a_record_less_completed_check_through(tmp_path, monkeypatch):
 
 
 def test_main_lets_a_record_less_check_in_an_excluded_env_through(tmp_path, monkeypatch):
-    # prod-eu is explicit: its check deliberately stays pending for a later
-    # targeted `shipmate apply prod-eu`, which refuses there if the record is
-    # still missing. Refusing HERE would strand every env that can apply.
+    # prod-eu is explicit, so its check deliberately stays pending for a later targeted
+    # `shipmate apply prod-eu`, which refuses there if the record is still missing. Refusing
+    # here would strand every env that can apply.
     parsed = _run_main(
         tmp_path,
         monkeypatch,
@@ -408,9 +404,9 @@ def test_main_lets_a_record_less_check_in_an_excluded_env_through(tmp_path, monk
 
 
 def test_main_keeps_a_failed_apply_check_re_appliable(tmp_path, monkeypatch):
-    # completed with a failing conclusion: done being RUN, but not applied. Such
-    # a cell is not pending, so membership by pending-ness alone would silently
-    # drop the one cell an operator is retrying.
+    # completed with a failing conclusion: done being run, but not applied. Such a cell is not
+    # pending, so membership by pending-ness alone would silently drop the one cell an operator
+    # is retrying.
     parsed = _run_main(
         tmp_path,
         monkeypatch,
@@ -457,8 +453,8 @@ def test_main_reports_every_env_applied_when_all_of_them_are_listed(tmp_path, mo
 
 
 def test_main_omits_a_listed_explicit_env_from_the_applied_report(tmp_path, monkeypatch):
-    # dev-us is ungated but explicit: it never ran, so the comment must not
-    # claim it applied.
+    # dev-us is ungated but explicit, so it never ran and the comment must not claim it
+    # applied.
     parsed = _run_main(
         tmp_path,
         monkeypatch,
@@ -473,8 +469,8 @@ def test_main_omits_a_listed_explicit_env_from_the_applied_report(tmp_path, monk
 
 
 def test_main_holds_every_env_unreviewed_when_the_variable_is_unset(tmp_path, monkeypatch):
-    # REVIEW_REQUIRED with no list exempts nothing, so nothing applies. The
-    # audit line stays empty: no env was permitted to apply without a review.
+    # REVIEW_REQUIRED with no list exempts nothing, so nothing applies. The audit line stays
+    # empty, because no env was permitted to apply without a review.
     parsed = _run_main(
         tmp_path,
         monkeypatch,
@@ -487,10 +483,10 @@ def test_main_holds_every_env_unreviewed_when_the_variable_is_unset(tmp_path, mo
 
 
 def test_main_holds_every_env_when_the_decision_variable_is_absent(tmp_path, monkeypatch):
-    # `decision=None` deletes SHIPMATE_REVIEW_DECISION, so this is the only test
-    # that exercises the `os.environ.get(..., "")` default -- the whole
-    # fail-closed behaviour when the review job's output never reaches the
-    # action. Without it the default could be flipped to "APPROVED" unnoticed.
+    """`decision=None` deletes SHIPMATE_REVIEW_DECISION, so this is the only test that
+    exercises the `os.environ.get(..., "")` default -- the whole fail-closed behaviour when the
+    review job's output never reaches the action. Without it the default could be flipped to
+    "APPROVED" unnoticed."""
     parsed = _run_main(
         tmp_path,
         monkeypatch,
@@ -502,9 +498,9 @@ def test_main_holds_every_env_when_the_decision_variable_is_absent(tmp_path, mon
 
 
 def test_main_applies_every_env_on_an_approved_pr_with_no_variable(tmp_path, monkeypatch):
-    # The un-opted-in consumer's ordinary run: APPROVED applies every pending
-    # env regardless of the list, so the unconditional review job costs them a
-    # deployment record and nothing else.
+    # The un-opted-in consumer's ordinary run: APPROVED applies every pending env regardless
+    # of the list, so the unconditional review job costs them a deployment record and nothing
+    # else.
     parsed = _run_main(
         tmp_path,
         monkeypatch,
@@ -516,9 +512,9 @@ def test_main_applies_every_env_on_an_approved_pr_with_no_variable(tmp_path, mon
 
 
 def test_main_claims_nothing_applied_ungated_on_a_reviewed_pull_request(tmp_path, monkeypatch):
-    # The variable is set and the envs are listed, but the PR was APPROVED --
-    # the exemption never fired, so "permitted to apply without an approving
-    # review" over a reviewed run would be a false audit line.
+    # The variable is set and the envs are listed, but the pull request was APPROVED, so the
+    # exemption never fired: "permitted to apply without an approving review" over a reviewed
+    # run would be a false audit line.
     parsed = _run_main(
         tmp_path,
         monkeypatch,
@@ -542,7 +538,7 @@ def test_main_without_the_variable_holds_every_env_on_changes_requested(tmp_path
     assert _wave_envs(parsed) == []
     assert json.loads(parsed["review_held_envs"]) == ["dev-eu", "dev-us", "prod-eu"]
     assert json.loads(parsed["applied_ungated_envs"]) == []
-    # Held, not excluded and not skipped: the fix is "get a review", and the
-    # comment must not tell the developer to run `shipmate apply <env>` instead.
+    # Held, not excluded and not skipped: the remedy is "get a review", and the comment must
+    # not tell the developer to run `shipmate apply <env>` instead.
     assert json.loads(parsed["excluded_envs"]) == []
     assert json.loads(parsed["skipped_envs"]) == []
