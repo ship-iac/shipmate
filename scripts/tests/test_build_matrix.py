@@ -115,7 +115,8 @@ def test_rejects_stack_path_exactly_shipmate():
     """`shipmate` renders a plan check `shipmate / <env>`, inside the reserved `shipmate / `
     namespace (`shipmate / gate`, and a consumer's own non-fan-out job names).
     summary-comment resolves plan links by an exact `<stack> / <env>` lookup over every
-    check run on the head SHA, so the row's link resolves to the wrong check."""
+    check run on the head SHA, so for an env named after one of those (e.g. `gate`) the
+    row's link resolves to the wrong check."""
     with pytest.raises(SystemExit, match="may not be exactly 'shipmate'"):
         bm.build_matrix(["dev-eu"], {"dev-eu": ["shipmate"]}, {"shipmate": ["env/dev-eu"]})
 
@@ -249,10 +250,9 @@ def _stub_terramate(monkeypatch, stacks, env_lines, calls=None):
             if calls is not None:
                 calls.append((args, env))
             return subprocess.CompletedProcess(args, 0, env_lines, "")
-        # `raise` rather than a bare `pytest.fail(...)` call, so the function has no
-        # implicit fall-through beside its three value returns. Same exception the call
-        # raises, and `Failed` is a BaseException, so a broad `except Exception` in the
-        # code under test cannot swallow it.
+        # `raise` rather than a bare `pytest.fail(...)` call, so the function has no implicit
+        # fall-through beside its three value returns. Same exception the call raises; `Failed`
+        # is a BaseException, so the code under test's `except Exception` cannot swallow it.
         raise pytest.fail.Exception(f"unexpected command: {args}")
 
     monkeypatch.setattr(bm, "_run", fake_run)
@@ -672,10 +672,10 @@ def test_an_unstated_head_is_refused_naming_the_input(monkeypatch):
 
 
 def test_the_opt_out_skips_the_head_checkout_check(monkeypatch):
-    # The drift path has no pull-request context and no reason to be at any particular
-    # commit, so `git rev-parse` must not even run. Case- and whitespace-insensitive for the
-    # same reason as the fork refusal's opt-out: `no-pull-request: True` must not redden a
-    # nightly over YAML capitalisation.
+    """The drift path has no pull-request context and no reason to be at any particular commit, so
+    `git rev-parse` must not even run. Case- and whitespace-insensitive for the same reason as the
+    fork refusal's opt-out: a `no-pull-request: True` must not redden a nightly over YAML
+    capitalisation."""
     monkeypatch.setattr(bm, "_run", lambda args: pytest.fail("head checkout was probed"))
     for value in ("true", "True", " TRUE "):
         for head in ("", "cafe1234"):

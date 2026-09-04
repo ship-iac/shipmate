@@ -349,8 +349,7 @@ def _guard_case_block():
 def test_the_doctor_access_allowlist_is_written_exactly_once():
     """`doctor`'s report enumerates the guardrails a repository is missing, so the route is
     gated on the commenter's association. Five copies of the allowlist in five `if:`
-    conditions is how such a gate drifts open, so it is computed once in the `guard` step and
-    every doctor step keys off its boolean output.
+    conditions is how such a gate drifts open, so it is computed once in the `guard` step.
 
     Two layers of counting, because either alone leaves a hole:
 

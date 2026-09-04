@@ -216,8 +216,8 @@ def test_link_only_distinguishes_missing_output_from_output_too_large():
 def test_build_comment_reserves_link_only_space_for_every_cell():
     """An early giant apply.txt may not starve a later cell of its link. The giant body must contain
     newlines: an unbroken line degrades to link-only (~200 chars) with or without the reserve, so it
-    can neither exercise nor disprove it -- with the reserve deleted, that fixture still fit
-    SIZE_BUDGET with every section present."""
+    can neither exercise nor disprove it -- with the reserve deleted, this exact fixture with a
+    no-newline giant still fit SIZE_BUDGET with every section present."""
     giant_text = "\n".join("X" * 80 for _ in range(3_000))
     rows = [
         _row(stack_display="giant", stack_path="stacks/giant", apply_text=giant_text),
@@ -1240,8 +1240,9 @@ def test_build_comment_no_unrecorded_note_when_nothing_is_unrecorded():
 def test_failure_line_present_even_when_an_unrecorded_row_already_explains_it():
     """An unrecorded row plus its note explains one cell in one environment and says nothing about a
     different environment whose job died before any cell reported. Suppressing the generic failure
-    line on `unrecorded` would swallow that environment's only failure signal, so it renders even in
-    this single-row, same-environment case."""
+    line on `unrecorded` would swallow that environment's only failure signal (see
+    test_failure_line_present_for_mixed_unrecorded_and_not_attempted_across_envs), so it renders
+    even in this single-row, same-environment case."""
     rows = [_row(status="unrecorded", stack_display="db", environment="prod")]
     assert ac._failure_line("success,failure", rows, "prod") == (
         ":x: shipmate: `shipmate apply prod` failed."
@@ -1378,10 +1379,11 @@ def test_load_check_maps_drops_records_with_no_app_silently(tmp_path, capsys):
 
 
 def test_check_name_grammar_matches_apply_cells_construction():
-    """Coupling: apply-snapshot builds the apply check's name -- apply-cell holds no App key and
-    builds none -- and apply-comment forward-builds that string to look the check up. A divergence
-    is silent: every lookup misses, `_check_state` returns CHECK_UNKNOWN for every row, and the
-    comment reverts to the artifact-only rendering this corrects."""
+    """Coupling: apply-snapshot builds the apply check's name, to look up the pre-existing check
+    ids before any wave runs -- apply-cell holds no App key and builds none -- and apply-comment
+    forward-builds the same string to look it up. A divergence is silent: every lookup misses,
+    `_check_state` returns CHECK_UNKNOWN, and the comment reverts to the artifact-only rendering
+    this corrects. Same posture as test_cell_schema_guard_apply_cell_writes_every_required_key."""
     src = (_ENGINE / "scripts" / "apply-snapshot").read_text(encoding="utf-8")
     expected = 'f"apply / {stack} / {env}"'
     assert expected in src, (
@@ -1420,10 +1422,10 @@ def test_wave_job_name_matches_the_apply_check_grammar():
     # The two literals agree only if the wave job hands apply-cell the same matrix keys it
     # renders from: it already feeds two inputs off one key (`stack:`, `stack-name:`), so a
     # display name routed through `matrix.stack` keeps both literals and breaks the name.
-    # Bare `env:` is the job-level env mapping, not the apply-cell input.
     wired = [
         ln.strip()
         for ln in src.splitlines()
+        # Bare `env:` is the job-level env mapping, not the apply-cell input.
         if ln.strip().startswith(("stack: ", "env: ")) and ln.strip() != "env:"
     ]
     assert wired == ["stack: ${{ matrix.stack }}", "env: ${{ matrix.environment }}"] * max_waves, (
