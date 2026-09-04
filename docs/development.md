@@ -1,7 +1,6 @@
 # Development
 
-Repository layout, toolchain, and testing model. Contribution etiquette and
-licensing: [`CONTRIBUTING.md`](../CONTRIBUTING.md).
+Contribution etiquette and licensing: [`CONTRIBUTING.md`](../CONTRIBUTING.md).
 
 ## Repo structure
 
@@ -73,7 +72,7 @@ Two traps when driving a sample repo:
   detection is `terramate list --changed`, so a re-pin-only PR fans out to
   nothing and its gate goes green over no work. It proves the pins parse and
   nothing about the engine.
-- **Bump `global.version` to get a real cycle in `repo-example-stacks`**, then
+- **Bump `global.version` to get a real cycle in `repo-example-stacks`.** Then
   run `terramate generate` and `terramate fmt`. The version feeds the stacks'
   `app_version` variable and its `triggers_replace`, so bumping it moves every
   stack. The consumer's `detect` job runs `terramate fmt --check` plus
