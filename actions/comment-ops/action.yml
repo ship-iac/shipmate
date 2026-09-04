@@ -331,7 +331,8 @@ runs:
         # -R is required: this job has no checkout, so gh cannot infer the repo from a git
         # remote and `gh run download` would fail every time. One directory per run, never a
         # shared one: a cell replanned in a later run carries the same artifact name in both,
-        # and a shared directory would let extraction order decide which plan doctor reports.
+        # and a shared directory would let extraction order decide which plan doctor reports
+        # on.
         mkdir -p doctor-cells
         while read -r rid; do
           [ -n "$rid" ] || continue
@@ -407,14 +408,14 @@ runs:
           export SHIPMATE_APP_PERMISSION_ERROR=""
         fi
         python3 "$GITHUB_ACTION_PATH/../../scripts/doctor" > doctor.md
-        # `retry_hint` resolves here, where whether the summary actually carries the report is
-        # known, so the listing-failure branch stays a single `echo`: a nested `if` inside that
-        # asserted degrade block would hide the warning.
+        # `retry_hint` is resolved by the job-summary write, the one place that knows whether
+        # the summary actually carries the report, so the listing-failure branch stays a single
+        # `echo`: a nested `if` inside that asserted degrade block would hide the warning.
         retry_hint="comment shipmate doctor again to retry"
-        # The report is 30-60s of probes, and both post paths can lose it: a failed comment
-        # listing exits 0 by design, leaving a green run with no report at all -- to the
-        # commenter, indistinguishable from the engine ignoring them -- and a failed PATCH/POST
-        # reds the step after the render. Publishing to the job summary first means the run
+        # The report is 30-60s of probes, and two failures lose it: a failed comment listing
+        # exits 0 by design, leaving a green run with no report at all -- to the commenter,
+        # indistinguishable from the engine ignoring them -- and a failed PATCH or POST of the
+        # comment reds the step after the render. Writing the job summary first means the run
         # page carries the report even when the pull request does not.
         # Degrading, never fatal, and deliberately not `|| true`, which a guard on the listing
         # forbids in this step: the summary is the added surface, so losing it must not cost a

@@ -176,8 +176,8 @@ runs:
       shell: bash
       env:
         GH_TOKEN: ${{ steps.token.outputs.token }}
-        # Empty when that mint failed; doctor then says the plan-env secret check did not
-        # run rather than reporting it clean.
+        # Empty when the `envtoken` mint failed; doctor then says the plan-env secret check
+        # did not run rather than reporting it clean.
         SHIPMATE_ENV_TOKEN: ${{ steps.envtoken.outputs.token }}
         SHIPMATE_DOCTOR_MODE: annotate
         SHIPMATE_APP_ID: ${{ inputs.app-id }}
@@ -239,7 +239,8 @@ runs:
         # matching page; the first line is the single id PATCH needs. The lookup writes to a
         # file rather than piping into `head`, which raises EPIPE under `pipefail` and needs a
         # `|| true` that also masks a genuine listing failure -- an empty id then falls through
-        # to the create branch, leaving two marker-bearing Bot comments the later runs PATCH.
+        # to the create branch, leaving two marker-bearing Bot comments, the older of which
+        # every later run then PATCHes.
         id=$(head -n1 summary-comment-ids.txt)
         # gate-state has already collapsed every untrustworthy-plan case -- a failed detect, a
         # failed plan job, a plan job skipped with cells planned, an unreported planned count,
@@ -260,8 +261,8 @@ runs:
         # later step regardless.
         # A run where doctor reported settings drift still posts: doctor's annotations carry no
         # file/line and so render only on the run page, and the comment's footer is the only
-        # pull-request-visible pointer at `shipmate doctor`. Warnings, actionable
-        # misconfiguration, only -- a `::notice::` finding is informational and would put a
+        # pull-request-visible pointer at `shipmate doctor`. Warnings (actionable
+        # misconfiguration) only -- a `::notice::` finding is informational and would put a
         # comment on every quiet run.
         # An existing comment is always kept current instead of suppressed, or a pull request
         # that planned changes and then pushed them away would keep displaying applies that no

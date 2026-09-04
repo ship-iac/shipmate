@@ -107,8 +107,8 @@ runs:
         STACK_NAME: ${{ inputs.stack-name }}
       run: |
         set -euo pipefail
-        # Out of the repo tree, as for the planned-commit record. Only the regenerated
-        # fingerprint.txt, a gitignored artifact, is left behind.
+        # The reviewed fingerprint moves out of the repo tree, as the planned-commit record
+        # does. Only the regenerated fingerprint.txt, a gitignored artifact, is left behind.
         expected="$RUNNER_TEMP/expected-fingerprint.txt"
         mv fingerprint.txt "$expected"
         python3 "$GITHUB_ACTION_PATH/../../scripts/plan-classify" --fingerprint-only
@@ -144,8 +144,9 @@ runs:
         # `-input=false` turns that question into a hard error.
         ws="$STACK/terraform.tfstate.d"
         hidden=$(mktemp -du "$RUNNER_TEMP/tfstate.d.XXXXXX")
-        # Hidden across the init and put back either way: under `-reconfigure` a migration is
-        # never intended, and non-interactively it could never have been answered.
+        # The workspace state is hidden across the init and put back either way: under
+        # `-reconfigure` a migration is never intended, and non-interactively it could never
+        # have been answered.
         if [ -d "$ws" ]; then mv "$ws" "$hidden"; fi
         # errexit is lifted only so the workspace restore runs even on a failed init.
         set +e
@@ -164,8 +165,8 @@ runs:
         # errexit is off for this one pipeline, and the step exits on tofu's own status via
         # PIPESTATUS[0]: with errexit and pipefail live, a `tee` failure alone -- a full
         # $RUNNER_TEMP, a disk hiccup mid-write -- would fail an apply whose every resource
-        # succeeded. `Save state` has already persisted the advanced state by then, so a
-        # re-run would hit the stale-plan fail-safe with no way back. Exiting on tofu's own
+        # succeeded. `Save state` (always()) still persists the advanced state, so a re-run
+        # would hit the stale-plan fail-safe with no way back. Exiting on tofu's own
         # captured status keeps a cosmetic `tee` failure from masking a success, or
         # manufacturing one.
         set +e
