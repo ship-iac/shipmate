@@ -5,11 +5,11 @@ Run from an engine clone (it needs engine history to judge the target):
 
     python dev/repin_consumer.py --repo ../repo-example-stacks --sha <sha> --label v0.2.0
 
-Two rules from docs/releasing.md, previously prose-only, are enforced here:
+Two rules from docs/releasing.md are enforced here:
 
 * Every engine ref moves together. actions/summary creates the pending apply
   check and actions/apply-cell -- pinned indirectly inside apply-env-level.yml --
-  completes it, each building the name independently; a pin pair straddling a
+  completes it, each building the name independently. A pin pair straddling a
   change to that grammar creates one name and looks for another, and every wave
   job dies before restoring state. There is deliberately no stale-only mode.
 * An intermediate commit of the internal-pin cascade is never a valid target.
@@ -31,18 +31,9 @@ pin_status = _ps.pin_status
 unreachable_from_main = _ps.unreachable_from_main
 format_issue = pinrefs.format_issue
 
-# A consumer ref is any path under the engine slug, pinned by SHA, optionally
-# wrapped in a quote (quoted `uses:` scalars are legal YAML), optionally
-# carrying a trailing comment this tool owns (the release annotation).
-#
-# Three clauses are load-bearing and non-obvious. The quote group is captured so
-# the sub can re-emit it BEFORE any comment (otherwise `"...@<old>"` becomes
-# `"...@<new> # label"`, a string Actions cannot resolve). `[^\S\n]*` excludes
-# newlines so a following standalone comment line is not captured as this ref's
-# trailing comment and deleted by a --label rewrite. And `(?(quote)(?P=quote))`
-# requires the SAME quote character to close the ref -- the equivalent-looking
-# `["']?` would let an opening `"` be closed by an unrelated `'` later on the
-# line, producing exactly the unresolvable string the first clause avoids.
+# A consumer ref is any path under the engine slug, pinned by SHA, optionally wrapped in a quote
+# (quoted `uses:` scalars are legal YAML), optionally carrying a trailing comment this tool owns
+# (the release annotation). ``_plan_consumer`` names the three load-bearing clauses.
 _CONSUMER_REF = re.compile(
     r"""(?P<quote>["'])?(?P<ref>ship-iac/shipmate/[^@\s]+)@[0-9a-f]{40}
         (?(quote)(?P=quote))
@@ -52,27 +43,38 @@ _CONSUMER_REF = re.compile(
 
 
 class _PlannedFile(NamedTuple):
-    """One workflow file's computed post-rewrite state, before anything is
-    written. Carries an entry for every workflow under ``root``, including
-    ones with no engine ref at all -- the survivor validation needs the
-    planned text of the whole set to judge the rewrite without reading disk
-    again."""
+    """One workflow file's computed post-rewrite state, before anything is written.
 
-    path: str  # repo-relative posix path
-    text: str  # full new content ("\n"-delimited)
-    newline: str  # newline style read_text reported for this file
-    matched: int  # engine refs found, regardless of whether the sub was a no-op
-    changed: bool  # whether the substitution actually altered the text
+    Carries an entry for every workflow under ``root``, including ones with no engine
+    ref at all: the survivor validation needs the planned text of the whole set to
+    judge the rewrite without reading disk again.
+    """
+
+    path: str  # Repo-relative posix path.
+    text: str  # Full new content ("\n"-delimited).
+    newline: str  # Newline style read_text reported for this file.
+    matched: int  # Engine refs found, regardless of whether the sub was a no-op.
+    changed: bool  # Whether the substitution actually altered the text.
 
 
 def _plan_consumer(root, new_sha, label):
-    """Compute the post-rewrite content of every workflow under ``root``, in
+    r"""Compute the post-rewrite content of every workflow under ``root``, in
     memory. Touches nothing on disk but the reads.
 
     With ``label``, the trailing comment becomes ``# <label>`` (docs/releasing.md
     annotates each consumer pin ``# vX.Y.Z``). Without, an existing comment is
     left untouched. Third-party pins are unaffected -- the pattern is anchored
     on the engine slug.
+
+    Three clauses of ``_CONSUMER_REF`` are load-bearing and non-obvious. The quote
+    group is captured so ``sub`` can re-emit it BEFORE any comment; otherwise
+    ``"...@<old>"`` becomes ``"...@<new> # label"``, a string Actions cannot resolve.
+    ``[^\S\n]*`` excludes newlines, so a following standalone comment line is not
+    captured as this ref's trailing comment and deleted by a ``--label`` rewrite.
+    ``(?(quote)(?P=quote))`` requires the SAME quote character to close the ref; the
+    equivalent-looking ``["']?`` would let an opening ``"`` be closed by an unrelated
+    ``'`` later on the line, producing exactly the unresolvable string the captured
+    quote group prevents.
     """
 
     def sub(m):
@@ -91,18 +93,17 @@ def _plan_consumer(root, new_sha, label):
 
 
 def _commit_consumer(root, planned):
-    """Write every planned file whose substitution actually altered the text
-    to disk, atomically per file (see pinrefs.atomic_write_text).
+    """Write every planned file whose substitution actually altered the text to
+    disk, atomically per file (see pinrefs.atomic_write_text).
 
-    Returns ``(changed, matched)``: ``changed`` is ``[(path, n)]`` for files
-    whose substitution actually altered the text; ``matched`` is the total
-    count of engine refs found across all files, independent of whether the
-    substitution was a no-op. The two differ exactly when every match was
-    already at ``new_sha``/``label`` -- the caller needs that to tell "matched
-    nothing" (wrong --repo) apart from "matched N, all already current"
-    (a safe re-run).
+    Returns ``(changed, matched)``. ``changed`` is ``[(path, n)]`` for the files
+    written; ``matched`` is the total count of engine refs found across all files,
+    independent of whether the substitution was a no-op. The two differ exactly when
+    every match was already at ``new_sha``/``label`` -- the caller needs that to tell
+    "matched nothing" (wrong --repo) apart from "matched N, all already current" (a
+    safe re-run).
 
-    Only-writes and per-file atomic, same shape as ``repin_internal._commit``.
+    Same shape as ``repin_internal._commit``.
     """
     changed = []
     matched = 0
@@ -144,11 +145,9 @@ def _safe_to_pin(new_sha, force):
 
 
 def _refuse_git_failure(new_sha, exc):
-    # A git failure means we do not know the target's pins at all -- refuse,
-    # same as an unsafe-to-pin verdict (exit 1), and distinct from both "no
-    # self-references" (exit 3, a bad-target shape) and a known stale pin
-    # --force is meant to override. --force must not bypass this: it overrides
-    # "your pins are stale", never "your pins cannot be judged."
+    # A git failure leaves the target's pins unknown, so refuse like an unsafe-to-pin verdict
+    # (exit 1), distinct from "no self-references" (exit 3, a bad-target shape). --force must not
+    # bypass this: it overrides "your pins are stale", never "your pins cannot be judged."
     print(f"{new_sha[:12]}: its pins could not be verified -- git failed: {exc.stderr}")
     return 1
 
@@ -172,14 +171,9 @@ def main(argv=None):
     if new_sha is None:
         return 3
 
-    # A bad-target check, not a staleness call: --force overrides "your pins
-    # are stale", never "your pins cannot be judged at all". refs_at([]) means
-    # this commit's tree has no shipmate self-references (an old commit
-    # predating today's actions/ layout, or an orphan commit) -- pin_status
-    # would then vacuously report zero issues and this tool would write a pin
-    # no one can evaluate. A git failure (GitFailure) is a different animal --
-    # not "no refs", but "could not check" -- so it is refused separately
-    # below, never folded into this message.
+    # A bad-target check, not a staleness call. An empty refs_at means this commit's tree has no
+    # shipmate self-references (an old commit predating today's actions/ layout, or an orphan
+    # commit), so pin_status would vacuously report zero issues over a pin no one can evaluate.
     try:
         has_refs = bool(pinrefs.refs_at(new_sha))
     except pinrefs.GitFailure as exc:

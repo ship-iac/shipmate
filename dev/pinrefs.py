@@ -20,10 +20,10 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 
 class GitFailure(RuntimeError):
-    """A git invocation this model depends on failed, so its answer is
-    unknown -- not empty. Without it, a failed ``git ls-tree`` and a commit with
-    no pin-bearing files both leave ``source_paths`` reporting nothing, and
-    every caller reads that as "no problems" instead of "could not check."
+    """A git invocation this model depends on failed, so its answer is unknown --
+    not empty. Without it, a failed ``git ls-tree`` and a commit with no pin-bearing
+    files both leave ``source_paths`` reporting nothing, which every caller reads as
+    "no problems" instead of "could not check."
     """
 
     def __init__(self, commit, stderr):
@@ -34,17 +34,13 @@ class GitFailure(RuntimeError):
 
 REF = re.compile(r"ship-iac/shipmate/([^@\s]+)@([0-9a-f]{40})")
 SCRIPT_REF = re.compile(r"\$GITHUB_ACTION_PATH/\.\./\.\./scripts/([A-Za-z0-9_-]+)")
-# The lookbehind matters: without it this matches the tail of any identifier
-# ending in _load, so a `yaml.safe_load("x")` anywhere in a helper would feed the
-# phantom dependency `scripts/x` into script_closure and make the premise check
-# in scripts/tests/test_pin_derivation_premises.py red with the wrong diagnosis.
+# The lookbehind matters: without it this matches the tail of any identifier ending in _load, so
+# a `yaml.safe_load("x")` anywhere in a helper would feed the phantom dependency `scripts/x` into
+# script_closure and redden scripts/tests/test_pin_derivation_premises.py with a wrong diagnosis.
 LOAD_REF = re.compile(r"""(?<![A-Za-z0-9_])_load\(\s*["']([^"']+)["']\s*\)""")
-# Any engine ref regardless of shape -- what the SHA-only REF and
-# repin_consumer._CONSUMER_REF cannot see, and would leave behind silently.
-# Quotes are excluded from the ref group so a trailing one on a legal quoted
-# `uses:` scalar cannot make a correctly rewritten ref look like a survivor.
-# A quote directly after the `@` is never canonical and no rewriter can touch
-# it, so `quote` is captured and reported even at the new SHA.
+# Any engine ref regardless of shape -- what the SHA-only REF and repin_consumer._CONSUMER_REF
+# cannot see, and would leave behind silently. ``scan_survivors`` says why quotes are excluded
+# from the ref group and captured separately.
 ANY_ENGINE_REF = re.compile(r"ship-iac/shipmate/([^@\s'\"]+)@(?P<quote>['\"])?([^\s'\"#]+)")
 
 
@@ -56,6 +52,11 @@ def scan_survivors(path_text_pairs, new_sha):
     named, not swallowed into a reported success. NOT valid for repin_internal's
     default stale-only mode, which legitimately leaves non-target pins alone --
     the caller guards it.
+
+    ``ANY_ENGINE_REF`` excludes quotes from its ref group, so a trailing one on a
+    legal quoted ``uses:`` scalar cannot make a correctly rewritten ref look like a
+    survivor. A quote directly after the ``@`` is never canonical and no rewriter can
+    touch it, so that quote is captured and reported even at the new SHA.
     """
     out = []
     for rel, text in path_text_pairs:
@@ -157,14 +158,8 @@ def release_baseline():
 
 _YAML = (".yml", ".yaml")
 
-#: Pin-bearing in shape only. manifest-load.yml references every engine action at
-#: the floating ``@main`` on purpose -- GitHub parses a remote action's manifest
-#: while setting the job up, which is the whole check, and a SHA there would
-#: validate an old tree's manifests instead of this one's while dragging all 20
-#: actions' script closures into the staleness cascade. An entry here is only
-#: safe with another selector holding its refs in shape: this one's is
-#: ``scripts/tests/test_manifest_load_workflow_covers_every_action.py``, which
-#: compares the whole step list, so a pin added to that file cannot hide.
+#: Pin-bearing in shape only. An entry here is safe only while another selector holds that file's
+#: refs in shape; ``source_paths`` says why manifest-load.yml is exempt and names its selector.
 _NOT_A_PIN_SOURCE = (".github/workflows/manifest-load.yml",)
 
 
@@ -190,6 +185,15 @@ def source_paths(commit=None, root=None):
 
     Both shapes match ``.yml`` and ``.yaml``: GitHub accepts either, and a
     workflow escaping the guard on its extension is the hole this prevents.
+
+    ``.github/workflows/manifest-load.yml`` is excluded (``_NOT_A_PIN_SOURCE``): it
+    references all 20 engine actions at the floating ``@main`` on purpose, because
+    GitHub parses a remote action's manifest while setting the job up and that parse
+    is the whole check. A SHA there would validate an old tree's manifests instead of
+    this one's, and would drag all 20 actions' script closures into the staleness
+    cascade. The exemption is safe only because
+    ``scripts/tests/test_manifest_load_workflow_covers_every_action.py`` compares that
+    workflow's whole step list, so a pin added to it cannot hide.
     """
     if commit is not None and root is not None:
         raise ValueError("source_paths: root is only meaningful for a working-tree read")
@@ -316,23 +320,22 @@ class PinIssue(NamedTuple):
     the fixer's target list while CI stays red.
     """
 
-    path: str  # the pinned path
-    sha: str  # the pinned commit, full
-    src: str  # the file the pin lives in
-    kind: str  # "stale" | "dep_stale" | "missing" | "error"
-    dep: str = ""  # scripts/<name>, when the issue is about a dependency
-    error: str = ""  # git stderr, when kind == "error"
+    path: str  # The pinned path.
+    sha: str  # The pinned commit, as a full SHA.
+    src: str  # The file the pin lives in.
+    kind: str  # One of "stale", "dep_stale", "missing", "error".
+    dep: str = ""  # scripts/<name>, when the issue is about a dependency.
+    error: str = ""  # git stderr, when kind == "error".
 
 
-#: Kinds a re-pin tool may act on. "missing" and "error" mean we do not know
-#: whether the pin is stale, so rewriting it would be a guess.
+#: Kinds a re-pin tool may act on. "missing" and "error" leave staleness unknown, so rewriting
+#: the pin would be a guess.
 ACTIONABLE = ("stale", "dep_stale")
 
 
-#: format_issue's baseline_desc for a caller that baselines a commit on itself
-#: (pin_status, repin_consumer) rather than on the mainline. The mainline
-#: wording there would claim the mainline moved past the target, when the fact
-#: is that the target's own tree runs stale code.
+#: format_issue's baseline_desc for a caller that baselines a commit on itself (pin_status,
+#: repin_consumer) rather than on the mainline. The mainline wording would claim the mainline
+#: moved past the target, when the fact is that the target's own tree runs stale code.
 SELF_BASELINE_DESC = "is out of date against this commit's own tree"
 
 
