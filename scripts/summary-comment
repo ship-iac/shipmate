@@ -2,10 +2,9 @@
 """Build the sticky plan comment: overview table + per-cell plan details.
 
 Reads the plan matrix jobs' auto check-runs (named `<stack> / <env>`) as JSON
-Lines on stdin (as emitted by `gh api --paginate ... --jq '.check_runs[]'`),
-cell summaries + rendered
-plan text from the $CELLS directory (cell-summary.* artifacts), and writes
-comment.md plus pending/count to GITHUB_OUTPUT.
+Lines on stdin (as emitted by `gh api --paginate ... --jq '.check_runs[]'`) and
+cell summaries plus rendered plan text from the $CELLS directory (cell-summary.*
+artifacts). Writes comment.md plus pending/count to GITHUB_OUTPUT.
 
 GitHub rejects issue-comment bodies over 65,536 characters. SIZE_BUDGET
 leaves headroom below that cap; each changed cell's details section degrades
@@ -13,6 +12,11 @@ full plan -> truncated plan -> link-only, never dropping the check-run link.
 Plan text is emitted only inside a backtick fence computed to be longer than
 any backtick run in the text, so author-controlled plan output cannot escape
 the fence (the comment-body injection surface).
+
+`FOOTER_HINT` exists for discoverability and nothing more: doctor's findings
+surface as workflow annotations on the plan run, those carry no `file=`/`line=`
+so they render only on the run page, and the comment commands would otherwise
+have no pull-request-visible surface at all.
 """
 
 import glob
@@ -38,13 +42,9 @@ def _load(fname):
 ag = _load("apply-gate")
 
 MARKER = "<!-- shipmate:summary -->"
-# Discoverability, and nothing more. doctor's findings surface as workflow
-# annotations on the plan run; those carry no `file=`/`line=`, so they render
-# only on the run page and the comment commands would otherwise have no
-# pull-request-visible surface at all. This line points at the command list --
-# it deliberately says nothing about doctor's output, so the plan comment gains
-# no coupling to doctor. Phrased so the line does not itself match the comment
-# grammar (`^shipmate <verb>`), which would make this comment a command.
+# Phrased so the line does not itself match the comment grammar (`^shipmate <verb>`), which
+# would make this comment a command. It names no doctor output, so the plan comment gains no
+# coupling to doctor; the module docstring says why the hint is here at all.
 FOOTER_HINT = "Comment `shipmate help` for the available commands."
 SIZE_BUDGET = 60_000
 HARD_CAP = 65_536
@@ -189,21 +189,18 @@ def render_section(cell, plan_text, url, limit):
     f = _fence_of(body)
     head = f"<details>{_summary_line(cell)}\n\n"
     full = f"{head}{fence(body, f)}\n</details>"
-    # The `limit >= MIN_PLAN_CHARS` guard matters even when `full` already
-    # fits: a tiny limit (e.g. the per-cell slice left over in build_comment's
-    # extreme-fan-out case) is a signal that this cell's budget is exhausted,
-    # not an invitation to inline whatever small plan happens to fit — link
-    # the check run instead so every degradation path stays intentional.
+    # The `limit >= MIN_PLAN_CHARS` guard matters even when `full` already fits: a tiny limit —
+    # the per-cell slice left over in build_comment's extreme-fan-out case — means this cell's
+    # budget is exhausted, so link the check run rather than inline whatever small plan fits.
     if len(full) <= limit and limit >= MIN_PLAN_CHARS:
         return full
     trailer = f"\n\n_Truncated — [full plan in the check run]({url})._\n</details>"
     room = limit - len(head) - len(fence("", f)) - len(trailer)
     if room >= MIN_PLAN_CHARS:
         sliced = body[:room]
-        # Cut at the last full line inside `room`. When the first line alone
-        # already exceeds `room`, `rfind` returns -1 and the slice would be
-        # the whole (still mid-line) fragment — degrade to link-only instead
-        # of violating "cut at a line boundary".
+        # Cut at the last full line inside `room`. When the first line alone already exceeds
+        # `room`, `rfind` returns -1 and the slice would be the whole (still mid-line)
+        # fragment, so degrade to link-only instead of violating "cut at a line boundary".
         cut = sliced[: sliced.rfind("\n")] if "\n" in sliced else ""
         if cut:
             return f"{head}{fence(cut, f)}{trailer}"
@@ -221,8 +218,7 @@ def build_comment(cells, checks, run_url):
     changed = [(c, t) for c, t in cells if c["changed"]]
     parts = [header]
     used = len(header) + len(footer)
-    # Precompute check_url/link_only once per changed cell (each recomputing
-    # it here and again below made every changed cell do the lookup twice).
+    # Precomputed once per changed cell: both loops below need the URL and its link-only form.
     enriched = []
     for c, text in changed:
         url = check_url(c, checks, run_url)
@@ -240,10 +236,9 @@ def build_comment(cells, checks, run_url):
         fallback = "_Too many changed stacks for inline plans — use each row's check link._"
         body = header + "\n\n" + fallback + footer
         if len(body) > HARD_CAP:
-            # Stack/env display names are author-controlled (fork-PR input);
-            # at extreme fan-out even the table-only fallback can exceed the
-            # hard cap. Fail loud rather than let GitHub's POST 422 on an
-            # oversized comment body.
+            # Stack/env display names are author-controlled (fork-PR input), so even the
+            # table-only fallback can exceed the hard cap at extreme fan-out. Fail loud
+            # rather than let GitHub 422 the POST on an oversized comment body.
             raise SystemExit(
                 "::error::plan table alone exceeds the 65,536-char comment "
                 "cap — shorten stack/env display names"
@@ -291,11 +286,9 @@ def load_cells(cells_dir):
         txt = pathlib.Path(p).with_name("plan.txt")
         text = None
         if txt.exists():
-            # Cap the read at SIZE_BUDGET: a body of length >= SIZE_BUDGET
-            # always exceeds every section's limit (all strictly below
-            # SIZE_BUDGET), so characters beyond it could never be emitted
-            # anyway — this keeps an unbounded multi-MB plan.txt from being
-            # fully read and regex-scanned (diff_map, _fence_of) for nothing.
+            # Cap the read at SIZE_BUDGET: a body that long already exceeds every section's
+            # limit (all strictly below SIZE_BUDGET), so later characters could never be
+            # emitted, and a multi-MB plan.txt is never fully read or scanned by diff_map.
             with open(txt, encoding="utf-8") as fh:
                 text = fh.read(SIZE_BUDGET)
         out.append((cell, text))
@@ -304,11 +297,9 @@ def load_cells(cells_dir):
 
 
 def main():
-    # prefix="" gathers every check-run on the head SHA (plan jobs, the pending
-    # apply checks, detect/summary). Plan check names carry no verb prefix now
-    # (the workflow is "shipmate · plan"), so the anchor is check_url's exact
-    # forward-built `<stack> / <env>` lookup, not a prefix filter; the coexisting
-    # apply checks keep their `apply / ` verb and so never collide.
+    # prefix="" gathers every check-run on the head SHA: plan jobs, pending apply checks,
+    # detect/summary. Plan check names carry no verb prefix (the workflow is "shipmate · plan"),
+    # so the anchor is check_url's exact `<stack> / <env>` lookup — and `apply / ` never collides.
     checks = ag.latest_by_name(ag.parse_jsonl(sys.stdin), prefix="")
     cells = load_cells(os.environ.get("CELLS", "cells"))
     # This job runs inside the plan run, so this run holds the logs and the

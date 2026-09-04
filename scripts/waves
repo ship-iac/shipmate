@@ -29,7 +29,7 @@ def parse_dot(text):
     ids = {nid: label.lstrip("/") for nid, label in _NODE.findall(text)}
     deps = {path: set() for path in ids.values()}
     for line in text.splitlines():
-        if "[label=" in line:  # node declaration, not an edge
+        if "[label=" in line:  # A `[label=` line declares a node, not an edge.
             continue
         m = _EDGE.match(line)
         if not m:

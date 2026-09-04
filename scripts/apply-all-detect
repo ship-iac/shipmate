@@ -11,7 +11,7 @@ never reverse-parsed.
 
 Three exclusions distinguish the bare form from deploy:
 - envs listed in `global.shipmate.explicit_envs` (typically prod) are removed
-  before env-levels are built; their apply checks simply stay pending, so
+  before env-levels are built; their apply checks stay pending, so
   `shipmate / gate` keeps gating the merge until a targeted
   `shipmate apply <env>` completes them;
 - envs ordered (transitively) after an env not applying this run — held or
@@ -84,9 +84,9 @@ def review_held(pending_envs, ungated, decision):
     the two pass values apply everything regardless of the list; REVIEW_REQUIRED
     applies the listed envs and holds the rest — every env when the list is
     empty; and every remaining value — an explicit CHANGES_REQUESTED, an unknown
-    enum, an absent decision — holds all of them. An absent decision is now
-    reachable only through wiring drift: the review job carries no `if:`, and a
-    review job that fails skips this script entirely."""
+    enum, an absent decision — holds all of them. An absent decision is reachable
+    only through wiring drift: the review job carries no `if:`, and a review job
+    that fails skips this script entirely."""
     if decision in ("NONE", "APPROVED"):
         return []
     if decision == "REVIEW_REQUIRED":
@@ -117,10 +117,9 @@ def main():
     # review" -- two causes, two outputs, or the comment names the wrong fix.
     excluded = sorted(set(excluded) - set(held))
     dropped = set(excluded) | set(skipped) | set(held)
-    # The plan runs attach to `runnable`, not to `pending`: an excluded or held
-    # env's checks deliberately stay pending for a later targeted apply, and
-    # refusing this run over a record-less cell it was never going to apply
-    # would strand the envs that CAN apply. That apply refuses on its own.
+    # The plan runs attach to `runnable`, not `pending`: an excluded or held env's checks
+    # stay pending by design for a later targeted apply, and that apply refuses on its own
+    # over a record-less cell, so refusing here would strand the envs that CAN apply.
     runnable = ad.with_plan_runs(
         [c for c in pending if c["environment"] not in dropped],
         ad.ag.plan_runs_by_name(lines, app_id),

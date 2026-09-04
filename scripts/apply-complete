@@ -51,10 +51,9 @@ import sys
 
 SEP = "\x00"
 UNRESOLVED_EXIT = 75  # EX_TEMPFAIL; not 2, which CPython itself exits with.
-# The one channel that says "ask me again, and here is why". The caller greps
-# this prefix out of stderr to annotate what it gave up on after its retries,
-# so it is a line-anchored contract, not a message: stderr also carries the
-# warnings about cells no retry can help, which name different cells.
+# The one channel that says "ask me again, and here is why". The caller greps this prefix out
+# of stderr to annotate what it gave up on after its retries, so it is a line-anchored
+# contract, not a message: stderr also carries warnings naming other cells no retry can help.
 RETRY_PREFIX = "retry: "
 
 

@@ -3,8 +3,13 @@
 
 `global.shipmate.env_order` maps an env -> the envs that must fully apply
 before it. Topologically sorted into levels; deploy applies level 0 fully,
-then level 1, etc. Unlisted envs are level 0. Absent global -> {} -> all level 0
-(unchanged behavior).
+then level 1, etc. Unlisted envs are level 0. Absent global -> {} -> all level 0.
+
+`MAX_ENV_LEVELS` is fixed because GHA declares no jobs or outputs dynamically.
+Bumping it needs matching `envlevelN_waves`/`_empty` output slots in
+actions/deploy-detect/action.yml and actions/apply-all-detect/action.yml, one
+envlevelN job in the engine's apply-all.yml, and one caller job per env-level in
+each consumer deploy.yml.
 """
 
 import importlib.util
@@ -13,12 +18,7 @@ import pathlib
 from graphlib import TopologicalSorter
 from importlib.machinery import SourceFileLoader
 
-# Cap on env-DAG depth. COUPLED: bumping this requires matching output slots
-# (envlevelN_waves/_empty) in actions/deploy-detect/action.yml AND
-# actions/apply-all-detect/action.yml, one caller job per env-level in each
-# consumer deploy.yml, and one envlevelN job in the engine's apply-all.yml —
-# GHA can't declare jobs/outputs dynamically, so the count is fixed in all of
-# these places.
+# Cap on env-DAG depth. COUPLED to fixed GHA job and output slots; see the module docstring.
 MAX_ENV_LEVELS = 4
 
 _D = pathlib.Path(__file__).resolve().parent
@@ -32,10 +32,9 @@ def _load(fname):
     return mod
 
 
-# build-matrix's _run (surfaces the tool's stderr, then raises `::error::` on
-# nonzero) and waves' level helpers. Both are import-safe -- they only define
-# functions and constants -- which matters because deploy-detect loads this
-# module the same way.
+# build-matrix's _run (surfaces the tool's stderr, then raises `::error::` on nonzero) and
+# waves' level helpers. Both are import-safe -- they only define functions and constants --
+# which matters because deploy-detect loads this module the same way.
 bm = _load("build-matrix")
 wv = _load("waves")
 
@@ -140,7 +139,7 @@ def env_levels(order, envs):
     nodes = set(envs) | set(order) | {p for preds in order.values() for p in preds}
     graph = {n: set(order.get(n, [])) for n in nodes}
     ts = TopologicalSorter(graph)
-    ts.prepare()  # raises CycleError on a cycle
+    ts.prepare()  # `prepare` raises CycleError on a cycle.
     level, i = {}, 0
     while ts.is_active():
         ready = ts.get_ready()
@@ -165,10 +164,9 @@ def waves_by_env_level(pending, deps, levels):
 
     Cells are bucketed by their env's level (0 = no env-order global, or an env
     with no predecessors), then stack-wave-ordered within it. Env-levels apply
-    fully in order (level 0 entirely before level 1, etc); stack waves within a
-    level run as today. No env-order global -> every env is level 0 -> a single
-    populated level -> unchanged behavior. Shared by deploy-detect (merge path)
-    and apply-all-detect (bare `shipmate apply`)."""
+    fully in order: level 0 entirely before level 1, and so on. No env-order
+    global -> every env is level 0 -> a single populated level. Shared by
+    deploy-detect (merge path) and apply-all-detect (bare `shipmate apply`)."""
     stack_levels = wv.levels(deps)
     out = []
     for lvl in range(MAX_ENV_LEVELS):

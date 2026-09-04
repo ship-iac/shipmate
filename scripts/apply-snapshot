@@ -22,15 +22,14 @@ def _key(stack, env):
 def snapshot(waves, check_runs, app_id):
     """{cell key: [check id, ...]} for every cell in this run's waves.
 
-    Every wanted cell must have one, and a cell that has none fails the run
-    here, before wave0 and so before anything applies. Skipping it instead
-    would let that cell mutate infrastructure for real with no id for the
-    trailing completer to PATCH: its apply check stays pending forever, the
-    gate stays pending with it, and a re-run hits the exact-plan stale-plan
-    fail-safe against the state the skipped cell already advanced. Failing
-    pre-flight costs the run's other waves (and, on the deploy/apply-all
-    paths, the successor env-levels) but leaves nothing half-applied, which is
-    the recoverable direction.
+    Every wanted cell must have one. A cell that has none fails the run here,
+    before wave0 and so before anything applies. Skipping it would let that
+    cell mutate infrastructure with no id for the trailing completer to PATCH:
+    its apply check stays pending forever, the gate stays pending with it, and
+    a re-run hits the exact-plan stale-plan fail-safe against the state the
+    skipped cell already advanced. Failing pre-flight costs the run's other
+    waves — and, on the deploy/apply-all paths, the successor env-levels — but
+    leaves nothing half-applied, the recoverable direction.
     """
     wanted = [
         (cell["stack"], cell["environment"]) for name in sorted(waves) for cell in waves[name] or []

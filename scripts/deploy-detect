@@ -9,7 +9,8 @@ each cell applies from the plan run its own apply check records.
 This is the path with no comment, no dispatch inputs and no operator watching, so
 a pending cell whose check records no plan run refuses the whole run — a default
 would apply it from nowhere and a skip would leave its check pending with nothing
-said.
+said. Every pending cell here is also runnable: this path holds nothing back, unlike
+the bare-apply path's explicit and held envs.
 """
 
 import importlib.util
@@ -78,17 +79,14 @@ def main():
     head = _merged_head(repo, merge_sha)
     cells = bm.compute_cells(all_stacks=False, base=os.environ.get("SHIPMATE_BASE_SHA", ""))
     app_id = os.environ["SHIPMATE_APP_ID"]
-    # One listing answers both questions — which cells are already applied, and
-    # which plan run each remaining one applies from. Two reads disagree when a
-    # re-plan lands between them: the name leaves `completed` on the second read
-    # and its cell re-enters the queue carrying the first read's record.
+    # One listing answers both questions: which cells are already applied, and which plan
+    # run each remaining one applies from. A re-plan landing between two reads makes them
+    # disagree — the name leaves `completed` and its cell re-queues on the earlier record.
     lines = ad._check_run_lines(repo, head)
     completed = ad.completed_apply_names(lines, app_id)
-    # AFTER the pending filter, as on both pre-merge paths: a cell applied by an
-    # older engine version carries a record-less check on that head forever, and
-    # refusing over one already-applied cell would strand every pull request
-    # merged across the upgrade. Every pending cell here is also runnable — this
-    # path holds nothing back, unlike the bare-apply one's explicit and held envs.
+    # AFTER the pending filter, as on both pre-merge paths: a cell applied by an older
+    # engine version carries a record-less check on that head forever, and refusing over
+    # one already-applied cell would strand every pull request merged across the upgrade.
     pending = ad.with_plan_runs(
         filter_pending(cells, completed), ad.ag.plan_runs_by_name(lines, app_id)
     )

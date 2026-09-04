@@ -37,13 +37,14 @@ DONE_CONCLUSIONS = {"success", "neutral"}
 
 def latest_by_name(check_runs, prefix=APPLY_PREFIX):
     """Group check-runs by name (names starting with `prefix`; default: apply
-    checks), keeping only the newest run per name. "Newest" is by check-run
-    `id`: GitHub assigns ids monotonically at creation, so the highest id is
-    the most recently created run -- and unlike `started_at` (nullable; a
-    freshly-created queued run may carry none) it is always present, so a
-    newer queued duplicate never sorts below an older completed run.
-    summary-comment reuses this with prefix="" (it resolves plan-check links by
-    an exact `<stack> / <env>` lookup, not a prefix filter). Returns {name: run}."""
+    checks), keeping only the newest run per name. Returns {name: run}.
+
+    "Newest" is by check-run `id`. GitHub assigns ids monotonically at creation,
+    so the highest id is the most recently created run. Unlike `started_at`
+    (nullable -- a freshly-created queued run may carry none) an id is always
+    present, so a newer queued duplicate never sorts below an older completed
+    run. summary-comment reuses this with prefix="": it resolves plan-check
+    links by an exact `<stack> / <env>` lookup, not a prefix filter."""
     latest = {}
     for run in check_runs:
         name = run["name"]
