@@ -730,8 +730,8 @@ def test_main_reports_already_current_on_a_repeat_run(tmp_path, capsys):
 
 
 def test_main_reports_no_references_when_truly_none_match(tmp_path, capsys):
-    # The other side: matched == 0 must keep reporting the original message, since that really
-    # is the "wrong --repo path" signal.
+    # The other side of test_main_reports_already_current_on_a_repeat_run: matched == 0 must
+    # keep reporting the original message, since that really is the "wrong --repo path" signal.
     root = _repo(tmp_path, {".github/workflows/plan.yml": "      - uses: actions/checkout@v4\n"})
 
     code = rc.main(["--repo", str(root), "--sha", REAL])

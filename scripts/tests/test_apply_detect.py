@@ -352,9 +352,9 @@ def test_duplicate_run_newer_queued_stays_pending():
 
 def test_main_wires_the_tag_map_into_the_cells(tmp_path, monkeypatch):
     """Two claims at once: the map reaches the cells, and it is derived for the workset alone.
-    Fails when the map never reaches them, which otherwise leaves every cell role-less with the
-    suite still green; evaluating `stacks/unrelated` would let a stack this apply never touches
-    block an approved plan."""
+    Fails when the map never reaches the cells: every cell is then role-less and the suite stays
+    green. Evaluating `stacks/unrelated` would let a stack this apply never touches block an
+    approved plan."""
     out = tmp_path / "out"
     out = _apply_env(monkeypatch, tmp_path)
     _stub_apply(

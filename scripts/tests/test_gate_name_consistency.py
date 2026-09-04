@@ -205,14 +205,13 @@ def test_inline_gate_write_job_mints_app_statuses_token():
     """Every job that writes the gate inline -- a `run:` step posting to the commit-statuses
     API with the `shipmate / gate` context, rather than delegating to the gate-refresh or
     summary composite actions -- must mint its own shipmate App installation token scoped
-    `permission-statuses: write`, and the inline POST step's `GH_TOKEN` must be that minted
-    token, never the ambient `github.token`, which cannot write a commit status pinned by
-    `integration_id` to the shipmate App. test_no_engine_job_grants_stale_checks_or_statuses_
-    write covers the GITHUB_TOKEN-scope side.
+    `permission-statuses: write`. The inline POST step's `GH_TOKEN` must be that minted token,
+    never the ambient `github.token`, which cannot write a commit status pinned by
+    `integration_id` to the shipmate App.
+    test_no_engine_job_grants_stale_checks_or_statuses_write covers the GITHUB_TOKEN-scope side.
 
-    `_job_writes_gate` locates candidate jobs, detecting either a gate-refresh/summary delegate
-    or an inline statuses/+GATE run step, and this narrows to the inline writers: a job that
-    only delegates is skipped, because those actions mint and scope their own token internally.
+    A job that only delegates is skipped, because those actions mint and scope their own token
+    internally.
     """
     offenders = []
     for wf in sorted(WORKFLOWS.glob("*.yml")):

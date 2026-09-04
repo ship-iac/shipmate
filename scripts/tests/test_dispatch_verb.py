@@ -182,7 +182,8 @@ MARKER_GH_STUB = "#!/bin/bash\ntouch marker.txt\n"
 
 def test_an_empty_verb_is_refused_before_any_api_call():
     """No verb, no dispatch, and the refusal names what the caller must wire: omitting the
-    `with:` line dispatches apply.yml with a plan body, for a 422 the pull request never shows.
+    `with:` line would dispatch apply.yml with a plan body, for a 422 the pull request never
+    shows.
 
     Mutation: delete the empty-verb refusal branch. The step then reaches `gh api`; the case
     list rejects it only after the marker exists, and with its own `''` arm re-added it goes
@@ -238,9 +239,9 @@ def test_each_verb_dispatches_its_own_workflow_file(verb, workflow):
 
 
 def test_the_action_declares_no_workflow_input():
-    """The whole input vector, hand-written. A `workflow` input overrides the filename, and one
-    static name cannot serve three verbs, so it misroutes two of them: the verb-to-file mapping
-    is the contract, not an overridable default.
+    """The whole input vector, hand-written. A `workflow` input would override the filename, and
+    one static name cannot serve three verbs, so it would misroute two of them: the verb-to-file
+    mapping is the contract, not an overridable default.
 
     Mutation: re-add `workflow` (or drop `verb`, or give `verb` a default).
     """
