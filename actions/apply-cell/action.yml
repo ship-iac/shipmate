@@ -17,7 +17,7 @@ inputs:
     description: Plan run id holding the reviewed plan artifact.
     required: true
   state-path:
-    description: Flavor state path, e.g. stacks/app/.state. Empty = remote backend owns state; both actions/state steps are skipped.
+    description: Flavor state path, e.g. stacks/app/.state. Empty = remote backend owns state; both actions/state steps are skipped, and `skipped` never matches the Compose cell summary step's 'failure' checks, so a remote-backend cell can never be blocked on artifact state.
     required: false
     default: ""
   github-token:
@@ -71,10 +71,9 @@ runs:
       env:
         ENV: ${{ inputs.env }}
         STACK_NAME: ${{ inputs.stack-name }}
-      # Before the decrypt, the state restore and the apply: a plan of another
-      # tree is refused at the cheapest point. The record is moved OUT of the
-      # repo tree for the same reason the fingerprint is -- the action runs in
-      # the consumer's checkout and must not leave a stray file at repo root.
+      # Runs before the decrypt, the state restore and the apply, so a plan of another tree
+      # is refused at the cheapest point. The record moves out of the repo tree because the
+      # action runs in the consumer's checkout and must not leave a stray file at its root.
       run: |
         set -euo pipefail
         if [ ! -f planned-head.txt ]; then
@@ -108,9 +107,8 @@ runs:
         STACK_NAME: ${{ inputs.stack-name }}
       run: |
         set -euo pipefail
-        # Move the reviewed fingerprint OUT of the repo tree: the action runs in
-        # the consumer's checkout and must not leave a stray file at repo root.
-        # Only the regenerated fingerprint.txt (a gitignored artifact) remains.
+        # Out of the repo tree, as for the planned-commit record. Only the regenerated
+        # fingerprint.txt, a gitignored artifact, is left behind.
         expected="$RUNNER_TEMP/expected-fingerprint.txt"
         mv fingerprint.txt "$expected"
         python3 "$GITHUB_ACTION_PATH/../../scripts/plan-classify" --fingerprint-only
@@ -135,56 +133,46 @@ runs:
       shell: bash
       env:
         STACK: ${{ inputs.stack }}
-      # The engine owns the command: `tofu apply stack.otplan` applies the
-      # reviewed plan artifact and nothing else, so the exact-plan invariant no
-      # longer depends on branch content. tofu rejects a plan whose state moved
-      # since it was generated -> non-zero exit -> apply check stays pending
-      # (fail-safe).
-      # `init` runs on its own line, outside the teed pipeline: its output is
-      # setup noise, and apply.txt is reviewer-facing comment data. It stays
-      # above the group marker so that failure's diagnostics are not buried in
-      # a group this step then exits without ever closing.
-      # Restored local-backend workspace state arrives without the `.terraform`
-      # record that marks the backend initialised, so `init` reads it as legacy
-      # state awaiting migration and `-input=false` turns that question into a
-      # hard error. Hide it across the init and put it back either way: under
-      # `-reconfigure` a migration is never intended, and non-interactively it
-      # could never have been answered. errexit is lifted only so the restore
-      # runs on a failed init; the explicit exit keeps that failure fatal --
-      # nothing applies against state the engine could not initialise.
-      # No `-auto-approve`: applying a stored plan never prompts, so the flag is
-      # inert here -- and its absence is a backstop. Were the `stack.otplan`
-      # argument ever lost, `-input=false` alone fails with "Error asking for
-      # approval", where `-auto-approve` would re-plan from branch content and
-      # apply that unattended.
-      # Tee combined stdout+stderr to RUNNER_TEMP (never the repo tree -- the
-      # action runs in the consumer's checkout) for the cell-summary
-      # artifact. errexit is turned off for just this one pipeline and the
-      # step exits explicitly on tofu's own status, captured via
-      # PIPESTATUS[0]: with errexit (and pipefail) live across the pipeline, a
-      # `tee` failure alone -- a full $RUNNER_TEMP, a disk hiccup mid-write --
-      # fails the *pipeline*, which fails this step even though every
-      # resource in the apply succeeded. That would strand the apply check
-      # pending after `Save state` below has already persisted the advanced
-      # state, so a re-run would hit the exact-plan stale-plan fail-safe with
-      # no way back on an otherwise-successful apply. Exiting explicitly on
-      # tofu's own captured status keeps a cosmetic `tee` failure from
-      # masking a success -- or manufacturing one.
+      # The engine owns the command: `tofu apply stack.otplan` applies the reviewed plan
+      # artifact and nothing else, so the exact-plan invariant does not depend on branch
+      # content. tofu rejects a plan whose state moved since generation, and the non-zero
+      # exit leaves the apply check pending (fail-safe).
       run: |
         set -euo pipefail
+        # Restored local-backend workspace state carries no `.terraform` record marking the
+        # backend initialised, so `init` reads it as legacy state awaiting migration and
+        # `-input=false` turns that question into a hard error.
         ws="$STACK/terraform.tfstate.d"
         hidden=$(mktemp -du "$RUNNER_TEMP/tfstate.d.XXXXXX")
+        # Hidden across the init and put back either way: under `-reconfigure` a migration is
+        # never intended, and non-interactively it could never have been answered.
         if [ -d "$ws" ]; then mv "$ws" "$hidden"; fi
+        # errexit is lifted only so the workspace restore runs even on a failed init.
         set +e
+        # `init` stays outside the teed pipeline -- its output is setup noise, apply.txt is
+        # reviewer-facing comment data -- and above the group marker, so a failure's
+        # diagnostics are not buried in a group this step then exits without closing.
         terramate run --disable-safeguards=git-out-of-sync --no-recursive -C "$STACK" -- tofu init -input=false -reconfigure
         init_status=$?
         set -e
         # init recreates $ws empty; drop that so the real state replaces it
         # rather than being moved inside it.
         if [ -d "$hidden" ]; then rm -rf "$ws"; mv "$hidden" "$ws"; fi
+        # Fatal: nothing applies against state the engine could not initialise.
         [ "$init_status" -eq 0 ] || exit "$init_status"
         echo "::group::terramate apply: $STACK"
+        # errexit is off for this one pipeline, and the step exits on tofu's own status via
+        # PIPESTATUS[0]: with errexit and pipefail live, a `tee` failure alone -- a full
+        # $RUNNER_TEMP, a disk hiccup mid-write -- would fail an apply whose every resource
+        # succeeded. `Save state` has already persisted the advanced state by then, so a
+        # re-run would hit the stale-plan fail-safe with no way back. Exiting on tofu's own
+        # captured status keeps a cosmetic `tee` failure from masking a success, or
+        # manufacturing one.
         set +e
+        # No `-auto-approve`: applying a stored plan never prompts, so the flag is inert, and
+        # its absence is a backstop. Were the `stack.otplan` argument ever lost, `-input=false`
+        # alone fails with "Error asking for approval", where `-auto-approve` would re-plan
+        # from branch content and apply that unattended.
         terramate run --disable-safeguards=git-out-of-sync --no-recursive -C "$STACK" -- tofu apply -input=false stack.otplan 2>&1 | tee "$RUNNER_TEMP/apply.txt"
         status="${PIPESTATUS[0]}"
         set -e
@@ -192,25 +180,19 @@ runs:
         exit "$status"
 
     - name: Save state
-      # Persist state whenever the apply was attempted (restore succeeded), not
-      # only on a clean apply: a partial `tofu apply` mutates local state
-      # per-resource whether it failed OR was cancelled (manual, or
-      # apply-<env>-<stack> concurrency displacement), and dropping that delta
-      # would orphan resources on the next run's restore-then-retry. always()
-      # (not !cancelled()) is safe here because the sink is actions/cache:
-      # entries commit only on a completed, size-validated upload and are keyed
-      # per run_id-run_attempt, so a teardown mid-upload never commits and can
-      # never clobber the last-good state — worst case is today's behaviour
-      # (delta lost), best case the partial state persists and the next retry
-      # hits tofu's stale-plan fail-safe loudly. Guard on restore's outcome so
-      # we never save a state that was never actually restored (e.g. restore
-      # itself failed). On cancellation this job's own conclusion reads
-      # cancelled, so the trusted trailing job (which completes a check only
-      # when the job that applied it succeeded) leaves the check pending and
-      # the work is re-detected. With an empty state-path (remote backend), both
-      # this and the restore skip: `skipped` never matches the Compose step's
-      # 'failure' checks, so a remote-backend cell can never be blocked on
-      # artifact state.
+      # Persisted whenever the apply was attempted, not only on a clean apply: a partial
+      # `tofu apply` mutates local state per-resource whether it failed or was cancelled
+      # (manually, or by apply-<env>-<stack> concurrency displacement), and dropping that
+      # delta would orphan resources on the next run's restore-then-retry.
+      # always(), not !cancelled(), is safe because the sink is actions/cache: entries commit
+      # only on a completed, size-validated upload, keyed per run_id-run_attempt, so a
+      # teardown mid-upload never commits and can never clobber the last-good state. Worst
+      # case the delta is lost; best case the partial state persists and the next retry hits
+      # tofu's stale-plan fail-safe loudly.
+      # The guard on the restore's outcome keeps state that was never restored from being
+      # saved. On cancellation this job's own conclusion reads cancelled, so the trusted
+      # trailing job -- which completes a check only when the job that applied it succeeded --
+      # leaves the check pending and the work is re-detected.
       if: ${{ always() && inputs.state-path != '' && steps.restore-state.outcome == 'success' }}
       uses: ship-iac/shipmate/actions/state@cc54ebf89eb763a243a0dc2fc2504ba7dbed5b92 # pinned to a commit on main
       with:
@@ -220,20 +202,14 @@ runs:
         path: ${{ inputs.state-path }}
 
     - name: Compose cell summary
-      # Runs even when a fail-safe or the apply itself failed/was cancelled --
-      # the aggregator needs a result for every attempted-or-blocked cell.
-      # Built via python from env vars only: stack/env/reason text is
-      # author-controlled (Terramate tags, workflow inputs) and must never be
-      # shell-interpolated into the script or spliced into JSON by string
-      # concat.
-      # continue-on-error: comment feedback must never outrank the work
-      # queue. This step is purely cosmetic (it only composes the apply
-      # result comment's data); Save state above has already advanced past
-      # the reviewed .otplan, so if this step failed the job outright, a
-      # re-run would hit the exact-plan stale-plan fail-safe with no way back
-      # on an otherwise-successful apply. Writes cell.json to $RUNNER_TEMP, not
-      # the repo tree -- like its sibling steps above, it must not leave a stray
-      # file in the consumer's checkout.
+      # Runs even when a fail-safe or the apply itself failed or was cancelled: the
+      # aggregator needs a result for every attempted-or-blocked cell. Built from env vars
+      # only, because stack/env/reason text is author-controlled (Terramate tags, workflow
+      # inputs) and must never be shell-interpolated or spliced into JSON by string concat.
+      # continue-on-error because comment feedback must never outrank the work queue: this
+      # step only composes the apply result comment's data, and `Save state` has already
+      # advanced past the reviewed .otplan, so failing the job would leave a re-run on the
+      # stale-plan fail-safe with no way back on an otherwise-successful apply.
       if: always()
       continue-on-error: true
       shell: bash
@@ -252,14 +228,10 @@ runs:
         python3 - <<'PY'
         import json, os
 
-        # Checked in pipeline order and matched on 'failure' specifically
-        # (not "!= success"): a composite-action step failure halts every
-        # later non-always() step, so a fail-safe that never ran reads
-        # 'skipped', not 'failure' -- an unrelated earlier failure would
-        # otherwise also read as 'skipped' on restore-state/apply and get
-        # misattributed to the wrong fail-safe. Matching 'failure' exactly
-        # means only the fail-safe that actually tripped can claim the
-        # blocked reason.
+        # Checked in pipeline order and matched on 'failure', not "!= success": a
+        # composite-action step failure halts every later non-always() step, so a fail-safe
+        # that never ran reads 'skipped', not 'failure'. Matching 'failure' exactly means only
+        # the fail-safe that actually tripped can claim the blocked reason.
         FAILSAFES = [
             ("DOWNLOAD_OUTCOME", "reviewed plan artifact missing or expired — re-run plan"),
             (
@@ -287,19 +259,15 @@ runs:
             elif apply_outcome in ("failure", "cancelled"):
                 result = "failed"
             else:
-                # No fail-safe failed and apply never ran (its outcome is
-                # 'skipped') -- some other step failed first (e.g. the stack
-                # slug validation). Still blocked, but the reason must not
-                # name a fail-safe that was never attempted.
+                # No fail-safe failed and apply never ran, so some other step failed
+                # first. Still blocked, but the reason must not name a fail-safe that
+                # was never attempted.
                 result = "blocked"
                 reason = "an earlier step failed before the apply ran — see the job log"
 
-        # Written to $RUNNER_TEMP, never the repo tree -- see the step
-        # comment above. apply.txt itself needs no copy here: the apply step
-        # above already tee'd it straight to $RUNNER_TEMP/apply.txt, so a
-        # blocked cell that never reached the apply step simply never wrote
-        # it, and an attempted cell's copy is already at the path the upload
-        # step below reads from.
+        # apply.txt needs no copy: `Apply the stored plan` already tee'd it to
+        # $RUNNER_TEMP/apply.txt, so a blocked cell that never reached the apply never wrote
+        # it, and an attempted cell's copy already sits where `Upload apply summary` reads.
         cell_path = os.path.join(os.environ["RUNNER_TEMP"], "cell.json")
         with open(cell_path, "w") as fh:
             json.dump(
@@ -315,13 +283,11 @@ runs:
         PY
 
     - name: Upload apply summary
-      # continue-on-error: comment feedback must never outrank the work
-      # queue -- see the note on Compose cell summary above. If this
-      # purely-cosmetic upload fails, we'd rather under-report in the PR
-      # comment (an applied cell renders as not-attempted) than strand an
-      # already-applied cell's check pending. overwrite: true so a job
-      # re-run in the same workflow run (the documented "re-run the deploy"
-      # recovery path) cannot 409 on the pre-existing artifact name.
+      # continue-on-error, as on `Compose cell summary`: a failed cosmetic upload
+      # under-reports in the pull request comment, an applied cell rendering as
+      # not-attempted, rather than stranding an already-applied cell's check pending.
+      # `overwrite: true` because a job re-run in the same workflow run -- the documented
+      # "re-run the deploy" recovery path -- cannot 409 on the pre-existing artifact name.
       if: always()
       continue-on-error: true
       uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

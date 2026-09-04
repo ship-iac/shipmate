@@ -62,21 +62,18 @@ runs:
         permission-statuses: write
         permission-pull-requests: write
         permission-contents: read
-        # For doctor's environment probes below (`/environments` and, per
-        # environment, `/environments/{name}`): on some configurations a
-        # fine-grained installation token needs Actions read to see them, and a
-        # degraded environment probe shows up only as a "could not verify"
-        # annotation. A subset of the `actions: write` app/manifest.json already
-        # declares, so it needs no re-approval of the installation.
+        # doctor's environment probes read `/environments` and `/environments/{name}`; on
+        # some configurations a fine-grained installation token needs Actions read to see
+        # them, and a degraded probe surfaces only as a "could not verify" annotation. A
+        # subset of the `actions: write` app/manifest.json already declares, so the
+        # installation needs no re-approval.
         permission-actions: read
 
     - name: Mint an environments-scoped token for doctor's plan-env secret probe
       id: envtoken
-      # Its own mint so that a permission request no org owner has accepted yet
-      # cannot reach the apply checks or the gate status — argued in
-      # scripts/tests/test_env_token_mint_scoping.py. Until it is accepted, the
-      # probe reports its "not performed" finding as a warning; that is the
-      # cost, and it clears on Accept.
+      # Its own mint, so a permission request no org owner has accepted yet cannot reach the
+      # apply checks or the gate status (scripts/tests/test_env_token_mint_scoping.py). Until
+      # it is accepted the probe reports "not performed" as a warning; it clears on Accept.
       continue-on-error: true
       uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
       with:
@@ -110,13 +107,11 @@ runs:
       run: |
         set -euo pipefail
         [[ "$SHIPMATE_HEAD_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::head-sha must be a 40-char lowercase hex SHA (got: $SHIPMATE_HEAD_SHA)"; exit 1; }
-        # GITHUB_SHA is this run's own commit — the ref it was dispatched on —
-        # which is where GitHub attached the plan jobs' checks.
-        # Degrades rather than fails: the gate is written by a later step, and a
-        # step that only decides what a reviewer SEES must not cost the gate.
-        # The pull request still carries the App-authored apply checks and the
-        # sticky comment either way. Deliberately not extended to anything the
-        # gate depends on.
+        # GITHUB_SHA is this run's own commit, the ref it was dispatched on, which is where
+        # GitHub attached the plan jobs' checks. This step degrades rather than fails: it only
+        # decides what a reviewer sees, and `Create/refresh gate` is a later step. The pull
+        # request still carries the App-authored apply checks and the sticky comment either
+        # way. The degrade is deliberately not extended to anything the gate depends on.
         if ! gh api --paginate \
           "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/check-runs?filter=all&per_page=100" \
           --jq '.check_runs[]' > run-checks.jsonl; then
@@ -130,9 +125,9 @@ runs:
         while IFS= read -r body; do
           [ -z "$body" ] && continue
           if ! printf '%s' "$body" | gh api "repos/$GITHUB_REPOSITORY/check-runs" --input - >/dev/null; then
-            # Every remaining body is still attempted: the listing is unordered,
-            # so bailing out here drops an arbitrary suffix — which can be
-            # exactly the failed cell this mirror exists to show.
+            # Every remaining body is still attempted: the listing is unordered, so
+            # bailing out drops an arbitrary suffix -- possibly the very failed cell
+            # this mirror exists to show.
             name=${body#*\"name\": \"}
             echo "::warning::could not mirror the check \"${name%%\"*}\" onto the pull request head; the pull request shows only some of this run's plan checks"
             continue
@@ -149,14 +144,13 @@ runs:
       run: |
         set -euo pipefail
         [[ "$HEAD_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::head-sha must be a 40-char lowercase hex SHA (got: $HEAD_SHA)"; exit 1; }
-        # filter=all + latest-run-per-name (apply-gate.latest_by_name): the
-        # same check-runs read discipline as gate-refresh / the detects.
-        # summary-comment resolves each cell's plan-check link from this list
-        # and writes comment.md + pending/count to GITHUB_OUTPUT. A transient
-        # listing failure must not block creation of the shipmate / gate
-        # check over what only feeds cosmetic links — degrade to an empty
-        # listing (summary-comment already falls back to the workflow-run URL
-        # when a check can't be resolved) instead of failing the step.
+        # filter=all + latest-run-per-name (apply-gate.latest_by_name): the same read
+        # discipline as gate-refresh and the detects. summary-comment resolves each cell's
+        # plan-check link from this list and writes comment.md plus pending/count to
+        # GITHUB_OUTPUT.
+        # A transient listing failure feeds only cosmetic links, so it degrades to an empty
+        # listing -- summary-comment falls back to the workflow-run URL for a check it cannot
+        # resolve -- rather than failing the step and blocking the gate status.
         if ! gh api --paginate \
           "repos/$GITHUB_REPOSITORY/commits/$HEAD_SHA/check-runs?filter=all&per_page=100" \
           --jq '.check_runs[] | {name, html_url, id}' > check-runs.jsonl; then
@@ -182,36 +176,34 @@ runs:
       shell: bash
       env:
         GH_TOKEN: ${{ steps.token.outputs.token }}
-        # Empty when the mint above failed; doctor then says the plan-env secret
-        # check did not run rather than reporting it clean.
+        # Empty when that mint failed; doctor then says the plan-env secret check did not
+        # run rather than reporting it clean.
         SHIPMATE_ENV_TOKEN: ${{ steps.envtoken.outputs.token }}
         SHIPMATE_DOCTOR_MODE: annotate
         SHIPMATE_APP_ID: ${{ inputs.app-id }}
         SHIPMATE_CELLS_DIR: ${{ inputs.cells-dir }}
         SHIPMATE_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
-        # The commit the pin probe reads the consumer's workflow files at.
-        # Without it the contents API falls back to the default branch, where a
-        # pin bump on this PR is not visible yet — doctor would report the pin
-        # stale on the very run that fixes it.
+        # The commit the pin probe reads the consumer's workflow files at. Without it the
+        # contents API falls back to the default branch, where a pin bump on this pull request
+        # is not visible yet, and doctor reports the pin stale on the run that fixes it.
         SHIPMATE_HEAD_SHA: ${{ inputs.head-sha }}
-        # The engine's own owner/repo, so the pin probe reports on shipmate's
-        # pins and not on some other org's shared action the consumer also uses.
-        # `github.action_repository` is the slug of the running action, resolved
-        # by GitHub at runtime — org-agnostic, never hardcoded. Empty when the
-        # action runs from a local path, and doctor then says pin freshness was
-        # not verified rather than guessing.
+        # The engine's own owner/repo, so the pin probe reports on shipmate's pins and not on
+        # some other org's shared action the consumer also uses. `github.action_repository` is
+        # the running action's slug, resolved by GitHub at runtime -- org-agnostic, never
+        # hardcoded. Empty when the action runs from a local path, and doctor then says pin
+        # freshness was not verified rather than guessing.
         SHIPMATE_ENGINE_REPO: ${{ github.action_repository }}
-        # For the engine-pin probe's cross-repo release read: the App
-        # installation token is scoped to the consumer repo and may not read
-        # the engine repo; the workflow token can (public repo). `github.token`
-        # is available inside a composite action — no new consumer input.
+        # For the engine-pin probe's cross-repo release read: the App installation token is
+        # scoped to the consumer repo and may not read the engine repo; the workflow token
+        # can, the engine repo being public. `github.token` resolves inside a composite
+        # action, so this needs no new consumer input.
         SHIPMATE_PUBLIC_TOKEN: ${{ github.token }}
       run: |
         set -euo pipefail
-        # Findings surface as workflow annotations on this run, not in the
-        # sticky comment: `shipmate doctor` harvests them back onto the PR on
-        # demand. doctor writes fully-formed ::warning::/::notice:: lines; cat
-        # them through unmodified so no shell reconstruction can mangle them.
+        # Findings surface as workflow annotations on this run, not in the sticky comment:
+        # `shipmate doctor` harvests them back onto the pull request on demand. doctor writes
+        # fully-formed ::warning::/::notice:: lines, catted through unmodified so no shell
+        # reconstruction can mangle them.
         if python3 "$GITHUB_ACTION_PATH/../../scripts/doctor" > doctor.txt; then
           cat doctor.txt
         else
@@ -228,39 +220,33 @@ runs:
       run: |
         set -euo pipefail
         marker='<!-- shipmate:summary -->'
-        # Match the marker plus any Bot author, not a hardcoded login: the
-        # App's bot login is derived from the registered App name, which a
-        # consumer org may have had to slug differently than "shipmate[bot]".
-        # `startswith`, not `contains`: build_comment emits the marker as the
-        # body's FIRST line, and a `contains` match also selects a comment that
-        # merely quotes it — doctor's report renders findings interpolating
-        # repository data such as workflow file names — which this step would
-        # then PATCH with the plan body.
-        # The lookup writes to a file instead of piping into `head`: `head`
-        # closing the pipe early raises EPIPE under `pipefail`, which is what
-        # the `|| true` here used to swallow — together with a genuine listing
-        # failure, whose empty id fell through to the create branch and left the
-        # pull request with two marker-bearing Bot comments, the older of which
-        # every later run then PATCHed. Removing the pipe removes the reason for
-        # the `|| true`, so a failed listing skips the post and the next run
-        # recovers. `Create/refresh gate` is a later step, so it still runs.
+        # The marker plus any Bot author, not a hardcoded login: the App's bot login derives
+        # from the registered App name, which a consumer org may have had to slug differently
+        # than "shipmate[bot]".
+        # `startswith`, not `contains`: build_comment emits the marker as the body's FIRST
+        # line, and a `contains` match also selects a comment that merely quotes it -- doctor's
+        # report interpolates repository data such as workflow file names -- which this step
+        # would then PATCH with the plan body.
         if ! gh api "repos/$GITHUB_REPOSITORY/issues/$PR/comments" --paginate \
                --jq "map(select(((.body // \"\") | startswith(\"$marker\")) and .user.type == \"Bot\")) | .[0].id // empty" \
                > summary-comment-ids.txt; then
+          # A failed listing skips the post and the next run recovers. `Create/refresh gate`
+          # is a later step, so the gate is still written.
           echo "::warning::could not list this pull request's comments; the sticky plan comment was not updated this run"
           exit 0
         fi
-        # --paginate evaluates --jq per page, so a marker match on >1 page emits
-        # one id per matching page; the first line is the single id PATCH needs.
+        # --paginate evaluates --jq per page, so a marker match on >1 page emits one id per
+        # matching page; the first line is the single id PATCH needs. The lookup writes to a
+        # file rather than piping into `head`, which raises EPIPE under `pipefail` and needs a
+        # `|| true` that also masks a genuine listing failure -- an empty id then falls through
+        # to the create branch, leaving two marker-bearing Bot comments the later runs PATCH.
         id=$(head -n1 summary-comment-ids.txt)
-        # gate-state has already collapsed every "the plan can't be trusted"
-        # case (a failed detect, a failed plan job, a plan job skipped with
-        # cells planned, an unreported planned count, or a shortfall between
-        # the planned cells and the summaries this job read) into
-        # comment_mode=hold. Warn and leave any existing comment untouched
-        # rather than overwriting the review surface with an incomplete
-        # picture — `Create/refresh gate` below also fails the gate on the same
-        # cases, so the pull request still shows that something is wrong.
+        # gate-state has already collapsed every untrustworthy-plan case -- a failed detect, a
+        # failed plan job, a plan job skipped with cells planned, an unreported planned count,
+        # a shortfall between the planned cells and the summaries this job read -- into
+        # comment_mode=hold. Warn and leave any existing comment untouched rather than
+        # overwrite the review surface with an incomplete picture; `Create/refresh gate` fails
+        # the gate on those cases, so the pull request still shows that something is wrong.
         if [ "$MODE" = "hold" ]; then
           echo "::warning::the plan job ($PLAN_RESULT) did not produce a trustworthy set of cell summaries; the sticky plan comment was left as it is"
           exit 0
@@ -269,18 +255,17 @@ runs:
         if [ "$MODE" = "nothing-changed" ]; then
           nothing_changed=true
         fi
-        # Nothing changed and no comment to keep current: post nothing, so a
-        # docs-only or engine-pin-bump pull request carries no plan comment at
-        # all. Two things keep that silence from hiding anything: the gate is
-        # written by a later step regardless, and a run where doctor reported
-        # settings drift still posts, because doctor's annotations carry no
-        # file/line and so render only on the run page — the comment's footer is
-        # the only pull-request-visible pointer at `shipmate doctor`. Warnings
-        # (actionable misconfiguration) only, not `::notice::` findings, which
-        # are informational and would put a comment on every quiet run.
-        # An existing comment is always kept current instead of suppressed, or a
-        # pull request that planned changes and then pushed them away would keep
-        # displaying applies that no longer exist.
+        # Nothing changed and no comment to keep current: post nothing, so a docs-only or
+        # engine-pin-bump pull request carries no plan comment at all. The gate is written by a
+        # later step regardless.
+        # A run where doctor reported settings drift still posts: doctor's annotations carry no
+        # file/line and so render only on the run page, and the comment's footer is the only
+        # pull-request-visible pointer at `shipmate doctor`. Warnings, actionable
+        # misconfiguration, only -- a `::notice::` finding is informational and would put a
+        # comment on every quiet run.
+        # An existing comment is always kept current instead of suppressed, or a pull request
+        # that planned changes and then pushed them away would keep displaying applies that no
+        # longer exist.
         doctor_warned=false
         if [ -s doctor.txt ] && grep -q '^::warning' doctor.txt; then
           doctor_warned=true
@@ -304,18 +289,16 @@ runs:
         PLAN_RESULT: ${{ inputs.plan-result }}
       run: |
         set -euo pipefail
-        # The gate is a commit STATUS, not a check-run. A check-run is bound to a
-        # check-suite; an imperatively-created one lands in an arbitrary suite
-        # when a commit carries more than one plan run (draft->ready, or a rapid
-        # re-push, spawns two runs = two suites). The merge evaluator then reads
-        # the live suite, finds no gate there, and blocks the PR forever while
-        # the green gate sits in the stale suite. A commit status is
-        # commit-scoped, so it is immune to that attribution race. Written
-        # with the App's installation token (statuses:write) alongside the
-        # App-authored checks and sticky comment above — one minted token
-        # covers all three writes for this job.
-        # gate-state already wrote gate.json and the state output. An empty
-        # state means "write nothing" — a cancelled plan job.
+        # The gate is a commit STATUS, not a check-run. A check-run is bound to a check-suite,
+        # and an imperatively-created one lands in an arbitrary suite when a commit carries
+        # more than one plan run (draft->ready, or a rapid re-push, spawns two runs and two
+        # suites); the merge evaluator then reads the live suite, finds no gate there, and
+        # blocks the pull request forever while the green gate sits in the stale one. A commit
+        # status is commit-scoped and immune to that attribution race. One minted App
+        # installation token (statuses:write) covers this write, the App-authored checks and
+        # the sticky comment.
+        # gate-state already wrote gate.json and the state output. An empty state means write
+        # nothing: a cancelled plan job.
         if [ -z "${STATE}" ]; then
           echo "plan job was ${PLAN_RESULT}; no gate written"
           exit 0

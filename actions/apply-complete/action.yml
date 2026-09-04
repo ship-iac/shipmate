@@ -1,5 +1,5 @@
 name: shipmate apply-complete
-description: Complete the apply checks for every wave cell whose job actually succeeded in this run. The only step in the apply path that mints the App key.
+description: Complete the apply checks for every wave cell whose job succeeded in this run. The only step in the apply path that mints the App key.
 inputs:
   snapshot:
     description: JSON object from apply-snapshot mapping each cell to its pre-existing apply-check ids.
@@ -33,61 +33,24 @@ runs:
       env:
         GH_TOKEN: ${{ inputs.github-token }}
         SHIPMATE_SNAPSHOT_JSON: ${{ inputs.snapshot }}
-      # A 256-cell level exceeds the 100-per-page cap, so --paginate --jq
-      # streams one job object per line for scripts/apply-complete to read on
-      # stdin. Unlike actions/apply-summary's cosmetic log-link listing, this
-      # one decides which checks get completed: an empty or failed listing
-      # must fail the step loudly rather than degrade to no data, or a
-      # successful apply would silently strand every check pending.
-      #
-      # The listing also lags: a wave job can finish seconds before its
-      # conclusion is readable here, and a cell we cannot yet decide is not a
-      # cell that did not run. So listing and selection are one retry loop --
-      # the `gh api` fetch is inside the `for` because re-reading the listing
-      # IS the retry; hoisting it turns twelve attempts into one, plus 110
-      # seconds of sleeping over a snapshot that can never change.
-      #
-      # An empty listing (or a fetch that failed outright) is the most extreme
-      # form of exactly that lag, so it is retried rather than failed on the
-      # first attempt. A failed fetch takes the same path without reading the
-      # file it half-wrote: a truncated listing matches a subset of cells and
-      # so slips past the script's all-cells-unmatched floor.
-      #
-      # Ids accumulate across attempts and are deduped at the end, because
-      # replicas differ: attempt 4 can land on a staler one than attempt 3 and
-      # lose a row attempt 3 already saw. A later read may add a completion,
-      # never revoke one -- the ids only ever come from a job GitHub recorded
-      # as `success`.
-      #
-      # ~2 minutes of budget, not the ~30s a lag is expected to need, because
-      # exhausting it is expensive rather than merely annoying: it fails
-      # `complete`, which fails the env-level, and deploy.yml's `!failure()`
-      # guards then skip every successor env-level -- halting a multi-region
-      # deploy over infrastructure that already applied.
-      #
-      # Which is also why exhaustion does not fail *here*: the steps below
-      # complete the checks this run did earn, and the last step then fails
-      # the job over the cells it did not. Failing at this point instead would
-      # discard a whole level's completions over one lagging cell, stranding
-      # 29 checks to report the 30th.
-      #
-      # Only exit 75 (EX_TEMPFAIL) means "ask me again"; any other non-zero is
-      # the script itself failing and is propagated immediately, so a broken
-      # invocation is not retried for two minutes and then misreported as a
-      # stale listing.
-      #
-      # Diagnostics are echoed once, after the loop, not per attempt: the file
-      # is rewritten each time, so a 12-attempt run would otherwise log the
-      # same warning 12 times. The stranded marker keeps only the script's
-      # `retry:` lines -- the file also holds warnings naming cells that no
-      # retry could have helped, and annotating those as the reason for the
-      # failure names the wrong cells.
+      # A 256-cell level exceeds the 100-per-page cap, so `--paginate --jq` streams one job
+      # object per line to scripts/apply-complete on stdin. Unlike actions/apply-summary's
+      # cosmetic log-link listing, this one decides which checks get completed, so it must
+      # never degrade to no data: a successful apply would silently strand every check pending.
       run: |
         set -euo pipefail
         : > "$RUNNER_TEMP/earned-ids.txt"
         : > "$RUNNER_TEMP/stranded.txt"
         ok=""
+        # ~2 minutes of budget, not the ~30s a lag is expected to need: exhausting it fails
+        # `complete`, which fails the env-level, and deploy.yml's `!failure()` guards then skip
+        # every successor env-level -- halting a multi-region deploy over infrastructure that
+        # already applied.
         attempts=12
+        # The listing lags: a wave job can finish seconds before its conclusion is readable
+        # here, and a cell that cannot yet be decided is not a cell that did not run. The
+        # fetch sits inside the loop because re-reading the listing IS the retry; hoisting it
+        # turns twelve attempts into one, plus 110 seconds of sleeping over a fixed snapshot.
         for n in $(seq "$attempts"); do
           rc=0
           : > "$RUNNER_TEMP/attempt-ids.txt"
@@ -99,11 +62,21 @@ runs:
               > "$RUNNER_TEMP/attempt-ids.txt" \
               2> "$RUNNER_TEMP/diagnostics.txt" || rc=$?
           else
+            # An empty listing or a failed fetch is the most extreme form of that lag, so it
+            # is retried rather than failed on. The half-written file is left unread: a
+            # truncated listing matches a subset of cells and so slips past the script's
+            # all-cells-unmatched floor.
             rc=75
             echo "retry: the run jobs listing came back empty or unreadable — cannot tell which wave cells succeeded" \
               > "$RUNNER_TEMP/diagnostics.txt"
           fi
+          # Ids accumulate and are deduped after the loop: replicas differ, so a later
+          # attempt can land on a staler one and lose a row an earlier attempt saw. A later
+          # read only ever adds a completion -- every id comes from a job recorded `success`.
           cat "$RUNNER_TEMP/attempt-ids.txt" >> "$RUNNER_TEMP/earned-ids.txt"
+          # Only exit 75 (EX_TEMPFAIL) means "ask me again". Any other non-zero is the script
+          # itself failing and propagates at once, so a broken invocation is not retried for
+          # two minutes and then misreported as a stale listing.
           case "$rc" in
             0) ok=1; break ;;
             75) if [ "$n" -lt "$attempts" ]; then sleep 10; fi ;;
@@ -111,8 +84,13 @@ runs:
           esac
         done
         sort -u "$RUNNER_TEMP/earned-ids.txt" > "$RUNNER_TEMP/complete-ids.txt"
+        # Echoed once after the loop, not per attempt: the file is rewritten each time, so a
+        # 12-attempt run would otherwise log the same warning 12 times.
         cat "$RUNNER_TEMP/diagnostics.txt" >&2
         if [ -z "$ok" ]; then
+          # Only the script's `retry:` lines: the file also holds warnings naming cells no
+          # retry could have helped, and naming those as the failure's reason names the
+          # wrong cells.
           sed -n 's/^retry: //p' "$RUNNER_TEMP/diagnostics.txt" > "$RUNNER_TEMP/stranded.txt"
           [ -s "$RUNNER_TEMP/stranded.txt" ] ||
             echo "the retries were exhausted without the script naming a reason" \
@@ -120,9 +98,8 @@ runs:
         fi
 
     - name: Mint App installation token
-      # Minted after the jobs listing (which can fail/abort) rather than
-      # before it, so the token's lifetime never spans a step that may not
-      # need it at all -- only the completion PATCH below actually uses it.
+      # Minted after the jobs listing, which can fail, so the token's lifetime never spans a
+      # step that may not need it -- only `Complete the apply checks` uses it.
       id: token
       uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
       with:
@@ -136,10 +113,9 @@ runs:
       shell: bash
       env:
         GH_TOKEN: ${{ steps.token.outputs.token }}
-      # The body is static (no author input) so it is a plain heredoc. Retry
-      # each completion so a transient API blip doesn't strand a check
-      # pending — re-running can't recover it (the applied state has already
-      # advanced past the reviewed plan).
+      # The body is static (no author input), so a plain heredoc is safe. Each completion is
+      # retried because a transient API blip would strand the check pending, and a re-run
+      # cannot recover it: the applied state has already advanced past the reviewed plan.
       run: |
         set -euo pipefail
         cat > body.json <<'JSON'
@@ -157,10 +133,9 @@ runs:
 
     - name: Fail over any cell the jobs listing never resolved
       shell: bash
-      # Deliberately last, and deliberately still a failure: the completions
-      # above are the earned half of this run, and a stranded check blocks the
-      # gate forever while reporting success everywhere a human looks, so it
-      # must never pass as one.
+      # Deliberately last, and deliberately still a failure: a stranded check blocks the gate
+      # forever while reporting success everywhere a human looks. Failing in the listing step
+      # instead would discard a level's earned completions over one lagging cell.
       run: |
         set -euo pipefail
         if [ -s "$RUNNER_TEMP/stranded.txt" ]; then
