@@ -6,12 +6,10 @@ displacement) mutates local state per-resource exactly like a failed apply. If
 next run restores the pre-apply state, and retries orphan resources / duplicate
 creates.
 
-The state sink is `actions/cache` (commit-on-complete, keyed per
-`run_id-run_attempt`): a torn-down upload never commits and cannot clobber the
-last-good entry, so saving on cancellation is strictly safe. The correct guard
-is therefore `always()` (still gated on a successful restore, so we never save a
-state that was never restored). This test pins that guard so it cannot silently
-regress to `!cancelled()`.
+The state sink is `actions/cache`, commit-on-complete and keyed per `run_id-run_attempt`: a
+torn-down upload never commits and cannot clobber the last-good entry, so saving on cancellation
+is safe. The correct guard is therefore `always()`, still gated on a successful restore so that a
+state which was never restored is never saved. Mutation: regress that guard to `!cancelled()`.
 """
 
 import re
@@ -37,9 +35,9 @@ def _guard(step):
 
 
 def test_save_state_runs_on_cancellation():
-    # always() (not !cancelled()) so a cancelled apply's partial state persists.
-    # The state-path conjunct skips the save entirely when a remote backend owns
-    # state; it does not weaken always() for the artifact-state path.
+    # always(), not !cancelled(), so a cancelled apply's partial state persists. The state-path
+    # conjunct skips the save entirely when a remote backend owns state; it does not weaken
+    # always() for the artifact-state path.
     assert _guard(_save_state_step()) == (
         "always() && inputs.state-path != '' && steps.restore-state.outcome == 'success'"
     )
@@ -51,5 +49,5 @@ def test_save_state_not_gated_by_not_cancelled():
 
 
 def test_save_state_still_requires_successful_restore():
-    # Never save a state that was never restored (e.g. restore itself failed).
+    # Never save a state that was never restored, the restore itself having failed.
     assert "steps.restore-state.outcome == 'success'" in _guard(_save_state_step())

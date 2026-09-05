@@ -1,51 +1,47 @@
-"""One workflow file per verb: `apply.yml` applies, `unlock.yml` unlocks, and
-neither file can do the other's work.
+"""One workflow file per verb: `apply.yml` applies, `unlock.yml` unlocks, and neither file can
+do the other's work.
 
-This replaces the `mode`-input split that used to keep the two paths apart
-inside a single file, so the guard has to hold in BOTH directions -- a test that
-only read `unlock.yml` would go quiet on `apply.yml` growing an unlock job back,
-which is the exact regression the file split was made to rule out.
+This replaces the `mode`-input split that kept the two paths apart inside a single file, so the
+guard holds in both directions -- a test that only read `unlock.yml` would go quiet on
+`apply.yml` growing an unlock job back, the exact regression the file split rules out.
 
 Pinned on the apply side:
 
-- its `workflow_call` inputs, whole. The retired `mode` rail coming back is the
-  regression, and an absence nothing compares is fail-open by construction;
+- its `workflow_call` inputs, whole. The retired `mode` rail coming back is the regression, and
+  an absence nothing compares is fail-open by construction;
 - its job ids, whole, and that no step anywhere in the file calls `unlock-cell`;
 - the waves job's `if:`, which must carry no verb clause;
-- both `summary` steps running unconditionally -- an `if:` there was only ever
-  the unlock skip.
+- both `summary` steps running unconditionally: an `if:` there was only ever the unlock skip.
 
 Pinned on the unlock side:
 
-- its `workflow_call` inputs, whole: the dispatch body `actions/dispatch` sends
-  is exactly what this set declares, and an undeclared input on a reusable
-  workflow is a load-time rejection with no job and no log;
-- every `uses:` its jobs call, in order and with the SHA dropped, so a step
-  re-aimed at `apply-cell` (or a `gate-refresh`/`apply-summary` bolted on) reds
-  rather than passing on the absence of a name;
-- the unlock job's `if:` -- its skip-propagation form over `guard`/`detect` is
-  what stops a rejected dispatch from fanning out, since a skipped `detect`
-  reads its outputs as empty strings and `'' != '[]'` is true;
-- its `strategy` -- `fail-fast: false`, so one cell that cannot determine its
-  lock state does not strand its siblings' locks, and the matrix source is
-  `cells` (`waves` is the EMPTY STRING on the unlock path, not `{}`, so a
-  matrix over it dies at `fromJSON`);
-- the concurrency group, against the wave jobs' AND a hand-written constant;
+- its `workflow_call` inputs, whole. The dispatch body `actions/dispatch` sends is exactly what
+  this set declares, and an undeclared input on a reusable workflow is a load-time rejection
+  with no job and no log;
+- every `uses:` its jobs call, in order and with the SHA dropped, so a step re-aimed at
+  `apply-cell`, or a `gate-refresh` or `apply-summary` bolted on, reds rather than passing on
+  the absence of a name;
+- the unlock job's `if:`. Its skip-propagation form over `guard` and `detect` is what stops a
+  rejected dispatch from fanning out, since a skipped `detect` reads its outputs as empty
+  strings and `'' != '[]'` is true;
+- its `strategy`: `fail-fast: false`, so one cell that cannot determine its lock state does not
+  strand its siblings' locks, and the matrix source is `cells` (`waves` is the empty string on
+  the unlock path, not `{}`, so a matrix over it dies at `fromJSON`);
+- the concurrency group, against the wave jobs' and a hand-written constant;
 - `detect`'s `apply-detect` inputs, whole, including the literal `unlock` mode;
-- `detect`'s environment pre-flight. The unlock job binds `<env>-apply`, and
-  GitHub creates a missing environment on demand with no reviewers and no
-  branch policy, then keeps it -- so an unlock into a missing environment would
-  retire the reviewer gate for every later apply of that env. The apply path
-  gets this refusal from apply-env-level's `snapshot` job.
+- `detect`'s environment pre-flight. The unlock job binds `<env>-apply`, and GitHub creates a
+  missing environment on demand with no reviewers and no branch policy, then keeps it, so an
+  unlock into a missing environment would retire the reviewer gate for every later apply of
+  that env. The apply path gets this refusal from apply-env-level's `snapshot` job.
 
-Not re-pinned here, to keep one selector per property: the bot-actor `guard`
-job (`test_apply_dispatch_actor_guard.py` covers both files), the `<env>-apply`
-environment binding (`test_apply_env_binding_guard.py`), and each job's `needs`
-list (the actor guard's whole-list-per-job map).
+Not re-pinned here, to keep one selector per property: the bot-actor `guard` job
+(`test_apply_dispatch_actor_guard.py` covers both files), the `<env>-apply` environment binding
+(`test_apply_env_binding_guard.py`), and each job's `needs` list (the actor guard's
+whole-list-per-job map).
 
-Threat model is accidental regression -- a clause dropped in a refactor, a
-matrix pointed at the wrong output, a step re-aimed at the apply family -- not a
-hostile edit to files every consumer reviews.
+Threat model is accidental regression -- a clause dropped in a refactor, a matrix pointed at the
+wrong output, a step re-aimed at the apply family -- not a hostile edit to files every consumer
+reviews.
 """
 
 import yaml
@@ -55,11 +51,10 @@ APPLY = "apply.yml"
 UNLOCK = "unlock.yml"
 ENV_LEVEL = "apply-env-level.yml"
 
-#: The whole `workflow_call.inputs` mapping of each file, hand-written. `mode`
-#: is gone from the apply side and never existed on the unlock side; on the
-#: unlock side this set is also the dispatch contract -- an input the body sends
-#: that this file does not declare kills the run at startup with no job, no
-#: check-run and no retrievable log.
+#: The whole `workflow_call.inputs` mapping of each file, hand-written. `mode` is absent from
+#: the apply side and never existed on the unlock side. On the unlock side this set is also the
+#: dispatch contract: an input the body sends that this file does not declare kills the run at
+#: startup with no job, no check-run and no retrievable log.
 APPLY_INPUTS = {
     "environment": {"required": True, "type": "string"},
     "ref": {"required": True, "type": "string"},
@@ -71,16 +66,15 @@ UNLOCK_INPUTS = {
     "ref": {"required": True, "type": "string"},
 }
 
-#: The whole job-id set of each file. The apply side is listed so pasting an
-#: `unlock` job back in reds on the job list as well as on the action check
-#: below -- a guard that only looks for a forbidden action name passes whenever
-#: the leaked job reaches for a different one.
+#: The whole job-id set of each file. The apply side is listed so pasting an `unlock` job back
+#: in reds on the job list as well as on the action check below: a guard that only looks for a
+#: forbidden action name passes whenever the leaked job reaches for a different one.
 APPLY_JOBS = {"guard", "review", "detect", "apply", "summary"}
 UNLOCK_JOBS = {"guard", "detect", "unlock"}
 
-#: Every `uses:` each unlock job declares, in order, SHA dropped -- a repin must
-#: not redden this, a reordered or added step must. This is the positive form of
-#: "calls nothing from the apply family": there is no room in the list for one.
+#: Every `uses:` each unlock job declares, in order, SHA dropped: a repin must not redden this,
+#: a reordered or added step must. This is the positive form of "calls nothing from the apply
+#: family" -- there is no room in the list for one.
 UNLOCK_STEP_ACTIONS = {
     "guard": [],
     "detect": [
@@ -97,30 +91,29 @@ UNLOCK_STEP_ACTIONS = {
     ],
 }
 
-#: `run:` steps per unlock job, hand-written. The `uses:` list above cannot see a
-#: shell step, and `tofu apply` pasted into the unlock job would run with the
-#: `<env>-apply` binding, id-token: write and an already-assumed apply role. The
-#: apply side takes no mirror of this: `apply.yml` legitimately runs shell, so a
-#: `tofu force-unlock` pasted there stays a blind spot rather than a second
-#: selector here.
+#: `run:` steps per unlock job, hand-written. The `uses:` list above cannot see a shell step,
+#: and `tofu apply` pasted into the unlock job would run with the `<env>-apply` binding,
+#: id-token: write and an already-assumed apply role. The apply side takes no mirror of this,
+#: because `apply.yml` legitimately runs shell, so a `tofu force-unlock` pasted there stays a
+#: blind spot rather than a second selector here.
 UNLOCK_RUN_STEPS = {"guard": 1, "detect": 0, "unlock": 0}
 
-#: The whole `outputs:` mapping of unlock's `detect`. `UNLOCK_STRATEGY` pins the
-#: consumer end of this wire; without this the producer end can be re-aimed at
-#: `waves` (the empty string here), which fans the job out and dies at fromJSON.
+#: The whole `outputs:` mapping of unlock's `detect`. `UNLOCK_STRATEGY` pins the consumer end
+#: of this wire, and without this one the producer end can be re-aimed at `waves`, the empty
+#: string here, which fans the job out and dies at fromJSON.
 DETECT_OUTPUTS = {"cells": "${{ steps.d.outputs.cells }}"}
 
 #: Named so a failure says which one leaked in.
 APPLY_FAMILY = ("apply-cell", "apply-complete", "gate-refresh", "apply-summary")
 APPLY_FAMILY_WORKFLOW = ".github/workflows/apply-env-level.yml"
 
-#: The whole `if:` of the waves job -- the mode clause is gone with the input,
-#: and it must not come back as a verb clause either.
+#: The whole `if:` of the waves job. The mode clause went with the input, and it must not come
+#: back as a verb clause either.
 WAVES_IF = "${{ !failure() && !cancelled() && needs.detect.outputs.empty != 'true' }}"
 
-#: The whole `if:` of the unlock job. `guard` is in its `needs` too, so a
-#: rejected dispatch reaches `!failure()` here instead of leaving `detect`
-#: skipped -- whose outputs read as empty strings, and `'' != '[]'` is true.
+#: The whole `if:` of the unlock job. `guard` is in its `needs` too, so a rejected dispatch
+#: reaches `!failure()` here instead of leaving `detect` skipped, whose outputs read as empty
+#: strings, and `'' != '[]'` is true.
 UNLOCK_IF = "${{ !failure() && !cancelled() && needs.detect.outputs.cells != '[]' }}"
 
 #: The whole `strategy:` mapping of the unlock job.
@@ -129,17 +122,17 @@ UNLOCK_STRATEGY = {
     "matrix": {"include": "${{ fromJSON(needs.detect.outputs.cells) }}"},
 }
 
-#: The per-cell serialization group, hand-written. Asserted equal to BOTH the
-#: unlock job's and every wave job's: a live apply for a cell makes the unlock
-#: queue behind it, so by the time it runs the lock is either gone or genuinely
-#: orphaned. Deriving it from either file would pass whatever that file says.
+#: The per-cell serialization group, hand-written. Asserted equal to both the unlock job's and
+#: every wave job's: a live apply for a cell makes the unlock queue behind it, so by the time it
+#: runs the lock is either gone or genuinely orphaned. Deriving it from either file would pass
+#: whatever that file says.
 CONCURRENCY_GROUP = "apply-${{ matrix.environment }}-${{ matrix.stack }}"
 WAVES = [f"wave{i}" for i in range(8)]
 
-#: The whole `with:` of unlock's `apply-detect` step. `mode` is a literal, not
-#: an expression: the file IS the verb now, so nothing may make it configurable.
-#: `review-decision` and `ungated-envs` are absent because `run_unlock` reads
-#: neither -- an approval reviews a diff and unlock applies none.
+#: The whole `with:` of unlock's `apply-detect` step. `mode` is a literal, not an expression:
+#: the file is the verb, so nothing may make it configurable. `review-decision` and
+#: `ungated-envs` are absent because `run_unlock` reads neither -- an approval reviews a diff
+#: and unlock applies none.
 DETECT_WITH = {
     "environment": "${{ inputs.environment }}",
     "mode": "unlock",
@@ -148,10 +141,9 @@ DETECT_WITH = {
     "app-id": "${{ vars.SHIPMATE_APP_ID }}",
 }
 
-#: The whole `if:` and `with:` of the environment pre-flight. The queue is one
-#: flat array and the script's input shape is the waves object, hence the
-#: single-wave wrapper; `!= '[]'` is load-bearing because the script refuses an
-#: empty cell set by design.
+#: The whole `if:` and `with:` of the environment pre-flight. The queue is one flat array and
+#: the script's input shape is the waves object, hence the single-wave wrapper. `!= '[]'` is
+#: load-bearing because the script refuses an empty cell set by design.
 PREFLIGHT_ACTION = "ship-iac/shipmate/actions/verify-environments"
 PREFLIGHT_IF = "${{ steps.d.outputs.cells != '[]' }}"
 PREFLIGHT_WITH = {
@@ -292,8 +284,8 @@ def test_the_unlock_detect_publishes_the_queue_and_nothing_else():
 
 def test_the_unlock_job_runs_only_with_a_non_empty_queue():
     unlock = _job(UNLOCK, "unlock")
-    # `.get`, not `[...]`: a DELETED `if:` is the fail-open mutation, and a
-    # KeyError would red without naming what went missing.
+    # `.get`, not `[...]`: a deleted `if:` is the fail-open mutation, and a KeyError would red
+    # without naming what went missing.
     got = unlock.get("if")
     assert got == UNLOCK_IF, (
         f"unlock's `if:` is {got!r}, not {UNLOCK_IF!r} -- without `!failure()` a rejected "

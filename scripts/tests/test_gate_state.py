@@ -1,5 +1,3 @@
-"""Unit tests for scripts/gate-state."""
-
 import json
 
 import pytest
@@ -34,8 +32,8 @@ def test_all_applied_greens_the_gate():
 
 
 def test_detect_failure_is_a_red_gate_not_a_silent_skip():
-    # detect IS the change detection; without it there is no claim to make, and
-    # writing nothing would leave the pull request with no gate to explain it.
+    # detect is the change detection. Without it there is no claim to make, and writing nothing
+    # would leave the pull request with no gate to explain it.
     state, desc, mode = d(detect_result="failure")
     assert state == "failure"
     assert mode == "hold"
@@ -43,9 +41,9 @@ def test_detect_failure_is_a_red_gate_not_a_silent_skip():
 
 
 def test_empty_matrix_greens_the_gate():
-    # The docs-only / pin-bump pull request: detect succeeded, the plan job was
-    # skipped because nothing changed. Mapping `skipped` onto the old
-    # run_conclusion would write NOTHING here and block every such PR forever.
+    # The docs-only or pin-bump pull request: detect succeeded, and the plan job was skipped
+    # because nothing changed. Mapping `skipped` onto the old run_conclusion would write nothing
+    # here and block every such pull request forever.
     state, _, mode = d(plan_result="skipped", planned_cells="0", cell_count=0, pending=False)
     assert state == "success"
     assert mode == "nothing-changed"
@@ -58,8 +56,8 @@ def test_skipped_plan_with_planned_cells_holds():
 
 
 def test_skipped_empty_matrix_with_parsed_cells_holds():
-    # planned==0 must not be a shortcut past the evidence check: cells nobody
-    # planned describe a run this job cannot account for.
+    # planned==0 must not be a shortcut past the evidence check: cells nobody planned describe a
+    # run this job cannot account for.
     state, _, mode = d(plan_result="skipped", planned_cells="0", cell_count=2, pending=False)
     assert state == "failure"
     assert mode == "hold"
@@ -79,10 +77,9 @@ def test_failed_plan_is_a_red_gate():
 
 @pytest.mark.parametrize("planned", ["", "unknown", "3.0", "None"])
 def test_a_non_integer_planned_count_holds(planned):
-    # The description is part of the property, not decoration: without the
-    # explicit "not reported" branch the gate still holds -- `cell_count !=
-    # None` is True -- but it holds telling the reader the run "planned None
-    # cell(s)", which sends them looking for the wrong problem.
+    # The description is part of the property, not decoration. Without the explicit "not
+    # reported" branch the gate still holds, `cell_count != None` being True, but it holds while
+    # telling the reader the run "planned None cell(s)", which sends them to the wrong problem.
     state, desc, mode = d(planned_cells=planned)
     assert state == "failure"
     assert "planned cell count was not reported" in desc
@@ -93,9 +90,9 @@ def test_fewer_cells_than_planned_holds():
     state, desc, mode = d(planned_cells="3", cell_count=2)
     assert state == "failure"
     assert mode == "hold"
-    # The recovery has to survive the 140-char truncation, and it must not be
-    # "re-plan": plan-cell's uploads are not `overwrite:`, so re-running a plan
-    # job that already published its artifacts 409s.
+    # The recovery has to survive the 140-char truncation, and it must not be "re-plan":
+    # plan-cell's uploads are not `overwrite:`, so re-running a plan job that already published
+    # its artifacts 409s.
     assert "re-run this summary job" in desc[:140]
     assert "re-plan" not in desc
 
@@ -141,25 +138,25 @@ def _main_body(tmp_path, monkeypatch, capsys, **env):
 
 
 def test_main_holds_the_gate_on_an_empty_planned_count_env(tmp_path, monkeypatch, capsys):
-    # An action input that was never wired (or a step that emitted no output)
-    # arrives as the empty string -- the real GHA shape. `_main_body` applies
-    # **env after its own defaults, so this overrides the default "3".
+    # An action input that was never wired, or a step that emitted no output, arrives as the
+    # empty string, which is the real GHA shape. `_main_body` applies **env after its own
+    # defaults, so this overrides the default "3".
     body = _main_body(tmp_path, monkeypatch, capsys, SHIPMATE_PLANNED_CELLS="")
     assert body["state"] == "failure"
     assert "planned cell count was not reported" in body["description"]
 
 
 def test_main_holds_the_gate_when_the_planned_count_env_is_absent(tmp_path, monkeypatch, capsys):
-    # Separate from the empty-string case above, and not redundant: this one is
-    # the only test that can see `main()`'s default, and a default of "0" there
-    # would green a quiet gate for a run whose count nobody ever reported.
+    # Separate from test_main_holds_the_gate_on_an_empty_planned_count_env, and not redundant:
+    # this is the only test that can see `main()`'s default, and a default of "0" there would
+    # green a quiet gate for a run whose count nobody ever reported.
     body = _main_body(tmp_path, monkeypatch, capsys, SHIPMATE_PLANNED_CELLS=None)
     assert body["state"] == "failure"
     assert "planned cell count was not reported" in body["description"]
 
 
 def test_gate_links_to_this_run(tmp_path, monkeypatch, capsys):
-    # The summary job now runs inside the plan run, so this run's URL holds the
-    # plan logs and the plan artifacts the gate points at.
+    # The summary job runs inside the plan run, so this run's URL holds the plan logs and the
+    # plan artifacts the gate points at.
     body = _main_body(tmp_path, monkeypatch, capsys)
     assert body["target_url"] == "https://example.invalid/acme/demo/actions/runs/999"

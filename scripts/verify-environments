@@ -9,7 +9,7 @@ one — a layout injecting no non-empty `TF_VAR_*` or `TF_WORKSPACE` hashes the
 empty set on both sides, matches, and applies. Existence, checked before any wave
 starts, is the only discriminator.
 
-Scope: the **apply-side** binding only. The plan side is bound in the consumer's
+Scope: the apply-side binding only. The plan side is bound in the consumer's
 own `plan.yml`/`drift.yml`, which the engine cannot read.
 """
 
@@ -27,7 +27,7 @@ def apply_binding(env, shared_envs):
     unlisted) and `dev-us` does not match an entry `dev-us-2`; matching is
     case-insensitive because GitHub's `contains()` is.
 
-    This rule now exists twice — here and as the YAML ternary in eight wave jobs.
+    This rule exists twice: here, and as the YAML ternary in eight wave jobs.
     Neither side is derived from the other: both are compared to one hand-written
     constant in scripts/tests/test_apply_env_binding_guard.py.
     """

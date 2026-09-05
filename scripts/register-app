@@ -37,19 +37,15 @@ import webbrowser
 
 REDACTED = "***"
 
-#: `code` is interpolated into the `app-manifests/<code>/conversions` API path
-#: and arrives over a loopback socket; a '/' or '..' in it retargets that request
-#: at another endpoint. `--repo`'s owner half is interpolated into the
-#: registration URL and both halves into `gh variable set --repo`; GitHub logins
-#: are alphanumeric-with-hyphens, and a repository name starts alphanumeric,
-#: which is what forecloses '.' and '..'. `--name` is embedded in the local HTML
-#: form -- where a quote would escape the attribute holding it -- and 34 is
-#: GitHub's App-name limit. Both halves of `--repo` start alphanumeric, as GitHub
-#: logins and repository names do: the value is its own argv element after
-#: `--repo`, and one beginning with '-' is the shape a downstream CLI reads as a
-#: flag rather than a value.
+#: `code` is interpolated into the `app-manifests/<code>/conversions` API path and arrives over
+#: a loopback socket; a '/' or '..' in it retargets that request at another endpoint.
 _CODE_RE = re.compile(r"[A-Za-z0-9_-]+")
+#: `--repo`'s owner half is interpolated into the registration URL, and both halves into
+#: `gh variable set --repo`. Each half starts alphanumeric, as GitHub logins and repository names
+#: do: that forecloses '.' and '..', and a value beginning with '-' reads to a CLI as a flag.
 _REPO_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9][A-Za-z0-9._-]*")
+#: `--name` is embedded in the local HTML form, where a quote would escape the attribute holding
+#: it. 34 is GitHub's App-name limit.
 _NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9 ._-]{0,33}")
 
 MANIFEST = pathlib.Path(__file__).resolve().parents[1] / "app" / "manifest.json"
@@ -97,14 +93,16 @@ class _Handler(http.server.BaseHTTPRequestHandler):
     state = None
 
     def do_GET(self):  # noqa: N802 -- BaseHTTPRequestHandler's dispatch name
+        """Capture the redirect's `code`; 404 everything else.
+
+        The browser also asks this port for /favicon.ico, and answering that as a
+        capture would end the wait holding no code. The port is reachable by anything
+        on this machine, so a callback that does not carry this run's state is some
+        other App's code, which main() would convert and store as if it were ours.
+        """
         params = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
         got = params.get("code", [None])[0]
         if not got or params.get("state", [None])[0] != _Handler.state:
-            # The browser also asks this port for /favicon.ico; answering that
-            # as a capture would end the wait holding no code. And the port is
-            # reachable by anything on this machine: a callback that does not
-            # carry this run's state is some other App's code, which main()
-            # would convert and store as if it were ours.
             self.send_error(404)
             return
         _Handler.code = got
@@ -115,7 +113,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         self.wfile.write(DONE_PAGE)
 
     def log_message(self, *args):
-        pass  # the request line carries the single-use code
+        pass  # The request line carries the single-use code.
 
 
 def _capture_code(name, org):

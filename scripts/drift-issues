@@ -1,14 +1,22 @@
 #!/usr/bin/env python3
 """Author drift Issues from every drift-cell's uploaded cell.json, and notify
-Slack once per drifted cell -- the same per-run granularity drift-cell's own
-Slack step used to have, just relocated.
+Slack once per drifted cell.
 
 Runs from the drift workflow's trusted trailing `issues` job -- the only place
-on the drift path that mints the App key. `drift-cell` no longer touches
-Issues (or Slack) at all: a plan environment must stay policy-free for
-planning to work at all, so a job naming one is reachable from a feature
-branch, and the credentialed work moved here so a compromised drift-cell run
-cannot open/close/comment on an Issue.
+on the drift path that mints the App key. `drift-cell` touches no Issue and no
+Slack webhook: a plan environment must stay policy-free for planning to work at
+all, so a job naming one is reachable from a feature branch, and the credentialed
+work lives here so a compromised drift-cell run cannot open, close or comment on
+an Issue.
+
+One cell's failure -- a rate limit, a transient 5xx, a rejected webhook -- must
+not abandon every later cell: a stack that has gone clean would otherwise keep an
+open Issue claiming it drifts. The per-cell jobs this batch replaced isolated such
+a failure to one cell, and their `curl --fail-with-body` step failed the job on a
+rejected webhook, so failures are collected here and the run exits nonzero at the
+end naming every cell that failed -- Slack failures included, because a revoked or
+rotated URL must not leave every nightly run green while no notification reaches
+anyone.
 
 A cell whose plan attempt itself did not succeed (`plan_ok` false -- state
 restore or `terramate plan` failed, or the composite action aborted before
@@ -74,11 +82,10 @@ def existing_issue_numbers():
     kept well above the realistic count of simultaneously-drifting stack x
     envs so an existing issue is never missed (which would open a duplicate).
 
-    The LOWEST number wins when two open issues share a title (the code this
-    replaced took `.[0]` off a listing gh itself does not guarantee any
-    particular order for): picking arbitrarily (e.g. last-seen in whatever
-    order gh returned) would leave the other one permanently unreachable by
-    title lookup -- never edited, never auto-closed."""
+    The LOWEST number wins when two open issues share a title, because gh
+    guarantees no particular listing order. Picking arbitrarily would leave the
+    other one permanently unreachable by title lookup -- never edited, never
+    auto-closed."""
     rows = json.loads(
         _run(
             [
@@ -129,8 +136,8 @@ def _ensure_label(created):
 
 
 def upsert_or_close(cell, existing, run_url, label_created):
-    """Create/update/close this cell's Issue. Returns True when this cell just
-    became (or still is) drifted with a fresh body -- the Slack-notify signal."""
+    """Create, update or close this cell's Issue. Returns True when the cell is
+    drifted and its Issue carries a fresh body -- the Slack-notify signal."""
     if not cell["plan_ok"]:
         return False
     title = _title(cell)
@@ -175,15 +182,8 @@ def main():
     existing = existing_issue_numbers()
     webhook = os.environ.get("SHIPMATE_SLACK_WEBHOOK", "")
     label_created = [False]
-    # One cell's failure (a rate limit, a transient 5xx, a rejected webhook)
-    # must not abandon every later cell: the per-cell jobs this batch replaced
-    # isolated such a failure to one cell. A stack that just went clean would
-    # otherwise keep an open Issue claiming it drifts. Failures are collected
-    # and the run still exits nonzero at the end, naming every cell that
-    # failed. Slack failures are collected the same way rather than warned
-    # about: the deleted per-cell `curl --fail-with-body` step failed its job
-    # on a rejected webhook, and a revoked or rotated URL must not leave every
-    # nightly run green while no notification reaches anyone.
+    # Failures are collected here, not raised: one cell's failure must not abandon the rest,
+    # and the run still exits nonzero at the end. The module docstring says why, per kind.
     failed = []
     for cell in cells:
         label = f"{cell['environment']} / {cell['stack_name']}"

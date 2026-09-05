@@ -1,18 +1,16 @@
 """Guards the AWS OIDC wiring in the apply-path reusable workflows.
 
 Invariants:
-- every wave job in apply-env-level.yml carries id-token: write, exactly one
-  credentials step gated on the workload role or vars.AWS_ROLE_ARN, placed
-  BEFORE the apply-cell step, and the empty-suffix state-path expression;
-- apply-env-level.yml and unlock.yml declare a workflow-level `permissions: {}`
-  floor, and apply-env-level's snapshot and complete jobs declare exactly the
-  scopes they need -- neither gets id-token (neither touches the cloud, and
-  complete holds the App key);
-- state_suffix stays required with no default on all four apply-path workflows,
-  so omitting it is a workflow-resolution error rather than a silent no-state
-  apply.
+- every wave job in apply-env-level.yml carries id-token: write, exactly one credentials step
+  gated on the workload role or vars.AWS_ROLE_ARN, placed before the apply-cell step, and the
+  empty-suffix state-path expression;
+- apply-env-level.yml and unlock.yml declare a workflow-level `permissions: {}` floor, and
+  apply-env-level's snapshot and complete jobs declare exactly the scopes they need. Neither gets
+  id-token: neither touches the cloud, and complete holds the App key;
+- state_suffix stays required with no default on all four apply-path workflows, so omitting it is
+  a workflow-resolution error rather than a silent no-state apply.
 
-Whole parsed values, never substrings (an inverted gate must fail here).
+Whole parsed values, never substrings. An inverted gate must fail here.
 """
 
 import pytest
@@ -70,9 +68,9 @@ def test_workflow_level_permissions_are_an_empty_floor(name):
 
 
 def test_snapshot_and_complete_jobs_get_exactly_their_declared_permissions():
-    # Whole-mapping comparison, not `id-token is None`: the realistic break is
-    # the block being deleted, and an absent block is not an absent scope -- the
-    # job then inherits the caller's grants (or, with the floor above, nothing).
+    # Whole-mapping comparison, not `id-token is None`: the realistic break is the block being
+    # deleted, and an absent block is not an absent scope. The job then inherits the caller's
+    # grants, or, with the workflow-level floor, nothing.
     expected = {
         "snapshot": {"checks": "read", "actions": "read"},
         "complete": {"actions": "read"},

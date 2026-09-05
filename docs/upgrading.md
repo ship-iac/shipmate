@@ -12,7 +12,7 @@ composite action you wrap all name the same SHA, or they disagree.
 [`../CONTRACT.md`](../CONTRACT.md) §Consumption is the rule;
 [`releasing.md`](releasing.md) is the maintainer side of the same cascade.
 
-Consumers pin by **commit SHA**, never by tag or branch name, optionally with a
+Consumers pin by commit SHA, never by tag or branch name, optionally with a
 trailing `# vX.Y.Z` comment naming the release that SHA belongs to
 (`uses: <owner>/shipmate/actions/state@<sha> # v0.1.0`). The comment is for
 human readers and for Dependabot's bookkeeping; the ref that resolves is always
@@ -20,8 +20,8 @@ the SHA. The SHA of record for a release is named in that release's section of
 [`../CHANGELOG.md`](../CHANGELOG.md).
 
 **Resolving a tag to its commit takes the dereferencing call.** Releases from
-`v0.14.2` on are *annotated* tags, so `git/ref/tags/<tag>` returns the **tag
-object's** SHA — 40 hex characters from a 200 response, and not a ref a workflow
+`v0.14.2` on are *annotated* tags, so `git/ref/tags/<tag>` returns the tag
+object's SHA — 40 hex characters from a 200 response, and not a ref a workflow
 can check out. Nothing a consumer sees separates the two values, so a pin at the
 tag object fails at ref resolution on every later run, in a repository whose
 change said "no migration required". This form dereferences, in one call, for
@@ -56,9 +56,9 @@ with four things expressed somewhere shipmate does not read. None of them is a
 shipmate defect and none of them announces itself, so each is worth a deliberate
 pass before the first plan run.
 
-**Ordering.** Wave ordering comes **only** from the Terramate `after` DAG. If
+**Ordering.** Wave ordering comes only from the Terramate `after` DAG. If
 your ordering lives in the outgoing tool's configuration, it must be ported into
-`after` — and **nothing will report the omission**, because a missing edge is
+`after`. Nothing will report the omission, because a missing edge is
 indistinguishable from a stack that is genuinely independent. Treat the outgoing
 tool's config as a *lower bound* on the real graph, not as the graph: one
 migration that audited the OpenTofu code instead of porting the config went from
@@ -68,8 +68,8 @@ Two detect jobs report the shape as a `::notice::` line — stack count, `after`
 edge count, wave levels, and how many stacks would apply concurrently. A reader
 who knows the repository can judge that last number immediately; nobody else
 can. Exactly two print it: the detect job of a dispatched `shipmate apply <env>`
-and the post-merge deploy's detect, so it arrives **after** the pull request
-that would have been the place to fix the graph. A **plan** run does not print
+and the post-merge deploy's detect, so it arrives after the pull request
+that would have been the place to fix the graph. A plan run does not print
 it, and neither does a bare `shipmate apply` — seeing no such line there says
 nothing about the graph. Before that point the equivalent is
 `terramate experimental run-graph --label stack.dir` run locally.
@@ -95,21 +95,21 @@ has the rule and the `tm_try` form that keeps a local default.
 
 `SHIPMATE_UNGATED_ENVS` lets named environments be applied without an approving
 review while the rest keep the branch ruleset's requirement. The exemption is
-opt-in and **re-pinning exempts nothing on its own** (it does change two other
+opt-in, and re-pinning exempts nothing on its own (it does change two other
 things for every consumer — see below):
 
 1. set the `SHIPMATE_UNGATED_ENVS` repository variable,
 2. add `ungated-envs: ${{ vars.SHIPMATE_UNGATED_ENVS }}` to the `comment-ops`
    step in your `comment-ops.yml`, and
-3. re-pin **both** engine references in your `apply.yml` — the targeted job's
+3. re-pin both engine references in your `apply.yml` — the targeted job's
    `.github/workflows/apply.yml@` and the bare job's
    `.github/workflows/apply-all.yml@` — to this release too, not only
    `comment-ops.yml`. The files carry separate pins, and an apply is authorized
    in `comment-ops.yml` but enforced in the engine: bump only the first and an
    unreviewed apply is dispatched into an engine that enforces nothing —
-   **every** pending environment applies through a stale `apply-all.yml@`, and
+   every pending environment applies through a stale `apply-all.yml@`, and
    the named environment applies through a stale `apply.yml@`. This is
-   §Re-pinning's one-change rule; on this feature breaking it fails **open**
+   §Re-pinning's one-change rule; on this feature breaking it fails open
    rather than loudly. The two are not equally likely: the bare-apply edge
    needs the full opt-in aligned, while the targeted edge is also reached by
    the step-2 literal mis-wiring below on its own, no opt-in needed — see
@@ -124,7 +124,7 @@ an unconditional `review` job:
 - **One extra `shipmate-engine` deployment record per apply run.** The
   workflow's `summary` job already creates one; this is the second. If your
   repository has put required reviewers on the `shipmate-engine` environment,
-  that approval is now requested at the **start** of an apply run rather than
+  that approval is now requested at the start of an apply run rather than
   at its end — no shipmate doc recommends that configuration, but the timing
   change is real.
 - **A broken App-key wiring is now a loud early failure.** The `review` job
@@ -141,7 +141,7 @@ With the variable set but the workflow line left out, `shipmate apply` refuses
 exactly as it does today — comment-ops receives an empty list, so both the
 targeted and the bare form are refused. That is the expected failure mode of a
 half-finished opt-in, and it is the one worth recognizing: the refusal is not a
-bug. Writing it as a **literal** list rather than the variable reference in
+bug. Writing it as a literal list rather than the variable reference in
 step 2 now costs a wasted run rather than an unreviewed apply — the engine reads
 the variable itself on both paths and refuses what the variable does not exempt.
 See [`getting-started.md`](getting-started.md) §"Applying chosen environments
@@ -150,7 +150,7 @@ without an approving review".
 Two things it does not change, worth confirming against your own policy before
 you set it: an environment's `required_reviewers` still gates the deployment
 (a separate control — see [`hardening.md`](hardening.md) §3–5), and the
-variable is editable by anyone holding the **Write** role.
+variable is editable by anyone holding the Write role.
 
 ## Past migrations
 
@@ -179,9 +179,9 @@ Two things to know before you spread a schedule, both in `drift.md`:
   drift, not for plans. Narrowing a plan run would leave changed stacks with no
   plan cell and no apply check, and `shipmate / gate` would go green over a
   change that then merges and never applies.
-- **A fully spread schedule has no run that sees the whole tree**, so the
-  artifact-name collision check that `build-matrix` performs no longer spans
-  slices; two stacks whose paths slug to the same name in different slices are
+- **A fully spread schedule has no run that sees the whole tree.** The
+  artifact-name collision check that `build-matrix` performs therefore no longer
+  spans slices; two stacks whose paths slug to the same name in different slices are
   first reported by a plan run. Keeping one unscoped sweep on a longer cron
   restores it.
 
@@ -198,14 +198,14 @@ rides the apply wrapper. Three edits, all shown in place in
 
 **1. Add `.github/workflows/unlock.yml`.** It calls the engine's `unlock.yml`
 with `environment` and `ref`, grants `id-token: write` on the calling job, and
-passes **no `secrets:` block** — unlock reads no plan artifact, so there is no
+passes no `secrets:` block — unlock reads no plan artifact, so there is no
 passphrase to forward, and mapping a secret the callee does not declare is a
 load-time rejection. Skip the file and every other verb keeps working;
 `shipmate unlock <env>` alone stops, refused at dispatch time with a 404 that
 the dispatch step turns into an error naming the missing wrapper — on the
 comment-handling run, where the pull request shows only the rocket reaction.
 
-**2. Delete `mode` from `apply.yml`** — both the `workflow_dispatch` input
+**2. Delete `mode` from `apply.yml`.** Remove both the `workflow_dispatch` input
 declaration and the `mode: ${{ inputs.mode }}` line forwarding it to the engine's
 reusable `apply.yml`. The forward is the fatal half: the engine no longer
 declares that input, and an undeclared reusable-workflow input is rejected as the
@@ -225,7 +225,7 @@ directions, and only one of them is loud. Old wrapper against the new engine: th
 surviving `mode:` forward is the load-time rejection above. New wrapper against
 an old pinned engine: `verb` reaches an `actions/dispatch` that declares no such
 input, which a composite action merely warns about and ignores — leaving that
-action on its own empty `mode`, which routes **every** comment at `apply.yml`, so
+action on its own empty `mode`, which routes every comment at `apply.yml`, so
 a `shipmate unlock` applies the reviewed plan instead of releasing the lock.
 
 Nothing else needs consumer action: `unlock.yml` binds the same `<env>-apply`
@@ -243,9 +243,9 @@ resolves every pull-request fact and the rest read it from there.
 [`getting-started.md`](getting-started.md) §The plan workflow is the whole file
 with these edits in place; work through them in this order.
 
-**1. Add the trigger and its one input**, beside the `pull_request_target:` your
-`on:` block already has. The dispatch body carries `pr_number` and nothing else,
-so that is the only input to declare:
+**1. Add the trigger and its one input.** It goes beside the
+`pull_request_target:` your `on:` block already has. The dispatch body carries
+`pr_number` and nothing else, so that is the only input to declare:
 
 ```yaml
 workflow_dispatch:
@@ -294,17 +294,17 @@ or stale codegen, and the `summary` job must still be told which head to gate.
 Add `needs: facts` to `detect` (and `needs: [facts, detect]` to `plan`, `needs:
 [facts, detect, plan]` to `summary`).
 
-**3. Replace every `github.event.pull_request.*` reference in the jobs** with the
+**3. Replace every `github.event.pull_request.*` reference in the jobs.** Use the
 matching `needs.facts.outputs.*` — the `ref:` on both checkouts, `head-repo` on
 `build-matrix`, `expected-head` on `plan-cell`, and `pr-number` / `head-sha` /
 `head-repo` / `is-draft` on the `summary` call. Under `workflow_dispatch` those
-payload expressions render **empty**, and every guard here reads an empty value
+payload expressions render empty, and every guard here reads an empty value
 as a refusal, so leaving one behind means a dispatched plan refuses instead of
 planning.
 
-**4. Pass `head-sha` on the `build-matrix` step.** New input, and **not
-optional** — the step compares the commit it has checked out against the one the
-run states, and refuses a run that states nothing:
+**4. Pass `head-sha` on the `build-matrix` step.** It is a new input, and it is
+not optional. The step compares the commit it has checked out against the one
+the run states, and refuses a run that states nothing:
 
 ```yaml
 with:
@@ -313,38 +313,40 @@ with:
   head-sha: ${{ needs.facts.outputs.head-sha }}
 ```
 
-**5. Pass `on-demand` on the `summary` call**, beside `head-repo` and `is-draft`:
+**5. Pass `on-demand` on the `summary` call.** It goes beside `head-repo` and
+`is-draft`:
 
 ```yaml
 with:
   on-demand: ${{ needs.facts.outputs.on-demand }}
 ```
 
-It says a human named this plan, and it is what lets a `shipmate plan` on a
-**draft** produce a gate and a plan comment — the autoplan still skips drafts.
+`on-demand` says a human named this plan, and it is what lets a `shipmate plan`
+on a draft produce a gate and a plan comment — the autoplan still skips drafts.
 It also puts a dispatched run's per-cell plan checks on the pull request's head:
 a dispatched run's own job check-runs attach to the ref it was dispatched on, so
 without it the pull request shows none of them, a failed cell included.
 
 **The two halves fail differently, and only one of them is loud.**
 
-- **Trigger half missing** (no `workflow_dispatch`, or no `pr_number` under it) —
-  the automatic plan is entirely unaffected. Only the new verb breaks: GitHub
-  refuses the dispatch with an HTTP 422 (`Workflow does not have
-  'workflow_dispatch' trigger`, or `Unexpected inputs provided`), **no run is
-  created**, and the error lands on the comment-handling run where nobody on the
-  pull request is looking. The commenter sees a rocket reaction and then nothing.
+- **The trigger half is missing.** The wrapper declares no `workflow_dispatch`,
+  or no `pr_number` under it. The automatic plan is entirely unaffected. Only
+  the new verb breaks. GitHub refuses the dispatch with an HTTP 422
+  (`Workflow does not have 'workflow_dispatch' trigger`, or
+  `Unexpected inputs provided`), no run is created, and the error lands on the
+  comment-handling run where nobody on the pull request is looking. The
+  commenter sees a rocket reaction and then nothing.
   `shipmate doctor` reports both, and a third case with no refusal at all: a
   wrapper that is dispatchable but has no `pr-facts` step, which accepts the
   dispatch and then has nothing resolving which pull request it is for.
-- **Facts half missing** (`head-sha` absent on `build-matrix`) — **every** pull
-  request fails, the automatic plan included, with a red `detect` naming the
-  input. Loud, and it holds the gate red rather than greening it.
+- **The facts half is missing.** `head-sha` is absent on `build-matrix`. Every
+  pull request fails, the automatic plan included, with a red `detect` naming
+  the input. Loud, and it holds the gate red rather than greening it.
 
 **Check one line outside `plan.yml`.** On this release's `mode` rail,
 `actions/dispatch` picks the workflow from `mode`, so a `comment-ops.yml` not
 forwarding `mode: ${{ steps.authz.outputs.mode }}` to that step sends a
-`shipmate plan` to the **apply** wrapper. The forwarded line has been in
+`shipmate plan` to the apply wrapper. The forwarded line has been in
 the reference `comment-ops.yml` since `0.16.0`, added there for `unlock`
 ([`../CHANGELOG.md`](../CHANGELOG.md) §0.16.0); this release is what makes its
 absence reachable from a comment that changes nothing. If you are upgrading past
@@ -354,7 +356,7 @@ one file, are both gone.
 
 **One shape stops passing that used to.** A wrapper on the older
 `on: pull_request` trigger that named no `ref:` at all and planned the default
-merge ref is now **refused**: the checkout comparison used to exempt
+merge ref is now refused: the checkout comparison used to exempt
 `pull_request`, whose default checkout is `refs/pull/<n>/merge` and so never
 equals the pull request's head, and that exemption is gone — the comparison is
 against the head the wrapper states, and `pr-facts` states the payload head under
@@ -363,16 +365,16 @@ every checkout like every other consumer. A merge-ref plan was never the reviewe
 artifact anyway: what applies is the plan of the head commit the gate is written
 for.
 
-**None of this shows up on the re-pin's own pull request**, for the same reason
-as `0.18.0`: a `pull_request_target` run uses a plan workflow from outside the
+**None of this shows up on the re-pin's own pull request.** The reason is
+`0.18.0`'s: a `pull_request_target` run uses a plan workflow from outside the
 pull request, never the copy on its head. Nor can the dispatch leg be smoke-tested
 from a branch — `issue_comment` resolves its workflow from the repository's
-**default** branch, so the comment that dispatches and the file it dispatches
+default branch, so the comment that dispatches and the file it dispatches
 both only start working once the edit is merged. If you require
 `shipmate / gate`, the recovery path is §0.18.0's.
 
 **The pin bump and these edits must land in the same commit.** The other order
-fails **quietly**: a wrapper passing `on-demand` to a `summary.yml` still at the
+fails quietly: a wrapper passing `on-demand` to a `summary.yml` still at the
 old pin declares no such input, and an undeclared reusable-workflow input is a
 load-time rejection: the run ends as `startup_failure` with no job and no
 retrievable log.
@@ -385,7 +387,7 @@ comment-ops or drift wrappers.
 
 **Re-pinning alone is not enough, and the edit touches two files.** Every
 `apply / <stack> / <env>` check now records the plan run its plan came from, so
-each apply, deploy and `shipmate doctor` lookup reads that run **per cell**
+each apply, deploy and `shipmate doctor` lookup reads that run per cell
 instead of being handed one run id for the whole command. The `plan_run_id` rail
 that carried it is gone from the engine, and a wrapper still carrying it breaks
 in two quite different ways depending on which file it sits in.
@@ -406,9 +408,9 @@ that forward it:
       state_suffix: ""
 ```
 
-The **forwarding line is the fatal one**. The engine's `apply.yml` and
+The forwarding line is the fatal one. The engine's `apply.yml` and
 `apply-all.yml` are *reusable workflows*, and a `with:` key a reusable workflow
-does not declare is rejected as GitHub **loads** the run — measured on a live run
+does not declare is rejected as GitHub loads the run — measured on a live run
 2026-08-24: `conclusion: startup_failure`, zero jobs, no check runs on the
 commit, and no retrievable log, only a workflow-validation error on the run
 itself. Nothing on any API or CLI surface names the offending input. The
@@ -435,10 +437,10 @@ gets missed.** On the `actions/dispatch` step:
 
 Both ends of that line are gone: `authorize` no longer writes the `plan-run-id`
 output and `dispatch` no longer declares the input, so it resolves empty into an
-input that does not exist. `dispatch` is a **composite action**, and GitHub
+input that does not exist. `dispatch` is a composite action, and GitHub
 answers an undeclared action input with `Unexpected input(s)` and runs the step
-anyway. **Fix only `apply.yml` and you get a working pipeline carrying a
-permanent, unexplained warning on every `shipmate apply`** — and nothing tells
+anyway. Fix only `apply.yml` and you get a working pipeline carrying a
+permanent, unexplained warning on every `shipmate apply`, with nothing telling
 you where it comes from. `shipmate doctor` gained a probe for the retired input
 this release, but it reads a file named exactly `apply.yml`: it does not report
 `comment-ops.yml`, and it does not report a split layout's `apply-all.yml`.
@@ -461,12 +463,13 @@ run that planned it while the failed one stays unappliable. This is deliberate,
 not a side effect. What still refuses is unchanged: a cell whose apply check
 records no plan run cannot be applied, `apply-cell` refuses a missing or expired
 plan artifact, the reviewed-plan-to-tree binding (§0.17.0) is untouched, and
-`shipmate / gate` stays **red** while any planned cell is incomplete — so a
+`shipmate / gate` stays red while any planned cell is incomplete — so a
 partial plan still merges nothing.
 
-**`shipmate doctor` reads a partially failed run's cell summaries too**, for the
-same reason and by the same change: it takes the plan runs named by this commit's
-apply checks rather than the newest successful run of the plan workflow. A run
+**`shipmate doctor` reads a partially failed run's cell summaries too.** It does
+so for the same reason and by the same change: it takes the plan runs named by
+this commit's apply checks rather than the newest successful run of the plan
+workflow. A run
 that lost one cell used to cost the whole report its environment probes; now it
 reports on the cells that produced summaries.
 
@@ -506,7 +509,7 @@ and on the `summary` job's call of the engine's `summary.yml`:
       is-draft: ${{ github.event.pull_request.draft }}
 ```
 
-**Moving from a pin older than this one, land §0.20.0's shape instead**: as of
+**Moving from a pin older than this one, land §0.20.0's shape instead.** As of
 `0.20.0` these values come from a `facts` job rather than the event payload
 (`needs.facts.outputs.head-repo`, `needs.facts.outputs.is-draft`), the summary
 call takes a third input, and `build-matrix` takes `head-sha` as well. The
@@ -515,7 +518,7 @@ state the facts at all is unchanged, and
 [`getting-started.md`](getting-started.md) §Required — plan always carries the
 current shape.
 
-**Pass those expressions, not constants**: a literal `is-draft: false` claims
+**Pass those expressions, not constants.** A literal `is-draft: false` claims
 "not a draft" for every run, and `head-repo: ${{ github.repository }}` passes the
 fork check for every pull request, fork ones included. `shipmate doctor` reports
 either — absent or wrong — on the `summary` call, and reports the `build-matrix`
@@ -523,37 +526,38 @@ step's own `head-repo` the same way. It reads only a file named `plan.yml`, so a
 plan wrapper under another name is checked by review or not at all, and it has
 nothing to say about `is-draft` on `build-matrix`, which takes no such input.
 
-**If you run the optional nightly drift workflow**, add `no-pull-request: "true"`
+If you run the optional nightly drift workflow, add `no-pull-request: "true"`
 to its `build-matrix` step ([`drift.md`](drift.md)). A drift run has no pull
 request to state a head repository for, and this is how it says so. It belongs
 in that file only: `doctor` reports a `no-pull-request` in `plan.yml`, because
 there it turns the fork refusal off for every pull request.
 
-**The pin bump and these edits must land in the same commit**, and the three
+**The pin bump and these edits must land in the same commit.** The three
 failure modes look nothing alike:
 
-- **No `head-repo` on `build-matrix`** — `detect` **fails**, on every pull
+- **No `head-repo` on `build-matrix`.** `detect` fails, on every pull
   request, with a message naming the input. Loud, and it holds the gate red.
-- **No `head-repo` / `is-draft` on the `summary` call** — the summary job is
-  **skipped**. There is no `shipmate / gate` status at all, so nothing merges,
+- **No `head-repo` / `is-draft` on the `summary` call.** The summary job is
+  skipped. There is no `shipmate / gate` status at all, so nothing merges,
   and nothing on the run page explains it. That is deliberate: the alternative
   was minting an App-authored gate over a head repository the engine was never
   told about. `shipmate doctor` reports exactly this wiring, and
   [`troubleshooting.md`](troubleshooting.md) §"`shipmate / gate` never goes
   green" lists it first among the causes.
-- **No `no-pull-request` on a drift wrapper** — the nightly turns red on
+- **No `no-pull-request` on a drift wrapper.** The nightly turns red on
   `head-repo`.
 
-**None of this shows up on the re-pin's own pull request**, for the same reason
-as in `0.17.0`: `pull_request_target` runs the **base** branch's `plan.yml`, so
+**None of this shows up on the re-pin's own pull request.** The reason is
+`0.17.0`'s: `pull_request_target` runs the base branch's `plan.yml`, so
 that run still uses the old pin. Once it merges, the default branch carries the
 new pin without the inputs and every pull request after it is affected.
 
-**Recovery needs a one-time bypass**, if you require `shipmate / gate` as a
-branch-protection check — the ruleset shape
+**Recovery needs a one-time bypass.** That holds if you require
+`shipmate / gate` as a branch-protection check — the ruleset shape
 [`branch-protection.md`](branch-protection.md) prescribes. Under it, unlike
 `0.17.0`, no ordinary pull request clears this. (A repository that never made
-the gate required merges the fix like any other change and needs no bypass.) Both failure modes bite regardless of what the pull request touches:
+the gate required merges the fix like any other change and needs no bypass.)
+Both failure modes bite regardless of what the pull request touches:
 `build-matrix` refuses before it enumerates a single stack, so the "wrapper-only
 pull request plans nothing and greens the gate" escape does not exist, and a
 skipped summary job writes no gate at all. The fixing pull request runs the base
@@ -569,7 +573,7 @@ wrappers.
 
 ### 0.17.0 — name the planned commit, and drain pending applies before re-pinning
 
-**Re-pinning alone is not enough.** `plan-cell` now takes a **required**
+**Re-pinning alone is not enough.** `plan-cell` now takes a required
 `expected-head` input — the commit the run is planning — so add it to the
 `plan-cell` step of your `.github/workflows/plan.yml` in the same change that
 moves your pins:
@@ -584,10 +588,10 @@ The same SHA the `plan` job's checkout already names — as of `0.20.0` that is
 [`getting-started.md`](getting-started.md) §Required — plan has the whole step.
 
 **The pin bump and this edit must land in the same commit.** A wrapper that
-re-pins without it has **every** plan cell refuse on its next pull request,
+re-pins without it has every plan cell refuse on its next pull request,
 naming the missing input, and the gate holds red (`plan incomplete`) so nothing
 merges. The trap is that this does not show up on the re-pin itself: its own
-pull request planned green because `pull_request_target` runs the **base**
+pull request planned green because `pull_request_target` runs the base
 branch's `plan.yml`, still at the old pin — so once it merges, the default
 branch carries the new pin without the input, and every stack-touching pull
 request is refused until a wrapper edit lands.
@@ -595,7 +599,7 @@ request is refused until a wrapper edit lands.
 Recovery needs no bypass: a pull request that edits only `plan.yml` touches no
 stack, so `build-matrix` reports an empty matrix, the plan job is skipped, and
 the gate greens on zero planned cells — one ordinary wrapper-only pull request
-clears it. **If the same change also moves you to `0.18.0` or later**, that
+clears it. If the same change also moves you to `0.18.0` or later, the
 escape needs the `0.18.0` inputs as well: without them `build-matrix` refuses
 before it enumerates anything, so there is no empty matrix to green (§0.18.0).
 Landing both in one commit is what avoids refusing everything in between.
@@ -606,8 +610,8 @@ rather than tolerating it — there is nothing to compare it against. Pre-merge
 that costs a re-plan: push to the pull request and apply the fresh plan.
 Re-running the old plan run does not help — a re-run replays the workflow file
 of the commit that triggered it, so it plans on the pre-re-pin engine pin and
-produces another record-less artifact. **The post-merge deploy path is the one a push cannot
-fix.** A cell whose `apply / <stack> / <env>` check was still pending when the
+produces another record-less artifact. The post-merge deploy path is the one a
+push cannot fix. A cell whose `apply / <stack> / <env>` check was still pending when the
 re-pin merged holds an old-format plan, its pull request is already merged, and
 there is no pull request left to push to — the remedy there is a follow-up pull
 request touching those stacks, which plans them afresh and applies on its own
@@ -617,7 +621,7 @@ is to land the re-pin with nothing pending.
 **A wrapper that does not name the head SHA on its checkout now fails loudly.**
 `plan-cell` refuses when the commit it has checked out is not the one the run
 says it is planning. Since `0.10.0` the plan path is `pull_request_target`,
-which checks out the **base** branch unless the checkout names the pull
+which checks out the base branch unless the checkout names the pull
 request's head SHA — a wrapper missing that line
 used to report a clean plan for a pull request it never read, and is refused
 from this release on. Fix the checkout, not the `expected-head` value. (As of
@@ -651,15 +655,15 @@ unchanged — the new per-cell check is additive.
         default: ''
 ```
 
-**Moving to `0.19.0` or later? Do not add `plan_run_id` at all** — that input is
+**Moving to `0.19.0` or later? Do not add `plan_run_id` at all.** That input is
 retired, and a wrapper forwarding it to the engine's reusable workflows now kills
-the run as GitHub loads it (§0.19.0). **Nor `mode`** — `0.21.0` retired that
+the run as GitHub loads it (§0.19.0). Nor `mode` — `0.21.0` retired that
 input too and gave unlock its own wrapper (§0.21.0). The rest of this entry still
 applies to `ref` and `pr_number`.
 
 `plan_run_id` is the one that breaks: `shipmate unlock` applies no plan, so the
-engine dispatches it with an empty run id, and **GitHub reads an empty value for
-a `required: true` `workflow_dispatch` input as "not provided"** — HTTP 422
+engine dispatches it with an empty run id, and GitHub reads an empty value for
+a `required: true` `workflow_dispatch` input as "not provided" — HTTP 422
 before the workflow starts, naming an input you never typed. Every unlock
 dispatch fails that way until this edit lands. `ref` and `pr_number` are the same
 class and are changed here for the same reason: the wrapper is dispatched only by
@@ -683,7 +687,7 @@ documented environment name carries a suffix since `0.13.0`, which is what makes
 this mistake likely; the fix is a one-line edit, and it can ship before the pin
 bump.
 
-**One edge worth knowing:** `shipmate doctor` no longer infers an environment
+**One edge to know.** `shipmate doctor` no longer infers an environment
 naming mode from a partial listing. A repository with more than 100 GitHub
 Environments now gets doctor's degrade warnings for the environment probes where
 it previously got environment findings — nothing else about the run changes.
@@ -704,16 +708,16 @@ that no longer play those roles, so every logical env is migrated by hand, per
 env, in the same change that moves your pins.
 
 **Which step moves the binding is not the same in the two modes, and it is the
-easiest thing on this page to get backwards.** In **split** mode
+easiest thing on this page to get backwards.** In split mode
 `SHIPMATE_SHARED_ENVS` does nothing and the workflow edit flips the binding; in
-**shared** mode the variable flips the binding and the delete is only cleanup. So
+shared mode the variable flips the binding and the delete is only cleanup. So
 an all-split repository never sets the variable at all and binds a static
 `${{ matrix.environment }}-plan`; read the two ordered lists below with that
 straight, and the mixed case after them.
 
 **Create the environments first, then edit the workflows.** Doing it the other
 way round means plan cells bind an environment that does not exist yet, GitHub
-auto-creates it empty, and the plan that follows is **quiet either way** — with a
+auto-creates it empty, and the plan that follows is quiet either way — with a
 `TF_VAR_env` fallback default it plans a name nobody chose, and without one it
 plans an *empty* environment name, which is a different state address rather than
 a failure. Measured on Terramate 0.17.1 / OpenTofu 1.12.4: `${{ vars.X }}` for a
@@ -721,7 +725,7 @@ variable the environment does not hold still sets the `env:` key, to the empty
 string; a `run.env` chain of the form
 `tm_try(env.TF_VAR_env, env.env, "dev")` passes that empty string through rather
 than falling back; and `TF_VAR_env=` satisfies a `variable "env"` that declares no
-default. **Do not count on a missing default to make this loud.**
+default. Do not count on a missing default to make this loud.
 
 Split mode (the default, keeps the reviewer gate):
 
@@ -731,30 +735,30 @@ Split mode (the default, keeps the reviewer gate):
    `…:environment:<env>` stops matching the moment plan cells bind `<env>-plan`,
    and the only symptom is a bare `AccessDenied — Not authorized to perform
    sts:AssumeRoleWithWebIdentity` with nothing wrong-looking in the policy, the
-   provider or the workflow. **Add** `…:environment:<env>-plan` alongside the
+   provider or the workflow. Add `…:environment:<env>-plan` alongside the
    existing subject — the condition value takes a list — rather than replacing it:
    until step 3's edit is on the default branch, plan runs still bind the bare
    environment and a single-value rewrite breaks every one of them. Write the
    subject in the immutable form your own OIDC logs show, not the documented shape
    (same section).
-2. Create `<env>-plan` and copy the bare `<env>`'s **variables** to it
+2. Create `<env>-plan` and copy the bare `<env>`'s variables to it
    (`TF_VAR_env`, `TF_VAR_region` / `TF_WORKSPACE`, any plan-side `AWS_ROLE_ARN` /
    `AWS_REGION`). Keep the plan environment policy-free: no reviewers, no
-   deployment branch policy. Environment **secrets** cannot be copied — no API
+   deployment branch policy. Environment secrets cannot be copied — no API
    returns a secret's value — so re-enter each one by hand; a plan-side secret
    left behind (`SHIPMATE_PLAN_PASSPHRASE` is the one to watch) resolves to empty
    and every later apply fails its plan-decrypt fail-safe.
 3. Change `environment:` to `${{ matrix.environment }}-plan` in the `plan` job of
-   `plan.yml` **and** the `drift` job of `drift.yml`. Nothing else moves:
+   `plan.yml` and the `drift` job of `drift.yml`. Nothing else moves:
    `matrix.environment`, check names, tags, `explicit_envs` and artifact names
-   all stay the bare logical name. **Verify it in both**, and do not wait for the
+   all stay the bare logical name. Verify it in both, and do not wait for the
    night's drift run to do it for you: a green plan run says nothing about a file
    the engine cannot read, and `drift.yml` is where a mis-set binding surfaces
    last. Dispatch a drift run after the merge and check that the `<env>-plan`
    environments each pick up a fresh deployment record from it.
-4. **Merge that change**, then delete the bare `<env>`. `plan.yml` runs on
+4. Merge that change, then delete the bare `<env>`. `plan.yml` runs on
    `pull_request_target`, so until the edit is on the default branch every plan
-   run — the migration pull request's own included — uses the **base** copy and
+   run — the migration pull request's own included — uses the base copy and
    still binds the bare environment. Deleting it before the merge means the next
    plan re-creates it empty and plans with no variables, which is the hazard
    above. Between the merge and the delete, doctor warns that the naming is
@@ -771,26 +775,26 @@ Shared mode (one environment, opt in per env):
 
 1. **Copy `<env>-apply`'s variables and secrets onto the bare `<env>` first.**
    Both are read from whichever environment the wave binds, and step 3 flips that
-   binding — not the delete in step 4. Variables copy; environment **secrets**
+   binding — not the delete in step 4. Variables copy; environment secrets
    cannot (no API returns a secret's value), so re-enter each one by hand and
    confirm the bare environment holds every name `<env>-apply` did. A secret that
    exists only on `<env>-apply` is unrecoverable after the delete.
 2. **If applies assume a cloud role through OIDC, add the bare subject to that
-   role's trust policy** — `…:environment:<env>` alongside the existing
+   role's trust policy.** Add `…:environment:<env>` alongside the existing
    `…:environment:<env>-apply`, in the immutable form your own OIDC logs show
    ([`aws.md`](aws.md) §GitHub OIDC). The environment claim is inside the `sub`
    condition, so without this the role stops matching the moment step 3 binds the
    bare environment, and the failure is the same undiagnosable `AccessDenied` that
-   section describes. The shared environment holds **one** `AWS_ROLE_ARN` and the
+   section describes. The shared environment holds one `AWS_ROLE_ARN` and the
    wave jobs read it, so it must name the apply role; plan cells running branch
    code then assume that role too, which is the cost priced in
-   [`hardening.md`](hardening.md) §7–9. **If your `plan.yml` carries its own
-   credentials step, make this edit before step 1**: that copy already repoints the
+   [`hardening.md`](hardening.md) §7–9. If your `plan.yml` carries its own
+   credentials step, make this edit before step 1. That copy already repoints the
    bare environment at the apply role while plan cells still bind that environment,
    so the `AccessDenied` arrives at step 1, not step 3. Widening early grants
    nothing — no run presents the bare subject to the apply role until then.
 3. Add the logical env name to the `SHIPMATE_SHARED_ENVS` repository variable:
-   comma-separated, **no spaces after the commas** (` dev-us` is not `dev-us`,
+   comma-separated, with no spaces after the commas (` dev-us` is not `dev-us`,
    and that env silently stays split). This is the step that moves the binding.
 4. Keep the bare `<env>`, and delete `<env>-apply` once nothing binds it — left in
    place it makes the naming ambiguous, and doctor warns for exactly that.
@@ -808,9 +812,9 @@ Shared mode (one environment, opt in per env):
 variable.** The wave jobs of the engine's `apply-env-level.yml` read
 `SHIPMATE_SHARED_ENVS` per env, but `plan.yml` and `drift.yml` are yours and the
 engine cannot reach their `environment:` line, so what you write there applies to
-every env at once. If **every** env moves the same way, bind statically —
+every env at once. If every env moves the same way, bind statically —
 `${{ matrix.environment }}-plan` for all-split, `${{ matrix.environment }}` for
-all-shared. For a **mixed** repository, carry the engine's own expression so one
+all-shared. For a mixed repository, carry the engine's own expression so one
 variable drives both paths ([`../CONTRACT.md`](../CONTRACT.md) §Env model has the
 rule and the indentation constraint):
 
@@ -831,21 +835,22 @@ the apply — and on a folder-per-env layout nothing refuses at all
 The expression falls back to `<env>-plan`, and shared mode never creates one, so
 merged with the variable unset every shared env's plan cells bind a `<env>-plan`
 nobody made — auto-created empty, with the same outcome as above. So finish the
-shared path's steps 1–3 for **every** env you are sharing before the change
+shared path's steps 1–3 for every env you are sharing before the change
 carrying this expression merges.
 
 **One silence to expect.** `shipmate doctor` infers the mode from the environment
 *names* — it never reads `SHIPMATE_SHARED_ENVS`, which would need a permission the
 App manifest does not declare. So a repository that keeps a bare `<env>` and never
-sets the variable gets **no existence finding**, where the old code warned that
+sets the variable gets no existence finding, where the old code warned that
 `<env>-apply` was missing: bare-only is exactly what a correctly configured shared
 env looks like, and doctor reports it as one — you still get its shared-environment
-findings (unreviewed applies, a warning if it carries approval rules, its secrets),
-just nothing saying an environment is missing. On a layout whose environment
-injects a non-empty `TF_VAR_*` or `TF_WORKSPACE` the apply itself still fails loud — it binds `<env>-apply`,
-GitHub auto-creates it empty, and the apply-match fingerprint refuses the cell
-naming every missing `TF_VAR_*` ([`troubleshooting.md`](troubleshooting.md)
-§`Saved plan is stale`). **On a folder-per-env layout it does not**: nothing is
+findings (unreviewed applies, a warning if it carries approval rules, its
+secrets), and nothing says an environment is missing. On a layout whose
+environment injects a non-empty `TF_VAR_*` or `TF_WORKSPACE` the apply itself
+still fails loud — it binds `<env>-apply`, GitHub auto-creates it empty, and the
+apply-match fingerprint refuses the cell naming every missing `TF_VAR_*`
+([`troubleshooting.md`](troubleshooting.md)
+§`Saved plan is stale`). On a folder-per-env layout it does not: nothing is
 injected, both sides hash the empty set, and the apply runs inside that empty
 environment with none of its protection rules
 ([`../CONTRACT.md`](../CONTRACT.md) §Env model states the condition and what it
@@ -855,14 +860,14 @@ whole check and verify the mode against the environment names by hand.
 ### 0.12.0 — wrappers pass secrets by name, and re-pinning alone is not enough
 
 Replace `secrets: inherit` in every wrapper job that calls an engine reusable
-workflow, in the same change that moves your pins. Pass **only what each callee
-declares** — naming one it does not is a load-time error that kills the run with
+workflow, in the same change that moves your pins. Pass only what each callee
+declares — naming one it does not is a load-time error that kills the run with
 no job and no log:
 
 | Your wrapper job calls | Pass |
 |---|---|
 | `summary.yml` (in `plan.yml`) | `SHIPMATE_APP_PRIVATE_KEY` |
-| `apply.yml`, `apply-all.yml`, `deploy.yml` | that **and** `SHIPMATE_PLAN_PASSPHRASE` |
+| `apply.yml`, `apply-all.yml`, `deploy.yml` | that and `SHIPMATE_PLAN_PASSPHRASE` |
 
 ```yaml
     secrets:
@@ -885,7 +890,7 @@ succeeds.
 Inside the engine's own organization `inherit` keeps working, so a repository
 that skips this stays green while handing the engine every secret it can see
 ([`hardening.md`](hardening.md) §What the engine receives from your repository).
-Outside it, `inherit` delivers nothing **and** suppresses what the
+Outside it, `inherit` delivers nothing, and it suppresses what the
 `shipmate-engine` environment would have supplied: no `shipmate / gate`, no
 pending `apply / <stack> / <env>` checks, no sticky comment.
 
@@ -931,7 +936,7 @@ afterwards. Every pull request after it gates normally.
 Plans now run against the branch tip rather than the merge commit: the explicit
 `head.sha` checkout does not produce a merge ref, so a pull request behind its
 base plans what the branch says. The surviving safety net is the stale-plan
-refusal at apply time; **require branches to be up to date before merging**
+refusal at apply time; "require branches to be up to date before merging"
 ([`branch-protection.md`](branch-protection.md)) closes the rest.
 
 ### 0.2.0 — apply check-name field order flipped
@@ -940,7 +945,7 @@ refusal at apply time; **require branches to be up to date before merging**
 is not enough.** The apply check is now `apply / <stack> / <env>` (was `apply / <env> /
 <stack>`). Nothing in branch protection references it (only `shipmate / gate` is
 required), so no ruleset edit is needed — but old-order checks left on a head
-SHA break **both** directions, and a re-plan fixes neither, because it adds the
+SHA break both directions, and a re-plan fixes neither, because it adds the
 new names *alongside* the old ones on the same commit:
 
 - **Old-order checks still pending → the gate never greens.** `apply-gate`
@@ -956,10 +961,10 @@ new names *alongside* the old ones on the same commit:
   `main` goes red per stack instead of no-opping. Nothing is applied twice —
   the fail-safe holds — but the deploy needs recovery.
 
-**Do this:** on every open PR that already has apply checks, push a commit (any
+**Do this.** On every open PR that already has apply checks, push a commit (any
 commit) so the fan-out lands on a fresh head SHA, then re-plan and, if it was
-applied pre-merge, re-apply under the new engine. Note that a check run **cannot
-be deleted or dismissed** — the Checks API offers only create, update, get, list
+applied pre-merge, re-apply under the new engine. A check run cannot
+be deleted or dismissed — the Checks API offers only create, update, get, list
 and rerequest — so the only alternative to a fresh commit is completing the
 stale check-run ids yourself with a shipmate-App installation token (a check run
 is updatable only by the app that created it, and these were App-authored). If a
@@ -1004,8 +1009,8 @@ step doesn't use it, and it needlessly widens the default token's scope.
 ### Required status check renamed
 
 If your branch protection currently requires the aggregate gate check under its
-pre-rename name, update it to require `shipmate / gate` instead — in the **same
-change** that bumps your pinned engine SHA. Otherwise GitHub keeps waiting on
+pre-rename name, update it to require `shipmate / gate` instead — in the same
+change that bumps your pinned engine SHA. Otherwise GitHub keeps waiting on
 the old required check forever, and PRs can't merge even though the new engine
 is reporting `shipmate / gate`.
 

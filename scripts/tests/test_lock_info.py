@@ -9,7 +9,7 @@ runner, escape bytes intact, and is the only one that proves the strip.
 
 import pathlib
 
-from _loader import load_script  # existing helper; see other tests for usage
+from _loader import load_script
 
 li = load_script("lock-info")
 FIX = pathlib.Path(__file__).parent / "fixtures"
@@ -37,8 +37,8 @@ def test_parses_the_s3_capture_despite_a_different_error_message():
 
 
 def test_who_is_never_returned():
-    # Who is user@host on a runner and cannot attribute a run; no caller may
-    # render it, so the parser does not hand it out at all.
+    # Who is user@host on a runner and cannot attribute a run. No caller may render it, so the
+    # parser does not hand it out at all.
     assert "who" not in li.parse(_fixture("lock_error_s3.txt"))
 
 
@@ -51,15 +51,15 @@ def test_success_output_is_not_a_lock():
 
 
 def test_a_truncated_block_is_not_a_lock():
-    # Fail closed: the acquisition error is present but the block is cut off
-    # before ID, so there is nothing safe to force-unlock.
+    # Fail closed: the acquisition error is present but the block is cut off before ID, so there
+    # is nothing safe to force-unlock.
     text = "│ Error: Error acquiring the state lock\n│ Lock Info:\n"
     assert li.parse(text) is None
 
 
 def test_a_block_cut_after_the_id_is_not_a_lock():
-    # Fail closed: ID is captured and valid, but the block is cut off before
-    # the other required fields, so guessing an id from half a block is refused.
+    # Fail closed: ID is captured and valid, but the block is cut off before the other required
+    # fields, so guessing an id from half a block is refused.
     text = (
         "│ Error: Error acquiring the state lock\n"
         "│ Lock Info:\n"
@@ -74,9 +74,8 @@ def test_lock_info_without_the_acquisition_error_is_not_a_lock():
 
 
 def test_an_out_of_charset_id_is_refused():
-    # apply.txt is provider/local-exec output: a provisioner can echo a
-    # look-alike block. An ID that could not be a lock id is refused rather
-    # than carried into a force-unlock argv.
+    # apply.txt is provider and local-exec output, so a provisioner can echo a look-alike block.
+    # An ID that could not be a lock id is refused rather than carried into a force-unlock argv.
     text = (
         "│ Error: Error acquiring the state lock\n"
         "│ Lock Info:\n"
@@ -89,7 +88,7 @@ def test_an_out_of_charset_id_is_refused():
 
 
 def test_undecorated_output_parses_too():
-    # No box prefix (a future renderer, or piped through a filter).
+    # No box prefix, as from a future renderer or a pipe through a filter.
     text = (
         "Error: Error acquiring the state lock\n"
         "Lock Info:\n"
@@ -114,8 +113,8 @@ S3_ID = "0f866bdc-d621-7230-876f-fa7398eff1f8"
 
 
 def test_a_real_created_value_survives_its_guard():
-    # The guard below must reject crafted values WITHOUT blanking the real
-    # format -- a blanket blank-out would silently cost every lock its age.
+    # The charset and size guards must reject crafted values without blanking the real format:
+    # a blanket blank-out would silently cost every lock its age.
     assert li.parse(_fixture("lock_error_local.txt"))["created"] == (
         "2026-08-20 19:46:05.0074419 +0000 UTC"
     )
@@ -126,17 +125,17 @@ def test_a_real_created_value_survives_its_guard():
 
 
 def test_an_oversized_created_is_dropped_but_the_lock_survives():
-    # apply.txt is capped at SIZE_BUDGET (60,000 chars), so a `local-exec` line
-    # can carry a ~59,900-char Created value. The id is what the engine acts
-    # on, so the lock must survive; the unbounded value must not.
+    # apply.txt is capped at SIZE_BUDGET (60,000 chars), so a `local-exec` line can carry a
+    # ~59,900-char Created value. The id is what the engine acts on, so the lock must survive;
+    # the unbounded value must not.
     got = li.parse(_with("Created", "2" * 59_900))
     assert got["created"] == ""
     assert got["id"] == S3_ID
 
 
 def test_a_created_carrying_markdown_emphasis_is_dropped():
-    # _md_escape does not escape `*` or a backtick, and the renderer puts this
-    # value inside a **bold** span in the bot's trusted voice.
+    # _md_escape does not escape `*` or a backtick, and the renderer puts this value inside a
+    # bold span in the bot's trusted voice.
     assert li.parse(_with("Created", "2026 **ship it** now"))["created"] == ""
     assert li.parse(_with("Created", "2026 `code` now"))["created"] == ""
     assert li.parse(_with("Created", "2026 **ship it** now"))["id"] == S3_ID

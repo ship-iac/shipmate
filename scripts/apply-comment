@@ -39,17 +39,16 @@ def _load(fname):
 
 
 sc = _load("summary-comment")
-# COUPLING: "what counts as a done apply check" is written once in apply-gate
-# and shared with the gate status and both detect paths, so this comment's row
-# states can never disagree with the work queue they report on. A second
-# predicate here would drift silently.
+# COUPLING: "what counts as a done apply check" is written once in apply-gate and shared with
+# the gate status and both detect paths, so this comment's row states can never disagree with
+# the work queue they report on. A second predicate here would drift silently.
 ag = _load("apply-gate")
 # COUPLING: the only parser of tofu's lock output in the engine, shared with
 # actions/unlock-cell so the note and the unlock can never name different locks.
 li = _load("lock-info")
 
-# COUPLED to env-order.MAX_ENV_LEVELS (which lists the GHA slots that move with
-# it); pinned equal by test_apply_comment. A local constant rather than an
+# COUPLED to env-order.MAX_ENV_LEVELS, whose module docstring lists the GHA slots that move
+# with it; pinned equal by test_apply_comment. A local constant rather than an
 # `_load("env-order")`, which would widen this renderer's pin closure.
 MAX_ENV_LEVELS = 4
 
@@ -190,10 +189,9 @@ def _lock_note(rows, env_name):
     )
 
 
-# Digits-only captures, so a look-alike line in author-controlled apply.txt
-# cannot inject into the resources cell. Whole-line anchored (^...$, re.M)
-# because tofu prints `Outputs:` AFTER this line: an unanchored match would let
-# an output value merely containing the literal win as the last match.
+# Digits-only captures, so a look-alike line in author-controlled apply.txt cannot inject into
+# the resources cell. Whole-line anchored (^...$, re.M) because tofu prints `Outputs:` AFTER
+# this line: an unanchored match would let an output value containing the literal win last.
 _RESOURCES_RE = re.compile(
     r"^Apply complete! Resources: (\d+) added, (\d+) changed, (\d+) destroyed\.?$",
     re.MULTILINE,
@@ -241,10 +239,9 @@ def _read_tail(path, budget):
     if len(text) > budget:
         text = text[-budget:]
     if truncated_front:
-        # The seek point (or the subsequent budget-slice) can land mid-line
-        # (or mid-character, now smoothed over by errors="replace"); drop
-        # that leading fragment rather than emit a line that never really
-        # existed in the source.
+        # The seek point (or the subsequent budget-slice) can land mid-line, and mid-character
+        # too (smoothed over by errors="replace"); drop that leading fragment rather than
+        # emit a line that never existed in the source.
         nl = text.find("\n")
         text = text[nl + 1 :] if nl != -1 else ""
     return text
@@ -506,7 +503,7 @@ def _summary_line(row):
 
 
 def _link_only(row, url):
-    """The smallest possible section for a row: no output, just a link.
+    """The smallest possible section for a row: no output, only a link.
 
     Two reasons land here and must not share one sentence. Output that exists
     but does not fit is "too large"; output that never arrived is unavailable,
@@ -700,11 +697,11 @@ def _failure_line(results_csv, rows, env_name):
 
 
 def _top_section(env_name, results_csv, rows, jobs, run_url):
-    """Header, the failure line (if any) directly beneath it, then the
-    table, then the state-lock note (if any), then the unrecorded note (if
-    any), then the not-attempted note.
-    Split out of build_comment so the latter's complexity budget (C901
-    ceiling 8) isn't spent on this concatenation."""
+    """Header, any failure line directly beneath it, the table, then the
+    state-lock, unrecorded and not-attempted notes, each when it has content.
+
+    Split out of build_comment so the latter's C901 ceiling of 8 is not spent on
+    this concatenation."""
     header = _header(env_name)
     table = build_table(rows, jobs, run_url)
     fail_line = _failure_line(results_csv, rows, env_name)
@@ -780,10 +777,9 @@ def build_comment(
         fallback = "_Apply output too large for this comment — use each row's log link._"
         body = top + "\n\n" + fallback + footer
         if len(body) > sc.HARD_CAP:
-            # Stack/env display names are author-controlled (fork-PR input);
-            # at extreme fan-out even the table-only fallback can exceed the
-            # hard cap. Fail loud rather than let GitHub's POST 422 on an
-            # oversized comment body.
+            # Stack/env display names are author-controlled (fork-PR input), so even the
+            # table-only fallback can exceed the hard cap at extreme fan-out. Fail loud
+            # rather than let GitHub 422 the POST on an oversized comment body.
             raise SystemExit(
                 "::error::apply table alone exceeds the 65,536-char comment "
                 "cap — shorten stack/env display names"

@@ -110,11 +110,9 @@ DOCTOR_MARKER = "<!-- shipmate:doctor -->"
 ANNOTATION_CAP = 10  # GitHub keeps at most 10 annotations per level per step
 HARVEST_LEVELS = ("warning", "failure")
 _LEVEL_EMOJI = {WARNING: ":warning:", NOTICE: ":information_source:"}
-# The github-actions app authors the plan/apply/drift auto check-runs carrying
-# shipmate's ::warning:: emissions; the shipmate App is matched by id instead
-# (org-dependent slug). The consumer's own non-shipmate workflows are
-# indistinguishable at this level and remain, hence the report heading says
-# "workflow runs", not "shipmate runs".
+# github-actions authors the plan/apply/drift auto check-runs carrying shipmate's ::warning::
+# emissions; the shipmate App is matched by id instead (org-dependent slug). A consumer's own
+# non-shipmate workflows are indistinguishable here and remain, hence the generic "workflow runs".
 _HARVEST_APP_SLUGS = ("github-actions",)
 # Covers both shapes the gather step reports: nothing read at all, and some read
 # but not all. A list item, so it reads as a peer of the rows it follows.
@@ -122,10 +120,9 @@ HARVEST_INCOMPLETE = (
     "- :warning: could not read all of this commit's check runs — any warnings recorded on "
     "the ones that could not be read are missing from this list."
 )
-# Distinct from HARVEST_INCOMPLETE: every read succeeded, there is simply
-# nothing recorded YET. An empty payload is byte-identical to "no warnings", so
-# without this a `shipmate doctor` typed while the plan run is queued gets an
-# all-clear that is never refreshed.
+# Distinct from HARVEST_INCOMPLETE: every read succeeded, nothing is recorded YET. An empty
+# payload is byte-identical to "no warnings", so without this a `shipmate doctor` typed while the
+# plan run is queued gets an all-clear that is never refreshed.
 HARVEST_PENDING = (
     "- :hourglass: some of this commit's workflow runs had not finished when this report was "
     "rendered — warnings they record later are not in this list; comment `shipmate doctor` "
@@ -253,12 +250,7 @@ def _existing_env_names(ctx):
 
 SPLIT, SHARED, AMBIGUOUS, MISSING = "split", "shared", "ambiguous", "missing"
 
-# Which environments each mode's probes read, and the role each plays. The mode
-# is really selected by the `SHIPMATE_SHARED_ENVS` repository variable, which
-# doctor never reads: that needs a `variables: read` permission
-# app/manifest.json does not declare, and every installation would have to
-# re-accept it. Ambiguous reads both namings, so a phantom reviewer on the one
-# nothing binds is still reported.
+# Which environments each mode's probes read, and the role each plays; see `_role_names`.
 _MODE_ROLES = {
     SPLIT: ("plan", "apply"),
     SHARED: ("shared",),
@@ -285,7 +277,13 @@ def _role_names(env, mode, roles=None):
     `roles` narrows it to a subset (the plan-side names). The advice texts spell
     the suffixed names out inline; what is single here is which environments a
     mode is probed through, and `_env_mode` is the only place the mode is
-    decided."""
+    decided.
+
+    The mode is really selected by the `SHIPMATE_SHARED_ENVS` repository
+    variable, which doctor never reads: that needs a `variables: read`
+    permission app/manifest.json does not declare, and every installation would
+    have to re-accept it. `_MODE_ROLES[AMBIGUOUS]` reads both namings, so a
+    phantom reviewer on the one nothing binds is still reported."""
     return [
         (env if role == "shared" else f"{env}-{role}", role)
         for role in _MODE_ROLES[mode]
@@ -424,10 +422,9 @@ def _env_shape_findings(name, env, data, role, mode):
     "Get an environment" payload."""
     out = []
     rules = sorted({r.get("type") for r in data.get("protection_rules", []) if r.get("type")})
-    # GitHub reports "branch_policy" whenever deployment_branch_policy is set.
-    # Excluded both ways: it refuses a plan job outright rather than delaying it
-    # (handled below), and it is not a review, so an apply env carrying nothing
-    # else is still entirely unreviewed.
+    # GitHub reports "branch_policy" whenever deployment_branch_policy is set. Excluded both
+    # ways: it refuses a plan job outright rather than delaying it (handled below), and it is
+    # not a review, so an apply env carrying nothing else is still entirely unreviewed.
     approval = [r for r in rules if r != "branch_policy"]
     policy = data.get("deployment_branch_policy")
     if role == "plan" and approval:
@@ -474,10 +471,9 @@ def _env_shape_findings(name, env, data, role, mode):
             )
         )
     if role == "shared" and policy and mode == AMBIGUOUS:
-        # The NOTICE below is shared mode's accepted trade, and only shared
-        # mode's: while the naming is ambiguous the bare environment is what an
-        # unmigrated `plan.yml` still binds, so the plan-stall this diagnoses is
-        # a live misconfiguration rather than a legitimate secret-release control.
+        # The NOTICE below is shared mode's accepted trade, and only shared mode's: while the
+        # naming is ambiguous, the bare environment is what an unmigrated `plan.yml` still binds,
+        # so this plan-stall is a live misconfiguration, not a legitimate secret-release control.
         out.append(
             (
                 WARNING,
@@ -490,10 +486,9 @@ def _env_shape_findings(name, env, data, role, mode):
             )
         )
     if role == "shared" and policy and mode != AMBIGUOUS:
-        # NOTICE, not the plan environment's WARNING: on a shared environment the
-        # policy is a real control over which branches may claim its secrets, and
-        # a consumer whose pull requests all target the default branch is right
-        # to set it. A WARNING nobody can clear is noise.
+        # NOTICE, not the plan environment's WARNING: on a shared environment the policy is a real
+        # control over which branches may claim its secrets, and a consumer whose pull requests all
+        # target the default branch is right to set it. A WARNING nobody can clear is noise.
         out.append(
             (
                 NOTICE,
@@ -523,18 +518,17 @@ def _env_protection_warnings(ctx):
     """Protection shape per environment, checked live, with the role each
     environment plays taken from `_env_mode`. An approval-type protection rule on
     a PLAN env — a required reviewer, or a wait timer — stops plan jobs from
-    starting when they should: no error, just a stalled matrix, which is the
-    hardest shipmate misconfiguration to diagnose. An APPLY env with no approval
+    starting when they should: no error, only a stalled matrix — the hardest
+    shipmate misconfiguration to diagnose. An APPLY env with no approval
     rule is the mirror problem: pre-merge applies to it are unreviewed. A SHARED
     env is both at once, so it can have neither.
 
     Existence comes from `_existing_env_names`; see its docstring."""
     out = []
     if not ctx["envs"]:
-        # Nothing to probe, so nothing to read: listing the environments anyway
-        # would let a repository whose token cannot list them collect a
-        # "could not verify" degrade for a probe that had no work to do. The
-        # skipped-probe statement itself lives in `_environment_warnings`.
+        # Nothing to probe, so nothing to read: listing the environments anyway would let a
+        # repository whose token cannot list them collect a "could not verify" degrade for a probe
+        # that had no work to do. The skipped-probe statement lives in `_environment_warnings`.
         return out
     existing = _existing_env_names(ctx)
     for env in sorted(ctx["envs"]):
@@ -654,11 +648,9 @@ def _engine_environment_warnings(ctx):
 # fires on a "SECRET" token in the binding name, and this is a secret's *name*.
 _APP_KEY_NAME = "SHIPMATE_APP_PRIVATE_KEY"
 
-# Emitted when the env-scoped token is absent: the listing needs the
-# `environments: read` permission app/manifest.json declares, and an
-# installation that has not accepted the request yet cannot mint it. A silent
-# skip here would be byte-identical to "no plan environment holds a secret",
-# which is the one thing this probe exists to be able to say.
+# Emitted when the env-scoped token is absent: the listing needs the `environments: read` permission
+# app/manifest.json declares, and no token carries it until the installation accepts the request. A
+# silent skip reads as "no plan environment holds a secret" — the one claim this probe exists for.
 _ENV_TOKEN_UNCHECKED = (
     WARNING,
     "plan-environment secrets were not checked — minting a token with the "
@@ -823,11 +815,9 @@ def _plan_env_secret_warnings(ctx):
                 continue
             if not names:
                 continue
-            # Capped like the all-clear line's environment list: the settings
-            # section is never truncated, so one crowded environment would spend
-            # the whole of `sc.SIZE_BUDGET` and push the other findings into the
-            # omitted fallback. `count` still reports the true total, so the cap
-            # only hides names.
+            # Capped like the all-clear line's env list: the settings section is never truncated, so
+            # one crowded environment would spend all of `sc.SIZE_BUDGET` and push the rest into the
+            # omitted fallback. `count` reports the true total, so the cap hides only names.
             shown = _one_line(", ".join(f"`{n}`" for n in sorted(names)), 400)
             count = f"at least {total}" if total > len(names) else str(len(names))
             out.append((NOTICE, _secret_finding(name, env, role, mode, count, shown)))
@@ -843,12 +833,9 @@ _SHA40 = re.compile(r"[0-9a-fA-F]{40}")
 
 
 _WORKFLOWS_DIR = ".github/workflows"
-# Degrade for any unreadable contents call in this probe family, at NOTICE like
-# the unreadable-release degrade below: a repo can legitimately fail this read
-# (the directory does not exist on the ref being read -- the first shipmate PR
-# is the one that adds it -- or the token cannot see it, or the API is
-# transiently failing), and none of those are a misconfiguration to warn about.
-# It must never fall through to the generic WARNING degrade in warnings().
+# Degrade for every unreadable contents call in this probe family, NOTICE like the
+# unreadable-release degrade below: none of the ways that read fails is a misconfiguration, for
+# the reasons `_scan_workflow_texts` states. Never the generic WARNING degrade in warnings().
 PIN_UNREADABLE = (
     NOTICE,
     f"could not read `{_WORKFLOWS_DIR}` — engine pin freshness not verified.",
@@ -937,7 +924,12 @@ def _scan_workflow_texts(ctx, ref, per_file, unreadable):
     The pin and fork-trigger probes each call this with their own reads rather
     than sharing one — a module-level cache would outlive a single probe run and
     couple two probes' failure modes — so each costs one listing plus one read
-    per file."""
+    per file.
+
+    Every caller's `unreadable` constant is a NOTICE, never a WARNING: the
+    directory may not exist on the ref being read — the first shipmate pull
+    request is the one that adds it — or the token cannot see it, or the API is
+    transiently failing. None of those is a misconfiguration to warn about."""
     base = f"repos/{ctx['repo']}/contents/{_WORKFLOWS_DIR}"
     names, readable = _workflow_names(f"{base}{ref}")
     if not readable:
@@ -1058,13 +1050,8 @@ def _pin_warnings(ctx):
     return out
 
 
-# The search is scoped to the workflow's top-level `on:` value, at the level
-# where event names live: a `run:` body, an `if:` expression and a
-# `strategy.matrix` value are not in that block at all, and a
-# `workflow_dispatch` input's `options:` entry is nested below it. The token
-# match takes word-ish boundaries so `pull_request_target_foo` is a different
-# trigger. doctor is stdlib-only and cannot yaml.safe_load, so the block is
-# sliced by indentation.
+# Word-ish boundaries, so `pull_request_target_foo` is a different trigger. Where the search runs:
+# `declares_pull_request_target`.
 _PR_TARGET = re.compile(r"(?<![\w-])pull_request_target(?![\w-])")
 # Same degrade posture and reason as PIN_UNREADABLE: an unreadable workflow
 # directory is not a misconfiguration to warn about.
@@ -1078,27 +1065,14 @@ FORK_TRIGGER_NO_COMMIT = (
     "could not be determined.",
 )
 
-# `actions/checkout` refuses to check out a fork's head under
-# `pull_request_target` unless this input turns the refusal off, which makes it
-# the single most consequential line a consumer can add: that third party's
-# default is the outermost guard on this path.
-#
-# Matched at a line start OR after `{`/`,`: flow style is a house idiom here —
-# `docs/drift.md` and all four sample repositories write
-# `with: { fetch-depth: 0 }`, so a one-line checkout step is what a consumer
-# copying those pages produces. The value stops at `,`/`}` for the same reason:
-# a flow-style `false` must read as `false` and not as `false }`, which would
-# report the safest shape a consumer can write.
+# Flow-style tolerant. Why this input matters, and why the anchor and the value terminator are
+# what they are: `_unsafe_checkout_warnings`.
 _UNSAFE_CHECKOUT = re.compile(
     r"(?:^|[{,])[ \t]*allow-unsafe-pr-checkout[ \t]*:(?P<value>[^,}\n]*)", re.M
 )
 
 
-#: `on` at column 0 only, optionally quoted: a workflow's `on:` is a top-level
-#: key, so an indented one belongs to something else. `_on_block` matches rather
-#: than searches, and that is the whole of the anchoring — unanchored,
-#: `    python-version: 3.12` matches (`versi` + `on:`) and silently retargets
-#: the block this probe reads.
+# `on` at column 0 only, optionally quoted; the anchoring is `_on_block`'s match, see there.
 _ON_KEY = re.compile(r"""["']?on["']?[ \t]*:(?P<rest>.*)$""")
 
 
@@ -1120,7 +1094,12 @@ def _on_block(text):
     """(inline remainder of the `on:` line, its following lines) with comments
     stripped, or (None, []) for a file with no top-level `on:`. The block runs to
     the first line starting at column 0; blank and comment-only lines do not end
-    it."""
+    it.
+
+    A workflow's `on:` is a top-level key, so an indented one belongs to
+    something else. `_ON_KEY` is matched rather than searched, and that is the
+    whole of the anchoring — unanchored, `    python-version: 3.12` matches
+    (`versi` + `on:`) and silently retargets the block this probe reads."""
     lines = text.splitlines()
     for i, line in enumerate(lines):
         m = _ON_KEY.match(line)
@@ -1157,7 +1136,14 @@ def declares_pull_request_target(text):
 
     Comments are stripped first: `# never add pull_request_target here` is
     exactly the line a repository writes *because* it does not have one, and
-    reporting it would train readers to ignore the finding."""
+    reporting it would train readers to ignore the finding.
+
+    The search is scoped to the workflow's top-level `on:` value, at the level
+    where event names live: a `run:` body, an `if:` expression and a
+    `strategy.matrix` value are not in that block at all, and a
+    `workflow_dispatch` input's `options:` entry is nested below it. doctor is
+    stdlib-only and cannot yaml.safe_load, so the block is sliced by
+    indentation."""
     inline, block = _on_block(text)
     if inline is None:
         return False
@@ -1179,7 +1165,19 @@ def _unsafe_checkout_warnings(text, name):
 
     The value is compared case-insensitively: `False` and `FALSE` are the same
     legal YAML boolean as `false`, and a finding on a correct repository trains
-    readers to ignore the whole suite."""
+    readers to ignore the whole suite.
+
+    `actions/checkout` refuses to check out a fork's head under
+    `pull_request_target` unless this input turns the refusal off, which makes
+    it the single most consequential line a consumer can add: that third party's
+    default is the outermost guard on this path.
+
+    `_UNSAFE_CHECKOUT` matches at a line start OR after `{`/`,`: flow style is a
+    house idiom here — `docs/drift.md` and all four sample repositories write
+    `with: { fetch-depth: 0 }`, so a one-line checkout step is what a consumer
+    copying those pages produces. The value stops at `,`/`}` for the same
+    reason: a flow-style `false` must read as `false` and not as `false }`,
+    which would report the safest shape a consumer can write."""
     values = [
         m.group("value").strip().strip("\"'").lower()
         for m in _UNSAFE_CHECKOUT.finditer(_stripped_text(text))
@@ -1203,7 +1201,7 @@ def _unsafe_checkout_warnings(text, name):
 
 
 def _fork_trigger_warnings(ctx):
-    """`pull_request_target` runs at the **base** ref, so it is handed the
+    """`pull_request_target` runs at the base ref, so it is handed the
     repository's secrets — and the base ref is exactly what `shipmate-engine`'s
     default-branch-only policy trusts, so a job declaring that environment would
     be handed the App key too — while checking out and acting on content the pull
@@ -1223,10 +1221,9 @@ def _fork_trigger_warnings(ctx):
         # Before the `plan.yml` exemption below, not after: `plan.yml` is
         # exactly the file where a fork checkout would be turned on.
         out = _unsafe_checkout_warnings(text, name)
-        # The engine's own plan workflow is on this trigger by design: the job
-        # holding the App key is the engine's reusable summary workflow, which
-        # checks out nothing. Exact name — a `custom-plan.yml` is a consumer
-        # file and gets the warning.
+        # The engine's own plan workflow is on this trigger by design: the job holding the App key
+        # is the engine's reusable summary workflow, which checks out nothing. Exact name — a
+        # `custom-plan.yml` is a consumer file and gets the warning.
         if name == "plan.yml":
             return out
         if not declares_pull_request_target(text):
@@ -1250,26 +1247,15 @@ def _fork_trigger_warnings(ctx):
     return _scan_workflow_texts(ctx, ref, finding, FORK_TRIGGER_UNREADABLE)
 
 
-# The three inputs the engine's reusable summary workflow decides on, with the
-# expression each must carry. Values, not just keys: a wrapper that wires
-# `head-repo: ${{ github.repository }}` — or `is-draft: false` — states the safe
-# answer for every run, fork pull requests and drafts included, and nothing else
-# in the system can see it. `on-demand` is the odd one: omitting it costs an
-# automatic plan nothing, which is why it is the input a wrapper keeps
-# missing. The expressions read the `facts` job rather than the
-# event payload for a second reason: the payload carries no pull request on the
-# dispatched plan leg, and a fact read from anywhere but that one producer has a
-# second producer — two producers of one fact disagree eventually.
+# The three inputs the engine's reusable summary workflow decides on, with the expression each
+# must carry; see `_summary_call_finding` for why the values are pinned, not only the keys.
 SUMMARY_WIRING = {
     "head-repo": "${{ needs.facts.outputs.head-repo }}",
     "is-draft": "${{ needs.facts.outputs.is-draft }}",
     "on-demand": "${{ needs.facts.outputs.on-demand }}",
 }
-#: What `plan.yml`'s `build-matrix` step must pass. Separate from SUMMARY_WIRING
-#: because the two sites read the facts from different places: the step is inside
-#: `detect` and reads `needs.facts.outputs.*` like the summary call, but it takes
-#: `head-sha`, which `SUMMARY_WIRING` does not police, and a shared constant
-#: would make one site's expectation silently govern the other.
+# What `plan.yml`'s `build-matrix` step must pass. Separate from SUMMARY_WIRING for the reason
+# `_build_matrix_finding` states.
 BUILD_MATRIX_WIRING = {
     "head-repo": "${{ needs.facts.outputs.head-repo }}",
     "head-sha": "${{ needs.facts.outputs.head-sha }}",
@@ -1279,13 +1265,8 @@ _BUILD_MATRIX_CALL = re.compile(r"/actions/build-matrix@")
 # Flow-style tolerant, like `_UNSAFE_CHECKOUT` and unlike `_WIRING_KEY` below:
 # this value is a short literal, so the `,`/`}` terminator truncates nothing.
 _NO_PULL_REQUEST = re.compile(r"(?:^|[{,])[ \t]*no-pull-request[ \t]*:(?P<value>[^,}\n]*)", re.M)
-# Line-anchored, unlike `_UNSAFE_CHECKOUT`: flow style is deliberately NOT
-# recognised here. The values these keys must carry end in `}}`, so the `,`/`}`
-# terminator that makes a flow mapping readable would truncate the block-style
-# expression the documented wrapper uses and report *that* as unwired — a false
-# positive on the one shape every consumer has. A flow-style summary call (eight
-# long expressions on one line) reads as unwired instead: noisy, but the
-# findings name every unwired input and the exact expressions to pass.
+# Line-anchored, unlike `_UNSAFE_CHECKOUT`: flow style is deliberately NOT recognised here, for
+# the reason `_wired_value` states.
 _WIRING_KEY = {
     key: re.compile(rf"^[ \t]*{key}[ \t]*:(?P<value>.*)$", re.M)
     for key in SUMMARY_WIRING | BUILD_MATRIX_WIRING
@@ -1376,19 +1357,20 @@ def _summary_wiring_warnings(ctx):
     Reads the consumer's workflow files at the commit under examination, the
     same way and for the same reason as the pin and fork-trigger probes
     (`_contents_ref`): a pull request that *fixes* the wiring must not still be
-    reported for it."""
+    reported for it.
+
+    Judged by exact name, like the fork-trigger exemption: the wrapper shipped
+    in docs/getting-started.md is `plan.yml`, and a workflow that calls the
+    summary workflow under another name is not the shape this reports on. The
+    `build-matrix` half sits behind that filter too, and must: `drift.yml` is
+    REQUIRED to carry `no-pull-request: "true"` and states no head repository,
+    so judging any other file reports the shape docs/drift.md documents."""
     ref = _contents_ref(ctx)
     if ref is None:
         return [SUMMARY_WIRING_NO_COMMIT]
 
     def finding(text, name):
-        # Exact name, like the fork-trigger exemption: the wrapper shipped in
-        # docs/getting-started.md is `plan.yml`, and a workflow that calls the
-        # summary workflow under another name is not the shape this reports on.
-        # The build-matrix half below sits behind this filter too, and must:
-        # `drift.yml` is REQUIRED to carry `no-pull-request: "true"` and states
-        # no head repository, so judging any other file reports the shape
-        # docs/drift.md documents.
+        # Exact name, and the build-matrix half behind the same filter: see the docstring.
         if name != "plan.yml":
             return []
         return _summary_call_finding(text, name) + _build_matrix_finding(text, name)
@@ -1403,7 +1385,17 @@ def _summary_call_finding(text, name):
     those two skip the job for every pull request, this one drops the draft
     override and the mirror of a dispatched run's per-cell checks. A reader told
     "the job is skipped" about a repository whose pull requests all gate
-    correctly stops reading."""
+    correctly stops reading.
+
+    `SUMMARY_WIRING` pins values, not only keys: a wrapper that wires
+    `head-repo: ${{ github.repository }}` — or `is-draft: false` — states the
+    safe answer for every run, fork pull requests and drafts included, and
+    nothing else in the system can see it. `on-demand` is the odd one: omitting
+    it costs an automatic plan nothing, which is why it is the input a wrapper
+    keeps missing. The expressions read the `facts` job rather than the event
+    payload for a second reason: the payload carries no pull request on the
+    dispatched plan leg, and a fact read from anywhere but that one producer has
+    a second producer — two producers of one fact disagree eventually."""
     region = _call_region(text, _SUMMARY_CALL)
     if region is None:
         return []
@@ -1469,7 +1461,13 @@ def _build_matrix_finding(text, name):
     is the same hole with one word: it is the only opt-out from both refusals.
 
     Both halves are one probe over one file — the reader's question is "is my
-    plan wrapper wired?", and splitting it in two asks it twice."""
+    plan wrapper wired?", and splitting it in two asks it twice.
+
+    `BUILD_MATRIX_WIRING` is separate from `SUMMARY_WIRING` because the two
+    sites read the facts from different places: the step is inside `detect` and
+    reads `needs.facts.outputs.*` like the summary call, but it takes
+    `head-sha`, which `SUMMARY_WIRING` does not police, and a shared constant
+    would make one site's expectation silently govern the other."""
     out = []
     region = _call_region(text, _BUILD_MATRIX_CALL)
     head_repo_expr = BUILD_MATRIX_WIRING["head-repo"]
@@ -1504,9 +1502,8 @@ def _build_matrix_finding(text, name):
             )
         )
     # Every occurrence, and anything but a literal false, for the two reasons
-    # `_unsafe_checkout_warnings` gives: one job's explicit `false` must not
-    # silence another's `true`, and a `${{ }}` value is unknown, not false. An
-    # empty value is what the action reads as no opt-out at all.
+    # `_unsafe_checkout_warnings` gives: one job's explicit `false` must not silence another's
+    # `true`, and a `${{ }}` value is unknown, not false. An empty value is no opt-out at all.
     values = [
         m.group("value").strip().strip("\"'").lower()
         for m in _NO_PULL_REQUEST.finditer(_stripped_text(text))
@@ -1532,18 +1529,23 @@ def _wired_value(region, key):
     quoting stripped, or None when the key is absent. Whitespace-insensitive
     because `${{github.repository}}` and `${{ github.repository }}` are the same
     expression, and formatters quote values (the reason the pin probe's anchor
-    tolerates quotes too)."""
+    tolerates quotes too).
+
+    `_WIRING_KEY` is line-anchored, so flow style is deliberately NOT recognised
+    here. The values these keys must carry end in `}}`, so the `,`/`}`
+    terminator that makes a flow mapping readable would truncate the block-style
+    expression the documented wrapper uses and report *that* as unwired — a
+    false positive on the one shape every consumer has. A flow-style summary
+    call (eight long expressions on one line) reads as unwired instead: noisy,
+    but the findings name every unwired input and the exact expressions to
+    pass."""
     m = _WIRING_KEY[key].search(region)
     if m is None:
         return None
     return "".join(m.group("value").strip().strip("\"'").split())
 
 
-#: Both spellings, line-anchored: a `workflow_call`/`workflow_dispatch` input is
-#: declared as `plan_run_id`, an action input passed as `plan-run-id`, and a
-#: wrapper carrying either is carrying the retired rail. Line-anchored means a
-#: fully inline flow `on: { workflow_dispatch: { inputs: { plan_run_id: … } } }`
-#: is NOT seen — a gap that stays silent rather than reporting a healthy file.
+# Both spellings, line-anchored, with a known gap: see `_plan_run_id_finding`.
 _PLAN_RUN_ID_KEY = re.compile(r"^[ \t]*plan[-_]run[-_]id[ \t]*:", re.M)
 # Same degrade posture and reason as PIN_UNREADABLE.
 PLAN_RUN_ID_UNREADABLE = (
@@ -1568,19 +1570,20 @@ def _plan_run_id_warnings(ctx):
     Reads the consumer's workflow files at the commit under examination, the
     same way and for the same reason as the pin, fork-trigger and summary-wiring
     probes (`_contents_ref`): a pull request that *removes* the input must not
-    still be reported for it."""
+    still be reported for it.
+
+    Judged by exact name, like the summary-wiring exemption above: the wrapper
+    shipped in docs/getting-started.md is `apply.yml`, and it is the file that
+    calls the engine's reusable apply workflows. The filter lives in this
+    function rather than in `_plan_run_id_finding` so that a direct call of that
+    function with another file's name still reports — a direct call bypasses the
+    exemption, and silence there reads as a false positive that is not one."""
     ref = _contents_ref(ctx)
     if ref is None:
         return [PLAN_RUN_ID_NO_COMMIT]
 
     def finding(text, name):
-        # Exact name, like the summary-wiring exemption above: the wrapper
-        # shipped in docs/getting-started.md is `apply.yml`, and it is the file
-        # that calls the engine's reusable apply workflows. The filter lives
-        # here rather than in `_plan_run_id_finding` so that a direct call of
-        # that function with another file's name still reports — a direct call
-        # bypasses the exemption, and silence there reads as a false positive
-        # that is not one.
+        # Exact name, and the filter's placement: see the docstring.
         if name != "apply.yml":
             return []
         return _plan_run_id_finding(text, name)
@@ -1607,7 +1610,14 @@ def _plan_run_id_finding(text, name):
     undeclared SECRET and says an undeclared ACTION input is silently ignored, so
     the workflow-call case was checked rather than inferred — `conclusion:
     startup_failure`, `jobs` reporting `total_count: 0`, no check runs on the
-    commit, and `gh run view --log` answering that the log is not found."""
+    commit, and `gh run view --log` answering that the log is not found.
+
+    `_PLAN_RUN_ID_KEY` matches both spellings: a
+    `workflow_call`/`workflow_dispatch` input is declared as `plan_run_id`, an
+    action input passed as `plan-run-id`, and a wrapper carrying either is
+    carrying the retired rail. Line-anchored means a fully inline flow
+    `on: { workflow_dispatch: { inputs: { plan_run_id: … } } }` is NOT seen — a
+    gap that stays silent rather than reporting a healthy file."""
     _, block = _on_block(text)
     declared = len(_PLAN_RUN_ID_KEY.findall("\n".join(block)))
     forwarded = len(_PLAN_RUN_ID_KEY.findall(_stripped_text(text))) - declared
@@ -1638,26 +1648,11 @@ def _plan_run_id_finding(text, name):
     return out
 
 
-#: Line-anchored, like `_PLAN_RUN_ID_KEY` and with the same known gap, which
-#: applies to BOTH halves: a fully inline flow mapping — `on: { workflow_dispatch:
-#: { inputs: { mode: … } } }`, or `with: { environment: …, mode: …, … }` on the
-#: apply call — is not seen. Both stay silent rather than reporting a healthy
-#: file, but the forward's silence is the costly one: the consumer re-pins, the
-#: run dies as GitHub LOADS it with `startup_failure`, no job and no log, and
-#: this probe said nothing about the one shape it exists to pre-warn about. The
-#: threat model it is written for is a wrapper copied from the block-style
-#: fences on our own pages and then drifting, so the anchor stays. Unlike that key,
-#: `mode` is generic YAML — `actions/state` takes `mode: restore`, `apply-cell`'s
-#: state steps and `actions/summary`'s `comment_mode` are unrelated — so where
-#: the key is found is the whole finding, and it is only ever searched inside the
-#: `on:` block or inside a job that calls the engine's reusable apply workflows.
+# Line-anchored, like `_PLAN_RUN_ID_KEY` and with the same known gap; `mode` is generic YAML, so
+# where the key is found is the whole finding. Both points: `_mode_input_finding`.
 _MODE_KEY = re.compile(r"^[ \t]*mode[ \t]*:", re.M)
-#: A job calling the engine's reusable apply workflows. Matched on the path
-#: rather than on `ctx["engine_repo"]`, which is an ACCEPTED cost, not a claim
-#: about what a consumer can write: a forward on a call to another org's own
-#: `.github/workflows/apply.yml` is reported too. Scoping it would need the
-#: engine slug and therefore a third degrade path, for a shape the caller has
-#: already narrowed to the consumer's own `apply.yml`.
+# A job calling the engine's reusable apply workflows, matched on the path rather than on
+# `ctx["engine_repo"]`; that is an accepted cost, see `_apply_call_regions`.
 _APPLY_CALL = re.compile(r"^[ \t]*uses[ \t]*:.*/\.github/workflows/apply(?:-all)?\.yml@")
 # Same degrade posture and reason as PIN_UNREADABLE.
 MODE_INPUT_UNREADABLE = (
@@ -1687,8 +1682,8 @@ def _mode_input_warnings(ctx):
         return [MODE_INPUT_NO_COMMIT]
 
     def finding(text, name):
-        # Exact name, and here rather than in `_mode_input_finding`, for the
-        # reasons the `plan_run_id` probe's identical filter states.
+        # Exact name, and here rather than in `_mode_input_finding`, for the reasons
+        # `_plan_run_id_warnings`' docstring states for its identical filter.
         if name != "apply.yml":
             return []
         return _mode_input_finding(text, name)
@@ -1700,7 +1695,14 @@ def _apply_call_regions(lines):
     """The line ranges of every job whose `uses:` names the engine's reusable
     apply workflows. A job's own keys sit at that `uses:` line's indent, so the
     job runs from the nearest shallower line above to the nearest one below —
-    both directions, because `with:` may be written before `uses:`."""
+    both directions, because `with:` may be written before `uses:`.
+
+    `_APPLY_CALL` matches on the path rather than on `ctx["engine_repo"]`, which
+    is an ACCEPTED cost, not a claim about what a consumer can write: a forward
+    on a call to another org's own `.github/workflows/apply.yml` is reported
+    too. Scoping it would need the engine slug and therefore a third degrade
+    path, for a shape the caller has already narrowed to the consumer's own
+    `apply.yml`."""
 
     def shallower(ln, n):
         return ln.strip() and len(ln) - len(ln.lstrip()) < n
@@ -1731,7 +1733,20 @@ def _mode_input_finding(text, name):
     logs, only a workflow-validation error on the run itself — which is the
     hardest failure in this system to diagnose from the outside. That asymmetry
     between an undeclared workflow-call input and an undeclared action input is
-    the measured one at `docs/upgrading.md`."""
+    the measured one at `docs/upgrading.md`.
+
+    `_MODE_KEY` is line-anchored, like `_PLAN_RUN_ID_KEY` and with the same
+    known gap, which applies to BOTH halves: a fully inline flow mapping —
+    `on: { workflow_dispatch: { inputs: { mode: … } } }`, or
+    `with: { environment: …, mode: …, … }` on the apply call — is not seen. Both
+    stay silent rather than reporting a healthy file, but the forward's silence
+    is the costly one: the consumer re-pins, the run dies as GitHub LOADS it
+    with `startup_failure`, no job and no log, and this probe said nothing about
+    the one shape it exists to pre-warn about. The threat model it is written for
+    is a wrapper copied from the block-style fences on our own pages and then
+    drifting, so the anchor stays. `apply-cell`'s state steps and
+    `actions/summary`'s `comment_mode` are two more unrelated uses of the
+    name."""
     lines = _stripped_text(text).splitlines()
     _, block = _on_block(text)
     declared = _MODE_KEY.findall("\n".join(block))
@@ -1764,16 +1779,8 @@ def _mode_input_finding(text, name):
     return out
 
 
-#: The dispatch leg of a plan wrapper. NOT line-anchored like `_PLAN_RUN_ID_KEY`,
-#: and the polarity is the reason: there a match IS the finding, so a shape the
-#: anchor misses stays silent, while here ABSENCE is the finding and the same
-#: miss reports a correctly wired file as declaring no trigger at all.
-#: `on: { workflow_dispatch:
-#: { inputs: { pr_number: … } } }` is legal YAML, and an anchor fails after `{ `
-#: however much of the flow mapping is fed in. A preceding brace, comma or
-#: whitespace stands in for the line start — safe only because both keys are
-#: searched inside the `on:` block alone: unanchored over a whole file, `versi` +
-#: `on:` is the retargeting `_ON_KEY` documents.
+# The dispatch leg of a plan wrapper. NOT line-anchored like `_PLAN_RUN_ID_KEY`, and the polarity
+# is the reason; see `_dispatch_wiring_finding`.
 _DISPATCH_TRIGGER = re.compile(r"[\s{,]workflow_dispatch[ \t]*:")
 _PR_NUMBER_INPUT = re.compile(r"[\s{,]pr_number[ \t]*:")
 _PR_FACTS_CALL = re.compile(r"/actions/pr-facts@")
@@ -1802,10 +1809,9 @@ def _dispatch_wiring_warnings(ctx):
         return [DISPATCH_WIRING_NO_COMMIT]
 
     def finding(text, name):
-        # Exact name, like the retired-input probe's: `plan.yml` is the file
-        # `actions/dispatch` targets for `verb: plan`, and the filter lives here
-        # rather than in `_dispatch_wiring_finding` so that a direct call of that
-        # function with another file's name still reports.
+        # Exact name, like the retired-input probe's: `plan.yml` is the file `actions/dispatch`
+        # targets for `verb: plan`. The filter lives here rather than in
+        # `_dispatch_wiring_finding` so a direct call with another file's name still reports.
         if name != "plan.yml":
             return []
         return _dispatch_wiring_finding(text, name)
@@ -1830,7 +1836,17 @@ def _dispatch_wiring_finding(text, name):
     (`Workflow does not have 'workflow_dispatch' trigger` versus `Unexpected
     inputs provided`) — the pair `actions/dispatch` recognises. The third is not
     a refusal at all: the wrapper accepts the dispatch and then has no source
-    for the pull request's facts."""
+    for the pull request's facts.
+
+    `_DISPATCH_TRIGGER` and `_PR_NUMBER_INPUT` are unanchored because ABSENCE is
+    the finding here: where a match IS the finding (`_PLAN_RUN_ID_KEY`) a shape
+    the anchor misses stays silent, while the same miss here would report a
+    correctly wired file as declaring no trigger at all.
+    `on: { workflow_dispatch: { inputs: { pr_number: … } } }` is legal YAML, and
+    an anchor fails after `{ ` however much of the flow mapping is fed in. A
+    preceding brace, comma or whitespace stands in for the line start. That is
+    safe only inside the `on:` block: unanchored over a whole file, `versi` +
+    `on:` is the retargeting `_on_block` documents."""
     inline, block = _on_block(text)
     on_text = "\n".join([inline or "", *block])
     out = []
@@ -2066,10 +2082,9 @@ def latest_check_ids(lines, app_id=""):
         if run is None:
             continue
         name = run.get("name") or ""
-        # An on-demand plan's mirrored cell checks share a name with the
-        # autoplan's annotation-bearing ones and are created later, so ranking
-        # them together loses the annotations: the mirror carries none. Only
-        # the apply checks are wanted from the App.
+        # An on-demand plan's mirrored cell checks share a name with the autoplan's
+        # annotation-bearing ones and are created later, so ranking them together loses the
+        # annotations: the mirror carries none. Only the apply checks are wanted from the App.
         if run.get("app_slug") not in _HARVEST_APP_SLUGS and not name.startswith(ag.APPLY_PREFIX):
             continue
         prev = newest.get(name)
@@ -2122,11 +2137,8 @@ def load_annotations(ctx):
         cid, name = line.split("\t", 1)
         payload = pathlib.Path(ctx["annotations_dir"]) / f"{cid.strip()}.json"
         try:
-            # A `[]` payload is indistinguishable from the gather step's
-            # `echo '[]'` fallback for a failed fetch: "this check run had no
-            # annotations" and "this check run's annotations could not be
-            # read" arrive here byte-identical. That is why the incomplete
-            # harvest has to be signalled out of band, via
+            # A `[]` payload is indistinguishable from the gather step's `echo '[]'` fallback for
+            # a failed fetch, so the incomplete harvest has to be signalled out of band, via
             # ctx["harvest_failed"], and cannot be inferred from the payloads.
             rows = json.loads(payload.read_text(encoding="utf-8"))
         except (OSError, ValueError):
@@ -2380,10 +2392,9 @@ def render_report(findings, annotations, ctx):
     )
     body = "\n".join(out + heading + lines)
     if len(body) > sc.HARD_CAP:
-        # The harvest section is already budgeted against sc.SIZE_BUDGET
-        # above, so overflow this large can only come from the
-        # settings-probe findings themselves -- degrade those too rather than
-        # let the comment-ops render step's `gh api ... -F body=@doctor.md` 422.
+        # The harvest section is already budgeted against sc.SIZE_BUDGET above, so overflow this
+        # large can only come from the settings-probe findings themselves — degrade those too
+        # rather than let the comment-ops render step's `gh api ... -F body=@doctor.md` 422.
         body = _findings_only_report(findings, ctx)
     return body
 

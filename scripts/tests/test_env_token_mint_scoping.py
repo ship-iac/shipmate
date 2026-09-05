@@ -1,27 +1,24 @@
 """The `environments: read` mint is its own step, and the gate path never asks
 for it.
 
-`shipmate doctor`'s plan-environment secret probe needs a fine-grained
-`environments: read` token. That permission is declared in
-`app/manifest.json`, and GitHub holds a widened grant as a **pending request**
-until an org owner accepts it -- so on every already-installed App, a mint that
-requests it fails until someone clicks Accept.
+`shipmate doctor`'s plan-environment secret probe needs a fine-grained `environments: read`
+token. That permission is declared in `app/manifest.json`, and GitHub holds a widened grant as a
+pending request until an organization owner accepts it, so on every already-installed App a mint
+requesting it fails until someone clicks Accept.
 
-That makes *where* it is requested a correctness question, not a style one:
+That makes where it is requested a correctness question, not a style one:
 
-- `actions/summary`'s `token` mint has no `continue-on-error` and gates the
-  apply-check creation and the `shipmate / gate` status. Requesting the new
-  permission there takes the merge gate down in every consumer repository that
-  has not accepted the request.
-- `actions/comment-ops`' `doctortoken` mint is `continue-on-error`, but its
-  failure short-circuits the whole doctor route to "could not mint a GitHub App
-  token" -- the new probe going dark would take the other ten with it.
+- `actions/summary`'s `token` mint has no `continue-on-error` and gates the apply-check creation
+  and the `shipmate / gate` status. Requesting the new permission there takes the merge gate down
+  in every consumer repository that has not accepted the request.
+- `actions/comment-ops`' `doctortoken` mint is `continue-on-error`, but its failure
+  short-circuits the whole doctor route to "could not mint a GitHub App token", so the new probe
+  going dark would take the other ten with it.
 
-So the permission is minted by a dedicated `continue-on-error` step in each
-action and handed to doctor as `SHIPMATE_ENV_TOKEN`, which the probe treats as
-optional. These guards pin both halves: the dedicated mints exist and are
-scoped and non-fatal, and the two load-bearing mints do not carry the
-permission.
+So the permission is minted by a dedicated `continue-on-error` step in each action and handed to
+doctor as `SHIPMATE_ENV_TOKEN`, which the probe treats as optional. These guards pin both halves:
+the dedicated mints exist, are scoped and are non-fatal, and the two load-bearing mints do not
+carry the permission.
 """
 
 import yaml
@@ -35,8 +32,8 @@ _MINT = "actions/create-github-app-token"
 #: action -> id of the load-bearing mint that must NOT request the permission.
 _GATE_MINTS = {"summary": "token", "comment-ops": "doctortoken"}
 
-#: The doctor modes that run the probes. `check-ids` only reduces a check-runs
-#: listing, so it is deliberately not here.
+#: The doctor modes that run the probes. `check-ids` only reduces a check-runs listing, so it is
+#: deliberately not here.
 _PROBE_MODES = frozenset({"annotate", "report"})
 
 
@@ -62,9 +59,9 @@ def test_each_action_mints_the_environments_permission_in_its_own_step():
 
 
 def test_the_environments_mint_requests_nothing_else():
-    """A second mint is only safe because it is narrow: anything else requested
-    here is a permission the gate path already has under a token that works,
-    and adding it widens what a failed Accept takes down."""
+    """A second mint is only safe because it is narrow: anything else requested here is a
+    permission the gate path already has under a token that works, and adding it widens what a
+    failed Accept takes down."""
     for action in _GATE_MINTS:
         with_ = _by_id(_steps(action), "envtoken")["with"]
         perms = {k: v for k, v in with_.items() if k.startswith("permission-")}
@@ -81,12 +78,12 @@ def test_the_gate_path_mints_do_not_request_the_environments_permission():
 
 
 def test_each_doctor_step_receives_the_env_token():
-    """The probe reads SHIPMATE_ENV_TOKEN from its own environment. A mint whose
-    output nobody threads is a check that is dark on every run.
+    """The probe reads SHIPMATE_ENV_TOKEN from its own environment. A mint whose output nobody
+    threads is a check that is dark on every run.
 
-    Selected by mode rather than by "the steps that already carry the token", so
-    that *every* probe-running step must thread it -- otherwise a third one added
-    later without it would satisfy this by the other two."""
+    Selected by mode rather than by the steps that already carry the token, so every
+    probe-running step must thread it. Otherwise a third one added later without it would satisfy
+    this by the other two."""
     for action in _GATE_MINTS:
         consumers = [
             s
@@ -102,8 +99,8 @@ def test_each_doctor_step_receives_the_env_token():
 
 
 def test_the_check_ids_step_is_not_a_consumer():
-    """`check-ids` mode reduces a check-runs listing and runs no probe, so it
-    has no use for the token; passing it there would only widen exposure."""
+    """`check-ids` mode reduces a check-runs listing and runs no probe, so it has no use for the
+    token. Passing it there would only widen exposure."""
     for step in _steps("comment-ops"):
         env = step.get("env") or {}
         if env.get("SHIPMATE_DOCTOR_MODE") == "check-ids":

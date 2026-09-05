@@ -51,8 +51,8 @@ def test_neutral_no_change_apply_counts_as_done():
 
 
 def test_latest_run_per_name_wins():
-    # A re-created check (e.g. plan rerun superseding an older pending one)
-    # must be judged by its newest run, picked by check-run id (creation order).
+    # A re-created check, a plan rerun superseding an older pending one for instance, must be
+    # judged by its newest run, picked by check-run id, which is creation order.
     runs = [
         _run(
             "apply / stacks/app / dev-eu",
@@ -162,9 +162,9 @@ def test_parse_jsonl_malformed_line_raises_systemexit_naming_line():
 
 
 def test_latest_by_name_handles_missing_started_at_key():
-    # A run missing the 'started_at' key entirely (not merely None/"") must not
-    # KeyError. Ordering no longer uses started_at at all, but a run may still
-    # arrive without it, so latest_by_name must tolerate its absence.
+    # A run missing the 'started_at' key entirely, not merely None or "", must not KeyError.
+    # Ordering does not use started_at at all, but a run may still arrive without it, so
+    # latest_by_name must tolerate its absence.
     runs = [
         {
             "name": "apply / stacks/app / dev-eu",
@@ -178,8 +178,8 @@ def test_latest_by_name_handles_missing_started_at_key():
 
 
 def test_latest_by_name_handles_missing_id_key():
-    # A run missing the 'id' key entirely must not KeyError -- a refactor from
-    # `run.get("id") or 0` to plain `run["id"]` must fail this test.
+    # A run missing the 'id' key entirely must not KeyError. Fails when `run.get("id") or 0`
+    # becomes a plain `run["id"]`.
     runs = [
         {
             "name": "apply / stacks/app / dev-eu",
@@ -193,12 +193,13 @@ def test_latest_by_name_handles_missing_id_key():
 
 
 def test_latest_by_name_newer_queued_null_started_at_beats_older_completed():
-    # The [0] regression: a queued duplicate created AFTER an apply completed
-    # carries a null started_at but a higher (newer) id. Ordering by id means
-    # the newer queued run wins, so the name is judged pending and is NOT masked
-    # by the older completed run. Under the old (started_at, id) ordering the
-    # null started_at ('') sorted below the completed run's real timestamp and
-    # the completed run wrongly won -- silently marking unapplied work done.
+    """A queued duplicate created after an apply completed carries a null started_at but a
+    higher, newer id. Ordering by id means the newer queued run wins, so the name is judged
+    pending and is not masked by the older completed run.
+
+    Fails under a (started_at, id) ordering: the null started_at ('') sorts below the completed
+    run's real timestamp, the completed run wins, and unapplied work is silently marked
+    done."""
     older_completed = {
         "name": "apply / stacks/app / dev-eu",
         "status": "completed",
@@ -233,10 +234,10 @@ def test_parse_jsonl_truncates_long_offending_line():
 
 
 def test_latest_by_name_empty_prefix_gathers_all_latest_per_name():
-    # summary-comment calls latest_by_name(prefix="") to gather every check-run
-    # on the head SHA; the plan-link anchor is check_url's exact `<stack> / <env>`
-    # lookup, not a prefix filter. Latest-id-per-name still applies, and the
-    # coexisting apply check keeps its distinct `apply / ` name.
+    """summary-comment calls latest_by_name(prefix="") to gather every check-run on the head
+    SHA, because the plan-link anchor is check_url's exact `<stack> / <env>` lookup rather than
+    a prefix filter. Latest-id-per-name still applies, and the coexisting apply check keeps its
+    distinct `apply / ` name."""
     runs = [
         {"name": "stacks/app / dev-eu", "id": 1, "html_url": "u1"},
         {"name": "stacks/app / dev-eu", "id": 3, "html_url": "u3"},
@@ -292,19 +293,19 @@ def test_forged_newer_completed_duplicate_cannot_green_a_pending_name():
 
 
 def test_from_app_empty_app_id_fails_loud():
-    # An unset SHIPMATE_APP_ID renders as '' -- int('') must not raw-traceback
-    # (ValueError) and take down the whole detect/gate/apply run; fail loud
-    # with a message naming the variable instead.
+    # An unset SHIPMATE_APP_ID renders as '', and int('') must not raw-traceback with a
+    # ValueError that takes down the whole detect, gate or apply run. It fails loud with a
+    # message naming the variable instead.
     runs = [_run_obj("apply / stacks/app / dev-eu")]
     with pytest.raises(SystemExit, match="SHIPMATE_APP_ID"):
         ag.from_app(runs, "")
 
 
 def test_app_done_names_excludes_foreign_app_completed():
-    # The real guard for detect scripts' main(): if app_done_names ever stops
-    # calling from_app internally, this must go red. A foreign-App (15368,
-    # github-actions) completed check must never appear in the result, even
-    # though an App-authored (999) completed check for a different name does.
+    """The real guard for detect scripts' main(): app_done_names ever ceasing to call from_app
+    internally must redden here. A foreign-App completed check (15368, github-actions) must
+    never appear in the result, even though an App-authored one (999) for a different name
+    does."""
     ours = json.dumps(_run_obj("apply / stacks/app / dev-eu", id=1, app_id=999))
     foreign = json.dumps(_run_obj("apply / stacks/app / dev-us", id=2, app_id=15368))
     names = ag.app_done_names([ours, foreign], "999")
@@ -319,14 +320,14 @@ def _ext(name, id, external_id, app_id=999, started_at="2026-07-18T10:00:00Z"):
     return json.dumps(run)
 
 
-# Must contain letters: an all-digit "hex" string parses as a JSON int, so it
-# exercises the non-dict guard instead of the JSONDecodeError path this pins.
+# Must contain letters: an all-digit "hex" string parses as a JSON int, so it exercises the
+# non-dict guard instead of the JSONDecodeError path this pins.
 LEGACY_HEX = "a3f" + "b" * 61
 
 
 def test_plan_runs_newest_app_run_supplies_the_id():
-    # id order and started_at order deliberately disagree: the higher id wins
-    # even though it started earlier, because latest_by_name orders by id.
+    # id order and started_at order deliberately disagree: the higher id wins even though it
+    # started earlier, because latest_by_name orders by id.
     older = _ext(
         "apply / stacks/app / dev-eu",
         1,
@@ -356,14 +357,14 @@ def test_plan_runs_ignores_foreign_app_even_when_newest():
 
 
 def test_plan_runs_legacy_bare_hex_external_id_is_absent():
-    # Records written by an engine version before external_id carried JSON are
-    # a bare 64-hex fingerprint: absent, never a JSONDecodeError traceback.
+    # Records written by an engine version before external_id carried JSON are a bare 64-hex
+    # fingerprint. They read as absent, never as a JSONDecodeError traceback.
     line = _ext("apply / stacks/app / dev-eu", 1, LEGACY_HEX)
     assert ag.plan_runs_by_name([line], "999") == {}
 
 
-# "1" * 64 is the only case that reaches the isinstance(record, dict) guard --
-# it parses as a JSON int, not a dict. Keep it.
+# "1" * 64 is the only case that reaches the isinstance(record, dict) guard, because it parses
+# as a JSON int rather than a dict. Keep it.
 @pytest.mark.parametrize("external_id", [None, "", "not json at all", "1" * 64])
 def test_plan_runs_unusable_external_id_is_absent(external_id):
     line = _ext("apply / stacks/app / dev-eu", 1, external_id)
@@ -385,8 +386,8 @@ def test_plan_runs_bad_plan_run_value_is_absent(record):
 
 
 def test_plan_runs_only_apply_prefixed_names():
-    # latest_by_name's default prefix must not be overridden: a plan check with
-    # a well-formed record contributes nothing.
+    # latest_by_name's default prefix must not be overridden: a plan check with a well-formed
+    # record contributes nothing.
     record = json.dumps({"fingerprint": "a" * 64, "plan_run": "111"})
     apply_line = _ext("apply / stacks/app / dev-eu", 1, record)
     plan_line = _ext("stacks/app / dev-eu", 2, record)
@@ -396,9 +397,9 @@ def test_plan_runs_only_apply_prefixed_names():
 
 
 def test_plan_runs_mode_prints_the_mapping_and_writes_no_verdict(monkeypatch, capsys):
-    # comment-ops' reviewed-plan lookup is this mode. GITHUB_OUTPUT is
-    # deliberately unset: a gate verdict written here would be a decision the
-    # caller never asked for, and would abort on the missing variable instead.
+    # comment-ops' reviewed-plan lookup is this mode. GITHUB_OUTPUT is deliberately unset: a
+    # gate verdict written here would be a decision the caller never asked for, and would abort
+    # on the missing variable instead.
     record = json.dumps({"fingerprint": "a" * 64, "plan_run": "777"})
     stdin = io.StringIO(
         _ext("apply / stacks/app / dev-eu", 1, record)
@@ -414,8 +415,8 @@ def test_plan_runs_mode_prints_the_mapping_and_writes_no_verdict(monkeypatch, ca
 
 
 def test_an_unrecognized_argument_fails_loud(monkeypatch):
-    # A typo'd flag must not fall through to the verdict path, which would write
-    # a gate decision where the caller asked for the mapping.
+    # A typo'd flag must not fall through to the verdict path, which would write a gate
+    # decision where the caller asked for the mapping.
     monkeypatch.setattr(ag.sys, "argv", ["apply-gate", "--plan-run"])
     with pytest.raises(SystemExit) as exc:
         ag.main()

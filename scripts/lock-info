@@ -12,7 +12,10 @@ Measured against OpenTofu v1.12.4 on both the local backend and S3 with
 line differs — so nothing here reads that line. The block arrives inside
 OpenTofu's `|`-prefixed diagnostic box even with no TTY, values are space-padded
 after the colon, and on a GitHub Actions runner every one of those lines is
-ANSI-coloured (see `_ANSI_RE`).
+ANSI-coloured, because OpenTofu colours its diagnostics whenever the sink looks
+capable and a runner's does: a live cell emits `ESC[31m│ESC[0m ESC[0mLock Info:`
+rather than `│ Lock Info:` (see `_ANSI_RE`). The first fixtures were captured
+through a colour-stripping filter; capture new ones raw.
 
 Fail-closed by construction: anything short of a complete block with an
 in-charset `ID` returns None, which every caller reads as "do not unlock".
@@ -30,16 +33,9 @@ import sys
 _ERROR_LINE = "Error acquiring the state lock"
 _BLOCK_START = "Lock Info:"
 
-# OpenTofu colours its diagnostics whenever the sink looks capable, and a GitHub
-# Actions runner does, so a live cell emits `ESC[31m│ESC[0m ESC[0mLock Info:`
-# rather than `│ Lock Info:`. Colour comes off before anything else here: every
-# pattern below anchors at the start of the line, which is exactly where an
-# escape sequence sits.
-#
-# The apply-comment path never exposed this. It strips ANSI in `load_cells`
-# before this parser is reached, and the captures used as fixtures had been put
-# through a colour-stripping filter as they were taken -- so the first output
-# this parser ever met with colour still in it was a real unlock run against S3.
+# Colour comes off before anything else here: every pattern below anchors at the start of the
+# line, which is exactly where an escape sequence sits. `apply-comment` strips ANSI in
+# `load_cells` before this parser is reached, so only the CLI path meets a coloured block.
 _ANSI_RE = re.compile(
     r"\x1b\[[0-?]*[ -/]*[@-~]"  # CSI
     r"|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)"  # OSC
@@ -58,11 +54,7 @@ _ID_RE = re.compile(r"^[0-9a-fA-F][0-9a-fA-F-]{7,63}$")
 _WANTED = {"ID": "id", "Path": "path", "Operation": "operation", "Created": "created"}
 
 
-# `created` and `operation` are display-only, and unlike `id` they have no
-# format the engine can rely on -- apply.txt is provider/`local-exec` output,
-# capped only in total (60,000 chars), so one `Created:` line can carry tens of
-# thousands of characters or markdown emphasis into the bot comment that renders
-# it. Both are whitelisted at the source so every consumer inherits the bound.
+# Whitelisted at the source, so every consumer inherits the bound; see `_fields`.
 _CREATED_RE = re.compile(r"^[0-9A-Za-z:.+\- ]{1,64}$")
 _OPERATION_RE = re.compile(r"^[A-Za-z]{1,32}$")
 
@@ -81,6 +73,11 @@ def _fields(lines):
     `created` and `operation` are blanked rather than dropped, so `parse`'s
     completeness check still sees a complete block; `id` is never touched here,
     because an unusable one makes the whole lock unusable and `parse` refuses it.
+
+    Unlike `id`, those two have no format the engine can rely on: apply.txt is
+    provider/`local-exec` output, capped only in total (60,000 chars), so one
+    `Created:` line can carry tens of thousands of characters or markdown
+    emphasis into the bot comment that renders it.
     """
     found = {}
     for ln in lines:

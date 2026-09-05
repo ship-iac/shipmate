@@ -1,16 +1,16 @@
-"""Unit tests for scripts/verify-environments and the action step that runs it.
+"""`scripts/verify-environments` and the action step that runs it.
 
-The pre-flight is fail-closed by design, and three of its refusals are the ones
-that would otherwise have landed fail-open, so each has its own test:
+The pre-flight is fail-closed by design, and three of its refusals are the ones that would
+otherwise have landed fail-open, so each has its own test:
 
 - a binding no environment satisfies fails the run, naming every missing one;
-- a listing that could not be read fails the run (the action's bash), with text
-  saying a transient failure clears on a re-run;
+- a listing that could not be read fails the run, in the action's bash, with text saying a
+  transient failure clears on a re-run;
 - a listing whose `total_count` exceeds what was read fails the run.
 
-The bash tests execute the real, unmodified action step with `gh` replaced by a
-bash function and `python3` pointed at the interpreter running pytest, so the
-whole chain -- listing, refusal text, exit status -- is what ships.
+The bash tests execute the real, unmodified action step with `gh` replaced by a bash function and
+`python3` pointed at the interpreter running pytest, so the whole chain -- listing, refusal text,
+exit status -- is what ships.
 """
 
 import json
@@ -63,8 +63,8 @@ def test_a_truncated_listing_is_refused():
 
 
 def test_a_listing_without_a_total_count_is_not_taken_as_complete():
-    # Absence-means-complete would be fail-open: the KeyError propagates and
-    # fails the step, which is the direction this guard exists to hold.
+    # Absence-means-complete would be fail-open. The KeyError propagates and fails the step,
+    # which is the direction this guard exists to hold.
     with pytest.raises(KeyError):
         vf.existing_names({"environments": [{"name": "dev-eu-apply"}]})
 
@@ -104,9 +104,8 @@ def _run_step(tmp_path, listing, waves_json, shared_envs, gh_exit=0):
 
 
 def _out(proc):
-    """Both streams: the runner reads workflow commands from either, and the
-    script's refusals travel on stderr through SystemExit while the action's own
-    `echo` goes to stdout."""
+    """Both streams: the runner reads workflow commands from either, and the script's refusals
+    travel on stderr through SystemExit while the action's own `echo` goes to stdout."""
     return proc.stdout + proc.stderr
 
 
@@ -157,7 +156,7 @@ def test_unparseable_waves_json_fails_the_run(tmp_path):
 
 @pytest.mark.skipif(_BASH is None, reason="bash not installed")
 def test_a_shared_env_is_satisfied_by_the_bare_environment(tmp_path):
-    # The other half of the branch: with dev-eu listed, `dev-eu-apply` need not
-    # exist and `dev-eu` must.
+    # The other half of the branch: with dev-eu listed, `dev-eu-apply` need not exist and
+    # `dev-eu` must.
     proc = _run_step(tmp_path, _listing(["dev-eu"]), json.dumps(WAVES), "dev-eu")
     assert proc.returncode == 0, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"

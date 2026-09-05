@@ -1,5 +1,3 @@
-"""Unit tests for scripts/apply-snapshot."""
-
 import pytest
 from _loader import load_script
 
@@ -54,11 +52,10 @@ def test_keeps_every_pre_existing_duplicate_for_a_cell():
 
 
 def test_a_single_cell_with_no_apply_check_fails_the_whole_run():
-    # Excluding the cell instead would let it apply for real with no id for the
-    # trailing completer to PATCH: its check stays pending forever, the gate
-    # stays pending with it, and a re-run hits the exact-plan stale-plan
-    # fail-safe against the state that cell already advanced. This runs
-    # pre-flight, before wave0, so failing costs the run but applies nothing.
+    # Excluding the cell instead would let it apply for real with no id for the trailing
+    # completer to PATCH: its check stays pending forever, the gate stays pending with it, and a
+    # re-run hits the exact-plan stale-plan fail-safe against the state that cell already
+    # advanced. This runs pre-flight, before wave0, so failing costs the run but applies nothing.
     with pytest.raises(SystemExit) as exc:
         apply_snapshot.snapshot(WAVES, [check("apply / stacks/dns / dev-eu", 1)], APP_ID)
     assert "apply / stacks/app / dev-eu" in str(exc.value)
@@ -77,9 +74,8 @@ def test_a_cell_whose_only_check_belongs_to_another_identity_fails_too():
 
 
 def test_a_run_where_no_cell_has_a_check_fails_loudly():
-    # A whole-run signal (wrong head SHA, no plan, a misconfigured App id).
-    # No separate whole-run branch is needed now that the per-cell check is
-    # strict -- the first wanted cell already fails it.
+    # A whole-run signal: a wrong head SHA, no plan, a misconfigured App id. The strict per-cell
+    # check needs no separate whole-run branch, because the first wanted cell already fails it.
     with pytest.raises(SystemExit) as exc:
         apply_snapshot.snapshot(WAVES, [check("stacks/dns / dev-eu", 3)], APP_ID)
     assert "apply / stacks/dns / dev-eu" in str(exc.value)

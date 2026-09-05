@@ -78,13 +78,11 @@ def decide(*, detect_result, plan_result, planned_cells, cell_count, pending):
 
     state is None when nothing should be written at all.
 
-    `plan_result` is a JOB result, not the old run conclusion, and the two
-    disagree on exactly one value: `skipped`. A run whose plan matrix was empty
-    used to arrive here as a SUCCESSFUL run; it now arrives as a skipped job.
-    Treating that as "write nothing" would leave every docs-only pull request
-    with no gate at all — so `skipped` is accepted, and then measured against
-    the same evidence checks as a successful plan rather than short-circuiting
-    past them.
+    `plan_result` is a JOB result, not a run conclusion, and the two disagree on
+    exactly one value: `skipped`. A run whose plan matrix was empty arrives as a
+    skipped job. Treating that as "write nothing" would leave every docs-only
+    pull request with no gate at all, so `skipped` is accepted and then measured
+    against the same evidence checks as a successful plan.
     """
     if detect_result != "success":
         return (
@@ -128,10 +126,9 @@ def main():
         detect_result=os.environ["SHIPMATE_DETECT_RESULT"],
         plan_result=os.environ["SHIPMATE_PLAN_RESULT"],
         planned_cells=os.environ.get("SHIPMATE_PLANNED_CELLS", ""),
-        # Bare `int()`, unlike the planned count: this one is `len(cells)` from
-        # summary-comment, so a non-integer here means that step did not run and
-        # the ValueError kills the action before any gate is written -- which
-        # blocks the merge. Fail-closed, and not the same guarantee as a hold.
+        # Bare `int()`, unlike the planned count: this one is `len(cells)` from summary-comment,
+        # so a non-integer means that step did not run and the ValueError kills the action
+        # before any gate is written -- blocking the merge. Fail-closed, not a hold's guarantee.
         cell_count=int(os.environ.get("SHIPMATE_CELL_COUNT", "0")),
         pending=os.environ.get("SHIPMATE_PENDING", "false") == "true",
     )

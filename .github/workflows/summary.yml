@@ -1,6 +1,10 @@
 name: summary
 on:
   workflow_call:
+    # The decision lives in the `summary` job, but the facts arrive as inputs the caller states: a
+    # reusable workflow's job-level `if:` reads only YAML contexts, so it cannot call a script, and
+    # reading the event payload directly is what made the `summary` job's `if:` and `build-matrix`,
+    # which keyed on the event name, disagree about what a non-pull-request trigger means.
     inputs:
       pr-number:
         required: true
@@ -17,6 +21,9 @@ on:
       planned-cells:
         required: true
         type: string
+      # Empty `head-repo` refuses: the caller gets a skipped job rather than an App-authored gate
+      # over fork content. Empty `is-draft` refuses unless `on-demand` is 'true', and empty
+      # `on-demand` refuses unless `is-draft` is 'false'.
       head-repo:
         required: false
         default: ""
@@ -25,57 +32,43 @@ on:
         required: false
         default: ""
         type: string
+      # Stated by the same producer as `head-repo` and `is-draft`. A caller that states it from
+      # anywhere else is a wiring defect `shipmate doctor` reports, not one the `if:` can see.
       on-demand:
         required: false
         default: ""
         type: string
+    # Declaring no other secret is load-bearing: mapping a secret a callee does not declare is a
+    # hard load-time error, so a plan wrapper passes this key alone and never the passphrase.
     secrets:
-      # `required: false` — see apply.yml's note. This workflow's only job binds
-      # `environment: shipmate-engine`, so a required declaration happens to be
-      # satisfiable today; adding any job that does not bind the environment
-      # would make every consumer that scopes the key to it fail at load time.
-      # Declaring nothing else is also load-bearing: mapping a secret a callee
-      # does not declare is a hard load-time error, so a consumer's plan
-      # wrapper passes this key alone and never the passphrase.
+      # `required: false` -- apply.yml's `secrets:` note carries the argument. The one job here
+      # binds `environment: shipmate-engine`, so a required declaration is satisfiable today; a job
+      # that bound no environment would fail every consumer scoping the key to it, at load time.
       SHIPMATE_APP_PRIVATE_KEY: { required: false }
 jobs:
   summary:
-    # The decision lives here, but the facts arrive as inputs the caller states:
-    # a reusable workflow's job-level `if:` can read only YAML contexts, so it
-    # cannot call a script, and reading the event payload directly is what made
-    # this guard and `build-matrix` — which keyed on the event name — disagree
-    # about what a non-pull-request trigger means. Empty means refuse: a caller
-    # that omits an input gets a skipped job rather than an App-authored gate
-    # over fork content. On the job, not on a step: a skipped job creates no
-    # deployment and never enters the environment, whereas a first-step check
-    # would already hold the App key in scope.
-    # The fork clause yields to no trigger: it is the one guarding App-key
-    # exposure over fork-authored content. The draft clause does yield, because
-    # skipping a draft is autoplan's economy, not a trust decision — and
-    # `shipmate plan` on a draft is a collaborator asking for exactly that plan.
-    # `on-demand` is stated by the same producer as the other two facts — a
-    # caller that states it from anywhere else is a wiring defect
-    # `shipmate doctor` reports, not one this guard can see. The
-    # parentheses are load-bearing: `&&` binds tighter than `||`, so dropping
-    # them would let `on-demand` alone satisfy the whole guard, fork included.
+    # The fork clause yields to no trigger; it alone guards App-key exposure over fork-authored
+    # content. The draft clause does yield: skipping a draft is autoplan's economy, not a trust
+    # decision, and `shipmate plan` on a draft asks for that plan. The parentheses are load-bearing:
+    # `&&` binds tighter than `||`, so without them a fork's `on-demand` alone satisfies the guard.
     if: >-
       inputs.head-repo != '' &&
       inputs.head-repo == github.repository &&
       (inputs.is-draft == 'false' || inputs.on-demand == 'true')
     runs-on: ubuntu-latest
+    # The guard is on the job, not on a step: a skipped job creates no deployment and never enters
+    # the environment, whereas a first-step check would already hold the App key in scope.
     environment: shipmate-engine
     permissions:
       contents: read
     steps:
+      # Unconditional: skipping it when zero cells were planned would make gate-state's "more
+      # cells than planned" branch unreachable, so a run reporting zero planned cells while cell
+      # summaries exist would green the gate instead of holding it. A `pattern:` matching nothing
+      # is a no-op for this action, not a failure -- only `name:` errors on a miss.
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        # Unconditional: skipping it when zero cells were planned would make
-        # gate-state's "more cells than planned" branch structurally unreachable,
-        # so a run reporting zero planned cells while cell summaries exist would
-        # green the gate instead of holding. A `pattern:` that matches nothing
-        # is a no-op for this action, not a failure — only `name:` errors on a
-        # miss — so there is nothing to guard against.
-        # A failed download must reach gate-state as a cell-summary shortfall it
-        # reports on the gate, not as a dead job that writes no gate at all.
+        # A failed download must reach gate-state as a cell-summary shortfall it reports on the
+        # gate, not as a dead job that writes no gate at all.
         continue-on-error: true
         with:
           pattern: cell-summary.*

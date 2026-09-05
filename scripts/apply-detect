@@ -8,8 +8,8 @@ Unlike deploy-detect (merge-driven, all envs), the work set here is scoped to
 ONE environment and sourced from the head's own apply checks: a run-graph stack
 belongs to this run when `apply / <path> / <env>` is among the App-authored
 checks on the head, and the plan run it applies from is the one that check
-records. We drop cells whose apply check already completed (idempotent no-op),
-then wave-order. A targeted `shipmate apply <env>` is single-env and explicit by
+records. Cells whose apply check already completed are dropped (idempotent
+no-op), and the rest wave-ordered. A targeted `shipmate apply <env>` is explicit by
 design — it never blocks on other environments; region-level sequencing across
 envs is handled separately on the apply-all path.
 
@@ -221,7 +221,7 @@ def validate_env(value):
     (the source of env names), but that is an upstream tool's invariant; enforce
     it here at the trust boundary rather than trusting it silently. A dotted env
     would let distinct (env, slug) pairs render the same artifact name and
-    cross-enrol the wrong stack into a wave — the exact bug the rename removed.
+    cross-enrol the wrong stack into a wave.
 
     Empty is refused for a second reason: `_review_reason` reads an empty
     environment as a BARE apply and exempts it whenever the variable names any
@@ -272,7 +272,7 @@ def run_unlock(repo, env, head):
     deliberately avoids (one unrelated stack's unresolvable expression would
     block an approved plan). That trade is inverted here on purpose: unlock has
     no plan to protect, and it must reach a cell whose plan artifacts expired
-    long ago. Deliberate, not an oversight.
+    long ago.
 
     `require_env_tag=False` for the same reason the bare-apply path passes it: an
     untagged stack contributes no cell anyway, and unlock is the RECOVERY verb —

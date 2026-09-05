@@ -130,12 +130,10 @@ def test_declared_envs_skips_malformed_cell_json(tmp_path):
 
 
 def test_declared_envs_skips_cell_json_without_a_usable_environment(tmp_path):
-    # Well-formed JSON that isn't the expected shape (e.g. a truncated
-    # download that still parses) must degrade the same way -- KeyError, not
-    # just JSONDecodeError, is one of the guarded exceptions. A present but
-    # unusable value (null, non-string, empty) must be dropped too: it would
-    # otherwise make envs_available true and run every environment probe
-    # against a name that cannot exist.
+    """Well-formed JSON of the wrong shape degrades like unparsable JSON: KeyError, not
+    only JSONDecodeError, is a guarded exception. A null, non-string or empty
+    `environment` is dropped too, or `envs_available` goes true and every environment
+    probe runs against a name that cannot exist."""
     for i, payload in enumerate(
         [{"stack": "app"}, {"environment": None}, {"environment": 7}, {"environment": ""}]
     ):
@@ -224,25 +222,27 @@ def _env(name, rules=(), branch_policy=None):
 
 
 def _quiet_new_probes():
-    """Healthy responses for the env-protection, engine-environment,
-    plan-env-secret, pin-freshness, fork-trigger, summary-wiring and
-    dispatch-wiring probes, so tests exercising the older gate/environment probes
-    via the top-level `warnings()` don't pick up incidental noise from these
-    seven. The two retired-input probes need no response here: the listing below
-    names no `apply.yml`, which is the only file either judges.
+    """Healthy responses for the env-protection, engine-environment, plan-env-secret,
+    pin-freshness, fork-trigger, summary-wiring and dispatch-wiring probes, so tests
+    exercising the older gate/environment probes through `warnings()` collect no
+    incidental noise from these seven. The two retired-input probes need no response: the
+    listing names no `apply.yml`, the only file either judges.
 
-    The last four read the same workflow listing. `_QUIET_PLAN`'s `uses:` lines
-    are engine pins, so the pin probe has something to read and needs the
-    release endpoints to agree with them -- the pinned SHA and the SHA the
-    release lookup returns are the same `_SHA`, or it reports staleness. That
-    same file is on `pull_request_target` and named `plan.yml`, which is what
-    keeps the fork-trigger probe quiet: it is the exemption, not the absence of
-    the trigger. Its summary call carries both normalized inputs, which keeps
-    the summary-wiring probe quiet, and its dispatch leg -- the trigger, the
-    `pr_number` input, the `pr-facts` step -- keeps the dispatch-wiring probe
-    quiet. The plan-env
-    secret probe reads one listing per plan env; an empty one keeps the healthy
-    path quiet."""
+    The last four read the same workflow listing. `_QUIET_PLAN`'s `uses:` lines are engine
+    pins, so the pin probe has something to read and needs the release endpoints to agree
+    with them -- the pinned SHA and the SHA the release lookup returns are the same `_SHA`,
+    or it reports staleness. That file is on `pull_request_target` and named `plan.yml`,
+    which keeps the fork-trigger probe quiet: it is the exemption, not the absence of the
+    trigger. Its summary call carries both normalized inputs, keeping the summary-wiring
+    probe quiet, and its dispatch leg -- the trigger, the `pr_number` input, the
+    `pr-facts` step -- keeps the dispatch-wiring probe quiet. The plan-env secret probe
+    reads one listing per plan env; an empty one keeps the healthy path quiet.
+
+    `_QUIET_PLAN` writes `head-repo` TWICE, as a correctly wired wrapper does: once on the
+    `build-matrix` step, once on the summary call. Without the first occurrence a wiring
+    probe searching the whole file instead of the summary call's own region passes this
+    fixture while missing the finding it exists for. `head-sha` is the step's second
+    expectation and appears only there."""
     return {
         f"repos/{_REPO}/environments/dev-eu-plan": _env("dev-eu-plan"),
         f"repos/{_REPO}/environments/dev-eu-plan/secrets?per_page=100": _secrets(),
@@ -281,8 +281,8 @@ def test_missing_environment_of_the_split_pair_warned(monkeypatch):
     already have."""
     responses = {
         f"repos/{_REPO}/rules/branches/{_BRANCH}?per_page=100": _gate_rule(),
-        # dev-eu-apply is missing; shipmate-engine present so only the pair
-        # probe's own finding surfaces
+        # `dev-eu-apply` is missing, and `shipmate-engine` is present so that only the
+        # pair probe's own finding surfaces.
         f"repos/{_REPO}/environments?per_page=100": _environments("dev-eu-plan", "shipmate-engine"),
         **_quiet_new_probes(),
     }
@@ -332,13 +332,11 @@ def test_no_environment_at_all_names_both_modes(monkeypatch):
 
 
 def test_ambiguous_environment_naming_is_the_phantom_control_warning(monkeypatch):
-    """Both namings present is the one silent failure: whichever environment
-    nothing binds is protected by rules in no code path, and it reads as a control
-    that is there. So the finding names both, says the binding is decided by the
-    variable and by the consumer's own plan.yml, and hedges *which* naming is the
-    unbound one -- with a static plan-side `-plan` binding and the env shared,
-    both namings are live, so this may not assert that one is inert nor advise
-    deleting it."""
+    """Both namings present is the one silent failure: whichever environment nothing binds
+    is protected by rules in no code path, reading as a control that is there. So the
+    finding names both, says the variable and the consumer's own `plan.yml` decide the
+    binding, and hedges WHICH naming is unbound -- a static plan-side `-plan` binding with
+    the env shared leaves both live, so it may not call one inert nor advise deleting it."""
     monkeypatch.setattr(doctor, "_gh_json", _existence("dev-eu", "dev-eu-apply"))
     out = doctor._environment_warnings(_ctx())
     # Two findings and no more: the ambiguity WARNING plus the missing `dev-eu-plan`
@@ -350,10 +348,9 @@ def test_ambiguous_environment_naming_is_the_phantom_control_warning(monkeypatch
     assert "`dev-eu-apply`" in text
     assert "SHIPMATE_SHARED_ENVS" in text
     assert "plan.yml" in text
-    # The binding half...
+    # Both halves are asserted -- the binding one, and the phantom-control one this test
+    # is named for -- or the name and docstring claim more than the body checks.
     assert "Either naming may therefore be bound by nothing" in text
-    # ...and the phantom-control half this test is named for. Both halves, or the
-    # name and docstring claim more than the body checks.
     assert "reading as a control that is in no code path" in text
     assert "the other is bound by nothing" not in text
     assert "Delete the environments" not in text
@@ -429,7 +426,6 @@ def test_gate_rule_wrong_integration_id_warned(monkeypatch):
 
 def test_gate_rule_absent_warned(monkeypatch):
     responses = {
-        # no required_status_checks rule at all
         f"repos/{_REPO}/rules/branches/{_BRANCH}?per_page=100": [
             {"type": "deletion", "parameters": {}},
             _pull_request_rule(),
@@ -464,16 +460,10 @@ def test_strict_policy_off_warned(monkeypatch):
 
 
 def test_probe_403_degrades_to_note_not_failure(monkeypatch):
-    # rules/branches probe raises the REAL failure type: bm.gh_json (via
-    # build-matrix's _run) hard-fails a nonzero `gh api` exit with
-    # `raise SystemExit(...)`, not a plain Exception -- SystemExit derives
-    # from BaseException, so a catch of only `except Exception` would let
-    # this propagate right past warnings(). This test simulates that exact
-    # 403-on-rules/branches case. The environments probe still succeeds and
-    # its own finding must still surface alongside the degrade note -- one
-    # probe failing must not swallow the other, and no exception may escape
-    # warnings() (no pytest.raises here -- a regression fails this test with
-    # an uncaught SystemExit error, not a silent pass).
+    """`bm.gh_json` hard-fails a nonzero `gh api` exit with `raise SystemExit`, which derives
+    from BaseException, so a catch of only `except Exception` lets a 403 on `rules/branches`
+    propagate past `warnings()`. The environments probe still succeeds and its own finding
+    must surface beside the degrade note: one probe failing may not swallow the other."""
     quiet = _quiet_new_probes()
 
     def fake_gh_json(path):
@@ -483,7 +473,7 @@ def test_probe_403_degrades_to_note_not_failure(monkeypatch):
             return quiet[path]
         return _environments(
             "dev-eu-plan", "shipmate-engine"
-        )  # dev-eu-apply missing -> its own warning
+        )  # `dev-eu-apply` is missing, so that probe adds its own warning.
 
     monkeypatch.setattr(doctor, "_gh_json", fake_gh_json)
     out = doctor.warnings(_ctx())
@@ -519,12 +509,10 @@ def test_probe_generic_exception_degrades_to_note(monkeypatch):
 
 
 def test_degrade_note_names_the_probe_and_drops_the_workflow_command_prefix(monkeypatch):
-    """The degrade text is rendered verbatim into the sticky comment and into
-    `::warning ...::` annotation data. `bm.gh_json` raises
-    `::error::command failed (N): gh api <path>`, so echoing the exception puts
-    a literal workflow-command prefix in the comment body (and nests one
-    workflow command inside another in annotate mode) and leaks the internal
-    endpoint. Name the probe that was skipped; keep the reason."""
+    """The degrade text renders verbatim into the sticky comment and into `::warning ...::`
+    annotation data, so echoing `bm.gh_json`'s `::error::command failed (N): gh api <path>`
+    would put a literal workflow command in the comment body, nest one inside another in
+    annotate mode, and leak the internal endpoint. Name the probe skipped; keep the reason."""
     quiet = _quiet_new_probes()
 
     def gh(path):
@@ -539,7 +527,7 @@ def test_degrade_note_names_the_probe_and_drops_the_workflow_command_prefix(monk
     assert len(out) == 2
     level, text = next((lv, t) for lv, t in out if "gate rule" in t)
     assert level == doctor.WARNING
-    assert "command failed (1)" in text  # the reason survives
+    assert "command failed (1)" in text
     assert "::error::" not in text
     assert "gh api" not in text and "rules/branches" not in text
 
@@ -590,7 +578,7 @@ def test_apply_env_without_approval_rules_noted(monkeypatch):
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
     out = doctor._env_protection_warnings(_ctx())
     assert len(out) == 1
-    assert out[0][0] == doctor.NOTICE  # note, not warning
+    assert out[0][0] == doctor.NOTICE
     assert "dev-eu-apply" in out[0][1]
     # "no approval rules", never "no protection rules": the finding keys on
     # `approval`, which excludes the branch_policy rule GitHub synthesizes, so
@@ -601,11 +589,9 @@ def test_apply_env_without_approval_rules_noted(monkeypatch):
 
 def test_apply_env_with_only_a_branch_policy_is_still_noted(monkeypatch):
     """GitHub synthesizes a `branch_policy` protection rule whenever
-    `deployment_branch_policy` is set, so an apply environment carrying nothing
-    but a branch policy has a truthy `protection_rules` list while being
-    entirely unreviewed. Keying the note on the raw rule list therefore reported
-    an unreviewed apply environment as protected — the exact inverse of the
-    finding's purpose."""
+    `deployment_branch_policy` is set, so an apply environment carrying nothing but a
+    branch policy has a truthy `protection_rules` list while being entirely unreviewed.
+    Keying the note on the raw rule list reports it as protected, inverting the finding."""
     responses = _protection(
         _env("dev-eu-plan"),
         _env("dev-eu-apply", branch_policy={"protected_branches": True}),
@@ -661,26 +647,24 @@ def test_shared_env_with_reviewers_warns_about_plan_cells_and_drift(monkeypatch)
 
 
 def test_shared_env_with_a_branch_policy_is_a_notice_naming_the_trade_both_ways(monkeypatch):
-    """NOTICE, not the WARNING a split plan environment gets: on a shared
-    environment the policy is a real control over which branches may claim its
-    secrets, and it is simultaneously what refuses plan cells whose base ref it
-    does not name. A consumer whose pull requests all target the default branch
-    is correct to set it, so a WARNING would be one nobody can clear."""
+    """NOTICE, not the WARNING a split plan environment gets: on a shared environment the
+    policy is a real control over which branches may claim its secrets, and simultaneously
+    what refuses plan cells whose base ref it does not name. A consumer whose pull requests
+    all target the default branch is correct to set it, so a WARNING would be unclearable."""
     responses = _protection(_env("dev-eu", branch_policy={"protected_branches": True}))
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
     out = doctor._env_protection_warnings(_ctx())
     assert [lvl for lvl, _ in out] == [doctor.NOTICE, doctor.NOTICE]
     policy = next(t for _, t in out if "branch policy" in t)
-    assert "secrets" in policy  # the control it provides
-    assert "base ref" in policy  # the plan cells it can refuse
+    assert "secrets" in policy
+    assert "base ref" in policy
 
 
 def test_ambiguous_bare_env_with_a_branch_policy_keeps_the_plan_stall_warning(monkeypatch):
-    """The NOTICE above is shared mode's accepted trade and only shared mode's.
-    While both namings exist the bare environment is what an unmigrated `plan.yml`
-    still binds, so a policy on it is the plan-stall misconfiguration the plan
-    environment's WARNING exists to diagnose -- not a legitimate secret-release
-    control. Downgrading it here made an unfinished migration a note."""
+    """The NOTICE above is shared mode's accepted trade and only shared mode's. While both
+    namings exist the bare environment is what an unmigrated `plan.yml` still binds, so a
+    policy on it is the plan-stall misconfiguration the plan environment's WARNING
+    diagnoses, not a secret-release control; a downgrade demotes an unfinished migration."""
     responses = _protection(
         _env("dev-eu", branch_policy={"protected_branches": True}),
         _env("dev-eu-apply"),
@@ -712,10 +696,10 @@ def test_shared_env_without_approval_rules_says_no_gate_is_available(monkeypatch
 
 
 def test_ambiguous_naming_reads_the_protection_shape_of_both_namings(monkeypatch):
-    """Ambiguous mode reads every environment that exists, not just one naming's
-    -- pinned on the requested paths, which is all this asserts. The
-    report-level statement that one naming may be bound by nothing is
-    `_environment_warnings`' ambiguity WARNING, not a per-rule finding here."""
+    """Ambiguous mode reads every environment that exists, not one naming's alone --
+    pinned on the requested paths, which is all this asserts. The report-level statement
+    that one naming may be bound by nothing is `_environment_warnings`' ambiguity WARNING,
+    not a per-rule finding here."""
     responses = _protection(
         _env("dev-eu"),
         _env("dev-eu-plan"),
@@ -743,10 +727,9 @@ _SHARED_INTRO = (
     "listed in the `SHIPMATE_SHARED_ENVS` repository variable, which doctor cannot "
     "read —"
 )
-#: Hedged both ways: the ambiguous clause may not assert that the bare
-#: environment IS shared, and may not assert that nothing binds it either -- a
-#: static `<env>-plan` plan-side binding with the env shared leaves both namings
-#: live, and doctor reads neither the variable nor the consumer's `plan.yml`.
+#: Hedged both ways: the ambiguous clause may not assert that the bare environment IS
+#: shared, nor that nothing binds it -- a static `<env>-plan` binding with the env shared
+#: leaves both namings live, and doctor reads neither the variable nor the `plan.yml`.
 _AMBIGUOUS_INTRO = (
     "GitHub Environment `dev-eu` — shared between plan and apply only if `dev-eu` is "
     "listed in the `SHIPMATE_SHARED_ENVS` repository variable, which doctor cannot "
@@ -758,13 +741,10 @@ _AMBIGUOUS_UNBOUND = "bound by nothing at all otherwise"
 
 
 def test_shared_role_findings_hedge_the_mode_when_the_naming_is_ambiguous(monkeypatch):
-    """With both namings present the sibling ambiguity WARNING says the binding is
-    undetermined, so a finding here may not assert that the bare environment IS
-    shared -- nor that nothing binds it, which the ambiguous branch-policy WARNING
-    in the same report would contradict, and which a reader could act on by
-    deleting an environment an unmigrated `plan.yml` still binds. Two findings in
-    one report may not contradict each other; the plan-env secret notice has the
-    same rule for the same reason."""
+    """The sibling ambiguity WARNING says the binding is undetermined, so a finding here
+    may not assert that the bare environment IS shared, nor that nothing binds it -- the
+    ambiguous branch-policy WARNING in the same report would contradict that, and a reader
+    could act on it by deleting an environment an unmigrated `plan.yml` still binds."""
     responses = _protection(
         _env("dev-eu", rules=("required_reviewers",)),
         _env("dev-eu-apply", rules=("required_reviewers",)),
@@ -780,12 +760,10 @@ def test_shared_role_findings_hedge_the_mode_when_the_naming_is_ambiguous(monkey
 
 
 def test_a_shared_env_names_the_variable_its_mode_depends_on(monkeypatch):
-    """Shared mode is selected by `SHIPMATE_SHARED_ENVS`, which doctor cannot
-    read, so this finding may not assert the mode either: a migration that
-    renamed the environments and forgot the variable has applies binding
-    `dev-eu-apply` while the bare `dev-eu` looks shared. Its clause differs from
-    the ambiguous one -- here the plan side does bind this environment -- so both
-    whole clauses are pinned."""
+    """Shared mode is selected by `SHIPMATE_SHARED_ENVS`, which doctor cannot read, so
+    this finding may not assert the mode: a migration that renamed the environments and
+    forgot the variable has applies binding `dev-eu-apply` while the bare `dev-eu` looks
+    shared. Its clause differs from the ambiguous one: here the plan side binds this env."""
     responses = _protection(_env("dev-eu", rules=("required_reviewers",)))
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
     out = doctor._env_protection_warnings(_ctx())
@@ -795,11 +773,10 @@ def test_a_shared_env_names_the_variable_its_mode_depends_on(monkeypatch):
 
 
 def test_env_protection_missing_env_is_not_this_probes_problem(monkeypatch):
-    """An environment that does not exist is `_environment_warnings`' finding,
-    not this probe's — so a name absent from the environments listing is skipped
-    without a per-environment read and without a finding. That used to be
-    achieved by catching every per-environment exception and continuing, which
-    silenced 403s and 5xx on environments that DO exist."""
+    """An environment that does not exist is `_environment_warnings`' finding, not this
+    probe's, so a name absent from the environments listing is skipped without a
+    per-environment read and without a finding. Catching every per-environment exception
+    and continuing instead silences 403s and 5xx on environments that DO exist."""
     responses = _protection(_env("dev-eu-plan"), listed=["dev-eu-plan"])
     seen = []
 
@@ -813,11 +790,10 @@ def test_env_protection_missing_env_is_not_this_probes_problem(monkeypatch):
 
 
 def test_env_protection_reads_nothing_when_no_environment_was_declared(monkeypatch):
-    """With no declared environment set there is nothing to probe, so the
-    listing must not be read either — otherwise a repository whose token cannot
-    list environments collects a "could not verify the env protection settings"
-    degrade for a probe that had no work to do, alongside
-    `_environment_warnings`' (correct) skipped statement."""
+    """With no declared environment set there is nothing to probe, so the listing must not
+    be read either: a repository whose token cannot list environments would otherwise
+    collect a "could not verify the env protection settings" degrade for a probe with no
+    work to do, beside `_environment_warnings`' (correct) skipped statement."""
 
     def gh(path):
         pytest.fail(f"the env protection probe hit the API with no envs: {path}")
@@ -827,10 +803,9 @@ def test_env_protection_reads_nothing_when_no_environment_was_declared(monkeypat
 
 
 def test_env_protection_unreadable_existing_env_is_a_notice_naming_it(monkeypatch):
-    """A 403 or 5xx on an environment that IS in the listing was
-    indistinguishable from a 404 (`bm.gh_json`'s exception carries no status
-    code) and got swallowed, so the report went on to say the settings probes
-    found no problems. Listing first makes the two distinguishable:
+    """`bm.gh_json`'s exception carries no status code, so a 403 or 5xx on an environment
+    that IS in the listing is indistinguishable from a 404; swallowing it lets the report
+    say the settings probes found no problems. Listing first separates the two:
     present-but-unreadable is a note that names the environment."""
     responses = _protection(_env("dev-eu-plan"), listed=["dev-eu-plan", "dev-eu-apply"])
 
@@ -867,10 +842,9 @@ def test_env_protection_listing_failure_propagates_to_the_degrade_note(monkeypat
 
 def _engine_env_responses(env=None, policies=None, listed=True):
     """Responses for `_engine_environment_warnings`. `listed` controls whether
-    `shipmate-engine` appears in the environments **listing** -- the only
-    thing existence is decided from -- independently of `env`/`policies`,
-    which answer the per-environment reads that only ever run once existence
-    is already established."""
+    `shipmate-engine` appears in the environments listing -- the only thing existence is
+    decided from -- independently of `env`/`policies`, which answer the per-environment
+    reads that run only once existence is established."""
 
     def fake(path):
         if path == f"repos/{_REPO}/environments?per_page=100":
@@ -885,11 +859,9 @@ def _engine_env_responses(env=None, policies=None, listed=True):
 
 
 def test_missing_engine_environment_warns(monkeypatch):
-    """The headline case: `shipmate-engine` absent from the environments
-    **listing** -- never a per-environment-read failure standing in for
-    absence, which `bm.gh_json` cannot tell apart from a 403 or a 5xx on an
-    environment that does exist (see `_engine_environment_warnings`'
-    docstring)."""
+    """The headline case: `shipmate-engine` absent from the environments listing itself,
+    never a per-environment-read failure standing in for absence -- `bm.gh_json` cannot
+    tell that apart from a 403 or a 5xx on an environment that does exist."""
     monkeypatch.setattr(doctor, "_gh_json", _engine_env_responses(listed=False))
     out = doctor._engine_environment_warnings(_ctx())
     assert len(out) == 1
@@ -920,7 +892,7 @@ def test_engine_environment_without_a_branch_policy_warns(monkeypatch):
 
 def test_engine_environment_with_a_non_custom_policy_warns(monkeypatch):
     # protected_branches-only restricts to whatever branch protection covers --
-    # not necessarily just the default branch -- so it can't be confirmed as
+    # not necessarily only the default branch -- so it can't be confirmed as
     # the specific guarantee this probe exists to check.
     monkeypatch.setattr(
         doctor,
@@ -957,10 +929,9 @@ def test_engine_environment_branch_policy_missing_default_branch_warns(monkeypat
 
 
 def test_engine_environment_branch_policy_with_an_extra_entry_warns(monkeypatch):
-    # The probe must confirm the default branch is the ONLY policy entry, not
-    # merely one of them -- a policy naming `main` plus a leftover branch (the
-    # exact shape a one-off allow-list forgotten in place produces) still lets
-    # a workflow on that leftover branch read the App private key.
+    # The probe must confirm the default branch is the ONLY policy entry: a policy naming
+    # `main` plus a leftover branch -- what a one-off allow-list forgotten in place
+    # produces -- still lets a workflow on that leftover branch read the App private key.
     monkeypatch.setattr(
         doctor,
         "_gh_json",
@@ -1056,7 +1027,7 @@ def test_engine_environment_probe_is_registered(monkeypatch):
     assert doctor._engine_environment_warnings in doctor.PROBES
     responses = {
         f"repos/{_REPO}/rules/branches/{_BRANCH}?per_page=100": _gate_rule(),
-        # shipmate-engine deliberately absent from the listing
+        # `shipmate-engine` is deliberately absent from the listing.
         f"repos/{_REPO}/environments?per_page=100": _environments("dev-eu-plan", "dev-eu-apply"),
         **_quiet_new_probes(),
     }
@@ -1078,21 +1049,9 @@ def _wf_file(text):
 _SHA = "a" * 40
 _OTHER_SHA = "b" * 40
 
-# The consumer workflow `_quiet_new_probes()` serves: the shipped shape, one
-# `pull_request_target` file exempt from the fork-trigger probe by exact name,
-# carrying a fresh engine pin for the pin probe. Defined here rather
-# than next to that fixture because interpolating `_SHA` happens at import time,
-# while the fixture's own body is only evaluated when a test calls it.
-#
-# It carries the dispatch leg too -- the `workflow_dispatch` trigger, its
-# `pr_number` input and a `pr-facts` step -- which is what keeps the
-# dispatch-wiring probe quiet.
-#
-# `head-repo` appears TWICE, as it does in a correctly wired wrapper: once on
-# the `build-matrix` step, once on the summary call. Without the first
-# occurrence a wiring probe that searches the whole file instead of the summary
-# call's own region passes this fixture while missing the finding it exists for.
-# `head-sha` is the step's second expectation and appears only there.
+# The consumer workflow `_quiet_new_probes()` serves, in the shipped shape. Defined here
+# rather than beside that fixture because interpolating `_SHA` happens at import time,
+# while the fixture's own body is evaluated only when a test calls it.
 _QUIET_PLAN = (
     "name: shipmate · plan\n"
     "on:\n"
@@ -1146,12 +1105,10 @@ def test_quoted_tag_pin_warned(monkeypatch):
 
 
 def test_non_file_workflow_entry_skipped(monkeypatch):
-    """A directory (or symlink/submodule) whose name ends in `.yml` is not a
-    workflow file -- its "contents" read returns a list, not a blob. This probe
-    SKIPS it and keeps scanning: it stops at the first unreadable FILE, so
-    treating a non-file entry as unreadable would abort the whole directory and
-    silently drop every pin finding after it. The entry sorts FIRST here on
-    purpose, which is the arrangement that hid the tag pin below."""
+    """A directory (or symlink/submodule) whose name ends in `.yml` is not a workflow
+    file: its "contents" read returns a list, not a blob. The probe SKIPS it and keeps
+    scanning, because it stops at the first unreadable FILE -- treating a non-file entry
+    as unreadable aborts the whole directory and drops every pin finding after it."""
     responses = {
         f"{_WF_DIR}{_REF}": [
             {"name": "sub.yml", "type": "dir"},
@@ -1194,10 +1151,9 @@ def test_current_sha_pin_silent(monkeypatch):
 
 
 def test_self_referencing_pin_ignored(monkeypatch):
-    # The engine repository is also a consumer of its own actions (its E2E
-    # workflows call them by local path or by slug). Exercised with
-    # engine_repo == repo, the one arrangement in which the self-pin exclusion
-    # is load-bearing rather than shadowed by the engine-slug filter.
+    # The engine repository is also a consumer of its own actions, whose E2E workflows
+    # call them by local path or by slug. With `engine_repo == repo` the self-pin
+    # exclusion is load-bearing rather than shadowed by the engine-slug filter.
     responses = {
         f"{_WF_DIR}{_REF}": _wf_listing("plan.yml"),
         f"{_WF_DIR}/plan.yml{_REF}": _wf_file(f"uses: {_REPO}/actions/setup@{_SHA}\n"),
@@ -1207,13 +1163,10 @@ def test_self_referencing_pin_ignored(monkeypatch):
 
 
 def test_pin_probe_ignores_another_orgs_shared_action(monkeypatch):
-    """The probe's findings are worded about the engine — "a moving ref lets the
-    engine change under your deploy credentials", "re-pin to pick up fixes" —
-    and are only true of shipmate's own repository. A consumer that also uses
-    some other org's shared composite action would otherwise be told its
-    unrelated action is a stale engine pin, once per workflow file, which can
-    also exhaust GitHub's 10-warning-per-step annotation budget and push the
-    real findings off the run page."""
+    """Findings worded about the engine ("a moving ref lets the engine change under your deploy
+    credentials", "re-pin to pick up fixes") are true only of shipmate's own repository. Another
+    org's shared action reported as a stale engine pin, once per workflow file, also exhausts
+    GitHub's 10-warning-per-step annotation budget, hiding the real findings."""
     responses = {
         f"{_WF_DIR}{_REF}": _wf_listing("plan.yml"),
         f"{_WF_DIR}/plan.yml{_REF}": _wf_file(
@@ -1226,9 +1179,9 @@ def test_pin_probe_ignores_another_orgs_shared_action(monkeypatch):
     }
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
     out = doctor._pin_warnings(_ctx())
-    # Only the engine's own stale pin — not the two tag-pinned third-party
-    # references, and no release lookup against `other/shared` (whose absence
-    # from `responses` would surface as an extra "could not read" note).
+    # Expect only the engine's own stale pin, not the two tag-pinned third-party
+    # references, and no release lookup against `other/shared`, whose absence from
+    # `responses` would surface as an extra "could not read" note.
     assert len(out) == 1, out
     assert _ENGINE_REPO in out[0][1]
     assert "other/shared" not in out[0][1]
@@ -1280,18 +1233,15 @@ def test_unreadable_release_degrades_to_note(monkeypatch):
     monkeypatch.setattr(doctor, "_gh_json", gh)
     out = doctor._pin_warnings(_ctx())
     assert len(out) == 1
-    assert out[0][0] == doctor.NOTICE  # degrade to a note
+    assert out[0][0] == doctor.NOTICE
     assert "not verified" in out[0][1]
 
 
 def test_missing_workflows_directory_degrades_to_a_note(monkeypatch):
-    """A brand-new consumer's first shipmate PR is the one that ADDS
-    `.github/workflows`, so this listing legitimately fails (and it is also how
-    a 403 or a transient 5xx arrives). That is the default outcome of the
-    first-ever `shipmate doctor`, so it must degrade at NOTICE like the
-    unreadable-release path above -- not fall through to warnings()' generic
-    WARNING, which renders a literal `::error::` prefix and the internal
-    `gh api` invocation into the comment body."""
+    """A brand-new consumer's first shipmate pull request is the one that ADDS
+    `.github/workflows`, so this listing legitimately fails -- as it also does on a 403 or a
+    transient 5xx. Being the default outcome of the first-ever `shipmate doctor`, it degrades
+    at NOTICE; `warnings()`' generic WARNING renders `::error::` and `gh api` in the body."""
 
     def gh(path):
         assert path == f"{_WF_DIR}{_REF}"
@@ -1306,10 +1256,9 @@ def test_missing_workflows_directory_degrades_to_a_note(monkeypatch):
 
 
 def test_workflow_file_read_failure_keeps_the_pins_found_so_far(monkeypatch):
-    # A per-file read can fail after the listing succeeded (a file deleted
-    # between the two calls, a 403, a transient 5xx). The findings already
-    # collected must survive, with the note appended -- not be discarded, and
-    # not escalate to the generic degrade.
+    # A per-file read can fail after the listing succeeded: a file deleted between the two
+    # calls, a 403, a transient 5xx. The findings already collected must survive with the
+    # note appended, not be discarded, and not escalate to the generic degrade.
     responses = {
         f"{_WF_DIR}{_REF}": _wf_listing("a.yml", "b.yml"),
         f"{_WF_DIR}/a.yml{_REF}": _wf_file("uses: acme/engine/actions/setup@v2\n"),
@@ -1328,11 +1277,11 @@ def test_workflow_file_read_failure_keeps_the_pins_found_so_far(monkeypatch):
 
 
 def test_pin_probe_ignores_a_head_sha_that_is_not_a_sha(monkeypatch):
-    # A value that isn't a 40-char hex SHA must never reach the request path --
-    # the same guard apply-detect puts on SHIPMATE_HEAD_SHA. It now reaches no
-    # request path at all: with no usable commit there is nothing to compare a
-    # pin against (see the test below), so the probe declines rather than
-    # retargeting the gh api URL or silently reading the default branch.
+    """A value that is not a 40-char hex SHA must never reach the request path -- the same
+    guard `apply-detect` puts on `SHIPMATE_HEAD_SHA`. With no usable commit there is
+    nothing to compare a pin against, so the probe declines rather than retargeting the
+    `gh api` URL or silently reading the default branch."""
+
     def gh(path):
         pytest.fail(f"the pin probe hit the API with an unusable head SHA: {path}")
 
@@ -1367,15 +1316,10 @@ def test_pin_probe_reads_the_commit_under_examination(monkeypatch):
 
 
 def test_pin_probe_does_not_read_at_all_without_a_commit_under_examination(monkeypatch):
-    """`head_sha` is empty on the comment path's degrade branch (the PR head
-    could not be read). Reading the default branch there is worse than not
-    reading: the pull request that bumps a stale pin carries the new SHA only on
-    its own head, so a default-branch read reports the pin stale on the very
-    change that fixes it — precisely the failure the `?ref=` was added to
-    prevent. Say freshness was not verified instead.
-
-    The annotate path always supplies a validated 40-hex head SHA, so only the
-    degrade path reaches this."""
+    """`head_sha` is empty on the comment path's degrade branch, where the pull request head
+    could not be read; the annotate path always supplies a validated 40-hex SHA. A
+    default-branch read reports the pin stale on the very change that fixes it, since the bumping
+    pull request carries the new SHA only on its own head. Say freshness was not verified."""
 
     def gh(path):
         pytest.fail(f"the pin probe hit the API with no commit to read: {path}")
@@ -1460,10 +1404,10 @@ def test_team_response_without_slug_warned(monkeypatch):
 
 def test_one_line_flattens_and_pins_the_truncation_boundary():
     assert doctor._one_line(" a\nb\tc ") == "a b c"
-    assert doctor._one_line("x" * 10, limit=10) == "x" * 10  # at the limit: untouched
+    assert doctor._one_line("x" * 10, limit=10) == "x" * 10  # At the limit, untouched.
     out = doctor._one_line("x" * 11, limit=10)
-    assert len(out) == 10 and out.endswith("…")  # never longer than `limit`
-    assert len(doctor._one_line("é" * 300, limit=120)) == 120  # code points, not bytes
+    assert len(out) == 10 and out.endswith("…")  # Never longer than `limit`.
+    assert len(doctor._one_line("é" * 300, limit=120)) == 120  # Code points, not bytes.
 
 
 def test_app_permission_probe_skipped_when_not_attempted():
@@ -1508,10 +1452,10 @@ def test_latest_check_ids_keeps_newest_shipmate_run_per_name():
         '{"id": 1, "name": "app / dev-eu", "started_at": "2026-07-26T10:00:00Z"' + ga,
         '{"id": 2, "name": "app / dev-eu", "started_at": "2026-07-26T11:00:00Z"' + ga,
         '{"id": 3, "name": "dns / dev-eu", "started_at": "2026-07-26T10:30:00Z"' + ga,
-        # the shipmate App's own check runs (apply checks) are kept via app_id
+        # The shipmate App's own check runs (the apply checks) are kept via `app_id`.
         '{"id": 4, "name": "apply / app / dev-eu", "started_at": "2026-07-26T10:00:00Z", '
         + '"app_slug": "shipmate", "app_id": 999}',
-        # third-party apps are dropped (out of the harvest's scope)
+        # Third-party apps are dropped: they are outside the harvest's scope.
         '{"id": 5, "name": "codecov/project", "started_at": "2026-07-26T10:00:00Z", '
         + '"app_slug": "codecov", "app_id": 254}',
     ]
@@ -1584,12 +1528,10 @@ def test_report_all_clear():
 
 
 def test_all_clear_names_the_environments_the_probes_actually_covered():
-    """All three environment probes — environment existence, protection shape and
-    plan-environment secrets — see only the environments of the stacks this
-    pull request changed — the declared set comes from the plan matrix's cell
-    summaries — so a categorical "no problems found by the settings probes"
-    overclaims: a broken `prod-eu` pair on a PR that touches only dev stacks was
-    never looked at. Name the set instead of implying the repository is sound."""
+    """All three environment probes -- existence, protection shape and plan-environment
+    secrets -- see only the environments of the stacks this pull request changed, since the
+    declared set comes from the plan matrix's cell summaries. A categorical "no problems
+    found" overclaims. Name the set instead of implying the repository is sound."""
     body = doctor.render_report([], [], _ctx(envs={"dev-eu", "dev-us"}))
     assert "no problems found by the settings probes" in body
     assert "`dev-eu`" in body and "`dev-us`" in body
@@ -1602,10 +1544,9 @@ def test_all_clear_says_when_no_environments_were_probed():
 
 
 def test_all_clear_escapes_and_bounds_the_environment_names():
-    # `environment` is read from cell.json, so it is repository data: a name
-    # carrying the plan comment's marker must not hijack this comment's
-    # identity, and a large fan-out's env list must not blow the size budget in
-    # a line no truncation path covers.
+    # `environment` is read from cell.json, so it is repository data: a name carrying the
+    # plan comment's marker must not hijack this comment's identity, and a large fan-out's
+    # env list must not blow the size budget in a line no truncation path covers.
     body = doctor.render_report([], [], _ctx(envs={"<!-- shipmate:summary -->"}))
     assert "<!-- shipmate:summary -->" not in body
     assert body.count(doctor.DOCTOR_MARKER) == 1
@@ -1624,15 +1565,10 @@ def test_findings_only_fallback_uses_the_same_all_clear_line():
 
 
 def test_harvest_incomplete_note_says_the_harvest_is_incomplete():
-    """The other harvest tests assert `HARVEST_INCOMPLETE in body`, which pins
-    the flag -> note wiring but not the note's meaning: swap the constant for
-    an all-clear and they all stay green, shipping the exact false all-clear
-    the flag exists to prevent. So the text's meaning is pinned here,
-    separately, on a stable stem -- a reword has to update this stem
-    deliberately instead of silently inverting the claim.
-
-    Stem, not the whole sentence, so ordinary rewording stays cheap: the
-    warning level, and a phrase that cannot be read as "everything is fine"."""
+    """The other harvest tests assert `HARVEST_INCOMPLETE in body`, pinning the flag-to-note
+    wiring but not the note's meaning: swap the constant for an all-clear and they stay green.
+    Pinned here on a stable stem -- the warning level, and a phrase unreadable as "everything
+    is fine" -- not the whole sentence, so ordinary rewording stays cheap."""
     assert doctor.HARVEST_INCOMPLETE.startswith("- :warning:")
     assert "could not read all" in doctor.HARVEST_INCOMPLETE
     assert ":white_check_mark:" not in doctor.HARVEST_INCOMPLETE
@@ -1648,10 +1584,9 @@ def test_report_states_when_the_whole_harvest_failed():
 
 
 def test_report_states_when_a_partial_harvest_still_found_warnings():
-    # The incompleteness note must be additive, not an alternative to the
-    # rows: one check run's annotations fetch can fail while the others
-    # return warnings, and then a note emitted only for an empty harvest
-    # would let the rows read as the complete set for the commit.
+    # The incompleteness note must be additive, not an alternative to the rows: one check
+    # run's annotations fetch can fail while the others return warnings, and a note
+    # emitted only for an empty harvest lets the rows read as the commit's complete set.
     body = doctor.render_report([], [_ann(title="real warning")], _ctx(harvest_failed=True))
     assert doctor.HARVEST_INCOMPLETE in body
     assert "real warning" in body
@@ -1679,15 +1614,11 @@ _COMPLETED = '"app_slug": "github-actions", "status": "completed"}'
 
 
 def test_harvest_pending_is_true_while_a_relevant_run_is_unfinished():
-    """An empty harvest cannot distinguish "annotations not recorded yet" from
-    "no warnings", so commenting `shipmate doctor` while the plan run is queued
-    or in flight printed an all-clear that was never refreshed.
-
-    Keyed on every shipmate-relevant check run, not on the subset
-    `latest_check_ids` selects: a queued run has no `started_at` and therefore
-    ranks *below* an already-completed run of the same name — the right ranking
-    for choosing whose annotations to fetch, but it would hide exactly the
-    still-running case this flag exists to report."""
+    """An empty harvest cannot tell "annotations not recorded yet" from "no warnings", so
+    `shipmate doctor` on a queued or in-flight plan run printed an all-clear nothing
+    refreshed. Keyed on every shipmate-relevant check run, not the subset
+    `latest_check_ids` ranks: a queued run has no `started_at`, so it sorts below a
+    completed run of the same name and the still-running case goes unreported."""
     lines = [
         '{"id": 1, "name": "app / dev-eu", "started_at": "t", ' + _COMPLETED,
         '{"id": 2, "name": "db / dev-eu", "app_slug": "github-actions", "status": "queued"}',
@@ -1709,12 +1640,10 @@ def test_harvest_pending_ignores_third_party_check_runs():
 
 
 def test_check_ids_mode_writes_the_harvest_pending_step_output(monkeypatch, tmp_path, capsys):
-    """The reduction already reads every check run on the commit, so it is also
-    where the pending flag is decided; it reaches the render step as a step
-    output of the gather step (the reader side is guarded in
-    test_comment_ops_action.py). The TSV on stdout must stay exactly (id, name)
-    pairs — `load_annotations` splits each line on the first tab and would
-    otherwise fold the flag into a check name."""
+    """The reduction already reads every check run on the commit, so it also decides the
+    pending flag, which reaches the render step as the gather step's output. The TSV on
+    stdout must stay exactly (id, name) pairs: `load_annotations` splits each line on the
+    first tab and would otherwise fold the flag into a check name."""
     out_file = tmp_path / "gh-output"
     out_file.write_text("", encoding="utf-8")
     monkeypatch.setenv("SHIPMATE_DOCTOR_MODE", "check-ids")
@@ -1746,7 +1675,7 @@ def test_harvest_pending_note_says_runs_had_not_finished():
     # would all stay green if the constant were swapped for an all-clear, which
     # is the exact false all-clear it exists to prevent.
     assert "had not finished" in doctor.HARVEST_PENDING
-    assert "shipmate doctor" in doctor.HARVEST_PENDING  # tells the reader what to do
+    assert "shipmate doctor" in doctor.HARVEST_PENDING  # It tells the reader what to do.
     assert ":white_check_mark:" not in doctor.HARVEST_PENDING
     assert doctor.HARVEST_PENDING != doctor.HARVEST_INCOMPLETE
 
@@ -1800,12 +1729,10 @@ def test_skipped_environment_probes_are_stated_exactly_once(monkeypatch):
 
 
 def test_provenance_and_probe_coverage_can_disagree_without_contradicting(monkeypatch):
-    """The id set is written from the plan records on the head's apply checks
-    whether or not those runs' cell summaries could be downloaded, so a
-    non-empty set with no declared environments is a live state. The preamble
-    must then still name the runs that were read, and the coverage claim must
-    still come from `envs_available` alone -- a preamble that inferred coverage
-    from the id set would contradict the very next line."""
+    """The id set is written from the plan records on the head's apply checks whether or
+    not those runs' cell summaries could be downloaded, so a non-empty set with no
+    declared environments is a live state. The preamble still names the runs read, and its
+    coverage claim still comes from `envs_available` alone, or it contradicts the next line."""
     monkeypatch.setattr(doctor, "_gh_json", _existence("dev-eu-plan", "dev-eu-apply"))
     findings = doctor._environment_warnings(_ctx(envs=set(), envs_available=False))
     body = doctor.render_report(findings, [], _ctx(envs_available=False, plan_run_ids=["1281"]))
@@ -1814,12 +1741,10 @@ def test_provenance_and_probe_coverage_can_disagree_without_contradicting(monkey
 
 
 def test_report_escapes_a_hostile_settings_finding():
-    """Settings findings interpolate repository data (a workflow file name
-    reaches the pin warning verbatim). A file named `<!-- shipmate:summary
-    -->.yml` would otherwise put the PLAN comment's upsert marker inside the
-    doctor comment, and actions/summary's marker+Bot upsert would then PATCH
-    this comment with the plan body -- destroying the report and orphaning the
-    plan comment."""
+    """Settings findings interpolate repository data: a workflow file name reaches the pin
+    warning verbatim. A file named `<!-- shipmate:summary -->.yml` would put the PLAN comment's
+    upsert marker inside the doctor comment, and `actions/summary`'s marker+Bot upsert would
+    then PATCH this comment with the plan body: report destroyed, plan comment orphaned."""
     finding = (doctor.WARNING, "`<!-- shipmate:summary -->.yml` pins `acme/engine@v2` by tag")
     body = doctor.render_report([finding], [], _ctx())
     assert "<!-- shipmate:summary -->" not in body
@@ -1833,7 +1758,7 @@ def test_findings_only_fallback_escapes_a_hostile_settings_finding():
     findings = [(doctor.WARNING, "<!-- shipmate:summary -->" + "x" * 200) for _ in range(400)]
     body = doctor.render_report(findings, [], _ctx())
     assert len(body) <= doctor.sc.HARD_CAP
-    assert "warnings from this commit's workflow runs" not in body  # the fallback fired
+    assert "warnings from this commit's workflow runs" not in body  # The fallback fired.
     assert "<!-- shipmate:summary -->" not in body
 
 
@@ -1847,11 +1772,10 @@ def test_provenance_names_every_run_the_head_recorded():
 
 
 def test_provenance_states_the_run_without_a_coverage_claim():
-    """The run branch must name what was read and claim nothing about what the
-    probes did with it: that claim belongs only to `_environment_warnings`'
-    NOTICE, keyed on `envs_available`. Pinned on the current stem, so restoring
-    wording that implies the declared environment set came from these runs, or
-    that mentions the probes at all, fails here."""
+    """The run branch must name what was read and claim nothing about what the probes did
+    with it: that claim belongs to `_environment_warnings`' NOTICE, keyed on
+    `envs_available`. Wording that implies the declared environment set came from these
+    runs, or that mentions the probes at all, fails here."""
     text = doctor._provenance(_ctx(plan_run_ids=["1281"]))
     assert text == f"_Commit `{_HEAD[:7]}`; cell summaries from plan run 1281._"
 
@@ -1886,10 +1810,9 @@ def test_load_annotations_joins_names_and_tolerates_missing_files(tmp_path):
 
 
 def test_load_annotations_skips_non_dict_rows(tmp_path):
-    # A payload that parses to a list of non-dict values (e.g. a check run
-    # whose annotations endpoint returned something unexpected) must be
-    # skipped row-by-row, never raise -- load_annotations's contract is
-    # "never fatal".
+    # A payload that parses to a list of non-dict values -- a check run whose annotations
+    # endpoint returned something unexpected -- must be skipped row by row and never
+    # raise: `load_annotations`'s contract is "never fatal".
     (tmp_path / "ann").mkdir()
     (tmp_path / "ann" / "3.json").write_text(json.dumps(["oops", 5, None]), encoding="utf-8")
     (tmp_path / "check-ids.tsv").write_text("3\tapp / dev-eu\n", encoding="utf-8")
@@ -1931,10 +1854,9 @@ def test_report_no_truncation_note_when_neither_level_hits_the_cap():
 
 
 def test_report_truncation_note_fires_on_raw_count_including_doctors_own():
-    # 10 raw warnings on one check, 2 of them doctor's own (dropped by
-    # harvest_sections, leaving only 8 rows shown) -- GitHub's cap already
-    # hit on the raw listing, so the note must still fire even though the
-    # rendered row count is under ANNOTATION_CAP.
+    # 10 raw warnings on one check, 2 of them doctor's own, which `harvest_sections` drops
+    # to leave 8 rows shown. GitHub's cap is already hit on the raw listing, so the note
+    # must fire even though the rendered row count is under `ANNOTATION_CAP`.
     anns = [_ann(level="warning", title=doctor.DOCTOR_TITLE) for _ in range(2)]
     anns += [_ann(level="warning", title=f"w{i}") for i in range(8)]
     body = doctor.render_report([], anns, _ctx())
@@ -1942,10 +1864,9 @@ def test_report_truncation_note_fires_on_raw_count_including_doctors_own():
 
 
 def test_report_harvest_truncates_to_stay_under_hard_cap_and_notes_dropped_count():
-    # The harvest keeps every github-actions check run on the commit, not
-    # just shipmate's -- a repo with broad lint/test annotations (or a large
-    # fan-out plan with one failure per cell) can produce far more content
-    # than a single PR comment can hold.
+    # The harvest keeps every github-actions check run on the commit, not shipmate's
+    # alone: a repository with broad lint/test annotations, or a large fan-out plan with
+    # one failure per cell, produces far more content than a single PR comment can hold.
     anns = [_ann(title=f"warning {i}", message="m" * 300, check=f"check-{i}") for i in range(400)]
     body = doctor.render_report([], anns, _ctx())
     assert len(body) <= doctor.sc.HARD_CAP
@@ -1953,16 +1874,14 @@ def test_report_harvest_truncates_to_stay_under_hard_cap_and_notes_dropped_count
 
 
 def test_report_findings_alone_stay_under_hard_cap_when_harvest_is_empty():
-    # The harvest is budgeted against sc.SIZE_BUDGET, but nothing budgets the
-    # settings-probe findings themselves -- hundreds of long findings (e.g.
-    # one warning per stale pin across many workflow files) can alone exceed
-    # sc.HARD_CAP, which is exactly the 422 the size budget was meant to
-    # prevent. render_report must fall back to a truncated findings list.
+    # `sc.SIZE_BUDGET` budgets the harvest and nothing budgets the settings-probe
+    # findings, so hundreds of long findings -- one per stale pin across many workflow
+    # files -- can alone exceed `sc.HARD_CAP`, the 422 the size budget exists to prevent.
     findings = [(doctor.WARNING, "x" * 200) for _ in range(400)]
     body = doctor.render_report(findings, [], _ctx())
     assert len(body) <= doctor.sc.HARD_CAP
     assert "omitted" in body
-    # the fallback drops the harvest section entirely
+    # The fallback drops the harvest section entirely.
     assert "warnings from this commit's workflow runs" not in body
 
 
@@ -1976,7 +1895,7 @@ def test_harvest_header_one_lines_a_pathological_check_name():
     lines, dropped = doctor._harvest_lines(sections, anns, budget=10_000)
     assert dropped == 0
     header = next(line for line in lines if line.startswith("- **"))
-    assert len(header) < 130  # _one_line(name, 120) + '- **' + '**' wrapping, not 5000
+    assert len(header) < 130  # `_one_line(name, 120)` plus the wrapping, never 5000.
 
 
 def test_harvest_never_emits_a_dangling_section_header():
@@ -1987,9 +1906,9 @@ def test_harvest_never_emits_a_dangling_section_header():
     toolong = _ann(check="zzz-toolong", title="t", message="m")
     header_fits = f"- **{doctor._md_escape('aaa-fits')}**"
     row_fits = doctor._render_annotation_row(fits)
-    # Room for "aaa-fits"'s header + row, plus "zzz-toolong"'s header alone --
-    # so a budget check that measured only the header would admit zzz-toolong,
-    # while the combined header+first-row check refuses it.
+    # The budget holds "aaa-fits"'s header and row plus "zzz-toolong"'s header alone, so
+    # a budget check measuring only the header would admit "zzz-toolong" while the
+    # combined header-plus-first-row check refuses it.
     budget = (
         len(header_fits)
         + 1
@@ -2016,10 +1935,9 @@ def test_emit_section_guards_against_an_empty_row_list():
 
 
 def test_doctor_marker_matches_action_upsert():
-    # Coupling: the marker doctor embeds <-> the marker the comment-ops
-    # action's doctor upsert step greps for. Drift = a new comment every run
-    # instead of an edit-in-place. Assert the action site carries the
-    # script's marker and that its doctor step actually invokes the script.
+    # Coupling: the marker doctor embeds must equal the marker the comment-ops action's
+    # doctor upsert step greps for. Drift means a new comment every run instead of an
+    # edit in place, so the action site must carry the marker and invoke the script.
     src = (ACTIONS / "comment-ops" / "action.yml").read_text(encoding="utf-8")
     assert src.count(doctor.DOCTOR_MARKER) >= 1, "upsert step no longer greps the script's marker"
     assert "scripts/doctor" in src, "comment-ops action no longer calls scripts/doctor"
@@ -2159,10 +2077,9 @@ def test_plain_pull_request_trigger_is_silent(monkeypatch):
 
 
 def test_commented_out_pull_request_target_is_silent(monkeypatch):
-    # The lines a careful repository writes *because* it has no such trigger.
-    # Reporting them would train readers to ignore the finding. Both shapes the
-    # pattern would otherwise match are here: a trailing comment carrying the
-    # flow-sequence form, and a commented-out key at the head of a line.
+    # These are the lines a careful repository writes *because* it has no such trigger, and
+    # reporting them trains readers to ignore the finding. Both shapes the pattern would match
+    # are here: a trailing comment, and a commented-out key at the head of a line.
     responses = _fork_responses(
         {
             "plan.yml": "on: [pull_request]  # never [pull_request_target]\n",
@@ -2187,10 +2104,9 @@ def test_quoted_event_name_comparison_is_silent(monkeypatch):
 
 
 def test_the_shipmate_plan_workflow_is_not_warned_about(monkeypatch):
-    # plan.yml declaring pull_request_target IS the shape the engine ships: the
-    # job that holds the App key is the engine's reusable summary workflow,
-    # which checks out nothing. Warning about it would train readers to ignore
-    # the finding on the labeler workflow that actually is dangerous.
+    # `plan.yml` declaring `pull_request_target` IS the shape the engine ships: the job
+    # holding the App key is the engine's reusable summary workflow, which checks out
+    # nothing. Warning about it trains readers to ignore the dangerous labeler workflow.
     responses = _fork_responses({"plan.yml": "on:\n  pull_request_target:\n    types: [opened]\n"})
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
     assert doctor._fork_trigger_warnings(_ctx()) == []
@@ -2272,12 +2188,10 @@ def test_a_byte_order_mark_does_not_hide_the_on_block(monkeypatch):
 
 
 def test_an_invalid_utf8_byte_does_not_abort_the_scan(monkeypatch):
-    """`errors="replace"`, both halves. A workflow written through a lossy
-    encoding is not valid UTF-8: a strict decode raises out of the probe rather
-    than reporting the trigger sitting in the same file, and an `ignore` decode
-    DROPS the bad byte, splicing `pull_request_targ<0xe9>et` back into the very
-    token this probe matches on -- a warning manufactured for a repository that
-    declares no such trigger. U+FFFD keeps the token broken."""
+    """`errors="replace"`, both halves. A lossy-encoded workflow is not valid UTF-8: a
+    strict decode raises out of the probe instead of reporting the trigger in the same
+    file, and an `ignore` decode drops the bad byte, splicing `pull_request_targ<0xe9>et`
+    back into this probe's own token and manufacturing a warning. U+FFFD keeps it broken."""
     responses = _fork_responses({"label.yml": ""})
     responses[f"{_WF_DIR}/label.yml{_REF}"] = _wf_bytes(b"# caf\xe9\non:\n  pull_request_target:\n")
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
@@ -2374,11 +2288,9 @@ def test_unsafe_pr_checkout_in_plan_yml_is_warned(monkeypatch):
 
 
 def test_unsafe_pr_checkout_in_another_workflow_is_warned(monkeypatch):
-    # No `pull_request_target` here, so the trigger finding cannot account for
-    # the warning: it is this check or nothing. The detection is deliberately
-    # trigger-blind, so the message has to be true of a `pull_request`-only
-    # file too -- under that trigger a fork's run is handed no secrets, and a
-    # message asserting a secret-holding job is simply wrong about it.
+    # No `pull_request_target` here, so the trigger finding cannot account for the
+    # warning: it is this check or nothing. The detection is deliberately trigger-blind,
+    # so the message must be true of a `pull_request`-only file, handed no secrets.
     responses = _fork_responses(
         {
             "label.yml": "on:\n  pull_request:\njobs:\n  x:\n    steps:\n"
@@ -2424,11 +2336,10 @@ def test_unsafe_pr_checkout_set_to_false_is_silent(monkeypatch):
 
 
 def test_a_capitalised_false_is_silent(monkeypatch):
-    """`False` and `FALSE` are the same legal YAML boolean as `false`, so both are
-    the safe configuration -- and a case-sensitive comparison reports them. A
-    probe that fires on a correct repository trains readers to ignore the suite.
-    `build-matrix`'s fork refusal normalizes with `.strip().lower()` for exactly
-    this reason; one release must not hold two guards that disagree about it."""
+    """`False` and `FALSE` are the same legal YAML boolean as `false`, so both are the safe
+    configuration and a case-sensitive comparison reports them -- a probe firing on a
+    correct repository trains readers to ignore the suite. `build-matrix`'s fork refusal
+    normalizes with `.strip().lower()`; two guards in one release may not disagree."""
     responses = _fork_responses(
         {
             "plan.yml": "on:\n  pull_request_target:\njobs:\n  x:\n    steps:\n"
@@ -2442,11 +2353,10 @@ def test_a_capitalised_false_is_silent(monkeypatch):
 
 
 def test_flow_style_unsafe_pr_checkout_is_warned(monkeypatch):
-    """A line-anchored key misses this, and it is not exotic authoring: the
+    """A line-anchored key misses this, and flow style is not exotic authoring: the
     engine's own `docs/drift.md` fence and all four sample repositories write
-    `with: { fetch-depth: 0 }`, so a flow-style checkout step is what a consumer
-    copying those pages produces. Missing it is fail-open on the outermost guard
-    of the whole plan path."""
+    `with: { fetch-depth: 0 }`, so it is what a consumer copying those pages produces.
+    Missing it is fail-open on the outermost guard of the whole plan path."""
     responses = _fork_responses(
         {
             "plan.yml": "on:\n  pull_request_target:\njobs:\n  x:\n    steps:\n"
@@ -2479,14 +2389,11 @@ def test_a_flow_style_false_is_silent(monkeypatch):
 
 
 def test_commented_out_unsafe_pr_checkout_is_silent(monkeypatch):
-    """The line a careful repository writes *because* it does not have one.
-    Reporting it would train readers to ignore the finding.
-
-    Two independent things keep it quiet -- the comment strip empties the line,
-    and the pattern's key anchor rejects a key with `set ` in front of it -- so
-    only removing BOTH turns this red. Each is pinned on its own by
-    `test_a_trailing_comment_after_a_false_value_is_silent` (the strip) and
-    `test_a_key_merely_ending_in_the_input_name_is_not_reported` (the anchor)."""
+    """The line a careful repository writes *because* it does not have one; reporting it trains
+    readers to ignore the finding. Two independent things keep it quiet -- the comment strip
+    empties the line, and the key anchor rejects a key with `set ` in front -- so only removing
+    BOTH reddens this. `test_a_trailing_comment_after_a_false_value_is_silent` pins the strip,
+    `test_a_key_merely_ending_in_the_input_name_is_not_reported` the anchor."""
     responses = _fork_responses(
         {
             "plan.yml": "on:\n  pull_request_target:\njobs:\n  x:\n    steps:\n"
@@ -2514,14 +2421,11 @@ def test_a_trailing_comment_after_a_false_value_is_silent(monkeypatch):
 
 
 def test_a_false_in_one_job_does_not_silence_a_true_in_another(monkeypatch):
-    """A plan wrapper checks out in more than one job, and this probe's own
-    finding asks for an explicit `false` -- so the two occurrences coexist in
-    one file routinely. Examining only the first read the `false` and returned
-    nothing, which is fail-open on the outermost guard of the whole plan path.
-
-    One FILE with both occurrences: `test_unsafe_pr_checkout_set_to_false_is_
-    silent` uses two files with one occurrence each, which is why it could not
-    see this."""
+    """A plan wrapper checks out in more than one job, and this probe's own finding asks for an
+    explicit `false`, so both occurrences coexist in one file routinely. Examining only the
+    first reads the `false` and returns nothing -- fail-open on the outermost guard of the plan
+    path. Both occurrences are in ONE file here;
+    `test_unsafe_pr_checkout_set_to_false_is_silent` uses two files with one each."""
     responses = _fork_responses(
         {
             "plan.yml": "on:\n  pull_request_target:\njobs:\n"
@@ -2567,22 +2471,20 @@ def _plan_calling_summary(
     matrix_with=None,
     on_demand=_ON_DEMAND_EXPR,
 ):
-    """A consumer `plan.yml` whose summary job passes `with_lines`, plus a
-    correctly wired `on-demand: on_demand` unless `on_demand` is None.
+    """A consumer `plan.yml` whose summary job passes `with_lines`, plus a correctly wired
+    `on-demand: on_demand` unless `on_demand` is None.
 
-    `on-demand` is wired by default so a fixture that omits one of the other
-    inputs produces that input's finding alone; `on_demand=None` (absent) and a
-    constant value are what the on-demand finding's own tests pass.
+    `on-demand` is wired by default so a fixture omitting one of the other inputs produces
+    that input's finding alone; `on_demand=None` (absent) and a constant value are what
+    the on-demand finding's own tests pass.
 
-    `detect_head_repo` adds the OTHER legitimate `head-repo`, on a correctly
-    wired `build-matrix` step of an EARLIER job -- the occurrence a whole-file
-    search is satisfied by. That step's own `head-sha` comes with it, so any
-    finding these fixtures produce is the summary call's rather than the step's.
-    `matrix_with` writes that step's `with:` lines verbatim
-    instead, for the checks on the step's own wiring (an empty sequence writes
-    the step with no `with:` block at all). `with_first` writes the summary
-    job's `with:` block ABOVE its `uses:` line, which is legal YAML a
-    forward-only scan cannot see."""
+    `detect_head_repo` adds the OTHER legitimate `head-repo`, on a correctly wired
+    `build-matrix` step of an EARLIER job -- the occurrence a whole-file search is
+    satisfied by. That step's own `head-sha` comes with it, so any finding these fixtures
+    produce is the summary call's rather than the step's. `matrix_with` writes that step's
+    `with:` lines verbatim instead, for the checks on the step's own wiring (an empty
+    sequence writes the step with no `with:` block at all). `with_first` writes the summary
+    job's `with:` block ABOVE its `uses:` line, legal YAML a forward-only scan cannot see."""
     matrix = (
         [f"head-repo: {_HEAD_REPO_EXPR}", f"head-sha: {_HEAD_SHA_EXPR}"]
         if detect_head_repo
@@ -2825,11 +2727,10 @@ def _both_wired(matrix_with):
 
 
 def test_a_constant_head_repo_on_the_build_matrix_step_is_reported(monkeypatch):
-    """The consequence asymmetry: a constant on the summary call costs a gate
-    job, while the same constant here equals the running repository for EVERY
-    pull request, so `build-matrix`'s fork refusal -- the layer docs/hardening.md
-    says has to hold -- passes a fork's own Terramate/OpenTofu onto the
-    consumer's runners. "A missing input is loud" covers the absent case only."""
+    """The consequence asymmetry: a constant on the summary call costs a gate job, while the
+    same constant here equals the running repository for EVERY pull request, so
+    `build-matrix`'s fork refusal -- the layer docs/hardening.md requires -- passes a fork's
+    own Terramate/OpenTofu onto the consumer's runners. Absence is loud; a wrong value is not."""
     responses = _fork_responses(
         {
             "plan.yml": _both_wired(
@@ -2849,11 +2750,10 @@ def test_a_constant_head_repo_on_the_build_matrix_step_is_reported(monkeypatch):
 
 
 def test_a_constant_head_sha_on_the_build_matrix_step_is_reported(monkeypatch):
-    """The step's second expectation, and a different hole from the one above: a
-    `head-sha` wired to `github.sha` is the base branch under
-    `pull_request_target`, so the checkout check compares the wrong tree against
-    itself, the matrix comes out empty and the gate greens with nothing queued to
-    apply. Reported as its own finding, because the remedy is not the fork one."""
+    """The step's second expectation, a different hole from the one above: a `head-sha`
+    wired to `github.sha` is the base branch under `pull_request_target`, so the checkout
+    check compares the wrong tree against itself, the matrix comes out empty, and the gate
+    greens with nothing queued to apply. Its own finding: the remedy is not the fork one."""
     responses = _fork_responses(
         {"plan.yml": _both_wired([f"head-repo: {_HEAD_REPO_EXPR}", "head-sha: ${{ github.sha }}"])}
     )
@@ -2970,12 +2870,10 @@ def test_drift_yml_may_carry_no_pull_request(monkeypatch):
 
 
 def test_the_documented_plan_wrapper_produces_no_finding(monkeypatch):
-    """The oracle for false positives: the wrapper consumers paste, verbatim
-    from the page, through the whole probe. A probe that fires on the documented
-    shape trains readers to ignore the advisory suite, which costs more than the
-    gap it closes. The fence count is asserted first, so a page edit that moves
-    the wrapper out of this selector's reach fails here instead of passing
-    vacuously."""
+    """The oracle for false positives: the wrapper consumers paste, verbatim from the
+    page, through the whole probe. A probe firing on the documented shape trains readers
+    to ignore the advisory suite, which costs more than the gap it closes. The fence count
+    is asserted first, so a page edit moving the wrapper beyond this selector fails here."""
     page = (ENGINE / "docs" / "getting-started.md").read_text(encoding="utf-8")
     fences = [
         textwrap.dedent(m.group("body"))
@@ -3153,10 +3051,9 @@ def test_the_documented_apply_wrapper_produces_no_finding(monkeypatch):
 
 
 def test_plan_run_id_without_a_commit_is_a_note_not_a_read(monkeypatch):
-    # Same reasoning as the pin, fork-trigger and summary-wiring probes: a
-    # default-branch read would report the retired input on the very pull request
-    # that removes it. The `gh` stub pins that no read happens at all, so a
-    # weaker read cannot be silently substituted for the skip.
+    # Same reasoning as the pin, fork-trigger and summary-wiring probes: a default-branch
+    # read would report the retired input on the very pull request that removes it. The
+    # `gh` stub pins that no read happens at all, so a weaker read cannot stand in.
     def gh(path):
         pytest.fail(f"the retired-input probe read the API with no commit: {path}")
 
@@ -3239,9 +3136,9 @@ _TARGETED_JOB_WITH_FIRST = (
 _APPLY_DECLARING_MODE = _MODE_ON_BLOCK + _TARGETED_JOB
 _APPLY_FORWARDING_MODE = _CLEAN_ON_BLOCK + _TARGETED_JOB_FORWARDING_MODE
 _APPLY_CARRYING_BOTH = _MODE_ON_BLOCK + _TARGETED_JOB_FORWARDING_MODE
-# The negative: `mode` is generic YAML, unlike `plan_run_id`. This wrapper calls
-# the engine's reusable apply workflow cleanly AND runs `actions/state`, whose
-# own input is spelled `mode` — a file-wide scan reports it.
+# The negative: `mode` is generic YAML, unlike `plan_run_id`. This wrapper calls the
+# engine's reusable apply workflow cleanly AND runs `actions/state`, whose own input is
+# spelled `mode` — a file-wide scan reports it.
 _APPLY_WITH_UNRELATED_MODE = (
     _CLEAN_ON_BLOCK + _TARGETED_JOB + "  archive:\n"
     "    steps:\n"
@@ -3296,23 +3193,20 @@ def test_a_wrapper_carrying_both_halves_is_reported_twice(monkeypatch):
 
 
 def test_an_unrelated_mode_key_is_not_reported(monkeypatch):
-    """The property `plan_run_id` never needed. `mode` is generic YAML —
-    `actions/state` takes `mode: restore`, `actions/summary` a `comment_mode` —
-    so only a `workflow_dispatch` declaration and a `with:` forward on a call to
-    the engine's reusable apply workflows count. A wrapper with a state step and
-    a clean engine call is healthy, and reporting it would train readers to
-    ignore the whole suite."""
+    """The property `plan_run_id` never needed. `mode` is generic YAML -- `actions/state`
+    takes `mode: restore`, `actions/summary` a `comment_mode` -- so only a
+    `workflow_dispatch` declaration and a `with:` forward on a call to the engine's
+    reusable apply workflows count. A state step beside a clean engine call is healthy."""
     responses = _fork_responses({"apply.yml": _APPLY_WITH_UNRELATED_MODE})
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
     assert doctor._mode_input_warnings(_ctx()) == []
 
 
 def test_a_forward_on_the_apply_all_call_is_reported(monkeypatch):
-    """`apply-all.yml` never declared `mode` at all, so the bare-apply job is
-    where a migration copying the targeted job's `with:` block lands — and the
-    shipped message, `CONTRACT.md` and `docs/troubleshooting.md` all promise to
-    cover it. A region matcher spelled `apply\\.yml@` reads this wrapper as
-    clean."""
+    """`apply-all.yml` never declared `mode` at all, so the bare-apply job is where a
+    migration copying the targeted job's `with:` block lands -- and the shipped message,
+    `CONTRACT.md` and `docs/troubleshooting.md` all promise to cover it. A region matcher
+    spelled `apply\\.yml@` reads this wrapper as clean."""
     responses = _fork_responses(
         {"apply.yml": _CLEAN_ON_BLOCK + _TARGETED_JOB + _APPLY_ALL_JOB_FORWARDING_MODE}
     )
@@ -3321,11 +3215,10 @@ def test_a_forward_on_the_apply_all_call_is_reported(monkeypatch):
 
 
 def test_a_with_block_above_the_uses_line_is_still_a_forward(monkeypatch):
-    """Key order in a YAML mapping carries no meaning, so the region around an
-    apply call runs in both directions from its `uses:` line — the same property
-    `test_a_with_block_above_the_uses_line_is_silent` pins for the summary-wiring
-    probe, in the opposite polarity. Scanning forward only reads this wrapper as
-    clean: silence at exactly the load-time rejection this probe exists for."""
+    """Key order in a YAML mapping carries no meaning, so the region around an apply call runs
+    in both directions from its `uses:` line -- `test_a_with_block_above_the_uses_line_is_silent`
+    pins the same property for the summary-wiring probe, in the opposite polarity. Scanning
+    forward only reads this wrapper as clean: silence at the load-time rejection it exists for."""
     responses = _fork_responses({"apply.yml": _CLEAN_ON_BLOCK + _TARGETED_JOB_WITH_FIRST})
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
     assert doctor._mode_input_warnings(_ctx()) == [(doctor.WARNING, _MODE_FORWARDED_TEXT)]
@@ -3362,10 +3255,9 @@ def test_the_documented_apply_wrapper_carries_no_mode(monkeypatch):
 
 
 def test_mode_input_without_a_commit_is_a_note_not_a_read(monkeypatch):
-    # Same reasoning as the pin, fork-trigger, summary-wiring and retired-input
-    # probes: a default-branch read would report `mode` on the very pull request
-    # that removes it. The `gh` stub pins that no read happens at all, so a
-    # weaker read cannot be silently substituted for the skip.
+    # Same reasoning as the pin, fork-trigger, summary-wiring and retired-input probes: a
+    # default-branch read would report `mode` on the very pull request that removes it.
+    # The `gh` stub pins that no read happens at all, so a weaker read cannot stand in.
     def gh(path):
         pytest.fail(f"the retired-`mode` probe read the API with no commit: {path}")
 
@@ -3440,10 +3332,9 @@ _PLAN_DISPATCHABLE = (
 )
 
 
-# Hand-written, whole: each finding is compared in full rather than by
-# substring, so a reworded message is a deliberate edit here and not a silent
-# one, and the three cannot collapse into one another. Never derived from
-# `scripts/doctor`.
+# Hand-written, whole, and never derived from `scripts/doctor`: each finding is compared
+# in full rather than by substring, so a reworded message is a deliberate edit here and
+# the three cannot collapse into one another.
 _NO_TRIGGER_TEXT = (
     "`plan.yml` declares no `workflow_dispatch` trigger — a commented `shipmate plan` is "
     "authorized, reacted to with a rocket, and then dispatches nothing: GitHub answers the "
@@ -3505,14 +3396,10 @@ def test_a_dispatchable_plan_wrapper_is_silent(monkeypatch):
 
 
 def test_a_flow_style_on_value_is_silent(monkeypatch):
-    """The whole `on:` value as one flow mapping, with no line start in front of
-    either key. The documented fence is block style and cannot cover this: with a
-    line-anchored regex both keys go unseen, and because ABSENCE is this probe's
-    finding, that reports a correctly wired wrapper as declaring no
-    `workflow_dispatch` trigger — one stray warning, not two, since the
-    `pr_number` finding is that one's `elif`. Both keys sit inside the flow
-    mapping with whitespace in front of them, which is what the one-character
-    lookbehind matches; index 0 is unreachable for a searched key here."""
+    """The whole `on:` value as one flow mapping, with no line start in front of either key;
+    the documented block-style fence cannot cover it. A line-anchored regex sees neither, and
+    because ABSENCE is this probe's finding it reports a correctly wired wrapper as declaring
+    no `workflow_dispatch` trigger."""
     text = (
         "name: shipmate · plan\n"
         "on:{ pull_request_target: , workflow_dispatch: { inputs: { pr_number: "
@@ -3554,12 +3441,10 @@ def test_the_plan_yml_filter_lives_in_the_dispatcher(monkeypatch):
 
 
 def test_the_documented_plan_wrapper_is_dispatchable(monkeypatch):
-    """The oracle for false positives, and for the page: the wrapper consumers
-    paste, verbatim, through the whole probe. The fence count is asserted first,
-    so a page edit that moves the wrapper out of this selector's reach fails
-    here instead of passing vacuously. The selector names `plan-cell`, which
-    this probe does not read, so the fence cannot be chosen by the very lines
-    under test."""
+    """The oracle for false positives and for the page: the wrapper consumers paste,
+    verbatim, through the whole probe. The fence count is asserted first, so a page edit
+    moving the wrapper out of this selector's reach fails here. The selector names
+    `plan-cell`, which this probe does not read, so the lines under test cannot select it."""
     page = (ENGINE / "docs" / "getting-started.md").read_text(encoding="utf-8")
     fences = [
         textwrap.dedent(m.group("body"))
@@ -3573,10 +3458,9 @@ def test_the_documented_plan_wrapper_is_dispatchable(monkeypatch):
 
 
 def test_dispatch_wiring_without_a_commit_is_a_note_not_a_read(monkeypatch):
-    # Same reasoning as the pin, fork-trigger and summary-wiring probes: a
-    # default-branch read would report the missing trigger on the very pull
-    # request that adds it. The `gh` stub pins that no read happens at all, so a
-    # weaker read cannot be silently substituted for the skip.
+    # Same reasoning as the pin, fork-trigger and summary-wiring probes: a default-branch
+    # read would report the missing trigger on the very pull request that adds it. The
+    # `gh` stub pins that no read happens at all, so a weaker read cannot stand in.
     def gh(path):
         pytest.fail(f"the dispatch-wiring probe read the API with no commit: {path}")
 
@@ -3650,7 +3534,7 @@ def test_review_rule_without_code_owner_review_warned(monkeypatch):
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
     out = doctor._review_rule_warnings(_ctx())
     assert out == [(doctor.WARNING, doctor._CODE_OWNER_REVIEW_OFF.format(branch=_BRANCH))]
-    # Pin the text, not just the constant: comparing against the constant leaves
+    # Pin the text, not the constant alone: comparing against the constant leaves
     # the two review findings' bodies interchangeable, so swapping them would
     # keep every review-rule test green while telling readers the wrong thing.
     assert "does not require code-owner review" in out[0][1]
@@ -3677,10 +3561,9 @@ def test_review_rule_count_zero_without_code_owner_review_is_the_worst_case_warn
 
 
 def test_review_rule_count_zero_with_code_owner_review_is_still_a_notice(monkeypatch):
-    # required_approving_review_count: 0 is a shipped, supported mode when
-    # code-owner review is on: the merge-side control a leaked App key cannot
-    # satisfy is still there. A warning on every run for a setting the sole
-    # maintainer will not change trains readers to ignore doctor.
+    # `required_approving_review_count: 0` is a shipped, supported mode when code-owner
+    # review is on: the merge-side control a leaked App key cannot satisfy is still there.
+    # Warning every run about a setting nobody will change teaches readers to ignore.
     responses = _rules_only(_pull_request_rule(code_owner=True, count=0))
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
     out = doctor._review_rule_warnings(_ctx())
@@ -3754,20 +3637,18 @@ def _count_word(n):
 
 
 def test_probe_count_is_stated_correctly_in_the_docs():
-    """Adding or removing a probe means editing six pieces of prose that spell
-    the count out — two in each of three files. Nothing else notices when they
-    go stale, so this reads all three and pins each phrase against
-    `len(PROBES)`:
+    """Adding or removing a probe means editing six pieces of prose that spell the count
+    out, two in each of three files. Nothing else notices when they go stale, so this
+    reads all three and pins each phrase against `len(PROBES)`:
 
     - `scripts/doctor`'s module docstring: (1) "the <n> live probes" and (2) the
       `Probes:` bullet list below it (one bullet per probe);
     - `CONTRACT.md`: (3) "<n> live settings probes" and (4) "<n-2> of the <n>";
-    - `docs/troubleshooting.md`: (5) "combining <n>" and (6) "<n-2> of the <n>
-      probes".
+    - `docs/troubleshooting.md`: (5) "combining <n>" and (6) "<n-2> of the <n> probes".
 
-    The number words come from the count rather than being hardcoded, so this
-    keeps biting when a further probe lands. `<n-2>` is the plan-path subset: the
-    approvers-team and App-permission probes cannot report from `annotate` mode.
+    The number words come from the count, so this keeps biting when a further probe lands.
+    `<n-2>` is the plan-path subset: the approvers-team and App-permission probes cannot
+    report from `annotate` mode.
     """
     total = len(doctor.PROBES)
     word, plan_word = _count_word(total), _count_word(total - 2)
@@ -3789,12 +3670,10 @@ def test_probe_count_is_stated_correctly_in_the_docs():
 
 
 def test_a_non_file_workflow_entry_does_not_blind_the_fork_trigger_probe(monkeypatch):
-    """The pin probe's twin. This probe exists to surface the one
-    misconfiguration on docs/hardening.md an outside contributor can reach, and
-    it also stops at the first unreadable file -- so a non-file entry sorting
-    ahead of the real workflows must be skipped, not treated as unreadable.
-    Treating it as unreadable reported "could not read" and hid the
-    `pull_request_target` trigger sitting in the very next file."""
+    """The pin probe's twin. This probe surfaces the one misconfiguration on docs/hardening.md
+    an outside contributor can reach, and it also stops at the first unreadable file, so a
+    non-file entry sorting ahead of the real workflows must be skipped. Treated as unreadable
+    it reports "could not read" and hides the `pull_request_target` trigger in the next file."""
     responses = {
         f"{_WF_DIR}{_REF}": [
             {"name": "sub.yml", "type": "dir"},
@@ -3881,13 +3760,10 @@ def test_plan_env_holding_secrets_is_a_notice_naming_each(monkeypatch):
 
 
 def test_the_notice_states_the_rule_and_never_that_this_env_is_unprotected(monkeypatch):
-    """The sibling `_env_protection_warnings` exists to report a plan
-    environment that *does* carry protection rules, so one report can hold both
-    findings: a NOTICE asserting that a plan environment cannot have approval
-    rules would contradict the warning printed beside it. State control 8's
-    requirement instead of a fact about this repository — and settle it without
-    reading protection data, which is the sibling's read, so that neither
-    probe's failure can silence the other."""
+    """The sibling `_env_protection_warnings` reports a plan environment that *does* carry
+    protection rules, so one report can hold both findings: a NOTICE asserting a plan
+    environment cannot have approval rules would contradict it. State control 8's requirement,
+    settled without the sibling's protection read, so one failure cannot silence the other."""
     responses = {
         f"repos/{_REPO}/environments?per_page=100": _environments("dev-eu-plan"),
         f"repos/{_REPO}/environments/dev-eu-plan/secrets?per_page=100": _secrets(
@@ -3914,11 +3790,10 @@ def test_the_notice_states_the_rule_and_never_that_this_env_is_unprotected(monke
 
 
 def test_shared_mode_reads_the_bare_env_and_says_it_is_the_apply_env_too(monkeypatch):
-    """In shared mode the plan environment IS the apply environment, so its
-    finding cannot be the split one: the credential a consumer put there for
-    applying is reachable by plan-time code. Pinned on the requested paths as
-    well as the wording -- a probe that read the right environment and worded it
-    as a split plan environment understates the exposure."""
+    """In shared mode the plan environment IS the apply environment, so its finding cannot
+    be the split one: the credential a consumer put there for applying is reachable by
+    plan-time code. Pinned on the requested paths as well as the wording -- wording it as
+    a split plan environment understates the exposure."""
     responses = {
         f"repos/{_REPO}/environments?per_page=100": _environments("dev-eu"),
         f"repos/{_REPO}/environments/dev-eu/secrets?per_page=100": _secrets("AWS_ROLE_ARN"),
@@ -3966,11 +3841,10 @@ def test_ambiguous_mode_reads_both_plan_side_names_and_never_the_apply_one(monke
 
 
 def test_ambiguous_mode_secret_findings_do_not_assert_the_environments_role(monkeypatch):
-    """Same rule as the protection findings: with both namings present the report
-    already says the binding is undetermined, so neither the notice nor the
-    App-key warning may call this environment shared or a plan environment --
-    including the notice's later clause about the apply role, which used to
-    assert what the opening clause had just hedged."""
+    """Same rule as the protection findings: with both namings present the report already
+    says the binding is undetermined, so neither the notice nor the App-key warning may
+    call this environment shared or a plan environment -- including the notice's later
+    clause about the apply role, which used to assert what the opening clause had hedged."""
     responses = {
         f"repos/{_REPO}/environments?per_page=100": _environments(
             "dev-eu", "dev-eu-plan", "dev-eu-apply"
@@ -3993,11 +3867,10 @@ def test_ambiguous_mode_secret_findings_do_not_assert_the_environments_role(monk
 
 
 def test_no_probe_reads_a_repository_variable(monkeypatch):
-    """The mode is inferred from environment names precisely so that doctor needs
-    no `variables: read` permission -- `app/manifest.json` does not declare one,
-    and adding it costs every installation a re-accept. A future "just read the
-    variable" edit must break here rather than degrade silently on every
-    consumer. Asserted over every path a full `warnings()` run requests."""
+    """The mode is inferred from environment names precisely so that doctor needs no
+    `variables: read` permission -- `app/manifest.json` does not declare one, and adding
+    it costs every installation a re-accept. A future "just read the variable" edit must
+    break here rather than degrade silently. Asserted over every path `warnings()` reads."""
     responses = {
         f"repos/{_REPO}/rules/branches/{_BRANCH}?per_page=100": _gate_rule(),
         f"repos/{_REPO}/environments?per_page=100": _environments(
@@ -4018,11 +3891,10 @@ def test_no_probe_reads_a_repository_variable(monkeypatch):
 
 
 def test_a_truncated_listing_cannot_clear_the_app_key(monkeypatch):
-    """`_APP_KEY_NAME in names` is a membership test over the names actually
-    read, and `bm.gh_json` does not multi-page — so on a truncated listing the
-    key can sit outside the page and produce silence, which is the one
-    configuration no document blesses reading as a routine note. Absence is
-    reportable only when the read was complete."""
+    """`_APP_KEY_NAME in names` is a membership test over the names actually read, and
+    `bm.gh_json` does not multi-page, so on a truncated listing the key can sit outside
+    the page and produce silence -- the one configuration no document blesses reading as a
+    routine note. Absence is reportable only when the read was complete."""
     responses = {
         f"repos/{_REPO}/environments?per_page=100": _environments("dev-eu-plan"),
         f"repos/{_REPO}/environments/dev-eu-plan/secrets?per_page=100": _secrets(
@@ -4140,11 +4012,10 @@ def test_shared_mode_app_key_warning_does_not_call_the_env_a_plan_environment(mo
 
 
 def test_a_truncated_environments_listing_refuses_to_infer_a_mode(monkeypatch):
-    """A partial listing used to produce a false "does not exist"; it now also
-    produces a wrong MODE, which asserts a naming the repository is not using and
-    redirects the plan-secret probe to the wrong environment. So it raises, and
-    `warnings()` degrades every environment probe loudly rather than reporting on
-    half the names."""
+    """A partial listing produces a false "does not exist" and a wrong MODE, which asserts
+    a naming the repository is not using and redirects the plan-secret probe to the wrong
+    environment. So it raises, and `warnings()` degrades every environment probe loudly
+    rather than reporting on half the names."""
     monkeypatch.setattr(doctor, "_gh_json", lambda path: _environments("dev-eu-plan", total=140))
     with pytest.raises(SystemExit, match="truncated"):
         doctor._existing_env_names(_ctx())
@@ -4160,11 +4031,10 @@ def test_an_environments_listing_without_a_total_count_is_not_taken_as_complete(
 
 
 def test_no_env_token_is_a_warning_and_reads_nothing(monkeypatch):
-    """An unaccepted permission request must never read as an all-clear.
-
-    `pytest.fail`, not a raise: the probe catches `(Exception, SystemExit)` per
-    environment, so a plain exception would degrade to a NOTICE and this test
-    would pass against the very mutation it exists to catch."""
+    """An unaccepted permission request must never read as an all-clear. `pytest.fail`,
+    not a raise: the probe catches `(Exception, SystemExit)` per environment, so a plain
+    exception would degrade to a NOTICE and this test would pass against the very mutation
+    it exists to catch."""
     monkeypatch.delenv("SHIPMATE_ENV_TOKEN", raising=False)
     monkeypatch.setattr(doctor, "_gh_json", lambda path: pytest.fail(f"read {path}"))
     found = doctor._plan_env_secret_warnings(_ctx())
@@ -4184,16 +4054,11 @@ def test_no_declared_env_reads_nothing_and_says_nothing(monkeypatch):
 
 
 def test_an_environment_that_does_not_exist_is_never_read(monkeypatch):
-    """Existence comes from the environments *listing*, never from the
-    per-environment read's exception. `bm.gh_json` raises without a status code,
-    so a 404 for a declared-but-absent environment would be indistinguishable
-    from the 403 that means this check saw nothing -- and the degrade note claims
-    the environment exists but could not be read, which for an absent one is
-    false and duplicates `_environment_warnings`' own finding.
-
-    Asserted on the paths requested, not just on the absence of a finding: a
-    probe that read the missing environment and swallowed the error would also
-    return []."""
+    """Existence comes from the environments *listing*, never from the per-environment
+    read's exception: `bm.gh_json` raises without a status code, so a 404 for a
+    declared-but-absent environment is indistinguishable from a 403, and the degrade note
+    would claim it exists. Asserted on the paths requested, since a probe that read the
+    absent environment and swallowed the error also returns []."""
     responses = {
         f"repos/{_REPO}/environments?per_page=100": _environments("dev-eu-plan"),
         f"repos/{_REPO}/environments/dev-eu-plan/secrets?per_page=100": _secrets(),
@@ -4210,12 +4075,11 @@ def test_an_environment_that_does_not_exist_is_never_read(monkeypatch):
 
 
 def test_a_long_secret_list_is_capped_so_it_cannot_eat_the_size_budget(monkeypatch):
-    """The settings section is never truncated, so one environment with many
-    secrets would otherwise spend the whole of `sc.SIZE_BUDGET` and push every
-    other finding into the omitted-findings fallback -- and in annotate mode
-    GitHub would cut the line off with no marker at all. Capped the same way the
-    all-clear line's environment list is. The count is asserted alongside: a cap
-    that also understated the total would hide secrets, not just their names."""
+    """The settings section is never truncated, so one environment with many secrets would
+    spend the whole of `sc.SIZE_BUDGET` and push every other finding into the
+    omitted-findings fallback -- and in annotate mode GitHub cuts the line off with no
+    marker. Capped like the all-clear line's environment list. The count is asserted too:
+    a cap that understated it would hide secrets, not only their names."""
     names = [f"CONSUMER_CREDENTIAL_NUMBER_{i:03d}" for i in range(60)]
     responses = {
         f"repos/{_REPO}/environments?per_page=100": _environments("dev-eu-plan"),
@@ -4271,11 +4135,9 @@ def test_plan_env_secret_listing_failure_propagates_to_the_degrade_note(monkeypa
 
 
 def test_truncated_secret_listing_reads_as_at_least(monkeypatch):
-    """`bm.gh_json` does not multi-page, so a repository with more than 100
-    secrets in one environment returns a partial list. Reporting `len(names)`
-    would understate it as the whole set. The same partial read also warns that
-    the App-key check could not be completed
-    (`test_a_truncated_listing_cannot_clear_the_app_key`)."""
+    """`bm.gh_json` does not multi-page, so an environment with more than 100 secrets
+    returns a partial list, and reporting `len(names)` understates it as the whole set.
+    The same partial read also warns that the App-key check could not be completed."""
     responses = {
         f"repos/{_REPO}/environments?per_page=100": _environments("dev-eu-plan"),
         f"repos/{_REPO}/environments/dev-eu-plan/secrets?per_page=100": _secrets(
@@ -4289,9 +4151,9 @@ def test_truncated_secret_listing_reads_as_at_least(monkeypatch):
 
 
 def test_secret_listing_uses_the_env_token_and_restores_gh_token(monkeypatch):
-    """The ambient GH_TOKEN is the App token minted without `environments:
-    read`; only the dedicated mint's token can list secrets. The five probes
-    after this one must still see the token it started with."""
+    """The ambient GH_TOKEN is the App token minted without `environments: read`; only
+    the dedicated mint's token can list secrets. The probes after this one must still see
+    the token it started with."""
     monkeypatch.setenv("GH_TOKEN", "apptok")
     monkeypatch.setenv("SHIPMATE_ENV_TOKEN", "envtok")
     seen = {}
@@ -4326,10 +4188,8 @@ def test_gh_token_stays_unset_when_it_was_unset_before(monkeypatch):
 
 
 def test_declared_envs_reads_a_flat_single_artifact_download(tmp_path):
-    # Same layout split `pending-checks` has to survive: with exactly one
-    # matching artifact, the download lands at `<cells>/cell.json` with no
-    # per-artifact directory. Insisting on the nested layout silently empties
-    # the declared-env set, which skips every environment probe on any
-    # single-cell plan.
+    # Same layout split `pending-checks` has to survive: with exactly one matching artifact
+    # the download lands at `<cells>/cell.json` with no per-artifact directory. Insisting on
+    # the nested layout empties the declared-env set, skipping every environment probe.
     (tmp_path / "cell.json").write_text(json.dumps({"environment": "dev-eu"}), encoding="utf-8")
     assert doctor._declared_envs(tmp_path) == {"dev-eu"}

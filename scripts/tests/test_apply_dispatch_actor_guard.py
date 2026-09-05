@@ -2,31 +2,28 @@
 bypass authorize by hand-rolling `gh workflow run apply.yml`/`apply-all.yml`/
 `unlock.yml`.
 
-The rejection is its own tiny job (`guard`), not a first step of `detect`.
-Two separate outcomes have to be told apart:
+The rejection is its own tiny job, `guard`, not a first step of `detect`. Two separate outcomes
+have to be told apart:
 
-- an **unauthorised dispatch** must not reach `summary`, which mints the App
-  key and comments on the dispatcher-supplied pull request number; and
-- a **genuine `detect` failure** -- a matrix over the 256-cell cap, an
-  env_order cycle, a cell whose apply check records no plan run -- must still
-  reach `summary`, or the developer gets no failure comment and no gate
-  refresh at all.
+- an unauthorised dispatch must not reach `summary`, which mints the App key and comments on the
+  dispatcher-supplied pull request number;
+- a genuine `detect` failure -- a matrix over the 256-cell cap, an env_order cycle, a cell whose
+  apply check records no plan run -- must still reach `summary`, or the developer gets no failure
+  comment and no gate refresh at all.
 
-`if: always() && needs.detect.result == 'success'` silenced both. Keying
-`summary` on `guard` instead separates them, and every fan-out job carries
-`guard` in its `needs` so the rejection reaches its `!failure()` clause: a
-rejected dispatch leaves `detect` *skipped*, and a skipped `detect` reads its
-outputs as empty strings, which the fan-out jobs' `!= 'true'` guards read as
-"not empty" and would start on.
+`if: always() && needs.detect.result == 'success'` silenced both. Keying `summary` on `guard`
+instead separates them, and every fan-out job carries `guard` in its `needs` so the rejection
+reaches its `!failure()` clause: a rejected dispatch leaves `detect` skipped, a skipped `detect`
+reads its outputs as empty strings, and the fan-out jobs' `!= 'true'` guards read empty as
+"not empty" and would start on it.
 
-A guard on `deploy.yml`'s `detect` would break every post-merge deploy, where
-`github.actor` is the human who merged -- that workflow must stay guard-free.
+A guard on `deploy.yml`'s `detect` would break every post-merge deploy, where `github.actor` is
+the human who merged. That workflow must stay guard-free.
 
-Every assertion below is on the *whole* parsed expression/string, not a
-substring. The substring form this replaces passed against `if: ${{ always()
-|| needs.detect.result == 'success' }}` (the hole reopened -- `||` instead of
-`&&`) and against a guard step moved to the end of `detect`, after the
-dispatcher-controlled ref had already been checked out.
+Every assertion below is on the whole parsed expression or string, not a substring. The substring
+form passed against `if: ${{ always() || needs.detect.result == 'success' }}` -- the hole
+reopened, `||` instead of `&&` -- and against a guard step moved to the end of `detect`, after
+the dispatcher-controlled ref had already been checked out.
 """
 
 import yaml
@@ -34,8 +31,8 @@ from _loader import WORKFLOWS
 
 GUARD_JOB = "guard"
 GUARD_IF = "${{ !endsWith(github.actor, '[bot]') }}"
-# The rejected verb differs per workflow, so the error line is keyed by
-# filename rather than a single shared constant.
+#: The rejected verb differs per workflow, so the error line is keyed by filename rather than a
+#: single shared constant.
 GUARD_ERROR_LINE = {
     "apply.yml": (
         "::error::apply must be dispatched by the shipmate App via comment-ops, "
@@ -50,25 +47,23 @@ GUARD_ERROR_LINE = {
         "not by a direct workflow_dispatch"
     ),
 }
-#: The whole `needs:` list each dispatched workflow's `detect` carries. Both
-#: apply paths wait on the `review` job that reads the pull request's review
-#: decision server-side; `unlock.yml` carries no such job, because an approval
-#: reviews a diff and unlock applies none. Compared whole, so neither `guard`
-#: dropping out nor an unreviewed extra dependency can slip in.
+#: The whole `needs:` list each dispatched workflow's `detect` carries. Both apply paths wait on
+#: the `review` job that reads the pull request's review decision server-side. `unlock.yml`
+#: carries no such job, because an approval reviews a diff and unlock applies none. Compared
+#: whole, so neither `guard` dropping out nor an unreviewed extra dependency can slip in.
 DETECT_NEEDS = {
     "apply.yml": ["guard", "review"],
     "apply-all.yml": ["guard", "review"],
     "unlock.yml": ["guard"],
 }
-#: The whole `needs:` list of every job downstream of `detect`, per file. Every
-#: job that can fail BEFORE `detect` has to appear, or its failure never reaches
-#: this job's `!failure()`: `detect` is skipped, its outputs read as empty
-#: strings, the `!= 'true'` clause reads empty as "not empty", and the job fans
-#: out on `fromJSON('')`. `summary` is in the map for the other half of the same
-#: property -- its `results:` is `join(needs.*.result, ',')` over its OWN needs,
-#: so an omitted pre-`detect` job renders the non-failure comment over a run
-#: that died. Compared whole, per job, so neither a pre-`detect` job dropping
-#: out nor a new one being omitted passes unnoticed.
+#: The whole `needs:` list of every job downstream of `detect`, per file. Every job that can fail
+#: before `detect` has to appear, or its failure never reaches this job's `!failure()`: `detect`
+#: is skipped, its outputs read as empty strings, the `!= 'true'` clause reads empty as
+#: "not empty", and the job fans out on `fromJSON('')`. `summary` is in the map for the other
+#: half of the same property, its `results:` being `join(needs.*.result, ',')` over its own
+#: needs, so an omitted pre-`detect` job renders the non-failure comment over a run that died.
+#: Compared whole, per job, so neither a pre-`detect` job dropping out nor a new one being
+#: omitted passes unnoticed.
 DOWNSTREAM_NEEDS = {
     "apply.yml": {
         "apply": ["guard", "review", "detect"],
@@ -89,14 +84,14 @@ DOWNSTREAM_NEEDS = {
             "envlevel3",
         ],
     },
-    # No `summary` job at all: an unlock posts no comment and refreshes no gate,
-    # which is why nothing here mints the App key.
+    # No `summary` job at all: an unlock posts no comment and refreshes no gate, which is why
+    # nothing here mints the App key.
     "unlock.yml": {"unlock": ["guard", "detect"]},
 }
 SUMMARY_IF = "${{ always() && needs.guard.result == 'success' }}"
-#: Every workflow `actions/dispatch` can target that carries the bot-actor
-#: rejection. `APPLY_PATHS` is the subset that also posts a result comment, and
-#: so has a `summary` job for the last test to read.
+#: Every workflow `actions/dispatch` can target that carries the bot-actor rejection.
+#: `APPLY_PATHS` is the subset that also posts a result comment, and so has a `summary` job for
+#: test_apply_paths_summary_is_gated_on_the_guard_and_not_on_detect to read.
 DISPATCH_PATHS = ("apply.yml", "apply-all.yml", "unlock.yml")
 APPLY_PATHS = ("apply.yml", "apply-all.yml")
 
@@ -112,9 +107,9 @@ def _needs(job):
 
 
 def test_dispatched_workflows_reject_dispatches_missing_a_bot_actor():
-    # The rejection must be the guard job's one and only step, so nothing at
-    # all can run in that job before it -- the reason it is not a step of
-    # `detect`, where `actions/checkout` of the dispatcher-supplied ref sits.
+    # The rejection must be the guard job's one and only step, so nothing can run in that job
+    # before it. That is why it is not a step of `detect`, where `actions/checkout` of the
+    # dispatcher-supplied ref sits.
     for name in DISPATCH_PATHS:
         job = _jobs(name)[GUARD_JOB]
         steps = job["steps"]
@@ -133,8 +128,8 @@ def test_dispatched_workflows_reject_dispatches_missing_a_bot_actor():
 
 
 def test_guard_job_holds_no_credentials_and_runs_no_repository_code():
-    # It gates the App key; it must not be able to reach one, name the
-    # environment that holds one, or execute the dispatcher's ref.
+    # It gates the App key, so it must not be able to reach one, name the environment that holds
+    # one, or execute the dispatcher's ref.
     for name in DISPATCH_PATHS:
         job = _jobs(name)[GUARD_JOB]
         assert job.get("permissions") == {}, (
@@ -148,10 +143,9 @@ def test_guard_job_holds_no_credentials_and_runs_no_repository_code():
 
 
 def test_every_fan_out_job_carries_the_guard_in_its_needs():
-    # A rejected dispatch leaves `detect` skipped, and a skipped `detect`'s
-    # outputs are empty strings -- which `needs.detect.outputs.*_empty !=
-    # 'true'` reads as "not empty". `guard` in `needs` is what makes the
-    # rejection visible to each job's `!failure()` clause.
+    # A rejected dispatch leaves `detect` skipped, and a skipped `detect`'s outputs are empty
+    # strings, which `needs.detect.outputs.*_empty != 'true'` reads as "not empty". `guard` in
+    # `needs` is what makes the rejection visible to each job's `!failure()` clause.
     for name in DISPATCH_PATHS:
         jobs = _jobs(name)
         assert _needs(jobs["detect"]) == DETECT_NEEDS[name], (
@@ -169,8 +163,8 @@ def test_every_fan_out_job_carries_the_guard_in_its_needs():
 def test_every_fan_out_job_needs_every_job_that_runs_before_detect():
     for name, expected_by_job in DOWNSTREAM_NEEDS.items():
         jobs = _jobs(name)
-        # Discovery decides the scope: a job added downstream of `detect` and
-        # left out of the map is exactly the omission this pins.
+        # Discovery decides the scope: a job added downstream of `detect` and left out of the map
+        # is the omission this pins.
         downstream = {j for j in jobs if j not in (GUARD_JOB, "detect", "review")}
         assert downstream == set(expected_by_job), (
             f"{name}: jobs downstream of detect are {sorted(downstream)}, but this "
@@ -199,15 +193,13 @@ def test_deploy_detect_carries_no_bot_actor_guard():
 
 
 def test_apply_paths_summary_is_gated_on_the_guard_and_not_on_detect():
-    # `if: always()` alone runs `summary` regardless of every `needs`
-    # conclusion, and `summary`'s steps read raw workflow_call inputs
-    # (pr_number, ref) rather than anything gated on `detect` -- so a bare
-    # `always()`, or `always() || needs.guard.result == 'success'` (still
-    # `true` unconditionally), would let a rejected dispatch mint the App key
-    # and post a pull request comment. Gating on `needs.detect.result` instead
-    # is the opposite regression: it also silences every genuine detect
-    # failure, so the developer gets no failure comment and no gate refresh.
-    # Pin the exact whole expression so either escape fails this test.
+    """`if: always()` alone runs `summary` regardless of every `needs` conclusion, and
+    `summary`'s steps read raw workflow_call inputs (pr_number, ref) rather than anything gated
+    on `detect`. So a bare `always()`, or `always() || needs.guard.result == 'success'`, still
+    unconditionally `true`, would let a rejected dispatch mint the App key and post a pull
+    request comment. Gating on `needs.detect.result` instead is the opposite regression: it also
+    silences every genuine detect failure, so the developer gets no failure comment and no gate
+    refresh. The whole expression is pinned so either escape fails."""
     for name in APPLY_PATHS:
         job = _jobs(name)["summary"]
         summary_if = job.get("if")

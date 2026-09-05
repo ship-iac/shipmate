@@ -12,15 +12,13 @@ path once -- ``apply-env-level.yml`` pinned ``apply-cell`` at a pre-safeguard SH
 so the ``--disable-safeguards=git-out-of-sync`` fix never reached post-merge
 applies even after consumers re-pinned to the new engine SHA.
 
-This test asserts every internal ``ship-iac/shipmate/<path>@<sha>`` reference
-pins a commit whose ``<path>`` content matches the **mainline** (the merge-base
-with ``main``), not HEAD. A difference means the pin is stale on the release
-line: bump it to a commit that contains the current action (in practice, a
-follow-up commit pinning the just-merged release SHA). Comparing against the
-mainline -- rather than HEAD -- means a branch that edits a pinned action isn't
-flagged for its own not-yet-merged change (the bump is impossible before the
-change has a SHA); the guard still fires once that change reaches ``main``
-without a pin bump. See ``_release_baseline``.
+This test asserts every internal ``ship-iac/shipmate/<path>@<sha>`` reference pins a commit whose
+``<path>`` content matches the mainline -- the merge-base with ``main`` -- not HEAD. A difference
+means the pin is stale on the release line: bump it to a commit that contains the current action,
+in practice a follow-up commit pinning the just-merged release SHA. Comparing against the
+mainline rather than HEAD means a branch that edits a pinned action is not flagged for its own
+not-yet-merged change, the bump being impossible before the change has a SHA; the guard still
+fires once that change reaches ``main`` without a pin bump. See ``pinrefs.release_baseline``.
 
 A second hazard, same shape, one directory level deeper: a composite action's
 runtime dependency surface is bigger than its own directory. Composite action
@@ -37,26 +35,23 @@ and its tests; the following pin-bump PR was still required, and until it
 landed, the previous pin's ``apply-summary`` action kept executing the
 pre-fix ``apply-comment``, with the guard reporting no staleness throughout.)
 
-To close that gap, every ``actions/<name>`` pin also gets its *script*
-dependency set derived -- action.yml's direct ``$GITHUB_ACTION_PATH`` script
-references, transitively closed over ``_load`` -- and each of those
-``scripts/<script>`` paths is diffed between the pin and the baseline exactly
-like a top-level ref. See ``_dependent_script_paths``. Deliberately not a diff
-of the whole ``scripts/`` directory: that would flag every pinned action on
-any unrelated script edit (e.g. a ``comment-parse`` change reddening
-``apply-summary``, which never runs it) -- a guard that cries wolf gets
-ignored, which is worse than the gap it closes. The pinned reusable workflow
-path (``.github/workflows/apply-env-level.yml``) is not treated as a
-script-running action for this purpose: comparing that file itself already
-covers it, and the action pins it contains are separate top-level ref-list
-entries, each checked (including their own script dependencies) on their own
--- adding the workflow's pinned actions' scripts to *its* set as well would
-double-count them under two different (referencing-file, sha) pairs.
+To close that gap, every ``actions/<name>`` pin also gets its script dependency set derived --
+action.yml's direct ``$GITHUB_ACTION_PATH`` script references, transitively closed over
+``_load`` -- and each of those ``scripts/<script>`` paths is diffed between the pin and the
+baseline exactly like a top-level ref. See ``pinrefs.dependent_script_paths``. Deliberately not a
+diff of the whole ``scripts/`` directory: that would flag every pinned action on any unrelated
+script edit, a ``comment-parse`` change reddening ``apply-summary``, which never runs it, for
+instance. A guard that cries wolf gets ignored, which is worse than the gap it closes. The pinned
+reusable workflow path (``.github/workflows/apply-env-level.yml``) is not treated as a
+script-running action for this purpose: comparing that file itself already covers it, and the
+action pins it contains are separate top-level ref-list entries, each checked on its own,
+including its own script dependencies. Adding the workflow's pinned actions' scripts to its set
+as well would double-count them under two different (referencing-file, sha) pairs.
 
-The derivation itself now lives in ``dev/pinrefs.py`` so the ``dev/`` re-pin
-CLIs run exactly the same logic this guard asserts on; a divergence between
-"what CI calls stale" and "what the fixer rewrites" would be worse than the
-duplication it replaces. This module keeps the rationale and the assertions.
+The derivation lives in ``dev/pinrefs.py``, so the ``dev/`` re-pin CLIs run exactly the logic
+this guard asserts on: a divergence between "what CI calls stale" and "what the fixer rewrites"
+would be worse than the duplication it replaces. This module keeps the rationale and the
+assertions.
 """
 
 import pinrefs
@@ -69,10 +64,10 @@ def test_internal_action_pins_are_current():
 
     baseline = pinrefs.release_baseline()
     if baseline is None:
-        # No mainline ref reachable (shallow clone / detached HEAD with truncated
-        # history). Falling back to HEAD would re-introduce the self-edit false
-        # positive the mainline comparison exists to remove, so skip rather than
-        # assert against the wrong baseline. CI checks out with fetch-depth: 0.
+        # No mainline ref reachable: a shallow clone, or a detached HEAD with truncated history.
+        # Falling back to HEAD would re-introduce the self-edit false positive the mainline
+        # comparison exists to remove, so skip rather than assert against the wrong baseline.
+        # CI checks out with fetch-depth: 0.
         pytest.skip("no mainline ref reachable (need main/origin/main with full history)")
 
     issues = pinrefs.pin_issues(refs, baseline)
@@ -86,26 +81,21 @@ def test_internal_action_pins_are_current():
         )
     if unverifiable:
         if pinrefs.is_shallow():
-            # merge-base resolving at the tip proves nothing about older
-            # history: a depth-1 clone of main resolves "merge-base HEAD
-            # origin/main" trivially while every older pinned commit object is
-            # absent. That is truncated history, not a dangling ref -- skip
-            # rather than misdiagnose it as a force-pushed/GC'd commit.
+            # merge-base resolving at the tip proves nothing about older history: a depth-1
+            # clone of main resolves "merge-base HEAD origin/main" trivially while every older
+            # pinned commit object is absent. That is truncated history, not a dangling ref, so
+            # skip rather than misdiagnose it as a force-pushed or GC'd commit.
             pytest.skip(
                 "clone is shallow -- cannot tell whether the missing pin "
                 "commit(s) are truncated history or genuinely gone:\n" + "\n".join(unverifiable)
             )
-        # A pin commit absent from a non-shallow clone means the commit itself
-        # is gone (force-push, GC), not truncated history. That is a ref
-        # GitHub cannot resolve at runtime, so it must fail -- pytest.skip
-        # would pass branch protection and ship the broken pin.
+        # A pin commit absent from a non-shallow clone means the commit itself is gone, by
+        # force-push or GC, not truncated history. GitHub cannot resolve that ref at runtime, so
+        # it must fail: pytest.skip would pass branch protection and ship the broken pin.
         pytest.fail(
             "internal pin(s) reference a commit that does not exist -- the ref "
             "cannot resolve at runtime:\n" + "\n".join(unverifiable)
         )
-
-
-# --- script-dependency derivation (pure, no git) ----------------------------
 
 
 def test_direct_script_refs_extracts_names_from_action_yaml():
@@ -140,9 +130,9 @@ def test_script_closure_terminates_on_cycle():
 
 
 def test_script_closure_handles_missing_script():
-    # A dependency name with no source on this side (added/removed between the
-    # pin and the baseline) must not raise -- it stays in the derived set so the
-    # caller diffs it and git reports the missing side.
+    # A dependency name with no source on this side, added or removed between the pin and the
+    # baseline, must not raise. It stays in the derived set, so the caller diffs it and git
+    # reports the missing side.
     assert pinrefs.script_closure({"ghost"}, lambda _n: None) == {"ghost"}
 
 
@@ -159,11 +149,10 @@ def test_composite_action_name_none_for_nested_path():
 
 
 def test_apply_summary_dependent_scripts_include_apply_comment_chain():
-    """Regression: actions/apply-summary/action.yml only names scripts/apply-comment
-    directly, but apply-comment cross-loads summary-comment and apply-gate. All
-    three must land in the derived set -- the exact shape of the gap that let a
-    scripts/apply-comment-only change ship without a pin bump while the guard
-    stayed green (see the module docstring)."""
+    """actions/apply-summary/action.yml names only scripts/apply-comment directly, but
+    apply-comment cross-loads summary-comment and apply-gate. All three must land in the derived
+    set: that is the shape of the gap which let a scripts/apply-comment-only change ship without
+    a pin bump while the guard stayed green. The module docstring has the history."""
     scripts_dir = pinrefs.ROOT / "scripts"
 
     def source_lookup(name):
@@ -179,9 +168,8 @@ def test_apply_summary_dependent_scripts_include_apply_comment_chain():
 
 
 def test_dependent_script_paths_empty_for_reusable_workflow():
-    # Comparing the reusable workflow file itself remains correct on its own; it
-    # must not also pull in unrelated scripts because it contains action pins
-    # (those are separate entries in the ref list).
+    # Comparing the reusable workflow file itself is correct on its own. It must not also pull in
+    # unrelated scripts because it contains action pins, which are separate ref-list entries.
     head = pinrefs.git("rev-parse", "HEAD").stdout.strip()
     assert (
         pinrefs.dependent_script_paths(".github/workflows/apply-env-level.yml", head, head) == set()
@@ -194,18 +182,16 @@ def test_dependent_script_paths_for_apply_summary_contains_apply_comment():
     assert {"scripts/apply-comment", "scripts/summary-comment", "scripts/apply-gate"} <= dependent
 
 
-# The three premise checks that once lived here -- SCRIPT_REF, REF and LOAD_REF
-# each seeing every reference of its kind -- are in
-# scripts/tests/test_pin_derivation_premises.py. They read only the working tree,
-# so they belong in a module PR CI runs; this one is --ignore'd there because the
-# tests below read git history and are red by design on a pin-bump PR.
+# The premise checks -- SCRIPT_REF, REF and LOAD_REF each seeing every reference of its kind --
+# are in scripts/tests/test_pin_derivation_premises.py, a module pull request CI runs because it
+# reads only the working tree. This one is --ignore'd there: it reads git history and is red by
+# design on a pin-bump pull request.
 
 
 def test_unverifiable_pin_fails_when_history_is_present(monkeypatch):
-    """A pin whose commit is absent while mainline history IS present is a
-    dangling ref, not a shallow clone: GitHub cannot resolve it at runtime and
-    every apply job dies. It must fail, because pytest.skip passes branch
-    protection -- the hole this closes.
+    """A pin whose commit is absent while mainline history is present is a dangling ref, not a
+    shallow clone: GitHub cannot resolve it at runtime and every apply job dies. It must fail,
+    because pytest.skip passes branch protection, which is the hole this closes.
     """
     monkeypatch.setattr(pinrefs, "refs_at", lambda *a, **k: [("actions/setup", "0" * 40, "x.yml")])
     monkeypatch.setattr(pinrefs, "release_baseline", lambda: "1" * 40)
@@ -216,11 +202,10 @@ def test_unverifiable_pin_fails_when_history_is_present(monkeypatch):
     )
     monkeypatch.setattr(pinrefs, "is_shallow", lambda: False)
 
-    # Both outcomes are caught explicitly rather than with pytest.raises: the
-    # pre-fix behavior is pytest.skip, whose exception would propagate out of
-    # pytest.raises and mark THIS test skipped -- a green run, which is exactly
-    # the failure mode under test. pytest.fail.Exception / pytest.skip.Exception
-    # are the public handles; _pytest.outcomes is private API.
+    # Both outcomes are caught explicitly rather than with pytest.raises: the regression is
+    # pytest.skip, whose exception would propagate out of pytest.raises and mark this test
+    # skipped -- a green run, which is the failure mode under test. pytest.fail.Exception and
+    # pytest.skip.Exception are the public handles; _pytest.outcomes is private API.
     try:
         test_internal_action_pins_are_current()
     except pytest.fail.Exception as exc:
@@ -232,12 +217,11 @@ def test_unverifiable_pin_fails_when_history_is_present(monkeypatch):
 
 
 def test_unverifiable_pin_skips_when_clone_is_shallow(monkeypatch):
-    """A depth-1 clone resolves `merge-base HEAD origin/main` trivially at the
-    tip even though every older pinned commit object is absent -- so a
-    resolved baseline does not prove full history the way it does in a full
-    clone. is_shallow() is what tells the two apart; without it this case
-    would be misdiagnosed as a force-pushed/GC'd commit and hard-fail every
-    shallow checkout instead of just reporting "cannot tell".
+    """A depth-1 clone resolves `merge-base HEAD origin/main` trivially at the tip even though
+    every older pinned commit object is absent, so a resolved baseline does not prove full
+    history the way it does in a full clone. is_shallow() is what tells the two apart; without it
+    this case would be misdiagnosed as a force-pushed or GC'd commit and hard-fail every shallow
+    checkout instead of reporting "cannot tell".
     """
     monkeypatch.setattr(pinrefs, "refs_at", lambda *a, **k: [("actions/setup", "0" * 40, "x.yml")])
     monkeypatch.setattr(pinrefs, "release_baseline", lambda: "1" * 40)

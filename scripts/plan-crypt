@@ -64,7 +64,7 @@ def encrypt(path):
 
 
 def decrypt(path):
-    """Decrypt in place per the fail-safe table (see module/plan docs)."""
+    """Decrypt in place, or refuse when the passphrase and the artifact disagree."""
     has_pass = bool(_passphrase())
     salted = _is_encrypted(path)
     if has_pass and salted:
@@ -79,7 +79,6 @@ def decrypt(path):
             "::error::plan artifact is encrypted but no plan-passphrase is configured; "
             "set the plan-passphrase secret (SHIPMATE_PLAN_PASSPHRASE) to apply this plan."
         )
-    # not has_pass and not salted -> plaintext passthrough (no-op)
 
 
 def main(argv):

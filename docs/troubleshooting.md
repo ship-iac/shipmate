@@ -13,133 +13,140 @@ findings as workflow annotations titled `shipmate doctor`
 doctor::<text>`) — read-only, never blocking. Comment `shipmate doctor` on a
 pull request for a consolidated report: a sticky comment (marker `<!--
 shipmate:doctor -->`, upserted in place like the plan comment) combining fourteen
-live probes — a missing or mis-pinned `shipmate / gate` rule on the default
-branch (no active ruleset requiring it, or one that doesn't pin
-`integration_id` to the shipmate App, or that isn't strict),
-whether the default branch's `pull_request` rule requires **code-owner** review
-(`hardening.md` #3–5 — an approval count alone is not reported as
-sufficient, because the shipmate App can submit an approving review, so only a
-CODEOWNERS review is out of reach of a leaked App private key, and only for
-changed files an entry actually owns — the rule is a no-op for unowned paths, and
-the probe reads ruleset booleans only, so it cannot see that;
-`required_approving_review_count: 0` *with* code-owner review on is the supported
-sole-maintainer mode, reported as a note rather than a warning, while count 0 with
-code-owner review off leaves no unforgeable merge-time control at all and warns;
-the booleans are unioned across every `pull_request` rule on the branch, since
-GitHub enforces the union across layered rulesets),
-a missing GitHub
-Environment (`<env>-plan` / `<env>-apply`, or a single shared `<env>`) for a
-tagged-in environment, the
-plan/apply environment protection shape (a plan environment must have no
-approval-type protection rules — required reviewers or wait timers — and no
-deployment branch policy; an apply environment with no approval rule is only a
-note, and "no approval rule" is deliberately not "no protection rules": GitHub
-synthesizes a `branch_policy` protection rule for any environment with a
-deployment branch policy, and a branch policy is not a review; the role each
-environment plays is inferred from the environment **names** — doctor never reads
-`SHIPMATE_SHARED_ENVS` — so a shared environment carrying approval rules warns
-that they stall the plan cells and the nightly drift run, its missing approval
-rules are a note, and its branch policy is a note only while no suffixed sibling
-exists: once one does, an unmigrated `plan.yml` may still bind the bare
-environment, so the policy is warned about as the plan-stall it can be. An env
-with a bare `<env>` *and* a suffixed sibling warns that which naming each path
-binds is undetermined, so either naming may be bound by nothing with its
-protection rules reading as a control in no code path — and the missing half of
-the suffixed pair is still reported), the secrets a
-plan environment holds (names only — the API never returns a value; a plan
-cell runs branch code with whatever that environment releases and control 8
-forbids protecting it, so a note giving the count — exact unless the listing was
-too long to read whole — and a capped list of
-the names — a crowded environment's later names are not printed, so that one
-finding cannot spend the whole report's size budget — and a warning if
-`SHIPMATE_APP_PRIVATE_KEY` is one of them), whether the `shipmate-engine`
-environment exists and its deployment branch policy actually names the default
-branch (see `hardening.md` #16 and `github-app.md` §Key-exposure
-boundary — this is the probe that catches a re-pin that never (re-)creates
-that environment, which would otherwise leave the App key a repository secret
-again with nothing else to notice), any workflow file other than `plan.yml`
-declaring the
-`pull_request_target` trigger (it runs at the base ref with the repository's
-secrets, and a workflow that also acts on content the pull request author
-controls from a job naming an environment hands those secrets to a fork —
-`hardening.md`; `plan.yml` is exempt by exact name because it uses the
-trigger in the one shape that is safe, with the credentialed job checking
-nothing out; the probe reads the same workflow files as the pin
-probe, at the same commit, so a pull request that removes the trigger is not
-still reported for it), engine
-action-pin freshness in the consumer's own workflow files (read at the commit
-under examination, so the pull request that bumps a stale pin is not itself
-reported stale, and restricted to pins of the engine's own repository, which
-the probe learns at runtime from the running action rather than from any
-hardcoded slug — another org's shared action is not shipmate's to report on),
-whether the `plan.yml` wrapper states the facts the engine's guards decide
-on — the head-repository, draft and on-demand inputs on its call of the engine's
-reusable summary workflow, the head-repository and head-SHA inputs on its own
-`build-matrix` step, and
-no `no-pull-request` anywhere in the file (an omitted `head-repo` or `is-draft`
-on the summary call skips the
-summary job, so no gate status is written and nothing on the run page says why
-the pull request cannot merge; a constant — the running repository, a literal
-`false` — states the safe answer for every run, fork pull requests and drafts
-included, so the value is checked and not just the key, and on the `build-matrix`
-step that constant is the fork refusal passing every pull request, or a run
-planning whatever the trigger checked out),
-whether the `apply.yml` wrapper still declares or forwards the retired
-`plan_run_id` input (the engine dispatches no such value and nothing it calls
-accepts one; a `with:` line forwarding it to the engine's reusable `apply.yml`
-or `apply-all.yml` makes GitHub reject the run as it LOADS the workflow — the
-run has no jobs and no logs, only a workflow-validation error on the run itself
-— while the same line on a composite action is only a warning),
-whether that same wrapper still carries the retired `mode` input, which
-`shipmate unlock` no longer uses now that it dispatches its own `unlock.yml`
-(declared under `on:` it is dead weight; forwarded to the engine's reusable
-`apply.yml` or `apply-all.yml` it is the same load-time rejection — those two
-placements are what the probe reads, so an ordinary `mode:` elsewhere in the
-file, such as an `actions/state` step's, is not reported),
-whether the `plan.yml` wrapper can serve a dispatched plan at all — the
-`workflow_dispatch` trigger a commented `shipmate plan` dispatches, the `pr_number`
-input that dispatch body carries, and a `pr-facts` step (the first two are refused
-at dispatch time with an HTTP 422 and no run created, so the failure lands on the
-comment-handling run rather than the pull request; without the third a dispatched
-run has nothing resolving which pull request it is for, since its event payload
-carries none),
-whether the configured approvers team resolves in the org, and
-whether the shipmate App installation still grants the manifest's full
-permission set — with the warning and failure annotations GitHub already
-recorded on this commit's workflow runs (shipmate's own and any other
-Actions workflow run on that commit; third-party-app-authored check runs are
-excluded). Only twelve of the fourteen probes can produce a finding from the plan
-path's own `annotate`-mode run (`actions/summary`): the approvers-team probe
-needs the `SHIPMATE_TEAM` environment variable, which the plan path does
-not supply, and
+live probes.
+
+- **The `shipmate / gate` rule on the default branch is missing or mis-pinned.**
+  No active ruleset requires it, or one does but does not pin `integration_id`
+  to the shipmate App, or is not strict.
+- **Whether the default branch's `pull_request` rule requires code-owner review
+  (`hardening.md` #3–5).** An approval count alone is not reported as sufficient,
+  because the shipmate App can submit an approving review. Only a CODEOWNERS
+  review is out of reach of a leaked App private key, and only for changed files
+  an entry actually owns — the rule is a no-op for unowned paths, and the probe
+  reads ruleset booleans only, so it cannot see that.
+  `required_approving_review_count: 0` *with* code-owner review on is the
+  supported sole-maintainer mode, reported as a note rather than a warning,
+  while count 0 with code-owner review off leaves no unforgeable merge-time
+  control at all and warns. The booleans are unioned across every
+  `pull_request` rule on the branch, since GitHub enforces the union across
+  layered rulesets.
+- **A GitHub Environment (`<env>-plan` / `<env>-apply`, or a single shared
+  `<env>`) is missing for a tagged-in environment.**
+- **The plan/apply environment protection shape.** A plan environment must have
+  no approval-type protection rules — required reviewers or wait timers — and
+  no deployment branch policy. An apply environment with no approval rule is
+  only a note, and "no approval rule" is deliberately not "no protection rules":
+  GitHub synthesizes a `branch_policy` protection rule for any environment with
+  a deployment branch policy, and a branch policy is not a review. The role each
+  environment plays is inferred from the environment names — doctor never reads
+  `SHIPMATE_SHARED_ENVS` — so a shared environment carrying approval rules warns
+  that they stall the plan cells and the nightly drift run, its missing approval
+  rules are a note, and its branch policy is a note only while no suffixed
+  sibling exists. Once one does, an unmigrated `plan.yml` may still bind the
+  bare environment, so the policy is warned about as the plan-stall it can be.
+  An env with a bare `<env>` *and* a suffixed sibling warns that which naming
+  each path binds is undetermined, so either naming may be bound by nothing with
+  its protection rules reading as a control in no code path — and the missing
+  half of the suffixed pair is still reported.
+- **The secrets a plan environment holds, names only.** The API never returns a
+  value. A plan cell runs branch code with whatever that environment releases
+  and control 8 forbids protecting it, so the finding is a note giving the count
+  — exact unless the listing was too long to read whole — and a capped list of
+  the names. A crowded environment's later names are not printed, so that one
+  finding cannot spend the whole report's size budget.
+  `SHIPMATE_APP_PRIVATE_KEY` among them is a warning.
+- **Whether the `shipmate-engine` environment exists, and whether its deployment
+  branch policy actually names the default branch.** See `hardening.md` #16 and
+  `github-app.md` §Key-exposure boundary. This is the probe that catches a
+  re-pin that never (re-)creates that environment, which would otherwise leave
+  the App key a repository secret again with nothing else to notice.
+- **A workflow file other than `plan.yml` declares the `pull_request_target`
+  trigger.** It runs at the base ref with the repository's secrets, and a
+  workflow that also acts on content the pull request author controls from a job
+  naming an environment hands those secrets to a fork (`hardening.md`).
+  `plan.yml` is exempt by exact name because it uses the trigger in the one
+  shape that is safe, with the credentialed job checking nothing out. The probe
+  reads the same workflow files as the pin probe, at the same commit, so a pull
+  request that removes the trigger is not still reported for it.
+- **Engine action-pin freshness in the consumer's own workflow files.** Each is
+  read at the commit under examination, so the pull request that bumps a stale
+  pin is not itself reported stale. It covers only pins of the engine's own
+  repository, which the probe learns at runtime from the running action rather
+  than from any hardcoded slug — another org's shared action is not shipmate's
+  to report on.
+- **Whether the `plan.yml` wrapper states the facts the engine's guards decide
+  on.**
+  Those are the head-repository, draft and on-demand inputs on its call of the
+  engine's reusable summary workflow, the head-repository and head-SHA inputs on
+  its own `build-matrix` step, and no `no-pull-request` anywhere in the file. An
+  omitted `head-repo` or `is-draft` on the summary call skips the summary job,
+  so no gate status is written and nothing on the run page says why the pull
+  request cannot merge. A constant — the running repository, a literal `false`
+  — states the safe answer for every run, fork pull requests and drafts
+  included, so the value is checked and not only the key; on the `build-matrix`
+  step that constant is the fork refusal passing every pull request, or a run
+  planning whatever the trigger checked out.
+- **Whether the `apply.yml` wrapper still declares or forwards the retired
+  `plan_run_id` input.** The engine dispatches no such value and nothing it
+  calls accepts one. A `with:` line forwarding it to the engine's reusable
+  `apply.yml` or `apply-all.yml` makes GitHub reject the run as it LOADS the
+  workflow — the run has no jobs and no logs, only a workflow-validation error
+  on the run itself — while the same line on a composite action is only a
+  warning.
+- **Whether that same wrapper still carries the retired `mode` input.**
+  `shipmate unlock` no longer uses it, now that it dispatches its own
+  `unlock.yml`. Declared under `on:` it is dead weight; forwarded to the
+  engine's reusable `apply.yml` or `apply-all.yml` it is the same load-time
+  rejection. Those two
+  placements are what the probe reads, so an ordinary `mode:` elsewhere in the
+  file, such as an `actions/state` step's, is not reported.
+- **Whether the `plan.yml` wrapper can serve a dispatched plan at all.** That needs the
+  `workflow_dispatch` trigger a commented `shipmate plan` dispatches, the
+  `pr_number` input that dispatch body carries, and a `pr-facts` step. The first
+  two are refused at dispatch time with an HTTP 422 and no run created, so the
+  failure lands on the comment-handling run rather than the pull request.
+  Without the third a dispatched run has nothing resolving which pull request it
+  is for, since its event payload carries none.
+- **Whether the configured approvers team resolves in the org.**
+- **Whether the shipmate App installation still grants the manifest's full
+  permission set.**
+
+The report carries those findings together with the warning and failure
+annotations GitHub already recorded on this commit's workflow runs — shipmate's
+own and any other Actions workflow run on that commit; third-party-app-authored
+check runs are excluded.
+
+Only twelve of the fourteen probes can produce a finding from the plan path's
+own `annotate`-mode run (`actions/summary`). The approvers-team probe needs the
+`SHIPMATE_TEAM` environment variable, which the plan path does not supply, and
 the App-permission-drift probe only has something to report when a
 full-manifest permission-set mint was actually attempted, which only
-`shipmate doctor` does — both are effectively comment-path-only. `doctor`
-degrades to a "could not verify" **warning** naming each probe that was skipped
-on an API error, and always exits 0, so a probe failure (for example, the App
-token lacking read access to `rules/branches` or `environments` — both token
-mints that drive doctor also request Actions read, which the environment reads
-need on some configurations) never fails the plan run. One endpoint failure can
-name more than one probe: a `rules/branches` failure degrades both the gate-rule
-and the review-rule probe, because the two read it independently on purpose, so
-neither is silenced by the other's failure. The engine-pin and fork-trigger
-probes degrade to a **note** instead — both read `.github/workflows`, and that
-read legitimately fails on the pull request that first adds that directory, which
-is the first `shipmate doctor` any consumer runs, so the first report a consumer
-sees carries two notes. Both also decline rather than guessing when they cannot
-tell which commit to read, and the pin probe when it cannot tell which
-repository the engine is.
-An environment that exists but whose settings cannot be read is likewise a
-note naming it, rather than the silence a nonexistent environment gets (that
-one is the environment-existence probe's finding) — the `shipmate-engine`
-probe degrades the same way. The plan-environment secret probe carries three
-degrade levels of its own: with no `environments: read` token it **warns** that
-the check was not performed — never that a plan environment is clean; an
-environment whose secret listing fails is a **note** naming it, so one
-unreadable environment does not silence the ones that could be read; and a
-listing too long to read whole **warns** that whether the environment holds
-`SHIPMATE_APP_PRIVATE_KEY` could not be determined, rather than reading as a
-routine note about the names it did see.
+`shipmate doctor` does. Both are effectively comment-path-only. `doctor`
+degrades to a "could not verify" warning naming each probe that was skipped on
+an API error, and always exits 0, so a probe failure never fails the plan run.
+One such failure is the App token lacking read access to `rules/branches` or
+`environments` — both token mints that drive doctor also request Actions read,
+which the environment reads need on some configurations. One endpoint failure
+can name more than one probe: a `rules/branches` failure degrades both the
+gate-rule and the review-rule probe, because the two read it independently on
+purpose, so neither is silenced by the other's failure.
+
+The engine-pin and fork-trigger probes degrade to a note instead. Both read
+`.github/workflows`, and that read legitimately fails on the pull request that
+first adds that directory, which is the first `shipmate doctor` any consumer
+runs, so the first report a consumer sees carries two notes. Both also decline
+rather than guessing when they cannot tell which commit to read, and the pin
+probe when it cannot tell which repository the engine is. An environment that
+exists but whose settings cannot be read is likewise a note naming it, rather
+than the silence a nonexistent environment gets — a nonexistent environment is
+the environment-existence probe's finding. The `shipmate-engine` probe degrades the
+same way. The plan-environment secret probe carries three degrade levels of its
+own: with no `environments: read` token it warns that the check was not
+performed, never that a plan environment is clean; an environment whose secret
+listing fails is a note naming it, so one unreadable environment does not
+silence the ones that could be read; and a listing too long to read whole warns
+that whether the environment holds `SHIPMATE_APP_PRIVATE_KEY` could not be
+determined, rather than reading as a routine note about the names it did see.
 
 All three environment probes — existence, protection shape, and the
 secrets a plan environment holds — cover only the environments of the stacks a
@@ -149,13 +156,16 @@ instead of implying the repository's environments are all sound, and a clean
 secret probe says nothing about an environment this pull request did not touch.
 The declared set is the cell summaries of the plan runs this commit's own apply
 checks record, so a run whose summaries cannot be downloaded is warned about and
-its environments are simply absent from the set. **One check is exempt and reported
-anyway: the ambiguous-naming warning** (a bare `<env>` beside `<env>-plan` or
-`<env>-apply`), which compares environment names against each other and needs no
-declared set — it therefore covers every logical environment in the repository,
-not only this pull request's. That is deliberate: the moment the warning is most
-wanted is mid-migration, between the merge and the delete, when a fan-out is at
-its most likely to lose a cell to something unrelated.
+its environments are absent from the set.
+
+**One check is exempt and reported anyway.** The ambiguous-naming warning (a
+bare `<env>` beside `<env>-plan` or `<env>-apply`) compares environment names
+against each other and needs no declared set, so it covers every logical
+environment in the repository, not only this pull request's. That is
+deliberate: the moment the warning is most wanted is mid-migration, between the
+merge and the delete, when a fan-out is at its most likely to lose a cell to
+something unrelated.
+
 Separately, the report states plainly when some of the commit's workflow runs
 had not finished yet, and when the warnings harvest itself could not complete
 (or may be truncated by GitHub's per-step annotation cap), rather than claiming
@@ -169,8 +179,8 @@ warning — so treat an unfamiliar line as upstream's until you have checked.
 
 The line you are most likely to meet is
 `Input 'app-id' has been deprecated with message: Use 'client-id' instead.`,
-once per token mint on the commit, from `actions/create-github-app-token`. **It
-is upstream deprecation noise, not a setting to fix** — nothing in your
+once per token mint on the commit, from `actions/create-github-app-token`.
+**It is upstream deprecation noise, not a setting to fix.** Nothing in your
 repository causes it and nothing you can configure removes it. Do not go looking
 for a second App credential or change `SHIPMATE_APP_ID`; that is a dead end.
 
@@ -193,7 +203,7 @@ wiring is wrong.
 `shipmate doctor` never blocks the gate, and it needs no team membership,
 review or reviewed plan, unlike `shipmate apply` — but because it reports this
 repository's own settings, the engine limits it to organization members and
-repository collaborators (below).
+repository collaborators (§Who can ask for the report, and who can see it).
 
 ## Who can ask for the report, and who can see it
 
@@ -214,17 +224,17 @@ does not recognize, or an event carrying no comment context at all, counts as no
 access. Nothing is required of you to adopt it beyond re-pinning the engine
 SHA — it adds no action input and no workflow `permissions:` entry.
 
-**What the engine does not enforce.** It does **not** check write access.
+**What the engine does not enforce.** It does not check write access.
 `author_association` is GitHub's own classification of the author's relationship
 to the repository, not a permission lookup, and it is wrong in both directions:
 
-- a collaborator invited with only the **Read** role is classified
-  `COLLABORATOR`, and an organization member whose base repository permission is
-  **None** is classified `MEMBER` — both are admitted to the report despite
-  having no write access. If that matters for your repository, add the
-  workflow-level layer below, or do not grant read-only collaborator access to
-  people who should not see the settings inventory;
-- conversely, an organization member whose membership is **private** is reported
+- a collaborator invited with only the Read role is classified `COLLABORATOR`,
+  and an organization member whose base repository permission is None is
+  classified `MEMBER` — both are admitted to the report despite having no write
+  access. If that matters for your repository, add the workflow-level layer
+  below, or do not grant read-only collaborator access to people who should not
+  see the settings inventory;
+- conversely, an organization member whose membership is private is reported
   as `NONE` and will be refused unless they are also a direct collaborator; make
   the membership public or add the person as a collaborator.
 
@@ -237,7 +247,7 @@ once someone with access asks for it, everyone who can read the pull request can
 read it. The same rendered report is also written to the run's job summary, so
 that a GitHub API outage which loses the comment does not discard the probes.
 That surface needs repository read access too, so it admits no one the comment
-did not — but it is **not** as retractable. The comment is a single sticky one
+did not — but it is not as retractable. The comment is a single sticky one
 you can edit or delete, and the next `shipmate doctor` overwrites it; a job
 summary cannot be edited or redacted at all, and every past run keeps its own
 copy for the repository's Actions retention window (90 days by default). So if a
@@ -245,11 +255,11 @@ report disclosed something you did not want recorded, deleting the comment is no
 enough — delete the workflow runs that produced it, or shorten the retention
 window.
 
-On a repository whose pull requests are **public** you can add a second layer
+On a repository whose pull requests are public you can add a second layer
 by gating the `issue_comment` job itself on the same
 `github.event.comment.author_association` values, or by keeping the repository
 private. That is belt and braces over the engine's own gate, not the primary
-mitigation. Note also that `app/manifest.json` declares
+mitigation. `app/manifest.json` declares
 `"public": false`: the shipmate App is registered per organization and intended
 for repositories the installing organization controls.
 
@@ -266,7 +276,7 @@ generated, and OpenTofu itself rejects the stored plan; or `apply-cell`'s
 pre-apply check found that the current environment's `TF_VAR_*` set no longer
 hashes to the fingerprint recorded with the plan — a variable was added,
 removed or changed ([`../CONTRACT.md`](../CONTRACT.md) §Apply-match
-fingerprint). That error names the current variable **names** only; it never
+fingerprint). That error names the current variable names only; it never
 prints a value.
 
 The fix is a re-plan — push, or re-run the plan workflow — and an apply of the
@@ -278,23 +288,23 @@ gate greening over an unapplied stack.
 available.** A failed apply leaves its `apply / <stack> / <env>` check *pending*
 rather than failed, so `snapshot` accepts a fresh `shipmate apply <env>` for that
 cell — the right recovery when nothing moved (a credentials failure, a rate limit,
-a cancelled run). If the apply **partially** succeeded, the state serial advanced
+a cancelled run). If the apply partially succeeded, the state serial advanced
 and the stored plan no longer matches it, so that retry is refused here instead.
 Re-plan first; the two recoveries are not interchangeable.
 
 A cancelled run has one further failure mode a bare retry cannot clear: it can
 die holding the state lock, and every later apply of that cell then fails
-acquiring it. See "A state lock is held", below.
+acquiring it. See §A state lock is held.
 
-**No supported route aims an apply at a superseded plan**, which is why this error
-normally means the state moved rather than that the wrong plan was chosen.
-both dispatched apply workflows refuse in their `guard` job any dispatch whose
+**No supported route aims an apply at a superseded plan.** That is why this
+error normally means the state moved rather than that the wrong plan was chosen.
+Both dispatched apply workflows refuse in their `guard` job any dispatch whose
 actor is not a `[bot]` — a hand-run one fails with `apply must be dispatched by
 the shipmate App via comment-ops, not by a direct workflow_dispatch` — and
-comment-ops
-reads the plan run each `apply / <stack> / <env>` check on the pull request's
-**current** head records, refusing the command when that head names none. These fail-safes are defence in
-depth behind that control, not the only thing behind it.
+comment-ops reads the plan run each `apply / <stack> / <env>` check on the pull
+request's current head records, refusing the command when that head names none.
+These fail-safes are defence in depth behind that control, not the only thing
+behind it.
 
 **If the mismatch names *every* `TF_VAR_*` and it started right after an
 environment-naming or `SHIPMATE_SHARED_ENVS` change, the cause is not the plan.**
@@ -304,10 +314,11 @@ is designed to produce on any layout whose environment injects a non-empty
 `TF_VAR_*` or `TF_WORKSPACE`. (A
 folder-per-env layout injects none, hashes the empty set on both sides and so
 never reaches this error at all; see [`../CONTRACT.md`](../CONTRACT.md) §Env
-model for what that layout gives up instead.) In practice the pre-flight in the
-next section refuses such a run before any wave starts, whatever the layout
-injects, so reaching *this* error from a naming change usually means either the
-environment went missing after the pre-flight passed, or it exists because an
+model for what that layout gives up instead.) In practice the environment
+pre-flight of §`this apply would bind GitHub Environment(s) that do not exist`
+refuses such a run before any wave starts, whatever the layout injects, so
+reaching *this* error from a naming change usually means either the environment
+went missing after the pre-flight passed, or it exists because an
 earlier mis-set run auto-created it empty — an environment that exists satisfies
 the pre-flight and still injects nothing. Two ways to arrive there:
 
@@ -324,7 +335,7 @@ the pre-flight and still injects nothing. Two ways to arrive there:
 
 A plan cell fails on its very first step, before `terramate` runs, so the cell
 produces no plan and its `<stack> / <env>` check does not go green. The failing
-plan job leaves `shipmate / gate` held **red** with `plan incomplete (plan job:
+plan job leaves `shipmate / gate` held red with `plan incomplete (plan job:
 failure)` — a hold, not an absence (§`shipmate / gate` never goes green, "The
 gate is deliberately held") — so nothing merges until the plan cells pass.
 
@@ -340,11 +351,11 @@ own fix:
   the input ([`upgrading.md`](upgrading.md) §0.17.0).
 - **The commit checked out is not the commit the run says it is planning.**
   Neither plan trigger checks out the pull request's head — `pull_request_target`
-  takes the **base** branch, `workflow_dispatch` the dispatch ref — so `detect`
+  takes the base branch, `workflow_dispatch` the dispatch ref — so `detect`
   and `plan` must name
   `ref: ${{ needs.facts.outputs.head-sha }}` on their checkout. Without it
   the cell plans the base and would report a clean plan for a pull request it
-  never read; that is now a refusal instead. Fix the **checkout** — passing the
+  never read; that is now a refusal instead. Fix the checkout — passing the
   base SHA as `expected-head` to make the comparison agree is the one wrong
   reading of this error, and it restores exactly the hazard the check exists to
   close. `build-matrix` holds the same line one job earlier, in `detect`, and
@@ -372,15 +383,15 @@ remedy differs:
 - **There is no record at all.** There is nothing to compare, so the absent
   record is refused rather than tolerated. Most often the plan predates the
   release that binds a plan to the tree it was produced from, though a
-  mismatched engine revision produces the same absence. **A push does not always fix
-  this one.** Pre-merge it does: push to the pull request and the fresh plan
+  mismatched engine revision produces the same absence. A push does not always
+  fix this one. Pre-merge it does: push to the pull request and the fresh plan
   carries a record — a *re-run* of the old plan run does not, because a re-run
   replays the workflow file of the commit that triggered it, so it produces
-  another old-format plan from the pre-re-pin engine pin. But the post-merge deploy path
-  can meet an old-format artifact for a cell that was still pending when the
-  re-pin merged, and there is no pull request left to push to — the remedy there
-  is a follow-up pull request touching those stacks. The way to avoid meeting it
-  at all is to land the re-pin with nothing pending
+  another old-format plan from the pre-re-pin engine pin. But the post-merge
+  deploy path can meet an old-format artifact for a cell that was still pending
+  when the re-pin merged, and there is no pull request left to push to — the
+  remedy there is a follow-up pull request touching those stacks. The way to
+  avoid meeting it at all is to land the re-pin with nothing pending
   ([`upgrading.md`](upgrading.md) §0.17.0).
 
 This check is per cell and additive: the apply path's plan-run binding — each
@@ -393,8 +404,8 @@ accepted.
 The apply run stopped in its `snapshot` job, before any wave, and the error names
 every environment the applies would have bound that the repository does not have.
 
-Why it refuses instead of warning: GitHub creates a missing environment **on
-demand**, with no reviewers, no wait timer and no deployment branch policy, and
+Why `snapshot` refuses instead of warning: GitHub creates a missing environment
+on demand, with no reviewers, no wait timer and no deployment branch policy, and
 the apply then runs inside it. That environment is the only control over an apply
 on a layout injecting no variables — the apply-match fingerprint compares
 variable *content*, and an auto-created environment is byte-identical to a
@@ -405,7 +416,7 @@ Two fixes, and the error names both because either can be the right one:
 
 - **Create each environment named.** The apply path binds `<env>-apply` for a
   split env and the bare `<env>` for one listed in the `SHIPMATE_SHARED_ENVS`
-  repository variable. Existence is matched **case-exactly** against the stack's
+  repository variable. Existence is matched case-exactly against the stack's
   env tag, while the `SHIPMATE_SHARED_ENVS` listing is case-insensitive — so an
   environment differing from the named binding only in case does not satisfy the
   pre-flight, and GitHub may reject a second one as a duplicate. Rename the
@@ -422,8 +433,8 @@ Two neighbouring failures from the same step, both also fail-closed:
 
 - **`could not list this repository's GitHub Environments`.** The check did not
   happen, so the applies are refused rather than permitted. Check first that the
-  job calling `apply-env-level.yml` grants **`actions: read`**: permissions cap at
-  each `uses:` boundary, and on a **private** repository listing environments 403s
+  job calling `apply-env-level.yml` grants `actions: read`: permissions cap at
+  each `uses:` boundary, and on a private repository listing environments 403s
   with `checks: read` alone. Every apply route shipped here grants it already, so
   a persistent 403 points at a hand-written caller. A 5xx or a rate limit clears
   on a re-run of the workflow.
@@ -432,7 +443,7 @@ Two neighbouring failures from the same step, both also fail-closed:
   unread one. Reduce the number of environments, or re-run — this is a hard
   ceiling around 100 environments, not a transient.
 
-What this does **not** cover, deliberately: the plan-side binding (that is in
+What this does not cover, deliberately: the plan-side binding (that is in
 your own `plan.yml` / `drift.yml`, which the engine cannot read), an environment
 that exists but is empty or mis-scoped (the fingerprint and `shipmate doctor`
 cover content), and an environment deleted between the pre-flight and the wave
@@ -460,28 +471,29 @@ contract). Every cell in that environment with a pending
 cell that cannot determine its lock state fails red rather than reporting the
 lock absent.
 
-Then re-apply. **Unlocking is not recovery**: a cancelled apply usually advanced
+Then re-apply. Unlocking is not recovery: a cancelled apply usually advanced
 the state, so `shipmate apply <env>` may now be refused by the exact-plan
-fail-safe above — re-plan and apply the fresh plan. The lock is released either
-way; the plan is a separate question.
+fail-safe of §`Saved plan is stale`, or `does not match the reviewed plan's
+fingerprint` — re-plan and apply the fresh plan. The
+lock is released either way; the plan is a separate question.
 
 Two locks this verb does not reach:
 
-- **A cell with no pending apply check** — a stack applied out of band, or one
-  whose check already completed. It is not in the queue, so release it the way
+- **A cell with no pending apply check.** A stack applied out of band, or one
+  whose check already completed, is not in the queue, so release it the way
   it was locked: `tofu force-unlock <id>` in that stack's directory, with the
   backend's credentials, having confirmed the id against the error the next
   apply prints.
-- **A lock a human is holding right now**, running OpenTofu by hand against the
-  same state. That is the lock unlock must not break, and it is why nothing here
-  waits on a lock or releases one it did not probe: check with whoever is
-  running it before forcing anything.
+- **A lock a human is holding right now.** Someone is running OpenTofu by hand
+  against the same state. That is the lock unlock must not break, and it is why
+  nothing here waits on a lock or releases one it did not probe: check with
+  whoever is running it before forcing anything.
 
 ### `shipmate / gate` never goes green
 
 Four distinct causes, in the order worth checking.
 
-**No gate status was written at all**, as opposed to a red or held one. The
+**No gate status was written at all, as opposed to a red or held one.** The
 trusted summary job decides on three inputs the `plan.yml` wrapper states —
 `head-repo`, `is-draft` and `on-demand` — and reads an absent or empty
 `head-repo` or `is-draft` as a refusal (an absent `on-demand` reads as `false`,
@@ -493,10 +505,10 @@ comment, and nothing on the run page saying why. The pull request cannot
 merge, which is the intended direction, but the cause is only visible in the
 wrapper. Add all three lines (`docs/getting-started.md` §Required — plan,
 `docs/upgrading.md` §0.20.0). Omitting `on-demand` is the quiet one: every
-ordinary pull request is unaffected, and only a `shipmate plan` on a **draft**
+ordinary pull request is unaffected, and only a `shipmate plan` on a draft
 loses its gate — it plans, uploads its artifacts, and is skipped at the summary,
-so nothing it just did is published. `shipmate doctor` reports this wiring, including a
-constant value that would pass the check for every run.
+so nothing it did is published. `shipmate doctor` reports this wiring,
+including a constant value that would pass the check for every run.
 
 **A pending apply check nothing will complete.** `gate-refresh` greens the gate
 only when every shipmate-App-authored check on that commit whose name begins
@@ -534,11 +546,11 @@ The apply comment says *"Held — the pull request's review state does not
 permit applying"*, or `shipmate apply` was refused with a review reason.
 
 `SHIPMATE_UNGATED_ENVS` exempts the environments it names from the review
-requirement and nothing else. A **targeted** `shipmate apply <env>` is decided
+requirement and nothing else. A targeted `shipmate apply <env>` is decided
 at comment time: an unlisted env gets the usual refusal, extended to say the
 env is not listed in the variable, and the engine re-applies the same rule to
 the decision it reads at apply time — a run refused there dies before any wave,
-leaving the apply checks pending. A **bare** `shipmate apply` is partitioned
+leaving the apply checks pending. A bare `shipmate apply` is partitioned
 per environment on the apply path, from the review decision read there:
 
 | `reviewDecision` when the apply runs | what applies |
@@ -564,10 +576,10 @@ comment-ops sees an empty list and refuses both forms. See
 bare env name is rejected loudly rather than left silently inert, because none
 of these would ever match an environment:
 
-- a `-plan` / `-apply` suffix — the list is matched against the **bare logical**
+- a `-plan` / `-apply` suffix — the list is matched against the bare logical
   env name carried by the apply checks, so write `dev-eu`, not `dev-eu-apply`;
 - surrounding whitespace — `dev-eu, dev-us` is an entry `" dev-us"`. The list is
-  comma-separated with **no spaces**; the error names the entry and the exact
+  comma-separated with no spaces; the error names the entry and the exact
   value to write;
 - anything outside the env charset (letters, digits, `-`, `_`) — a pasted
   `"dev-eu"` with its quotes, an internal space, a `/`. The variable holds the
@@ -578,8 +590,7 @@ malformed entry is rejected inside the Authorize step, which fails the run
 before either the 🚀 reaction or the refusal comment is reached. So a
 repository-wide breakage of `shipmate apply` (every command, every environment,
 however well-formed) is invisible on the pull request itself. The real error is
-the
-`::error::SHIPMATE_UNGATED_ENVS entry ...` annotation on the comment-ops
+the `::error::SHIPMATE_UNGATED_ENVS entry ...` annotation on the comment-ops
 workflow run; open that run from the Actions tab and fix the variable. A
 targeted apply that was genuinely refused always comments its reason, so
 silence points at the variable rather than at the authorization.
@@ -593,7 +604,7 @@ names no command.
 
 **A listed environment that is also explicit is not held.** It is reported as
 excluded, with the usual "run `shipmate apply <env>`" — and that targeted apply
-then succeeds **without** an approving review, because the environment is
+then succeeds without an approving review, because the environment is
 listed. Listing an environment and marking it explicit are independent: the
 first decides whether a review is required, the second only decides that a bare
 apply will not reach it. An environment that must never apply unreviewed does
@@ -615,15 +626,15 @@ edit — plans nothing. This is expected, not a fault.
 `this run did not state its head repository`.
 
 Planning a fork head would run the pull request's own Terramate/OpenTofu code on
-your runners with whatever the plan environment exposes as **variables** — those
+your runners with whatever the plan environment exposes as variables — those
 are not secrets, and they are not withheld from a fork's run. No
 `shipmate / gate` status is ever written for a fork head either, so the pull
 request could not merge whatever the plan said. The refusal is loud rather than
 an empty matrix, so an outside contributor is not left waiting on a gate that
 cannot arrive.
 
-It keys on the `head-repo` input the wrapper passes, and it **refuses by
-default**: a run that states no head repository is refused too, with a message
+The refusal keys on the `head-repo` input the wrapper passes, and it refuses by
+default: a run that states no head repository is refused too, with a message
 naming the input. So the same failure has a second cause — a `plan.yml` that
 re-pinned the engine without adding
 `head-repo: ${{ needs.facts.outputs.head-repo }}` to its

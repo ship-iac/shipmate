@@ -27,54 +27,50 @@ runs:
     - name: Probe the state lock
       id: probe
       shell: bash
-      # A plan is the probe: it takes the backend's lock (so a held lock fails
-      # it and prints the whole `Lock Info:` block, which carries the only copy
-      # of the id `force-unlock` needs), and `-refresh=false` keeps it from
-      # touching a single provider on the way there. No `-out`: nothing here
-      # ever applies what this plans.
-      # errexit is lifted for just that pipeline and tofu's own status taken
-      # from PIPESTATUS[0]: a failing plan is the EXPECTED path here, and a
-      # cosmetic `tee` failure must not decide which of the three outcomes
-      # below the cell reports.
-      # scripts/lock-info is the engine's only parser of this output; it writes
-      # held/lock_id/lock_created/lock_operation and exits 0 either way, so
-      # "no lock" arrives as data rather than as a failure.
+      # A plan is the probe: it takes the backend's lock, so a held lock fails it and prints the
+      # whole `Lock Info:` block, which carries the only copy of the id `force-unlock` needs.
       env:
         STACK: ${{ inputs.stack }}
       run: |
         set -euo pipefail
         echo "::group::terramate plan (lock probe): $STACK"
+        # errexit is lifted for the probe pipeline and tofu's own status taken from PIPESTATUS[0]:
+        # a failing plan is the EXPECTED path here, and a cosmetic `tee` failure must not decide
+        # which of the three outcomes the cell reports.
         set +e
+        # `-refresh=false` keeps the probe from touching a single provider on the way there, and
+        # there is no `-out` -- nothing here ever applies what this plans.
         terramate run --disable-safeguards=git-out-of-sync --no-recursive -C "$STACK" -- tofu plan -input=false -refresh=false 2>&1 | tee "$RUNNER_TEMP/probe.txt"
         status="${PIPESTATUS[0]}"
         set -e
         echo "::endgroup::"
         echo "probe_status=$status" >> "$GITHUB_OUTPUT"
+        # scripts/lock-info is the engine's only parser of this output. It writes
+        # held/lock_id/lock_created/lock_operation and exits 0 either way, so "no lock" arrives
+        # as data rather than as a failure.
         python3 "$GITHUB_ACTION_PATH/../../scripts/lock-info" < "$RUNNER_TEMP/probe.txt"
 
     - name: Report that no lock was released
       id: report
       if: ${{ steps.probe.outputs.held != 'true' }}
       shell: bash
-      # Two ways to get here, and they are not the same fact. A clean probe
-      # proves no lock is held -- which is also every local-backend cell, where
-      # a lock dies with the process that took it, so this action is
-      # structurally a graceful no-op there, and that path succeeds.
-      # A failed probe with no parsable lock (a config error, a failed init, any
-      # other tofu failure) proves nothing at all. It must never be reported as
-      # "no lock held" -- an operator reading that would take the cell for clean
-      # while it may still be locked -- and it fails the cell: the engine
-      # failing to look is not a success, and an annotation on a green run
-      # across dozens of cells is easy to miss.
       env:
         STACK_NAME: ${{ inputs.stack-name }}
         ENV: ${{ inputs.env }}
         PROBE_STATUS: ${{ steps.probe.outputs.probe_status }}
       run: |
         set -euo pipefail
+        # A clean probe proves no lock is held. That is also every local-backend cell, where a
+        # lock dies with the process that took it, so this action is structurally a graceful
+        # no-op there, and that path succeeds.
         if [ "$PROBE_STATUS" = "0" ]; then
           echo "::notice::no state lock held for $STACK_NAME / $ENV"
         else
+          # A failed probe with no parsable lock (a config error, a failed init, any other tofu
+          # failure) proves nothing at all, so it must never be reported as "no lock held" -- an
+          # operator reading that would take the cell for clean while it may still be locked. It
+          # fails the cell rather than annotating: the engine failing to look is not a success,
+          # and an annotation on a green run across dozens of cells is easy to miss.
           echo "::error::could not determine whether a lock is held for $STACK_NAME / $ENV — see the log"
           exit 1
         fi
@@ -83,14 +79,8 @@ runs:
       id: release
       if: ${{ steps.probe.outputs.held == 'true' }}
       shell: bash
-      # `-force` is mandatory: without it OpenTofu asks for confirmation, and no
-      # cell has a TTY. The id comes from the probe's own output via env: it
-      # reaches an argv, which is why lock-info charset-pins it.
-      # Not wrapped in a `::group::`: this is one command whose failure text is
-      # the whole point, and an unclosed group collapses it.
-      # `created` and `operation` are rendered only when non-empty -- lock-info
-      # blanks a value that fails its charset guard rather than rejecting an
-      # otherwise-usable lock, so neither field may be rendered unconditionally.
+      # Not wrapped in a `::group::`: this is one command whose failure text is the whole point,
+      # and an unclosed group collapses it.
       env:
         STACK: ${{ inputs.stack }}
         STACK_NAME: ${{ inputs.stack-name }}
@@ -100,8 +90,14 @@ runs:
         LOCK_OPERATION: ${{ steps.probe.outputs.lock_operation }}
       run: |
         set -euo pipefail
+        # `-force` is mandatory: without it OpenTofu asks for confirmation, and no cell has a
+        # TTY. The id comes from the probe's own output via env and reaches an argv, which is
+        # why lock-info charset-pins it.
         terramate run --disable-safeguards=git-out-of-sync --no-recursive -C "$STACK" -- tofu force-unlock -force "$LOCK_ID"
         msg="released state lock $LOCK_ID for $STACK_NAME / $ENV"
+        # `created` and `operation` are rendered only when non-empty: lock-info blanks a value
+        # that fails its charset guard rather than rejecting an otherwise-usable lock, so
+        # neither field may be rendered unconditionally.
         if [ -n "$LOCK_CREATED" ]; then msg="$msg, created $LOCK_CREATED"; fi
         if [ -n "$LOCK_OPERATION" ]; then msg="$msg, operation $LOCK_OPERATION"; fi
         echo "::notice::$msg"

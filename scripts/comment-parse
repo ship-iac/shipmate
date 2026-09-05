@@ -16,10 +16,9 @@ import os
 import re
 import sys
 
-# `shipmate` as a whole word, then verb, optional env, optional tag-filter.
-# env is lower kebab (matches GitHub env naming); tag-filter allows the
-# on-disk tag charset. env is tried first (leftmost), so a bare token that
-# fits both charsets parses as the env.
+# `shipmate` as a whole word, then verb, optional env, optional tag-filter. env is lower kebab
+# (matching GitHub env naming); tag-filter allows the on-disk tag charset. env is tried first
+# (leftmost), so a bare token that fits both charsets parses as the env.
 _CMD = re.compile(
     r"^shipmate (?P<verb>[a-z]+)(?: (?P<env>[a-z0-9][a-z0-9-]*))?"
     r"(?: (?P<tag>[A-Za-z0-9][A-Za-z0-9/_:.-]*))?$"
@@ -30,10 +29,9 @@ ACTIVE = "active"
 RESERVED = "reserved"
 HELP_MARKER = "<!-- shipmate:help -->"
 
-# Single source of truth for the grammar, the help comment and the reject hint:
-# adding a verb is a one-line change here. `args` is the documented arg shape
-# ("" = the verb takes none, and supplying one is an error rather than being
-# silently ignored). `route` is the value actions/comment-ops branches on.
+# Single source of truth for the grammar, the help comment and the reject hint: adding a verb is
+# a one-line change here. `args` is the arg shape ("" = the verb takes none, and supplying one
+# is an error, not silently ignored). `route` is the value actions/comment-ops branches on.
 VERBS = {
     "apply": {
         "status": ACTIVE,
@@ -129,10 +127,9 @@ def parse(body):
         "error": None,
     }
     lines = [ln.strip() for ln in body.splitlines()]
-    # Prefer the first line that's a fully recognized command over the first
-    # merely shipmate-prefixed line -- otherwise incidental chatter like
-    # "shipmate is great" ahead of a real "shipmate apply dev-eu" would win
-    # and bury the actual command behind an "unknown verb" error.
+    # Prefer the first line that is a fully recognized command over the first merely
+    # shipmate-prefixed line: incidental chatter like "shipmate is great" ahead of a real
+    # "shipmate apply dev-eu" would otherwise win and bury it behind an "unknown verb" error.
     line = next((ln for ln in lines if _is_recognized_command(ln)), None)
     if line is None:
         line = next((ln for ln in lines if _SHIPMATE_LINE.match(ln)), None)

@@ -26,7 +26,7 @@ inputs:
     description: 'GITHUB_TOKEN with issues:write and pull-requests:write (reactions + reject comments + PR reads).'
     required: true
   ungated-envs:
-    description: 'Optional: SHIPMATE_UNGATED_ENVS verbatim (comma-separated bare env names). Environments listed here may be applied without an approving review; every other environment keeps the branch ruleset requirement. Omitted or empty = every environment keeps it. Ergonomics, not policy: the engine reads vars.SHIPMATE_UNGATED_ENVS itself on both apply paths and enforces there, so this input only buys a crisp PR-comment refusal instead of a dispatched run that refuses inside the engine. Wire it to the vars.SHIPMATE_UNGATED_ENVS repository variable anyway — an input wider than the variable costs a wasted run, and one narrower refuses an apply the engine would have allowed.'
+    description: 'SHIPMATE_UNGATED_ENVS verbatim (comma-separated bare env names). Environments listed here may be applied without an approving review; every other environment keeps the branch ruleset requirement. Omitted or empty = every environment keeps it. Ergonomics, not policy: the engine reads vars.SHIPMATE_UNGATED_ENVS itself on both apply paths and enforces there, so this input only buys a PR-comment refusal instead of a dispatched run that refuses inside the engine. Wire it to the vars.SHIPMATE_UNGATED_ENVS repository variable anyway — an input wider than the variable costs a wasted run, and one narrower refuses an apply the engine would have allowed.'
     required: false
     default: ''
 outputs:
@@ -53,8 +53,8 @@ runs:
       shell: bash
       env:
         COMMENT_USER: ${{ inputs.comment-user }}
-        # Author-controlled only in the sense that GitHub classifies the author;
-        # via env: like COMMENT_USER, never interpolated into the shell below.
+        # Author-controlled only in the sense that GitHub classifies the author. Reaches
+        # bash through env: like COMMENT_USER, never interpolated into the shell.
         COMMENT_ASSOCIATION: ${{ github.event.comment.author_association }}
       run: |
         set -euo pipefail
@@ -67,23 +67,20 @@ runs:
         else
           echo "skip=false" >> "$GITHUB_OUTPUT"
         fi
-        # Access gate for the `doctor` and `plan` routes, computed once here and
-        # consumed by every step on both. doctor's report is a map of the
-        # guardrails a repository is *missing*, and a plan spends this
-        # repository's runners on its own code, so on a repository with public
-        # pull requests neither may answer an arbitrary account. The allowlist is
-        # written exactly once — repeated per-step in every route's `if:` is
-        # precisely how such a gate drifts open. Two routes read it now: narrowing
-        # or widening it for one moves the other's gate with it.
-        # This is GitHub's own classification of the author's relationship to
-        # the repository, NOT a permission check, and the output name says so:
-        # a collaborator holding only the Read role, and an organization member
-        # whose base repository permission is None, both pass this gate. What it
-        # buys is that an account with no declared relationship to the
-        # repository does not. CONTRIBUTOR — whose only signal is one merged
-        # pull request — is deliberately excluded. Fails closed: the default
-        # branch covers an absent `comment` context (empty string) as well as
-        # every association not named above.
+        # Access gate for the `doctor` and `plan` routes, computed once here and consumed by
+        # every step on both. doctor's report maps the guardrails a repository is missing, and
+        # a plan spends this repository's runners on its own code, so on a repository with
+        # public pull requests neither may answer an arbitrary account. The allowlist is
+        # written exactly once: repeating it per-step in every route's `if:` is precisely how
+        # such a gate drifts open, and narrowing or widening it for one of the two routes
+        # moves the other's gate with it.
+        # This is GitHub's own classification of the author's relationship to the repository,
+        # NOT a permission check, and the output name says so: a collaborator holding only the
+        # Read role, and an organization member whose base repository permission is None, both
+        # pass this gate. What it buys is that an account with no declared relationship to the
+        # repository does not. CONTRIBUTOR, whose only signal is one merged pull request, is
+        # deliberately excluded. Fails closed: the default branch covers an absent `comment`
+        # context (empty string) as well as every association not listed.
         case "$COMMENT_ASSOCIATION" in
           OWNER|MEMBER|COLLABORATOR) echo "privileged_association=true" >> "$GITHUB_OUTPUT" ;;
           *) echo "privileged_association=false" >> "$GITHUB_OUTPUT" ;;
@@ -104,8 +101,8 @@ runs:
         python3 "$GITHUB_ACTION_PATH/../../scripts/comment-parse"
 
     - name: Reject malformed / reserved command
-      # Runs only when it IS a shipmate command but not valid. Non-commands are
-      # silently ignored (no output). GITHUB_TOKEN posts the comment.
+      # Runs only when the comment IS a shipmate command but not a valid one. A non-command
+      # is silently ignored, with no output. GITHUB_TOKEN posts the comment.
       if: ${{ steps.parse.outputs.is_command == 'true' && steps.parse.outputs.valid != 'true' }}
       shell: bash
       env:
@@ -124,16 +121,15 @@ runs:
         PR_NUMBER: ${{ inputs.pr-number }}
       run: |
         set -euo pipefail
-        # GITHUB_TOKEN, not the App: help must answer even when the App is not
-        # installed, which is exactly when someone needs to be told what to run.
+        # GITHUB_TOKEN, not the App: help must answer even when the App is not installed,
+        # which is exactly when someone needs to be told what to run.
         python3 "$GITHUB_ACTION_PATH/../../scripts/comment-parse" --help-markdown > help.md
         gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -F body=@help.md >/dev/null
 
     - name: Acknowledge a command that changes no infrastructure
-      # Two of the three routes it covers are slow to show a result: doctor
-      # spends 30-60s in API calls before its report comment appears, and a plan
-      # is a dispatched run that takes as long to surface. With no
-      # acknowledgement the commenter's next move is to comment again.
+      # Two of the three routes are slow to show a result: doctor spends 30-60s in API calls
+      # before its report comment appears, and a plan is a dispatched run that takes as long
+      # to surface. Without an acknowledgement the commenter's next move is to comment again.
       if: ${{ steps.parse.outputs.route == 'doctor' || steps.parse.outputs.route == 'help' || steps.parse.outputs.route == 'plan' }}
       shell: bash
       env:
@@ -141,21 +137,18 @@ runs:
         COMMENT_ID: ${{ inputs.comment-id }}
       run: |
         set -euo pipefail
-        # `eyes` is the conventional "working on it" for a command that changes
-        # no infrastructure — `rocket` marks an authorized dispatch instead.
-        # `|| true`: the reaction is cosmetic (the comment may already be
-        # deleted, or reactions disabled), and losing it must not fail the
-        # command.
+        # `eyes` is the conventional "working on it" for a command that changes no
+        # infrastructure; `rocket` marks an authorized dispatch. `|| true` because the reaction
+        # is cosmetic -- comment deleted, reactions disabled -- and must not fail the command.
         gh api -X POST "repos/$GITHUB_REPOSITORY/issues/comments/$COMMENT_ID/reactions" \
           -f content=eyes >/dev/null || true
 
     - name: Authorize plan
       id: planauthz
-      # The plan verb sits at `doctor`'s tier: the same collaborator standing,
-      # classified once in the guard step above. No App token, no review, no
-      # plan lookup — a plan applies nothing, and the commenter chooses only
-      # WHEN a plan runs. WHAT gets planned comes from the pull request itself,
-      # never from this comment.
+      # The plan verb sits at `doctor`'s tier: the same collaborator standing, classified
+      # once in the `guard` step. No App token, no review, no plan lookup: a plan applies
+      # nothing, and the commenter chooses only WHEN it runs. WHAT gets planned comes from
+      # the pull request itself, never from this comment.
       if: ${{ steps.parse.outputs.route == 'plan' }}
       shell: bash
       env:
@@ -169,10 +162,9 @@ runs:
         fi
 
     - name: Reject an unauthorized plan
-      # GITHUB_TOKEN, not the App: the plan route mints nothing, so this must
-      # answer wherever the route itself can run. The reason is plan's own, not
-      # doctor's — a plan discloses no settings; it spends this repository's
-      # runners on this repository's code.
+      # GITHUB_TOKEN, not the App: the plan route mints nothing, so this must answer wherever
+      # the route itself can run. The reason is plan's own, not doctor's -- a plan discloses no
+      # settings; it spends this repository's runners on this repository's code.
       if: ${{ steps.parse.outputs.route == 'plan' && steps.planauthz.outputs.authorized != 'true' }}
       shell: bash
       env:
@@ -183,11 +175,10 @@ runs:
         gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -f body=":x: shipmate: \`plan\` runs this repository's Terramate/OpenTofu on its runners, so it answers only organization members and repository collaborators." >/dev/null
 
     - name: Doctor — reject a commenter without a privileged association
-      # Silence would be indistinguishable from a broken engine, so say why.
-      # GITHUB_TOKEN, not the App: this must answer even where the App is not
-      # installed. One line, no probe results — the point is to disclose nothing.
-      # The wording states what is actually checked (GitHub's classification of
-      # the author), not "write access", which this gate does not verify.
+      # Silence would be indistinguishable from a broken engine, so say why. GITHUB_TOKEN, not
+      # the App: this must answer even where the App is not installed. One line, no probe
+      # results -- the point is to disclose nothing. The wording names GitHub's classification
+      # of the author, not the "write access" this gate does not verify.
       if: ${{ steps.parse.outputs.route == 'doctor' && steps.guard.outputs.privileged_association != 'true' }}
       shell: bash
       env:
@@ -210,18 +201,15 @@ runs:
         permission-checks: read
         permission-contents: read
         permission-members: read
-        # `pull-requests`, not `issues`: the report is posted to
-        # `/issues/{pr}/comments`, but a pull request comment is governed by the
-        # pull-requests permission -- an installation token holding only
-        # `issues: write` gets 403 "Resource not accessible by integration"
+        # `pull-requests`, not `issues`: the report posts to `/issues/{pr}/comments`, but a
+        # pull request comment is governed by the pull-requests permission -- an installation
+        # token holding only `issues: write` gets 403 "Resource not accessible by integration"
         # there. Same permission the plan and apply comment mints use.
         permission-pull-requests: write
-        # For the environment probes' reads (`/environments` and, per
-        # environment, `/environments/{name}`): on some configurations a
-        # fine-grained installation token needs Actions read to see them, and a
-        # degraded environment probe shows up only as a "could not verify" note.
-        # A subset of the `actions: write` app/manifest.json already declares,
-        # so it needs no re-approval of the installation.
+        # The environment probes read `/environments` and `/environments/{name}`; on some
+        # configurations a fine-grained installation token needs Actions read to see them, and
+        # a degraded probe surfaces only as a "could not verify" note. A subset of the
+        # `actions: write` app/manifest.json declares, so no re-approval is needed.
         permission-actions: read
 
     - name: Doctor — App token unavailable
@@ -237,9 +225,9 @@ runs:
     - name: Doctor — probe the manifest's full permission set
       id: fullmint
       if: ${{ steps.parse.outputs.route == 'doctor' && steps.guard.outputs.privileged_association == 'true' && steps.doctortoken.outcome == 'success' }}
-      # A mint requesting every permission app/manifest.json declares fails
-      # when the installation is missing one (typical after a manifest bump
-      # nobody re-approved). The failure IS the probe result — never fatal.
+      # A mint requesting every permission app/manifest.json declares fails when the
+      # installation is missing one, which is typical after a manifest bump nobody
+      # re-approved. The failure IS the probe result, so it is never fatal.
       continue-on-error: true
       uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
       with:
@@ -259,9 +247,8 @@ runs:
     - name: Doctor — mint an environments-scoped token for the plan-env secret probe
       id: envtoken
       if: ${{ steps.parse.outputs.route == 'doctor' && steps.guard.outputs.privileged_association == 'true' && steps.doctortoken.outcome == 'success' }}
-      # Its own mint so that a permission request no org owner has accepted yet
-      # costs this one probe and not the whole report — argued in
-      # scripts/tests/test_env_token_mint_scoping.py.
+      # Its own mint, so a permission request no org owner has accepted yet costs this one
+      # probe and not the whole report (scripts/tests/test_env_token_mint_scoping.py).
       continue-on-error: true
       uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
       with:
@@ -294,25 +281,22 @@ runs:
           exit 0
         fi
         echo "head_sha=$head" >> "$GITHUB_OUTPUT"
-        # Harvest: latest shipmate-authored check-run per name (check-ids mode
-        # filters on app slug/id), then its annotations. Degrades to an empty
-        # harvest rather than failing the command. harvest_failed is written
-        # exactly once, after every fallible step below has had a chance to
-        # flip it -- a per-id annotations-fetch failure is just as much a
-        # partial harvest as the listing or reduction failing, and an empty
-        # "ann/<id>.json" fallback is byte-identical to "no annotations", so
-        # it must not silently look like a clean, complete harvest.
+        # Harvest: latest shipmate-authored check-run per name (check-ids mode filters on app
+        # slug/id), then its annotations. Degrades to an empty harvest rather than failing the
+        # command. harvest_failed is written exactly once, after every fallible step has had a
+        # chance to flip it: a per-id annotations-fetch failure is as much a partial harvest as
+        # the listing or the reduction failing, and an empty "ann/<id>.json" fallback is
+        # byte-identical to "no annotations", so it must not look like a complete harvest.
         mkdir -p ann
         : > check-ids.tsv
         harvest_failed=false
         if GH_TOKEN="$APP_TOKEN" gh api --paginate \
              "repos/$GITHUB_REPOSITORY/commits/$head/check-runs?filter=all&per_page=100" \
              --jq '.check_runs[] | {id, name, status, started_at, external_id, app: {id: .app.id}, app_slug: .app.slug, app_id: .app.id}' > check-runs.jsonl; then
-          # check-ids mode also writes the `harvest_pending` step output (true
-          # when any shipmate-relevant check run on this commit has not
-          # completed) -- it is the one step that already reads every check run,
-          # and the render step needs it so a report requested mid-run says so
-          # instead of printing an all-clear no later run ever refreshes.
+          # check-ids mode also writes the `harvest_pending` step output, true when any
+          # shipmate-relevant check run on this commit has not completed -- this is the one
+          # step that already reads every check run. The render step needs it so a report
+          # requested mid-run says so instead of printing an all-clear nothing refreshes.
           if ! python3 "$GITHUB_ACTION_PATH/../../scripts/doctor" < check-runs.jsonl > check-ids.tsv; then
             echo "::warning::doctor check-ids reduction failed; doctor reports settings probes only"
             : > check-ids.tsv
@@ -322,9 +306,8 @@ runs:
           echo "::warning::check-runs listing failed; doctor reports settings probes only"
           harvest_failed=true
         fi
-        # per_page=100, no --paginate: --paginate concatenates the pages' JSON
-        # arrays, which json.loads rejects; 100 comfortably covers GHA's
-        # 10-per-level-per-step annotation caps.
+        # per_page=100, no --paginate: --paginate concatenates the pages' JSON arrays, which
+        # json.loads rejects. 100 covers GHA's 10-per-level-per-step annotation caps.
         while IFS=$'\t' read -r id _name; do
           [ -z "$id" ] && continue
           if ! GH_TOKEN="$APP_TOKEN" gh api "repos/$GITHUB_REPOSITORY/check-runs/$id/annotations?per_page=100" \
@@ -335,10 +318,9 @@ runs:
           fi
         done < check-ids.tsv
         echo "harvest_failed=$harvest_failed" >> "$GITHUB_OUTPUT"
-        # Declared environment set: the cell summaries of the plan runs this
-        # head's own apply checks name -- read from the listing above, so a
-        # renamed plan workflow cannot silently empty the environment probes.
-        # No records -> doctor says so and skips those probes.
+        # Declared environment set: the cell summaries of the plan runs this head's own apply
+        # checks name, read from the check-runs listing, so a renamed plan workflow cannot
+        # silently empty the environment probes. With no records doctor says so and skips them.
         if ! python3 "$GITHUB_ACTION_PATH/../../scripts/apply-gate" --plan-runs \
              < check-runs.jsonl > plan_runs.json; then
           echo '{}' > plan_runs.json
@@ -346,22 +328,21 @@ runs:
         fi
         run_ids=$(python3 -c 'import json,sys; print("\n".join(sorted(set(json.load(sys.stdin).values()))))' \
                     < plan_runs.json || echo "")
-        # -R is required: this job has no checkout, so gh cannot infer the repo
-        # from a git remote and `gh run download` would fail every time. One
-        # directory per run, never a shared one: a cell replanned in a later run
-        # carries the same artifact name in both, and a shared directory would
-        # let extraction order decide which plan doctor reports on.
+        # -R is required: this job has no checkout, so gh cannot infer the repo from a git
+        # remote and `gh run download` would fail every time. One directory per run, never a
+        # shared one: a cell replanned in a later run carries the same artifact name in both,
+        # and a shared directory would let extraction order decide which plan doctor reports
+        # on.
         mkdir -p doctor-cells
         while read -r rid; do
           [ -n "$rid" ] || continue
           gh run download "$rid" -R "$GITHUB_REPOSITORY" -p 'cell-summary.*' -D "doctor-cells/$rid" \
             || echo "::warning::the cell summaries of plan run $rid could not be downloaded; doctor's environment probes may be incomplete"
         done <<< "$run_ids"
-        # Then keep, per cell, only the copy from the run that cell's own newest
-        # apply check names -- the replanned cell's older copy would otherwise
-        # report an environment this head no longer declares. A cell no record
-        # names is KEPT and warned about: dropping it would narrow the declared
-        # set silently, which is the failure these warnings exist to prevent.
+        # Keep, per cell, only the copy from the run that cell's own newest apply check names:
+        # the replanned cell's older copy would otherwise report an environment this head no
+        # longer declares. A cell no record names is KEPT and warned about, because dropping
+        # it would narrow the declared set silently.
         if ! python3 - <<'PY'
         import json, pathlib
         runs = json.load(open("plan_runs.json", encoding="utf-8"))
@@ -386,8 +367,8 @@ runs:
       shell: bash
       env:
         GH_TOKEN: ${{ steps.doctortoken.outputs.token }}
-        # Environment secret listing only; empty when the mint above failed, and
-        # doctor then reports that check as not performed.
+        # Environment secret listing only. Empty when the mint failed, and doctor then
+        # reports that check as not performed.
         SHIPMATE_ENV_TOKEN: ${{ steps.envtoken.outputs.token }}
         PR_NUMBER: ${{ inputs.pr-number }}
         SHIPMATE_DOCTOR_MODE: report
@@ -397,30 +378,26 @@ runs:
         SHIPMATE_TEAM: ${{ inputs.approvers-team }}
         SHIPMATE_HEAD_SHA: ${{ steps.gatherdoc.outputs.head_sha }}
         SHIPMATE_PLAN_RUN_IDS: ${{ steps.gatherdoc.outputs.plan_run_ids }}
-        # The engine's own owner/repo, so the pin probe reports on shipmate's
-        # pins and not on some other org's shared action the consumer also uses.
-        # `github.action_repository` is the slug of the running action, resolved
-        # by GitHub at runtime — org-agnostic, never hardcoded. Empty when the
-        # action runs from a local path, and doctor then says pin freshness was
-        # not verified rather than guessing.
+        # The engine's own owner/repo, so the pin probe reports on shipmate's pins and not on
+        # some other org's shared action the consumer also uses. `github.action_repository` is
+        # the running action's slug, resolved by GitHub at runtime -- org-agnostic, never
+        # hardcoded. Empty when the action runs from a local path, and doctor then says pin
+        # freshness was not verified rather than guessing.
         SHIPMATE_ENGINE_REPO: ${{ github.action_repository }}
         SHIPMATE_ANNOTATIONS_DIR: ann
         SHIPMATE_CHECK_IDS: check-ids.tsv
-        # `|| 'true'`: this render step's `if:` doesn't key on gatherdoc's
-        # outcome, so if that step ever reds or is skipped, its output is
-        # unset -- an empty string is falsy in this expression, so the
-        # fallback fires and the harvest is (correctly) treated as failed
-        # rather than silently reading as SHIPMATE_HARVEST_FAILED=false. A
-        # real 'false' is a non-empty string, hence truthy, and passes through.
+        # `|| 'true'`: this step's `if:` does not key on gatherdoc's outcome, so a red or
+        # skipped gatherdoc leaves the output unset. An empty string is falsy here, so the
+        # fallback fires and the harvest reads as failed rather than as false. A real 'false'
+        # is a non-empty string, hence truthy, and passes through.
         SHIPMATE_HARVEST_FAILED: ${{ steps.gatherdoc.outputs.harvest_failed || 'true' }}
-        # Written by check-ids mode, above. No `|| 'true'` fallback: if
-        # gatherdoc never ran there is no harvest at all and
-        # SHIPMATE_HARVEST_FAILED already says so — adding "and some runs may
-        # still be going" on top of that would be noise, not honesty.
+        # Written by check-ids mode. No `|| 'true'` fallback: if gatherdoc never ran there is
+        # no harvest at all and SHIPMATE_HARVEST_FAILED already says so, and adding "some runs
+        # may still be going" on top of that would be noise.
         SHIPMATE_HARVEST_PENDING: ${{ steps.gatherdoc.outputs.harvest_pending }}
         SHIPMATE_APP_PERMISSIONS_CHECKED: 'true'
-        # Workflow token for the pin probe's cross-repo release read — the
-        # App token is scoped to the consumer repo.
+        # Workflow token for the pin probe's cross-repo release read: the App token is
+        # scoped to the consumer repo.
         SHIPMATE_PUBLIC_TOKEN: ${{ inputs.github-token }}
         FULLMINT_OUTCOME: ${{ steps.fullmint.outcome }}
       run: |
@@ -431,60 +408,48 @@ runs:
           export SHIPMATE_APP_PERMISSION_ERROR=""
         fi
         python3 "$GITHUB_ACTION_PATH/../../scripts/doctor" > doctor.md
-        # The report is 30-60s of probes, and every path below can lose it: a
-        # failed comment listing exits 0 by design (leaving a green run with no
-        # report at all — indistinguishable, to the commenter, from the engine
-        # ignoring them), and a failed PATCH/POST reds the step after the render.
-        # So publish to the job summary before any of them: the run page then
-        # carries the report even when the pull request does not, and a retry is
-        # a convenience rather than the only way to see it.
-        #
-        # Degrading, never fatal, and deliberately not `|| true` (which a guard
-        # on the listing below forbids in this step): the summary is the *added*
-        # surface, so losing it must not cost the comment that posted fine
-        # before — which a bare `cat` under `set -e` would do. `:-` in the
-        # emptiness test keeps `set -u` from killing the step on a runner that
-        # never exports the variable; the write itself can still fail on a full
-        # or read-only runner volume.
-        #
-        # `retry_hint` resolves here, where whether the summary actually carries
-        # the report is known, so the listing-failure branch stays a single
-        # `echo` — it sits inside an `if ! gh api ... fi` whose degrade block is
-        # asserted on, and a nested `if` there would hide the warning.
+        # `retry_hint` is resolved by the job-summary write, the one place that knows whether
+        # the summary actually carries the report, so the listing-failure branch stays a single
+        # `echo`: a nested `if` inside that asserted degrade block would hide the warning.
         retry_hint="comment shipmate doctor again to retry"
+        # The report is 30-60s of probes, and two failures lose it: a failed comment listing
+        # exits 0 by design, leaving a green run with no report at all -- to the commenter,
+        # indistinguishable from the engine ignoring them -- and a failed PATCH or POST of the
+        # comment reds the step after the render. Writing the job summary first means the run
+        # page carries the report even when the pull request does not.
+        # Degrading, never fatal, and deliberately not `|| true`, which a guard on the listing
+        # forbids in this step: the summary is the added surface, so losing it must not cost a
+        # comment that would have posted -- which a bare `cat` under `set -e` would do. `:-` in
+        # the emptiness test keeps `set -u` from killing the step on a runner that never
+        # exports the variable; the write itself can still fail on a full or read-only volume.
         if [ -z "${GITHUB_STEP_SUMMARY:-}" ] || ! cat doctor.md >> "$GITHUB_STEP_SUMMARY"; then
           echo "::warning::could not publish the doctor report to this job's summary; it survives only as the pull request comment"
         else
           retry_hint="read it in this job's summary, or $retry_hint"
         fi
         marker='<!-- shipmate:doctor -->'
-        # Same upsert discipline as the sticky plan comment: marker + Bot
-        # author (the App's bot login is org-dependent), single id.
-        # `startswith`, not `contains`: render_report emits the marker as the
-        # body's FIRST line. A `contains` match also selects a comment that
-        # merely quotes the marker — the sticky plan comment embeds `tofu plan`
-        # output verbatim — and this step would then PATCH the plan comment
-        # with the doctor report, destroying it and orphaning the summary marker.
-        # The lookup writes to a file instead of piping into `head`: `head`
-        # closing the pipe early raises EPIPE under `pipefail`, which is what
-        # the `|| true` here used to swallow — together with a genuine listing
-        # failure, whose empty id fell through to the create branch and left the
-        # pull request with two marker-bearing Bot comments. Removing the pipe
-        # removes the reason for the `|| true`, so a failed listing can skip the
-        # post and let the next run recover instead.
+        # Same upsert discipline as the sticky plan comment: marker plus Bot author (the App's
+        # bot login is org-dependent), single id.
+        # `startswith`, not `contains`: render_report emits the marker as the body's FIRST
+        # line. A `contains` match also selects a comment that merely quotes the marker -- the
+        # sticky plan comment embeds `tofu plan` output verbatim -- and this step would then
+        # PATCH the plan comment with the doctor report, destroying it and orphaning the
+        # summary marker.
         if ! gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" --paginate \
                --jq "map(select(((.body // \"\") | startswith(\"$marker\")) and .user.type == \"Bot\")) | .[0].id // empty" \
                > doctor-comment-ids.txt; then
-          # `retry_hint` names the surface that did survive. Without it the only
-          # signal is this annotation, which the commenter cannot see from the
-          # pull request, so their next move is another `shipmate doctor` — a
-          # second mint and another 30-60s of probes for a report already
-          # rendered on this run.
+          # `retry_hint` names the surface that did survive. Without it the only signal is
+          # this annotation, invisible from the pull request, so the commenter's next move is
+          # another `shipmate doctor` -- a second mint and 30-60s of probes for a report this
+          # run already rendered. A failed listing skips the post so the next run can recover.
           echo "::warning::could not list this pull request's comments; the doctor report was not posted to the pull request this run — $retry_hint"
           exit 0
         fi
-        # --paginate evaluates --jq per page, so a marker match on >1 page emits
-        # one id per matching page; the first line is the single id PATCH needs.
+        # --paginate evaluates --jq per page, so a marker match on >1 page emits one id per
+        # matching page; the first line is the single id PATCH needs. The lookup writes to a
+        # file rather than piping into `head`, which raises EPIPE under `pipefail` and needs a
+        # `|| true` that also masks a genuine listing failure -- an empty id then falls through
+        # to the create branch, leaving two marker-bearing Bot comments.
         id=$(head -n1 doctor-comment-ids.txt)
         if [ -n "$id" ]; then
           gh api -X PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$id" -F body=@doctor.md >/dev/null
@@ -495,8 +460,9 @@ runs:
     - name: Mint App token (members:read, checks:read)
       id: apptoken
       if: ${{ steps.parse.outputs.route == 'apply' || steps.parse.outputs.route == 'unlock' }}
-      # Don't hard-fail the job if the token can't be minted (e.g. the App isn't
-      # installed on this repo) — the next step reports it to the commenter.
+      # A failed mint -- the App not being installed on this repository, for instance -- must
+      # not hard-fail the job: `App token unavailable (App not installed?)` reports it to the
+      # commenter.
       continue-on-error: true
       uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
       with:
@@ -505,11 +471,11 @@ runs:
         owner: ${{ github.repository_owner }}
         repositories: ${{ github.event.repository.name }}
         permission-members: read
-        # The reviewed-plan lookup below reads the head's check runs. `checks` is
-        # declared `write` in app/manifest.json, so read is a subset of what the
-        # installation already granted -- no re-approval, no consumer change.
-        # An unlock does not use this scope (it runs no lookup); one mint serves
-        # both routes rather than a third existing for one permission.
+        # The reviewed-plan lookup in `Gather authorization inputs` reads the head's check
+        # runs. `checks` is declared `write` in app/manifest.json, so read is a subset of what
+        # the installation already granted -- no re-approval, no consumer change. An unlock
+        # runs no lookup and does not use this scope; one mint serves both routes rather than
+        # a third existing for one permission.
         permission-checks: read
 
     - name: App token unavailable (App not installed?)
@@ -537,11 +503,10 @@ runs:
         SHIPMATE_APP_ID: ${{ inputs.app-id }}
       run: |
         set -euo pipefail
-        # PR (retry until mergeable is computed; GitHub computes it async).
-        # Not for unlock: it ignores `mergeable`, and a *merged* PR reports it
-        # null forever — exactly the stranded-lock case unlock exists for — so the
-        # retries would only cost 15s and end in a warning that is false for a
-        # verb that never reads the field.
+        # Retry until `mergeable` is computed; GitHub computes it asynchronously. Not for
+        # unlock, which ignores `mergeable`: a merged pull request reports it null forever --
+        # exactly the stranded-lock case unlock exists for -- so the retries would cost 15s
+        # and end in a warning that is false for a verb that never reads the field.
         if [ "$SHIPMATE_VERB" != unlock ]; then
           pr_ok=""
           for _ in 1 2 3 4 5; do
@@ -554,10 +519,10 @@ runs:
         else
           gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" > pr.json
         fi
-        # Review decision (ruleset-driven). A null decision means the ruleset
-        # requires no review; normalize it to the explicit NONE sentinel —
-        # authorize fails closed on anything that isn't NONE or a decision
-        # enum value, so an empty string must never be a pass value.
+        # Review decision (ruleset-driven). A null decision means the ruleset requires no
+        # review; normalize it to the explicit NONE sentinel, because authorize fails closed
+        # on anything that is neither NONE nor a decision enum value, and an empty string must
+        # never be a pass value.
         # The $owner/$repo/$pr tokens are GraphQL query variables (bound via -F), not
         # shell variables — single quotes are intentional.
         # shellcheck disable=SC2016
@@ -565,23 +530,22 @@ runs:
           -F owner="$OWNER" -F repo="${GITHUB_REPOSITORY#*/}" -F pr="$PR_NUMBER" \
           --jq '.data.repository.pullRequest.reviewDecision // "NONE"')
         echo "review_decision=$rd" >> "$GITHUB_OUTPUT"
-        # Team membership via the App token (members:read). 200 + active = member.
-        # Read into a variable, never a pipe: `grep -q` exits first, `gh` takes
-        # SIGPIPE, and pipefail turns a member into a non-member. `|| true`
-        # because a non-member is a 404 and errexit is live outside an `if`.
+        # Team membership via the App token (members:read). 200 + active = member. Read into a
+        # variable, never a pipe: `grep -q` exits first, `gh` takes SIGPIPE, and pipefail turns
+        # a member into a non-member. `|| true` because a non-member is a 404 and errexit is
+        # live outside an `if`.
         state=$(GH_TOKEN="$APP_TOKEN" gh api "orgs/$OWNER/teams/$TEAM/memberships/$USER" --jq '.state' 2>/dev/null || true)
         if [ "$state" = "active" ]; then
           echo "is_member=true" >> "$GITHUB_OUTPUT"
         else
           echo "is_member=false" >> "$GITHUB_OUTPUT"
         fi
-        # The reviewed plan runs for the CURRENT head: every App-authored apply
-        # check on the head records the plan run its plan came from, so a record
-        # read here is for this head by construction -- no plan-workflow lookup,
-        # and no head SHA left to compare. An empty mapping means nothing has
-        # planned this head, which authorize refuses.
-        # An unlock consumes no plan artifact and must not depend on a plan
-        # run existing; authorize ignores the file for unlock, so leave it {}.
+        # The reviewed plan runs for the CURRENT head: every App-authored apply check on the
+        # head records the plan run its plan came from, so a record read here is for this head
+        # by construction -- no plan-workflow lookup, and no head SHA left to compare. An empty
+        # mapping means nothing has planned this head, which authorize refuses.
+        # An unlock consumes no plan artifact and must not depend on a plan run existing;
+        # authorize ignores the file for unlock, so leave it {}.
         if [ "$SHIPMATE_VERB" != unlock ]; then
           head=$(python3 -c "import json;print(json.load(open('pr.json'))['head']['sha'])")
           GH_TOKEN="$APP_TOKEN" gh api --paginate \
@@ -609,12 +573,11 @@ runs:
 
     - name: Combine the route verdicts
       id: verdict
-      # One value for every route, so the reaction, the caller's dispatch
-      # condition and this action's `authorized` output cannot disagree. Exactly
-      # one authorization step runs — their `if:`s name disjoint routes — and the
-      # other's output is empty. No `if:` here: a skipped step writes no output,
-      # and then no route has a verdict at all. Routes that dispatch nothing
-      # (help, doctor, a non-command) land on false.
+      # One value for every route, so the reaction, the caller's dispatch condition and this
+      # action's `authorized` output cannot disagree. Exactly one authorization step runs --
+      # their `if:`s name disjoint routes -- and the other's output is empty. No `if:` here: a
+      # skipped step writes no output, and then no route has a verdict at all. Routes that
+      # dispatch nothing (help, doctor, a non-command) land on false.
       shell: bash
       env:
         APPLY_AUTHORIZED: ${{ steps.authz.outputs.authorized }}
@@ -639,11 +602,10 @@ runs:
           -f content=rocket >/dev/null
         echo "::notice title=comment-ops::command authorized (the caller's next step dispatches it)"
 
-    # A report, not a decision — authorize already decided. It exists because
-    # `reviewDecision` keeps no history: once the review lands, nothing else
-    # records that this apply was permitted without one. Wording matches
-    # apply-comment's bare-path sentence and claims permission, never
-    # completion — nothing has applied at comment time.
+    # A report, not a decision: authorize already decided. It exists because `reviewDecision`
+    # keeps no history -- once the review lands, nothing else records that this apply was
+    # permitted without one. The wording matches apply-comment's bare-path sentence and claims
+    # permission, never completion: nothing has applied at comment time.
     - name: Report the review exemption
       if: ${{ steps.authz.outputs.ungated_exemption == 'true' }}
       shell: bash

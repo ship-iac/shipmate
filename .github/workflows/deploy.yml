@@ -2,24 +2,19 @@ name: deploy
 on:
   workflow_call:
     inputs:
-      # The flavor's state filename suffix under actions/state (e.g. `.state`,
-      # `terraform.tfstate`, `terraform.tfstate.d`). A remote backend passes the
-      # empty string explicitly, which skips actions/state entirely; omitting the
-      # input fails at workflow-resolution time, deliberately — a missing state
-      # configuration must be loud, not silently indistinguishable from
-      # "a remote backend owns state".
+      # The flavor's state filename suffix under actions/state (`.state`, `terraform.tfstate`,
+      # `terraform.tfstate.d`). A remote backend passes the empty string explicitly, which skips
+      # actions/state entirely. Omitting the input fails at workflow-resolution time, deliberately:
+      # a missing state configuration must be loud, not indistinguishable from a remote backend.
       state_suffix: { required: true, type: string }
     secrets:
-      # Consumers pass this by name. `vars` (TERRAMATE_VERSION, TOFU_VERSION,
-      # SLACK_WEBHOOK) are inherited by a called workflow automatically;
-      # secrets are NOT, and an encrypting consumer that forwards nothing has
-      # every env-level apply fail its decrypt fail-safe. There is no
-      # environment to fall back on: the wave jobs bind the env's apply
-      # environment, not `shipmate-engine`, so this one has to travel down the
-      # call chain.
+      # Consumers pass this by name. `vars` (TERRAMATE_VERSION, TOFU_VERSION, SLACK_WEBHOOK) are
+      # inherited by a called workflow automatically; secrets are NOT, and an encrypting consumer
+      # that forwards nothing has every env-level apply fail its decrypt fail-safe. No environment
+      # can supply it either: the wave jobs bind the env's apply environment, not `shipmate-engine`.
       SHIPMATE_PLAN_PASSPHRASE: { required: false }
-      # Feeds the summary job's gate-refresh + Complete-gate App-token mints.
-      # An empty key fails loud at mint.
+      # Feeds the `summary` job's App-token mint for the gate write. An empty key fails loud one
+      # step earlier, in that job's `Verify the App key arrived`.
       SHIPMATE_APP_PRIVATE_KEY: { required: false }
 jobs:
   detect:
@@ -52,7 +47,7 @@ jobs:
           app-id: ${{ vars.SHIPMATE_APP_ID }}
 
   envlevel0:
-    # Display name only (job id unchanged) — see apply.yml's `waves` job.
+    # Display name only (job id unchanged) -- see apply.yml's `waves` job.
     name: L0
     needs: [detect]
     if: ${{ !failure() && !cancelled() && needs.detect.outputs.envlevel0_empty != 'true' && !contains(join(needs.*.result, ','), 'cancelled') }}
@@ -62,20 +57,19 @@ jobs:
       waves_json: ${{ needs.detect.outputs.envlevel0_waves }}
       head_sha: ${{ needs.detect.outputs.head_sha }}
       state_suffix: ${{ inputs.state_suffix }}
-    # Named, never `inherit`: these two files sit in one organization but the RUN
-    # belongs to the consumer, and `inherit` is evaluated against the run -- so a
-    # cross-organization consumer's `complete` job would hold no key, and its
-    # applies would execute and strand their apply checks pending forever.
-    # Ordering rule for adding a secret here: declare it in apply-env-level.yml,
-    # merge, bump the pin below, and only then map it in this block. Mapping a
-    # secret the pinned callee does not declare is a hard load-time error (unlike
-    # an undeclared action input, which is silently ignored) -- docs/releasing.md.
+    # Named, never `inherit`: these two files sit in one organization but the RUN belongs to the
+    # consumer, and `inherit` is evaluated against the run -- so a cross-organization consumer's
+    # `complete` job would hold no key, its applies would execute, and their apply checks would
+    # strand pending forever.
     secrets:
+      # Adding a secret here is ordered: declare it in apply-env-level.yml, merge, bump this
+      # job's `uses:` pin, and only then map it. Mapping a secret the pinned callee does not
+      # declare is a hard load-time error, unlike an undeclared action input, which is silently
+      # ignored (docs/releasing.md).
       SHIPMATE_APP_PRIVATE_KEY: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
       SHIPMATE_PLAN_PASSPHRASE: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
 
   envlevel1:
-    # Display name only (job id unchanged) — see apply.yml's `waves` job.
     name: L1
     needs: [detect, envlevel0]
     if: ${{ !failure() && !cancelled() && needs.detect.outputs.envlevel1_empty != 'true' && !contains(join(needs.*.result, ','), 'cancelled') }}
@@ -90,7 +84,6 @@ jobs:
       SHIPMATE_PLAN_PASSPHRASE: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
 
   envlevel2:
-    # Display name only (job id unchanged) — see apply.yml's `waves` job.
     name: L2
     needs: [detect, envlevel0, envlevel1]
     if: ${{ !failure() && !cancelled() && needs.detect.outputs.envlevel2_empty != 'true' && !contains(join(needs.*.result, ','), 'cancelled') }}
@@ -105,7 +98,6 @@ jobs:
       SHIPMATE_PLAN_PASSPHRASE: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
 
   envlevel3:
-    # Display name only (job id unchanged) — see apply.yml's `waves` job.
     name: L3
     needs: [detect, envlevel0, envlevel1, envlevel2]
     if: ${{ !failure() && !cancelled() && needs.detect.outputs.envlevel3_empty != 'true' && !contains(join(needs.*.result, ','), 'cancelled') }}
@@ -123,10 +115,9 @@ jobs:
     needs: [detect, envlevel0, envlevel1, envlevel2, envlevel3]
     if: always()
     runs-on: ubuntu-latest
-    # The gate write goes through a minted App token, not GITHUB_TOKEN. Same
-    # environment as apply-env-level.yml's complete job -- deployment branch
-    # policy restricts this to the default branch, which is also this
-    # workflow's own trigger, so it never blocks the real run.
+    # The gate write goes through a minted App token, not GITHUB_TOKEN. Same environment as
+    # apply-env-level.yml's `complete` job: deployment branch policy restricts it to the default
+    # branch, which is also this workflow's own trigger, so it never blocks the real run.
     environment: shipmate-engine
     permissions: {}
     steps:
@@ -158,18 +149,18 @@ jobs:
           RESULTS: ${{ join(needs.*.result, ',') }}
         run: |
           set -euo pipefail
-          # detect failed -> no head SHA -> do not post a (green) gate; fail loud instead.
+          # A failed `detect` leaves no head SHA. Fail loud rather than post a gate reading green.
           if [ -z "$HEAD_SHA" ]; then
             echo "::error::detect produced no head SHA; deploy cannot gate"; exit 1
           fi
-          # Any env-level result other than success/skipped (failure, cancelled,
-          # timed_out, ...) blocks the gate. grep -q failure alone missed cancels.
-          # Scanned in-process: a pipeline whose reader exits early inverts the
-          # verdict under `pipefail` (SIGPIPE 141 reads as "all clean").
+          # Any env-level result other than success or skipped -- failure, cancelled, timed_out --
+          # blocks the gate; `grep -q failure` alone missed cancels. Scanned in-process because a
+          # pipeline whose reader exits early inverts the verdict under `pipefail`, SIGPIPE 141
+          # reading as "all clean".
           concl=success; title="all env-levels applied"
           IFS=',' read -ra results <<< "$RESULTS"
-          # An empty result string means no env-level job reported at all —
-          # nothing was applied, so it must read as incomplete, not as all-clean.
+          # An empty result string means no env-level job reported at all. Nothing was applied,
+          # so it must read as incomplete rather than all-clean.
           [ ${#results[@]} -gt 0 ] || results=("")
           for r in "${results[@]}"; do
             case "$r" in

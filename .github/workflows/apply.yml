@@ -6,31 +6,24 @@ on:
       ref: { required: true, type: string }
       pr_number: { required: true, type: string }
       state_suffix: { required: true, type: string }
+    # A callee's `environment:` resolves in the CALLER's repository, and the environment's value
+    # wins over whatever the caller passed, empty included -- `summary` binds `shipmate-engine`.
     secrets:
-      # `required: false` is load-bearing, not laxity: consumers hold this key
-      # as a secret on the `shipmate-engine` environment (docs/github-app.md
-      # §5), so a caller that binds no environment has no value to pass. It
-      # does not need one — `summary` binds `environment: shipmate-engine`,
-      # which resolves in the *caller's* repository, and an environment's value
-      # wins over whatever the caller passed, empty included. A *required*
-      # declaration would reject the call before any step of the first callee
-      # job that binds no environment (`guard`), killing the run red with
-      # "Secret ... is required, but not provided while calling".
+      # `required: false` is load-bearing: consumers hold this key on the `shipmate-engine`
+      # environment (docs/github-app.md §5), so a caller binding no environment has nothing to
+      # pass. A required declaration rejects the call before the first callee job binding none
+      # (`guard`) runs a step, with "Secret ... is required, but not provided while calling".
       SHIPMATE_APP_PRIVATE_KEY: { required: false }
       SHIPMATE_PLAN_PASSPHRASE: { required: false }
 jobs:
-  # `gh workflow run apply.yml` by a human with write access would otherwise
-  # skip every requirement in scripts/authorize. A human cannot make
-  # github.actor a bot login, so this rejects any human dispatch -- though it
-  # admits any bot actor with actions:write, not only this App.
+  # `gh workflow run apply.yml` by a human with write access would otherwise skip every requirement
+  # in scripts/authorize. A human cannot make github.actor a bot login, so this rejects any human
+  # dispatch -- though it admits any bot actor with actions:write, not only this App.
   #
-  # Its own job, not a first step of `detect`: `summary` must refuse a rejected
-  # dispatch (it mints the App key and comments on the dispatcher-supplied PR
-  # number) while still posting the failure comment and refreshing the gate
-  # when `detect` genuinely fails -- an env_order cycle, a cell whose apply
-  # check records no plan run. Keying `summary` on this job separates the two:
-  # `needs.guard.result == 'success'` is false only for an
-  # unauthorised dispatch. No secrets, no environment, no checkout.
+  # Its own job, not a first step of `detect`: `summary` must refuse a rejected dispatch -- it mints
+  # the App key and comments on the dispatcher-supplied PR number -- while still posting the failure
+  # comment and refreshing the gate when `detect` genuinely fails. `needs.guard.result == 'success'`
+  # is false only for an unauthorised dispatch. No secrets, no environment, no checkout.
   guard:
     runs-on: ubuntu-latest
     permissions: {}
@@ -41,25 +34,22 @@ jobs:
           echo "::error::apply must be dispatched by the shipmate App via comment-ops, not by a direct workflow_dispatch"
           exit 1
 
-  # The review state this apply rests on, re-read here rather than trusted from
-  # comment-ops: `guard` above admits any bot actor holding actions:write, so a
-  # dispatch input would be a claim that surface could forge. Byte-identical to
-  # `apply-all.yml`'s job -- one shape, one decision, on both apply paths.
-  # Its own job because `detect` checks out the PR head and runs Terramate over
-  # branch-controlled HCL -- no token belongs in that job. `environment:` is how
-  # a callee reaches the App key (same mechanism as `summary` below).
-  #
-  # Deliberately unconditional -- no `if:`. A gate on the repository variable is
-  # what let a `ungated-envs` action input wider than the variable escape
-  # enforcement, and running always is also what closes the TOCTOU between the
-  # comment that authorized this apply and the dispatch: the decision is re-read
-  # here, so an approval dismissed in between holds. `apply-detect` refuses the
-  # run on the decision; this job only fetches it.
+  # The review state this apply rests on, re-read here rather than trusted from comment-ops: `guard`
+  # admits any bot actor holding actions:write, so a dispatch input would be a claim that surface
+  # could forge. Its own job because `detect` checks out the PR head and runs Terramate over
+  # branch-controlled HCL, where no token belongs.
   review:
+    # Deliberately unconditional -- no `if:`. A gate on the repository variable is what let an
+    # `ungated-envs` action input wider than the variable escape enforcement, and running always
+    # closes the TOCTOU between the comment that authorized this apply and the dispatch: the
+    # decision is re-read here, so an approval dismissed in between holds.
     needs: [guard]
     runs-on: ubuntu-latest
+    # How a callee reaches the App key, the same mechanism the `summary` job uses.
     environment: shipmate-engine
     permissions: {}
+    # `apply-detect` refuses the run on this decision; this job only fetches it. Byte-identical to
+    # `apply-all.yml`'s `review` job -- one shape, one decision, on both apply paths.
     outputs:
       decision: ${{ steps.rd.outputs.decision }}
     steps:
@@ -91,14 +81,11 @@ jobs:
           PR_NUMBER: ${{ inputs.pr_number }}
         run: |
           set -euo pipefail
-          # NONE is the sentinel for a PR that exists with a null decision --
-          # the ruleset requires no review. Nothing here has proved the PR
-          # exists (unlike comment-ops, which reads it over REST first), and a
-          # pr_number matching no pull request returns a null `pullRequest`
-          # with no errors and exit 0 -- so that case gets its own value, which
-          # detect's catch-all holds every env on. Never defaulted in a
-          # workflow expression: a decision that fails to arrive must arrive
-          # empty, which holds every env too.
+          # NONE is the sentinel for a PR that exists with a null decision: the ruleset requires
+          # no review. Nothing here has proved the PR exists -- comment-ops reads it over REST
+          # first, this does not -- and a pr_number matching no pull request returns a null
+          # `pullRequest` with no errors and exit 0, so MISSING_PR is its own value, which
+          # detect's catch-all holds every env on.
           # The $owner/$repo/$pr tokens are GraphQL query variables (bound via
           # -F), not shell variables -- single quotes are intentional.
           # shellcheck disable=SC2016
@@ -129,25 +116,22 @@ jobs:
           head-sha: ${{ inputs.ref }}
           github-token: ${{ github.token }}
           app-id: ${{ vars.SHIPMATE_APP_ID }}
-          # Passed through raw, never defaulted: an empty decision means the
-          # review signal never arrived, and empty refuses the run.
+          # Passed through raw, never defaulted: an empty decision means the review signal never
+          # arrived, and empty refuses the run.
           ungated-envs: ${{ vars.SHIPMATE_UNGATED_ENVS }}
           review-decision: ${{ needs.review.outputs.decision }}
 
-  # A targeted apply is single-env by design, so its pending wave set is exactly
-  # one env-level's wave matrix — run it through the same engine the deploy and
-  # bare-apply paths use instead of duplicating wave0..wave7 here.
+  # A targeted apply is single-env by design, so its pending wave set is exactly one env-level's
+  # wave matrix. It runs through the same engine the deploy and bare-apply paths use, rather than
+  # duplicating wave0..wave7 here.
   apply:
-    # Display name only (the job id stays `apply`): a called workflow's jobs
-    # display as `<caller job> / <this name> / <wave job>`, and GHA cannot
-    # suppress a level — so this level is named for what it fans out instead of
-    # repeating the verb the wave job already carries.
+    # Display name only (the job id stays `apply`): a called workflow's jobs display as
+    # `<caller job> / <this name> / <wave job>`, and GHA cannot suppress a level -- so this level
+    # is named for what it fans out instead of repeating the verb the wave job already carries.
     name: waves
-    # `guard` and `review` are in `needs` as well as `detect`, so their failures
-    # reach `!failure()` here: without them a rejected dispatch (or a review job
-    # that could not mint the App key) skips `detect`, and a skipped `detect`
-    # reads its outputs as empty strings -- which the `!= 'true'` guard below
-    # reads as "not empty" and fans out anyway.
+    # `guard` and `review` join `detect` in `needs` so their failures reach `!failure()`: without
+    # them a rejected dispatch, or a `review` that could not mint the App key, skips `detect`, and
+    # a skipped `detect` reads its outputs as empty strings -- which `!= 'true'` fans out on.
     needs: [guard, review, detect]
     if: ${{ !failure() && !cancelled() && needs.detect.outputs.empty != 'true' }}
     uses: ship-iac/shipmate/.github/workflows/apply-env-level.yml@a8107dde2500a7f36839a65c1da74f5f11685eca # pinned to a commit on main
@@ -156,44 +140,38 @@ jobs:
       waves_json: ${{ needs.detect.outputs.waves }}
       head_sha: ${{ needs.detect.outputs.head_sha }}
       state_suffix: ${{ inputs.state_suffix }}
-    # Named, never `inherit`: these two files sit in one organization but the RUN
-    # belongs to the consumer, and `inherit` is evaluated against the run -- so a
-    # cross-organization consumer's `complete` job would hold no key, and its
-    # applies would execute and strand their apply checks pending forever.
-    # Ordering rule for adding a secret here: declare it in apply-env-level.yml,
-    # merge, bump the pin below, and only then map it in this block. Mapping a
-    # secret the pinned callee does not declare is a hard load-time error (unlike
-    # an undeclared action input, which is silently ignored) -- docs/releasing.md.
+    # Named, never `inherit`: these two files sit in one organization but the RUN belongs to the
+    # consumer, and `inherit` is evaluated against the run -- so a cross-organization consumer's
+    # `complete` job would hold no key, its applies would execute, and their apply checks would
+    # strand pending forever.
     secrets:
+      # Adding a secret here is ordered: declare it in apply-env-level.yml, merge, bump this
+      # job's `uses:` pin, and only then map it. Mapping a secret the pinned callee does not
+      # declare is a hard load-time error, unlike an undeclared action input, which is silently
+      # ignored (docs/releasing.md).
       SHIPMATE_APP_PRIVATE_KEY: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
       SHIPMATE_PLAN_PASSPHRASE: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
 
   summary:
-    # `review` is in this list because `results:` below is
-    # `join(needs.*.result, ',')` -- which covers only THIS job's needs. A
-    # failed `review` skips `detect` (correctly: nothing applies, the gate stays
-    # pending) while `summary` still runs on `guard`'s success, so without the
-    # entry the comment renders the non-failure form over a run that died.
+    # `review` is in this list because `results:` is `join(needs.*.result, ',')`, which covers only
+    # THIS job's needs. A failed `review` skips `detect` -- correctly: nothing applies and the gate
+    # stays pending -- while `summary` still runs on `guard`'s success, so without the entry the
+    # comment renders the non-failure form over a run that died.
     needs: [guard, review, detect, apply]
-    # `always()` alone would still run this job -- and mint the App key -- when
-    # the bot-actor rejection failed; `needs.guard.result == 'success'` closes
-    # that. Keyed on `guard` and NOT on `detect`: `always()` is needed so
-    # results/gate-refresh post when apply failed or was cancelled, and a
-    # genuine `detect` failure (a cell recording no plan run) must still get
-    # the developer a failure comment and a gate refresh.
+    # `always()` alone would still run this job, and mint the App key, when the bot-actor rejection
+    # failed; `needs.guard.result == 'success'` closes that. Keyed on `guard`, not `detect`:
+    # `always()` posts the comment and refreshes the gate when apply failed or was cancelled, and
+    # must do the same for a genuine `detect` failure -- a cell recording no plan run.
     if: ${{ always() && needs.guard.result == 'success' }}
     runs-on: ubuntu-latest
-    # Both steps below mint the App key (via secrets.SHIPMATE_APP_PRIVATE_KEY),
-    # same as apply-env-level.yml's complete job -- deployment branch policy
-    # restricts this environment to the default branch, so a branch-authored
-    # workflow naming it is denied and never sees the key.
+    # Both steps mint the App key from secrets.SHIPMATE_APP_PRIVATE_KEY, the same as
+    # apply-env-level.yml's `complete` job. Deployment branch policy restricts this environment to
+    # the default branch, so a branch-authored workflow naming it is denied and never sees the key.
     environment: shipmate-engine
-    # gate-refresh mints its own App token (checks:read scan + statuses:write
-    # gate write); apply-summary mints its own App token too, also
-    # checks:read now -- it scans the head SHA's apply checks to fold their
-    # state into the result comment, not just the comment POST. actions:read
-    # is needed here for apply-summary's artifact download and run-jobs
-    # listing.
+    # gate-refresh and apply-summary each mint their own App token: a checks:read scan plus the
+    # statuses:write gate write, and a checks:read scan of the head SHA's apply checks plus the
+    # comment POST. actions:read is the one GITHUB_TOKEN scope needed here, for apply-summary's
+    # artifact download and run-jobs listing.
     permissions: { actions: read }
     steps:
       - name: Complete gate if every apply check is done

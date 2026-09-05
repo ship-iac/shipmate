@@ -9,11 +9,11 @@ the input, and every wave job reads the value off its matrix row.
 import yaml
 from _loader import WORKFLOWS
 
-# Every `workflow_call`/`workflow_dispatch` input name in the engine, per file.
-# Hand-written, never read back from the files it guards: the property is that
-# no entry says `plan_run_id`, and a guard that derives the constant asserts
-# whatever the files happen to say. A file with no inputs is listed as `{}` so a
-# new workflow reaching for the retired rail cannot dodge the comparison.
+#: Every `workflow_call`/`workflow_dispatch` input name in the engine, per file. Hand-written,
+#: never read back from the files it guards: the property is that no entry says `plan_run_id`, and
+#: a guard that derives the constant asserts whatever the files happen to say. A file with no
+#: inputs is listed as `{}`, so a new workflow reaching for the retired rail cannot dodge the
+#: comparison.
 EXPECTED_INPUTS = {
     "apply-all.yml": {"workflow_call": ["pr_number", "ref", "state_suffix"]},
     "apply-env-level.yml": {"workflow_call": ["head_sha", "state_suffix", "waves_json"]},
@@ -37,10 +37,10 @@ EXPECTED_INPUTS = {
     "unlock.yml": {"workflow_call": ["environment", "ref"]},
 }
 
-# The wave fan-out `apply-env-level.yml` pre-declares. Hand-written so a deleted
-# wave job reddens instead of passing by absence -- a wave job that references a
-# workflow input the file no longer declares fails the run at startup, with no
-# job and no log, so "every job that exists is correct" is not enough.
+#: The wave fan-out `apply-env-level.yml` pre-declares. Hand-written, so a deleted wave job
+#: reddens instead of passing by absence: a wave job referencing a workflow input the file no
+#: longer declares fails the run at startup with no job and no log, which is why "every job that
+#: exists is correct" is not enough.
 EXPECTED_WAVE_JOBS = ["wave0", "wave1", "wave2", "wave3", "wave4", "wave5", "wave6", "wave7"]
 
 PER_CELL_PLAN_RUN = "${{ matrix.plan_run_id }}"

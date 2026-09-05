@@ -1,11 +1,10 @@
-"""Guards the optional-state contract: an empty state-path means a remote
-backend owns state, so every actions/state step must be skipped -- a restore
-that still runs would fail the cell (no artifact exists), and apply-cell's save
-that still runs would upload nothing meaningful and mask the skip. drift-cell
-only restores.
+"""Guards the optional-state contract: an empty state-path means a remote backend owns state, so
+every actions/state step must be skipped. A restore that still runs would fail the cell, because
+no artifact exists; apply-cell's save that still runs would upload nothing meaningful and mask
+the skip. drift-cell only restores.
 
-Asserts whole parsed `if:` expressions, never substrings: an inverted
-operator or a condition moved into a comment must fail these guards.
+Asserts whole parsed `if:` expressions, never substrings: an inverted operator or a condition
+moved into a comment must fail these guards.
 """
 
 import pytest

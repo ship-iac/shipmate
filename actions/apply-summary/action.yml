@@ -1,5 +1,5 @@
 name: shipmate apply-summary
-description: Download per-cell apply-summary.* artifacts, mint a shipmate App installation token, scan the head SHA's apply checks, list the run's jobs for per-cell log links, render the apply result comment, and post a fresh PR comment.
+description: Render the apply result comment and post it to the pull request. Downloads the per-cell apply-summary.* artifacts, mints a shipmate App installation token, scans the head SHA's apply checks, and lists the run's jobs for per-cell log links.
 inputs:
   pr-number:
     description: Pull request number to comment on.
@@ -84,12 +84,11 @@ runs:
         [ -n "$APP_ID" ] || { echo "::error::SHIPMATE_APP_ID is unset. Set it as a repository or organization variable (docs/github-app.md)."; exit 1; }
     - name: Download apply cell summaries
       id: download
-      # continue-on-error: for comment-ops, the comment IS the feedback
-      # channel -- a transient artifact-API 5xx or a 403 here must not skip
-      # the token mint and the POST below and leave a developer whose apply
-      # fully succeeded with no PR comment at all. The renderer already
-      # handles an empty (or partial) cells directory: missing cells render
-      # as not-attempted rows, or the whole run degrades to the short form.
+      # continue-on-error because for comment-ops the comment IS the feedback channel: a
+      # transient artifact-API 5xx or a 403 must not skip `Mint App installation token` and
+      # `Post apply result comment`, leaving a developer whose apply fully succeeded with no PR
+      # comment at all. The renderer already handles an empty or partial cells directory --
+      # missing cells render as not-attempted rows, or the whole run degrades to the short form.
       continue-on-error: true
       uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
       with:
@@ -105,12 +104,9 @@ runs:
         echo "::warning::apply cell summaries download failed; the comment renders without per-cell detail"
 
     - name: Mint App installation token
-      # Minted before the render step, not just before the POST: the apply-check
-      # scan below needs it too. One token covers both uses for this job (the
-      # same shape actions/summary uses for its three writes). checks:read comes
-      # from the App installation, so no consumer's calling job has to grant it
-      # -- a called workflow's job permissions cannot exceed its caller's, so
-      # taking this off GITHUB_TOKEN would break every consumer wrapper.
+      # Minted before `Render apply result comment`, not only before `Post apply result
+      # comment`: `Scan apply checks (degrade to no data on failure)` needs it too, and one token
+      # covers both uses -- the same shape actions/summary uses for its three writes.
       id: token
       uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
       with:
@@ -118,6 +114,9 @@ runs:
         private-key: ${{ inputs.private-key }}
         owner: ${{ github.repository_owner }}
         repositories: ${{ github.event.repository.name }}
+        # From the App installation, so no consumer's calling job has to grant it: a called
+        # workflow's job permissions cannot exceed its caller's, so taking this off GITHUB_TOKEN
+        # would break every consumer wrapper.
         permission-checks: read
         permission-pull-requests: write
 
@@ -126,19 +125,17 @@ runs:
       env:
         GH_TOKEN: ${{ steps.token.outputs.token }}
         HEAD_SHA: ${{ inputs.head-sha }}
-      # The pending apply checks are the work queue, so the comment reads them
-      # rather than trusting the per-cell artifact alone: apply-cell composes
-      # its verdict from the apply step and uploads it before Save state, the
-      # completion-token mint and Complete the apply check can fail, so an
-      # `applied` artifact can sit against a still-pending check.
-      # filter=all for the same reason gate-refresh uses it: a re-created check
-      # name keeps its historical runs and apply-gate judges the newest run per
-      # name. Degrade, never fail: the renderer treats an absent name as
-      # unknown and falls back to artifact-only status, and for comment-ops the
-      # comment IS the feedback channel.
+      # The pending apply checks are the work queue, so the comment reads them rather than
+      # trusting the per-cell artifact alone. apply-cell composes its verdict from the apply step
+      # and uploads it; actions/apply-complete then completes the check from a later job, and only
+      # for cells whose own job recorded success. A failed `Save state` in the cell, or a failed
+      # completion, leaves an `applied` artifact against a still-pending check.
       run: |
         set -euo pipefail
         [[ "$HEAD_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::head-sha must be a 40-char lowercase hex SHA (got: $HEAD_SHA)"; exit 1; }
+        # filter=all for the same reason gate-refresh uses it: a re-created check name keeps its
+        # historical runs and apply-gate judges the newest run per name. Degrade, never fail --
+        # the renderer treats an absent name as unknown and falls back to artifact-only status.
         if ! gh api --paginate \
           "repos/$GITHUB_REPOSITORY/commits/$HEAD_SHA/check-runs?filter=all&per_page=100" \
           --jq '.check_runs[] | {name, status, conclusion, id, app: {id: .app.id}}' > checks.jsonl; then
@@ -152,10 +149,9 @@ runs:
         GH_TOKEN: ${{ inputs.github-token }}
       run: |
         set -euo pipefail
-        # Costs only per-cell log links (apply-comment falls back to the
-        # workflow-run URL per row) -- mirror actions/summary's treatment of
-        # a cosmetic API listing: warn and degrade to an empty file, never
-        # fail the step.
+        # Cosmetic: apply-comment falls back to the workflow-run URL per row. Mirror
+        # actions/summary's treatment of a cosmetic API listing -- warn and degrade to an empty
+        # file, never fail the step.
         if ! gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs" --jq '.jobs[] | {name, html_url}' > jobs.jsonl; then
           echo "::warning::run jobs listing failed; per-cell log links degrade to the workflow-run URL"
           : > jobs.jsonl

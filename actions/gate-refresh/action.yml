@@ -45,11 +45,10 @@ runs:
         GH_TOKEN: ${{ steps.token.outputs.token }}
         HEAD_SHA: ${{ inputs.head-sha }}
         SHIPMATE_APP_ID: ${{ inputs.app-id }}
-      # filter=all: a re-created check name keeps its historical runs; apply-gate
-      # groups by name and judges the newest run per name. A duplicate apply
-      # check created mid-apply is left pending by apply-cell (it completes only
-      # ids snapshotted before its apply began), so the gate correctly stays
-      # pending until that duplicate's plan is itself applied.
+      # filter=all: a re-created check name keeps its historical runs, and apply-gate groups by
+      # name and judges the newest run per name. A duplicate apply check created mid-apply is left
+      # pending, because actions/apply-complete completes only the ids actions/apply-snapshot took
+      # before the waves began, so the gate stays pending until that duplicate's plan is applied.
       run: |
         set -euo pipefail
         [[ "$HEAD_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::head-sha must be a 40-char lowercase hex SHA (got: $HEAD_SHA)"; exit 1; }
@@ -65,29 +64,26 @@ runs:
         HEAD_SHA: ${{ inputs.head-sha }}
       run: |
         set -euo pipefail
-        # A hold must not be cleared by the very applies it exists to prevent.
-        # `shipmate apply` never consults the gate (scripts/authorize reads
-        # reviewDecision), so the cells that WERE parsed can apply and land
-        # here with verdict=complete while the stacks whose summaries were
-        # never read still have no apply check at all.
-        # Matched on the STATE alone, not on the description: gate-state writes
-        # `failure` for exactly its hold cases (non-success plan run,
-        # unreadable artifact list, cell/artifact shortfall) and only
-        # `pending`/`success` otherwise -- so this is narrow enough that a
-        # legitimate pending -> success refresh is untouched, and it needs no
-        # wording to stay in sync. The only exit from a hold is a fresh plan
-        # run, which rewrites the gate itself.
+        # A hold must not be cleared by the very applies it exists to prevent. `shipmate apply`
+        # never consults the gate (scripts/authorize reads reviewDecision), so the cells that WERE
+        # parsed can apply and reach verdict=complete while the stacks whose summaries were never
+        # read still have no apply check at all.
         held=$(gh api "repos/$GITHUB_REPOSITORY/commits/$HEAD_SHA/status" \
           --jq '[.statuses[] | select(.context == "shipmate / gate")] | .[0].state // empty')
+        # Matched on the STATE alone, not on the description: gate-state writes `failure` for
+        # exactly its hold cases (non-success plan run, unreadable artifact list, cell/artifact
+        # shortfall) and only `pending`/`success` otherwise, so a legitimate pending -> success
+        # refresh is untouched and no wording has to stay in sync. The only exit from a hold is a
+        # fresh plan run, which rewrites the gate itself.
         if [ "$held" = "failure" ]; then
           echo "::error::shipmate / gate is held for $HEAD_SHA because the plan run's evidence was incomplete — some planned stacks may carry no apply check. Re-plan this pull request; the gate cannot be greened from apply checks alone."
           exit 1
         fi
         python3 - > gate.json <<'PY'
         import json, os
-        # Commit status, not a check-run — see actions/summary for the rationale
-        # (check-runs bind to a suite; a commit status is commit-scoped and so
-        # survives the multi-suite attribution race).
+        # Commit status, not a check-run — see actions/summary for the rationale. A check-run
+        # binds to a suite; a commit status is commit-scoped and so survives the multi-suite
+        # attribution race.
         body = {"state": "success", "context": "shipmate / gate",
                 "description": "all applies complete — nothing left to apply"}
         server, repo, run_id = (os.environ.get(k, "") for k in

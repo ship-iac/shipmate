@@ -1,22 +1,20 @@
 """`manifest-load.yml` must name every action, in the one shape that parses it.
 
-That workflow is the only guard on "GitHub can load this manifest", and it is
-silent about what it does not list: add an action and forget a step and the new
-manifest simply has no coverage. Its discriminating power also rests on two
-details a reader is likely to tidy away --
+That workflow is the only guard on "GitHub can load this manifest", and it is silent about what
+it does not list: add an action, forget a step, and the new manifest has no coverage. Its
+discriminating power also rests on two details a reader is likely to tidy away:
 
-  * the ref must be **remote** (`ship-iac/shipmate/actions/x@main`). A local
-    `./actions/x` manifest is only read when the step executes, so under
-    `if: false` it is never parsed at all: measured 2026-08-22, a comma-split
-    local manifest under `if: false` passes.
-  * `if: false` must stay. Without it every action actually runs, which is what
-    made the smoke run look expensive: 19 actions, 83 required inputs between
-    them, App tokens, a live PR, terramate/tofu.
+  * the ref must be remote (`ship-iac/shipmate/actions/x@main`). A local `./actions/x` manifest is
+    only read when the step executes, so under `if: false` it is never parsed at all -- measured
+    2026-08-22, a comma-split local manifest under `if: false` passes.
+  * `if: false` must stay. Without it every action actually runs, which is what made the smoke run
+    look expensive: 19 actions, 83 required inputs between them, App tokens, a live pull request,
+    terramate/tofu.
 
-So compare the whole step list to one built here, rather than checking a part.
-The trigger is compared the same way: `@main` is only the right tree on a push
-to `main`, so a workflow retriggered anywhere else (a PR, where the ref is
-stale) or nowhere at all would leave 19 correct steps that never run.
+So compare the whole step list to one built here, rather than checking a part. The trigger is
+compared the same way: `@main` is only the right tree on a push to `main`, so a workflow
+retriggered anywhere else -- a pull request, where the ref is stale -- or nowhere at all would
+leave 19 correct steps that never run.
 """
 
 import glob

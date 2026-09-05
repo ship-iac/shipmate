@@ -1,20 +1,18 @@
 """Guards the documented wiring of the two guards that decide on stated facts.
 
-The fork refusal and the draft skip read inputs the wrapper passes, so the
-snippets consumers paste are what makes those guards real. Omitting `head-repo`
-on `build-matrix` fails `detect` loudly; omitting `head-repo` or `is-draft` on the
-`summary` call SKIPS that job, which writes no gate at all and says nothing on
-the run page -- a snippet missing them documents a wrapper that cannot merge
-anything; omitting `on-demand` documents one whose `shipmate plan` on a draft
-plans and then gates nothing.
-`drift.md`'s `no-pull-request` is the same class: without it the documented
-nightly is refused.
+The fork refusal and the draft skip read inputs the wrapper passes, so the snippets consumers
+paste are what makes those guards real. Omitting `head-repo` on `build-matrix` fails `detect`
+loudly. Omitting `head-repo` or `is-draft` on the `summary` call skips that job, which writes no
+gate at all and says nothing on the run page, so a snippet missing them documents a wrapper that
+cannot merge anything. Omitting `on-demand` documents one whose `shipmate plan` on a draft plans
+and then gates nothing. `drift.md`'s `no-pull-request` is the same class: without it the
+documented nightly is refused.
 
-Whole-mapping comparisons against hand-written literals, for the reason
-`CLAUDE.md` gives: a "contains head-repo" check relocates the hole to whichever
-key it does not name, and a constant read out of the page would agree with
-whatever the page says. `test_docs_yaml_parses.py` proves these fences parse; it
-cannot see a dropped input.
+Whole-mapping comparisons against hand-written literals, for the reason `docs/development.md`
+§Guard tests must be able to fail gives: a "contains head-repo" check relocates the hole to
+whichever key it does not name, and a constant read out of the page would agree with whatever
+the page says. `test_docs_yaml_parses.py` proves these fences parse; it cannot see a dropped
+optional input.
 """
 
 import re
@@ -28,7 +26,7 @@ doctor = load_script("doctor")
 _FENCE = re.compile(r"^(?P<indent>[ \t]*)```yaml[ \t]*$\n(?P<body>.*?)^\1```", re.M | re.S)
 
 # Owner-agnostic, like test_docs_yaml_parses.py's selectors: the pages publish
-# `<owner>/shipmate/...` as well as the engine's own org.
+# `<owner>/shipmate/...` as well as the engine's own organization.
 _SUMMARY_CALL = "/shipmate/.github/workflows/summary.yml@"
 _BUILD_MATRIX = "/shipmate/actions/build-matrix@"
 
@@ -92,9 +90,9 @@ def _build_matrix_steps(page):
 
 
 def test_the_documented_call_sites_are_found():
-    """A floor under the three guards below, which assert nothing when their
-    selectors match nothing: renaming a documented job out of a selector's reach
-    fails here rather than going quiet."""
+    """A floor under the three `with:`-mapping guards, which assert nothing when their selectors
+    match nothing: renaming a documented job out of a selector's reach fails here rather than
+    going quiet."""
     found = (
         sorted(job for job, _ in _summary_calls(_PLAN_PAGE)),
         sorted(job for job, _ in _build_matrix_steps(_PLAN_PAGE)),
@@ -114,18 +112,16 @@ def test_documented_summary_call_states_the_facts_it_decides_on():
 
 
 def test_the_documented_call_passes_exactly_the_inputs_the_workflow_declares():
-    """Three files hand-write these input names: this page's snippet, the
-    workflow's `workflow_call` declarations, and `scripts/doctor`'s wiring
-    constant. A rename that updates one leaves the others stale with a green
-    suite -- a documented wrapper whose summary job silently skips, or a probe
-    looking for a key nobody passes.
+    """Three files hand-write these input names: this page's snippet, the workflow's
+    `workflow_call` declarations, and `scripts/doctor`'s wiring constant. A rename that updates
+    one leaves the others stale with a green suite -- a documented wrapper whose summary job
+    silently skips, or a probe looking for a key nobody passes.
 
-    Both sides are derived here, which is not the `CLAUDE.md` hand-written-constant
-    rule being broken: that rule pins a *value* against a constant, and the two
-    expected mappings above do exactly that. This pins *agreement between two
-    files*, neither of which is the constant for the other. Both sides are
-    asserted non-empty, so a selector that matches nothing fails instead of
-    passing vacuously."""
+    Both sides are derived here, which does not break `docs/development.md`'s
+    hand-written-constant rule: that rule pins a value against a constant, which
+    `_EXPECTED_SUMMARY_WITH` and `_EXPECTED_PLAN_MATRIX_WITH` do. This pins agreement between
+    two files, neither of which is the constant for the other. Both sides are asserted
+    non-empty, so a selector that matches nothing fails instead of passing vacuously."""
     declared = yaml.safe_load(_SUMMARY_WF.read_text(encoding="utf-8"))
     # `doc[True]`: PyYAML parses the bare key `on:` as the boolean True.
     names = sorted(declared[True]["workflow_call"]["inputs"])
@@ -140,13 +136,12 @@ def test_the_documented_call_passes_exactly_the_inputs_the_workflow_declares():
 
 
 def test_doctors_wiring_constant_expects_what_the_page_documents():
-    """The third file this module's docstring names. `doctor.SUMMARY_WIRING` is a
-    hand-written copy of these three expressions and is compared against a
-    consumer's real `plan.yml`, so a change to the documented expression that
-    leaves it behind makes the probe WARN on every correctly wired repository --
-    a finding on a healthy repo, which is what teaches readers to ignore the
-    suite. Nothing else pins the two together: `test_doctor.py`'s fixtures are
-    written from `SUMMARY_WIRING`'s own side."""
+    """The third file this module's docstring names. `doctor.SUMMARY_WIRING` is a hand-written
+    copy of these three expressions and is compared against a consumer's real `plan.yml`, so a
+    change to the documented expression that leaves it behind makes the probe warn on every
+    correctly wired repository -- a finding on a healthy repo, which is what teaches readers to
+    ignore the suite. Nothing else pins the two together: `test_doctor.py`'s fixtures are written
+    from `SUMMARY_WIRING`'s own side."""
     assert doctor.SUMMARY_WIRING == {
         key: _EXPECTED_SUMMARY_WITH[key] for key in ("head-repo", "is-draft", "on-demand")
     }, (
@@ -156,10 +151,10 @@ def test_doctors_wiring_constant_expects_what_the_page_documents():
 
 
 def test_doctors_build_matrix_constant_expects_what_the_page_documents():
-    """Same failure mode as the summary constant above, on the step's own two
-    inputs: `doctor.BUILD_MATRIX_WIRING` is a hand-written copy of what this page
-    documents, and a documented expression that leaves it behind makes the probe
-    WARN on every correctly wired repository."""
+    """Same failure mode as test_doctors_wiring_constant_expects_what_the_page_documents, on the
+    step's own two inputs: `doctor.BUILD_MATRIX_WIRING` is a hand-written copy of what this page
+    documents, and a documented expression that leaves it behind makes the probe warn on every
+    correctly wired repository."""
     assert doctor.BUILD_MATRIX_WIRING == {
         key: _EXPECTED_PLAN_MATRIX_WITH[key] for key in ("head-repo", "head-sha")
     }, (
@@ -177,16 +172,15 @@ def test_documented_plan_build_matrix_states_the_head_repository_and_commit():
 
 
 def _scoping_with_fragments(page):
-    """The `with:`-only fences: `build-matrix` call blocks a reader pastes over
-    the nightly's, carrying no `uses:` and so invisible to `_build_matrix_steps`."""
+    """The `with:`-only fences: `build-matrix` call blocks a reader pastes over the nightly's,
+    carrying no `uses:` and so invisible to `_build_matrix_steps`."""
     return [doc["with"] for doc in _fence_docs(page) if list(doc) == ["with"]]
 
 
 def test_documented_scoped_sweep_fragments_keep_the_drift_wiring():
-    """The `tags:` recipes are the only documented `build-matrix` calls no
-    `uses:`-keyed selector reaches. Dropping `no-pull-request` from one of them
-    documents a sweep `build-matrix` refuses outright -- the same class as the
-    nightly's own block below, and nothing else reads these fences."""
+    """The `tags:` recipes are the only documented `build-matrix` calls no `uses:`-keyed selector
+    reaches. Dropping `no-pull-request` from one of them documents a sweep `build-matrix` refuses
+    outright, the same class as the nightly's own block, and nothing else reads these fences."""
     found = _scoping_with_fragments(_DRIFT_PAGE)
     assert len(found) == 2, f"docs/drift.md's `with:` fragments changed: {found}"
     for block in found:

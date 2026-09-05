@@ -1,14 +1,14 @@
 """`pr-facts` is the single producer of the plan path's pull-request facts.
 
-The properties worth pinning are all about where a fact comes FROM. A dispatched
-plan may state a pull-request number and nothing else: the moment a head SHA or
-head repository could arrive as a dispatch input, anyone holding `actions: write`
-could name a fork's head while claiming this repository, and `build-matrix`'s
-fork refusal -- which keys on the head repository stated to it -- would pass.
+The properties worth pinning are all about where a fact comes from. A dispatched plan may state
+a pull-request number and nothing else: the moment a head SHA or head repository could arrive as
+a dispatch input, anyone holding `actions: write` could name a fork's head while claiming this
+repository, and `build-matrix`'s fork refusal, which keys on the head repository stated to it,
+would pass.
 
-So: the payload leg spends no API call, the dispatch leg resolves everything
-from the number through one hand-written API path, and every partial answer is
-refused rather than emitted as an empty fact.
+So the payload leg spends no API call, the dispatch leg resolves everything from the number
+through one hand-written API path, and every partial answer is refused rather than emitted as an
+empty fact.
 """
 
 import json
@@ -40,9 +40,9 @@ def _no_api(path):
 
 
 def _main(monkeypatch, tmp_path, payload, gh=_no_api, repo="own/repo"):
-    """main() over `payload`, with the API stubbed. Returns (raw GITHUB_OUTPUT
-    text, api paths called) -- raw text so key order and one-per-line are
-    observable, and the call list so a refusal before any API call is too."""
+    """main() over `payload`, with the API stubbed. Returns (raw GITHUB_OUTPUT text, api paths
+    called): raw text so key order and one-per-line are observable, and the call list so a
+    refusal before any API call is observable too."""
     event = tmp_path / "event.json"
     event.write_text(json.dumps(payload), encoding="utf-8")
     out = tmp_path / "out.txt"
@@ -84,13 +84,13 @@ def test_payload_leg_reads_the_payload_and_makes_no_api_call(monkeypatch, tmp_pa
 
 
 def test_dispatch_leg_resolves_the_inputs_number_through_one_api_path(monkeypatch, tmp_path):
-    """No pull request in the payload: the `pr_number` input is looked up once,
-    at the pulls path, and every fact comes from the answer.
+    """No pull request in the payload: the `pr_number` input is looked up once, at the pulls
+    path, and every fact comes from the answer.
 
-    The inputs also state a head SHA and a head repository, as anyone holding
-    `actions: write` could. Neither reaches an output -- `build-matrix`'s fork
-    refusal keys on the head repository this action emits, so a stated one would
-    run fork-authored code on the consumer's runners."""
+    The inputs also state a head SHA and a head repository, as anyone holding `actions: write`
+    could. Neither reaches an output: `build-matrix`'s fork refusal keys on the head repository
+    this action emits, so a stated one would run fork-authored code on the consumer's
+    runners."""
     text, calls = _main(
         monkeypatch,
         tmp_path,
@@ -115,9 +115,8 @@ def test_a_run_with_neither_source_is_refused(monkeypatch, tmp_path):
 
 
 def test_on_demand_marks_the_dispatch_leg_only(monkeypatch):
-    """`on_demand` says which leg produced the facts -- it is what lets an
-    explicitly requested plan override the draft skip, so the two legs must not
-    answer it the same way."""
+    """`on_demand` says which leg produced the facts, which is what lets an explicitly requested
+    plan override the draft skip, so the two legs must not answer it the same way."""
     monkeypatch.setattr(pf, "_gh_json", _api(_API_PR))
     assert pf.from_payload(_PAYLOAD_PR)["on_demand"] == "false"
     assert pf.from_api("42", "own/repo")["on_demand"] == "true"
@@ -130,9 +129,8 @@ def test_on_demand_marks_the_dispatch_leg_only(monkeypatch):
 def test_a_number_that_is_not_a_pull_request_number_is_refused_before_the_api_call(
     monkeypatch, number
 ):
-    """The number is interpolated into an API path, so it is validated whole:
-    an 11-digit value and a path-traversing one are both refused, and the
-    refusal lands before the call."""
+    """The number is interpolated into an API path, so it is validated whole: an 11-digit value
+    and a path-traversing one are both refused, and the refusal lands before the call."""
     monkeypatch.setattr(pf, "_gh_json", _no_api)
     with pytest.raises(SystemExit) as exc:
         pf.from_api(number, "own/repo")
@@ -157,8 +155,8 @@ def test_an_unset_repository_is_refused(monkeypatch):
 
 
 def test_a_deleted_fork_head_is_refused_as_such():
-    """A null `head.repo` is the deleted-fork case: refused with that name, not
-    passed on as an empty head repository for the fork refusal to read."""
+    """A null `head.repo` is the deleted-fork case: refused with that name, not passed on as an
+    empty head repository for the fork refusal to read."""
     pr = dict(_PAYLOAD_PR, head={"sha": "a" * 40, "repo": None})
     with pytest.raises(SystemExit) as exc:
         pf.from_payload(pr)
@@ -174,8 +172,8 @@ def test_a_deleted_fork_head_is_refused_as_such():
     ],
 )
 def test_a_missing_fact_is_refused_and_named(patch, named, unnamed):
-    """Each absent fact is refused by name -- an empty head SHA would leave the
-    checkout on the base and green a gate over a pull request nobody planned."""
+    """Each absent fact is refused by name: an empty head SHA would leave the checkout on the
+    base and green a gate over a pull request nobody planned."""
     with pytest.raises(SystemExit) as exc:
         pf.from_payload(dict(_PAYLOAD_PR, **patch))
     message = str(exc.value)
@@ -196,9 +194,9 @@ def test_is_draft_is_the_string_the_guards_compare_against(draft, expected):
 
 
 def test_the_actions_outputs_are_exactly_the_six_step_outputs():
-    """Hand-written, whole-mapping: the action's kebab-case outputs and the
-    script's snake_case GITHUB_OUTPUT keys are two spellings of one list, and a
-    rename on either side leaves the other reading an empty string."""
+    """Hand-written, whole-mapping: the action's kebab-case outputs and the script's snake_case
+    GITHUB_OUTPUT keys are two spellings of one list, and a rename on either side leaves the
+    other reading an empty string."""
     spec = action_yaml("pr-facts")
     assert {name: out["value"] for name, out in spec["outputs"].items()} == {
         "head-sha": "${{ steps.facts.outputs.head_sha }}",
@@ -208,6 +206,6 @@ def test_the_actions_outputs_are_exactly_the_six_step_outputs():
         "is-draft": "${{ steps.facts.outputs.is_draft }}",
         "on-demand": "${{ steps.facts.outputs.on_demand }}",
     }
-    # No inputs at all: `github.token` is available inside a composite action, so
-    # an input for it would be a consumer surface with no decision behind it.
+    # No inputs at all: `github.token` is available inside a composite action, so an input for
+    # it would be a consumer surface with no decision behind it.
     assert "inputs" not in spec

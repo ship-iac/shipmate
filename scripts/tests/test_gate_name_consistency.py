@@ -1,18 +1,17 @@
 """Freeze the aggregate gate check name across its writers.
 
-The gate `shipmate / gate` is created pending by `actions/summary`, completed
-pre-merge by `actions/gate-refresh`, and completed post-merge inline in
-`deploy.yml`. All three must emit the byte-identical name, or the gate greens
-on one path and sticks on another. This guards that invariant the same way
-test_check_runs_filter_aligned guards the check-runs read discipline.
+The gate `shipmate / gate` is created pending by `actions/summary`, completed pre-merge by
+`actions/gate-refresh`, and completed post-merge inline in `deploy.yml`. All three must emit the
+byte-identical name, or the gate greens on one path and sticks on another. This guards that
+invariant the same way test_check_runs_filter_aligned guards the check-runs read discipline.
 """
 
 import yaml
 from _loader import ENGINE, ENGINE_CALL_SECRETS, WORKFLOWS
 
-# Generated / third-party / VCS dirs: never shipmate source, and their contents
-# (compiled .pyc constant pools, vendored packages) can carry the retired token
-# for reasons unrelated to this repo -- scanning them would false-fail the guard.
+# Generated, third-party and VCS dirs are never shipmate source, and their contents -- .pyc
+# constant pools, vendored packages -- can carry the retired token for reasons unrelated to
+# this repo, so scanning them would false-fail the guard.
 SKIP_DIRS = {
     ".git",
     ".superpowers",
@@ -23,21 +22,18 @@ SKIP_DIRS = {
     "node_modules",
 }
 GATE = "shipmate / gate"
-# The literal's home in `actions/summary` moved to `scripts/gate-state` (a
-# shared script decides gate state, where it can be unit- and mutation-tested,
-# instead of an inline heredoc in the action or a workflow `if:`); the
-# composite action itself now only POSTs the body gate-state already built.
+# The literal lives in `scripts/gate-state`, a shared script that can be unit- and
+# mutation-tested, rather than an inline heredoc in the action or a workflow `if:`. The
+# composite action only POSTs the body gate-state already built.
 WRITERS = [
     "scripts/gate-state",
     "actions/gate-refresh/action.yml",
     ".github/workflows/deploy.yml",
 ]
 
-# The files whose gate-writing step must target the commit-statuses API, never
-# check-runs. Same idea as WRITERS but a different set: `actions/summary`
-# carries no `shipmate / gate` literal any more (it only POSTs a body
-# `scripts/gate-state` built), so it is absent from WRITERS above -- but it
-# still performs the actual write, so it still needs this guard.
+# The files whose gate-writing step must target the commit-statuses API, never check-runs.
+# Same idea as WRITERS over a different set: `actions/summary` carries no `shipmate / gate`
+# literal, only a POST of a body `scripts/gate-state` built, yet still performs the write.
 STATUS_WRITERS = [*WRITERS, "actions/summary/action.yml"]
 
 
@@ -48,14 +44,12 @@ def test_gate_literal_present_in_every_writer():
 
 
 def _gate_writing_run_blocks(text):
-    """Yield each `run:` block (as a single string) that writes the gate: it
-    either references the gate context literal AND posts (contains
-    `--input`, a `gh api ... --input` call), or -- `actions/summary`'s shape,
-    which carries no context literal of its own -- POSTs the specific body
-    `scripts/gate-state` produced (`--input gate.json`). A step that merely
-    names the gate in a comment/echo does not count; the writer files each
-    have exactly one such block, but this scans generically instead of
-    assuming a fixed line layout."""
+    """Yield each `run:` block, as a single string, that writes the gate: it either references
+    the gate context literal and posts it (`--input`, from a `gh api ... --input` call), or --
+    `actions/summary`'s shape, which carries no context literal of its own -- POSTs the specific
+    body `scripts/gate-state` produced (`--input gate.json`). A step that merely names the gate
+    in a comment or echo does not count. The writer files each have exactly one such block, but
+    this scans generically rather than assume a fixed line layout."""
     blocks = []
     current = []
     in_run = False
@@ -83,16 +77,14 @@ def _gate_writing_run_blocks(text):
 
 
 def _writer_gate_segments(rel, text):
-    """The text segment(s) of one STATUS_WRITERS entry to check for the
-    commit-status invariant.
+    """The text segments of one STATUS_WRITERS entry to check for the commit-status invariant.
 
-    A `.yml` writer (a composite action or workflow) keeps the existing
-    `run:`-block extraction: a step may hold other unrelated `run:` blocks
-    that must not be conflated with the gate-writing one. `scripts/gate-state`
-    is not YAML and has no `run:` blocks at all -- it is a plain script whose
-    only job is building the gate body (the POST itself now lives in
-    `actions/summary`'s `Create/refresh gate` step, over a body it did not
-    build), so the whole file is the one segment to check.
+    A `.yml` writer, a composite action or a workflow, gets the `run:`-block extraction,
+    because a step may hold other unrelated `run:` blocks that must not be conflated with the
+    gate-writing one. `scripts/gate-state` is not YAML and has no `run:` blocks at all -- it is
+    a plain script whose only job is building the gate body, the POST living in
+    `actions/summary`'s `Create/refresh gate` step over a body it did not build -- so the whole
+    file is the one segment to check.
     """
     if not rel.endswith((".yml", ".yaml")):
         return [text] if GATE in text else []
@@ -100,30 +92,26 @@ def _writer_gate_segments(rel, text):
 
 
 def test_gate_written_as_commit_status_not_check_run():
-    """The gate must be a commit STATUS, not a check-run.
+    """The gate must be a commit status, not a check-run.
 
-    A check-run binds to a check-suite; an imperatively-created one lands in an
-    arbitrary suite when a commit carries two plan runs (draft->ready, or a
-    rapid re-push). The merge evaluator reads the live suite, finds no gate, and
-    blocks the PR forever while the green gate sits in the stale suite. A commit
-    status is commit-scoped and immune. Lock every writer onto the statuses API.
+    A check-run binds to a check-suite, and an imperatively-created one lands in an arbitrary
+    suite when a commit carries two plan runs (draft to ready, or a rapid re-push). The merge
+    evaluator reads the live suite, finds no gate and blocks the pull request forever while the
+    green gate sits in the stale suite. A commit status is commit-scoped and immune, so every
+    writer is locked onto the statuses API.
 
-    Scoped to the GATE-writing step(s) only (the block that references the
-    `shipmate / gate` context and POSTs it, or -- `actions/summary` -- POSTs
-    the specific body `scripts/gate-state` produced) -- NOT every line in the
-    writer file. `actions/summary` also legitimately creates apply check-runs
-    in a separate step; that step must not be flagged by this guard.
+    Scoped to the gate-writing steps only -- the block referencing the `shipmate / gate` context
+    and POSTing it, or, for `actions/summary`, POSTing the specific body `scripts/gate-state`
+    produced -- not every line in the writer file. `actions/summary` also legitimately creates
+    apply check-runs in a separate step, and that step must not be flagged here.
 
-    Checks STATUS_WRITERS, not WRITERS: `actions/summary` carries no
-    `shipmate / gate` literal of its own any more (moved to
-    `scripts/gate-state`, which it calls), but it still performs the actual
-    POST, so it still needs this guard even though it is exempt from
-    test_gate_literal_present_in_every_writer above.
+    STATUS_WRITERS, not WRITERS: `actions/summary` carries no `shipmate / gate` literal of its
+    own, only the call to `scripts/gate-state`, but it still performs the POST, so it needs this
+    guard even though test_gate_literal_present_in_every_writer above exempts it.
 
-    `scripts/gate-state` never calls `gh api` at all -- it only builds the
-    body JSON that `actions/summary` later POSTs -- so it cannot itself target
-    the wrong endpoint; the guard there narrows to the weaker but still
-    meaningful claim that it never even names the check-runs endpoint.
+    `scripts/gate-state` never calls `gh api` at all and only builds the body JSON that
+    `actions/summary` later POSTs, so it cannot itself target the wrong endpoint. The guard
+    narrows there to the weaker claim that it never names the check-runs endpoint.
     """
     for rel in STATUS_WRITERS:
         text = (ENGINE / rel).read_text(encoding="utf-8")
@@ -153,20 +141,18 @@ CREDENTIALED_ACTIONS = (
     "actions/apply-summary",
     "actions/drift-issues",
 )
-# Actions that will need the same credential-threading guard once they exist,
-# but don't yet -- kept out of CREDENTIALED_ACTIONS itself (a bare substring
-# allowlist with no existence check) so a not-yet-created action can't sit in
-# there silently. Each entry here is an explicit, reviewed choice to exempt it
-# for now, not an accident: see test_credentialed_actions_exist_or_are_pending.
+# Actions that will need the same credential-threading guard once they exist. Kept out of
+# CREDENTIALED_ACTIONS, a bare substring allowlist with no existence check, so a not-yet-created
+# action cannot sit there silently: see test_credentialed_actions_exist_or_are_pending.
 PENDING_CREDENTIALED_ACTIONS = ()
 
 
 def test_credentialed_actions_exist_or_are_pending():
-    # A bare substring allowlist has no existence check of its own -- a typo in
-    # an entry here (or in PENDING_CREDENTIALED_ACTIONS) would silently disable
-    # the credential-threading guard for every step that calls the real action,
-    # with nothing failing anywhere. Every live entry must resolve to a real
-    # action.yml; every pending entry must NOT (once it exists, move it up).
+    """A bare substring allowlist has no existence check of its own: a typo in an entry here,
+    or in PENDING_CREDENTIALED_ACTIONS, would silently disable the credential-threading guard
+    for every step that calls the real action, with nothing failing anywhere. Every live entry
+    must resolve to a real action.yml, and every pending entry must not -- once it exists, move
+    it up."""
     for action in CREDENTIALED_ACTIONS:
         path = ENGINE / action / "action.yml"
         assert path.is_file(), f"CREDENTIALED_ACTIONS entry {action!r} has no {path}"
@@ -179,11 +165,10 @@ def test_credentialed_actions_exist_or_are_pending():
 
 
 def _job_writes_gate(job):
-    """A workflow job writes the gate when a step calls gate-refresh/summary
-    (which POST the status internally) or posts the gate status inline in the
-    same run block (deploy.yml). Prose that merely mentions the gate name in a
-    comment body does not count -- inline detection requires the statuses API
-    call and the gate context in the *same* step."""
+    """A workflow job writes the gate when a step calls gate-refresh or summary, which POST the
+    status internally, or posts the gate status inline in the same run block, as deploy.yml
+    does. Prose that merely mentions the gate name in a comment body does not count: inline
+    detection requires the statuses API call and the gate context in the same step."""
     for step in job.get("steps") or []:
         uses = step.get("uses") or ""
         if any(action in uses for action in GATE_WRITER_ACTIONS):
@@ -195,10 +180,9 @@ def _job_writes_gate(job):
 
 
 def _inline_gate_steps(job):
-    """Steps within a job that inline-POST the gate status (statuses/ + GATE
-    in the same run block) -- the deploy.yml style writer, as opposed to a
-    job that delegates to the gate-refresh/summary composite actions (which
-    mint and use their own App token internally)."""
+    """Steps within a job that inline-POST the gate status, statuses/ and GATE in the same run
+    block -- the deploy.yml style writer, as opposed to a job delegating to the gate-refresh or
+    summary composite actions, which mint and use their own App token internally."""
     return [
         step
         for step in (job.get("steps") or [])
@@ -207,8 +191,8 @@ def _inline_gate_steps(job):
 
 
 def _app_statuses_token_step_id(job):
-    """The id of a step in the job that mints a shipmate App installation
-    token scoped `permission-statuses: write`, or None if there is none."""
+    """The id of a step in the job that mints a shipmate App installation token scoped
+    `permission-statuses: write`, or None if there is none."""
     for step in job.get("steps") or []:
         if "create-github-app-token" not in (step.get("uses") or ""):
             continue
@@ -218,20 +202,16 @@ def _app_statuses_token_step_id(job):
 
 
 def test_inline_gate_write_job_mints_app_statuses_token():
-    """Every job that writes the gate INLINE (a `run:` step posting to the
-    commit-statuses API with the `shipmate / gate` context, rather than
-    delegating to the gate-refresh/summary composite actions) must mint its
-    own shipmate App installation token scoped `permission-statuses: write`,
-    and the inline POST step's `GH_TOKEN` must be that minted token -- never
-    the ambient `github.token`, which cannot write a commit status pinned by
-    `integration_id` to the shipmate App (see test_no_engine_job_grants_stale_
-    checks_or_statuses_write for the GITHUB_TOKEN-scope side of this).
+    """Every job that writes the gate inline -- a `run:` step posting to the commit-statuses
+    API with the `shipmate / gate` context, rather than delegating to the gate-refresh or
+    summary composite actions -- must mint its own shipmate App installation token scoped
+    `permission-statuses: write`. The inline POST step's `GH_TOKEN` must be that minted token,
+    never the ambient `github.token`, which cannot write a commit status pinned by
+    `integration_id` to the shipmate App.
+    test_no_engine_job_grants_stale_checks_or_statuses_write covers the GITHUB_TOKEN-scope side.
 
-    Uses `_job_writes_gate` to locate candidate jobs (it detects exactly this:
-    a gate-refresh/summary delegate OR an inline statuses/+GATE run step),
-    then narrows to the inline-writer jobs specifically -- a job that merely
-    delegates to gate-refresh/summary is skipped here, since those actions
-    mint and scope their own token internally.
+    A job that only delegates is skipped, because those actions mint and scope their own token
+    internally.
     """
     offenders = []
     for wf in sorted(WORKFLOWS.glob("*.yml")):
@@ -241,7 +221,7 @@ def test_inline_gate_write_job_mints_app_statuses_token():
                 continue
             inline_steps = _inline_gate_steps(job)
             if not inline_steps:
-                continue  # delegates to gate-refresh/summary; not this guard's concern
+                continue  # It delegates, so it is not this guard's concern.
             token_id = _app_statuses_token_step_id(job)
             if token_id is None:
                 offenders.append(
@@ -263,9 +243,9 @@ def test_inline_gate_write_job_mints_app_statuses_token():
 
 
 def _grants_stale_perm(job, workflow_perms):
-    # A job-level `permissions:` fully REPLACES the workflow default (GHA
-    # semantics), so a job that sets any permissions must set the scope
-    # itself; only a job that omits `permissions:` inherits the workflow block.
+    # A job-level `permissions:` fully replaces the workflow default, per GHA semantics, so a
+    # job that sets any permissions must set the scope itself. Only a job that omits
+    # `permissions:` inherits the workflow block.
     perms = job.get("permissions", workflow_perms)
     if perms == "write-all":
         return True
@@ -275,18 +255,14 @@ def _grants_stale_perm(job, workflow_perms):
 
 
 def test_no_engine_job_grants_stale_checks_or_statuses_write():
-    """No ENGINE workflow job grants `checks: write` or `statuses: write` on
-    GITHUB_TOKEN any more.
+    """No engine workflow job grants `checks: write` or `statuses: write` on GITHUB_TOKEN.
 
-    Those two GITHUB_TOKEN scopes are relics of the check-run/GITHUB_TOKEN era.
-    Every writer that needs them now mints a shipmate App installation token
-    instead (App manifest carries `checks: write` + `statuses: write`), so a
-    job-level grant of either scope on GITHUB_TOKEN is stale and should be
-    removed -- it is unused (the writer steps use the App token) and widens the
-    default token's blast radius for no reason. The exception list is empty by
-    design: if a genuine GITHUB_TOKEN need for one of these scopes turns up,
-    that is a real design question, not something this guard should silently
-    exempt.
+    Every writer that needs those scopes mints a shipmate App installation token instead, and
+    the App manifest carries `checks: write` and `statuses: write`. A job-level grant of either
+    scope on GITHUB_TOKEN is therefore unused, because the writer steps use the App token, and
+    widens the default token's blast radius for no reason. The exception list is empty by
+    design: a genuine GITHUB_TOKEN need for one of these scopes is a design question, not
+    something this guard should silently exempt.
     """
     offenders = []
     for wf in sorted(WORKFLOWS.glob("*.yml")):
@@ -308,7 +284,8 @@ def _is_reusable_caller(job):
 
 
 def _reusable_target_name(uses):
-    # e.g. "ship-iac/shipmate/.github/workflows/apply-env-level.yml@<sha>" -> "apply-env-level.yml"
+    # "ship-iac/shipmate/.github/workflows/apply-env-level.yml@<sha>" becomes
+    # "apply-env-level.yml".
     path_part = uses.split("@", 1)[0]
     return path_part.rsplit("/", 1)[-1]
 
@@ -321,13 +298,13 @@ def _declares_app_private_key_secret(workflow_doc):
 
 
 def test_app_key_secret_interface_is_never_required():
-    """No `workflow_call` interface may declare `SHIPMATE_APP_PRIVATE_KEY`
-    required. Consumers scope that key to the `shipmate-engine` environment
-    (docs/github-app.md §5), and `secrets: inherit` cannot satisfy a required
-    declaration from an environment: GHA rejects the call before any step of the
-    first callee job that binds no environment, killing the whole run. The jobs
-    that mint the App token bind the environment and read the key from there, so
-    requiring it buys nothing and breaks the documented storage model.
+    """No `workflow_call` interface may declare `SHIPMATE_APP_PRIVATE_KEY` required.
+
+    Consumers scope that key to the `shipmate-engine` environment (docs/github-app.md §5), and
+    `secrets: inherit` cannot satisfy a required declaration from an environment: GHA rejects
+    the call before any step of the first callee job that binds no environment, killing the
+    whole run. The jobs that mint the App token bind the environment and read the key from
+    there, so requiring it buys nothing and breaks the documented storage model.
     """
     offenders = []
     for wf in sorted(WORKFLOWS.glob("*.yml")):
@@ -345,17 +322,17 @@ def test_app_key_secret_interface_is_never_required():
 
 
 def _reusable_caller_offense(wf_name, job_name, job, workflow_docs):
-    """Check one reusable-workflow-caller job; return an offense string, or
-    None if credential-threading into the callee is sound."""
+    """Check one reusable-workflow-caller job; return an offense string, or None if
+    credential-threading into the callee is sound."""
     target = _reusable_target_name(job.get("uses") or "")
     target_doc = workflow_docs.get(target)
     if target_doc is None:
-        # Target lives outside this glob (shouldn't happen for the engine's
-        # own reusable workflows) -- nothing to check here.
+        # The target lives outside this glob, which should not happen for the engine's own
+        # reusable workflows, so there is nothing to check here.
         return None
     if not _declares_app_private_key_secret(target_doc):
-        # Flag any reusable target missing the secret declaration so a future
-        # caller doesn't silently lose the credential thread.
+        # Flag any reusable target missing the secret declaration, so a future caller does
+        # not silently lose the credential thread.
         return (
             f"{wf_name}:{job_name} -> {target} missing "
             "SHIPMATE_APP_PRIVATE_KEY in on.workflow_call.secrets"
@@ -375,17 +352,18 @@ def _reusable_caller_offense(wf_name, job_name, job, workflow_docs):
 
 
 def _never_runs(step):
-    """`if: false` -- a step GitHub always skips, so it threads nothing at
-    runtime. manifest-load.yml is built entirely of them: they exist so the
-    runner parses each action's manifest while setting the job up, which happens
-    before any `if:` is evaluated, and they deliberately carry no `with:`.
+    """`if: false` marks a step GitHub always skips, so it threads nothing at runtime.
+
+    manifest-load.yml is built entirely of them: they exist so the runner parses each action's
+    manifest while setting the job up, which happens before any `if:` is evaluated, and they
+    deliberately carry no `with:`.
     """
     return step.get("if") is False
 
 
 def _credentialed_step_offenses(wf_name, job_name, job):
-    """Check every credentialed-action step in one non-reusable job; return
-    a list of offense strings (empty if all such steps pass both creds)."""
+    """Check every credentialed-action step in one non-reusable job; return a list of offense
+    strings, empty when every such step passes both credentials."""
     offenses = []
     for step in job.get("steps") or []:
         uses = step.get("uses") or ""
@@ -399,24 +377,22 @@ def _credentialed_step_offenses(wf_name, job_name, job):
 
 
 def test_credentialed_action_steps_thread_app_credentials():
-    """Every step calling an action in CREDENTIALED_ACTIONS (gate-refresh,
-    summary, apply-complete, apply-summary) passes both `app-id` and
-    `private-key` in its `with:` -- these actions each mint their own App
-    installation token and 403 (or silently no-op) without both.
+    """Every step calling an action in CREDENTIALED_ACTIONS -- gate-refresh, summary,
+    apply-complete, apply-summary, drift-issues -- passes both `app-id` and `private-key` in
+    its `with:`, because each mints its own App installation token and 403s, or silently no-ops,
+    without both.
 
-    For a job that is itself a reusable-workflow CALLER (`uses:` points at
-    another `.github/workflows/*.yml`), the credential is threaded through the
-    `secrets:` block rather than passed as a `with:` input -- assert instead
-    that the CALLED workflow declares `SHIPMATE_APP_PRIVATE_KEY` under
-    `on.workflow_call.secrets`, and that the caller passes the whole block
-    `_loader.ENGINE_CALL_SECRETS` names for that callee.
+    A job that is itself a reusable-workflow caller (`uses:` points at another
+    `.github/workflows/*.yml`) threads the credential through the `secrets:` block rather than a
+    `with:` input, so the assertion there is that the called workflow declares
+    `SHIPMATE_APP_PRIVATE_KEY` under `on.workflow_call.secrets` and that the caller passes the
+    whole block `_loader.ENGINE_CALL_SECRETS` names for that callee.
 
-    Never `secrets: inherit`, including on these engine-internal hops. The
-    files sit in one organization but the RUN belongs to the consumer, and
-    inherit is evaluated against the run: a cross-organization consumer's
-    applies would execute and then strand their `apply / <stack> / <env>`
-    checks pending forever, because `apply-env-level.yml`'s `complete` job
-    would hold no key to complete them with.
+    Never `secrets: inherit`, including on these engine-internal hops. The files sit in one
+    organization but the run belongs to the consumer, and inherit is evaluated against the run:
+    a cross-organization consumer's applies would execute and then strand their
+    `apply / <stack> / <env>` checks pending forever, because `apply-env-level.yml`'s `complete`
+    job would hold no key to complete them with.
     """
     offenders = []
     workflow_docs = {
@@ -444,8 +420,8 @@ DETECT_ACTIONS = (
 
 
 def _detect_step_offenses(wf_name, job_name, job):
-    """Check every detect-action step in one job; return a list of offense
-    strings (empty if each such step passes `app-id`)."""
+    """Check every detect-action step in one job; return a list of offense strings, empty when
+    each such step passes `app-id`."""
     offenses = []
     for step in job.get("steps") or []:
         uses = step.get("uses") or ""
@@ -458,10 +434,10 @@ def _detect_step_offenses(wf_name, job_name, job):
 
 
 def test_detect_action_steps_thread_app_id():
-    """Every step calling deploy-detect/apply-detect/apply-all-detect passes
-    `app-id` in its `with:` -- these scripts read `os.environ["SHIPMATE_APP_ID"]`
-    and KeyError at runtime without it. Nothing else guards this threading, so a
-    call-site dropping the input would only surface as a runtime crash."""
+    """Every step calling deploy-detect, apply-detect or apply-all-detect passes `app-id` in
+    its `with:`, because those scripts read `os.environ["SHIPMATE_APP_ID"]` and KeyError at
+    runtime without it. Nothing else guards this threading, so a call site dropping the input
+    would only surface as a runtime crash."""
     offenders = []
     for wf in sorted(WORKFLOWS.glob("*.yml")):
         doc = yaml.safe_load(wf.read_text(encoding="utf-8")) or {}
@@ -472,8 +448,8 @@ def test_detect_action_steps_thread_app_id():
     assert not offenders, f"detect action(s) missing app-id threading: {offenders}"
 
 
-# Assembled so THIS file never contains the retired token as a literal
-# substring -- writing it out would self-match and the test could never pass.
+# Assembled so this file never contains the retired token as a literal substring: writing it
+# out would self-match and the test could never pass.
 RETIRED = "check" + "mate"
 
 

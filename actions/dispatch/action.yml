@@ -52,8 +52,8 @@ runs:
         permission-actions: write
     - name: workflow_dispatch apply
       shell: bash
-      # All author-controlled values pass via env; the JSON body is built in
-      # python (never a shell heredoc with interpolation) — injection-safe.
+      # All author-controlled values pass via env, and the JSON body is built in python, never
+      # a shell heredoc with interpolation — injection-safe.
       env:
         GH_TOKEN: ${{ steps.token.outputs.token }}
         REPO: ${{ inputs.repository }}
@@ -64,11 +64,10 @@ runs:
         PR_NUMBER: ${{ inputs.pr-number }}
       run: |
         set -euo pipefail
-        # A composite action's `required: true` is not enforced by GitHub, so a
-        # caller that omits the input arrives here with the empty string. Refuse
-        # rather than default: a default dispatches one verb's body at another
-        # verb's workflow, and that rejection lands on this run, where nobody on
-        # the pull request is looking.
+        # A composite action's `required: true` is not enforced by GitHub, so a caller that omits
+        # the input arrives with the empty string. Refuse rather than default: a default dispatches
+        # one verb's body at another verb's workflow, and that rejection lands on this run, where
+        # nobody on the pull request is looking.
         if [ -z "${VERB:-}" ]; then
           echo "::error::The calling workflow did not pass a verb to shipmate/actions/dispatch, so there is no workflow to dispatch. Wire that step's verb input to the verb output of the comment-ops step above it (docs/getting-started.md)."
           exit 1
@@ -84,23 +83,23 @@ runs:
         import json, os
         verb = os.environ["VERB"]
         if verb == "plan":
-            # plan.yml declares exactly one input, pr_number. `ref` is not among
-            # them: the dispatched run resolves the head from the pull request
-            # itself, so nothing a dispatcher states decides what is planned.
+            # plan.yml declares exactly one input, pr_number. `ref` is not among them: the
+            # dispatched run resolves the head from the pull request itself, so nothing a
+            # dispatcher states decides what is planned.
             inputs = {"pr_number": os.environ["PR_NUMBER"]}
         elif verb == "unlock":
-            # Releasing a stranded lock applies no plan and comments on no pull
-            # request, so unlock.yml declares neither a pr_number nor anything
-            # else only the apply body needs.
+            # Releasing a stranded lock applies no plan and comments on no pull request, so
+            # unlock.yml declares neither a pr_number nor anything else only the apply body
+            # needs.
             inputs = {"ref": os.environ["REF"], "environment": os.environ["ENVIRONMENT"]}
         else:
             inputs = {
                 "ref": os.environ["REF"],
                 "pr_number": os.environ["PR_NUMBER"],
             }
-            # The `environment` key is included only when set: apply.yml declares
-            # it optional (empty = bare `shipmate apply`), and GitHub reads an
-            # empty value for a required workflow_dispatch input as not provided.
+            # The `environment` key is included only when set: apply.yml declares it optional
+            # (empty = bare `shipmate apply`), and GitHub reads an empty value for a required
+            # workflow_dispatch input as not provided.
             if os.environ.get("ENVIRONMENT"):
                 inputs["environment"] = os.environ["ENVIRONMENT"]
         print(json.dumps({"ref": os.environ["DISPATCH_REF"], "inputs": inputs}))
@@ -108,23 +107,17 @@ runs:
         rc=0
         out=$(gh api -X POST "repos/$REPO/actions/workflows/$WORKFLOW/dispatches" --input body.json 2>&1) || rc=$?
         printf '%s\n' "$out"
+        # Only a failure that names the missing surface is version skew. A 403, a rate limit, or
+        # a 422 about a different input is another problem entirely, and explaining it as skew
+        # sends the operator to edit workflows that are fine.
         if [ "$rc" -ne 0 ]; then
-          # Only a failure that actually names the missing surface is version
-          # skew. A 403, a rate limit -- or a 422 about a different input -- is
-          # another problem entirely, and explaining it as skew sends the
-          # operator to edit workflows that are fine. The raw API message is
-          # printed above either way.
-          # Neither remedy is a re-pin: both shapes are a consumer file the
-          # upgrade guide says to author or edit by hand, and a pin bump alone
-          # leaves them exactly as they were.
-          # Measured: a workflow file that does not exist answers 404, and one
-          # with no such trigger answers `Workflow does not have
-          # 'workflow_dispatch' trigger (HTTP 422)` -- the two shapes a consumer
-          # predating the unlock wrapper produces.
+          # Measured for a consumer predating the unlock wrapper: a workflow file that does not
+          # exist answers 404, and one with no such trigger answers `Workflow does not have
+          # 'workflow_dispatch' trigger (HTTP 422)`.
           if [ "$VERB" = "unlock" ] && [[ "$out" == *"HTTP 404"* || "$out" == *workflow_dispatch* ]]; then echo "::error::This repository has no unlock.yml wrapper, or it declares no workflow_dispatch trigger; its workflows predate shipmate unlock. Add .github/workflows/unlock.yml to this repository — docs/upgrading.md section 0.21.0 step 1 has the file; re-pinning cannot create it."; fi
-          # No input name is ANDed in as a body-shape check would be: the plan
-          # body carries one input, so an unexpected-input 422 there can only be
-          # about pr_number, which is what the message already says.
+          # No input name is ANDed in as a body-shape check would be: the plan body carries one
+          # input, so an unexpected-input 422 there can only be about pr_number, which is what the
+          # message already says.
           if [ "$VERB" = "plan" ] && [[ "$out" == *"Unexpected inputs provided"* || "$out" == *workflow_dispatch* ]]; then echo "::error::This repository's plan.yml does not accept a dispatched plan — it predates the plan verb, or declares no pr_number input. Edit .github/workflows/plan.yml in this repository — docs/upgrading.md section 0.20.0 lists the edits; re-pinning alone does not make them."; fi
           exit "$rc"
         fi

@@ -4,4 +4,4 @@ contact_links:
     url: https://github.com/ship-iac/shipmate/security/advisories/new
     about: >-
       Do not open a public issue. Use the Security tab's private vulnerability
-      reporting, which opens an advisory visible only to the maintainers.
+      reporting. The advisory is visible only to the maintainers.

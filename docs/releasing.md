@@ -1,7 +1,7 @@
 # Releasing (engine-internal action pins)
 
 Consumers pin shipmate's actions and reusable workflows by commit SHA. The engine
-**also** references its own actions internally by SHA — most notably the reusable
+also references its own actions internally by SHA — most notably the reusable
 `.github/workflows/apply-env-level.yml`, which pins `actions/setup` and
 `actions/apply-cell`, and the composite actions, which pin `actions/state`.
 
@@ -23,7 +23,7 @@ sequence — and a three-step one whenever the change touches an action that
 `.github/workflows/apply-env-level.yml` pins, since bumping that file's action
 pins changes the file and in turn invalidates the pins *to* it:
 
-1. Merge the action change (creates the **action commit**).
+1. Merge the action change (creates the action commit).
 2. In a follow-up commit, bump the internal pins to that SHA:
 
    ```bash
@@ -34,7 +34,7 @@ pins changes the file and in turn invalidates the pins *to* it:
    now stale, so bump again to step 2's commit.
 
    After each bump commit, run `python dev/pin_status.py HEAD` to check
-   convergence at the commit you just made. `repin_internal.py` itself compares
+   convergence at that commit. `repin_internal.py` itself compares
    the working tree against the *mainline* merge-base, so it cannot see a bump
    you have only committed locally — re-running it right after committing step
    2 prints "nothing to bump" whether or not the cascade has actually
@@ -51,7 +51,7 @@ tree is running" one grep.
 ### Adding a secret to a reusable workflow is the same cascade
 
 `apply.yml`, `apply-all.yml` and `deploy.yml` pass named secrets to the SHA-pinned
-`apply-env-level.yml`. Mapping a secret the **pinned** callee does not declare is
+`apply-env-level.yml`. Mapping a secret the pinned callee does not declare is
 a hard load-time error — unlike an undeclared action input, which is silently
 ignored — so a new secret lands in three steps, in this order:
 
@@ -69,7 +69,7 @@ supplied. Named secrets plus this ordering is the trade that works both ways.
 ### Consumers must bump every engine ref in one change
 
 A consumer's own `uses:` pins are outside the guard's reach, and two of them are
-**coupled by the apply check-run name**: `actions/summary` creates the pending
+coupled by the apply check-run name: `actions/summary` creates the pending
 check (it runs `scripts/pending-checks` out of its own pinned checkout) and
 `actions/apply-cell` — pinned indirectly, inside `apply-env-level.yml` — completes
 it. Both sides build the name independently, so a consumer sitting on a pin pair
@@ -77,7 +77,7 @@ that straddles a change to that grammar creates one name and looks for another:
 apply-cell then fails with `no apply check named ... nothing to complete` and
 every wave job dies before restoring state.
 
-So re-pin **all** engine references in a single commit (as the sample repos do),
+So re-pin all engine references in a single commit (as the sample repos do),
 and never merge a Dependabot PR that bumps one engine `uses:` line in isolation.
 The same applies while a cascade is in flight in this repo: an intermediate
 commit of the cascade above is not a release SHA, and nothing should ever be
@@ -90,17 +90,17 @@ pinned to one.
 matches the mainline tree. A red run after an action change means step 2 above is
 still pending.
 
-It runs in its own workflow (`.github/workflows/internal-pins.yml`) on **push to
-main only — never on pull_request**. The guard reads the pins from the working
+It runs in its own workflow (`.github/workflows/internal-pins.yml`) on push to
+main only — never on pull_request. The guard reads the pins from the working
 tree and diffs each pinned SHA's `<path>` content against the merge-base with
 `main`. On a branch this means:
 
-- A PR that edits a *pinned action's code* is **not** flagged for its own
+- A PR that edits a *pinned action's code* is not flagged for its own
   not-yet-merged change — the comparison is against the fork point, and step 1's
   commit cannot pin its own unborn SHA. This is the false positive the mainline
   baseline exists to suppress.
 - A PR that edits a *pin reference itself* to a SHA whose content is already
-  stale (a fat-fingered step-2 bump) **is** something the guard could catch
+  stale (a fat-fingered step-2 bump) is something the guard could catch
   pre-merge — and the PR trigger did catch it.
 
 Not running on PRs is a deliberate tradeoff: it trades that pre-merge catch of a
@@ -111,8 +111,8 @@ The push-to-main run still catches a bad pin, one step later, exactly where and
 when the bump is done. (The workflow checks out with `fetch-depth: 0` so the test
 can read the pinned commit objects.)
 
-One case does **not** degrade to a skip: a pin whose commit is absent in a
-**non-shallow** clone. The mainline baseline resolving is not by itself proof of
+One case does not degrade to a skip: a pin whose commit is absent in a
+non-shallow clone. The mainline baseline resolving is not by itself proof of
 full history — a depth-1 clone of `main` resolves `merge-base HEAD origin/main`
 trivially at the tip while every older pinned commit object is absent — so the
 guard checks `git rev-parse --is-shallow-repository` directly. Shallow: skip,
@@ -122,7 +122,7 @@ outside the fetched range. Not shallow: fail, because the commit itself is gone
 branch protection, so this distinction is what keeps a broken pin from shipping
 green.
 
-Because this workflow reports **no status on PR heads**, it must **never** be
+Because this workflow reports no status on PR heads, it must never be
 added to this repo's required status checks — a required check that never
 reports deadlocks every PR.
 
@@ -137,7 +137,7 @@ extra key named for the tail of the sentence and accepts the file, while
 that and every apply and deploy job died in `Set up job`, before its first step.
 
 The workflow is one job of 20 steps, each `if: false` and each `uses:` one action
-at the **remote** ref `ship-iac/shipmate/actions/<name>@main`. Both halves are
+at the remote ref `ship-iac/shipmate/actions/<name>@main`. Both halves are
 load-bearing, measured 2026-08-22:
 
 | step form | `if: false` | comma-split manifest |
@@ -158,7 +158,7 @@ Three limits, all deliberate:
 
 - **Merge-time, not PR-time.** `uses:` takes no expressions, so the ref cannot
   follow a PR head, and `@main` is the only ref that stays correct. Like `## The
-  guard` above this runs on **push to main**, so it must never be a required
+  guard` above this runs on push to main, so it must never be a required
   status check. It still runs before any tag is cut, which is where `v0.16.0`
   escaped — but its push run covers whichever commit was the tip then, not
   necessarily the release SHA, so `## Publishing the release` below checks that
@@ -201,7 +201,7 @@ gh api repos/ship-iac/shipmate/immutable-releases   # {"enabled":true,...}
 ```
 
 Write the release's `CHANGELOG.md` section first, in its own PR, and cut the tag
-at **that** merge commit: the section describes what consumers get when they
+at that merge commit: the section describes what consumers get when they
 re-pin, so it belongs in the tree they pin, not in a commit that arrives after
 it. A commit cannot name its own SHA, so the section's SHA line is backfilled by
 the first commit after the tag.
@@ -215,8 +215,8 @@ release ships pointing at a heading that no longer exists.
 ### Smoke the live path before the tag
 
 The runbook's ordering is right — release first, samples after — but it also
-means **the first time anything runs the new engine code for real is after the
-tag exists.** For a feature whose whole surface is a live Actions path, the
+means the first time anything runs the new engine code for real is after the
+tag exists. For a feature whose whole surface is a live Actions path, the
 release is therefore always cut on unexercised code. `v0.16.0` was tagged with an
 action manifest GitHub could not parse (apply and deploy dead), a dispatch that
 could not reach the engine at all (empty `required: true` input, HTTP 422), and a
@@ -224,25 +224,28 @@ parser blind to the ANSI colour OpenTofu emits on a runner. All three are
 boundary behaviours no unit test reaches, and each surfaced in the first minutes
 of live use — three patch releases, each with its own pin cascade.
 
-So before cutting the tag, run the **thinnest live exercise** of the new path, on
+So before cutting the tag, run the thinnest live exercise of the new path, on
 the release commit, from one sample:
 
-1. Re-pin **one** sample to the release commit on a **scratch branch**, never its
+1. Re-pin one sample to the release commit on a scratch branch, never its
    default branch — a re-pin on `main` with no release cut yet is exactly the
-   backwards staleness the section above warns about.
+   backwards staleness that makes the pin probe report correctly-pinned
+   consumers as stale and tell them to re-pin backwards.
 
    ```bash
    git -C ../repo-example-stacks-aws checkout -b smoke/vX.Y.Z
    python dev/repin_consumer.py --repo ../repo-example-stacks-aws --sha <release-sha> --label vX.Y.Z
    ```
 
-   **`repin_consumer.py` rewrites pins and nothing else**, so when a release
+   **`repin_consumer.py` rewrites pins and nothing else.** When a release
    changes a wrapper's declared input contract, make those body edits on the
    scratch branch too — a new pin under an old wrapper body is the load-time
-   rejection described below, not a smoke result.
+   rejection described below, not a smoke result. `docs/upgrading.md`'s section
+   for the release names those edits; for this release it is deleting the
+   retired `mode` input and its `with:` line from `apply.yml`.
 
    The same gap has a second form the tool cannot reach at all: a consumer's
-   **allowed-actions list is a repository setting**, not a file. Under
+   allowed-actions list is a repository setting, not a file. Under
    `docs/hardening.md` row 12 a consumer restricts `allowed_actions` to a named
    pattern list, and those patterns end `@*` — so a version bump is absorbed,
    but a third-party action this release *adds or renames* is not. The first run
@@ -251,11 +254,9 @@ the release commit, from one sample:
    the engine's third-party set changes, so you find out while committing rather
    than from a consumer. When it does: add the pattern to `docs/hardening.md`'s
    list, and say so in `docs/upgrading.md`'s section for the release — it is a
-   setting the consumer has to change by hand before they re-pin. `docs/upgrading.md`'s section
-   for the release names them; for this one it is deleting the retired `mode`
-   input and its `with:` line from `apply.yml`.
+   setting the consumer has to change by hand before they re-pin.
 
-2. Drive the wrapper **directly at that ref**, with the body `actions/dispatch`
+2. Drive the wrapper directly at that ref, with the body `actions/dispatch`
    would build — exactly those keys, and no others:
 
    ```bash
@@ -265,7 +266,7 @@ the release commit, from one sample:
 
    **Drive a wrapper the release *changed*, never one it introduces.** A
    `workflow_dispatch` runs a workflow only if the file exists on the
-   repository's **default** branch — the same resolution constraint as the
+   repository's default branch — the same resolution constraint as the
    paragraph below — so `--ref` picks which branch's copy runs, not whether the
    file is dispatchable at all. A wrapper the release *adds* is on the scratch
    branch only, and dispatching it answers a 404 indistinguishable from the
@@ -294,7 +295,7 @@ parses the engine reusable workflow at the new SHA, because that happens when th
 run graph is built.
 
 It cannot reach a composite action's manifest — not because those refs are
-local (the engine's reusable workflows reach every action at a **remote** SHA
+local (the engine's reusable workflows reach every action at a remote SHA
 pin, which is exactly why `v0.16.0` died in `Set up job`), but because the job
 holding them never starts: `detect` runs only behind `guard`, and `guard`
 rejects any actor not ending in `[bot]` — correctly, since a direct human
@@ -320,7 +321,7 @@ is only the most obvious case of it:
 python dev/pin_status.py <release-sha>   # exit 0 == safe to pin
 ```
 
-Then confirm `manifest-load` is green **on that exact commit**. Its push-to-main
+Then confirm `manifest-load` is green on that exact commit. Its push-to-main
 run covers whichever commit was `main`'s tip at the time, which during a cascade
 is not yet the release SHA — and a run that was cancelled or never triggered
 leaves no coverage at all, silently:
@@ -347,11 +348,11 @@ inventing a tag when the push did not land.
 
 Three constraints, each with a specific failure mode:
 
-- **Tag the commit consumers pin** — the release SHA, meaning `main`'s tip once
-  the cascade above has converged, which is also the commit the sample repos are
-  re-pinned to — not the action commit that started the cascade. `doctor`
-  resolves the tag with `repos/{slug}/commits/{tag}` and compares that SHA
-  against each consumer pin; tagging the action commit instead reports
+- **Tag the commit consumers pin.** That is the release SHA, meaning `main`'s
+  tip once the cascade above has converged, which is also the commit the sample
+  repos are re-pinned to — not the action commit that started the cascade.
+  `doctor` resolves the tag with `repos/{slug}/commits/{tag}` and compares that
+  SHA against each consumer pin; tagging the action commit instead reports
   correctly-pinned consumers as stale.
 - **Never mark a release as prerelease.** `repos/{slug}/releases/latest` returns
   only the newest non-draft, non-prerelease release. While the repository had no
@@ -375,7 +376,7 @@ for d in repo-example-stacks repo-example-folders repo-example-workspaces repo-e
 done
 ```
 
-`dev/repin_consumer.py` moves **every** engine reference in one pass (see
+`dev/repin_consumer.py` moves every engine reference in one pass (see
 § Consumers must bump every engine ref in one change) and refuses a target whose
 own internal pins are stale, so it cannot re-pin a sample to an intermediate
 cascade commit. `--force` overrides, loudly.

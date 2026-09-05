@@ -17,17 +17,14 @@ _PR_EVENTS = ("pull_request", "pull_request_target")
 
 MATRIX_LIMIT = 256
 
-#: Where the plan workflow must live. No plan-run lookup matches this path
-#: literally any more — every apply, deploy and doctor path reads a cell's plan
-#: run from that cell's own apply check — but two surfaces still match the
-#: filename: `shipmate doctor` keys its plan-wrapper probes on it, and
-#: `actions/dispatch` sends a commented `shipmate plan` to it by name.
+#: Where the plan workflow must live. Two surfaces match this filename literally: `shipmate
+#: doctor` keys its plan-wrapper probes on it, and `actions/dispatch` sends a commented
+#: `shipmate plan` to it by name. No plan-run lookup does — each reads a cell's own apply check.
 PLAN_WORKFLOW = ".github/workflows/plan.yml"
 
-#: Stack paths whose verb-less plan check name would land inside a namespace
-#: the engine selects on. `shipmate` fails SILENTLY: summary-comment resolves
-#: each row's plan link by exact `<stack> / <env>` lookup, so the link points at
-#: the wrong check rather than erroring.
+#: Stack paths whose verb-less plan check name would land inside a namespace the engine
+#: selects on. `shipmate` fails SILENTLY: summary-comment resolves each row's plan link by an
+#: exact `<stack> / <env>` lookup, so the link points at the wrong check rather than erroring.
 RESERVED_STACK_PATHS = {
     "apply": (
         "::error::a stack path may not be exactly 'apply': its plan check "
@@ -269,11 +266,9 @@ def env_membership(all_stacks=False, base="", require_env_tag=True):
     return stacks_by_env, tags_by_stack
 
 
-#: Injected by `assert_run_env_roundtrip` and expected back unchanged. A value
-#: that cannot occur naturally, because comparing the AMBIENT value would be
-#: vacuous exactly where this runs: detect binds no environment, so all three
-#: variables are unset there and any reported value would compare equal to
-#: nothing.
+#: Injected by `assert_run_env_roundtrip` and expected back unchanged. A value that cannot
+#: occur naturally, because comparing the AMBIENT value would be vacuous where this runs: detect
+#: binds no environment, so all three are unset there and there is nothing to compare against.
 RT_SENTINEL = "SHIPMATE_RT_PROBE"
 RT_VARS = ("TF_VAR_env", "TF_VAR_region", "TF_WORKSPACE")
 
@@ -436,12 +431,11 @@ def head_checkout_error(head_sha, no_pull_request):
     input on a plan wrapper still refuses, while a forgotten opt-out on a drift
     wrapper turns the nightly red.
 
-    The event-keyed version had to exclude `pull_request`, whose default
-    checkout is `refs/pull/<n>/merge` and so never equals the payload head. That
-    exclusion is gone rather than lost: the comparison is now against the head
-    the wrapper states, and `actions/pr-facts` states the payload head under
-    both pull-request events, so a `pull_request` consumer names `ref:` like
-    every other one and the comparison holds.
+    No `pull_request` exclusion, even though its default checkout is
+    `refs/pull/<n>/merge` and so never equals the payload head: the comparison is
+    against the head the wrapper states, and `actions/pr-facts` states the payload
+    head under both pull-request events, so a `pull_request` consumer names `ref:`
+    like every other one.
     """
     if no_pull_request.strip().lower() == "true":
         return ""

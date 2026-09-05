@@ -25,9 +25,9 @@ def _stub_run(monkeypatch):
 
 
 def test_main_writes_the_key_to_a_file_and_creates_no_repository_secret(monkeypatch, tmp_path):
-    # The whole command list, not a scan: a `gh secret set` restored anywhere in
-    # the file puts the App key in a repository secret, readable by any workflow
-    # on any branch -- the exact placement docs/github-app.md §5 exists to avoid.
+    # The whole command list, not a scan: a `gh secret set` restored anywhere in the file puts
+    # the App key in a repository secret, readable by any workflow on any branch, which is the
+    # placement docs/github-app.md §5 exists to avoid.
     out = tmp_path / "key.pem"
     calls = _stub_run(monkeypatch)
 
@@ -43,9 +43,9 @@ def test_main_writes_the_key_to_a_file_and_creates_no_repository_secret(monkeypa
 
 
 def test_main_refuses_an_out_path_that_already_exists(monkeypatch, tmp_path):
-    # POSIX applies the mode only on creation, so writing into a file left by an
-    # earlier bootstrap would inherit its 0644. The refusal comes BEFORE the
-    # conversion call -- refusing after it costs an App key nothing can mint again.
+    # POSIX applies the mode only on creation, so writing into a file left by an earlier
+    # bootstrap would inherit its 0644. The refusal comes before the conversion call: refusing
+    # after it costs an App key nothing can mint again.
     out = tmp_path / "key.pem"
     out.write_text("AN EARLIER KEY", encoding="utf-8")
     calls = _stub_run(monkeypatch)
@@ -61,8 +61,8 @@ def test_main_refuses_an_out_path_that_already_exists(monkeypatch, tmp_path):
 
 
 def test_main_refuses_an_out_path_whose_directory_does_not_exist(monkeypatch, tmp_path):
-    # os.open raises here too, but only after the App exists -- and then the PEM
-    # is in process memory alone. Refuse while refusing is still free.
+    # os.open raises here too, but only after the App exists, and then the PEM is in process
+    # memory alone. Refuse while refusing is still free.
     out = tmp_path / "nope" / "key.pem"
     calls = _stub_run(monkeypatch)
 
@@ -76,8 +76,8 @@ def test_main_refuses_an_out_path_whose_directory_does_not_exist(monkeypatch, tm
 
 
 def test_the_app_id_is_printed_before_the_key_is_written(monkeypatch, tmp_path, capsys):
-    # A refusal from _write_key leaves an App that exists on GitHub; without the
-    # id the operator cannot even find it to generate a replacement key.
+    # A refusal from _write_key leaves an App that exists on GitHub, and without the id the
+    # operator cannot even find it to generate a replacement key.
     _stub_run(monkeypatch)
     monkeypatch.setattr(ra, "_write_key", lambda path, pem: (_ for _ in ()).throw(SystemExit("no")))
 
@@ -107,9 +107,9 @@ def test_the_app_id_is_printed_before_the_key_is_written(monkeypatch, tmp_path, 
     ],
 )
 def test_main_refuses_an_operator_value_before_it_reaches_gh(monkeypatch, tmp_path, field, value):
-    # --repo's owner half is interpolated into the registration URL and both
-    # halves into `gh variable set --repo`; --name is embedded in the local HTML
-    # form, where a quote escapes the attribute holding it.
+    # --repo's owner half is interpolated into the registration URL, and both halves into
+    # `gh variable set --repo`. --name is embedded in the local HTML form, where a quote escapes
+    # the attribute holding it.
     calls = _stub_run(monkeypatch)
     argv = {
         "--name": "shipmate-acme",
@@ -127,11 +127,10 @@ def test_main_refuses_an_operator_value_before_it_reaches_gh(monkeypatch, tmp_pa
 
 
 def test_main_refuses_an_owner_that_could_be_read_as_a_flag(monkeypatch, tmp_path):
-    # `--repo`'s value is its own argv element in `gh variable set --repo <value>`,
-    # so one starting with '-' is the shape a CLI reads as a flag. GitHub logins
-    # cannot start with '-' either. Written in the `--repo=` form deliberately:
-    # argparse itself refuses the space-separated form, so that shape never
-    # reaches the regex and would prove nothing about it.
+    # `--repo`'s value is its own argv element in `gh variable set --repo <value>`, so one
+    # starting with '-' is the shape a CLI reads as a flag; GitHub logins cannot start with '-'
+    # either. Written in the `--repo=` form deliberately: argparse refuses the space-separated
+    # form, so that shape never reaches the regex and would prove nothing about it.
     calls = _stub_run(monkeypatch)
 
     with pytest.raises(SystemExit) as exc:
@@ -152,9 +151,9 @@ def test_main_refuses_an_owner_that_could_be_read_as_a_flag(monkeypatch, tmp_pat
 
 
 def test_main_refuses_a_manifest_code_that_would_retarget_the_api_path(monkeypatch, tmp_path):
-    # The code lands in `app-manifests/<code>/conversions` and arrives over a
-    # loopback socket: a '/' in it points the conversion at another endpoint.
-    # The refusal must not echo it -- it converts into a private key.
+    # The code lands in `app-manifests/<code>/conversions` and arrives over a loopback socket, so
+    # a '/' in it points the conversion at another endpoint. The refusal must not echo it,
+    # because it converts into a private key.
     calls = _stub_run(monkeypatch)
 
     with pytest.raises(SystemExit) as exc:
@@ -176,8 +175,8 @@ def test_main_refuses_a_manifest_code_that_would_retarget_the_api_path(monkeypat
 
 
 def test_out_is_required(monkeypatch):
-    # An optional --out defaults to writing the key nowhere, which is the same
-    # failure as writing it to a secret: the key is minted and then unreachable.
+    # An optional --out defaults to writing the key nowhere, which is the same failure as writing
+    # it to a secret: the key is minted and then unreachable.
     _stub_run(monkeypatch)
 
     with pytest.raises(SystemExit) as exc:
@@ -198,12 +197,11 @@ def _get(server, path):
 
 
 def test_the_listener_captures_the_code_and_refuses_a_request_without_one():
-    # The capture is what keeps the single-use code off the clipboard, and the
-    # browser asks for /favicon.ico on the same port -- answering that as a
-    # capture would end the wait with no code at all. A callback carrying a code
-    # but not this run's state is another App's registration, delivered by
-    # anything that can reach the port: converting it would write that App's key
-    # to --out and store its id as SHIPMATE_APP_ID.
+    """The capture is what keeps the single-use code off the clipboard. The browser asks for
+    /favicon.ico on the same port, and answering that as a capture would end the wait with no
+    code at all. A callback carrying a code but not this run's state is another App's
+    registration, delivered by anything that can reach the port: converting it would write that
+    App's key to --out and store its id as SHIPMATE_APP_ID."""
     ra._Handler.code = None
     ra._Handler.state = "this-runs-state"
     server = http.server.HTTPServer(("127.0.0.1", 0), ra._Handler)
@@ -228,9 +226,9 @@ def _failing_gh(monkeypatch, stderr):
 
 
 def test_run_error_never_echoes_the_argv(monkeypatch, capsys):
-    # The argv carries the App private key and the one-time manifest code, so a
-    # failure must name the subcommand and nothing else. Enforced only here --
-    # the real failure needs a broken gh.
+    # The argv carries the App private key and the one-time manifest code, so a failure must name
+    # the subcommand and nothing else. Enforced only here, because the real failure needs a
+    # broken gh.
     _failing_gh(monkeypatch, "gh: HTTP 403\n")
 
     try:
@@ -249,9 +247,9 @@ def test_run_error_never_echoes_the_argv(monkeypatch, capsys):
 
 
 def test_run_error_scrubs_secrets_out_of_ghs_own_stderr(monkeypatch, capsys):
-    # gh quotes the URL it called, and the one-time manifest code is IN that URL
-    # -- so suppressing our own argv is not enough. Anything the caller declares
-    # as a secret must be scrubbed from gh's message too.
+    # gh quotes the URL it called, and the one-time manifest code is in that URL, so suppressing
+    # the tool's own argv is not enough. Anything the caller declares as a secret must be
+    # scrubbed from gh's message too.
     _failing_gh(monkeypatch, "gh: HTTP 404 (POST app-manifests/CODE123/conversions)\n")
 
     with pytest.raises(SystemExit):

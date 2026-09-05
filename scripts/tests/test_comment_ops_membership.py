@@ -1,9 +1,9 @@
 """Run comment-ops' team-membership decision over what the API can answer.
 
-`is_member` is one of the two inputs `scripts/authorize` weighs before a
-`shipmate apply` dispatches, and it is decided by bash in the action rather than
-by an importable script. Both ways it can be wrong are silent: a member read as
-a non-member is refused an apply they are entitled to, the reverse is a bypass.
+`is_member` is one of the two inputs `scripts/authorize` weighs before a `shipmate apply`
+dispatches, and bash in the action decides it rather than an importable script. Both ways it can
+be wrong are silent: a member read as a non-member is refused an apply they are entitled to, and
+the reverse is a bypass.
 """
 
 import re
@@ -36,8 +36,8 @@ def _membership_block():
 
 
 def test_membership_read_is_not_a_pipeline():
-    """`gh | grep -q` lets grep exit first; gh takes SIGPIPE and pipefail's 141
-    reads as "not a member", refusing an authorized user their apply."""
+    """`gh | grep -q` lets grep exit first, so gh takes SIGPIPE and pipefail's 141 reads as
+    "not a member", refusing an authorized user their apply."""
     code = "\n".join(
         ln for ln in _membership_block().splitlines() if not ln.strip().startswith("#")
     )
@@ -77,8 +77,8 @@ def _decide(tmp_path, *, stdout, rc):
     [
         ("active", 0, "is_member=true"),
         ("pending", 0, "is_member=false"),  # invited, not accepted
-        # 404: not in the team. The step must record a non-member and carry on --
-        # it still has the review decision and the plan run to gather.
+        # 404 is not in the team. The step must record a non-member and carry on, because it
+        # still has the review decision and the plan run to gather.
         ("", 1, "is_member=false"),
         ("null", 0, "is_member=false"),
         ("", 0, "is_member=false"),

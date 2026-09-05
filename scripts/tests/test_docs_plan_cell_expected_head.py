@@ -5,11 +5,11 @@ plan-cell refuses an empty `expected-head` and points the reader at
 consumer to a page without the fix. The realistic failure is an input added to
 the action and forgotten in the snippet consumers copy.
 
-Whole-mapping comparison against a hand-written literal, for the reason
-`CLAUDE.md` gives: a "contains expected-head" check relocates the hole to
-whichever key it does not name. The fences are parsed as YAML rather than
-regexed, because an indentation change would silently stop a text match and
-leave this green over nothing -- which is also why the call count is pinned.
+Whole-mapping comparison against a hand-written literal, for the reason `docs/development.md`
+§Guard tests must be able to fail gives: a "contains expected-head" check relocates the hole to
+whichever key it does not name. The fences are parsed as YAML rather than regexed, because an
+indentation change would silently stop a text match and leave this green over nothing. That is
+also why the call count is pinned.
 """
 
 import re
@@ -23,7 +23,7 @@ _PAGE = ENGINE / "docs" / "getting-started.md"
 _FENCE = re.compile(r"^(?P<indent>[ \t]*)```yaml[ \t]*$\n(?P<body>.*?)^\1```", re.M | re.S)
 
 # Owner-agnostic, like test_docs_yaml_parses.py's selector: the pages publish
-# `<owner>/shipmate/...` as well as the engine's own org.
+# `<owner>/shipmate/...` as well as the engine's own organization.
 _ACTION = "/shipmate/actions/plan-cell@"
 
 _EXPECTED_WITH = {
@@ -48,8 +48,8 @@ def _plan_cell_steps(page):
 
 
 def test_documented_plan_cell_calls_are_found():
-    """A floor under the guard below, which asserts nothing when its selector
-    matches nothing: rewording the step out of the selector's reach fails here
+    """A floor under test_documented_plan_cell_passes_expected_head, which asserts nothing when
+    its selector matches nothing: rewording the step out of the selector's reach fails here
     rather than going quiet."""
     found = [job for job, _ in _plan_cell_steps(_PAGE)]
     assert found == ["plan"], f"documented plan-cell call sites changed: {found}"

@@ -13,20 +13,22 @@ decision — no review required by the ruleset) and `APPROVED` authorize; any
 other value — including an absent/empty one — fails closed, except that
 `REVIEW_REQUIRED` also authorizes for an environment listed in
 `SHIPMATE_UNGATED_ENVS`.
+
+The `ungated_exemption` output is the targeted path's audit trail: `reviewDecision`
+is a live value with no history, so once the review lands nothing else distinguishes
+an apply that waited for it from one that did not. It requires all three of
+`authorized` (a report over a refused apply is false), a named environment (a bare
+apply is reported per env by apply-all-detect instead), and verb="apply" (unlock
+applies nothing, so it must never carry this record).
 """
 
 import json
 import os
 import re
 
-#: An entry that cannot BE an env name matches nothing, and a silently inert
-#: entry leaves an operator believing an environment is ungated when it is not.
-#: Allow-list rather than deny-list: naming the two shapes that go wrong most
-#: often (a padded entry, a suffixed one) left every other shape — a pasted
-#: `"dev-eu"`, an internal space, a slash — silently inert. Env names come from
-#: Terramate `env/<name>` tags; the charset is comment-parse's env grammar plus
-#: `_` (a legal tag character no `shipmate apply <env>` can name) and either
-#: case, since the match itself is case-insensitive.
+#: Env names come from Terramate `env/<name>` tags, so the charset is comment-parse's env
+#: grammar plus `_`, a legal tag character no `shipmate apply <env>` can name. Both cases are
+#: accepted, since the match itself is case-insensitive.
 _ENV_ENTRY = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*")
 
 
@@ -35,9 +37,13 @@ def parse_ungated_envs(raw):
 
     Comma-separated bare logical env names, matched case-insensitively against
     the env on the apply checks. Anything that is not a bare env name — a
-    `-plan`/`-apply` suffix, a stray space, a pasted quote — would exempt
-    nothing at all, so each is a configuration error rather than a silently
-    inert entry."""
+    `-plan`/`-apply` suffix, a stray space, a pasted quote — would exempt nothing
+    at all, and a silently inert entry leaves an operator believing an environment
+    is ungated when it is not, so each is a configuration error.
+
+    Allow-listed rather than deny-listed: naming only the two shapes that go wrong
+    most often (a padded entry, a suffixed one) left every other shape — a pasted
+    `"dev-eu"`, an internal space, a slash — silently inert."""
     envs = [e for e in (raw or "").split(",") if e]
     for e in envs:
         if e != e.strip():
@@ -125,8 +131,8 @@ def decide(
     - mergeable: measured behaviour — a merged PR reports mergeable: null,
       which the apply path reads as "still computing" and refuses. A stranded
       lock from a cancelled post-merge deploy is reachable only from a merged
-      PR, so keeping this check would make the followup's second routine
-      trigger unfixable.
+      PR, so keeping this check would leave that lock impossible to release with
+      `shipmate unlock`.
     - plan runs: unlock consumes no plan artifact.
     - draft: the draft flag says the change is not ready for review, which
       bounds applying it; unlock changes no infrastructure, so readiness for
@@ -209,14 +215,9 @@ def main():
         ungated_envs=ungated_envs,
         verb=verb,
     )
-    # The targeted path's audit trail. `reviewDecision` is a live value with no
-    # history, so once the review lands nothing distinguishes an apply that
-    # waited for it from one that did not. Requires `ok`: a later requirement
-    # (no reviewed plan) still refuses, and a report over a refused apply is false.
-    # Requires a named environment: a bare apply is reported per env by
-    # apply-all-detect instead, and has no single env to name here.
-    # Requires verb="apply": the exemption is an audit record about applying
-    # without a review; unlock applies nothing, so must never produce this output.
+    # The targeted path's audit trail. REVIEW_REQUIRED plus a listed env define the
+    # exemption; `ok`, a named environment and verb="apply" are the gates the module
+    # docstring explains.
     exempted = (
         verb == "apply"
         and ok

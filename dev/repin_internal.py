@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """Rewrite the engine's stale internal SHA pins.
 
-Replaces the hand-run sed in docs/releasing.md. The staleness selection is the
-same code the CI guard asserts on (dev/pinrefs.py), so "what CI calls stale" and
-"what this rewrites" cannot drift.
+docs/releasing.md is the runbook. The staleness selection is the same code the CI
+guard asserts on (dev/pinrefs.py), so "what CI calls stale" and "what this
+rewrites" cannot drift.
 
 This does not shorten the cascade. Workflows pin apply-env-level.yml, which pins
 actions, so bumping an action changes that file and invalidates the pins to it --
 an inherent 2-cycle needing fix -> bump-actions -> converge-workflow. Run this
-once per step; it removes the hand-editing, not the steps.
+once per step. It removes the hand-editing, not the steps.
 
     python dev/repin_internal.py                  # bump stale pins to HEAD
     python dev/repin_internal.py --to <sha>
@@ -27,16 +27,18 @@ import pinrefs
 
 
 class _PlannedEdit(NamedTuple):
-    """One source file's computed post-rewrite state, before anything is
-    written. Carries an entry for every candidate file, including ones the
-    targets did not touch (``count == 0``) -- the ``--all`` survivor
-    validation needs the planned text of the whole set, not just the files
-    that changed, to judge the flatten without reading disk again."""
+    """One source file's computed post-rewrite state, before anything is written.
 
-    path: str  # repo-relative posix path
-    text: str  # full new content ("\n"-delimited)
-    newline: str  # newline style read_text reported for this file
-    count: int  # substitutions made; 0 means this file needs no write
+    Carries an entry for every candidate file, including ones the targets did not
+    touch (``count == 0``): the ``--all`` survivor validation needs the planned text
+    of the whole set, not only the files that changed, to judge the flatten without
+    reading disk again.
+    """
+
+    path: str  # Repo-relative posix path.
+    text: str  # Full new content ("\n"-delimited).
+    newline: str  # Newline style read_text reported for this file.
+    count: int  # Substitutions made; 0 means this file needs no write.
 
 
 def _plan(root, targets, new_sha):
@@ -63,9 +65,9 @@ def _commit(root, planned):
     file (see pinrefs.atomic_write_text), and return (source_path,
     replacements) for the files that changed.
 
-    The only place this rewriter touches disk, and it does nothing but write --
-    no git calls, no regex -- so an interrupt here can leave some files replaced
-    and others not, never a torn file.
+    The only place this rewriter touches disk, and it does nothing but write: no git
+    calls, no regex. An interrupt here can leave some files replaced and others not,
+    never a torn file.
     """
     changed = []
     for p in planned:
@@ -98,15 +100,13 @@ def _survivor_report(survivors, new_sha):
 def _targets(refs, new_sha, bump_all):
     """((path, old_sha) pairs to rewrite, notes to print, staleness_unknown).
 
-    Selection comes off PinIssue.kind, never off a formatted message. Two kinds
-    are deliberately excluded: "missing" (the pin's commit is absent, so we
-    cannot tell whether it is stale) and "error" (git itself failed). Rewriting
-    either would be a guess dressed as a fix.
+    Selection comes off ``PinIssue.kind``, never off a formatted message: in
+    stale-only mode only ``pinrefs.ACTIONABLE`` kinds are rewritten. ``bump_all``
+    takes every ref not already at ``new_sha``, kinds unread.
 
-    ``staleness_unknown`` is True only when no mainline ref resolved at all, so
-    the caller can tell "verified nothing is stale" apart from "could not
-    check" -- both leave ``targets`` empty, but they are not the same thing to
-    report.
+    ``staleness_unknown`` is True only when no mainline ref resolved at all, so the
+    caller can tell "verified nothing is stale" apart from "could not check". Both
+    leave ``targets`` empty; they are not the same thing to report.
     """
     baseline = pinrefs.release_baseline()
     if bump_all:

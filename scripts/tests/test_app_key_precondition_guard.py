@@ -17,19 +17,18 @@ either alone leaves a hole:
   the expectation back out of the files under test would pass whatever they say,
   and a substring would survive both a comment and an inverted test.
 
-`comment-ops` is the one file that mints and carries no precondition, and that
-is asserted rather than skipped. All four of its mints are
-`continue-on-error: true`, each paired with a fallback that posts the diagnosis
-*as a PR comment*; aborting the action first would replace a visible answer with
-a red run and a log annotation, and would take `shipmate help` -- which needs no
-App token at all -- down with it.
+`comment-ops` is the one file that mints and carries no precondition, and that is asserted rather
+than skipped. All four of its mints are `continue-on-error: true`, each paired with a fallback
+that posts the diagnosis as a pull request comment. Aborting the action first would replace a
+visible answer with a red run and a log annotation, and would take `shipmate help`, which needs
+no App token at all, down with it.
 """
 
 import yaml
 from _loader import ACTIONS, WORKFLOWS
 
-# One physical line each in the shell body -- a `::error::` annotation ends at
-# the first newline, so a wrapped message loses everything after cause (1).
+# One physical line each in the shell body: a `::error::` annotation ends at the first newline,
+# so a wrapped message loses everything after cause (1).
 _KEY_MSG = (
     "The shipmate App private key did not reach this job. Three causes, in the order "
     "worth checking: (1) the calling workflow used 'secrets: inherit' across an "
@@ -66,10 +65,9 @@ def _step(env):
 
 _MINT_ACTION = "actions/create-github-app-token@"
 
-#: file -> (step list to read, expected env), or None for the file that mints
-#: without a precondition (see the module docstring). Hand-written, and compared
-#: as a whole set against what discovery finds, so a ninth mint site fails rather
-#: than escaping.
+#: file -> (step list to read, expected env), or None for the file that mints without a
+#: precondition; the module docstring says which and why. Hand-written, and compared as a whole
+#: set against what discovery finds, so a ninth mint site fails rather than escaping.
 _SITES = {
     ACTIONS / "summary" / "action.yml": (("runs", "steps"), _ACTION_ENV),
     ACTIONS / "apply-summary" / "action.yml": (("runs", "steps"), _ACTION_ENV),
@@ -98,8 +96,8 @@ def _steps(path, keys):
 
 
 def test_the_mint_sites_are_the_ones_this_guard_knows_about():
-    """Discovery, not the hand-written list, decides which files are in scope --
-    otherwise a mint site added later is one this file simply never looks at."""
+    """Discovery, not the hand-written list, decides which files are in scope. Otherwise a mint
+    site added later is one this file never looks at."""
     found = _minting_files()
     assert found == set(_SITES), (
         "the set of files invoking the App-token mint changed; add each new one to "
@@ -122,9 +120,9 @@ def test_every_mint_site_verifies_the_key_arrived():
 
 
 def test_comment_ops_answers_instead_of_aborting():
-    """comment-ops must NOT gain the precondition: every one of its mints is
-    `continue-on-error` with a fallback that posts the diagnosis as a PR comment,
-    and `shipmate help` needs no App token at all."""
+    """comment-ops must not gain the precondition: every one of its mints is
+    `continue-on-error` with a fallback that posts the diagnosis as a pull request comment, and
+    `shipmate help` needs no App token at all."""
     doc = yaml.safe_load((ACTIONS / "comment-ops" / "action.yml").read_text(encoding="utf-8"))
     steps = doc["runs"]["steps"]
     assert not [s for s in steps if s.get("name") == "Verify the App key arrived"], (

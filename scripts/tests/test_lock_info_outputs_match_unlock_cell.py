@@ -10,18 +10,16 @@ Both sides are derived, never transcribed: a hand-written copy of either list is
 the thing that rots, and a copy of the producer's keys would pass whatever the
 producer says.
 
-`probe_status` is consumed but not produced by lock-info -- the probe step echoes
-it itself. It is excluded by deriving the outputs that step's own `run:` body
-writes, so the exclusion cannot swallow a lock-info key: lock-info writes through
-python, not through an `echo ... >> "$GITHUB_OUTPUT"` in the shell body. That
-leaves an equality, which is the direction that catches the failure: a rename on
-either side moves a name out of one set and not the other, and a dropped write
-shrinks one side.
+`probe_status` is consumed but not produced by lock-info -- the probe step echoes it itself. It
+is excluded by deriving the outputs that step's own `run:` body writes, so the exclusion cannot
+swallow a lock-info key: lock-info writes through python, not through an
+`echo ... >> "$GITHUB_OUTPUT"` in the shell body. That leaves an equality, which is the direction
+that catches the failure: a rename on either side moves a name out of one set and not the other,
+and a dropped write shrinks one side.
 
-`step_written` is deliberately not asserted non-empty. If the probe step ever
-legitimately stops echoing an output of its own, this guard should still hold;
-and an exclusion regex that breaks *today* fails loud anyway, because
-`probe_status` then survives into the equality.
+`step_written` is deliberately not asserted non-empty. The guard must still hold if the probe
+step ever legitimately stops echoing an output of its own, and an exclusion regex that breaks
+today fails loud anyway, because `probe_status` then survives into the equality.
 """
 
 import re
@@ -33,9 +31,9 @@ _ACTION = "unlock-cell"
 
 
 def _strings(node):
-    """Every string anywhere in the parsed action -- `if:` expressions included,
-    not just the `env:` blocks. Parsed, so a comment naming an output name (this
-    action has several) cannot stand in for a real use of it."""
+    """Every string anywhere in the parsed action, `if:` expressions included and not only the
+    `env:` blocks. Parsed, so a comment naming an output name -- this action has several --
+    cannot stand in for a real use of it."""
     if isinstance(node, dict):
         node = list(node.values())
     if isinstance(node, list):

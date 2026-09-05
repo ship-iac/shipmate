@@ -6,11 +6,10 @@ One parsed-assertion implementation covers both cells: `apply-cell` (which runs
 `tofu apply`) and `drift-cell` (which runs `tofu plan` from a policy-free plan
 environment reachable off any branch).
 
-Every assertion is on the PARSED action.yml. The raw-text form this replaces
-(`"private-key" not in text`, `"create-github-app-token" not in text`) was
-vacuous twice over: a comment naming either one satisfied it, and the actual way
-a cell would regain the key -- a direct `secrets.SHIPMATE_APP_PRIVATE_KEY`
-reference in an `env:` value -- contains neither substring.
+Every assertion is on the parsed action.yml. A raw-text form (`"private-key" not in text`,
+`"create-github-app-token" not in text`) is vacuous twice over: a comment naming either one
+satisfies it, and the way a cell would actually regain the key -- a direct
+`secrets.SHIPMATE_APP_PRIVATE_KEY` reference in an `env:` value -- contains neither substring.
 """
 
 import pytest
@@ -19,8 +18,8 @@ from _loader import WORKFLOWS, action_steps, action_yaml
 
 CELLS = ("apply-cell", "drift-cell")
 
-#: `uses:` repos that mint a GitHub App installation token. Matched on the repo
-#: part alone, so a version bump or a SHA re-pin cannot slip past.
+#: `uses:` repos that mint a GitHub App installation token. Matched on the repo part alone, so a
+#: version bump or a SHA re-pin cannot slip past.
 TOKEN_MINTERS = (
     "actions/create-github-app-token",
     "tibdex/github-app-token",
@@ -36,9 +35,9 @@ LEVEL = WORKFLOWS / "apply-env-level.yml"
 def _strings(node):
     """Every scalar string reachable in a parsed subtree, mapping keys included.
 
-    Walking the parsed tree rather than the file text is the point: an `env:`
-    value, a `with:` value and a `run:` body are all reached, while a YAML
-    comment -- which `safe_load` discards -- can no longer satisfy the guard.
+    Walking the parsed tree rather than the file text is the point: an `env:` value, a `with:`
+    value and a `run:` body are all reached, while a YAML comment, which `safe_load` discards,
+    can no longer satisfy the guard.
     """
     if isinstance(node, dict):
         for key, value in node.items():
@@ -75,10 +74,9 @@ def test_cell_never_references_the_app_private_key(action):
 
 
 def test_only_the_completer_job_reads_the_app_key():
-    # Parse, don't string-split: the secret stays DECLARED at the top of the
-    # file (the complete job consumes it, and test_gate_name_consistency
-    # requires reusable targets called with `secrets: inherit` to declare it),
-    # so a textual "not in" assertion would be checking the wrong thing.
+    # Parse, do not string-split: the secret stays declared at the top of the file, because the
+    # complete job consumes it and test_gate_name_consistency requires reusable targets called
+    # with `secrets: inherit` to declare it. A textual "not in" assertion checks the wrong thing.
     doc = yaml.safe_load(LEVEL.read_text(encoding="utf-8"))
     for name, job in doc["jobs"].items():
         body = yaml.safe_dump(job)
@@ -89,12 +87,10 @@ def test_only_the_completer_job_reads_the_app_key():
 
 
 def test_the_completer_is_the_only_job_naming_the_engine_environment():
-    # Parsed, not a `text.count(...) == 1` textual check: that form is
-    # satisfied by ANY single job naming the environment, so moving it onto
-    # e.g. wave0 (which runs tofu over branch content) would keep the count at
-    # 1 and the test green while releasing the key to consumer code -- the
-    # exact thing this task exists to prevent. Assert the specific job, not
-    # just the count.
+    # Parsed, not a `text.count(...) == 1` textual check: that form is satisfied by any single
+    # job naming the environment, so moving it onto wave0, which runs tofu over branch content,
+    # would keep the count at 1 and the test green while releasing the key to consumer code.
+    # Assert the specific job, not the count.
     doc = yaml.safe_load(LEVEL.read_text(encoding="utf-8"))
     named = {n for n, j in doc["jobs"].items() if j.get("environment") == "shipmate-engine"}
     assert named == {"complete"}
