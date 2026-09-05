@@ -11,6 +11,37 @@ section below names the SHA the release tags.
 The version line stays `v0.x` while action inputs, check names, and the comment
 grammar are declared unstable in `README.md`.
 
+## [0.22.2] — 2026-09-05
+
+Tags _pending_.
+
+**No wrapper change is required, and nothing changes at runtime.** Six Python
+blocks that lived inside `action.yml` files moved to `scripts/` helpers, byte
+for byte. Every input, output, check name, artifact name, JSON body and runtime
+message is identical to `0.22.1`; the suite is 1526 → 1529.
+
+### Changed
+
+- **The embedded Python in `actions/` moved to `scripts/`, where the toolchain
+  lints it.** Nothing reads Python out of a YAML scalar, so `ruff` never saw
+  these six blocks — 133 lines across `apply-cell`, `dispatch`, `drift-cell`,
+  `plan-cell`, `comment-ops` and `gate-refresh`. The gap was not theoretical:
+  `0.22.1`'s writing pass added three lines to `drift-cell`'s block with
+  nothing checking the result. Each block is now `scripts/apply-cell-summary`,
+  `dispatch-body`, `drift-cell-summary`, `plan-cell-summary`, `doctor-cells` and
+  `gate-status-body`, invoked the way every other helper already is, and all six
+  are in `pyproject.toml`'s `extend-include`.
+- **The guards over that logic read the scripts, and pin that the actions still
+  run them.** A guard reading a script no action invokes asserts nothing, so
+  each moved script has a test matching its invocation as a whole `run:` line —
+  a commented-out call reddens it. `test_gate_refresh_hold.py` also stopped
+  stubbing `python3` away and now compares the whole posted `shipmate / gate`
+  body against a hand-written constant.
+
+One block stays inline, in `deploy.yml`'s `summary` job: that job checks out no
+engine tree, so reaching a script from it is a new checkout step rather than a
+move.
+
 ## [0.22.1] — 2026-09-05
 
 Tags `71e1aa4`.
