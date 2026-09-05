@@ -12,9 +12,10 @@ Measured against OpenTofu v1.12.4 on both the local backend and S3 with
 line differs — so nothing here reads that line. The block arrives inside
 OpenTofu's `|`-prefixed diagnostic box even with no TTY, values are space-padded
 after the colon, and on a GitHub Actions runner every one of those lines is
-ANSI-coloured: a live cell emits `ESC[31m│ESC[0m ESC[0mLock Info:` rather than
-`│ Lock Info:` (see `_ANSI_RE`). The first fixtures were captured through a
-colour-stripping filter; capture new ones raw.
+ANSI-coloured, because OpenTofu colours its diagnostics whenever the sink looks
+capable and a runner's does: a live cell emits `ESC[31m│ESC[0m ESC[0mLock Info:`
+rather than `│ Lock Info:` (see `_ANSI_RE`). The first fixtures were captured
+through a colour-stripping filter; capture new ones raw.
 
 Fail-closed by construction: anything short of a complete block with an
 in-charset `ID` returns None, which every caller reads as "do not unlock".

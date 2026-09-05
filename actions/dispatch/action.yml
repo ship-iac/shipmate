@@ -109,8 +109,7 @@ runs:
         printf '%s\n' "$out"
         # Only a failure that names the missing surface is version skew. A 403, a rate limit, or
         # a 422 about a different input is another problem entirely, and explaining it as skew
-        # sends the operator to edit workflows that are fine. Neither branch's remedy is a
-        # re-pin: both are a consumer file the upgrade guide says to author or hand-edit.
+        # sends the operator to edit workflows that are fine.
         if [ "$rc" -ne 0 ]; then
           # Measured for a consumer predating the unlock wrapper: a workflow file that does not
           # exist answers 404, and one with no such trigger answers `Workflow does not have

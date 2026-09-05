@@ -229,7 +229,8 @@ the release commit, from one sample:
 
 1. Re-pin one sample to the release commit on a scratch branch, never its
    default branch — a re-pin on `main` with no release cut yet is exactly the
-   backwards staleness the section above warns about.
+   backwards staleness that makes the pin probe report correctly-pinned
+   consumers as stale and tell them to re-pin backwards.
 
    ```bash
    git -C ../repo-example-stacks-aws checkout -b smoke/vX.Y.Z

@@ -50,13 +50,13 @@ a written rationale (see the one `S603` in `scripts/build-matrix`).
 Text exists where code cannot carry the meaning. Two regimes:
 
 - Contract: module docstrings of `scripts/*` state the CLI contract (env vars, inputs, outputs, exit codes); public functions state behavior, errors, and invariants. As full as the contract needs.
-- Implementation: a comment is a last resort. Keep one only for a non-obvious why, a workaround (name the external cause), a consequence a maintainer could miss, the evidence behind a value, a coupling that fails silently, or a do-not-refactor warning. Three lines maximum. Longer rationale goes in the docstring, `CONTRACT.md`, or the pull request.
+- Implementation: a comment is a last resort. Keep one only for a non-obvious why, a workaround (name the external cause), a consequence a maintainer could miss, the evidence behind a value, a coupling that fails silently, or a do-not-refactor warning. Three lines maximum in Python; longer rationale goes in the docstring, `CONTRACT.md`, or the pull request. YAML has no docstring: one fact per line, and rationale `CONTRACT.md` already states becomes a `§` pointer.
 
 What earns a comment in this repository: a GitHub Actions platform constraint (outputs cannot contain `-`; a failed `if: always()` step still skips later `success()` steps), two sites that must stay byte-identical, a security property, a fail-safe ordering rule.
 
 Never: restate the code, narrate the edit, reference a review or conversation, list callers, add section or file banners, keep commented-out code, use a `TODO` without an issue (`TODO #123: reason`).
 
-Test docstrings state what the test pins and the mutation that reddens it. Nothing else.
+Test docstrings state what the test pins, the mutation that reddens it, and any do-not-refactor warning the body's shape depends on. Nothing else.
 
 Commits: Conventional Commits, subject imperative and at most 72 characters, scope = directory or action name, body only when the subject cannot carry the why. Pull requests: the template's "What and why" in one or two sentences.
 
@@ -116,7 +116,7 @@ commented out, the draft-skip deleted — left the suite byte-identical to green
   hand-written constant — as a net deletion of a helper, three tests and a
   denylist, after ten rounds in which every fix checked a part and reasoned
   about the rest.
-  `test_current_failsafe_set_is_exactly_the_four_known_ids` in
+  `test_current_failsafe_set_is_exactly_the_five_known_ids` in
   `scripts/tests/test_apply_cell_failsafe_wiring_guard.py` is the shape. Its
   module docstring argues against hardcoded lists for the *structural* guards
   around it; this one is a deliberate tripwire.

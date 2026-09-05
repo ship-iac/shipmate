@@ -1836,7 +1836,7 @@ environments that must complete their applies first (its predecessors). An
 environment absent from the map, or the whole global absent, is unordered
 relative to everything else.
 
-The merge-deploy path topologically sorts this map into **env-levels**
+The merge-deploy path topologically sorts this map into `env-levels`
 (level 0 = no predecessors, or not listed at all): all pending applies whose
 environment falls in level 0 run to completion (respecting the existing
 stack-wave DAG within that level) before any env-level-1 apply starts, and so

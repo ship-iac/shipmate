@@ -761,7 +761,7 @@ Properties that fall out of the existing gate semantics:
   resets gate to pending until the fresh plans are applied. The
   exact-plan invariant is preserved.
 
-  Strict gates merging and nothing else, so it does not protect the apply:
+  Strict gates the merge and nothing else, so it does not protect the apply:
   a `shipmate apply <env>` from a stale branch applies the plan as reviewed, and
   a stack updated and merged to main since this branch forked is rolled back in
   real infrastructure ([`branch-protection.md`](branch-protection.md)). Update

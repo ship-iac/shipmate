@@ -648,8 +648,8 @@ def _engine_environment_warnings(ctx):
 # fires on a "SECRET" token in the binding name, and this is a secret's *name*.
 _APP_KEY_NAME = "SHIPMATE_APP_PRIVATE_KEY"
 
-# Emitted when the env-scoped token is absent: the listing needs the `environments: read`
-# permission app/manifest.json declares, unmintable until the installation accepts the request. A
+# Emitted when the env-scoped token is absent: the listing needs the `environments: read` permission
+# app/manifest.json declares, and no token carries it until the installation accepts the request. A
 # silent skip reads as "no plan environment holds a secret" — the one claim this probe exists for.
 _ENV_TOKEN_UNCHECKED = (
     WARNING,
