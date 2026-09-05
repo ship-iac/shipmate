@@ -81,6 +81,9 @@ def test_the_step_is_attributable_in_the_cell_summary():
         "DECRYPT_OUTCOME",
         "FINGERPRINT_OUTCOME",
         "RESTORE_OUTCOME",
+        "DIGEST_INPUT_OUTCOME",
+        "INIT_OUTCOME",
+        "PLAN_DIGEST_OUTCOME",
     ]
 
 

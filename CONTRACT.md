@@ -1399,9 +1399,8 @@ verbatim:
   blocked it, or why an earlier step failed first; the empty string for
   `applied`/`failed`).
 - `apply.txt` — the apply step's combined stdout+stderr, present only when
-  the apply step actually ran (absent for a cell blocked before then, and for a
-  cell whose init failed before the apply pipeline was reached — that cell is
-  failed, not blocked).
+  the apply step actually ran (absent for a cell blocked before then, a failed
+  init and a plan text that did not match what was reviewed included).
 
 `apply-cell` (writer) and `scripts/apply-comment` (reader, via
 `actions/apply-summary`) are pinned by the same SHA in a consumer's

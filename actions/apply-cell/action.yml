@@ -131,26 +131,31 @@ runs:
         mode: restore
         path: ${{ inputs.state-path }}
 
-    - name: Apply the stored plan (exact-plan; stale -> fail-safe)
-      id: apply
+    - name: Check the reviewed plan text's digest reached this action
+      id: digest-input
       shell: bash
       env:
-        STACK: ${{ inputs.stack }}
-        STACK_NAME: ${{ inputs.stack-name }}
         ENV: ${{ inputs.env }}
+        STACK_NAME: ${{ inputs.stack-name }}
         PLAN_SHA256: ${{ inputs.plan-sha256 }}
-      # The engine owns the command: `tofu apply stack.otplan` applies the reviewed plan
-      # artifact and nothing else, so the exact-plan invariant does not depend on branch
-      # content. tofu rejects a plan whose state moved since generation, and the non-zero
-      # exit leaves the apply check pending (fail-safe).
       run: |
         set -euo pipefail
         # `required: true` is not enforced by GitHub Actions, so an unwired input arrives empty;
-        # one shape check refuses that and a malformed value, before any work is done.
+        # one shape check refuses that and a malformed value, before any work is done. Its own
+        # step, and above the init: a wiring slip and a tampered plan need different remedies, so
+        # they must not share a blocked reason.
         [[ "$PLAN_SHA256" =~ ^[0-9a-f]{64}$ ]] || {
           echo "::error::apply aborted for $ENV/$STACK_NAME: no usable plan-text digest reached this action. Re-pin every engine reference to one commit, then re-plan."
           exit 1
         }
+
+    - name: Initialize the stack
+      id: init
+      shell: bash
+      env:
+        STACK: ${{ inputs.stack }}
+      run: |
+        set -euo pipefail
         # Restored local-backend workspace state carries no `.terraform` record marking the
         # backend initialised, so `init` reads it as legacy state awaiting migration and
         # `-input=false` turns that question into a hard error.
@@ -162,9 +167,8 @@ runs:
         if [ -d "$ws" ]; then mv "$ws" "$hidden"; fi
         # errexit is lifted only so the workspace restore runs even on a failed init.
         set +e
-        # `init` stays outside the teed pipeline -- its output is setup noise, apply.txt is
-        # reviewer-facing comment data -- and above the group marker, so a failure's
-        # diagnostics are not buried in a group this step then exits without closing.
+        # `init` output is setup noise and stays out of the apply step's teed pipeline, apply.txt
+        # being reviewer-facing comment data.
         terramate run --disable-safeguards=git-out-of-sync --no-recursive -C "$STACK" -- tofu init -input=false -reconfigure
         init_status=$?
         set -e
@@ -173,10 +177,22 @@ runs:
         if [ -d "$hidden" ]; then rm -rf "$ws"; mv "$hidden" "$ws"; fi
         # Fatal: nothing applies against state the engine could not initialise.
         [ "$init_status" -eq 0 ] || exit "$init_status"
+
+    - name: Verify the stored plan renders as the reviewed plan text
+      id: plan-digest
+      shell: bash
+      env:
+        STACK: ${{ inputs.stack }}
+        STACK_NAME: ${{ inputs.stack-name }}
+        ENV: ${{ inputs.env }}
+        PLAN_SHA256: ${{ inputs.plan-sha256 }}
+      run: |
+        set -euo pipefail
         # Binds the plan text a reviewer approved to the plan about to run: re-rendered with the
         # command that wrote it, compared whole. `tofu show` of a stored plan is byte-identical
         # across runners at one tofu version, and a version or provider change makes tofu refuse
-        # the plan file outright, so a difference here means the two disagree about content.
+        # the plan file outright, so a difference here means the two disagree about content. The
+        # render needs the providers `init` installs, hence its place after that step.
         rendered="$RUNNER_TEMP/rendered-plan.txt"
         tofu -chdir="$STACK" show -no-color stack.otplan > "$rendered"
         # Digested from stdin, not by name: sha256sum escapes a path containing a backslash and
@@ -186,6 +202,18 @@ runs:
           echo "::error::apply aborted for $ENV/$STACK_NAME: the stored plan does not render to the plan text that was reviewed (expected $PLAN_SHA256, got $actual). Nothing has been applied. Re-plan this stack on its pull request and review the fresh plan."
           exit 1
         fi
+
+    - name: Apply the stored plan (exact-plan; stale -> fail-safe)
+      id: apply
+      shell: bash
+      env:
+        STACK: ${{ inputs.stack }}
+      # The engine owns the command: `tofu apply stack.otplan` applies the reviewed plan
+      # artifact and nothing else, so the exact-plan invariant does not depend on branch
+      # content. tofu rejects a plan whose state moved since generation, and the non-zero
+      # exit leaves the apply check pending (fail-safe).
+      run: |
+        set -euo pipefail
         echo "::group::terramate apply: $STACK"
         # errexit is off for this one pipeline, and the step exits on tofu's own status via
         # PIPESTATUS[0]: with errexit and pipefail live, a `tee` failure alone -- a full
@@ -248,6 +276,9 @@ runs:
         DECRYPT_OUTCOME: ${{ steps.decrypt.outcome }}
         FINGERPRINT_OUTCOME: ${{ steps.fingerprint.outcome }}
         RESTORE_OUTCOME: ${{ steps.restore-state.outcome }}
+        DIGEST_INPUT_OUTCOME: ${{ steps.digest-input.outcome }}
+        INIT_OUTCOME: ${{ steps.init.outcome }}
+        PLAN_DIGEST_OUTCOME: ${{ steps.plan-digest.outcome }}
         APPLY_OUTCOME: ${{ steps.apply.outcome }}
       run: |
         set -euo pipefail

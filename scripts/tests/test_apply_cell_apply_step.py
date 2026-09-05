@@ -16,12 +16,14 @@ mask a real success, and a real apply failure still fails the step -- the
 pending-apply-check-as-work-queue invariant, where a failed apply must still leave its check
 pending.
 
-The same step also binds the plan text a reviewer approved to the plan about to run: it re-renders
-the stored `.otplan` and refuses unless the render's digest equals the one the trusted summary job
-recorded on the apply check. Both refusals in it are guarded here on ordering, not only on exit
-code -- the shape check must land before `init`, and a digest mismatch must land before the apply
--- because a guard that runs after the thing it guards exits non-zero all the same and protects
-nothing.
+The steps ahead of it bind the plan text a reviewer approved to the plan about to run: they
+re-render the stored `.otplan` and refuse unless the render's digest equals the one the trusted
+summary job recorded on the apply check. They are separate steps from the apply, and from each
+other, so that each carries its own blocked reason in `scripts/apply-cell-summary`; at runtime
+they are one sequence in one workspace, which is what this file executes. Their refusals are
+guarded here on ordering, not only on exit code -- the shape check must land before `init`, and a
+digest mismatch must land before the apply -- because a guard that runs after the thing it guards
+exits non-zero all the same and protects nothing.
 """
 
 import hashlib
@@ -34,10 +36,31 @@ from _loader import action_steps, action_yaml, usable_bash
 _BASH = usable_bash()
 
 
-def _apply_step():
-    matches = [s for s in action_steps("apply-cell") if s.get("id") == "apply"]
-    assert len(matches) == 1, f"expected exactly one apply step (id: apply), got {len(matches)}"
+#: The four steps the apply half of the cell is split across, in the order the runner executes
+#: them. The three ahead of the apply each carry a blocked reason of their own -- a wiring slip, a
+#: failed init and a tampered plan need different remedies -- and together the four are the one
+#: script this file exercises.
+_STEP_IDS = ("digest-input", "init", "plan-digest", "apply")
+
+
+def _step(step_id):
+    matches = [s for s in action_steps("apply-cell") if s.get("id") == step_id]
+    assert len(matches) == 1, f"expected exactly one step with id {step_id!r}, got {len(matches)}"
     return matches[0]
+
+
+def _apply_step():
+    return _step("apply")
+
+
+def test_the_apply_half_is_split_across_its_four_attributable_steps():
+    """Ordering, and that each half is a step in its own right. A refusal folded back inside
+    another step loses its blocked reason: scripts/apply-cell-summary maps a step id to one, so a
+    tamper detection with no id of its own renders as `failed` with no reason -- the same
+    reviewer-facing bucket as a real apply error that may have mutated infrastructure."""
+    ids = [s.get("id") for s in action_steps("apply-cell") if s.get("id")]
+    start = ids.index("digest-input")
+    assert tuple(ids[start : start + len(_STEP_IDS)]) == _STEP_IDS
 
 
 def test_apply_step_captures_pipestatus_and_exits_on_it():
@@ -82,7 +105,10 @@ def _run_step(
     action must leave nothing at its root, and pytest's own cwd is the engine tree.
     """
     assert _BASH is not None  # callers are skipif-gated on this; narrows the type too
-    run = _apply_step()["run"]
+    # The four step bodies concatenated in runner order. They are separate steps so that each
+    # refusal carries its own blocked reason, but composite-action steps share one workspace and
+    # run in sequence, so one script under one set of stubs is what they amount to at runtime.
+    run = "\n".join(_step(step_id)["run"] for step_id in _STEP_IDS)
     # The step calls terramate twice: a plain `init` line, then the teed apply. `terramate_body`
     # ends in `exit`, which dies in a subshell inside the pipeline but would kill this whole
     # script on the init line, so the stub dispatches on the tofu subcommand.
