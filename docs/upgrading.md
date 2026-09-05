@@ -159,6 +159,15 @@ names. The entries below `0.2.0` predate the first tagged release, or
 `CHANGELOG.md` does not pin one; they are kept for repositories moving from a
 very old pin.
 
+### 0.22.2 — re-pin only: embedded Python moved to `scripts/`
+
+**Re-pinning is enough, and optional.** Six Python blocks moved out of
+`action.yml` files into `scripts/` helpers so `ruff` reads them; the code is
+byte-identical and runs from the same actions' own pinned checkouts. No input,
+output, check name, artifact name, or runtime message changed, so a repository
+on `0.22.1` behaves identically before and after the bump. Re-pin to keep
+`shipmate doctor`'s pin-freshness probe quiet.
+
 ### 0.22.1 — re-pin only: a writing pass, no behaviour change
 
 **Re-pinning is enough, and optional.** This release rewrites comments,
