@@ -35,7 +35,7 @@ jobs:
           terramate-version: ${{ vars.TERRAMATE_VERSION }}
           tofu-version: ${{ vars.TOFU_VERSION }}
       - id: d
-        uses: ship-iac/shipmate/actions/apply-detect@a9be68cc9442bbf03478a7eabbd0afc2847cdd4e
+        uses: ship-iac/shipmate/actions/apply-detect@463196516076cfbbbbbe5503b3d65352d5eb1bb5
         with:
           environment: ${{ inputs.environment }}
           # A literal, not an input: this file is the verb. `run_unlock` reads

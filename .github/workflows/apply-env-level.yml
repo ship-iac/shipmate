@@ -86,7 +86,7 @@ jobs:
         with:
           role-to-assume: ${{ matrix.workload_var != '' && vars[format('AWS_ROLE_ARN_{0}', matrix.workload_var)] || vars.AWS_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
-      - uses: ship-iac/shipmate/actions/apply-cell@39b452149dc25eabb6364f6044862e1780b066f2
+      - uses: ship-iac/shipmate/actions/apply-cell@463196516076cfbbbbbe5503b3d65352d5eb1bb5
         with:
           stack: ${{ matrix.stack }}
           stack-name: ${{ matrix.stack }}
@@ -130,7 +130,7 @@ jobs:
         with:
           role-to-assume: ${{ matrix.workload_var != '' && vars[format('AWS_ROLE_ARN_{0}', matrix.workload_var)] || vars.AWS_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
-      - uses: ship-iac/shipmate/actions/apply-cell@39b452149dc25eabb6364f6044862e1780b066f2
+      - uses: ship-iac/shipmate/actions/apply-cell@463196516076cfbbbbbe5503b3d65352d5eb1bb5
         with:
           stack: ${{ matrix.stack }}
           stack-name: ${{ matrix.stack }}
@@ -174,7 +174,7 @@ jobs:
         with:
           role-to-assume: ${{ matrix.workload_var != '' && vars[format('AWS_ROLE_ARN_{0}', matrix.workload_var)] || vars.AWS_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
-      - uses: ship-iac/shipmate/actions/apply-cell@39b452149dc25eabb6364f6044862e1780b066f2
+      - uses: ship-iac/shipmate/actions/apply-cell@463196516076cfbbbbbe5503b3d65352d5eb1bb5
         with:
           stack: ${{ matrix.stack }}
           stack-name: ${{ matrix.stack }}
@@ -218,7 +218,7 @@ jobs:
         with:
           role-to-assume: ${{ matrix.workload_var != '' && vars[format('AWS_ROLE_ARN_{0}', matrix.workload_var)] || vars.AWS_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
-      - uses: ship-iac/shipmate/actions/apply-cell@39b452149dc25eabb6364f6044862e1780b066f2
+      - uses: ship-iac/shipmate/actions/apply-cell@463196516076cfbbbbbe5503b3d65352d5eb1bb5
         with:
           stack: ${{ matrix.stack }}
           stack-name: ${{ matrix.stack }}
@@ -262,7 +262,7 @@ jobs:
         with:
           role-to-assume: ${{ matrix.workload_var != '' && vars[format('AWS_ROLE_ARN_{0}', matrix.workload_var)] || vars.AWS_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
-      - uses: ship-iac/shipmate/actions/apply-cell@39b452149dc25eabb6364f6044862e1780b066f2
+      - uses: ship-iac/shipmate/actions/apply-cell@463196516076cfbbbbbe5503b3d65352d5eb1bb5
         with:
           stack: ${{ matrix.stack }}
           stack-name: ${{ matrix.stack }}
@@ -306,7 +306,7 @@ jobs:
         with:
           role-to-assume: ${{ matrix.workload_var != '' && vars[format('AWS_ROLE_ARN_{0}', matrix.workload_var)] || vars.AWS_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
-      - uses: ship-iac/shipmate/actions/apply-cell@39b452149dc25eabb6364f6044862e1780b066f2
+      - uses: ship-iac/shipmate/actions/apply-cell@463196516076cfbbbbbe5503b3d65352d5eb1bb5
         with:
           stack: ${{ matrix.stack }}
           stack-name: ${{ matrix.stack }}
@@ -350,7 +350,7 @@ jobs:
         with:
           role-to-assume: ${{ matrix.workload_var != '' && vars[format('AWS_ROLE_ARN_{0}', matrix.workload_var)] || vars.AWS_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
-      - uses: ship-iac/shipmate/actions/apply-cell@39b452149dc25eabb6364f6044862e1780b066f2
+      - uses: ship-iac/shipmate/actions/apply-cell@463196516076cfbbbbbe5503b3d65352d5eb1bb5
         with:
           stack: ${{ matrix.stack }}
           stack-name: ${{ matrix.stack }}
@@ -394,7 +394,7 @@ jobs:
         with:
           role-to-assume: ${{ matrix.workload_var != '' && vars[format('AWS_ROLE_ARN_{0}', matrix.workload_var)] || vars.AWS_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
-      - uses: ship-iac/shipmate/actions/apply-cell@39b452149dc25eabb6364f6044862e1780b066f2
+      - uses: ship-iac/shipmate/actions/apply-cell@463196516076cfbbbbbe5503b3d65352d5eb1bb5
         with:
           stack: ${{ matrix.stack }}
           stack-name: ${{ matrix.stack }}

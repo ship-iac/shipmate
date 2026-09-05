@@ -118,7 +118,7 @@ jobs:
           terramate-version: ${{ vars.TERRAMATE_VERSION }}
           tofu-version: ${{ vars.TOFU_VERSION }}
       - id: d
-        uses: ship-iac/shipmate/actions/apply-all-detect@a9be68cc9442bbf03478a7eabbd0afc2847cdd4e
+        uses: ship-iac/shipmate/actions/apply-all-detect@463196516076cfbbbbbe5503b3d65352d5eb1bb5
         with:
           head-sha: ${{ inputs.ref }}
           github-token: ${{ github.token }}
@@ -137,7 +137,7 @@ jobs:
     # `fromJSON('')`.
     needs: [guard, review, detect]
     if: ${{ !failure() && !cancelled() && needs.detect.outputs.envlevel0_empty != 'true' && !contains(join(needs.*.result, ','), 'cancelled') }}
-    uses: ship-iac/shipmate/.github/workflows/apply-env-level.yml@c4b6de6f619b9f0d1635cb2337857018337f2227 # pinned to a commit on main
+    uses: ship-iac/shipmate/.github/workflows/apply-env-level.yml@463196516076cfbbbbbe5503b3d65352d5eb1bb5 # pinned to a commit on main
     permissions: { contents: read, checks: read, actions: read, id-token: write }
     with:
       waves_json: ${{ needs.detect.outputs.envlevel0_waves }}
@@ -159,7 +159,7 @@ jobs:
     name: L1
     needs: [guard, review, detect, envlevel0]
     if: ${{ !failure() && !cancelled() && needs.detect.outputs.envlevel1_empty != 'true' && !contains(join(needs.*.result, ','), 'cancelled') }}
-    uses: ship-iac/shipmate/.github/workflows/apply-env-level.yml@c4b6de6f619b9f0d1635cb2337857018337f2227 # pinned to a commit on main
+    uses: ship-iac/shipmate/.github/workflows/apply-env-level.yml@463196516076cfbbbbbe5503b3d65352d5eb1bb5 # pinned to a commit on main
     permissions: { contents: read, checks: read, actions: read, id-token: write }
     with:
       waves_json: ${{ needs.detect.outputs.envlevel1_waves }}
@@ -173,7 +173,7 @@ jobs:
     name: L2
     needs: [guard, review, detect, envlevel0, envlevel1]
     if: ${{ !failure() && !cancelled() && needs.detect.outputs.envlevel2_empty != 'true' && !contains(join(needs.*.result, ','), 'cancelled') }}
-    uses: ship-iac/shipmate/.github/workflows/apply-env-level.yml@c4b6de6f619b9f0d1635cb2337857018337f2227 # pinned to a commit on main
+    uses: ship-iac/shipmate/.github/workflows/apply-env-level.yml@463196516076cfbbbbbe5503b3d65352d5eb1bb5 # pinned to a commit on main
     permissions: { contents: read, checks: read, actions: read, id-token: write }
     with:
       waves_json: ${{ needs.detect.outputs.envlevel2_waves }}
@@ -187,7 +187,7 @@ jobs:
     name: L3
     needs: [guard, review, detect, envlevel0, envlevel1, envlevel2]
     if: ${{ !failure() && !cancelled() && needs.detect.outputs.envlevel3_empty != 'true' && !contains(join(needs.*.result, ','), 'cancelled') }}
-    uses: ship-iac/shipmate/.github/workflows/apply-env-level.yml@c4b6de6f619b9f0d1635cb2337857018337f2227 # pinned to a commit on main
+    uses: ship-iac/shipmate/.github/workflows/apply-env-level.yml@463196516076cfbbbbbe5503b3d65352d5eb1bb5 # pinned to a commit on main
     permissions: { contents: read, checks: read, actions: read, id-token: write }
     with:
       waves_json: ${{ needs.detect.outputs.envlevel3_waves }}
@@ -221,13 +221,13 @@ jobs:
     steps:
       - name: Complete gate if every apply check is done
         id: gate
-        uses: ship-iac/shipmate/actions/gate-refresh@39b452149dc25eabb6364f6044862e1780b066f2
+        uses: ship-iac/shipmate/actions/gate-refresh@463196516076cfbbbbbe5503b3d65352d5eb1bb5
         with:
           head-sha: ${{ inputs.ref }}
           app-id: ${{ vars.SHIPMATE_APP_ID }}
           private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
       - name: Post apply result comment
-        uses: ship-iac/shipmate/actions/apply-summary@a9be68cc9442bbf03478a7eabbd0afc2847cdd4e
+        uses: ship-iac/shipmate/actions/apply-summary@463196516076cfbbbbbe5503b3d65352d5eb1bb5
         with:
           pr-number: ${{ inputs.pr_number }}
           head-sha: ${{ inputs.ref }}
