@@ -114,27 +114,59 @@ def app_done_names(check_run_lines, app_id):
     return done_names(from_app(parse_jsonl(check_run_lines), app_id))
 
 
-def plan_runs_by_name(check_run_lines, app_id):
-    """Map each App-authored apply check name to the plan run id that produced
-    its plan, read from the check-run's `external_id` record written by
-    pending-checks. Reuses app_done_names' primitives -- parse_jsonl, the
-    fail-closed from_app filter, and latest_by_name's newest-by-id grouping --
-    so only the newest App-authored run per name is consulted.
+def _records_by_name(check_run_lines, app_id):
+    """Map each App-authored apply check name to the decoded `external_id` record
+    pending-checks wrote on it. Runs app_done_names' primitives -- parse_jsonl, the
+    fail-closed from_app filter, and latest_by_name's newest-by-id grouping -- so only the
+    newest App-authored run per name is consulted, and both public projections below see the
+    same one parse.
 
-    A name is absent when that newest run carries no usable record: a legacy
-    bare-hex external_id from an older engine version, a null/empty/non-JSON
-    one, or a record without a decimal-digit `plan_run`. Absence is not an
-    error here -- no JSONDecodeError escapes -- and each caller decides per
-    cell what a missing plan run means."""
+    A name is absent when that newest run carries no decodable record: a legacy bare-hex
+    external_id from an older engine version, a null/empty/non-JSON one, or one that decodes
+    to something other than an object. No JSONDecodeError escapes."""
     out = {}
     for name, run in latest_by_name(from_app(parse_jsonl(check_run_lines), app_id)).items():
         try:
             record = json.loads(run.get("external_id") or "")
         except json.JSONDecodeError:
             continue
-        plan_run = record.get("plan_run") if isinstance(record, dict) else None
+        if isinstance(record, dict):
+            out[name] = record
+    return out
+
+
+def plan_runs_by_name(check_run_lines, app_id):
+    """Map each App-authored apply check name to the plan run id that produced its plan, read
+    from the check-run's `external_id` record written by pending-checks.
+
+    A name is absent when its newest run's record has no decimal-digit `plan_run`, or no
+    usable record at all. Absence is not an error here, and each caller decides per cell what
+    a missing plan run means.
+
+    The return shape is `{name: run id}` and does not narrow for any other reason: authorize
+    reads it as PLAN_RUN_JSON and answers an empty mapping with "no reviewed plan for the
+    current PR head", and doctor-cells warns per name absent from it. A name dropped here for
+    a policy that is not theirs surfaces as those two messages."""
+    out = {}
+    for name, record in _records_by_name(check_run_lines, app_id).items():
+        plan_run = record.get("plan_run")
         if isinstance(plan_run, str) and re.fullmatch(r"[0-9]+", plan_run):
             out[name] = plan_run
+    return out
+
+
+def plan_hashes_by_name(check_run_lines, app_id):
+    """Map each App-authored apply check name to the sha256 of the plan text the trusted
+    summary job published for it, read from the same `external_id` record.
+
+    A name is absent when its newest run records no 64-lowercase-hex `plan_sha256` -- most
+    often a check written before the engine recorded one. Absence is not an error here; each
+    caller decides what an unbound plan text means for the action it is about to take."""
+    out = {}
+    for name, record in _records_by_name(check_run_lines, app_id).items():
+        digest = record.get("plan_sha256")
+        if isinstance(digest, str) and re.fullmatch(r"[0-9a-f]{64}", digest):
+            out[name] = digest
     return out
 
 
