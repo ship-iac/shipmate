@@ -1,7 +1,7 @@
 import json
 
 import pytest
-from _detect_fixtures import APP_ID, _apply_check, _record, check_run
+from _detect_fixtures import APP_ID, PLAN_SHA, _apply_check, _record, check_run
 from _loader import load_script
 
 aad = load_script("apply-all-detect")
@@ -280,6 +280,7 @@ def test_main_wires_the_tag_map_into_the_cells(tmp_path, monkeypatch):
             "environment": "dev-eu",
             "workload_var": "NET_EDGE",
             "plan_run_id": "42",
+            "plan_sha256": PLAN_SHA,
         }
     ]
 
@@ -329,6 +330,32 @@ def test_main_gives_each_cell_the_plan_run_its_own_check_names(tmp_path, monkeyp
         ("dev-eu", "111"),
         ("dev-us", "222"),
     ]
+
+
+def test_main_refuses_a_cell_whose_check_records_no_plan_text_digest(tmp_path, monkeypatch):
+    """Through this detect's own entry point: the digest reaches `with_plan_runs` from this
+    call site, so a call site that stopped passing it -- or passed the wrong mapping -- would
+    apply dev-us against a plan text nobody bound. The cell HAS a usable plan run, so the
+    missing-run refusal cannot absorb this one."""
+    with pytest.raises(SystemExit) as exc_info:
+        _run_main(
+            tmp_path,
+            monkeypatch,
+            envs=["dev-eu", "dev-us"],
+            decision="APPROVED",
+            checks=[
+                _apply_check("stacks/app", "dev-eu", plan_run="42"),
+                _apply_check("stacks/app", "dev-us", plan_run="43", plan_sha256=None),
+            ],
+        )
+    assert str(exc_info.value) == (
+        "::error::apply aborted: no plan-text digest recorded for apply / stacks/app / dev-us "
+        "— the reviewed plan text cannot be checked against the plan that would be applied, so "
+        "this apply is refused rather than run unverified. The check was written before this "
+        "engine version. Re-plan these stacks on their pull request, then apply again; if that "
+        "pull request has already merged, a new pull request touching them plans and applies "
+        "them afresh."
+    )
 
 
 def test_main_refuses_a_cell_whose_check_records_no_plan_run(tmp_path, monkeypatch):

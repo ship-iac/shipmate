@@ -86,9 +86,10 @@ def cells_for_env(env, paths, tags_by_stack):
     ]
 
 
-def with_plan_runs(cells, plan_runs):
-    """Each cell gains the plan run id ITS OWN check records, so a cell recovered
-    by a re-run plan job downloads from the run that re-planned it while its
+def with_plan_runs(cells, plan_runs, plan_hashes):
+    """Each cell gains the plan run id and the plan-text digest ITS OWN check
+    records, so a cell recovered by a re-run plan job downloads from the run that
+    re-planned it, and is bound to the plan text reviewed for it, while its
     siblings stay on the original.
 
     A cell whose newest check records no usable run refuses. The alternative —
@@ -98,13 +99,26 @@ def with_plan_runs(cells, plan_runs):
     older engine version carries a record-less check on that head forever, and
     refusing over one already-completed apply would strand every upgraded PR.
 
-    The refusal is shared by all three detects, so it is worded for both paths:
-    deploy's candidates come from the git diff rather than from the checks, so a
-    cell here may have no apply check whatsoever, and its pull request is already
-    merged — a remedy phrased as "re-plan on this pull request" would send a
-    post-merge operator to a pull request that no longer accepts commits."""
-    named = [(c, plan_runs.get(_check_name(c["stack"], c["environment"]))) for c in cells]
-    missing = [_check_name(c["stack"], c["environment"]) for c, run in named if not run]
+    A cell with a run but no digest refuses separately, and says so separately:
+    the causes differ, and a reader told "no plan run" would go looking for a
+    check that exists. It refuses rather than applying unverified because an
+    accepted absence is a guard the plan cell switches off by omitting a file.
+
+    The refusals are shared by all three detects, so they are worded for both
+    paths: deploy's candidates come from the git diff rather than from the
+    checks, so a cell here may have no apply check whatsoever, and its pull
+    request is already merged — a remedy phrased as "re-plan on this pull
+    request" would send a post-merge operator to a pull request that no longer
+    accepts commits."""
+    named = [
+        (
+            c,
+            plan_runs.get(_check_name(c["stack"], c["environment"])),
+            plan_hashes.get(_check_name(c["stack"], c["environment"])),
+        )
+        for c in cells
+    ]
+    missing = [_check_name(c["stack"], c["environment"]) for c, run, _ in named if not run]
     if missing:
         raise SystemExit(
             f"::error::apply aborted: no plan run recorded for {', '.join(missing)} — the "
@@ -114,7 +128,17 @@ def with_plan_runs(cells, plan_runs):
             "that pull request has already merged, a new pull request touching them plans "
             "and applies them afresh."
         )
-    return [{**c, "plan_run_id": run} for c, run in named]
+    unbound = [_check_name(c["stack"], c["environment"]) for c, _, digest in named if not digest]
+    if unbound:
+        raise SystemExit(
+            f"::error::apply aborted: no plan-text digest recorded for {', '.join(unbound)} — "
+            "the reviewed plan text cannot be checked against the plan that would be applied, "
+            "so this apply is refused rather than run unverified. The check was written before "
+            "this engine version. Re-plan these stacks on their pull request, then apply "
+            "again; if that pull request has already merged, a new pull request touching them "
+            "plans and applies them afresh."
+        )
+    return [{**c, "plan_run_id": run, "plan_sha256": digest} for c, run, digest in named]
 
 
 def filter_pending(cells, completed_names):
@@ -350,6 +374,7 @@ def main():
     # from_app filter). That App authorship is what binds a run id to the plan
     # workflow; there is no workflow-path check to re-add here.
     plan_runs = ag.plan_runs_by_name(lines, app_id)
+    plan_hashes = ag.plan_hashes_by_name(lines, app_id)
     completed = completed_apply_names(lines, app_id)
 
     # Tags only for the workset: this path reconstructs its cells from the head's
@@ -358,7 +383,7 @@ def main():
     paths = paths_with_checks(env, list(deps.keys()), names)
     cells = cells_for_env(env, paths, {p: bm._tags(p) for p in paths})
 
-    pending = with_plan_runs(filter_pending(cells, completed), plan_runs)
+    pending = with_plan_runs(filter_pending(cells, completed), plan_runs, plan_hashes)
 
     waves = wv.assign_waves(wv.levels(deps), pending)
     wv.guard_max_waves(waves)

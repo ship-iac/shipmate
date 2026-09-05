@@ -1,7 +1,7 @@
 import json
 
 import pytest
-from _detect_fixtures import APP_ID, _apply_check, _record, completed_names
+from _detect_fixtures import APP_ID, PLAN_SHA, _apply_check, _record, completed_names
 from _detect_fixtures import check_run as _check
 from _loader import load_script
 
@@ -54,25 +54,61 @@ _TWO_CELLS = [
 ]
 
 
-def test_each_cell_carries_the_plan_run_its_own_check_names():
+_RUNS = {"apply / stacks/app / dev-eu": "111", "apply / stacks/dns / dev-eu": "222"}
+_HASHES = {"apply / stacks/app / dev-eu": "a" * 64, "apply / stacks/dns / dev-eu": "b" * 64}
+
+
+def test_each_cell_carries_the_plan_run_and_digest_its_own_check_names():
     # The recovery shape: one cell re-planned by a later run while its sibling is still named
-    # by the first. Each must apply from the run that planned it.
-    out = ad.with_plan_runs(
-        _TWO_CELLS,
-        {"apply / stacks/app / dev-eu": "111", "apply / stacks/dns / dev-eu": "222"},
-    )
+    # by the first. Each must apply from the run that planned it, and each must be bound to
+    # the plan text reviewed for IT -- one shared digest would let a sibling's text vouch for
+    # this cell's plan.
+    out = ad.with_plan_runs(_TWO_CELLS, _RUNS, _HASHES)
     assert out == [
-        {"stack": "stacks/app", "environment": "dev-eu", "workload_var": "", "plan_run_id": "111"},
-        {"stack": "stacks/dns", "environment": "dev-eu", "workload_var": "", "plan_run_id": "222"},
+        {
+            "stack": "stacks/app",
+            "environment": "dev-eu",
+            "workload_var": "",
+            "plan_run_id": "111",
+            "plan_sha256": "a" * 64,
+        },
+        {
+            "stack": "stacks/dns",
+            "environment": "dev-eu",
+            "workload_var": "",
+            "plan_run_id": "222",
+            "plan_sha256": "b" * 64,
+        },
     ]
+
+
+def test_a_cell_with_a_plan_run_but_no_digest_refuses_with_its_own_message():
+    """The cell IS in `plan_runs`, so the missing-plan-run arm cannot absorb this: the two
+    refusals name different causes and different remedies, and a reader told "no plan run"
+    would go looking for a check that exists."""
+    with pytest.raises(SystemExit) as exc_info:
+        ad.with_plan_runs(_TWO_CELLS, _RUNS, {"apply / stacks/app / dev-eu": "a" * 64})
+    assert str(exc_info.value) == (
+        "::error::apply aborted: no plan-text digest recorded for apply / stacks/dns / dev-eu "
+        "— the reviewed plan text cannot be checked against the plan that would be applied, so "
+        "this apply is refused rather than run unverified. The check was written before this "
+        "engine version. Re-plan these stacks on their pull request, then apply again; if that "
+        "pull request has already merged, a new pull request touching them plans and applies "
+        "them afresh."
+    )
 
 
 def test_a_cell_whose_check_names_no_plan_run_refuses():
     # Not skipped and not defaulted: falling back to a run lookup keyed on a plan run's
     # head_sha is the platform dependency this path exists to drop, and a silent default
-    # applies a cell from nowhere.
+    # applies a cell from nowhere. `stacks/dns` is in neither mapping, and the message is the
+    # missing-run one: a cell with no check at all is not a cell whose digest went missing.
     with pytest.raises(SystemExit) as exc_info:
-        ad.with_plan_runs(_TWO_CELLS, {"apply / stacks/app / dev-eu": "111"})
+        ad.with_plan_runs(
+            _TWO_CELLS,
+            {"apply / stacks/app / dev-eu": "111"},
+            {"apply / stacks/app / dev-eu": "a" * 64},
+        )
     assert str(exc_info.value) == (
         "::error::apply aborted: no plan run recorded for apply / stacks/dns / dev-eu — the "
         "apply check names no plan run to apply from — most likely a check written "
@@ -376,6 +412,7 @@ def test_main_wires_the_tag_map_into_the_cells(tmp_path, monkeypatch):
             "environment": "dev-eu",
             "workload_var": "NET_EDGE",
             "plan_run_id": "42",
+            "plan_sha256": PLAN_SHA,
         }
     ]
     assert evaluated == ["stacks/app"]
@@ -714,7 +751,8 @@ def test_apply_mode_writes_the_whole_output_file_verbatim(monkeypatch, tmp_path)
     ad.main()
     assert out.read_text(encoding="utf-8") == (
         'waves={"wave0": [{"stack": "stacks/app", "environment": "dev-eu", '
-        '"workload_var": "APP", "plan_run_id": "42"}], "wave1": [], "wave2": [], '
+        '"workload_var": "APP", "plan_run_id": "42", "plan_sha256": "dddddddddddddddd'
+        'dddddddddddddddddddddddddddddddddddddddddddddddd"}], "wave1": [], "wave2": [], '
         '"wave3": [], "wave4": [], "wave5": [], "wave6": [], "wave7": []}\n'
         "empty=false\n"
         "cells=[]\n"

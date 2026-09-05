@@ -123,6 +123,7 @@ def main():
     runnable = ad.with_plan_runs(
         [c for c in pending if c["environment"] not in dropped],
         ad.ag.plan_runs_by_name(lines, app_id),
+        ad.ag.plan_hashes_by_name(lines, app_id),
     )
     # From `runnable`, never from `pending & ungated`: a listed env can still be
     # excluded or skipped, and claiming it applied is worse than saying nothing.
