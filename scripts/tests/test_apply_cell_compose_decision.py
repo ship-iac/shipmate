@@ -19,7 +19,7 @@ never ran.
 import json
 
 import pytest
-from _loader import action_steps, load_script
+from _loader import action_steps, load_script, run_lines
 
 
 def _compose_step():
@@ -29,8 +29,10 @@ def _compose_step():
 
 
 def test_the_compose_step_runs_the_script_this_file_exercises():
-    assert (
-        'python3 "$GITHUB_ACTION_PATH/../../scripts/apply-cell-summary"' in _compose_step()["run"]
+    # A whole run line, not a substring: a commented-out invocation writes no cell.json, and
+    # apply-comment then renders an applied cell as never attempted.
+    assert 'python3 "$GITHUB_ACTION_PATH/../../scripts/apply-cell-summary"' in run_lines(
+        _compose_step()
     )
 
 

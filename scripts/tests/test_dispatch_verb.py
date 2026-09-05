@@ -9,7 +9,15 @@ import tempfile
 from pathlib import Path
 
 import pytest
-from _loader import ACTIONS, SCRIPTS, action_steps, action_yaml, load_script, usable_bash
+from _loader import (
+    ACTIONS,
+    SCRIPTS,
+    action_steps,
+    action_yaml,
+    load_script,
+    run_lines,
+    usable_bash,
+)
 
 DISPATCH_ACTION = "dispatch"
 
@@ -29,9 +37,11 @@ def _dispatch_step():
 
 
 def test_the_dispatch_step_runs_the_body_builder_this_file_exercises():
-    assert (
-        'python3 "$GITHUB_ACTION_PATH/../../scripts/dispatch-body" > body.json'
-        in _dispatch_step()["run"]
+    # A whole run line, not a substring: the recording `gh` stub never opens body.json, so a
+    # commented-out builder would leave every body assertion here exercising a script nothing
+    # runs, and production would POST an empty --input.
+    assert 'python3 "$GITHUB_ACTION_PATH/../../scripts/dispatch-body" > body.json' in run_lines(
+        _dispatch_step()
     )
 
 
