@@ -1399,9 +1399,8 @@ verbatim:
   blocked it, or why an earlier step failed first; the empty string for
   `applied`/`failed`).
 - `apply.txt` — the apply step's combined stdout+stderr, present only when
-  the apply step actually ran (absent for a cell blocked before then, and for a
-  cell whose init failed before the apply pipeline was reached — that cell is
-  failed, not blocked).
+  the apply step actually ran (absent for a cell blocked before then, a failed
+  init and a plan text that did not match what was reviewed included).
 
 `apply-cell` (writer) and `scripts/apply-comment` (reader, via
 `actions/apply-summary`) are pinned by the same SHA in a consumer's
@@ -1475,7 +1474,10 @@ with the glob pattern `cell-summary.*`. It contains verbatim:
   `destroy` (integers), `changed` (boolean); written by `plan-cell` at plan
   time from `scripts/plan-classify` output — the summary never re-parses
   plan text.
-- `plan.txt` — the `tofu show -no-color` rendering of the reviewed plan.
+- `plan.txt` — the `tofu show -no-color` rendering of the reviewed plan. The
+  `summary` job hashes these exact bytes and records the digest on the cell's
+  apply check; the apply re-renders the stored plan and refuses a difference
+  (§Apply-match fingerprint).
 
 `plan-cell` (writer) and `summary` (reader) are pinned by the same SHA in a
 consumer's `plan.yml`, so the schema upgrades atomically; the summary
@@ -1623,7 +1625,8 @@ degrade to the workflow-run URL on no match.
 
 Each plan stores a fingerprint (`fingerprint.txt` in the artifact; on the apply
 check, the `external_id` JSON record holds it alongside the id of the plan run
-that produced the cell): `sha256` over the sorted JSON of every non-empty
+that produced the cell and the digest of that cell's plan text, below):
+`sha256` over the sorted JSON of every non-empty
 `TF_VAR_*` environment variable (name→value) plus `TF_WORKSPACE` when it is set.
 Ephemeral credential vars (`AWS_*`, etc.) are excluded. A set-but-empty
 `TF_VAR_*` is excluded from the payload, so it now hashes identically to that
@@ -1657,6 +1660,23 @@ is additive to the plan-run binding the apply path already carries: each cell's
 plan run is read from an App-authored apply check on that same head, so no plan
 run from another head can be named. That binding bounds which plan run may be
 applied; this one binds each individual plan to the tree it was produced from.
+
+A third record binds the plan *text* to the plan that executes. The trusted
+`summary` job takes `sha256` over the **whole** `plan.txt` it downloaded —
+computed there, never copied from the cell — and writes it as the record's
+`plan_sha256` field, on the queued and the neutral check alike. The comment
+embeds at most the first 60 000 characters of that file and may truncate further or
+degrade to a link, so on a large plan the digest covers more than the comment
+shows; it binds the file, not the excerpt.
+`apply-cell` re-renders the stored plan with `tofu -chdir=<stack> show
+-no-color stack.otplan`, the command that produced the file, and refuses unless
+the digest matches. The comparison runs after `init`, which the render needs for
+its providers, and
+before `tofu apply`, so a refusal applies nothing. An absent digest is refused
+too, at detect: a check written before the engine recorded one carries none, and
+the remedy is a re-plan. `tofu show` of a stored plan renders identically on any
+runner at one tofu version, and both `show` and `apply` refuse a plan file from
+another version, so the record carries no version field.
 
 ## Secrets in published output
 
@@ -1759,6 +1779,14 @@ directory and the safeguard policy only:
 |---|---|
 | `plan-cell`, `drift-cell` | `tofu init -input=false -reconfigure`; `tofu plan -input=false -lock=false -out=stack.otplan` |
 | `apply-cell` | `tofu init -input=false -reconfigure`; `tofu apply -input=false stack.otplan` |
+
+Four `tofu show` invocations sit outside that wrapper, invoked directly:
+`plan-cell` renders both the reviewed plan text and its JSON form, `drift-cell`
+renders the JSON form, and `apply-cell` re-renders the plan text to compare
+against the recorded digest (§Apply-match fingerprint). Rendering a stored plan
+reads a file and touches neither state nor the stack graph, so it needs no
+wrapper. `plan-cell`'s text render and `apply-cell`'s stay byte-identical to
+each other; that equality is what the plan-text binding rests on.
 
 A consumer repository therefore needs no `script` blocks and no
 `terramate.config.experiments = ["scripts"]`. `init` always passes

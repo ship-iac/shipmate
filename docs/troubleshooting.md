@@ -400,6 +400,42 @@ cell's plan run read from an App-authored apply check on that same head — is
 unchanged, and a repository sees this error only for a plan run that binding
 accepted.
 
+### `no plan-text digest recorded for`, or `the stored plan does not render to the plan text that was reviewed`
+
+An apply is refused over the plan text a reviewer read, at one of three points.
+The first is `detect`, before any cell job starts. The other two are inside an
+apply cell and leave its `apply / <stack> / <env>` check pending: the
+`digest-input` step refuses a digest that never reached the action, before
+`tofu init`; the `plan-digest` step refuses a render that disagrees with it,
+after `init` and before `tofu apply`. Each names its own blocked reason in the
+cell summary.
+
+The plan text and the stored plan are produced by the same job, which runs the
+pull request's own code, so the two can be made to disagree. The trusted summary
+job records the digest of the `plan.txt` it publishes in the comment
+([`../CONTRACT.md`](../CONTRACT.md) §Apply-match fingerprint), and the applying
+cell re-renders the stored plan with the command that wrote it and compares.
+
+- **No digest is recorded.** The apply check was written before the release that
+  records one. Nothing is compared, so it is refused rather than applied
+  unverified. Pre-merge the fix is a push and an apply of the fresh plan; a
+  *re-run* of the old plan run does not help, because it replays the workflow
+  file of the commit that triggered it. Post-merge, a follow-up pull request
+  touching those stacks plans and applies them afresh. This is the same shape as
+  the absent planned-commit record above, and the same remedy.
+- **The render disagrees with the digest.** The error names both digests. Either
+  the plan text published for review does not describe the plan that would run,
+  or the tooling moved underneath the artifact. A `TOFU_VERSION` bump between
+  plan and apply reaches `tofu` first and fails earlier with `plan files cannot
+  be transferred between different versions`; a provider that moved fails at the
+  apply with `Inconsistent dependency lock file`. Neither produces this message.
+  There is no force. Re-plan the stack on its pull request and review the fresh
+  plan.
+
+Nothing has been applied in either case: the comparison runs before
+`tofu apply`, and the pending check is what keeps the gate from greening over
+an unapplied stack.
+
 ### `this apply would bind GitHub Environment(s) that do not exist`
 
 The apply run stopped in its `snapshot` job, before any wave, and the error names

@@ -240,6 +240,31 @@ def test_main_gives_each_cell_the_plan_run_its_own_check_names(tmp_path, monkeyp
     ]
 
 
+def test_main_refuses_a_cell_whose_check_records_no_plan_text_digest(tmp_path, monkeypatch):
+    """Through this detect's own entry point, for the same reason as the missing-run refusal:
+    nobody is watching a post-merge run, so a call site that stopped passing the digests would
+    apply every cell unverified with nothing said. The cell HAS a usable plan run, so the
+    missing-run refusal cannot absorb this one."""
+    with pytest.raises(SystemExit) as exc_info:
+        _run_main(
+            tmp_path,
+            monkeypatch,
+            cells=[_cell("stacks/app", "dev-eu"), _cell("stacks/app", "dev-us")],
+            checks=[
+                _apply_check("stacks/app", "dev-eu", plan_run="42"),
+                _apply_check("stacks/app", "dev-us", plan_run="43", plan_sha256=None),
+            ],
+        )
+    assert str(exc_info.value) == (
+        "::error::apply aborted: no plan-text digest recorded for apply / stacks/app / dev-us "
+        "— the reviewed plan text cannot be checked against the plan that would be applied, so "
+        "this apply is refused rather than run unverified. The check was written before this "
+        "engine version. Re-plan these stacks on their pull request, then apply again; if that "
+        "pull request has already merged, a new pull request touching them plans and applies "
+        "them afresh."
+    )
+
+
 def test_main_refuses_a_cell_whose_check_records_no_plan_run(tmp_path, monkeypatch):
     # The loud refusal this path most needs: nobody is watching a post-merge run, so a default
     # would apply a cell from nowhere and a skip would leave the check pending with nothing

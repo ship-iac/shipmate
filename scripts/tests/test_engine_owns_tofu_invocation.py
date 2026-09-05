@@ -85,6 +85,23 @@ _EXPECTED = {
     "apply-cell": [_INIT, _APPLY],
     "unlock-cell": [_INIT, _PROBE, _FORCE_UNLOCK],
 }
+#: The plan-text render, one constant for the two sides of the plan-text binding: plan-cell writes
+#: the reviewed plan.txt with it, and apply-cell re-renders the stored plan with it before the
+#: apply and refuses a difference. The binding holds only while the two are the same command, so
+#: neither is written out separately here.
+_SHOW_TEXT = ["tofu", "-chdir=$STACK", "show", "-no-color", "stack.otplan"]
+_SHOW_JSON = ["tofu", "-chdir=$STACK", "show", "-json", "stack.otplan"]
+
+#: Every bare `tofu` line each cell is expected to run -- the ones outside a `terramate run`
+#: wrapper, which `_EXPECTED` does not claim. Rendering a stored plan needs no wrapper: it reads a
+#: file and touches neither state nor the stack graph.
+_EXPECTED_BARE = {
+    "plan-cell": [[*_SHOW_TEXT, ">", "plan.txt"], [*_SHOW_JSON, ">", "plan.json"]],
+    "drift-cell": [[*_SHOW_JSON, ">", "plan.json"]],
+    "apply-cell": [[*_SHOW_TEXT, ">", "$rendered"]],
+    "unlock-cell": [],
+}
+
 #: One source for the cell list, so a cell added here cannot be guarded by one test and silently
 #: skipped by the other. Which cells belong in it is derived from the tree, by
 #: `_tofu_invoking_actions`, never hand-maintained here.
@@ -183,3 +200,25 @@ def test_each_cell_runs_exactly_the_engines_own_terramate_run_invocations():
         lines = [ln for ln in _command_lines(cell) if re.search(r"terramate\s+run\b", ln)]
         got = [shlex.split(ln) for ln in lines]
         assert got == expected, f"{cell}: unexpected invocations, got {got}"
+
+
+def test_each_cell_runs_exactly_the_engines_own_bare_tofu_invocations():
+    """The `tofu` lines outside a `terramate run` wrapper, whole and in order.
+
+    `_EXPECTED`'s selector sees only wrapped invocations, so before this every bare `tofu` line in
+    the tree was pinned by nothing. That matters most for the plan-text render: the binding
+    apply-cell enforces holds only while its render is byte-for-byte the command plan-cell used to
+    write the reviewed plan.txt, and a flag added to one side alone would refuse every apply.
+    """
+    assert set(_EXPECTED_BARE) == set(_EXPECTED), (
+        "the two expectation tables disagree about which actions are cells: "
+        f"{sorted(set(_EXPECTED_BARE) ^ set(_EXPECTED))}"
+    )
+    for cell, expected in _EXPECTED_BARE.items():
+        lines = [
+            ln
+            for ln in _command_lines(cell)
+            if _TOFU_RE.search(ln) and not re.search(r"terramate\s+run\b", ln)
+        ]
+        got = [shlex.split(ln) for ln in lines]
+        assert got == expected, f"{cell}: unexpected bare tofu invocations, got {got}"

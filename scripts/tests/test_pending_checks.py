@@ -10,16 +10,28 @@ pc = load_script("pending-checks")
 HEAD = "a" * 40
 RUN_ID = "32668143791"
 
+# Hand-written: the bytes and the digest below were computed once, off the tree, so an
+# assertion cannot be satisfied by the same hashlib call the code under test makes. The
+# trailing newline is load-bearing -- it is what a `.strip()` before hashing would drop.
+PLAN_A = b"Terraform will perform the following actions:\n\n  # null_resource.a will be created\n"
+SHA_A = "4e6d7400bf477bbcb3b78627cecd50f1a4706fa04da5a4f809ae0e1fb3b58704"
+PLAN_B = b"No changes. Your infrastructure matches the configuration.\n"
+SHA_B = "016cf8c84f06456af2ec0f1866e01c39d69ecd581daddf619528719a31e3dbc8"
+
 
 @pytest.fixture(autouse=True)
 def _plan_run(monkeypatch):
     monkeypatch.setenv("GITHUB_RUN_ID", RUN_ID)
 
 
-def _write_cell(tmp_path, env, slug, **cell):
+def _write_cell(tmp_path, env, slug, plan_text=PLAN_A, **cell):
     d = tmp_path / f"cell-summary.{env}.{slug}"
     d.mkdir(parents=True)
     (d / "cell.json").write_text(json.dumps(cell), encoding="utf-8")
+    if plan_text is not None:
+        # write_bytes, not write_text: Windows would translate the newline and invalidate
+        # the hand-written digest.
+        (d / "plan.txt").write_bytes(plan_text)
 
 
 def test_changed_cell_yields_queued_body(tmp_path):
@@ -37,6 +49,7 @@ def test_changed_cell_yields_queued_body(tmp_path):
     assert json.loads(body.pop("external_id")) == {
         "fingerprint": "f" * 64,
         "plan_run": RUN_ID,
+        "plan_sha256": SHA_A,
     }
     assert body == {
         "name": "apply / stacks/app / dev-eu",
@@ -55,6 +68,7 @@ def test_unchanged_cell_yields_completed_neutral_body(tmp_path):
         tmp_path,
         "dev-eu",
         "stacks-dns",
+        plan_text=PLAN_B,
         stack="dns",
         stack_path="stacks/dns",
         environment="dev-eu",
@@ -68,6 +82,7 @@ def test_unchanged_cell_yields_completed_neutral_body(tmp_path):
     assert json.loads(body["external_id"]) == {
         "fingerprint": "0" * 64,
         "plan_run": RUN_ID,
+        "plan_sha256": SHA_B,
     }
 
 
@@ -103,6 +118,7 @@ def test_plan_run_comes_from_the_environment(tmp_path, monkeypatch):
     assert json.loads(body["external_id"]) == {
         "fingerprint": "f" * 64,
         "plan_run": "409181227",
+        "plan_sha256": SHA_A,
     }
 
 
@@ -169,6 +185,94 @@ def test_single_cell_downloaded_flat_still_yields_a_body(tmp_path):
         ),
         encoding="utf-8",
     )
+    (tmp_path / "plan.txt").write_bytes(PLAN_A)
     (body,) = pc.bodies(str(tmp_path), HEAD)
     assert body["name"] == "apply / stacks/auth / dev-eu"
     assert body["status"] == "queued"
+
+
+def test_each_cell_gets_the_digest_of_its_own_plan_text(tmp_path):
+    """Mutation: hash the first plan.txt found and reuse it for every cell."""
+    _write_cell(
+        tmp_path,
+        "dev-eu",
+        "stacks-app",
+        plan_text=PLAN_A,
+        stack="app",
+        stack_path="stacks/app",
+        environment="dev-eu",
+        changed=True,
+        fingerprint="1" * 64,
+    )
+    _write_cell(
+        tmp_path,
+        "dev-us",
+        "stacks-app",
+        plan_text=PLAN_B,
+        stack="app",
+        stack_path="stacks/app",
+        environment="dev-us",
+        changed=True,
+        fingerprint="2" * 64,
+    )
+    eu, us = pc.bodies(str(tmp_path), HEAD)
+    assert json.loads(eu["external_id"])["plan_sha256"] == SHA_A
+    assert json.loads(us["external_id"])["plan_sha256"] == SHA_B
+
+
+def test_digest_is_computed_never_copied_from_the_cell(tmp_path):
+    """external_id's plan_sha256 is the digest of plan.txt, not the cell's claim about it.
+
+    Mutation: read the value from the cell with the computed one as a fallback."""
+    _write_cell(
+        tmp_path,
+        "dev-eu",
+        "stacks-app",
+        stack="app",
+        stack_path="stacks/app",
+        environment="dev-eu",
+        changed=True,
+        fingerprint="f" * 64,
+        plan_sha256="b" * 64,
+    )
+    (body,) = pc.bodies(str(tmp_path), HEAD)
+    assert json.loads(body["external_id"])["plan_sha256"] == SHA_A
+
+
+def test_missing_plan_text_fails_loud_and_emits_nothing(tmp_path):
+    """A run where every cell has a plan.txt returns every body; removing one cell's
+    plan.txt aborts the whole run, so no body is emitted for the sound cell either.
+
+    Mutations: raise unconditionally -- the first assertion reddens; `continue` (or a
+    None/"" fallback) instead of raising -- the second does."""
+    _write_cell(
+        tmp_path,
+        "dev-eu",
+        "stacks-app",
+        stack="app",
+        stack_path="stacks/app",
+        environment="dev-eu",
+        changed=True,
+        fingerprint="1" * 64,
+    )
+    _write_cell(
+        tmp_path,
+        "dev-us",
+        "stacks-app",
+        plan_text=PLAN_B,
+        stack="app",
+        stack_path="stacks/app",
+        environment="dev-us",
+        changed=True,
+        fingerprint="2" * 64,
+    )
+    assert [
+        json.loads(b["external_id"])["plan_sha256"] for b in pc.bodies(str(tmp_path), HEAD)
+    ] == [
+        SHA_A,
+        SHA_B,
+    ]
+
+    (tmp_path / "cell-summary.dev-us.stacks-app" / "plan.txt").unlink()
+    with pytest.raises(SystemExit, match=r"cell-summary\.dev-us\.stacks-app.*has no plan\.txt"):
+        pc.bodies(str(tmp_path), HEAD)

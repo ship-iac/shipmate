@@ -340,7 +340,9 @@ def test_plan_runs_newest_app_run_supplies_the_id():
         json.dumps({"fingerprint": "b" * 64, "plan_run": "222"}),
         started_at="2026-07-18T09:00:00Z",
     )
-    assert ag.plan_runs_by_name([older, newer], "999") == {"apply / stacks/app / dev-eu": "222"}
+    # newer listed FIRST: a substitute that keeps the last run seen per name, rather than the
+    # newest by id, must not be absorbed by input order.
+    assert ag.plan_runs_by_name([newer, older], "999") == {"apply / stacks/app / dev-eu": "222"}
 
 
 def test_plan_runs_ignores_foreign_app_even_when_newest():
@@ -421,3 +423,75 @@ def test_an_unrecognized_argument_fails_loud(monkeypatch):
     with pytest.raises(SystemExit) as exc:
         ag.main()
     assert "--plan-run" in str(exc.value)
+
+
+def _record(plan_run="111", **extra):
+    return json.dumps({"fingerprint": "a" * 64, "plan_run": plan_run, **extra})
+
+
+def test_plan_hashes_reads_the_recorded_digest():
+    line = _ext("apply / stacks/app / dev-eu", 1, _record(plan_sha256="c" * 64))
+    assert ag.plan_hashes_by_name([line], "999") == {"apply / stacks/app / dev-eu": "c" * 64}
+
+
+# 64 chars where the value is merely not lowercase hex, so a length-only substitute for the
+# fullmatch cannot absorb the case. The int exercises the isinstance guard: without it,
+# re.fullmatch would raise TypeError rather than read as absence.
+@pytest.mark.parametrize(
+    "digest",
+    [None, "", "z" * 64, "c" * 63, "c" * 65, "C" * 64, 1234],
+)
+def test_plan_hashes_unusable_digest_is_absent(digest):
+    record = json.dumps({"fingerprint": "a" * 64, "plan_run": "111", "plan_sha256": digest})
+    line = _ext("apply / stacks/app / dev-eu", 1, record)
+    assert ag.plan_hashes_by_name([line], "999") == {}
+
+
+def test_plan_hashes_uppercase_digest_is_absent():
+    # Explicit literal beside the parametrization: sha256sum on the runner prints lowercase,
+    # and the comparison at apply is a string equality, so an uppercase record would never
+    # match anyway.
+    line = _ext("apply / stacks/app / dev-eu", 1, _record(plan_sha256="ABCDEF" + "a" * 58))
+    assert ag.plan_hashes_by_name([line], "999") == {}
+
+
+def test_plan_hashes_missing_key_is_absent():
+    # A check written by an engine version before the digest existed.
+    line = _ext("apply / stacks/app / dev-eu", 1, _record())
+    assert ag.plan_hashes_by_name([line], "999") == {}
+
+
+def test_plan_runs_is_identical_with_and_without_a_digest():
+    """authorize and doctor-cells read plan_runs_by_name's membership; a name must not drop
+    out of it because its record carries no digest, or an operator is told their plan does not
+    exist. Both mappings are compared whole against the same hand-written literal."""
+    expected = {"apply / stacks/app / dev-eu": "111"}
+    with_hash = _ext("apply / stacks/app / dev-eu", 1, _record(plan_sha256="c" * 64))
+    without_hash = _ext("apply / stacks/app / dev-eu", 1, _record())
+    assert ag.plan_runs_by_name([with_hash], "999") == expected
+    assert ag.plan_runs_by_name([without_hash], "999") == expected
+
+
+@pytest.mark.parametrize("external_id", [None, "", "not json at all", "1" * 64, LEGACY_HEX])
+def test_plan_hashes_unusable_external_id_is_absent(external_id):
+    line = _ext("apply / stacks/app / dev-eu", 1, external_id)
+    assert ag.plan_hashes_by_name([line], "999") == {}
+    assert ag.plan_runs_by_name([line], "999") == {}
+
+
+def test_plan_hashes_newest_app_run_supplies_the_digest():
+    # Higher id listed FIRST: a substitute that keeps the last run seen per name, instead of
+    # the newest by id, must not be absorbed by input order.
+    newer = _ext("apply / stacks/app / dev-eu", 2, _record(plan_run="222", plan_sha256="b" * 64))
+    older = _ext("apply / stacks/app / dev-eu", 1, _record(plan_run="111", plan_sha256="a" * 64))
+    assert ag.plan_hashes_by_name([newer, older], "999") == {
+        "apply / stacks/app / dev-eu": "b" * 64
+    }
+
+
+def test_plan_hashes_ignores_foreign_app_even_when_newest():
+    ours = _ext("apply / stacks/app / dev-eu", 1, _record(plan_sha256="a" * 64))
+    foreign = _ext("apply / stacks/app / dev-eu", 2, _record(plan_sha256="b" * 64), app_id=15368)
+    assert ag.plan_hashes_by_name([ours, foreign], "999") == {
+        "apply / stacks/app / dev-eu": "a" * 64
+    }

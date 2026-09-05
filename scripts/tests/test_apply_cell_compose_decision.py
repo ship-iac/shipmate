@@ -10,10 +10,9 @@ a script nothing runs asserts nothing.
 
 Why the step matches `== "failure"` rather than `!= "success"`: a composite step failure halts
 every later step whose `if` defaults to `success()`, so a fail-safe that never ran reads
-'skipped', not 'failure'. An unrelated earlier failure -- the un-id'd "Snapshot pre-existing
-apply-check ids" step, which sits between fingerprint and restore-state -- must read as the
-generic "an earlier step failed" reason, never as a specific fail-safe's message that in fact
-never ran.
+'skipped', not 'failure'. An unrelated earlier failure -- any step in that range carrying no id,
+so no FAILSAFES row can name it -- must read as the generic "an earlier step failed" reason,
+never as a specific fail-safe's message that in fact never ran.
 """
 
 import json
@@ -45,6 +44,9 @@ def _run_compose(
     decrypt="skipped",
     fingerprint="skipped",
     restore="skipped",
+    digest_input="skipped",
+    init="skipped",
+    plan_digest="skipped",
     apply="skipped",
     stack="stacks/app",
     stack_name="app",
@@ -60,6 +62,9 @@ def _run_compose(
     monkeypatch.setenv("DECRYPT_OUTCOME", decrypt)
     monkeypatch.setenv("FINGERPRINT_OUTCOME", fingerprint)
     monkeypatch.setenv("RESTORE_OUTCOME", restore)
+    monkeypatch.setenv("DIGEST_INPUT_OUTCOME", digest_input)
+    monkeypatch.setenv("INIT_OUTCOME", init)
+    monkeypatch.setenv("PLAN_DIGEST_OUTCOME", plan_digest)
     monkeypatch.setenv("APPLY_OUTCOME", apply)
     monkeypatch.setenv("RUNNER_TEMP", str(tmp_path))
 
@@ -103,6 +108,33 @@ def test_restore_state_failure_blocks_with_its_own_reason(monkeypatch, tmp_path)
     assert cell["reason"] == "state restore failed"
 
 
+def test_digest_input_failure_blocks_with_its_own_reason(monkeypatch, tmp_path):
+    cell = _run_compose(monkeypatch, tmp_path, digest_input="failure")
+    assert cell["result"] == "blocked"
+    assert (
+        cell["reason"]
+        == "no plan-text digest reached this action — re-pin every engine reference to one commit"
+    )
+
+
+def test_init_failure_blocks_with_its_own_reason(monkeypatch, tmp_path):
+    # Before the apply step was split, a failed init reported result="failed" with no reason --
+    # the bucket a real apply error lands in, which may have mutated infrastructure. Its own row
+    # rather than the digest's, so that pre-existing gap is not hidden behind a new message.
+    cell = _run_compose(monkeypatch, tmp_path, init="failure")
+    assert cell["result"] == "blocked"
+    assert cell["reason"] == "tofu init failed — see the job log"
+
+
+def test_plan_digest_failure_blocks_with_its_own_reason(monkeypatch, tmp_path):
+    cell = _run_compose(monkeypatch, tmp_path, plan_digest="failure")
+    assert cell["result"] == "blocked"
+    assert (
+        cell["reason"]
+        == "the stored plan does not render to the plan text that was reviewed — re-plan"
+    )
+
+
 def test_apply_success_is_applied_with_empty_reason(monkeypatch, tmp_path):
     cell = _run_compose(
         monkeypatch,
@@ -112,6 +144,9 @@ def test_apply_success_is_applied_with_empty_reason(monkeypatch, tmp_path):
         decrypt="success",
         fingerprint="success",
         restore="success",
+        digest_input="success",
+        init="success",
+        plan_digest="success",
         apply="success",
     )
     assert cell["result"] == "applied"
@@ -131,6 +166,9 @@ def test_remote_backend_skipped_restore_is_applied_with_empty_reason(monkeypatch
         decrypt="success",
         fingerprint="success",
         restore="skipped",
+        digest_input="success",
+        init="success",
+        plan_digest="success",
         apply="success",
     )
     assert cell["result"] == "applied"
@@ -146,6 +184,9 @@ def test_apply_failure_is_failed_with_empty_reason(monkeypatch, tmp_path):
         decrypt="success",
         fingerprint="success",
         restore="success",
+        digest_input="success",
+        init="success",
+        plan_digest="success",
         apply="failure",
     )
     assert cell["result"] == "failed"
@@ -161,6 +202,9 @@ def test_apply_cancelled_is_failed_with_empty_reason(monkeypatch, tmp_path):
         decrypt="success",
         fingerprint="success",
         restore="success",
+        digest_input="success",
+        init="success",
+        plan_digest="success",
         apply="cancelled",
     )
     assert cell["result"] == "failed"
@@ -170,8 +214,8 @@ def test_apply_cancelled_is_failed_with_empty_reason(monkeypatch, tmp_path):
 def test_unrelated_step_failed_between_fingerprint_and_restore_reads_as_generic_blocked(
     monkeypatch, tmp_path
 ):
-    # The un-id'd "Snapshot pre-existing apply-check ids" step sits between fingerprint and
-    # restore-state. If it fails, every fail-safe up to it reads 'success' and restore-state and
+    # An un-id'd step failing between fingerprint and
+    # restore-state: every fail-safe up to it reads 'success' and restore-state and
     # apply never ran, reading 'skipped'. The decision must not misattribute that to
     # restore-state.
     cell = _run_compose(
@@ -217,6 +261,9 @@ def test_two_failsafes_failing_together_the_earlier_in_pipeline_order_wins(monke
             "decrypt": "success",
             "fingerprint": "success",
             "restore": "success",
+            "digest_input": "success",
+            "init": "success",
+            "plan_digest": "success",
             "apply": "success",
         },
         {
@@ -225,6 +272,9 @@ def test_two_failsafes_failing_together_the_earlier_in_pipeline_order_wins(monke
             "decrypt": "success",
             "fingerprint": "success",
             "restore": "success",
+            "digest_input": "success",
+            "init": "success",
+            "plan_digest": "success",
             "apply": "failure",
         },
         {},
