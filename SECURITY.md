@@ -5,8 +5,8 @@ short-lived credentials, so security reports are taken seriously.
 
 ## Reporting a vulnerability
 
-Please **do not** open a public issue for security problems. Use GitHub's
-private vulnerability reporting instead:
+Do not open a public issue for security problems. Use GitHub's private
+vulnerability reporting instead:
 
 1. Open the **Security** tab of this repository.
 2. Click **Report a vulnerability**.

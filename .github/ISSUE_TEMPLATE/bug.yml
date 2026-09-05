@@ -15,7 +15,7 @@ body:
         controls as sensitive in its own right.
 
         For a security vulnerability, do not open an issue at all — use the
-        repository's **Security** tab (see [`SECURITY.md`](https://github.com/ship-iac/shipmate/blob/main/SECURITY.md)).
+        repository's Security tab (see [`SECURITY.md`](https://github.com/ship-iac/shipmate/blob/main/SECURITY.md)).
 
   - type: input
     id: engine-pin

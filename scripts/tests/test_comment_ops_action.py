@@ -606,7 +606,7 @@ _PROSE_PERMISSION_LISTS = {
 
 def test_both_prose_permission_lists_name_every_manifest_permission():
     """`app/manifest.json` is what GitHub grants; two documents spell the same set out in prose for
-    readers, and `CLAUDE.md` names `CONTRACT.md` the single source for the contract.
+    readers, and `CONTRACT.md` is the single source for the contract.
     test_fullmint_requests_the_manifests_exact_permission_set pins only the action YAML, so nothing
     noticed when a manifest bump left `CONTRACT.md` listing seven permissions -- this pins both
     lists against the manifest instead.

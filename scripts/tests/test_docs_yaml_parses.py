@@ -4,10 +4,10 @@ None is a mangled paste rather than a workflow. Discovery must lose none of them
 pairing logic drops fails the guard rather than going unchecked.
 
 Threat model: the realistic failure is an accidental bad paste, or a later edit that outdents a
-line and breaks a block's indentation. Reviewers reading prose do not reliably see either. A
-fence that parses but is semantically wrong is out of scope: the docs are reviewed prose, and the
-sample repos remain the executed copies of record. Catches syntax rot from a bad paste, not
-semantic drift from the sample repos; proving a documented workflow runs is the sample repos' CI.
+line and breaks a block's indentation. Reviewers reading prose do not reliably see either. This
+catches syntax rot from a bad paste, not semantic drift from the sample repos: a fence that
+parses but is semantically wrong is out of scope, because the docs are reviewed prose and the
+sample repos' CI remains the executed copy of record that proves a documented workflow runs.
 """
 
 import re
@@ -231,11 +231,10 @@ def test_the_documented_wrapper_inputs_are_exactly_these():
     the same vector and stays green.
 
     Whole-vector comparison against a hand-written constant, for the reason
-    `docs/development.md` §Guard tests must be able to fail gives: a
-    "no input is required" predicate is also satisfied by a selector that finds nothing, and a
-    per-input assertion cannot see an input that was deleted. Adding an input here is a
-    deliberate edit that must state its shape, which is the point, because `required` is what a
-    new input drifts to.
+    `docs/development.md` §Guard tests must be able to fail gives: a "no input is required"
+    predicate is also satisfied by a selector that finds nothing, and a per-input assertion
+    cannot see an input that was deleted. Adding an input here is a deliberate edit that must
+    state its shape, which is the point, because `required` is what a new input drifts to.
 
     Out of reach: a fence showing an input block as a fragment, with no `on:` above it, of which
     `docs/upgrading.md`'s migration snippet is one. Those are illustrative; the copyable wrapper

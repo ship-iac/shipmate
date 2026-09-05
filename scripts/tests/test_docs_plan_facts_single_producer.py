@@ -9,10 +9,11 @@ is the single producer, and a fact read from the payload beside it is a second
 producer of the same fact.
 
 The whole set of `github.event.pull_request` occurrences inside the fence is
-compared against a hand-written constant, for the reason `CLAUDE.md` gives: an
-"is the checkout wired to `facts`" check leaves the hole wherever it does not
-look, and the surviving occurrence is a real one -- the concurrency group, which
-must read payload data because `needs` is not in scope at that level.
+compared against a hand-written constant, for the reason `docs/development.md`
+§Guard tests must be able to fail gives: an "is the checkout wired to `facts`"
+check leaves the hole wherever it does not look, and the surviving occurrence is
+a real one -- the concurrency group, which must read payload data because
+`needs` is not in scope at that level.
 
 That set is read as fence text rather than parsed values: a payload expression inside a comment
 teaches the reader to write it back, and the concurrency key is a scalar whose sibling

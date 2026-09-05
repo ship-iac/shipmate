@@ -6,10 +6,10 @@ consumer to a page without the fix. The realistic failure is an input added to
 the action and forgotten in the snippet consumers copy.
 
 Whole-mapping comparison against a hand-written literal, for the reason `docs/development.md`
-§Guard tests must be able to fail gives: a
-"contains expected-head" check relocates the hole to whichever key it does not name. The fences
-are parsed as YAML rather than regexed, because an indentation change would silently stop a text
-match and leave this green over nothing. That is also why the call count is pinned.
+§Guard tests must be able to fail gives: a "contains expected-head" check relocates the hole to
+whichever key it does not name. The fences are parsed as YAML rather than regexed, because an
+indentation change would silently stop a text match and leave this green over nothing. That is
+also why the call count is pinned.
 """
 
 import re

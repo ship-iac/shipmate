@@ -9,10 +9,10 @@ and then gates nothing. `drift.md`'s `no-pull-request` is the same class: withou
 documented nightly is refused.
 
 Whole-mapping comparisons against hand-written literals, for the reason `docs/development.md`
-§Guard tests must be able to fail gives: a
-"contains head-repo" check relocates the hole to whichever key it does not name, and a constant
-read out of the page would agree with whatever the page says. `test_docs_yaml_parses.py` proves
-these fences parse; it cannot see a dropped optional input.
+§Guard tests must be able to fail gives: a "contains head-repo" check relocates the hole to
+whichever key it does not name, and a constant read out of the page would agree with whatever
+the page says. `test_docs_yaml_parses.py` proves these fences parse; it cannot see a dropped
+optional input.
 """
 
 import re
@@ -119,10 +119,9 @@ def test_the_documented_call_passes_exactly_the_inputs_the_workflow_declares():
 
     Both sides are derived here, which does not break `docs/development.md`'s
     hand-written-constant rule: that rule pins a value against a constant, which
-    `_EXPECTED_SUMMARY_WITH` and
-    `_EXPECTED_PLAN_MATRIX_WITH` do. This pins agreement between two files, neither of which is
-    the constant for the other. Both sides are asserted non-empty, so a selector that matches
-    nothing fails instead of passing vacuously."""
+    `_EXPECTED_SUMMARY_WITH` and `_EXPECTED_PLAN_MATRIX_WITH` do. This pins agreement between
+    two files, neither of which is the constant for the other. Both sides are asserted
+    non-empty, so a selector that matches nothing fails instead of passing vacuously."""
     declared = yaml.safe_load(_SUMMARY_WF.read_text(encoding="utf-8"))
     # `doc[True]`: PyYAML parses the bare key `on:` as the boolean True.
     names = sorted(declared[True]["workflow_call"]["inputs"])
