@@ -93,6 +93,7 @@ jobs:
           env: ${{ matrix.environment }}
           head-sha: ${{ inputs.head_sha }}
           plan-run-id: ${{ matrix.plan_run_id }}
+          plan-sha256: ${{ matrix.plan_sha256 }}
           state-path: ${{ inputs.state_suffix != '' && format('{0}/{1}', matrix.stack, inputs.state_suffix) || '' }}
           github-token: ${{ github.token }}
           plan-passphrase: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
@@ -136,6 +137,7 @@ jobs:
           env: ${{ matrix.environment }}
           head-sha: ${{ inputs.head_sha }}
           plan-run-id: ${{ matrix.plan_run_id }}
+          plan-sha256: ${{ matrix.plan_sha256 }}
           state-path: ${{ inputs.state_suffix != '' && format('{0}/{1}', matrix.stack, inputs.state_suffix) || '' }}
           github-token: ${{ github.token }}
           plan-passphrase: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
@@ -179,6 +181,7 @@ jobs:
           env: ${{ matrix.environment }}
           head-sha: ${{ inputs.head_sha }}
           plan-run-id: ${{ matrix.plan_run_id }}
+          plan-sha256: ${{ matrix.plan_sha256 }}
           state-path: ${{ inputs.state_suffix != '' && format('{0}/{1}', matrix.stack, inputs.state_suffix) || '' }}
           github-token: ${{ github.token }}
           plan-passphrase: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
@@ -222,6 +225,7 @@ jobs:
           env: ${{ matrix.environment }}
           head-sha: ${{ inputs.head_sha }}
           plan-run-id: ${{ matrix.plan_run_id }}
+          plan-sha256: ${{ matrix.plan_sha256 }}
           state-path: ${{ inputs.state_suffix != '' && format('{0}/{1}', matrix.stack, inputs.state_suffix) || '' }}
           github-token: ${{ github.token }}
           plan-passphrase: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
@@ -265,6 +269,7 @@ jobs:
           env: ${{ matrix.environment }}
           head-sha: ${{ inputs.head_sha }}
           plan-run-id: ${{ matrix.plan_run_id }}
+          plan-sha256: ${{ matrix.plan_sha256 }}
           state-path: ${{ inputs.state_suffix != '' && format('{0}/{1}', matrix.stack, inputs.state_suffix) || '' }}
           github-token: ${{ github.token }}
           plan-passphrase: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
@@ -308,6 +313,7 @@ jobs:
           env: ${{ matrix.environment }}
           head-sha: ${{ inputs.head_sha }}
           plan-run-id: ${{ matrix.plan_run_id }}
+          plan-sha256: ${{ matrix.plan_sha256 }}
           state-path: ${{ inputs.state_suffix != '' && format('{0}/{1}', matrix.stack, inputs.state_suffix) || '' }}
           github-token: ${{ github.token }}
           plan-passphrase: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
@@ -351,6 +357,7 @@ jobs:
           env: ${{ matrix.environment }}
           head-sha: ${{ inputs.head_sha }}
           plan-run-id: ${{ matrix.plan_run_id }}
+          plan-sha256: ${{ matrix.plan_sha256 }}
           state-path: ${{ inputs.state_suffix != '' && format('{0}/{1}', matrix.stack, inputs.state_suffix) || '' }}
           github-token: ${{ github.token }}
           plan-passphrase: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
@@ -394,6 +401,7 @@ jobs:
           env: ${{ matrix.environment }}
           head-sha: ${{ inputs.head_sha }}
           plan-run-id: ${{ matrix.plan_run_id }}
+          plan-sha256: ${{ matrix.plan_sha256 }}
           state-path: ${{ inputs.state_suffix != '' && format('{0}/{1}', matrix.stack, inputs.state_suffix) || '' }}
           github-token: ${{ github.token }}
           plan-passphrase: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}

@@ -15,7 +15,9 @@ Invariants:
 - snapshot runs the environment pre-flight before it snapshots the apply checks,
   and both before any wave: the pre-flight is only a control while it can still
   refuse the run;
-- scripts/verify-environments computes the same binding those jobs bind.
+- scripts/verify-environments computes the same binding those jobs bind;
+- every apply-cell invocation passes the reviewed plan text's digest, which the
+  action refuses to apply without.
 
 That last one is the price of the pre-flight: the binding rule exists twice, as the YAML ternary
 above and as code. Two selectors for one property disagree eventually, so neither side is derived
@@ -44,6 +46,12 @@ APPLY_ENV = (
     "|| format('{0}-apply', matrix.environment) }}"
 )
 WAVES = [f"wave{i}" for i in range(8)]
+
+#: The apply cell, and the matrix field carrying the digest of the plan text a reviewer approved.
+#: A composite action's `required: true` is not enforced, so a dropped `with:` line arrives as the
+#: empty string; apply-cell refuses that, which turns a wiring slip into eight failed applies.
+APPLY_CELL = "ship-iac/shipmate/actions/apply-cell"
+PLAN_SHA256 = "${{ matrix.plan_sha256 }}"
 
 #: workflow file -> the jobs in it that bind an env derived from a cell, written by hand.
 #: `unlock` is here, and not only in test_verb_path_isolation.py, because this is one property
@@ -138,4 +146,21 @@ def test_snapshot_verifies_the_environments_before_snapshotting_the_checks():
     assert _jobs()["wave0"]["needs"] == ["snapshot"], (
         "wave0 must gate on snapshot, or the pre-flight refuses a run whose first "
         "wave is already applying"
+    )
+
+
+def test_every_apply_cell_invocation_passes_the_reviewed_plan_digest():
+    """The count and the per-site input, together: a count alone is satisfied by eight steps of
+    which one dropped the digest, and a per-site check alone is satisfied by seven sites plus a
+    ninth wave that never got one."""
+    steps = [
+        step
+        for job in _jobs().values()
+        for step in (job.get("steps") or [])
+        if (step.get("uses") or "").split("@")[0] == APPLY_CELL
+    ]
+    assert len(steps) == 8, f"apply-env-level.yml invokes apply-cell {len(steps)} times, not 8"
+    assert [(s.get("with") or {}).get("plan-sha256") for s in steps] == [PLAN_SHA256] * 8, (
+        "an apply-cell invocation does not pass matrix.plan_sha256 -- apply-cell refuses an "
+        "empty digest, so that wave's cells cannot apply at all"
     )

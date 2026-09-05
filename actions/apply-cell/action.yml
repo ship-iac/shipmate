@@ -16,6 +16,9 @@ inputs:
   plan-run-id:
     description: Plan run id holding the reviewed plan artifact.
     required: true
+  plan-sha256:
+    description: sha256 of the reviewed plan text, recorded on the apply check by the trusted summary job. The apply re-renders the stored plan and refuses if it does not match.
+    required: true
   state-path:
     description: Flavor state path, e.g. stacks/app/.state. Empty = remote backend owns state; both actions/state steps are skipped, and `skipped` never matches the Compose cell summary step's 'failure' checks, so a remote-backend cell can never be blocked on artifact state.
     required: false
@@ -133,12 +136,21 @@ runs:
       shell: bash
       env:
         STACK: ${{ inputs.stack }}
+        STACK_NAME: ${{ inputs.stack-name }}
+        ENV: ${{ inputs.env }}
+        PLAN_SHA256: ${{ inputs.plan-sha256 }}
       # The engine owns the command: `tofu apply stack.otplan` applies the reviewed plan
       # artifact and nothing else, so the exact-plan invariant does not depend on branch
       # content. tofu rejects a plan whose state moved since generation, and the non-zero
       # exit leaves the apply check pending (fail-safe).
       run: |
         set -euo pipefail
+        # `required: true` is not enforced by GitHub Actions, so an unwired input arrives empty;
+        # one shape check refuses that and a malformed value, before any work is done.
+        [[ "$PLAN_SHA256" =~ ^[0-9a-f]{64}$ ]] || {
+          echo "::error::apply aborted for $ENV/$STACK_NAME: no usable plan-text digest reached this action. Re-pin every engine reference to one commit, then re-plan."
+          exit 1
+        }
         # Restored local-backend workspace state carries no `.terraform` record marking the
         # backend initialised, so `init` reads it as legacy state awaiting migration and
         # `-input=false` turns that question into a hard error.
@@ -161,6 +173,19 @@ runs:
         if [ -d "$hidden" ]; then rm -rf "$ws"; mv "$hidden" "$ws"; fi
         # Fatal: nothing applies against state the engine could not initialise.
         [ "$init_status" -eq 0 ] || exit "$init_status"
+        # Binds the plan text a reviewer approved to the plan about to run: re-rendered with the
+        # command that wrote it, compared whole. `tofu show` of a stored plan is byte-identical
+        # across runners at one tofu version, and a version or provider change makes tofu refuse
+        # the plan file outright, so a difference here means the two disagree about content.
+        rendered="$RUNNER_TEMP/rendered-plan.txt"
+        tofu -chdir="$STACK" show -no-color stack.otplan > "$rendered"
+        # Digested from stdin, not by name: sha256sum escapes a path containing a backslash and
+        # prefixes the whole line with one, which would never equal the recorded digest.
+        actual=$(sha256sum < "$rendered" | cut -d' ' -f1)
+        if [ "$actual" != "$PLAN_SHA256" ]; then
+          echo "::error::apply aborted for $ENV/$STACK_NAME: the stored plan does not render to the plan text that was reviewed (expected $PLAN_SHA256, got $actual). Nothing has been applied. Re-plan this stack on its pull request and review the fresh plan."
+          exit 1
+        fi
         echo "::group::terramate apply: $STACK"
         # errexit is off for this one pipeline, and the step exits on tofu's own status via
         # PIPESTATUS[0]: with errexit and pipefail live, a `tee` failure alone -- a full
