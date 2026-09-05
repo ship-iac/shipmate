@@ -182,7 +182,7 @@ unset the expression renders empty and no notification is attempted — nothing
 else changes.
 
 When it is set, `drift-issues` POSTs one message per cell that is drifted on this
-run (the same cells whose Issue it created or updated on this run), a single-line
+run (the same cells whose Issue it created or updated), a single-line
 `:ocean: drift detected: <env> / <stack>`. A rejected or timed-out webhook is not
 a warning. The cell is recorded as failed and the job exits nonzero at the end,
 naming it, so a revoked or rotated URL cannot leave every nightly run green while

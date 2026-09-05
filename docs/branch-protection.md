@@ -78,12 +78,12 @@ satisfy — an App cannot be a CODEOWNER. It only bites for changed files a
 and the workflows live in.
 
 **A single maintainer cannot satisfy `require_last_push_approval` and
-`require_code_owner_review` together** where `CODEOWNERS` covers the changed
-files. The pusher cannot approve their own last push, and an App cannot be a code
-owner, so there is nobody left to approve. That posture needs either a narrow
-`CODEOWNERS` — covering `/.github/workflows/` alone, say, so ordinary IaC pull
-requests need no code-owner approval — or a bypass actor on the ruleset, which
-spends exactly the control a leaked App key cannot get past.
+`require_code_owner_review` together.** That holds where `CODEOWNERS` covers the
+changed files: the pusher cannot approve their own last push, and an App cannot
+be a code owner, so there is nobody left to approve. That posture needs either a
+narrow `CODEOWNERS` — covering `/.github/workflows/` alone, say, so ordinary IaC
+pull requests need no code-owner approval — or a bypass actor on the ruleset,
+which spends exactly the control a leaked App key cannot get past.
 
 **If you narrow `CODEOWNERS`, land that on its own pull request first.** GitHub
 evaluates `CODEOWNERS` from the pull request's base branch, so a narrowing
@@ -111,9 +111,9 @@ can satisfy the required check.
 
 `shipmate doctor`'s report and its authorization are in `troubleshooting.md`.
 
-**Environment setup.** `getting-started.md` has it: §Required — plan →
-§Environments for this tier has the `<env>-plan` environments and
-`shipmate-engine`, and §Required — apply → §Environment setup has the
+**Environment setup.** `getting-started.md` holds the environment settings:
+§Required — plan → §Environments for this tier has the `<env>-plan` environments
+and `shipmate-engine`, and §Required — apply → §Environment setup has the
 `<env>-apply` environments.
 
 ## Review policy for `shipmate apply`

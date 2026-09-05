@@ -105,8 +105,8 @@ repository that runs `comment-ops.yml` / `dispatch`:
 https://github.com/organizations/<org>/settings/apps/shipmate/installations
 ```
 
-Click Install, choose Only select repositories, then pick your repository. Add
-more from the same page as further consumer repos come online.
+Click `Install`, choose `Only select repositories`, then pick your repository.
+Add more from the same page as further consumer repos come online.
 
 ## 5. Create the `shipmate-engine` environment
 
@@ -221,8 +221,8 @@ every consumer repo, not once for the org.
 
 ## 7. Rotate the private key (on suspicion of compromise)
 
-1. In the App settings (`.../settings/apps/shipmate`), under Private keys,
-   click Generate a private key. GitHub downloads a new PEM; the old key(s)
+1. In the App settings (`.../settings/apps/shipmate`), under `Private keys`,
+   click `Generate a private key`. GitHub downloads a new PEM; the old key(s)
    remain valid until you delete them.
 2. Store the new key everywhere it's used:
 
