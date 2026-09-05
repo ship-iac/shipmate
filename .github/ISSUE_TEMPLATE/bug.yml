@@ -59,13 +59,13 @@ body:
     attributes:
       label: shipmate doctor report
       description: |
-        `shipmate doctor` is a pull request comment command. It runs a set of
-        live probes over the repository's settings — gate ruleset, review
-        requirements, GitHub Environments and their protection shape, plan
-        environment secrets, engine pin freshness, the approvers team, the
-        shipmate App installation — and posts a consolidated report as a sticky
-        comment. It reports settings problems, not plan or apply failures, and
-        never blocks. See [`docs/troubleshooting.md`](https://github.com/ship-iac/shipmate/blob/main/docs/troubleshooting.md#shipmate-doctor).
+        `shipmate doctor` is a pull request comment command. It runs live probes
+        over the repository's settings — gate ruleset, review requirements,
+        GitHub Environments and their protection shape, plan environment secrets,
+        engine pin freshness, the approvers team, the shipmate App installation.
+        It posts the consolidated result as a sticky comment. It reports settings
+        problems, not plan or apply failures, and never blocks. See
+        [`docs/troubleshooting.md`](https://github.com/ship-iac/shipmate/blob/main/docs/troubleshooting.md#shipmate-doctor).
 
         If you have comment-ops working, run `shipmate doctor` and paste the
         report here, redacted as described above.

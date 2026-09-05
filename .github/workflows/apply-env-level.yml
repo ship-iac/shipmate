@@ -10,33 +10,26 @@ on:
         required: false
       SHIPMATE_APP_PRIVATE_KEY:
         required: false
-# Floor, not a default to inherit from: every job below declares its own block,
-# and this makes a job that loses its block get nothing rather than everything
-# the caller granted -- which now includes id-token: write.
+# Floor, not a default to inherit from: every job here declares its own block, so a job that
+# loses its block gets nothing rather than everything the caller granted, id-token: write included.
 permissions: {}
 jobs:
-  # Pre-flight, before any wave runs: verify the environments the waves will
-  # bind exist, then capture the apply-check ids. No secret, no
-  # environment needed -- but permissions cap at each `uses:` boundary, so
-  # every caller job below must also grant checks:read or this job fails at
-  # workflow-resolution time.
-  #
-  # actions:read is not decorative: on a private repository, listing the
-  # environments 403s with checks:read alone, and actions:read is the scope that
-  # unlocks it (measured; the mapping is undocumented). Every call site already
-  # grants it for the wave jobs and `complete`.
+  # Pre-flight, before any wave runs: verify that the environments the waves will bind exist,
+  # then capture the apply-check ids. It needs no secret and no environment.
   snapshot:
     runs-on: ubuntu-latest
+    # Permissions cap at each `uses:` boundary, so every calling job must also grant checks:read or
+    # this job fails at workflow-resolution time. actions:read is not decorative: on a private
+    # repository, listing environments 403s with checks:read alone, and actions:read unlocks it
+    # (measured; undocumented). Every call site already grants it for the waves and `complete`.
     permissions: { checks: read, actions: read }
     outputs:
       snapshot: ${{ steps.snap.outputs.snapshot }}
     steps:
-      # First, before anything else in this workflow: an apply that binds an
-      # environment nobody created gets one auto-created with no reviewers, no
-      # wait timer and no branch policy, and the fingerprint cannot see it (an
-      # auto-created environment and a legitimately empty shared one are
-      # byte-identical in content). Existence is the only discriminator, and it
-      # is only worth checking before the waves.
+      # First, before anything else in this workflow: an apply that binds an environment nobody
+      # created gets one auto-created with no reviewers, no wait timer and no branch policy, and
+      # the fingerprint cannot see it -- an auto-created environment and a legitimately empty
+      # shared one are byte-identical in content. Existence is the only discriminator.
       - uses: ship-iac/shipmate/actions/verify-environments@9c0354a97cd97e07967dac2c7e36f524cdc18700
         with:
           waves-json: ${{ inputs.waves_json }}
@@ -59,11 +52,10 @@ jobs:
       fail-fast: false
       matrix:
         include: ${{ fromJSON(inputs.waves_json).wave0 }}
-    # A repository variable, not a workflow input: which environment an apply
-    # binds decides whether the reviewer gate and the apply role apply to it, and
-    # branch content must not be able to choose that. A listed env's applies bind
-    # the bare environment; the consumer's plan workflow must name the same one
-    # (CONTRACT.md).
+    # SHIPMATE_SHARED_ENVS is a repository variable, not a workflow input: which environment an
+    # apply binds decides whether the reviewer gate and the apply role reach it, and branch content
+    # must not choose that. A listed env's applies bind the bare environment, and the consumer's
+    # plan workflow must name the same one (CONTRACT.md). Every wave job below binds it this way.
     environment: >-
       ${{ contains(format(',{0},', vars.SHIPMATE_SHARED_ENVS), format(',{0},', matrix.environment))
       && matrix.environment || format('{0}-apply', matrix.environment) }}
@@ -71,9 +63,10 @@ jobs:
       group: apply-${{ matrix.environment }}-${{ matrix.stack }}
       cancel-in-progress: false
     name: apply / ${{ matrix.stack }} / ${{ matrix.environment }}
+    # Flavor-agnostic, in every wave job: an unset var resolves to "" and is excluded from the
+    # fingerprint, since empty TF_VAR_* are not hashed, so folders (which set none) still match
+    # their plan.
     env:
-      # Flavor-agnostic: unset vars resolve to "" and are excluded from the
-      # fingerprint (empty TF_VAR_* aren't hashed), so folders (no vars) still match their plan.
       TF_VAR_env: ${{ vars.TF_VAR_env }}
       TF_VAR_region: ${{ vars.TF_VAR_region }}
       TF_WORKSPACE: ${{ vars.TF_WORKSPACE }}
@@ -84,9 +77,9 @@ jobs:
         with:
           terramate-version: ${{ vars.TERRAMATE_VERSION }}
           tofu-version: ${{ vars.TOFU_VERSION }}
-      # A consumer opts into AWS OIDC per environment (plan/apply roles may
-      # differ per env/account), and AWS_ROLE_ARN_<WORKLOAD> wins over
-      # AWS_ROLE_ARN so one environment can serve several workloads.
+      # A consumer opts into AWS OIDC per environment, since plan and apply roles may differ per
+      # env or account, and AWS_ROLE_ARN_<WORKLOAD> wins over AWS_ROLE_ARN so one environment can
+      # serve several workloads. Every wave job below repeats this step unchanged.
       - name: Configure cloud credentials (AWS OIDC)
         if: ${{ (matrix.workload_var != '' && vars[format('AWS_ROLE_ARN_{0}', matrix.workload_var)]) != '' || vars.AWS_ROLE_ARN != '' }}
         uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
@@ -120,8 +113,6 @@ jobs:
       cancel-in-progress: false
     name: apply / ${{ matrix.stack }} / ${{ matrix.environment }}
     env:
-      # Flavor-agnostic: unset vars resolve to "" and are excluded from the
-      # fingerprint (empty TF_VAR_* aren't hashed), so folders (no vars) still match their plan.
       TF_VAR_env: ${{ vars.TF_VAR_env }}
       TF_VAR_region: ${{ vars.TF_VAR_region }}
       TF_WORKSPACE: ${{ vars.TF_WORKSPACE }}
@@ -132,9 +123,6 @@ jobs:
         with:
           terramate-version: ${{ vars.TERRAMATE_VERSION }}
           tofu-version: ${{ vars.TOFU_VERSION }}
-      # A consumer opts into AWS OIDC per environment (plan/apply roles may
-      # differ per env/account), and AWS_ROLE_ARN_<WORKLOAD> wins over
-      # AWS_ROLE_ARN so one environment can serve several workloads.
       - name: Configure cloud credentials (AWS OIDC)
         if: ${{ (matrix.workload_var != '' && vars[format('AWS_ROLE_ARN_{0}', matrix.workload_var)]) != '' || vars.AWS_ROLE_ARN != '' }}
         uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
@@ -168,8 +156,6 @@ jobs:
       cancel-in-progress: false
     name: apply / ${{ matrix.stack }} / ${{ matrix.environment }}
     env:
-      # Flavor-agnostic: unset vars resolve to "" and are excluded from the
-      # fingerprint (empty TF_VAR_* aren't hashed), so folders (no vars) still match their plan.
       TF_VAR_env: ${{ vars.TF_VAR_env }}
       TF_VAR_region: ${{ vars.TF_VAR_region }}
       TF_WORKSPACE: ${{ vars.TF_WORKSPACE }}
@@ -180,9 +166,6 @@ jobs:
         with:
           terramate-version: ${{ vars.TERRAMATE_VERSION }}
           tofu-version: ${{ vars.TOFU_VERSION }}
-      # A consumer opts into AWS OIDC per environment (plan/apply roles may
-      # differ per env/account), and AWS_ROLE_ARN_<WORKLOAD> wins over
-      # AWS_ROLE_ARN so one environment can serve several workloads.
       - name: Configure cloud credentials (AWS OIDC)
         if: ${{ (matrix.workload_var != '' && vars[format('AWS_ROLE_ARN_{0}', matrix.workload_var)]) != '' || vars.AWS_ROLE_ARN != '' }}
         uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
@@ -216,8 +199,6 @@ jobs:
       cancel-in-progress: false
     name: apply / ${{ matrix.stack }} / ${{ matrix.environment }}
     env:
-      # Flavor-agnostic: unset vars resolve to "" and are excluded from the
-      # fingerprint (empty TF_VAR_* aren't hashed), so folders (no vars) still match their plan.
       TF_VAR_env: ${{ vars.TF_VAR_env }}
       TF_VAR_region: ${{ vars.TF_VAR_region }}
       TF_WORKSPACE: ${{ vars.TF_WORKSPACE }}
@@ -228,9 +209,6 @@ jobs:
         with:
           terramate-version: ${{ vars.TERRAMATE_VERSION }}
           tofu-version: ${{ vars.TOFU_VERSION }}
-      # A consumer opts into AWS OIDC per environment (plan/apply roles may
-      # differ per env/account), and AWS_ROLE_ARN_<WORKLOAD> wins over
-      # AWS_ROLE_ARN so one environment can serve several workloads.
       - name: Configure cloud credentials (AWS OIDC)
         if: ${{ (matrix.workload_var != '' && vars[format('AWS_ROLE_ARN_{0}', matrix.workload_var)]) != '' || vars.AWS_ROLE_ARN != '' }}
         uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
@@ -264,8 +242,6 @@ jobs:
       cancel-in-progress: false
     name: apply / ${{ matrix.stack }} / ${{ matrix.environment }}
     env:
-      # Flavor-agnostic: unset vars resolve to "" and are excluded from the
-      # fingerprint (empty TF_VAR_* aren't hashed), so folders (no vars) still match their plan.
       TF_VAR_env: ${{ vars.TF_VAR_env }}
       TF_VAR_region: ${{ vars.TF_VAR_region }}
       TF_WORKSPACE: ${{ vars.TF_WORKSPACE }}
@@ -276,9 +252,6 @@ jobs:
         with:
           terramate-version: ${{ vars.TERRAMATE_VERSION }}
           tofu-version: ${{ vars.TOFU_VERSION }}
-      # A consumer opts into AWS OIDC per environment (plan/apply roles may
-      # differ per env/account), and AWS_ROLE_ARN_<WORKLOAD> wins over
-      # AWS_ROLE_ARN so one environment can serve several workloads.
       - name: Configure cloud credentials (AWS OIDC)
         if: ${{ (matrix.workload_var != '' && vars[format('AWS_ROLE_ARN_{0}', matrix.workload_var)]) != '' || vars.AWS_ROLE_ARN != '' }}
         uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
@@ -312,8 +285,6 @@ jobs:
       cancel-in-progress: false
     name: apply / ${{ matrix.stack }} / ${{ matrix.environment }}
     env:
-      # Flavor-agnostic: unset vars resolve to "" and are excluded from the
-      # fingerprint (empty TF_VAR_* aren't hashed), so folders (no vars) still match their plan.
       TF_VAR_env: ${{ vars.TF_VAR_env }}
       TF_VAR_region: ${{ vars.TF_VAR_region }}
       TF_WORKSPACE: ${{ vars.TF_WORKSPACE }}
@@ -324,9 +295,6 @@ jobs:
         with:
           terramate-version: ${{ vars.TERRAMATE_VERSION }}
           tofu-version: ${{ vars.TOFU_VERSION }}
-      # A consumer opts into AWS OIDC per environment (plan/apply roles may
-      # differ per env/account), and AWS_ROLE_ARN_<WORKLOAD> wins over
-      # AWS_ROLE_ARN so one environment can serve several workloads.
       - name: Configure cloud credentials (AWS OIDC)
         if: ${{ (matrix.workload_var != '' && vars[format('AWS_ROLE_ARN_{0}', matrix.workload_var)]) != '' || vars.AWS_ROLE_ARN != '' }}
         uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
@@ -360,8 +328,6 @@ jobs:
       cancel-in-progress: false
     name: apply / ${{ matrix.stack }} / ${{ matrix.environment }}
     env:
-      # Flavor-agnostic: unset vars resolve to "" and are excluded from the
-      # fingerprint (empty TF_VAR_* aren't hashed), so folders (no vars) still match their plan.
       TF_VAR_env: ${{ vars.TF_VAR_env }}
       TF_VAR_region: ${{ vars.TF_VAR_region }}
       TF_WORKSPACE: ${{ vars.TF_WORKSPACE }}
@@ -372,9 +338,6 @@ jobs:
         with:
           terramate-version: ${{ vars.TERRAMATE_VERSION }}
           tofu-version: ${{ vars.TOFU_VERSION }}
-      # A consumer opts into AWS OIDC per environment (plan/apply roles may
-      # differ per env/account), and AWS_ROLE_ARN_<WORKLOAD> wins over
-      # AWS_ROLE_ARN so one environment can serve several workloads.
       - name: Configure cloud credentials (AWS OIDC)
         if: ${{ (matrix.workload_var != '' && vars[format('AWS_ROLE_ARN_{0}', matrix.workload_var)]) != '' || vars.AWS_ROLE_ARN != '' }}
         uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
@@ -408,8 +371,6 @@ jobs:
       cancel-in-progress: false
     name: apply / ${{ matrix.stack }} / ${{ matrix.environment }}
     env:
-      # Flavor-agnostic: unset vars resolve to "" and are excluded from the
-      # fingerprint (empty TF_VAR_* aren't hashed), so folders (no vars) still match their plan.
       TF_VAR_env: ${{ vars.TF_VAR_env }}
       TF_VAR_region: ${{ vars.TF_VAR_region }}
       TF_WORKSPACE: ${{ vars.TF_WORKSPACE }}
@@ -420,9 +381,6 @@ jobs:
         with:
           terramate-version: ${{ vars.TERRAMATE_VERSION }}
           tofu-version: ${{ vars.TOFU_VERSION }}
-      # A consumer opts into AWS OIDC per environment (plan/apply roles may
-      # differ per env/account), and AWS_ROLE_ARN_<WORKLOAD> wins over
-      # AWS_ROLE_ARN so one environment can serve several workloads.
       - name: Configure cloud credentials (AWS OIDC)
         if: ${{ (matrix.workload_var != '' && vars[format('AWS_ROLE_ARN_{0}', matrix.workload_var)]) != '' || vars.AWS_ROLE_ARN != '' }}
         uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
@@ -440,11 +398,10 @@ jobs:
           github-token: ${{ github.token }}
           plan-passphrase: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
 
-  # Completes the checks the snapshot job captured, for every cell whose wave
-  # job actually succeeded in this run. The only job in this workflow that
-  # holds the App key — ordered after every wave so gate-refresh and the
-  # apply-summary comment (both `needs:` this called workflow in the callers)
-  # never observe a stale-pending check for a cell that just applied.
+  # Completes the checks the `snapshot` job captured, for every cell whose wave job succeeded in
+  # this run. The only job in this workflow that holds the App key. Ordered after every wave, so
+  # that gate-refresh and the apply-summary comment -- both of which `needs:` this called workflow
+  # in the callers -- never observe a stale-pending check for a cell that just applied.
   complete:
     needs: [snapshot, wave0, wave1, wave2, wave3, wave4, wave5, wave6, wave7]
     if: ${{ always() && needs.snapshot.result == 'success' }}

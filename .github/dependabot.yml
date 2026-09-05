@@ -1,9 +1,8 @@
 version: 2
 updates:
-  # Composite-action + workflow `uses:` SHA pins. `/` covers .github/workflows
-  # only; each composite action carries its own third-party pins (e.g.
-  # create-github-app-token in actions/dispatch), so the glob is what puts them
-  # in scope.
+  # Composite-action and workflow `uses:` SHA pins. `/` covers .github/workflows only. Each
+  # composite action carries its own third-party pins (create-github-app-token in
+  # actions/dispatch, for one), so the `/actions/*` glob is what puts those in scope.
   - package-ecosystem: github-actions
     directories: ["/", "/actions/*"]
     schedule:
@@ -13,12 +12,10 @@ updates:
         # Group minor + patch into one PR; majors open individually for review.
         update-types: [minor, patch]
     ignore:
-      # This repo's own action pins are managed by hand by the two-step cascade in
-      # docs/releasing.md, and are deliberately heterogeneous — each points at the
-      # commit whose action content it needs. Dependabot would flatten them all to
-      # the latest release SHA; mid-cascade that is a content downgrade of exactly
-      # the pin just bumped. internal-pins.yml runs on push-to-main only, so such a
-      # PR would merge unguarded and only go red afterwards.
+      # This repo's own action pins are hand-managed by docs/releasing.md's two-step cascade and
+      # are deliberately heterogeneous: each points at the commit whose action content it needs.
+      # Dependabot would flatten them to the latest release SHA, which mid-cascade downgrades the
+      # pin just bumped -- and internal-pins.yml, on push-to-main only, catches that after merge.
       - dependency-name: "ship-iac/shipmate*"
 
   # Dev toolchain pinned in pyproject.toml / uv.lock (ruff, ty, pytest, ...).

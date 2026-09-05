@@ -1,27 +1,14 @@
 name: manifest-load
 
-# Let GitHub parse the action manifests, since GitHub is what parses them in
-# production. `yaml.safe_load` is more permissive than
-# GitHub.DistributedTask.ObjectTemplating: an unquoted description containing a
-# comma inside a { } flow mapping splits into a bogus key, PyYAML accepts it and
-# GitHub refuses the whole file. v0.16.0 shipped exactly that and every apply and
-# deploy job died in "Set up job", before its first step.
-#
-# Two details make this cheap, and both are load-bearing -- see
-# docs/releasing.md § Manifest load:
-#   * the ref is *remote* (ship-iac/shipmate/...@main), not ./actions/... . The
-#     runner downloads and parses remote action manifests during "Set up job";
-#     local ./ manifests are only read when the step executes.
-#   * `if: false` therefore still parses the manifest but never runs the action,
-#     so no action needs inputs, credentials or a live PR.
-# Measured 2026-08-22: the pair is discriminating -- a comma-split manifest under
-# `if: false` fails at Set up job with the production error.
-#
-# @main means this is merge-time, not PR-time, coverage: `uses:` takes no
-# expressions, so the ref cannot follow the PR head. It still runs before any
-# release tag, which is where the defect escaped. workflow_dispatch is here for
-# the release runbook's pre-tag check, when the push run covered an earlier tip.
+# GitHub parses these manifests here, because GitHub is what parses them in production.
+# `yaml.safe_load` is more permissive than GitHub.DistributedTask.ObjectTemplating: it accepts an
+# unquoted description whose comma splits a `{ }` flow mapping into a bogus key, and GitHub then
+# refuses the whole file. v0.16.0 shipped that, and every apply and deploy job died in "Set up job".
 
+# @main makes this merge-time coverage, not PR-time: `uses:` takes no expressions, so the ref
+# cannot follow a PR head. It still runs before any release tag, where the defect escaped.
+# workflow_dispatch serves the pre-tag check in docs/releasing.md § Manifest load, for when the
+# push run predates the tip.
 on:
   push:
     branches: [main]
@@ -33,6 +20,10 @@ permissions:
 jobs:
   load:
     runs-on: ubuntu-latest
+    # The ref is remote (ship-iac/shipmate/...@main), not ./actions/...: the runner downloads and
+    # parses a remote manifest during "Set up job", while a local ./ manifest is read only when the
+    # step executes, so `if: false` parses every manifest and runs no action. Measured 2026-08-22:
+    # a comma-split manifest under `if: false` fails Set up job with the production error.
     steps:
       - if: false
         uses: ship-iac/shipmate/actions/apply-all-detect@main
