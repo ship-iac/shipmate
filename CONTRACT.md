@@ -349,12 +349,14 @@ never used.
 
 The apply-path reusable workflows (`deploy.yml`, `apply-all.yml`, `apply.yml`,
 and the `apply-env-level.yml` they call) take a required `state_suffix`
-input, and the `apply-cell` / `drift-cell` actions an optional `state-path`:
+input, and the `apply-cell` / `drift-cell` / `plan-cell` actions an optional
+`state-path`:
 
 - **Non-empty** — the consumer's state is a local backend materialized in the
-  working tree. `apply-env-level.yml` passes `<stack>/<state_suffix>` as
-  `state-path`, and the cell restores that path via `actions/state` before the
-  run and saves it after (`drift-cell` restores only; it never writes state).
+  working tree. The caller passes `<stack>/<state_suffix>` as `state-path`
+  (`apply-env-level.yml` on the apply path), and the cell restores that path via
+  `actions/state` before the run and saves it after (`drift-cell` and
+  `plan-cell` restore only; neither writes state).
 - **Explicitly empty** (`state_suffix: ''`) — a remote backend (for example
   S3) owns the state. Both `actions/state` steps are skipped entirely and
   shipmate never handles a state file; the backend and its locking are the

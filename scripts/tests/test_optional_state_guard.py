@@ -1,7 +1,7 @@
 """Guards the optional-state contract: an empty state-path means a remote backend owns state, so
 every actions/state step must be skipped. A restore that still runs would fail the cell, because
 no artifact exists; apply-cell's save that still runs would upload nothing meaningful and mask
-the skip. drift-cell only restores.
+the skip. drift-cell and plan-cell only restore.
 
 Asserts whole parsed `if:` expressions, never substrings: an inverted operator or a condition
 moved into a comment must fail these guards.
@@ -10,7 +10,7 @@ moved into a comment must fail these guards.
 import pytest
 from _loader import action_steps, action_yaml
 
-OPTIONAL_STATE_ACTIONS = ["apply-cell", "drift-cell"]
+OPTIONAL_STATE_ACTIONS = ["apply-cell", "drift-cell", "plan-cell"]
 
 
 def _step(action, name):
@@ -40,4 +40,9 @@ def test_apply_cell_save_is_skipped_when_state_path_empty():
 
 def test_drift_cell_restore_is_skipped_when_state_path_empty():
     step = _step("drift-cell", "Restore state")
+    assert step.get("if") == "${{ inputs.state-path != '' }}"
+
+
+def test_plan_cell_restore_is_skipped_when_state_path_empty():
+    step = _step("plan-cell", "Restore state")
     assert step.get("if") == "${{ inputs.state-path != '' }}"
