@@ -13,7 +13,7 @@ grammar are declared unstable in `README.md`.
 
 ## [0.22.1] — 2026-09-05
 
-Tags `<backfilled>`.
+Tags `71e1aa4`.
 
 **No wrapper change is required, and nothing changes at runtime.** Every
 comment, docstring, action and workflow `description:`, and docs page now
