@@ -310,12 +310,14 @@ def test_load_cells_caps_plan_text_read_at_size_budget(tmp_path):
 
 
 def test_cell_schema_guard_plan_cell_writes_every_required_key():
-    # Coupling: plan-cell (writer of cell.json) <-> summary-comment (reader). The writer is
-    # inline python in the action, so every key the reader requires must appear as a JSON key
-    # literal in the writer's source.
-    src = (_ENGINE / "actions" / "plan-cell" / "action.yml").read_text(encoding="utf-8")
+    # Coupling: plan-cell (writer of cell.json) <-> summary-comment (reader). Every key the
+    # reader requires must appear as a JSON key literal in the writer's source.
+    src = (_ENGINE / "scripts" / "plan-cell-summary").read_text(encoding="utf-8")
     missing = [k for k in sc.CELL_KEYS if f'"{k}"' not in src]
-    assert missing == [], f"plan-cell action.yml no longer writes cell.json keys: {missing}"
+    assert missing == [], f"plan-cell-summary no longer writes cell.json keys: {missing}"
+    # And the action still runs that writer: a guard over a script nothing invokes pins nothing.
+    action = (_ENGINE / "actions" / "plan-cell" / "action.yml").read_text(encoding="utf-8")
+    assert 'python3 "$GITHUB_ACTION_PATH/../../scripts/plan-cell-summary"' in action
 
 
 def test_cell_summary_artifact_name_is_dot_delimited_env_first():

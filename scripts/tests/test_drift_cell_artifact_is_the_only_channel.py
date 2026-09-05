@@ -23,6 +23,13 @@ def _step(name):
     return matches[0]
 
 
+def test_the_compose_step_runs_the_cell_summary_writer():
+    # The step's whole job is running that script; a step that stopped calling it would upload
+    # no cell.json at all, and drift-issues reads an absent cell as a cell that does not exist.
+    run = _step("Compose cell summary").get("run") or ""
+    assert 'python3 "$GITHUB_ACTION_PATH/../../scripts/drift-cell-summary"' in run
+
+
 @pytest.mark.parametrize("name", LOAD_BEARING)
 def test_the_cell_artifact_path_is_not_continue_on_error(name):
     step = _step(name)

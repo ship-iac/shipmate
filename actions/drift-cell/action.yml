@@ -96,27 +96,7 @@ runs:
         DESTROY: ${{ steps.plan.outputs.destroy }}
       run: |
         set -euo pipefail
-        python3 - <<'PY'
-        import json, os
-
-        # plan_ok is false whenever `Plan + classify drift` did not conclude with success,
-        # 'skipped' included. drift-issues treats such a cell as unknown and leaves its Issue
-        # state untouched, rather than reading a missing or blank DRIFTED output as "clean".
-        plan_ok = os.environ["PLAN_OUTCOME"] == "success"
-        cell = {
-            "stack": os.environ["STACK"],
-            "stack_name": os.environ["STACK_NAME"],
-            "environment": os.environ["ENV"],
-            "plan_ok": plan_ok,
-            "drifted": plan_ok and os.environ["DRIFTED"] == "true",
-            "add": int(os.environ["ADD"]) if plan_ok else 0,
-            "change": int(os.environ["CHANGE"]) if plan_ok else 0,
-            "destroy": int(os.environ["DESTROY"]) if plan_ok else 0,
-        }
-        cell_path = os.path.join(os.environ["RUNNER_TEMP"], "cell.json")
-        with open(cell_path, "w") as fh:
-            json.dump(cell, fh)
-        PY
+        python3 "$GITHUB_ACTION_PATH/../../scripts/drift-cell-summary"
 
     - name: Upload drift summary
       # NOT continue-on-error, unlike apply-cell's namesake, whose artifact is only comment

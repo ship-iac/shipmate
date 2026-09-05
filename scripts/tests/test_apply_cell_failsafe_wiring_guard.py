@@ -4,15 +4,16 @@ still halts the apply, as any non-zero-exit step does composite-action-wide, but
 the generic "an earlier step failed" reason, or worse a neighbouring fail-safe's reason, instead
 of its own.
 
-Everything here is derived from action.yml itself -- step order, ids, the Compose step's `env:`
-mappings, the heredoc's FAILSAFES list -- rather than a hand-maintained list of the five current
-ids, because a hardcoded list is itself the kind of thing that silently goes stale.
+Everything here is derived from the shipped source itself -- step order, ids and the Compose
+step's `env:` mappings from action.yml, the FAILSAFES list from scripts/apply-cell-summary --
+rather than a hand-maintained list of the five current ids, because a hardcoded list is itself
+the kind of thing that silently goes stale.
 """
 
 import ast
 import re
 
-from _loader import action_steps
+from _loader import SCRIPTS, action_steps
 
 #: Ids in the guarded range that are deliberately not fail-safes wired into the Compose step's
 #: decision, such as a step added only to expose an output with no bearing on whether the apply
@@ -66,21 +67,16 @@ def _compose_env_id_mapping():
 
 
 def _failsafes():
-    """The heredoc's FAILSAFES list, read via ast.literal_eval rather than exec. It is a plain
-    list of (env-var-name, message) string literals, so no execution is needed to recover it, and
-    nothing the heredoc does at runtime can trick this."""
-    run = _compose_step()["run"]
-    _, _, rest = run.partition("<<'PY'\n")
-    body, sep, _ = rest.rpartition("\nPY")
-    assert sep, "Compose cell summary heredoc has no closing PY terminator"
-
-    tree = ast.parse(body)
+    """`scripts/apply-cell-summary`'s FAILSAFES list, read via ast.literal_eval rather than exec.
+    It is a plain list of (env-var-name, message) string literals, so no execution is needed to
+    recover it, and nothing the script does at runtime can trick this."""
+    tree = ast.parse((SCRIPTS / "apply-cell-summary").read_text(encoding="utf-8"))
     for node in tree.body:
         if isinstance(node, ast.Assign) and any(
             isinstance(t, ast.Name) and t.id == "FAILSAFES" for t in node.targets
         ):
             return ast.literal_eval(node.value)
-    raise AssertionError("no FAILSAFES assignment found in the Compose cell summary heredoc")
+    raise AssertionError("no FAILSAFES assignment found in scripts/apply-cell-summary")
 
 
 def test_not_a_failsafe_exemptions_are_not_stale():

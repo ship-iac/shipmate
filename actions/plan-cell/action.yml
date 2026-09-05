@@ -171,22 +171,7 @@ runs:
         DESTROY: ${{ steps.plan.outputs.destroy }}
         CHANGED: ${{ steps.plan.outputs.changed }}
       run: |
-        python3 - <<'PY'
-        import json, os
-        with open("fingerprint.txt", encoding="utf-8") as fh:
-            fingerprint = fh.read().strip()
-        with open("cell.json", "w") as fh:
-            json.dump({
-                "stack": os.environ["STACK_NAME"],
-                "stack_path": os.environ["STACK"],
-                "environment": os.environ["ENV"],
-                "add": int(os.environ["ADD"]),
-                "change": int(os.environ["CHANGE"]),
-                "destroy": int(os.environ["DESTROY"]),
-                "changed": os.environ["CHANGED"] == "true",
-                "fingerprint": fingerprint,
-            }, fh)
-        PY
+        python3 "$GITHUB_ACTION_PATH/../../scripts/plan-cell-summary"
 
     - name: Upload cell summary
       uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

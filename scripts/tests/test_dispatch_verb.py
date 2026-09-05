@@ -9,7 +9,7 @@ import tempfile
 from pathlib import Path
 
 import pytest
-from _loader import action_steps, action_yaml, load_script, usable_bash
+from _loader import ACTIONS, SCRIPTS, action_steps, action_yaml, load_script, usable_bash
 
 DISPATCH_ACTION = "dispatch"
 
@@ -28,19 +28,11 @@ def _dispatch_step():
     return matches[0]
 
 
-def _extract_python_heredoc():
-    """Extract the python body from the step's run field.
-
-    Fails on an empty body, which would exec "" and pass vacuously.
-    """
-    run = _dispatch_step()["run"]
-    _, _, rest = run.partition("<<'PY'\n")
-    body, sep, _ = rest.rpartition("\nPY")
-    assert sep, "workflow_dispatch apply step has no closing PY terminator"
-    assert body.strip(), (
-        "workflow_dispatch apply python heredoc body is empty — a vacuous assertion"
+def test_the_dispatch_step_runs_the_body_builder_this_file_exercises():
+    assert (
+        'python3 "$GITHUB_ACTION_PATH/../../scripts/dispatch-body" > body.json'
+        in _dispatch_step()["run"]
     )
-    return body
 
 
 def _extract_dispatch_run_block():
@@ -52,7 +44,6 @@ def _extract_dispatch_run_block():
 
 def _build_dispatch_body(verb, environment=""):
     """The whole parsed dispatch body for `verb`."""
-    code = _extract_python_heredoc()
     env = os.environ.copy()
     env.update(
         {
@@ -64,7 +55,7 @@ def _build_dispatch_body(verb, environment=""):
         }
     )
     result = subprocess.run(
-        [__import__("sys").executable, "-c", code],
+        [__import__("sys").executable, str(SCRIPTS / "dispatch-body")],
         env=env,
         capture_output=True,
         text=True,
@@ -162,6 +153,7 @@ def _run_dispatch(tmpdir, verb, environment="", gh_stub=RECORDING_GH_STUB):
     env["VERB"] = verb
     env["REF"] = "abc123"
     env["PR_NUMBER"] = "42"
+    env["GITHUB_ACTION_PATH"] = str(ACTIONS / "dispatch")
 
     result = subprocess.run(
         [usable_bash(), "-c", _extract_dispatch_run_block()],

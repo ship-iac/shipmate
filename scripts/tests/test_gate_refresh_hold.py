@@ -19,7 +19,7 @@ import os
 import subprocess
 
 import pytest
-from _loader import action_steps, usable_bash
+from _loader import ACTIONS, action_steps, usable_bash
 
 _BASH = usable_bash()
 
@@ -54,6 +54,7 @@ def _run_step(tmp_path, gate_state):
     env.update(
         {
             "GH_TOKEN": "x",
+            "GITHUB_ACTION_PATH": str(ACTIONS / "gate-refresh"),
             "HEAD_SHA": HEAD_SHA,
             "GITHUB_REPOSITORY": "acme/demo",
             "GITHUB_SERVER_URL": "https://example.invalid",
@@ -66,6 +67,15 @@ def _run_step(tmp_path, gate_state):
         [_BASH, str(script)], cwd=tmp_path, env=env, capture_output=True, text=True, timeout=30
     )
     return proc, wrote.exists()
+
+
+def test_the_posted_body_is_the_one_gate_status_body_builds():
+    # The behavioural tests below stub `python3` away, so nothing there would notice the step
+    # POSTing a body it composed itself -- one that could name another context, or no
+    # target_url -- instead of the script's.
+    run = _complete_step()["run"]
+    assert 'python3 "$GITHUB_ACTION_PATH/../../scripts/gate-status-body" > gate.json' in run
+    assert "--input gate.json" in run
 
 
 def test_the_gate_is_read_before_it_is_written():

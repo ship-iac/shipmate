@@ -16,7 +16,7 @@ materialize in the tree -- `stack.otplan`, `fingerprint.txt`, `.terraform/`, the
 are covered by CONTRACT.md's gitignore requirement instead.
 """
 
-from _loader import action_steps
+from _loader import SCRIPTS, action_steps
 
 
 def _step(name):
@@ -45,12 +45,12 @@ def test_upload_apply_summary_paths_are_under_runner_temp_not_repo_tree():
 
 
 def test_compose_cell_summary_writes_cell_json_under_runner_temp_not_repo_tree():
-    run = _step("Compose cell summary").get("run") or ""
-    assert 'os.path.join(os.environ["RUNNER_TEMP"], "cell.json")' in run
+    src = (SCRIPTS / "apply-cell-summary").read_text(encoding="utf-8")
+    assert 'os.path.join(os.environ["RUNNER_TEMP"], "cell.json")' in src
     # The old repo-tree writes must be gone, not merely joined by a new one.
-    assert 'open("cell.json"' not in run
-    assert 'open("apply.txt"' not in run
-    assert 'shutil.copyfile(apply_log, "apply.txt")' not in run
+    assert 'open("cell.json"' not in src
+    assert 'open("apply.txt"' not in src
+    assert 'shutil.copyfile(apply_log, "apply.txt")' not in src
 
 
 def test_both_new_steps_still_run_always():
