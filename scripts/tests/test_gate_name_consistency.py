@@ -22,11 +22,14 @@ SKIP_DIRS = {
     "node_modules",
 }
 GATE = "shipmate / gate"
-# The literal lives in `scripts/gate-state`, a shared script that can be unit- and
-# mutation-tested, rather than an inline heredoc in the action or a workflow `if:`. The
-# composite action only POSTs the body gate-state already built.
+# The literal lives in `scripts/gate-state` and `scripts/gate-status-body`, shared scripts that
+# can be unit- and mutation-tested, rather than an inline heredoc in the action or a workflow
+# `if:`. The composite actions only POST the body those scripts already built --
+# `actions/gate-refresh/action.yml` is listed alongside because it also names the gate in its
+# hold refusal, and that message must move with the context if the context is ever renamed.
 WRITERS = [
     "scripts/gate-state",
+    "scripts/gate-status-body",
     "actions/gate-refresh/action.yml",
     ".github/workflows/deploy.yml",
 ]

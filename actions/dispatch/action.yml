@@ -79,31 +79,7 @@ runs:
           *) echo "::error::verb must be plan, apply or unlock (got: $VERB)"; exit 1 ;;
         esac
         [[ "$WORKFLOW" =~ ^[A-Za-z0-9._-]+$ ]] || { echo "::error::workflow must match ^[A-Za-z0-9._-]+$ (got: $WORKFLOW)"; exit 1; }
-        python3 - > body.json <<'PY'
-        import json, os
-        verb = os.environ["VERB"]
-        if verb == "plan":
-            # plan.yml declares exactly one input, pr_number. `ref` is not among them: the
-            # dispatched run resolves the head from the pull request itself, so nothing a
-            # dispatcher states decides what is planned.
-            inputs = {"pr_number": os.environ["PR_NUMBER"]}
-        elif verb == "unlock":
-            # Releasing a stranded lock applies no plan and comments on no pull request, so
-            # unlock.yml declares neither a pr_number nor anything else only the apply body
-            # needs.
-            inputs = {"ref": os.environ["REF"], "environment": os.environ["ENVIRONMENT"]}
-        else:
-            inputs = {
-                "ref": os.environ["REF"],
-                "pr_number": os.environ["PR_NUMBER"],
-            }
-            # The `environment` key is included only when set: apply.yml declares it optional
-            # (empty = bare `shipmate apply`), and GitHub reads an empty value for a required
-            # workflow_dispatch input as not provided.
-            if os.environ.get("ENVIRONMENT"):
-                inputs["environment"] = os.environ["ENVIRONMENT"]
-        print(json.dumps({"ref": os.environ["DISPATCH_REF"], "inputs": inputs}))
-        PY
+        python3 "$GITHUB_ACTION_PATH/../../scripts/dispatch-body" > body.json
         rc=0
         out=$(gh api -X POST "repos/$REPO/actions/workflows/$WORKFLOW/dispatches" --input body.json 2>&1) || rc=$?
         printf '%s\n' "$out"

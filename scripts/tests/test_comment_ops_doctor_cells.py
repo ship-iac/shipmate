@@ -13,7 +13,7 @@ import subprocess
 import sys
 
 import pytest
-from _loader import ACTIONS, action_steps, usable_bash
+from _loader import ACTIONS, SCRIPTS, action_steps, usable_bash
 
 _START = "--plan-runs"
 _END = "plan_run_ids=$("
@@ -29,7 +29,10 @@ def _cells_block():
     block = lines[starts[0] : ends[0] + 1]
     # A slice that missed either half would assert nothing.
     assert any("gh run download" in ln for ln in block), "extracted block downloads nothing"
-    assert any("unlink()" in ln for ln in block), "extracted block selects nothing"
+    assert any("scripts/doctor-cells" in ln for ln in block), "extracted block selects nothing"
+    assert "unlink()" in (SCRIPTS / "doctor-cells").read_text(encoding="utf-8"), (
+        "scripts/doctor-cells no longer prunes"
+    )
     return "\n".join(block)
 
 

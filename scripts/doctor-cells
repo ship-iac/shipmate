@@ -1,0 +1,32 @@
+#!/usr/bin/env python3
+"""Drop the downloaded cell summaries this head's apply checks no longer name.
+
+Used by actions/comment-ops' doctor route. Keep, per cell, only the copy from the run that
+cell's own newest apply check names: the replanned cell's older copy would otherwise report an
+environment this head no longer declares. A cell no record names is KEPT and warned about,
+because dropping it would narrow the declared set silently.
+"""
+
+import json
+import pathlib
+
+
+def main():
+    runs = json.load(open("plan_runs.json", encoding="utf-8"))
+    for cj in pathlib.Path("doctor-cells").glob("*/**/cell.json"):
+        try:
+            cell = json.loads(cj.read_text(encoding="utf-8"))
+            name = f"apply / {cell['stack_path']} / {cell['environment']}"
+        except (OSError, ValueError, KeyError, TypeError):
+            continue
+        if name not in runs:
+            print(
+                f"::warning::no apply check on this commit records a plan run for {name}; "
+                "doctor reports its environment from the summary it downloaded"
+            )
+        elif runs[name] != cj.relative_to("doctor-cells").parts[0]:
+            cj.unlink()
+
+
+if __name__ == "__main__":
+    main()

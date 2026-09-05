@@ -22,7 +22,7 @@ import re
 import subprocess
 
 import pytest
-from _loader import action_steps, usable_bash
+from _loader import SCRIPTS, action_steps, usable_bash
 
 _BASH = usable_bash()
 
@@ -52,18 +52,15 @@ def _compose_step():
 
 
 def _failsafe_env_keys():
-    """The env-var names of the Compose step heredoc's FAILSAFES list, in order, read via
+    """The env-var names of `scripts/apply-cell-summary`'s FAILSAFES list, in order, read via
     ast.literal_eval: a parsed value, not file text."""
-    run = _compose_step()["run"]
-    _, _, rest = run.partition("<<'PY'\n")
-    body, sep, _ = rest.rpartition("\nPY")
-    assert sep, "Compose cell summary heredoc has no closing PY terminator"
-    for node in ast.parse(body).body:
+    source = (SCRIPTS / "apply-cell-summary").read_text(encoding="utf-8")
+    for node in ast.parse(source).body:
         if isinstance(node, ast.Assign) and any(
             isinstance(t, ast.Name) and t.id == "FAILSAFES" for t in node.targets
         ):
             return [env_key for env_key, _message in ast.literal_eval(node.value)]
-    raise AssertionError("no FAILSAFES assignment found in the Compose cell summary heredoc")
+    raise AssertionError("no FAILSAFES assignment found in scripts/apply-cell-summary")
 
 
 def test_verification_sits_between_the_download_and_the_decrypt():

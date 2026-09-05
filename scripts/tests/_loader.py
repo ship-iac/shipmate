@@ -122,6 +122,20 @@ def action_steps(action):
     return (action_yaml(action).get("runs") or {}).get("steps") or []
 
 
+def run_lines(step):
+    """Stripped, non-empty, non-comment lines of ``step``'s ``run:``.
+
+    Match a whole line against this rather than a substring of the raw block: a substring is
+    satisfied by a commented-out invocation, which is the accidental regression a
+    "the step still calls the script" guard exists to catch.
+    """
+    return [
+        ln.strip()
+        for ln in (step.get("run") or "").splitlines()
+        if ln.strip() and not ln.strip().startswith("#")
+    ]
+
+
 @functools.cache
 def usable_bash():
     """Path to a bash that actually runs, or None: what the tests that execute an action's shell

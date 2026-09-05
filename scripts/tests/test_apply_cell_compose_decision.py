@@ -1,12 +1,12 @@
 """Executable coverage for the Compose cell summary step's result and reason decision in
 actions/apply-cell/action.yml.
 
-The step is a Python heredoc inline in the composite action, kept there rather than extracted to
-`scripts/`, because the capture must live where the apply runs. The sibling YAML-shape guards
-(ids exist, continue-on-error is set, files land under $RUNNER_TEMP) leave the branching logic
-itself unexercised, so this file extracts the heredoc body straight out of action.yml -- never a
-hand-copy, which could silently drift from what ships -- and execs it under a controlled
-environment for every outcome combination the decision branches on.
+The step runs `scripts/apply-cell-summary`. The sibling YAML-shape guards (ids exist,
+continue-on-error is set, files land under $RUNNER_TEMP) leave the branching logic itself
+unexercised, so this file loads that script -- never a hand-copy, which could silently drift from
+what ships -- and calls its `main()` under a controlled environment for every outcome combination
+the decision branches on. One guard here pins that the step still invokes it, because a test over
+a script nothing runs asserts nothing.
 
 Why the step matches `== "failure"` rather than `!= "success"`: a composite step failure halts
 every later step whose `if` defaults to `success()`, so a fail-safe that never ran reads
@@ -19,7 +19,7 @@ never ran.
 import json
 
 import pytest
-from _loader import action_steps
+from _loader import action_steps, load_script, run_lines
 
 
 def _compose_step():
@@ -28,16 +28,12 @@ def _compose_step():
     return matches[0]
 
 
-def _compose_heredoc_body():
-    """Pull the Python source out of `python3 - <<'PY' ... PY` in the step's `run:` block.
-    Splitting on the exact heredoc markers, rather than hand-copying the logic elsewhere, is what
-    keeps this test bound to the code that ships."""
-    run = _compose_step()["run"]
-    assert "<<'PY'\n" in run, "Compose cell summary no longer opens a 'PY' heredoc"
-    _, _, rest = run.partition("<<'PY'\n")
-    body, sep, _ = rest.rpartition("\nPY")
-    assert sep, "Compose cell summary heredoc has no closing PY terminator"
-    return body
+def test_the_compose_step_runs_the_script_this_file_exercises():
+    # A whole run line, not a substring: a commented-out invocation writes no cell.json, and
+    # apply-comment then renders an applied cell as never attempted.
+    assert 'python3 "$GITHUB_ACTION_PATH/../../scripts/apply-cell-summary"' in run_lines(
+        _compose_step()
+    )
 
 
 def _run_compose(
@@ -54,7 +50,7 @@ def _run_compose(
     stack_name="app",
     env="dev-eu",
 ):
-    """Exec the real heredoc body with os.environ patched to a given outcome combination and
+    """Run the real script with os.environ patched to a given outcome combination and
     RUNNER_TEMP pointed at a tmp dir, then return the resulting cell.json as a dict."""
     monkeypatch.setenv("STACK", stack)
     monkeypatch.setenv("STACK_NAME", stack_name)
@@ -67,15 +63,10 @@ def _run_compose(
     monkeypatch.setenv("APPLY_OUTCOME", apply)
     monkeypatch.setenv("RUNNER_TEMP", str(tmp_path))
 
-    body = _compose_heredoc_body()
-    # The whole point of this test is to execute the exact source that ships
-    # in action.yml (never a hand-copy that could drift from it) -- exec is
-    # unavoidable. body is read straight out of the action's own heredoc,
-    # never from external/user input.
-    exec(compile(body, "<Compose cell summary heredoc>", "exec"), {})  # noqa: S102
+    load_script("apply-cell-summary").main()
 
     cell_path = tmp_path / "cell.json"
-    assert cell_path.exists(), "heredoc did not write cell.json under RUNNER_TEMP"
+    assert cell_path.exists(), "the script did not write cell.json under RUNNER_TEMP"
     return json.loads(cell_path.read_text(encoding="utf-8"))
 
 

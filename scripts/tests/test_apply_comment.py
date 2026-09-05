@@ -971,11 +971,11 @@ def test_short_form_and_failure_line_agree_blank_token_is_failure():
 
 def test_cell_schema_guard_apply_cell_writes_every_required_key():
     # Coupling: apply-cell (writer of cell.json) <-> apply-comment (reader).
-    # The writer is inline python in the action; assert every key the reader
-    # requires appears as a JSON key literal in the writer's source.
-    src = (_ENGINE / "actions" / "apply-cell" / "action.yml").read_text(encoding="utf-8")
+    # Assert every key the reader requires appears as a JSON key literal in
+    # the writer's source.
+    src = (_ENGINE / "scripts" / "apply-cell-summary").read_text(encoding="utf-8")
     missing = [k for k in ac.CELL_KEYS if f'"{k}"' not in src]
-    assert missing == [], f"apply-cell action.yml no longer writes cell.json keys: {missing}"
+    assert missing == [], f"apply-cell-summary no longer writes cell.json keys: {missing}"
 
 
 def test_apply_summary_artifact_name_matches_contract():

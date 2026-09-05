@@ -1,0 +1,32 @@
+#!/usr/bin/env python3
+"""Write a plan cell's cell.json from env vars.
+
+Used by actions/plan-cell's `Write cell summary` step. Built from env vars rather than shell
+interpolation so an author-controlled stack-name/env cannot inject shell or break the JSON.
+"""
+
+import json
+import os
+
+
+def main():
+    with open("fingerprint.txt", encoding="utf-8") as fh:
+        fingerprint = fh.read().strip()
+    with open("cell.json", "w") as fh:
+        json.dump(
+            {
+                "stack": os.environ["STACK_NAME"],
+                "stack_path": os.environ["STACK"],
+                "environment": os.environ["ENV"],
+                "add": int(os.environ["ADD"]),
+                "change": int(os.environ["CHANGE"]),
+                "destroy": int(os.environ["DESTROY"]),
+                "changed": os.environ["CHANGED"] == "true",
+                "fingerprint": fingerprint,
+            },
+            fh,
+        )
+
+
+if __name__ == "__main__":
+    main()

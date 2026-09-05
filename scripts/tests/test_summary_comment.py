@@ -3,7 +3,7 @@ import json
 
 import pytest
 from _loader import ENGINE as _ENGINE
-from _loader import load_script
+from _loader import action_steps, load_script, run_lines
 
 sc = load_script("summary-comment")
 
@@ -310,12 +310,17 @@ def test_load_cells_caps_plan_text_read_at_size_budget(tmp_path):
 
 
 def test_cell_schema_guard_plan_cell_writes_every_required_key():
-    # Coupling: plan-cell (writer of cell.json) <-> summary-comment (reader). The writer is
-    # inline python in the action, so every key the reader requires must appear as a JSON key
-    # literal in the writer's source.
-    src = (_ENGINE / "actions" / "plan-cell" / "action.yml").read_text(encoding="utf-8")
+    # Coupling: plan-cell (writer of cell.json) <-> summary-comment (reader). Every key the
+    # reader requires must appear as a JSON key literal in the writer's source.
+    src = (_ENGINE / "scripts" / "plan-cell-summary").read_text(encoding="utf-8")
     missing = [k for k in sc.CELL_KEYS if f'"{k}"' not in src]
-    assert missing == [], f"plan-cell action.yml no longer writes cell.json keys: {missing}"
+    assert missing == [], f"plan-cell-summary no longer writes cell.json keys: {missing}"
+    # And the step still runs that writer: a guard over a script nothing invokes pins nothing.
+    # Matched as a whole run line, so neither prose elsewhere in the file nor a commented-out
+    # invocation satisfies it.
+    steps = [s for s in action_steps("plan-cell") if s.get("name") == "Write cell summary"]
+    assert len(steps) == 1, f"expected one Write cell summary step, got {len(steps)}"
+    assert 'python3 "$GITHUB_ACTION_PATH/../../scripts/plan-cell-summary"' in run_lines(steps[0])
 
 
 def test_cell_summary_artifact_name_is_dot_delimited_env_first():

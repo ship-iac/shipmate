@@ -12,7 +12,7 @@ namesakes, whose artifact carries only comment data. Asserted on the parsed acti
 """
 
 import pytest
-from _loader import action_steps
+from _loader import action_steps, run_lines
 
 LOAD_BEARING = ("Compose cell summary", "Upload drift summary")
 
@@ -21,6 +21,15 @@ def _step(name):
     matches = [s for s in action_steps("drift-cell") if s.get("name") == name]
     assert len(matches) == 1, f"expected exactly one {name!r} step, got {len(matches)}"
     return matches[0]
+
+
+def test_the_compose_step_runs_the_cell_summary_writer():
+    # The step's whole job is running that script; a step that stopped calling it would upload
+    # no cell.json at all, and drift-issues reads an absent cell as a cell that does not exist.
+    # A whole run line, not a substring, so a commented-out invocation cannot satisfy it.
+    assert 'python3 "$GITHUB_ACTION_PATH/../../scripts/drift-cell-summary"' in run_lines(
+        _step("Compose cell summary")
+    )
 
 
 @pytest.mark.parametrize("name", LOAD_BEARING)

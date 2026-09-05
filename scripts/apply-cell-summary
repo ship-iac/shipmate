@@ -1,0 +1,69 @@
+#!/usr/bin/env python3
+"""Decide an apply cell's result and blocked reason, then write $RUNNER_TEMP/cell.json.
+
+Used by actions/apply-cell's `Compose cell summary` step, which runs even when a fail-safe or
+the apply itself failed or was cancelled: the aggregator needs a result for every
+attempted-or-blocked cell.
+"""
+
+import json
+import os
+
+# Checked in pipeline order and matched on 'failure', not "!= success": a
+# composite-action step failure halts every later non-always() step, so a fail-safe
+# that never ran reads 'skipped', not 'failure'. Matching 'failure' exactly means only
+# the fail-safe that actually tripped can claim the blocked reason.
+FAILSAFES = [
+    ("DOWNLOAD_OUTCOME", "reviewed plan artifact missing or expired — re-run plan"),
+    (
+        "PLANNED_HEAD_OUTCOME",
+        "reviewed plan records no commit or was produced from a different one — re-plan",
+    ),
+    ("DECRYPT_OUTCOME", "plan artifact could not be decrypted — passphrase/config mismatch"),
+    (
+        "FINGERPRINT_OUTCOME",
+        "environment does not match the reviewed plan's fingerprint — re-plan",
+    ),
+    ("RESTORE_OUTCOME", "state restore failed"),
+]
+
+
+def main():
+    result, reason = None, ""
+    for env_key, message in FAILSAFES:
+        if os.environ[env_key] == "failure":
+            result, reason = "blocked", message
+            break
+
+    if result is None:
+        apply_outcome = os.environ["APPLY_OUTCOME"]
+        if apply_outcome == "success":
+            result = "applied"
+        elif apply_outcome in ("failure", "cancelled"):
+            result = "failed"
+        else:
+            # No fail-safe failed and apply never ran, so some other step failed
+            # first. Still blocked, but the reason must not name a fail-safe that
+            # was never attempted.
+            result = "blocked"
+            reason = "an earlier step failed before the apply ran — see the job log"
+
+    # apply.txt needs no copy: `Apply the stored plan` already tee'd it to
+    # $RUNNER_TEMP/apply.txt, so a blocked cell that never reached the apply never wrote
+    # it, and an attempted cell's copy already sits where `Upload apply summary` reads.
+    cell_path = os.path.join(os.environ["RUNNER_TEMP"], "cell.json")
+    with open(cell_path, "w") as fh:
+        json.dump(
+            {
+                "stack": os.environ["STACK_NAME"],
+                "stack_path": os.environ["STACK"],
+                "environment": os.environ["ENV"],
+                "result": result,
+                "reason": reason,
+            },
+            fh,
+        )
+
+
+if __name__ == "__main__":
+    main()

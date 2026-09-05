@@ -1,0 +1,30 @@
+#!/usr/bin/env python3
+"""Build the aggregate gate's success commit-status body for actions/gate-refresh.
+
+The context literal below is the only copy in this file: test_gate_name_consistency.py asserts
+it is present, and a second copy in prose would satisfy that guard on its own.
+
+Commit status, not a check-run — see actions/summary for the rationale. A check-run binds to a
+suite; a commit status is commit-scoped and so survives the multi-suite attribution race.
+"""
+
+import json
+import os
+
+
+def main():
+    body = {
+        "state": "success",
+        "context": "shipmate / gate",
+        "description": "all applies complete — nothing left to apply",
+    }
+    server, repo, run_id = (
+        os.environ.get(k, "") for k in ("GITHUB_SERVER_URL", "GITHUB_REPOSITORY", "GITHUB_RUN_ID")
+    )
+    if server and repo and run_id:
+        body["target_url"] = f"{server}/{repo}/actions/runs/{run_id}"
+    print(json.dumps(body))
+
+
+if __name__ == "__main__":
+    main()
