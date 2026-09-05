@@ -402,10 +402,13 @@ accepted.
 
 ### `no plan-text digest recorded for`, or `the stored plan does not render to the plan text that was reviewed`
 
-An apply is refused over the plan text a reviewer read, at one of two points.
-The first is `detect`, before any cell job starts; the second is inside an apply
-cell, after `tofu init` and before `tofu apply`, leaving its
-`apply / <stack> / <env>` check pending.
+An apply is refused over the plan text a reviewer read, at one of three points.
+The first is `detect`, before any cell job starts. The other two are inside an
+apply cell and leave its `apply / <stack> / <env>` check pending: the
+`digest-input` step refuses a digest that never reached the action, before
+`tofu init`; the `plan-digest` step refuses a render that disagrees with it,
+after `init` and before `tofu apply`. Each names its own blocked reason in the
+cell summary.
 
 The plan text and the stored plan are produced by the same job, which runs the
 pull request's own code, so the two can be made to disagree. The trusted summary

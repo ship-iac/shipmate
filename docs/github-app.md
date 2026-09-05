@@ -359,9 +359,9 @@ actual work here:
   pull-request-side trigger is safe only in that shape — see `CONTRACT.md`
   §Post-plan topology and `docs/hardening.md`.
 - **The plan-text digest is authored in that job, and does not widen the
-  boundary.** The `summary` job hashes the `plan.txt` bytes it already downloads
-  and embeds in the plan comment: reading author-produced data is not executing
-  it, and no new secret enters the job. Re-rendering the plan there instead of
+  boundary.** The `summary` job hashes the whole `plan.txt` it already downloads
+  for the plan comment: reading author-produced data is not executing it, and no
+  new secret enters the job. Re-rendering the plan there instead of
   hashing it was rejected for exactly this reason — the render needs the plan
   artifact decrypted, which would put `SHIPMATE_PLAN_PASSPHRASE` in the job that
   holds the App key.

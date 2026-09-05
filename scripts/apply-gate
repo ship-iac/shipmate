@@ -118,8 +118,9 @@ def _records_by_name(check_run_lines, app_id):
     """Map each App-authored apply check name to the decoded `external_id` record
     pending-checks wrote on it. Runs app_done_names' primitives -- parse_jsonl, the
     fail-closed from_app filter, and latest_by_name's newest-by-id grouping -- so only the
-    newest App-authored run per name is consulted, and both public projections below see the
-    same one parse.
+    newest App-authored run per name is consulted, and the two public projections below read
+    one record shape rather than each re-deriving it. Each call re-runs the chain; nothing
+    here is memoized.
 
     A name is absent when that newest run carries no decodable record: a legacy bare-hex
     external_id from an older engine version, a null/empty/non-JSON one, or one that decodes

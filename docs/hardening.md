@@ -822,10 +822,13 @@ from `actions/pr-facts`, which reads the pull request itself. See below for why.
 The plan comment shows `tofu show` output a plan cell produced while executing
 the pull request's own code, and the `.otplan` an apply runs comes out of that
 same cell. So the two are bound to each other rather than trusted individually:
-the trusted `summary` job takes `sha256` over the `plan.txt` bytes it embeds in
-the comment and records the digest on each apply check, and the apply re-renders
-the stored plan with the command that wrote the file
+the trusted `summary` job takes `sha256` over the whole `plan.txt` it downloaded
+and records the digest on each apply check, and the apply re-renders the stored
+plan with the command that wrote the file
 (`tofu -chdir=<stack> show -no-color stack.otplan`) and refuses any difference.
+The digest covers the file, not the excerpt: the comment embeds a capped prefix
+(`CONTRACT.md` §Plan comment), so on a large plan a reviewer sees less than what
+is bound.
 
 Three refusals hold that chain closed, each of them a refusal rather than a
 warning:
