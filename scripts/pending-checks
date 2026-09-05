@@ -7,13 +7,17 @@ plan matrix cells (they execute PR-head code) and a 256-cell run mints one
 token, not 256. Body semantics match the old plan-cell step apart from
 external_id: changed cells get a queued "apply pending" check, no-change cells
 a completed/neutral "no changes" check. external_id is new -- a JSON record of
-the TF_VAR fingerprint and the id of the plan run that produced the cell, on
-either branch, where plan-cell wrote the bare fingerprint. The check name uses
-the stack PATH so deploy-detect (which only has the path) reconstructs it
-exactly. A missing pending check is not a quiet degradation: the pre-apply snapshot
+the TF_VAR fingerprint, the id of the plan run that produced the cell, and the
+sha256 of the plan text that run published, on either branch, where plan-cell
+wrote the bare fingerprint. That digest is computed here, from the plan.txt
+bytes this job reads and embeds in the review comment, never copied from the
+cell: it is what binds the reviewed text to the plan apply executes.
+The check name uses the stack PATH so deploy-detect (which only has the path)
+reconstructs it exactly. A missing pending check is not a quiet degradation: the pre-apply snapshot
 refuses over it, and deploy-detect's work queue comes up empty.
 """
 
+import hashlib
 import json
 import os
 import pathlib
@@ -39,11 +43,25 @@ def bodies(cells_dir, head_sha):
                 f"::error::{cj} has no 'fingerprint' key — plan-cell and summary "
                 "are from mismatched engine revisions; re-run the plan."
             )
+        txt = cj.with_name("plan.txt")
+        if not txt.is_file():
+            raise SystemExit(
+                f"::error::{cj} has no plan.txt beside it — the plan text a reviewer "
+                "reads cannot be bound to the plan that will be applied. plan-cell and "
+                "summary are from mismatched engine revisions; re-run the plan."
+            )
+        plan_sha256 = hashlib.sha256(txt.read_bytes()).hexdigest()
         body = {
             "name": f"apply / {cell['stack_path']} / {cell['environment']}",
             "head_sha": head_sha,
             "status": "queued",
-            "external_id": json.dumps({"fingerprint": cell["fingerprint"], "plan_run": plan_run}),
+            "external_id": json.dumps(
+                {
+                    "fingerprint": cell["fingerprint"],
+                    "plan_run": plan_run,
+                    "plan_sha256": plan_sha256,
+                }
+            ),
             "output": {
                 "title": "apply pending",
                 "summary": "Waiting to be applied. Merge after apply completes "
