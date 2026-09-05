@@ -105,10 +105,8 @@ runs:
 
     - name: Mint App installation token
       # Minted before `Render apply result comment`, not only before `Post apply result
-      # comment`: `Scan apply checks` needs it too, and one token covers both uses for this job.
-      # checks:read comes from the App installation, so no consumer's calling job has to grant
-      # it -- a called workflow's job permissions cannot exceed its caller's, so taking this off
-      # GITHUB_TOKEN would break every consumer wrapper.
+      # comment`: `Scan apply checks (degrade to no data on failure)` needs it too, and one token
+      # covers both uses -- the same shape actions/summary uses for its three writes.
       id: token
       uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
       with:
@@ -116,6 +114,9 @@ runs:
         private-key: ${{ inputs.private-key }}
         owner: ${{ github.repository_owner }}
         repositories: ${{ github.event.repository.name }}
+        # From the App installation, so no consumer's calling job has to grant it: a called
+        # workflow's job permissions cannot exceed its caller's, so taking this off GITHUB_TOKEN
+        # would break every consumer wrapper.
         permission-checks: read
         permission-pull-requests: write
 

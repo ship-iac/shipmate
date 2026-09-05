@@ -107,12 +107,14 @@ runs:
         rc=0
         out=$(gh api -X POST "repos/$REPO/actions/workflows/$WORKFLOW/dispatches" --input body.json 2>&1) || rc=$?
         printf '%s\n' "$out"
+        # Only a failure that names the missing surface is version skew. A 403, a rate limit, or
+        # a 422 about a different input is another problem entirely, and explaining it as skew
+        # sends the operator to edit workflows that are fine. Neither branch's remedy is a
+        # re-pin: both are a consumer file the upgrade guide says to author or hand-edit.
         if [ "$rc" -ne 0 ]; then
-          # Measured: a workflow file that does not exist answers 404, and one with no such
-          # trigger answers `Workflow does not have 'workflow_dispatch' trigger (HTTP 422)`. Those
-          # two shapes are version skew -- reporting a 403, a rate limit or a 422 about a different
-          # input as skew sends the operator to edit workflows that are fine. Neither remedy is a
-          # re-pin: both shapes are a consumer file the upgrade guide says to hand-edit.
+          # Measured for a consumer predating the unlock wrapper: a workflow file that does not
+          # exist answers 404, and one with no such trigger answers `Workflow does not have
+          # 'workflow_dispatch' trigger (HTTP 422)`.
           if [ "$VERB" = "unlock" ] && [[ "$out" == *"HTTP 404"* || "$out" == *workflow_dispatch* ]]; then echo "::error::This repository has no unlock.yml wrapper, or it declares no workflow_dispatch trigger; its workflows predate shipmate unlock. Add .github/workflows/unlock.yml to this repository — docs/upgrading.md section 0.21.0 step 1 has the file; re-pinning cannot create it."; fi
           # No input name is ANDed in as a body-shape check would be: the plan body carries one
           # input, so an unexpected-input 422 there can only be about pr_number, which is what the

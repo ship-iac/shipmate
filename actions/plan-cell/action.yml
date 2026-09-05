@@ -31,8 +31,6 @@ runs:
         EXPECTED_HEAD: ${{ inputs.expected-head }}
       # First step on purpose: `Plan` runs author-controlled HCL and provider binaries through
       # terramate, so a rev-parse after it reports whatever git state that content left behind.
-      # The value is emitted as a step output rather than written to a file, because a file at
-      # repo root would be rewritable by the code `Plan` executes and an output is not.
       run: |
         set -euo pipefail
         if [ -z "${EXPECTED_HEAD:-}" ]; then

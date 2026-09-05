@@ -29,8 +29,6 @@ runs:
       shell: bash
       # A plan is the probe: it takes the backend's lock, so a held lock fails it and prints the
       # whole `Lock Info:` block, which carries the only copy of the id `force-unlock` needs.
-      # `-refresh=false` keeps it from touching a single provider on the way there, and there is
-      # no `-out` -- nothing here ever applies what this plans.
       env:
         STACK: ${{ inputs.stack }}
       run: |
@@ -40,6 +38,8 @@ runs:
         # a failing plan is the EXPECTED path here, and a cosmetic `tee` failure must not decide
         # which of the three outcomes the cell reports.
         set +e
+        # `-refresh=false` keeps the probe from touching a single provider on the way there, and
+        # there is no `-out` -- nothing here ever applies what this plans.
         terramate run --disable-safeguards=git-out-of-sync --no-recursive -C "$STACK" -- tofu plan -input=false -refresh=false 2>&1 | tee "$RUNNER_TEMP/probe.txt"
         status="${PIPESTATUS[0]}"
         set -e

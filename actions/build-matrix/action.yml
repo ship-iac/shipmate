@@ -24,8 +24,9 @@ inputs:
     default: ""
   no-pull-request:
     description: >-
-      Set to 'true' only in a workflow with no pull-request context (nightly drift). It skips
-      the head-repository and head-commit checks. Never set it in a plan wrapper.
+      Set to 'true' only in a workflow with no pull-request context (nightly drift). A
+      no-pull-request of 'true' is what skips the head-repository and head-commit checks. Never
+      set it in a plan wrapper.
     required: false
     default: "false"
   tags:
