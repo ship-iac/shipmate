@@ -7,14 +7,15 @@ error -- and AFTER `Stack slug`, because a forward `steps.<id>` reference render
 empty slug builds a `restore-keys:` prefix matching no real key, so the cell plans against empty
 state and reports it clean.
 
-`test_optional_state_guard.py` owns the skipped-when-empty property and the input's
-`required`/`default`; what stays here is plan-cell's parity with drift-cell and the wiring.
+`test_optional_state_guard.py` owns the `state-path` input's terms and the skipped-when-empty
+property, for all three cells against hand-written constants; what stays here is the wiring the
+registry does not reach.
 
 Assertions are on the parsed action.yml. A substring form is satisfied by a comment naming
 `actions/state`, and by a restore step whose `if:` was inverted.
 """
 
-from _loader import action_steps, action_yaml
+from _loader import action_steps
 
 _STATE = "ship-iac/shipmate/actions/state"
 
@@ -27,14 +28,6 @@ def _step_index(steps, predicate, what):
 
 def _restore_index(steps):
     return _step_index(steps, lambda s: _STATE in str(s.get("uses", "")), "actions/state")
-
-
-def test_the_state_path_input_matches_drift_cells():
-    """Parity, not the terms themselves: the registry checks each action against constants, so
-    nothing there would catch the two cells drifting apart."""
-    plan = (action_yaml("plan-cell")["inputs"] or {})["state-path"]
-    drift = (action_yaml("drift-cell")["inputs"] or {})["state-path"]
-    assert plan["required"] == drift["required"] and plan["default"] == drift["default"]
 
 
 def test_the_slug_is_computed_before_the_restore_and_the_restore_before_the_plan():
