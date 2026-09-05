@@ -60,7 +60,10 @@ def test_the_apply_half_is_split_across_its_four_attributable_steps():
     reviewer-facing bucket as a real apply error that may have mutated infrastructure."""
     ids = [s.get("id") for s in action_steps("apply-cell") if s.get("id")]
     start = ids.index("digest-input")
-    assert tuple(ids[start : start + len(_STEP_IDS)]) == _STEP_IDS
+    # Written out here rather than compared against _STEP_IDS: the harness concatenates the
+    # bodies in that constant's order, so a swap made in both places would leave every runtime
+    # assertion in this file green and this the only test able to catch it.
+    assert tuple(ids[start : start + 4]) == ("digest-input", "init", "plan-digest", "apply")
 
 
 def test_apply_step_captures_pipestatus_and_exits_on_it():

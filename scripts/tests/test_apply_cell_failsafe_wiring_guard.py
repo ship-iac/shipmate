@@ -6,7 +6,7 @@ of its own.
 
 Everything here is derived from the shipped source itself -- step order, ids and the Compose
 step's `env:` mappings from action.yml, the FAILSAFES list from scripts/apply-cell-summary --
-rather than a hand-maintained list of the five current ids, because a hardcoded list is itself
+rather than a hand-maintained list of the current ids, because a hardcoded list is itself
 the kind of thing that silently goes stale.
 """
 

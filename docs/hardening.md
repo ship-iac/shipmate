@@ -830,7 +830,7 @@ The digest covers the file, not the excerpt: the comment embeds a capped prefix
 (`CONTRACT.md` §Plan comment), so on a large plan a reviewer sees less than what
 is bound.
 
-Three refusals hold that chain closed, each of them a refusal rather than a
+Four refusals hold that chain closed, each of them a refusal rather than a
 warning:
 
 - A `cell.json` with no `plan.txt` beside it fails the `summary` job. Tolerating
@@ -839,6 +839,10 @@ warning:
 - An apply check carrying no digest is refused at detect, before any apply job
   starts. Most often the plan predates the release that began recording one
   ([`upgrading.md`](upgrading.md)); the remedy is a re-plan.
+- A digest that never reached the apply cell fails it before `tofu init`. A
+  composite action's `required: true` is not enforced, so an unwired input
+  arrives empty; accepting it would skip the comparison silently. The remedy is
+  a re-pin, not a re-plan, and the cell says so.
 - A digest that disagrees with what the stored plan renders to fails the cell
   with nothing applied. That comparison sits after `tofu init` — the render needs
   the providers `init` installs — and before `tofu apply`.

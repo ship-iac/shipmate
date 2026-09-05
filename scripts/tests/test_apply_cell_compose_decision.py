@@ -10,10 +10,9 @@ a script nothing runs asserts nothing.
 
 Why the step matches `== "failure"` rather than `!= "success"`: a composite step failure halts
 every later step whose `if` defaults to `success()`, so a fail-safe that never ran reads
-'skipped', not 'failure'. An unrelated earlier failure -- the un-id'd "Snapshot pre-existing
-apply-check ids" step, which sits between fingerprint and restore-state -- must read as the
-generic "an earlier step failed" reason, never as a specific fail-safe's message that in fact
-never ran.
+'skipped', not 'failure'. An unrelated earlier failure -- any step in that range carrying no id,
+so no FAILSAFES row can name it -- must read as the generic "an earlier step failed" reason,
+never as a specific fail-safe's message that in fact never ran.
 """
 
 import json
@@ -215,8 +214,8 @@ def test_apply_cancelled_is_failed_with_empty_reason(monkeypatch, tmp_path):
 def test_unrelated_step_failed_between_fingerprint_and_restore_reads_as_generic_blocked(
     monkeypatch, tmp_path
 ):
-    # The un-id'd "Snapshot pre-existing apply-check ids" step sits between fingerprint and
-    # restore-state. If it fails, every fail-safe up to it reads 'success' and restore-state and
+    # An un-id'd step failing between fingerprint and
+    # restore-state: every fail-safe up to it reads 'success' and restore-state and
     # apply never ran, reading 'skipped'. The decision must not misattribute that to
     # restore-state.
     cell = _run_compose(

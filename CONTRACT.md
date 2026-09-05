@@ -1665,7 +1665,7 @@ A third record binds the plan *text* to the plan that executes. The trusted
 `summary` job takes `sha256` over the **whole** `plan.txt` it downloaded —
 computed there, never copied from the cell — and writes it as the record's
 `plan_sha256` field, on the queued and the neutral check alike. The comment
-embeds at most the first 60 000 bytes of that file and may truncate further or
+embeds at most the first 60 000 characters of that file and may truncate further or
 degrade to a link, so on a large plan the digest covers more than the comment
 shows; it binds the file, not the excerpt.
 `apply-cell` re-renders the stored plan with `tofu -chdir=<stack> show
