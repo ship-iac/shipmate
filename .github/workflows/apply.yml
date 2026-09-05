@@ -110,7 +110,7 @@ jobs:
           terramate-version: ${{ vars.TERRAMATE_VERSION }}
           tofu-version: ${{ vars.TOFU_VERSION }}
       - id: d
-        uses: ship-iac/shipmate/actions/apply-detect@07bfc1c80279fdf3b53c792d41eeac0f2463b0f6
+        uses: ship-iac/shipmate/actions/apply-detect@a9be68cc9442bbf03478a7eabbd0afc2847cdd4e
         with:
           environment: ${{ inputs.environment }}
           head-sha: ${{ inputs.ref }}
@@ -134,7 +134,7 @@ jobs:
     # a skipped `detect` reads its outputs as empty strings -- which `!= 'true'` fans out on.
     needs: [guard, review, detect]
     if: ${{ !failure() && !cancelled() && needs.detect.outputs.empty != 'true' }}
-    uses: ship-iac/shipmate/.github/workflows/apply-env-level.yml@a8107dde2500a7f36839a65c1da74f5f11685eca # pinned to a commit on main
+    uses: ship-iac/shipmate/.github/workflows/apply-env-level.yml@a9be68cc9442bbf03478a7eabbd0afc2847cdd4e # pinned to a commit on main
     permissions: { contents: read, checks: read, actions: read, id-token: write }
     with:
       waves_json: ${{ needs.detect.outputs.waves }}
@@ -176,13 +176,13 @@ jobs:
     steps:
       - name: Complete gate if every apply check is done
         id: gate
-        uses: ship-iac/shipmate/actions/gate-refresh@94d9d252bbc37a291b2077911ce0c2531c2c9c2f
+        uses: ship-iac/shipmate/actions/gate-refresh@a9be68cc9442bbf03478a7eabbd0afc2847cdd4e
         with:
           head-sha: ${{ inputs.ref }}
           app-id: ${{ vars.SHIPMATE_APP_ID }}
           private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
       - name: Post apply result comment
-        uses: ship-iac/shipmate/actions/apply-summary@94d9d252bbc37a291b2077911ce0c2531c2c9c2f
+        uses: ship-iac/shipmate/actions/apply-summary@a9be68cc9442bbf03478a7eabbd0afc2847cdd4e
         with:
           pr-number: ${{ inputs.pr_number }}
           head-sha: ${{ inputs.ref }}
