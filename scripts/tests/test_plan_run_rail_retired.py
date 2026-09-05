@@ -22,6 +22,7 @@ EXPECTED_INPUTS = {
     "deploy.yml": {"workflow_call": ["state_suffix"]},
     "internal-pins.yml": {},
     "manifest-load.yml": {},
+    "plan.yml": {"workflow_call": ["runs_on", "state_suffix"]},
     "summary.yml": {
         "workflow_call": [
             "detect-result",

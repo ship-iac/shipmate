@@ -1,42 +1,29 @@
 """The trusted summary job must refuse forks and unrequested drafts, and execute nothing.
 
 It runs on `pull_request_target`, through the consumer's plan workflow, holding the App key. Two
-things keep it safe: its `if:`, and the fact that it executes no repository content. Every
-assertion below is on a parsed value -- `yaml.safe_load`, then a whole
-`if:`/`environment:`/`with:` field -- rather than a substring of the raw file text. The substring
-form was proven vacuous: four simultaneous mutations of `summary.yml` (all three trust guards
-inverted, `environment: shipmate-engine` commented out, the draft-skip deleted) left the old
-suite's `1 failed, 762 passed` unchanged from baseline. A YAML comment or an inverted operator
-can contain the same substring as the real guard; it cannot produce the same parsed value.
+things keep it safe: its `if:`, and the fact that it executes no repository content. The job now
+lives in `plan.yml` alongside three jobs that check out and execute pull-request content, so the
+job-id list is pinned here too. Every assertion below is on a parsed value -- `yaml.safe_load`,
+then a whole `if:`/`environment:`/`with:` field -- rather than a substring of the raw file text.
+The substring form was proven vacuous: four simultaneous mutations of the summary job (all three
+trust guards inverted, `environment: shipmate-engine` commented out, the draft-skip deleted) left
+the old suite's `1 failed, 762 passed` unchanged from baseline. A YAML comment or an inverted
+operator can contain the same substring as the real guard; it cannot produce the same parsed
+value.
 """
 
 import yaml
 from _loader import WORKFLOWS
 
-WF = WORKFLOWS / "summary.yml"
+WF = WORKFLOWS / "plan.yml"
 
 #: Hand-written, never derived from the workflow. A constant lifted out of the file it checks
 #: passes whatever the file says.
 EXPECTED_IF = (
-    "inputs.head-repo != '' && inputs.head-repo == github.repository && "
-    "(inputs.is-draft == 'false' || inputs.on-demand == 'true')"
+    "${{ !cancelled() && needs.facts.outputs.head-repo != '' && "
+    "needs.facts.outputs.head-repo == github.repository && "
+    "(needs.facts.outputs.is-draft == 'false' || needs.facts.outputs.on-demand == 'true') }}"
 )
-#: The whole declaration per input, not only the names. A `default:` added here is what makes a
-#: caller that stops passing the input silent: `planned-cells` arrives as '0', `cell_count` as 0,
-#: and the gate greens over a run that planned cells. `required: false` does the same by another
-#: route. `head-repo`, `is-draft` and `on-demand` are the deliberate inverse, which is why they
-#: carry the default the other five refuse; the reason is in
-#: test_the_workflow_call_inputs_are_exactly_these.
-EXPECTED_INPUTS = {
-    "pr-number": {"required": True, "type": "string"},
-    "head-sha": {"required": True, "type": "string"},
-    "detect-result": {"required": True, "type": "string"},
-    "plan-result": {"required": True, "type": "string"},
-    "planned-cells": {"required": True, "type": "string"},
-    "head-repo": {"required": False, "default": "", "type": "string"},
-    "is-draft": {"required": False, "default": "", "type": "string"},
-    "on-demand": {"required": False, "default": "", "type": "string"},
-}
 #: The whole job, as an ordered list of what each step runs. It subsumes "no checkout": a
 #: checkout step, a `run:` step, or any extra step at all changes this list, where a substring
 #: scan for "checkout" would miss every one of those.
@@ -45,22 +32,26 @@ EXPECTED_STEP_USES = [
     "ship-iac/shipmate/actions/summary",
 ]
 EXPECTED_SUMMARY_WITH = {
-    "pr-number": "${{ inputs.pr-number }}",
-    "head-sha": "${{ inputs.head-sha }}",
-    "detect-result": "${{ inputs.detect-result }}",
-    "plan-result": "${{ inputs.plan-result }}",
-    "planned-cells": "${{ inputs.planned-cells }}",
-    "on-demand": "${{ inputs.on-demand }}",
+    "pr-number": "${{ needs.facts.outputs.pr-number }}",
+    "head-sha": "${{ needs.facts.outputs.head-sha }}",
+    "detect-result": "${{ needs.detect.result }}",
+    "plan-result": "${{ needs.plan.result }}",
+    "planned-cells": "${{ needs.detect.outputs.count }}",
+    "on-demand": "${{ needs.facts.outputs.on-demand }}",
     "app-id": "${{ vars.SHIPMATE_APP_ID }}",
     "private-key": "${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}",
 }
+EXPECTED_JOB_IDS = ["facts", "detect", "plan", "summary"]
 
 
 def _summary_job():
     doc = yaml.safe_load(WF.read_text(encoding="utf-8"))
     jobs = doc["jobs"]
-    assert len(jobs) == 1, "a second job here would not be covered by these guards"
-    return next(iter(jobs.values())), doc
+    assert list(jobs) == EXPECTED_JOB_IDS, (
+        f"plan.yml's jobs are {list(jobs)}; these guards cover only {EXPECTED_JOB_IDS}, and "
+        "each job id is also a check-run name segment"
+    )
+    return jobs["summary"], doc
 
 
 def test_the_trusted_job_refuses_forks_and_unrequested_drafts():
@@ -69,11 +60,11 @@ def test_the_trusted_job_refuses_forks_and_unrequested_drafts():
     Every clause is load-bearing, the parentheses included: `&&` binds tighter than `||`, so
     losing them makes `on-demand` alone satisfy the guard. The decision cannot move to the
     consumer's file, because nothing inspects consumer YAML -- a consumer who dropped a clause
-    would hand a fork an App-authored gate and nothing anywhere would notice. What the consumer
-    does supply is the facts: a head repository, a draft flag, and whether a person named this
-    run. The empty-string clause is what makes an omitted fact a refusal instead of a pass. Only
-    the draft clause yields to `on-demand`; the fork clause guards the App key over fork-authored
-    content and yields to no trigger.
+    would hand a fork an App-authored gate and nothing anywhere would notice. What the facts job
+    supplies is a head repository, a draft flag, and whether a person named this run. The
+    empty-string clause is what makes an omitted fact a refusal instead of a pass. Only the draft
+    clause yields to `on-demand`; the fork clause guards the App key over fork-authored content
+    and yields to no trigger.
     """
     job, _ = _summary_job()
     assert " ".join(job["if"].split()) == EXPECTED_IF
@@ -97,13 +88,3 @@ def test_the_workflow_passes_exactly_these_values_to_the_summary_action():
     call = [s for s in job["steps"] if "actions/summary" in str(s.get("uses", ""))]
     assert len(call) == 1
     assert call[0]["with"] == EXPECTED_SUMMARY_WITH
-
-
-def test_the_workflow_call_inputs_are_exactly_these():
-    """Three inputs carry the default the other five refuse. `required: true` on them would buy a
-    startup error on the caller's run: no job, no log, no gate, and no way for the engine to state
-    the reason. `required: false` plus `default: ""` plus an `if:` that rejects empty buys a
-    skipped job instead -- the same refusal, said out loud."""
-    # `doc[True]` is not a typo: PyYAML parses the bare key `on:` as the boolean True.
-    _, doc = _summary_job()
-    assert doc[True]["workflow_call"]["inputs"] == EXPECTED_INPUTS
