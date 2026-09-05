@@ -12,7 +12,7 @@ inputs:
     required: false
     default: ''
   verb:
-    description: Which workflow to dispatch — plan, apply or unlock, one consumer file each. No default — a guessed verb dispatches one verb's body at another verb's workflow, and the pull request never sees the rejection. `actions/comment-ops` exposes this as its `verb` output.
+    description: Which workflow to dispatch — plan, apply or unlock, one consumer file each. No default — a guessed verb dispatches one verb's body at another verb's workflow, and the pull request learns only that a dispatch failed. `actions/comment-ops` exposes this as its `verb` output.
     required: true
   ref:
     description: PR head SHA to check out and apply. Empty and unused on the plan route, whose dispatched run resolves the head from the pull request itself.
@@ -62,12 +62,16 @@ runs:
         VERB: ${{ inputs.verb }}
         REF: ${{ inputs.ref }}
         PR_NUMBER: ${{ inputs.pr-number }}
+        # Not the App token above, which is minted `actions: write` and cannot comment. The
+        # workflow token can, and the calling job already holds `pull-requests: write` for
+        # comment-ops' own rejections.
+        COMMENT_TOKEN: ${{ github.token }}
       run: |
         set -euo pipefail
         # A composite action's `required: true` is not enforced by GitHub, so a caller that omits
         # the input arrives with the empty string. Refuse rather than default: a default dispatches
-        # one verb's body at another verb's workflow, and that rejection lands on this run, where
-        # nobody on the pull request is looking.
+        # one verb's body at another verb's workflow, for a rejection the pull request sees only as
+        # a failed dispatch.
         if [ -z "${VERB:-}" ]; then
           echo "::error::The calling workflow did not pass a verb to shipmate/actions/dispatch, so there is no workflow to dispatch. Wire that step's verb input to the verb output of the comment-ops step above it (docs/getting-started.md)."
           exit 1
@@ -95,6 +99,12 @@ runs:
           # input, so an unexpected-input 422 there can only be about pr_number, which is what the
           # message already says.
           if [ "$VERB" = "plan" ] && [[ "$out" == *"Unexpected inputs provided"* || "$out" == *workflow_dispatch* ]]; then echo "::error::This repository's plan.yml does not accept a dispatched plan — it predates the plan verb, or declares no pr_number input. Edit .github/workflows/plan.yml in this repository — docs/upgrading.md section 0.20.0 lists the edits; re-pinning alone does not make them."; fi
+          # This run's checks land on the dispatch ref, not on the pull request the commenter is
+          # watching, so the pull request would show nothing at all. Link, never `$out`: the API
+          # answers at no bounded length, and a comment body has one. `|| true` because a
+          # cosmetic failure must not mask the dispatch's own exit code.
+          GH_TOKEN="$COMMENT_TOKEN" gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" \
+            -f body=":x: shipmate: \`$VERB\` was authorized, but dispatching its workflow failed, so no run started. The error is in [this run]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID)." >/dev/null || true
           exit "$rc"
         fi
         if [ "$VERB" = plan ]; then

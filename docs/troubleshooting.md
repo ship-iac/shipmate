@@ -462,8 +462,8 @@ Comment `shipmate unlock <env>`. The environment is required; there is no bare
 form. It dispatches your repository's own `.github/workflows/unlock.yml`
 ([`upgrading.md`](upgrading.md) §0.21.0 has the wrapper); wrappers predating that
 file get no run at all — the dispatch is refused with a 404, the comment-handling
-run carries an error saying so, and the pull request shows only the rocket
-reaction. It authorizes on approvers-team membership and the `<env>-apply`
+run carries an error saying so, and the pull request gets a comment saying the
+dispatch failed and linking that run. It authorizes on approvers-team membership and the `<env>-apply`
 environment, not on a review — so a lock stranded after the pull request merged
 is still releasable ([`../CONTRACT.md`](../CONTRACT.md) §Comment-ops has the
 contract). Every cell in that environment with a pending

@@ -221,7 +221,8 @@ passphrase to forward, and mapping a secret the callee does not declare is a
 load-time rejection. Skip the file and every other verb keeps working;
 `shipmate unlock <env>` alone stops, refused at dispatch time with a 404 that
 the dispatch step turns into an error naming the missing wrapper — on the
-comment-handling run, where the pull request shows only the rocket reaction.
+comment-handling run, which the pull request is pointed at by a comment saying
+the dispatch failed.
 
 **2. Delete `mode` from `apply.yml`.** Remove both the `workflow_dispatch` input
 declaration and the `mode: ${{ inputs.mode }}` line forwarding it to the engine's
@@ -352,8 +353,8 @@ without it the pull request shows none of them, a failed cell included.
   the new verb breaks. GitHub refuses the dispatch with an HTTP 422
   (`Workflow does not have 'workflow_dispatch' trigger`, or
   `Unexpected inputs provided`), no run is created, and the error lands on the
-  comment-handling run where nobody on the pull request is looking. The
-  commenter sees a rocket reaction and then nothing.
+  comment-handling run — which the pull request is pointed at by a comment
+  saying the dispatch failed.
   `shipmate doctor` reports both, and a third case with no refusal at all: a
   wrapper that is dispatchable but has no `pr-facts` step, which accepts the
   dispatch and then has nothing resolving which pull request it is for.
