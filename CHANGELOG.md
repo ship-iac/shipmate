@@ -13,7 +13,7 @@ grammar are declared unstable in `README.md`.
 
 ## [0.22.2] — 2026-09-05
 
-Tags _pending_.
+Tags `83d69cb`.
 
 **No wrapper change is required, and nothing changes at runtime.** Six Python
 blocks that lived inside `action.yml` files moved to `scripts/` helpers, byte
