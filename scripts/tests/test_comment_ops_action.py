@@ -1048,8 +1048,13 @@ def test_a_head_this_step_cannot_read_leaves_the_refusal_where_it_is_enforced(he
     where a fork is actually refused. This step explains that refusal; it must never become a
     second, quieter version of it that answers on a fact it does not have.
 
-    Mutation: drop either the `-n` or the `!= "null"` arm, and an unreadable head starts
-    refusing pull requests of this repository's own branches.
+    The fall-through is the one arm an operator cannot infer from the outcome -- a dispatched
+    fork plan looks the same whether the head was unreadable or the comparison is broken -- so
+    it says which.
+
+    Mutations: drop either the `-n` or the `!= "null"` arm, and an unreadable head starts
+    refusing pull requests of this repository's own branches; drop the notice, and the
+    fall-through goes silent.
     """
     if not usable_bash():
         pytest.skip("bash not available on this platform")
@@ -1057,6 +1062,9 @@ def test_a_head_this_step_cannot_read_leaves_the_refusal_where_it_is_enforced(he
         result, outputs, _ = _run_planauthz(tmpdir, privileged=True, head_repo=head_repo)
         assert result.returncode == 0, result.stderr
         assert outputs == {"authorized": "true"}
+        assert "could not read this pull request's head repository" in result.stdout, (
+            f"the fall-through must say why it dispatched: {result.stdout!r}"
+        )
 
 
 def test_no_step_on_the_plan_route_touches_the_app_key():

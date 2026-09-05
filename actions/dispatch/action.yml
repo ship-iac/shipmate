@@ -67,19 +67,26 @@ runs:
         COMMENT_TOKEN: ${{ github.token }}
       run: |
         set -euo pipefail
+        # Every refusal below lands on a run whose checks attach to the dispatch ref, so the pull
+        # request would show nothing. Link, never the API's answer: that has no bounded length and
+        # a comment body does. `|| true` so a cosmetic failure cannot mask the refusal's status.
+        say_no_run_started() {
+          GH_TOKEN="$COMMENT_TOKEN" gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" \
+            -f body=":x: shipmate: the command was authorized, but dispatching its workflow failed, so no run started. The error is in [this run]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID)." >/dev/null || true
+        }
         # A composite action's `required: true` is not enforced by GitHub, so a caller that omits
         # the input arrives with the empty string. Refuse rather than default: a default dispatches
-        # one verb's body at another verb's workflow, for a rejection the pull request sees only as
-        # a failed dispatch.
+        # one verb's body at another verb's workflow.
         if [ -z "${VERB:-}" ]; then
           echo "::error::The calling workflow did not pass a verb to shipmate/actions/dispatch, so there is no workflow to dispatch. Wire that step's verb input to the verb output of the comment-ops step above it (docs/getting-started.md)."
+          say_no_run_started
           exit 1
         fi
         case "$VERB" in
           plan) WORKFLOW=plan.yml ;;
           apply) WORKFLOW=apply.yml ;;
           unlock) WORKFLOW=unlock.yml ;;
-          *) echo "::error::verb must be plan, apply or unlock (got: $VERB)"; exit 1 ;;
+          *) echo "::error::verb must be plan, apply or unlock (got: $VERB)"; say_no_run_started; exit 1 ;;
         esac
         [[ "$WORKFLOW" =~ ^[A-Za-z0-9._-]+$ ]] || { echo "::error::workflow must match ^[A-Za-z0-9._-]+$ (got: $WORKFLOW)"; exit 1; }
         python3 "$GITHUB_ACTION_PATH/../../scripts/dispatch-body" > body.json
@@ -98,11 +105,7 @@ runs:
           # input, so an unexpected-input 422 there can only be about pr_number, which is what the
           # message already says.
           if [ "$VERB" = "plan" ] && [[ "$out" == *"Unexpected inputs provided"* || "$out" == *workflow_dispatch* ]]; then echo "::error::This repository's plan.yml does not accept a dispatched plan — it predates the plan verb, or declares no pr_number input. Edit .github/workflows/plan.yml in this repository — docs/upgrading.md section 0.20.0 lists the edits; re-pinning alone does not make them."; fi
-          # This run's checks land on the dispatch ref, so the pull request would show nothing.
-          # Link, never `$out`: the API answer has no bounded length and a comment body does.
-          # `|| true` so a cosmetic failure cannot mask the dispatch's exit code.
-          GH_TOKEN="$COMMENT_TOKEN" gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" \
-            -f body=":x: shipmate: \`$VERB\` was authorized, but dispatching its workflow failed, so no run started. The error is in [this run]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID)." >/dev/null || true
+          say_no_run_started
           exit "$rc"
         fi
         if [ "$VERB" = plan ]; then

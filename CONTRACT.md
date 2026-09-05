@@ -522,7 +522,11 @@ alone carries two triggers — `pull_request_target` for the autoplan and
 `workflow_dispatch` for the commented form; the other two are dispatch-only.
 `doctor` and `help` dispatch nothing: both are answered inside the comment-ops
 run itself. A verb whose file the repository does not carry fails at dispatch
-time on that comment-handling run, and no other verb is affected.
+time on that comment-handling run, and no other verb is affected. That run is
+not visible from the pull request, so every refusal in the dispatch step — an
+unwired verb, an unknown one, and a rejected API call alike — also posts a
+one-line comment there linking the run. The run holds the error; the comment
+never carries the API's answer.
 
 `shipmate plan` plans the pull request's changed stacks on demand, authoring
 exactly what a push-triggered plan authors and nothing more: the sticky plan
@@ -1162,8 +1166,9 @@ The file path is still load-bearing, and nothing diagnoses a rename as the
 cause: `actions/build-matrix` refuses a checkout that has no
 `.github/workflows/plan.yml`; `actions/dispatch` sends a commented
 `shipmate plan` to that literal filename, so a renamed wrapper is dispatched
-nowhere and the API's refusal reaches only the comment-handling run; and doctor keys
-on the exact name for its `pull_request_target` exemption and for the
+nowhere, and the pull request is told only that the dispatch failed, with the
+API's refusal left in the comment-handling run that comment links; and doctor
+keys on the exact name for its `pull_request_target` exemption and for the
 plan-wrapper wiring probes (the head-repository, head-SHA and draft inputs, and
 the dispatch wiring), which report nothing on a file called
 anything else. Rename the file and planning is refused from that commit on, and

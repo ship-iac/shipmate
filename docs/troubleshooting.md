@@ -103,8 +103,9 @@ live probes.
 - **Whether the `plan.yml` wrapper can serve a dispatched plan at all.** That needs the
   `workflow_dispatch` trigger a commented `shipmate plan` dispatches, the
   `pr_number` input that dispatch body carries, and a `pr-facts` step. The first
-  two are refused at dispatch time with an HTTP 422 and no run created, so the
-  failure lands on the comment-handling run rather than the pull request.
+  two are refused at dispatch time with an HTTP 422 and no run created; the pull
+  request gets a comment saying the dispatch failed and linking the
+  comment-handling run that carries the error.
   Without the third a dispatched run has nothing resolving which pull request it
   is for, since its event payload carries none.
 - **Whether the configured approvers team resolves in the org.**
@@ -463,13 +464,13 @@ form. It dispatches your repository's own `.github/workflows/unlock.yml`
 ([`upgrading.md`](upgrading.md) §0.21.0 has the wrapper); wrappers predating that
 file get no run at all — the dispatch is refused with a 404, the comment-handling
 run carries an error saying so, and the pull request gets a comment saying the
-dispatch failed and linking that run. It authorizes on approvers-team membership and the `<env>-apply`
-environment, not on a review — so a lock stranded after the pull request merged
-is still releasable ([`../CONTRACT.md`](../CONTRACT.md) §Comment-ops has the
-contract). Every cell in that environment with a pending
-`apply / <stack> / <env>` check is probed; each reports in its own job, and a
-cell that cannot determine its lock state fails red rather than reporting the
-lock absent.
+dispatch failed and linking that run. It authorizes on approvers-team
+membership and the `<env>-apply` environment, not on a review — so a lock
+stranded after the pull request merged is still releasable
+([`../CONTRACT.md`](../CONTRACT.md) §Comment-ops has the contract). Every cell
+in that environment with a pending `apply / <stack> / <env>` check is probed;
+each reports in its own job, and a cell that cannot determine its lock state
+fails red rather than reporting the lock absent.
 
 Then re-apply. Unlocking is not recovery: a cancelled apply usually advanced
 the state, so `shipmate apply <env>` may now be refused by the exact-plan
