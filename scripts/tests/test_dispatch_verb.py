@@ -521,8 +521,7 @@ def test_plan_403_prints_no_skew_message():
 _RECORDING_FAILURE_STUB = (
     "#!/bin/bash\nprintf '%s\\n' \"$@\" >> argv.txt\necho 'gh: Not Found (HTTP 404)' >&2\nexit 1\n"
 )
-#: The run link, hand-written from the three runner variables the step reads. It is
-#: the whole remedy the comment offers: the diagnostic lives in that log.
+#: The run link, hand-written from the three runner variables the step reads.
 _RUN_URL = "https://github.com/org/repo/actions/runs/7777"
 
 

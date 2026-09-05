@@ -62,9 +62,8 @@ runs:
         VERB: ${{ inputs.verb }}
         REF: ${{ inputs.ref }}
         PR_NUMBER: ${{ inputs.pr-number }}
-        # Not the App token above, which is minted `actions: write` and cannot comment. The
-        # workflow token can, and the calling job already holds `pull-requests: write` for
-        # comment-ops' own rejections.
+        # The App token above is minted `actions: write` and cannot comment; the calling job
+        # already holds `pull-requests: write` for comment-ops' own refusals.
         COMMENT_TOKEN: ${{ github.token }}
       run: |
         set -euo pipefail
@@ -99,10 +98,9 @@ runs:
           # input, so an unexpected-input 422 there can only be about pr_number, which is what the
           # message already says.
           if [ "$VERB" = "plan" ] && [[ "$out" == *"Unexpected inputs provided"* || "$out" == *workflow_dispatch* ]]; then echo "::error::This repository's plan.yml does not accept a dispatched plan — it predates the plan verb, or declares no pr_number input. Edit .github/workflows/plan.yml in this repository — docs/upgrading.md section 0.20.0 lists the edits; re-pinning alone does not make them."; fi
-          # This run's checks land on the dispatch ref, not on the pull request the commenter is
-          # watching, so the pull request would show nothing at all. Link, never `$out`: the API
-          # answers at no bounded length, and a comment body has one. `|| true` because a
-          # cosmetic failure must not mask the dispatch's own exit code.
+          # This run's checks land on the dispatch ref, so the pull request would show nothing.
+          # Link, never `$out`: the API answer has no bounded length and a comment body does.
+          # `|| true` so a cosmetic failure cannot mask the dispatch's exit code.
           GH_TOKEN="$COMMENT_TOKEN" gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" \
             -f body=":x: shipmate: \`$VERB\` was authorized, but dispatching its workflow failed, so no run started. The error is in [this run]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID)." >/dev/null || true
           exit "$rc"

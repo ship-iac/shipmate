@@ -162,10 +162,9 @@ runs:
           echo "reason=\`plan\` runs this repository's Terramate/OpenTofu on its runners, so it answers only organization members and repository collaborators." >> "$GITHUB_OUTPUT"
           exit 0
         fi
-        # Not a second gate: build-matrix refuses a fork head inside the dispatched run, whose
-        # checks land on the dispatch ref -- so the refusal is invisible on the pull request that
-        # asked for it. Say so here instead. A head this cannot read falls through to that
-        # refusal rather than substituting a verdict for it.
+        # Not a second gate: build-matrix refuses a fork head inside the dispatched run, on
+        # checks that land on the dispatch ref where the pull request cannot see them. A head
+        # this cannot read falls through to that refusal rather than replacing it.
         HEAD_REPO=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" --jq .head.repo.full_name 2>/dev/null || true)
         if [ -n "$HEAD_REPO" ] && [ "$HEAD_REPO" != "null" ] && [ "$HEAD_REPO" != "$GITHUB_REPOSITORY" ]; then
           echo "authorized=false" >> "$GITHUB_OUTPUT"
