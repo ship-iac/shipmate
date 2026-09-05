@@ -159,6 +159,26 @@ names. The entries below `0.2.0` predate the first tagged release, or
 `CHANGELOG.md` does not pin one; they are kept for repositories moving from a
 very old pin.
 
+### Unreleased — the reviewed plan text is bound to the plan that applies; re-plan open pull requests
+
+**Re-pinning is enough.** The trusted `summary` job records the sha256 of each
+cell's plan text on that cell's apply check, and `apply-cell` re-renders the
+stored plan and refuses a difference before applying anything. The digest
+travels on rails the engine owns, so no wrapper declares, forwards or ignores
+anything new.
+
+**Re-plan open pull requests once the re-pin lands.** Same instruction §0.19.0
+gives, for the same reason: a plan produced before this release carries an apply
+check with no digest, and an apply refuses such a cell — `no plan-text digest
+recorded for …` — rather than running a plan whose reviewed text it cannot
+check. Pre-merge that costs a re-plan: push to the pull request, or comment
+`shipmate plan`, and apply the fresh plan. A cell still pending when the re-pin
+merges is refused by the post-merge deploy instead, and the remedy there is a
+follow-up pull request touching those stacks.
+
+Re-running the apply repairs nothing on its own — the digest is written by a
+plan run, so only a new plan produces a check that applies.
+
 ### 0.23.0 — re-pin only: a dispatched verb that never starts now says so
 
 **Re-pinning is enough.** A `shipmate plan`, `apply` or `unlock` that fails

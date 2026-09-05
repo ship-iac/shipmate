@@ -817,6 +817,39 @@ code. That is now a red `detect` naming the input.
 The stated commit is not something a commenter or a dispatcher supplies: it comes
 from `actions/pr-facts`, which reads the pull request itself. See below for why.
 
+## The plan text a reviewer approves
+
+The plan comment shows `tofu show` output a plan cell produced while executing
+the pull request's own code, and the `.otplan` an apply runs comes out of that
+same cell. So the two are bound to each other rather than trusted individually:
+the trusted `summary` job takes `sha256` over the `plan.txt` bytes it embeds in
+the comment and records the digest on each apply check, and the apply re-renders
+the stored plan with the command that wrote the file
+(`tofu -chdir=<stack> show -no-color stack.otplan`) and refuses any difference.
+
+Three refusals hold that chain closed, each of them a refusal rather than a
+warning:
+
+- A `cell.json` with no `plan.txt` beside it fails the `summary` job. Tolerating
+  it would let an author publish no text, leave no bytes to hash, and switch the
+  comparison off by omission.
+- An apply check carrying no digest is refused at detect, before any apply job
+  starts. Most often the plan predates the release that began recording one
+  ([`upgrading.md`](upgrading.md)); the remedy is a re-plan.
+- A digest that disagrees with what the stored plan renders to fails the cell
+  with nothing applied. That comparison sits after `tofu init` — the render needs
+  the providers `init` installs — and before `tofu apply`.
+
+`tofu show` of a stored plan renders the same bytes on any runner at one tofu
+version, and every measured way for the two to differ is one tofu itself
+refuses: it rejects a plan file from another version, and an apply under drifted
+providers fails on the dependency lock.
+
+What this binds is agreement, not honesty. A privileged author still authors
+both the plan text and the `.otplan`; what they can no longer do is have the two
+disagree. The `+add ~change -destroy` counts beside the text are a separate
+matter — see "What none of this fixes".
+
 ## Contributors without push access
 
 **Fork pull requests are refused outright.** `actions/build-matrix` fails the
@@ -960,13 +993,28 @@ for exactly the exposure control 1 exists to limit.
   greens a quiet gate over stacks that were planned. The check catches a
   download or parse that came up short, not a privileged author, who can already
   fabricate the whole artifact surface the summary reads: the cell summaries,
-  the `cell.json` verdicts, the `.otplan` files. Nothing here makes the gate
+  the `cell.json` verdicts, the `.otplan` files. What that author can no longer
+  do is publish a `plan.txt` describing a different plan from the `.otplan`
+  beside it — the artifacts are still theirs, but they have to agree (see "The
+  plan text a reviewer approves"). Nothing here makes the gate
   unforgeable from inside the repository; control 1 (who can push a branch) is
   what bounds that.
+- **The counts beside the plan text.** The `+add ~change -destroy` tally in
+  every comment section comes from `cell.json`, which the plan cell writes; the
+  summary never re-parses the plan text to check it (`CONTRACT.md` §Plan
+  comment). The plan-text binding does not reach it. The sharp case is a plan
+  too large to embed in full: the comment cuts the text at a line boundary, so
+  an author can name a resource such that it sorts past the cut, lie in the
+  counts, and have the digest pass over a genuine prefix carrying a false tally.
+  The link-only degradation is milder only because the reviewer can see they
+  were shown nothing. Making the counts trustworthy means deriving them in the
+  trusted job from the plan text it already holds; nothing here does that.
 - **Plan-time code execution.** Reviewing a plan means reading output produced
   by a pipeline running the author's code. A hostile provider, an `external`
   data source, or a module the branch points at executes during plan. Control 8
-  bounds the damage; nothing eliminates it.
+  bounds the damage; nothing eliminates it. Binding the plan text to the
+  `.otplan` makes the reviewer's copy honest about the plan; it does nothing
+  about the code that ran to produce both.
   `shipmate doctor`'s plan-environment secret probe reports what such an
   environment *stores*; it cannot observe what plan-time code does with it, and
   a credential the consumer's own workflow maps in from a repository secret is

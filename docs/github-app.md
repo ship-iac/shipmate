@@ -358,6 +358,13 @@ actual work here:
   call the workflow, they do not own its steps. Reaching the key from a
   pull-request-side trigger is safe only in that shape — see `CONTRACT.md`
   §Post-plan topology and `docs/hardening.md`.
+- **The plan-text digest is authored in that job, and does not widen the
+  boundary.** The `summary` job hashes the `plan.txt` bytes it already downloads
+  and embeds in the plan comment: reading author-produced data is not executing
+  it, and no new secret enters the job. Re-rendering the plan there instead of
+  hashing it was rejected for exactly this reason — the render needs the plan
+  artifact decrypted, which would put `SHIPMATE_PLAN_PASSPHRASE` in the job that
+  holds the App key.
 - The *token* minted from the key is still readable in plaintext by any step
   in the job that mints it, same as before the key moved — the environment
   boundary controls which jobs can mint one, not what a job does with it
