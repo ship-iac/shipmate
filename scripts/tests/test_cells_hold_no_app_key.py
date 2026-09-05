@@ -2,7 +2,7 @@
 `external` data sources, modules), so they must hold no App key -- the
 credentialed work lives in the trusted trailing jobs.
 
-One parsed-assertion implementation covers both cells: `apply-cell` (which runs
+One parsed-assertion implementation covers all three cells: `apply-cell` (which runs
 `tofu apply`) and `drift-cell` (which runs `tofu plan` from a policy-free plan
 environment reachable off any branch). `plan-cell` runs `tofu plan` over
 pull-request branch content (providers, `external` data sources, modules) and is
