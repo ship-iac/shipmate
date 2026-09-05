@@ -134,7 +134,7 @@ jobs:
     # a skipped `detect` reads its outputs as empty strings -- which `!= 'true'` fans out on.
     needs: [guard, review, detect]
     if: ${{ !failure() && !cancelled() && needs.detect.outputs.empty != 'true' }}
-    uses: ship-iac/shipmate/.github/workflows/apply-env-level.yml@ede3e43cde30543d845f6841f604575cd24e0f06 # pinned to a commit on main
+    uses: ship-iac/shipmate/.github/workflows/apply-env-level.yml@61e685a17d1a7cce2b204c6f875f10df6082f5bd # pinned to a commit on main
     permissions: { contents: read, checks: read, actions: read, id-token: write }
     with:
       waves_json: ${{ needs.detect.outputs.waves }}
