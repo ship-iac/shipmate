@@ -668,7 +668,9 @@ Because the report enumerates the guardrails a repository is *missing* — an
 ungated default branch, an apply environment with no approval rule, the
 configured approvers team and whether it resolves, an App installation short of
 the manifest's permissions — the `doctor` route is gated on the commenter's
-GitHub `author_association`. What the engine enforces: `doctor` runs only
+GitHub `author_association`.
+
+**What the engine enforces:** `doctor` runs only
 when `github.event.comment.author_association` is `OWNER`, `MEMBER` or
 `COLLABORATOR` — that is, only for organization members and repository
 collaborators. Any other commenter gets a single-line refusal saying so, and
@@ -794,8 +796,8 @@ SHIPMATE_UNGATED_ENVS = dev-eu,dev-us
 
 It exempts one requirement, `reviewed`, and only its `REVIEW_REQUIRED`
 value. Everything else still decides, on a listed environment exactly as on any
-other: shipmate team membership, not a draft, mergeable,
-undiverged and the exact-plan rule are unchanged; a `CHANGES_REQUESTED` review still refuses,
+other: `shipmate team` membership, `not a draft`, `mergeable`,
+`undiverged` and the exact-plan rule are unchanged; a `CHANGES_REQUESTED` review still refuses,
 because an explicit human "no" is not an absent review; and an unknown or
 absent decision still fails closed. Nor does it touch the `<env>-apply`
 environment's required reviewers — that is a different control, gating the
@@ -916,7 +918,7 @@ that stranded it, and those artifacts may be long expired. Each queued cell runs
 the lock and so prints the holder's `Lock Info:` block when one is held), then
 `tofu force-unlock -force <id>` on the id parsed from that block — and nothing
 else. Three outcomes per cell: no lock held and lock released are both green,
-while could not be determined fails the cell with an `::error::` and is
+while `could not be determined` fails the cell with an `::error::` and is
 never reported as "no lock held". A cell whose apply check is not pending is not
 in the queue and not reachable by this verb.
 
@@ -1547,8 +1549,8 @@ same predicate the gate and both detects use). The pending apply checks are the
 work queue, so they outrank the artifact, which only records what a cell's own
 job believed before its check was completed:
 
-- ✅ applied — the apply succeeded and its check is recorded.
-- ⚠️ applied but not recorded — the apply succeeded but its check is still
+- ✅ **applied** — the apply succeeded and its check is recorded.
+- ⚠️ **applied but not recorded** — the apply succeeded but its check is still
   pending, because `Save state`, the completion-token mint or `Complete the
   apply check` failed (or the job was cancelled) after the cell summary was
   already composed. `shipmate / gate` stays pending, and the stack needs a
@@ -1562,7 +1564,7 @@ job believed before its check was completed:
   cosmetic, `continue-on-error` upload dropped) renders ✅ with its output
   unavailable — never ⏭️, and it does not drag the "apply check stays pending"
   note along with it.
-- ❌ failed / 🚫 blocked rows are never re-derived from check state. A
+- ❌ **failed** / 🚫 **blocked** rows are never re-derived from check state. A
   red row against a completed check means some other run applied that cell:
   the row over-reports, nothing is stranded, and downgrading it would let an
   unrelated run's completed check hide a real failure in this one.
