@@ -1,29 +1,32 @@
 # Recommended settings (hardening)
 
 `docs/branch-protection.md` covers the settings shipmate *needs* to function.
-This page covers the settings that decide **who can make the engine do things**,
-and it starts from one fact:
+This page covers the settings that decide who can make the engine do things.
+It starts from one fact.
 
-> **Push access to a consumer repository is authority over the engine.**
+**Push access to a consumer repository is authority over the engine.**
 
 A branch may carry its own workflow files. GitHub runs them, with whatever
 secrets that job's own environment bindings grant, on push — before a pull
 request exists, before review, and before `CODEOWNERS` applies.
-`SHIPMATE_APP_PRIVATE_KEY` itself is out of reach this way: the
+`SHIPMATE_APP_PRIVATE_KEY` itself is out of reach this way. The
 `shipmate-engine` environment's deployment branch policy only ever satisfies
 a job running at the default-branch ref (row 16; `docs/github-app.md`
-§Key-exposure boundary), so a branch-pushed workflow cannot mint an App
-token, and so cannot POST a `shipmate / gate` status, submit an approving
+§Key-exposure boundary), so a branch-pushed workflow cannot mint an App token.
+Without a token it cannot POST a `shipmate / gate` status, submit an approving
 review as the App, complete `apply / <stack> / <env>` checks, or dispatch an
-apply — but the gate's verdict is still computed from artifacts the
-branch's own plan run produced (see "What none of this fixes"). What it
-*can* still do, absent the rest of this checklist: declare
-`environment: <env>-apply` itself and claim that environment's cloud
-credentials directly, if that environment carries no deployment branch
-policy of its own (row 17 closes this); and run arbitrary code inside
-whatever a *plan* environment holds, since a plan job executes branch
-content by design regardless of anything below (§7–9, "What none of this
-fixes").
+apply — but the gate's verdict is still computed from artifacts the branch's
+own plan run produced (see "What none of this fixes").
+
+Two things a branch-pushed workflow *can* still do, absent the rest of this
+checklist:
+
+- declare `environment: <env>-apply` itself and claim that environment's cloud
+  credentials directly, if that environment carries no deployment branch policy
+  of its own (row 17 closes this);
+- run arbitrary code inside whatever a *plan* environment holds, since a plan
+  job executes branch content by design regardless of anything below (§7–9,
+  "What none of this fixes").
 
 The arbitrary-code-execution residual is upstream of any workflow shipmate
 ships — nothing in the engine can prevent it. The settings below close the
@@ -34,36 +37,36 @@ not plan a pull request unless the wrapper states a head repository equal to
 this repository, and it refuses by default when the wrapper states nothing (see
 "Contributors without push access").
 
-**`pull_request_target` is how the engine reaches the App key, so the question
-is never the trigger but the shape.** The plan workflow runs on
-`pull_request_target`, which evaluates at the **base** ref — a ref
+**The question is never the trigger but the shape.** `pull_request_target` is
+how the engine reaches the App key. The plan workflow runs on
+`pull_request_target`, which evaluates at the base ref — a ref
 `shipmate-engine`'s default-branch-only policy trusts. (Its second trigger, the
 `workflow_dispatch` a commented `shipmate plan` sends, evaluates at the
 default branch itself and raises the same question with the same answer; see
-"Contributors without push access".) That is deliberate: it is
-what lets the plan run's trusted `summary` job mint an App token and write the
+"Contributors without push access".) That ref choice is deliberate: it is what
+lets the plan run's trusted `summary` job mint an App token and write the
 `shipmate / gate` status. What makes it safe is a property of that job, not of
-the trigger: **it executes no repository content at all.** It is a call to the
+the trigger: it executes no repository content at all. It is a call to the
 engine's own reusable workflow, and it has no checkout step. A consumer cannot
 add one, because they do not own that job's steps. The two jobs that *do* check
 out the pull request's head — `detect` and `plan` — reach no credentialed
 environment: `detect` binds none, and `plan` binds only the *plan* environment
 for the cell it is planning, which by design holds no App key and no
 apply-capable secret (controls 8, 6 and 17). What a plan environment does hold
-is still executed against by branch content — that is the standing residual this
-page opens with, unchanged by this trigger.
+is still executed against by branch content — the standing residual this page
+opens with, unchanged by this trigger.
 
 The dangerous shape is the same trigger without that separation: a workflow
 that checks out or otherwise acts on the pull request's own content inside a job
-that names a **credentialed** environment — one holding the App key, or cloud
+that names a credentialed environment — one holding the App key, or cloud
 credentials. "Names an environment" is not the criterion; which environment is.
-A ref the policy trusts, executing input it doesn't,
-is the no-push-access version of the attack this page opens with, and it is
-reachable regardless of the fork refusal above, which only governs the plan
-path. That is the shape a labeler or commenter workflow usually takes — don't
-add one to a repository that holds the App key. `shipmate doctor` warns for
-every workflow file declaring the trigger except `plan.yml`, matched by exact
-name. See "Contributors without push access" for the trade-off that follows.
+A ref the policy trusts, executing input it doesn't, is the no-push-access
+version of the attack this page opens with. It is reachable regardless of the
+fork refusal above, which only governs the plan path. That is the shape a
+labeler or commenter workflow usually takes — don't add one to a repository that
+holds the App key. `shipmate doctor` warns for every workflow file declaring the
+trigger except `plan.yml`, matched by exact name. See "Contributors without push
+access" for the trade-off that follows.
 
 ## Checklist
 
@@ -72,26 +75,26 @@ name. See "Contributors without push access" for the trade-off that follows.
 | 1 | Write access only for people trusted to apply | Repo/team access | Everything below is downstream of this |
 | 2 | Push ruleset restricting `.github/workflows/**` *and every other path a workflow executes* | Repo/org ruleset (push target) | Branch-authored workflows |
 | 3 | Required check `shipmate / gate` with `integration_id`, strict | Branch ruleset | A *third party* posting `shipmate / gate` under another identity |
-| 4 | ≥1 approving review, code-owner review, dismiss stale, require approval of most recent push | Branch ruleset | Self-merge; the code-owner review is **unforgeable** at merge time (an App cannot be a `CODEOWNERS` entry) *provided a `CODEOWNERS` entry actually covers the IaC paths* — the rule is a no-op for changed files with no owner — and the approval *count* never is |
+| 4 | ≥1 approving review, code-owner review, dismiss stale, require approval of most recent push | Branch ruleset | Self-merge; the code-owner review is unforgeable at merge time (an App cannot be a `CODEOWNERS` entry) *provided a `CODEOWNERS` entry actually covers the IaC paths* — the rule is a no-op for changed files with no owner — and the approval *count* never is |
 | 5 | Block force-push and deletion on the default branch | Branch ruleset | History rewrite after apply |
-| 6 | Required reviewers + "Prevent self-review" on the `<env>-apply` environments you decide to gate (§6 states the trade-off; the choice is yours) — **on a private repository this rule needs Enterprise**, see "Plan prerequisites" | Environment | **Unforgeable** at apply time — the last line of defense once a merge has happened, on each environment you apply it to |
-| 7 | Cloud credentials scoped to `<env>-apply` — the OIDC path's `AWS_ROLE_ARN`/`AWS_REGION` as environment **variables**, any residual static key as an environment **secret** — never repo- or org-level | Environment | Repo-wide exposure (for a secret, bounded *only* on an environment that also carries row 6; and for a variable the scoping is advisory — see §7–9) |
+| 6 | Required reviewers + "Prevent self-review" on the `<env>-apply` environments you decide to gate (§6 states the trade-off; the choice is yours) — on a private repository this rule needs Enterprise, see "Plan prerequisites" | Environment | Unforgeable at apply time — the last line of defense once a merge has happened, on each environment you apply it to |
+| 7 | Cloud credentials scoped to `<env>-apply` — the OIDC path's `AWS_ROLE_ARN`/`AWS_REGION` as environment variables, any residual static key as an environment secret — never repo- or org-level | Environment | Repo-wide exposure (for a secret, bounded *only* on an environment that also carries row 6; and for a variable the scoping is advisory — see §7–9) |
 | 8 | Plan environments (`<env>-plan`; in shared mode the bare `<env>`, which must hold the apply role instead — §7–9) hold read-only, blast-radius-free credentials, no approval rules, and no branch policy — except on a shared environment, where a default-branch policy is row 17 doing real work and plan cells still pass it (see below) — ideally no secret at all (`shipmate doctor` reports what it finds) | Environment | Plan-time code execution |
-| 9 | OIDC with an `environment:` claim condition instead of static keys | Cloud IdP | Long-lived credential theft — and, since the engine's apply jobs mint OIDC tokens unconditionally, this claim condition is the **only** bound on which role an apply job can assume (see §7–9). In shared mode it separates nothing: both tokens carry the same `environment:` claim |
+| 9 | OIDC with an `environment:` claim condition instead of static keys | Cloud IdP | Long-lived credential theft — and, since the engine's apply jobs mint OIDC tokens unconditionally, this claim condition is the only bound on which role an apply job can assume (see §7–9). In shared mode it separates nothing: both tokens carry the same `environment:` claim |
 | 10 | Default `GITHUB_TOKEN` = read-only; Actions may not approve PRs | Settings → Actions | Token privilege creep |
 | 11 | Require approval for all outside collaborators' workflow runs | Settings → Actions | Drive-by fork execution |
-| 12 | Allowed-actions list (this engine + the third-party actions the engine itself pulls in, not just the ones your own workflows name) | Settings → Actions | Supply chain |
+| 12 | Allowed-actions list (this engine + the third-party actions the engine itself pulls in, not only the ones your own workflows name) | Settings → Actions | Supply chain |
 | 13 | One App per trust domain; key as a per-repository `shipmate-engine` environment secret | App registration | Cross-repo blast radius |
 | 14 | Rotate the App key when push access is revoked | Runbook | Ex-member with a copied PEM |
 | 15 | Shorten Actions retention | Settings → Actions | `shipmate doctor` report disclosure |
 | 16 | `shipmate-engine` Environment exists, deployment branch policy restricted to the default branch | Environment | Repository-secret App key readable by any branch |
 | 17 | Deployment branch policy restricted to the default branch on every `<env>-apply` | Environment | Branch-authored workflow claiming apply-environment secrets directly |
-| 18 | `AWS_ROLE_ARN` + `AWS_REGION` as variables on **each** `<env>-apply` you want cloud access from — never at repository or organization level | Environment variables | Opting in per environment; set at repo/org level they apply to every apply environment at once (§7–9) |
-| 19 | `id-token: write` on the call-site job of every consumer `apply.yml`, `unlock.yml` and `deploy.yml` wrapper — **not** `plan.yml` | Consumer workflow YAML | Nothing — it is **required**: GitHub caps a called workflow's permissions at each `uses:` boundary, so without it every apply and unlock run fails at workflow-resolution time, cloud or not |
+| 18 | `AWS_ROLE_ARN` + `AWS_REGION` as variables on each `<env>-apply` you want cloud access from — never at repository or organization level | Environment variables | Opting in per environment; set at repo/org level they apply to every apply environment at once (§7–9) |
+| 19 | `id-token: write` on the call-site job of every consumer `apply.yml`, `unlock.yml` and `deploy.yml` wrapper — not `plan.yml` | Consumer workflow YAML | Nothing — it is required: GitHub caps a called workflow's permissions at each `uses:` boundary, so without it every apply and unlock run fails at workflow-resolution time, cloud or not |
 | 20 | Require actions to be pinned to a full-length commit SHA | Settings → Actions | A tag or branch ref moving under a workflow that was pinned only by convention |
 
 Rows 6, 7, 17 and 18 name `<env>-apply`, which is the apply environment in the
-default **split** naming (`<env>-plan` + `<env>-apply`). A logical env listed in
+default split naming (`<env>-plan` + `<env>-apply`). A logical env listed in
 the `SHIPMATE_SHARED_ENVS` repository variable binds one bare `<env>` on both
 paths instead (CONTRACT.md §Env model). On such an environment:
 
@@ -104,20 +107,20 @@ paths instead (CONTRACT.md §Env model). On such an environment:
   default branch admits plan cells (they evaluate at the pull request's *base*
   ref), the scheduled drift run and the apply, while still refusing a
   branch-authored workflow that names the environment — the control row 17 exists
-  for. It holds only while every pull request targets a branch the policy names; a
-  repository using release branches must open the policy up, and then row 17 is
+  for. It holds only while every pull request targets a branch the policy names.
+  A repository using release branches must open the policy up, and then row 17 is
   forfeited too.
 
 ### Plan prerequisites
 
-Rows 3–6, 16 and 17 are not configurable on every GitHub plan. Check them before you design
-a posture on one, because the checklist reads as if every row were always
-available and row 6 is the one a production posture usually rests on.
+Rows 3–6, 16 and 17 are not configurable on every GitHub plan. Check them before
+you design a posture on one, because the checklist reads as if every row were
+always available and row 6 is the one a production posture usually rests on.
 
 | Row | Public repository | Private repository |
 |---|---|---|
 | 3–5 (branch ruleset) | any plan | Pro / Team / Enterprise |
-| 6 (required reviewers, wait timer) | any plan | **Enterprise only** |
+| 6 (required reviewers, wait timer) | any plan | Enterprise only |
 | 16, 17 (environments, deployment branch policies) | any plan | Pro / Team / Enterprise |
 
 Row 2's push ruleset is plan-gated on its own axis — see §2.
@@ -136,15 +139,15 @@ supports the required reviewers protection rule. (HTTP 422)
 
 Deployment branches and tags are a separate rule and *are* available on private
 repositories from Pro/Team up, so rows 16 and 17 hold where row 6 does not. A
-private repository on Team can therefore carry every row on this page **except
-6** — the one row that is unforgeable at apply time.
+private repository on Team can therefore carry every row on this page except
+row 6 — the one row that is unforgeable at apply time.
 
-**What is left when row 6 is unavailable**, and it is a coherent posture rather
-than a broken one:
+**What is left when row 6 is unavailable.** It is a coherent posture rather than
+a broken one:
 
 - production absent from `SHIPMATE_UNGATED_ENVS`, so no apply reaches it without
   an approving review on the pull request;
-- production in `global.shipmate.explicit_envs`, so **before the merge** a bare
+- production in `global.shipmate.explicit_envs`, so before the merge a bare
   `shipmate apply` skips it and only the targeted `shipmate apply <env>` reaches
   it — the global constrains that path only. The post-merge deploy applies every
   cell whose apply check is still pending, explicit environments included
@@ -156,13 +159,13 @@ than a broken one:
 - rows 7–9's read/write credential split, which is then the only App-unforgeable
   control on this page still standing.
 
-Read that list for what it does not contain: **no apply-time human approval at
-all.** Every control in it is either upstream of the merge or satisfiable by a
+Read that list for what it does not contain: no apply-time human approval at
+all. Every control in it is either upstream of the merge or satisfiable by a
 holder of the App private key — including the review requirement, which the App
 can supply as an approving review unless a `CODEOWNERS` entry covers the changed
-paths (rows 3–5). §6 is written as though the reviewer gate were always an option;
-on a private repository below Enterprise it is not, and the pull-request review
-plus the code-owner requirement is the whole gate.
+paths (rows 3–5). §6 is written as though the reviewer gate were always an
+option. On a private repository below Enterprise it is not, and the pull-request
+review plus the code-owner requirement is the whole gate.
 
 ## 1. Write access
 
@@ -176,13 +179,13 @@ the stronger of the two.
 
 ## 2. Restrict pushes that touch executable paths
 
-A **push** ruleset (distinct from the branch ruleset in
+A push ruleset (distinct from the branch ruleset in
 `docs/branch-protection.md`) with a *restricted file paths* rule blocks the
 malicious workflow at push time rather than at merge time.
 
-Restrict **every path whose content a workflow job executes**, not just the
+Restrict every path whose content a workflow job executes, not only the
 workflow files. A local composite action or a script a `run:` step invokes
-executes inside the same job — including the job that has just minted an App
+executes inside the same job — including the job that minted an App
 installation token, which any step in that job can read in plaintext — so
 leaving those paths writable leaves the whole control open:
 
@@ -214,14 +217,14 @@ Notes before you adopt it:
   whole load.
 - Add the workflow owners as bypass actors, or nobody can change a workflow —
   including pin bumps. A team is `"actor_type": "Team"` with the team id.
-- **Dependabot** proposes shipmate pin bumps as commits touching
-  `.github/workflows/`, and it is a GitHub App, so its bypass entry is
-  `"actor_type": "Integration"` with Dependabot's app id — not the `Team` shape
-  above. Adding it from the ruleset UI's bypass-list picker fills in the right
-  id for you. Either add it (its pushes are generated from `dependabot.yml`, not
-  from arbitrary branch content) or accept that pin bumps become manual — and
-  note that CONTRACT.md §Consumption makes Dependabot the intended path for
-  receiving engine updates.
+- **Dependabot takes a different bypass shape.** It proposes shipmate pin bumps
+  as commits touching `.github/workflows/`, and it is a GitHub App, so its bypass
+  entry is `"actor_type": "Integration"` with Dependabot's app id — not the
+  `Team` shape above. Adding it from the ruleset UI's bypass-list picker fills in
+  the right id for you. Either add it (its pushes are generated from
+  `dependabot.yml`, not from arbitrary branch content) or accept that pin bumps
+  become manual — and CONTRACT.md §Consumption makes Dependabot the intended path
+  for receiving engine updates.
 - Add any other path your workflows execute: a `run: ./scripts/...` helper, a
   `Makefile`, a `dependabot.yml` that could be repointed. Anything a job runs.
 - The rule restricts *paths*, not content: it does not stop malicious IaC code,
@@ -231,8 +234,8 @@ Notes before you adopt it:
 ## 3–5. Branch ruleset
 
 Control 3 is the ruleset in `docs/branch-protection.md` — required
-`shipmate / gate` with `integration_id` pinned, `strict_required_status_checks_policy: true`.
-Add to it:
+`shipmate / gate` with `integration_id` pinned and
+`strict_required_status_checks_policy: true`. Add to it:
 
 ```json
 { "type": "pull_request",
@@ -252,68 +255,66 @@ ever sees their combined result via `reviewDecision`:
 
 - `dismiss_stale_reviews_on_push` dismisses existing approvals whenever new
   commits are pushed, so the pull request drops back to `REVIEW_REQUIRED`.
-- `require_last_push_approval` requires the **most recent push** to be approved
+- `require_last_push_approval` requires the most recent push to be approved
   by someone other than the person who pushed it. It is what stops an approver
   from pushing one more commit onto an approved pull request and applying it
   themselves. Keep it even if you decide dismiss-on-push is too disruptive for
   your team — it is the one that survives that trade-off.
 
-`required_approving_review_count` is the **approval-count** half of one
+`required_approving_review_count` is the approval-count half of one
 repository-wide review rule. The apply path never reads the count: it reads
 `reviewDecision`, the whole `pull_request` rule's verdict — the count,
 `require_code_owner_review` and `require_last_push_approval` combined — and
 shipmate imposes no review policy of its own on top of it.
 
-Setting the count to `0` **with code-owner review off** is the version that
-costs the most: GitHub then reports no review decision at all,
-`scripts/authorize` passes on that for **every** environment, so no apply path
+Setting the count to `0` with code-owner review off is the version that costs
+the most. GitHub then reports no review decision at all, and
+`scripts/authorize` passes on that for every environment, so no apply path
 anywhere requires a reviewed pull request — and no merge-time control a holder
 of the App private key cannot satisfy is left either. `shipmate doctor` warns
-whenever code-owner review is off, whatever the count is. Count `0` **with**
-`require_code_owner_review`
-on is a different setting: the code-owner review still gates the **merge**
-wherever a `CODEOWNERS` entry covers the changed files, which is why doctor
-reports that combination as a note rather than a warning. Either way, a
-`CHANGES_REQUESTED` review still blocks an apply until it is resolved or
-dismissed (`authorize` passes only on `NONE` or `APPROVED`; see
+whenever code-owner review is off, whatever the count is. Count `0` with
+`require_code_owner_review` on is a different setting: the code-owner review
+still gates the merge wherever a `CODEOWNERS` entry covers the changed files,
+which is why doctor reports that combination as a note rather than a warning.
+Either way, a `CHANGES_REQUESTED` review still blocks an apply until it is
+resolved or dismissed (`authorize` passes only on `NONE` or `APPROVED`; see
 `docs/branch-protection.md` §"Review policy").
 
 Keeping the count at `1` and exempting named environments is the other way to
 get self-service applies on a low-blast-radius tier. The two per-environment
-controls below do **different** jobs, and an organization can want either
-without the other:
+controls below do different jobs, and an organization can want either without
+the other:
 
-- **`SHIPMATE_UNGATED_ENVS`** (repository variable) exempts the environments it
-  names from *the code review before apply* — and from nothing else. The
-  ruleset still requires the review before the **merge**, `CHANGES_REQUESTED`
+- **`SHIPMATE_UNGATED_ENVS` exempts named environments from the code review
+  before apply, and from nothing else.** It is a repository variable. The
+  ruleset still requires the review before the merge, `CHANGES_REQUESTED`
   still refuses, and the approvers-team, not-a-draft, mergeable and exact-plan
-  requirements are untouched (CONTRACT.md §Comment-ops). Environments it does not name are
-  held out of a bare `shipmate apply` and refused on a targeted one, their apply
-  checks left pending, so the gate keeps blocking the merge until they are
-  applied with a review in hand. Both engine apply workflows read the variable
-  themselves and enforce on it; the `comment-ops.yml` line is an early refusal,
-  not the policy.
-  Opting in also takes one line in `comment-ops.yml` — see
-  `docs/getting-started.md`.
-- **Environment `required_reviewers`** on `<env>-apply` (§6) gates *the
-  deployment*: a human other than the author releases the environment's
+  requirements are untouched (CONTRACT.md §Comment-ops). Environments it does
+  not name are held out of a bare `shipmate apply` and refused on a targeted
+  one, their apply checks left pending, so the gate keeps blocking the merge
+  until they are applied with a review in hand. Both engine apply workflows read
+  the variable themselves and enforce on it; the `comment-ops.yml` line is an
+  early refusal, not the policy. Opting in also takes one line in
+  `comment-ops.yml` — see `docs/getting-started.md`.
+- **Environment `required_reviewers` on `<env>-apply` (§6) gates the
+  deployment.** A human other than the author releases the environment's
   secrets and lets the apply proceed. It is unforgeable by a holder of the App
   private key, which the review requirement above is not.
 
 Two things to know before relying on the variable:
 
-- **It is not an admin boundary.** GitHub grants *"Create, update, and delete
-  GitHub Actions variables"* to **Write and above**, so anyone who can push can
-  also edit the list, and `shipmate doctor` does not read it. What it buys is
+- **The variable is not an admin boundary.** GitHub grants *"Create, update, and
+  delete GitHub Actions variables"* to Write and above, so anyone who can push
+  can also edit the list, and `shipmate doctor` does not read it. What it buys is
   that relaxing the gate is a separate, deliberate act against repository
   settings, with no plan attached and no reviewer reading it as code — it
   cannot ride inside the pull request that benefits from it. Do not carry
   control 1's grant over to it by assumption.
-- **It is inert at `required_approving_review_count: 0`.** Every environment is
-  already ungated there, so listing some narrows nothing. The variable can only
-  relax an existing requirement, never create one, and nothing warns about the
-  combination — a repository that sets both, and believes prod is gated, gets
-  no signal that it is not.
+- **The variable is inert at `required_approving_review_count: 0`.** Every
+  environment is already ungated there, so listing some narrows nothing. The
+  variable can only relax an existing requirement, never create one, and nothing
+  warns about the combination — a repository that sets both, and believes prod is
+  gated, gets no signal that it is not.
 
 `require_code_owner_review` is doing more work here than the approval count.
 A GitHub App cannot be listed in `CODEOWNERS`, so a code-owner review is one of
@@ -322,8 +323,8 @@ satisfy (the other is #6). An approval *count* is not: the App holds
 `pull-requests: write` and can submit an approving review that counts toward it.
 
 That unforgeability holds only where the rule actually bites. GitHub requires a
-code-owner review for a changed file **that has an owner**; with no `CODEOWNERS`
-file, an entry that does not parse, or IaC paths simply left unowned, the setting
+code-owner review for a changed file that has an owner; with no `CODEOWNERS`
+file, an entry that does not parse, or IaC paths left unowned, the setting
 is a no-op and the App's own approving review satisfies the count on its own.
 Write a `CODEOWNERS` entry covering the paths the stacks and the Terramate
 configuration live in, and confirm on a real pull request that the reviewer
@@ -332,59 +333,59 @@ not code-owner review — it does not check `CODEOWNERS` coverage, and it never
 fails a run, so that is a warning, not enforcement.
 
 **Know which copy of `CODEOWNERS` decides, before you need to change it.** GitHub
-evaluates it from the pull request's **base** branch, so narrowing or widening
+evaluates it from the pull request's base branch, so narrowing or widening
 ownership never applies to the pull request carrying the edit — it has to merge
-first, on its own. That is the difference between a sole maintainer being able to
-merge an engine migration that touches a workflow file and not being able to, and
-it has a floor worth checking now: an entry that owns `/.github/` (or
-`CODEOWNERS`' own path) owns the fix too, leaving a ruleset bypass actor as the
-only way out — and that spends the one merge-time control a leaked App key cannot
-satisfy. `docs/branch-protection.md` has the sole-maintainer shape.
+first, on its own. That timing is the difference between a sole maintainer being
+able to merge an engine migration that touches a workflow file and not being
+able to. The rule also has a floor to check now: an entry that owns `/.github/`
+(or `CODEOWNERS`' own path) owns the fix too, leaving a ruleset bypass actor as
+the only way out — and that spends the one merge-time control a leaked App key
+cannot satisfy. `docs/branch-protection.md` has the sole-maintainer shape.
 
 ## 6. Environment reviewers — the gate that holds after a merge
 
-**Check "Plan prerequisites" first: on a private repository this rule requires
-Enterprise, and below it the API refuses to create one.** Everything in this
+**Check "Plan prerequisites" first.** On a private repository this rule requires
+Enterprise, and below it the API refuses to create one. Everything in this
 section describes a control that plan cannot have.
 
-Environment reviewers are **users and teams**. A GitHub App installation token
+Environment reviewers are users and teams. A GitHub App installation token
 cannot be a reviewer and cannot approve a pending deployment, so this is the
-**second** of the two controls in the list that an attacker holding the App
+second of the two controls in the list that an attacker holding the App
 private key cannot satisfy — the other is the code-owner review in #3–5, which
 an App cannot supply because it cannot be listed in `CODEOWNERS`. They are
 unforgeable at different points, which is why both matter: code-owner review
-guards the **merge**, the `<env>-apply` reviewer guards the **apply**.
+guards the merge, the `<env>-apply` reviewer guards the apply.
 
 On an `<env>-apply` environment you decide to gate:
 
 - add required reviewers (a team, not one person),
-- tick **Prevent self-review**.
+- tick "Prevent self-review".
 
 Two platform ceilings this control cannot be configured past:
 
 - **Six reviewers, one approval.** An environment takes at most six users or
   teams, and a single one of them approving releases the deployment. There is
-  no quorum and no per-team requirement, so "two of SRE", or "one security
-  **and** one platform", is not expressible here. Quorum has to come from the
+  no quorum and no per-team requirement, so "two of SRE", or "one security and
+  one platform", is not expressible here. Quorum has to come from the
   pull request side — which is repository-wide, and so cannot be asked of one
   environment alone.
-- **On a private repository this rule needs Enterprise — it cannot be created at
-  all below it.** GitHub's plan comparison does not say so on the environments
+- **On a private repository this rule needs Enterprise.** It cannot be created at
+  all below it. GitHub's plan comparison does not say so on the environments
   page; the sentence that bites is *"required reviewers are only available for
   public repositories"* on GitHub Free, Pro and Team
   ([Deployments and environments](https://docs.github.com/en/actions/reference/workflows-and-actions/deployments-and-environments)),
   and the API refuses with `HTTP 422 ... Please ensure the billing plan supports
-  the required reviewers protection rule`. The refusal was **measured on a
-  private repository in a Team-plan organization** — there, a wait timer is
-  refused identically and a deployment branch policy creates fine. On **Free** the
+  the required reviewers protection rule`. The refusal was measured on a
+  private repository in a Team-plan organization — there, a wait timer is
+  refused identically and a deployment branch policy creates fine. On Free the
   refusal is unmeasured and an earlier observation had a private repository's
   protection rules *ignored* rather than refused: environments exist, deployments
-  record, nothing errors, and the reviewer requirement simply does not apply.
+  record, nothing errors, and the reviewer requirement does not apply.
   Which of the two you hit does not change the posture — below Enterprise on a
   private repository none of the protection in this section is in force — but it
   does change what you see, so do not read a created-without-error rule as an
   enforced one. See "Plan prerequisites" for what is left when this section is
-  unavailable: a posture with no apply-time approval at all, so do not design
+  unavailable: a posture with no apply-time approval at all. Do not design
   production gating on this section without checking the plan first. Row 6
   presupposes a public repository or Enterprise; rows 16 and 17 presuppose a
   public repository or Pro/Team and above.
@@ -420,9 +421,9 @@ Pair every environment you gate with `global.shipmate.explicit_envs`, whichever
 ones those are: list it there so a bare `shipmate apply` skips it and it is
 reached only by the targeted `shipmate apply <env>`. Left off, a bare
 `shipmate apply` fans out into that environment and stalls there waiting for the
-reviewer nobody expected to be asked. Use the **bare environment name** —
-`staging`, not `staging-plan` or `staging-apply`; the value is matched against the
-environment name carried by the apply checks (see CONTRACT.md), and an entry
+reviewer nobody expected to be asked. Use the bare environment name —
+`staging`, not `staging-plan` or `staging-apply`. The value is matched against
+the environment name carried by the apply checks (see CONTRACT.md), and an entry
 carrying either suffix is a configuration error the engine rejects loudly.
 
 `explicit_envs` is read from the *pull request branch* and can therefore be
@@ -433,43 +434,42 @@ What the reviewer sees is a deployment-approval prompt naming the environment �
 not a diff. Approving it means "I have read this pull request's plans", so the
 approval is only as good as that habit.
 
-A **deployment branch policy** on `<env>-apply`, scoped to the default branch,
+A deployment branch policy on `<env>-apply`, scoped to the default branch,
 does not change *which code the engine applies* — the pre-merge apply is
 always dispatched on the default branch and applies the pull request head
-passed as an input, policy or not. But it is very much a control on **secret
-release**: without one, a branch-authored workflow that simply declares
-`environment: dev-eu-apply` in its own YAML is handed that environment's
-secrets directly on push, bypassing comment-ops, the gate, and everything
-else in this list — the same path row 16 closes for the App key. Set it on
-every `<env>-apply`, restricted to the default branch, and do count it as a
-control.
+passed as an input, policy or not. It is a control on secret release. Without
+one, a branch-authored workflow that declares `environment: dev-eu-apply` in its
+own YAML is handed that environment's secrets directly on push, bypassing
+comment-ops, the gate, and everything else in this list — the same path row 16
+closes for the App key. Set it on every `<env>-apply`, restricted to the default
+branch, and do count it as a control.
 
 ## 7–9. Credentials
 
-> **The credential path is AWS OIDC, opt-in per environment, and engine-wired
-> on the apply side only.** Every wave job in `apply-env-level.yml` requests
-> `id-token: write` and runs a credentials step gated on the environment naming
-> a role; a consumer opts in by setting `AWS_ROLE_ARN` (or the cell's
-> `AWS_ROLE_ARN_<WORKLOAD>`, which wins) and `AWS_REGION` as variables on
-> that job's `<env>-apply` environment. With them unset the step is skipped and
-> no cloud credential exists in the job, which is why the sample repos (null
-> resources, local state) still run credential-free. With them set, the assumed
-> role's session env vars do reach `tofu` — they are `AWS_*`, so the fingerprint
-> excludes them (CONTRACT.md §Apply-match fingerprint). On the plan path the
-> engine wires no credentials step because it owns no plan workflow: `plan.yml`
-> is the consumer's, so the consumer adds `configure-aws-credentials` to it and
-> the plan environment (`<env>-plan`) supplies a **read-only** role
-> (`docs/aws.md` §Where the credentials step goes). OIDC is available on both
-> paths; only the wiring differs in whose file it lives in.
->
-> No job interpolates a consumer *secret*: do not move a long-lived access key
-> into an environment secret expecting the engine to pick it up — it will not,
-> and that apply cell will fail at provider init. The role split controls 7 and
-> 9 describe is therefore the consumer's to configure, by giving the plan
-> environment and the `<env>-apply` environment different `AWS_ROLE_ARN` values
-> and scoping each role's trust policy and permissions accordingly. The engine
-> passes through whatever role each environment names; it enforces no split of
-> its own.
+**The credential path is AWS OIDC, opt-in per environment, and engine-wired on
+the apply side only.** Every wave job in `apply-env-level.yml` requests
+`id-token: write` and runs a credentials step gated on the environment naming
+a role. A consumer opts in by setting `AWS_ROLE_ARN` (or the cell's
+`AWS_ROLE_ARN_<WORKLOAD>`, which wins) and `AWS_REGION` as variables on
+that job's `<env>-apply` environment. With them unset the step is skipped and
+no cloud credential exists in the job, which is why the sample repos (null
+resources, local state) still run credential-free. With them set, the assumed
+role's session env vars do reach `tofu` — they are `AWS_*`, so the fingerprint
+excludes them (CONTRACT.md §Apply-match fingerprint). On the plan path the
+engine wires no credentials step because it owns no plan workflow: `plan.yml`
+is the consumer's, so the consumer adds `configure-aws-credentials` to it and
+the plan environment (`<env>-plan`) supplies a read-only role
+(`docs/aws.md` §Where the credentials step goes). OIDC is available on both
+paths; only the wiring differs in whose file it lives in.
+
+No job interpolates a consumer *secret*: do not move a long-lived access key
+into an environment secret expecting the engine to pick it up — it will not,
+and that apply cell will fail at provider init. The role split controls 7 and
+9 describe is therefore the consumer's to configure, by giving the plan
+environment and the `<env>-apply` environment different `AWS_ROLE_ARN` values
+and scoping each role's trust policy and permissions accordingly. The engine
+passes through whatever role each environment names; it enforces no split of
+its own.
 
 - **Apply credentials belong on the `<env>-apply` environment, never at
   repository or organization level.** For a residual static key — a *secret* —
@@ -479,45 +479,42 @@ control.
   environment with no rules releases it to any branch on demand; the scoping is
   worth nothing without control 6, so treat the two as one setting.
 
-  **For the OIDC path the scoping is advisory, and this is worth being blunt
-  about.** `AWS_ROLE_ARN` and `AWS_REGION` are `vars`, and for `vars` the most
-  specific wins: environment overrides repository overrides organization. A
-  repository- or organization-level `AWS_ROLE_ARN` is therefore picked up
-  identically by every wave job in every apply environment that does not set its
-  own, with no warning and nothing in the engine to guard it —
-  "opt in per environment" (CONTRACT.md §AWS OIDC) is where you *should* set it,
-  not something GitHub or shipmate enforces. Set it on each `<env>-apply` — and,
-  if your `plan.yml` carries its own credentials step, on each `<env>-plan`
-  environment with a **read-only** plan role (`docs/aws.md` §Environment
-  variables) — never at repository or organization level, and understand that
-  the enforcing control is not the variable's
-  location at all: it is the **role's trust policy**, whose `environment:` claim
-  condition is the only thing that decides which environments can actually
-  assume it.
+  **For the OIDC path the scoping is advisory.** `AWS_ROLE_ARN` and `AWS_REGION`
+  are `vars`, and for `vars` the most specific wins: environment overrides
+  repository overrides organization. A repository- or organization-level
+  `AWS_ROLE_ARN` is therefore picked up identically by every wave job in every
+  apply environment that does not set its own, with no warning and nothing in the
+  engine to guard it — "opt in per environment" (CONTRACT.md §AWS OIDC) is where
+  the value belongs, not something GitHub or shipmate enforces. Set it on each
+  `<env>-apply` — and, if your `plan.yml` carries its own credentials step, on
+  each `<env>-plan` environment with a read-only plan role (`docs/aws.md`
+  §Environment variables) — never at repository or organization level. The
+  enforcing control is not the variable's location at all: it is the role's trust
+  policy, whose `environment:` claim condition is the only thing that decides
+  which environments can assume it.
 - **Plan environments must have no approval-type protection rules (required
-  reviewers, wait timers) and no deployment branch policy** — an approval rule
+  reviewers, wait timers) and no deployment branch policy.** An approval rule
   blocks every plan cell outright, and a branch policy blocks every plan cell
   whose pull request targets a branch the policy does not name (plan jobs run at
-  the pull request's *base* ref). Either leaves
-  the gate red until it is removed (`shipmate doctor` warns; see
-  `docs/troubleshooting.md`). One carve-out, and only for the branch policy: on a
-  **shared** environment a default-branch policy is row 17 doing real work, plan
-  cells pass it at the base ref, and doctor notes it rather than warning. The
-  approval-rule half is absolute in both namings. That constraint is not
-  negotiable, so treat a
-  plan environment as readable by anyone with push access: a plan cell runs
-  `terramate`/`tofu` over branch code, which is arbitrary code execution with
-  whatever that environment holds. Read-only, blast-radius-free credentials
-  only. Assume `SHIPMATE_PLAN_PASSPHRASE` is readable by the same people for the
-  same reason.
-  The strongest version of this control is a plan environment with **no secret
-  in it at all**, and it is reachable today: put a **read-only** OIDC role's
-  ARN in the plan environment as a *variable*, assumed by a
+  the pull request's *base* ref). Either leaves the gate red until it is removed
+  (`shipmate doctor` warns; see `docs/troubleshooting.md`). One carve-out, and
+  only for the branch policy: on a shared environment a default-branch policy is
+  row 17 doing real work, plan cells pass it at the base ref, and doctor notes it
+  rather than warning. The approval-rule half is absolute in both namings. That
+  constraint is not negotiable, so treat a plan environment as readable by anyone
+  with push access: a plan cell runs `terramate`/`tofu` over branch code, which
+  is arbitrary code execution with whatever that environment holds. Read-only,
+  blast-radius-free credentials only. Assume `SHIPMATE_PLAN_PASSPHRASE` is
+  readable by the same people for the same reason.
+
+  The strongest version of this control is a plan environment with no secret in
+  it at all, and it is reachable today: put a read-only OIDC role's ARN in the
+  plan environment as a *variable*, assumed by a
   `configure-aws-credentials` step in your own `plan.yml` (`docs/aws.md`
   §Where the credentials step goes), with the role's trust policy conditioned on
   the plan environment's claim (`repo:<owner>/<repo>:environment:<env>-plan`,
   the plan environment, not `<env>-apply`), so a token minted in a plan cell can
-  never assume the apply role. That removes the long-lived key; it does not
+  never assume the apply role. That removes the long-lived key. It does not
   remove the statement above — whatever the plan environment names is reachable
   by anyone who can push a branch, which is why the role must be read-only.
 
@@ -531,15 +528,15 @@ control.
   was too long to read whole. The report says the check was not performed,
   rather than reporting it clean, when the App installation has not
   accepted the `environments: read` permission the manifest declares.
-- **Prefer OIDC** to static cloud keys — on the apply path the engine wires it,
-  so this is available today — and condition the trust policy on the environment
+- **Prefer OIDC to static cloud keys.** On the apply path the engine wires it,
+  so this is available today. Condition the trust policy on the environment
   claim (`repo:<owner>/<repo>:environment:<env>-apply`) so a token minted from a
   plan cell — or from a branch workflow — cannot assume the apply role. Do this
-  on **every** role reachable from the repository, not only the apply role: see
+  on every role reachable from the repository, not only the apply role: see
   "What none of this fixes" for why it is the only bound that holds.
 - **In shared mode the plan path holds the apply role.** The bare `<env>` carries
   one `AWS_ROLE_ARN` (or one `AWS_ROLE_ARN_<WORKLOAD>`) and the wave jobs read it
-  off that environment, so it must name the **apply** role or every apply fails at
+  off that environment, so it must name the apply role or every apply fails at
   provider init — and a consumer's own `plan.yml` credentials step reads the same
   variable from the same environment. So a read-only plan role is unreachable for
   every shared env: plan cells and the nightly drift run assume the write role
@@ -556,19 +553,19 @@ control.
   workflow file is part of what the policy matches) is the escape hatch; it is
   consumer-side, unsupported by the engine, and out of scope here.
 - **Read the toggle at the granularity of what it spends, not of where it is
-  set.** `SHIPMATE_SHARED_ENVS` is a list of environments, which invites reading a
-  shared cell as a setting you can revisit; the OIDC consequence is not
+  set.** `SHIPMATE_SHARED_ENVS` is a list of environments, which invites reading
+  a shared cell as a setting you can revisit. The OIDC consequence is not
   revisitable. What each listed cell gives up is not a knob on that cell — it is
-  shipmate's ability to say *plan may read, apply may write* **for** that cell, and
+  shipmate's ability to say *plan may read, apply may write* for that cell, and
   the only way back is splitting the environment again. A repository that lists
-  every cell cannot express the read/write split anywhere, for any environment, and
-  the variable looks identical in both cases. So decide it as a posture, per cell,
-  before the migration rather than after: shared where plan-time branch code
-  holding the write role is genuinely acceptable, split everywhere you would ever
-  want a reviewer or a read-only plan role.
+  every cell cannot express the read/write split anywhere, for any environment,
+  and the variable looks identical in both cases. So decide it as a posture, per
+  cell, before the migration rather than after: shared where plan-time branch
+  code holding the write role is genuinely acceptable, split everywhere you
+  would ever want a reviewer or a read-only plan role.
 - **The toggle is not admin-gated.** `SHIPMATE_SHARED_ENVS` is a repository
-  **variable**, and GitHub grants *"Create, update, and delete GitHub Actions
-  variables"* to **Write and above** — this posture decision is not scoped to
+  variable, and GitHub grants *"Create, update, and delete GitHub Actions
+  variables"* to Write and above — this posture decision is not scoped to
   control 1's grant, it is reachable by anyone holding it. On a repository whose
   plan path carries its own credentials, one comma-separated entry moves plan
   cells running unreviewed branch code onto the apply role, and the nightly drift
@@ -581,17 +578,17 @@ control.
 
 Settings → Actions → General:
 
-- **Workflow permissions**: read repository contents, and clear "Allow GitHub
+- **Workflow permissions.** Read repository contents, and clear "Allow GitHub
   Actions to create and approve pull requests". shipmate's workflows declare the
   permissions they need per job.
-- **Fork pull request workflows**: require approval for **all outside
-  collaborators** (the strictest option), and never enable "Send secrets to
+- **Fork pull request workflows.** Require approval for all outside
+  collaborators (the strictest option), and never enable "Send secrets to
   workflows from fork pull requests". In workflow code the rule is about the
   shape rather than the trigger — stated in full at the top of this page, and
   the reason shipmate's own `plan.yml` may use `pull_request_target` while a
   labeler workflow may not. `shipmate doctor` names any *other* workflow file
   declaring the trigger; `plan.yml` is exempt by exact name.
-- **Allowed actions**: mode `selected`, with GitHub-owned actions allowed,
+- **Allowed actions.** Mode `selected`, with GitHub-owned actions allowed,
   verified-creator actions not, and these patterns:
 
   ```
@@ -602,7 +599,7 @@ Settings → Actions → General:
   aws-actions/configure-aws-credentials@*
   ```
 
-  The list must cover what the **engine** pulls in, not what your own workflows
+  The list must cover what the engine pulls in, not what your own workflows
   name. shipmate's composite actions execute inside your job, so their `uses:`
   refs are resolved against your repository's list: a consumer whose own YAML
   names only `actions/checkout` and `actions/download-artifact` still needs the
@@ -623,18 +620,18 @@ Settings → Actions → General:
   (`<owner>/shipmate/.github/workflows/unlock.yml@<sha>`), and the engine
   repository referencing its own actions at `@main`, all resolved.
 
-  The cost is that this list is a **second place pins live**: an action the
+  The cost is that this list is a second place pins live: an action the
   engine adds or renames in a pin bump has to be added here too, in every
   repository, or the next run stops at "Set up job" — loudly, naming the action
   it refused.
 
   This is supply-chain hygiene; it does not constrain `run:` steps.
-- **Require actions to be pinned to a full-length commit SHA**: makes the
-  platform enforce what this engine already asks of you, so a `uses:` naming a
+- **Require actions to be pinned to a full-length commit SHA.** The platform
+  then enforces what this engine already asks of you, so a `uses:` naming a
   tag or a branch is refused during "Set up job" instead of being caught in
   review. GitHub documents exemptions for local `./path` actions and for
   reusable workflows referenced by tag; an `owner/repo/path@ref` reference is
-  **not** exempt — measured here, even when `owner/repo` is the repository
+  not exempt — measured here, even when `owner/repo` is the repository
   running the workflow. On a repository that already pins by SHA this costs
   nothing — it is the engine's own repository that cannot enable it, for the
   reason in `docs/releasing.md` § Manifest load.
@@ -671,21 +668,21 @@ which is an answer for row 12 in its own right.
 
 ## 13–14. The App
 
-The private key is authority over **every repository the App is installed on**,
+The private key is authority over every repository the App is installed on,
 regardless of how the installations are split — a key holder can enumerate
 installations and mint a token for any of them. Splitting one App across repos
 with different levels of push access therefore lifts the weakest repository's
 trust to all of them.
 
-- Register **one App per trust domain**. Repositories with wide push access get
+- Register one App per trust domain. Repositories with wide push access get
   their own App and their own key.
-- Set the key as a **`shipmate-engine` environment secret, per repository**
+- Set the key as a `shipmate-engine` environment secret, per repository
   (`docs/github-app.md` steps 5–6) — never at repository or org level, and
   never shared org-wide the way `SHIPMATE_APP_ID` (a variable, not a secret)
   may be: environment secrets are scoped to one repository's environment, so
   each consumer repo needs its own `shipmate-engine` environment and its own
   copy of the key.
-- **Rotate the key whenever push access is revoked** — the runbook is
+- Rotate the key whenever push access is revoked — the runbook is
   `docs/github-app.md` §7. Anyone who had push access could have copied the
   PEM out of a workflow run, and revoking their access does not invalidate it.
 
@@ -693,16 +690,15 @@ trust to all of them.
 secrets — environments are per repository — so an organization whose IaC is
 split across N repositories places the key N times and rotates it N times. It
 does not *create* N keys: creation is per App, and #13 above already asks for
-one App per trust domain, so one key covers every repository in it. That
-is a genuine operational cost, and it is worth being clear about what it is and
-is not:
+one App per trust domain, so one key covers every repository in it. That is a
+real operational cost. What it is and is not:
 
-- It is **not** a cost this scoping introduced. The alternative, an org secret
+- It is not a cost this scoping introduced. The alternative, an org secret
   with `--visibility selected`, is readable by any workflow on any branch in
   every selected repository — the same exposure replicated N times, each
   independently reachable by that repository's own developers. Per-repository
   scoping is unavoidable once the key lives in the repositories at all.
-- It **is** work that should be automated rather than clicked: place and rotate
+- It is work to automate rather than click: place and rotate
   across every repository in one scripted pass, not one at a time. The
   cost is three API calls per repository at onboarding (create the environment,
   add its branch policy, write the environment secret) against one
@@ -714,11 +710,11 @@ is not:
   which requires something outside GitHub Actions to hold it. That is a
   different architecture, not a setting.
 
-**A dead end, so it is not re-proposed:** a single "control repository" holding
+**A dead end, so it is not re-proposed.** A single "control repository" holding
 the key on behalf of the others does not work without a server. Triggering a
 workflow in another repository requires a credential in the calling repository —
 a `GITHUB_TOKEN` cannot trigger another repository's workflow — so every IaC
-repository would need a secret in order to avoid having a secret.
+repository would need a secret to avoid having a secret.
 
 ## 15. Retention and disclosure
 
@@ -732,17 +728,17 @@ retention window if that inventory is sensitive
 `SHIPMATE_APP_PRIVATE_KEY` lives as a secret on the `shipmate-engine` GitHub
 Environment, not as a repository (or org) secret — see `docs/github-app.md`
 §Key-exposure boundary for why that specific environment is what makes the
-key unreachable from a branch-authored workflow. **Three** things must all be
+key unreachable from a branch-authored workflow. Three things must all be
 true for that to hold. `shipmate doctor` checks the first two on every plan run
 and on demand; it cannot check the third:
 
 - the `shipmate-engine` environment exists;
-- its deployment branch policy is a **custom** policy naming the default
+- its deployment branch policy is a custom policy naming the default
   branch — not merely present, and not the "protected branches" mode, which
   restricts to whatever branch protection covers rather than the default
   branch specifically;
-- **no repository (or organization) secret named `SHIPMATE_APP_PRIVATE_KEY`
-  remains.** An environment secret is released only to a job that *names* the
+- no repository (or organization) secret named `SHIPMATE_APP_PRIVATE_KEY`
+  remains. An environment secret is released only to a job that *names* the
   environment. A repository secret of the same name is readable by any workflow
   on any branch without naming anything, so leaving one in place defeats this
   control completely — the environment becomes decoration.
@@ -770,11 +766,11 @@ read out of documentation; they are what the plan path's trusted `summary` job
 rests on.
 
 **Tag pushes are covered, and there is one way to uncover them.** A deployment
-branch policy is typed: the entry naming your default branch is a **branch**
+branch policy is typed: the entry naming your default branch is a branch
 policy, and it matches no tag, so a workflow run at `refs/tags/…` that declares
 this environment is refused before a runner starts and is handed nothing —
 measured, not assumed. Someone who can push tags but not branches therefore
-cannot reach the key either. What breaks that is adding a **tag** policy to
+cannot reach the key either. What breaks that is adding a tag policy to
 `shipmate-engine` — for release automation, say. Do not: a tag is a ref anyone
 with tag-push access can create at any commit, including one carrying a workflow
 of their choosing. `shipmate doctor` warns about any extra policy here, tag ones
@@ -787,7 +783,7 @@ The documented wrappers pass exactly two secrets by name:
 `SHIPMATE_PLAN_PASSPHRASE`. Nothing else crosses into a called workflow, because
 GHA forwards no secret a caller does not name.
 
-`secrets: inherit` forwards **every** secret the calling repository can see:
+`secrets: inherit` forwards every secret the calling repository can see:
 cloud access keys, PATs, third-party API tokens, anything a later, unrelated
 workflow added. A reusable workflow is upgraded by moving a SHA, so the set a
 consumer hands over is not the set they reviewed. If you keep `inherit` — it
@@ -795,14 +791,14 @@ still works inside one organization — treat the engine as holding your whole
 secret inventory, and size the review of each pin bump accordingly.
 
 Across an organization boundary `inherit` does not merely forward less: it
-delivers nothing **and** suppresses the value the callee's `environment:` would
+delivers nothing, and it suppresses the value the callee's `environment:` would
 otherwise supply. A consumer outside the engine's organization must pass the
 secrets by name; §16's key placement does not change.
 
 ## The commit a plan run states
 
 A plan is only worth gating on if it planned the pull request's own head, and
-**no plan trigger checks that head out by itself**: `pull_request_target` takes
+no plan trigger checks that head out by itself: `pull_request_target` takes
 the base branch, `workflow_dispatch` takes the ref it was dispatched on. So the
 wrapper *states* the commit it is planning — `head-sha` on the `build-matrix`
 step, `expected-head` on each `plan-cell` — and both steps compare the statement
@@ -810,7 +806,7 @@ against the tree they are actually standing in, failing the run when the two
 differ. `shipmate doctor` reports a `build-matrix` step whose `head-sha` is
 absent or is not the expression the reference wrapper uses.
 
-Both **refuse by default**: a run that states no commit at all is refused, not
+Both refuse by default: a run that states no commit at all is refused, not
 planned (the one exception is `no-pull-request: "true"`, for a nightly drift
 workflow that has no pull request to state anything about). The direction is the
 point. A wrapper that forgot the `ref:` used to plan the base branch, report no
@@ -825,13 +821,13 @@ from `actions/pr-facts`, which reads the pull request itself. See below for why.
 
 **Fork pull requests are refused outright.** `actions/build-matrix` fails the
 step unless the wrapper's `head-repo` input states a head repository equal to
-this repository — and it **refuses by default**, so a wrapper that states
+this repository — and it refuses by default, so a wrapper that states
 nothing is refused rather than planned. No input, variable or setting permits a
 fork: the one opt-out, `no-pull-request: "true"`, says the run has no pull
 request at all and belongs only in a workflow that has none (nightly drift,
 [`drift.md`](drift.md)). Setting it in a plan wrapper is the one consumer edit
-that would turn this refusal off for every pull request — so don't, and note
-that the value is the wrapper's own default-branch YAML, which a pull request
+that would turn this refusal off for every pull request — so don't. The value
+lives in the wrapper's own default-branch YAML, which a pull request
 author cannot edit. `shipmate doctor` reports both consumer mistakes on this
 step: a `head-repo` that is absent or a constant, and a `no-pull-request`
 anywhere in `plan.yml`. A fork's plan is refused before any
@@ -878,10 +874,10 @@ checkout's own refusal off, each re-opens the surface to anyone who can fork.
 repository the standing residual is arbitrary code execution offered to anyone
 who can open a pull request *from a branch in the repository*.
 
-**The App key is now inside a workflow a fork pull request can start**, because
-the plan workflow runs on `pull_request_target` and that trigger fires for a
-fork. Two things keep it out of reach, and they are both structural rather than
-conventions. The trusted `summary` job declines unless the head repository the
+**The App key is now inside a workflow a fork pull request can start.** The
+reason is the trigger: the plan workflow runs on `pull_request_target`, which
+fires for a fork. Two things keep it out of reach, and they are both structural
+rather than conventions. The trusted `summary` job declines unless the head repository the
 caller states — its `head-repo` input — equals `github.repository`, and an
 absent or empty value is a refusal, not a pass: a job-level `if:`, so the job
 never starts, no deployment is created and the environment is never entered. And
@@ -891,19 +887,20 @@ The comparison lives in engine-owned, SHA-pinned YAML (`CONTRACT.md`
 consumer can fail it closed but cannot loosen it. What a consumer *can* get
 wrong is wiring a constant there — `head-repo: ${{ github.repository }}` passes
 for every pull request, fork ones included — which is why `shipmate doctor`
-checks the expression and not just the key
+checks the expression and not only the key
 ([`getting-started.md`](getting-started.md) §Required — plan).
 
-**The third trigger keeps every fact out of a dispatcher's hands.** A commented `shipmate plan`
-`workflow_dispatch`es the same `plan.yml`, and a dispatch reaches strictly less
-than a pull-request event does: the body carries **one** input, the pull
-request's number, and `plan.yml` declares no other, so GitHub refuses a dispatch
-that names anything else (HTTP 422, no run). Everything the guards decide on —
-the head SHA, the head repository, the draft flag — is then **derived** from that
-number by `actions/pr-facts`, which asks the API for the pull request. That is
-deliberate: the fork refusal keys on the head repository, so a caller holding
-`actions: write` — comment-ops mints an App token to dispatch, and any workflow
-file may grant itself that scope — must not be able to *state* one. A number
+**The third trigger keeps every fact out of a dispatcher's hands.** A commented
+`shipmate plan` `workflow_dispatch`es the same `plan.yml`, and a dispatch reaches
+strictly less than a pull-request event does: the body carries one input, the
+pull request's number, and `plan.yml` declares no other, so GitHub refuses a
+dispatch that names anything else (HTTP 422, no run). Everything the guards
+decide on — the head SHA, the head repository, the draft flag — is then derived
+from that number by `actions/pr-facts`, which asks the API for the pull request.
+That derivation is deliberate: the fork refusal keys on the head repository, so
+a caller holding `actions: write` — comment-ops mints an App token to dispatch,
+and any workflow file may grant itself that scope — must not be able to *state*
+one. A number
 cannot lie about its own head repository, and a number naming a fork's pull
 request resolves to that fork, which the `build-matrix` step refuses in `detect`
 exactly as it refuses one on the autoplan leg. What the dispatch leg does add is
@@ -919,24 +916,23 @@ key on, so on this leg the fork's head checks out and the inner refusal in
 `build-matrix` is the only one left — measured 2026-08-29: a dispatched plan
 naming a real fork's pull request checked that fork's head out and then failed
 in `build-matrix`. The reference `detect` therefore
-runs that step **before** `terramate fmt --check` and `terramate generate`, so a
+runs that step before `terramate fmt --check` and `terramate generate`, so a
 fork is turned away before either evaluates the tree it wrote. Keep that order:
 reversed, the two terramate steps evaluate (and generate from) fork-authored HCL
 first. What the reversed order would cost is bounded — `detect` holds
 `contents: read` and no App key, binds no environment, runs no `tofu`, and only
 an `OWNER`, `MEMBER` or `COLLABORATOR` can start the run at all — but the outer
 guard reaching one step less far is exactly the kind of difference worth not
-having. The two legs are **not** identical, and that is the measured shape: on
+having. The two legs are not identical, and that is the measured shape: on
 the autoplan leg `actions/checkout` refused and `build-matrix` never ran; on the
 dispatch leg the checkout succeeded and `build-matrix` did the refusing.
 
 The refusal in `detect` is loud (a red step) rather than a quiet empty matrix,
 because a fork pull request could not merge either way: with the `summary` job
 declined, no `shipmate / gate` status is ever written and the required check
-never appears.
-A green "nothing to plan" would leave an outside contributor waiting on a gate
-that structurally cannot arrive. Comment-ops has nothing to dispatch either —
-no gate, no reviewed plan to point `shipmate apply` at.
+never appears. A green "nothing to plan" would leave an outside contributor
+waiting on a gate that structurally cannot arrive. Comment-ops has nothing to
+dispatch either — no gate, no reviewed plan to point `shipmate apply` at.
 
 So the fork model is safe but not self-service: a maintainer must bring the
 branch into the repository (`gh pr checkout` then push to a branch) for it to
@@ -954,7 +950,7 @@ for exactly the exposure control 1 exists to limit.
   `cell-summary.*` artifacts read equals the count `detect` reported (see
   `CONTRACT.md` §Plan comment). That count comes out of the plan run, which
   executes the pull request's own code, so an author
-  with **write access** can report any count they like — including a zero that
+  with write access can report any count they like — including a zero that
   greens a quiet gate over stacks that were planned. The check catches a
   download or parse that came up short, not a privileged author, who can already
   fabricate the whole artifact surface the summary reads: the cell summaries,
@@ -977,7 +973,7 @@ for exactly the exposure control 1 exists to limit.
   cell runs the reviewed plan, but the Terramate configuration around it is still
   the branch's). The engine cannot avoid this: the grant is per job, statically.
   The only mitigation is on the cloud side — an `environment:` claim condition
-  (control 9) on **every** role that trusts this repository's OIDC provider, so
+  (control 9) on every role that trusts this repository's OIDC provider, so
   a token minted in one job cannot assume a role meant for another. A role whose
   trust policy names only `repo:<owner>/<repo>:*` is assumable from every job
   here, including a plan cell.
@@ -985,7 +981,7 @@ for exactly the exposure control 1 exists to limit.
   `git-uncommitted` safeguards do not run on a cell (see `CONTRACT.md`
   §Terramate safeguards), and `outdated-code` only checks files Terramate
   itself generates. A stray `evil.tf` in a stack directory — left by an earlier
-  job on a **self-hosted or otherwise reused runner**, or written by a consumer
+  job on a self-hosted or otherwise reused runner, or written by a consumer
   workflow step that runs before `plan-cell` — is read by `tofu plan` and baked
   into the reviewed `.otplan` with nothing flagging it. On ephemeral
   GitHub-hosted runners the checkout is fresh each job and the only writer is
@@ -1000,7 +996,7 @@ for exactly the exposure control 1 exists to limit.
 - **The gate is an assertion, not a proof.** The App identity and pull request
   approvals are out of a push-capable developer's reach only because control 16
   keeps the App private key on the `shipmate-engine` environment, unreadable
-  from a branch-authored workflow — a holder of that key can forge both; the
-  gate remains an assertion produced by the author's own pipeline; the enforcing
-  controls are the code-owner-required pull request approval and the
+  from a branch-authored workflow. A holder of that key can forge both. The
+  gate remains an assertion produced by the author's own pipeline, and the
+  enforcing controls are the code-owner-required pull request approval and the
   `<env>-apply` environment reviewer. Do not claim the gate is unforgeable.
