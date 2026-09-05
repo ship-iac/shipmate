@@ -137,7 +137,7 @@ jobs:
     # `fromJSON('')`.
     needs: [guard, review, detect]
     if: ${{ !failure() && !cancelled() && needs.detect.outputs.envlevel0_empty != 'true' && !contains(join(needs.*.result, ','), 'cancelled') }}
-    uses: ship-iac/shipmate/.github/workflows/apply-env-level.yml@a8a4158c82a2c33171585e4095d04fb5ee6d3c77 # pinned to a commit on main
+    uses: ship-iac/shipmate/.github/workflows/apply-env-level.yml@ede3e43cde30543d845f6841f604575cd24e0f06 # pinned to a commit on main
     permissions: { contents: read, checks: read, actions: read, id-token: write }
     with:
       waves_json: ${{ needs.detect.outputs.envlevel0_waves }}
@@ -159,7 +159,7 @@ jobs:
     name: L1
     needs: [guard, review, detect, envlevel0]
     if: ${{ !failure() && !cancelled() && needs.detect.outputs.envlevel1_empty != 'true' && !contains(join(needs.*.result, ','), 'cancelled') }}
-    uses: ship-iac/shipmate/.github/workflows/apply-env-level.yml@a8a4158c82a2c33171585e4095d04fb5ee6d3c77 # pinned to a commit on main
+    uses: ship-iac/shipmate/.github/workflows/apply-env-level.yml@ede3e43cde30543d845f6841f604575cd24e0f06 # pinned to a commit on main
     permissions: { contents: read, checks: read, actions: read, id-token: write }
     with:
       waves_json: ${{ needs.detect.outputs.envlevel1_waves }}
@@ -173,7 +173,7 @@ jobs:
     name: L2
     needs: [guard, review, detect, envlevel0, envlevel1]
     if: ${{ !failure() && !cancelled() && needs.detect.outputs.envlevel2_empty != 'true' && !contains(join(needs.*.result, ','), 'cancelled') }}
-    uses: ship-iac/shipmate/.github/workflows/apply-env-level.yml@a8a4158c82a2c33171585e4095d04fb5ee6d3c77 # pinned to a commit on main
+    uses: ship-iac/shipmate/.github/workflows/apply-env-level.yml@ede3e43cde30543d845f6841f604575cd24e0f06 # pinned to a commit on main
     permissions: { contents: read, checks: read, actions: read, id-token: write }
     with:
       waves_json: ${{ needs.detect.outputs.envlevel2_waves }}
@@ -187,7 +187,7 @@ jobs:
     name: L3
     needs: [guard, review, detect, envlevel0, envlevel1, envlevel2]
     if: ${{ !failure() && !cancelled() && needs.detect.outputs.envlevel3_empty != 'true' && !contains(join(needs.*.result, ','), 'cancelled') }}
-    uses: ship-iac/shipmate/.github/workflows/apply-env-level.yml@a8a4158c82a2c33171585e4095d04fb5ee6d3c77 # pinned to a commit on main
+    uses: ship-iac/shipmate/.github/workflows/apply-env-level.yml@ede3e43cde30543d845f6841f604575cd24e0f06 # pinned to a commit on main
     permissions: { contents: read, checks: read, actions: read, id-token: write }
     with:
       waves_json: ${{ needs.detect.outputs.envlevel3_waves }}
