@@ -6,9 +6,23 @@ the action would parse, authorize, and then silently do nothing.
 """
 
 import json
+import os
 import re
+import shlex
+import subprocess
+import tempfile
+from pathlib import Path
 
-from _loader import ACTIONS, ENGINE, SCRIPTS, action_steps, action_yaml, load_script
+import pytest
+from _loader import (
+    ACTIONS,
+    ENGINE,
+    SCRIPTS,
+    action_steps,
+    action_yaml,
+    load_script,
+    usable_bash,
+)
 
 _ACTION_FILE = ACTIONS / "comment-ops" / "action.yml"
 _ACTION = _ACTION_FILE.read_text(encoding="utf-8")
@@ -877,29 +891,65 @@ def _by_id(step_id):
     return step
 
 
-#: `planauthz`' whole `run` body, hand-written. The whole body, because the
-#: property is that plan's tier is the guard step's single classification and
-#: *nothing else*: a second `case` on the association, an extra login test, an
-#: unconditional pass -- each of them changes this string.
-_PLANAUTHZ_RUN = """set -euo pipefail
-if [ "${PRIVILEGED:-}" = "true" ]; then
-  echo "authorized=true" >> "$GITHUB_OUTPUT"
-else
-  echo "authorized=false" >> "$GITHUB_OUTPUT"
-fi
-"""
+#: The two verdicts `planauthz` can write, hand-written whole. The step is
+#: exercised rather than string-matched, so what a mutation has to survive is the
+#: rendered value a commenter reads, not the source line that produced it.
+_PLAN_ASSOCIATION_REASON = (
+    "`plan` runs this repository's Terramate/OpenTofu on its runners, so it answers only "
+    "organization members and repository collaborators."
+)
+_PLAN_FORK_REASON = (
+    "this pull request's head is in `someone/fork`, and shipmate plans only branches of this "
+    "repository — a fork's plan would execute the pull request's own Terramate/OpenTofu code "
+    "with everything the plan environment holds."
+)
 
-#: The plan rejection's whole body, hand-written. It states plan's own reason:
-#: doctor's gate exists because its report maps the guardrails a repository is
-#: missing, and plan reports no configuration at all -- copying doctor's
-#: sentence here would be an active falsehood.
+#: The plan rejection's whole body, hand-written. It renders whichever reason
+#: `planauthz` wrote; a body that hard-codes one of them again silently tells a
+#: fork's commenter to go and get a collaborator role.
 _PLAN_REJECT_RUN = (
     "set -euo pipefail\n"
     'gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -f '
-    "body=\":x: shipmate: \\`plan\\` runs this repository's Terramate/OpenTofu on its "
-    'runners, so it answers only organization members and repository collaborators." '
-    ">/dev/null\n"
+    'body=":x: shipmate: $REASON" >/dev/null\n'
 )
+
+
+def _run_planauthz(tmpdir, *, privileged, head_repo="org/repo"):
+    """Run `planauthz`'s shipped body against a stub `gh`; returns (result, outputs, gh argv).
+
+    `head_repo=None` stubs a `gh` that fails, which is the head this step cannot read.
+    """
+    gh_path = Path(tmpdir) / "gh"
+    answer = "exit 1\n" if head_repo is None else f"printf '%s\\n' {shlex.quote(head_repo)}\n"
+    gh_path.write_text("#!/bin/bash\nprintf '%s\\n' \"$@\" >> argv.txt\n" + answer)
+    gh_path.chmod(0o755)
+
+    out_file = Path(tmpdir) / "github_output"
+    out_file.write_text("", encoding="utf-8")
+
+    env = os.environ.copy()
+    env["PATH"] = f"{tmpdir}{os.pathsep}{env.get('PATH', '')}"
+    env["PRIVILEGED"] = "true" if privileged else "false"
+    env["GH_TOKEN"] = "test_token"  # noqa: S105
+    env["PR_NUMBER"] = "42"
+    env["GITHUB_REPOSITORY"] = "org/repo"
+    env["GITHUB_OUTPUT"] = str(out_file)
+
+    result = subprocess.run(
+        [usable_bash(), "-c", _by_id("planauthz")["run"]],
+        env=env,
+        capture_output=True,
+        text=True,
+        cwd=tmpdir,
+        timeout=30,
+    )
+    outputs = dict(
+        line.split("=", 1)
+        for line in out_file.read_text(encoding="utf-8").splitlines()
+        if "=" in line
+    )
+    argv_file = Path(tmpdir) / "argv.txt"
+    return result, outputs, (argv_file.read_text() if argv_file.exists() else "")
 
 
 def test_the_plan_route_is_gated_on_the_association_the_help_footer_promises():
@@ -909,20 +959,31 @@ def test_the_plan_route_is_gated_on_the_association_the_help_footer_promises():
     * the footer says it, of `plan` specifically;
     * `plan`'s own authorization step keys on the guard step's single classification of the
       author and on nothing else -- not team membership, not the commenter's login, and not a
-      second `case` of its own;
+      second `case` of its own. The whole `env:` vector pins every *input-borne* source of
+      standing, which is what this action's steps read; the runner's own context
+      (`$GITHUB_EVENT_PATH` and friends) is outside it, and passing values through `env:` is
+      the idiom that keeps it that way;
     * a commenter without that standing is told so, in plan's own words.
 
     Without the second claim the footer's promise is enforced by nothing: the phrase alone is
     already in the action, in doctor's refusal, so a plan route wired with no gate at all
-    leaves every phrase-level assertion green."""
+    leaves every phrase-level assertion green.
+
+    Mutations: invert the `!= "true"` test; add a login or team lookup to the `env:` vector;
+    reword either half of the reason.
+    """
     footer = cp.help_markdown().rsplit("\n", 1)[-1]
     promise = next(s for s in footer.split(";") if _CLAIM in s)
     assert "`plan`" in promise, promise
+    assert _CLAIM in _PLAN_ASSOCIATION_REASON
 
     planauthz = _by_id("planauthz")
     assert planauthz["if"] == "${{ steps.parse.outputs.route == 'plan' }}"
-    assert planauthz["env"] == {"PRIVILEGED": "${{ " + _GATE + " }}"}
-    assert planauthz["run"] == _PLANAUTHZ_RUN
+    assert planauthz["env"] == {
+        "PRIVILEGED": "${{ " + _GATE + " }}",
+        "GH_TOKEN": "${{ inputs.github-token }}",
+        "PR_NUMBER": "${{ inputs.pr-number }}",
+    }
 
     reject = next(
         s for s in action_steps("comment-ops") if s.get("name") == "Reject an unauthorized plan"
@@ -933,8 +994,69 @@ def test_the_plan_route_is_gated_on_the_association_the_help_footer_promises():
     assert reject["env"] == {
         "GH_TOKEN": "${{ inputs.github-token }}",
         "PR_NUMBER": "${{ inputs.pr-number }}",
+        "REASON": "${{ steps.planauthz.outputs.reason }}",
     }
     assert reject["run"] == _PLAN_REJECT_RUN
+
+    if not usable_bash():
+        pytest.skip("bash not available on this platform")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        result, outputs, argv = _run_planauthz(tmpdir, privileged=False)
+        assert result.returncode == 0, result.stderr
+        assert outputs == {"authorized": "false", "reason": _PLAN_ASSOCIATION_REASON}
+        assert argv == "", f"an unauthorized commenter must cost no API call: {argv!r}"
+
+
+def test_a_privileged_commenter_planning_this_repositorys_own_head_is_authorized():
+    """The path that must stay open: standing plus a head in this repository dispatches.
+
+    Mutation: compare `$HEAD_REPO` to anything but `$GITHUB_REPOSITORY`, and this repository's
+    own pull requests stop planning.
+    """
+    if not usable_bash():
+        pytest.skip("bash not available on this platform")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        result, outputs, argv = _run_planauthz(tmpdir, privileged=True, head_repo="org/repo")
+        assert result.returncode == 0, result.stderr
+        assert outputs == {"authorized": "true"}
+        assert "-X" not in argv, f"the authorization step writes nothing, it reads: {argv!r}"
+        assert "repos/org/repo/pulls/42" in argv, f"the head was never read: {argv!r}"
+
+
+def test_a_forks_head_is_refused_here_rather_than_in_a_run_the_pull_request_cannot_see():
+    """`build-matrix` refuses a fork head inside the dispatched run, whose checks land on the
+    dispatch ref -- so a fork's `shipmate plan` shows the pull request nothing at all. The
+    refusal is stated here, in its own words, before the dispatch it would have wasted.
+
+    Mutations: invert the `$HEAD_REPO` comparison to `=`; reuse the association reason for this
+    branch, which tells a fork's commenter to go and get a collaborator role. Deleting the
+    comparison instead leaves this green -- the `-n` arm alone still refuses a fork -- which is
+    why test_a_privileged_commenter_planning_this_repositorys_own_head_is_authorized is the
+    other half of the pair.
+    """
+    if not usable_bash():
+        pytest.skip("bash not available on this platform")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        result, outputs, _ = _run_planauthz(tmpdir, privileged=True, head_repo="someone/fork")
+        assert result.returncode == 0, result.stderr
+        assert outputs == {"authorized": "false", "reason": _PLAN_FORK_REASON}
+
+
+@pytest.mark.parametrize("head_repo", [None, "null"])
+def test_a_head_this_step_cannot_read_leaves_the_refusal_where_it_is_enforced(head_repo):
+    """A failed read and a deleted head repository both fall through to `build-matrix`, which is
+    where a fork is actually refused. This step explains that refusal; it must never become a
+    second, quieter version of it that answers on a fact it does not have.
+
+    Mutation: drop either the `-n` or the `!= "null"` arm, and an unreadable head starts
+    refusing pull requests of this repository's own branches.
+    """
+    if not usable_bash():
+        pytest.skip("bash not available on this platform")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        result, outputs, _ = _run_planauthz(tmpdir, privileged=True, head_repo=head_repo)
+        assert result.returncode == 0, result.stderr
+        assert outputs == {"authorized": "true"}
 
 
 def test_no_step_on_the_plan_route_touches_the_app_key():

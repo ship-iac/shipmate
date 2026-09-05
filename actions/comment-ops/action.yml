@@ -153,13 +153,26 @@ runs:
       shell: bash
       env:
         PRIVILEGED: ${{ steps.guard.outputs.privileged_association }}
+        GH_TOKEN: ${{ inputs.github-token }}
+        PR_NUMBER: ${{ inputs.pr-number }}
       run: |
         set -euo pipefail
-        if [ "${PRIVILEGED:-}" = "true" ]; then
-          echo "authorized=true" >> "$GITHUB_OUTPUT"
-        else
+        if [ "${PRIVILEGED:-}" != "true" ]; then
           echo "authorized=false" >> "$GITHUB_OUTPUT"
+          echo "reason=\`plan\` runs this repository's Terramate/OpenTofu on its runners, so it answers only organization members and repository collaborators." >> "$GITHUB_OUTPUT"
+          exit 0
         fi
+        # Not a second gate: build-matrix refuses a fork head inside the dispatched run, whose
+        # checks land on the dispatch ref -- so the refusal is invisible on the pull request that
+        # asked for it. Say so here instead. A head this cannot read falls through to that
+        # refusal rather than substituting a verdict for it.
+        HEAD_REPO=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" --jq .head.repo.full_name 2>/dev/null || true)
+        if [ -n "$HEAD_REPO" ] && [ "$HEAD_REPO" != "null" ] && [ "$HEAD_REPO" != "$GITHUB_REPOSITORY" ]; then
+          echo "authorized=false" >> "$GITHUB_OUTPUT"
+          echo "reason=this pull request's head is in \`$HEAD_REPO\`, and shipmate plans only branches of this repository — a fork's plan would execute the pull request's own Terramate/OpenTofu code with everything the plan environment holds." >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+        echo "authorized=true" >> "$GITHUB_OUTPUT"
 
     - name: Reject an unauthorized plan
       # GITHUB_TOKEN, not the App: the plan route mints nothing, so this must answer wherever
@@ -170,9 +183,10 @@ runs:
       env:
         GH_TOKEN: ${{ inputs.github-token }}
         PR_NUMBER: ${{ inputs.pr-number }}
+        REASON: ${{ steps.planauthz.outputs.reason }}
       run: |
         set -euo pipefail
-        gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -f body=":x: shipmate: \`plan\` runs this repository's Terramate/OpenTofu on its runners, so it answers only organization members and repository collaborators." >/dev/null
+        gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -f body=":x: shipmate: $REASON" >/dev/null
 
     - name: Doctor — reject a commenter without a privileged association
       # Silence would be indistinguishable from a broken engine, so say why. GITHUB_TOKEN, not

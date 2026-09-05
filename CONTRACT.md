@@ -542,7 +542,13 @@ artifacts. A commenter without the standing the table above names gets a
 single-line refusal stating `plan`'s own reason — that it runs this
 repository's Terramate/OpenTofu on its runners — and nothing is dispatched:
 the standing is the same once-evaluated boolean the `doctor` gate below
-describes, and the plan route mints no App token of its own.
+describes, and the plan route mints no App token of its own. A pull request
+whose head is in another repository gets a second refusal, in its own words,
+and is likewise not dispatched: a fork's plan is refused inside the run
+(§Post-plan topology), on a run whose checks land on the dispatch ref, so the
+pull request that asked would see nothing at all. This is a message rather than
+a layer — it reads the same head repository the run's own guard reads, and a
+head it cannot read is dispatched, leaving the refusal where it is enforced.
 
 `destroy` is recognized and rejected with a "reserved" message, so the grammar
 does not need to change shape when that verb is implemented. A
@@ -1229,7 +1235,10 @@ trusting the trigger alone closes two paths a trigger check alone would not:
 
 - A fork's plan run completes normally but produces nothing further — the fork
   clause above declines the `summary` job
-  (`docs/hardening.md` §"Contributors without push access").
+  (`docs/hardening.md` §"Contributors without push access"). That is the
+  autoplan leg; a commented `shipmate plan` naming a fork's pull request is
+  normally refused by `actions/comment-ops` before any run exists, and §Comment-ops
+  states the one case that still dispatches.
 - A branch-authored workflow cannot reach the key by declaring
   `environment: shipmate-engine` itself: that environment's deployment
   branch policy is scoped to the default branch, and a job triggered by a
