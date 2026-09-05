@@ -1857,9 +1857,9 @@ def _dispatch_wiring_finding(text, name):
                 f"`{name}` declares no `workflow_dispatch` trigger — a commented `shipmate "
                 "plan` is authorized, reacted to with a rocket, and then dispatches nothing: "
                 "GitHub answers the dispatch with `Workflow does not have 'workflow_dispatch' "
-                "trigger`, no run is created, and the error lands on the comment-handling run "
-                "where nobody on the pull request sees it. Add the trigger, with a `pr_number` "
-                "input (docs/getting-started.md).",
+                "trigger`, no run is created, and the pull request gets a comment saying the "
+                "dispatch failed and linking the comment-handling run that holds the error. Add "
+                "the trigger, with a `pr_number` input (docs/getting-started.md).",
             )
         )
     elif not _PR_NUMBER_INPUT.search(on_text):
@@ -1869,8 +1869,9 @@ def _dispatch_wiring_finding(text, name):
                 f"`{name}`'s `workflow_dispatch` trigger declares no `pr_number` input — that "
                 "is the one input `shipmate plan` sends, and GitHub refuses a dispatch body "
                 "naming an input the workflow does not declare: `Unexpected inputs provided`, "
-                "no run created, the error on the comment-handling run rather than the pull "
-                "request. Declare `pr_number` under the trigger's `inputs:` "
+                "no run created, and the pull request pointed at the comment-handling run by a "
+                "comment saying the dispatch failed. Declare `pr_number` under the trigger's "
+                "`inputs:` "
                 "(docs/getting-started.md).",
             )
         )

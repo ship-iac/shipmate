@@ -163,7 +163,12 @@ def _run_dispatch(tmpdir, verb, environment="", gh_stub=RECORDING_GH_STUB):
     env["VERB"] = verb
     env["REF"] = "abc123"
     env["PR_NUMBER"] = "42"
+    env["COMMENT_TOKEN"] = "workflow_token"  # noqa: S105
     env["GITHUB_ACTION_PATH"] = str(ACTIONS / "dispatch")
+    # Runner-supplied, and the failure comment's only content besides fixed text.
+    env["GITHUB_REPOSITORY"] = "org/repo"
+    env["GITHUB_SERVER_URL"] = "https://github.com"
+    env["GITHUB_RUN_ID"] = "7777"
 
     result = subprocess.run(
         [usable_bash(), "-c", _extract_dispatch_run_block()],
@@ -177,50 +182,54 @@ def _run_dispatch(tmpdir, verb, environment="", gh_stub=RECORDING_GH_STUB):
     return result, (argv_file.read_text() if argv_file.exists() else "")
 
 
-#: A gh stub that leaves a marker instead of answering: any invocation of it is
-#: proof the step reached the API.
-MARKER_GH_STUB = "#!/bin/bash\ntouch marker.txt\n"
+#: The path segment that means a dispatch was actually attempted. The comment the
+#: refusals post is a `gh api` call too, so "gh ran at all" no longer separates the
+#: two -- this does.
+_DISPATCH_PATH = "/actions/workflows/"
 
 
-def test_an_empty_verb_is_refused_before_any_api_call():
+def test_an_empty_verb_dispatches_nothing_and_says_so_on_the_pull_request():
     """No verb, no dispatch, and the refusal names what the caller must wire: omitting the
-    `with:` line would dispatch apply.yml with a plan body, for a 422 the pull request never
-    shows.
+    `with:` line would otherwise dispatch apply.yml with a plan body. A consumer wired that way
+    is the shape this path exists for, so the commenter is told rather than left with a rocket
+    reaction and silence.
 
-    Mutation: delete the empty-verb refusal branch. The step then reaches `gh api`; the case
-    list rejects it only after the marker exists, and with its own `''` arm re-added it goes
-    all the way through.
+    Mutations: delete the refusal branch *and* give the `case` an `""` arm -- deleting it
+    alone leaves the case's `*)` arm refusing, so the pair is the hole; drop the branch's
+    `say_no_run_started` call, and the comment does not appear.
     """
     if not usable_bash():
         pytest.skip("bash not available on this platform")
     with tempfile.TemporaryDirectory() as tmpdir:
-        result, _ = _run_dispatch(tmpdir, verb="", gh_stub=MARKER_GH_STUB)
+        result, argv = _run_dispatch(tmpdir, verb="", gh_stub=RECORDING_GH_STUB)
         output = result.stdout + result.stderr
         assert result.returncode != 0, f"an empty verb must be refused: {output}"
-        assert not (Path(tmpdir) / "marker.txt").exists(), (
-            f"gh was invoked; an empty verb must be refused before the API call: {output}"
-        )
+        assert _DISPATCH_PATH not in argv, f"an empty verb must dispatch nothing: {argv!r}"
         assert "did not pass a verb" in output and "comment-ops" in output, (
             f"the refusal must name the missing input and where it comes from: {output}"
         )
+        assert "/issues/42/comments" in argv and _RUN_URL in argv, (
+            f"the commenter must be told no run started: {argv!r}"
+        )
 
 
-def test_an_unknown_verb_is_refused_before_any_api_call():
-    """A verb outside {plan, apply, unlock} never reaches the API.
+def test_an_unknown_verb_dispatches_nothing_and_says_so_on_the_pull_request():
+    """A verb outside {plan, apply, unlock} reaches no workflow, and says so.
 
-    Mutation: add a fourth value to the `case` list.
+    Mutations: add a fourth value to the `case` list; drop that arm's `say_no_run_started`.
     """
     if not usable_bash():
         pytest.skip("bash not available on this platform")
     with tempfile.TemporaryDirectory() as tmpdir:
-        result, _ = _run_dispatch(tmpdir, verb="bogus", gh_stub=MARKER_GH_STUB)
+        result, argv = _run_dispatch(tmpdir, verb="bogus", gh_stub=RECORDING_GH_STUB)
         output = result.stdout + result.stderr
         assert result.returncode != 0, "an unknown verb must be refused"
-        assert not (Path(tmpdir) / "marker.txt").exists(), (
-            f"gh was invoked; validation must reject before the API call: {output}"
-        )
+        assert _DISPATCH_PATH not in argv, f"an unknown verb must dispatch nothing: {argv!r}"
         assert "::error::verb must be plan, apply or unlock (got: bogus)" in output, (
             f"expected error message not found in output: {output}"
+        )
+        assert "/issues/42/comments" in argv and _RUN_URL in argv, (
+            f"the commenter must be told no run started: {argv!r}"
         )
 
 
@@ -304,6 +313,7 @@ def test_dispatch_step_env_mapping_is_complete():
         "VERB",
         "REF",
         "PR_NUMBER",
+        "COMMENT_TOKEN",
     }
     actual_env_vars = set(env.keys())
 
@@ -508,6 +518,81 @@ def test_plan_403_prints_no_skew_message():
         assert result.returncode == 1, f"gh's exit status must survive: {result.returncode}"
         assert "HTTP 403: Forbidden" in output, f"raw gh output missing: {output}"
         assert _PLAN_SKEW not in output, f"a 403 is not version skew: {output}"
+
+
+#: Fails like `_NOT_FOUND_STUB` and records every argv, so what the failure branch
+#: does after the refusal is observable rather than inferred.
+_RECORDING_FAILURE_STUB = (
+    "#!/bin/bash\nprintf '%s\\n' \"$@\" >> argv.txt\necho 'gh: Not Found (HTTP 404)' >&2\nexit 1\n"
+)
+#: The run link, hand-written from the three runner variables the step reads.
+_RUN_URL = "https://github.com/org/repo/actions/runs/7777"
+
+
+@pytest.mark.parametrize("verb", ["plan", "apply", "unlock"])
+def test_a_failed_dispatch_says_so_on_the_pull_request(verb):
+    """Every failure here lands on a run whose checks attach to the dispatch ref, so the pull
+    request that asked for the verb shows no check, no comment and no gate change -- and the
+    commenter's last signal was comment-ops' rocket. One comment, on the pull request, carrying
+    the run link.
+
+    Mutations: delete the comment call; scope it to one verb; swap `$COMMENT_TOKEN` back to
+    `$GH_TOKEN`, which is minted `actions: write` and cannot comment.
+    """
+    if not usable_bash():
+        pytest.skip("bash not available on this platform")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        result, argv = _run_dispatch(
+            tmpdir, verb=verb, environment="dev-eu", gh_stub=_RECORDING_FAILURE_STUB
+        )
+        assert result.returncode == 1, f"gh's exit status must survive: {result.returncode}"
+        # Both calls, in one argv: the comment must not erase the record of the dispatch it
+        # is reporting on.
+        assert _DISPATCH_PATH in argv, f"the dispatch was never attempted: {argv!r}"
+        assert "repos/org/repo/issues/42/comments" in argv, (
+            f"a failed {verb} dispatch must comment on the pull request, gh saw: {argv!r}"
+        )
+        assert _RUN_URL in argv, f"the comment must carry the run link, gh saw: {argv!r}"
+        assert "Not Found (HTTP 404)" not in argv, (
+            f"the API's answer is unbounded and must not be pasted into a comment: {argv!r}"
+        )
+
+
+def test_a_successful_dispatch_comments_nothing():
+    """`summary` owns the pull request on a run that starts. This comment exists only for the
+    window before it, so a dispatch that succeeded must leave no trace here.
+
+    Mutation: move the comment call out of the `if [ "$rc" -ne 0 ]` branch.
+    """
+    if not usable_bash():
+        pytest.skip("bash not available on this platform")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        _, argv = _run_dispatch(tmpdir, verb="plan")
+        assert "/issues/42/comments" not in argv, f"a successful dispatch commented: {argv!r}"
+
+
+def test_a_failed_comment_does_not_mask_the_dispatch_failure():
+    """The comment is cosmetic -- a repository whose workflow token cannot write pull requests
+    still has to see the dispatch fail. `|| true` is what keeps `$rc` the exit status under
+    `set -e`.
+
+    Mutation: drop the `|| true` and this exits 1 (the comment's status) instead of 22.
+    """
+    if not usable_bash():
+        pytest.skip("bash not available on this platform")
+    # Succeeds at the dispatch, then refuses the comment: exactly a job without
+    # `pull-requests: write`.
+    stub = (
+        "#!/bin/bash\n"
+        'if [[ "$*" == *comments* ]]; then echo "HTTP 403: Forbidden" >&2; exit 1; fi\n'
+        "echo \"gh: Workflow does not have 'workflow_dispatch' trigger (HTTP 422)\" >&2\n"
+        "exit 22\n"
+    )
+    with tempfile.TemporaryDirectory() as tmpdir:
+        result, _ = _run_dispatch(tmpdir, verb="plan", gh_stub=stub)
+        assert result.returncode == 22, (
+            f"the dispatch's own status must survive a failed comment: {result.returncode}"
+        )
 
 
 def test_the_plan_notice_states_neither_an_environment_nor_a_ref():

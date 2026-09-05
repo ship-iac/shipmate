@@ -522,7 +522,11 @@ alone carries two triggers — `pull_request_target` for the autoplan and
 `workflow_dispatch` for the commented form; the other two are dispatch-only.
 `doctor` and `help` dispatch nothing: both are answered inside the comment-ops
 run itself. A verb whose file the repository does not carry fails at dispatch
-time on that comment-handling run, and no other verb is affected.
+time on that comment-handling run, and no other verb is affected. That run is
+not visible from the pull request, so every refusal in the dispatch step — an
+unwired verb, an unknown one, and a rejected API call alike — also posts a
+one-line comment there linking the run. The run holds the error; the comment
+never carries the API's answer.
 
 `shipmate plan` plans the pull request's changed stacks on demand, authoring
 exactly what a push-triggered plan authors and nothing more: the sticky plan
@@ -542,7 +546,13 @@ artifacts. A commenter without the standing the table above names gets a
 single-line refusal stating `plan`'s own reason — that it runs this
 repository's Terramate/OpenTofu on its runners — and nothing is dispatched:
 the standing is the same once-evaluated boolean the `doctor` gate below
-describes, and the plan route mints no App token of its own.
+describes, and the plan route mints no App token of its own. A pull request
+whose head is in another repository is refused in its own words and likewise
+not dispatched: the run's own fork refusal (§Post-plan topology) lands on
+checks attached to the dispatch ref, where the pull request cannot see it. That
+is a message, not a layer — it reads the same head repository that guard reads,
+and a head it cannot read is dispatched, leaving the refusal where it is
+enforced.
 
 `destroy` is recognized and rejected with a "reserved" message, so the grammar
 does not need to change shape when that verb is implemented. A
@@ -1156,8 +1166,9 @@ The file path is still load-bearing, and nothing diagnoses a rename as the
 cause: `actions/build-matrix` refuses a checkout that has no
 `.github/workflows/plan.yml`; `actions/dispatch` sends a commented
 `shipmate plan` to that literal filename, so a renamed wrapper is dispatched
-nowhere and the API's refusal reaches only the comment-handling run; and doctor keys
-on the exact name for its `pull_request_target` exemption and for the
+nowhere, and the pull request is told only that the dispatch failed, with the
+API's refusal left in the comment-handling run that comment links; and doctor
+keys on the exact name for its `pull_request_target` exemption and for the
 plan-wrapper wiring probes (the head-repository, head-SHA and draft inputs, and
 the dispatch wiring), which report nothing on a file called
 anything else. Rename the file and planning is refused from that commit on, and
@@ -1229,7 +1240,10 @@ trusting the trigger alone closes two paths a trigger check alone would not:
 
 - A fork's plan run completes normally but produces nothing further — the fork
   clause above declines the `summary` job
-  (`docs/hardening.md` §"Contributors without push access").
+  (`docs/hardening.md` §"Contributors without push access"). That is the
+  autoplan leg; a commented `shipmate plan` naming a fork's pull request is
+  normally refused by `actions/comment-ops` before any run exists, and §Comment-ops
+  states the one case that still dispatches.
 - A branch-authored workflow cannot reach the key by declaring
   `environment: shipmate-engine` itself: that environment's deployment
   branch policy is scoped to the default branch, and a job triggered by a

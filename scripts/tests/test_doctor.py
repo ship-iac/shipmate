@@ -3339,15 +3339,16 @@ _NO_TRIGGER_TEXT = (
     "`plan.yml` declares no `workflow_dispatch` trigger — a commented `shipmate plan` is "
     "authorized, reacted to with a rocket, and then dispatches nothing: GitHub answers the "
     "dispatch with `Workflow does not have 'workflow_dispatch' trigger`, no run is created, "
-    "and the error lands on the comment-handling run where nobody on the pull request sees "
-    "it. Add the trigger, with a `pr_number` input (docs/getting-started.md)."
+    "and the pull request gets a comment saying the dispatch failed and linking the "
+    "comment-handling run that holds the error. Add the trigger, with a `pr_number` input "
+    "(docs/getting-started.md)."
 )
 _NO_PR_NUMBER_TEXT = (
     "`plan.yml`'s `workflow_dispatch` trigger declares no `pr_number` input — that is the "
     "one input `shipmate plan` sends, and GitHub refuses a dispatch body naming an input the "
-    "workflow does not declare: `Unexpected inputs provided`, no run created, the error on "
-    "the comment-handling run rather than the pull request. Declare `pr_number` under the "
-    "trigger's `inputs:` (docs/getting-started.md)."
+    "workflow does not declare: `Unexpected inputs provided`, no run created, and the pull "
+    "request pointed at the comment-handling run by a comment saying the dispatch failed. "
+    "Declare `pr_number` under the trigger's `inputs:` (docs/getting-started.md)."
 )
 _NO_PR_FACTS_TEXT = (
     "`plan.yml` has no `actions/pr-facts` step — a dispatched run carries no pull request in "

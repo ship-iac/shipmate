@@ -859,6 +859,12 @@ been seen to hold: against a real fork's pull request on the dispatch leg
 (2026-08-29), where the first guard does not apply, `build-matrix` failed
 `detect` with its fork refusal and the trusted `summary` job never started.
 
+`actions/comment-ops` refuses a commented `shipmate plan` naming a fork's pull
+request, rather than dispatching a run whose refusal would land on the dispatch
+ref. **That is a message, not a third layer.** It reads the same head repository
+the two guards above read, and a head it cannot read is dispatched anyway, so
+nothing keeping a fork out of a plan cell depends on it.
+
 `pull_request_target` does not sandbox a fork's run: nothing is withheld from
 it, so a plan cell reached by a fork would read the plan environment's
 variables *and its secrets* (the reference `plan.yml` passes
