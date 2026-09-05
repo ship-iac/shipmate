@@ -13,7 +13,7 @@ grammar are declared unstable in `README.md`.
 
 ## [0.23.0] — 2026-09-05
 
-Tags _pending_.
+Tags `d780e60`.
 
 **No wrapper change is required.** Both changes are engine-side and need only
 the pin bump. The comment described below is posted with the workflow token the
