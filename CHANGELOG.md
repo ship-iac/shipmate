@@ -11,6 +11,56 @@ section below names the SHA the release tags.
 The version line stays `v0.x` while action inputs, check names, and the comment
 grammar are declared unstable in `README.md`.
 
+## [0.23.0] — 2026-09-05
+
+Tags _pending_.
+
+**No wrapper change is required.** Both changes are engine-side and need only
+the pin bump. The comment described below is posted with the workflow token the
+`comment-ops` job already holds, so a repository that narrowed that job's
+`pull-requests: write` gets the refusal without the comment rather than a failed
+run. `docs/upgrading.md` §0.23.0 has the summary.
+
+### Added
+
+- **A dispatched verb that never starts now says so on the pull request.**
+  `shipmate plan`, `apply` and `unlock` answer a commenter with a rocket
+  reaction and then dispatch. Every failure between that reaction and the
+  dispatched run's `summary` job landed on the comment-handling run, whose
+  checks attach to the dispatch ref — so the pull request showed no check, no
+  comment and no gate change, and the last signal the commenter had was
+  positive. Two shapes were seen in practice: a consumer whose `comment-ops.yml`
+  did not forward the verb, and a wrapper predating the verb it was sent.
+
+  `actions/dispatch` now posts one comment on the pull request for each of its
+  three refusals — an unwired verb, an unknown one, and a dispatch the API
+  rejected — carrying fixed text and a link to the run that holds the error. The
+  API's own answer is never pasted into it: that has no bounded length and a
+  comment body does.
+
+  The comment uses the workflow token, not the App installation token the same
+  step mints for the dispatch: that one is minted `actions: write` and cannot
+  comment. No consumer permission widens, because the `comment-ops` job already
+  holds `pull-requests: write` for the refusals `actions/comment-ops` posts.
+  Nothing changes on a dispatch that succeeds — the dispatched run's `summary`
+  job owns the pull request from there.
+
+- **`shipmate plan` naming a fork's pull request is refused before it is
+  dispatched, in its own words.** `actions/build-matrix` refuses a fork head
+  inside the dispatched run, on checks that land on the dispatch ref, so that
+  refusal was invisible to the pull request that asked for it.
+
+  This is a message, not a second gate. It reads the same head repository
+  `build-matrix` reads, and a head it cannot read — an unreadable API answer, or
+  a deleted fork — is dispatched anyway, leaving the refusal where it is
+  enforced and emitting a `::notice::` saying which case it was. `build-matrix`
+  and the engine's `summary.yml` trust guards are unchanged.
+
+### Changed
+
+- `shipmate doctor`'s two plan-wrapper dispatch findings said the error lands
+  where nobody on the pull request sees it. Both now name the comment.
+
 ## [0.22.2] — 2026-09-05
 
 Tags `83d69cb`.

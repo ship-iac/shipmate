@@ -159,6 +159,28 @@ names. The entries below `0.2.0` predate the first tagged release, or
 `CHANGELOG.md` does not pin one; they are kept for repositories moving from a
 very old pin.
 
+### 0.23.0 — re-pin only: a dispatched verb that never starts now says so
+
+**Re-pinning is enough.** A `shipmate plan`, `apply` or `unlock` that fails
+before its dispatched run reaches `summary` used to leave the pull request with
+a rocket reaction and nothing else, because the failure lands on the
+comment-handling run and that run's checks attach to the dispatch ref.
+`actions/dispatch` now comments the run link on the pull request for each of its
+three refusals, and `actions/comment-ops` refuses a `shipmate plan` naming a
+fork's pull request rather than dispatching a run whose refusal the pull request
+cannot see.
+
+**Check one permission if you narrowed it.** The comment is posted with the
+workflow token, and the reference `comment-ops.yml` grants the job
+`issues: write` and `pull-requests: write` — the same permissions
+`actions/comment-ops`' own refusal comments have always needed. A job without
+them still refuses correctly; it just cannot say so. Nothing else changes, and
+no wrapper edit is owed.
+
+The sections below describe past releases. Where one names what a failed
+dispatch does, it describes the behaviour above — not the behaviour a repository
+still pinned before `0.23.0` will see, which is silence.
+
 ### 0.22.2 — re-pin only: embedded Python moved to `scripts/`
 
 **Re-pinning is enough, and optional.** Six Python blocks moved out of
