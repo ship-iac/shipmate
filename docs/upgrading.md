@@ -159,6 +159,15 @@ names. The entries below `0.2.0` predate the first tagged release, or
 `CHANGELOG.md` does not pin one; they are kept for repositories moving from a
 very old pin.
 
+### 0.22.1 — re-pin only: a writing pass, no behaviour change
+
+**Re-pinning is enough, and optional.** This release rewrites comments,
+docstrings, action descriptions, and docs to the convention in
+[`development.md`](development.md) §Writing. No input, output, check name,
+comment verb, runtime message, or documented workflow fragment changed, so a
+repository on `0.22.0` behaves identically before and after the bump. Re-pin to
+keep `shipmate doctor`'s pin-freshness probe quiet.
+
 ### 0.22.0 — optional: scope the nightly drift sweep
 
 **Re-pinning is enough.** `actions/build-matrix`'s new `tags` input is optional

@@ -11,6 +11,33 @@ section below names the SHA the release tags.
 The version line stays `v0.x` while action inputs, check names, and the comment
 grammar are declared unstable in `README.md`.
 
+## [0.22.1] — 2026-09-05
+
+Tags `<backfilled>`.
+
+**No wrapper change is required, and nothing changes at runtime.** Every
+comment, docstring, action and workflow `description:`, and docs page now
+follows the writing convention published in `docs/development.md` §Writing.
+Runtime strings, input and output names, check names, the comment grammar, and
+every YAML fragment the docs show consumers are byte-identical to `0.22.0`; the
+test suite is unchanged at 1526.
+
+### Changed
+
+- **Comments and docstrings cut to the repository cap.** Inline comments are at
+  most three lines in Python and one fact per line in YAML; rationale a constant
+  used to carry sits in the docstring of the function that consumes it. Test
+  docstrings state what the test pins and the mutation that reddens it. Comment
+  lines: 2412 → 1641 in Python, 1072 → 804 in YAML.
+- **Docs pages read one claim per sentence.** `README.md`, `CONTRIBUTING.md`,
+  `CONTRACT.md`, and every page under `docs/` drop filler words and bold inside
+  sentences, split compound sentences, and turn enumerating paragraphs into
+  lists. Headings, fenced examples, link targets, commands, and setting values
+  are unchanged, so every `§` cross-reference still resolves.
+- **`docs/development.md` gains §Writing**, the convention this release applies:
+  the two comment regimes, what earns a comment in this repository, the test
+  docstring shape, and the commit and pull-request form.
+
 ## [0.22.0] — 2026-08-31
 
 Tags `cda2a93`.
