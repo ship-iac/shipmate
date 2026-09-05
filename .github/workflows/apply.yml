@@ -9,10 +9,10 @@ on:
     # A callee's `environment:` resolves in the CALLER's repository, and the environment's value
     # wins over whatever the caller passed, empty included -- `summary` binds `shipmate-engine`.
     secrets:
-      # `required: false` is load-bearing, not laxity: consumers hold this key on the
-      # `shipmate-engine` environment (docs/github-app.md §5), so a caller that binds no
-      # environment has no value to pass, and a required declaration would reject the call before
-      # any step of `guard`, with "Secret ... is required, but not provided while calling".
+      # `required: false` is load-bearing: consumers hold this key on the `shipmate-engine`
+      # environment (docs/github-app.md §5), so a caller binding no environment has nothing to
+      # pass. A required declaration rejects the call before the first callee job binding none
+      # (`guard`) runs a step, with "Secret ... is required, but not provided while calling".
       SHIPMATE_APP_PRIVATE_KEY: { required: false }
       SHIPMATE_PLAN_PASSPHRASE: { required: false }
 jobs:
@@ -145,9 +145,10 @@ jobs:
     # `complete` job would hold no key, its applies would execute, and their apply checks would
     # strand pending forever.
     secrets:
-      # Adding a secret here is ordered: declare it in apply-env-level.yml, merge, bump this job's
-      # `uses:` pin, and only then map it. Mapping a secret the pinned callee does not declare is a
-      # hard load-time error, unlike an undeclared action input (docs/releasing.md).
+      # Adding a secret here is ordered: declare it in apply-env-level.yml, merge, bump this
+      # job's `uses:` pin, and only then map it. Mapping a secret the pinned callee does not
+      # declare is a hard load-time error, unlike an undeclared action input, which is silently
+      # ignored (docs/releasing.md).
       SHIPMATE_APP_PRIVATE_KEY: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
       SHIPMATE_PLAN_PASSPHRASE: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
 

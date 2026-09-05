@@ -13,7 +13,8 @@ on:
       # that forwards nothing has every env-level apply fail its decrypt fail-safe. No environment
       # can supply it either: the wave jobs bind the env's apply environment, not `shipmate-engine`.
       SHIPMATE_PLAN_PASSPHRASE: { required: false }
-      # Feeds the `summary` job's App-token mint for the gate write. An empty key fails loud there.
+      # Feeds the `summary` job's App-token mint for the gate write. An empty key fails loud one
+      # step earlier, in that job's `Verify the App key arrived`.
       SHIPMATE_APP_PRIVATE_KEY: { required: false }
 jobs:
   detect:
@@ -61,9 +62,10 @@ jobs:
     # `complete` job would hold no key, its applies would execute, and their apply checks would
     # strand pending forever.
     secrets:
-      # Adding a secret here is ordered: declare it in apply-env-level.yml, merge, bump this job's
-      # `uses:` pin, and only then map it. Mapping a secret the pinned callee does not declare is a
-      # hard load-time error, unlike an undeclared action input (docs/releasing.md).
+      # Adding a secret here is ordered: declare it in apply-env-level.yml, merge, bump this
+      # job's `uses:` pin, and only then map it. Mapping a secret the pinned callee does not
+      # declare is a hard load-time error, unlike an undeclared action input, which is silently
+      # ignored (docs/releasing.md).
       SHIPMATE_APP_PRIVATE_KEY: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
       SHIPMATE_PLAN_PASSPHRASE: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
 

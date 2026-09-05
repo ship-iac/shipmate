@@ -55,7 +55,7 @@ jobs:
     # SHIPMATE_SHARED_ENVS is a repository variable, not a workflow input: which environment an
     # apply binds decides whether the reviewer gate and the apply role reach it, and branch content
     # must not choose that. A listed env's applies bind the bare environment, and the consumer's
-    # plan workflow must name the same one (CONTRACT.md). Every wave job below binds it this way.
+    # plan workflow must name the same one (CONTRACT.md). Every wave job binds it this way.
     environment: >-
       ${{ contains(format(',{0},', vars.SHIPMATE_SHARED_ENVS), format(',{0},', matrix.environment))
       && matrix.environment || format('{0}-apply', matrix.environment) }}
@@ -79,7 +79,7 @@ jobs:
           tofu-version: ${{ vars.TOFU_VERSION }}
       # A consumer opts into AWS OIDC per environment, since plan and apply roles may differ per
       # env or account, and AWS_ROLE_ARN_<WORKLOAD> wins over AWS_ROLE_ARN so one environment can
-      # serve several workloads. Every wave job below repeats this step unchanged.
+      # serve several workloads. Every wave job repeats this step unchanged.
       - name: Configure cloud credentials (AWS OIDC)
         if: ${{ (matrix.workload_var != '' && vars[format('AWS_ROLE_ARN_{0}', matrix.workload_var)]) != '' || vars.AWS_ROLE_ARN != '' }}
         uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3

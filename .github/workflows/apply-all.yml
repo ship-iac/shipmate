@@ -148,9 +148,10 @@ jobs:
     # `complete` job would hold no key, its applies would execute, and their apply checks would
     # strand pending forever.
     secrets:
-      # Adding a secret here is ordered: declare it in apply-env-level.yml, merge, bump this job's
-      # `uses:` pin, and only then map it. Mapping a secret the pinned callee does not declare is a
-      # hard load-time error, unlike an undeclared action input (docs/releasing.md).
+      # Adding a secret here is ordered: declare it in apply-env-level.yml, merge, bump this
+      # job's `uses:` pin, and only then map it. Mapping a secret the pinned callee does not
+      # declare is a hard load-time error, unlike an undeclared action input, which is silently
+      # ignored (docs/releasing.md).
       SHIPMATE_APP_PRIVATE_KEY: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
       SHIPMATE_PLAN_PASSPHRASE: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
 
@@ -203,10 +204,9 @@ jobs:
     # comment renders the non-failure form over a run that died.
     needs: [guard, review, detect, envlevel0, envlevel1, envlevel2, envlevel3]
     # `always()` alone would still run this job, and mint the App key, when the bot-actor rejection
-    # failed; `needs.guard.result == 'success'` closes that. Keyed on `guard`, not `detect`:
-    # `always()` posts the comment and refreshes the gate when an envlevel failed or was cancelled,
-    # and must do the same for a genuine `detect` failure -- an env_order cycle, or a cell recording
-    # no plan run.
+    # failed; `needs.guard.result == 'success'` closes that. Keyed on `guard`, not `detect`, since
+    # `always()` must still post the comment and refresh the gate when an envlevel failed or was
+    # cancelled, and when `detect` itself failed: an env_order cycle, a cell recording no plan run.
     if: ${{ always() && needs.guard.result == 'success' }}
     runs-on: ubuntu-latest
     # Both steps mint the App key from secrets.SHIPMATE_APP_PRIVATE_KEY, the same as

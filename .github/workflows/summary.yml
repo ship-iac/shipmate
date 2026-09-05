@@ -21,8 +21,9 @@ on:
       planned-cells:
         required: true
         type: string
-      # Empty refuses: a caller that omits any of these three optional inputs gets a skipped job
-      # rather than an App-authored gate over fork content.
+      # Empty `head-repo` refuses: the caller gets a skipped job rather than an App-authored gate
+      # over fork content. Empty `is-draft` refuses unless `on-demand` is 'true', and empty
+      # `on-demand` refuses unless `is-draft` is 'false'.
       head-repo:
         required: false
         default: ""

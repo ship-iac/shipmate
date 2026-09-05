@@ -22,9 +22,11 @@ jobs:
     runs-on: ubuntu-latest
     # The ref is remote (ship-iac/shipmate/...@main), not ./actions/...: the runner downloads and
     # parses a remote manifest during "Set up job", while a local ./ manifest is read only when the
-    # step executes, so `if: false` parses every manifest and runs no action. Measured 2026-08-22:
-    # a comma-split manifest under `if: false` fails Set up job with the production error.
+    # step executes. `if: false` therefore parses every manifest and runs no action, so no action
+    # needs inputs, credentials or a live pull request.
     steps:
+      # Measured 2026-08-22: a comma-split manifest under `if: false` fails Set up job with the
+      # production error, so the pair discriminates.
       - if: false
         uses: ship-iac/shipmate/actions/apply-all-detect@main
       - if: false
