@@ -13,8 +13,7 @@ grammar are declared unstable in `README.md`.
 
 ## [0.24.0] — 2026-09-05
 
-Tags the commit this section merges at; the SHA line is backfilled by the first
-commit after the tag.
+Tags `9916735`.
 
 **No wrapper change is required, but re-plan open pull requests after re-pinning.**
 The digest travels on rails the engine owns, so no wrapper declares or forwards

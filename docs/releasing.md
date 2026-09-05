@@ -381,6 +381,23 @@ done
 own internal pins are stale, so it cannot re-pin a sample to an intermediate
 cascade commit. `--force` overrides, loudly.
 
+**Keep the re-pin pull request pins-only when the release adds a fail-closed
+check on data a plan writes.** The usual advice is the opposite — bump
+`global.version` so the plan path fans out over real changes instead of greening
+on an empty matrix — and it is right for most releases. It is wrong for this
+class, because of where a plan run gets its workflow definition: under
+`pull_request_target` that comes from the **base** branch, which still carries
+the old pin. So a re-pin pull request's own plan always runs the *previous*
+engine, and every cell it plans records whatever that engine wrote. Merge it and
+the post-merge deploy — which does run the new engine, from `main` — refuses
+every one of those cells, on a head with no pull request left to push to.
+
+`v0.24.0` is the worked example: it refuses an apply whose plan carries no
+plan-text digest, and a version-bumping re-pin would have stranded eight cells
+that way. Land the re-pin with nothing pending, then bump the version in its own
+pull request — whose plan does run the new engine, and which is the first real
+exercise of the new behaviour.
+
 The version line is `v0.x` while the action inputs, check names, and tag grammar
 are still declared unstable in `README.md`. `--generate-notes` diffs against the
 previous tag; the first release used hand-written notes because it had no
