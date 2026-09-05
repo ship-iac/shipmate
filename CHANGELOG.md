@@ -11,6 +11,62 @@ section below names the SHA the release tags.
 The version line stays `v0.x` while action inputs, check names, and the comment
 grammar are declared unstable in `README.md`.
 
+## [0.24.0] — 2026-09-05
+
+Tags the commit this section merges at; the SHA line is backfilled by the first
+commit after the tag.
+
+**No wrapper change is required, but re-plan open pull requests after re-pinning.**
+The digest travels on rails the engine owns, so no wrapper declares or forwards
+anything new. A plan produced before this release carries an apply check with no
+digest, and such a cell is refused rather than applied unverified.
+`docs/upgrading.md` §0.24.0 has the remedy for both the pre-merge and the
+post-merge case.
+
+### Added
+
+- **The reviewed plan text is bound to the plan that executes.** `plan.txt` is
+  what a reviewer approves, and the job that writes it runs the pull request's
+  own code — the same job that produces the `.otplan`. An author who could push
+  a branch could therefore publish a plan text that did not describe the plan an
+  apply would run, and nothing downstream compared the two. Atlantis and
+  Terrateam render server-side and do not have this gap.
+
+  The trusted `summary` job already reads each cell's `plan.txt` into the
+  pull-request comment. It now also records `sha256` over that file on the
+  cell's apply check, in the `external_id` record beside the fingerprint and the
+  plan run — computed there, never copied from the cell. `actions/apply-cell`
+  re-renders the stored plan with the command that wrote the file
+  (`tofu -chdir=<stack> show -no-color stack.otplan`) and refuses any
+  difference, before `tofu apply`.
+
+  Four refusals hold the chain closed, each fail-closed: a cell summary with no
+  `plan.txt` fails the `summary` job; an apply check carrying no digest is
+  refused at detect; a digest that never reached the apply cell fails it before
+  `tofu init`; and a render disagreeing with the recorded digest fails the cell
+  with nothing applied.
+
+  Determinism was measured rather than assumed. `tofu show -no-color` of a
+  stored plan is byte-identical across runners with no committed
+  `.terraform.lock.hcl`, and the two ways the plan and apply runs could
+  otherwise disagree are refusals OpenTofu already makes on the existing apply
+  path: a plan file from another OpenTofu version cannot be read at all, and a
+  moved provider fails the apply on the plan's own dependency snapshot. The
+  digest therefore carries no version field.
+
+  What this does not fix is written down in `docs/hardening.md`: plan-time code
+  execution itself is untouched, and the `+add ~change -destroy` counts in the
+  plan comment still come from the untrusted cell summary — on a plan too large
+  to embed in full, that tally can cover text the reviewer never saw.
+
+### Changed
+
+- **Each of `actions/apply-cell`'s fail-safes has a step of its own.** The apply
+  half is now four steps — `digest-input`, `init`, `plan-digest`, `apply` — so
+  each refusal names its own blocked reason in the cell summary instead of
+  reporting a bare failure in the same bucket as a real `tofu apply` error. A
+  failed `tofu init` gains a reason of its own for the first time.
+
 ## [0.23.0] — 2026-09-05
 
 Tags `d780e60`.

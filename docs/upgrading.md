@@ -159,7 +159,7 @@ names. The entries below `0.2.0` predate the first tagged release, or
 `CHANGELOG.md` does not pin one; they are kept for repositories moving from a
 very old pin.
 
-### Unreleased — the reviewed plan text is bound to the plan that applies; re-plan open pull requests
+### 0.24.0 — the reviewed plan text is bound to the plan that applies; re-plan open pull requests
 
 **Re-pinning is enough.** The trusted `summary` job records the sha256 of each
 cell's plan text on that cell's apply check, and `apply-cell` re-renders the
