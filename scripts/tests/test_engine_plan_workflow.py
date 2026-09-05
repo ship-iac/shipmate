@@ -32,8 +32,8 @@ def _step(job_id, needle):
 
 def test_the_workflow_call_inputs_are_exactly_these():
     """A `default:` on `state_suffix` is what makes a caller that stops passing it silent: the
-    local-backend flavors would plan against no restored state and report a clean plan for a
-    stack whose real state they never read. `runs_on` is the deliberate inverse."""
+    local-backend flavors would plan against no restored state, so every existing resource reads
+    as absent and the cell plans a full create. `runs_on` is the deliberate inverse."""
     # `doc[True]` is not a typo: PyYAML parses the bare key `on:` as the boolean True.
     assert _doc()[True]["workflow_call"]["inputs"] == {
         "state_suffix": {"required": True, "type": "string"},
@@ -105,18 +105,31 @@ def test_the_plan_workflow_never_sets_no_pull_request():
             assert "no-pull-request" not in (step.get("with") or {})
 
 
-def test_the_cells_check_out_the_head_the_facts_job_named():
-    """plan-cell refuses a checkout that is not `expected-head`, so these two must agree; a
-    constant or a `github.sha` here plans a tree nobody reviewed."""
-    checkout = _step("plan", "actions/checkout@")
+def test_every_checkout_takes_the_head_the_facts_job_named():
+    """Both jobs that check out, compared whole. plan-cell refuses a checkout that is not
+    `expected-head`, so its cell and its checkout must agree; `detect` has no such refusal, and a
+    `github.sha` there builds the matrix from base-branch content while build-matrix's own
+    refusals still pass, because they read the facts job. `fetch-depth: 0` is load-bearing in
+    both: without the full history `terramate list --changed` finds nothing and reports it as no
+    change.
+
+    Mutations: `ref: ${{ github.sha }}` on `detect`, the same on `plan`, `fetch-depth` deleted
+    from each, and `expected-head: ${{ github.sha }}` on the cell.
+    """
+    # PyYAML gives the int 0, not "0".
+    expected = {"ref": "${{ needs.facts.outputs.head-sha }}", "fetch-depth": 0}
+    for job_id in ("detect", "plan"):
+        assert _step(job_id, "actions/checkout@")["with"] == expected, job_id
     cell = _step("plan", "actions/plan-cell@")
-    assert checkout["with"]["ref"] == "${{ needs.facts.outputs.head-sha }}"
     assert cell["with"]["expected-head"] == "${{ needs.facts.outputs.head-sha }}"
 
 
 def test_the_cell_binds_the_shared_or_plan_environment_from_the_repository_variable():
     """Hand-written whole expression, whitespace-collapsed. `-apply` here would hand a plan the
-    apply role; a literal env name here is the thing CLAUDE.md forbids outright."""
+    apply role; a literal env name here is the thing CLAUDE.md forbids outright.
+
+    Mutations: `-plan` -> `-apply`, and the whole expression replaced by a literal `dev-eu`.
+    """
     expected = (
         "${{ contains(format(',{0},', vars.SHIPMATE_SHARED_ENVS), "
         "format(',{0},', matrix.environment)) && matrix.environment "

@@ -2,11 +2,10 @@
 `external` data sources, modules), so they must hold no App key -- the
 credentialed work lives in the trusted trailing jobs.
 
-One parsed-assertion implementation covers all three cells: `apply-cell` (which runs
-`tofu apply`) and `drift-cell` (which runs `tofu plan` from a policy-free plan
-environment reachable off any branch). `plan-cell` runs `tofu plan` over
-pull-request branch content (providers, `external` data sources, modules) and is
-in scope for the same reason.
+One parsed-assertion implementation covers all three: `apply-cell`, which runs
+`tofu apply`; `drift-cell`, which runs `tofu plan` from a policy-free plan
+environment reachable off any branch; and `plan-cell`, which runs `tofu plan`
+over a pull request's head.
 
 Every assertion is on the parsed action.yml. A raw-text form (`"private-key" not in text`,
 `"create-github-app-token" not in text`) is vacuous twice over: a comment naming either one
@@ -107,10 +106,12 @@ def test_plan_workflow_untrusted_jobs_never_reach_the_app_key(job_id):
 
 
 @pytest.mark.parametrize("job_id", UNTRUSTED_PLAN_JOBS)
-def test_plan_workflow_untrusted_jobs_bind_no_credentialed_environment(job_id):
-    """`shipmate-engine` is the environment holding the App key, and its branch policy trusts the
-    base ref -- which is exactly the ref `pull_request_target` runs at. A job that both binds it
-    and checks out the pull request head is the canonical pull_request_target vulnerability.
+def test_plan_workflow_untrusted_jobs_bind_no_engine_environment(job_id):
+    """`shipmate-engine` alone, not every credentialed environment: the `plan` job binds a shared
+    bare `<env>` whenever the consumer lists it in SHIPMATE_SHARED_ENVS, which is the documented
+    shared-envs trade-off. `shipmate-engine` holds the App key and its branch policy trusts the
+    base ref -- exactly the ref `pull_request_target` runs at -- so a job that binds it and checks
+    out the pull request head is the canonical pull_request_target vulnerability.
 
     Mutation: set `environment: shipmate-engine` on the `detect` job.
     """

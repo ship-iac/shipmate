@@ -15,10 +15,9 @@ on:
 # loses its block gets nothing rather than everything the caller granted.
 permissions: {}
 jobs:
-  # One producer for every pull-request fact the jobs below decide on. Its own job, not `detect`'s
-  # first step: `detect` can fail (a fmt check, stale codegen) and `summary` must still be told
-  # which head to gate -- an empty `head-repo` there is a refusal, which would turn a failing gate
-  # into no gate at all.
+  # One producer for every pull-request fact below, and its own job rather than `detect`'s first
+  # step: `detect` can fail on a fmt check or stale codegen, and `summary` must still be told which
+  # head to gate -- an empty `head-repo` there refuses, turning a failing gate into no gate at all.
   facts:
     runs-on: ${{ inputs.runs_on }}
     permissions:
@@ -121,9 +120,8 @@ jobs:
   summary:
     needs: [facts, detect, plan]
     # The fork clause yields to no trigger; it alone guards App-key exposure over fork-authored
-    # content. The draft clause does yield: skipping a draft is autoplan's economy, not a trust
-    # decision. The parentheses are load-bearing -- `&&` binds tighter than `||`, so without them
-    # a fork's `on-demand` alone satisfies the guard.
+    # content. The draft clause does yield -- skipping a draft is economy, not trust. The
+    # parentheses are load-bearing: `&&` binds tighter than `||`, so `on-demand` alone would pass.
     if: >-
       ${{ !cancelled() && needs.facts.outputs.head-repo != '' &&
       needs.facts.outputs.head-repo == github.repository &&
