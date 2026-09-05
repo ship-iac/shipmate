@@ -121,7 +121,7 @@ runs:
     - name: Restore state
       id: restore-state
       if: ${{ inputs.state-path != '' }}
-      uses: ship-iac/shipmate/actions/state@cc54ebf89eb763a243a0dc2fc2504ba7dbed5b92 # pinned to a commit on main
+      uses: ship-iac/shipmate/actions/state@a9be68cc9442bbf03478a7eabbd0afc2847cdd4e # pinned to a commit on main
       with:
         stack-slug: ${{ steps.ids.outputs.slug }}
         env: ${{ inputs.env }}
@@ -195,7 +195,7 @@ runs:
       # trailing job -- which completes a check only when the job that applied it succeeded --
       # leaves the check pending and the work is re-detected.
       if: ${{ always() && inputs.state-path != '' && steps.restore-state.outcome == 'success' }}
-      uses: ship-iac/shipmate/actions/state@cc54ebf89eb763a243a0dc2fc2504ba7dbed5b92 # pinned to a commit on main
+      uses: ship-iac/shipmate/actions/state@a9be68cc9442bbf03478a7eabbd0afc2847cdd4e # pinned to a commit on main
       with:
         stack-slug: ${{ steps.ids.outputs.slug }}
         env: ${{ inputs.env }}

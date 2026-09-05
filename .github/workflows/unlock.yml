@@ -35,7 +35,7 @@ jobs:
           terramate-version: ${{ vars.TERRAMATE_VERSION }}
           tofu-version: ${{ vars.TOFU_VERSION }}
       - id: d
-        uses: ship-iac/shipmate/actions/apply-detect@07bfc1c80279fdf3b53c792d41eeac0f2463b0f6
+        uses: ship-iac/shipmate/actions/apply-detect@a9be68cc9442bbf03478a7eabbd0afc2847cdd4e
         with:
           environment: ${{ inputs.environment }}
           # A literal, not an input: this file is the verb. `run_unlock` reads
@@ -54,7 +54,7 @@ jobs:
         # GitHub creates a missing environment on demand with no reviewers, no wait timer and no
         # branch policy, and that created environment then satisfies the apply path's own
         # pre-flight -- so an unlock into a missing one silently retires that env's reviewer gate.
-        uses: ship-iac/shipmate/actions/verify-environments@9c0354a97cd97e07967dac2c7e36f524cdc18700
+        uses: ship-iac/shipmate/actions/verify-environments@a9be68cc9442bbf03478a7eabbd0afc2847cdd4e
         with:
           # The flat queue is wrapped as one wave because the action's input shape is the waves
           # object. It refuses an empty cell set by design, which is why the step's `if:` filters
@@ -113,7 +113,7 @@ jobs:
         with:
           role-to-assume: ${{ matrix.workload_var != '' && vars[format('AWS_ROLE_ARN_{0}', matrix.workload_var)] || vars.AWS_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
-      - uses: ship-iac/shipmate/actions/unlock-cell@674c5f68a60b3b338e4994a068d42284b9c84fc7
+      - uses: ship-iac/shipmate/actions/unlock-cell@a9be68cc9442bbf03478a7eabbd0afc2847cdd4e
         with:
           stack: ${{ matrix.stack }}
           stack-name: ${{ matrix.stack }}

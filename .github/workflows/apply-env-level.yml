@@ -30,13 +30,13 @@ jobs:
       # created gets one auto-created with no reviewers, no wait timer and no branch policy, and
       # the fingerprint cannot see it -- an auto-created environment and a legitimately empty
       # shared one are byte-identical in content. Existence is the only discriminator.
-      - uses: ship-iac/shipmate/actions/verify-environments@9c0354a97cd97e07967dac2c7e36f524cdc18700
+      - uses: ship-iac/shipmate/actions/verify-environments@a9be68cc9442bbf03478a7eabbd0afc2847cdd4e
         with:
           waves-json: ${{ inputs.waves_json }}
           shared-envs: ${{ vars.SHIPMATE_SHARED_ENVS }}
           github-token: ${{ github.token }}
       - id: snap
-        uses: ship-iac/shipmate/actions/apply-snapshot@83960876131bf43583026d39948184079c807e33
+        uses: ship-iac/shipmate/actions/apply-snapshot@a9be68cc9442bbf03478a7eabbd0afc2847cdd4e
         with:
           head-sha: ${{ inputs.head_sha }}
           waves-json: ${{ inputs.waves_json }}
@@ -86,7 +86,7 @@ jobs:
         with:
           role-to-assume: ${{ matrix.workload_var != '' && vars[format('AWS_ROLE_ARN_{0}', matrix.workload_var)] || vars.AWS_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
-      - uses: ship-iac/shipmate/actions/apply-cell@94d9d252bbc37a291b2077911ce0c2531c2c9c2f
+      - uses: ship-iac/shipmate/actions/apply-cell@a9be68cc9442bbf03478a7eabbd0afc2847cdd4e
         with:
           stack: ${{ matrix.stack }}
           stack-name: ${{ matrix.stack }}
@@ -129,7 +129,7 @@ jobs:
         with:
           role-to-assume: ${{ matrix.workload_var != '' && vars[format('AWS_ROLE_ARN_{0}', matrix.workload_var)] || vars.AWS_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
-      - uses: ship-iac/shipmate/actions/apply-cell@94d9d252bbc37a291b2077911ce0c2531c2c9c2f
+      - uses: ship-iac/shipmate/actions/apply-cell@a9be68cc9442bbf03478a7eabbd0afc2847cdd4e
         with:
           stack: ${{ matrix.stack }}
           stack-name: ${{ matrix.stack }}
@@ -172,7 +172,7 @@ jobs:
         with:
           role-to-assume: ${{ matrix.workload_var != '' && vars[format('AWS_ROLE_ARN_{0}', matrix.workload_var)] || vars.AWS_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
-      - uses: ship-iac/shipmate/actions/apply-cell@94d9d252bbc37a291b2077911ce0c2531c2c9c2f
+      - uses: ship-iac/shipmate/actions/apply-cell@a9be68cc9442bbf03478a7eabbd0afc2847cdd4e
         with:
           stack: ${{ matrix.stack }}
           stack-name: ${{ matrix.stack }}
@@ -215,7 +215,7 @@ jobs:
         with:
           role-to-assume: ${{ matrix.workload_var != '' && vars[format('AWS_ROLE_ARN_{0}', matrix.workload_var)] || vars.AWS_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
-      - uses: ship-iac/shipmate/actions/apply-cell@94d9d252bbc37a291b2077911ce0c2531c2c9c2f
+      - uses: ship-iac/shipmate/actions/apply-cell@a9be68cc9442bbf03478a7eabbd0afc2847cdd4e
         with:
           stack: ${{ matrix.stack }}
           stack-name: ${{ matrix.stack }}
@@ -258,7 +258,7 @@ jobs:
         with:
           role-to-assume: ${{ matrix.workload_var != '' && vars[format('AWS_ROLE_ARN_{0}', matrix.workload_var)] || vars.AWS_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
-      - uses: ship-iac/shipmate/actions/apply-cell@94d9d252bbc37a291b2077911ce0c2531c2c9c2f
+      - uses: ship-iac/shipmate/actions/apply-cell@a9be68cc9442bbf03478a7eabbd0afc2847cdd4e
         with:
           stack: ${{ matrix.stack }}
           stack-name: ${{ matrix.stack }}
@@ -301,7 +301,7 @@ jobs:
         with:
           role-to-assume: ${{ matrix.workload_var != '' && vars[format('AWS_ROLE_ARN_{0}', matrix.workload_var)] || vars.AWS_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
-      - uses: ship-iac/shipmate/actions/apply-cell@94d9d252bbc37a291b2077911ce0c2531c2c9c2f
+      - uses: ship-iac/shipmate/actions/apply-cell@a9be68cc9442bbf03478a7eabbd0afc2847cdd4e
         with:
           stack: ${{ matrix.stack }}
           stack-name: ${{ matrix.stack }}
@@ -344,7 +344,7 @@ jobs:
         with:
           role-to-assume: ${{ matrix.workload_var != '' && vars[format('AWS_ROLE_ARN_{0}', matrix.workload_var)] || vars.AWS_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
-      - uses: ship-iac/shipmate/actions/apply-cell@94d9d252bbc37a291b2077911ce0c2531c2c9c2f
+      - uses: ship-iac/shipmate/actions/apply-cell@a9be68cc9442bbf03478a7eabbd0afc2847cdd4e
         with:
           stack: ${{ matrix.stack }}
           stack-name: ${{ matrix.stack }}
@@ -387,7 +387,7 @@ jobs:
         with:
           role-to-assume: ${{ matrix.workload_var != '' && vars[format('AWS_ROLE_ARN_{0}', matrix.workload_var)] || vars.AWS_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
-      - uses: ship-iac/shipmate/actions/apply-cell@94d9d252bbc37a291b2077911ce0c2531c2c9c2f
+      - uses: ship-iac/shipmate/actions/apply-cell@a9be68cc9442bbf03478a7eabbd0afc2847cdd4e
         with:
           stack: ${{ matrix.stack }}
           stack-name: ${{ matrix.stack }}
@@ -409,7 +409,7 @@ jobs:
     permissions: { actions: read }
     environment: shipmate-engine
     steps:
-      - uses: ship-iac/shipmate/actions/apply-complete@4ab4d7a13c1db20003938dbd72b34290217176f4
+      - uses: ship-iac/shipmate/actions/apply-complete@a9be68cc9442bbf03478a7eabbd0afc2847cdd4e
         with:
           snapshot: ${{ needs.snapshot.outputs.snapshot }}
           app-id: ${{ vars.SHIPMATE_APP_ID }}
