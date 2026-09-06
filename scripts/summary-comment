@@ -51,10 +51,10 @@ HARD_CAP = 65_536
 MIN_PLAN_CHARS = 500
 CELL_KEYS = ("stack", "stack_path", "environment", "add", "change", "destroy", "changed")
 
-#: The consumer's shim names its calling job `shipmate`, and GitHub names a called workflow's
+#: The consumer names its plan-calling job `shipmate`, and GitHub names a called workflow's
 #: check runs `<caller job> / <callee job>`. A plan cell's callee job name is already
-#: `<stack> / <env>`, so its check is this prefix plus that. `shipmate doctor` reports a shim
-#: whose job carries another name.
+#: `<stack> / <env>`, so its check is this prefix plus that. `shipmate doctor` reports a job
+#: carrying another name.
 PLAN_CHECK_PREFIX = "shipmate / "
 
 # A plan line's change sign, possibly indented: `+`, `-`, `~`, or the
@@ -148,7 +148,7 @@ def check_url(cell, checks, run_url):
 
     Name is built FORWARD from the cell's (stack_path, environment) — the CONTRACT check-name
     grammar; never parsed back. Falls back to the workflow-run URL when the name is absent
-    (a shim whose calling job is not named `shipmate`).
+    (a consumer file whose plan-calling job is not named `shipmate`).
     """
     run = checks.get(f"{PLAN_CHECK_PREFIX}{cell['stack_path']} / {cell['environment']}")
     return run["html_url"] if run and run.get("html_url") else run_url
@@ -306,7 +306,7 @@ def load_cells(cells_dir):
 
 def main():
     # prefix="" gathers every check-run on the head SHA: plan jobs, pending apply checks,
-    # detect/summary. Plan check names carry the shim's calling job as a `shipmate / ` prefix,
+    # detect/summary. Plan check names carry the consumer's calling job as a `shipmate / ` prefix,
     # so the anchor is check_url's exact lookup — and `apply / ` never collides.
     checks = ag.latest_by_name(ag.parse_jsonl(sys.stdin), prefix="")
     cells = load_cells(os.environ.get("CELLS", "cells"))

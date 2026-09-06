@@ -207,8 +207,8 @@ reports it.
 **The filename is load-bearing too.** `actions/build-matrix` refuses to plan a
 repository that has no `.github/workflows/shipmate.yml`; `actions/dispatch`
 dispatches that one filename for every verb, choosing the job by the `verb`
-input it sends; and `shipmate doctor` keys its calling-job-name, dispatch-wiring
-and routing probes on it. A file under another name is reached by nothing.
+input it sends; and `shipmate doctor` keys its calling-job-name, retired
+`plan_run_id`, retired `mode`, dispatch-wiring and routing probes on it. A file under another name is reached by nothing.
 
 Which trigger reaches which job, and which engine workflow it calls:
 

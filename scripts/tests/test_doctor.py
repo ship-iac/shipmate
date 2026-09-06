@@ -1186,8 +1186,9 @@ def test_stale_sha_pin_warned(monkeypatch):
 
 
 def test_a_stale_engine_workflow_pin_is_warned(monkeypatch):
-    r"""A shim's only pin is the engine reusable workflow it calls -- a `.github/workflows/` path,
-    not an `actions/` one -- so every consumer's engine pin travels that arm of `_PIN`. Every
+    r"""A consumer's only pin is the engine reusable workflow each job calls -- a
+    `.github/workflows/` path, not an `actions/` one -- so every consumer's engine pin
+    travels that arm of `_PIN`. Every
     other fixture that produces a pin finding pins an `actions/` path.
 
     Mutation: drop `|\.github` from `_PIN`. The suite stays green while doctor stops reporting a
@@ -2491,7 +2492,7 @@ def test_a_trailing_comment_after_a_false_value_is_silent(monkeypatch):
 
 
 def test_a_false_in_one_job_does_not_silence_a_true_in_another(monkeypatch):
-    """A plan wrapper checks out in more than one job, and this probe's own finding asks for an
+    """A consumer file checks out in more than one job, and this probe's own finding asks for an
     explicit `false`, so both occurrences coexist in one file routinely. Examining only the
     first reads the `false` and returns nothing -- fail-open on the outermost guard of the plan
     path. Both occurrences are in ONE file here;
@@ -2567,7 +2568,7 @@ def test_a_shim_with_no_job_name_takes_the_job_id_and_is_silent(monkeypatch):
 
 def test_a_job_name_beats_a_job_id_that_is_the_contract_name(monkeypatch):
     """GitHub displays `name:` when there is one, so the id is read only in its absence. The
-    uncovered shape is a consumer who copies the documented shim and edits the display name
+    uncovered shape is a consumer who copies the documented file and edits the display name
     alone: job id `shipmate`, `name: terraform`, and the checks become
     `terraform / <stack> / <env>`.
 
@@ -2592,7 +2593,7 @@ def test_a_job_id_that_is_not_the_contract_name_is_reported(monkeypatch):
 
 
 def test_a_name_below_the_uses_line_is_still_the_jobs_name(monkeypatch):
-    """The whole job block is read, in both directions: the documented shim writes `name:`
+    """The whole job block is read, in both directions: the documented file writes `name:`
     above its `uses:` line, and either side of it is the same job's name. Mutation: end the
     region at the `uses:` line rather than at the end of the job block."""
     uses_line = f"    uses: {_ENGINE_REPO}/.github/workflows/plan.yml@{_SHA}\n"
@@ -2700,7 +2701,7 @@ def test_shim_job_name_probe_is_registered(monkeypatch):
     assert (doctor.WARNING, _WRONG_JOB_NAME_TEXT) in doctor.warnings(_ctx())
 
 
-# The three apply-wrapper shapes the retired-input probe judges. The
+# The three `shipmate.yml` shapes the retired-input probe judges. The
 # declaration is written flow-style, the shape three of the four sample repos
 # carry, so the line-anchored key must match it there too.
 _APPLY_DECLARING_IT = (
@@ -2777,7 +2778,7 @@ def test_a_forwarded_plan_run_id_is_reported(monkeypatch):
     assert out == [(doctor.WARNING, _FORWARDED_TEXT)]
 
 
-def test_a_clean_apply_wrapper_is_silent(monkeypatch):
+def test_a_clean_apply_job_is_silent(monkeypatch):
     responses = _fork_responses({"shipmate.yml": _APPLY_CLEAN})
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
     assert doctor._plan_run_id_warnings(_ctx()) == []
@@ -2828,7 +2829,7 @@ def test_plan_run_id_unreadable_directory_degrades_to_a_note(monkeypatch):
     assert out[0][0] == doctor.NOTICE
 
 
-# The four apply-wrapper shapes the retired-`mode` probe judges, written as the
+# The four `shipmate.yml` shapes the retired-`mode` probe judges, written as the
 # page that documented them wrote them: `mode` was a block-style
 # `workflow_dispatch` input and a `with:` line on the `targeted` job.
 _MODE_ON_BLOCK = (
@@ -2891,7 +2892,7 @@ _TARGETED_JOB_WITH_FIRST = (
 _APPLY_DECLARING_MODE = _MODE_ON_BLOCK + _TARGETED_JOB
 _APPLY_FORWARDING_MODE = _CLEAN_ON_BLOCK + _TARGETED_JOB_FORWARDING_MODE
 _APPLY_CARRYING_BOTH = _MODE_ON_BLOCK + _TARGETED_JOB_FORWARDING_MODE
-# The negative: `mode` is generic YAML, unlike `plan_run_id`. This wrapper calls the
+# The negative: `mode` is generic YAML, unlike `plan_run_id`. This file calls the
 # engine's reusable apply workflow cleanly AND runs `actions/state`, whose own input is
 # spelled `mode` — a file-wide scan reports it.
 _APPLY_WITH_UNRELATED_MODE = (
@@ -2936,7 +2937,7 @@ def test_a_forwarded_mode_is_reported(monkeypatch):
     assert doctor._mode_input_warnings(_ctx()) == [(doctor.WARNING, _MODE_FORWARDED_TEXT)]
 
 
-def test_a_wrapper_carrying_both_halves_is_reported_twice(monkeypatch):
+def test_a_file_carrying_both_halves_is_reported_twice(monkeypatch):
     """The two halves are independent findings with independent remedies: a
     declaration is dead weight, a forward kills the run at load time."""
     responses = _fork_responses({"shipmate.yml": _APPLY_CARRYING_BOTH})
@@ -2961,7 +2962,7 @@ def test_a_forward_on_the_apply_all_call_is_reported(monkeypatch):
     """`apply-all.yml` never declared `mode` at all, so the bare-apply job is where a
     migration copying the targeted job's `with:` block lands -- and the shipped message,
     `CONTRACT.md` and `docs/troubleshooting.md` all promise to cover it. A region matcher
-    spelled `apply\\.yml@` reads this wrapper as clean."""
+    spelled `apply\\.yml@` reads this file as clean."""
     responses = _fork_responses(
         {"shipmate.yml": _CLEAN_ON_BLOCK + _TARGETED_JOB + _APPLY_ALL_JOB_FORWARDING_MODE}
     )
@@ -2974,7 +2975,7 @@ def test_a_with_block_above_the_uses_line_is_still_a_forward(monkeypatch):
     in both directions from its `uses:` line --
     `test_a_name_below_the_uses_line_is_still_the_jobs_name` pins the same property for the
     shim-job-name probe, in the opposite polarity. Scanning
-    forward only reads this wrapper as clean: silence at the load-time rejection it exists for."""
+    forward only reads this file as clean: silence at the load-time rejection it exists for."""
     responses = _fork_responses({"shipmate.yml": _CLEAN_ON_BLOCK + _TARGETED_JOB_WITH_FIRST})
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
     assert doctor._mode_input_warnings(_ctx()) == [(doctor.WARNING, _MODE_FORWARDED_TEXT)]
@@ -3103,7 +3104,7 @@ _NO_ENGINE_CALL_TEXT = (
     "`shipmate.yml` does not call the engine's plan workflow — the dispatch is accepted and the "
     "run starts, with nothing in it that resolves the pull request, plans a cell or reports a "
     "gate status, so a commented `shipmate plan` produces a green run and no plan. That call "
-    "is the whole shim: `uses: <engine>/.github/workflows/plan.yml@<sha>` "
+    "is the whole `plan` job: `uses: <engine>/.github/workflows/plan.yml@<sha>` "
     "(docs/getting-started.md)."
 )
 
@@ -3131,7 +3132,7 @@ def test_the_dispatch_probe_reports_a_required_input_other_than_verb(monkeypatch
     """`verb` is the only required input the file may declare: every dispatch body omits at
     least one of the other three, and GitHub answers an omitted value for a required input
     with HTTP 422 and no run — which is how every `shipmate unlock` failed while the old
-    apply wrapper still required the retired plan-run input.
+    apply file still required the retired plan-run input.
 
     Mutation: drop the `_required_inputs` finding, and a file that refuses every unlock
     passes."""
@@ -3228,7 +3229,7 @@ def test_a_flow_style_on_value_is_silent(monkeypatch):
 def test_a_workflow_dispatch_line_under_jobs_does_not_satisfy_the_trigger(monkeypatch):
     """The reason the trigger is looked for inside the `on:` block: no such key
     exists under `jobs:`, but a whole-file regex is satisfied by any line that
-    spells it, and the shim is then reported healthy while `shipmate plan`
+    spells it, and the file is then reported healthy while `shipmate plan`
     reaches nothing."""
     text = _WF_NO_TRIGGER.replace(
         "  plan:\n", "  plan:\n    env:\n      workflow_dispatch: yes\n", 1

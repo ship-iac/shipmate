@@ -784,7 +784,8 @@ def test_a_renamed_plan_workflow_is_refused(tmp_path):
         "::error::this repository has no `.github/workflows/shipmate.yml` — the one path "
         "`CONTRACT.md` lets the consumer's workflow file live at, and this refusal is what "
         "enforces it. That exact filename is matched literally by `shipmate doctor`, which "
-        "keys its calling-job-name, dispatch-wiring and routing probes on it, and by "
+        "keys its calling-job-name, retired `plan_run_id`, retired `mode`, dispatch-wiring "
+        "and routing probes on it, and by "
         "`actions/dispatch`, which sends every commented verb to it. A consumer workflow "
         "under any other name silently loses those probes, draws doctor's own "
         "`pull_request_target` warning instead, and is reached by no `shipmate` command at "
@@ -1331,8 +1332,8 @@ def test_the_three_outputs_agree_on_one_cell_list(monkeypatch, tmp_path, cells):
 
 def test_the_plan_workflow_path_is_the_one_consumer_file():
     """The whole path, hand-written. Three surfaces match this literally — `actions/dispatch`
-    aims every verb at it, `shipmate doctor` keys its fork-trigger exemption and its
-    calling-job-name, dispatch-wiring and routing probes on it, and this refusal is what makes
+    aims every verb at it, `shipmate doctor` keys its fork-trigger exemption and its five
+    filename-keyed probes on it, and this refusal is what makes
     a repository carry it at all. A rename here silently retires all of them.
 
     Mutation: set it back to `.github/workflows/plan.yml`.

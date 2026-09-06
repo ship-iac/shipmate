@@ -1164,7 +1164,7 @@ def _unsafe_checkout_warnings(text, name):
     *because* it does not have one. A `${{ }}` value is unknown, not false, so
     it is reported — it may evaluate true.
 
-    EVERY occurrence is examined, not the first: a plan wrapper checks out in
+    EVERY occurrence is examined, not the first: a consumer file checks out in
     more than one job, and one job's explicit `false` — the shape this very
     finding asks for — must not silence another job's `true`.
 
@@ -1406,12 +1406,12 @@ _PLAN_RUN_ID_KEY = re.compile(r"^[ \t]*plan[-_]run[-_]id[ \t]*:", re.M)
 # Same degrade posture and reason as PIN_UNREADABLE.
 PLAN_RUN_ID_UNREADABLE = (
     NOTICE,
-    f"could not read `{_WORKFLOWS_DIR}` — the apply wrapper's retired `plan_run_id` "
+    f"could not read `{_WORKFLOWS_DIR}` — the workflow file's retired `plan_run_id` "
     "input not verified.",
 )
 PLAN_RUN_ID_NO_COMMIT = (
     NOTICE,
-    "the apply wrapper's retired `plan_run_id` input not verified — the commit under "
+    "the workflow file's retired `plan_run_id` input not verified — the commit under "
     "examination could not be determined.",
 )
 
@@ -1474,7 +1474,7 @@ def _plan_run_id_finding(text, name):
 
     `_PLAN_RUN_ID_KEY` matches both spellings: a
     `workflow_call`/`workflow_dispatch` input is declared as `plan_run_id`, an
-    action input passed as `plan-run-id`, and a wrapper carrying either is
+    action input passed as `plan-run-id`, and a consumer file carrying either is
     carrying the retired rail. Line-anchored means a fully inline flow
     `on: { workflow_dispatch: { inputs: { plan_run_id: … } } }` is NOT seen — a
     gap that stays silent rather than reporting a healthy file."""
@@ -1517,11 +1517,11 @@ _APPLY_CALL = re.compile(r"^[ \t]*uses[ \t]*:.*/\.github/workflows/apply(?:-all)
 # Same degrade posture and reason as PIN_UNREADABLE.
 MODE_INPUT_UNREADABLE = (
     NOTICE,
-    f"could not read `{_WORKFLOWS_DIR}` — the apply wrapper's retired `mode` input not verified.",
+    f"could not read `{_WORKFLOWS_DIR}` — the workflow file's retired `mode` input not verified.",
 )
 MODE_INPUT_NO_COMMIT = (
     NOTICE,
-    "the apply wrapper's retired `mode` input not verified — the commit under examination "
+    "the workflow file's retired `mode` input not verified — the commit under examination "
     "could not be determined.",
 )
 
@@ -1603,7 +1603,7 @@ def _mode_input_finding(text, name):
     is the costly one: the consumer re-pins, the run dies as GitHub LOADS it
     with `startup_failure`, no job and no log, and this probe said nothing about
     the one shape it exists to pre-warn about. The threat model it is written for
-    is a wrapper copied from the block-style fences on our own pages and then
+    is a file copied from the block-style fences on our own pages and then
     drifting, so the anchor stays. `apply-cell`'s state steps and
     `actions/summary`'s `comment_mode` are two more unrelated uses of the
     name."""
@@ -1663,11 +1663,11 @@ _REQUIRED_TRUE = re.compile(r"""[\s{,]required[ \t]*:[ \t]*["']?true["']?""", re
 # Same degrade posture and reason as PIN_UNREADABLE.
 DISPATCH_WIRING_UNREADABLE = (
     NOTICE,
-    f"could not read `{_WORKFLOWS_DIR}` — the plan wrapper's dispatch wiring not verified.",
+    f"could not read `{_WORKFLOWS_DIR}` — the workflow file's dispatch wiring not verified.",
 )
 DISPATCH_WIRING_NO_COMMIT = (
     NOTICE,
-    "the plan wrapper's dispatch wiring not verified — the commit under examination could "
+    "the workflow file's dispatch wiring not verified — the commit under examination could "
     "not be determined.",
 )
 
@@ -1847,7 +1847,7 @@ def _dispatch_wiring_finding(text, name):
                 f"`{name}` does not call the engine's plan workflow — the dispatch is accepted "
                 "and the run starts, with nothing in it that resolves the pull request, plans a "
                 "cell or reports a gate status, so a commented `shipmate plan` produces a green "
-                "run and no plan. That call is the whole shim: `uses: "
+                "run and no plan. That call is the whole `plan` job: `uses: "
                 "<engine>/.github/workflows/plan.yml@<sha>` (docs/getting-started.md).",
             )
         )
