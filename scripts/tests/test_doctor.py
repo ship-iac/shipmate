@@ -3580,18 +3580,23 @@ def _count_word(n):
 
 
 def test_probe_count_is_stated_correctly_in_the_docs():
-    """Adding or removing a probe means editing six pieces of prose that spell the count
-    out, two in each of three files. Nothing else notices when they go stale, so this
-    reads all three and pins each phrase against `len(PROBES)`:
+    """Adding or removing a probe means editing seven pieces of prose that spell the
+    count out. Nothing else notices when they go stale, so this reads all three files
+    and pins each against `len(PROBES)`:
 
     - `scripts/doctor`'s module docstring: (1) "the <n> live probes" and (2) the
       `Probes:` bullet list below it (one bullet per probe);
     - `CONTRACT.md`: (3) "<n> live settings probes" and (4) "<n-2> of the <n>";
-    - `docs/troubleshooting.md`: (5) "combining <n>" and (6) "<n-2> of the <n> probes".
+    - `docs/troubleshooting.md`: (5) "combining <n>", (6) "<n-2> of the <n> probes"
+      and (7) the reader-facing probe list itself, one `- **` bullet per probe.
 
     The number words come from the count, so this keeps biting when a further probe lands.
     `<n-2>` is the plan-path subset: the approvers-team and App-permission probes cannot
     report from `annotate` mode.
+
+    Mutations, one per claim: change `len(PROBES)`; delete a bullet from the `Probes:`
+    docstring list; edit either count phrase in `CONTRACT.md` or in
+    `docs/troubleshooting.md`; delete a `- **` bullet from that page's probe list.
     """
     total = len(doctor.PROBES)
     word, plan_word = _count_word(total), _count_word(total - 2)
@@ -3610,6 +3615,13 @@ def test_probe_count_is_stated_correctly_in_the_docs():
     trouble = (ENGINE / "docs" / "troubleshooting.md").read_text(encoding="utf-8")
     assert f"combining {word}" in trouble
     assert f"{plan_word} of the {word} probes" in trouble
+    # The list the two phrases above count, sliced between the sentence that states the
+    # count and the paragraph that closes the list.
+    listing = trouble.split("live probes.\n", 1)[1].split("\nThe report carries", 1)[0]
+    page_bullets = [ln for ln in listing.splitlines() if ln.startswith("- **")]
+    assert len(page_bullets) == total, (
+        f"docs/troubleshooting.md's probe list names {len(page_bullets)} probes, not {total}"
+    )
 
 
 def test_a_non_file_workflow_entry_does_not_blind_the_fork_trigger_probe(monkeypatch):
