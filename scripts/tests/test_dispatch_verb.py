@@ -261,8 +261,8 @@ def test_every_verb_dispatches_the_one_consumer_file(verb):
 
 def test_the_action_declares_no_workflow_input():
     """The whole input vector, hand-written. A `workflow` input would override the one filename
-    every verb aims at, sending an authorized command to a file the engine's jobs do not live
-    in: the consumer filename is the contract, not an overridable default.
+    every verb aims at, sending an authorized command to a file nothing else reaches: the
+    consumer filename is the contract, not an overridable default.
 
     Mutation: re-add `workflow` (or drop `verb`, or give `verb` a default).
     """
