@@ -1324,7 +1324,7 @@ def _callees(text):
 
 
 def test_every_shim_fence_is_found_and_calls_exactly_the_expected_engine_workflows():
-    """The locator replaces the copy of the six bodies that used to live in this script.
+    """The locator reads the six shim bodies out of the docs rather than carrying a copy.
     It must find exactly one fence per shim, and each fence must call exactly the engine
     reusable workflows that shim is for, in document order -- `apply.yml` is one file with
     two pin sites, and a locator that found only the first would ship an unpinned
@@ -1496,3 +1496,18 @@ def test_main_refuses_a_state_suffix_that_cannot_sit_in_a_yaml_scalar():
     with pytest.raises(SystemExit) as e:
         onboard.main(["--team", "ops", "--app-id", "1", "--key", "k", "--state-suffix", '." #'])
     assert "--state-suffix" in str(e.value)
+
+
+def test_a_file_still_carrying_the_docs_placeholder_is_not_reported_pin_only(tmp_path):
+    """A consumer who pasted the published fence by hand holds `@<engine-sha>`, which is not a
+    pin `dev/repin_consumer.py` can move: its pattern requires 40 hex, so it would answer "no
+    engine references found". Naming a remedy that cannot work is worse than naming none, so
+    that file is `differs`.
+
+    Mutation: widen `_ANY_PIN` from `[0-9a-f]{40}` to `\\S+`.
+    """
+    path, _text = _plan_shim(tmp_path)
+    page = (ENGINE / "docs" / "getting-started.md").read_text(encoding="utf-8")
+    path.write_text(onboard._fence(page, "shipmate · plan"), encoding="utf-8", newline="\n")
+    onboard._reconcile_shim(_shim_ctx(tmp_path), "plan.yml")
+    assert onboard.REPORT == [("differs", "plan.yml", "local edits, not overwritten")]
