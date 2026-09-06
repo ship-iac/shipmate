@@ -13,6 +13,8 @@ grammar are declared unstable in `README.md`.
 
 ## [0.25.0] — 2026-09-06
 
+Tags `9e12610`.
+
 **Breaking for every consumer: the pin bump and a body rewrite of `plan.yml`,
 `drift.yml` and `comment-ops.yml` land in one commit.** A new shim against an
 old pin, or an old inline body against the new pin, is a load-time rejection
