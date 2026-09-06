@@ -31,16 +31,25 @@ from the one value they share.
 The engine composes the plan check's name nowhere: it is the plan matrix job's own
 auto-generated check-run, whose name is the job's `name:` (`<stack> / <env>`),
 and GitHub names a called workflow's check runs `<caller job> / <callee job>`.
-The consuming shim names its calling job `shipmate`, so the check is
+The consumer's plan-calling job is named `shipmate`, so the check is
 `shipmate / <stack> / <env>`; the same rule makes the engine plan workflow's
 summary job report as `shipmate / summary`. The workflow name does not supply
 the verb.
 
 That job name is a contract element a consumer must match. `shipmate doctor`
-reports a shim whose calling job carries another name; until it is fixed,
+reports a plan-calling job carrying another name; until it is fixed,
 `summary-comment` — which resolves each comment row's plan link by an exact
 `shipmate / <stack> / <env>` lookup across every check run on the head SHA —
 finds no match and every `[plan]` link falls back to the workflow-run URL.
+
+The consumer's one workflow file gates seven jobs on the event (§Post-plan
+topology), so every run also carries one one-segment check-run per job that did
+not run, named by that job's display name — `shipmate`, `post-merge`,
+`targeted`, `all`, `unlock` — with conclusion `skipped`. They are display
+artefacts of the file's shape, and nothing reads them: `shipmate / gate` is the
+required check, `scripts/summary-comment` resolves plan links by an exact
+three-segment name, and `scripts/mirror-checks` copies only names beginning
+`shipmate / `.
 
 The apply check keeps its `apply / ` verb prefix: it is created pending (by
 `actions/summary`) on the same head SHA that carries the plan job's check, and
@@ -73,8 +82,11 @@ cannot suppress a level. The apply leaf is therefore three deep, e.g.
 `post-merge / L0 / apply / <stack> / <env>`. The intermediate names are kept
 short and non-redundant (`L0`..`L3` for env-levels in `apply-all.yml` /
 `deploy.yml`, `waves` for the single-env `apply.yml`) rather than repeating the
-verb the leaf already carries; consumer workflows supply the outermost segment
-and are named `shipmate · apply` / `shipmate · deploy`. Only the leaf is
+verb the leaf already carries; the consumer's calling job supplies the outermost
+segment (`post-merge` on the deploy path). Its file is named `shipmate`, so the
+pull request's checks UI renders that workflow name and then the job path
+(`shipmate / shipmate / facts`); the repetition is cosmetic and the check-run
+names the engine matches on are unchanged. Only the leaf is
 load-bearing — the intermediate names are display-only, and the job ids
 they belong to are what `needs:` refers to.
 
@@ -90,13 +102,13 @@ need to be edited every time a stack or environment is added or removed.
 `shipmate / ` is the namespace for shipmate's plan checks and its aggregate,
 non-fan-out surfaces. `shipmate / gate` is the only required member — it is
 matched by exact string in a repository ruleset. The rest of the namespace
-comes from the shim's job name rather than being written anywhere: the engine
-plan workflow's own jobs report as `shipmate / facts`, `shipmate / detect` and
-`shipmate / summary`, so the checks list identifies the tool without the
-consumer naming anything (a job's check run is always created by the GitHub
-Actions app, and its name is the only part that can say which tool produced
-it). These are not required checks, and nothing in the engine reconstructs
-them.
+comes from the plan-calling job's name rather than being written anywhere: the
+engine plan workflow's own jobs report as `shipmate / facts`, `shipmate /
+detect` and `shipmate / summary`, so the checks list identifies the tool
+without the consumer naming anything (a job's check run is always created by
+the GitHub Actions app, and its name is the only part that can say which tool
+produced it). These are not required checks, and nothing in the engine
+reconstructs them.
 
 Everything in the check/status namespace is ASCII and slash-delimited, which
 is GitHub's own convention for status contexts (`ci/circleci`), and — for
@@ -106,10 +118,10 @@ free of lookalike characters. A required context that differs from the posted
 one by an invisible character is never satisfied, so every pull request is
 unmergeable while the status itself renders green.
 
-The middot is reserved for workflow names (`shipmate · plan`,
-`shipmate · apply`, `shipmate · deploy`) — the one place a shipmate label is
-concatenated onto a check name by GitHub rather than matched by anything, where
-it keeps the seam legible: `shipmate · plan / shipmate / <stack> / <env>`.
+The middot is reserved for the consumer file's `run-name` (`shipmate · plan`,
+`shipmate · deploy`, `shipmate · drift`, one per event or verb) — a run title
+GitHub renders and nothing matches on, where it says which of the seven jobs
+this run is for. The workflow's own `name:` is plain `shipmate`.
 
 `build-matrix` rejects a stack path of exactly `apply` or exactly `shipmate`.
 Neither can be mistaken for an engine surface by the engine itself: a stack
@@ -312,10 +324,10 @@ never used.
   appears only inside the engine's reusable workflows — `plan.yml`'s
   `summary` job, `comment-ops.yml`'s `ops` job, `drift.yml`'s `issues` job, and
   the apply path (`apply.yml`, `apply-all.yml`, `apply-env-level.yml`,
-  `deploy.yml`). No consumer file names it: a consumer's `plan.yml`,
-  `drift.yml` and `comment-ops.yml` are shims that pass the key by name and
-  bind no environment of their own. Each of those jobs runs at a ref the
-  environment's default-branch policy admits — the base ref under
+  `deploy.yml`). No consumer file names it: the consumer's `shipmate.yml`
+  passes the key by name and binds no environment of its own. Each of those
+  engine jobs runs at a ref the environment's default-branch policy admits —
+  the base ref under
   `pull_request_target`, the default branch under `issue_comment`, the nightly
   `schedule` and `push` — which is what lets them declare it at all. What never
   happens is a *logical* environment name
@@ -362,19 +374,19 @@ Every reusable workflow that runs a cell — `deploy.yml`, `apply-all.yml`,
   consumer's configuration.
 
 `state_suffix` declares no default, so omitting it is a workflow-resolution
-error, not a third mode. That loudness is deliberate: a shim that forgot its
-state configuration would otherwise restore nothing, apply, discard the state,
-and still report `applied` — a green gate over infrastructure nothing recorded.
-A remote backend opts in by writing the empty string. `unlock.yml` is the one
-reusable workflow that declares no such input: it releases locks and applies
-nothing, so passing one is a load-time rejection.
+error, not a third mode. That loudness is deliberate: a calling job that forgot
+its state configuration would otherwise restore nothing, apply, discard the
+state, and still report `applied` — a green gate over infrastructure nothing
+recorded. A remote backend opts in by writing the empty string. `unlock.yml` is
+the one reusable workflow that declares no such input: it releases locks and
+applies nothing, so passing one is a load-time rejection.
 
 The input is repo-wide. A repository mixing local- and remote-backend stacks
 has no correct value — non-empty makes `actions/cache/save` target a nonexistent
 path for the remote stacks, empty silently discards the local ones — so a mixed
 repository is unsupported. That forecloses a gradual migration in which one
 workload moves to a remote backend first: the backend move has to be repo-wide
-and land with the `state_suffix` change in every shim in the same step.
+and land with the `state_suffix` change in every calling job in the same step.
 
 **On the state key.** Where the consumer's backend derives a key per stack,
 derive it from `terramate.stack.path.absolute` (as `docs/aws.md` does), which
@@ -465,10 +477,10 @@ OpenTofu's provider consumes them. They are `AWS_*`, so they are excluded from
 the apply-match fingerprint by construction — it hashes only non-empty
 `TF_VAR_*` plus `TF_WORKSPACE` (see Apply-match fingerprint, below).
 
-**Every shim whose callee runs a cell must grant `id-token: write`, cloud or
-not.** GitHub caps a called workflow's permissions at each `uses:` boundary, so
-the calling job of a consumer's `plan.yml`, `drift.yml`, `apply.yml`,
-`unlock.yml` and `deploy.yml` grants it; `comment-ops.yml` does not, because no
+**Every calling job whose callee runs a cell must grant `id-token: write`, cloud
+or not.** GitHub caps a called workflow's permissions at each `uses:` boundary,
+so the `plan`, `drift`, `deploy`, `targeted`, `all` and `unlock` jobs of the
+consumer's `shipmate.yml` grant it; its `comment-ops` job does not, because no
 job in engine `comment-ops.yml` requests it. This applies to a consumer that
 uses no cloud credentials whatsoever: without the grant the run fails at
 workflow-resolution time, the same failure mode `apply-env-level.yml` already
@@ -536,18 +548,21 @@ themselves contain text that matches the command grammar.
 | `shipmate unlock <env>` | active | required env | team membership plus the `<env>-apply` environment — no review policy, no mergeable check, no draft check, no reviewed plan (below) |
 | `shipmate destroy` | reserved | — | — |
 
-Each dispatching verb has its own consumer workflow file, and `actions/dispatch`
-picks the file from the verb: `shipmate plan` → `.github/workflows/plan.yml`,
-`shipmate apply` → `apply.yml`, `shipmate unlock` → `unlock.yml`. `plan.yml`
-alone carries two triggers — `pull_request_target` for the autoplan and
-`workflow_dispatch` for the commented form; the other two are dispatch-only.
-`doctor` and `help` dispatch nothing: both are answered inside the comment-ops
-run itself. A verb whose file the repository does not carry fails at dispatch
-time on that comment-handling run, and no other verb is affected. That run is
-not visible from the pull request, so every refusal in the dispatch step — an
-unwired verb, an unknown one, and a rejected API call alike — also posts a
-one-line comment there linking the run. The run holds the error; the comment
-never carries the API's answer.
+Every dispatching verb dispatches the same file,
+`.github/workflows/shipmate.yml`, and the `verb` input in the dispatch body
+selects the job: `plan` → the `plan` job, `apply` with an environment → the
+`targeted` job, `apply` without one → the `all` job, `unlock` → the `unlock`
+job. That file carries five triggers; `workflow_dispatch` is the one a
+commented verb reaches, and the other four (`pull_request_target`,
+`issue_comment`, `push`, `schedule`) fire from their own events. `doctor` and
+`help` dispatch
+nothing: both are answered inside the comment-ops run itself. A repository whose
+`shipmate.yml` is missing, or which predates this layout, fails at dispatch time
+on that comment-handling run — for every verb alike, since they share the file.
+That run is not visible from the pull request, so every refusal in the dispatch
+step — an unwired verb, an unknown one, and a rejected API call alike — also
+posts a one-line comment there linking the run. The run holds the error; the
+comment never carries the API's answer.
 
 `shipmate plan` plans the pull request's changed stacks on demand, authoring
 exactly what a push-triggered plan authors and nothing more: the sticky plan
@@ -595,26 +610,28 @@ only labels the output as shipmate's own.
 `shipmate doctor` posts a consolidated, sticky report — one comment per pull
 request, identified by the HTML marker `<!-- shipmate:doctor -->` (distinct
 from the plan comment's `<!-- shipmate:summary -->`) and upserted in place the
-same way. It combines fourteen live settings probes (gate ruleset,
+same way. It combines fifteen live settings probes (gate ruleset,
 default-branch `pull_request` rule, environment existence, environment
 protection shape, plan-environment secrets, the `shipmate-engine`
 environment's own existence and default-branch scoping, `pull_request_target`
-triggers in the consumer's workflow files other than `plan.yml`, which uses
+triggers in the consumer's workflow files other than `shipmate.yml`, which uses
 that trigger by design, engine action-pin freshness,
-the calling job name in the consumer's `plan.yml`, which must be `shipmate`
-or the plan cell checks are not `shipmate / <stack> / <env>` and every `[plan]`
-link in the plan comment falls back to the workflow-run page,
+the plan-calling job name in the consumer's `shipmate.yml`, which must be
+`shipmate` or the plan cell checks are not `shipmate / <stack> / <env>` and
+every `[plan]` link in the plan comment falls back to the workflow-run page,
 a retired `plan_run_id` input still declared or forwarded by the consumer's
-`apply.yml` (a forward to a reusable workflow is rejected as the run LOADS, so
-there is no job and no log to read),
-a retired `mode` input on the same wrapper — declared under `on:`, or forwarded
+`shipmate.yml` (a forward to a reusable workflow is rejected as the run LOADS,
+so there is no job and no log to read),
+a retired `mode` input on the same file — declared under `on:`, or forwarded
 to the engine's reusable apply workflows, where the same load-time rejection
 applies — only those two placements are read as the retired rail,
-the dispatch wiring of the consumer's `plan.yml` — the `workflow_dispatch` trigger
-a commented `shipmate plan` dispatches, the `pr_number` input that dispatch sends,
+the dispatch wiring of the consumer's `shipmate.yml` — the `workflow_dispatch`
+trigger every commented verb dispatches, the four inputs that dispatch sends,
 and its call of the engine's plan workflow, without which the dispatch starts a
 run that plans nothing; without the first two GitHub refuses the dispatch with an
 HTTP 422 and creates no run at all,
+the event routing of that same file — one job per engine reusable workflow,
+each carrying the `if:` that selects it, so a wrong one sends a verb nowhere,
 approvers-team resolvability, and App installation permission
 drift — see `docs/branch-protection.md`) with a harvest of the warning and
 failure annotations GitHub already recorded on this commit's workflow runs
@@ -626,7 +643,7 @@ when the report was rendered, it says so and asks for the command again once
 they have, and if the harvest itself could not be read in full it says that
 too — the two are separate statements, since a run that has not finished has
 recorded nothing yet while a run that could not be read may have recorded
-plenty. Only twelve of the fourteen
+plenty. Only thirteen of the fifteen
 probes can produce a finding from the plan path's own `annotate`-mode
 invocation: the approvers-team probe needs the `SHIPMATE_TEAM` environment
 variable, which the plan path does not supply, so it silently returns
@@ -809,9 +826,9 @@ A bare `shipmate apply` is authorized once at comment time, by the same five
 apply requirements. Comment time is never the whole review decision: both apply
 paths re-read `reviewDecision` server-side before anything applies (below), so
 an approval dismissed between the comment and the dispatch holds. Both forms
-dispatch the consumer's single `apply.yml` wrapper; its optional `environment`
-input selects the path (set → targeted, empty → bare). Both share the same
-App-minted `workflow_dispatch` mechanism and the same per-env
+dispatch the consumer's `shipmate.yml` with `verb: apply`; the optional
+`environment` input selects the job (set → `targeted`, empty → `all`). Both
+share the same App-minted `workflow_dispatch` mechanism and the same per-env
 `apply-<env>-<stack>` concurrency groups.
 
 The repository variable `SHIPMATE_UNGATED_ENVS` lists the environments that
@@ -851,9 +868,9 @@ where unset means split.
 Opting in takes two things, and the variable alone is not enough:
 
 1. the repository variable, and
-2. the consumer's `apply.yml` pinning both engine references —
-   `.github/workflows/apply.yml@` (the targeted job) and
-   `.github/workflows/apply-all.yml@` (the bare job) — at or past the release
+2. the consumer's `shipmate.yml` pinning both engine references —
+   `.github/workflows/apply.yml@` (the `targeted` job) and
+   `.github/workflows/apply-all.yml@` (the `all` job) — at or past the release
    that carries this feature. §Consumption's one-change rule already requires
    it; here breaking it fails open, not loudly, and once per reference: a
    bare `shipmate apply` authorized under `REVIEW_REQUIRED` by a fresh
@@ -1007,9 +1024,11 @@ itself), not something a separate API call authors, so it necessarily stays
 on the `github-actions` identity regardless of App permissions. An on-demand
 plan carries an App-authored *copy* of it: GitHub attaches a dispatched run's
 job checks to the commit of the ref it was dispatched on, never to the pull
-request head, so `actions/summary` mirrors that run's own completed checks —
-the cells plus `shipmate / facts` and `shipmate / detect` — onto the head as
-App-authored check-runs holding a fixed line and a link back to the original,
+request head, so `actions/summary` mirrors that run's own completed checks
+whose names begin `shipmate / ` — the cells plus `shipmate / facts` and
+`shipmate / detect`, and none of the consumer file's skipped sibling jobs — onto
+the head as App-authored check-runs holding a fixed line and a link back to the
+original,
 whose step summary keeps the plan text. They exist so the pull request shows the
 cells, a failed one above all — and because the sticky comment resolves each
 row's plan link across the checks on the head, which is why the mirror runs
@@ -1031,13 +1050,28 @@ is then refused by the exact-plan fail-safe if the first advanced the state.
 
 ## Post-plan topology
 
-The consumer's plan workflow is a shim: two triggers — `pull_request_target`
-for the automatic plan and `workflow_dispatch` for a commented `shipmate plan`
-— a `permissions:` block, and one job named `shipmate` whose `uses:` is the
-engine's reusable `.github/workflows/plan.yml`. It passes
-`SHIPMATE_APP_PRIVATE_KEY` and `SHIPMATE_PLAN_PASSPHRASE` by name (never
-`secrets: inherit`) and `state_suffix` as its one required input. Everything
-below that line is engine-owned, SHA-pinned YAML.
+The consumer's workflow is one file, `.github/workflows/shipmate.yml`: five
+triggers, and seven jobs each gated on the event with an `if:` and each calling
+one engine reusable workflow, SHA-pinned. Top-level `permissions: {}`; every job
+declares its own. The plan job passes `SHIPMATE_APP_PRIVATE_KEY` and
+`SHIPMATE_PLAN_PASSPHRASE` by name (never `secrets: inherit`) and `state_suffix`
+as its one required input. Everything a `uses:` line reaches is engine-owned,
+SHA-pinned YAML.
+
+| event or verb | job | engine callee |
+|---|---|---|
+| `pull_request_target`, or `workflow_dispatch` with `verb: plan` | `plan` | `plan.yml` |
+| `issue_comment` | `comment-ops` | `comment-ops.yml` |
+| `push` | `deploy` | `deploy.yml` |
+| `schedule`, or `workflow_dispatch` with `verb: drift` | `drift` | `drift.yml` |
+| `workflow_dispatch` with `verb: apply` and an `environment` | `targeted` | `apply.yml` |
+| `workflow_dispatch` with `verb: apply` and no `environment` | `all` | `apply-all.yml` |
+| `workflow_dispatch` with `verb: unlock` | `unlock` | `unlock.yml` |
+
+Each of those `if:` expressions is a contract literal, not a style choice:
+`shipmate doctor`'s routing probe holds all seven and compares each one whole,
+because a wrong expression sends a verb nowhere and produces a dispatched run
+that completes with every job skipped — green, and no work done.
 
 Engine `plan.yml` is four jobs: `facts`, `detect`, `plan`, `summary`. `facts`
 is `actions/pr-facts`, the single producer of every pull-request fact the other
@@ -1049,13 +1083,16 @@ issues) is created by a job bound to that fixed GitHub Environment
 (`docs/github-app.md` §Key-exposure boundary), each running at a ref that
 satisfies its default-branch-only policy for a different reason.
 
-**The calling job's name is a contract literal.** GitHub names a called
-workflow's check runs `<caller job> / <callee job>`, so only a job named
-`shipmate` produces `shipmate / <stack> / <env>` plan cells and the
-`shipmate / summary`, `shipmate / facts` and `shipmate / detect` names beside
-them. `scripts/summary-comment` resolves each row's `[plan]` link by that exact
-name. A job named anything else plans correctly and every such link falls back
-to the workflow-run page; `shipmate doctor` reports it.
+**The calling job's name is a contract literal.** Three jobs carry
+`name: shipmate` — `plan`, `comment-ops` and `drift` — and `deploy` carries
+`name: post-merge`; the other three carry no `name:` and display as their
+job id.
+GitHub names a called workflow's check runs `<caller job> / <callee job>`, so
+only a plan job named `shipmate` produces `shipmate / <stack> / <env>` plan
+cells and the `shipmate / summary`, `shipmate / facts` and `shipmate / detect`
+names beside them. `scripts/summary-comment` resolves each row's `[plan]` link
+by that exact name. A job named anything else plans correctly and every such
+link falls back to the workflow-run page; `shipmate doctor` reports it.
 
 **Adopting this topology takes one ungatable pull request.** A `pull_request`
 run uses the workflow file from the pull request's own head; a
@@ -1066,21 +1103,30 @@ switches the trigger therefore satisfies neither — its head no longer declares
 Merge that one pull request with an administrative bypass and restore
 enforcement straight after; every pull request following it gates normally.
 
+The move from six workflow files to this one is ungatable for the same reason,
+and needs the same bypass: the plan that runs on it is the default branch's old
+`plan.yml`, whose `build-matrix` refuses a checkout carrying no
+`.github/workflows/plan.yml` — which the pull request has just deleted. Merge it
+with an administrative bypass; the next pull request gates normally.
+
 For a repository migrating from another TACO, that same pull request is
 ungated by both systems at once: the outgoing tool's checks are being removed
 in it, and shipmate's cannot run on it yet. Review it as the one change nothing
 plans.
 
-**The shim job's `permissions:` block must be a superset of every per-job block
-in engine `plan.yml`** — `contents: read`, `pull-requests: read` and
-`id-token: write` between the four jobs. A called workflow's permissions are
-capped at each `uses:` boundary, so a caller that grants less kills the run at
-startup: no job, no log, no annotation, and no `shipmate / gate`. Fail-closed,
-since the pull request cannot merge without the gate, but there is nothing on
-the run page to say why, and no job inside the callee starts either.
-`scripts/tests/test_docs_yaml_parses.py` compares each published shim's block
-against the union its callee requests. Copy the reference shim whole rather
-than trimming its `permissions:` block.
+**Each job's `permissions:` block must be a superset of every per-job block in
+the workflow it calls** — for the `plan` job, `contents: read`,
+`pull-requests: read` and `id-token: write` between engine `plan.yml`'s four
+jobs. A called workflow's permissions are capped at each `uses:` boundary, so a
+caller that grants less kills the run at startup: no job, no log, no annotation,
+and no `shipmate / gate`. Fail-closed, since the pull request cannot merge
+without the gate, but there is nothing on the run page to say why, and no job
+inside the callee starts either. The file's top-level `permissions: {}` grants
+nothing to fall back on, which is the point: a job that loses its block gets
+nothing rather than everything the file granted.
+`scripts/tests/test_docs_yaml_parses.py` compares each published calling job's
+block against the union its callee requests. Copy the reference file whole
+rather than trimming a `permissions:` block.
 
 Under `pull_request_target` a plan run's `head_sha` and `head_branch` are the
 pull request's head commit and branch, not the base branch's — which is why
@@ -1089,15 +1135,17 @@ in the engine placing it there. What *is* base-branch under this trigger is the
 checkout: `GITHUB_SHA` and `GITHUB_REF` name the base, which is why the engine's
 `detect` and `plan` jobs pass `ref: ${{ needs.facts.outputs.head-sha }}`
 explicitly. The two are routinely confused; they are opposite sides of the same
-trigger.
+trigger. The file's other six jobs are skipped under that trigger, each
+completing as a `skipped` check-run on the same head; nothing functional depends
+on them, and `scripts/mirror-checks` does not copy them.
 
 A dispatched plan has neither side: its `head_sha` is a commit on the ref it
 was dispatched on (the default branch), and nothing on the run identifies the
 pull request it was dispatched for. So the checkout's `ref:` is what makes it a
 plan of the pull request there too, and every check-run its own jobs create
 attaches to the dispatch ref rather than to the pull request — which is why the
-`summary` job mirrors the completed per-cell plan checks onto the head commit
-on an `on-demand` run.
+`summary` job mirrors this run's completed `shipmate / ` checks onto the head
+commit on an `on-demand` run.
 
 **Requirement: no job in engine `plan.yml` other than `summary` may reference a
 `shipmate-engine` secret.** Under either trigger every job in that file runs at
@@ -1107,9 +1155,9 @@ branch-authored `env/*` tags, so the file naming no such secret outside
 `summary` is what keeps the key out of branch reach.
 `scripts/tests/test_cells_hold_no_app_key.py` is the guard;
 `docs/github-app.md` §Key-exposure boundary has the reasoning. The consumer's
-shim names `SHIPMATE_APP_PRIVATE_KEY` once, in the `secrets:` block of its
-single job, and that copy of the file is the base branch's or the default
-branch's — never the pull request's own.
+`plan` job names `SHIPMATE_APP_PRIVATE_KEY` in its own `secrets:` block, and
+that copy of the file is the base branch's or the default branch's — never the
+pull request's own.
 
 The four jobs:
 
@@ -1131,8 +1179,8 @@ The four jobs:
   clean plan for a pull request they never read. `actions/build-matrix` refuses
   that: on every trigger it compares the head SHA the run states against the
   commit it is running on. On a pull-request event it also refuses a checkout
-  with no `.github/workflows/plan.yml` — the one path this contract lets the
-  consumer's plan workflow live at. `actions/build-matrix` fails `detect`
+  with no `.github/workflows/shipmate.yml` — the one path this contract lets
+  the consumer's workflow live at. `actions/build-matrix` fails `detect`
   outright unless the run states a head repository equal to the running
   repository: fork pull requests are not planned, and no input permits one. A
   fork's plan would execute the pull request's own Terramate/OpenTofu code with
@@ -1155,51 +1203,53 @@ The four jobs:
   minted inside that environment. This is what creates the pending
   `apply / <stack> / <env>` checks, the sticky plan comment, and the
   `shipmate / gate` status, and — on an `on-demand` run — the mirror of this
-  run's per-cell plan checks onto the pull request's head.
+  run's completed `shipmate / ` checks onto the pull request's head.
   `pull_request_target` evaluates at the base branch ref and a dispatched run at
   the ref it was dispatched on, either of which satisfies the environment's
   policy. It reads every fact it decides on from `needs.facts.outputs`, and the
   rest from the two other jobs' results; nothing is recovered from artifacts or
   from a second API lookup.
 - **`apply.yml` / `apply-all.yml` / `apply-env-level.yml` / `deploy.yml`**
-  (consumer shims, `workflow_dispatch` via comment-ops, or `push` to the default
-  branch) — the jobs that mint an App token (completing apply checks,
-  refreshing the gate, posting the apply result comment) are likewise bound
-  to `shipmate-engine`.
+  (engine, reached through the `targeted`, `all` and `deploy` jobs —
+  `workflow_dispatch` via comment-ops, or `push` to the default branch) — the
+  jobs that mint an App token (completing apply checks, refreshing the gate,
+  posting the apply result comment) are likewise bound to `shipmate-engine`.
 - **`comment-ops.yml`**'s `ops` job (engine, reached through the consumer's
-  `issue_comment` shim) — binds `shipmate-engine` for comment authorization and
-  for the `workflow_dispatch` that kicks off an apply. `issue_comment` evaluates
-  at the default branch's tip, never a PR head, so it satisfies the policy the
-  same way `push` does.
+  `comment-ops` job on `issue_comment`) — binds `shipmate-engine` for comment
+  authorization and for the `workflow_dispatch` that kicks off an apply.
+  `issue_comment` evaluates at the default branch's tip, never a PR head, so it
+  satisfies the policy the same way `push` does.
 - **`drift.yml`**'s `issues` job (engine, reached through the consumer's
-  nightly `schedule` / `workflow_dispatch` shim) — binds `shipmate-engine` to
-  author the drift Issues, and a scheduled or manually dispatched run evaluates
-  at the default branch.
+  `drift` job on the nightly `schedule` or a `workflow_dispatch`) — binds
+  `shipmate-engine` to author the drift Issues, and a scheduled or manually
+  dispatched run evaluates at the default branch.
 
-Nothing matches on the plan workflow's `name:` any more. Doctor reads the
-consumer's workflow files for six probes — stale engine pins,
-`pull_request_target` triggers, a retired `plan_run_id` input in `apply.yml`, a
-retired `mode` input in the same file, the plan shim's calling job name, and its
-dispatch wiring; the last two observe whether the plan comment's per-cell links
-will resolve and whether `shipmate plan` reaches anything at all, and they
-report rather than fail.
+Nothing matches on the workflow's `name:` any more. Doctor reads the consumer's
+workflow files for seven probes — stale engine pins, `pull_request_target`
+triggers, a retired `plan_run_id` input in `shipmate.yml`, a retired `mode`
+input in the same file, its plan-calling job name, its dispatch wiring, and its
+event routing; the last three observe whether the plan comment's per-cell links
+will resolve, whether a commented verb reaches anything at all, and whether the
+job it reaches is the one that verb names — and they report rather than fail.
 
 The file path is still load-bearing, and nothing diagnoses a rename as the
 cause: `actions/build-matrix` refuses a checkout that has no
-`.github/workflows/plan.yml`; `actions/dispatch` sends a commented
-`shipmate plan` to that literal filename, so a renamed shim is dispatched
-nowhere, and the pull request is told only that the dispatch failed, with the
-API's refusal left in the comment-handling run that comment links; and doctor
-keys on the exact name for its `pull_request_target` exemption and for the
-shim's calling-job-name and dispatch-wiring probes, which report nothing on a
-file called anything else. Rename the file and planning is refused from that
-commit on, and the renamed file starts drawing doctor's own
-`pull_request_target` warning. Each symptom surfaces on its own — the refusal
-names the path it looked for — but none of them names the rename.
+`.github/workflows/shipmate.yml`; `actions/dispatch` sends every commented verb
+to that literal filename, naming the verb in the dispatch body, so a renamed
+file is dispatched nowhere, and the pull request is told only that the dispatch
+failed, with the API's refusal left in the comment-handling run that comment
+links; and doctor keys on the exact name for its `pull_request_target`
+exemption and for the calling-job-name, `plan_run_id`, `mode`, dispatch-wiring
+and routing probes, all of which report nothing on a file called anything else.
+Rename the file and planning is refused from that commit on, and the renamed
+file starts drawing doctor's own `pull_request_target` warning. Each symptom
+surfaces on its own — the refusal names the path it looked for — but none of
+them names the rename.
 
-No apply path matches on it any more: a dispatched, bare or post-merge apply
-reads each cell's plan run from that cell's own apply check, so a renamed plan
-workflow no longer strands work already planned.
+No apply path matches on it to find work already planned: a dispatched, bare or
+post-merge apply reads each cell's plan run from that cell's own apply check, so
+a rename strands nothing that was planned before it. It does stop the dispatch
+itself, for apply exactly as for plan.
 
 Both trust decisions live on the `summary` job's `if:`, in engine-owned,
 SHA-pinned YAML, and so do the facts they read:
@@ -1226,8 +1276,8 @@ Producing them and comparing them are now the same file, so the three
 mis-wirings this contract used to enumerate — a constant
 `head-repo: ${{ github.repository }}`, a literal `is-draft: false`, a literal
 `on-demand: true`, each of which stated the safe answer for every run, forks and
-drafts included — have no site left to be written at. The shim passes secrets,
-permissions and `state_suffix`; the engine decides everything else.
+drafts included — have no site left to be written at. The consumer's file passes
+secrets, permissions and `state_suffix`; the engine decides everything else.
 
 `summary` deliberately does not require `detect` or `plan` to have succeeded: a
 failed detect or plan must still produce a red gate with an explanation, because
@@ -1372,11 +1422,11 @@ but fall in different slices are caught by no scoped sweep. An unscoped drift
 run stays the whole-tree check for that.
 
 This naming contract is breaking for any in-flight plan artifacts: land the
-change when no applies are mid-flight. It also spans two consumer workflow
-files pinned independently — `plan.yml` pins `plan-cell` (the uploader) and
-`apply.yml` pins the engine's reusable apply workflows, which pin
-`apply-cell` (the downloader) internally. Bump both
-pins together when adopting a build that changes this name: a partial
+change when no applies are mid-flight. It also spans two engine references
+pinned independently in the consumer's `shipmate.yml` — its `plan.yml` reference
+pins `plan-cell` (the uploader) and its `apply.yml` reference pins the engine's
+reusable apply workflows, which pin `apply-cell` (the downloader) internally.
+Bump both pins together when adopting a build that changes this name: a partial
 bump (uploader on the new name, downloader on the old, or vice versa) makes
 every apply fail its reviewed-plan download fail-safe until the pins agree.
 
@@ -1404,9 +1454,10 @@ verbatim:
   init and a plan text that did not match what was reviewed included).
 
 `apply-cell` (writer) and `scripts/apply-comment` (reader, via
-`actions/apply-summary`) are pinned by the same SHA in a consumer's
-`apply.yml` / `apply-all.yml`, so the schema upgrades atomically; the reader
-fails loud on a `cell.json` missing schema keys or carrying an out-of-enum
+`actions/apply-summary`) are pinned by the same SHA in the consumer's
+`shipmate.yml`, on its `apply.yml` / `apply-all.yml` references, so the schema
+upgrades atomically; the reader fails loud on a `cell.json` missing schema keys
+or carrying an out-of-enum
 `result` rather than rendering around pin skew.
 
 ## Plan comment
@@ -1481,10 +1532,10 @@ with the glob pattern `cell-summary.*`. It contains verbatim:
   apply check; the apply re-renders the stored plan and refuses a difference
   (§Apply-match fingerprint).
 
-`plan-cell` (writer) and `summary` (reader) are pinned by the same SHA in a
-consumer's `plan.yml`, so the schema upgrades atomically; the summary
-fails loud on a `cell.json` missing schema keys rather than rendering around
-pin skew.
+`plan-cell` (writer) and `summary` (reader) are pinned by the same SHA in the
+consumer's `shipmate.yml`, on its `plan.yml` reference, so the schema upgrades
+atomically; the summary fails loud on a `cell.json` missing schema keys rather
+than rendering around pin skew.
 
 The count those summaries are measured against is not an artifact: `detect`
 declares it as the `count` output of `actions/build-matrix`, and the `summary`
@@ -1734,8 +1785,8 @@ as the optional `SHIPMATE_PLAN_PASSPHRASE` secret into the reusable
 merge-deploy path, via the engine `apply-all.yml` for the bare form, and via
 the engine `apply.yml` for the targeted form. Consumers set
 `SHIPMATE_PLAN_PASSPHRASE` as a repository secret and forward it by name
-in the `secrets:` block of their `deploy.yml` and `apply.yml` wrapper workflows.
-Never `secrets: inherit`: it hands the engine the caller's whole secret set, and
+in the `secrets:` block of their `shipmate.yml`'s `plan`, `deploy`, `targeted`
+and `all` jobs. Never `secrets: inherit`: it hands the engine the caller's whole secret set, and
 across an organization boundary it delivers nothing at all.
 
 Not an environment secret, and specifically not on `shipmate-engine`: a
@@ -1765,8 +1816,9 @@ produced, which is any branch; `docs/hardening.md` #7–9 says to treat it so.
   machine plan at rest and nothing else; redaction in the published text comes
   from `sensitive` marking (see Secrets in published output, above).
 - **Both sides must agree.** `plan-cell` (encrypt) and `apply-cell` (decrypt) are
-  pinned independently (`plan.yml` vs `apply.yml`); the passphrase and the
-  engine SHA must match on both. A mismatch surfaces as the fail-safe above, not
+  pinned independently (the `plan.yml` and `apply.yml` references in the
+  consumer's `shipmate.yml`); the passphrase and the engine SHA must match on
+  both. A mismatch surfaces as the fail-safe above, not
   a silent wrong apply.
 
 ## Engine-owned tofu invocation
@@ -1919,14 +1971,13 @@ targeted path as `.github/workflows/apply.yml` (single-env detect → one
 `apply-env-level.yml` call → gate refresh + result comment), and the unlock path
 as `.github/workflows/unlock.yml` (guard → single-env detect → one flat unlock
 matrix; it takes `environment` and `ref` only, and declares no secrets). A
-consuming repo carries three thin wrappers on this side: `deploy.yml`
-(`on: push` to the default branch; passes only its flavor's `state_suffix`,
-which it sets to `''` on a remote backend), `apply.yml` (`workflow_dispatch`;
-its optional `environment` input routes to the targeted or bare engine workflow)
-and `unlock.yml` (`workflow_dispatch`; one call, no `state_suffix` and no
-`secrets:` block). All three must grant `id-token: write` on the calling
-job, added in the same pull request that repins past the change introducing it
-(see AWS OIDC, above).
+consuming repo reaches all four from `shipmate.yml`: the `deploy` job (on
+`push` to the default branch; passes only its flavor's `state_suffix`, which it
+sets to `''` on a remote backend), the `targeted` and `all` jobs (dispatched
+`apply`, split on whether an `environment` was given) and the `unlock` job
+(dispatched `unlock`; no `state_suffix` and no `secrets:` block). All four must
+grant `id-token: write`, added in the same pull request that repins past the
+change introducing it (see AWS OIDC, above).
 
 ## OpenTofu note
 
