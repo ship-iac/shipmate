@@ -98,10 +98,8 @@ review while the rest keep the branch ruleset's requirement. The exemption is
 opt-in, and re-pinning exempts nothing on its own (it does change two other
 things for every consumer — see below):
 
-1. set the `SHIPMATE_UNGATED_ENVS` repository variable,
-2. add `ungated-envs: ${{ vars.SHIPMATE_UNGATED_ENVS }}` to the `comment-ops`
-   step in your `comment-ops.yml`, and
-3. re-pin both engine references in your `apply.yml` — the targeted job's
+1. set the `SHIPMATE_UNGATED_ENVS` repository variable, and
+2. re-pin both engine references in your `apply.yml` — the targeted job's
    `.github/workflows/apply.yml@` and the bare job's
    `.github/workflows/apply-all.yml@` — to this release too, not only
    `comment-ops.yml`. The files carry separate pins, and an apply is authorized
@@ -110,11 +108,9 @@ things for every consumer — see below):
    every pending environment applies through a stale `apply-all.yml@`, and
    the named environment applies through a stale `apply.yml@`. This is
    §Re-pinning's one-change rule; on this feature breaking it fails open
-   rather than loudly. The two are not equally likely: the bare-apply edge
-   needs the full opt-in aligned, while the targeted edge is also reached by
-   the step-2 literal mis-wiring below on its own, no opt-in needed — see
+   rather than loudly. Both edges need the variable set — see
    §"Applying chosen environments without an approving review" in
-   [`getting-started.md`](getting-started.md) for that ranking in full.
+   [`getting-started.md`](getting-started.md).
 
 With the variable unset, every environment keeps its review requirement, so
 *what applies* is unchanged. Three things do change for everyone, opted in or
@@ -137,14 +133,12 @@ an unconditional `review` job:
   review decision, so an approval dismissed between the comment and the
   dispatch applied anyway. The engine re-reads it at apply time and holds.
 
-With the variable set but the workflow line left out, `shipmate apply` refuses
-exactly as it does today — comment-ops receives an empty list, so both the
-targeted and the bare form are refused. That is the expected failure mode of a
-half-finished opt-in, and it is the one worth recognizing: the refusal is not a
-bug. Writing it as a literal list rather than the variable reference in
-step 2 now costs a wasted run rather than an unreviewed apply — the engine reads
-the variable itself on both paths and refuses what the variable does not exempt.
-See [`getting-started.md`](getting-started.md) §"Applying chosen environments
+The workflow line this section used to ask for is gone: engine
+`comment-ops.yml` passes `ungated-envs: ${{ vars.SHIPMATE_UNGATED_ENVS }}`
+itself, and `vars` inherit into a called workflow, so the variable resolves in
+your repository with nothing to wire. A consumer moving to the shims deletes
+that line along with the rest of the file's body (§Unreleased). See
+[`getting-started.md`](getting-started.md) §"Applying chosen environments
 without an approving review".
 
 Two things it does not change, worth confirming against your own policy before
@@ -158,6 +152,86 @@ An entry applies only if you are moving *from* a pin older than the release it
 names. The entries below `0.2.0` predate the first tagged release, or
 `CHANGELOG.md` does not pin one; they are kept for repositories moving from a
 very old pin.
+
+### Unreleased — `plan.yml`, `drift.yml` and `comment-ops.yml` become shims
+
+**This release is breaking for every consumer.** The pin bump and the body
+rewrite of those three files land in **one commit**. A new shim against an old
+pin is a load-time rejection — no job, no check run and no log, only a
+workflow-validation error on the run itself — and an old inline body against the
+new pin fails the same way, because the engine summary workflow it calls no
+longer exists as a file.
+`dev/repin_consumer.py` rewrites pins and nothing else, so the body edit is by
+hand.
+
+**Check `AWS_ROLE_ARN` before you re-pin.** The engine's `plan.yml` and
+`drift.yml` run the apply path's `aws-actions/configure-aws-credentials` step in
+every plan and drift cell, gated on `AWS_ROLE_ARN` — or the cell's
+`AWS_ROLE_ARN_<WORKLOAD>` — resolving non-empty. `vars` resolve organization →
+repository → environment, so a repository- or organization-level `AWS_ROLE_ARN`
+set for the apply path is now read by every plan and drift cell as well. Before
+this release nothing on the plan path read it unless the consumer's own
+`plan.yml` wrote a credentials step — which is what `repo-example-stacks-aws`
+did, and what a consumer who wrote none never had. A plan cell executes
+branch-authored HCL — a provider or an `external` data source runs at plan time
+— so that role becomes reachable by anyone who can push a branch (fork pull
+requests are refused in `detect` before a cell exists); a drift cell runs merged
+default-branch code, so what it gains is an apply role where a read-only one
+belongs. Nothing in the engine bounds either; the role's own trust policy does.
+A claim condition naming `repo:<owner>/<repo>:environment:<env>-apply` refuses
+the `<env>-plan` token, so **every plan cell goes red at the credentials step**
+— that failure is the safe configuration announcing itself, and the fix is a
+read-only plan role on each `<env>-plan` ([`aws.md`](aws.md) §Environment
+variables), not a widened trust policy. A repository-wide claim condition does
+not refuse it, and that configuration hands apply credentials to a plan of any
+branch. Check the claim condition on every role a plan environment can now name
+([`hardening.md`](hardening.md) §7–9).
+
+The three bodies are in [`getting-started.md`](getting-started.md) §Required —
+plan and §The apply workflows, and [`drift.md`](drift.md) §The workflow. Replace
+each file's contents with the shim there. For `plan.yml` and `drift.yml`, keep
+your own `state_suffix`, your runner label and any `tags:` value your drift files
+carry. `comment-ops.yml` takes none of them: engine `comment-ops.yml` declares no
+`workflow_call` inputs at all and its `ops` job fixes `runs-on: ubuntu-latest`,
+so any `with:` block on that shim is the load-time rejection above.
+
+1. **Delete the `summary:` job.** It was a job inside your `plan.yml`, not a
+   file of its own, so what goes is the job block — the whole shim replaces it.
+2. **Name the calling job `shipmate`.** GitHub names a called workflow's check
+   runs `<caller job> / <callee job>`, and `scripts/summary-comment` resolves
+   each plan comment row's `[plan]` link by that exact name. Under any other
+   name the plan still runs and the gate is unaffected; every one of those links
+   falls back to the workflow-run page instead of the cell's own check.
+   `shipmate doctor` reports it.
+3. **The per-cell plan check name changes** from `<stack> / <env>` to
+   `shipmate / <stack> / <env>`. Anyone who listed a per-cell plan check as a
+   required status check in a ruleset must update it. The aggregate
+   `shipmate / gate` is unchanged, and it is the only check
+   [`branch-protection.md`](branch-protection.md) asks you to require.
+4. **`drift.yml`'s `workflow_dispatch` `tags` input is gone** from the shipped
+   shape. A manual run sweeps whatever literal that file's `with:` block names;
+   [`drift.md`](drift.md) §An ad-hoc scoped sweep is the shape to add back if
+   you want the prompt.
+5. **Set `state_suffix` on `plan.yml` and `drift.yml`.** It is your flavor's
+   per-stack state path suffix — `.state`, `terraform.tfstate`,
+   `terraform.tfstate.d` — or `""` for a remote backend: the same value your
+   `deploy.yml` and `apply.yml` shims already pass. `comment-ops.yml` takes no
+   input at all.
+6. **Grant the whole permission union on the `plan.yml` and `drift.yml` calling
+   jobs.** A called workflow's permissions are capped at the `uses:` boundary,
+   and each callee's jobs request between them `contents: read`,
+   `pull-requests: read` and `id-token: write` for `plan.yml`, and
+   `contents: read`, `id-token: write` and `actions: read` for `drift.yml`.
+   `comment-ops.yml` is unaffected: its `ops` job asks for `contents: read`,
+   `issues: write`, `pull-requests: write` and `actions: read`, and for no
+   `id-token: write` — paste its shim from
+   [`getting-started.md`](getting-started.md) §The apply workflows as it
+   stands. Granting less than a callee requests kills the run at startup with no
+   job and no log.
+
+Nothing changes for environments, secrets or the App. The ruleset changes only
+where it lists a per-cell plan check (step 3), and variables change as the
+`AWS_ROLE_ARN` paragraph above sets out.
 
 ### 0.24.0 — the reviewed plan text is bound to the plan that applies; re-plan open pull requests
 
@@ -435,7 +509,7 @@ both only start working once the edit is merged. If you require
 `shipmate / gate`, the recovery path is §0.18.0's.
 
 **The pin bump and these edits must land in the same commit.** The other order
-fails quietly: a wrapper passing `on-demand` to a `summary.yml` still at the
+fails quietly: a wrapper passing `on-demand` to a summary workflow still at the
 old pin declares no such input, and an undeclared reusable-workflow input is a
 load-time rejection: the run ends as `startup_failure` with no job and no
 retrievable log.
@@ -562,7 +636,8 @@ on the `build-matrix` step of `detect`:
           head-repo: ${{ github.event.pull_request.head.repo.full_name }}
 ```
 
-and on the `summary` job's call of the engine's `summary.yml`:
+and on the `summary` job's call of the engine's summary workflow (folded into
+the engine's plan workflow in §Unreleased):
 
 ```yaml
     with:
@@ -581,17 +656,16 @@ current shape.
 
 **Pass those expressions, not constants.** A literal `is-draft: false` claims
 "not a draft" for every run, and `head-repo: ${{ github.repository }}` passes the
-fork check for every pull request, fork ones included. `shipmate doctor` reports
-either — absent or wrong — on the `summary` call, and reports the `build-matrix`
-step's own `head-repo` the same way. It reads only a file named `plan.yml`, so a
-plan wrapper under another name is checked by review or not at all, and it has
-nothing to say about `is-draft` on `build-matrix`, which takes no such input.
+fork check for every pull request, fork ones included. `shipmate doctor` reported
+each of those while a consumer owned the wiring; §Unreleased moves both the facts
+and the comparison inside the engine, and those probes were retired with it.
 
 If you run the optional nightly drift workflow, add `no-pull-request: "true"`
 to its `build-matrix` step ([`drift.md`](drift.md)). A drift run has no pull
 request to state a head repository for, and this is how it says so. It belongs
-in that file only: `doctor` reports a `no-pull-request` in `plan.yml`, because
-there it turns the fork refusal off for every pull request.
+in that file only: in `plan.yml` it turns the fork refusal off for every pull
+request. As of §Unreleased the engine passes it, and no consumer file carries
+it.
 
 **The pin bump and these edits must land in the same commit.** The three
 failure modes look nothing alike:
@@ -927,8 +1001,12 @@ no job and no log:
 
 | Your wrapper job calls | Pass |
 |---|---|
-| `summary.yml` (in `plan.yml`) | `SHIPMATE_APP_PRIVATE_KEY` |
+| the summary workflow (in `plan.yml`) | `SHIPMATE_APP_PRIVATE_KEY` |
 | `apply.yml`, `apply-all.yml`, `deploy.yml` | that and `SHIPMATE_PLAN_PASSPHRASE` |
+
+§Unreleased folds the summary workflow into the engine's `plan.yml` and
+[`getting-started.md`](getting-started.md) §Why the shims name their secrets
+carries the current table.
 
 ```yaml
     secrets:
@@ -957,13 +1035,14 @@ pending `apply / <stack> / <env>` checks, no sticky comment.
 
 ### 0.10.0 — the plan path is one workflow, and re-pinning alone is not enough
 
-You must rewrite `.github/workflows/plan.yml` and delete
+You must rewrite `.github/workflows/plan.yml` and delete your own
 `.github/workflows/summary.yml` in the same change that moves your pins. A
 repository that re-pins without rewriting gets no `shipmate / gate`, so its pull
 requests cannot merge — the old `workflow_run` topology is not supported.
 
 `plan.yml` moves to `pull_request_target` and gains a third job, `summary`,
-which is `uses: <owner>/shipmate/.github/workflows/summary.yml@<sha>` with
+which calls the engine's summary workflow — a file of its own at this release,
+folded into the engine's `plan.yml` in §Unreleased — with
 `secrets: { SHIPMATE_APP_PRIVATE_KEY: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }} }`
 — that secret alone, since a callee rejects a name it does not declare — and
 five inputs (`pr-number`, `head-sha`, `detect-result`,
@@ -973,7 +1052,7 @@ run at startup with no job, no log and no annotation to explain it. Because
 `pull_request_target` checks out the base by default, `detect` and `plan` must
 name the pull request's head SHA on their checkout's `ref:`
 explicitly — without it they plan the base branch and report a clean plan for a
-pull request they never read (refused outright since `0.17.0`). The consumer's own `summary.yml` is deleted; the
+pull request they never read (refused outright since `0.17.0`). The consumer's own summary workflow file is deleted; the
 engine's is a `workflow_call` workflow whose single job binds `shipmate-engine`,
 checks out nothing, and carries both trust conditions (the fork refusal and the
 draft skip) where a consumer cannot drop them. As of `0.18.0` the caller states

@@ -2,9 +2,10 @@
 `external` data sources, modules), so they must hold no App key -- the
 credentialed work lives in the trusted trailing jobs.
 
-One parsed-assertion implementation covers both cells: `apply-cell` (which runs
-`tofu apply`) and `drift-cell` (which runs `tofu plan` from a policy-free plan
-environment reachable off any branch).
+One parsed-assertion implementation covers all three: `apply-cell`, which runs
+`tofu apply`; `drift-cell`, which runs `tofu plan` from a policy-free plan
+environment reachable off any branch; and `plan-cell`, which runs `tofu plan`
+over a pull request's head.
 
 Every assertion is on the parsed action.yml. A raw-text form (`"private-key" not in text`,
 `"create-github-app-token" not in text`) is vacuous twice over: a comment naming either one
@@ -16,7 +17,7 @@ import pytest
 import yaml
 from _loader import WORKFLOWS, action_steps, action_yaml
 
-CELLS = ("apply-cell", "drift-cell")
+CELLS = ("apply-cell", "drift-cell", "plan-cell")
 
 #: `uses:` repos that mint a GitHub App installation token. Matched on the repo part alone, so a
 #: version bump or a SHA re-pin cannot slip past.
@@ -30,6 +31,11 @@ TOKEN_MINTERS = (
 APP_KEY_ENV = "SHIPMATE_APP_PRIVATE_KEY"
 
 LEVEL = WORKFLOWS / "apply-env-level.yml"
+
+PLAN_WF = WORKFLOWS / "plan.yml"
+#: Every job in plan.yml that runs repository content. `summary` is deliberately absent: it is
+#: the one job that holds the key, and it checks nothing out.
+UNTRUSTED_PLAN_JOBS = ("facts", "detect", "plan")
 
 
 def _strings(node):
@@ -84,6 +90,34 @@ def test_only_the_completer_job_reads_the_app_key():
             assert APP_KEY_ENV in body
         else:
             assert APP_KEY_ENV not in body, name
+
+
+@pytest.mark.parametrize("job_id", UNTRUSTED_PLAN_JOBS)
+def test_plan_workflow_untrusted_jobs_never_reach_the_app_key(job_id):
+    """plan.yml declares the App key so its `summary` job can mint. Declaring it puts the secret
+    in the file's scope, and the three untrusted jobs must not reference it -- by an `env:`
+    value, a `with:` value or a `run:` body. Two of them check out and execute pull-request
+    content; `facts` checks nothing out, but it runs on the same untrusted side of the file.
+
+    Mutation: add `env: { K: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }} }` to the `plan` job.
+    """
+    job = yaml.safe_load(PLAN_WF.read_text(encoding="utf-8"))["jobs"][job_id]
+    hits = [s for s in _strings(job) if APP_KEY_ENV in s]
+    assert not hits, f"plan.yml job `{job_id}` references the App key: {hits}"
+
+
+@pytest.mark.parametrize("job_id", UNTRUSTED_PLAN_JOBS)
+def test_plan_workflow_untrusted_jobs_bind_no_engine_environment(job_id):
+    """`shipmate-engine` alone, not every credentialed environment: the `plan` job binds a shared
+    bare `<env>` whenever the consumer lists it in SHIPMATE_SHARED_ENVS, which is the documented
+    shared-envs trade-off. `shipmate-engine` holds the App key and its branch policy trusts the
+    base ref -- exactly the ref `pull_request_target` runs at -- so a job that binds it and checks
+    out the pull request head is the canonical pull_request_target vulnerability.
+
+    Mutation: set `environment: shipmate-engine` on the `detect` job.
+    """
+    job = yaml.safe_load(PLAN_WF.read_text(encoding="utf-8"))["jobs"][job_id]
+    assert "shipmate-engine" not in str(job.get("environment", ""))
 
 
 def test_the_completer_is_the_only_job_naming_the_engine_environment():

@@ -1,9 +1,14 @@
-"""Guards the AWS OIDC wiring in the apply-path reusable workflows.
+"""Guards the AWS OIDC wiring in the reusable workflows that run a cell.
 
 Invariants:
-- every wave job in apply-env-level.yml carries id-token: write, exactly one credentials step
-  gated on the workload role or vars.AWS_ROLE_ARN, placed before the apply-cell step, and the
-  empty-suffix state-path expression;
+- every cell-running job -- apply-env-level.yml's waves, plan.yml's `plan`, drift.yml's `drift`
+  -- carries exactly one credentials step gated on the workload role or vars.AWS_ROLE_ARN and
+  placed before its cell step, with the gate and the role expression byte-identical across the
+  three files. Byte-identity is the property: the plan and drift cells resolve the same
+  per-workload override the wave jobs do, and a collapse to a bare `vars.AWS_ROLE_ARN` on either
+  hands a workload-tagged cell the broader role while the run stays green;
+- every wave job in apply-env-level.yml carries id-token: write and the empty-suffix state-path
+  expression;
 - apply-env-level.yml and unlock.yml declare a workflow-level `permissions: {}` floor, and
   apply-env-level's snapshot and complete jobs declare exactly the scopes they need. Neither gets
   id-token: neither touches the cloud, and complete holds the App key;
@@ -32,6 +37,12 @@ STATE_PATH_EXPR = (
     "${{ inputs.state_suffix != '' && format('{0}/{1}', matrix.stack, inputs.state_suffix) || '' }}"
 )
 WAVES = [f"wave{i}" for i in range(8)]
+#: (workflow, cell-running job ids, cell action) -- the three files that must agree.
+CELL_JOBS = [
+    ("apply-env-level.yml", WAVES, "apply-cell"),
+    ("plan.yml", ["plan"], "plan-cell"),
+    ("drift.yml", ["drift"], "drift-cell"),
+]
 
 
 def _load(name):
@@ -40,15 +51,19 @@ def _load(name):
     return spec
 
 
-def _is_cell(step):
-    return "/actions/apply-cell@" in str(step.get("uses", ""))
+def _is_cell(step, action="apply-cell"):
+    return f"/actions/{action}@" in str(step.get("uses", ""))
+
+
+def _cell_jobs(workflow, job_ids):
+    jobs = _load(workflow)["jobs"]
+    missing = [j for j in job_ids if j not in jobs]
+    assert not missing, f"{workflow} lost cell jobs: {missing}"
+    return {j: jobs[j] for j in job_ids}
 
 
 def _wave_jobs():
-    jobs = _load("apply-env-level.yml")["jobs"]
-    missing = [w for w in WAVES if w not in jobs]
-    assert not missing, f"apply-env-level.yml lost wave jobs: {missing}"
-    return {w: jobs[w] for w in WAVES}
+    return _cell_jobs("apply-env-level.yml", WAVES)
 
 
 def test_every_wave_job_grants_id_token_write():
@@ -83,24 +98,34 @@ def test_snapshot_and_complete_jobs_get_exactly_their_declared_permissions():
         )
 
 
-def test_every_wave_has_exactly_one_gated_cred_step_before_apply_cell():
-    for wave, job in _wave_jobs().items():
+@pytest.mark.parametrize(
+    ("workflow", "job_ids", "action"), CELL_JOBS, ids=[c[0] for c in CELL_JOBS]
+)
+def test_every_cell_job_has_exactly_one_gated_cred_step_before_its_cell(workflow, job_ids, action):
+    """The same two hand-written constants for all three files, never one per file: a plan or
+    drift cell that resolves the role differently from a wave job is the defect this catches, and
+    a per-file constant would follow the divergence instead of failing on it.
+
+    Mutations, each reddening only its own case: `role-to-assume` collapsed to
+    `${{ vars.AWS_ROLE_ARN }}` in plan.yml, the `if:` gate rewritten in drift.yml, and the whole
+    step deleted from plan.yml.
+    """
+    for job_id, job in _cell_jobs(workflow, job_ids).items():
+        where = f"{workflow} `{job_id}`"
         steps = job["steps"]
         cred_idx = [i for i, s in enumerate(steps) if CRED_ACTION in str(s.get("uses", ""))]
         assert len(cred_idx) == 1, (
-            f"{wave}: expected exactly one credentials step, got {len(cred_idx)}"
+            f"{where}: expected exactly one credentials step, got {len(cred_idx)}"
         )
         cred = steps[cred_idx[0]]
         assert cred.get("if") == CRED_IF, (
-            f"{wave}: credentials step must be gated on the workload role or AWS_ROLE_ARN"
+            f"{where}: credentials step must be gated on the workload role or AWS_ROLE_ARN"
         )
-        assert cred["with"]["role-to-assume"] == ROLE_TO_ASSUME
+        assert cred["with"]["role-to-assume"] == ROLE_TO_ASSUME, where
         assert cred["with"]["aws-region"] == "${{ vars.AWS_REGION }}"
-        cell_idx = [i for i, s in enumerate(steps) if _is_cell(s)]
-        assert len(cell_idx) == 1, f"{wave}: expected exactly one apply-cell step"
-        assert cred_idx[0] < cell_idx[0], (
-            f"{wave}: credentials must be configured before apply-cell"
-        )
+        cell_idx = [i for i, s in enumerate(steps) if _is_cell(s, action)]
+        assert len(cell_idx) == 1, f"{where}: expected exactly one {action} step"
+        assert cred_idx[0] < cell_idx[0], f"{where}: credentials must be configured before {action}"
 
 
 def test_every_wave_passes_empty_state_path_when_suffix_empty():

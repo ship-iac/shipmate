@@ -50,8 +50,8 @@ rather than one conditional attribute because Terramate 0.17.1 has no
 `tm_unset()`, and a bare `unset` emits `assume_role = unset`, which survives
 `fmt` and `validate` and dies at `init`.
 
-Because the backend owns the state, the `apply.yml` and `deploy.yml` wrappers
-pass `state_suffix: ""`. That is the explicitly-empty mode of
+Because the backend owns the state, the `plan.yml`, `drift.yml`, `apply.yml`
+and `deploy.yml` shims all pass `state_suffix: ""`. That is the explicitly-empty mode of
 [`../CONTRACT.md`](../CONTRACT.md) §State backend: both `actions/state` steps are
 skipped entirely and shipmate never handles a state file. The input declares no
 default, so omitting it is a workflow-resolution error rather than a third mode.
@@ -126,8 +126,9 @@ repository renamed or recreated under an old name cannot inherit the trust.
 
 ## Environment variables
 
-A consumer opts into AWS OIDC by setting two GitHub Environment variables.
-Neither is a secret:
+A consumer opts into AWS OIDC by setting two variables. A GitHub Environment is
+where they belong — see below — but not where GitHub stops looking. Neither is
+a secret:
 
 - `AWS_ROLE_ARN` — the IAM role the job assumes.
 - `AWS_REGION` — the region passed to the credentials step.
@@ -140,8 +141,11 @@ On the apply path a third, optional variable takes precedence:
   tag, or that variable is unset, the job falls back to `AWS_ROLE_ARN`.
 
 With no role variable set the engine's credentials step is skipped and the job
-holds no cloud credential at all, which is how the three non-AWS sample
-repositories run credential-free.
+holds no cloud credential at all. *Unset* means unset at all three levels:
+`vars` resolve organization → repository → environment, so a job whose
+environment names no role still reads whatever the repository or the
+organization names, and the step fires. The three non-AWS sample repositories
+run credential-free because none of the three levels names a role.
 
 `AWS_ROLE_ARN_<WORKLOAD>` changes the Environment-count arithmetic. Without it,
 one role per workload means one Environment per (env × region × workload). With
@@ -152,8 +156,8 @@ Set the variables per environment, never at repository or organization level:
 
 - on each `<env>-apply` you want cloud access from — that is the apply path, where
   the engine reads them ([`hardening.md`](hardening.md) #18);
-- and, only if your `plan.yml` carries its own credentials step, on each
-  `<env>-plan` environment too, with a read-only plan role. That is what
+- and on each `<env>-plan` environment you want plan-time or drift-time cloud
+  access from, with a read-only plan role. That is what
   `repo-example-stacks-aws` does: its plan environments name a read-only role
   and its apply environments name the apply role. A plan
   environment can have no approval rules and no branch policy at all
@@ -168,14 +172,18 @@ nothing in the engine to guard it. The role's trust policy is the real bound.
 
 ## Where the credentials step goes
 
-**On the apply and unlock paths the consumer writes no credentials step.** The
-engine's `apply-env-level.yml` runs `aws-actions/configure-aws-credentials` in
-every wave job itself — after `actions/setup`, before `apply-cell`, gated on
-either role being set — reading the variables from the apply environment the job
-is bound to (`<env>-apply`, or the bare `<env>` in shared mode); `unlock.yml`'s
-unlock job carries the same step in the same position. The wrapper's only
-obligation is `id-token: write` on the calling job (see
-[`getting-started.md`](getting-started.md) §Required — apply).
+**The consumer writes no credentials step on any path.** Every engine job that
+runs a cell carries `aws-actions/configure-aws-credentials` itself — after
+`actions/setup`, before the cell action, gated on either role resolving
+non-empty — reading the variables against the environment that job is bound to,
+and, where that environment sets neither, against the repository and the
+organization behind it (§Environment variables above). That is the
+wave jobs of `apply-env-level.yml` and `unlock.yml`'s unlock job on the apply
+side, reading `<env>-apply` (or the bare `<env>` in shared mode), and
+`plan.yml`'s `plan` job and `drift.yml`'s `drift` job on the plan side, reading
+`<env>-plan` (or that same bare `<env>`). A shim's only obligation is
+`id-token: write` on its calling job (see
+[`getting-started.md`](getting-started.md) §Required — plan).
 
 The plan-side role lives on the `<env>-plan` environment. In shared mode — a
 logical env listed in `SHIPMATE_SHARED_ENVS` binds one bare `<env>` on both paths
@@ -184,18 +192,20 @@ role: plan-time branch code and the drift run then have write access, and the
 read-only plan role is unreachable for that env
 ([`hardening.md`](hardening.md) §7–9).
 
-**On the plan and drift paths the step is the consumer's own.** `plan.yml` and
-`drift.yml` are consumer-owned workflows, and the engine provides no credentials
-step there. In both sample workflows it sits in the same position: after the
-`ship-iac/shipmate/actions/setup` step and before the cell action (`plan-cell`,
-`drift-cell`), so the assumed session exists by the time `tofu` runs and setup
-has not yet been given a credential it does not need.
+**The plan and drift steps resolve a workload role too.** Like the wave jobs,
+they look first for `AWS_ROLE_ARN_<WORKLOAD>` — the cell's `workload/<name>` tag
+upper-cased with `-` replaced by `_` — and fall back to `AWS_ROLE_ARN`. A
+repository that sets a per-workload variable on a plan environment therefore has
+its plan and drift cells assume that role rather than the bare one.
 
-Both sample steps are unconditional, because that repository sets the variables
-on every environment. If some of your environments run credential-free, guard
-your step with `if: ${{ vars.AWS_ROLE_ARN != '' }}`. With the variable unset,
-`configure-aws-credentials` has no role to assume and the cell fails there rather
-than skipping.
+Every one of these steps is skipped only where neither variable resolves at any
+level — environment, repository or organization. An environment that sets
+neither is therefore not credential-free on its own: a repository- or
+organization-level `AWS_ROLE_ARN` set for the apply path is what every plan and
+drift cell then assumes, and the only thing that refuses it is the role's own
+trust-policy claim condition ([`hardening.md`](hardening.md) §7–9). Where no
+level sets either variable the job holds no cloud credential and the environment
+needs no opt-out.
 
 ## A green plan does not size either policy
 

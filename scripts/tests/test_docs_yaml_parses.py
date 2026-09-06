@@ -137,10 +137,15 @@ def test_the_wrapper_snippets_are_still_being_found():
         for _, target, _ in _engine_workflow_calls(yaml.safe_load(body))
     )
     assert found == [
+        # Two: the unscoped nightly shim, and the `drift-<slice>.yml` copy under
+        # "Spreading a sweep across the week" that carries a literal `tags:` value.
+        ("docs/drift.md", "drift.yml"),
+        ("docs/drift.md", "drift.yml"),
         ("docs/getting-started.md", "apply-all.yml"),
         ("docs/getting-started.md", "apply.yml"),
+        ("docs/getting-started.md", "comment-ops.yml"),
         ("docs/getting-started.md", "deploy.yml"),
-        ("docs/getting-started.md", "summary.yml"),
+        ("docs/getting-started.md", "plan.yml"),
         ("docs/getting-started.md", "unlock.yml"),
     ], f"documented engine reusable-workflow calls changed: {found}"
 
@@ -195,6 +200,102 @@ def test_documented_wrapper_passes_exactly_the_declared_engine_inputs(page, line
         assert not unpassed, (
             f"{where} omits {unpassed}, which `{target}` declares required -- the call "
             "is rejected before any job starts"
+        )
+
+
+def _workflow_call_secrets(target):
+    """{name: spec} for the engine callee's declared `workflow_call` secrets.
+
+    Read from the callee, like `_workflow_call_inputs`: here the hand-written side is the
+    registry itself.
+    """
+    doc = yaml.safe_load((WORKFLOWS / target).read_text(encoding="utf-8"))
+    on = doc.get("on", doc.get(True))
+    return (on["workflow_call"].get("secrets") or {}) if isinstance(on, dict) else {}
+
+
+@pytest.mark.parametrize("target", sorted(ENGINE_CALL_SECRETS))
+def test_the_secrets_registry_holds_each_callees_exact_declaration_set(target):
+    """`_loader.ENGINE_CALL_SECRETS` claims each entry is the callee's exact declaration set, and
+    nothing checked it: both guards that read the registry compare a *shim* against it, never it
+    against the callee.
+
+    Same failure mode the inputs guard above names. Mapping a secret the callee does not declare
+    is a load-time rejection -- no job, no check-run, no retrievable log -- so a callee that
+    retires one leaves every shim the registry blesses dead, with the registry and the shims in
+    perfect agreement.
+
+    Mutation: add a key to `_loader._APP_KEY` and "fix" the documented `drift.yml` and
+    `comment-ops.yml` shims to match. That agreement is exactly what this refuses as evidence.
+    """
+    declared = sorted(_workflow_call_secrets(target))
+    assert sorted(ENGINE_CALL_SECRETS[target] or {}) == declared, (
+        f"_loader.ENGINE_CALL_SECRETS[{target!r}] names "
+        f"{sorted(ENGINE_CALL_SECRETS[target] or {})}, but `{target}` declares {declared}"
+    )
+
+
+#: Grant strength. A callee job asking for `read` is satisfied by a caller granting `write`, so
+#: the comparison is by rank and not by equality.
+_GRANTS = ("none", "read", "write")
+
+
+def _callee_permissions_union(target):
+    """{scope: strongest grant} over every job of the engine callee.
+
+    Derived from the callee, not hand-written: this guard compares two files that must agree, and
+    the callee is the side that changes. The documented shim is the hand-written side.
+    """
+    doc = yaml.safe_load((WORKFLOWS / target).read_text(encoding="utf-8"))
+    union = {}
+    for job_id, job in doc["jobs"].items():
+        perms = job.get("permissions")
+        # A string form would silently contribute no scope and leave this comparison vacuous.
+        assert isinstance(perms, dict), (
+            f"{target} job `{job_id}` declares `permissions: {perms!r}`, which this guard "
+            "cannot rank -- the shim's block would be compared against nothing"
+        )
+        for scope, grant in perms.items():
+            if _GRANTS.index(grant) > _GRANTS.index(union.get(scope, "none")):
+                union[scope] = grant
+    return union
+
+
+@pytest.mark.parametrize(
+    ("page", "line", "body"),
+    _FENCES,
+    ids=[f"{page.name}:{line}" for page, line, _ in _FENCES],
+)
+def test_documented_wrapper_grants_every_permission_the_callee_requests(page, line, body):
+    """A documented shim's calling job grants at least what every job inside the callee requests.
+
+    Permissions cap at the `uses:` boundary: a callee job cannot hold a scope its caller did not
+    grant, and a shim that grants less kills the run as it LOADS -- no job, no check-run and no
+    retrievable log, only a workflow-validation error on the run itself. It is the third axis of
+    the shim contract, beside the secrets and inputs pinned above, and the only one no consumer
+    can discover from a failing run.
+
+    A superset, not an exact match: an over-grant is a hardening question, not a broken pipeline,
+    and the failure this guards is a scope the callee gained and the published shim never did.
+
+    Mutations: drop `id-token: write` from the plan shim, `actions: read` from the drift shim,
+    `issues: write` from the comment-ops shim.
+    """
+    for job_name, target, job in _engine_workflow_calls(yaml.safe_load(body)):
+        where = f"{page.relative_to(ENGINE).as_posix()}:{line} job `{job_name}`"
+        granted = job.get("permissions") or {}
+        assert isinstance(granted, dict), (
+            f"{where} declares `permissions: {granted!r}`; the published shims write a mapping"
+        )
+        short = sorted(
+            f"{scope}: {grant}"
+            for scope, grant in _callee_permissions_union(target).items()
+            if _GRANTS.index(granted.get(scope, "none")) < _GRANTS.index(grant)
+        )
+        assert not short, (
+            f"{where} grants {granted} but `{target}` has a job requesting {short} -- a "
+            "callee's permissions are capped by this job's, so the run dies at load with no "
+            "job and no log"
         )
 
 

@@ -33,8 +33,8 @@ ships — nothing in the engine can prevent it. The settings below close the
 apply-environment path and limit who can reach even the residual one.
 
 Fork pull requests are outside this, and are refused outright — the engine will
-not plan a pull request unless the wrapper states a head repository equal to
-this repository, and it refuses by default when the wrapper states nothing (see
+not plan a pull request whose head repository is not this repository, and it
+refuses by default when the head repository could not be read at all (see
 "Contributors without push access").
 
 **The question is never the trigger but the shape.** `pull_request_target` is
@@ -78,9 +78,9 @@ access" for the trade-off that follows.
 | 4 | ≥1 approving review, code-owner review, dismiss stale, require approval of most recent push | Branch ruleset | Self-merge; the code-owner review is unforgeable at merge time (an App cannot be a `CODEOWNERS` entry) *provided a `CODEOWNERS` entry actually covers the IaC paths* — the rule is a no-op for changed files with no owner — and the approval *count* never is |
 | 5 | Block force-push and deletion on the default branch | Branch ruleset | History rewrite after apply |
 | 6 | Required reviewers + "Prevent self-review" on the `<env>-apply` environments you decide to gate (§6 states the trade-off; the choice is yours) — on a private repository this rule needs Enterprise, see "Plan prerequisites" | Environment | Unforgeable at apply time — the last line of defense once a merge has happened, on each environment you apply it to |
-| 7 | Cloud credentials scoped to `<env>-apply` — the OIDC path's `AWS_ROLE_ARN`/`AWS_REGION` as environment variables, any residual static key as an environment secret — never repo- or org-level | Environment | Repo-wide exposure (for a secret, bounded *only* on an environment that also carries row 6; and for a variable the scoping is advisory — see §7–9) |
+| 7 | Cloud credentials scoped to the environment that needs them — the OIDC path's `AWS_ROLE_ARN`/`AWS_REGION` as environment variables on each `<env>-apply` and on each `<env>-plan` that needs a read-only role, any residual static key as an environment secret — never repo- or org-level | Environment | Repo-wide exposure (for a secret, bounded *only* on an environment that also carries row 6; and for a variable the scoping is advisory — see §7–9) |
 | 8 | Plan environments (`<env>-plan`; in shared mode the bare `<env>`, which must hold the apply role instead — §7–9) hold read-only, blast-radius-free credentials, no approval rules, and no branch policy — except on a shared environment, where a default-branch policy is row 17 doing real work and plan cells still pass it (see below) — ideally no secret at all (`shipmate doctor` reports what it finds) | Environment | Plan-time code execution |
-| 9 | OIDC with an `environment:` claim condition instead of static keys | Cloud IdP | Long-lived credential theft — and, since the engine's apply jobs mint OIDC tokens unconditionally, this claim condition is the only bound on which role an apply job can assume (see §7–9). In shared mode it separates nothing: both tokens carry the same `environment:` claim |
+| 9 | OIDC with an `environment:` claim condition instead of static keys | Cloud IdP | Long-lived credential theft — and, since every cell-running job (plan, drift, apply, unlock) mints OIDC tokens unconditionally, this claim condition is the only thing that decides which role any of them may assume (see §7–9). In shared mode it separates nothing: both tokens carry the same `environment:` claim |
 | 10 | Default `GITHUB_TOKEN` = read-only; Actions may not approve PRs | Settings → Actions | Token privilege creep |
 | 11 | Require approval for all outside collaborators' workflow runs | Settings → Actions | Drive-by fork execution |
 | 12 | Allowed-actions list (this engine + the third-party actions the engine itself pulls in, not only the ones your own workflows name) | Settings → Actions | Supply chain |
@@ -89,8 +89,8 @@ access" for the trade-off that follows.
 | 15 | Shorten Actions retention | Settings → Actions | `shipmate doctor` report disclosure |
 | 16 | `shipmate-engine` Environment exists, deployment branch policy restricted to the default branch | Environment | Repository-secret App key readable by any branch |
 | 17 | Deployment branch policy restricted to the default branch on every `<env>-apply` | Environment | Branch-authored workflow claiming apply-environment secrets directly |
-| 18 | `AWS_ROLE_ARN` + `AWS_REGION` as variables on each `<env>-apply` you want cloud access from — never at repository or organization level | Environment variables | Opting in per environment; set at repo/org level they apply to every apply environment at once (§7–9) |
-| 19 | `id-token: write` on the call-site job of every consumer `apply.yml`, `unlock.yml` and `deploy.yml` wrapper — not `plan.yml` | Consumer workflow YAML | Nothing — it is required: GitHub caps a called workflow's permissions at each `uses:` boundary, so without it every apply and unlock run fails at workflow-resolution time, cloud or not |
+| 18 | `AWS_ROLE_ARN` + `AWS_REGION` as variables on each environment you want cloud access from — never at repository or organization level | Environment variables | Opting in per environment; set at repo/org level they apply to every environment at once — every plan and drift cell included, so a role scoped no tighter than the repository is assumed by a plan cell running branch-authored HCL (§7–9) |
+| 19 | `id-token: write` on the calling job of every consumer shim but `comment-ops.yml` | Consumer workflow YAML | Nothing — it is required: GitHub caps a called workflow's permissions at each `uses:` boundary, so without it every plan, drift, apply and unlock run fails at workflow-resolution time, cloud or not |
 | 20 | Require actions to be pinned to a full-length commit SHA | Settings → Actions | A tag or branch ref moving under a workflow that was pinned only by convention |
 
 Rows 6, 7, 17 and 18 name `<env>-apply`, which is the apply environment in the
@@ -447,20 +447,27 @@ branch, and do count it as a control.
 ## 7–9. Credentials
 
 **The credential path is AWS OIDC, opt-in per environment, and engine-wired on
-the apply side only.** Every wave job in `apply-env-level.yml` requests
-`id-token: write` and runs a credentials step gated on the environment naming
-a role. A consumer opts in by setting `AWS_ROLE_ARN` (or the cell's
-`AWS_ROLE_ARN_<WORKLOAD>`, which wins) and `AWS_REGION` as variables on
-that job's `<env>-apply` environment. With them unset the step is skipped and
+every path.** Every job that runs a cell — the wave jobs of
+`apply-env-level.yml`, `unlock.yml`'s unlock job, `plan.yml`'s `plan` job and
+`drift.yml`'s `drift` job — requests `id-token: write` and runs a credentials
+step gated on a role variable being non-empty. A consumer opts in by setting
+`AWS_ROLE_ARN` (or the cell's `AWS_ROLE_ARN_<WORKLOAD>`, which wins) and
+`AWS_REGION` as variables on the environment that job binds — `<env>-apply` for
+a wave or unlock job, `<env>-plan` for a plan or drift cell. The gate reads
+`vars`, and `vars` resolve organization → repository → environment, so a role
+set at repository or organization level satisfies it in *every* one of those
+jobs; that is the whole of Critical exposure §7–9 describes below. With them
+unset the step is skipped and
 no cloud credential exists in the job, which is why the sample repos (null
 resources, local state) still run credential-free. With them set, the assumed
 role's session env vars do reach `tofu` — they are `AWS_*`, so the fingerprint
-excludes them (CONTRACT.md §Apply-match fingerprint). On the plan path the
-engine wires no credentials step because it owns no plan workflow: `plan.yml`
-is the consumer's, so the consumer adds `configure-aws-credentials` to it and
-the plan environment (`<env>-plan`) supplies a read-only role
-(`docs/aws.md` §Where the credentials step goes). OIDC is available on both
-paths; only the wiring differs in whose file it lives in.
+excludes them (CONTRACT.md §Apply-match fingerprint). The plan and drift cells
+carry the identical step, reading the role from the `<env>-plan` environment
+they bind, so a read-only plan role is opted into the same way: set the
+variables there (`docs/aws.md` §Where the credentials step goes). Both sides are
+engine-wired, and the only thing that differs between them is which environment
+supplies the role — which is what makes the trust policy, not the wiring, the
+boundary.
 
 No job interpolates a consumer *secret*: do not move a long-lived access key
 into an environment secret expecting the engine to pick it up — it will not,
@@ -482,16 +489,33 @@ its own.
   **For the OIDC path the scoping is advisory.** `AWS_ROLE_ARN` and `AWS_REGION`
   are `vars`, and for `vars` the most specific wins: environment overrides
   repository overrides organization. A repository- or organization-level
-  `AWS_ROLE_ARN` is therefore picked up identically by every wave job in every
-  apply environment that does not set its own, with no warning and nothing in the
+  `AWS_ROLE_ARN` is therefore picked up identically by every cell-running job in
+  every environment that does not set its own, with no warning and nothing in the
   engine to guard it — "opt in per environment" (CONTRACT.md §AWS OIDC) is where
   the value belongs, not something GitHub or shipmate enforces. Set it on each
-  `<env>-apply` — and, if your `plan.yml` carries its own credentials step, on
-  each `<env>-plan` environment with a read-only plan role (`docs/aws.md`
-  §Environment variables) — never at repository or organization level. The
-  enforcing control is not the variable's location at all: it is the role's trust
-  policy, whose `environment:` claim condition is the only thing that decides
-  which environments can assume it.
+  `<env>-apply`, and on each `<env>-plan` you want plan-time or drift-time access
+  from with a read-only plan role (`docs/aws.md` §Environment variables) — never
+  at repository or organization level. The enforcing control is not the
+  variable's location at all: it is the role's trust policy, whose `environment:`
+  claim condition is what decides which environments may assume it.
+  `AWS_REGION` rides along in the same step and appears nowhere in the gate that
+  decides whether it runs, so it bounds nothing.
+
+  **That last sentence is now load-bearing where it used to be advice.** The
+  plan and drift cells read these variables too, so a repository- or
+  organization-level `AWS_ROLE_ARN` set for the apply path is read by every plan
+  and drift cell. A plan cell executes branch-authored HCL, so the role is
+  exposed to anyone who can push a branch; a drift cell runs only at the default
+  branch ref, so what it gains is an apply role where a read-only one belongs —
+  the over-scoped credential without the untrusted code. A role whose claim
+  condition names `environment:<env>-apply` refuses the `<env>-plan` token and
+  the cell fails loudly at the credentials step, before `tofu init`: fail-closed
+  and diagnosable. A role with a repository-wide claim condition does not refuse
+  it, and a plan of any branch someone with push access can push then holds
+  apply credentials — fork pull requests are refused in `detect` before a cell
+  exists. Repositories
+  repinning past the release that wired the plan path check the claim condition
+  on every role a plan environment can reach.
 - **Plan environments must have no approval-type protection rules (required
   reviewers, wait timers) and no deployment branch policy.** An approval rule
   blocks every plan cell outright, and a branch policy blocks every plan cell
@@ -509,8 +533,8 @@ its own.
 
   The strongest version of this control is a plan environment with no secret in
   it at all, and it is reachable today: put a read-only OIDC role's ARN in the
-  plan environment as a *variable*, assumed by a
-  `configure-aws-credentials` step in your own `plan.yml` (`docs/aws.md`
+  plan environment as a *variable*, which the engine's own
+  `configure-aws-credentials` step in the plan cell assumes (`docs/aws.md`
   §Where the credentials step goes), with the role's trust policy conditioned on
   the plan environment's claim (`repo:<owner>/<repo>:environment:<env>-plan`,
   the plan environment, not `<env>-apply`), so a token minted in a plan cell can
@@ -528,8 +552,8 @@ its own.
   was too long to read whole. The report says the check was not performed,
   rather than reporting it clean, when the App installation has not
   accepted the `environments: read` permission the manifest declares.
-- **Prefer OIDC to static cloud keys.** On the apply path the engine wires it,
-  so this is available today. Condition the trust policy on the environment
+- **Prefer OIDC to static cloud keys.** The engine wires it on every path, so
+  this is available today. Condition the trust policy on the environment
   claim (`repo:<owner>/<repo>:environment:<env>-apply`) so a token minted from a
   plan cell — or from a branch workflow — cannot assume the apply role. Do this
   on every role reachable from the repository, not only the apply role: see
@@ -537,18 +561,23 @@ its own.
 - **In shared mode the plan path holds the apply role.** The bare `<env>` carries
   one `AWS_ROLE_ARN` (or one `AWS_ROLE_ARN_<WORKLOAD>`) and the wave jobs read it
   off that environment, so it must name the apply role or every apply fails at
-  provider init — and a consumer's own `plan.yml` credentials step reads the same
-  variable from the same environment. So a read-only plan role is unreachable for
-  every shared env: plan cells and the nightly drift run assume the write role
-  while executing branch-authored HCL ("Plan-time code execution" — a provider or
-  an `external` data source runs at plan time). The claim condition cannot
+  provider init — and the plan and drift cells read the same variable from the
+  same environment. So a read-only plan role is unreachable for
+  every shared env: plan cells assume the write role while executing
+  branch-authored HCL ("Plan-time code execution" — a provider or an `external`
+  data source runs at plan time), and the nightly drift run assumes it too,
+  over the default branch's code. The claim condition cannot
   separate the two paths either: both tokens carry
   `repo:<owner>/<repo>:environment:<env>` — byte-identical `sub` — so no trust
   policy can admit the apply job and refuse the plan job. Separate *variable
   names* do not help: a variable is not a boundary, and code running in the job
-  can name any ARN it likes. A plan path that holds no cloud credentials at all —
-  no `id-token: write`, no credentials step — pays none of this, which is what
-  makes shared mode reasonable there. GitHub's per-repository `sub`
+  can name any ARN it likes. The one way out is to leave both role variables
+  unset on that environment, which skips the credentials step and leaves the cell
+  with no cloud credential — the shape the three local-backend sample
+  repositories run in. Declining
+  the grant is not an alternative: `id-token: write` is mandatory on the plan and
+  drift shims, and a shim that omits it is rejected at load with no job and no
+  log. GitHub's per-repository `sub`
   customization (adding `job_workflow_ref` to the claim, so the engine's apply
   workflow file is part of what the policy matches) is the escape hatch; it is
   consumer-side, unsupported by the engine, and out of scope here.
@@ -566,10 +595,11 @@ its own.
 - **The toggle is not admin-gated.** `SHIPMATE_SHARED_ENVS` is a repository
   variable, and GitHub grants *"Create, update, and delete GitHub Actions
   variables"* to Write and above — this posture decision is not scoped to
-  control 1's grant, it is reachable by anyone holding it. On a repository whose
-  plan path carries its own credentials, one comma-separated entry moves plan
-  cells running unreviewed branch code onto the apply role, and the nightly drift
-  run with them. `shipmate doctor` cannot warn about it either: it infers the
+  control 1's grant, it is reachable by anyone holding it. One comma-separated
+  entry moves plan cells running unreviewed branch code onto the apply role, and
+  the nightly drift run with them — including on a repository that set no
+  plan-side role at all, because the cell reads the role off the bare `<env>` it
+  now binds. `shipmate doctor` cannot warn about it either: it infers the
   mode from environment names and never reads the variable, which would need a
   permission the App manifest does not declare. Control 2 restricts a branch;
   this restricts none of it — do not carry that protection over by assumption.
@@ -604,8 +634,10 @@ Settings → Actions → General:
   refs are resolved against your repository's list: a consumer whose own YAML
   names only `actions/checkout` and `actions/download-artifact` still needs the
   three third-party actions above, plus
-  `aws-actions/configure-aws-credentials` on the apply path even when
-  `AWS_ROLE_ARN` is never set (the step is gated, the `uses:` is not). Allowing
+  `aws-actions/configure-aws-credentials` on every cell path — plan, drift,
+  apply and unlock — even when `AWS_ROLE_ARN` is never set (the step is gated,
+  the `uses:` is not). Omit it and a plan run now fails at "Set up job", not
+  only an apply. Allowing
   GitHub-owned actions covers the engine's other transitive dependencies
   (`actions/cache`, `actions/create-github-app-token`,
   `actions/upload-artifact`); enumerating only the refs visible in your own
@@ -778,9 +810,10 @@ included, because it compares the policy names against the default branch alone.
 
 ## What the engine receives from your repository
 
-The documented wrappers pass exactly two secrets by name:
-`SHIPMATE_APP_PRIVATE_KEY` and — on the apply and deploy paths only —
-`SHIPMATE_PLAN_PASSPHRASE`. Nothing else crosses into a called workflow, because
+The documented shims pass exactly two secrets by name:
+`SHIPMATE_APP_PRIVATE_KEY`, and `SHIPMATE_PLAN_PASSPHRASE` wherever the callee
+writes or reads an encrypted plan artifact (`plan.yml` and the apply and deploy
+paths). Nothing else crosses into a called workflow, because
 GHA forwards no secret a caller does not name.
 
 `secrets: inherit` forwards every secret the calling repository can see:
@@ -800,19 +833,20 @@ secrets by name; §16's key placement does not change.
 A plan is only worth gating on if it planned the pull request's own head, and
 no plan trigger checks that head out by itself: `pull_request_target` takes
 the base branch, `workflow_dispatch` takes the ref it was dispatched on. So the
-wrapper *states* the commit it is planning — `head-sha` on the `build-matrix`
-step, `expected-head` on each `plan-cell` — and both steps compare the statement
-against the tree they are actually standing in, failing the run when the two
-differ. `shipmate doctor` reports a `build-matrix` step whose `head-sha` is
-absent or is not the expression the reference wrapper uses.
+engine *states* the commit it is planning — `head-sha` on the `build-matrix`
+step, `expected-head` on each `plan-cell`, both from the `facts` job — and both
+steps compare the statement against the tree they are actually standing in,
+failing the run when the two differ.
 
 Both refuse by default: a run that states no commit at all is refused, not
-planned (the one exception is `no-pull-request: "true"`, for a nightly drift
-workflow that has no pull request to state anything about). The direction is the
-point. A wrapper that forgot the `ref:` used to plan the base branch, report no
-changes for a pull request it had never read, and green `shipmate / gate` with
-nothing queued to apply — a silent, reviewable-looking pass over unreviewed
-code. That is now a red `detect` naming the input.
+planned (the one exception is `no-pull-request: "true"`, which only engine
+`drift.yml` passes, for a nightly sweep that has no pull request to state
+anything about). The direction is the point. A plan workflow that forgot the
+`ref:` would plan the base branch, report no changes for a pull request it had
+never read, and green `shipmate / gate` with nothing queued to apply — a silent,
+reviewable-looking pass over unreviewed code. That is a red `detect` naming the
+input, and the `ref:` now lives in SHA-pinned engine YAML rather than in a file
+each consumer writes.
 
 The stated commit is not something a commenter or a dispatcher supplies: it comes
 from `actions/pr-facts`, which reads the pull request itself. See below for why.
@@ -860,33 +894,27 @@ matter — see "What none of this fixes".
 ## Contributors without push access
 
 **Fork pull requests are refused outright.** `actions/build-matrix` fails the
-step unless the wrapper's `head-repo` input states a head repository equal to
-this repository — and it refuses by default, so a wrapper that states
-nothing is refused rather than planned. No input, variable or setting permits a
-fork: the one opt-out, `no-pull-request: "true"`, says the run has no pull
-request at all and belongs only in a workflow that has none (nightly drift,
-[`drift.md`](drift.md)). Setting it in a plan wrapper is the one consumer edit
-that would turn this refusal off for every pull request — so don't. The value
-lives in the wrapper's own default-branch YAML, which a pull request
-author cannot edit. `shipmate doctor` reports both consumer mistakes on this
-step: a `head-repo` that is absent or a constant, and a `no-pull-request`
-anywhere in `plan.yml`. A fork's plan is refused before any
-stack is enumerated and before any `tofu` process starts — and, in the
-reference `plan.yml`, before `detect`'s own `terramate` steps: the
-`actions/build-matrix` step precedes `terramate fmt --check` and
-`terramate generate --detailed-exit-code`, so neither evaluates the fork's
-Terramate HCL — globals, `tm_*` functions and generate blocks included.
-Measured on the dispatch leg, 2026-08-29: `build-matrix` failed and both
-terramate steps were skipped. That order is yours to keep; reversing it in your
-own `plan.yml` puts the two terramate steps in front of the refusal.
+step unless the `head-repo` input states a head repository equal to this
+repository — and it refuses by default, so a run that states nothing is refused
+rather than planned. No input, variable or setting permits a fork: the one
+opt-out, `no-pull-request: "true"`, says the run has no pull request at all, and
+only engine `drift.yml` passes it. Both values are set in engine-owned,
+SHA-pinned YAML, so there is nothing a consumer can wire wrong and nothing a
+pull request author can edit. A fork's plan is refused before any stack is
+enumerated and before any `tofu` process starts — and before `detect`'s own
+`terramate` steps: the `actions/build-matrix` step precedes
+`terramate fmt --check` and `terramate generate --detailed-exit-code`, so
+neither evaluates the fork's Terramate HCL — globals, `tm_*` functions and
+generate blocks included. Measured on the dispatch leg, 2026-08-29:
+`build-matrix` failed and both terramate steps were skipped.
 
 **Two things keep a fork out of a plan cell, in this order.** First,
 `actions/checkout` itself refuses to check out a fork's head under
 `pull_request_target` — measured on a current release (2026-08-23), against a
-wrapper naming the pull request's head SHA on its checkout `ref:`, which is what
-the reference `plan.yml` does (it now reads that SHA from `actions/pr-facts`
-rather than from the event payload; the refusal keys on the commit, not on where
-the wrapper found it) — unless the workflow passes
+workflow naming the pull request's head SHA on its checkout `ref:`, which is what
+engine `plan.yml` does (it reads that SHA from `actions/pr-facts` rather than
+from the event payload; the refusal keys on the commit, not on where the
+workflow found it) — unless the workflow passes
 `allow-unsafe-pr-checkout: true`. That is a third party's
 default, and it is the outermost guard on this path: `shipmate doctor` warns on
 every occurrence of that input set to anything but `false`, including a `${{ }}`
@@ -907,7 +935,7 @@ nothing keeping a fork out of a plan cell depends on it.
 
 `pull_request_target` does not sandbox a fork's run: nothing is withheld from
 it, so a plan cell reached by a fork would read the plan environment's
-variables *and its secrets* (the reference `plan.yml` passes
+variables *and its secrets* (engine `plan.yml` passes
 `secrets.SHIPMATE_PLAN_PASSPHRASE` into `actions/plan-cell`) while executing the
 pull request's own Terramate/OpenTofu code. Under the old `pull_request`
 trigger, GitHub withholding secrets from a fork was a second, independently
@@ -923,23 +951,19 @@ who can open a pull request *from a branch in the repository*.
 **The App key is now inside a workflow a fork pull request can start.** The
 reason is the trigger: the plan workflow runs on `pull_request_target`, which
 fires for a fork. Two things keep it out of reach, and they are both structural
-rather than conventions. The trusted `summary` job declines unless the head repository the
-caller states — its `head-repo` input — equals `github.repository`, and an
-absent or empty value is a refusal, not a pass: a job-level `if:`, so the job
-never starts, no deployment is created and the environment is never entered. And
-that job has no checkout, so even admitted it would run nothing the fork wrote.
-The comparison lives in engine-owned, SHA-pinned YAML (`CONTRACT.md`
-§Post-plan topology); the wrapper only supplies the value it compares, so a
-consumer can fail it closed but cannot loosen it. What a consumer *can* get
-wrong is wiring a constant there — `head-repo: ${{ github.repository }}` passes
-for every pull request, fork ones included — which is why `shipmate doctor`
-checks the expression and not only the key
-([`getting-started.md`](getting-started.md) §Required — plan).
+rather than conventions. The trusted `summary` job declines unless the head
+repository `facts` reported equals `github.repository`, and an absent or empty
+value is a refusal, not a pass: a job-level `if:`, so the job never starts, no
+deployment is created and the environment is never entered. And that job has no
+checkout, so even admitted it would run nothing the fork wrote. Both the fact and
+the comparison live in engine-owned, SHA-pinned YAML (`CONTRACT.md` §Post-plan
+topology), so a consumer supplies neither and can neither fail it closed nor
+loosen it.
 
 **The third trigger keeps every fact out of a dispatcher's hands.** A commented
-`shipmate plan` `workflow_dispatch`es the same `plan.yml`, and a dispatch reaches
-strictly less than a pull-request event does: the body carries one input, the
-pull request's number, and `plan.yml` declares no other, so GitHub refuses a
+`shipmate plan` `workflow_dispatch`es the same `plan.yml` shim, and a dispatch
+reaches strictly less than a pull-request event does: the body carries one input,
+the pull request's number, and the shim declares no other, so GitHub refuses a
 dispatch that names anything else (HTTP 422, no run). Everything the guards
 decide on — the head SHA, the head repository, the draft flag — is then derived
 from that number by `actions/pr-facts`, which asks the API for the pull request.
@@ -1026,13 +1050,13 @@ for exactly the exposure control 1 exists to limit.
   environment *stores*; it cannot observe what plan-time code does with it, and
   a credential the consumer's own workflow maps in from a repository secret is
   outside what it can see at all.
-- **Unconditional OIDC minting in the apply jobs.** GHA's `permissions:` cannot
-  be an expression, so `id-token: write` on the wave jobs is not gated on
-  `AWS_ROLE_ARN` — every consumer, cloud or not, now runs apply cells in a job
-  that can mint an OIDC token for any audience, from a job that runs tofu over
-  branch-authored configuration (see "Plan-time code execution" — the apply
-  cell runs the reviewed plan, but the Terramate configuration around it is still
-  the branch's). The engine cannot avoid this: the grant is per job, statically.
+- **Unconditional OIDC minting in every cell-running job.** GHA's `permissions:`
+  cannot be an expression, so `id-token: write` on the wave, unlock, plan and
+  drift jobs is not gated on `AWS_ROLE_ARN` — every consumer, cloud or not, runs
+  every cell in a job that can mint an OIDC token for any audience, from a job
+  that runs tofu over branch-authored configuration (see "Plan-time code
+  execution"; on the apply side the cell runs the reviewed plan, but the
+  Terramate configuration around it is still the branch's). The engine cannot avoid this: the grant is per job, statically.
   The only mitigation is on the cloud side — an `environment:` claim condition
   (control 9) on every role that trusts this repository's OIDC provider, so
   a token minted in one job cannot assume a role meant for another. A role whose

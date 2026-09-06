@@ -19,21 +19,12 @@ EXPECTED_INPUTS = {
     "apply-env-level.yml": {"workflow_call": ["head_sha", "state_suffix", "waves_json"]},
     "apply.yml": {"workflow_call": ["environment", "pr_number", "ref", "state_suffix"]},
     "ci.yml": {},
+    "comment-ops.yml": {},
     "deploy.yml": {"workflow_call": ["state_suffix"]},
+    "drift.yml": {"workflow_call": ["runs_on", "state_suffix", "tags"]},
     "internal-pins.yml": {},
     "manifest-load.yml": {},
-    "summary.yml": {
-        "workflow_call": [
-            "detect-result",
-            "head-repo",
-            "head-sha",
-            "is-draft",
-            "on-demand",
-            "plan-result",
-            "planned-cells",
-            "pr-number",
-        ]
-    },
+    "plan.yml": {"workflow_call": ["runs_on", "state_suffix"]},
     "unlock.yml": {"workflow_call": ["environment", "ref"]},
 }
 

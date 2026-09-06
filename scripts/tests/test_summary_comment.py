@@ -110,15 +110,38 @@ def test_md_escape_neutralizes_markdown_link_syntax():
 
 
 CHECKS = {
-    "stacks/app / dev-eu": {"html_url": "https://ck/app-eu"},
-    "stacks/db / dev-us": {"html_url": "https://ck/db-us"},
+    "shipmate / stacks/app / dev-eu": {"html_url": "https://ck/app-eu"},
+    "shipmate / stacks/db / dev-us": {"html_url": "https://ck/db-us"},
 }
 RUN_URL = "https://gh/run/1"
 
 
+def test_plan_check_prefix_is_the_shim_job_name():
+    """The shim's calling job name is a contract literal, restated here rather than imported.
+
+    Reddens on any edit to `PLAN_CHECK_PREFIX` -- the whole value is compared against a
+    hand-written constant.
+    """
+    assert sc.PLAN_CHECK_PREFIX == "shipmate / "
+
+
 def test_check_url_resolves_by_env_and_stack_path_with_run_url_fallback():
+    """Reddens on `PLAN_CHECK_PREFIX = ""` or `"shipmate/"`: the prefixed name misses."""
     assert sc.check_url(_cell(), CHECKS, RUN_URL) == "https://ck/app-eu"
     assert sc.check_url(_cell(environment="prod"), CHECKS, RUN_URL) == RUN_URL
+
+
+def test_check_url_ignores_an_unprefixed_check_and_falls_back_to_the_run_url():
+    """A shim job named anything but `shipmate` degrades every plan link to the run URL.
+
+    The old two-segment name is not a match, so this reddens on `PLAN_CHECK_PREFIX = ""`
+    for the reason the constant exists, not on a plain absent-name miss.
+    """
+    cell = _cell(stack="a", stack_path="a", environment="dev")
+    assert sc.check_url(cell, {"shipmate / a / dev": {"html_url": "https://ck/a"}}, RUN_URL) == (
+        "https://ck/a"
+    )
+    assert sc.check_url(cell, {"a / dev": {"html_url": "https://ck/a"}}, RUN_URL) == RUN_URL
 
 
 def test_build_table_row_per_cell_with_emoji_counts_and_link():

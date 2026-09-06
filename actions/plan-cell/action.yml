@@ -10,6 +10,10 @@ inputs:
   env:
     description: Environment name, e.g. dev-eu.
     required: true
+  state-path:
+    description: Flavor state path, e.g. stacks/app/.state. Empty = remote backend owns state; the restore step is skipped.
+    required: false
+    default: ""
   expected-head:
     description: The commit this run is planning, e.g. the pull request's head SHA. Empty is refused — a plan whose provenance is unrecorded cannot be applied.
     required: true
@@ -43,6 +47,26 @@ runs:
           exit 1
         fi
         echo "head=$observed" >> "$GITHUB_OUTPUT"
+
+    - name: Stack slug
+      id: ids
+      shell: bash
+      # Author-controlled $STACK via env (never interpolated) — injection-safe.
+      env:
+        STACK: ${{ inputs.stack }}
+      run: |
+        slug=$(printf '%s' "$STACK" | tr / -)
+        [[ "$slug" =~ ^[A-Za-z0-9._-]+$ ]] || { echo "::error::stack path produced invalid slug"; exit 1; }
+        echo "slug=$slug" >> "$GITHUB_OUTPUT"
+
+    - name: Restore state
+      if: ${{ inputs.state-path != '' }}
+      uses: ship-iac/shipmate/actions/state@a9be68cc9442bbf03478a7eabbd0afc2847cdd4e # pinned to a commit on main
+      with:
+        stack-slug: ${{ steps.ids.outputs.slug }}
+        env: ${{ inputs.env }}
+        mode: restore
+        path: ${{ inputs.state-path }}
 
     - name: Plan
       shell: bash
@@ -82,17 +106,6 @@ runs:
         set -e
         echo "::endgroup::"
         exit "$status"
-
-    - name: Stack slug
-      id: ids
-      shell: bash
-      # Author-controlled $STACK via env (never interpolated) — injection-safe.
-      env:
-        STACK: ${{ inputs.stack }}
-      run: |
-        slug=$(printf '%s' "$STACK" | tr / -)
-        [[ "$slug" =~ ^[A-Za-z0-9._-]+$ ]] || { echo "::error::stack path produced invalid slug"; exit 1; }
-        echo "slug=$slug" >> "$GITHUB_OUTPUT"
 
     - name: Render + classify plan
       id: plan

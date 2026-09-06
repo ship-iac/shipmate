@@ -10,7 +10,7 @@ outputs:
     description: The pull request's head commit. Name it as every checkout's `ref:` and as plan-cell's `expected-head`.
     value: ${{ steps.facts.outputs.head_sha }}
   head-repo:
-    description: The head repository's full name (owner/repo). What build-matrix's fork refusal and the summary workflow's guard decide on.
+    description: The head repository's full name (owner/repo). What build-matrix's fork refusal and the engine plan workflow's summary guard decide on.
     value: ${{ steps.facts.outputs.head_repo }}
   base-sha:
     description: The pull request's base commit, for change detection.

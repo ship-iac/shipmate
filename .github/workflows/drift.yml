@@ -1,0 +1,108 @@
+name: drift
+on:
+  workflow_call:
+    inputs:
+      state_suffix: { required: true, type: string }
+      runs_on: { required: false, default: ubuntu-latest, type: string }
+      # An input, not a repository variable: a consumer may spread the sweep across several
+      # drift files with one literal tag query each, and a variable cannot differ per file.
+      tags: { required: false, default: "", type: string }
+    secrets:
+      SHIPMATE_APP_PRIVATE_KEY: { required: false }
+# Floor, not a default to inherit from: every job here declares its own block, so a job that
+# loses its block gets nothing rather than everything the caller granted.
+permissions: {}
+jobs:
+  # Resolves the default branch from the API, not from github.event.repository.default_branch,
+  # whose population under `schedule` is the question the gates below must not depend on. Ungated
+  # on purpose: no consumer code, no secret, so a feature-branch dispatch fails at those gates.
+  detect:
+    runs-on: ${{ inputs.runs_on }}
+    permissions:
+      contents: read
+    outputs:
+      matrix: ${{ steps.m.outputs.matrix }}
+      empty: ${{ steps.m.outputs.empty }}
+      default_branch: ${{ steps.default_branch.outputs.default_branch }}
+    steps:
+      - id: default_branch
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          echo "default_branch=$(gh api "repos/$GITHUB_REPOSITORY" --jq .default_branch)" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { fetch-depth: 0 }
+      - uses: ship-iac/shipmate/actions/setup@59ac665afe78a75d4fe1d18bf4349dbbde9b08c2
+        with:
+          terramate-version: ${{ vars.TERRAMATE_VERSION }}
+          tofu-version: ${{ vars.TOFU_VERSION }}
+      - id: m
+        uses: ship-iac/shipmate/actions/build-matrix@59ac665afe78a75d4fe1d18bf4349dbbde9b08c2
+        with:
+          base-sha: ""
+          all-stacks: "true"
+          tags: ${{ inputs.tags }}
+          # Skips build-matrix's head-repository and head-commit refusals. A sweep has no pull
+          # request; a plan workflow must never set this.
+          no-pull-request: "true"
+
+  drift:
+    needs: detect
+    if: ${{ needs.detect.outputs.empty == 'false' && github.ref == format('refs/heads/{0}', needs.detect.outputs.default_branch) }}
+    runs-on: ${{ inputs.runs_on }}
+    permissions: { contents: read, id-token: write }
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.detect.outputs.matrix) }}
+    # SHIPMATE_SHARED_ENVS is a repository variable, not a workflow input: which environment a
+    # cell binds decides whether the reviewer gate and the cloud role reach it, and branch content
+    # must not choose that. The plan and apply sides bind the same variable the same way.
+    environment: >-
+      ${{ contains(format(',{0},', vars.SHIPMATE_SHARED_ENVS), format(',{0},', matrix.environment))
+      && matrix.environment || format('{0}-plan', matrix.environment) }}
+    name: ${{ matrix.stack }} / ${{ matrix.environment }}
+    env:
+      TF_VAR_env: ${{ vars.TF_VAR_env }}
+      TF_VAR_region: ${{ vars.TF_VAR_region }}
+      TF_WORKSPACE: ${{ vars.TF_WORKSPACE }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { fetch-depth: 0 }
+      - uses: ship-iac/shipmate/actions/setup@59ac665afe78a75d4fe1d18bf4349dbbde9b08c2
+        with:
+          terramate-version: ${{ vars.TERRAMATE_VERSION }}
+          tofu-version: ${{ vars.TOFU_VERSION }}
+      - name: Configure cloud credentials (AWS OIDC)
+        if: ${{ (matrix.workload_var != '' && vars[format('AWS_ROLE_ARN_{0}', matrix.workload_var)]) != '' || vars.AWS_ROLE_ARN != '' }}
+        uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4
+        with:
+          role-to-assume: ${{ matrix.workload_var != '' && vars[format('AWS_ROLE_ARN_{0}', matrix.workload_var)] || vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+      - uses: ship-iac/shipmate/actions/drift-cell@59ac665afe78a75d4fe1d18bf4349dbbde9b08c2
+        with:
+          stack: ${{ matrix.stack }}
+          stack-name: ${{ matrix.stack }}
+          env: ${{ matrix.environment }}
+          state-path: ${{ inputs.state_suffix != '' && format('{0}/{1}', matrix.stack, inputs.state_suffix) || '' }}
+
+  # Completes the credentialed work drift-cell does not do: authors and closes the drift Issues
+  # from the downloaded cell artifacts, and holds the only App key on this path.
+  issues:
+    needs: [detect, drift]
+    # `empty == 'false'` replaces the download's `continue-on-error`: an empty matrix downloads
+    # nothing and drift-issues returns silently, indistinguishable from a LOST artifact. detect
+    # tells the two apart, so an empty matrix skips the job and a failed download fails it.
+    if: ${{ always() && needs.detect.outputs.empty == 'false' && github.ref == format('refs/heads/{0}', needs.detect.outputs.default_branch) }}
+    runs-on: ${{ inputs.runs_on }}
+    environment: shipmate-engine
+    permissions: { actions: read }
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with: { pattern: drift-summary.*, path: drift }
+      - uses: ship-iac/shipmate/actions/drift-issues@59ac665afe78a75d4fe1d18bf4349dbbde9b08c2
+        with:
+          app-id: ${{ vars.SHIPMATE_APP_ID }}
+          private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
+          slack-webhook: ${{ vars.SLACK_WEBHOOK }}

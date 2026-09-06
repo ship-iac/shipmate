@@ -91,7 +91,7 @@ def bodies(lines, suite_id, head_sha):
 def main():
     repo = os.environ["GITHUB_REPOSITORY"]
     run_id = os.environ["GITHUB_RUN_ID"]
-    # The reusable summary workflow shares the caller's run id (measured), so
+    # The engine plan workflow's `summary` job shares the caller's run id (measured), so
     # this reads the plan run's own suite without an input.
     suite_id = bm.gh_json(f"repos/{repo}/actions/runs/{run_id}").get("check_suite_id")
     out = bodies(sys.stdin, suite_id, os.environ["SHIPMATE_HEAD_SHA"])

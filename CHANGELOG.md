@@ -11,6 +11,61 @@ section below names the SHA the release tags.
 The version line stays `v0.x` while action inputs, check names, and the comment
 grammar are declared unstable in `README.md`.
 
+## [Unreleased]
+
+**Breaking for every consumer: the pin bump and a body rewrite of `plan.yml`,
+`drift.yml` and `comment-ops.yml` land in one commit.** A new shim against an
+old pin, or an old inline body against the new pin, is a load-time rejection
+with no job, no check run and no log. `docs/upgrading.md` §Unreleased is the
+migration.
+
+### Changed
+
+- **The plan, drift and comment-ops job graphs move into the engine.** A
+  consumer's `plan.yml`, `drift.yml` and `comment-ops.yml` are now shims — a
+  trigger block, a `permissions:` block, and one job named `shipmate` calling
+  `.github/workflows/plan.yml`, `drift.yml` or `comment-ops.yml`. Every fact the
+  plan path's trust guards decide on is now produced and compared inside the
+  same engine file, so the three mis-wirings a consumer could previously make —
+  a constant `head-repo`, a literal `is-draft: false`, a literal
+  `on-demand: true` — have no site left to be written at. `CONTRACT.md`
+  §Post-plan topology is the written form.
+- **The engine's reusable `summary.yml` is gone.** Its job is now the `summary`
+  job of the engine's `plan.yml`, unchanged in what it does and in the
+  environment it binds.
+- **Plan and drift check names gain a `shipmate / ` prefix**, from the shim's
+  calling job: `shipmate / <stack> / <env>`, plus `shipmate / facts`,
+  `shipmate / detect` and `shipmate / summary`. A per-cell plan check named in a
+  ruleset must be updated. The aggregate `shipmate / gate` is unchanged.
+- **The plan and drift cells run the apply path's AWS OIDC step**, workload
+  override included: a cell carrying a `workload/<name>` tag assumes
+  `AWS_ROLE_ARN_<WORKLOAD>` from the plan environment it binds, falling back to
+  `AWS_ROLE_ARN`, and holds no cloud credential when neither is set. This is a
+  widening — the consumer-authored plan workflow it replaces had a credentials
+  step only where its author wrote one, and never resolved a per-workload role.
+  The consequential case is a role set *above* the environment: `vars` resolve
+  organization → repository → environment, so an `AWS_ROLE_ARN` set at
+  repository or organization level for the apply path is now assumed by every
+  plan and drift cell, and a plan cell executes branch-authored HCL. Only the
+  role's own trust policy bounds that — a claim condition naming
+  `environment:<env>-apply` refuses the `<env>-plan` token and the cell fails at
+  the credentials step; a repository-wide one does not.
+  `CONTRACT.md` §AWS OIDC, `docs/hardening.md` §7–9.
+- **`plan.yml` and `drift.yml` take a required `state_suffix` input**, and their
+  calling jobs must grant `id-token: write`.
+- **`SHIPMATE_UNGATED_ENVS` is now read by the engine's `comment-ops.yml`.**
+  `vars` inherit into a called workflow, so the variable resolves in the
+  consumer's repository exactly as their own `ungated-envs:` line did. Opting in
+  is now the variable plus the two `apply.yml` pins; the consumer-written input
+  is gone, and with it the mis-wiring where a literal list authorized a dispatch
+  the variable never exempted.
+- **`shipmate doctor` retires five probe halves and gains one.** The summary
+  call's fork, draft and on-demand wiring, the `build-matrix` step's
+  `head-repo`/`head-sha`, the `no-pull-request` check and the dispatch probe's
+  `pr-facts` half all described a file consumers no longer write. The new probe
+  reports a `plan.yml` shim whose calling job is not named `shipmate`, which
+  costs every `[plan]` link in the plan comment. `PROBES` stays at 14.
+
 ## [0.24.0] — 2026-09-05
 
 Tags `9916735`.

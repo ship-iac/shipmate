@@ -94,15 +94,23 @@ def test_raises_above_256_cells():
 
 
 def test_rejects_stack_path_exactly_apply():
-    # A stack literally named `apply` renders a plan check `apply / <env>`, which
-    # collides with the apply-check namespace apply-gate selects the queue by.
-    with pytest.raises(SystemExit, match="may not be exactly 'apply'"):
+    """A stack path of exactly `apply` is refused, with the whole message pinned.
+
+    Reddens on dropping `"apply"` from `RESERVED_STACK_PATHS` (no SystemExit), and on any
+    edit to its message -- the comparison is against a hand-written constant, so a reason
+    rewritten back into the retired collision claim fails here.
+    """
+    with pytest.raises(SystemExit) as exc_info:
         bm.build_matrix(["dev-eu"], {"dev-eu": ["apply"]}, {"apply": ["env/dev-eu"]})
+    assert exc_info.value.code == (
+        "::error::a stack path may not be exactly 'apply': 'apply' is the engine's own "
+        "verb, and its checks are named 'apply / <stack> / <env>'. Rename or nest the stack."
+    )
 
 
 def test_nested_apply_stack_is_allowed():
-    # Only an exact top-level `apply` collides; `infra/apply` renders
-    # `infra/apply / <env>`, outside the `apply / ` namespace.
+    # Only an exact top-level `apply` is reserved; `infra/apply` reads as a stack, not as
+    # the engine's verb.
     cells = bm.build_matrix(
         ["dev-eu"], {"dev-eu": ["infra/apply"]}, {"infra/apply": ["env/dev-eu"]}
     )
@@ -112,13 +120,19 @@ def test_nested_apply_stack_is_allowed():
 
 
 def test_rejects_stack_path_exactly_shipmate():
-    """`shipmate` renders a plan check `shipmate / <env>`, inside the reserved `shipmate / `
-    namespace (`shipmate / gate`, and a consumer's own non-fan-out job names).
-    summary-comment resolves plan links by an exact `<stack> / <env>` lookup over every
-    check run on the head SHA, so for an env named after one of those (e.g. `gate`) the
-    row's link resolves to the wrong check."""
-    with pytest.raises(SystemExit, match="may not be exactly 'shipmate'"):
+    """A stack path of exactly `shipmate` is refused, with the whole message pinned.
+
+    Reddens on dropping `"shipmate"` from `RESERVED_STACK_PATHS` (no SystemExit), and on any
+    edit to its message -- the comparison is against a hand-written constant, so a reason
+    rewritten back into the retired collision claim fails here.
+    """
+    with pytest.raises(SystemExit) as exc_info:
         bm.build_matrix(["dev-eu"], {"dev-eu": ["shipmate"]}, {"shipmate": ["env/dev-eu"]})
+    assert exc_info.value.code == (
+        "::error::a stack path may not be exactly 'shipmate': 'shipmate / ' is the engine's "
+        "own check namespace (e.g. 'shipmate / gate', 'shipmate / summary'). Rename or nest "
+        "the stack."
+    )
 
 
 def test_nested_shipmate_stack_is_allowed():
@@ -770,11 +784,11 @@ def test_a_renamed_plan_workflow_is_refused(tmp_path):
         "::error::this repository has no `.github/workflows/plan.yml` — the one path "
         "`CONTRACT.md` lets the plan workflow live at, and this refusal is what enforces it. "
         "That exact filename is matched literally by `shipmate doctor`, which keys its "
-        "plan-wrapper probes on it, and by `actions/dispatch`, which picks the workflow file "
+        "plan-shim probes on it, and by `actions/dispatch`, which picks the workflow file "
         "from the verb — `shipmate plan` dispatches this filename and no other. A plan "
-        "workflow under any other name silently loses the head-repository, head-commit and "
-        "draft wiring checks, draws doctor's own `pull_request_target` warning instead, and "
-        "is reached by no `shipmate plan` at all. "
+        "workflow under any other name silently loses the calling-job-name and "
+        "dispatch-wiring checks, draws doctor's own `pull_request_target` warning instead, "
+        "and is reached by no `shipmate plan` at all. "
         "Move the plan workflow back to `.github/workflows/plan.yml`."
     )
 

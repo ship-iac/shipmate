@@ -44,7 +44,7 @@ def latest_by_name(check_runs, prefix=APPLY_PREFIX):
     (nullable -- a freshly-created queued run may carry none) an id is always
     present, so a newer queued duplicate never sorts below an older completed
     run. summary-comment reuses this with prefix="": it resolves plan-check
-    links by an exact `<stack> / <env>` lookup, not a prefix filter."""
+    links by an exact `shipmate / <stack> / <env>` lookup, not a prefix filter."""
     latest = {}
     for run in check_runs:
         name = run["name"]

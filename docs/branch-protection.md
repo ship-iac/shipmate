@@ -8,8 +8,9 @@ shipmate does no gating in workflow logic. The apply-before-merge guarantee
 is enforced entirely by GitHub branch protection requiring one aggregate check:
 
 - **Require the status check `shipmate / gate` (verbatim), and only that check.**
-  The per-unit `<stack> / <env>` (plan) and `apply / <stack> / <env>`
-  checks come and go as stacks and environments change. Requiring the single
+  The per-unit `shipmate / <stack> / <env>` (plan) and
+  `apply / <stack> / <env>` checks come and go as stacks and environments
+  change. Requiring the single
   `shipmate / gate` roll-up means the required-checks list never needs
   editing when a stack or environment is added or removed.
 - **Require branches to be up to date before merging (strict).** Plans run

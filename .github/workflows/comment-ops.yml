@@ -1,0 +1,52 @@
+name: comment-ops
+on:
+  workflow_call:
+    secrets:
+      # `required: false`, as drift.yml and the apply path declare it: the job binds
+      # `shipmate-engine`, so a required declaration would fail at load time for every consumer
+      # who scopes the key to an environment instead of the repository.
+      SHIPMATE_APP_PRIVATE_KEY: { required: false }
+# Floor, not a default to inherit from: the job below declares its own block, so a job that
+# loses its block gets nothing rather than everything the caller granted.
+permissions: {}
+jobs:
+  ops:
+    # Only pull-request comments (issue_comment fires on issues too). On the engine side rather
+    # than the shim's trigger block: a consumer cannot drop it here.
+    if: ${{ github.event.issue.pull_request }}
+    runs-on: ubuntu-latest
+    environment: shipmate-engine
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+      actions: read
+    steps:
+      - id: authz
+        uses: ship-iac/shipmate/actions/comment-ops@59ac665afe78a75d4fe1d18bf4349dbbde9b08c2
+        with:
+          app-id: ${{ vars.SHIPMATE_APP_ID }}
+          private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
+          approvers-team: ${{ vars.SHIPMATE_APPROVERS_TEAM }}
+          # `vars` inherit into a called workflow, so this resolves in the consumer's repository
+          # exactly as their own step did before the shim. Read here once, not per consumer file.
+          ungated-envs: ${{ vars.SHIPMATE_UNGATED_ENVS }}
+          comment-body: ${{ github.event.comment.body }}
+          comment-user: ${{ github.event.comment.user.login }}
+          comment-id: ${{ github.event.comment.id }}
+          pr-number: ${{ github.event.issue.number }}
+          github-token: ${{ github.token }}
+      # The refusal is this `if:` alone: a refused apply still carries a verb, an environment and
+      # the real head SHA out of the step above, so a dispatch reaching this action would be
+      # indistinguishable from an authorized one.
+      - if: ${{ steps.authz.outputs.authorized == 'true' }}
+        uses: ship-iac/shipmate/actions/dispatch@59ac665afe78a75d4fe1d18bf4349dbbde9b08c2
+        with:
+          app-id: ${{ vars.SHIPMATE_APP_ID }}
+          private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
+          verb: ${{ steps.authz.outputs.verb }}
+          environment: ${{ steps.authz.outputs.environment }}
+          ref: ${{ steps.authz.outputs.head-sha }}
+          pr-number: ${{ github.event.issue.number }}
+          dispatch-ref: ${{ github.event.repository.default_branch }}
+          repository: ${{ github.repository }}
