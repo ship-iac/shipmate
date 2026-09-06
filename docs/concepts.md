@@ -232,7 +232,7 @@ settings that bound that, see [`hardening.md`](hardening.md).
 ## Deploy and drift
 
 shipmate follows a serverless plan→store→review→apply model: the reviewed plan
-is stored and applied verbatim, with no server or database. A consumer's
+is stored and applied verbatim, with no server or database.
 A consumer's `deploy.yml` is a shim over the engine's reusable deploy workflow,
 passing only its flavor's `state_suffix`; `drift.yml` is a shim of the same
 shape over the engine's reusable drift workflow.

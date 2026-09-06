@@ -50,8 +50,9 @@ jobs:
 ```
 
 The engine's jobs run on `ubuntu-latest` unless the shim passes a `runs_on:`
-input; the sample repositories pass `ubuntu-slim`. A label your plan does not
-provide leaves every job waiting for a runner that never arrives.
+input — the fence above omits it, as `repo-example-stacks-aws` does. Pass it
+only for a different label your plan actually offers; one it does not leaves
+every job waiting for a runner that never arrives.
 
 **`state_suffix` is required and may be `""`.** `""` — what the fence above
 pastes, because the AWS sample uses a remote backend — means the backend owns

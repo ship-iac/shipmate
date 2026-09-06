@@ -592,11 +592,14 @@ narrows what a `REVIEW_REQUIRED` decision holds; it is the decision that
 decides, so an unreviewed pull request holds every environment in a repository
 that set nothing.
 
-**The apply is refused although the variable is set.** Check the entry's
-spelling against the rules below — an entry that matches no environment is
-rejected loudly, but one naming an environment that simply does not exist is
-inert. The engine reads the variable itself, in `comment-ops.yml` and in both
-apply workflows, so there is no consumer wiring left to omit. See
+**The apply is refused although the variable is set.** Check the entry against
+the rules below. The refusal is by *shape*: a suffix, surrounding whitespace or a
+character outside the env charset is rejected loudly, naming the entry. Spelling
+is not checked against anything — nothing compares the list to the repository's
+real environments — so `dev-eu2` for `dev-eu` is accepted, matches no cell, and
+that environment simply keeps its review requirement. The engine reads the
+variable itself, in `comment-ops.yml` and in both apply workflows, so there is no
+consumer wiring left to omit. See
 [`upgrading.md`](upgrading.md) §"Opt-in: per-environment review gating".
 
 **The run failed with a `SHIPMATE_UNGATED_ENVS` error.** An entry that is not a

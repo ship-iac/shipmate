@@ -420,8 +420,9 @@ environments' roles live in different AWS accounts — is a property of *where t
 consumer sets the variable*, not something the engine resolves or validates.
 "Per Environment" is where the consumer *should* set it, not an enforcement:
 `vars` resolve organization → repository → environment, so an `AWS_ROLE_ARN` set
-at repository or organization level is read identically by every wave job in
-every environment, with no warning. The only real bound is the role's own
+at repository or organization level is read identically by every cell-running
+job — every wave job, and now every plan and drift cell — in every environment,
+with no warning. The only real bound is the role's own
 trust-policy claim condition (`docs/hardening.md` §7–9).
 
 **The plan and drift paths run that same step, workload override included.**
@@ -435,6 +436,20 @@ plans now has its plan cells assume the workload role wherever the cell carries
 a `workload/<name>` tag and that variable is set on the plan Environment. Where
 the two must differ, they differ by *where the variable is set*, as on the apply
 path.
+
+**The repository- or organization-level case is the consequential one.** A
+consumer who set `AWS_ROLE_ARN` at repository or organization level and never
+wrote a plan-path credentials step had no plan-time cloud credential at all,
+because nothing read the variable there. Every plan and drift cell now does, and
+a plan cell executes branch-authored Terramate/OpenTofu — a provider or an
+`external` data source runs at plan time. What bounds it is the role's trust
+policy and nothing else: a policy conditioned on
+`repo:<owner>/<repo>:environment:<env>-apply` refuses the `<env>-plan` token, so
+the credentials step fails and the cell fails loudly before `tofu init`. A
+repository-wide claim condition does not refuse it, and that configuration hands
+apply credentials to a plan of a pull request. `docs/hardening.md` §7–9 is the
+threat model; a consumer repinning past this change checks the claim condition
+on every role a plan environment can now name.
 
 It follows that the plan/apply role split is the consumer's to configure and to
 enforce in the roles' trust policies: one variable on each Environment, and a
@@ -1285,8 +1300,8 @@ trigger alone closes two paths a trigger check alone would not:
   `ubuntu-slim` image, whose
   [included-software list](https://github.com/actions/runner-images/blob/066b3201a74f4551f70c221a71c49746d02c0864/images/ubuntu-slim/ubuntu-slim-Readme.md)
   names the GitHub CLI. That one is load-bearing for the drift path: the
-  default-branch probe in the consumer's `drift.yml` calls `gh api` in a job
-  with no `setup` step before it. Self-hosted runners must preinstall these
+  default-branch probe in engine `drift.yml`'s `detect` job calls `gh api`
+  before that job's `setup` step. Self-hosted runners must preinstall these
   tools.
 - The Python scripts have no third-party dependencies — nothing is
   `pip install`ed at runtime, so no Python setup step (or network access
@@ -1826,9 +1841,9 @@ Disabling `git-untracked` or `git-uncommitted` there changes nothing for cells,
 which never reach them (see the table above); it still affects the consumer's
 own recursive `terramate run` invocations. The `detect` job's
 `terramate generate --detailed-exit-code` still catches stale codegen —
-`disable_safeguards` gates `terramate run`, not `generate` — but
-that step lives in the consumer's own plan workflow, so it is a second thing the
-consumer controls rather than an engine backstop.
+`disable_safeguards` gates `terramate run`, not `generate` — and that step lives
+in engine `plan.yml`'s `detect` job, so it is an engine backstop a consumer
+cannot disable.
 
 **Consistency invariant.** The disabled-safeguard set is identical across
 `plan-cell`, `apply-cell`, and `drift-cell`, and across both invocations within

@@ -150,8 +150,9 @@ else is dispatched by nothing, and the command silently reaches no workflow.
 Create all three under exactly those names.
 
 The engine's jobs run on `ubuntu-latest` unless the shim passes a `runs_on:`
-input; the sample repositories pass `ubuntu-slim`. A label your plan does not
-provide leaves every job waiting for a runner that never arrives.
+input — the fence below omits it, as `repo-example-stacks-aws` does. Pass it
+only for a different label your plan actually offers; one it does not leaves
+every job waiting for a runner that never arrives.
 
 ```yaml
 name: shipmate · plan
@@ -316,7 +317,8 @@ configuration must fail loud rather than apply with no state at all.
 authorized `workflow_dispatch` — one shim file per verb: `plan.yml` for `plan`,
 `apply.yml` for `apply`, `unlock.yml` for `unlock`. The engine picks the file
 from the parsed verb; a comment naming a verb whose file the repository does not
-carry fails at dispatch time and says so on the pull request.
+carry fails at dispatch time, and the pull request is told only that the dispatch
+failed, with a link to the comment-handling run that holds the API's answer.
 
 ```yaml
 name: comment-ops

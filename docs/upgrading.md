@@ -166,8 +166,11 @@ hand.
 
 The three bodies are in [`getting-started.md`](getting-started.md) §Required —
 plan and §The apply workflows, and [`drift.md`](drift.md) §The workflow. Replace
-each file's contents with the shim there, keeping your own `state_suffix`, your
-runner label, and any `tags:` value your drift files carry.
+each file's contents with the shim there. For `plan.yml` and `drift.yml`, keep
+your own `state_suffix`, your runner label and any `tags:` value your drift files
+carry. `comment-ops.yml` takes none of them: engine `comment-ops.yml` declares no
+`workflow_call` inputs at all and its `ops` job fixes `runs-on: ubuntu-latest`,
+so any `with:` block on that shim is the load-time rejection above.
 
 1. **Delete the `summary:` job.** It was a job inside your `plan.yml`, not a
    file of its own, so what goes is the job block — the whole shim replaces it.
@@ -186,10 +189,11 @@ runner label, and any `tags:` value your drift files carry.
    shape. A manual run sweeps whatever literal that file's `with:` block names;
    [`drift.md`](drift.md) §An ad-hoc scoped sweep is the shape to add back if
    you want the prompt.
-5. **Set `state_suffix` on all three.** It is your flavor's per-stack state path
-   suffix — `.state`, `terraform.tfstate`, `terraform.tfstate.d` — or `""` for a
-   remote backend: the same value your `deploy.yml` and `apply.yml` shims
-   already pass. `comment-ops.yml` takes no such input.
+5. **Set `state_suffix` on `plan.yml` and `drift.yml`.** It is your flavor's
+   per-stack state path suffix — `.state`, `terraform.tfstate`,
+   `terraform.tfstate.d` — or `""` for a remote backend: the same value your
+   `deploy.yml` and `apply.yml` shims already pass. `comment-ops.yml` takes no
+   input at all.
 6. **Grant `id-token: write` on the `plan.yml` and `drift.yml` calling jobs.**
    Their callees run cells, so they request it; `comment-ops.yml` does not.
    Granting less kills the run at startup with no job and no log.
