@@ -50,13 +50,14 @@ rather than one conditional attribute because Terramate 0.17.1 has no
 `tm_unset()`, and a bare `unset` emits `assume_role = unset`, which survives
 `fmt` and `validate` and dies at `init`.
 
-Because the backend owns the state, the `plan.yml`, `drift.yml`, `apply.yml`
-and `deploy.yml` shims all pass `state_suffix: ""`. That is the explicitly-empty mode of
+Because the backend owns the state, the `plan`, `drift`, `targeted`, `all` and
+`deploy` jobs all pass `state_suffix: ""`. That is the explicitly-empty mode of
 [`../CONTRACT.md`](../CONTRACT.md) §State backend: both `actions/state` steps are
 skipped entirely and shipmate never handles a state file. The input declares no
 default, so omitting it is a workflow-resolution error rather than a third mode.
-`unlock.yml` is the exception. It declares no such input, because it releases
-locks and applies nothing, and passing one is a load-time rejection.
+The `unlock` job is the exception. The engine's `unlock.yml` declares no such
+input, because it releases locks and applies nothing, and passing one is a
+load-time rejection.
 
 ## Named profiles must be conditional
 
@@ -181,8 +182,8 @@ organization behind it (§Environment variables above). That is the
 wave jobs of `apply-env-level.yml` and `unlock.yml`'s unlock job on the apply
 side, reading `<env>-apply` (or the bare `<env>` in shared mode), and
 `plan.yml`'s `plan` job and `drift.yml`'s `drift` job on the plan side, reading
-`<env>-plan` (or that same bare `<env>`). A shim's only obligation is
-`id-token: write` on its calling job (see
+`<env>-plan` (or that same bare `<env>`). A consumer job's only obligation is
+`id-token: write` on itself (see
 [`getting-started.md`](getting-started.md) §Required — plan).
 
 The plan-side role lives on the `<env>-plan` environment. In shared mode — a

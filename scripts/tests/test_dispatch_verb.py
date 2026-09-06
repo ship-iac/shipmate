@@ -338,7 +338,7 @@ def test_the_verb_output_of_comment_ops_is_the_parsed_route_alone():
     """comment-ops hands the route through unchanged — no fallback expression.
 
     A fallback here is the outage: `|| 'apply'` sends every route a branch does
-    not name to the apply wrapper, carrying another verb's body.
+    not name to the apply jobs, carrying another verb's body.
 
     Mutation: append `|| 'apply'` to the expression, or rename the output.
     """

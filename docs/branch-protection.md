@@ -145,8 +145,8 @@ fails closed rather than proceeding unreviewed.)
   environments and holds the rest, their apply checks left pending, so the gate
   keeps blocking the merge. With the variable unset or empty, "the rest" is
   every environment, since the engine enforces on the variable itself. Opting in
-  also takes one line in `comment-ops.yml`;
-  anyone with the Write role can edit the variable. Semantics:
+  takes no line in your workflow file; anyone with the Write role can edit the
+  variable. Semantics:
   `../CONTRACT.md` §Comment-ops. What it costs against the deployment-side
   gate: `hardening.md` §3–5.
 - **Per-environment approval** — which environments require a human is your
@@ -155,7 +155,7 @@ fails closed rather than proceeding unreviewed.)
   required reviewers on the `<env>-apply` GitHub Environment, not in the ruleset
   (`getting-started.md` §Required — apply → §Environment setup has those
   settings). This gates both pre-merge `shipmate apply <env>` and the
-  post-merge `deploy.yml` apply, since both run against the apply environment. An
+  post-merge `deploy` job's apply, since both run against the apply environment. An
   env sharing one environment between plan and apply (`SHIPMATE_SHARED_ENVS`)
   cannot be gated this way at all — a reviewer there stalls the plan cells too
   (`hardening.md` §6).

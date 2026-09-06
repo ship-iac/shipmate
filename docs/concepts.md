@@ -44,8 +44,9 @@ The plan matrix job's own `shipmate / <stack> / <env>` check-run stays on the sh
 `github-actions` identity — it's the job's own auto check-run, not something
 the App creates separately. An on-demand plan is the exception: a dispatched
 run's job checks land on the ref it was dispatched on, so the summary job
-mirrors that run's own completed checks onto the pull request head as
-App-authored copies linking back to the originals.
+mirrors that run's own completed `shipmate / ` checks onto the pull request head
+as App-authored copies linking back to the originals. The prefix leaves out the
+file's sibling jobs, which complete as `skipped` in the same suite.
 
 Authorizing an apply requires team membership, a non-draft, mergeable PR that
 satisfies the branch ruleset's review policy, and a reviewed plan for the PR's
@@ -129,22 +130,22 @@ independent of the complexity of its CI configuration.
 
 ## The plan path
 
-A consumer's `plan.yml` is a shim over the engine's reusable plan workflow,
-which has four jobs: `facts`, `detect`, `plan`, and `summary`. The shape is the
+The consumer's `plan` job calls the engine's reusable plan workflow, which has
+four jobs: `facts`, `detect`, `plan`, and `summary`. The shape is the
 same across repo layouts and across repositories — what differs per flavor is
 which variables the plan environment injects (`TF_VAR_*`, `TF_WORKSPACE`, or
 nothing) and whether a role variable is set there at all.
 
-The shim answers to two triggers: `pull_request_target` for the automatic plan
-on every push to a pull request, and `workflow_dispatch` for the plan a
-commented `shipmate plan` asks for. Both run at a ref the trusted `summary` job's
+Two of `shipmate.yml`'s five triggers select that job: `pull_request_target` for
+the automatic plan on every push to a pull request, and the `workflow_dispatch`
+carrying `verb: plan` that a commented `shipmate plan` sends. Both run at a ref the trusted `summary` job's
 environment policy admits (the base ref under `pull_request_target`, the
 dispatch ref under `workflow_dispatch`), which is what lets that job reach the
 App key. Neither checks out the pull request's head, so `detect` and `plan` have
 to name `ref: ${{ needs.facts.outputs.head-sha }}` on their checkout explicitly,
 or the run is refused for planning a tree the pull request never named.
 
-The engine's jobs appear in the checks list under the shim's calling job name:
+The engine's jobs appear in the checks list under the calling job's name:
 `shipmate / facts`, `shipmate / detect`, `shipmate / summary` and one
 `shipmate / <stack> / <env>` per cell. Those check runs are created by GitHub
 Actions, as a job's check run always is, and the prefix is what says which tool
@@ -197,8 +198,8 @@ produced them. See
   is a refusal rather than a pass. Nothing a consumer writes reaches that
   decision.
 
-  On an `on-demand` run it also mirrors this run's own
-  completed per-cell plan checks onto the head commit: a dispatched run's job
+  On an `on-demand` run it also mirrors this run's own completed
+  `shipmate / ` per-cell plan checks onto the head commit: a dispatched run's job
   check-runs attach to the dispatch ref, so without the mirror the pull request
   shows none of them — not even a failed cell, which is the state
   `shipmate plan` exists to recover from.
@@ -233,11 +234,11 @@ settings that bound that, see [`hardening.md`](hardening.md).
 
 shipmate follows a serverless plan→store→review→apply model: the reviewed plan
 is stored and applied verbatim, with no server or database.
-A consumer's `deploy.yml` is a shim over the engine's reusable deploy workflow,
-passing only its flavor's `state_suffix`; `drift.yml` is a shim of the same
-shape over the engine's reusable drift workflow.
+The consumer's `deploy` job calls the engine's reusable deploy workflow, passing
+only its flavor's `state_suffix`; its `drift` job is the same shape over the
+engine's reusable drift workflow.
 
-- **`deploy.yml`** (`on: push main`, engine reusable
+- **`deploy`** (selected by `push` to the default branch, engine reusable
   `.github/workflows/deploy.yml`) is the exact-plan apply path.
   `actions/deploy-detect` maps the merge commit → its PR head SHA, takes the
   stacks whose `apply / <stack> / <env>` check is still pending, and orders
@@ -250,7 +251,7 @@ shape over the engine's reusable drift workflow.
   that exact plan (never re-plans; stale state → fail-safe), and completes
   the apply check. A stack already applied (pre-merge, or a no-change re-plan)
   has a completed check → deploy no-ops it.
-- **`drift.yml`** (nightly cron, engine reusable
+- **`drift`** (selected by the nightly `schedule`, engine reusable
   `.github/workflows/drift.yml`) fans out over all stacks × envs, or a
   slice of them, and plans each with `actions/drift-cell`, which holds no App
   credential and only uploads a drift-summary artifact. A separate `issues` job,
@@ -260,7 +261,7 @@ shape over the engine's reusable drift workflow.
   [drift.md](drift.md).
 - **Generalization:** deploy + drift run unchanged across all three layouts
   (`repo-example-{stacks,folders,workspaces}`) — same pinned shipmate SHA, only
-  the per-flavor state path (each shim's `state_suffix`) differs; the per-flavor
+  the per-flavor state path (each job's `state_suffix`) differs; the per-flavor
   environment variables come from the GitHub Environment a cell binds (folders
   inject nothing, workspaces inject `TF_WORKSPACE`).
 
@@ -277,8 +278,8 @@ environment names neither still reads whatever the repository or the
 organization sets. Only where no level sets one does the credentials step skip
 and no cloud credential enter the job, which is how the sample repos run
 credential-free. Every job that runs a cell requests `id-token: write`, and GitHub
-caps a called workflow's permissions at each `uses:` boundary. So the calling
-job of every consumer shim but `comment-ops.yml` must grant `id-token: write` —
+caps a called workflow's permissions at each `uses:` boundary. So every job of
+`shipmate.yml` but `comment-ops` must grant `id-token: write` —
 including consumers using no cloud credentials at all. The plan and drift cells
 run the same credentials step as the apply waves, so a repository- or
 organization-level role set for the apply path is assumed by every plan and
@@ -290,6 +291,6 @@ One model note vs a hosted service: with no server-side queue, GHA can drop a
 superseded deploy run — its stacks stay pending + visible and are recovered
 by re-running that deploy. The manual pre-merge exact-plan apply
 (`shipmate apply <env>` in a PR comment) shares the same exact-plan `apply-cell`
-path and the same per-env, per-stack concurrency group as `deploy.yml`, so a
+path and the same per-env, per-stack concurrency group as the `deploy` job, so a
 comment-triggered apply and a post-merge deploy can never race against the
 same stack × environment; see Comment-ops above and `CONTRACT.md`.
