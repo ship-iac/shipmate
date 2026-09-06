@@ -497,9 +497,9 @@ its own.
   from with a read-only plan role (`docs/aws.md` §Environment variables) — never
   at repository or organization level. The enforcing control is not the
   variable's location at all: it is the role's trust policy, whose `environment:`
-  claim condition is what decides which environments may assume it. (Where the
-  *region* variable is set still decides whether the step runs at all, since
-  `AWS_REGION` is passed through unresolved and is not part of the role gate.)
+  claim condition is what decides which environments may assume it.
+  `AWS_REGION` rides along in the same step and appears nowhere in the gate that
+  decides whether it runs, so it bounds nothing.
 
   **That last sentence is now load-bearing where it used to be advice.** The
   plan and drift cells read these variables too, so a repository- or

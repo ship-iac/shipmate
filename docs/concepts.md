@@ -273,7 +273,7 @@ configuration must fail loud rather than apply with no state at all.
 Credentials are opt-in per GitHub Environment
 through two variables, `AWS_ROLE_ARN` and `AWS_REGION` — unset, and no cloud
 credential ever enters the job, which is how the sample repos run
-credential-free. The apply and unlock jobs request `id-token: write`, and GitHub
+credential-free. Every job that runs a cell requests `id-token: write`, and GitHub
 caps a called workflow's permissions at each `uses:` boundary. So the calling
 job of every consumer shim but `comment-ops.yml` must grant `id-token: write` —
 including consumers using no cloud credentials at all. The plan and drift cells
