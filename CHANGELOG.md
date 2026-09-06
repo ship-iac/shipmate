@@ -11,6 +11,72 @@ section below names the SHA the release tags.
 The version line stays `v0.x` while action inputs, check names, and the comment
 grammar are declared unstable in `README.md`.
 
+## [0.26.0] — 2026-09-06
+
+Tags `<sha>`.
+
+Additive. No consumer has to change anything to take this release; the new
+script is hand-run from an engine checkout and is never invoked from a workflow.
+
+### Added
+
+- **`scripts/onboard` — one command per consumer repository.** It reconciles a
+  repository to the setup `docs/getting-started.md` and `docs/github-app.md`
+  describe: the `shipmate-engine` environment and its default-branch policy, the
+  `<env>-plan` / `<env>-apply` pair per environment (or a shared bare `<env>`),
+  the App private key on `shipmate-engine` plus deletion of any repository-level
+  copy, `SHIPMATE_APP_ID`, `SHIPMATE_APPROVERS_TEAM`, `TERRAMATE_VERSION` and
+  `TOFU_VERSION`, the `shipmate-gate` ruleset, and the six workflow shims. Run
+  it from inside the consumer's checkout:
+
+  ```bash
+  python <engine-checkout>/scripts/onboard --team <approvers-team-slug> \
+      --app-id <id> --key shipmate-app.private-key.pem
+  ```
+
+  It is a reconciler, not a create-once onboarder. Every setting is read the way
+  `shipmate doctor` reads it, written only when absent, and reported as `differs`
+  when present and different — a value a consumer chose is never overwritten. A
+  second run over a configured repository writes nothing and prints every line as
+  `ok`. `--dry-run` reports every change and performs no write. Exit 0 when
+  nothing differs, 2 when something does, 1 on a refusal.
+
+  Two disagreements are refused rather than reported, because proceeding would
+  leave the repository worse than it started: a `SHIPMATE_APP_ID` variable that
+  differs from `--app-id`, since the same run pins the gate ruleset's
+  `integration_id` to the flag and a ruleset the workflows cannot satisfy blocks
+  the default branch; and an environment whose unused naming already exists,
+  since creating the bound naming beside it produces the ambiguity `shipmate
+  doctor` reports and neither naming can then be reconciled.
+
+  The six shim bodies are not a second copy of the documented ones — they are
+  rendered at run time from the ```yaml fences in `docs/getting-started.md` and
+  `docs/drift.md`, with the pin and `state_suffix` substituted, so the files the
+  script writes and the files the docs publish cannot drift. The pin it writes is
+  byte-identical to what `dev/repin_consumer.py` writes at the next release.
+
+  What it cannot know it prints as a checklist: the cloud role and region, the
+  per-environment `TF_VAR_*` or `TF_WORKSPACE` your layout injects,
+  `SHIPMATE_PLAN_PASSPHRASE`, `SLACK_WEBHOOK`, environment reviewers, a
+  `CODEOWNERS` entry, and adding the repository to the App installation, which the
+  API does not allow a `gh` OAuth token to do. It writes files and stops: the
+  branch, commit and pull request are yours, and that first pull request is the
+  ungatable one (`CONTRACT.md` §Post-plan topology).
+
+### Changed
+
+- `docs/github-app.md` §Appendix's shell loop over repositories is replaced by a
+  loop over checkouts calling the script. Two implementations of one spec drift,
+  and the evidence was in this organization: `repo-example-stacks-aws` had no
+  deployment branch policy on `shipmate-engine`, `dev-eu-apply` or `dev-us-apply`
+  after the runbook had been followed by hand, and `shipmate doctor` warned on
+  every plan run without that getting it fixed.
+- `docs/getting-started.md` gains a Quick path, and its tier sections each say
+  which step the script performs. `docs/troubleshooting.md` gains a section
+  explaining every line the script reports.
+- `scripts/register-app` now points at `scripts/onboard` for the per-repository
+  half it does not cover.
+
 ## [0.25.0] — 2026-09-06
 
 Tags `9e12610`.
