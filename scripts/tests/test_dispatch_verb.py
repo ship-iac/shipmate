@@ -435,10 +435,10 @@ def test_a_dispatch_against_a_repo_without_shipmate_yml_prints_the_layout_messag
         result, _ = _run_dispatch(tmpdir, verb=verb, environment="dev-eu", gh_stub=stub)
         output = result.stdout + result.stderr
         assert result.returncode != 0, f"a {verb} failure must exit non-zero: {output}"
-        assert "HTTP 4" in output, f"raw gh output missing: {output}"
         # The hint explains the answer; it does not replace it. Pinned per shape, because the
         # remaining two carry no distinctive sentence of their own -- and against stdout alone,
-        # because the refusal comment's own gh call leaks the same text on stderr.
+        # because the refusal comment's own gh call leaks the same text on stderr, which is what
+        # made the `"HTTP 4" in output` this replaces unable to fail.
         if stub is _NO_TRIGGER_STUB:
             assert "Workflow does not have" in result.stdout, (
                 f"the API's own answer must still print beside the hint: {output}"
