@@ -956,23 +956,32 @@ def test_absent_variables_are_set_from_versions_and_flags(monkeypatch, tmp_path)
 
 
 def test_variables_that_exist_with_another_value_are_reported(monkeypatch, tmp_path):
-    """A consumer pinning an older tested pair is making a deliberate choice: the
-    reconciler names the disagreement and writes nothing over it.
+    """A consumer pinning an older tested pair, or another App, is making a deliberate
+    choice: the reconciler names the disagreement and writes nothing over it. Each
+    `differs` line names where the value it would have written came from, so two
+    variables from different sources are driven here -- a swap of the `--app-id` and
+    `--team` labels reddens the first line.
 
-    Mutation: overwrite the existing value instead of reporting -- the `differs` tuple
-    disappears and a `gh variable set TERRAMATE_VERSION` appears.
+    Mutation: overwrite the existing value instead of reporting -- both `differs` tuples
+    disappear and `gh variable set` calls for both appear.
     """
-    fake = make_gh({VARIABLE_LIST: [{"name": "TERRAMATE_VERSION", "value": "0.16.0"}]})
+    fake = make_gh(
+        {
+            VARIABLE_LIST: [
+                {"name": "SHIPMATE_APP_ID", "value": "123"},
+                {"name": "TERRAMATE_VERSION", "value": "0.16.0"},
+            ]
+        }
+    )
     monkeypatch.setattr(onboard, "_run", fake)
-    onboard._reconcile_variables(ctx(engine=engine_with_versions(tmp_path)))
+    onboard._reconcile_variables(ctx(app_id="456", engine=engine_with_versions(tmp_path)))
     assert fake.calls == [
         ["gh", "variable", "list", "--json", "name,value"],
-        ["gh", "variable", "set", "SHIPMATE_APP_ID", "--body", "1"],
         ["gh", "variable", "set", "SHIPMATE_APPROVERS_TEAM", "--body", "ops"],
         ["gh", "variable", "set", "TOFU_VERSION", "--body", "8.8.8"],
     ]
     assert onboard.REPORT == [
-        ("set", "SHIPMATE_APP_ID", "1"),
+        ("differs", "SHIPMATE_APP_ID", "repository has 123, --app-id is 456"),
         ("set", "SHIPMATE_APPROVERS_TEAM", "ops"),
         ("differs", "TERRAMATE_VERSION", "repository has 0.16.0, VERSIONS is 9.9.9"),
         ("set", "TOFU_VERSION", "8.8.8"),
@@ -1007,11 +1016,17 @@ def test_shared_environments_are_written_as_one_sorted_variable(monkeypatch, tmp
     """SHIPMATE_SHARED_ENVS is a set written as a list, so the value written is sorted
     and a repository whose variable lists the same names in another order is not drift.
 
-    Mutations: drop the SHIPMATE_SHARED_ENVS entry from `_wanted_variables`, which
-    reddens the first case; drop the `_matches` set comparison, which turns the second
-    into a `differs` and a rewrite of a variable that already says what it should.
+    Three names, not two: `PYTHONHASHSEED` randomises string hashing, so an unsorted
+    join of two names lands in sorted order about half the time. Three shortens that to
+    one run in six -- measured red on 9 of 12 seeds, so the unsorted mutation below is
+    the one probabilistic claim here, not a certain one.
+
+    Mutations: join the set unsorted (`",".join(ctx["shared"])`), or drop the
+    SHIPMATE_SHARED_ENVS entry from `_wanted_variables` -- both redden the first case;
+    drop the `_matches` set comparison, which turns the second into a `differs` and a
+    rewrite of a variable that already says what it should.
     """
-    shared = {"dev-us", "dev-eu"}
+    shared = {"dev-us", "dev-eu", "dev-ap"}
     fake = make_gh({VARIABLE_LIST: []})
     monkeypatch.setattr(onboard, "_run", fake)
     onboard._reconcile_variables(ctx(engine=engine_with_versions(tmp_path), shared=shared))
@@ -1021,11 +1036,13 @@ def test_shared_environments_are_written_as_one_sorted_variable(monkeypatch, tmp
         ["gh", "variable", "set", "SHIPMATE_APPROVERS_TEAM", "--body", "ops"],
         ["gh", "variable", "set", "TERRAMATE_VERSION", "--body", "9.9.9"],
         ["gh", "variable", "set", "TOFU_VERSION", "--body", "8.8.8"],
-        ["gh", "variable", "set", "SHIPMATE_SHARED_ENVS", "--body", "dev-eu,dev-us"],
+        ["gh", "variable", "set", "SHIPMATE_SHARED_ENVS", "--body", "dev-ap,dev-eu,dev-us"],
     ]
 
     onboard.REPORT.clear()
-    fake = make_gh({VARIABLE_LIST: [{"name": "SHIPMATE_SHARED_ENVS", "value": "dev-us, dev-eu"}]})
+    fake = make_gh(
+        {VARIABLE_LIST: [{"name": "SHIPMATE_SHARED_ENVS", "value": "dev-us, dev-ap, dev-eu"}]}
+    )
     monkeypatch.setattr(onboard, "_run", fake)
     onboard._reconcile_variables(ctx(engine=engine_with_versions(tmp_path), shared=shared))
     assert onboard.REPORT == [
@@ -1033,9 +1050,33 @@ def test_shared_environments_are_written_as_one_sorted_variable(monkeypatch, tmp
         ("set", "SHIPMATE_APPROVERS_TEAM", "ops"),
         ("set", "TERRAMATE_VERSION", "9.9.9"),
         ("set", "TOFU_VERSION", "8.8.8"),
-        ("ok", "SHIPMATE_SHARED_ENVS", "dev-eu,dev-us"),
+        ("ok", "SHIPMATE_SHARED_ENVS", "dev-ap,dev-eu,dev-us"),
     ]
     assert onboard._exit_code() == 0
+
+
+def test_a_missing_versions_file_is_refused(tmp_path):
+    """Every other refusal in this script is a `SystemExit` naming what to fix, and this
+    one fires before any variable is written.
+
+    Mutation: drop the `is_file()` check, so a `FileNotFoundError` traceback replaces it.
+    """
+    with pytest.raises(SystemExit) as e:
+        onboard._versions(tmp_path)
+    assert "VERSIONS" in str(e.value)
+
+
+def test_a_versions_file_missing_a_key_is_refused(tmp_path):
+    """`terramate=` and `tofu=` are this script's only coupling to that file's shape, and
+    nothing else in the repository parses it. A renamed key must name itself, not raise a
+    `KeyError` two frames away.
+
+    Mutation: drop the `missing` check, so `_wanted_variables` raises `KeyError: 'tofu'`.
+    """
+    (tmp_path / "VERSIONS").write_text("terramate=9.9.9\n", encoding="utf-8", newline="\n")
+    with pytest.raises(SystemExit) as e:
+        onboard._versions(tmp_path)
+    assert "tofu" in str(e.value)
 
 
 def test_missing_gate_rule_creates_the_ruleset(monkeypatch):
@@ -1145,18 +1186,22 @@ def test_a_gate_without_strict_is_reported(monkeypatch):
     ]
 
 
-def test_ruleset_post_forbidden_is_reported_with_the_plan_sentence(monkeypatch):
-    """Rulesets need a paid plan or a public repository, and a private Free repository
-    answers the POST with 403. Every other setting is reconciled by then, so it is a
-    report line, not a crash the operator has to re-run past.
+@pytest.mark.parametrize("status", ["HTTP 403", "HTTP 404"])
+def test_ruleset_post_forbidden_is_reported_with_the_plan_sentence(monkeypatch, status):
+    """Rulesets need a paid plan or a public repository. Which status a repository
+    without that plan answers the POST with is not established -- 403 and 404 are both
+    plausible and neither was observed here -- so both are tolerated, and each is driven
+    below rather than reasoned about. Every other setting is reconciled by then, so it
+    is a report line, not a crash the operator has to re-run past.
 
-    Mutation: drop the `except SystemExit` arm, so the 403 propagates and the run dies
-    with no report line at all.
+    Mutations: drop the `except SystemExit` arm, so the failure propagates and the run
+    dies with no report line; or drop either half of the 403/404 test, which reddens
+    that half's case alone.
     """
 
     def fake(args, secrets=(), stdin=None):
         if "-X" in args:
-            raise SystemExit("command failed (1): gh api\ngh: Forbidden (HTTP 403)")
+            raise SystemExit(f"command failed (1): gh api\ngh: refused ({status})")
         return json.dumps([])
 
     monkeypatch.setattr(onboard, "_run", fake)
@@ -1171,3 +1216,50 @@ def test_ruleset_post_forbidden_is_reported_with_the_plan_sentence(monkeypatch):
         )
     ]
     assert onboard._exit_code() == 2
+
+
+def test_an_invisible_shipmate_gate_ruleset_is_reported_not_fatal(monkeypatch):
+    """A `shipmate-gate` ruleset whose enforcement is `evaluate` or `disabled` requires
+    nothing, so the effective-rules read cannot see it and the create branch is taken --
+    where the POST answers 422 `name already in use`. Letting that propagate breaks the
+    promise that a second run over a configured repository changes nothing.
+
+    Mutation: drop the `HTTP 422` arm of `_post_failure`, so the run dies here.
+    """
+
+    def fake(args, secrets=(), stdin=None):
+        if "-X" in args:
+            raise SystemExit("command failed (1): gh api\ngh: Validation Failed (HTTP 422)")
+        return json.dumps([])
+
+    monkeypatch.setattr(onboard, "_run", fake)
+    onboard._reconcile_ruleset(ctx())
+    assert onboard.REPORT == [
+        (
+            "differs",
+            "gate ruleset",
+            "a `shipmate-gate` ruleset already exists but requires nothing on this "
+            "branch, so its enforcement is `evaluate` or `disabled` — the effective-rules "
+            "read cannot see it. Set it to active, or delete it and run this again.",
+        )
+    ]
+    assert onboard._exit_code() == 2
+
+
+def test_an_unrecognised_ruleset_post_failure_propagates(monkeypatch):
+    """A 500 or an expired token is not a plan-tier limitation: reporting `differs` over
+    it would tell the operator to configure the gate by hand when the truth is that the
+    call never landed.
+
+    Mutation: `return None` in `_post_failure` to `return _PLAN_TIER`.
+    """
+
+    def fake(args, secrets=(), stdin=None):
+        if "-X" in args:
+            raise SystemExit("command failed (1): gh api\ngh: Server Error (HTTP 500)")
+        return json.dumps([])
+
+    monkeypatch.setattr(onboard, "_run", fake)
+    with pytest.raises(SystemExit) as e:
+        onboard._reconcile_ruleset(ctx())
+    assert "HTTP 500" in str(e.value)

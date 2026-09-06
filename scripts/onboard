@@ -406,10 +406,26 @@ def _reconcile_envs(ctx):
 
 
 def _versions(engine):
-    """{"terramate": ..., "tofu": ...} from the engine checkout's VERSIONS file."""
-    text = (pathlib.Path(engine) / "VERSIONS").read_text(encoding="utf-8")
-    pairs = (line.partition("=") for line in text.splitlines() if "=" in line)
-    return {name.strip(): value.strip() for name, _sep, value in pairs}
+    """{"terramate": ..., "tofu": ...} from the engine checkout's VERSIONS file.
+
+    Nothing else in the repository parses that file, so these two key names are an
+    undocumented coupling; the refusals below are where it is recorded. Both are
+    `SystemExit` like every other refusal here, and both fire before any write.
+    """
+    path = pathlib.Path(engine) / "VERSIONS"
+    if not path.is_file():
+        raise SystemExit(f"{path} does not exist: TERRAMATE_VERSION and TOFU_VERSION come from it.")
+    pairs = (
+        line.partition("=") for line in path.read_text(encoding="utf-8").splitlines() if "=" in line
+    )
+    versions = {name.strip(): value.strip() for name, _sep, value in pairs}
+    missing = [key for key in ("terramate", "tofu") if not versions.get(key)]
+    if missing:
+        raise SystemExit(
+            f"{path} carries no {' and no '.join(missing)} line: it needs a "
+            "`terramate=` and a `tofu=` line."
+        )
+    return versions
 
 
 def _wanted_variables(ctx):
@@ -477,6 +493,12 @@ def _ruleset_body(ctx):
     }
 
 
+_NAME_TAKEN = (
+    "a `shipmate-gate` ruleset already exists but requires nothing on this branch, so "
+    "its enforcement is `evaluate` or `disabled` — the effective-rules read cannot see "
+    "it. Set it to active, or delete it and run this again."
+)
+
 _PLAN_TIER = (
     "rulesets need GitHub Pro, Team, Enterprise, or a public repository "
     "(docs/branch-protection.md §Reproducible ruleset). Configure the gate by hand there."
@@ -486,8 +508,11 @@ _PLAN_TIER = (
 def _gate_entry(ctx):
     """(the `shipmate / gate` status-check entry, its rule parameters), or (None, None).
 
-    The effective rules across every ruleset, read the way `doctor` reads them, so a
-    gate required by a ruleset this script did not create is found too.
+    The effective rules across every ruleset, read the way `doctor`'s gate probe reads
+    them -- including the assumption, inherited from it and not verified here, that this
+    endpoint answers `[]` rather than 404 when the branch carries no rule. If that is
+    wrong, a repository with no ruleset crashes here instead of reaching the report
+    `_reconcile_ruleset` writes for one that cannot have rulesets at all.
     """
     rules = _gh_json(f"repos/{ctx['repo']}/rules/branches/{ctx['default_branch']}?per_page=100")
     for rule in rules:
@@ -498,6 +523,15 @@ def _gate_entry(ctx):
             if chk.get("context") == GATE:
                 return chk, params
     return None, None
+
+
+def _post_failure(e):
+    """The report detail for a failed rulesets POST, or None when it must re-raise."""
+    if "HTTP 422" in str(e):
+        return _NAME_TAKEN
+    if "HTTP 403" in str(e) or "HTTP 404" in str(e):
+        return _PLAN_TIER
+    return None
 
 
 def _reconcile_ruleset(ctx):
@@ -520,9 +554,10 @@ def _reconcile_ruleset(ctx):
                 detail=GATE,
             )
         except SystemExit as e:
-            if "HTTP 403" not in str(e) and "HTTP 404" not in str(e):
+            detail = _post_failure(e)
+            if detail is None:
                 raise
-            report("differs", subject, _PLAN_TIER)
+            report("differs", subject, detail)
     elif chk.get("integration_id") != app_id:
         report(
             "differs",
