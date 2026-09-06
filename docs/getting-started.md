@@ -54,9 +54,9 @@ one-time runbook. It is a prerequisite of this tier, not an optional extra.
 ### Quick path
 
 `scripts/onboard` reconciles every tier on this page in one command. Run it
-from inside the consumer checkout, on its default branch, with `gh` authenticated
-against that repository, `terramate` on `PATH`, and an engine checkout sitting on
-a `vX.Y.Z` release tag:
+from inside the consumer checkout, with `gh` authenticated against that
+repository, `terramate` on `PATH`, and an engine checkout sitting on a `vX.Y.Z`
+release tag:
 
 ```bash
 python3 <engine-checkout>/scripts/onboard \
@@ -632,7 +632,10 @@ A nightly `drift.yml` plans every stack × environment — or a slice of them �
 against real state, then opens, updates and closes drift Issues from what those
 cells report. It is one more shim, and the engine jobs behind it that hold a
 credential run only at the default-branch ref; it needs the `shipmate-engine`
-environment from the plan tier. The workflow and its costs are in [`drift.md`](drift.md).
+environment from the plan tier. `scripts/onboard` writes this shim along with the
+other five, so a repository it reconciled already has the workflow — delete the
+file if you do not want a nightly run. The workflow and its costs are in
+[`drift.md`](drift.md).
 
 ### Recipe: automerge after apply
 

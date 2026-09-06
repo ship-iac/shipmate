@@ -17,9 +17,9 @@ an App named `shipmate-acme` comments as `shipmate-acme[bot]`.
 This is a runbook, not a tutorial: run the commands in order. Steps 1–4 are
 once per GitHub org: register the App and install it, selecting the repositories
 it may act on. Steps 5–6 onboard one repository, and are written for the
-repository you are setting up now, or run `scripts/onboard`, which performs both
-and the rest of that repository's setup. Onboarding several at once is that
-script in a loop — see the appendix.
+repository you are setting up now. `scripts/onboard` performs both, plus the rest
+of that repository's setup. Onboarding several at once is that script in a
+loop — see the appendix.
 
 ## Prerequisites
 

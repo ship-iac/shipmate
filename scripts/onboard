@@ -5,8 +5,8 @@
         --key shipmate-app.private-key.pem [--state-suffix <s>] \
         [--shared <env,env>] [--dry-run]
 
-Hand-run from inside the consumer checkout, at its default branch, with `gh`
-authenticated against that repository. It reads what is already there and
+Hand-run from inside the consumer checkout, with `gh` authenticated against that
+repository. It reads what is already there and
 creates or updates only what differs, so a second run over a configured
 repository changes nothing.
 
@@ -330,7 +330,13 @@ def _plan_drift(env):
             "it carries a deployment branch policy, which blocks every plan cell whose "
             "pull request targets a branch the policy does not name"
         )
-    rules = sorted(r.get("type") or "?" for r in env.get("protection_rules") or [])
+    # GitHub synthesizes a `branch_policy` rule for any environment with a deployment
+    # branch policy; it is the reason above, not a second one, and it does not stall.
+    rules = sorted(
+        r.get("type") or "?"
+        for r in env.get("protection_rules") or []
+        if r.get("type") != "branch_policy"
+    )
     if rules:
         reasons.append(f"it carries protection rules ({', '.join(rules)}), which stall plan cells")
     if not reasons:
@@ -430,6 +436,7 @@ def _bare_env_conflict(ctx, env):
 def _reconcile_envs(ctx):
     for env in ctx["envs"]:
         if env not in ctx["shared"] and _bare_env_conflict(ctx, env):
+            ctx["unresolved"].add(env)
             continue
         for name, role in _env_names(env, ctx["shared"]):
             _reconcile_env(ctx, name, role)
@@ -695,23 +702,27 @@ def _reconcile_shims(ctx):
 
 _LAYOUT = """Per environment, the cloud role and the env identity your layout injects. A
 DRY/dynamic backend needs TF_VAR_env and TF_VAR_region, workspace-per-env needs
-TF_WORKSPACE, folder-per-env needs neither (CONTRACT.md §Env model). For a cell
-carrying a workload/<name> tag the role variable is AWS_ROLE_ARN_<WORKLOAD>."""
+TF_WORKSPACE, folder-per-env needs neither (CONTRACT.md §Env model). On an apply
+environment a cell carrying a workload/<name> tag reads AWS_ROLE_ARN_<WORKLOAD>
+first; the plan path has no such fallback (docs/aws.md §Environment variables)."""
 
 _ENV_VARS = ("AWS_ROLE_ARN", "AWS_REGION", "TF_VAR_env", "TF_VAR_region", "TF_WORKSPACE")
 
 
 def _checklist(ctx):
-    """Print the values and steps this script cannot supply, as pasteable commands.
+    """Print the values and steps this script cannot supply, as commands to fill in.
 
     Which of `TF_VAR_env`+`TF_VAR_region` or `TF_WORKSPACE` an environment needs is a
     property of the stacks' layout and is not readable from outside them, so all three
-    are printed with the CONTRACT.md sentence rather than guessed.
+    are printed with the CONTRACT.md sentence rather than guessed. Every `<...>` is a
+    placeholder to substitute, so no line here runs as printed.
     """
     halves = [
-        (env, name, role) for env in ctx["envs"] for name, role in _env_names(env, ctx["shared"])
+        (env, name, role)
+        for env in ctx["envs"]
+        if env not in ctx["unresolved"]
+        for name, role in _env_names(env, ctx["shared"])
     ]
-    org = ctx["repo"].partition("/")[0]
     out = [
         "",
         "Still yours — these values are the consumer's, so this script cannot set them.",
@@ -731,8 +742,9 @@ def _checklist(ctx):
         "By hand:",
         "",
         f"  Add {ctx['repo']} to the App installation's repository selection, at",
-        f"  https://github.com/organizations/{org}/settings/apps/shipmate/installations. The",
-        "  add-repository endpoint accepts PAT-classic tokens only, so it stays a UI step.",
+        "  https://github.com/organizations/<org>/settings/apps/shipmate/installations",
+        "  — substitute your org and the App name you registered (docs/github-app.md §4).",
+        "  The add-repository endpoint accepts PAT-classic tokens only, so it stays a UI step.",
     ]
     # A reviewer on a shared env's bare environment stalls the plan cells and the drift
     # run, so it is asked for only where the apply path has an environment of its own.
@@ -743,11 +755,12 @@ def _checklist(ctx):
             f"  Required reviewers and `Prevent self-review` on {', '.join(reviewed)}",
             "  (docs/getting-started.md §Environment setup).",
         ]
+    verb = "Re-run without --dry-run, then commit" if _DRY else "Commit"
     out += [
         "",
         "  A CODEOWNERS entry covering /.github/workflows/.",
         "",
-        "  Commit the six shims and open the pull request. `shipmate / gate` cannot be",
+        f"  {verb} the six shims and open the pull request. `shipmate / gate` cannot be",
         "  green on that one: the workflows that produce it are not on the default branch",
         "  yet (CONTRACT.md §Post-plan topology). Merge it with an administrative bypass.",
     ]
@@ -801,6 +814,7 @@ def main(argv=None):
         "key": key,
         "envs": envs,
         "shared": _resolve_shared(args.shared, _variables(), envs),
+        "unresolved": set(),
         "state_suffix": args.state_suffix,
         "root": root,
         "engine": engine,

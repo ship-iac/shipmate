@@ -84,6 +84,7 @@ def ctx(**over):
         "key": "-----BEGIN-----\npem\n",
         "envs": ["dev-eu"],
         "shared": set(),
+        "unresolved": set(),
         "state_suffix": "",
         "root": None,
         "engine": None,
@@ -435,9 +436,8 @@ def test_main_calls_every_stage_in_order():
     Mutations, each proven: delete `_reconcile_engine_env(ctx)`; delete
     `_reconcile_envs(ctx)`; delete `_reconcile_variables(ctx)`; delete
     `_reconcile_ruleset(ctx)`; delete `_reconcile_shims(ctx)`; delete `_checklist(ctx)`;
-    `_repo_root()` back to
-    `pathlib.Path.cwd()`; delete
-    `sys.exit(_exit_code())`; swap two reconcilers.
+    `_repo_root()` back to `pathlib.Path.cwd()`; delete `sys.exit(_exit_code())`; swap
+    two reconcilers.
     """
     tree = ast.parse((ENGINE / "scripts" / "onboard").read_text(encoding="utf-8"))
     main = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "main")
@@ -1586,8 +1586,9 @@ Still yours — these values are the consumer's, so this script cannot set them.
 
 Per environment, the cloud role and the env identity your layout injects. A
 DRY/dynamic backend needs TF_VAR_env and TF_VAR_region, workspace-per-env needs
-TF_WORKSPACE, folder-per-env needs neither (CONTRACT.md §Env model). For a cell
-carrying a workload/<name> tag the role variable is AWS_ROLE_ARN_<WORKLOAD>.
+TF_WORKSPACE, folder-per-env needs neither (CONTRACT.md §Env model). On an apply
+environment a cell carrying a workload/<name> tag reads AWS_ROLE_ARN_<WORKLOAD>
+first; the plan path has no such fallback (docs/aws.md §Environment variables).
 
   gh variable set AWS_ROLE_ARN --env dev-eu-plan --body <value>
   gh variable set AWS_REGION --env dev-eu-plan --body <value>
@@ -1609,8 +1610,9 @@ Repository-wide, both optional:
 By hand:
 
   Add o/r to the App installation's repository selection, at
-  https://github.com/organizations/o/settings/apps/shipmate/installations. The
-  add-repository endpoint accepts PAT-classic tokens only, so it stays a UI step.
+  https://github.com/organizations/<org>/settings/apps/shipmate/installations
+  — substitute your org and the App name you registered (docs/github-app.md §4).
+  The add-repository endpoint accepts PAT-classic tokens only, so it stays a UI step.
 
   Required reviewers and `Prevent self-review` on dev-eu-apply
   (docs/getting-started.md §Environment setup).
@@ -1645,8 +1647,9 @@ Still yours — these values are the consumer's, so this script cannot set them.
 
 Per environment, the cloud role and the env identity your layout injects. A
 DRY/dynamic backend needs TF_VAR_env and TF_VAR_region, workspace-per-env needs
-TF_WORKSPACE, folder-per-env needs neither (CONTRACT.md §Env model). For a cell
-carrying a workload/<name> tag the role variable is AWS_ROLE_ARN_<WORKLOAD>.
+TF_WORKSPACE, folder-per-env needs neither (CONTRACT.md §Env model). On an apply
+environment a cell carrying a workload/<name> tag reads AWS_ROLE_ARN_<WORKLOAD>
+first; the plan path has no such fallback (docs/aws.md §Environment variables).
 
   gh variable set AWS_ROLE_ARN --env dev-eu --body <value>
   gh variable set AWS_REGION --env dev-eu --body <value>
@@ -1662,8 +1665,9 @@ Repository-wide, both optional:
 By hand:
 
   Add o/r to the App installation's repository selection, at
-  https://github.com/organizations/o/settings/apps/shipmate/installations. The
-  add-repository endpoint accepts PAT-classic tokens only, so it stays a UI step.
+  https://github.com/organizations/<org>/settings/apps/shipmate/installations
+  — substitute your org and the App name you registered (docs/github-app.md §4).
+  The add-repository endpoint accepts PAT-classic tokens only, so it stays a UI step.
 
   A CODEOWNERS entry covering /.github/workflows/.
 
@@ -1683,3 +1687,71 @@ def test_the_checklist_asks_for_no_reviewer_on_a_shared_environment(capsys):
     """
     onboard._checklist(ctx(repo="o/r", envs=["dev-eu"], shared={"dev-eu"}))
     assert capsys.readouterr().out == SHARED_CHECKLIST
+
+
+def test_a_plan_environment_with_a_branch_policy_reports_the_policy_alone(monkeypatch):
+    """GitHub synthesizes a `branch_policy` protection rule for any environment that has
+    a deployment branch policy (`scripts/doctor` filters the same entry). Counted, it
+    makes every policy-carrying plan environment also report "it carries protection
+    rules (branch_policy), which stall plan cells" -- false, because a branch policy
+    refuses the cell rather than delaying it, and it names a rule the consumer cannot
+    find in the UI.
+
+    Mutation: drop the `!= "branch_policy"` filter from `_plan_drift`.
+    """
+    fake = make_gh(
+        {
+            "repos/o/r/environments/dev-eu": SystemExit("gh: Not Found (HTTP 404)"),
+            "repos/o/r/environments/dev-eu-plan": {
+                "deployment_branch_policy": CUSTOM_POLICY,
+                "protection_rules": [{"type": "branch_policy"}],
+            },
+            "repos/o/r/environments/dev-eu-apply": {"deployment_branch_policy": CUSTOM_POLICY},
+            "repos/o/r/environments/dev-eu-apply/deployment-branch-policies": {
+                "total_count": 1,
+                "branch_policies": [{"name": "main"}],
+            },
+        }
+    )
+    monkeypatch.setattr(onboard, "_run", fake)
+    onboard._reconcile_envs(ctx())
+    assert onboard.REPORT == [
+        (
+            "differs",
+            "dev-eu-plan",
+            "it carries a deployment branch policy, which blocks every plan cell whose "
+            "pull request targets a branch the policy does not name. Removing a "
+            "protection a consumer set is not this script's call, so it is reported and "
+            "left alone.",
+        ),
+        ("ok", "dev-eu-apply", ""),
+        ("ok", "dev-eu-apply branch policy", "main"),
+    ]
+
+
+def test_the_checklist_skips_an_environment_the_reconciler_left_alone(capsys):
+    """`_reconcile_envs` touches neither half of an environment holding both a bare
+    `<env>` and an `<env>-apply`, because which the engine binds is undecided. Naming
+    those halves in the checklist tells a consumer to set variables on environments the
+    run refused to reconcile, one of which it may then delete.
+
+    `dev-us` contributes nothing, so the expected block is the split constant unchanged.
+
+    Mutation: drop the `env not in ctx["unresolved"]` filter from `_checklist`.
+    """
+    onboard._checklist(ctx(envs=["dev-eu", "dev-us"], unresolved={"dev-us"}))
+    assert capsys.readouterr().out == SPLIT_CHECKLIST
+
+
+def test_the_checklist_does_not_tell_a_dry_run_to_commit_six_shims_it_did_not_write(capsys):
+    """--dry-run writes no shim, so the closing step is a re-run, not a commit. The
+    expected block is the split constant with that one line substituted by hand.
+
+    Mutation: drop the `_DRY` branch from the closing line.
+    """
+    onboard._DRY = True
+    onboard._checklist(ctx())
+    assert capsys.readouterr().out == SPLIT_CHECKLIST.replace(
+        "  Commit the six shims",
+        "  Re-run without --dry-run, then commit the six shims",
+    )
