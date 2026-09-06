@@ -2,9 +2,9 @@
 
 Three of these carry the weight. The suite-id refusal: a run whose own check suite could not be
 identified must mirror nothing, or it copies every check on the commit, other workflows'
-included, onto the pull request head. The `completed` filter: it is what excludes this job's own
-still-running check, and the `shipmate / ` prefix is what keeps the consumer file's sibling
-jobs — which complete as `skipped` in this same suite — off the head. And the fixed
+included, onto the pull request head. The two row filters: `completed` excludes this job's own
+still-running check, and the `shipmate / ` prefix excludes the consumer file's sibling jobs,
+which complete as `skipped` in this same suite. And the fixed
 output text: the plan output is author-controlled, so no cell summary or plan text may reach the
 mirrored check.
 

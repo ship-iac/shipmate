@@ -63,7 +63,9 @@ _DECIMAL = re.compile(r"[0-9]+")
 
 
 def bodies(lines, suite_id, head_sha):
-    """One POST body per completed check-run of `suite_id`, aimed at `head_sha`.
+    """One POST body per completed `shipmate / ` check-run of `suite_id`, aimed at
+    `head_sha`. Both conditions: a completed check named outside that namespace is
+    one of the consumer file's skipped router jobs, not a cell.
 
     An empty or non-decimal `suite_id` is refused rather than treated as "match
     everything": a run whose suite could not be identified would otherwise
@@ -113,9 +115,9 @@ def main():
         # Never silent: a mirror that copied nothing means the reviewer sees no
         # per-cell checks, and the reason is not visible anywhere else.
         print(
-            "::warning::this plan run's own check suite held no completed checks to mirror "
-            "onto the pull request head; the pull request shows no per-cell plan checks for "
-            "this run",
+            "::warning::no `shipmate / ` check completed in this plan run's own check suite, "
+            "so nothing was mirrored onto the pull request head; the pull request shows no "
+            "per-cell plan checks for this run",
             file=sys.stderr,
         )
 
