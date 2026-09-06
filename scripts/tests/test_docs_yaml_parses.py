@@ -139,14 +139,15 @@ def test_the_wrapper_snippets_are_still_being_found():
         for _, target, _ in _engine_workflow_calls(yaml.safe_load(body))
     )
     assert found == [
-        # Two: the unscoped nightly shim, and the `drift-<slice>.yml` copy under
-        # "Spreading a sweep across the week" that carries a literal `tags:` value.
-        ("docs/drift.md", "drift.yml"),
+        # One: the `drift-<slice>.yml` copy under "Spreading a sweep across the week",
+        # which carries a literal `tags:` value. The unscoped sweep is the `drift` job of
+        # `shipmate.yml` and is published in getting-started.md with the other six.
         ("docs/drift.md", "drift.yml"),
         ("docs/getting-started.md", "apply-all.yml"),
         ("docs/getting-started.md", "apply.yml"),
         ("docs/getting-started.md", "comment-ops.yml"),
         ("docs/getting-started.md", "deploy.yml"),
+        ("docs/getting-started.md", "drift.yml"),
         ("docs/getting-started.md", "plan.yml"),
         ("docs/getting-started.md", "unlock.yml"),
     ], f"documented engine reusable-workflow calls changed: {found}"
@@ -317,21 +318,19 @@ def test_the_documented_wrapper_inputs_are_exactly_these():
     """The whole vector of documented `workflow_dispatch` inputs, requiredness
     and default included.
 
-    An input a dispatch body may send empty is optional with a default. The apply wrapper is
-    dispatched only by `actions/dispatch`, from a body the engine builds and no human fills, so
-    `required: true` protects no caller there. What it does do is turn a value the engine sent
-    empty on purpose into an HTTP 422 before the workflow starts: GitHub reads an empty value for
-    a required `workflow_dispatch` input as "not provided". Every `shipmate unlock` dispatch
-    failed that way while the wrapper still declared the plan-run input the engine has since
-    retired, because unlock applies no plan and so carried no run id. The engine validates
-    instead, where the verb is known. The plan wrapper's `pr_number` is the one required input,
-    and states why: that dispatch carries exactly one input and always fills it, and
-    `required: true` is what makes a hand-dispatched plan name the pull request it plans rather
-    than start a run with nothing to resolve.
+    An input a dispatch body may send empty is optional with a default. The one documented
+    wrapper is dispatched only by `actions/dispatch`, from a body the engine builds and no human
+    fills, so `required: true` protects no caller there. What it does do is turn a value the
+    engine sent empty on purpose into an HTTP 422 before the workflow starts: GitHub reads an
+    empty value for a required `workflow_dispatch` input as "not provided". Every
+    `shipmate unlock` dispatch failed that way while the wrapper still declared the plan-run
+    input the engine has since retired, because unlock applies no plan and so carried no run id.
+    The engine validates instead, where the verb is known. `verb` is the one required input: one
+    schema serves four verbs, every body `actions/dispatch` sends carries a verb, and a run with
+    none has no job to route to.
 
-    Keyed by the fence's own workflow `name:`, not by the page alone: two wrappers on one page
-    declare a `pr_number`, and without the name an exact requiredness swap between them sorts to
-    the same vector and stays green.
+    Keyed by the fence's own workflow `name:` as well as the page, so that a second documented
+    wrapper cannot swap requiredness with this one and sort to the same vector.
 
     Whole-vector comparison against a hand-written constant, for the reason
     `docs/development.md` §Guard tests must be able to fail gives: a "no input is required"
@@ -351,10 +350,8 @@ def test_the_documented_wrapper_inputs_are_exactly_these():
         for shape in [(spec.get("required"), spec.get("default"))]
     )
     assert found == [
-        ("docs/getting-started.md", "shipmate · apply", "environment", False, ""),
-        ("docs/getting-started.md", "shipmate · apply", "pr_number", False, ""),
-        ("docs/getting-started.md", "shipmate · apply", "ref", False, ""),
-        ("docs/getting-started.md", "shipmate · plan", "pr_number", True, None),
-        ("docs/getting-started.md", "shipmate · unlock", "environment", False, ""),
-        ("docs/getting-started.md", "shipmate · unlock", "ref", False, ""),
+        ("docs/getting-started.md", "shipmate", "environment", False, ""),
+        ("docs/getting-started.md", "shipmate", "pr_number", False, ""),
+        ("docs/getting-started.md", "shipmate", "ref", False, ""),
+        ("docs/getting-started.md", "shipmate", "verb", True, None),
     ], f"documented workflow_dispatch inputs changed: {found}"

@@ -976,8 +976,8 @@ def test_dry_run_reaches_every_write_path_and_issues_only_reads(monkeypatch, tmp
     a reconciler routes through it. This drives every reconciler over a repository shaped
     so that all seven `write(...)` sites and the one `write_file(...)` site are reached --
     create, update, the branch-policy POST, the key, the destructive repository-secret
-    delete, the variable set, the ruleset POST and the six absent shims -- and compares the
-    whole recorded call list against a hand-written constant of reads.
+    delete, the variable set, the ruleset POST and the absent workflow file -- and compares
+    the whole recorded call list against a hand-written constant of reads.
 
     The engine environment exists with a null policy (the update path) and a
     repository-level copy of the key exists (the delete path); everything else is absent,
@@ -1036,11 +1036,6 @@ def test_dry_run_reaches_every_write_path_and_issues_only_reads(monkeypatch, tmp
         "would set",
         "would set",
         "would set",
-        "would create",
-        "would create",
-        "would create",
-        "would create",
-        "would create",
         "would create",
         "would create",
     ]
@@ -1407,17 +1402,29 @@ def test_an_unrecognised_ruleset_post_failure_propagates(monkeypatch):
     assert "HTTP 500" in str(e.value)
 
 
+def test_the_shim_table_names_one_file_rendered_from_one_fence():
+    """The whole table, hand-written. One file replaced six, and a second entry would write a
+    file `actions/dispatch` no longer reaches and `shipmate doctor` no longer probes.
+
+    Mutation: re-add `("plan.yml", ("getting-started.md", "shipmate · plan"))`.
+    """
+    assert onboard.SHIMS == {"shipmate.yml": ("getting-started.md", "shipmate")}
+
+
 #: Owner-agnostic, like the docs guard's selector: the pages publish `<owner>/shipmate/...`
 #: as well as this organization's own spelling.
 _CALL_PATH = "/shipmate/.github/workflows/"
 
 _EXPECTED_CALLEES = {
-    "plan.yml": ["plan.yml"],
-    "apply.yml": ["apply.yml", "apply-all.yml"],
-    "comment-ops.yml": ["comment-ops.yml"],
-    "unlock.yml": ["unlock.yml"],
-    "deploy.yml": ["deploy.yml"],
-    "drift.yml": ["drift.yml"],
+    "shipmate.yml": [
+        "plan.yml",
+        "comment-ops.yml",
+        "deploy.yml",
+        "drift.yml",
+        "apply.yml",
+        "apply-all.yml",
+        "unlock.yml",
+    ],
 }
 
 
@@ -1432,20 +1439,17 @@ def _callees(text):
 
 
 def test_every_shim_fence_is_found_and_calls_exactly_the_expected_engine_workflows():
-    """The locator reads the six shim bodies out of the docs rather than carrying a copy.
-    It must find exactly one fence per shim, and each fence must call exactly the engine
-    reusable workflows that shim is for, in document order -- `apply.yml` is one file with
-    two pin sites, and a locator that found only the first would ship an unpinned
-    `apply-all.yml`.
+    """The locator reads the workflow file's body out of the docs rather than carrying a
+    copy. It must find exactly one fence, and that fence must call every engine reusable
+    workflow the file routes to, in document order -- seven jobs, seven pin sites, and a
+    locator that found only the first would ship six unpinned calls.
 
-    The expected callee lists are hand-written here, never read out of the docs, and the
+    The expected callee list is hand-written here, never read out of the docs, and the
     whole mapping is compared with `==`.
 
-    Three claims, three mutations, each proved separately:
-    - edit a fence's top-level `name:` line -> the locator matches zero fences and refuses;
-    - make the `name:` comparison a prefix match -> `drift` matches two fences, the unscoped
-      shim and the per-slice copy, and the locator refuses;
-    - edit a `uses:` filename in the `apply.yml` fence -> the callee list differs.
+    Two claims, two mutations, each proved separately:
+    - edit the fence's top-level `name:` line -> the locator matches zero fences and refuses;
+    - edit a `uses:` filename in the fence -> the callee list differs.
     """
     found = {
         name: _callees(onboard._render(ENGINE, name, "c" * 40, "v9.9.9", ""))
@@ -1484,18 +1488,11 @@ def test_the_rendered_pin_is_byte_identical_to_what_repin_consumer_writes(tmp_pa
         )
 
 
-_EXPECTED_PINS = {
-    "plan.yml": 1,
-    "apply.yml": 2,
-    "comment-ops.yml": 1,
-    "unlock.yml": 1,
-    "deploy.yml": 1,
-    "drift.yml": 1,
-}
+_EXPECTED_PINS = {"shipmate.yml": 7}
 
 
 def test_every_shim_is_pinned_at_every_site():
-    """Six files, seven pins, and a shim shipped still carrying `@<engine-sha>` resolves to
+    """One file, seven pins, and a file shipped still carrying `@<engine-sha>` resolves to
     nothing.
 
     Nothing else can see a missed rewrite. `_callees` splits before the `@`, and the
@@ -1503,15 +1500,15 @@ def test_every_shim_is_pinned_at_every_site():
     40-hex pin on either side. Two live triggers make that silence expensive: `_DOC_PIN`
     requires the trailing `#` comment, so a docs edit dropping `# see the latest release`
     from one line stops that pin being rewritten; and it is anchored on `ship-iac`, so
-    normalising an owner in the docs to `<owner>` would unpin all six. `_DOC_PIN` stays
+    normalising an owner in the docs to `<owner>` would unpin all seven. `_DOC_PIN` stays
     anchored deliberately -- `dev/repin_consumer.py` is anchored the same way and the two
     writers must agree -- and this vector is what makes either edit loud.
 
     Hand-written, never derived from the docs.
 
-    Mutations: `_DOC_PIN.sub(..., count=1)`, which halves `apply.yml`; and delete
-    `  # see the latest release` from the plan fence's `uses:` line in the docs, which
-    leaves that shim on `@<engine-sha>`.
+    Mutations: `_DOC_PIN.sub(..., count=1)`, which leaves six of the seven; and delete
+    `  # see the latest release` from the `plan` job's `uses:` line in the docs, which
+    leaves that one call on `@<engine-sha>`.
     """
     rendered = {
         name: onboard._render(ENGINE, name, "c" * 40, "v9.9.9", "") for name in onboard.SHIMS
@@ -1523,7 +1520,7 @@ def test_every_shim_is_pinned_at_every_site():
 
 
 def test_state_suffix_is_substituted_into_every_site():
-    """Every documented `state_suffix: ""` becomes the operator's value, and the two shims
+    """Every documented `state_suffix: ""` becomes the operator's value, and the two jobs
     that carry none stay that way.
 
     The whole vector of (file, job, parsed value) is compared against a hand-written
@@ -1540,11 +1537,11 @@ def test_state_suffix_is_substituted_into_every_site():
         if "state_suffix" in (job.get("with") or {})
     ]
     assert found == [
-        ("plan.yml", "shipmate", ".state"),
-        ("apply.yml", "targeted", ".state"),
-        ("apply.yml", "all", ".state"),
-        ("deploy.yml", "deploy", ".state"),
-        ("drift.yml", "shipmate", ".state"),
+        ("shipmate.yml", "plan", ".state"),
+        ("shipmate.yml", "deploy", ".state"),
+        ("shipmate.yml", "drift", ".state"),
+        ("shipmate.yml", "targeted", ".state"),
+        ("shipmate.yml", "all", ".state"),
     ]
 
 
@@ -1553,10 +1550,10 @@ def _shim_ctx(tmp_path):
 
 
 def _plan_shim(tmp_path):
-    """(path to the consumer's plan.yml, the text this script would render for it)."""
-    path = tmp_path / ".github" / "workflows" / "plan.yml"
+    """(path to the consumer's shipmate.yml, the text this script would render for it)."""
+    path = tmp_path / ".github" / "workflows" / "shipmate.yml"
     path.parent.mkdir(parents=True, exist_ok=True)
-    return path, onboard._render(ENGINE, "plan.yml", "c" * 40, "v9.9.9", "")
+    return path, onboard._render(ENGINE, "shipmate.yml", "c" * 40, "v9.9.9", "")
 
 
 def test_an_identical_file_reports_ok_through_crlf(tmp_path):
@@ -1569,8 +1566,8 @@ def test_an_identical_file_reports_ok_through_crlf(tmp_path):
     path, text = _plan_shim(tmp_path)
     on_disk = text.replace("\n", "\r\n").encode("utf-8")
     path.write_bytes(on_disk)
-    onboard._reconcile_shim(_shim_ctx(tmp_path), "plan.yml")
-    assert onboard.REPORT == [("ok", "plan.yml", "")]
+    onboard._reconcile_shim(_shim_ctx(tmp_path), "shipmate.yml")
+    assert onboard.REPORT == [("ok", "shipmate.yml", "")]
     assert path.read_bytes() == on_disk
 
 
@@ -1583,10 +1580,10 @@ def test_a_file_differing_only_in_its_pin_reports_pin_only(tmp_path):
     reads as `differs`.
     """
     path, _text = _plan_shim(tmp_path)
-    older = onboard._render(ENGINE, "plan.yml", "d" * 40, "v9.9.8", "")
+    older = onboard._render(ENGINE, "shipmate.yml", "d" * 40, "v9.9.8", "")
     path.write_text(older, encoding="utf-8", newline="\n")
-    onboard._reconcile_shim(_shim_ctx(tmp_path), "plan.yml")
-    assert onboard.REPORT == [("pin-only", "plan.yml", "run dev/repin_consumer.py")]
+    onboard._reconcile_shim(_shim_ctx(tmp_path), "shipmate.yml")
+    assert onboard.REPORT == [("pin-only", "shipmate.yml", "run dev/repin_consumer.py")]
     assert path.read_text(encoding="utf-8") == older
     assert onboard._exit_code() == 0
 
@@ -1600,8 +1597,10 @@ def test_a_locally_edited_file_is_reported_and_not_overwritten(tmp_path):
     path, text = _plan_shim(tmp_path)
     edited = text + "# a local edit\n"
     path.write_text(edited, encoding="utf-8", newline="\n")
-    onboard._reconcile_shim(_shim_ctx(tmp_path), "plan.yml")
-    assert onboard.REPORT == [("differs", "plan.yml", "differs beyond its pin, not overwritten")]
+    onboard._reconcile_shim(_shim_ctx(tmp_path), "shipmate.yml")
+    assert onboard.REPORT == [
+        ("differs", "shipmate.yml", "differs beyond its pin, not overwritten")
+    ]
     assert path.read_text(encoding="utf-8") == edited
     assert onboard._exit_code() == 2
 
@@ -1626,8 +1625,8 @@ def test_an_absent_file_is_created_with_lf_endings(tmp_path, monkeypatch):
 
     monkeypatch.setattr(pathlib.Path, "write_text", fake)
     path, text = _plan_shim(tmp_path)
-    onboard._reconcile_shim(_shim_ctx(tmp_path), "plan.yml")
-    assert onboard.REPORT == [("created", "plan.yml", "")]
+    onboard._reconcile_shim(_shim_ctx(tmp_path), "shipmate.yml")
+    assert onboard.REPORT == [("created", "shipmate.yml", "")]
     assert seen["kwargs"] == {"encoding": "utf-8", "newline": "\n"}
     assert path.read_bytes().decode("utf-8") == text
 
@@ -1654,11 +1653,50 @@ def test_a_file_still_carrying_the_docs_placeholder_is_not_reported_pin_only(tmp
     """
     path, _text = _plan_shim(tmp_path)
     page = (ENGINE / "docs" / "getting-started.md").read_text(encoding="utf-8")
-    path.write_text(onboard._fence(page, "shipmate · plan"), encoding="utf-8", newline="\n")
-    onboard._reconcile_shim(_shim_ctx(tmp_path), "plan.yml")
+    path.write_text(onboard._fence(page, "shipmate"), encoding="utf-8", newline="\n")
+    onboard._reconcile_shim(_shim_ctx(tmp_path), "shipmate.yml")
     assert onboard.REPORT == [
-        ("differs", "plan.yml", "the published fence, never pinned: delete it and run again")
+        ("differs", "shipmate.yml", "the published fence, never pinned: delete it and run again")
     ]
+
+
+#: Hand-written, not read back from `_reconcile_shims`: a detail string taken from the code
+#: it checks passes whatever that code says.
+_LEGACY_DETAIL = (
+    "the retired six-file layout: `shipmate.yml` carries this file's job now, "
+    "so a leftover still firing on its own trigger runs it twice. Delete it by hand."
+)
+
+
+def test_every_retired_filename_present_is_reported_and_never_deleted(tmp_path):
+    """A consumer upgrading from the six-file layout keeps those files until they remove them
+    by hand: each still fires on its own trigger and so runs a job `shipmate.yml` now runs as
+    well, and deleting one for them would discard an edit that is theirs.
+
+    Both halves in one test, because each is satisfied by the wrong reconciler alone: one
+    that deleted the files would still emit the rows, and one that reported nothing would
+    still leave the files. The whole REPORT is compared against a hand-written constant
+    rather than filtered for `differs`, so a row that goes missing and a row for a file that
+    is not there both fail.
+
+    Mutation: delete the legacy loop from `_reconcile_shims`. The REPORT assertion reddens
+    and the on-disk assertion stays green.
+    """
+    wf = tmp_path / ".github" / "workflows"
+    wf.mkdir(parents=True)
+    for filename in onboard.LEGACY_SHIMS:
+        (wf / filename).write_text("# left over\n", encoding="utf-8", newline="\n")
+    onboard._reconcile_shims(_shim_ctx(tmp_path))
+    assert onboard.REPORT == [
+        ("created", "shipmate.yml", ""),
+        ("differs", "plan.yml", _LEGACY_DETAIL),
+        ("differs", "apply.yml", _LEGACY_DETAIL),
+        ("differs", "comment-ops.yml", _LEGACY_DETAIL),
+        ("differs", "unlock.yml", _LEGACY_DETAIL),
+        ("differs", "deploy.yml", _LEGACY_DETAIL),
+        ("differs", "drift.yml", _LEGACY_DETAIL),
+    ]
+    assert sorted(f.name for f in wf.iterdir()) == sorted(["shipmate.yml", *onboard.LEGACY_SHIMS])
 
 
 #: Hand-written, not captured from the implementation: a constant pasted from the output
@@ -1701,7 +1739,7 @@ By hand:
 
   A CODEOWNERS entry covering /.github/workflows/.
 
-  Commit the six shims and open the pull request. `shipmate / gate` cannot be
+  Commit the workflow file and open the pull request. `shipmate / gate` cannot be
   green on that one: the workflows that produce it are not on the default branch
   yet (CONTRACT.md §Post-plan topology). Merge it with an administrative bypass.
 """
@@ -1753,7 +1791,7 @@ By hand:
 
   A CODEOWNERS entry covering /.github/workflows/.
 
-  Commit the six shims and open the pull request. `shipmate / gate` cannot be
+  Commit the workflow file and open the pull request. `shipmate / gate` cannot be
   green on that one: the workflows that produce it are not on the default branch
   yet (CONTRACT.md §Post-plan topology). Merge it with an administrative bypass.
 """
@@ -1825,8 +1863,8 @@ def test_the_checklist_skips_an_environment_the_reconciler_left_alone(capsys):
     assert capsys.readouterr().out == SPLIT_CHECKLIST
 
 
-def test_the_checklist_does_not_tell_a_dry_run_to_commit_six_shims_it_did_not_write(capsys):
-    """--dry-run writes no shim, so the closing step is a re-run, not a commit. The
+def test_the_checklist_does_not_tell_a_dry_run_to_commit_a_file_it_did_not_write(capsys):
+    """--dry-run writes no workflow file, so the closing step is a re-run, not a commit. The
     expected block is the split constant with that one line substituted by hand.
 
     Mutation: drop the `_DRY` branch from the closing line.
@@ -1834,8 +1872,8 @@ def test_the_checklist_does_not_tell_a_dry_run_to_commit_six_shims_it_did_not_wr
     onboard._DRY = True
     onboard._checklist(ctx())
     assert capsys.readouterr().out == SPLIT_CHECKLIST.replace(
-        "  Commit the six shims",
-        "  Re-run without --dry-run, then commit the six shims",
+        "  Commit the workflow file",
+        "  Re-run without --dry-run, then commit the workflow file",
     )
 
 
