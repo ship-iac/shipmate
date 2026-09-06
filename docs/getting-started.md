@@ -25,8 +25,9 @@ does with that wiring.
   nightly drift run is the repo-wide backstop — it inspects every stack, so it
   fails until the last one is tagged.
 - **The Terramate and OpenTofu versions this release is tested against.** They
-  are in [`../VERSIONS`](../VERSIONS). Set them as the repository variables
-  `TERRAMATE_VERSION` and `TOFU_VERSION`, which the workflows below read.
+  are in [`../VERSIONS`](../VERSIONS), and the workflows below read them from the
+  repository variables `TERRAMATE_VERSION` and `TOFU_VERSION`. `scripts/onboard`
+  sets both from that file; set them by hand only if you are not running it.
 - **`gh` authenticated with admin on the repository.** Every tier creates
   environments, variables or rulesets.
 - **Remote state you control, or a local backend materialized in the working
@@ -49,6 +50,47 @@ apply checks at all, and the run goes red.
 
 Register and install the App first. [`github-app.md`](github-app.md) is the
 one-time runbook. It is a prerequisite of this tier, not an optional extra.
+
+### Quick path
+
+`scripts/onboard` reconciles this tier and the two below in one command. Run it
+from inside the consumer checkout, on its default branch, with `gh` authenticated
+against that repository, `terramate` on `PATH`, and an engine checkout sitting on
+a `vX.Y.Z` release tag:
+
+```bash
+python3 <engine-checkout>/scripts/onboard \
+  --team <approvers-team-slug> --app-id <app-id> \
+  --key shipmate-app.private-key.pem
+```
+
+It writes:
+
+- `shipmate-engine` and, for every environment your stacks' `env/<name>` tags
+  declare, an `<env>-plan` / `<env>-apply` pair — each apply environment scoped to
+  the default branch, with the App key on `shipmate-engine` and any
+  repository-level copy of that key deleted;
+- the `SHIPMATE_APP_ID`, `SHIPMATE_APPROVERS_TEAM`, `TERRAMATE_VERSION` and
+  `TOFU_VERSION` repository variables;
+- a `shipmate-gate` ruleset requiring `shipmate / gate` under the App;
+- the six workflow shims under `.github/workflows/`, rendered from this page and
+  [`drift.md`](drift.md) and pinned to the engine checkout's release.
+
+It reads before it writes and creates or updates only what differs, so a second
+run over a configured repository changes nothing. What it will not touch — a
+variable holding another value, an environment carrying a protection it did not
+set — it reports as a `differs` line and exits 2
+([`troubleshooting.md`](troubleshooting.md) §What `scripts/onboard` reports).
+`--dry-run` reports every change and performs no write.
+
+It then prints what it cannot know, because those values are yours: the cloud
+role and region, the env identity your layout injects, `SHIPMATE_PLAN_PASSPHRASE`,
+`SLACK_WEBHOOK`, adding the repository to the App installation, environment
+reviewers, a `CODEOWNERS` entry, and the pull request carrying the six shims.
+
+Branch, commit, push and pull request are yours: the script writes files and
+stops. The tier sections below are the spec it implements — read them to know
+what you are getting, and to configure a repository by hand instead.
 
 ### Environments for this tier
 
@@ -84,7 +126,8 @@ edit in a workflow file ([`../CONTRACT.md`](../CONTRACT.md) §Env model).
 
 Create each environment with
 `gh api -X PUT repos/<owner>/<repo>/environments/<name>`, then set protection
-rules from Settings → Environments → `<name>` (or the API):
+rules from Settings → Environments → `<name>` (or the API). `scripts/onboard`
+creates all of them, including `shipmate-engine` and its branch policy:
 
 - **`shipmate-engine`** (create once, regardless of how many env tiers you
   run): [`github-app.md`](github-app.md) §5 creates it, and is a prerequisite of
@@ -122,7 +165,8 @@ rules from Settings → Environments → `<name>` (or the API):
 
 ### The plan workflow
 
-`plan.yml` is a shim: two triggers, a `permissions:` block, and one job that
+`scripts/onboard` writes this file, pinned, from the fence below. `plan.yml` is a
+shim: two triggers, a `permissions:` block, and one job that
 calls the engine's reusable plan workflow. The four jobs behind it — `facts`,
 `detect`, `plan` and `summary` — live in engine `plan.yml`, SHA-pinned, so
 none of what they decide is wiring you can get wrong.
@@ -261,7 +305,9 @@ repository that does *not* require the gate.
 
 These are the environment-level settings behind the credential controls
 [`hardening.md`](hardening.md) #6–9 describes; the reviewer question below is
-the one that page leaves to you. Create each environment with
+the one that page leaves to you. `scripts/onboard` creates each `<env>-apply`
+with the deployment branch policy; the reviewer settings are yours, and it lists
+the environments awaiting them. Create each environment with
 `gh api -X PUT repos/<owner>/<repo>/environments/<name>`, then set protection
 rules from Settings → Environments → `<name>` (or the API):
 
@@ -294,7 +340,8 @@ rules from Settings → Environments → `<name>` (or the API):
 
 ### The apply workflows
 
-Two things bite everyone on this tier.
+`scripts/onboard` writes `apply.yml`, `comment-ops.yml`, `unlock.yml` and
+`deploy.yml` from the fences below. Two things bite everyone on this tier.
 
 **`id-token: write` on the calling job of every shim whose callee runs a cell —
 including consumers with no cloud credentials at all.** GitHub caps a called
@@ -571,6 +618,10 @@ other identity does not satisfy the rule.
 
 [`branch-protection.md`](branch-protection.md) has the pasteable ruleset, the
 gate's state table, and the upgrade notes. Configure it from there.
+`scripts/onboard` creates a `shipmate-gate` ruleset carrying that one rule; the
+`pull_request`, `non_fast_forward` and `deletion` rules on that page stay a
+choice you make, so that a repository already carrying a `pull_request` rule
+does not end up with a conflicting second one.
 
 ## Optional
 

@@ -40,6 +40,7 @@ and what it deliberately does not claim.
 | --- | --- |
 | [`docs/README.md`](docs/README.md) | The docs index |
 | [`docs/getting-started.md`](docs/getting-started.md) | Wire shipmate into one repository, in four ordered tiers |
+| [`scripts/onboard`](scripts/onboard) | Hand-run reconciler: one command for that page's per-repository setup |
 | [`docs/aws.md`](docs/aws.md) | S3 backend, GitHub OIDC roles, per-environment variables |
 | [`docs/github-app.md`](docs/github-app.md) | Register and install the App; the `shipmate-engine` environment |
 | [`docs/branch-protection.md`](docs/branch-protection.md) | Require `shipmate / gate`; the reproducible ruleset |

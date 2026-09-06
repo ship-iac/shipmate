@@ -693,6 +693,67 @@ def _reconcile_shims(ctx):
         _reconcile_shim(ctx, filename)
 
 
+_LAYOUT = """Per environment, the cloud role and the env identity your layout injects. A
+DRY/dynamic backend needs TF_VAR_env and TF_VAR_region, workspace-per-env needs
+TF_WORKSPACE, folder-per-env needs neither (CONTRACT.md §Env model). For a cell
+carrying a workload/<name> tag the role variable is AWS_ROLE_ARN_<WORKLOAD>."""
+
+_ENV_VARS = ("AWS_ROLE_ARN", "AWS_REGION", "TF_VAR_env", "TF_VAR_region", "TF_WORKSPACE")
+
+
+def _checklist(ctx):
+    """Print the values and steps this script cannot supply, as pasteable commands.
+
+    Which of `TF_VAR_env`+`TF_VAR_region` or `TF_WORKSPACE` an environment needs is a
+    property of the stacks' layout and is not readable from outside them, so all three
+    are printed with the CONTRACT.md sentence rather than guessed.
+    """
+    halves = [
+        (env, name, role) for env in ctx["envs"] for name, role in _env_names(env, ctx["shared"])
+    ]
+    org = ctx["repo"].partition("/")[0]
+    out = [
+        "",
+        "Still yours — these values are the consumer's, so this script cannot set them.",
+        "",
+        _LAYOUT,
+    ]
+    for _env, name, _role in halves:
+        out.append("")
+        out += [f"  gh variable set {v} --env {name} --body <value>" for v in _ENV_VARS]
+    out += [
+        "",
+        "Repository-wide, both optional:",
+        "",
+        "  gh secret set SHIPMATE_PLAN_PASSPHRASE",
+        "  gh variable set SLACK_WEBHOOK --body <value>",
+        "",
+        "By hand:",
+        "",
+        f"  Add {ctx['repo']} to the App installation's repository selection, at",
+        f"  https://github.com/organizations/{org}/settings/apps/shipmate/installations. The",
+        "  add-repository endpoint accepts PAT-classic tokens only, so it stays a UI step.",
+    ]
+    # A reviewer on a shared env's bare environment stalls the plan cells and the drift
+    # run, so it is asked for only where the apply path has an environment of its own.
+    reviewed = [name for env, name, role in halves if role == "apply" and env not in ctx["shared"]]
+    if reviewed:
+        out += [
+            "",
+            f"  Required reviewers and `Prevent self-review` on {', '.join(reviewed)}",
+            "  (docs/getting-started.md §Environment setup).",
+        ]
+    out += [
+        "",
+        "  A CODEOWNERS entry covering /.github/workflows/.",
+        "",
+        "  Commit the six shims and open the pull request. `shipmate / gate` cannot be",
+        "  green on that one: the workflows that produce it are not on the default branch",
+        "  yet (CONTRACT.md §Post-plan topology). Merge it with an administrative bypass.",
+    ]
+    print("\n".join(out))
+
+
 def _exit_code():
     """2 when anything differs, else 0.
 
@@ -757,6 +818,7 @@ def main(argv=None):
     _reconcile_variables(ctx)
     _reconcile_ruleset(ctx)
     _reconcile_shims(ctx)
+    _checklist(ctx)
 
     sys.exit(_exit_code())
 

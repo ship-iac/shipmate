@@ -224,7 +224,10 @@ def main(argv=None):
     _write_key(args.out, app["pem"])
     _run(["gh", "variable", "set", "SHIPMATE_APP_ID", "--repo", args.repo, "--body", app_id])
     print(f"Stored SHIPMATE_APP_ID (variable) and wrote the private key to {args.out}.")
-    print("Next: install the App, then place that key per docs/github-app.md §4-§6.")
+    print(
+        "Next: install the App (docs/github-app.md §4), then run scripts/onboard in each "
+        "consumer checkout to place that key and the rest."
+    )
 
 
 if __name__ == "__main__":

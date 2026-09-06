@@ -434,7 +434,8 @@ def test_main_calls_every_stage_in_order():
 
     Mutations, each proven: delete `_reconcile_engine_env(ctx)`; delete
     `_reconcile_envs(ctx)`; delete `_reconcile_variables(ctx)`; delete
-    `_reconcile_ruleset(ctx)`; delete `_reconcile_shims(ctx)`; `_repo_root()` back to
+    `_reconcile_ruleset(ctx)`; delete `_reconcile_shims(ctx)`; delete `_checklist(ctx)`;
+    `_repo_root()` back to
     `pathlib.Path.cwd()`; delete
     `sys.exit(_exit_code())`; swap two reconcilers.
     """
@@ -458,6 +459,7 @@ def test_main_calls_every_stage_in_order():
         "_reconcile_variables(ctx)",
         "_reconcile_ruleset(ctx)",
         "_reconcile_shims(ctx)",
+        "_checklist(ctx)",
         "sys.exit(_exit_code())",
         "_exit_code()",
     ]
@@ -903,7 +905,8 @@ def test_dry_run_reaches_every_write_path_and_issues_only_reads(monkeypatch, tmp
     Mutations, each proven: swap any one of the seven `write(...)` calls for a direct
     `_run(...)`, which appears in the call list below; and make `write_file` fall through to
     `write_text` under `_DRY`, which puts a file in a checkout the operator was promised
-    would not be touched.
+    would not be touched. `_checklist` is driven here too: it only prints, so any `gh`
+    call it grew would land in the list below.
     """
     absent = SystemExit("gh: Not Found (HTTP 404)")
     fake = make_gh(
@@ -927,6 +930,7 @@ def test_dry_run_reaches_every_write_path_and_issues_only_reads(monkeypatch, tmp
     onboard._reconcile_variables(ctx())
     onboard._reconcile_ruleset(ctx())
     onboard._reconcile_shims(ctx(root=tmp_path, engine=ENGINE))
+    onboard._checklist(ctx())
     assert list(tmp_path.iterdir()) == []
     assert fake.calls == [
         ["gh", "api", "repos/o/r/environments/shipmate-engine"],
@@ -1573,3 +1577,109 @@ def test_a_file_still_carrying_the_docs_placeholder_is_not_reported_pin_only(tmp
     assert onboard.REPORT == [
         ("differs", "plan.yml", "the published fence, never pinned: delete it and run again")
     ]
+
+
+#: Hand-written, not captured from the implementation: a constant pasted from the output
+#: passes whatever the output says.
+SPLIT_CHECKLIST = """
+Still yours — these values are the consumer's, so this script cannot set them.
+
+Per environment, the cloud role and the env identity your layout injects. A
+DRY/dynamic backend needs TF_VAR_env and TF_VAR_region, workspace-per-env needs
+TF_WORKSPACE, folder-per-env needs neither (CONTRACT.md §Env model). For a cell
+carrying a workload/<name> tag the role variable is AWS_ROLE_ARN_<WORKLOAD>.
+
+  gh variable set AWS_ROLE_ARN --env dev-eu-plan --body <value>
+  gh variable set AWS_REGION --env dev-eu-plan --body <value>
+  gh variable set TF_VAR_env --env dev-eu-plan --body <value>
+  gh variable set TF_VAR_region --env dev-eu-plan --body <value>
+  gh variable set TF_WORKSPACE --env dev-eu-plan --body <value>
+
+  gh variable set AWS_ROLE_ARN --env dev-eu-apply --body <value>
+  gh variable set AWS_REGION --env dev-eu-apply --body <value>
+  gh variable set TF_VAR_env --env dev-eu-apply --body <value>
+  gh variable set TF_VAR_region --env dev-eu-apply --body <value>
+  gh variable set TF_WORKSPACE --env dev-eu-apply --body <value>
+
+Repository-wide, both optional:
+
+  gh secret set SHIPMATE_PLAN_PASSPHRASE
+  gh variable set SLACK_WEBHOOK --body <value>
+
+By hand:
+
+  Add o/r to the App installation's repository selection, at
+  https://github.com/organizations/o/settings/apps/shipmate/installations. The
+  add-repository endpoint accepts PAT-classic tokens only, so it stays a UI step.
+
+  Required reviewers and `Prevent self-review` on dev-eu-apply
+  (docs/getting-started.md §Environment setup).
+
+  A CODEOWNERS entry covering /.github/workflows/.
+
+  Commit the six shims and open the pull request. `shipmate / gate` cannot be
+  green on that one: the workflows that produce it are not on the default branch
+  yet (CONTRACT.md §Post-plan topology). Merge it with an administrative bypass.
+"""
+
+
+def test_the_checklist_names_every_value_the_script_cannot_set(capsys):
+    """The printed block is the only place a consumer learns which values remain.
+    A name dropped from it is a repository that looks reconciled and cannot plan.
+
+    The block is compared whole against a hand-written constant, because a membership
+    check would pass a block that silently lost one -- and cannot see a wrong `--env`
+    argument, a dropped `gh` prefix, or a line that lost its command.
+
+    Mutations, each proven: delete SHIPMATE_PLAN_PASSPHRASE from the block; write
+    `--env dev-eu` where the environment half belongs.
+    """
+    onboard._checklist(ctx(repo="o/r", envs=["dev-eu"], shared=set()))
+    assert capsys.readouterr().out == SPLIT_CHECKLIST
+
+
+#: The shared half of the same block. `_env_names` returns one bare `<env>` for a shared
+#: environment, and a reviewer on it stalls every plan cell, so no reviewer line is due.
+SHARED_CHECKLIST = """
+Still yours — these values are the consumer's, so this script cannot set them.
+
+Per environment, the cloud role and the env identity your layout injects. A
+DRY/dynamic backend needs TF_VAR_env and TF_VAR_region, workspace-per-env needs
+TF_WORKSPACE, folder-per-env needs neither (CONTRACT.md §Env model). For a cell
+carrying a workload/<name> tag the role variable is AWS_ROLE_ARN_<WORKLOAD>.
+
+  gh variable set AWS_ROLE_ARN --env dev-eu --body <value>
+  gh variable set AWS_REGION --env dev-eu --body <value>
+  gh variable set TF_VAR_env --env dev-eu --body <value>
+  gh variable set TF_VAR_region --env dev-eu --body <value>
+  gh variable set TF_WORKSPACE --env dev-eu --body <value>
+
+Repository-wide, both optional:
+
+  gh secret set SHIPMATE_PLAN_PASSPHRASE
+  gh variable set SLACK_WEBHOOK --body <value>
+
+By hand:
+
+  Add o/r to the App installation's repository selection, at
+  https://github.com/organizations/o/settings/apps/shipmate/installations. The
+  add-repository endpoint accepts PAT-classic tokens only, so it stays a UI step.
+
+  A CODEOWNERS entry covering /.github/workflows/.
+
+  Commit the six shims and open the pull request. `shipmate / gate` cannot be
+  green on that one: the workflows that produce it are not on the default branch
+  yet (CONTRACT.md §Post-plan topology). Merge it with an administrative bypass.
+"""
+
+
+def test_the_checklist_asks_for_no_reviewer_on_a_shared_environment(capsys):
+    """A shared env is bound by plan cells and the nightly drift run too, so a required
+    reviewer on it stalls them rather than gating an apply: the reviewer line is due only
+    for an `<env>-apply`. The split fixture above cannot reach this branch.
+
+    Mutation: select the reviewer line on `role == "apply"` alone, which a bare shared
+    environment satisfies.
+    """
+    onboard._checklist(ctx(repo="o/r", envs=["dev-eu"], shared={"dev-eu"}))
+    assert capsys.readouterr().out == SHARED_CHECKLIST
