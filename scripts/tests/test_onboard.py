@@ -20,30 +20,77 @@ def make_gh(routes):
     """A fake `_run`: records every invocation, answers reads from `routes`,
     returns "" for every write.
 
-    A read is `gh api <path>` with no `-X`; anything carrying `-X` is a write and is
-    only recorded. An unrouted read raises `AssertionError`, deliberately NOT
-    `SystemExit`: `_gh_json_or_none` catches `SystemExit` as "absent", so a
-    `SystemExit` here would be swallowed into the absent branch and the test would
-    pass while the implementation wrote against a read nobody stubbed.
+    A read is `gh api <path>` with no `-X`, keyed by the path, or `gh secret list ...`,
+    keyed by its whole command line; anything else is a write and is only recorded. An
+    unrouted read raises `AssertionError`, deliberately NOT `SystemExit`:
+    `_gh_json_or_none` catches `SystemExit` as "absent", so a `SystemExit` here would be
+    swallowed into the absent branch and the test would pass while the implementation
+    wrote against a read nobody stubbed.
 
     A route whose value is a `SystemExit` instance is the 404 case.
+
+    `_run.stdin` and `_run.secrets` are the per-call stdin and scrub list, positionally
+    parallel to `_run.calls`, so a body can be parsed and compared rather than matched as
+    text and a credential's placement can be asserted.
     """
     calls = []
+    stdins = []
+    scrubbed = []
 
     def _run(args, secrets=(), stdin=None):
         calls.append(list(args))
+        stdins.append(stdin)
+        scrubbed.append(secrets)
         if args[:2] == ["gh", "api"] and "-X" not in args:
-            path = args[2]
-            if path not in routes:
-                raise AssertionError(f"unrouted read: {path}")
-            answer = routes[path]
-            if isinstance(answer, SystemExit):
-                raise answer
-            return json.dumps(answer)
-        return ""
+            key = args[2]
+        elif args[:3] == ["gh", "secret", "list"]:
+            key = " ".join(args)
+        else:
+            return ""
+        if key not in routes:
+            raise AssertionError(f"unrouted read: {key}")
+        answer = routes[key]
+        if isinstance(answer, SystemExit):
+            raise answer
+        return json.dumps(answer)
 
     _run.calls = calls
+    _run.stdin = stdins
+    _run.secrets = scrubbed
     return _run
+
+
+ENGINE_PATH = "repos/o/r/environments/shipmate-engine"
+ENGINE_POLICIES = f"{ENGINE_PATH}/deployment-branch-policies"
+ENGINE_SECRETS = f"{ENGINE_PATH}/secrets?per_page=100"
+# Named without the word ruff S105 flags: this is a command line, not a credential.
+REPO_KEY_LIST = "gh secret list --json name"
+CUSTOM_POLICY = {"protected_branches": False, "custom_branch_policies": True}
+
+
+def ctx(**over):
+    base = {
+        "repo": "o/r",
+        "default_branch": "main",
+        "app_id": "1",
+        "team": "ops",
+        "key": "-----BEGIN-----\npem\n",
+        "envs": ["dev-eu"],
+        "shared": set(),
+        "state_suffix": "",
+        "engine": None,
+        "sha": "a" * 40,
+        "version": "v0.26.0",
+    }
+    base.update(over)
+    return base
+
+
+def body_of(fake, argv):
+    """The parsed stdin of the one recorded call whose argv is `argv`."""
+    hits = [i for i, c in enumerate(fake.calls) if c == argv]
+    assert len(hits) == 1, f"{argv} recorded {len(hits)} times"
+    return json.loads(fake.stdin[hits[0]])
 
 
 @pytest.fixture(autouse=True)
@@ -346,3 +393,332 @@ def test_main_exits_through_the_report_predicate():
         if isinstance(n, ast.Call) and ast.unparse(n).startswith("sys.exit")
     ]
     assert exits == ["sys.exit(_exit_code())"]
+
+
+_CONFORMING_ENGINE = {
+    ENGINE_PATH: {"deployment_branch_policy": CUSTOM_POLICY},
+    ENGINE_POLICIES: {"total_count": 1, "branch_policies": [{"name": "main"}]},
+    ENGINE_SECRETS: {"total_count": 1, "secrets": [{"name": "SHIPMATE_APP_PRIVATE_KEY"}]},
+    REPO_KEY_LIST: [],
+}
+
+
+def test_fresh_engine_environment_is_created_with_the_policy_and_the_key(monkeypatch):
+    """A repository with no `shipmate-engine` gets the environment, a custom branch
+    policy naming the default branch, and the key -- in that order, because a secret
+    cannot be written to an environment that does not exist.
+
+    The recorded call list is compared whole against a hand-written constant: a
+    membership check would pass a run that also issued a call nobody intended.
+
+    Mutation: drop the deployment-branch-policies POST from `_ensure_policy`.
+    """
+    fake = make_gh(
+        {
+            ENGINE_PATH: SystemExit("gh: Not Found (HTTP 404)"),
+            ENGINE_POLICIES: {"total_count": 0, "branch_policies": []},
+            ENGINE_SECRETS: {"total_count": 0, "secrets": []},
+            REPO_KEY_LIST: [],
+        }
+    )
+    monkeypatch.setattr(onboard, "_run", fake)
+    onboard._reconcile_engine_env(ctx())
+    assert fake.calls == [
+        ["gh", "api", "repos/o/r/environments/shipmate-engine"],
+        ["gh", "api", "-X", "PUT", "repos/o/r/environments/shipmate-engine", "--input", "-"],
+        ["gh", "api", "repos/o/r/environments/shipmate-engine/deployment-branch-policies"],
+        [
+            "gh",
+            "api",
+            "-X",
+            "POST",
+            "repos/o/r/environments/shipmate-engine/deployment-branch-policies",
+            "-f",
+            "name=main",
+        ],
+        ["gh", "api", "repos/o/r/environments/shipmate-engine/secrets?per_page=100"],
+        ["gh", "secret", "set", "SHIPMATE_APP_PRIVATE_KEY", "--env", "shipmate-engine"],
+        ["gh", "secret", "list", "--json", "name"],
+    ]
+
+
+def test_the_key_reaches_gh_secret_set_on_stdin_and_as_a_secret(monkeypatch):
+    """`gh secret set` has no `--body` sentinel for stdin -- `--body -` stores the
+    literal one-character string `-` -- and the PEM must be in `secrets` so a failed
+    write cannot echo it.
+
+    Mutation: pass the PEM as `["--body", ctx["key"]]` instead of on stdin; or drop
+    `secrets=(ctx["key"],)`.
+    """
+    fake = make_gh(
+        {
+            ENGINE_SECRETS: {"total_count": 0, "secrets": []},
+            REPO_KEY_LIST: [],
+        }
+    )
+    monkeypatch.setattr(onboard, "_run", fake)
+    onboard._reconcile_key(ctx())
+    sets = [
+        (argv, fake.stdin[i], fake.secrets[i])
+        for i, argv in enumerate(fake.calls)
+        if argv[:3] == ["gh", "secret", "set"]
+    ]
+    assert sets == [
+        (
+            ["gh", "secret", "set", "SHIPMATE_APP_PRIVATE_KEY", "--env", "shipmate-engine"],
+            "-----BEGIN-----\npem\n",
+            ("-----BEGIN-----\npem\n",),
+        )
+    ]
+
+
+def test_null_policy_on_an_existing_engine_environment_is_repaired(monkeypatch):
+    """An environment created without a branch policy lets a workflow on any branch
+    claim the App key. The repair is a PUT naming only `deployment_branch_policy`,
+    which is additive -- reviewers and `wait_timer` survive it.
+
+    No `gh secret set`: the key is already listed, and its value is unreadable, so
+    overwriting could only destroy a working placement.
+
+    Mutation: change `_APPLY_BODY` to
+    `{"protected_branches": True, "custom_branch_policies": False}`.
+    """
+    fake = make_gh(
+        {
+            ENGINE_PATH: {"deployment_branch_policy": None},
+            ENGINE_POLICIES: {"total_count": 0, "branch_policies": []},
+            ENGINE_SECRETS: {"total_count": 1, "secrets": [{"name": "SHIPMATE_APP_PRIVATE_KEY"}]},
+            REPO_KEY_LIST: [],
+        }
+    )
+    monkeypatch.setattr(onboard, "_run", fake)
+    onboard._reconcile_engine_env(ctx())
+    assert fake.calls == [
+        ["gh", "api", "repos/o/r/environments/shipmate-engine"],
+        ["gh", "api", "-X", "PUT", "repos/o/r/environments/shipmate-engine", "--input", "-"],
+        ["gh", "api", "repos/o/r/environments/shipmate-engine/deployment-branch-policies"],
+        [
+            "gh",
+            "api",
+            "-X",
+            "POST",
+            "repos/o/r/environments/shipmate-engine/deployment-branch-policies",
+            "-f",
+            "name=main",
+        ],
+        ["gh", "api", "repos/o/r/environments/shipmate-engine/secrets?per_page=100"],
+        ["gh", "secret", "list", "--json", "name"],
+    ]
+    assert body_of(
+        fake, ["gh", "api", "-X", "PUT", "repos/o/r/environments/shipmate-engine", "--input", "-"]
+    ) == {"deployment_branch_policy": {"protected_branches": False, "custom_branch_policies": True}}
+
+
+def test_conforming_engine_environment_writes_nothing(monkeypatch):
+    """A second run over a configured repository must change nothing: four reads, no
+    write, and every report line `ok` so the exit code stays 0.
+
+    Mutation: drop the `custom_branch_policies` test in `_reconcile_env`, so a
+    conforming environment is PUT again.
+    """
+    fake = make_gh(dict(_CONFORMING_ENGINE))
+    monkeypatch.setattr(onboard, "_run", fake)
+    onboard._reconcile_engine_env(ctx())
+    assert fake.calls == [
+        ["gh", "api", "repos/o/r/environments/shipmate-engine"],
+        ["gh", "api", "repos/o/r/environments/shipmate-engine/deployment-branch-policies"],
+        ["gh", "api", "repos/o/r/environments/shipmate-engine/secrets?per_page=100"],
+        ["gh", "secret", "list", "--json", "name"],
+    ]
+    assert [verb for verb, _subject, _detail in onboard.REPORT] == ["ok", "ok", "ok", "ok"]
+    assert onboard._exit_code() == 0
+
+
+def test_repository_level_key_is_deleted(monkeypatch):
+    """A repository-level copy of the App key defeats the environment scoping
+    entirely -- a workflow on any branch can read it -- so it is removed, not
+    reported.
+
+    Mutation: downgrade the deletion to `report("differs", ...)`.
+    """
+    fake = make_gh(
+        dict(_CONFORMING_ENGINE, **{REPO_KEY_LIST: [{"name": "SHIPMATE_APP_PRIVATE_KEY"}]})
+    )
+    monkeypatch.setattr(onboard, "_run", fake)
+    onboard._reconcile_engine_env(ctx())
+    assert fake.calls == [
+        ["gh", "api", "repos/o/r/environments/shipmate-engine"],
+        ["gh", "api", "repos/o/r/environments/shipmate-engine/deployment-branch-policies"],
+        ["gh", "api", "repos/o/r/environments/shipmate-engine/secrets?per_page=100"],
+        ["gh", "secret", "list", "--json", "name"],
+        ["gh", "secret", "delete", "SHIPMATE_APP_PRIVATE_KEY"],
+    ]
+    assert [(verb, subject) for verb, subject, _detail in onboard.REPORT] == [
+        ("ok", "shipmate-engine"),
+        ("ok", "shipmate-engine branch policy"),
+        ("ok", "shipmate-engine SHIPMATE_APP_PRIVATE_KEY"),
+        ("delete", "repository secret SHIPMATE_APP_PRIVATE_KEY"),
+    ]
+
+
+def test_shared_mode_binds_one_bare_environment(monkeypatch):
+    """An environment listed in `--shared` / SHIPMATE_SHARED_ENVS is one bare
+    `<env>` on both paths; no `<env>-plan` is created for it.
+
+    Mutation: make `_env_names` ignore `shared` and always return the split pair.
+    """
+    assert onboard._env_names("dev-eu", {"dev-eu"}) == [("dev-eu", "apply")]
+    fake = make_gh(
+        {
+            "repos/o/r/environments/dev-eu": {"deployment_branch_policy": CUSTOM_POLICY},
+            "repos/o/r/environments/dev-eu/deployment-branch-policies": {
+                "total_count": 1,
+                "branch_policies": [{"name": "main"}],
+            },
+        }
+    )
+    monkeypatch.setattr(onboard, "_run", fake)
+    onboard._reconcile_envs(ctx(shared={"dev-eu"}))
+    assert fake.calls == [
+        ["gh", "api", "repos/o/r/environments/dev-eu"],
+        ["gh", "api", "repos/o/r/environments/dev-eu/deployment-branch-policies"],
+    ]
+
+
+def test_plan_environment_gets_no_branch_policy(monkeypatch):
+    """A plan environment must admit every branch: a branch policy there stops the
+    autoplan on a pull request. Its PUT body sets `deployment_branch_policy` to null
+    and no POST follows it.
+
+    Mutation: reuse `_APPLY_BODY` for the plan half.
+    """
+    fake = make_gh(
+        {
+            "repos/o/r/environments/dev-eu": SystemExit("gh: Not Found (HTTP 404)"),
+            "repos/o/r/environments/dev-eu-plan": SystemExit("gh: Not Found (HTTP 404)"),
+            "repos/o/r/environments/dev-eu-apply": SystemExit("gh: Not Found (HTTP 404)"),
+            "repos/o/r/environments/dev-eu-apply/deployment-branch-policies": {
+                "total_count": 0,
+                "branch_policies": [],
+            },
+        }
+    )
+    monkeypatch.setattr(onboard, "_run", fake)
+    onboard._reconcile_envs(ctx())
+    assert fake.calls == [
+        ["gh", "api", "repos/o/r/environments/dev-eu"],
+        ["gh", "api", "repos/o/r/environments/dev-eu-plan"],
+        ["gh", "api", "-X", "PUT", "repos/o/r/environments/dev-eu-plan", "--input", "-"],
+        ["gh", "api", "repos/o/r/environments/dev-eu-apply"],
+        ["gh", "api", "-X", "PUT", "repos/o/r/environments/dev-eu-apply", "--input", "-"],
+        ["gh", "api", "repos/o/r/environments/dev-eu-apply/deployment-branch-policies"],
+        [
+            "gh",
+            "api",
+            "-X",
+            "POST",
+            "repos/o/r/environments/dev-eu-apply/deployment-branch-policies",
+            "-f",
+            "name=main",
+        ],
+    ]
+    assert body_of(
+        fake, ["gh", "api", "-X", "PUT", "repos/o/r/environments/dev-eu-plan", "--input", "-"]
+    ) == {"deployment_branch_policy": None}
+    assert body_of(
+        fake, ["gh", "api", "-X", "PUT", "repos/o/r/environments/dev-eu-apply", "--input", "-"]
+    ) == {"deployment_branch_policy": {"protected_branches": False, "custom_branch_policies": True}}
+
+
+def test_existing_policy_naming_another_branch_is_reported_not_edited(monkeypatch):
+    """Adding the default branch to an environment that already names another one is
+    additive; removing the other name is the consumer's call, so no DELETE is issued.
+
+    Mutation: delete the policies that do not name the default branch.
+    """
+    fake = make_gh(
+        dict(
+            _CONFORMING_ENGINE,
+            **{ENGINE_POLICIES: {"total_count": 1, "branch_policies": [{"name": "release/*"}]}},
+        )
+    )
+    monkeypatch.setattr(onboard, "_run", fake)
+    onboard._reconcile_engine_env(ctx())
+    assert fake.calls == [
+        ["gh", "api", "repos/o/r/environments/shipmate-engine"],
+        ["gh", "api", "repos/o/r/environments/shipmate-engine/deployment-branch-policies"],
+        [
+            "gh",
+            "api",
+            "-X",
+            "POST",
+            "repos/o/r/environments/shipmate-engine/deployment-branch-policies",
+            "-f",
+            "name=main",
+        ],
+        ["gh", "api", "repos/o/r/environments/shipmate-engine/secrets?per_page=100"],
+        ["gh", "secret", "list", "--json", "name"],
+    ]
+
+
+def test_plan_environment_carrying_a_policy_is_reported_not_stripped(monkeypatch):
+    """Removing a consumer's protection is not this script's call, and doctor already
+    warns on it: the plan half is reported as differing and left untouched.
+
+    Mutation: PUT `_PLAN_BODY` over it instead of reporting.
+    """
+    fake = make_gh(
+        {
+            "repos/o/r/environments/dev-eu": SystemExit("gh: Not Found (HTTP 404)"),
+            "repos/o/r/environments/dev-eu-plan": {"deployment_branch_policy": CUSTOM_POLICY},
+            "repos/o/r/environments/dev-eu-apply": {"deployment_branch_policy": CUSTOM_POLICY},
+            "repos/o/r/environments/dev-eu-apply/deployment-branch-policies": {
+                "total_count": 1,
+                "branch_policies": [{"name": "main"}],
+            },
+        }
+    )
+    monkeypatch.setattr(onboard, "_run", fake)
+    onboard._reconcile_envs(ctx())
+    assert fake.calls == [
+        ["gh", "api", "repos/o/r/environments/dev-eu"],
+        ["gh", "api", "repos/o/r/environments/dev-eu-plan"],
+        ["gh", "api", "repos/o/r/environments/dev-eu-apply"],
+        ["gh", "api", "repos/o/r/environments/dev-eu-apply/deployment-branch-policies"],
+    ]
+    assert [(verb, subject) for verb, subject, _detail in onboard.REPORT][0] == (
+        "differs",
+        "dev-eu-plan",
+    )
+    assert onboard._exit_code() == 2
+
+
+def test_a_bare_env_alongside_an_apply_env_is_reported_as_ambiguous(monkeypatch):
+    """Which of `dev-eu` and `dev-eu-apply` the engine binds depends on
+    SHIPMATE_SHARED_ENVS, so a repository holding both while `--shared` is empty is a
+    state the script must not resolve by guessing: it reports and writes nothing.
+
+    Mutation: fall through to reconciling `dev-eu-apply` and say nothing.
+    """
+    fake = make_gh(
+        {
+            "repos/o/r/environments/dev-eu": {"deployment_branch_policy": CUSTOM_POLICY},
+            # Routed, though a conforming run never reads it: without it the mutation
+            # below reddens on an unrouted read rather than on the property named here.
+            "repos/o/r/environments/dev-eu-plan": SystemExit("gh: Not Found (HTTP 404)"),
+            "repos/o/r/environments/dev-eu-apply": {"deployment_branch_policy": CUSTOM_POLICY},
+            "repos/o/r/environments/dev-eu-apply/deployment-branch-policies": {
+                "total_count": 1,
+                "branch_policies": [{"name": "main"}],
+            },
+        }
+    )
+    monkeypatch.setattr(onboard, "_run", fake)
+    onboard._reconcile_envs(ctx())
+    assert fake.calls == [
+        ["gh", "api", "repos/o/r/environments/dev-eu"],
+        ["gh", "api", "repos/o/r/environments/dev-eu-apply"],
+    ]
+    assert onboard.REPORT[0][0] == "differs"
+    assert "`dev-eu`" in onboard.REPORT[0][2] and "`dev-eu-apply`" in onboard.REPORT[0][2]
+    assert len(onboard.REPORT) == 1

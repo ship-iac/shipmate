@@ -242,6 +242,142 @@ def _variables():
     return {v["name"].upper(): v["value"] for v in listed}
 
 
+# Named `_APP_KEY_NAME`, not `..._SECRET`: ruff's S105 fires on a "SECRET" token in
+# the binding name, and this is a secret's *name*.
+_APP_KEY_NAME = "SHIPMATE_APP_PRIVATE_KEY"
+
+#: An apply environment -- and `shipmate-engine`, which is one -- is scoped to the
+#: default branch alone. A PUT naming only this key is additive: an environment
+#: carrying reviewers, `prevent_self_review` or a `wait_timer` keeps all three.
+_APPLY_BODY = {
+    "deployment_branch_policy": {"protected_branches": False, "custom_branch_policies": True}
+}
+#: A plan environment must admit every branch, or the autoplan stops on a pull request.
+_PLAN_BODY = {"deployment_branch_policy": None}
+
+_PLAN_POLICY_DETAIL = (
+    "a plan environment carrying a deployment branch policy stops the autoplan on the "
+    "branches it excludes. Removing a protection rule is the consumer's call, not this "
+    "script's, so it is reported and left alone."
+)
+
+
+def _ensure_policy(ctx, name):
+    """POST the default branch into `name`'s custom branch policies unless it is there.
+
+    Additive only: a policy naming some other branch is reported by `doctor`, and
+    deleting one here would remove a scope the consumer chose.
+    """
+    path = f"repos/{ctx['repo']}/environments/{name}/deployment-branch-policies"
+    policies = _gh_json_or_none(path)
+    branch = ctx["default_branch"]
+    if branch in {p.get("name") for p in (policies or {}).get("branch_policies", [])}:
+        report("ok", f"{name} branch policy", branch)
+        return
+    write(
+        "create",
+        f"{name} branch policy",
+        ["gh", "api", "-X", "POST", path, "-f", f"name={branch}"],
+        detail=branch,
+    )
+
+
+def _reconcile_env(ctx, name, role):
+    """Create or repair one environment. `role` is "plan" or "apply"."""
+    path = f"repos/{ctx['repo']}/environments/{name}"
+    env = _gh_json_or_none(path)
+    body = _APPLY_BODY if role == "apply" else _PLAN_BODY
+    put = ["gh", "api", "-X", "PUT", path, "--input", "-"]
+    if env is None:
+        write("create", name, put, stdin=json.dumps(body))
+    elif role == "plan":
+        if env.get("deployment_branch_policy"):
+            report("differs", name, _PLAN_POLICY_DETAIL)
+            return
+        report("ok", name)
+    elif (env.get("deployment_branch_policy") or {}).get("custom_branch_policies"):
+        report("ok", name)
+    else:
+        write("update", name, put, stdin=json.dumps(body))
+    if role == "apply":
+        _ensure_policy(ctx, name)
+
+
+def _reconcile_key(ctx):
+    """Place the App key on `shipmate-engine`, and remove any repository-level copy.
+
+    An existing environment copy is left alone: no REST path returns a secret's
+    value, so overwriting could only destroy a working placement. Rotation is
+    docs/github-app.md.
+    """
+    repo = ctx["repo"]
+    data = _gh_json_or_none(f"repos/{repo}/environments/{ENGINE_ENV}/secrets?per_page=100")
+    subject = f"{ENGINE_ENV} {_APP_KEY_NAME}"
+    if _APP_KEY_NAME in {s.get("name") for s in (data or {}).get("secrets", [])}:
+        report("ok", subject)
+    else:
+        write(
+            "set",
+            subject,
+            ["gh", "secret", "set", _APP_KEY_NAME, "--env", ENGINE_ENV],
+            stdin=ctx["key"],
+            secrets=(ctx["key"],),
+        )
+    listed = json.loads(_run(["gh", "secret", "list", "--json", "name"]))
+    if _APP_KEY_NAME not in {s.get("name") for s in listed}:
+        report("ok", f"no repository-level {_APP_KEY_NAME}")
+        return
+    write(
+        "delete",
+        f"repository secret {_APP_KEY_NAME}",
+        ["gh", "secret", "delete", _APP_KEY_NAME],
+        detail="a repository secret is readable by a workflow on any branch",
+    )
+
+
+def _reconcile_engine_env(ctx):
+    """`shipmate-engine`: the environment, its branch policy, and the key on it.
+
+    It is an apply environment in every respect, so it goes through the same
+    reconciler; only the key placement is its own.
+    """
+    _reconcile_env(ctx, ENGINE_ENV, "apply")
+    _reconcile_key(ctx)
+
+
+def _env_names(env, shared):
+    """[(environment name, role)] for one derived environment."""
+    if env in shared:
+        return [(env, "apply")]
+    return [(f"{env}-plan", "plan"), (f"{env}-apply", "apply")]
+
+
+def _bare_env_conflict(ctx, env):
+    """True when a split-mode `env` also has a bare `<env>` environment.
+
+    Which of the two the engine binds depends on SHIPMATE_SHARED_ENVS, so a
+    repository holding both is a state this script must not resolve by guessing.
+    """
+    path = f"repos/{ctx['repo']}/environments/{env}"
+    if _gh_json_or_none(path) is None or _gh_json_or_none(f"{path}-apply") is None:
+        return False
+    report(
+        "differs",
+        env,
+        f"both `{env}` and `{env}-apply` exist; which one the engine binds depends on "
+        f"SHIPMATE_SHARED_ENVS. Delete one, or list `{env}` in --shared.",
+    )
+    return True
+
+
+def _reconcile_envs(ctx):
+    for env in ctx["envs"]:
+        if env not in ctx["shared"] and _bare_env_conflict(ctx, env):
+            continue
+        for name, role in _env_names(env, ctx["shared"]):
+            _reconcile_env(ctx, name, role)
+
+
 def _exit_code():
     """2 when anything differs, else 0.
 
@@ -290,6 +426,9 @@ def main(argv=None):
     print(f"environments: {', '.join(ctx['envs'])}")
     print(f"shared: {', '.join(sorted(ctx['shared'])) or '(none)'}")
     print(f"engine pin: {ctx['sha']} ({ctx['version']})")
+
+    _reconcile_engine_env(ctx)
+    _reconcile_envs(ctx)
 
     sys.exit(_exit_code())
 
