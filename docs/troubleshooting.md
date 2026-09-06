@@ -761,12 +761,13 @@ the environment exists and that its policy actually names the default branch.
 
 ### The post-merge deploy was dropped as superseded
 
-A pull request merged, the deploy run for that merge was cancelled before it
+A pull request merged, the `deploy` job for that merge was cancelled before it
 started, and its stacks are still pending.
 
 There is no server-side queue behind the apply path: the consumer's `deploy` job
 declares a `concurrency` group (`group: deploy-main`), and GitHub drops the older
-*pending* job whenever a second merge lands while the first is still queued. The stacks stay pending and visible, which is the recoverable
-state: re-run that deploy. `deploy-detect` rebuilds its work queue from the
+*pending* job whenever a second merge lands while the first is still queued. The
+stacks stay pending and visible, which is the recoverable state: re-run that
+deploy. `deploy-detect` rebuilds its work queue from the
 apply checks that are still pending, so a re-run is idempotent — anything
 already applied is skipped.
