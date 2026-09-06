@@ -315,8 +315,8 @@ def _dispatch_inputs(doc):
 
 
 def test_the_documented_wrapper_inputs_are_exactly_these():
-    """The whole vector of documented `workflow_dispatch` inputs, requiredness
-    and default included.
+    """The whole vector of documented `workflow_dispatch` inputs -- requiredness, default,
+    type and the choice list included.
 
     An input a dispatch body may send empty is optional with a default. The one documented
     wrapper is dispatched only by `actions/dispatch`, from a body the engine builds and no human
@@ -332,6 +332,10 @@ def test_the_documented_wrapper_inputs_are_exactly_these():
     Keyed by the fence's own workflow `name:` as well as the page, so that a second documented
     wrapper cannot swap requiredness with this one and sort to the same vector.
 
+    `type` and `options` are in the vector because the routing depends on them and nothing
+    else reads them: drop `unlock` from the choice list and GitHub answers HTTP 422 to every
+    `shipmate unlock` dispatch, with the `unlock` job still sitting in the file.
+
     Whole-vector comparison against a hand-written constant, for the reason
     `docs/development.md` §Guard tests must be able to fail gives: a "no input is required"
     predicate is also satisfied by a selector that finds nothing, and a per-input assertion
@@ -341,17 +345,35 @@ def test_the_documented_wrapper_inputs_are_exactly_these():
     Out of reach: a fence showing an input block as a fragment, with no `on:` above it, of which
     `docs/upgrading.md`'s migration snippet is one. Those are illustrative; the copyable wrapper
     in `getting-started.md` is what consumers paste, and it is what this pins.
+
+    Mutations: drop `unlock` from the fence's `options:` list; swap `verb` to
+    `required: false`.
     """
     found = sorted(
         (page.relative_to(ENGINE).as_posix(), doc.get("name"), name, *shape)
         for page, _, body in _FENCES
         for doc in [yaml.safe_load(body)]
         for name, spec in _dispatch_inputs(doc)
-        for shape in [(spec.get("required"), spec.get("default"))]
+        for shape in [
+            (
+                spec.get("required"),
+                spec.get("default"),
+                spec.get("type"),
+                tuple(spec.get("options") or ()),
+            )
+        ]
     )
     assert found == [
-        ("docs/getting-started.md", "shipmate", "environment", False, ""),
-        ("docs/getting-started.md", "shipmate", "pr_number", False, ""),
-        ("docs/getting-started.md", "shipmate", "ref", False, ""),
-        ("docs/getting-started.md", "shipmate", "verb", True, None),
+        ("docs/getting-started.md", "shipmate", "environment", False, "", None, ()),
+        ("docs/getting-started.md", "shipmate", "pr_number", False, "", None, ()),
+        ("docs/getting-started.md", "shipmate", "ref", False, "", None, ()),
+        (
+            "docs/getting-started.md",
+            "shipmate",
+            "verb",
+            True,
+            None,
+            "choice",
+            ("plan", "apply", "unlock", "drift"),
+        ),
     ], f"documented workflow_dispatch inputs changed: {found}"

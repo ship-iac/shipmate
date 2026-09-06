@@ -231,10 +231,10 @@ every job waiting for a runner that never arrives.
 name: shipmate
 run-name: >-
   shipmate · ${{ github.event_name == 'pull_request_target' && 'plan'
-    || github.event_name == 'issue_comment' && 'comment'
-    || github.event_name == 'push' && 'deploy'
-    || github.event_name == 'schedule' && 'drift'
-    || inputs.verb }}
+  || github.event_name == 'issue_comment' && 'comment'
+  || github.event_name == 'push' && 'deploy'
+  || github.event_name == 'schedule' && 'drift'
+  || inputs.verb }}
 on:
   pull_request_target:
     types: [opened, synchronize, reopened, ready_for_review]
@@ -277,9 +277,10 @@ jobs:
   plan:
     name: shipmate
     # `github.event.inputs` is the form readable under either trigger, unlike the `inputs`
-    # context; the concurrency group below relies on the same thing. `targeted` and `all` keep
-    # `inputs.` because only that form applies a declared default, which is what makes an
-    # omitted `environment` key read as the empty string.
+    # context, and `plan` and `drift` also run under one that is not `workflow_dispatch`; the
+    # concurrency group below relies on the same thing. `targeted`, `all` and `unlock` are
+    # dispatch-only and keep `inputs.`, because only that form applies a declared default,
+    # which is what makes an omitted `environment` key read as the empty string.
     if: github.event_name == 'pull_request_target' || (github.event_name == 'workflow_dispatch' && github.event.inputs.verb == 'plan')
     concurrency:
       # `github.event.inputs` is readable under either trigger, unlike the `inputs` context.
@@ -376,8 +377,8 @@ jobs:
 ```
 
 **The `permissions:` block on each calling job is not optional.** A called
-workflow's permissions are capped at the `uses:` boundary, and the engine's jobs
-request between them everything the blocks above grant. Grant less and the run
+workflow's permissions are capped at the `uses:` boundary, so each block above has
+to grant every scope the callee's own jobs request. Grant less and the run
 dies at startup — no job, no log, no annotation and no `shipmate / gate`. That is
 fail-closed, since nothing merges without the gate, but nothing on the run page
 says why, so copy each block whole rather than trimming it. The top-level
@@ -388,10 +389,11 @@ is what its callee is capped at, and a job that loses its block gets nothing.
 **`verb` is the one required input, and every other is optional with an explicit
 default.** One schema serves four verbs, and GitHub reads an empty value for a
 `required: true` input as not provided, answering HTTP 422 before the run starts
-— so requiring `pr_number` would refuse every `unlock` and every `apply`, whose
-bodies do not carry one. That is how every `shipmate unlock` dispatch failed
-while the apply wrapper still declared the plan-run input the engine has since
-retired: unlock applies no plan, so the engine sent that value empty. No human
+— so requiring `pr_number` would refuse every `unlock`, whose dispatch body does
+not carry one, and every hand-dispatched `drift`. That is how every
+`shipmate unlock` dispatch failed while the old `apply.yml` shim still declared the
+plan-run input the engine has since retired: unlock applies no plan, so the engine
+sent that value empty. No human
 fills a form here either — `actions/dispatch` mints an App token and sends a body
 the engine builds — so `required: true` protects no real caller.
 

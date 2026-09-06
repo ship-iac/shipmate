@@ -1632,8 +1632,8 @@ def test_an_absent_file_is_created_with_lf_endings(tmp_path, monkeypatch):
 
 
 def test_main_refuses_a_state_suffix_that_cannot_sit_in_a_yaml_scalar():
-    """The suffix is interpolated into `state_suffix: "<value>"` in every rendered shim, so a
-    `"` in it writes six workflow files GitHub cannot load.
+    """The suffix is interpolated into every `state_suffix: "<value>"` of the rendered
+    workflow file, so a `"` in it writes a file GitHub cannot load.
 
     Mutation: drop the `_SUFFIX_RE` check. `--key k` does not exist, so `_read_key` raises
     `SystemExit` too -- the assertion is on the message, not on the exception.

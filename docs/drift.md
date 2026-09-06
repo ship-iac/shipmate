@@ -164,11 +164,14 @@ it, on that slice's next run.
 
 ### Spreading a sweep across the week
 
-One workflow file per slice — `drift-<slice>.yml` — each a copy of
-`shipmate.yml`'s `drift` job in a file of its own, with three things changed: the
-`name:`, the single `cron:`, and the literal `tags:` value in its `with:` block.
-A repository variable cannot differ per file, which is why `tags` is an input
-rather than one.
+One workflow file per slice — `drift-<slice>.yml` — each a copy of the fence
+below, which differs from `shipmate.yml`'s `drift` job in three ways: a top-level
+`name:` and `schedule:` of its own, a literal `tags:` value, and **no `if:`**.
+Do not copy the job's `if:` across: it tests `github.event.inputs.verb`, which a
+slice file's bare `workflow_dispatch:` never sets, so a manual re-run of the
+slice would skip the job with no error. The calling job's own `name: shipmate`
+is the check-name contract literal and stays as it is. A repository variable
+cannot differ per file, which is why `tags` is an input rather than one.
 
 ```yaml
 name: shipmate · drift · dev-eu
