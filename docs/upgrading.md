@@ -153,6 +153,72 @@ names. The entries below `0.2.0` predate the first tagged release, or
 `CHANGELOG.md` does not pin one; they are kept for repositories moving from a
 very old pin.
 
+### 0.27.0 — the six workflow files become one `.github/workflows/shipmate.yml`
+
+**This release is breaking for every consumer.** `plan.yml`, `comment-ops.yml`,
+`deploy.yml`, `drift.yml`, `apply.yml` and `unlock.yml` are replaced by one
+file, `.github/workflows/shipmate.yml`: five triggers and seven jobs, each
+selected by its own `if:` and each calling the engine reusable workflow one of
+those files used to call. `actions/dispatch` no longer picks a filename per
+verb — it sends every commented verb to `shipmate.yml` and names the verb in
+the dispatch body, and the job whose `if:` matches that verb is the one that
+runs. Adding the new file, deleting the six and bumping every pin land in **one
+commit**. `dev/repin_consumer.py` rewrites pins in files that already exist, so
+the new file and the deletions are by hand.
+
+**Either half alone breaks the repository, in a different place.** New pin
+without the file: the engine's `build-matrix` refuses a checkout that carries
+no `.github/workflows/shipmate.yml` — the one path the consumer's workflow may
+live at — so `detect` fails, `summary` writes a red `shipmate / gate` reading
+`change detection did not succeed (failure) — fix the shipmate / detect job
+before merging`, and the refusal itself is the `::error::` annotation on
+`detect`. A commented verb does not dispatch either: `actions/dispatch` now
+posts to `shipmate.yml`, which is not there, so it prints the missing-file hint
+naming this section and comments that the command was authorized but no run
+started. The file without the new pin fails in the same two places for the
+opposite reason: the pinned engine is still looking for
+`.github/workflows/plan.yml`, which the commit deleted, so every pull request
+draws that same red gate, and the pinned `actions/dispatch` posts to the
+per-verb file the commit deleted, gets a 404, and comments the same refusal —
+with the reason in that run's log either way, never in the comment.
+
+**The migration pull request cannot be gated.** It is planned by the *old*
+`plan.yml` on the default branch at the *old* pin, whose `build-matrix` refuses
+a head checkout carrying no `.github/workflows/plan.yml` — which this pull
+request has just deleted. Merge it with an administrative bypass and restore
+enforcement straight after; the next pull request gates normally.
+[`../CONTRACT.md`](../CONTRACT.md) §Post-plan topology records the same shape
+for the original trigger switch.
+
+1. **Add `.github/workflows/shipmate.yml`.** The whole file is in
+   [`getting-started.md`](getting-started.md) §The workflow file; fill its seven
+   `<engine-sha>` placeholders with this release's SHA. `scripts/onboard` writes
+   it for you, pinned to the engine checkout's release — which means an engine
+   checkout sitting on the `v0.27.0` tag, since it refuses one on a commit that
+   carries no release tag. It writes and reconciles; it deletes nothing.
+2. **Carry your own values across.** `state_suffix` on the `plan`, `deploy`,
+   `drift`, `targeted` and `all` jobs — `unlock` takes none — your runner label,
+   and the `tags:` value on the `drift` job. They are the values your six files
+   pass today.
+3. **Delete the six files.** All of them, in this commit. A leftover
+   `plan.yml` or `drift.yml` keeps its own triggers and plans or sweeps a second
+   time.
+4. **Keep your `drift-<slice>.yml` files.** They stay as separate files beside
+   `shipmate.yml`, each with its own `schedule:` and its own literal `tags:`
+   ([`drift.md`](drift.md) §Spreading a sweep across the week). Bump their pins
+   with the rest.
+5. **Merge with an administrative bypass, then restore enforcement.**
+
+Nothing changes for environments, variables, secrets, the App or the ruleset.
+Every check name is what it was: plan cells are still
+`shipmate / <stack> / <env>`, apply checks still `apply / <stack> / <env>`, and
+the required check is still `shipmate / gate`. The pin count is unchanged at seven, one per `uses:` —
+they are in one file now instead of six.
+
+What is new in the checks list is six one-segment check-runs per run with
+conclusion `skipped`, one for each job the event did not select. They are
+artefacts of the file's shape; nothing functional reads them.
+
 ### 0.25.0 — `plan.yml`, `drift.yml` and `comment-ops.yml` become shims
 
 **This release is breaking for every consumer.** The pin bump and the body
