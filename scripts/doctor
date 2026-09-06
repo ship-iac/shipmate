@@ -1269,11 +1269,11 @@ _SHIM_JOB_NAME = "shipmate"
 # directory is not a misconfiguration to warn about.
 SHIM_JOB_UNREADABLE = (
     NOTICE,
-    f"could not read `{_WORKFLOWS_DIR}` — the shim's calling job name not verified.",
+    f"could not read `{_WORKFLOWS_DIR}` — the workflow file's calling job name not verified.",
 )
 SHIM_JOB_NO_COMMIT = (
     NOTICE,
-    "the shim's calling job name not verified — the commit under examination "
+    "the workflow file's calling job name not verified — the commit under examination "
     "could not be determined.",
 )
 
