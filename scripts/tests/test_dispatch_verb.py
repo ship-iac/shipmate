@@ -1,5 +1,5 @@
-"""Tests for actions/dispatch's `verb` input: the verb selects one workflow file and one body
-shape, and nothing else routes.
+"""Tests for actions/dispatch's `verb` input: every verb dispatches one consumer file, and the
+verb rides in the body — selecting the job that runs — alongside one body shape per verb.
 """
 
 import json
@@ -21,9 +21,9 @@ from _loader import (
 
 DISPATCH_ACTION = "dispatch"
 
-#: verb -> the consumer workflow file it dispatches. Hand-written; never derived
-#: from the action, which is the file under test.
-VERB_WORKFLOW = {"plan": "plan.yml", "apply": "apply.yml", "unlock": "unlock.yml"}
+#: Every verb reaches the same consumer file; the verb rides in the body and selects a job
+#: there. Hand-written; never derived from the action, which is the file under test.
+CONSUMER_WORKFLOW = "shipmate.yml"
 
 
 def _dispatch_step():
@@ -80,54 +80,61 @@ def _build_dispatch_body(verb, environment=""):
 # selectors for one property disagree eventually.
 
 
-def test_plan_body_is_the_dispatch_ref_and_pr_number_alone():
-    """A plan body is exactly {ref: dispatch ref, inputs: {pr_number}}. plan.yml declares one
-    input, so every extra key is a production 422; the top-level ref is the dispatch ref rather
+def test_plan_body_is_the_dispatch_ref_the_verb_and_pr_number_alone():
+    """A plan body is exactly {ref: dispatch ref, inputs: {verb, pr_number}}. `verb` is what
+    selects the `plan` job in `shipmate.yml`; without it every job's `if:` is false and the
+    dispatched run completes having done nothing. The top-level ref is the dispatch ref rather
     than the head SHA, because a plan states no head.
 
-    Mutations: add `ref`, `environment` or `mode` to the plan inputs; swap the top-level ref
-    for the head SHA.
+    Mutations: drop the `verb` key; add `ref` or `environment` to the plan inputs; swap the
+    top-level ref for the head SHA.
     """
     body = _build_dispatch_body("plan", environment="dev-eu")
-    assert body == {"ref": "main", "inputs": {"pr_number": "42"}}, (
-        f"plan body must carry the PR number alone, on the dispatch ref: {body}"
+    assert body == {"ref": "main", "inputs": {"verb": "plan", "pr_number": "42"}}, (
+        f"plan body must carry the verb and the PR number alone, on the dispatch ref: {body}"
     )
 
 
 def test_apply_body_omits_the_environment_when_it_is_empty():
-    """A bare `shipmate apply` sends {ref, pr_number} and no environment key. An empty
-    environment is the bare apply, and GitHub reads an empty value for a required
-    workflow_dispatch input as not provided (422), so the key is omitted rather than sent empty.
+    """A bare `shipmate apply` sends {verb, ref, pr_number} and no environment key, which is
+    what selects the `all` job (`inputs.environment == ''`) over `targeted`.
 
-    Mutation: drop the `if os.environ.get("ENVIRONMENT")` guard.
+    Mutation: drop the `if os.environ.get("ENVIRONMENT")` guard, and a bare apply routes to
+    `targeted` instead — one environment applied where every environment was asked for.
     """
     assert _build_dispatch_body("apply") == {
         "ref": "main",
-        "inputs": {"ref": "abc123def456", "pr_number": "42"},
+        "inputs": {"verb": "apply", "ref": "abc123def456", "pr_number": "42"},
     }
 
 
 def test_apply_body_carries_the_environment_when_it_is_set():
-    """A targeted `shipmate apply dev-eu` sends {ref, pr_number, environment}.
+    """A targeted `shipmate apply dev-eu` sends {verb, ref, pr_number, environment}.
 
     Mutation: drop the environment key entirely.
     """
     assert _build_dispatch_body("apply", environment="dev-eu") == {
         "ref": "main",
-        "inputs": {"ref": "abc123def456", "pr_number": "42", "environment": "dev-eu"},
+        "inputs": {
+            "verb": "apply",
+            "ref": "abc123def456",
+            "pr_number": "42",
+            "environment": "dev-eu",
+        },
     }
 
 
-def test_unlock_body_is_the_ref_and_environment_alone():
-    """An unlock body is exactly {ref, environment} -- no pr_number, no mode. unlock.yml
-    releases a stranded lock: it applies no plan and comments on no pull request, so nothing on
-    that path reads a PR number.
+def test_unlock_body_is_the_verb_the_ref_and_the_environment_alone():
+    """An unlock body is exactly {verb, ref, environment} — no pr_number. Releasing a stranded
+    lock applies no plan and comments on no pull request, so nothing on that path reads one,
+    and `pr_number` is `required: false` on `shipmate.yml` precisely so this body is legal.
 
-    Mutations: add `pr_number` to the unlock branch; re-add `inputs["mode"]`.
+    Mutations: add `pr_number` to the unlock branch; drop `verb`, and the dispatched run
+    matches no job's `if:` and unlocks nothing while reporting success.
     """
     assert _build_dispatch_body("unlock", environment="dev-eu") == {
         "ref": "main",
-        "inputs": {"ref": "abc123def456", "environment": "dev-eu"},
+        "inputs": {"verb": "unlock", "ref": "abc123def456", "environment": "dev-eu"},
     }
 
 
@@ -190,8 +197,9 @@ _DISPATCH_PATH = "/actions/workflows/"
 
 def test_an_empty_verb_dispatches_nothing_and_says_so_on_the_pull_request():
     """No verb, no dispatch, and the refusal names what the caller must wire: omitting the
-    `with:` line would otherwise dispatch apply.yml with a plan body. A consumer wired that way
-    is the shape this path exists for, so the commenter is told rather than left with a rocket
+    `with:` line would otherwise dispatch a body with no verb in it, which every job's `if:`
+    rejects — a run that starts, does nothing, and reports success. A consumer wired that way is
+    the shape this path exists for, so the commenter is told rather than left with a rocket
     reaction and silence.
 
     Mutations: delete the refusal branch *and* give the `case` an `""` arm -- deleting it
@@ -233,26 +241,28 @@ def test_an_unknown_verb_dispatches_nothing_and_says_so_on_the_pull_request():
         )
 
 
-@pytest.mark.parametrize(("verb", "workflow"), sorted(VERB_WORKFLOW.items()))
-def test_each_verb_dispatches_its_own_workflow_file(verb, workflow):
-    """One entry point per verb: plan.yml, apply.yml, unlock.yml.
+@pytest.mark.parametrize("verb", ["plan", "apply", "unlock"])
+def test_every_verb_dispatches_the_one_consumer_file(verb):
+    """One entry point for every verb: the file is fixed, and the body's `verb` selects the
+    job. What kept the verbs apart before was the filename; what keeps them apart now is the
+    seven `if:` expressions `shipmate doctor`'s routing probe compares whole.
 
-    Mutation: swap two of the three filenames in the `case`.
+    Mutation: make the `case` resolve a per-verb filename again.
     """
     if not usable_bash():
         pytest.skip("bash not available on this platform")
     with tempfile.TemporaryDirectory() as tmpdir:
         result, argv = _run_dispatch(tmpdir, verb=verb, environment="dev-eu")
         assert result.returncode == 0, f"{verb} dispatch failed: {result.stdout}{result.stderr}"
-        assert f"repos/org/repo/actions/workflows/{workflow}/dispatches" in argv, (
-            f"{verb} must be dispatched at {workflow}, gh saw: {argv!r}"
+        assert f"repos/org/repo/actions/workflows/{CONSUMER_WORKFLOW}/dispatches" in argv, (
+            f"{verb} must be dispatched at {CONSUMER_WORKFLOW}, gh saw: {argv!r}"
         )
 
 
 def test_the_action_declares_no_workflow_input():
-    """The whole input vector, hand-written. A `workflow` input would override the filename, and
-    one static name cannot serve three verbs, so it would misroute two of them: the verb-to-file
-    mapping is the contract, not an overridable default.
+    """The whole input vector, hand-written. A `workflow` input would override the one filename
+    every verb aims at, sending an authorized command to a file the engine's jobs do not live
+    in: the consumer filename is the contract, not an overridable default.
 
     Mutation: re-add `workflow` (or drop `verb`, or give `verb` a default).
     """
@@ -268,8 +278,8 @@ def test_the_action_declares_no_workflow_input():
         "verb",
     ], f"the dispatch action's inputs changed: {sorted(inputs)}"
     assert "default" not in inputs["verb"], (
-        "`verb` must have no default: a guessed verb dispatches one verb's body "
-        f"at another verb's workflow, got {inputs['verb']!r}"
+        "`verb` must have no default: a guessed verb runs one verb's job with "
+        f"another verb's inputs, got {inputs['verb']!r}"
     )
 
 
@@ -283,7 +293,7 @@ FILENAME_REGEX_GUARD = (
 
 def test_the_resolved_filename_is_checked_before_it_reaches_an_api_path():
     """The filename regex still guards the value interpolated into the API path. Structural by
-    necessity: the `case` resolves `WORKFLOW` to one of three literals, so no runtime input can
+    necessity: the `case` resolves `WORKFLOW` to a single literal, so no runtime input can
     make this check fire. It is the last line between a verb value and an API path and costs
     one line, so it stays, and only its presence is observable.
 
@@ -385,8 +395,8 @@ def test_dispatch_success_exits_zero():
 
 
 # Only a failure that matches the skew shape gets the skew explanation: a 403 or a rate limit
-# explained as skew sends the operator to edit workflows that are fine. Each message's remedy
-# is pinned too, because neither failure is fixed by a re-pin.
+# explained as skew sends the operator to edit workflows that are fine. The remedy is pinned
+# too, because no such failure is fixed by a re-pin.
 
 _NO_TRIGGER_STUB = (
     "#!/bin/bash\n"
@@ -394,70 +404,55 @@ _NO_TRIGGER_STUB = (
     "exit 22\n"
 )
 _NOT_FOUND_STUB = "#!/bin/bash\necho 'gh: Not Found (HTTP 404)' >&2\nexit 1\n"
+_UNEXPECTED_INPUTS_STUB = (
+    "#!/bin/bash\necho 'gh: Unexpected inputs provided: [\"verb\"] (HTTP 422)' >&2\nexit 22\n"
+)
 _FORBIDDEN_STUB = "#!/bin/bash\necho 'HTTP 403: Forbidden' >&2\nexit 1\n"
-_UNLOCK_SKEW = "has no unlock.yml"
-_PLAN_SKEW = "does not accept a dispatched plan"
-# The remedy half. The consumer authors `unlock.yml` and edits `plan.yml` by hand, a pin bump
-# does neither, and `docs/releasing.md` is the maintainer's runbook rather than the page that
-# tells them.
-_UNLOCK_REMEDY = "docs/upgrading.md section 0.21.0"
-_PLAN_REMEDY = "docs/upgrading.md section 0.20.0"
+_LAYOUT_SKEW = "has no .github/workflows/shipmate.yml"
+# The remedy half. The consumer authors that file by hand, a pin bump does not, and
+# `docs/releasing.md` is the maintainer's runbook rather than the page that tells them.
+_LAYOUT_REMEDY = "docs/upgrading.md section <this release>"
 
 
-@pytest.mark.parametrize("stub", [_NOT_FOUND_STUB, _NO_TRIGGER_STUB])
-def test_unlock_against_a_repo_with_no_unlock_wrapper_prints_the_missing_wrapper_message(stub):
-    """Both shapes a missing unlock.yml produces get the missing-wrapper message. Measured: a
-    workflow file that does not exist answers 404; one with no such trigger answers `Workflow
-    does not have 'workflow_dispatch' trigger (HTTP 422)`.
+@pytest.mark.parametrize("stub", [_NOT_FOUND_STUB, _NO_TRIGGER_STUB, _UNEXPECTED_INPUTS_STUB])
+@pytest.mark.parametrize("verb", ["plan", "apply", "unlock"])
+def test_a_dispatch_against_a_repo_without_shipmate_yml_prints_the_layout_message(verb, stub):
+    """All three shapes an absent or outdated `shipmate.yml` produces get the layout message,
+    for every verb — every verb now aims at that one file. Measured: a workflow file that does
+    not exist answers 404; one with no such trigger answers `Workflow does not have
+    'workflow_dispatch' trigger (HTTP 422)`; one declaring fewer inputs than the body names
+    answers `Unexpected inputs provided`.
 
-    Mutation: drop either half of the message-text condition and the other shape stops being
-    explained; point the remedy at `docs/releasing.md` and the remedy assertion reddens.
+    Mutations: scope the condition to one verb again and the other two stop being explained;
+    drop any one of the three message-text halves and its shape stops being explained; point
+    the remedy at `docs/releasing.md` and the remedy assertion reddens.
     """
     if not usable_bash():
         pytest.skip("bash not available on this platform")
     with tempfile.TemporaryDirectory() as tmpdir:
-        result, _ = _run_dispatch(tmpdir, verb="unlock", environment="dev-eu", gh_stub=stub)
+        result, _ = _run_dispatch(tmpdir, verb=verb, environment="dev-eu", gh_stub=stub)
         output = result.stdout + result.stderr
-        assert result.returncode != 0, f"an unlock failure must exit non-zero: {output}"
+        assert result.returncode != 0, f"a {verb} failure must exit non-zero: {output}"
         assert "HTTP 4" in output, f"raw gh output missing: {output}"
-        assert _UNLOCK_SKEW in output, f"missing-wrapper message missing: {output}"
-        assert _UNLOCK_REMEDY in output, f"remedy must name the upgrade guide: {output}"
+        assert _LAYOUT_SKEW in output, f"layout message missing: {output}"
+        assert _LAYOUT_REMEDY in output, f"remedy must name the upgrade guide: {output}"
 
 
-def test_unlock_403_prints_no_skew_message():
-    """A 403 is not version skew: the raw output prints, the message does not.
+@pytest.mark.parametrize("verb", ["plan", "apply", "unlock"])
+def test_a_403_prints_no_skew_message(verb):
+    """A 403 is not version skew, on any verb: the raw output prints, the message does not.
 
-    Mutation: drop the whole `[[ ... ]]` message-text condition, so any unlock failure is
-    reported as skew. Neither half alone reddens it, because a 403 is neither a 404 nor a
-    missing trigger.
+    Mutation: drop the whole `[[ ... ]]` message-text condition, so any failure is reported as
+    skew. No single one of its three halves reddens it, because a 403 is none of them.
     """
     if not usable_bash():
         pytest.skip("bash not available on this platform")
     with tempfile.TemporaryDirectory() as tmpdir:
-        result, _ = _run_dispatch(
-            tmpdir, verb="unlock", environment="dev-eu", gh_stub=_FORBIDDEN_STUB
-        )
+        result, _ = _run_dispatch(tmpdir, verb=verb, environment="dev-eu", gh_stub=_FORBIDDEN_STUB)
         output = result.stdout + result.stderr
         assert result.returncode == 1, f"gh's exit status must survive, got {result.returncode}"
         assert "HTTP 403: Forbidden" in output, f"raw gh output missing: {output}"
-        assert _UNLOCK_SKEW not in output, f"a 403 is not a missing wrapper: {output}"
-
-
-def test_an_apply_failure_prints_no_degrade_message():
-    """The apply path stays green: a failed apply prints the raw error alone.
-
-    Mutation: remove the verb scoping so either message prints unconditionally.
-    """
-    if not usable_bash():
-        pytest.skip("bash not available on this platform")
-    with tempfile.TemporaryDirectory() as tmpdir:
-        result, _ = _run_dispatch(tmpdir, verb="apply", gh_stub=_NO_TRIGGER_STUB)
-        output = result.stdout + result.stderr
-        assert result.returncode == 22, f"gh's exit status must survive: {result.returncode}"
-        assert "HTTP 422" in output, f"raw gh output missing: {output}"
-        assert _UNLOCK_SKEW not in output and _PLAN_SKEW not in output, (
-            f"no degrade message belongs on the apply path: {output}"
-        )
+        assert _LAYOUT_SKEW not in output, f"a 403 is not a missing consumer file: {output}"
 
 
 def test_a_422_about_another_input_is_not_reported_as_skew():
@@ -467,7 +462,7 @@ def test_a_422_about_another_input_is_not_reported_as_skew():
     any 422 tells the operator to edit workflows that are already current and hides the real
     cause printed one line above.
 
-    Mutation: widen the unlock condition to any `HTTP 422` and this reddens.
+    Mutation: match any `HTTP 422` and this reddens.
     """
     if not usable_bash():
         pytest.skip("bash not available on this platform")
@@ -483,41 +478,9 @@ def test_a_422_about_another_input_is_not_reported_as_skew():
         assert "Required input 'plan_run_id' not provided" in output, (
             f"the API's own message must still print: {output}"
         )
-        assert _UNLOCK_SKEW not in output, (
-            f"a 422 about plan_run_id is not a missing wrapper: {output}"
+        assert _LAYOUT_SKEW not in output, (
+            f"a 422 about plan_run_id is not a missing consumer file: {output}"
         )
-
-
-def test_plan_422_prints_the_skew_message():
-    """A plan 422 naming the missing surface prints the skew message and remedy.
-
-    Mutation: invert the verb half of the condition; point the remedy at
-    `docs/releasing.md` and the remedy assertion reddens.
-    """
-    if not usable_bash():
-        pytest.skip("bash not available on this platform")
-    with tempfile.TemporaryDirectory() as tmpdir:
-        result, _ = _run_dispatch(tmpdir, verb="plan", gh_stub=_NO_TRIGGER_STUB)
-        output = result.stdout + result.stderr
-        assert result.returncode == 22, f"gh's exit status must survive: {result.returncode}"
-        assert "Workflow does not have" in output, f"raw gh output missing: {output}"
-        assert _PLAN_SKEW in output, f"skew message missing: {output}"
-        assert _PLAN_REMEDY in output, f"remedy must name the upgrade guide: {output}"
-
-
-def test_plan_403_prints_no_skew_message():
-    """A plan 403 is not version skew: the raw output prints, the message does not.
-
-    Mutation: drop the message-text half of the plan condition.
-    """
-    if not usable_bash():
-        pytest.skip("bash not available on this platform")
-    with tempfile.TemporaryDirectory() as tmpdir:
-        result, _ = _run_dispatch(tmpdir, verb="plan", gh_stub=_FORBIDDEN_STUB)
-        output = result.stdout + result.stderr
-        assert result.returncode == 1, f"gh's exit status must survive: {result.returncode}"
-        assert "HTTP 403: Forbidden" in output, f"raw gh output missing: {output}"
-        assert _PLAN_SKEW not in output, f"a 403 is not version skew: {output}"
 
 
 #: Fails like `_NOT_FOUND_STUB` and records every argv, so what the failure branch
@@ -605,7 +568,7 @@ def test_the_plan_notice_states_neither_an_environment_nor_a_ref():
     with tempfile.TemporaryDirectory() as tmpdir:
         result, _ = _run_dispatch(tmpdir, verb="plan")
         output = result.stdout + result.stderr
-        assert "::notice title=dispatch::dispatched plan.yml on main for PR #42" in output, (
+        assert "::notice title=dispatch::dispatched shipmate.yml on main for PR #42" in output, (
             f"the plan notice must name the workflow, the dispatch ref and the PR: {output}"
         )
         assert "all environments" not in output and "(ref " not in output, (
