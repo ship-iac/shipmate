@@ -190,6 +190,16 @@ def _derive_envs():
     return sorted(stacks_by_env)
 
 
+def _repo_root():
+    """The consumer checkout's root.
+
+    Not `cwd`: `gh repo view` resolves the same repository from any subdirectory and
+    `terramate list` still enumerates every stack, so a run from `stacks/` would report six
+    files created under `stacks/.github/workflows/`, where GitHub never looks.
+    """
+    return pathlib.Path(_run(["git", "rev-parse", "--show-toplevel"]).strip())
+
+
 def _repo_facts():
     facts = json.loads(_run(["gh", "repo", "view", "--json", "nameWithOwner,defaultBranchRef"]))
     slug = facts.get("nameWithOwner") or ""
@@ -610,8 +620,9 @@ SHIMS = {
     "drift.yml": ("drift.md", "shipmate · drift"),
 }
 
-#: The same expression `scripts/tests/test_docs_yaml_parses.py` discovers fences with, so an
-#: indented fence is dedented rather than missed.
+#: `scripts/tests/test_docs_yaml_parses.py` imports this rather than keeping a second copy:
+#: the shims are rendered from the fences that guard parses, and an indented fence must be
+#: dedented rather than missed.
 _FENCE = re.compile(r"^(?P<indent>[ \t]*)```yaml[ \t]*$\n(?P<body>.*?)^\1```", re.M | re.S)
 _DOC_PIN = re.compile(
     r"(?P<ref>ship-iac/shipmate/\.github/workflows/[^@\s]+)@<engine-sha>[^\S\n]*#[^\n]*"
@@ -666,6 +677,8 @@ def _reconcile_shim(ctx, filename):
         report("ok", filename)
     elif _depin(current) == _depin(text):
         report("pin-only", filename, "run dev/repin_consumer.py")
+    elif "<engine-sha>" in current:
+        report("differs", filename, "the published fence, never pinned: delete it and run again")
     else:
         report("differs", filename, "local edits, not overwritten")
 
@@ -716,6 +729,7 @@ def main(argv=None):
     engine = pathlib.Path(__file__).resolve().parents[1]
     versions = _versions(engine)
     sha, version = _engine_pin(engine)
+    root = _repo_root()
     repo, default_branch = _repo_facts()
     envs = _derive_envs()
     ctx = {
@@ -727,7 +741,7 @@ def main(argv=None):
         "envs": envs,
         "shared": _resolve_shared(args.shared, _variables(), envs),
         "state_suffix": args.state_suffix,
-        "root": pathlib.Path.cwd(),
+        "root": root,
         "engine": engine,
         "versions": versions,
         "sha": sha,

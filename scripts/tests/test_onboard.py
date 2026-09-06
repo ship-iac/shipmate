@@ -7,6 +7,7 @@ hostile edit to this repository, which is reviewed on every pull request.
 
 import ast
 import json
+import pathlib
 import subprocess
 import sys
 
@@ -260,6 +261,25 @@ def test_absent_read_returns_none(monkeypatch):
     assert fake.calls == [["gh", "api", "repos/o/r/environments/dev-eu"]]
 
 
+def test_repo_root_is_the_checkout_root_not_the_cwd(monkeypatch):
+    """The shims land at `<root>/.github/workflows/`. `gh repo view` resolves the same
+    repository from any subdirectory and `terramate list` enumerates every stack from one, so
+    a run started in a stack directory would otherwise report six files created where GitHub
+    never looks -- exit 0 over a repository nothing was set up in.
+
+    Mutation: `pathlib.Path.cwd()`, which records no call at all.
+    """
+    calls = []
+
+    def fake(args, secrets=(), stdin=None):
+        calls.append(list(args))
+        return "/w/consumer\n"
+
+    monkeypatch.setattr(onboard, "_run", fake)
+    assert onboard._repo_root() == pathlib.Path("/w/consumer")
+    assert calls == [["git", "rev-parse", "--show-toplevel"]]
+
+
 def test_repo_facts_refuses_a_missing_default_branch(monkeypatch):
     """`gh repo view` outside a repository answers with nulls, and every later
     write would target the wrong place.
@@ -414,7 +434,8 @@ def test_main_calls_every_stage_in_order():
 
     Mutations, each proven: delete `_reconcile_engine_env(ctx)`; delete
     `_reconcile_envs(ctx)`; delete `_reconcile_variables(ctx)`; delete
-    `_reconcile_ruleset(ctx)`; delete `_reconcile_shims(ctx)`; delete
+    `_reconcile_ruleset(ctx)`; delete `_reconcile_shims(ctx)`; `_repo_root()` back to
+    `pathlib.Path.cwd()`; delete
     `sys.exit(_exit_code())`; swap two reconcilers.
     """
     tree = ast.parse((ENGINE / "scripts" / "onboard").read_text(encoding="utf-8"))
@@ -427,6 +448,7 @@ def test_main_calls_every_stage_in_order():
         "_read_key(args.key)",
         "_versions(engine)",
         "_engine_pin(engine)",
+        "_repo_root()",
         "_repo_facts()",
         "_derive_envs()",
         "_resolve_shared(args.shared, _variables(), envs)",
@@ -1363,8 +1385,9 @@ def test_the_rendered_pin_is_byte_identical_to_what_repin_consumer_writes(tmp_pa
             encoding="utf-8",
             newline="\n",
         )
-    # The real release writer, not an imitation of it: this is the exact call
-    # docs/releasing.md makes against a consumer once the tag is cut.
+    # The real release writer, not an imitation of it. `docs/releasing.md` runs
+    # `repin_consumer.main`, which reaches this planner through `_rewrite_and_report` and
+    # writes the planned text unchanged.
     planned = repin_consumer._plan_consumer(tmp_path, "d" * 40, "v9.9.10")
     assert len(planned) == len(onboard.SHIMS)
     for f in planned:
@@ -1375,15 +1398,42 @@ def test_the_rendered_pin_is_byte_identical_to_what_repin_consumer_writes(tmp_pa
         )
 
 
-def test_apply_shim_rewrites_both_pins():
-    """`apply.yml` is one file with two jobs and two pin sites. A first-match rewrite ships
-    an `apply-all.yml` still pinned to the docs placeholder, which resolves to nothing.
+_EXPECTED_PINS = {
+    "plan.yml": 1,
+    "apply.yml": 2,
+    "comment-ops.yml": 1,
+    "unlock.yml": 1,
+    "deploy.yml": 1,
+    "drift.yml": 1,
+}
 
-    Mutation: pass `count=1` to the `_DOC_PIN` substitution.
+
+def test_every_shim_is_pinned_at_every_site():
+    """Six files, seven pins, and a shim shipped still carrying `@<engine-sha>` resolves to
+    nothing.
+
+    Nothing else can see a missed rewrite. `_callees` splits before the `@`, and the
+    byte-identity guard is blind by construction, because a surviving placeholder is not a
+    40-hex pin on either side. Two live triggers make that silence expensive: `_DOC_PIN`
+    requires the trailing `#` comment, so a docs edit dropping `# see the latest release`
+    from one line stops that pin being rewritten; and it is anchored on `ship-iac`, so
+    normalising an owner in the docs to `<owner>` would unpin all six. `_DOC_PIN` stays
+    anchored deliberately -- `dev/repin_consumer.py` is anchored the same way and the two
+    writers must agree -- and this vector is what makes either edit loud.
+
+    Hand-written, never derived from the docs.
+
+    Mutations: `_DOC_PIN.sub(..., count=1)`, which halves `apply.yml`; and delete
+    `  # see the latest release` from the plan fence's `uses:` line in the docs, which
+    leaves that shim on `@<engine-sha>`.
     """
-    text = onboard._render(ENGINE, "apply.yml", "c" * 40, "v9.9.9", "")
-    assert "<engine-sha>" not in text
-    assert text.count(f"@{'c' * 40} # v9.9.9") == 2
+    rendered = {
+        name: onboard._render(ENGINE, name, "c" * 40, "v9.9.9", "") for name in onboard.SHIMS
+    }
+    assert {name: text.count(f"@{'c' * 40} # v9.9.9") for name, text in rendered.items()} == (
+        _EXPECTED_PINS
+    )
+    assert [name for name, text in rendered.items() if "<engine-sha>" in text] == []
 
 
 def test_state_suffix_is_substituted_into_every_site():
@@ -1470,20 +1520,30 @@ def test_a_locally_edited_file_is_reported_and_not_overwritten(tmp_path):
     assert onboard._exit_code() == 2
 
 
-def test_an_absent_file_is_created_with_lf_endings(tmp_path):
-    """The shim is written LF-delimited whatever platform the operator runs on. A CRLF copy
-    would be reported `differs` by nothing -- the classifier reads universal-newline -- but
-    `dev/repin_consumer.py` and every other consumer's copy are LF.
+def test_an_absent_file_is_created_with_lf_endings(tmp_path, monkeypatch):
+    """The shim is written LF-delimited whatever platform the operator runs on: every other
+    copy of it -- the docs, `dev/repin_consumer.py`'s rewrite, the other consumers -- is LF.
 
-    Mutation: drop `newline="\\n"` from `write_file`. This reddens on Windows only; on Linux
-    the default translation is already LF, so a Linux-only proof of this one is no proof.
+    The whole kwargs mapping is compared against a hand-written dict rather than only the
+    bytes on disk, for the reason `test_run_passes_stdin_as_bytes_with_text_mode_off` gives:
+    translation only happens where the platform newline is `\r\n`, so a bytes-only assertion
+    is inert on the Linux runner CI uses and the guard could not fail where it runs.
+
+    Mutation: drop `newline="\\n"` from `write_file`.
     """
+    seen = {}
+    real = pathlib.Path.write_text
+
+    def fake(self, data, **kwargs):
+        seen["kwargs"] = kwargs
+        return real(self, data, **kwargs)
+
+    monkeypatch.setattr(pathlib.Path, "write_text", fake)
     path, text = _plan_shim(tmp_path)
     onboard._reconcile_shim(_shim_ctx(tmp_path), "plan.yml")
     assert onboard.REPORT == [("created", "plan.yml", "")]
-    written = path.read_bytes()
-    assert b"\r" not in written
-    assert written.decode("utf-8") == text
+    assert seen["kwargs"] == {"encoding": "utf-8", "newline": "\n"}
+    assert path.read_bytes().decode("utf-8") == text
 
 
 def test_main_refuses_a_state_suffix_that_cannot_sit_in_a_yaml_scalar():
@@ -1510,4 +1570,6 @@ def test_a_file_still_carrying_the_docs_placeholder_is_not_reported_pin_only(tmp
     page = (ENGINE / "docs" / "getting-started.md").read_text(encoding="utf-8")
     path.write_text(onboard._fence(page, "shipmate · plan"), encoding="utf-8", newline="\n")
     onboard._reconcile_shim(_shim_ctx(tmp_path), "plan.yml")
-    assert onboard.REPORT == [("differs", "plan.yml", "local edits, not overwritten")]
+    assert onboard.REPORT == [
+        ("differs", "plan.yml", "the published fence, never pinned: delete it and run again")
+    ]
