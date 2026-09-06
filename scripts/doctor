@@ -7,7 +7,7 @@ Three modes, selected via SHIPMATE_DOCTOR_MODE:
   actions/summary right after a plan run. NEVER fails the run: a probe
   error becomes a 'could not verify' note — doctor guards onboarding, it
   must not take down the plan path.
-- report: render the sticky PR comment on demand — the fourteen live probes'
+- report: render the sticky PR comment on demand — the fifteen live probes'
   findings plus a harvest of the warnings GitHub already recorded as
   annotations on this commit's workflow check runs.
 - check-ids: reduce a check-runs JSONL listing to the (id, name) pairs worth
@@ -30,17 +30,20 @@ Probes:
 - secrets held by each declared plan environment.
 - engine action-pin freshness in the consumer's workflow files.
 - `pull_request_target` triggers in the consumer's workflow files.
-- the calling job name in the consumer's `plan.yml`: `shipmate`, or the plan
-  cell checks are not `shipmate / <stack> / <env>`.
+- the plan-calling job name in the consumer's `shipmate.yml`: `shipmate`, or the
+  plan cell checks are not `shipmate / <stack> / <env>`.
 - a retired `plan_run_id` input still declared or forwarded by the consumer's
-  `apply.yml`.
-- a retired `mode` input still declared by the consumer's `apply.yml`, or
+  `shipmate.yml`.
+- a retired `mode` input still declared by the consumer's `shipmate.yml`, or
   forwarded from it to the engine's reusable apply workflows.
-- the dispatch wiring of the consumer's `plan.yml`: the `workflow_dispatch`
-  trigger `shipmate plan` needs, its `pr_number` input, and its call of the
+- the dispatch wiring of the consumer's `shipmate.yml`: the `workflow_dispatch`
+  trigger every commented verb needs, its four inputs, and its call of the
   engine's plan workflow.
 - approvers team resolvability in the repo's org.
 - GitHub App installation permission drift.
+- the event routing of `shipmate.yml`: one job per engine reusable workflow, each
+  with the `if:` that selects it — a wrong one sends a verb nowhere and its run
+  completes green with every job skipped.
 """
 
 import base64
@@ -1212,6 +1215,12 @@ def _fork_trigger_warnings(ctx):
     misconfiguration on that page an outside contributor can reach without push
     access.
 
+    The consumer's one workflow file is on this trigger by design and stays exempt with the
+    comment-ops, deploy, drift and apply jobs in it: their `if:` is false under
+    `pull_request_target`, and a job that is skipped never enters its environment and is
+    never handed a token — measured. `_routing_warnings` is what watches those seven `if:`
+    expressions.
+
     Reads the consumer's workflow files at the commit under examination, the
     same way and for the same reason as the pin probe (`_contents_ref`): a pull
     request that *removes* the trigger must not still be reported for it."""
@@ -1220,13 +1229,12 @@ def _fork_trigger_warnings(ctx):
         return [FORK_TRIGGER_NO_COMMIT]
 
     def finding(text, name):
-        # Before the `plan.yml` exemption below, not after: `plan.yml` is
-        # exactly the file where a fork checkout would be turned on.
+        # Before the `shipmate.yml` exemption below, not after: `shipmate.yml`
+        # is exactly the file where a fork checkout would be turned on.
         out = _unsafe_checkout_warnings(text, name)
-        # The shim is on this trigger by design: the job holding the App key is the `summary`
-        # job inside the engine's reusable plan workflow, which runs no repository content.
-        # Exact name — a `custom-plan.yml` is a consumer file and gets the warning.
-        if name == "plan.yml":
+        # Exempt for the reasons the docstring gives. Exact name — a `custom-plan.yml` is a
+        # consumer file and gets the warning.
+        if name == "shipmate.yml":
             return out
         if not declares_pull_request_target(text):
             return out
@@ -1236,7 +1244,7 @@ def _fork_trigger_warnings(ctx):
                 f"`{name}` triggers on `pull_request_target` — that trigger runs at "
                 "the base ref with this repository's secrets, and on a pull request "
                 "into the default branch that is the ref `shipmate-engine`'s branch "
-                "policy trusts, so a fork can reach them. shipmate's own `plan.yml` "
+                "policy trusts, so a fork can reach them. shipmate's own `shipmate.yml` "
                 "uses this trigger safely because the job holding the App key — the "
                 "`summary` job inside the engine's reusable plan workflow — runs "
                 "no repository content at all. If this workflow checks out or acts "
@@ -1253,9 +1261,9 @@ def _fork_trigger_warnings(ctx):
 # The shim's call of the engine's plan workflow. Read by two probes: this one, which judges the
 # calling job's name, and the dispatch probe, for which the call's absence is the finding.
 _PLAN_WORKFLOW_CALL = re.compile(r"/\.github/workflows/plan\.yml@")
-# Line-anchored, and matched only against a direct child of the calling job: a `name:` deeper in
-# the block belongs to something else.
-_JOB_NAME = re.compile(r"^[ \t]*name[ \t]*:(?P<value>.*)$")
+# Line-anchored, and matched only against a direct child of the calling job: a `name:` or `if:`
+# deeper in the block belongs to something else. Read through `_job_key`.
+_JOB_KEY = re.compile(r"^[ \t]*(?P<key>name|if)[ \t]*:(?P<value>.*)$")
 _SHIM_JOB_NAME = "shipmate"
 # Same degrade posture and reason as PIN_UNREADABLE: an unreadable workflow
 # directory is not a misconfiguration to warn about.
@@ -1303,8 +1311,31 @@ def _call_region(text, pattern):
     return None
 
 
+def _job_key(region, key):
+    """The value of `key` written as a direct child of the job block `region`, or None.
+
+    Only a direct child is read, so a `name:` under `with:` or an `if:` on a step cannot
+    stand in for the job's own. Judged block-style, like the documented file and every other
+    finder here.
+
+    KNOWN GAP: a block scalar (`if: >-`) yields its first line alone, which the whole-value
+    comparison then reports as differing. That reports a healthy file rather than passing a
+    broken one, which is the safe direction, and the published file writes one line."""
+    lines = region.splitlines()
+    body = [ln for ln in lines[1:] if ln.strip()]
+    depth = min((len(ln) - len(ln.lstrip()) for ln in body), default=0)
+    values = [
+        m.group("value").strip()
+        for ln in body
+        if len(ln) - len(ln.lstrip()) == depth
+        for m in [_JOB_KEY.match(ln)]
+        if m and m.group("key") == key
+    ]
+    return values[0] if values else None
+
+
 def _shim_job_name_warnings(ctx):
-    """A `plan.yml` whose calling job is not named `shipmate` still plans
+    """A `shipmate.yml` whose plan-calling job is not named `shipmate` still plans
     correctly, and its plan comment loses every per-cell deep link.
 
     GitHub names a called workflow's check runs `<caller job> / <callee job>`,
@@ -1323,10 +1354,10 @@ def _shim_job_name_warnings(ctx):
         return [SHIM_JOB_NO_COMMIT]
 
     def finding(text, name):
-        # Exact name, like the fork-trigger exemption's: `plan.yml` is the file
-        # `actions/dispatch` targets for `verb: plan` and the one whose cells produce the
+        # Exact name, like the fork-trigger exemption's: `shipmate.yml` is the file
+        # `actions/dispatch` targets for every verb and the one whose cells produce the
         # linked checks.
-        if name != "plan.yml":
+        if name != "shipmate.yml":
             return []
         return _shim_job_name_finding(text, name)
 
@@ -1349,17 +1380,12 @@ def _shim_job_name_finding(text, name):
     region = _call_region(text, _PLAN_WORKFLOW_CALL)
     if region is None:
         return []
-    lines = region.splitlines()
-    body = [ln for ln in lines[1:] if ln.strip()]
-    depth = min((len(ln) - len(ln.lstrip()) for ln in body), default=0)
-    named = [
-        m.group("value").strip().strip("\"'")
-        for ln in body
-        if len(ln) - len(ln.lstrip()) == depth
-        for m in [_JOB_NAME.match(ln)]
-        if m
-    ]
-    job_name = named[0] if named else lines[0].strip().rstrip(":").strip("\"'")
+    named = _job_key(region, "name")
+    job_name = (
+        named.strip("\"'")
+        if named is not None
+        else region.splitlines()[0].strip().rstrip(":").strip("\"'")
+    )
     if job_name == _SHIM_JOB_NAME:
         return []
     return [
@@ -1393,28 +1419,32 @@ PLAN_RUN_ID_NO_COMMIT = (
 def _plan_run_id_warnings(ctx):
     """The engine retired the `plan_run_id` rail: the plan run id now travels
     per apply cell, so no engine workflow or action outside `apply-cell` takes
-    one. A wrapper that still declares or forwards it is the one shape of this
-    breakage a consumer owns, and the forwarding half is invisible from outside
-    (see `_plan_run_id_finding`).
+    one. A consumer's workflow file that still declares or forwards it is the one
+    shape of this breakage a consumer owns, and the forwarding half is invisible
+    from outside (see `_plan_run_id_finding`).
 
     Reads the consumer's workflow files at the commit under examination, the
     same way and for the same reason as the pin, fork-trigger and shim-job-name
     probes (`_contents_ref`): a pull request that *removes* the input must not
     still be reported for it.
 
-    Judged by exact name, like the shim-job-name exemption above: the wrapper
-    shipped in docs/getting-started.md is `apply.yml`, and it is the file that
+    Judged by exact name, like the shim-job-name exemption above: the file
+    shipped in docs/getting-started.md is `shipmate.yml`, and it is the file that
     calls the engine's reusable apply workflows. The filter lives in this
     function rather than in `_plan_run_id_finding` so that a direct call of that
     function with another file's name still reports — a direct call bypasses the
-    exemption, and silence there reads as a false positive that is not one."""
+    exemption, and silence there reads as a false positive that is not one.
+
+    The forwarded count `_plan_run_id_finding` derives now spans all seven of that file's
+    jobs rather than one file's single job, which widens it: a `plan_run_id` forwarded from
+    any of them is a finding, and every one of them is a real breakage."""
     ref = _contents_ref(ctx)
     if ref is None:
         return [PLAN_RUN_ID_NO_COMMIT]
 
     def finding(text, name):
         # Exact name, and the filter's placement: see the docstring.
-        if name != "apply.yml":
+        if name != "shipmate.yml":
             return []
         return _plan_run_id_finding(text, name)
 
@@ -1499,8 +1529,8 @@ MODE_INPUT_NO_COMMIT = (
 def _mode_input_warnings(ctx):
     """The engine retired the `mode` rail: `shipmate unlock` dispatches its own
     `unlock.yml`, so the reusable `apply.yml`/`apply-all.yml` declare no such
-    input. A wrapper that still declares or forwards it is the one shape of this
-    breakage a consumer owns, and the forwarding half is invisible from outside
+    input. A consumer's workflow file that still declares or forwards it is the one shape
+    of this breakage a consumer owns, and the forwarding half is invisible from outside
     (see `_mode_input_finding`).
 
     Reads the consumer's workflow files at the commit under examination, the
@@ -1514,7 +1544,7 @@ def _mode_input_warnings(ctx):
     def finding(text, name):
         # Exact name, and here rather than in `_mode_input_finding`, for the reasons
         # `_plan_run_id_warnings`' docstring states for its identical filter.
-        if name != "apply.yml":
+        if name != "shipmate.yml":
             return []
         return _mode_input_finding(text, name)
 
@@ -1609,10 +1639,25 @@ def _mode_input_finding(text, name):
     return out
 
 
-# The dispatch leg of a plan wrapper. NOT line-anchored like `_PLAN_RUN_ID_KEY`, and the polarity
-# is the reason; see `_dispatch_wiring_finding`.
+# The dispatch leg of the consumer's workflow file. NOT line-anchored like `_PLAN_RUN_ID_KEY`,
+# and the polarity is the reason; see `_dispatch_wiring_finding`.
 _DISPATCH_TRIGGER = re.compile(r"[\s{,]workflow_dispatch[ \t]*:")
-_PR_NUMBER_INPUT = re.compile(r"[\s{,]pr_number[ \t]*:")
+#: Every input `scripts/dispatch-body` can name. An input the file does not declare is
+#: `Unexpected inputs provided` (HTTP 422, no run); one it declares `required: true` that a body
+#: omits is `Required input not provided` (HTTP 422, no run) — which is why the three beside
+#: `verb` must be optional.
+_DISPATCH_INPUTS = ("verb", "environment", "ref", "pr_number")
+# One selector per input from one template: two spellings of "is this input declared" disagree
+# eventually. Unanchored for `_DISPATCH_TRIGGER`'s reason.
+_INPUT_KEYS = {name: re.compile(rf"[\s{{,]{name}[ \t]*:") for name in _DISPATCH_INPUTS}
+#: The whole option list `actions/dispatch` and the `drift` job between them can send. Compared
+#: as a whole value, in order: a list missing `unlock` refuses that verb at the form and at the
+#: API, and one carrying an extra option offers a verb no `if:` selects. KNOWN GAP: only the
+#: flow form is recognised, so a block-style `options:` is reported as differing — the safe
+#: direction, and the published file writes the flow form.
+_VERB_OPTIONS = "[plan, apply, unlock, drift]"
+_VERB_OPTIONS_KEY = re.compile(r"[\s{,]options[ \t]*:[ \t]*(?P<value>\[[^\]]*\])")
+_REQUIRED_TRUE = re.compile(r"""[\s{,]required[ \t]*:[ \t]*["']?true["']?""", re.I)
 # Same degrade posture and reason as PIN_UNREADABLE.
 DISPATCH_WIRING_UNREADABLE = (
     NOTICE,
@@ -1626,8 +1671,8 @@ DISPATCH_WIRING_NO_COMMIT = (
 
 
 def _dispatch_wiring_warnings(ctx):
-    """`shipmate plan` dispatches the consumer's own `plan.yml`, and every way
-    that wrapper can be unready for it is invisible until someone comments.
+    """Every commented verb dispatches the consumer's own `shipmate.yml`, and every way
+    that file can be unready for it is invisible until someone comments.
 
     Reads the consumer's workflow files at the commit under examination, the
     same way and for the same reason as the pin, fork-trigger and shim-job-name
@@ -1638,20 +1683,105 @@ def _dispatch_wiring_warnings(ctx):
         return [DISPATCH_WIRING_NO_COMMIT]
 
     def finding(text, name):
-        # Exact name, like the retired-input probe's: `plan.yml` is the file `actions/dispatch`
-        # targets for `verb: plan`. The filter lives here rather than in
+        # Exact name, like the retired-input probe's: `shipmate.yml` is the file
+        # `actions/dispatch` targets for every verb. The filter lives here rather than in
         # `_dispatch_wiring_finding` so a direct call with another file's name still reports.
-        if name != "plan.yml":
+        if name != "shipmate.yml":
             return []
         return _dispatch_wiring_finding(text, name)
 
     return _scan_workflow_texts(ctx, ref, finding, DISPATCH_WIRING_UNREADABLE)
 
 
-def _dispatch_wiring_finding(text, name):
-    """The three ways a plan wrapper cannot serve a dispatched plan.
+def _required_inputs(on_text):
+    """The `_DISPATCH_INPUTS` other than `verb` that the `on:` block declares `required:
+    true`, block-style or in a flow mapping on the key's own line.
 
-    The trigger and its input are looked for inside the `on:` block
+    Each input is judged over its own block alone — its key line's remainder plus the lines
+    indented deeper than it — because `verb` IS required and a scan of the whole trigger
+    would read its `required: true` as every other input's.
+
+    KNOWN GAP: a wholly inline `on:` mapping puts every input on one line, so `verb`'s
+    requiredness reads as the first other input's and that one is reported. The remedy the
+    finding names still applies to the file, and the alternative is silence on the shape
+    that refuses a whole verb."""
+    out = []
+    lines = on_text.splitlines()
+    for input_name in _DISPATCH_INPUTS[1:]:
+        for i, line in enumerate(lines):
+            m = _INPUT_KEYS[input_name].search(line)
+            if not m:
+                continue
+            depth = len(line) - len(line.lstrip())
+            body = [line[m.end() :]]
+            for nxt in lines[i + 1 :]:
+                if nxt.strip() and len(nxt) - len(nxt.lstrip()) <= depth:
+                    break
+                body.append(nxt)
+            if any(_REQUIRED_TRUE.search(f" {b}") for b in body):
+                out.append(input_name)
+            break
+    return out
+
+
+def _dispatch_input_findings(on_text, name):
+    """The three ways a declared `workflow_dispatch` trigger still refuses a verb: an input
+    `scripts/dispatch-body` names that the file does not declare, a `verb` offering the wrong
+    option list, and an input other than `verb` declared required."""
+    out = []
+    missing = [n for n in _DISPATCH_INPUTS if not _INPUT_KEYS[n].search(on_text)]
+    if missing:
+        out.append(
+            (
+                WARNING,
+                f"`{name}`'s `workflow_dispatch` trigger declares no "
+                f"{_and_list(missing)} input — `actions/dispatch` sends one body per verb, and "
+                "GitHub refuses a body naming an input the workflow does not declare: "
+                "`Unexpected inputs provided`, no run created, and the pull request pointed at "
+                "the comment-handling run by a comment saying the dispatch failed. Declare "
+                f"{_and_list(_DISPATCH_INPUTS)} under the trigger's `inputs:` "
+                "(docs/getting-started.md).",
+            )
+        )
+    found = _VERB_OPTIONS_KEY.search(on_text)
+    if not found or " ".join(found.group("value").split()) != _VERB_OPTIONS:
+        out.append(
+            (
+                WARNING,
+                f"`{name}`'s `verb` input does not offer `{_VERB_OPTIONS}` — that is the whole "
+                "set of verbs this file routes. A missing option is refused at the dispatch "
+                "form and at the API, so that verb reaches nothing; an extra one offers a verb "
+                "no job's `if:` selects, and its run completes with every job skipped, which "
+                f"reads as success everywhere. Write `options: {_VERB_OPTIONS}` "
+                "(docs/getting-started.md).",
+            )
+        )
+    required = _required_inputs(on_text)
+    if required:
+        out.append(
+            (
+                WARNING,
+                f"`{name}` declares the {_and_list(required)} input `required: true` — every "
+                "dispatch body omits at least one of these, and GitHub reads an omitted or "
+                "empty value for a required input as not provided: `Required input not "
+                "provided`, no run created, so one required input refuses a whole verb. `verb` "
+                "is the only required one; give the rest `required: false` and `default: ''` "
+                "(docs/getting-started.md).",
+            )
+        )
+    return out
+
+
+def _and_list(names):
+    """The names as prose — `a`, `b` and `c` — for the findings that list an input set."""
+    quoted = [f"`{n}`" for n in names]
+    return " and ".join([", ".join(quoted[:-1]), quoted[-1]] if len(quoted) > 1 else quoted)
+
+
+def _dispatch_wiring_finding(text, name):
+    """The five ways the consumer's workflow file cannot serve a dispatched verb.
+
+    The trigger and its inputs are looked for inside the `on:` block
     (`_on_block`), inline remainder included, and not in the whole file: a `with:`
     line forwarding `pr_number` on is not a declaration of it, and a
     `workflow_dispatch:` line under `jobs:` — no such key exists, but a stray line
@@ -1659,15 +1789,20 @@ def _dispatch_wiring_finding(text, name):
     also what lets the two keys be matched unanchored, which is what sees a
     flow-style `on:` value.
 
-    Three findings rather than one, because the remedies differ and so do the
-    refusals. Both of the first two end in a dispatch-time HTTP 422 with no run
-    created, but they are told apart by the message GitHub answers with
-    (`Workflow does not have 'workflow_dispatch' trigger` versus `Unexpected
-    inputs provided`) — the pair `actions/dispatch` recognises. The third is not
-    a refusal at all: the shim accepts the dispatch and then runs nothing that
-    plans.
+    Five findings rather than one, because the remedies differ and so do the
+    refusals. The first four end in a dispatch-time HTTP 422 with no run
+    created, and they are told apart by the message GitHub answers with
+    (`Workflow does not have 'workflow_dispatch' trigger`, `Unexpected inputs
+    provided`, `Required input not provided`) — the set `actions/dispatch`
+    recognises. A wrong `options:` list is refused the same way, one verb at a
+    time, and offers a verb no job's `if:` selects when it carries an extra. The
+    last is not a refusal at all: the file accepts the dispatch and then runs
+    nothing that plans.
 
-    `_DISPATCH_TRIGGER` and `_PR_NUMBER_INPUT` are unanchored because ABSENCE is
+    The four input findings are examined only where the trigger itself is there: without it
+    nothing is dispatched at all, and three further remedies below that one bury it.
+
+    `_DISPATCH_TRIGGER` and the `_INPUT_KEYS` are unanchored because ABSENCE is
     the finding here: where a match IS the finding (`_PLAN_RUN_ID_KEY`) a shape
     the anchor misses stays silent, while the same miss here would report a
     correctly wired file as declaring no trigger at all.
@@ -1683,27 +1818,17 @@ def _dispatch_wiring_finding(text, name):
         out.append(
             (
                 WARNING,
-                f"`{name}` declares no `workflow_dispatch` trigger — a commented `shipmate "
-                "plan` is authorized, reacted to with a rocket, and then dispatches nothing: "
+                f"`{name}` declares no `workflow_dispatch` trigger — every commented verb is "
+                "authorized, reacted to with a rocket, and then dispatches nothing: "
                 "GitHub answers the dispatch with `Workflow does not have 'workflow_dispatch' "
                 "trigger`, no run is created, and the pull request gets a comment saying the "
                 "dispatch failed and linking the comment-handling run that holds the error. Add "
-                "the trigger, with a `pr_number` input (docs/getting-started.md).",
-            )
-        )
-    elif not _PR_NUMBER_INPUT.search(on_text):
-        out.append(
-            (
-                WARNING,
-                f"`{name}`'s `workflow_dispatch` trigger declares no `pr_number` input — that "
-                "is the one input `shipmate plan` sends, and GitHub refuses a dispatch body "
-                "naming an input the workflow does not declare: `Unexpected inputs provided`, "
-                "no run created, and the pull request pointed at the comment-handling run by a "
-                "comment saying the dispatch failed. Declare `pr_number` under the trigger's "
-                "`inputs:` "
+                "the trigger, with its `verb`, `environment`, `ref` and `pr_number` inputs "
                 "(docs/getting-started.md).",
             )
         )
+    else:
+        out.extend(_dispatch_input_findings(on_text, name))
     if not _PLAN_WORKFLOW_CALL.search(_stripped_text(text)):
         out.append(
             (
@@ -1716,6 +1841,132 @@ def _dispatch_wiring_finding(text, name):
             )
         )
     return out
+
+
+#: The whole `if:` of each job of `shipmate.yml`, keyed by the engine reusable workflow it
+#: calls. The consumer owns these seven expressions and `docs/getting-started.md` publishes
+#: them; a wrong one routes a verb nowhere and its dispatched run completes with every job
+#: skipped, which reads as success everywhere. Compared whole, normalised only for the
+#: optional `${{ }}` wrapper and whitespace: a subset check would bless
+#: `github.event_name == 'workflow_dispatch'` alone, which sends every verb to every job.
+ROUTING_IFS = {
+    "plan.yml": (
+        "github.event_name == 'pull_request_target' || "
+        "(github.event_name == 'workflow_dispatch' && github.event.inputs.verb == 'plan')"
+    ),
+    "comment-ops.yml": "github.event_name == 'issue_comment'",
+    "deploy.yml": "github.event_name == 'push'",
+    "drift.yml": (
+        "github.event_name == 'schedule' || "
+        "(github.event_name == 'workflow_dispatch' && github.event.inputs.verb == 'drift')"
+    ),
+    "apply.yml": (
+        "github.event_name == 'workflow_dispatch' && inputs.verb == 'apply' "
+        "&& inputs.environment != ''"
+    ),
+    "apply-all.yml": (
+        "github.event_name == 'workflow_dispatch' && inputs.verb == 'apply' "
+        "&& inputs.environment == ''"
+    ),
+    "unlock.yml": "github.event_name == 'workflow_dispatch' && inputs.verb == 'unlock'",
+}
+# Same degrade posture and reason as PIN_UNREADABLE.
+ROUTING_UNREADABLE = (
+    NOTICE,
+    f"could not read `{_WORKFLOWS_DIR}` — the workflow file's event routing not verified.",
+)
+ROUTING_NO_COMMIT = (
+    NOTICE,
+    "the workflow file's event routing not verified — the commit under examination could "
+    "not be determined.",
+)
+
+
+def _normalize_if(value):
+    """An `if:` expression reduced to its comparable form: an enclosing pair of quotes
+    dropped, then an enclosing `${{ }}` dropped, then every run of whitespace collapsed.
+
+    Both wrappers are optional in GitHub's own syntax and the published files use neither,
+    so a consumer who writes `if: ${{ ... }}` — the shape `docs/getting-started.md` shipped
+    before this file existed — must not be reported for a difference that is not one.
+
+    Only a MATCHING enclosing pair of quotes is dropped: five of the seven expressions end
+    in a `'`, and stripping quote characters off both ends would mangle every one of them
+    on both sides of the comparison, which stays green while the message is wrong."""
+    v = value.strip()
+    if len(v) > 1 and v[0] == v[-1] and v[0] in "\"'":
+        v = v[1:-1].strip()
+    if v.startswith("${{") and v.endswith("}}"):
+        v = v[3:-2]
+    return " ".join(v.split())
+
+
+def _routing_finding(text, name):
+    """One finding per `ROUTING_IFS` entry the file does not satisfy."""
+    out = []
+    stripped = _stripped_text(text)
+    for callee, expected in ROUTING_IFS.items():
+        pattern = re.compile(rf"/\.github/workflows/{re.escape(callee)}@")
+        count = len(pattern.findall(stripped))
+        if count != 1:
+            out.append(
+                (
+                    WARNING,
+                    f"`{name}` has {count} jobs calling the engine's `{callee}` — exactly one "
+                    "does, selected by the `if:` that routes its event. With none, the verb or "
+                    "event it serves reaches nothing and its run completes with every job "
+                    "skipped, which reads as success everywhere; with more than one, either "
+                    "the work runs twice or one of them is unreachable "
+                    "(docs/getting-started.md).",
+                )
+            )
+            continue
+        found = _job_key(_call_region(text, pattern), "if")
+        if found is None:
+            out.append(
+                (
+                    WARNING,
+                    f"`{name}`'s job calling the engine's `{callee}` declares no `if:` — it "
+                    "then runs on every one of this file's triggers, so a `push` starts a plan "
+                    f"and an `issue_comment` starts an apply. Add `if: {expected}` "
+                    "(docs/getting-started.md).",
+                )
+            )
+        elif _normalize_if(found) != _normalize_if(expected):
+            out.append(
+                (
+                    WARNING,
+                    f"`{name}`'s job calling the engine's `{callee}` is selected by "
+                    f"`{_normalize_if(found)}`, not `{_normalize_if(expected)}` — a wrong "
+                    "expression routes a verb nowhere and its dispatched run completes with "
+                    "every job skipped, which reads as success everywhere "
+                    "(docs/getting-started.md).",
+                )
+            )
+    return out
+
+
+def _routing_warnings(ctx):
+    """One file gates seven jobs on the event, and a wrong gate is silent in both directions:
+    a dispatched verb whose job never runs completes green with nothing done, and a job whose
+    `if:` is too wide runs on an event it was never meant to see.
+
+    Nothing else observes this. `actions/dispatch` sees an accepted dispatch; the run page
+    shows six skipped jobs beside the one that ran, which is what a healthy run also shows.
+
+    Reads the consumer's workflow files at the commit under examination, the same way and for
+    the same reason as the pin, fork-trigger, shim-job-name and dispatch probes
+    (`_contents_ref`): a pull request that FIXES an expression must not still be reported."""
+    ref = _contents_ref(ctx)
+    if ref is None:
+        return [ROUTING_NO_COMMIT]
+
+    def finding(text, name):
+        if name != "shipmate.yml":
+            return []
+        return _routing_finding(text, name)
+
+    return _scan_workflow_texts(ctx, ref, finding, ROUTING_UNREADABLE)
 
 
 def _one_line(s, limit=200):
@@ -1779,6 +2030,7 @@ PROBES = (
     _plan_run_id_warnings,
     _mode_input_warnings,
     _dispatch_wiring_warnings,
+    _routing_warnings,
     _team_warnings,
     _app_permission_warnings,
 )
