@@ -203,3 +203,27 @@ def test_the_workflow_reads_the_event_payload_nowhere():
     """
     found = sorted({m for s in _strings(_doc()) for m in re.findall(r"github\.event\.[\w.]*", s)})
     assert found == [], f"plan.yml reads the event payload: {found}"
+
+
+#: Both gated jobs' whole `if:`, hand-written rather than read back from the file, as
+#: `test_engine_drift_workflow.py` pins drift's pair. A substring check over either survives
+#: `||` -> `&&`, which keeps every word and inverts the gate.
+_GATED_IF = {
+    "detect": "needs.facts.outputs.is-draft == 'false' || needs.facts.outputs.on-demand == 'true'",
+    "plan": "needs.detect.outputs.empty == 'false'",
+}
+
+
+def test_the_detect_and_plan_jobs_carry_exactly_these_gates():
+    """Mutations, each reddening only its own case: drop `detect`'s `on-demand` clause, and a
+    `shipmate plan` on a draft skips `detect` and `plan` while `summary` still runs on its own
+    on-demand clause, writing a gate over cells nobody planned; turn either `||` into `&&`;
+    invert `plan`'s `empty` comparison, and a pull request with changed stacks plans no cell
+    while the gate greens over it.
+
+    `facts` and `summary` are absent by design: `facts` carries no gate, and
+    `test_summary_workflow_guards.py` owns `summary`'s. The job-id list there is what fails when
+    a fourth gated job appears.
+    """
+    jobs = _doc()["jobs"]
+    assert {j: " ".join(jobs[j]["if"].split()) for j in _GATED_IF} == _GATED_IF
