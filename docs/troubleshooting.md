@@ -74,18 +74,13 @@ live probes.
   repository, which the probe learns at runtime from the running action rather
   than from any hardcoded slug — another org's shared action is not shipmate's
   to report on.
-- **Whether the `plan.yml` wrapper states the facts the engine's guards decide
-  on.**
-  Those are the head-repository, draft and on-demand inputs on its call of the
-  engine's reusable summary workflow, the head-repository and head-SHA inputs on
-  its own `build-matrix` step, and no `no-pull-request` anywhere in the file. An
-  omitted `head-repo` or `is-draft` on the summary call skips the summary job,
-  so no gate status is written and nothing on the run page says why the pull
-  request cannot merge. A constant — the running repository, a literal `false`
-  — states the safe answer for every run, fork pull requests and drafts
-  included, so the value is checked and not only the key; on the `build-matrix`
-  step that constant is the fork refusal passing every pull request, or a run
-  planning whatever the trigger checked out.
+- **Whether the `plan.yml` shim's calling job is named `shipmate`.** GitHub
+  names a called workflow's check runs `<caller job> / <callee job>`, so that
+  name is what makes the plan cell checks `shipmate / <stack> / <env>`. Under
+  another name the plan still runs and the gate is unaffected; what is lost is
+  every `[plan]` link in the plan comment, which falls back to the workflow-run
+  page instead of the cell's own check. A job with no `name:` is judged by its
+  job id, which is what GitHub displays then.
 - **Whether the `apply.yml` wrapper still declares or forwards the retired
   `plan_run_id` input.** The engine dispatches no such value and nothing it
   calls accepts one. A `with:` line forwarding it to the engine's reusable
@@ -100,14 +95,13 @@ live probes.
   rejection. Those two
   placements are what the probe reads, so an ordinary `mode:` elsewhere in the
   file, such as an `actions/state` step's, is not reported.
-- **Whether the `plan.yml` wrapper can serve a dispatched plan at all.** That needs the
+- **Whether the `plan.yml` shim can serve a dispatched plan at all.** That needs the
   `workflow_dispatch` trigger a commented `shipmate plan` dispatches, the
-  `pr_number` input that dispatch body carries, and a `pr-facts` step. The first
-  two are refused at dispatch time with an HTTP 422 and no run created; the pull
-  request gets a comment saying the dispatch failed and linking the
-  comment-handling run that carries the error.
-  Without the third a dispatched run has nothing resolving which pull request it
-  is for, since its event payload carries none.
+  `pr_number` input that dispatch body carries, and the call of the engine's plan
+  workflow. The first two are refused at dispatch time with an HTTP 422 and no run
+  created; the pull request gets a comment saying the dispatch failed and linking
+  the comment-handling run that carries the error.
+  Without the third the dispatch is accepted and the run plans nothing.
 - **Whether the configured approvers team resolves in the org.**
 - **Whether the shipmate App installation still grants the manifest's full
   permission set.**

@@ -30,15 +30,15 @@ Probes:
 - secrets held by each declared plan environment.
 - engine action-pin freshness in the consumer's workflow files.
 - `pull_request_target` triggers in the consumer's workflow files.
-- the fork and draft wiring in the consumer's `plan.yml`: the inputs its
-  summary call passes, and its `build-matrix` step's own `head-repo`, `head-sha`
-  and `no-pull-request`.
+- the calling job name in the consumer's `plan.yml`: `shipmate`, or the plan
+  cell checks are not `shipmate / <stack> / <env>`.
 - a retired `plan_run_id` input still declared or forwarded by the consumer's
   `apply.yml`.
 - a retired `mode` input still declared by the consumer's `apply.yml`, or
   forwarded from it to the engine's reusable apply workflows.
 - the dispatch wiring of the consumer's `plan.yml`: the `workflow_dispatch`
-  trigger `shipmate plan` needs, its `pr_number` input, and a `pr-facts` step.
+  trigger `shipmate plan` needs, its `pr_number` input, and its call of the
+  engine's plan workflow.
 - approvers team resolvability in the repo's org.
 - GitHub App installation permission drift.
 """
@@ -297,9 +297,10 @@ def _shared_intro(name, env, mode):
     Neither branch asserts the mode: sharing is selected by the
     `SHIPMATE_SHARED_ENVS` repository variable, which doctor cannot read. In
     ambiguous mode it may not go on to assert that nothing binds the bare
-    environment either -- the plan side is bound by the consumer's own `plan.yml`,
-    which doctor does not read, so a static `<env>-plan` binding with the env
-    shared leaves both namings live; in shared mode the variable is what makes the
+    environment either -- the plan side binds from that same variable, inside the
+    engine's reusable plan and drift workflows, so a repository still pinned to an
+    engine that binds `<env>-plan` statically leaves both namings live with the env
+    shared; in shared mode the variable is what makes the
     bare environment the apply environment too, and a half-done migration that
     renamed the environments and forgot the variable leaves the applies binding
     `<env>-apply`. Two findings in one report may not contradict each other."""
@@ -364,15 +365,16 @@ def _ambiguity(env, names):
     present = ", ".join(f"`{n}`" for n, _ in _role_names(env, SPLIT) if n in names)
     return (
         f"GitHub Environments `{env}` and {present} exist side by side for "
-        f"`env:{env}` — the apply waves bind `{env}` while `{env}` is listed in "
-        f"the `SHIPMATE_SHARED_ENVS` repository variable and `{env}-apply` "
-        "otherwise, and the plan side is bound by this repository's own "
-        "`plan.yml` and `drift.yml`; doctor reads neither the variable nor those "
-        "files, so which naming each path binds is undetermined here. Either "
-        "naming may therefore be bound by nothing, with its protection rules "
-        "reading as a control that is in no code path. Establish both bindings "
-        "before removing either naming — with a static plan-side `-plan` binding "
-        f"and `{env}` shared, both namings are live."
+        f"`env:{env}` — every path binds `{env}` while `{env}` is listed in "
+        f"the `SHIPMATE_SHARED_ENVS` repository variable and the suffixed naming "
+        "otherwise: the apply waves from the engine's reusable apply workflow, the "
+        "plan cells and the nightly drift run from the engine's reusable plan and "
+        "drift workflows. doctor cannot read the variable, so which naming each path "
+        "binds is undetermined here. Either naming may therefore be bound by nothing, "
+        "with its protection rules reading as a control that is in no code path. "
+        "Establish both bindings before removing either naming — a repository still "
+        "pinned to an engine that binds `-plan` statically keeps both namings live "
+        f"while `{env}` is shared."
     )
 
 
@@ -472,8 +474,8 @@ def _env_shape_findings(name, env, data, role, mode):
         )
     if role == "shared" and policy and mode == AMBIGUOUS:
         # The NOTICE below is shared mode's accepted trade, and only shared mode's: while the
-        # naming is ambiguous, the bare environment is what an unmigrated `plan.yml` still binds,
-        # so this plan-stall is a live misconfiguration, not a legitimate secret-release control.
+        # naming is ambiguous, the bare environment is what a plan side still on the old naming
+        # binds, so this plan-stall is a live misconfiguration, not a secret-release control.
         out.append(
             (
                 WARNING,
@@ -1221,9 +1223,10 @@ def _fork_trigger_warnings(ctx):
         # Before the `plan.yml` exemption below, not after: `plan.yml` is
         # exactly the file where a fork checkout would be turned on.
         out = _unsafe_checkout_warnings(text, name)
-        # The engine's own plan workflow is on this trigger by design: the job holding the App key
-        # is the engine's reusable summary workflow, which checks out nothing. Exact name — a
-        # `custom-plan.yml` is a consumer file and gets the warning.
+        # The shim is on this trigger by design: the job holding the App key is the `summary` job
+        # inside the engine's reusable plan workflow, which checks out nothing and runs no
+        # repository content. Exact name — a `custom-plan.yml` is a consumer file and gets the
+        # warning.
         if name == "plan.yml":
             return out
         if not declares_pull_request_target(text):
@@ -1235,7 +1238,8 @@ def _fork_trigger_warnings(ctx):
                 "the base ref with this repository's secrets, and on a pull request "
                 "into the default branch that is the ref `shipmate-engine`'s branch "
                 "policy trusts, so a fork can reach them. shipmate's own `plan.yml` "
-                "uses this trigger safely because the job holding the App key runs "
+                "uses this trigger safely because the job holding the App key — the "
+                "`summary` job inside the engine's reusable plan workflow — runs "
                 "no repository content at all. If this workflow checks out or acts "
                 "on the pull request's own code in a job binding a CREDENTIALED "
                 "environment — one holding the App key or cloud credentials — it "
@@ -1247,73 +1251,37 @@ def _fork_trigger_warnings(ctx):
     return _scan_workflow_texts(ctx, ref, finding, FORK_TRIGGER_UNREADABLE)
 
 
-# The three inputs the engine's reusable summary workflow decides on, with the expression each
-# must carry; see `_summary_call_finding` for why the values are pinned, not only the keys.
-SUMMARY_WIRING = {
-    "head-repo": "${{ needs.facts.outputs.head-repo }}",
-    "is-draft": "${{ needs.facts.outputs.is-draft }}",
-    "on-demand": "${{ needs.facts.outputs.on-demand }}",
-}
-# What `plan.yml`'s `build-matrix` step must pass. Separate from SUMMARY_WIRING for the reason
-# `_build_matrix_finding` states.
-BUILD_MATRIX_WIRING = {
-    "head-repo": "${{ needs.facts.outputs.head-repo }}",
-    "head-sha": "${{ needs.facts.outputs.head-sha }}",
-}
-_SUMMARY_CALL = re.compile(r"/\.github/workflows/summary\.yml@")
-_BUILD_MATRIX_CALL = re.compile(r"/actions/build-matrix@")
-# Flow-style tolerant, like `_UNSAFE_CHECKOUT` and unlike `_WIRING_KEY` below:
-# this value is a short literal, so the `,`/`}` terminator truncates nothing.
-_NO_PULL_REQUEST = re.compile(r"(?:^|[{,])[ \t]*no-pull-request[ \t]*:(?P<value>[^,}\n]*)", re.M)
-# Line-anchored, unlike `_UNSAFE_CHECKOUT`: flow style is deliberately NOT recognised here, for
-# the reason `_wired_value` states.
-_WIRING_KEY = {
-    key: re.compile(rf"^[ \t]*{key}[ \t]*:(?P<value>.*)$", re.M)
-    for key in SUMMARY_WIRING | BUILD_MATRIX_WIRING
-}
+# The shim's call of the engine's plan workflow. Read by two probes: this one, which judges the
+# calling job's name, and the dispatch probe, for which the call's absence is the finding.
+_PLAN_WORKFLOW_CALL = re.compile(r"/\.github/workflows/plan\.yml@")
+# Line-anchored, and matched only against a direct child of the calling job: a `name:` deeper in
+# the block belongs to something else.
+_JOB_NAME = re.compile(r"^[ \t]*name[ \t]*:(?P<value>.*)$")
+_SHIM_JOB_NAME = "shipmate"
 # Same degrade posture and reason as PIN_UNREADABLE: an unreadable workflow
 # directory is not a misconfiguration to warn about.
-SUMMARY_WIRING_UNREADABLE = (
+SHIM_JOB_UNREADABLE = (
     NOTICE,
-    f"could not read `{_WORKFLOWS_DIR}` — the plan wrapper's fork and draft wiring not verified.",
+    f"could not read `{_WORKFLOWS_DIR}` — the shim's calling job name not verified.",
 )
-SUMMARY_WIRING_NO_COMMIT = (
+SHIM_JOB_NO_COMMIT = (
     NOTICE,
-    "the plan wrapper's fork and draft wiring not verified — the commit under examination "
+    "the shim's calling job name not verified — the commit under examination "
     "could not be determined.",
 )
 
 
 def _call_region(text, pattern):
     """The comment-stripped lines of the block enclosing the `uses:` line
-    `pattern` matches, or None when the file has no such line. Used for both
-    calls this probe judges: the summary workflow's, and the `build-matrix`
-    step's.
-
-    Scoped to one block rather than the whole file deliberately: a correctly
-    wired `plan.yml` carries `head-repo:` three times — once as the
-    `facts` job's output, once on the `build-matrix` step in `detect`, once on
-    the summary call — and a whole-file search is
-    satisfied by the wrong occurrence while the call that decides the gate
-    carries nothing.
+    `pattern` matches, or None when the file has no such line.
 
     The block is found by walking BACK from the `uses:` line to the enclosing
     key (the first shallower line) and then forward to the next line at that
-    key's level or above. Forward-only from `uses:` would miss a `with:` block
-    written above it in the same job, and report a visibly correct wrapper as
-    unwired — a probe that fires on a healthy repository trains readers to
-    ignore the suite.
-
-    For a step written `- uses: …` the enclosing key is `steps:`, so the region
-    is that job's whole step list rather than the one step. That superset hides a
-    finding rather than inventing one only for as long as no sibling step in the
-    same job carries a `head-repo:` or `head-sha:` line of its own. No engine
-    action other than `build-matrix` takes `head-repo`; seven others take
-    `head-sha`, but all of them are apply-, gate- or summary-path actions and none
-    belongs in `detect`, whose steps are the checkout, `setup`, the two terramate
-    checks and this one. A sibling that did carry either line would satisfy this
-    check for a step wired wrong. The documented and sample shape (`- id: matrix`
-    then `uses:`) resolves to the step itself and is unaffected."""
+    key's level or above, so one `uses:` inside a shim's calling job returns
+    that whole job, its id line included. Forward-only from `uses:` would miss a
+    `name:` written above it — the shape docs/getting-started.md ships — and
+    report a correctly named job as carrying no name at all. A probe that fires
+    on the documented shape trains readers to ignore the suite."""
     lines = _stripped_text(text).splitlines()
     for i, line in enumerate(lines):
         if not pattern.search(line):
@@ -1336,213 +1304,75 @@ def _call_region(text, pattern):
     return None
 
 
-def _summary_wiring_warnings(ctx):
-    """The gate and the plan comment are authored by the engine's reusable
-    summary workflow, whose job refuses an empty or unexpected `head-repo` /
-    `is-draft`, and reads `on-demand` to decide whether a draft was asked for. A
-    consumer wrapper that omits one — or wires a constant — is
-    invisible: the omitting case SKIPS the job, so there is no gate status, the
-    pull request cannot merge, and nothing on the run page says why; the
-    constant case passes the guard for every pull request, fork ones included.
-    An omitted `on-demand` skips nothing for an automatic plan — it drops the
-    draft override and the check mirror, so only a commented `shipmate plan`
-    pays, and it pays after doing the whole plan.
-    The engine's own `if:` is SHA-pinned and reviewed; the consumer's `with:`
-    block is not.
+def _shim_job_name_warnings(ctx):
+    """A `plan.yml` whose calling job is not named `shipmate` still plans
+    correctly, and its plan comment loses every per-cell deep link.
 
-    The same file's `build-matrix` step is read for the same reason
-    (`_build_matrix_finding`), and it is the half that matters more: a wrong
-    value there passes the fork refusal itself.
+    GitHub names a called workflow's check runs `<caller job> / <callee job>`,
+    so the plan cell checks are `shipmate / <stack> / <env>` only when the
+    shim's job carries that name. `scripts/summary-comment` resolves each row's
+    `[plan]` link by that exact name and falls back to the workflow-run URL on a
+    miss — so the failure is a silently degraded comment, not an error anyone
+    sees.
 
     Reads the consumer's workflow files at the commit under examination, the
-    same way and for the same reason as the pin and fork-trigger probes
-    (`_contents_ref`): a pull request that *fixes* the wiring must not still be
-    reported for it.
-
-    Judged by exact name, like the fork-trigger exemption: the wrapper shipped
-    in docs/getting-started.md is `plan.yml`, and a workflow that calls the
-    summary workflow under another name is not the shape this reports on. The
-    `build-matrix` half sits behind that filter too, and must: `drift.yml` is
-    REQUIRED to carry `no-pull-request: "true"` and states no head repository,
-    so judging any other file reports the shape docs/drift.md documents."""
+    same way and for the same reason as the pin, fork-trigger and dispatch
+    probes (`_contents_ref`): a pull request that renames the job must not still
+    be reported for the old name."""
     ref = _contents_ref(ctx)
     if ref is None:
-        return [SUMMARY_WIRING_NO_COMMIT]
+        return [SHIM_JOB_NO_COMMIT]
 
     def finding(text, name):
-        # Exact name, and the build-matrix half behind the same filter: see the docstring.
+        # Exact name, like the fork-trigger exemption's: `plan.yml` is the file
+        # `actions/dispatch` targets for `verb: plan` and the one whose cells produce the
+        # linked checks.
         if name != "plan.yml":
             return []
-        return _summary_call_finding(text, name) + _build_matrix_finding(text, name)
+        return _shim_job_name_finding(text, name)
 
-    return _scan_workflow_texts(ctx, ref, finding, SUMMARY_WIRING_UNREADABLE)
+    return _scan_workflow_texts(ctx, ref, finding, SHIM_JOB_UNREADABLE)
 
 
-def _summary_call_finding(text, name):
-    """The three inputs `plan.yml`'s summary call must pass, or [].
+def _shim_job_name_finding(text, name):
+    """The calling job's display name, or [] when it is `shipmate` or the file
+    calls the engine's plan workflow nowhere.
 
-    `on-demand` is reported separately because its cost is not the others':
-    those two skip the job for every pull request, this one drops the draft
-    override and the mirror of a dispatched run's per-cell checks. A reader told
-    "the job is skipped" about a repository whose pull requests all gate
-    correctly stops reading.
+    Regex over the call's own block rather than a YAML parse, like every other
+    finder here: a consumer file that does not parse must still be read for what
+    can be read, not skipped.
 
-    `SUMMARY_WIRING` pins values, not only keys: a wrapper that wires
-    `head-repo: ${{ github.repository }}` — or `is-draft: false` — states the
-    safe answer for every run, fork pull requests and drafts included, and
-    nothing else in the system can see it. `on-demand` is the odd one: omitting
-    it costs an automatic plan nothing, which is why it is the input a wrapper
-    keeps missing. The expressions read the `facts` job rather than the event
-    payload for a second reason: the payload carries no pull request on the
-    dispatched plan leg, and a fact read from anywhere but that one producer has
-    a second producer — two producers of one fact disagree eventually."""
-    region = _call_region(text, _SUMMARY_CALL)
+    An absent `name:` is not a finding — GitHub displays the job id then, so
+    `jobs: { shipmate: { uses: … } }` produces the same check names as the
+    documented shape. Only a direct child of the job is read as its name, so a
+    `name:` under `with:` cannot stand in for one."""
+    region = _call_region(text, _PLAN_WORKFLOW_CALL)
     if region is None:
         return []
-
-    def unwired(key):
-        return _wired_value(region, key) != "".join(SUMMARY_WIRING[key].split())
-
-    out = []
-    # Anything but `on-demand`, so a fourth input added to SUMMARY_WIRING is
-    # reported by this finding rather than by none.
-    bad = [key for key in SUMMARY_WIRING if key != "on-demand" and unwired(key)]
-    if bad:
-        wanted = ", ".join(f"`{key}: {SUMMARY_WIRING[key]}`" for key in bad)
-        out.append(
-            (
-                WARNING,
-                f"`{name}`'s call of the engine's `summary.yml` must pass {wanted}, and does "
-                "not: the input is absent, or carries a different value. The "
-                "summary job decides on those inputs and refuses an empty or unexpected "
-                "value, so it is SKIPPED — on every autoplan run, and on an explicitly "
-                "requested plan too unless the only fact missing is the draft flag: no gate "
-                "status, no plan comment, and nothing on the run page saying why the pull "
-                "request cannot merge. Each must be the pull "
-                "request's own value; a constant (the running repository, a literal `false`) "
-                "states the safe answer for every run, fork pull requests and drafts included.",
-            )
-        )
-    if unwired("on-demand"):
-        expr = SUMMARY_WIRING["on-demand"]
-        out.append(
-            (
-                WARNING,
-                f"`{name}`'s call of the engine's `summary.yml` must pass `on-demand: {expr}`, "
-                "and does not: the input is absent, or carries a different value. This one "
-                "costs an automatic plan nothing and a commented `shipmate plan` two things. It "
-                "is what lets a requested plan override the draft skip, so without it a "
-                "`shipmate plan` on a draft plans every stack, uploads its artifacts, and then "
-                "produces no gate status, no plan comment and no apply checks for the work it "
-                "just did; and on "
-                "any pull request its per-cell `<stack> / <env>` checks stay on the ref the run "
-                "was dispatched on, so the pull request shows none of them — the failed cell "
-                "included. A constant `true` claims every run was named by a person, which "
-                "gates every draft.",
-            )
-        )
-    return out
-
-
-def _build_matrix_finding(text, name):
-    """The same file's `build-matrix` step: its own `head-repo` and `head-sha`,
-    and a `no-pull-request` anywhere in the file.
-
-    One finding per input, because the two holes are not alike: a wrong
-    `head-repo` plans a fork, a wrong `head-sha` plans whatever tree the trigger
-    left checked out and reports no changes, and a reader told only "the step is
-    miswired" cannot tell which remedy is theirs.
-
-    Not covered by the summary call's half, and the consequences are not
-    alike. A constant `head-repo` on the summary call costs a gate job; on this
-    step it passes the fork refusal for EVERY pull request, and a fork's plan
-    runs the pull request's own Terramate/OpenTofu on the consumer's runners
-    with whatever the plan environment exposes as variables. `no-pull-request`
-    is the same hole with one word: it is the only opt-out from both refusals.
-
-    Both halves are one probe over one file — the reader's question is "is my
-    plan wrapper wired?", and splitting it in two asks it twice.
-
-    `BUILD_MATRIX_WIRING` is separate from `SUMMARY_WIRING` because the two
-    sites read the facts from different places: the step is inside `detect` and
-    reads `needs.facts.outputs.*` like the summary call, but it takes
-    `head-sha`, which `SUMMARY_WIRING` does not police, and a shared constant
-    would make one site's expectation silently govern the other."""
-    out = []
-    region = _call_region(text, _BUILD_MATRIX_CALL)
-    head_repo_expr = BUILD_MATRIX_WIRING["head-repo"]
-    if region is not None and _wired_value(region, "head-repo") != "".join(head_repo_expr.split()):
-        out.append(
-            (
-                WARNING,
-                f"`{name}`'s `build-matrix` step must pass `head-repo: {head_repo_expr}`, and "
-                "does not: "
-                "the input is absent, or carries a different value. That step is where a fork's "
-                "pull request is refused, and it decides on this one value: a constant (the "
-                "running repository) equals it for every pull request, fork ones included, so "
-                "the refusal holds nothing and a fork's plan runs its own Terramate/OpenTofu "
-                "on your runners with everything the plan environment exposes as variables. An "
-                "absent value refuses every pull request instead, failing `detect` loudly "
-                "(see docs/hardening.md).",
-            )
-        )
-    head_sha_expr = BUILD_MATRIX_WIRING["head-sha"]
-    if region is not None and _wired_value(region, "head-sha") != "".join(head_sha_expr.split()):
-        out.append(
-            (
-                WARNING,
-                f"`{name}`'s `build-matrix` step must pass `head-sha: {head_sha_expr}`, and "
-                "does not: "
-                "the input is absent, or carries a different value. That is the commit the run "
-                "says it is planning, and the step checks the checkout against it: neither plan "
-                "trigger checks out the head by default, so a constant or a stale value lets "
-                "the run plan the base branch or the dispatch ref, report no changes, and green "
-                "`shipmate / gate` with nothing queued to apply. An absent value refuses every "
-                "pull request instead, failing `detect` loudly (see docs/hardening.md).",
-            )
-        )
-    # Every occurrence, and anything but a literal false, for the two reasons
-    # `_unsafe_checkout_warnings` gives: one job's explicit `false` must not silence another's
-    # `true`, and a `${{ }}` value is unknown, not false. An empty value is no opt-out at all.
-    values = [
-        m.group("value").strip().strip("\"'").lower()
-        for m in _NO_PULL_REQUEST.finditer(_stripped_text(text))
+    lines = region.splitlines()
+    body = [ln for ln in lines[1:] if ln.strip()]
+    depth = min((len(ln) - len(ln.lstrip()) for ln in body), default=0)
+    named = [
+        m.group("value").strip().strip("\"'")
+        for ln in body
+        if len(ln) - len(ln.lstrip()) == depth
+        for m in [_JOB_NAME.match(ln)]
+        if m
     ]
-    if any(v not in ("", "false") for v in values):
-        out.append(
-            (
-                WARNING,
-                f"`{name}` sets `no-pull-request` to something other than `false` — that input "
-                "is the single opt-out from `build-matrix`'s fork refusal, and it says the run "
-                "has no pull request at all, so it belongs only in a workflow that has none "
-                "(nightly drift). In a plan wrapper it turns the refusal off for every pull "
-                "request, and a fork's plan then runs its own Terramate/OpenTofu on your "
-                "runners with everything the plan environment exposes as variables. Remove the "
-                "input (see docs/hardening.md).",
-            )
+    job_name = named[0] if named else lines[0].strip().rstrip(":").strip("\"'")
+    if job_name == _SHIM_JOB_NAME:
+        return []
+    return [
+        (
+            WARNING,
+            f"`{name}`'s calling job is not named `{_SHIM_JOB_NAME}` — GitHub names a called "
+            "workflow's check runs `<caller job> / <callee job>`, so this repository's plan cell "
+            f"checks are not `{_SHIM_JOB_NAME} / <stack> / <env>`. The plan runs and the gate is "
+            "unaffected; what is lost is every `[plan]` link in the plan comment, which falls "
+            "back to the workflow-run page instead of the cell's own check. Rename the job "
+            f"`{_SHIM_JOB_NAME}` (docs/getting-started.md).",
         )
-    return out
-
-
-def _wired_value(region, key):
-    """`key`'s value in `region`, whitespace removed and one layer of YAML
-    quoting stripped, or None when the key is absent. Whitespace-insensitive
-    because `${{github.repository}}` and `${{ github.repository }}` are the same
-    expression, and formatters quote values (the reason the pin probe's anchor
-    tolerates quotes too).
-
-    `_WIRING_KEY` is line-anchored, so flow style is deliberately NOT recognised
-    here. The values these keys must carry end in `}}`, so the `,`/`}`
-    terminator that makes a flow mapping readable would truncate the block-style
-    expression the documented wrapper uses and report *that* as unwired — a
-    false positive on the one shape every consumer has. A flow-style summary
-    call (eight long expressions on one line) reads as unwired instead: noisy,
-    but the findings name every unwired input and the exact expressions to
-    pass."""
-    m = _WIRING_KEY[key].search(region)
-    if m is None:
-        return None
-    return "".join(m.group("value").strip().strip("\"'").split())
+    ]
 
 
 # Both spellings, line-anchored, with a known gap: see `_plan_run_id_finding`.
@@ -1568,11 +1398,11 @@ def _plan_run_id_warnings(ctx):
     (see `_plan_run_id_finding`).
 
     Reads the consumer's workflow files at the commit under examination, the
-    same way and for the same reason as the pin, fork-trigger and summary-wiring
+    same way and for the same reason as the pin, fork-trigger and shim-job-name
     probes (`_contents_ref`): a pull request that *removes* the input must not
     still be reported for it.
 
-    Judged by exact name, like the summary-wiring exemption above: the wrapper
+    Judged by exact name, like the shim-job-name exemption above: the wrapper
     shipped in docs/getting-started.md is `apply.yml`, and it is the file that
     calls the engine's reusable apply workflows. The filter lives in this
     function rather than in `_plan_run_id_finding` so that a direct call of that
@@ -1674,7 +1504,7 @@ def _mode_input_warnings(ctx):
     (see `_mode_input_finding`).
 
     Reads the consumer's workflow files at the commit under examination, the
-    same way and for the same reason as the pin, fork-trigger, summary-wiring and
+    same way and for the same reason as the pin, fork-trigger, shim-job-name and
     `plan_run_id` probes (`_contents_ref`): a pull request that *removes* the
     input must not still be reported for it."""
     ref = _contents_ref(ctx)
@@ -1783,7 +1613,6 @@ def _mode_input_finding(text, name):
 # is the reason; see `_dispatch_wiring_finding`.
 _DISPATCH_TRIGGER = re.compile(r"[\s{,]workflow_dispatch[ \t]*:")
 _PR_NUMBER_INPUT = re.compile(r"[\s{,]pr_number[ \t]*:")
-_PR_FACTS_CALL = re.compile(r"/actions/pr-facts@")
 # Same degrade posture and reason as PIN_UNREADABLE.
 DISPATCH_WIRING_UNREADABLE = (
     NOTICE,
@@ -1801,7 +1630,7 @@ def _dispatch_wiring_warnings(ctx):
     that wrapper can be unready for it is invisible until someone comments.
 
     Reads the consumer's workflow files at the commit under examination, the
-    same way and for the same reason as the pin, fork-trigger and summary-wiring
+    same way and for the same reason as the pin, fork-trigger and shim-job-name
     probes (`_contents_ref`): a pull request that *adds* the trigger must not
     still be reported for lacking it."""
     ref = _contents_ref(ctx)
@@ -1835,8 +1664,8 @@ def _dispatch_wiring_finding(text, name):
     created, but they are told apart by the message GitHub answers with
     (`Workflow does not have 'workflow_dispatch' trigger` versus `Unexpected
     inputs provided`) — the pair `actions/dispatch` recognises. The third is not
-    a refusal at all: the wrapper accepts the dispatch and then has no source
-    for the pull request's facts.
+    a refusal at all: the shim accepts the dispatch and then runs nothing that
+    plans.
 
     `_DISPATCH_TRIGGER` and `_PR_NUMBER_INPUT` are unanchored because ABSENCE is
     the finding here: where a match IS the finding (`_PLAN_RUN_ID_KEY`) a shape
@@ -1875,18 +1704,15 @@ def _dispatch_wiring_finding(text, name):
                 "(docs/getting-started.md).",
             )
         )
-    if not _PR_FACTS_CALL.search(_stripped_text(text)):
+    if not _PLAN_WORKFLOW_CALL.search(_stripped_text(text)):
         out.append(
             (
                 WARNING,
-                f"`{name}` has no `actions/pr-facts` step — a dispatched run carries no pull "
-                "request in its event payload and checks out the dispatch ref, so that step is "
-                "the only thing that resolves which pull request, head and repository the run "
-                "is for. Without it there is no head SHA to hand `build-matrix`, so on a "
-                "current engine pin that step refuses EVERY pull request and `detect` fails "
-                "loudly — the autoplan too, not only the dispatched leg — rather than planning "
-                "the wrong tree quietly. Add the step and feed the jobs below from it "
-                "(docs/getting-started.md).",
+                f"`{name}` does not call the engine's plan workflow — the dispatch is accepted "
+                "and the run starts, with nothing in it that resolves the pull request, plans a "
+                "cell or reports a gate status, so a commented `shipmate plan` produces a green "
+                "run and no plan. That call is the whole shim: `uses: "
+                "<engine>/.github/workflows/plan.yml@<sha>` (docs/getting-started.md).",
             )
         )
     return out
@@ -1949,7 +1775,7 @@ PROBES = (
     _plan_env_secret_warnings,
     _pin_warnings,
     _fork_trigger_warnings,
-    _summary_wiring_warnings,
+    _shim_job_name_warnings,
     _plan_run_id_warnings,
     _mode_input_warnings,
     _dispatch_wiring_warnings,

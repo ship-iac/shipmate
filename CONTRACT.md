@@ -586,12 +586,9 @@ protection shape, plan-environment secrets, the `shipmate-engine`
 environment's own existence and default-branch scoping, `pull_request_target`
 triggers in the consumer's workflow files other than `plan.yml`, which uses
 that trigger by design, engine action-pin freshness,
-the fork and draft wiring of the consumer's `plan.yml` — the head-repository,
-draft and on-demand inputs it passes to the engine's reusable summary workflow,
-the head-repository and head-SHA inputs on its own `build-matrix` step, and a
-`no-pull-request` anywhere in that file; absent or constant, they cost a skipped
-summary job, a fork refusal that passes for every pull request, or a plan of a
-tree the pull request never named —
+the calling job name in the consumer's `plan.yml`, which must be `shipmate`
+or the plan cell checks are not `shipmate / <stack> / <env>` and every `[plan]`
+link in the plan comment falls back to the workflow-run page,
 a retired `plan_run_id` input still declared or forwarded by the consumer's
 `apply.yml` (a forward to a reusable workflow is rejected as the run LOADS, so
 there is no job and no log to read),
@@ -600,9 +597,9 @@ to the engine's reusable apply workflows, where the same load-time rejection
 applies — only those two placements are read as the retired rail,
 the dispatch wiring of the consumer's `plan.yml` — the `workflow_dispatch` trigger
 a commented `shipmate plan` dispatches, the `pr_number` input that dispatch sends,
-and a `pr-facts` step to resolve the pull request a dispatched run has no payload
-for; without the first two GitHub refuses the dispatch with an HTTP 422 and creates
-no run at all,
+and its call of the engine's plan workflow, without which the dispatch starts a
+run that plans nothing; without the first two GitHub refuses the dispatch with an
+HTTP 422 and creates no run at all,
 approvers-team resolvability, and App installation permission
 drift — see `docs/branch-protection.md`) with a harvest of the warning and
 failure annotations GitHub already recorded on this commit's workflow runs

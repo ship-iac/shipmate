@@ -135,34 +135,6 @@ def test_the_documented_call_passes_exactly_the_inputs_the_workflow_declares():
         )
 
 
-def test_doctors_wiring_constant_expects_what_the_page_documents():
-    """The third file this module's docstring names. `doctor.SUMMARY_WIRING` is a hand-written
-    copy of these three expressions and is compared against a consumer's real `plan.yml`, so a
-    change to the documented expression that leaves it behind makes the probe warn on every
-    correctly wired repository -- a finding on a healthy repo, which is what teaches readers to
-    ignore the suite. Nothing else pins the two together: `test_doctor.py`'s fixtures are written
-    from `SUMMARY_WIRING`'s own side."""
-    assert doctor.SUMMARY_WIRING == {
-        key: _EXPECTED_SUMMARY_WITH[key] for key in ("head-repo", "is-draft", "on-demand")
-    }, (
-        "scripts/doctor's SUMMARY_WIRING drifted from the documented wrapper: "
-        f"{doctor.SUMMARY_WIRING}"
-    )
-
-
-def test_doctors_build_matrix_constant_expects_what_the_page_documents():
-    """Same failure mode as test_doctors_wiring_constant_expects_what_the_page_documents, on the
-    step's own two inputs: `doctor.BUILD_MATRIX_WIRING` is a hand-written copy of what this page
-    documents, and a documented expression that leaves it behind makes the probe warn on every
-    correctly wired repository."""
-    assert doctor.BUILD_MATRIX_WIRING == {
-        key: _EXPECTED_PLAN_MATRIX_WITH[key] for key in ("head-repo", "head-sha")
-    }, (
-        "scripts/doctor's BUILD_MATRIX_WIRING drifted from the documented wrapper: "
-        f"{doctor.BUILD_MATRIX_WIRING}"
-    )
-
-
 def test_documented_plan_build_matrix_states_the_head_repository_and_commit():
     for job, step in _build_matrix_steps(_PLAN_PAGE):
         assert step.get("with") == _EXPECTED_PLAN_MATRIX_WITH, (
