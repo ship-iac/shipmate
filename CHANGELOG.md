@@ -11,12 +11,12 @@ section below names the SHA the release tags.
 The version line stays `v0.x` while action inputs, check names, and the comment
 grammar are declared unstable in `README.md`.
 
-## [Unreleased]
+## [0.25.0] — 2026-09-06
 
 **Breaking for every consumer: the pin bump and a body rewrite of `plan.yml`,
 `drift.yml` and `comment-ops.yml` land in one commit.** A new shim against an
 old pin, or an old inline body against the new pin, is a load-time rejection
-with no job, no check run and no log. `docs/upgrading.md` §Unreleased is the
+with no job, no check run and no log. `docs/upgrading.md` §0.25.0 is the
 migration.
 
 ### Changed

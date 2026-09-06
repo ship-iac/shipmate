@@ -137,7 +137,7 @@ The workflow line this section used to ask for is gone: engine
 `comment-ops.yml` passes `ungated-envs: ${{ vars.SHIPMATE_UNGATED_ENVS }}`
 itself, and `vars` inherit into a called workflow, so the variable resolves in
 your repository with nothing to wire. A consumer moving to the shims deletes
-that line along with the rest of the file's body (§Unreleased). See
+that line along with the rest of the file's body (§0.25.0). See
 [`getting-started.md`](getting-started.md) §"Applying chosen environments
 without an approving review".
 
@@ -153,7 +153,7 @@ names. The entries below `0.2.0` predate the first tagged release, or
 `CHANGELOG.md` does not pin one; they are kept for repositories moving from a
 very old pin.
 
-### Unreleased — `plan.yml`, `drift.yml` and `comment-ops.yml` become shims
+### 0.25.0 — `plan.yml`, `drift.yml` and `comment-ops.yml` become shims
 
 **This release is breaking for every consumer.** The pin bump and the body
 rewrite of those three files land in **one commit**. A new shim against an old
@@ -637,7 +637,7 @@ on the `build-matrix` step of `detect`:
 ```
 
 and on the `summary` job's call of the engine's summary workflow (folded into
-the engine's plan workflow in §Unreleased):
+the engine's plan workflow in §0.25.0):
 
 ```yaml
     with:
@@ -657,14 +657,14 @@ current shape.
 **Pass those expressions, not constants.** A literal `is-draft: false` claims
 "not a draft" for every run, and `head-repo: ${{ github.repository }}` passes the
 fork check for every pull request, fork ones included. `shipmate doctor` reported
-each of those while a consumer owned the wiring; §Unreleased moves both the facts
+each of those while a consumer owned the wiring; §0.25.0 moves both the facts
 and the comparison inside the engine, and those probes were retired with it.
 
 If you run the optional nightly drift workflow, add `no-pull-request: "true"`
 to its `build-matrix` step ([`drift.md`](drift.md)). A drift run has no pull
 request to state a head repository for, and this is how it says so. It belongs
 in that file only: in `plan.yml` it turns the fork refusal off for every pull
-request. As of §Unreleased the engine passes it, and no consumer file carries
+request. As of §0.25.0 the engine passes it, and no consumer file carries
 it.
 
 **The pin bump and these edits must land in the same commit.** The three
@@ -1004,7 +1004,7 @@ no job and no log:
 | the summary workflow (in `plan.yml`) | `SHIPMATE_APP_PRIVATE_KEY` |
 | `apply.yml`, `apply-all.yml`, `deploy.yml` | that and `SHIPMATE_PLAN_PASSPHRASE` |
 
-§Unreleased folds the summary workflow into the engine's `plan.yml` and
+§0.25.0 folds the summary workflow into the engine's `plan.yml` and
 [`getting-started.md`](getting-started.md) §Why the shims name their secrets
 carries the current table.
 
@@ -1042,7 +1042,7 @@ requests cannot merge — the old `workflow_run` topology is not supported.
 
 `plan.yml` moves to `pull_request_target` and gains a third job, `summary`,
 which calls the engine's summary workflow — a file of its own at this release,
-folded into the engine's `plan.yml` in §Unreleased — with
+folded into the engine's `plan.yml` in §0.25.0 — with
 `secrets: { SHIPMATE_APP_PRIVATE_KEY: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }} }`
 — that secret alone, since a callee rejects a name it does not declare — and
 five inputs (`pr-number`, `head-sha`, `detect-result`,
