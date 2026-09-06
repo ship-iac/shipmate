@@ -318,13 +318,18 @@ def test_run_scrubs_secrets_from_a_failure():
     """The App key fails exactly when it has been minted but not yet stored, so the
     failure path must not echo it.
 
-    Two mutations redden it: drop the `_scrub` call around the stderr, so the token
-    appears verbatim; or drop the `raise` and return `p.stdout`, so a failed write is
-    reported as done.
+    The child concatenates the token from two halves, so the whole value appears only in
+    its stderr and never in the argv: scrubbing the argv alone cannot satisfy the
+    assertions, and the stderr clause is load-bearing rather than incidental.
+
+    Three mutations redden it: drop the `_scrub` call around the stderr, so the token
+    appears verbatim; drop the `raise` and return `p.stdout`, so a failed write is
+    reported as done; or drop the `+ f"\\n{_scrub(stderr, secrets)}"` clause, which also
+    takes `_gh_json_or_none`'s only channel for spotting an `HTTP 404`.
     """
     with pytest.raises(SystemExit) as e:
         onboard._run(
-            [sys.executable, "-c", "import sys; sys.stderr.write('tok-abc'); sys.exit(3)"],
+            [sys.executable, "-c", "import sys; sys.stderr.write('tok-' + 'abc'); sys.exit(3)"],
             secrets=("tok-abc",),
         )
     assert "tok-abc" not in str(e.value)
@@ -381,13 +386,13 @@ def test_write_forwards_secrets_to_run(monkeypatch):
     assert seen["secrets"] == ("pem",)
 
 
-def _module_calls(node):
+def _calls_in_order(node):
     """`ast.unparse` of every call inside `node`, in source order, depth first."""
     out = []
     for child in ast.iter_child_nodes(node):
         if isinstance(child, ast.Call):
             out.append(ast.unparse(child))
-        out.extend(_module_calls(child))
+        out.extend(_calls_in_order(child))
     return out
 
 
@@ -396,15 +401,17 @@ def test_main_calls_every_stage_in_order():
     call sites unguarded: deleting both `_reconcile_*` lines left the whole suite green.
     The refusals and `sys.exit(_exit_code())` have the same exposure.
 
-    One hand-written ordered list, compared with `==`, so a stage that is dropped,
-    reordered or added has to be reflected here deliberately.
+    One hand-written ordered list, compared with `==`, so a call to a private helper or
+    to `sys.exit` that is dropped, reordered or added has to be reflected here
+    deliberately. Ceiling: the filter is exactly that -- a stage added as `report(...)`
+    or `write(...)` directly in `main` is not seen.
 
     Mutations, each proven: delete `_reconcile_engine_env(ctx)`; delete
     `_reconcile_envs(ctx)`; delete `sys.exit(_exit_code())`; swap the two reconcilers.
     """
     tree = ast.parse((ENGINE / "scripts" / "onboard").read_text(encoding="utf-8"))
     main = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "main")
-    stages = [c for c in _module_calls(main) if c.startswith("_") or c.startswith("sys.exit")]
+    stages = [c for c in _calls_in_order(main) if c.startswith("_") or c.startswith("sys.exit")]
     assert stages == [
         "_TEAM_RE.fullmatch(args.team)",
         "_APP_ID_RE.fullmatch(args.app_id)",
@@ -691,15 +698,18 @@ def test_existing_policy_naming_another_branch_is_reported_not_edited(monkeypatc
         ["gh", "api", "repos/o/r/environments/shipmate-engine/secrets?per_page=100"],
         ["gh", "secret", "list", "--json", "name"],
     ]
-    verbs = [(verb, subject) for verb, subject, _detail in onboard.REPORT]
-    assert verbs == [
-        ("ok", "shipmate-engine"),
-        ("create", "shipmate-engine branch policy"),
-        ("differs", "shipmate-engine branch policy"),
-        ("ok", "shipmate-engine SHIPMATE_APP_PRIVATE_KEY"),
-        ("ok", "no repository-level SHIPMATE_APP_PRIVATE_KEY"),
+    assert onboard.REPORT == [
+        ("ok", "shipmate-engine", ""),
+        ("create", "shipmate-engine branch policy", "main"),
+        (
+            "differs",
+            "shipmate-engine branch policy",
+            "also permits release/* — a workflow on those branches can still claim what "
+            "`shipmate-engine` scopes. Remove them by hand if that is not intended.",
+        ),
+        ("ok", "shipmate-engine SHIPMATE_APP_PRIVATE_KEY", ""),
+        ("ok", "no repository-level SHIPMATE_APP_PRIVATE_KEY", ""),
     ]
-    assert "release/*" in onboard.REPORT[2][2]
     assert onboard._exit_code() == 2
 
 
@@ -728,12 +738,18 @@ def test_plan_environment_carrying_a_policy_is_reported_not_stripped(monkeypatch
         ["gh", "api", "repos/o/r/environments/dev-eu-apply"],
         ["gh", "api", "repos/o/r/environments/dev-eu-apply/deployment-branch-policies"],
     ]
-    assert [(verb, subject) for verb, subject, _detail in onboard.REPORT] == [
-        ("differs", "dev-eu-plan"),
-        ("ok", "dev-eu-apply"),
-        ("ok", "dev-eu-apply branch policy"),
+    assert onboard.REPORT == [
+        (
+            "differs",
+            "dev-eu-plan",
+            "it carries a deployment branch policy, which blocks every plan cell whose "
+            "pull request targets a branch the policy does not name. Removing a "
+            "protection a consumer set is not this script's call, so it is reported "
+            "and left alone.",
+        ),
+        ("ok", "dev-eu-apply", ""),
+        ("ok", "dev-eu-apply branch policy", "main"),
     ]
-    assert "blocks every plan cell" in onboard.REPORT[0][2]
     assert onboard._exit_code() == 2
 
 
@@ -803,12 +819,17 @@ def test_plan_environment_with_a_protection_rule_is_reported(monkeypatch):
         ["gh", "api", "repos/o/r/environments/dev-eu-apply"],
         ["gh", "api", "repos/o/r/environments/dev-eu-apply/deployment-branch-policies"],
     ]
-    assert [(verb, subject) for verb, subject, _detail in onboard.REPORT] == [
-        ("differs", "dev-eu-plan"),
-        ("ok", "dev-eu-apply"),
-        ("ok", "dev-eu-apply branch policy"),
+    assert onboard.REPORT == [
+        (
+            "differs",
+            "dev-eu-plan",
+            "it carries protection rules (required_reviewers, wait_timer), which stall "
+            "plan cells. Removing a protection a consumer set is not this script's "
+            "call, so it is reported and left alone.",
+        ),
+        ("ok", "dev-eu-apply", ""),
+        ("ok", "dev-eu-apply branch policy", "main"),
     ]
-    assert "required_reviewers, wait_timer" in onboard.REPORT[0][2]
     assert onboard._exit_code() == 2
 
 
@@ -832,21 +853,26 @@ def test_a_read_failure_that_is_not_a_404_refuses(monkeypatch):
     assert fake.calls == [["gh", "api", "repos/o/r/environments/dev-eu-plan"]]
 
 
-def test_dry_run_over_a_fresh_repository_issues_only_reads(monkeypatch):
+def test_dry_run_reaches_every_write_path_and_issues_only_reads(monkeypatch):
     """`test_dry_run_issues_no_write` pins `write` itself; it says nothing about whether
-    a reconciler routes through it. This runs both reconcilers over a repository where
-    nothing exists and compares the whole recorded call list against a hand-written
-    constant of reads: any write appearing here is a dry run that writes.
+    a reconciler routes through it. This drives both reconcilers over a repository shaped
+    so that all five `write(...)` sites are reached -- create, update, the branch-policy
+    POST, the key, and the destructive repository-secret delete -- and compares the whole
+    recorded call list against a hand-written constant of reads.
 
-    Mutation: swap any one `write(...)` in a reconciler for a direct `_run(...)`.
+    The engine environment exists with a null policy (the update path) and a
+    repository-level copy of the key exists (the delete path); everything else is absent.
+
+    Mutation: swap any one of the five `write(...)` calls for a direct `_run(...)`. Each
+    one appears in the call list below and reddens it.
     """
     absent = SystemExit("gh: Not Found (HTTP 404)")
     fake = make_gh(
         {
-            ENGINE_PATH: absent,
-            ENGINE_POLICIES: absent,
+            ENGINE_PATH: {"deployment_branch_policy": None},
+            ENGINE_POLICIES: {"total_count": 0, "branch_policies": []},
             ENGINE_SECRETS: absent,
-            REPO_KEY_LIST: [],
+            REPO_KEY_LIST: [{"name": "SHIPMATE_APP_PRIVATE_KEY"}],
             "repos/o/r/environments/dev-eu": absent,
             "repos/o/r/environments/dev-eu-plan": absent,
             "repos/o/r/environments/dev-eu-apply": absent,
@@ -868,10 +894,10 @@ def test_dry_run_over_a_fresh_repository_issues_only_reads(monkeypatch):
         ["gh", "api", "repos/o/r/environments/dev-eu-apply/deployment-branch-policies"],
     ]
     assert [verb for verb, _subject, _detail in onboard.REPORT] == [
-        "would create",
+        "would update",
         "would create",
         "would set",
-        "ok",
+        "would delete",
         "would create",
         "would create",
         "would create",

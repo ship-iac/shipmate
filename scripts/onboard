@@ -257,7 +257,7 @@ _APPLY_BODY = {
 }
 #: A plan environment takes no branch policy: plan cells evaluate at the pull request's
 #: base ref, so a policy blocks every cell whose pull request targets a branch it does
-#: not name (docs/hardening.md #17).
+#: not name (docs/hardening.md row 8).
 _PLAN_BODY = {"deployment_branch_policy": None}
 
 
