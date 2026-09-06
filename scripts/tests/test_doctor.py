@@ -2520,6 +2520,15 @@ def test_a_name_deeper_in_the_block_is_not_the_jobs_name(monkeypatch):
     assert doctor._shim_job_name_warnings(_ctx()) == [(doctor.WARNING, _WRONG_JOB_NAME_TEXT)]
 
 
+def test_a_quoted_job_name_is_silent(monkeypatch):
+    """Formatters quote scalars, so the value carries one layer of YAML quoting the comparison
+    must strip. Mutation: drop the `.strip("\\"'")` on the matched value."""
+    text = _SHIM_PLAN.replace("    name: shipmate\n", '    name: "shipmate"\n')
+    responses = _fork_responses({"plan.yml": text})
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    assert doctor._shim_job_name_warnings(_ctx()) == []
+
+
 def test_a_trailing_comment_after_the_job_name_is_silent(monkeypatch):
     """The block is comment-stripped before it is read, so a trailing comment is not part of
     the name. A probe that fires on this shape fires on a correct repository. Mutation: read

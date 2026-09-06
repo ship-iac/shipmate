@@ -1223,10 +1223,9 @@ def _fork_trigger_warnings(ctx):
         # Before the `plan.yml` exemption below, not after: `plan.yml` is
         # exactly the file where a fork checkout would be turned on.
         out = _unsafe_checkout_warnings(text, name)
-        # The shim is on this trigger by design: the job holding the App key is the `summary` job
-        # inside the engine's reusable plan workflow, which checks out nothing and runs no
-        # repository content. Exact name — a `custom-plan.yml` is a consumer file and gets the
-        # warning.
+        # The shim is on this trigger by design: the job holding the App key is the `summary`
+        # job inside the engine's reusable plan workflow, which runs no repository content.
+        # Exact name — a `custom-plan.yml` is a consumer file and gets the warning.
         if name == "plan.yml":
             return out
         if not declares_pull_request_target(text):
@@ -1342,10 +1341,11 @@ def _shim_job_name_finding(text, name):
     finder here: a consumer file that does not parse must still be read for what
     can be read, not skipped.
 
-    An absent `name:` is not a finding — GitHub displays the job id then, so
-    `jobs: { shipmate: { uses: … } }` produces the same check names as the
-    documented shape. Only a direct child of the job is read as its name, so a
-    `name:` under `with:` cannot stand in for one."""
+    An absent `name:` is not a finding — GitHub displays the job id then, so a job written
+    `jobs:` / `  shipmate:` / `    uses: …` produces the same check names as the documented
+    shape. Only a direct child of the job is read as its name, so a `name:` under `with:`
+    cannot stand in for one. Judged block-style, like the documented shim and every other
+    finder here."""
     region = _call_region(text, _PLAN_WORKFLOW_CALL)
     if region is None:
         return []

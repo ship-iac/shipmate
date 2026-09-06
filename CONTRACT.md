@@ -1172,9 +1172,8 @@ cause: `actions/build-matrix` refuses a checkout that has no
 nowhere, and the pull request is told only that the dispatch failed, with the
 API's refusal left in the comment-handling run that comment links; and doctor
 keys on the exact name for its `pull_request_target` exemption and for the
-plan-wrapper wiring probes (the head-repository, head-SHA and draft inputs, and
-the dispatch wiring), which report nothing on a file called
-anything else. Rename the file and planning is refused from that commit on, and
+shim's calling-job-name and dispatch-wiring probes, which report nothing on a
+file called anything else. Rename the file and planning is refused from that commit on, and
 the renamed file starts drawing doctor's own `pull_request_target` warning. Each
 symptom surfaces on its own — the refusal names the path it looked for — but
 none of them names the rename.
