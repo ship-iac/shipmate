@@ -186,7 +186,7 @@ def test_a_missing_fact_is_refused_and_named(patch, named, unnamed):
     [(True, "true"), (False, "false"), (None, "false"), ("yes", "false")],
 )
 def test_is_draft_is_the_string_the_guards_compare_against(draft, expected):
-    """`summary.yml`'s guard compares against 'false'; a Python bool renders as
+    """The summary job's guard compares against 'false'; a Python bool renders as
     'True' and matches neither."""
     value = pf.from_payload(dict(_PAYLOAD_PR, draft=draft))["is_draft"]
     assert value == expected

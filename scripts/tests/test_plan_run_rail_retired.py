@@ -25,18 +25,6 @@ EXPECTED_INPUTS = {
     "internal-pins.yml": {},
     "manifest-load.yml": {},
     "plan.yml": {"workflow_call": ["runs_on", "state_suffix"]},
-    "summary.yml": {
-        "workflow_call": [
-            "detect-result",
-            "head-repo",
-            "head-sha",
-            "is-draft",
-            "on-demand",
-            "plan-result",
-            "planned-cells",
-            "pr-number",
-        ]
-    },
     "unlock.yml": {"workflow_call": ["environment", "ref"]},
 }
 

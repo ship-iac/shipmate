@@ -66,9 +66,13 @@ _APP_KEY_AND_PASSPHRASE = {
 #: reads them back passes whatever the file says. Two rules meet here. `secrets: inherit`
 #: delivers nothing across an organization boundary and suppresses what the callee's
 #: `environment:` would otherwise supply. Mapping a secret the callee does not declare is a
-#: load-time failure, which is why `summary.yml` takes one secret and not two.
+#: load-time failure, which is why each entry is the callee's exact declaration set: `plan.yml`
+#: encrypts plan artifacts and mints the gate, so it takes both; `drift.yml` and
+#: `comment-ops.yml` mint only.
 ENGINE_CALL_SECRETS = {
-    "summary.yml": _APP_KEY,
+    "plan.yml": _APP_KEY_AND_PASSPHRASE,
+    "drift.yml": _APP_KEY,
+    "comment-ops.yml": _APP_KEY,
     "apply.yml": _APP_KEY_AND_PASSPHRASE,
     "apply-all.yml": _APP_KEY_AND_PASSPHRASE,
     "deploy.yml": _APP_KEY_AND_PASSPHRASE,
