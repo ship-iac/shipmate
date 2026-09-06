@@ -405,6 +405,143 @@ def _reconcile_envs(ctx):
             _reconcile_env(ctx, name, role)
 
 
+def _versions(engine):
+    """{"terramate": ..., "tofu": ...} from the engine checkout's VERSIONS file."""
+    text = (pathlib.Path(engine) / "VERSIONS").read_text(encoding="utf-8")
+    pairs = (line.partition("=") for line in text.splitlines() if "=" in line)
+    return {name.strip(): value.strip() for name, _sep, value in pairs}
+
+
+def _wanted_variables(ctx):
+    """{name: (value, the flag or file it came from)}, in the order they are written."""
+    versions = _versions(ctx["engine"])
+    wanted = {
+        "SHIPMATE_APP_ID": (ctx["app_id"], "--app-id"),
+        "SHIPMATE_APPROVERS_TEAM": (ctx["team"], "--team"),
+        "TERRAMATE_VERSION": (versions["terramate"], "VERSIONS"),
+        "TOFU_VERSION": (versions["tofu"], "VERSIONS"),
+    }
+    if ctx["shared"]:
+        wanted["SHIPMATE_SHARED_ENVS"] = (",".join(sorted(ctx["shared"])), "--shared")
+    return wanted
+
+
+def _matches(name, current, value):
+    # SHIPMATE_SHARED_ENVS is a set written as a list: order and spacing are not drift.
+    if name == "SHIPMATE_SHARED_ENVS":
+        return _split(current) == _split(value)
+    return current == value
+
+
+def _reconcile_variables(ctx):
+    """Set the repository variables the workflows read.
+
+    A variable that exists with another value is reported, never overwritten: a
+    consumer pinning an older tested pair is making a deliberate choice, and moving
+    it silently is this script exceeding its mandate.
+    """
+    existing = _variables()
+    for name, (value, source) in _wanted_variables(ctx).items():
+        current = existing.get(name)
+        if current is None:
+            write("set", name, ["gh", "variable", "set", name, "--body", value], detail=value)
+        elif _matches(name, current, value):
+            report("ok", name, value)
+        else:
+            report("differs", name, f"repository has {current}, {source} is {value}")
+
+
+def _ruleset_body(ctx):
+    """A ruleset carrying the gate rule alone.
+
+    `docs/branch-protection.md`'s `pull_request`, `non_fast_forward` and `deletion`
+    rules stay a documented choice: a repository already carrying a ruleset with a
+    `pull_request` rule must not get a conflicting second one.
+    """
+    return {
+        "name": "shipmate-gate",
+        "target": "branch",
+        "enforcement": "active",
+        "conditions": {"ref_name": {"include": ["~DEFAULT_BRANCH"], "exclude": []}},
+        "rules": [
+            {
+                "type": "required_status_checks",
+                "parameters": {
+                    "required_status_checks": [
+                        {"context": GATE, "integration_id": int(ctx["app_id"])}
+                    ],
+                    "strict_required_status_checks_policy": True,
+                },
+            }
+        ],
+    }
+
+
+_PLAN_TIER = (
+    "rulesets need GitHub Pro, Team, Enterprise, or a public repository "
+    "(docs/branch-protection.md §Reproducible ruleset). Configure the gate by hand there."
+)
+
+
+def _gate_entry(ctx):
+    """(the `shipmate / gate` status-check entry, its rule parameters), or (None, None).
+
+    The effective rules across every ruleset, read the way `doctor` reads them, so a
+    gate required by a ruleset this script did not create is found too.
+    """
+    rules = _gh_json(f"repos/{ctx['repo']}/rules/branches/{ctx['default_branch']}?per_page=100")
+    for rule in rules:
+        if rule.get("type") != "required_status_checks":
+            continue
+        params = rule.get("parameters") or {}
+        for chk in params.get("required_status_checks") or []:
+            if chk.get("context") == GATE:
+                return chk, params
+    return None, None
+
+
+def _reconcile_ruleset(ctx):
+    """Require `shipmate / gate`, pinned to the App, on the default branch.
+
+    An entry under another `integration_id`, or without `strict`, is reported and left
+    alone: editing a ruleset this script did not create is a policy change it must not
+    make silently.
+    """
+    subject = "gate ruleset"
+    chk, params = _gate_entry(ctx)
+    app_id = int(ctx["app_id"])
+    if chk is None:
+        try:
+            write(
+                "create",
+                subject,
+                ["gh", "api", "-X", "POST", f"repos/{ctx['repo']}/rulesets", "--input", "-"],
+                stdin=json.dumps(_ruleset_body(ctx)),
+                detail=GATE,
+            )
+        except SystemExit as e:
+            if "HTTP 403" not in str(e) and "HTTP 404" not in str(e):
+                raise
+            report("differs", subject, _PLAN_TIER)
+    elif chk.get("integration_id") != app_id:
+        report(
+            "differs",
+            subject,
+            f"`{GATE}` is required under integration_id {chk.get('integration_id')!r}, not the "
+            f"shipmate App ({app_id}) — a status from another identity satisfies it. "
+            "Change it by hand.",
+        )
+    elif not params.get("strict_required_status_checks_policy"):
+        report(
+            "differs",
+            subject,
+            "it does not require branches to be up to date (strict), so plans can go "
+            "stale against the base before merge. Change it by hand.",
+        )
+    else:
+        report("ok", subject)
+
+
 def _exit_code():
     """2 when anything differs, else 0.
 
@@ -456,6 +593,8 @@ def main(argv=None):
 
     _reconcile_engine_env(ctx)
     _reconcile_envs(ctx)
+    _reconcile_variables(ctx)
+    _reconcile_ruleset(ctx)
 
     sys.exit(_exit_code())
 

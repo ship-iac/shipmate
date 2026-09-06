@@ -20,8 +20,9 @@ def make_gh(routes):
     """A fake `_run`: records every invocation, answers reads from `routes`,
     returns "" for every write.
 
-    A read is `gh api <path>` with no `-X`, keyed by the path, or `gh secret list ...`,
-    keyed by its whole command line; anything else is a write and is only recorded. An
+    A read is `gh api <path>` with no `-X`, keyed by the path, or `gh secret list ...` /
+    `gh variable list ...`, keyed by its whole command line; anything else is a write and
+    is only recorded. An
     unrouted read raises `AssertionError`, deliberately NOT `SystemExit`:
     `_gh_json_or_none` reads a `SystemExit` naming HTTP 404 as "absent", so a routing
     mistake phrased that way would be swallowed into the absent branch and the test
@@ -45,7 +46,7 @@ def make_gh(routes):
         scrubbed.append(secrets)
         if args[:2] == ["gh", "api"] and "-X" not in args:
             key = args[2]
-        elif args[:3] == ["gh", "secret", "list"]:
+        elif args[:3] in (["gh", "secret", "list"], ["gh", "variable", "list"]):
             key = " ".join(args)
         else:
             return ""
@@ -67,6 +68,8 @@ ENGINE_POLICIES = f"{ENGINE_PATH}/deployment-branch-policies"
 ENGINE_SECRETS = f"{ENGINE_PATH}/secrets?per_page=100"
 # Named without the word ruff S105 flags: this is a command line, not a credential.
 REPO_KEY_LIST = "gh secret list --json name"
+VARIABLE_LIST = "gh variable list --json name,value"
+RULES = "repos/o/r/rules/branches/main?per_page=100"
 CUSTOM_POLICY = {"protected_branches": False, "custom_branch_policies": True}
 
 
@@ -86,6 +89,15 @@ def ctx(**over):
     }
     base.update(over)
     return base
+
+
+def engine_with_versions(tmp_path, terramate="9.9.9", tofu="8.8.8"):
+    """An engine checkout carrying a VERSIONS file, with values no real release uses:
+    a constant copied from the repository's own VERSIONS would rot on every bump."""
+    (tmp_path / "VERSIONS").write_text(
+        f"terramate={terramate}\ntofu={tofu}\n", encoding="utf-8", newline="\n"
+    )
+    return tmp_path
 
 
 def body_of(fake, argv):
@@ -407,7 +419,8 @@ def test_main_calls_every_stage_in_order():
     or `write(...)` directly in `main` is not seen.
 
     Mutations, each proven: delete `_reconcile_engine_env(ctx)`; delete
-    `_reconcile_envs(ctx)`; delete `sys.exit(_exit_code())`; swap the two reconcilers.
+    `_reconcile_envs(ctx)`; delete `_reconcile_variables(ctx)`; delete
+    `_reconcile_ruleset(ctx)`; delete `sys.exit(_exit_code())`; swap two reconcilers.
     """
     tree = ast.parse((ENGINE / "scripts" / "onboard").read_text(encoding="utf-8"))
     main = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "main")
@@ -423,6 +436,8 @@ def test_main_calls_every_stage_in_order():
         "_variables()",
         "_reconcile_engine_env(ctx)",
         "_reconcile_envs(ctx)",
+        "_reconcile_variables(ctx)",
+        "_reconcile_ruleset(ctx)",
         "sys.exit(_exit_code())",
         "_exit_code()",
     ]
@@ -853,17 +868,19 @@ def test_a_read_failure_that_is_not_a_404_refuses(monkeypatch):
     assert fake.calls == [["gh", "api", "repos/o/r/environments/dev-eu-plan"]]
 
 
-def test_dry_run_reaches_every_write_path_and_issues_only_reads(monkeypatch):
+def test_dry_run_reaches_every_write_path_and_issues_only_reads(monkeypatch, tmp_path):
     """`test_dry_run_issues_no_write` pins `write` itself; it says nothing about whether
-    a reconciler routes through it. This drives both reconcilers over a repository shaped
-    so that all five `write(...)` sites are reached -- create, update, the branch-policy
-    POST, the key, and the destructive repository-secret delete -- and compares the whole
-    recorded call list against a hand-written constant of reads.
+    a reconciler routes through it. This drives every reconciler over a repository shaped
+    so that all seven `write(...)` sites are reached -- create, update, the branch-policy
+    POST, the key, the destructive repository-secret delete, the variable set and the
+    ruleset POST -- and compares the whole recorded call list against a hand-written
+    constant of reads.
 
     The engine environment exists with a null policy (the update path) and a
-    repository-level copy of the key exists (the delete path); everything else is absent.
+    repository-level copy of the key exists (the delete path); everything else is absent,
+    and the repository has no variable and no rule.
 
-    Mutation: swap any one of the five `write(...)` calls for a direct `_run(...)`. Each
+    Mutation: swap any one of the seven `write(...)` calls for a direct `_run(...)`. Each
     one appears in the call list below and reddens it.
     """
     absent = SystemExit("gh: Not Found (HTTP 404)")
@@ -877,12 +894,16 @@ def test_dry_run_reaches_every_write_path_and_issues_only_reads(monkeypatch):
             "repos/o/r/environments/dev-eu-plan": absent,
             "repos/o/r/environments/dev-eu-apply": absent,
             "repos/o/r/environments/dev-eu-apply/deployment-branch-policies": absent,
+            VARIABLE_LIST: [],
+            RULES: [],
         }
     )
     monkeypatch.setattr(onboard, "_run", fake)
     monkeypatch.setattr(onboard, "_DRY", True)
     onboard._reconcile_engine_env(ctx())
     onboard._reconcile_envs(ctx())
+    onboard._reconcile_variables(ctx(engine=engine_with_versions(tmp_path)))
+    onboard._reconcile_ruleset(ctx())
     assert fake.calls == [
         ["gh", "api", "repos/o/r/environments/shipmate-engine"],
         ["gh", "api", "repos/o/r/environments/shipmate-engine/deployment-branch-policies"],
@@ -892,6 +913,8 @@ def test_dry_run_reaches_every_write_path_and_issues_only_reads(monkeypatch):
         ["gh", "api", "repos/o/r/environments/dev-eu-plan"],
         ["gh", "api", "repos/o/r/environments/dev-eu-apply"],
         ["gh", "api", "repos/o/r/environments/dev-eu-apply/deployment-branch-policies"],
+        ["gh", "variable", "list", "--json", "name,value"],
+        ["gh", "api", RULES],
     ]
     assert [verb for verb, _subject, _detail in onboard.REPORT] == [
         "would update",
@@ -901,4 +924,234 @@ def test_dry_run_reaches_every_write_path_and_issues_only_reads(monkeypatch):
         "would create",
         "would create",
         "would create",
+        "would set",
+        "would set",
+        "would set",
+        "would set",
+        "would create",
     ]
+
+
+def test_absent_variables_are_set_from_versions_and_flags(monkeypatch, tmp_path):
+    """A repository with no variables gets all four the workflows read, the two version
+    pins taken from the engine checkout's VERSIONS file rather than from anything the
+    operator retypes.
+
+    The whole recorded call list is compared against a hand-written constant: a
+    membership check would pass a run that also set a variable nobody intended.
+
+    Mutation: read `TOFU_VERSION` from `ctx["version"]` -- the engine release tag --
+    instead of from VERSIONS.
+    """
+    fake = make_gh({VARIABLE_LIST: []})
+    monkeypatch.setattr(onboard, "_run", fake)
+    onboard._reconcile_variables(ctx(engine=engine_with_versions(tmp_path)))
+    assert fake.calls == [
+        ["gh", "variable", "list", "--json", "name,value"],
+        ["gh", "variable", "set", "SHIPMATE_APP_ID", "--body", "1"],
+        ["gh", "variable", "set", "SHIPMATE_APPROVERS_TEAM", "--body", "ops"],
+        ["gh", "variable", "set", "TERRAMATE_VERSION", "--body", "9.9.9"],
+        ["gh", "variable", "set", "TOFU_VERSION", "--body", "8.8.8"],
+    ]
+
+
+def test_variables_that_exist_with_another_value_are_reported(monkeypatch, tmp_path):
+    """A consumer pinning an older tested pair is making a deliberate choice: the
+    reconciler names the disagreement and writes nothing over it.
+
+    Mutation: overwrite the existing value instead of reporting -- the `differs` tuple
+    disappears and a `gh variable set TERRAMATE_VERSION` appears.
+    """
+    fake = make_gh({VARIABLE_LIST: [{"name": "TERRAMATE_VERSION", "value": "0.16.0"}]})
+    monkeypatch.setattr(onboard, "_run", fake)
+    onboard._reconcile_variables(ctx(engine=engine_with_versions(tmp_path)))
+    assert ["gh", "variable", "set", "TERRAMATE_VERSION", "--body", "9.9.9"] not in fake.calls
+    assert onboard.REPORT == [
+        ("set", "SHIPMATE_APP_ID", "1"),
+        ("set", "SHIPMATE_APPROVERS_TEAM", "ops"),
+        ("differs", "TERRAMATE_VERSION", "repository has 0.16.0, VERSIONS is 9.9.9"),
+        ("set", "TOFU_VERSION", "8.8.8"),
+    ]
+    assert onboard._exit_code() == 2
+
+
+def test_variable_names_are_matched_uppercased(monkeypatch, tmp_path):
+    """The API returns variable names uppercased whatever case they were created in, so
+    a case-sensitive lookup would set a variable that is already there.
+
+    Mutation: drop the `.upper()` in `_variables`.
+    """
+    fake = make_gh({VARIABLE_LIST: [{"name": "tofu_version", "value": "8.8.8"}]})
+    monkeypatch.setattr(onboard, "_run", fake)
+    onboard._reconcile_variables(ctx(engine=engine_with_versions(tmp_path)))
+    assert fake.calls == [
+        ["gh", "variable", "list", "--json", "name,value"],
+        ["gh", "variable", "set", "SHIPMATE_APP_ID", "--body", "1"],
+        ["gh", "variable", "set", "SHIPMATE_APPROVERS_TEAM", "--body", "ops"],
+        ["gh", "variable", "set", "TERRAMATE_VERSION", "--body", "9.9.9"],
+    ]
+    assert ("ok", "TOFU_VERSION", "8.8.8") in onboard.REPORT
+
+
+def test_shared_environments_are_written_as_one_sorted_variable(monkeypatch, tmp_path):
+    """SHIPMATE_SHARED_ENVS is a set written as a list, so the value written is sorted
+    and a repository whose variable lists the same names in another order is not drift.
+
+    Mutations: drop the SHIPMATE_SHARED_ENVS entry from `_wanted_variables`, which
+    reddens the first case; drop the `_matches` set comparison, which turns the second
+    into a `differs` and a rewrite of a variable that already says what it should.
+    """
+    shared = {"dev-us", "dev-eu"}
+    fake = make_gh({VARIABLE_LIST: []})
+    monkeypatch.setattr(onboard, "_run", fake)
+    onboard._reconcile_variables(ctx(engine=engine_with_versions(tmp_path), shared=shared))
+    assert fake.calls[-1] == [
+        "gh",
+        "variable",
+        "set",
+        "SHIPMATE_SHARED_ENVS",
+        "--body",
+        "dev-eu,dev-us",
+    ]
+
+    onboard.REPORT.clear()
+    fake = make_gh({VARIABLE_LIST: [{"name": "SHIPMATE_SHARED_ENVS", "value": "dev-us, dev-eu"}]})
+    monkeypatch.setattr(onboard, "_run", fake)
+    onboard._reconcile_variables(ctx(engine=engine_with_versions(tmp_path), shared=shared))
+    assert ("ok", "SHIPMATE_SHARED_ENVS", "dev-eu,dev-us") in onboard.REPORT
+    assert onboard._exit_code() == 0
+
+
+def test_missing_gate_rule_creates_the_ruleset(monkeypatch):
+    """A repository with no gate requirement gets exactly the gate rule, pinned to the
+    App id, with `strict` on -- and nothing else, because a second ruleset carrying a
+    `pull_request` rule would conflict with one the repository may already have.
+
+    The POST body is compared whole against a hand-written dict.
+
+    Mutation: drop `strict_required_status_checks_policy` from the body.
+    """
+    fake = make_gh({RULES: []})
+    monkeypatch.setattr(onboard, "_run", fake)
+    onboard._reconcile_ruleset(ctx(app_id="4326562"))
+    post = ["gh", "api", "-X", "POST", "repos/o/r/rulesets", "--input", "-"]
+    assert fake.calls == [["gh", "api", RULES], post]
+    assert body_of(fake, post) == {
+        "name": "shipmate-gate",
+        "target": "branch",
+        "enforcement": "active",
+        "conditions": {"ref_name": {"include": ["~DEFAULT_BRANCH"], "exclude": []}},
+        "rules": [
+            {
+                "type": "required_status_checks",
+                "parameters": {
+                    "required_status_checks": [
+                        {"context": "shipmate / gate", "integration_id": 4326562}
+                    ],
+                    "strict_required_status_checks_policy": True,
+                },
+            }
+        ],
+    }
+
+
+def _rules(integration_id=1, strict=True):
+    """The effective branch rules of a repository whose gate is already required."""
+    return [
+        {
+            "type": "required_status_checks",
+            "parameters": {
+                "required_status_checks": [
+                    {"context": "other / check", "integration_id": 15368},
+                    {"context": "shipmate / gate", "integration_id": integration_id},
+                ],
+                "strict_required_status_checks_policy": strict,
+            },
+        }
+    ]
+
+
+def test_gate_under_another_integration_id_is_reported_not_edited(monkeypatch):
+    """A gate pinned to another identity is satisfied by a status that identity writes,
+    so it is real drift -- but editing a ruleset this script did not create is a policy
+    change it must not make silently.
+
+    Mutation: make the wrong-`integration_id` branch fall through to the POST; the call
+    list gains `repos/o/r/rulesets` and the report loses its `differs` line.
+    """
+    fake = make_gh({RULES: _rules(integration_id=15368)})
+    monkeypatch.setattr(onboard, "_run", fake)
+    onboard._reconcile_ruleset(ctx(app_id="4326562"))
+    assert fake.calls == [["gh", "api", RULES]]
+    assert onboard.REPORT == [
+        (
+            "differs",
+            "gate ruleset",
+            "`shipmate / gate` is required under integration_id 15368, not the shipmate "
+            "App (4326562) — a status from another identity satisfies it. Change it by hand.",
+        )
+    ]
+    assert onboard._exit_code() == 2
+
+
+def test_conforming_gate_is_ok(monkeypatch):
+    """A second run over a configured repository reads the rules and writes nothing.
+
+    Mutation: compare `integration_id` against `ctx["app_id"]` without `int(...)`, so a
+    conforming repository is reported as differing on every run.
+    """
+    fake = make_gh({RULES: _rules()})
+    monkeypatch.setattr(onboard, "_run", fake)
+    onboard._reconcile_ruleset(ctx())
+    assert fake.calls == [["gh", "api", RULES]]
+    assert onboard.REPORT == [("ok", "gate ruleset", "")]
+    assert onboard._exit_code() == 0
+
+
+def test_a_gate_without_strict_is_reported(monkeypatch):
+    """Without `strict`, GitHub never re-tests the merge result and a plan can go stale
+    against the base before merge.
+
+    Mutation: drop the `strict_required_status_checks_policy` arm, so the repository is
+    reported `ok` and the run exits 0.
+    """
+    fake = make_gh({RULES: _rules(strict=False)})
+    monkeypatch.setattr(onboard, "_run", fake)
+    onboard._reconcile_ruleset(ctx())
+    assert fake.calls == [["gh", "api", RULES]]
+    assert onboard.REPORT == [
+        (
+            "differs",
+            "gate ruleset",
+            "it does not require branches to be up to date (strict), so plans can go "
+            "stale against the base before merge. Change it by hand.",
+        )
+    ]
+
+
+def test_ruleset_post_forbidden_is_reported_with_the_plan_sentence(monkeypatch):
+    """Rulesets need a paid plan or a public repository, and a private Free repository
+    answers the POST with 403. Every other setting is reconciled by then, so it is a
+    report line, not a crash the operator has to re-run past.
+
+    Mutation: drop the `except SystemExit` arm, so the 403 propagates and the run dies
+    with no report line at all.
+    """
+
+    def fake(args, secrets=(), stdin=None):
+        if "-X" in args:
+            raise SystemExit("command failed (1): gh api\ngh: Forbidden (HTTP 403)")
+        return json.dumps([])
+
+    monkeypatch.setattr(onboard, "_run", fake)
+    onboard._reconcile_ruleset(ctx())
+    assert onboard.REPORT == [
+        (
+            "differs",
+            "gate ruleset",
+            "rulesets need GitHub Pro, Team, Enterprise, or a public repository "
+            "(docs/branch-protection.md §Reproducible ruleset). Configure the gate by "
+            "hand there.",
+        )
+    ]
+    assert onboard._exit_code() == 2
