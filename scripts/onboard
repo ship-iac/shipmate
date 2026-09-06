@@ -113,17 +113,20 @@ def _gh_json(path):
 
 
 def _gh_json_or_none(path):
-    """Parsed `gh api <path>`, or None when `gh` exits nonzero.
+    """Parsed `gh api <path>`, or None when `gh` answers 404.
 
-    Ceiling: *every* nonzero exit reads as absent, not only a 404, so an expired
-    token or a dropped network makes the caller attempt a create instead of
-    reporting the read failure. That is bounded -- every create it can trigger is
-    additive, and fails loudly on the write -- and it keeps one exit path instead
-    of parsing gh's stderr for `HTTP 404`.
+    Only a 404 is absence. Every other failure -- an expired token, a dropped
+    network, a 403 for a permission the token lacks -- re-raises, because a
+    caller reading "absent" from one of those does not merely skip a create: a
+    plan environment whose read failed takes the create branch and is PUT with a
+    null `deployment_branch_policy`, silently removing a policy the consumer set.
+    `_run` puts gh's scrubbed stderr in the message, so the status is there to match.
     """
     try:
         return _gh_json(path)
-    except SystemExit:
+    except SystemExit as e:
+        if "HTTP 404" not in str(e):
+            raise
         return None
 
 
@@ -252,33 +255,59 @@ _APP_KEY_NAME = "SHIPMATE_APP_PRIVATE_KEY"
 _APPLY_BODY = {
     "deployment_branch_policy": {"protected_branches": False, "custom_branch_policies": True}
 }
-#: A plan environment must admit every branch, or the autoplan stops on a pull request.
+#: A plan environment takes no branch policy: plan cells evaluate at the pull request's
+#: base ref, so a policy blocks every cell whose pull request targets a branch it does
+#: not name (docs/hardening.md #17).
 _PLAN_BODY = {"deployment_branch_policy": None}
-
-_PLAN_POLICY_DETAIL = (
-    "a plan environment carrying a deployment branch policy stops the autoplan on the "
-    "branches it excludes. Removing a protection rule is the consumer's call, not this "
-    "script's, so it is reported and left alone."
-)
 
 
 def _ensure_policy(ctx, name):
-    """POST the default branch into `name`'s custom branch policies unless it is there.
+    """Scope `name` to the default branch alone: POST it when missing, report any other.
 
-    Additive only: a policy naming some other branch is reported by `doctor`, and
-    deleting one here would remove a scope the consumer chose.
+    Additive only. Extra names are drift -- `doctor` warns that a workflow on one of
+    them can still claim what the environment scopes -- but removing a policy entry the
+    consumer added is not this script's call, so they are named, not deleted.
     """
     path = f"repos/{ctx['repo']}/environments/{name}/deployment-branch-policies"
     policies = _gh_json_or_none(path)
     branch = ctx["default_branch"]
-    if branch in {p.get("name") for p in (policies or {}).get("branch_policies", [])}:
-        report("ok", f"{name} branch policy", branch)
-        return
-    write(
-        "create",
-        f"{name} branch policy",
-        ["gh", "api", "-X", "POST", path, "-f", f"name={branch}"],
-        detail=branch,
+    names = {p.get("name") for p in (policies or {}).get("branch_policies", [])}
+    subject = f"{name} branch policy"
+    if branch in names:
+        report("ok", subject, branch)
+    else:
+        write(
+            "create",
+            subject,
+            ["gh", "api", "-X", "POST", path, "-f", f"name={branch}"],
+            detail=branch,
+        )
+    extra = sorted(n for n in names if n and n != branch)
+    if extra:
+        report(
+            "differs",
+            subject,
+            f"also permits {', '.join(extra)} — a workflow on those branches can still "
+            f"claim what `{name}` scopes. Remove them by hand if that is not intended.",
+        )
+
+
+def _plan_drift(env):
+    """What disqualifies `env` as a plan environment, as one sentence, or ""."""
+    reasons = []
+    if env.get("deployment_branch_policy"):
+        reasons.append(
+            "it carries a deployment branch policy, which blocks every plan cell whose "
+            "pull request targets a branch the policy does not name"
+        )
+    rules = sorted(r.get("type") or "?" for r in env.get("protection_rules") or [])
+    if rules:
+        reasons.append(f"it carries protection rules ({', '.join(rules)}), which stall plan cells")
+    if not reasons:
+        return ""
+    return (
+        f"{' and '.join(reasons)}. Removing a protection a consumer set is not this "
+        "script's call, so it is reported and left alone."
     )
 
 
@@ -291,10 +320,8 @@ def _reconcile_env(ctx, name, role):
     if env is None:
         write("create", name, put, stdin=json.dumps(body))
     elif role == "plan":
-        if env.get("deployment_branch_policy"):
-            report("differs", name, _PLAN_POLICY_DETAIL)
-            return
-        report("ok", name)
+        drift = _plan_drift(env)
+        report("differs" if drift else "ok", name, drift)
     elif (env.get("deployment_branch_policy") or {}).get("custom_branch_policies"):
         report("ok", name)
     else:
