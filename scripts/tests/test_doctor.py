@@ -2547,7 +2547,7 @@ def test_a_shim_whose_job_is_named_something_else_is_reported(monkeypatch):
     """Mutation: `_shim_job_name_finding` returning [] unconditionally. This test passes
     vacuously if the probe reports nothing for everything, so it is paired with the silent
     case above."""
-    text = _SHIPMATE_WF.replace("    name: shipmate\n", "    name: terraform\n")
+    text = _SHIPMATE_WF.replace("    name: shipmate\n", "    name: terraform\n", 1)
     responses = _fork_responses({"shipmate.yml": text})
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
     assert doctor._shim_job_name_warnings(_ctx()) == [(doctor.WARNING, _WRONG_JOB_NAME_TEXT)]
@@ -2557,7 +2557,9 @@ def test_a_shim_with_no_job_name_takes_the_job_id_and_is_silent(monkeypatch):
     """GitHub uses the job id as the display name when `name:` is absent, so
     `jobs: { shipmate: { uses: ... } }` produces the same check names. Mutation: read the
     job id as unnamed and this documented-equivalent shape is reported."""
-    text = _SHIPMATE_WF.replace("  plan:\n", "  shipmate:\n").replace("    name: shipmate\n", "")
+    text = _SHIPMATE_WF.replace("  plan:\n", "  shipmate:\n", 1).replace(
+        "    name: shipmate\n", "", 1
+    )
     responses = _fork_responses({"shipmate.yml": text})
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
     assert doctor._shim_job_name_warnings(_ctx()) == []
@@ -2572,8 +2574,8 @@ def test_a_job_name_beats_a_job_id_that_is_the_contract_name(monkeypatch):
     Mutation: `job_name = <id> if <id> == _SHIM_JOB_NAME else (named[0] if named else <id>)`,
     which every other shape test in this file passes.
     """
-    text = _SHIPMATE_WF.replace("  plan:\n", "  shipmate:\n").replace(
-        "    name: shipmate\n", "    name: terraform\n"
+    text = _SHIPMATE_WF.replace("  plan:\n", "  shipmate:\n", 1).replace(
+        "    name: shipmate\n", "    name: terraform\n", 1
     )
     responses = _fork_responses({"shipmate.yml": text})
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
@@ -2583,7 +2585,7 @@ def test_a_job_name_beats_a_job_id_that_is_the_contract_name(monkeypatch):
 def test_a_job_id_that_is_not_the_contract_name_is_reported(monkeypatch):
     """The other half of the job-id fallback: with no `name:` the id IS the display name, so
     an id that is not `shipmate` produces the wrong check names."""
-    text = _SHIPMATE_WF.replace("    name: shipmate\n", "")
+    text = _SHIPMATE_WF.replace("    name: shipmate\n", "", 1)
     responses = _fork_responses({"shipmate.yml": text})
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
     assert doctor._shim_job_name_warnings(_ctx()) == [(doctor.WARNING, _WRONG_JOB_NAME_TEXT)]
@@ -2592,10 +2594,10 @@ def test_a_job_id_that_is_not_the_contract_name_is_reported(monkeypatch):
 def test_a_name_below_the_uses_line_is_still_the_jobs_name(monkeypatch):
     """The whole job block is read, in both directions: the documented shim writes `name:`
     above its `uses:` line, and either side of it is the same job's name. Mutation: end the
-    region at the `uses:` line's own enclosing key."""
-    text = _SHIPMATE_WF.replace(
-        f"    name: shipmate\n    uses: {_ENGINE_REPO}/.github/workflows/plan.yml@{_SHA}\n",
-        f"    uses: {_ENGINE_REPO}/.github/workflows/plan.yml@{_SHA}\n    name: shipmate\n",
+    region at the `uses:` line rather than at the end of the job block."""
+    uses_line = f"    uses: {_ENGINE_REPO}/.github/workflows/plan.yml@{_SHA}\n"
+    text = _SHIPMATE_WF.replace("    name: shipmate\n", "", 1).replace(
+        uses_line, uses_line + "    name: shipmate\n", 1
     )
     responses = _fork_responses({"shipmate.yml": text})
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
@@ -2605,7 +2607,7 @@ def test_a_name_below_the_uses_line_is_still_the_jobs_name(monkeypatch):
 def test_a_name_deeper_in_the_block_is_not_the_jobs_name(monkeypatch):
     """Only a direct child of the job is its name. A `name:` under `with:` is an input, and
     taking it would silence the finding for a job called something else entirely."""
-    text = _SHIPMATE_WF.replace("    name: shipmate\n", "").replace(
+    text = _SHIPMATE_WF.replace("    name: shipmate\n", "", 1).replace(
         '      state_suffix: ""\n', '      state_suffix: ""\n      name: shipmate\n'
     )
     responses = _fork_responses({"shipmate.yml": text})
@@ -2616,7 +2618,7 @@ def test_a_name_deeper_in_the_block_is_not_the_jobs_name(monkeypatch):
 def test_a_quoted_job_name_is_silent(monkeypatch):
     """Formatters quote scalars, so the value carries one layer of YAML quoting the comparison
     must strip. Mutation: drop the `.strip("\\"'")` on the matched value."""
-    text = _SHIPMATE_WF.replace("    name: shipmate\n", '    name: "shipmate"\n')
+    text = _SHIPMATE_WF.replace("    name: shipmate\n", '    name: "shipmate"\n', 1)
     responses = _fork_responses({"shipmate.yml": text})
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
     assert doctor._shim_job_name_warnings(_ctx()) == []
@@ -2636,8 +2638,8 @@ def test_a_trailing_comment_after_the_job_name_is_silent(monkeypatch):
 
 def test_another_workflow_file_with_a_differently_named_job_is_not_reported(monkeypatch):
     """Exact name, like the fork-trigger exemption's: a `custom-plan.yml` is not the file whose
-    cells produce the linked checks. Mutation: drop the `if name != "plan.yml"` filter."""
-    text = _SHIPMATE_WF.replace("    name: shipmate\n", "    name: terraform\n")
+    cells produce the linked checks. Mutation: drop the `if name != "shipmate.yml"` filter."""
+    text = _SHIPMATE_WF.replace("    name: shipmate\n", "    name: terraform\n", 1)
     responses = _fork_responses({"custom-plan.yml": text})
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
     assert doctor._shim_job_name_warnings(_ctx()) == []
@@ -2654,7 +2656,7 @@ def test_a_workflow_file_that_calls_no_engine_plan_workflow_is_silent(monkeypatc
 def test_an_unparseable_shim_reports_nothing_and_does_not_crash(monkeypatch):
     """doctor reads consumer text with regexes precisely because a consumer file may not
     parse. A YAML parser raises here; this probe must return the finding it can see."""
-    text = _SHIPMATE_WF.replace("  plan:\n", "  plan:\n    on: [ unbalanced\n")
+    text = _SHIPMATE_WF.replace("  plan:\n", "  plan:\n    on: [ unbalanced\n", 1)
     responses = _fork_responses({"shipmate.yml": text})
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
     assert doctor._shim_job_name_warnings(_ctx()) == []
@@ -2691,7 +2693,7 @@ def test_shim_job_name_probe_is_registered(monkeypatch):
         f"repos/{_REPO}/environments?per_page=100": _environments("dev-eu-plan", "dev-eu-apply"),
         **_quiet_new_probes(),
         f"{_WF_DIR}/shipmate.yml{_REF}": _wf_file(
-            _SHIPMATE_WF.replace("    name: shipmate\n", "    name: terraform\n")
+            _SHIPMATE_WF.replace("    name: shipmate\n", "    name: terraform\n", 1)
         ),
     }
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])

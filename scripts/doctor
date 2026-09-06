@@ -1791,13 +1791,14 @@ def _dispatch_wiring_finding(text, name):
 
     Five findings rather than one, because the remedies differ and so do the
     refusals. The first four end in a dispatch-time HTTP 422 with no run
-    created, and they are told apart by the message GitHub answers with
-    (`Workflow does not have 'workflow_dispatch' trigger`, `Unexpected inputs
-    provided`, `Required input not provided`) — the set `actions/dispatch`
-    recognises. A wrong `options:` list is refused the same way, one verb at a
-    time, and offers a verb no job's `if:` selects when it carries an extra. The
-    last is not a refusal at all: the file accepts the dispatch and then runs
-    nothing that plans.
+    created, and they are told apart by the message GitHub answers with:
+    `Workflow does not have 'workflow_dispatch' trigger` and `Unexpected inputs
+    provided` are the pair `actions/dispatch` recognises, while `Required input
+    not provided` is GitHub's answer to the requiredness finding and nothing
+    downstream reads it. A wrong `options:` list is refused the same way, one
+    verb at a time, and offers a verb no job's `if:` selects when it carries an
+    extra. The last is not a refusal at all: the file accepts the dispatch and
+    then runs nothing that plans.
 
     The four input findings are examined only where the trigger itself is there: without it
     nothing is dispatched at all, and three further remedies below that one bury it.
@@ -1846,8 +1847,8 @@ def _dispatch_wiring_finding(text, name):
 #: The whole `if:` of each job of `shipmate.yml`, keyed by the engine reusable workflow it
 #: calls. The consumer owns these seven expressions and `docs/getting-started.md` publishes
 #: them; a wrong one routes a verb nowhere and its dispatched run completes with every job
-#: skipped, which reads as success everywhere. Compared whole, normalised only for the
-#: optional `${{ }}` wrapper and whitespace: a subset check would bless
+#: skipped, which reads as success everywhere. Compared whole, normalised only for an
+#: enclosing quote pair, the optional `${{ }}` wrapper and whitespace: a subset check would bless
 #: `github.event_name == 'workflow_dispatch'` alone, which sends every verb to every job.
 ROUTING_IFS = {
     "plan.yml": (
