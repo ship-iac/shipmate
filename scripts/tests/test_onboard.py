@@ -833,7 +833,8 @@ def test_a_bare_env_alongside_an_apply_env_is_reported_as_ambiguous(monkeypatch)
             "dev-eu",
             "`dev-eu` and `dev-eu-apply` all exist; which naming the engine binds depends "
             "on SHIPMATE_SHARED_ENVS, so neither was touched. Delete the naming you are "
-            "not using, or list `dev-eu` in --shared.",
+            "not using: the bare `dev-eu` is the one SHIPMATE_SHARED_ENVS names, the pair "
+            "is the one it does not.",
         )
     ]
 
@@ -1778,8 +1779,9 @@ def test_a_bare_env_alongside_only_a_plan_env_is_reported_as_ambiguous(monkeypat
     run over a configured repository changes nothing" and disagreeing with doctor about
     the same repository.
 
-    Mutation: require `<env>-apply` as well (`if not all(halves)`), which drops the report
-    and creates `dev-eu-apply`.
+    Mutation: `if not halves:` to `if len(halves) != 2:`, which requires both halves,
+    drops the report and creates `dev-eu-apply`. Not `if not all(halves)`: `all([])` is
+    True, so that edit changes nothing here.
     """
     fake = make_gh(
         {
@@ -1808,7 +1810,8 @@ def test_a_bare_env_alongside_only_a_plan_env_is_reported_as_ambiguous(monkeypat
             "dev-eu",
             "`dev-eu` and `dev-eu-plan` all exist; which naming the engine binds depends "
             "on SHIPMATE_SHARED_ENVS, so neither was touched. Delete the naming you are "
-            "not using, or list `dev-eu` in --shared.",
+            "not using: the bare `dev-eu` is the one SHIPMATE_SHARED_ENVS names, the pair "
+            "is the one it does not.",
         )
     ]
     assert context["unresolved"] == {"dev-eu"}
@@ -1846,7 +1849,8 @@ def test_shared_mode_reports_the_ambiguity_too(monkeypatch):
             "dev-eu",
             "`dev-eu` and `dev-eu-plan` and `dev-eu-apply` all exist; which naming the "
             "engine binds depends on SHIPMATE_SHARED_ENVS, so neither was touched. Delete "
-            "the naming you are not using, or list `dev-eu` in --shared.",
+            "the naming you are not using: the bare `dev-eu` is the one "
+            "SHIPMATE_SHARED_ENVS names, the pair is the one it does not.",
         )
     ]
 
@@ -1857,10 +1861,10 @@ def test_a_shared_environment_carrying_protection_rules_is_reported(monkeypatch)
     `doctor` warns on it; `_env_names` collapses the env to `role == "apply"`, which
     would otherwise report a conforming branch policy as plain `ok`.
 
-    Mutation: drop the `_report_shared_approval` call from `_reconcile_env`, or drop its
-    `name in ctx["shared"]` test -- the first loses the `differs` line, the second adds
-    the same line to every split apply environment, which is the reviewer gate working
-    as designed.
+    Mutation: drop the `_report_shared_approval` call from `_reconcile_env`, which loses
+    the `differs` line. Dropping its `name in ctx["shared"]` test does nothing here --
+    both suffixed names are absent in this fixture -- and reddens
+    `test_a_split_apply_environments_reviewers_are_not_reported` instead.
     """
     fake = make_gh(
         {

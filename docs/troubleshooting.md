@@ -282,14 +282,24 @@ mandate. Each one names what to do.
 | `<env>-plan` — it carries a deployment branch policy | a plan environment must have none: plan cells evaluate at the pull request's base ref, so a policy blocks every cell whose pull request targets a branch it does not name ([`hardening.md`](hardening.md) #8). Remove the policy. |
 | `<env>-plan` — it carries protection rules | required reviewers or a wait timer on a plan environment stall every plan cell and the nightly drift run. Remove them ([`hardening.md`](hardening.md) #6). |
 | `<env>` — it carries protection rules and is shared | a shared bare `<env>` is bound by the plan cells and the nightly drift run as well as the applies, and GitHub offers no per-job filter, so a protection rule there stalls all three. To gate applies alone, split it into `<env>-plan` / `<env>-apply` and drop it from `SHIPMATE_SHARED_ENVS`. |
-| `<env>` — that name and `<env>-plan` and/or `<env>-apply` all exist | the repository holds both namings for one logical environment, and which the engine binds depends on `SHIPMATE_SHARED_ENVS`. Neither is touched — the same state `shipmate doctor` calls ambiguous. Delete the naming you are not using, or pass `--shared <env>` to keep the bare one. |
-| `<VARIABLE>` — repository has one value, the flag or `VERSIONS` has another | the variable exists with another value. A pinned older `TERRAMATE_VERSION` or `TOFU_VERSION` is a deliberate choice, so it is never overwritten. Change it with `gh variable set` if it was not. `SHIPMATE_APP_ID` is the exception: a disagreement there is a refusal before the first write, because `--app-id` also pins the gate ruleset's `integration_id` and selects whose key is stored, and a ruleset pinned to an App the workflows do not use blocks the default branch. |
+| `<env>` — that name and `<env>-plan` and/or `<env>-apply` all exist | the repository holds both namings for one logical environment, and which the engine binds depends on `SHIPMATE_SHARED_ENVS`. Neither is touched — the same state `shipmate doctor` calls ambiguous. Delete the naming you are not using: the bare `<env>` is the one `SHIPMATE_SHARED_ENVS` names, the `<env>-plan` / `<env>-apply` pair is the one it does not. |
+| `<VARIABLE>` — repository has one value, the flag or `VERSIONS` has another | the variable exists with another value. A pinned older `TERRAMATE_VERSION` or `TOFU_VERSION` is a deliberate choice, so it is never overwritten. Change it with `gh variable set` if it was not. `SHIPMATE_APP_ID` never reaches this table — see the refusal below. |
 | `gate ruleset` — the rulesets POST was rejected (HTTP 422) | most likely the name is taken by a ruleset whose enforcement is `evaluate` or `disabled`, which the effective-rules read cannot see; 422 has other causes, so read `gh api repos/OWNER/REPO/rulesets` first. Set it to active, or delete it and run again. |
 | `gate ruleset` — rulesets need GitHub Pro, Team, Enterprise, or a public repository | the plan this repository is on has no rulesets. Configure the gate by hand from [`branch-protection.md`](branch-protection.md). |
 | `gate ruleset` — `shipmate / gate` is required under another `integration_id` | the gate is required, but not pinned to the shipmate App, so a status of that name from any other identity satisfies it. Set `integration_id` to `SHIPMATE_APP_ID`. |
 | `gate ruleset` — it does not require branches to be up to date (strict) | plans can go stale against the base before merge. Turn on "Require branches to be up to date before merging". |
 | `<file>.yml` — the published fence, never pinned | the file holds the `@<engine-sha>` placeholder from the docs rather than a pin, which `dev/repin_consumer.py` cannot move. Delete the file and run the script again. |
 | `<file>.yml` — local edits, not overwritten | the shim differs from what this engine release publishes by more than its pin. Diff it against the fence on the page that publishes it and reconcile by hand, or delete it and run again to take the published one. |
+
+One disagreement is refused rather than reported. When the `SHIPMATE_APP_ID`
+repository variable differs from `--app-id`, the run stops before its first
+write and exits 1 — no `differs` line, and nothing else runs. `--app-id` does
+not only set that variable: it pins the gate ruleset's `integration_id` and
+selects whose private key is stored on `shipmate-engine`. Reconciling the two
+separately would require a `shipmate / gate` status the workflows — which mint
+their token from the variable — can never post, and the default branch would
+stay blocked until an admin deleted the ruleset. Re-run with the variable's
+value, or change the variable first.
 
 ## Common failures
 

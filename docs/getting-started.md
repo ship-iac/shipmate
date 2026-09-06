@@ -86,7 +86,11 @@ run over a configured repository changes nothing. What it will not touch — a
 variable holding another value, an environment carrying a protection it did not
 set — it reports as a `differs` line and exits 2
 ([`troubleshooting.md`](troubleshooting.md) §What `scripts/onboard` reports).
-`--dry-run` reports every change and performs no write.
+One disagreement is not reported but refused: a `SHIPMATE_APP_ID` repository
+variable that differs from `--app-id` stops the run before its first write, with
+exit 1 and no `differs` line, because `--app-id` also pins the gate ruleset to an
+App and a ruleset pinned to one the workflows do not use blocks the default
+branch. `--dry-run` reports every change and performs no write.
 
 It then prints what it cannot know, because those values are yours: the cloud
 role and region, the env identity your layout injects, `SHIPMATE_PLAN_PASSPHRASE`,
