@@ -43,7 +43,7 @@ outputs:
     description: PR head SHA; empty on the plan route, whose dispatched run resolves the head from the pull request itself.
     value: ${{ steps.authz.outputs.head_sha }}
   verb:
-    description: The parsed verb, forwarded to actions/dispatch — plan, apply or unlock, one consumer workflow file each. The `doctor` and `help` routes are answered in place and never reach a dispatch.
+    description: The parsed verb, forwarded to actions/dispatch — plan, apply or unlock, which select a job in the consumer's one shipmate.yml. The `doctor` and `help` routes are answered in place and never reach a dispatch.
     value: ${{ steps.parse.outputs.route }}
 runs:
   using: composite

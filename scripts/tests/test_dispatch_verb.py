@@ -196,10 +196,11 @@ _DISPATCH_PATH = "/actions/workflows/"
 
 
 def test_an_empty_verb_dispatches_nothing_and_says_so_on_the_pull_request():
-    """No verb, no dispatch, and the refusal names what the caller must wire: omitting the
-    `with:` line would otherwise dispatch a body with no verb in it, which every job's `if:`
-    rejects — a run that starts, does nothing, and reports success. A consumer wired that way is
-    the shape this path exists for, so the commenter is told rather than left with a rocket
+    """No verb, no dispatch, and the refusal names what the caller must wire. Without it the
+    body carries an empty `verb`, which GitHub reads as not provided for a `required: true`
+    input and answers HTTP 422 — a raw API error on a run nobody is watching, where the wiring
+    error names the missing `with:` line on the pull request instead. A consumer wired that way
+    is the shape this path exists for, so the commenter is told rather than left with a rocket
     reaction and silence.
 
     Mutations: delete the refusal branch *and* give the `case` an `""` arm -- deleting it
@@ -425,7 +426,8 @@ def test_a_dispatch_against_a_repo_without_shipmate_yml_prints_the_layout_messag
 
     Mutations: scope the condition to one verb again and the other two stop being explained;
     drop any one of the three message-text halves and its shape stops being explained; point
-    the remedy at `docs/releasing.md` and the remedy assertion reddens.
+    the remedy at `docs/releasing.md` and the remedy assertion reddens; drop the `printf` that
+    echoes `$out` and the hint prints without the answer it explains.
     """
     if not usable_bash():
         pytest.skip("bash not available on this platform")
@@ -434,6 +436,13 @@ def test_a_dispatch_against_a_repo_without_shipmate_yml_prints_the_layout_messag
         output = result.stdout + result.stderr
         assert result.returncode != 0, f"a {verb} failure must exit non-zero: {output}"
         assert "HTTP 4" in output, f"raw gh output missing: {output}"
+        # The hint explains the answer; it does not replace it. Pinned per shape, because the
+        # remaining two carry no distinctive sentence of their own -- and against stdout alone,
+        # because the refusal comment's own gh call leaks the same text on stderr.
+        if stub is _NO_TRIGGER_STUB:
+            assert "Workflow does not have" in result.stdout, (
+                f"the API's own answer must still print beside the hint: {output}"
+            )
         assert _LAYOUT_SKEW in output, f"layout message missing: {output}"
         assert _LAYOUT_REMEDY in output, f"remedy must name the upgrade guide: {output}"
 

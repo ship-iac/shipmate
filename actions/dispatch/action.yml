@@ -78,14 +78,13 @@ runs:
         # the input arrives with the empty string. Refuse rather than default: a default runs one
         # verb's job with another verb's inputs.
         if [ -z "${VERB:-}" ]; then
-          echo "::error::The calling workflow did not pass a verb to shipmate/actions/dispatch, so there is no workflow to dispatch. Wire that step's verb input to the verb output of the comment-ops step above it (docs/getting-started.md)."
+          echo "::error::The calling workflow did not pass a verb to shipmate/actions/dispatch, so nothing selects a job in shipmate.yml. Wire that step's verb input to the verb output of the comment-ops step above it (docs/getting-started.md)."
           say_no_run_started
           exit 1
         fi
-        # The verb no longer picks a file — it picks a job inside one, through the `verb` key
-        # `scripts/dispatch-body` puts in the body. The case stays because an unknown verb must
-        # still be refused here: dispatched with a bogus verb, `shipmate.yml` accepts the call
-        # (the input is declared) and completes with every job skipped, which reads as success.
+        # The verb picks a job, not a file. The case survives to refuse a verb `shipmate.yml`
+        # would accept — the input is declared — and then skip every job over, reading as a
+        # successful run that did nothing.
         case "$VERB" in
           plan|apply|unlock) WORKFLOW=shipmate.yml ;;
           *) echo "::error::verb must be plan, apply or unlock (got: $VERB)"; say_no_run_started; exit 1 ;;
@@ -96,12 +95,9 @@ runs:
         out=$(gh api -X POST "repos/$REPO/actions/workflows/$WORKFLOW/dispatches" --input body.json 2>&1) || rc=$?
         printf '%s\n' "$out"
         if [ "$rc" -ne 0 ]; then
-          # Measured for a consumer predating a wrapper: a workflow file that does not exist
-          # answers 404, one with no such trigger answers `Workflow does not have
-          # 'workflow_dispatch' trigger (HTTP 422)`, and one whose trigger declares fewer
-          # inputs than the body names answers `Unexpected inputs provided`. A 403, a rate
-          # limit, or a 422 about a different input is another problem, and explaining it as
-          # skew sends the operator to edit workflows that are fine.
+          # Measured, in order: an absent file answers 404, one with no such trigger `Workflow
+          # does not have 'workflow_dispatch' trigger (HTTP 422)`, one declaring fewer inputs
+          # than the body names `Unexpected inputs provided`. Anything else is not skew.
           if [[ "$out" == *"HTTP 404"* || "$out" == *workflow_dispatch* || "$out" == *"Unexpected inputs provided"* ]]; then echo "::error::This repository has no .github/workflows/shipmate.yml, or it predates the single-file layout — it declares no workflow_dispatch trigger, or not the verb/environment/ref/pr_number inputs every dispatch sends. Add or update that file — docs/upgrading.md section <this release> has it; re-pinning cannot create it."; fi
           say_no_run_started
           exit "$rc"
