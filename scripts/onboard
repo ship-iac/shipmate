@@ -446,35 +446,50 @@ def _env_names(env, shared):
     return [(f"{env}-plan", "plan"), (f"{env}-apply", "apply")]
 
 
-def _bare_env_conflict(ctx, env):
-    """True when a bare `<env>` coexists with either half of the split naming.
+def _unused_naming(env, shared):
+    """The environment names for the naming this repository does *not* bind."""
+    if env in shared:
+        return [f"{env}-plan", f"{env}-apply"]
+    return [env]
 
-    Deliberately `doctor`'s own test, not a narrower one: reading it as ambiguous only
-    when `<env>-apply` is also there lets a repository holding `<env>` and `<env>-plan`
-    fall through, get its `<env>-apply` created here, and be refused by the next run --
-    over an environment this script itself wrote. Checked in shared mode too: which
-    naming the engine binds is SHIPMATE_SHARED_ENVS' answer, not this script's.
+
+def _naming_conflict(ctx, env):
+    """True when the naming this repository does not bind already exists for `env`.
+
+    Probed before the create, not only over what is already there: a check that fires
+    only once both namings exist still lets a repository holding one of them get the
+    other created here and be refused by the next run -- over environments this script
+    itself wrote, falsifying "a second run changes nothing" and leaving the pair
+    unreconcilable from then on. Unlike `doctor`, which cannot read
+    SHIPMATE_SHARED_ENVS, this script resolved it in `_resolve_shared`, so which naming
+    goes unused is known rather than guessed.
     """
     base = f"repos/{ctx['repo']}/environments/"
-    if _gh_json_or_none(f"{base}{env}") is None:
+    unused = [n for n in _unused_naming(env, ctx["shared"]) if _gh_json_or_none(f"{base}{n}")]
+    if not unused:
         return False
-    halves = [n for n in (f"{env}-plan", f"{env}-apply") if _gh_json_or_none(f"{base}{n}")]
-    if not halves:
-        return False
+    names = " and ".join(f"`{n}`" for n in unused)
+    remedy = (
+        f"drop `{env}` from `--shared` and SHIPMATE_SHARED_ENVS"
+        if env in ctx["shared"]
+        else f"pass `--shared {env}` so the engine binds the bare `{env}` instead"
+    )
     report(
         "differs",
         env,
-        f"`{env}` and {' and '.join(f'`{n}`' for n in halves)} all exist; which naming the "
-        "engine binds depends on SHIPMATE_SHARED_ENVS, so neither was touched. Delete the "
-        f"naming you are not using: the bare `{env}` is the one SHIPMATE_SHARED_ENVS names, "
-        "the pair is the one it does not.",
+        f"the engine binds {' / '.join(f'`{n}`' for n, _role in _env_names(env, ctx['shared']))} "
+        f"for `{env}`, and {names} {'is' if len(unused) == 1 else 'are'} also present. Holding "
+        "both namings for one logical environment is the state `shipmate doctor` calls "
+        "ambiguous, "
+        "where which naming each path binds is undetermined, so nothing was created or changed "
+        f"for `{env}`. Delete {names}, or {remedy}.",
     )
     return True
 
 
 def _reconcile_envs(ctx):
     for env in ctx["envs"]:
-        if _bare_env_conflict(ctx, env):
+        if _naming_conflict(ctx, env):
             ctx["unresolved"].add(env)
             continue
         for name, role in _env_names(env, ctx["shared"]):
@@ -728,7 +743,7 @@ def _reconcile_shim(ctx, filename):
     elif "<engine-sha>" in current:
         report("differs", filename, "the published fence, never pinned: delete it and run again")
     else:
-        report("differs", filename, "local edits, not overwritten")
+        report("differs", filename, "differs beyond its pin, not overwritten")
 
 
 def _reconcile_shims(ctx):

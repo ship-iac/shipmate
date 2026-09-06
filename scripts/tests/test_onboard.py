@@ -639,8 +639,8 @@ def test_shared_mode_binds_one_bare_environment(monkeypatch):
     """An environment listed in `--shared` / SHIPMATE_SHARED_ENVS is one bare
     `<env>` on both paths; no `<env>-plan` is created for it.
 
-    The two suffixed reads are the ambiguity probe, which runs in shared mode too: they
-    404 here, so the bare environment is reconciled.
+    The two suffixed reads are the naming-conflict probe, which in shared mode looks for
+    the split pair: they 404 here, so the bare environment is reconciled.
 
     Mutation: make `_env_names` ignore `shared` and always return the split pair.
     """
@@ -659,7 +659,6 @@ def test_shared_mode_binds_one_bare_environment(monkeypatch):
     monkeypatch.setattr(onboard, "_run", fake)
     onboard._reconcile_envs(ctx(shared={"dev-eu"}))
     assert fake.calls == [
-        ["gh", "api", "repos/o/r/environments/dev-eu"],
         ["gh", "api", "repos/o/r/environments/dev-eu-plan"],
         ["gh", "api", "repos/o/r/environments/dev-eu-apply"],
         ["gh", "api", "repos/o/r/environments/dev-eu"],
@@ -802,6 +801,28 @@ def test_plan_environment_carrying_a_policy_is_reported_not_stripped(monkeypatch
     assert onboard._exit_code() == 2
 
 
+#: The one `differs` line `_naming_conflict` writes, per mode. Hand-written, not built
+#: from the module: a detail derived from the code it checks says whatever the code says.
+SPLIT_CONFLICT = (
+    "differs",
+    "dev-eu",
+    "the engine binds `dev-eu-plan` / `dev-eu-apply` for `dev-eu`, and `dev-eu` is also "
+    "present. Holding both namings for one logical environment is the state `shipmate doctor` "
+    "calls ambiguous, where which naming each path binds is undetermined, so nothing was "
+    "created or changed for `dev-eu`. Delete `dev-eu`, or pass `--shared dev-eu` so the "
+    "engine binds the bare `dev-eu` instead.",
+)
+SHARED_CONFLICT = (
+    "differs",
+    "dev-eu",
+    "the engine binds `dev-eu` for `dev-eu`, and `dev-eu-plan` and `dev-eu-apply` are "
+    "also present. Holding both namings for one logical environment is the state `shipmate "
+    "doctor` calls ambiguous, where which naming each path binds is undetermined, so "
+    "nothing was created or changed for `dev-eu`. Delete `dev-eu-plan` and "
+    "`dev-eu-apply`, or drop `dev-eu` from `--shared` and SHIPMATE_SHARED_ENVS.",
+)
+
+
 def test_a_bare_env_alongside_an_apply_env_is_reported_as_ambiguous(monkeypatch):
     """Which naming the engine binds depends on SHIPMATE_SHARED_ENVS, so a repository
     holding both is a state the script must not resolve by guessing: it reports and
@@ -812,6 +833,9 @@ def test_a_bare_env_alongside_an_apply_env_is_reported_as_ambiguous(monkeypatch)
     fake = make_gh(
         {
             "repos/o/r/environments/dev-eu": {"deployment_branch_policy": CUSTOM_POLICY},
+            # Routed though a conforming run never reads them: the split naming's own
+            # halves are what the mutation above would go on to reconcile, and without
+            # these it would redden on an unrouted read rather than on the property here.
             "repos/o/r/environments/dev-eu-plan": SystemExit("gh: Not Found (HTTP 404)"),
             "repos/o/r/environments/dev-eu-apply": {"deployment_branch_policy": CUSTOM_POLICY},
             "repos/o/r/environments/dev-eu-apply/deployment-branch-policies": {
@@ -822,21 +846,65 @@ def test_a_bare_env_alongside_an_apply_env_is_reported_as_ambiguous(monkeypatch)
     )
     monkeypatch.setattr(onboard, "_run", fake)
     onboard._reconcile_envs(ctx())
+    assert fake.calls == [["gh", "api", "repos/o/r/environments/dev-eu"]]
+    assert onboard.REPORT == [SPLIT_CONFLICT]
+
+
+def test_a_bare_env_alone_is_refused_before_the_split_pair_is_created(monkeypatch):
+    """The conflict is probed before the create, so this script never manufactures the
+    state its own next run refuses. A repository carrying a plain `dev-eu` from before it
+    adopted shipmate would otherwise have `dev-eu-plan` / `dev-eu-apply` created beside
+    it, exit 0, and then be reported ambiguous by every later run and by `shipmate
+    doctor` -- with the pair it just wrote never reconciled again.
+
+    Mutation: `_naming_conflict` back to returning False unless a suffixed half already
+    exists, which creates both halves here and reports nothing.
+    """
+    fake = make_gh(
+        {
+            "repos/o/r/environments/dev-eu": {"deployment_branch_policy": CUSTOM_POLICY},
+            "repos/o/r/environments/dev-eu-plan": SystemExit("gh: Not Found (HTTP 404)"),
+            "repos/o/r/environments/dev-eu-apply": SystemExit("gh: Not Found (HTTP 404)"),
+            "repos/o/r/environments/dev-eu-apply/deployment-branch-policies": SystemExit(
+                "gh: Not Found (HTTP 404)"
+            ),
+        }
+    )
+    monkeypatch.setattr(onboard, "_run", fake)
+    context = ctx()
+    onboard._reconcile_envs(context)
+    assert fake.calls == [["gh", "api", "repos/o/r/environments/dev-eu"]]
+    assert onboard.REPORT == [SPLIT_CONFLICT]
+    assert context["unresolved"] == {"dev-eu"}
+
+
+def test_the_split_pair_alone_is_refused_before_the_bare_env_is_created(monkeypatch):
+    """The mirror of the case above, reached by migrating a split repository to
+    `--shared`: creating the bare `dev-eu` beside the pair is the same self-inflicted
+    ambiguity, so it is refused rather than written.
+
+    Mutation: `_unused_naming` returning `[env]` unconditionally, which reads the bare
+    name, finds it absent, and creates it beside the pair.
+    """
+    fake = make_gh(
+        {
+            "repos/o/r/environments/dev-eu": SystemExit("gh: Not Found (HTTP 404)"),
+            "repos/o/r/environments/dev-eu-plan": {"deployment_branch_policy": None},
+            "repos/o/r/environments/dev-eu-apply": {"deployment_branch_policy": CUSTOM_POLICY},
+            "repos/o/r/environments/dev-eu/deployment-branch-policies": SystemExit(
+                "gh: Not Found (HTTP 404)"
+            ),
+        }
+    )
+    monkeypatch.setattr(onboard, "_run", fake)
+    context = ctx(shared={"dev-eu"})
+    onboard._reconcile_envs(context)
     assert fake.calls == [
-        ["gh", "api", "repos/o/r/environments/dev-eu"],
         ["gh", "api", "repos/o/r/environments/dev-eu-plan"],
         ["gh", "api", "repos/o/r/environments/dev-eu-apply"],
     ]
-    assert onboard.REPORT == [
-        (
-            "differs",
-            "dev-eu",
-            "`dev-eu` and `dev-eu-apply` all exist; which naming the engine binds depends "
-            "on SHIPMATE_SHARED_ENVS, so neither was touched. Delete the naming you are "
-            "not using: the bare `dev-eu` is the one SHIPMATE_SHARED_ENVS names, the pair "
-            "is the one it does not.",
-        )
-    ]
+    assert onboard.REPORT == [SHARED_CONFLICT]
+    assert context["unresolved"] == {"dev-eu"}
 
 
 def test_plan_environment_with_a_protection_rule_is_reported(monkeypatch):
@@ -1493,8 +1561,8 @@ def _plan_shim(tmp_path):
 
 def test_an_identical_file_reports_ok_through_crlf(tmp_path):
     """A CRLF checkout of an otherwise identical shim is not drift: git's autocrlf gives a
-    Windows consumer one, and reporting it `differs` would tell every such repository that
-    it holds local edits it does not have.
+    Windows consumer one, and reporting it `differs` would tell every such repository it
+    diverges from the published fence when it does not.
 
     Mutation: read the existing file with `newline=""`, which stops the translation.
     """
@@ -1533,7 +1601,7 @@ def test_a_locally_edited_file_is_reported_and_not_overwritten(tmp_path):
     edited = text + "# a local edit\n"
     path.write_text(edited, encoding="utf-8", newline="\n")
     onboard._reconcile_shim(_shim_ctx(tmp_path), "plan.yml")
-    assert onboard.REPORT == [("differs", "plan.yml", "local edits, not overwritten")]
+    assert onboard.REPORT == [("differs", "plan.yml", "differs beyond its pin, not overwritten")]
     assert path.read_text(encoding="utf-8") == edited
     assert onboard._exit_code() == 2
 
@@ -1772,24 +1840,22 @@ def test_the_checklist_does_not_tell_a_dry_run_to_commit_six_shims_it_did_not_wr
 
 
 def test_a_bare_env_alongside_only_a_plan_env_is_reported_as_ambiguous(monkeypatch):
-    """`doctor`'s `_env_mode` calls a logical env ambiguous when the bare name coexists
-    with *either* half. Reading it as ambiguous only when `<env>-apply` is there would let
-    this repository fall through, have its `<env>-apply` created here, and then be refused
-    by the next run -- over an environment this script itself wrote, falsifying "a second
-    run over a configured repository changes nothing" and disagreeing with doctor about
-    the same repository.
+    """The half-migrated repository: `dev-eu` and `dev-eu-plan`, no `dev-eu-apply`. The
+    probe reads the unused naming alone, so it refuses on `dev-eu` without ever looking
+    at the half that is there -- and the remedy it names is deleting `dev-eu`, never the
+    `dev-eu-plan` the engine binds.
 
-    Mutation: `if not halves:` to `if len(halves) != 2:`, which requires both halves,
-    drops the report and creates `dev-eu-apply`. Not `if not all(halves)`: `all([])` is
-    True, so that edit changes nothing here.
+    Mutation: probe the bound naming instead of the unused one
+    (`[n for n, _r in _env_names(env, ctx["shared"])]` in the comprehension). It still
+    refuses, on `dev-eu-plan`, and tells the operator to delete an environment the
+    engine binds -- which the recorded reads and the message below both catch.
     """
     fake = make_gh(
         {
             "repos/o/r/environments/dev-eu": {"deployment_branch_policy": CUSTOM_POLICY},
+            # Routed though a conforming run never reads them, for the mutation above.
             "repos/o/r/environments/dev-eu-plan": {"deployment_branch_policy": None},
             "repos/o/r/environments/dev-eu-apply": SystemExit("gh: Not Found (HTTP 404)"),
-            # Routed, though a conforming run never reads it: without it the mutation
-            # below reddens on an unrouted read rather than on the property named here.
             "repos/o/r/environments/dev-eu-apply/deployment-branch-policies": {
                 "total_count": 0,
                 "branch_policies": [],
@@ -1799,21 +1865,8 @@ def test_a_bare_env_alongside_only_a_plan_env_is_reported_as_ambiguous(monkeypat
     monkeypatch.setattr(onboard, "_run", fake)
     context = ctx()
     onboard._reconcile_envs(context)
-    assert fake.calls == [
-        ["gh", "api", "repos/o/r/environments/dev-eu"],
-        ["gh", "api", "repos/o/r/environments/dev-eu-plan"],
-        ["gh", "api", "repos/o/r/environments/dev-eu-apply"],
-    ]
-    assert onboard.REPORT == [
-        (
-            "differs",
-            "dev-eu",
-            "`dev-eu` and `dev-eu-plan` all exist; which naming the engine binds depends "
-            "on SHIPMATE_SHARED_ENVS, so neither was touched. Delete the naming you are "
-            "not using: the bare `dev-eu` is the one SHIPMATE_SHARED_ENVS names, the pair "
-            "is the one it does not.",
-        )
-    ]
+    assert fake.calls == [["gh", "api", "repos/o/r/environments/dev-eu"]]
+    assert onboard.REPORT == [SPLIT_CONFLICT]
     assert context["unresolved"] == {"dev-eu"}
 
 
@@ -1839,20 +1892,10 @@ def test_shared_mode_reports_the_ambiguity_too(monkeypatch):
     monkeypatch.setattr(onboard, "_run", fake)
     onboard._reconcile_envs(ctx(shared={"dev-eu"}))
     assert fake.calls == [
-        ["gh", "api", "repos/o/r/environments/dev-eu"],
         ["gh", "api", "repos/o/r/environments/dev-eu-plan"],
         ["gh", "api", "repos/o/r/environments/dev-eu-apply"],
     ]
-    assert onboard.REPORT == [
-        (
-            "differs",
-            "dev-eu",
-            "`dev-eu` and `dev-eu-plan` and `dev-eu-apply` all exist; which naming the "
-            "engine binds depends on SHIPMATE_SHARED_ENVS, so neither was touched. Delete "
-            "the naming you are not using: the bare `dev-eu` is the one "
-            "SHIPMATE_SHARED_ENVS names, the pair is the one it does not.",
-        )
-    ]
+    assert onboard.REPORT == [SHARED_CONFLICT]
 
 
 def test_a_shared_environment_carrying_protection_rules_is_reported(monkeypatch):
@@ -1887,7 +1930,6 @@ def test_a_shared_environment_carrying_protection_rules_is_reported(monkeypatch)
     monkeypatch.setattr(onboard, "_run", fake)
     onboard._reconcile_envs(ctx(shared={"dev-eu"}))
     assert fake.calls == [
-        ["gh", "api", "repos/o/r/environments/dev-eu"],
         ["gh", "api", "repos/o/r/environments/dev-eu-plan"],
         ["gh", "api", "repos/o/r/environments/dev-eu-apply"],
         ["gh", "api", "repos/o/r/environments/dev-eu"],
