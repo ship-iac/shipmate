@@ -20,6 +20,7 @@ EXPECTED_INPUTS = {
     "apply.yml": {"workflow_call": ["environment", "pr_number", "ref", "state_suffix"]},
     "ci.yml": {},
     "deploy.yml": {"workflow_call": ["state_suffix"]},
+    "drift.yml": {"workflow_call": ["runs_on", "state_suffix", "tags"]},
     "internal-pins.yml": {},
     "manifest-load.yml": {},
     "plan.yml": {"workflow_call": ["runs_on", "state_suffix"]},
