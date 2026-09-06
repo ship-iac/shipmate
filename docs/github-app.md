@@ -14,10 +14,11 @@ fresh per job, never a long-lived credential in the workflow. The bot
 identity is derived automatically from the App name once it's registered, so
 an App named `shipmate-acme` comments as `shipmate-acme[bot]`.
 
-This is a runbook, not a tutorial: run the commands in order. Steps 1–3 register
-the App once per GitHub org. Steps 4–6 onboard one repository, and are written
-for the repository you are setting up now. Onboarding several at once is the
-same commands in a loop — see the appendix.
+This is a runbook, not a tutorial: run the commands in order. Steps 1–4 are
+once per GitHub org: register the App and install it, selecting the repositories
+it may act on. Steps 5–6 onboard one repository, and are written for the
+repository you are setting up now. Onboarding several at once is the same
+commands in a loop — see the appendix.
 
 ## Prerequisites
 
@@ -96,17 +97,22 @@ installations page: App settings (`.../settings/apps/shipmate`) → Display
 information → Upload a logo. Purely cosmetic — everything above works
 without it.
 
-## 4. Install the App on your repository
+## 4. Install the App in your organization
 
-The App must be installed (separately from being registered) on the
-repository that runs `comment-ops.yml` / `dispatch`:
+Registration and installation are separate. One installation per organization
+covers every repository that runs `comment-ops.yml` / `dispatch`:
 
 ```
 https://github.com/organizations/<org>/settings/apps/shipmate/installations
 ```
 
-Click `Install`, choose `Only select repositories`, then pick your repository.
-Add more from the same page as further consumer repos come online.
+Click `Install`, choose `Only select repositories`, then pick every IaC
+repository shipmate will serve. A repository added later is an edit to that
+selection on the same page, not a second installation. `All repositories` also
+works and widens nothing the App can do — its permission set is the manifest's
+either way — but the selection is the record of which repositories are shipmate
+consumers, and the key is authority over every one of them (§Key-exposure
+boundary).
 
 ## 5. Create the `shipmate-engine` environment
 
@@ -414,12 +420,13 @@ enough to read the key outright the way an unreviewed branch push once was.
 
 ## Appendix: onboarding several repositories at once
 
-Steps 5 and 6 in a loop. Nothing about them changes per repository except the
-repository, so the guards read the same way — with one difference: a repository
-whose default branch cannot be read is skipped rather than aborting the run, so
-one unreachable repository does not strand the rest half-onboarded. Read the
-PEM once, before the loop, so a wrong filename fails immediately instead of
-writing an empty secret to every repository.
+First add every repository to the installation's selection (§4, one page, no
+loop). Then steps 5 and 6 in a loop. Nothing about them changes per repository
+except the repository, so the guards read the same way — with one difference: a
+repository whose default branch cannot be read is skipped rather than aborting
+the run, so one unreachable repository does not strand the rest half-onboarded.
+Read the PEM once, before the loop, so a wrong filename fails immediately
+instead of writing an empty secret to every repository.
 
 ```bash
 REPOS="<owner>/<repo> <owner>/<repo>"
