@@ -72,7 +72,11 @@ It writes:
   repository-level copy of that key deleted;
 - the `SHIPMATE_APP_ID`, `SHIPMATE_APPROVERS_TEAM`, `TERRAMATE_VERSION` and
   `TOFU_VERSION` repository variables, plus `SHIPMATE_SHARED_ENVS` when `--shared`
-  names environments bound as a single bare `<env>`;
+  names environments bound as a single bare `<env>`. A `--shared` environment is an
+  apply environment, so it gets the same default-branch policy — on a bare `<env>`
+  that policy also refuses plan cells whose pull request targets any other branch,
+  and `shipmate doctor` says so afterwards. Pass `--shared` only where every pull
+  request targets the default branch ([`hardening.md`](hardening.md) rows 8 and 17);
 - a `shipmate-gate` ruleset requiring `shipmate / gate` under the App;
 - the six workflow shims under `.github/workflows/`, rendered from this page and
   [`drift.md`](drift.md) and pinned to the engine checkout's release.

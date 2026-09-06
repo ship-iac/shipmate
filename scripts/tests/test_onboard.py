@@ -89,6 +89,7 @@ def ctx(**over):
         "root": None,
         "engine": None,
         "versions": {"terramate": "9.9.9", "tofu": "8.8.8"},
+        "variables": {},
         "sha": "a" * 40,
         "version": "v0.26.0",
     }
@@ -436,8 +437,10 @@ def test_main_calls_every_stage_in_order():
     Mutations, each proven: delete `_reconcile_engine_env(ctx)`; delete
     `_reconcile_envs(ctx)`; delete `_reconcile_variables(ctx)`; delete
     `_reconcile_ruleset(ctx)`; delete `_reconcile_shims(ctx)`; delete `_checklist(ctx)`;
-    `_repo_root()` back to `pathlib.Path.cwd()`; delete `sys.exit(_exit_code())`; swap
-    two reconcilers.
+    `_repo_root()` back to `pathlib.Path.cwd()`; delete
+    `_refuse_diverging_app_id(args.app_id, variables)`, which is the only guard against a
+    ruleset pinned to an App the workflows do not use; delete `sys.exit(_exit_code())`;
+    swap two reconcilers.
     """
     tree = ast.parse((ENGINE / "scripts" / "onboard").read_text(encoding="utf-8"))
     main = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "main")
@@ -452,8 +455,9 @@ def test_main_calls_every_stage_in_order():
         "_repo_root()",
         "_repo_facts()",
         "_derive_envs()",
-        "_resolve_shared(args.shared, _variables(), envs)",
         "_variables()",
+        "_refuse_diverging_app_id(args.app_id, variables)",
+        "_resolve_shared(args.shared, variables, envs)",
         "_reconcile_engine_env(ctx)",
         "_reconcile_envs(ctx)",
         "_reconcile_variables(ctx)",
@@ -635,12 +639,17 @@ def test_shared_mode_binds_one_bare_environment(monkeypatch):
     """An environment listed in `--shared` / SHIPMATE_SHARED_ENVS is one bare
     `<env>` on both paths; no `<env>-plan` is created for it.
 
+    The two suffixed reads are the ambiguity probe, which runs in shared mode too: they
+    404 here, so the bare environment is reconciled.
+
     Mutation: make `_env_names` ignore `shared` and always return the split pair.
     """
     assert onboard._env_names("dev-eu", {"dev-eu"}) == [("dev-eu", "apply")]
     fake = make_gh(
         {
             "repos/o/r/environments/dev-eu": {"deployment_branch_policy": CUSTOM_POLICY},
+            "repos/o/r/environments/dev-eu-plan": SystemExit("gh: Not Found (HTTP 404)"),
+            "repos/o/r/environments/dev-eu-apply": SystemExit("gh: Not Found (HTTP 404)"),
             "repos/o/r/environments/dev-eu/deployment-branch-policies": {
                 "total_count": 1,
                 "branch_policies": [{"name": "main"}],
@@ -650,6 +659,9 @@ def test_shared_mode_binds_one_bare_environment(monkeypatch):
     monkeypatch.setattr(onboard, "_run", fake)
     onboard._reconcile_envs(ctx(shared={"dev-eu"}))
     assert fake.calls == [
+        ["gh", "api", "repos/o/r/environments/dev-eu"],
+        ["gh", "api", "repos/o/r/environments/dev-eu-plan"],
+        ["gh", "api", "repos/o/r/environments/dev-eu-apply"],
         ["gh", "api", "repos/o/r/environments/dev-eu"],
         ["gh", "api", "repos/o/r/environments/dev-eu/deployment-branch-policies"],
     ]
@@ -791,17 +803,15 @@ def test_plan_environment_carrying_a_policy_is_reported_not_stripped(monkeypatch
 
 
 def test_a_bare_env_alongside_an_apply_env_is_reported_as_ambiguous(monkeypatch):
-    """Which of `dev-eu` and `dev-eu-apply` the engine binds depends on
-    SHIPMATE_SHARED_ENVS, so a repository holding both while `--shared` is empty is a
-    state the script must not resolve by guessing: it reports and writes nothing.
+    """Which naming the engine binds depends on SHIPMATE_SHARED_ENVS, so a repository
+    holding both is a state the script must not resolve by guessing: it reports and
+    writes nothing.
 
     Mutation: fall through to reconciling `dev-eu-apply` and say nothing.
     """
     fake = make_gh(
         {
             "repos/o/r/environments/dev-eu": {"deployment_branch_policy": CUSTOM_POLICY},
-            # Routed, though a conforming run never reads it: without it the mutation
-            # below reddens on an unrouted read rather than on the property named here.
             "repos/o/r/environments/dev-eu-plan": SystemExit("gh: Not Found (HTTP 404)"),
             "repos/o/r/environments/dev-eu-apply": {"deployment_branch_policy": CUSTOM_POLICY},
             "repos/o/r/environments/dev-eu-apply/deployment-branch-policies": {
@@ -814,14 +824,16 @@ def test_a_bare_env_alongside_an_apply_env_is_reported_as_ambiguous(monkeypatch)
     onboard._reconcile_envs(ctx())
     assert fake.calls == [
         ["gh", "api", "repos/o/r/environments/dev-eu"],
+        ["gh", "api", "repos/o/r/environments/dev-eu-plan"],
         ["gh", "api", "repos/o/r/environments/dev-eu-apply"],
     ]
     assert onboard.REPORT == [
         (
             "differs",
             "dev-eu",
-            "both `dev-eu` and `dev-eu-apply` exist; which one the engine binds depends "
-            "on SHIPMATE_SHARED_ENVS. Delete one, or list `dev-eu` in --shared.",
+            "`dev-eu` and `dev-eu-apply` all exist; which naming the engine binds depends "
+            "on SHIPMATE_SHARED_ENVS, so neither was touched. Delete the naming you are "
+            "not using, or list `dev-eu` in --shared.",
         )
     ]
 
@@ -941,7 +953,6 @@ def test_dry_run_reaches_every_write_path_and_issues_only_reads(monkeypatch, tmp
         ["gh", "api", "repos/o/r/environments/dev-eu-plan"],
         ["gh", "api", "repos/o/r/environments/dev-eu-apply"],
         ["gh", "api", "repos/o/r/environments/dev-eu-apply/deployment-branch-policies"],
-        ["gh", "variable", "list", "--json", "name,value"],
         ["gh", "api", RULES],
     ]
     assert [verb for verb, _subject, _detail in onboard.REPORT] == [
@@ -979,7 +990,7 @@ def test_absent_variables_are_set_from_versions_and_flags(monkeypatch):
     """
     fake = make_gh({VARIABLE_LIST: []})
     monkeypatch.setattr(onboard, "_run", fake)
-    onboard._reconcile_variables(ctx())
+    onboard._reconcile_variables(ctx(variables=onboard._variables()))
     assert fake.calls == [
         ["gh", "variable", "list", "--json", "name,value"],
         ["gh", "variable", "set", "SHIPMATE_APP_ID", "--body", "1"],
@@ -1008,7 +1019,7 @@ def test_variables_that_exist_with_another_value_are_reported(monkeypatch):
         }
     )
     monkeypatch.setattr(onboard, "_run", fake)
-    onboard._reconcile_variables(ctx(app_id="456"))
+    onboard._reconcile_variables(ctx(app_id="456", variables=onboard._variables()))
     assert fake.calls == [
         ["gh", "variable", "list", "--json", "name,value"],
         ["gh", "variable", "set", "SHIPMATE_APPROVERS_TEAM", "--body", "ops"],
@@ -1031,7 +1042,7 @@ def test_variable_names_are_matched_uppercased(monkeypatch):
     """
     fake = make_gh({VARIABLE_LIST: [{"name": "tofu_version", "value": "8.8.8"}]})
     monkeypatch.setattr(onboard, "_run", fake)
-    onboard._reconcile_variables(ctx())
+    onboard._reconcile_variables(ctx(variables=onboard._variables()))
     assert fake.calls == [
         ["gh", "variable", "list", "--json", "name,value"],
         ["gh", "variable", "set", "SHIPMATE_APP_ID", "--body", "1"],
@@ -1063,7 +1074,7 @@ def test_shared_environments_are_written_as_one_sorted_variable(monkeypatch):
     shared = {"dev-us", "dev-eu", "dev-ap"}
     fake = make_gh({VARIABLE_LIST: []})
     monkeypatch.setattr(onboard, "_run", fake)
-    onboard._reconcile_variables(ctx(shared=shared))
+    onboard._reconcile_variables(ctx(shared=shared, variables=onboard._variables()))
     assert fake.calls == [
         ["gh", "variable", "list", "--json", "name,value"],
         ["gh", "variable", "set", "SHIPMATE_APP_ID", "--body", "1"],
@@ -1078,7 +1089,7 @@ def test_shared_environments_are_written_as_one_sorted_variable(monkeypatch):
         {VARIABLE_LIST: [{"name": "SHIPMATE_SHARED_ENVS", "value": "dev-us, dev-ap, dev-eu"}]}
     )
     monkeypatch.setattr(onboard, "_run", fake)
-    onboard._reconcile_variables(ctx(shared=shared))
+    onboard._reconcile_variables(ctx(shared=shared, variables=onboard._variables()))
     assert onboard.REPORT == [
         ("set", "SHIPMATE_APP_ID", "1"),
         ("set", "SHIPMATE_APPROVERS_TEAM", "ops"),
@@ -1298,9 +1309,11 @@ def test_an_invisible_shipmate_gate_ruleset_is_reported_not_fatal(monkeypatch):
         (
             "differs",
             "gate ruleset",
-            "a `shipmate-gate` ruleset already exists but requires nothing on this "
-            "branch, so its enforcement is `evaluate` or `disabled` — the effective-rules "
-            "read cannot see it. Set it to active, or delete it and run this again.",
+            "the rulesets POST was rejected (HTTP 422). Most likely a `shipmate-gate` "
+            "ruleset already exists but requires nothing on this branch, because its "
+            "enforcement is `evaluate` or `disabled` and the effective-rules read cannot "
+            "see it — 422 has other causes, so read `gh api repos/OWNER/REPO/rulesets` "
+            "before acting. Set it to active, or delete it and run this again.",
         )
     ]
     assert onboard._exit_code() == 2
@@ -1755,3 +1768,192 @@ def test_the_checklist_does_not_tell_a_dry_run_to_commit_six_shims_it_did_not_wr
         "  Commit the six shims",
         "  Re-run without --dry-run, then commit the six shims",
     )
+
+
+def test_a_bare_env_alongside_only_a_plan_env_is_reported_as_ambiguous(monkeypatch):
+    """`doctor`'s `_env_mode` calls a logical env ambiguous when the bare name coexists
+    with *either* half. Reading it as ambiguous only when `<env>-apply` is there would let
+    this repository fall through, have its `<env>-apply` created here, and then be refused
+    by the next run -- over an environment this script itself wrote, falsifying "a second
+    run over a configured repository changes nothing" and disagreeing with doctor about
+    the same repository.
+
+    Mutation: require `<env>-apply` as well (`if not all(halves)`), which drops the report
+    and creates `dev-eu-apply`.
+    """
+    fake = make_gh(
+        {
+            "repos/o/r/environments/dev-eu": {"deployment_branch_policy": CUSTOM_POLICY},
+            "repos/o/r/environments/dev-eu-plan": {"deployment_branch_policy": None},
+            "repos/o/r/environments/dev-eu-apply": SystemExit("gh: Not Found (HTTP 404)"),
+            # Routed, though a conforming run never reads it: without it the mutation
+            # below reddens on an unrouted read rather than on the property named here.
+            "repos/o/r/environments/dev-eu-apply/deployment-branch-policies": {
+                "total_count": 0,
+                "branch_policies": [],
+            },
+        }
+    )
+    monkeypatch.setattr(onboard, "_run", fake)
+    context = ctx()
+    onboard._reconcile_envs(context)
+    assert fake.calls == [
+        ["gh", "api", "repos/o/r/environments/dev-eu"],
+        ["gh", "api", "repos/o/r/environments/dev-eu-plan"],
+        ["gh", "api", "repos/o/r/environments/dev-eu-apply"],
+    ]
+    assert onboard.REPORT == [
+        (
+            "differs",
+            "dev-eu",
+            "`dev-eu` and `dev-eu-plan` all exist; which naming the engine binds depends "
+            "on SHIPMATE_SHARED_ENVS, so neither was touched. Delete the naming you are "
+            "not using, or list `dev-eu` in --shared.",
+        )
+    ]
+    assert context["unresolved"] == {"dev-eu"}
+
+
+def test_shared_mode_reports_the_ambiguity_too(monkeypatch):
+    """Running once without `--shared` and once with it produces all three environments.
+    The second run must not silently bind the bare one: the ambiguity is doctor's
+    shared-mode warning, so the probe runs in shared mode as well.
+
+    Mutation: guard the probe with `if env not in ctx["shared"]`, which reconciles
+    `dev-eu` and reports nothing.
+    """
+    fake = make_gh(
+        {
+            "repos/o/r/environments/dev-eu": {"deployment_branch_policy": CUSTOM_POLICY},
+            "repos/o/r/environments/dev-eu-plan": {"deployment_branch_policy": None},
+            "repos/o/r/environments/dev-eu-apply": {"deployment_branch_policy": CUSTOM_POLICY},
+            "repos/o/r/environments/dev-eu/deployment-branch-policies": {
+                "total_count": 1,
+                "branch_policies": [{"name": "main"}],
+            },
+        }
+    )
+    monkeypatch.setattr(onboard, "_run", fake)
+    onboard._reconcile_envs(ctx(shared={"dev-eu"}))
+    assert fake.calls == [
+        ["gh", "api", "repos/o/r/environments/dev-eu"],
+        ["gh", "api", "repos/o/r/environments/dev-eu-plan"],
+        ["gh", "api", "repos/o/r/environments/dev-eu-apply"],
+    ]
+    assert onboard.REPORT == [
+        (
+            "differs",
+            "dev-eu",
+            "`dev-eu` and `dev-eu-plan` and `dev-eu-apply` all exist; which naming the "
+            "engine binds depends on SHIPMATE_SHARED_ENVS, so neither was touched. Delete "
+            "the naming you are not using, or list `dev-eu` in --shared.",
+        )
+    ]
+
+
+def test_a_shared_environment_carrying_protection_rules_is_reported(monkeypatch):
+    """A shared env is one bare environment on both paths, so a required reviewer there
+    gates the plan cells and the nightly drift run too -- GitHub has no per-job filter.
+    `doctor` warns on it; `_env_names` collapses the env to `role == "apply"`, which
+    would otherwise report a conforming branch policy as plain `ok`.
+
+    Mutation: drop the `_report_shared_approval` call from `_reconcile_env`, or drop its
+    `name in ctx["shared"]` test -- the first loses the `differs` line, the second adds
+    the same line to every split apply environment, which is the reviewer gate working
+    as designed.
+    """
+    fake = make_gh(
+        {
+            "repos/o/r/environments/dev-eu": {
+                "deployment_branch_policy": CUSTOM_POLICY,
+                "protection_rules": [
+                    {"type": "branch_policy"},
+                    {"type": "required_reviewers"},
+                    {"type": "wait_timer"},
+                ],
+            },
+            "repos/o/r/environments/dev-eu-plan": SystemExit("gh: Not Found (HTTP 404)"),
+            "repos/o/r/environments/dev-eu-apply": SystemExit("gh: Not Found (HTTP 404)"),
+            "repos/o/r/environments/dev-eu/deployment-branch-policies": {
+                "total_count": 1,
+                "branch_policies": [{"name": "main"}],
+            },
+        }
+    )
+    monkeypatch.setattr(onboard, "_run", fake)
+    onboard._reconcile_envs(ctx(shared={"dev-eu"}))
+    assert fake.calls == [
+        ["gh", "api", "repos/o/r/environments/dev-eu"],
+        ["gh", "api", "repos/o/r/environments/dev-eu-plan"],
+        ["gh", "api", "repos/o/r/environments/dev-eu-apply"],
+        ["gh", "api", "repos/o/r/environments/dev-eu"],
+        ["gh", "api", "repos/o/r/environments/dev-eu/deployment-branch-policies"],
+    ]
+    assert onboard.REPORT == [
+        ("ok", "dev-eu", ""),
+        (
+            "differs",
+            "dev-eu",
+            "it carries protection rules (required_reviewers, wait_timer) and is shared, "
+            "so the plan cells and the nightly drift run do not start immediately either. "
+            "To gate applies alone, split it into `dev-eu-plan` and `dev-eu-apply` and "
+            "drop `dev-eu` from --shared and SHIPMATE_SHARED_ENVS.",
+        ),
+        ("ok", "dev-eu branch policy", "main"),
+    ]
+    assert onboard._exit_code() == 2
+
+
+def test_a_split_apply_environments_reviewers_are_not_reported(monkeypatch):
+    """Required reviewers on `<env>-apply` are the reviewer gate docs/hardening.md row 6
+    asks for, not drift: only a *shared* bare environment's rules stall the plan path.
+
+    Mutation: drop the `name in ctx["shared"]` test in `_report_shared_approval`.
+    """
+    fake = make_gh(
+        {
+            "repos/o/r/environments/dev-eu": SystemExit("gh: Not Found (HTTP 404)"),
+            "repos/o/r/environments/dev-eu-plan": {"deployment_branch_policy": None},
+            "repos/o/r/environments/dev-eu-apply": {
+                "deployment_branch_policy": CUSTOM_POLICY,
+                "protection_rules": [{"type": "required_reviewers"}],
+            },
+            "repos/o/r/environments/dev-eu-apply/deployment-branch-policies": {
+                "total_count": 1,
+                "branch_policies": [{"name": "main"}],
+            },
+        }
+    )
+    monkeypatch.setattr(onboard, "_run", fake)
+    onboard._reconcile_envs(ctx())
+    assert onboard.REPORT == [
+        ("ok", "dev-eu-plan", ""),
+        ("ok", "dev-eu-apply", ""),
+        ("ok", "dev-eu-apply branch policy", "main"),
+    ]
+    assert onboard._exit_code() == 0
+
+
+def test_a_diverging_repository_app_id_is_refused(monkeypatch):
+    """`SHIPMATE_APP_ID` is reported-not-overwritten, but `--app-id` also pins the gate
+    ruleset's `integration_id` and selects whose PEM lands on `shipmate-engine`. Letting
+    the two diverge writes a required status check the workflows -- which mint their
+    token from the variable -- can never satisfy, and the default branch stays blocked
+    until an admin deletes the ruleset. Refusing costs no extra call: `main` has the
+    variables in hand before the first reconciler.
+
+    The agreeing case is built with `"".join`, so the two equal values are distinct
+    objects: `"111"` twice is one interned literal, and an identity comparison would pass
+    over it.
+
+    Mutations, each proven: downgrade the refusal to `report("differs", ...)`; compare
+    with `is` rather than `==`.
+    """
+    with pytest.raises(SystemExit) as e:
+        onboard._refuse_diverging_app_id("222", {"SHIPMATE_APP_ID": "111"})
+    assert "111" in str(e.value) and "222" in str(e.value)
+    assert onboard.REPORT == []
+
+    onboard._refuse_diverging_app_id("".join("111"), {"SHIPMATE_APP_ID": "111"})
+    onboard._refuse_diverging_app_id("222", {})
+    assert onboard.REPORT == []

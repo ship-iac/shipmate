@@ -59,7 +59,8 @@ _TEAM_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*")
 _VERSION_RE = re.compile(r"v[0-9]+\.[0-9]+\.[0-9]+")
 _APP_ID_RE = re.compile(r"[0-9]+")
 #: The suffix is interpolated into a double-quoted YAML scalar in every rendered shim, so a
-#: '"' or a backslash would break the file the consumer then runs. It is a path segment.
+#: '"' or a backslash would break the file the consumer then runs. '/' and '.' are admitted:
+#: the value is a fragment of an artifact name, supplied by the operator running this.
 _SUFFIX_RE = re.compile(r"[A-Za-z0-9._/-]*")
 
 _D = pathlib.Path(__file__).resolve().parent
@@ -322,6 +323,20 @@ def _ensure_policy(ctx, name):
         )
 
 
+def _approval_rules(env):
+    """`env`'s protection rules that stop a job from starting.
+
+    GitHub synthesizes a `branch_policy` rule for any environment carrying a deployment
+    branch policy; that is the policy itself, not a second protection, and it stalls
+    nothing.
+    """
+    return sorted(
+        r.get("type") or "?"
+        for r in env.get("protection_rules") or []
+        if r.get("type") != "branch_policy"
+    )
+
+
 def _plan_drift(env):
     """What disqualifies `env` as a plan environment, as one sentence, or ""."""
     reasons = []
@@ -330,13 +345,7 @@ def _plan_drift(env):
             "it carries a deployment branch policy, which blocks every plan cell whose "
             "pull request targets a branch the policy does not name"
         )
-    # GitHub synthesizes a `branch_policy` rule for any environment with a deployment
-    # branch policy; it is the reason above, not a second one, and it does not stall.
-    rules = sorted(
-        r.get("type") or "?"
-        for r in env.get("protection_rules") or []
-        if r.get("type") != "branch_policy"
-    )
+    rules = _approval_rules(env)
     if rules:
         reasons.append(f"it carries protection rules ({', '.join(rules)}), which stall plan cells")
     if not reasons:
@@ -344,6 +353,27 @@ def _plan_drift(env):
     return (
         f"{' and '.join(reasons)}. Removing a protection a consumer set is not this "
         "script's call, so it is reported and left alone."
+    )
+
+
+def _report_shared_approval(ctx, name, env):
+    """Report approval rules on a shared bare environment.
+
+    `_env_names` collapses a shared env to one apply-role environment, but a protection
+    rule there is not the reviewer gate the split naming gives an apply environment: the
+    plan cells and the nightly drift run bind the same environment and GitHub offers no
+    per-job filter, so they stall too. `doctor` warns on it; reported here, never stripped.
+    """
+    approval = _approval_rules(env) if env is not None and name in ctx["shared"] else []
+    if not approval:
+        return
+    report(
+        "differs",
+        name,
+        f"it carries protection rules ({', '.join(approval)}) and is shared, so the plan "
+        "cells and the nightly drift run do not start immediately either. To gate applies "
+        f"alone, split it into `{name}-plan` and `{name}-apply` and drop `{name}` from "
+        "--shared and SHIPMATE_SHARED_ENVS.",
     )
 
 
@@ -363,6 +393,7 @@ def _reconcile_env(ctx, name, role):
     else:
         write("update", name, put, stdin=json.dumps(body))
     if role == "apply":
+        _report_shared_approval(ctx, name, env)
         _ensure_policy(ctx, name)
 
 
@@ -416,26 +447,33 @@ def _env_names(env, shared):
 
 
 def _bare_env_conflict(ctx, env):
-    """True when a split-mode `env` also has a bare `<env>` environment.
+    """True when a bare `<env>` coexists with either half of the split naming.
 
-    Which of the two the engine binds depends on SHIPMATE_SHARED_ENVS, so a
-    repository holding both is a state this script must not resolve by guessing.
+    Deliberately `doctor`'s own test, not a narrower one: reading it as ambiguous only
+    when `<env>-apply` is also there lets a repository holding `<env>` and `<env>-plan`
+    fall through, get its `<env>-apply` created here, and be refused by the next run --
+    over an environment this script itself wrote. Checked in shared mode too: which
+    naming the engine binds is SHIPMATE_SHARED_ENVS' answer, not this script's.
     """
-    path = f"repos/{ctx['repo']}/environments/{env}"
-    if _gh_json_or_none(path) is None or _gh_json_or_none(f"{path}-apply") is None:
+    base = f"repos/{ctx['repo']}/environments/"
+    if _gh_json_or_none(f"{base}{env}") is None:
+        return False
+    halves = [n for n in (f"{env}-plan", f"{env}-apply") if _gh_json_or_none(f"{base}{n}")]
+    if not halves:
         return False
     report(
         "differs",
         env,
-        f"both `{env}` and `{env}-apply` exist; which one the engine binds depends on "
-        f"SHIPMATE_SHARED_ENVS. Delete one, or list `{env}` in --shared.",
+        f"`{env}` and {' and '.join(f'`{n}`' for n in halves)} all exist; which naming the "
+        "engine binds depends on SHIPMATE_SHARED_ENVS, so neither was touched. Delete the "
+        f"naming you are not using, or list `{env}` in --shared.",
     )
     return True
 
 
 def _reconcile_envs(ctx):
     for env in ctx["envs"]:
-        if env not in ctx["shared"] and _bare_env_conflict(ctx, env):
+        if _bare_env_conflict(ctx, env):
             ctx["unresolved"].add(env)
             continue
         for name, role in _env_names(env, ctx["shared"]):
@@ -494,7 +532,7 @@ def _reconcile_variables(ctx):
     consumer pinning an older tested pair is making a deliberate choice, and moving
     it silently is this script exceeding its mandate.
     """
-    existing = _variables()
+    existing = ctx["variables"]
     for name, (value, source) in _wanted_variables(ctx).items():
         current = existing.get(name)
         if current is None:
@@ -532,9 +570,11 @@ def _ruleset_body(ctx):
 
 
 _NAME_TAKEN = (
-    "a `shipmate-gate` ruleset already exists but requires nothing on this branch, so "
-    "its enforcement is `evaluate` or `disabled` — the effective-rules read cannot see "
-    "it. Set it to active, or delete it and run this again."
+    "the rulesets POST was rejected (HTTP 422). Most likely a `shipmate-gate` ruleset "
+    "already exists but requires nothing on this branch, because its enforcement is "
+    "`evaluate` or `disabled` and the effective-rules read cannot see it — 422 has other "
+    "causes, so read `gh api repos/OWNER/REPO/rulesets` before acting. Set it to active, "
+    "or delete it and run this again."
 )
 
 _PLAN_TIER = (
@@ -767,6 +807,27 @@ def _checklist(ctx):
     print("\n".join(out))
 
 
+def _refuse_diverging_app_id(app_id, variables):
+    """Refuse when SHIPMATE_APP_ID exists and disagrees with --app-id.
+
+    Every other variable is reported and left alone, which is right for a value nothing
+    else derives from. `app_id` has three consumers: the workflows mint their token from
+    the variable, while `--app-id` pins the gate ruleset's `integration_id` and selects
+    whose PEM goes on `shipmate-engine`. Reconciling those separately writes a required
+    check no workflow can satisfy, and the default branch stays blocked until an admin
+    deletes the ruleset. Called before the first reconciler, while failing is still free.
+    """
+    current = variables.get("SHIPMATE_APP_ID")
+    if current is None or current == app_id:
+        return
+    raise SystemExit(
+        f"the SHIPMATE_APP_ID repository variable is {current} and --app-id is {app_id}. "
+        "The workflows mint their token from the variable, so a gate ruleset pinned to "
+        f"{app_id} could never be satisfied and the default branch would be blocked. "
+        f"Re-run with --app-id {current}, or change the variable first."
+    )
+
+
 def _exit_code():
     """2 when anything differs, else 0.
 
@@ -806,6 +867,8 @@ def main(argv=None):
     root = _repo_root()
     repo, default_branch = _repo_facts()
     envs = _derive_envs()
+    variables = _variables()
+    _refuse_diverging_app_id(args.app_id, variables)
     ctx = {
         "repo": repo,
         "default_branch": default_branch,
@@ -813,12 +876,13 @@ def main(argv=None):
         "team": args.team,
         "key": key,
         "envs": envs,
-        "shared": _resolve_shared(args.shared, _variables(), envs),
+        "shared": _resolve_shared(args.shared, variables, envs),
         "unresolved": set(),
         "state_suffix": args.state_suffix,
         "root": root,
         "engine": engine,
         "versions": versions,
+        "variables": variables,
         "sha": sha,
         "version": version,
     }
