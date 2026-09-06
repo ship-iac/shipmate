@@ -215,8 +215,7 @@ def _callee_permissions_union(target):
     union = {}
     for job_id, job in doc["jobs"].items():
         perms = job.get("permissions")
-        # Every engine job declares a mapping (each workflow's own guard pins that). A string
-        # form here would silently contribute no scope and leave this comparison vacuous.
+        # A string form would silently contribute no scope and leave this comparison vacuous.
         assert isinstance(perms, dict), (
             f"{target} job `{job_id}` declares `permissions: {perms!r}`, which this guard "
             "cannot rank -- the shim's block would be compared against nothing"
