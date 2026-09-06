@@ -31,7 +31,7 @@ jobs:
       on-demand: ${{ steps.facts.outputs.on-demand }}
     steps:
       - id: facts
-        uses: ship-iac/shipmate/actions/pr-facts@59ac665afe78a75d4fe1d18bf4349dbbde9b08c2
+        uses: ship-iac/shipmate/actions/pr-facts@44e0692b874f0ac75de1adfac277850fb0288c75
 
   detect:
     needs: facts
@@ -59,7 +59,7 @@ jobs:
       # Before the two terramate steps, not after: this step is where a fork's pull request is
       # refused, and `terramate fmt`/`generate` evaluate the checked-out HCL.
       - id: matrix
-        uses: ship-iac/shipmate/actions/build-matrix@59ac665afe78a75d4fe1d18bf4349dbbde9b08c2
+        uses: ship-iac/shipmate/actions/build-matrix@44e0692b874f0ac75de1adfac277850fb0288c75
         with:
           base-sha: ${{ needs.facts.outputs.base-sha }}
           head-repo: ${{ needs.facts.outputs.head-repo }}
@@ -105,7 +105,7 @@ jobs:
         with:
           role-to-assume: ${{ matrix.workload_var != '' && vars[format('AWS_ROLE_ARN_{0}', matrix.workload_var)] || vars.AWS_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
-      - uses: ship-iac/shipmate/actions/plan-cell@59ac665afe78a75d4fe1d18bf4349dbbde9b08c2
+      - uses: ship-iac/shipmate/actions/plan-cell@44e0692b874f0ac75de1adfac277850fb0288c75
         with:
           stack: ${{ matrix.stack }}
           stack-name: ${{ matrix.stack }}
@@ -142,7 +142,7 @@ jobs:
         with:
           pattern: cell-summary.*
           path: cells
-      - uses: ship-iac/shipmate/actions/summary@59ac665afe78a75d4fe1d18bf4349dbbde9b08c2
+      - uses: ship-iac/shipmate/actions/summary@44e0692b874f0ac75de1adfac277850fb0288c75
         with:
           pr-number: ${{ needs.facts.outputs.pr-number }}
           head-sha: ${{ needs.facts.outputs.head-sha }}
