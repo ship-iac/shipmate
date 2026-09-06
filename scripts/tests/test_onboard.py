@@ -965,7 +965,12 @@ def test_variables_that_exist_with_another_value_are_reported(monkeypatch, tmp_p
     fake = make_gh({VARIABLE_LIST: [{"name": "TERRAMATE_VERSION", "value": "0.16.0"}]})
     monkeypatch.setattr(onboard, "_run", fake)
     onboard._reconcile_variables(ctx(engine=engine_with_versions(tmp_path)))
-    assert ["gh", "variable", "set", "TERRAMATE_VERSION", "--body", "9.9.9"] not in fake.calls
+    assert fake.calls == [
+        ["gh", "variable", "list", "--json", "name,value"],
+        ["gh", "variable", "set", "SHIPMATE_APP_ID", "--body", "1"],
+        ["gh", "variable", "set", "SHIPMATE_APPROVERS_TEAM", "--body", "ops"],
+        ["gh", "variable", "set", "TOFU_VERSION", "--body", "8.8.8"],
+    ]
     assert onboard.REPORT == [
         ("set", "SHIPMATE_APP_ID", "1"),
         ("set", "SHIPMATE_APPROVERS_TEAM", "ops"),
@@ -990,7 +995,12 @@ def test_variable_names_are_matched_uppercased(monkeypatch, tmp_path):
         ["gh", "variable", "set", "SHIPMATE_APPROVERS_TEAM", "--body", "ops"],
         ["gh", "variable", "set", "TERRAMATE_VERSION", "--body", "9.9.9"],
     ]
-    assert ("ok", "TOFU_VERSION", "8.8.8") in onboard.REPORT
+    assert onboard.REPORT == [
+        ("set", "SHIPMATE_APP_ID", "1"),
+        ("set", "SHIPMATE_APPROVERS_TEAM", "ops"),
+        ("set", "TERRAMATE_VERSION", "9.9.9"),
+        ("ok", "TOFU_VERSION", "8.8.8"),
+    ]
 
 
 def test_shared_environments_are_written_as_one_sorted_variable(monkeypatch, tmp_path):
@@ -1005,20 +1015,26 @@ def test_shared_environments_are_written_as_one_sorted_variable(monkeypatch, tmp
     fake = make_gh({VARIABLE_LIST: []})
     monkeypatch.setattr(onboard, "_run", fake)
     onboard._reconcile_variables(ctx(engine=engine_with_versions(tmp_path), shared=shared))
-    assert fake.calls[-1] == [
-        "gh",
-        "variable",
-        "set",
-        "SHIPMATE_SHARED_ENVS",
-        "--body",
-        "dev-eu,dev-us",
+    assert fake.calls == [
+        ["gh", "variable", "list", "--json", "name,value"],
+        ["gh", "variable", "set", "SHIPMATE_APP_ID", "--body", "1"],
+        ["gh", "variable", "set", "SHIPMATE_APPROVERS_TEAM", "--body", "ops"],
+        ["gh", "variable", "set", "TERRAMATE_VERSION", "--body", "9.9.9"],
+        ["gh", "variable", "set", "TOFU_VERSION", "--body", "8.8.8"],
+        ["gh", "variable", "set", "SHIPMATE_SHARED_ENVS", "--body", "dev-eu,dev-us"],
     ]
 
     onboard.REPORT.clear()
     fake = make_gh({VARIABLE_LIST: [{"name": "SHIPMATE_SHARED_ENVS", "value": "dev-us, dev-eu"}]})
     monkeypatch.setattr(onboard, "_run", fake)
     onboard._reconcile_variables(ctx(engine=engine_with_versions(tmp_path), shared=shared))
-    assert ("ok", "SHIPMATE_SHARED_ENVS", "dev-eu,dev-us") in onboard.REPORT
+    assert onboard.REPORT == [
+        ("set", "SHIPMATE_APP_ID", "1"),
+        ("set", "SHIPMATE_APPROVERS_TEAM", "ops"),
+        ("set", "TERRAMATE_VERSION", "9.9.9"),
+        ("set", "TOFU_VERSION", "8.8.8"),
+        ("ok", "SHIPMATE_SHARED_ENVS", "dev-eu,dev-us"),
+    ]
     assert onboard._exit_code() == 0
 
 
