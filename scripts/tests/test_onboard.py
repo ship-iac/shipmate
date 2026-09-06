@@ -1506,7 +1506,7 @@ def test_every_shim_is_pinned_at_every_site():
 
     Hand-written, never derived from the docs.
 
-    Mutations: `_DOC_PIN.sub(..., count=1)`, which leaves six of the seven; and delete
+    Mutations: `_DOC_PIN.sub(..., count=1)`, which rewrites one pin of the seven; and delete
     `  # see the latest release` from the `plan` job's `uses:` line in the docs, which
     leaves that one call on `@<engine-sha>`.
     """

@@ -176,11 +176,16 @@ creates all of them, including `shipmate-engine` and its branch policy:
 ### The workflow file
 
 `scripts/onboard` writes this one file, pinned, from the fence below. It is a
-shim: six triggers, and one job per thing shipmate does, each calling an engine
+shim: five triggers, and one job per thing shipmate does, each calling an engine
 reusable workflow SHA-pinned. The jobs behind those calls — `facts`, `detect`,
 `plan` and `summary` in engine `plan.yml`, and their equivalents on the other
 paths — live in the engine, so none of what they decide is wiring you can get
 wrong.
+
+The whole file goes in at tier 1, but only two of its jobs are this tier's: `plan`
+and `comment-ops`, which need `<env>-plan`, `shipmate-engine` and the App key and
+nothing else. The other five wait for the environments and secrets the apply tier
+creates.
 
 The plan triggers are `pull_request_target` for the automatic plan on every push
 to a pull request, and `workflow_dispatch` with `verb: plan` for the plan a
@@ -498,10 +503,11 @@ rules from Settings → Environments → `<name>` (or the API):
 
 ### The apply jobs
 
-This tier adds no file. The `comment-ops`, `targeted`, `all`, `unlock` and
-`deploy` jobs are already in the `shipmate.yml` published above
+This tier adds no file. The `targeted`, `all`, `unlock` and `deploy` jobs are
+already in the `shipmate.yml` published above
 (§[The workflow file](#the-workflow-file)); what this tier does is create the
-environments and secrets they need, and require the gate.
+environments and secrets they need. The `comment-ops` job that dispatches them is
+tier 1's, and is described here because this is where its verbs land.
 
 The `comment-ops` job turns a `shipmate <verb>` pull request comment into an
 authorized `workflow_dispatch` of `shipmate.yml` itself, carrying the parsed verb
