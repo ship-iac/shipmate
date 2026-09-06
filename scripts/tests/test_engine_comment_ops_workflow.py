@@ -21,9 +21,9 @@ def _job():
     return _doc()["jobs"]["ops"]
 
 
-def _dispatch_step():
-    hits = [s for s in _job()["steps"] if "actions/dispatch@" in str(s.get("uses", ""))]
-    assert len(hits) == 1, f"{len(hits)} steps use actions/dispatch"
+def _step(needle):
+    hits = [s for s in _job()["steps"] if needle in str(s.get("uses", ""))]
+    assert len(hits) == 1, f"{len(hits)} steps use {needle}"
     return hits[0]
 
 
@@ -37,13 +37,15 @@ def test_the_workflow_declares_no_inputs_and_one_secret():
 
 def test_only_pull_request_comments_are_handled():
     """issue_comment fires on issues too. Mutation: delete the `if:`, and every issue comment in
-    the repository runs the comment-ops action with an issue number as `pr-number`."""
+    the repository spins a job binding `shipmate-engine`. Issues and pull requests share one
+    number sequence, so the `pulls/<n>` read 404s and the command refuses -- cost and
+    pending-deployment noise, not an escalation."""
     assert _job()["if"] == "${{ github.event.issue.pull_request }}"
 
 
 def test_the_dispatch_step_runs_only_when_the_guard_authorized():
     """Mutation: delete the dispatch step's `if:`, or change `'true'` to `'false'`."""
-    assert _dispatch_step()["if"] == "${{ steps.authz.outputs.authorized == 'true' }}"
+    assert _step("actions/dispatch@")["if"] == "${{ steps.authz.outputs.authorized == 'true' }}"
 
 
 def test_the_guard_step_runs_before_the_dispatch_step():
@@ -91,13 +93,35 @@ def test_every_job_binds_the_engine_environment():
     assert bound == {"ops": "shipmate-engine"}
 
 
+def test_the_authz_step_passes_this_whole_with_block():
+    """Hand-written. This is the deciding step, so every input here is a security input.
+    `comment-user` twice over: it is the `[bot]` loop guard's only subject, and it is the login
+    whose team membership authorizes an apply.
+
+    Mutations: delete `comment-user`, and the loop guard sees an empty login, never matches
+    `*[bot]`, and shipmate's own help output re-triggers the command grammar; rewire it to a
+    constant privileged login, and every commenter's `shipmate apply` passes the membership
+    check; delete `approvers-team`, which fails closed but silently.
+    """
+    assert _step("actions/comment-ops@")["with"] == {
+        "app-id": "${{ vars.SHIPMATE_APP_ID }}",
+        "private-key": "${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}",
+        "approvers-team": "${{ vars.SHIPMATE_APPROVERS_TEAM }}",
+        "comment-body": "${{ github.event.comment.body }}",
+        "comment-user": "${{ github.event.comment.user.login }}",
+        "comment-id": "${{ github.event.comment.id }}",
+        "pr-number": "${{ github.event.issue.number }}",
+        "github-token": "${{ github.token }}",
+    }
+
+
 def test_the_dispatch_step_passes_this_whole_with_block():
     """Hand-written. `dispatch-ref` is the default branch on purpose: a dispatched workflow file
     only ever resolves there, so pointing it at the head ref dispatches nothing.
 
     Mutation: `dispatch-ref: ${{ github.head_ref }}`.
     """
-    assert _dispatch_step()["with"] == {
+    assert _step("actions/dispatch@")["with"] == {
         "app-id": "${{ vars.SHIPMATE_APP_ID }}",
         "private-key": "${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}",
         "verb": "${{ steps.authz.outputs.verb }}",
