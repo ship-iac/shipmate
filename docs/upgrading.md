@@ -169,8 +169,10 @@ hand.
 every plan and drift cell, gated on `AWS_ROLE_ARN` — or the cell's
 `AWS_ROLE_ARN_<WORKLOAD>` — resolving non-empty. `vars` resolve organization →
 repository → environment, so a repository- or organization-level `AWS_ROLE_ARN`
-set for the apply path is now read by every plan and drift cell as well; before
-this release nothing on the plan path read it. A plan cell executes
+set for the apply path is now read by every plan and drift cell as well. Before
+this release nothing on the plan path read it unless the consumer's own
+`plan.yml` wrote a credentials step — which is what `repo-example-stacks-aws`
+did, and what a consumer who wrote none never had. A plan cell executes
 branch-authored HCL — a provider or an `external` data source runs at plan time
 — so that role becomes reachable by anyone who can push a branch (fork pull
 requests are refused in `detect` before a cell exists); a drift cell runs merged
@@ -220,8 +222,12 @@ so any `with:` block on that shim is the load-time rejection above.
    and each callee's jobs request between them `contents: read`,
    `pull-requests: read` and `id-token: write` for `plan.yml`, and
    `contents: read`, `id-token: write` and `actions: read` for `drift.yml`.
-   `comment-ops.yml` asks for none of them. Granting less kills the run at
-   startup with no job and no log.
+   `comment-ops.yml` is unaffected: its `ops` job asks for `contents: read`,
+   `issues: write`, `pull-requests: write` and `actions: read`, and for no
+   `id-token: write` — paste its shim from
+   [`getting-started.md`](getting-started.md) §The apply workflows as it
+   stands. Granting less than a callee requests kills the run at startup with no
+   job and no log.
 
 Nothing changes for environments, secrets or the App. The ruleset changes only
 where it lists a per-cell plan check (step 3), and variables change as the

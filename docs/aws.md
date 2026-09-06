@@ -126,8 +126,9 @@ repository renamed or recreated under an old name cannot inherit the trust.
 
 ## Environment variables
 
-A consumer opts into AWS OIDC by setting two GitHub Environment variables.
-Neither is a secret:
+A consumer opts into AWS OIDC by setting two variables. A GitHub Environment is
+where they belong — see below — but not where GitHub stops looking. Neither is
+a secret:
 
 - `AWS_ROLE_ARN` — the IAM role the job assumes.
 - `AWS_REGION` — the region passed to the credentials step.
@@ -140,8 +141,11 @@ On the apply path a third, optional variable takes precedence:
   tag, or that variable is unset, the job falls back to `AWS_ROLE_ARN`.
 
 With no role variable set the engine's credentials step is skipped and the job
-holds no cloud credential at all, which is how the three non-AWS sample
-repositories run credential-free.
+holds no cloud credential at all. *Unset* means unset at all three levels:
+`vars` resolve organization → repository → environment, so a job whose
+environment names no role still reads whatever the repository or the
+organization names, and the step fires. The three non-AWS sample repositories
+run credential-free because none of the three levels names a role.
 
 `AWS_ROLE_ARN_<WORKLOAD>` changes the Environment-count arithmetic. Without it,
 one role per workload means one Environment per (env × region × workload). With
