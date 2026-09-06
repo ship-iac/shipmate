@@ -200,6 +200,71 @@ def test_documented_wrapper_passes_exactly_the_declared_engine_inputs(page, line
         )
 
 
+#: Grant strength. A callee job asking for `read` is satisfied by a caller granting `write`, so
+#: the comparison is by rank and not by equality.
+_GRANTS = ("none", "read", "write")
+
+
+def _callee_permissions_union(target):
+    """{scope: strongest grant} over every job of the engine callee.
+
+    Derived from the callee, not hand-written: this guard compares two files that must agree, and
+    the callee is the side that changes. The documented shim is the hand-written side.
+    """
+    doc = yaml.safe_load((WORKFLOWS / target).read_text(encoding="utf-8"))
+    union = {}
+    for job_id, job in doc["jobs"].items():
+        perms = job.get("permissions")
+        # Every engine job declares a mapping (each workflow's own guard pins that). A string
+        # form here would silently contribute no scope and leave this comparison vacuous.
+        assert isinstance(perms, dict), (
+            f"{target} job `{job_id}` declares `permissions: {perms!r}`, which this guard "
+            "cannot rank -- the shim's block would be compared against nothing"
+        )
+        for scope, grant in perms.items():
+            if _GRANTS.index(grant) > _GRANTS.index(union.get(scope, "none")):
+                union[scope] = grant
+    return union
+
+
+@pytest.mark.parametrize(
+    ("page", "line", "body"),
+    _FENCES,
+    ids=[f"{page.name}:{line}" for page, line, _ in _FENCES],
+)
+def test_documented_wrapper_grants_every_permission_the_callee_requests(page, line, body):
+    """A documented shim's calling job grants at least what every job inside the callee requests.
+
+    Permissions cap at the `uses:` boundary: a callee job cannot hold a scope its caller did not
+    grant, and a shim that grants less kills the run as it LOADS -- no job, no check-run and no
+    retrievable log, only a workflow-validation error on the run itself. It is the third axis of
+    the shim contract, beside the secrets and inputs pinned above, and the only one no consumer
+    can discover from a failing run.
+
+    A superset, not an exact match: an over-grant is a hardening question, not a broken pipeline,
+    and the failure this guards is a scope the callee gained and the published shim never did.
+
+    Mutations: drop `id-token: write` from the plan shim, `actions: read` from the drift shim,
+    `issues: write` from the comment-ops shim.
+    """
+    for job_name, target, job in _engine_workflow_calls(yaml.safe_load(body)):
+        where = f"{page.relative_to(ENGINE).as_posix()}:{line} job `{job_name}`"
+        granted = job.get("permissions") or {}
+        assert isinstance(granted, dict), (
+            f"{where} declares `permissions: {granted!r}`; the published shims write a mapping"
+        )
+        short = sorted(
+            f"{scope}: {grant}"
+            for scope, grant in _callee_permissions_union(target).items()
+            if _GRANTS.index(granted.get(scope, "none")) < _GRANTS.index(grant)
+        )
+        assert not short, (
+            f"{where} grants {granted} but `{target}` has a job requesting {short} -- a "
+            "callee's permissions are capped by this job's, so the run dies at load with no "
+            "job and no log"
+        )
+
+
 def _dispatch_inputs(doc):
     """(input name, spec) per `workflow_dispatch` input in a fence.
 

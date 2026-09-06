@@ -177,11 +177,20 @@ def test_the_cell_injects_the_three_flavor_variables():
     }
 
 
-def test_the_cell_state_path_is_built_from_the_state_suffix_input():
-    """Mutation: `${{ matrix.stack }}/.state`. A hard-coded suffix is the per-flavor value this
-    input exists to carry, and the `|| ''` branch is what keeps the S3-backend flavor restoring
-    nothing."""
-    assert _step("drift", "actions/drift-cell@")["with"]["state-path"] == (
-        "${{ inputs.state_suffix != '' && "
-        "format('{0}/{1}', matrix.stack, inputs.state_suffix) || '' }}"
-    )
+def test_the_cell_passes_this_whole_with_block():
+    """The whole mapping against a hand-written constant, as the plan side is pinned: a dropped
+    `with:` line reaches a composite action as the empty string rather than as an error, so a key
+    checked one at a time leaves the hole wherever it does not look. An empty `env` here plans
+    every cell against the wrong environment and fails nothing.
+
+    Mutations: `env` deleted, and `state-path: ${{ matrix.stack }}/.state` — a hard-coded suffix
+    is the per-flavor value the input exists to carry, and the `|| ''` branch is what keeps the
+    S3-backend flavor restoring nothing.
+    """
+    assert _step("drift", "actions/drift-cell@")["with"] == {
+        "stack": "${{ matrix.stack }}",
+        "stack-name": "${{ matrix.stack }}",
+        "env": "${{ matrix.environment }}",
+        "state-path": "${{ inputs.state_suffix != '' && "
+        "format('{0}/{1}', matrix.stack, inputs.state_suffix) || '' }}",
+    }
