@@ -203,6 +203,38 @@ def test_documented_wrapper_passes_exactly_the_declared_engine_inputs(page, line
         )
 
 
+def _workflow_call_secrets(target):
+    """{name: spec} for the engine callee's declared `workflow_call` secrets.
+
+    Read from the callee, like `_workflow_call_inputs`: here the hand-written side is the
+    registry itself.
+    """
+    doc = yaml.safe_load((WORKFLOWS / target).read_text(encoding="utf-8"))
+    on = doc.get("on", doc.get(True))
+    return (on["workflow_call"].get("secrets") or {}) if isinstance(on, dict) else {}
+
+
+@pytest.mark.parametrize("target", sorted(ENGINE_CALL_SECRETS))
+def test_the_secrets_registry_holds_each_callees_exact_declaration_set(target):
+    """`_loader.ENGINE_CALL_SECRETS` claims each entry is the callee's exact declaration set, and
+    nothing checked it: both guards that read the registry compare a *shim* against it, never it
+    against the callee.
+
+    Same failure mode the inputs guard above names. Mapping a secret the callee does not declare
+    is a load-time rejection -- no job, no check-run, no retrievable log -- so a callee that
+    retires one leaves every shim the registry blesses dead, with the registry and the shims in
+    perfect agreement.
+
+    Mutation: add a key to `_loader._APP_KEY` and "fix" the documented `drift.yml` and
+    `comment-ops.yml` shims to match. That agreement is exactly what this refuses as evidence.
+    """
+    declared = sorted(_workflow_call_secrets(target))
+    assert sorted(ENGINE_CALL_SECRETS[target] or {}) == declared, (
+        f"_loader.ENGINE_CALL_SECRETS[{target!r}] names "
+        f"{sorted(ENGINE_CALL_SECRETS[target] or {})}, but `{target}` declares {declared}"
+    )
+
+
 #: Grant strength. A callee job asking for `read` is satisfied by a caller granting `write`, so
 #: the comparison is by rank and not by equality.
 _GRANTS = ("none", "read", "write")

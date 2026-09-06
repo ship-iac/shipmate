@@ -9,6 +9,8 @@ Every assertion is a whole hand-written value against `yaml.safe_load` output. A
 passes an entry whose expression was mistyped; a substring test is satisfied by a comment.
 """
 
+import re
+
 import yaml
 from _loader import WORKFLOWS
 
@@ -167,3 +169,37 @@ def test_the_cell_passes_this_whole_with_block():
         "format('{0}/{1}', matrix.stack, inputs.state_suffix) || '' }}",
         "plan-passphrase": "${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}",
     }
+
+
+def _strings(node):
+    """Every scalar string reachable in the parsed workflow, mapping keys included.
+
+    Parsed, not file text: a payload expression inside a comment teaches the next reader to write
+    it back, but `safe_load` discards comments, so this cannot be satisfied by one.
+    """
+    if isinstance(node, dict):
+        for key, value in node.items():
+            yield from _strings(key)
+            yield from _strings(value)
+    elif isinstance(node, list):
+        for item in node:
+            yield from _strings(item)
+    elif isinstance(node, str):
+        yield node
+
+
+def test_the_workflow_reads_the_event_payload_nowhere():
+    """`facts` is the single producer of every pull-request fact, and a fact read from the
+    payload beside it is a second producer of the same fact. This file answers to whatever
+    trigger its caller declares -- a `workflow_dispatch` run's payload carries no
+    `github.event.pull_request` at all, so every expression reading it renders empty, and an
+    empty checkout `ref` plans the dispatch ref while an empty `head-repo` refuses `summary`.
+    Both fail toward a green gate over a pull request nobody planned.
+
+    The shim owns the one read that has to exist -- the concurrency group, where `needs` is not
+    in scope -- so this file's count is zero, compared whole rather than per expression.
+
+    Mutation: `env: { PR: ${{ github.event.pull_request.number }} }` on the `detect` job.
+    """
+    found = sorted({m for s in _strings(_doc()) for m in re.findall(r"github\.event\.[\w.]*", s)})
+    assert found == [], f"plan.yml reads the event payload: {found}"

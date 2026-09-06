@@ -1131,6 +1131,26 @@ def test_stale_sha_pin_warned(monkeypatch):
     assert "v1.4.0" in out[0][1] and _SHA[:7] in out[0][1]
 
 
+def test_a_stale_engine_workflow_pin_is_warned(monkeypatch):
+    r"""A shim's only pin is the engine reusable workflow it calls -- a `.github/workflows/` path,
+    not an `actions/` one -- so every consumer's engine pin travels that arm of `_PIN`. Every
+    other fixture that produces a pin finding pins an `actions/` path.
+
+    Mutation: drop `|\.github` from `_PIN`. The suite stays green while doctor stops reporting a
+    stale engine pin for every consumer there is.
+    """
+    responses = {
+        **_fork_responses({"plan.yml": _SHIM_PLAN}),
+        f"repos/{_ENGINE_REPO}/releases/latest": {"tag_name": "v1.4.0"},
+        f"repos/{_ENGINE_REPO}/commits/v1.4.0": {"sha": _OTHER_SHA},
+    }
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    out = doctor._pin_warnings(_ctx())
+    assert len(out) == 1, out
+    assert out[0][0] == doctor.WARNING
+    assert "v1.4.0" in out[0][1] and _SHA[:7] in out[0][1]
+
+
 def test_current_sha_pin_silent(monkeypatch):
     responses = {
         f"{_WF_DIR}{_REF}": _wf_listing("plan.yml", "notes.md"),
@@ -2485,6 +2505,23 @@ def test_a_shim_with_no_job_name_takes_the_job_id_and_is_silent(monkeypatch):
     responses = _fork_responses({"plan.yml": text})
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
     assert doctor._shim_job_name_warnings(_ctx()) == []
+
+
+def test_a_job_name_beats_a_job_id_that_is_the_contract_name(monkeypatch):
+    """GitHub displays `name:` when there is one, so the id is read only in its absence. The
+    uncovered shape is a consumer who copies the documented shim and edits the display name
+    alone: job id `shipmate`, `name: terraform`, and the checks become
+    `terraform / <stack> / <env>`.
+
+    Mutation: `job_name = <id> if <id> == _SHIM_JOB_NAME else (named[0] if named else <id>)`,
+    which every other shape test in this file passes.
+    """
+    text = _SHIM_PLAN.replace("  plan:\n", "  shipmate:\n").replace(
+        "    name: shipmate\n", "    name: terraform\n"
+    )
+    responses = _fork_responses({"plan.yml": text})
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    assert doctor._shim_job_name_warnings(_ctx()) == [(doctor.WARNING, _WRONG_JOB_NAME_TEXT)]
 
 
 def test_a_job_id_that_is_not_the_contract_name_is_reported(monkeypatch):
