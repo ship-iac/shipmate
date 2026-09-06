@@ -38,6 +38,7 @@ import pathlib
 import re
 import subprocess
 import sys
+import textwrap
 from importlib.machinery import SourceFileLoader
 
 ENGINE_ENV = "shipmate-engine"
@@ -57,6 +58,9 @@ _ENV_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 _TEAM_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*")
 _VERSION_RE = re.compile(r"v[0-9]+\.[0-9]+\.[0-9]+")
 _APP_ID_RE = re.compile(r"[0-9]+")
+#: The suffix is interpolated into a double-quoted YAML scalar in every rendered shim, so a
+#: '"' or a backslash would break the file the consumer then runs. It is a path segment.
+_SUFFIX_RE = re.compile(r"[A-Za-z0-9._/-]*")
 
 _D = pathlib.Path(__file__).resolve().parent
 
@@ -148,6 +152,22 @@ def write(verb, subject, args, stdin=None, detail="", secrets=()):
         return False
     _run(args, secrets=secrets, stdin=stdin)
     report(verb, subject, detail)
+    return True
+
+
+def write_file(path, text, subject):
+    """Create one file, or report it as pending under --dry-run.
+
+    A file write is not a `gh` argv, so it cannot go through `write`; it honours
+    `_DRY` here instead, because a --dry-run that writes into a consumer checkout
+    is not a dry run.
+    """
+    if _DRY:
+        report("would create", subject)
+        return False
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8", newline="\n")
+    report("created", subject)
     return True
 
 
@@ -578,6 +598,88 @@ def _reconcile_ruleset(ctx):
         report("ok", subject)
 
 
+#: Each consumer workflow file, the docs page publishing it, and the top-level `name:`
+#: selecting its fence. The selector is exact equality: `docs/drift.md` carries a second
+#: drift fence named `shipmate · drift · dev-eu`, which a prefix match would also find.
+SHIMS = {
+    "plan.yml": ("getting-started.md", "shipmate · plan"),
+    "apply.yml": ("getting-started.md", "shipmate · apply"),
+    "comment-ops.yml": ("getting-started.md", "comment-ops"),
+    "unlock.yml": ("getting-started.md", "shipmate · unlock"),
+    "deploy.yml": ("getting-started.md", "shipmate · deploy"),
+    "drift.yml": ("drift.md", "shipmate · drift"),
+}
+
+#: The same expression `scripts/tests/test_docs_yaml_parses.py` discovers fences with, so an
+#: indented fence is dedented rather than missed.
+_FENCE = re.compile(r"^(?P<indent>[ \t]*)```yaml[ \t]*$\n(?P<body>.*?)^\1```", re.M | re.S)
+_DOC_PIN = re.compile(
+    r"(?P<ref>ship-iac/shipmate/\.github/workflows/[^@\s]+)@<engine-sha>[^\S\n]*#[^\n]*"
+)
+#: Only a 40-hex pin, matching what `dev/repin_consumer.py` rewrites: a file still carrying the
+#: docs placeholder must not be reported `pin-only`, because that names a remedy which would
+#: then find no engine reference to move.
+_ANY_PIN = re.compile(
+    r"(?P<ref>ship-iac/shipmate/\.github/workflows/[^@\s]+)@[0-9a-f]{40}[^\S\n]*(#[^\n]*)?"
+)
+
+
+def _fence(page_text, name):
+    """The dedented body of the one ```yaml fence in `page_text` whose first line is
+    `name: <name>`."""
+    bodies = [
+        body
+        for m in _FENCE.finditer(page_text)
+        for body in [textwrap.dedent(m.group("body"))]
+        if body.partition("\n")[0] == f"name: {name}"
+    ]
+    if len(bodies) != 1:
+        raise SystemExit(
+            f"{len(bodies)} documented fences are named {name!r}; expected exactly one. "
+            "The shims are rendered from the docs, so the docs and this table must agree."
+        )
+    return bodies[0]
+
+
+def _render(engine, filename, sha, version, state_suffix):
+    """The full text of one consumer shim, LF-delimited and newline-terminated."""
+    page, name = SHIMS[filename]
+    text = _fence((pathlib.Path(engine) / "docs" / page).read_text(encoding="utf-8"), name)
+    text = _DOC_PIN.sub(rf"\g<ref>@{sha} # {version}", text)
+    return text.replace('state_suffix: ""', f'state_suffix: "{state_suffix}"')
+
+
+def _depin(text):
+    """`text` with every engine pin and its trailing comment reduced to a placeholder."""
+    return _ANY_PIN.sub(r"\g<ref>@<pin>", text)
+
+
+def _reconcile_shim(ctx, filename):
+    path = pathlib.Path(ctx["root"]) / ".github" / "workflows" / filename
+    text = _render(ctx["engine"], filename, ctx["sha"], ctx["version"], ctx["state_suffix"])
+    if not path.is_file():
+        write_file(path, text, filename)
+        return
+    # Universal-newline read: a CRLF checkout of an otherwise identical file is not drift.
+    current = path.read_text(encoding="utf-8")
+    if current == text:
+        report("ok", filename)
+    elif _depin(current) == _depin(text):
+        report("pin-only", filename, "run dev/repin_consumer.py")
+    else:
+        report("differs", filename, "local edits, not overwritten")
+
+
+def _reconcile_shims(ctx):
+    """Write the six consumer workflow shims, reporting anything already there.
+
+    `pin-only` is not drift: moving a pin is `dev/repin_consumer.py`'s job, driven by
+    docs/releasing.md, so it does not reach `_exit_code`.
+    """
+    for filename in SHIMS:
+        _reconcile_shim(ctx, filename)
+
+
 def _exit_code():
     """2 when anything differs, else 0.
 
@@ -601,6 +703,11 @@ def main(argv=None):
         raise SystemExit(f"--team must be a GitHub team slug: {args.team!r}")
     if not _APP_ID_RE.fullmatch(args.app_id):
         raise SystemExit(f"--app-id must be all digits: {args.app_id!r}")
+    if not _SUFFIX_RE.fullmatch(args.state_suffix):
+        raise SystemExit(
+            f"--state-suffix must be a path segment: {args.state_suffix!r}. It is written "
+            'into a `state_suffix: "<value>"` scalar in every shim.'
+        )
     _DRY = args.dry_run
 
     # The local reads first: a bad key path or an unusable VERSIONS must fail in under a
@@ -620,6 +727,7 @@ def main(argv=None):
         "envs": envs,
         "shared": _resolve_shared(args.shared, _variables(), envs),
         "state_suffix": args.state_suffix,
+        "root": pathlib.Path.cwd(),
         "engine": engine,
         "versions": versions,
         "sha": sha,
@@ -634,6 +742,7 @@ def main(argv=None):
     _reconcile_envs(ctx)
     _reconcile_variables(ctx)
     _reconcile_ruleset(ctx)
+    _reconcile_shims(ctx)
 
     sys.exit(_exit_code())
 

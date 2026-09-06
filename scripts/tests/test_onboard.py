@@ -11,6 +11,7 @@ import subprocess
 import sys
 
 import pytest
+import yaml
 from _loader import ENGINE, load_script
 
 onboard = load_script("onboard")
@@ -83,6 +84,7 @@ def ctx(**over):
         "envs": ["dev-eu"],
         "shared": set(),
         "state_suffix": "",
+        "root": None,
         "engine": None,
         "versions": {"terramate": "9.9.9", "tofu": "8.8.8"},
         "sha": "a" * 40,
@@ -412,7 +414,8 @@ def test_main_calls_every_stage_in_order():
 
     Mutations, each proven: delete `_reconcile_engine_env(ctx)`; delete
     `_reconcile_envs(ctx)`; delete `_reconcile_variables(ctx)`; delete
-    `_reconcile_ruleset(ctx)`; delete `sys.exit(_exit_code())`; swap two reconcilers.
+    `_reconcile_ruleset(ctx)`; delete `_reconcile_shims(ctx)`; delete
+    `sys.exit(_exit_code())`; swap two reconcilers.
     """
     tree = ast.parse((ENGINE / "scripts" / "onboard").read_text(encoding="utf-8"))
     main = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "main")
@@ -420,6 +423,7 @@ def test_main_calls_every_stage_in_order():
     assert stages == [
         "_TEAM_RE.fullmatch(args.team)",
         "_APP_ID_RE.fullmatch(args.app_id)",
+        "_SUFFIX_RE.fullmatch(args.state_suffix)",
         "_read_key(args.key)",
         "_versions(engine)",
         "_engine_pin(engine)",
@@ -431,6 +435,7 @@ def test_main_calls_every_stage_in_order():
         "_reconcile_envs(ctx)",
         "_reconcile_variables(ctx)",
         "_reconcile_ruleset(ctx)",
+        "_reconcile_shims(ctx)",
         "sys.exit(_exit_code())",
         "_exit_code()",
     ]
@@ -861,20 +866,22 @@ def test_a_read_failure_that_is_not_a_404_refuses(monkeypatch):
     assert fake.calls == [["gh", "api", "repos/o/r/environments/dev-eu-plan"]]
 
 
-def test_dry_run_reaches_every_write_path_and_issues_only_reads(monkeypatch):
+def test_dry_run_reaches_every_write_path_and_issues_only_reads(monkeypatch, tmp_path):
     """`test_dry_run_issues_no_write` pins `write` itself; it says nothing about whether
     a reconciler routes through it. This drives every reconciler over a repository shaped
-    so that all seven `write(...)` sites are reached -- create, update, the branch-policy
-    POST, the key, the destructive repository-secret delete, the variable set and the
-    ruleset POST -- and compares the whole recorded call list against a hand-written
-    constant of reads.
+    so that all seven `write(...)` sites and the one `write_file(...)` site are reached --
+    create, update, the branch-policy POST, the key, the destructive repository-secret
+    delete, the variable set, the ruleset POST and the six absent shims -- and compares the
+    whole recorded call list against a hand-written constant of reads.
 
     The engine environment exists with a null policy (the update path) and a
     repository-level copy of the key exists (the delete path); everything else is absent,
-    and the repository has no variable and no rule.
+    and the repository has no variable, no rule and no workflow file.
 
-    Mutation: swap any one of the seven `write(...)` calls for a direct `_run(...)`. Each
-    one appears in the call list below and reddens it.
+    Mutations, each proven: swap any one of the seven `write(...)` calls for a direct
+    `_run(...)`, which appears in the call list below; and make `write_file` fall through to
+    `write_text` under `_DRY`, which puts a file in a checkout the operator was promised
+    would not be touched.
     """
     absent = SystemExit("gh: Not Found (HTTP 404)")
     fake = make_gh(
@@ -897,6 +904,8 @@ def test_dry_run_reaches_every_write_path_and_issues_only_reads(monkeypatch):
     onboard._reconcile_envs(ctx())
     onboard._reconcile_variables(ctx())
     onboard._reconcile_ruleset(ctx())
+    onboard._reconcile_shims(ctx(root=tmp_path, engine=ENGINE))
+    assert list(tmp_path.iterdir()) == []
     assert fake.calls == [
         ["gh", "api", "repos/o/r/environments/shipmate-engine"],
         ["gh", "api", "repos/o/r/environments/shipmate-engine/deployment-branch-policies"],
@@ -921,6 +930,12 @@ def test_dry_run_reaches_every_write_path_and_issues_only_reads(monkeypatch):
         "would set",
         "would set",
         "would set",
+        "would create",
+        "would create",
+        "would create",
+        "would create",
+        "would create",
+        "would create",
         "would create",
     ]
 
@@ -1282,3 +1297,202 @@ def test_an_unrecognised_ruleset_post_failure_propagates(monkeypatch):
     with pytest.raises(SystemExit) as e:
         onboard._reconcile_ruleset(ctx())
     assert "HTTP 500" in str(e.value)
+
+
+#: Owner-agnostic, like the docs guard's selector: the pages publish `<owner>/shipmate/...`
+#: as well as this organization's own spelling.
+_CALL_PATH = "/shipmate/.github/workflows/"
+
+_EXPECTED_CALLEES = {
+    "plan.yml": ["plan.yml"],
+    "apply.yml": ["apply.yml", "apply-all.yml"],
+    "comment-ops.yml": ["comment-ops.yml"],
+    "unlock.yml": ["unlock.yml"],
+    "deploy.yml": ["deploy.yml"],
+    "drift.yml": ["drift.yml"],
+}
+
+
+def _callees(text):
+    """The engine reusable workflow each job of a rendered shim calls, in document order."""
+    doc = yaml.safe_load(text)
+    return [
+        job["uses"].split(_CALL_PATH, 1)[1].split("@", 1)[0]
+        for job in doc["jobs"].values()
+        if _CALL_PATH in (job.get("uses") or "")
+    ]
+
+
+def test_every_shim_fence_is_found_and_calls_exactly_the_expected_engine_workflows():
+    """The locator replaces the copy of the six bodies that used to live in this script.
+    It must find exactly one fence per shim, and each fence must call exactly the engine
+    reusable workflows that shim is for, in document order -- `apply.yml` is one file with
+    two pin sites, and a locator that found only the first would ship an unpinned
+    `apply-all.yml`.
+
+    The expected callee lists are hand-written here, never read out of the docs, and the
+    whole mapping is compared with `==`.
+
+    Three claims, three mutations, each proved separately:
+    - edit a fence's top-level `name:` line -> the locator matches zero fences and refuses;
+    - make the `name:` comparison a prefix match -> `drift` matches two fences, the unscoped
+      shim and the per-slice copy, and the locator refuses;
+    - edit a `uses:` filename in the `apply.yml` fence -> the callee list differs.
+    """
+    found = {
+        name: _callees(onboard._render(ENGINE, name, "c" * 40, "v9.9.9", ""))
+        for name in onboard.SHIMS
+    }
+    assert found == _EXPECTED_CALLEES
+
+
+def test_the_rendered_pin_is_byte_identical_to_what_repin_consumer_writes(tmp_path):
+    """Two writers produce one string. `dev/repin_consumer.py` re-pins a consumer at release
+    time; this script writes the first copy. A spacing difference between them makes every
+    re-pinned consumer report `differs` forever, and acceptance can never pass.
+
+    Mutation: render the separator as two spaces before the `#`.
+    """
+    import repin_consumer
+
+    wf = tmp_path / ".github" / "workflows"
+    wf.mkdir(parents=True)
+    for name in onboard.SHIMS:
+        (wf / name).write_text(
+            onboard._render(ENGINE, name, "c" * 40, "v9.9.9", ""),
+            encoding="utf-8",
+            newline="\n",
+        )
+    # The real release writer, not an imitation of it: this is the exact call
+    # docs/releasing.md makes against a consumer once the tag is cut.
+    planned = repin_consumer._plan_consumer(tmp_path, "d" * 40, "v9.9.10")
+    assert len(planned) == len(onboard.SHIMS)
+    for f in planned:
+        name = f.path.rsplit("/", 1)[1]
+        assert f.text == onboard._render(ENGINE, name, "d" * 40, "v9.9.10", ""), (
+            f"{name}: onboard and repin_consumer disagree on the pin line, so a "
+            "re-pinned consumer never reports `ok`"
+        )
+
+
+def test_apply_shim_rewrites_both_pins():
+    """`apply.yml` is one file with two jobs and two pin sites. A first-match rewrite ships
+    an `apply-all.yml` still pinned to the docs placeholder, which resolves to nothing.
+
+    Mutation: pass `count=1` to the `_DOC_PIN` substitution.
+    """
+    text = onboard._render(ENGINE, "apply.yml", "c" * 40, "v9.9.9", "")
+    assert "<engine-sha>" not in text
+    assert text.count(f"@{'c' * 40} # v9.9.9") == 2
+
+
+def test_state_suffix_is_substituted_into_every_site():
+    """Every documented `state_suffix: ""` becomes the operator's value, and the two shims
+    that carry none stay that way.
+
+    The whole vector of (file, job, parsed value) is compared against a hand-written
+    constant: asserting one site would leave the other four unpinned, and asserting on a
+    substring would be satisfied by the same words appearing in a comment.
+
+    Mutation: substitute into a copy that is then discarded.
+    """
+    found = [
+        (name, job_id, job["with"]["state_suffix"])
+        for name in onboard.SHIMS
+        for doc in [yaml.safe_load(onboard._render(ENGINE, name, "c" * 40, "v9.9.9", ".state"))]
+        for job_id, job in doc["jobs"].items()
+        if "state_suffix" in (job.get("with") or {})
+    ]
+    assert found == [
+        ("plan.yml", "shipmate", ".state"),
+        ("apply.yml", "targeted", ".state"),
+        ("apply.yml", "all", ".state"),
+        ("deploy.yml", "deploy", ".state"),
+        ("drift.yml", "shipmate", ".state"),
+    ]
+
+
+def _shim_ctx(tmp_path):
+    return ctx(root=tmp_path, engine=ENGINE, sha="c" * 40, version="v9.9.9")
+
+
+def _plan_shim(tmp_path):
+    """(path to the consumer's plan.yml, the text this script would render for it)."""
+    path = tmp_path / ".github" / "workflows" / "plan.yml"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return path, onboard._render(ENGINE, "plan.yml", "c" * 40, "v9.9.9", "")
+
+
+def test_an_identical_file_reports_ok_through_crlf(tmp_path):
+    """A CRLF checkout of an otherwise identical shim is not drift: git's autocrlf gives a
+    Windows consumer one, and reporting it `differs` would tell every such repository that
+    it holds local edits it does not have.
+
+    Mutation: read the existing file with `newline=""`, which stops the translation.
+    """
+    path, text = _plan_shim(tmp_path)
+    on_disk = text.replace("\n", "\r\n").encode("utf-8")
+    path.write_bytes(on_disk)
+    onboard._reconcile_shim(_shim_ctx(tmp_path), "plan.yml")
+    assert onboard.REPORT == [("ok", "plan.yml", "")]
+    assert path.read_bytes() == on_disk
+
+
+def test_a_file_differing_only_in_its_pin_reports_pin_only(tmp_path):
+    """A consumer sitting on an older release differs only in its pin, and moving a pin is
+    `dev/repin_consumer.py`'s job. Naming that remedy is the whole point of the verb, and it
+    is not drift, so it must not set exit 2 and fail the operator's run.
+
+    Mutation: make `_depin` leave the trailing comment in place, so the version comment alone
+    reads as `differs`.
+    """
+    path, _text = _plan_shim(tmp_path)
+    older = onboard._render(ENGINE, "plan.yml", "d" * 40, "v9.9.8", "")
+    path.write_text(older, encoding="utf-8", newline="\n")
+    onboard._reconcile_shim(_shim_ctx(tmp_path), "plan.yml")
+    assert onboard.REPORT == [("pin-only", "plan.yml", "run dev/repin_consumer.py")]
+    assert path.read_text(encoding="utf-8") == older
+    assert onboard._exit_code() == 0
+
+
+def test_a_locally_edited_file_is_reported_and_not_overwritten(tmp_path):
+    """A consumer's own edit to a shim is theirs. Overwriting it is this script exceeding
+    its mandate, and it is unrecoverable from the run output.
+
+    Mutation: overwrite on the `differs` branch.
+    """
+    path, text = _plan_shim(tmp_path)
+    edited = text + "# a local edit\n"
+    path.write_text(edited, encoding="utf-8", newline="\n")
+    onboard._reconcile_shim(_shim_ctx(tmp_path), "plan.yml")
+    assert onboard.REPORT == [("differs", "plan.yml", "local edits, not overwritten")]
+    assert path.read_text(encoding="utf-8") == edited
+    assert onboard._exit_code() == 2
+
+
+def test_an_absent_file_is_created_with_lf_endings(tmp_path):
+    """The shim is written LF-delimited whatever platform the operator runs on. A CRLF copy
+    would be reported `differs` by nothing -- the classifier reads universal-newline -- but
+    `dev/repin_consumer.py` and every other consumer's copy are LF.
+
+    Mutation: drop `newline="\\n"` from `write_file`. This reddens on Windows only; on Linux
+    the default translation is already LF, so a Linux-only proof of this one is no proof.
+    """
+    path, text = _plan_shim(tmp_path)
+    onboard._reconcile_shim(_shim_ctx(tmp_path), "plan.yml")
+    assert onboard.REPORT == [("created", "plan.yml", "")]
+    written = path.read_bytes()
+    assert b"\r" not in written
+    assert written.decode("utf-8") == text
+
+
+def test_main_refuses_a_state_suffix_that_cannot_sit_in_a_yaml_scalar():
+    """The suffix is interpolated into `state_suffix: "<value>"` in every rendered shim, so a
+    `"` in it writes six workflow files GitHub cannot load.
+
+    Mutation: drop the `_SUFFIX_RE` check. `--key k` does not exist, so `_read_key` raises
+    `SystemExit` too -- the assertion is on the message, not on the exception.
+    """
+    with pytest.raises(SystemExit) as e:
+        onboard.main(["--team", "ops", "--app-id", "1", "--key", "k", "--state-suffix", '." #'])
+    assert "--state-suffix" in str(e.value)
