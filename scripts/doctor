@@ -1339,8 +1339,8 @@ def _shim_job_name_warnings(ctx):
     correctly, and its plan comment loses every per-cell deep link.
 
     GitHub names a called workflow's check runs `<caller job> / <callee job>`,
-    so the plan cell checks are `shipmate / <stack> / <env>` only when the
-    shim's job carries that name. `scripts/summary-comment` resolves each row's
+    so the plan cell checks are `shipmate / <stack> / <env>` only when that
+    job carries that name. `scripts/summary-comment` resolves each row's
     `[plan]` link by that exact name and falls back to the workflow-run URL on a
     miss — so the failure is a silently degraded comment, not an error anyone
     sees.
@@ -1375,7 +1375,7 @@ def _shim_job_name_finding(text, name):
     An absent `name:` is not a finding — GitHub displays the job id then, so a job written
     `jobs:` / `  shipmate:` / `    uses: …` produces the same check names as the documented
     shape. Only a direct child of the job is read as its name, so a `name:` under `with:`
-    cannot stand in for one. Judged block-style, like the documented shim and every other
+    cannot stand in for one. Judged block-style, like the documented file and every other
     finder here."""
     region = _call_region(text, _PLAN_WORKFLOW_CALL)
     if region is None:

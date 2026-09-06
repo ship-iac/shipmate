@@ -494,13 +494,13 @@ def tag_filter_error(tags, no_pull_request):
     request, or "" when it may be honoured.
 
     Keyed on `no-pull-request` alone, and NOT exempted by `all-stacks`: a plan
-    wrapper that sets both would drop changed stacks from the matrix, and a
+    job that sets both would drop changed stacks from the matrix, and a
     dropped stack gets no plan cell, so no apply check is created, `count` and
     the summary's cell count still agree, the gate greens, and the reviewed
     change merges and never applies. `all-stacks` on its own only over-plans,
     which is the safe direction; combined with a filter it stops being safe.
     One marker, one meaning -- `no-pull-request` is the input already documented
-    as never belonging in a plan wrapper."""
+    as never belonging in a plan job."""
     if not tags.strip():
         return ""
     if no_pull_request.strip().lower() == "true":
@@ -508,9 +508,9 @@ def tag_filter_error(tags, no_pull_request):
     return (
         "::error::the `tags` filter is only for a workflow with no pull request at all "
         "(nightly drift), and this run did not pass `no-pull-request: true`. In a plan "
-        "wrapper it would drop changed stacks from the matrix: a dropped stack gets no plan "
+        "job it would drop changed stacks from the matrix: a dropped stack gets no plan "
         "cell and no apply check, `shipmate / gate` greens over it, and the change merges "
-        "and never applies. Remove the input from the plan wrapper."
+        "and never applies. Remove the input from the plan job."
     )
 
 

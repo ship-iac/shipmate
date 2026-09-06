@@ -953,8 +953,8 @@ repository the standing residual is arbitrary code execution offered to anyone
 who can open a pull request *from a branch in the repository*.
 
 **The App key is now inside a workflow a fork pull request can start.** The
-reason is the trigger: the plan workflow runs on `pull_request_target`, which
-fires for a fork. Two things keep it out of reach, and they are both structural
+reason is the trigger: the consumer's `plan` job runs on `pull_request_target`,
+which fires for a fork. Two things keep it out of reach, and they are both structural
 rather than conventions. The trusted `summary` job declines unless the head
 repository `facts` reported equals `github.repository`, and an absent or empty
 value is a refusal, not a pass: a job-level `if:`, so the job never starts, no
@@ -964,7 +964,7 @@ the comparison live in engine-owned, SHA-pinned YAML (`CONTRACT.md` §Post-plan
 topology), so a consumer supplies neither and can neither fail it closed nor
 loosen it.
 
-**The third trigger keeps every fact out of a dispatcher's hands.** A commented
+**`workflow_dispatch` keeps every fact out of a dispatcher's hands.** A commented
 `shipmate plan` `workflow_dispatch`es the same `shipmate.yml` the autoplan runs
 in, and a dispatch reaches strictly less than a pull-request event does: the body
 carries the verb that selects the `plan` job and the pull request's number,

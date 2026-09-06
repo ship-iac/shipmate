@@ -105,12 +105,15 @@ live probes.
 - **Whether each of `shipmate.yml`'s jobs is selected by the `if:` its event
   needs.** One file gates seven jobs, one per engine reusable workflow, and the
   probe compares each job's whole `if:` against the expression that file's
-  published fence carries. A job that is missing, duplicated, declares no `if:`
-  or carries a different expression is reported by name. Nothing else observes
-  this: a verb whose job never runs completes green with nothing done, and a
-  job whose `if:` is too wide runs on an event it was never meant to see.
-  Copy the expression the finding names from
-  [`getting-started.md`](getting-started.md).
+  published fence carries. Each finding identifies the job by the engine
+  workflow it calls — "the job calling the engine's `apply.yml`", which is the
+  fence's `targeted` — because a job that is missing or duplicated has no one
+  job id to name. A wrong expression and a missing `if:` are both quoted with
+  the expression to write; a job count other than one is not, since there is no
+  single job to compare. Nothing else observes any of this: a verb whose job
+  never runs completes green with nothing done, and a job whose `if:` is too
+  wide runs on an event it was never meant to see. The fence in
+  [`getting-started.md`](getting-started.md) has every expression.
 - **Whether the configured approvers team resolves in the org.**
 - **Whether the shipmate App installation still grants the manifest's full
   permission set.**
@@ -715,9 +718,9 @@ six jobs the event did not select.
 
 The job that serves that verb is not selected by its `if:` in
 `.github/workflows/shipmate.yml`, or the file declares a `verb` option its jobs
-do not cover. `shipmate doctor`'s routing probe reports the exact expression it
-expected on every plan run, and the dispatch comment on the pull request already
-links the run. Reconcile the job against the fence in
+do not cover. `shipmate doctor`'s routing probe reports that job on every plan
+run — with the expression to write, unless what it found was a job count other
+than one — and the dispatch comment on the pull request already links the run. Reconcile the job against the fence in
 [`getting-started.md`](getting-started.md) §The workflow file.
 
 ### Fork pull request refused
