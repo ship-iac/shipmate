@@ -489,12 +489,12 @@ def _run_main(
     out = tmp_path / "out.txt"
     out.write_text("", encoding="utf-8")
     monkeypatch.setenv("GITHUB_OUTPUT", str(out))
-    # main() reads the checkout it runs in: the plan workflow has to be where
-    # plan_workflow_error requires it, and the engine repo (pytest's cwd) has no
-    # plan.yml of its own.
+    # main() reads the checkout it runs in: the consumer's workflow file has to be
+    # where plan_workflow_error requires it, and the engine repo (pytest's cwd) has
+    # no shipmate.yml of its own.
     (tmp_path / ".github" / "workflows").mkdir(parents=True, exist_ok=True)
     if plan_workflow:
-        (tmp_path / ".github" / "workflows" / "plan.yml").write_text("", encoding="utf-8")
+        (tmp_path / ".github" / "workflows" / "shipmate.yml").write_text("", encoding="utf-8")
     monkeypatch.chdir(tmp_path)
     for k in (
         "SHIPMATE_ALL_STACKS",
@@ -768,7 +768,7 @@ def test_main_refuses_a_dispatched_run_that_states_no_head(monkeypatch, tmp_path
 
 def test_plan_workflow_at_the_contract_path_is_planned(tmp_path):
     (tmp_path / ".github" / "workflows").mkdir(parents=True)
-    (tmp_path / ".github" / "workflows" / "plan.yml").write_text("", encoding="utf-8")
+    (tmp_path / ".github" / "workflows" / "shipmate.yml").write_text("", encoding="utf-8")
     assert bm.plan_workflow_error("pull_request_target", str(tmp_path)) == ""
 
 
@@ -776,20 +776,19 @@ def test_a_renamed_plan_workflow_is_refused(tmp_path):
     """This refusal makes the path load-bearing: no plan-run lookup matches it literally any
     more, so a rename would merge green while doctor's filename-keyed probes went quiet. The
     whole message is hand-written, and names only consequences still true now that the plan
-    run id rides on each apply check and `actions/dispatch` picks the workflow file from the
-    verb; a clause about plan-run discovery coming back here would be a falsehood."""
+    run id rides on each apply check and `actions/dispatch` aims every verb at this one file;
+    a clause about plan-run discovery coming back here would be a falsehood."""
     (tmp_path / ".github" / "workflows").mkdir(parents=True)
     (tmp_path / ".github" / "workflows" / "shipmate-plan.yml").write_text("", encoding="utf-8")
     assert bm.plan_workflow_error("pull_request", str(tmp_path)) == (
-        "::error::this repository has no `.github/workflows/plan.yml` — the one path "
-        "`CONTRACT.md` lets the plan workflow live at, and this refusal is what enforces it. "
-        "That exact filename is matched literally by `shipmate doctor`, which keys its "
-        "plan-shim probes on it, and by `actions/dispatch`, which picks the workflow file "
-        "from the verb — `shipmate plan` dispatches this filename and no other. A plan "
-        "workflow under any other name silently loses the calling-job-name and "
-        "dispatch-wiring checks, draws doctor's own `pull_request_target` warning instead, "
-        "and is reached by no `shipmate plan` at all. "
-        "Move the plan workflow back to `.github/workflows/plan.yml`."
+        "::error::this repository has no `.github/workflows/shipmate.yml` — the one path "
+        "`CONTRACT.md` lets the consumer's workflow file live at, and this refusal is what "
+        "enforces it. That exact filename is matched literally by `shipmate doctor`, which "
+        "keys its calling-job-name, dispatch-wiring and routing probes on it, and by "
+        "`actions/dispatch`, which sends every commented verb to it. A consumer workflow "
+        "under any other name silently loses those probes, draws doctor's own "
+        "`pull_request_target` warning instead, and is reached by no `shipmate` command at "
+        "all. Move the consumer's workflow back to `.github/workflows/shipmate.yml`."
     )
 
 
@@ -832,7 +831,7 @@ def test_main_refuses_a_missing_plan_workflow(monkeypatch, tmp_path):
             plan_workflow=False,
             head_sha="cafe1234",
         )
-    assert ".github/workflows/plan.yml" in str(excinfo.value)
+    assert ".github/workflows/shipmate.yml" in str(excinfo.value)
     assert called == []
 
 
@@ -1328,3 +1327,14 @@ def test_the_three_outputs_agree_on_one_cell_list(monkeypatch, tmp_path, cells):
     assert outputs["count"] == str(len(cells))
     assert len(json.loads(outputs["matrix"])["include"]) == len(cells)
     assert outputs["empty"] == ("true" if not cells else "false")
+
+
+def test_the_plan_workflow_path_is_the_one_consumer_file():
+    """The whole path, hand-written. Three surfaces match this literally — `actions/dispatch`
+    aims every verb at it, `shipmate doctor` keys its fork-trigger exemption and its
+    calling-job-name, dispatch-wiring and routing probes on it, and this refusal is what makes
+    a repository carry it at all. A rename here silently retires all of them.
+
+    Mutation: set it back to `.github/workflows/plan.yml`.
+    """
+    assert bm.PLAN_WORKFLOW == ".github/workflows/shipmate.yml"

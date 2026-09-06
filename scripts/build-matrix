@@ -12,15 +12,16 @@ import os
 import subprocess
 import sys
 
-#: The two pull-request events `plan_workflow_error` requires a plan workflow on.
+#: The two pull-request events `plan_workflow_error` requires a consumer workflow file on.
 _PR_EVENTS = ("pull_request", "pull_request_target")
 
 MATRIX_LIMIT = 256
 
-#: Where the plan workflow must live. Two surfaces match this filename literally: `shipmate
-#: doctor` keys its plan-shim probes on it, and `actions/dispatch` sends a commented
-#: `shipmate plan` to it by name. No plan-run lookup does — each reads a cell's own apply check.
-PLAN_WORKFLOW = ".github/workflows/plan.yml"
+#: Where the consumer's workflow file must live. Three surfaces match this filename
+#: literally: `shipmate doctor` keys its fork-trigger exemption and its shim probes on it,
+#: and `actions/dispatch` sends every commented verb to it by name, choosing the job with the
+#: `verb` it puts in the body. No plan-run lookup does — each reads a cell's own apply check.
+PLAN_WORKFLOW = ".github/workflows/shipmate.yml"
 
 #: Stack paths a reader would take for an engine artifact. Neither can collide any more: a plan
 #: check is `shipmate / <stack> / <env>`, so a stack named `apply` yields `shipmate / apply /
@@ -465,7 +466,7 @@ def head_checkout_error(head_sha, no_pull_request):
 
 
 def plan_workflow_error(event_name, root="."):
-    """The `::error::` line refusing a checkout with no plan workflow at
+    """The `::error::` line refusing a checkout with no consumer workflow file at
     `PLAN_WORKFLOW`, or "" when this run may be planned.
 
     A sparse checkout would fail this falsely; `detect` needs the whole tree for
@@ -477,13 +478,13 @@ def plan_workflow_error(event_name, root="."):
         return ""
     return (
         f"::error::this repository has no `{PLAN_WORKFLOW}` — the one path `CONTRACT.md` "
-        "lets the plan workflow live at, and this refusal is what enforces it. That exact "
-        "filename is matched literally by `shipmate doctor`, which keys its plan-shim "
-        "probes on it, and by `actions/dispatch`, which picks the workflow file from the "
-        "verb — `shipmate plan` dispatches this filename and no other. A plan workflow "
-        "under any other name silently loses the calling-job-name and dispatch-wiring "
-        "checks, draws doctor's own `pull_request_target` warning instead, and is "
-        f"reached by no `shipmate plan` at all. Move the plan workflow back to `{PLAN_WORKFLOW}`."
+        "lets the consumer's workflow file live at, and this refusal is what enforces it. "
+        "That exact filename is matched literally by `shipmate doctor`, which keys its "
+        "calling-job-name, dispatch-wiring and routing probes on it, and by "
+        "`actions/dispatch`, which sends every commented verb to it. A consumer workflow "
+        "under any other name silently loses those probes, draws doctor's own "
+        "`pull_request_target` warning instead, and is reached by no `shipmate` command at "
+        f"all. Move the consumer's workflow back to `{PLAN_WORKFLOW}`."
     )
 
 
