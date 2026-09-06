@@ -15,13 +15,15 @@ import textwrap
 
 import pytest
 import yaml
-from _loader import ENGINE, ENGINE_CALL_SECRETS, WORKFLOWS
+from _loader import ENGINE, ENGINE_CALL_SECRETS, WORKFLOWS, load_script
 
 DOCS = ENGINE / "docs"
 
 _PAGES = [ENGINE / "README.md", *sorted(DOCS.glob("*.md"))]
 
-_FENCE = re.compile(r"^(?P<indent>[ \t]*)```yaml[ \t]*$\n(?P<body>.*?)^\1```", re.M | re.S)
+# Imported, not copied: `scripts/onboard` renders the consumer shims out of these same
+# fences, and two definitions of "a fence" would drift.
+_FENCE = load_script("onboard")._FENCE
 
 # Openers as a reader sees them, not as _FENCE pairs them: `yml`, and an info string after the
 # language, both count here and neither pairs in _FENCE.

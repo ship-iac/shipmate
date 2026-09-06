@@ -1,0 +1,922 @@
+#!/usr/bin/env python3
+"""Reconcile one consumer repository to shipmate's per-repository setup.
+
+    python3 <engine>/scripts/onboard --team <team-slug> --app-id <id> \
+        --key shipmate-app.private-key.pem [--state-suffix <s>] \
+        [--shared <env,env>] [--dry-run]
+
+Hand-run from inside the consumer checkout, with `gh` authenticated against that
+repository. It reads what is already there and
+creates or updates only what differs, so a second run over a configured
+repository changes nothing.
+
+Flags:
+
+  --team          GitHub team slug whose members may apply and unlock.
+  --app-id        the shipmate App's numeric id.
+  --key           path to the App's PEM private key (its text, not the path,
+                  is what gets stored).
+  --state-suffix  suffix appended to state artifact names; "" by default.
+  --shared        comma-separated environments bound as one bare `<env>` on
+                  both paths instead of the `<env>-plan` / `<env>-apply` split.
+                  Must agree with the SHIPMATE_SHARED_ENVS repository variable
+                  when both are set.
+  --dry-run       report `would <verb>` for every change and run no write.
+
+Exit codes: 0 clean, 2 at least one item differs, 1 a refusal or a failed
+write. `argparse` also exits 2 on a usage error, so a wrapper branching on 2
+must distinguish the two by output, or validate its own arguments first.
+
+Environments are derived from the repository's own Terramate env/* tags, never
+passed in: the set of environments is a property of the stacks.
+"""
+
+import argparse
+import importlib.util
+import json
+import pathlib
+import re
+import subprocess
+import sys
+import textwrap
+from importlib.machinery import SourceFileLoader
+
+ENGINE_ENV = "shipmate-engine"
+GATE = "shipmate / gate"
+REDACTED = "***"
+REPORT = []
+_DRY = False
+
+#: Both halves start alphanumeric, as GitHub logins and repository names do: that
+#: forecloses '.' and '..', and a value beginning with '-' reads to a CLI as a flag.
+_REPO_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9][A-Za-z0-9._-]*")
+#: Environment names are interpolated into API paths and `gh --env` arguments.
+_ENV_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
+#: A team slug is interpolated into an action input and an API path: starting
+#: alphanumeric forecloses a leading '-' reading to a CLI as a flag, and the
+#: character set forecloses '/' and '..'.
+_TEAM_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*")
+_VERSION_RE = re.compile(r"v[0-9]+\.[0-9]+\.[0-9]+")
+_APP_ID_RE = re.compile(r"[0-9]+")
+#: The suffix is interpolated into a double-quoted YAML scalar in every rendered shim, so a
+#: '"' or a backslash would break the file the consumer then runs. '/' and '.' are admitted:
+#: the value is a fragment of an artifact name, supplied by the operator running this.
+_SUFFIX_RE = re.compile(r"[A-Za-z0-9._/-]*")
+
+_D = pathlib.Path(__file__).resolve().parent
+
+
+def _load(fname):
+    loader = SourceFileLoader(fname.replace("-", "_"), str(_D / fname))
+    spec = importlib.util.spec_from_loader(loader.name, loader)
+    mod = importlib.util.module_from_spec(spec)
+    loader.exec_module(mod)
+    return mod
+
+
+def _scrub(text, secrets):
+    for secret in secrets:
+        if secret:
+            text = text.replace(secret, REDACTED)
+    return text
+
+
+def _run(args, secrets=(), stdin=None):
+    r"""Run a `gh` or `git` invocation, returning stdout; raise on a nonzero exit.
+
+    `stdin` is sent as UTF-8 bytes rather than through `text=True`, which wraps
+    the child's stdin in a `TextIOWrapper` and rewrites every \n to
+    `os.linesep`. The App private key goes through here on its way to
+    `gh secret set`, and a CRLF-mangled PEM is not the key that was read.
+
+    `secrets` are the live credential values this call carries, scrubbed from
+    the failure message -- which carries the child's stderr, so that
+    `_gh_json_or_none` can swallow a 404 without printing it. Nothing else
+    prints, so a caller that discards the exception discards the noise too.
+    """
+    # args is built here, shell=False. The values interpolated into it passed a
+    # regex first: the team slug and the app id in main(), the repository slug in
+    # _repo_facts(), environment names in _derive_envs(). `default_branch` from
+    # _repo_facts() is unchecked -- GitHub's own value, echoed back into a body.
+    p = subprocess.run(  # noqa: S603
+        args,
+        capture_output=True,
+        input=None if stdin is None else stdin.encode("utf-8"),
+    )
+    if p.returncode != 0:
+        # gh's stderr is the only diagnosis a hand-run reconciler gets.
+        stderr = p.stderr.decode("utf-8", "replace").strip()
+        raise SystemExit(
+            f"command failed ({p.returncode}): {_scrub(' '.join(args), secrets)}"
+            + (f"\n{_scrub(stderr, secrets)}" if stderr else "")
+        )
+    return p.stdout.decode("utf-8", "replace")
+
+
+def _gh_json(path):
+    return json.loads(_run(["gh", "api", path]))
+
+
+def _gh_json_or_none(path):
+    """Parsed `gh api <path>`, or None when `gh` answers 404.
+
+    Only a 404 is absence. Every other failure -- an expired token, a dropped
+    network, a 403 for a permission the token lacks -- re-raises, because a
+    caller reading "absent" from one of those does not merely skip a create: a
+    plan environment whose read failed takes the create branch and is PUT with a
+    null `deployment_branch_policy`, silently removing a policy the consumer set.
+    `_run` puts gh's scrubbed stderr in the message, so the status is there to match.
+    """
+    try:
+        return _gh_json(path)
+    except SystemExit as e:
+        if "HTTP 404" not in str(e):
+            raise
+        return None
+
+
+def report(verb, subject, detail=""):
+    REPORT.append((verb, subject, detail))
+    print(f"{verb} {subject}" + (f": {detail}" if detail else ""))
+
+
+def write(verb, subject, args, stdin=None, detail="", secrets=()):
+    """Perform one write, or report it as pending under --dry-run.
+
+    `secrets` reaches `_run` unchanged: a write that carries a credential must
+    go through here, not around it, or --dry-run stops being read-only.
+
+    Returns True when the command ran.
+    """
+    if _DRY:
+        report(f"would {verb}", subject, detail)
+        return False
+    _run(args, secrets=secrets, stdin=stdin)
+    report(verb, subject, detail)
+    return True
+
+
+def write_file(path, text, subject):
+    """Create one file, or report it as pending under --dry-run.
+
+    A file write is not a `gh` argv, so it cannot go through `write`; it honours
+    `_DRY` here instead, because a --dry-run that writes into a consumer checkout
+    is not a dry run.
+    """
+    if _DRY:
+        report("would create", subject)
+        return False
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8", newline="\n")
+    report("created", subject)
+    return True
+
+
+def _env_membership():
+    """Terramate env membership for this checkout. Its own function so tests can
+    replace it without a terramate binary on PATH."""
+    return _load("build-matrix").env_membership(all_stacks=True)
+
+
+def _derive_envs():
+    stacks_by_env, _ = _env_membership()
+    if not stacks_by_env:
+        raise SystemExit(
+            "::error::this repository declares no environment: no stack carries an env/* tag, "
+            "so there is nothing to bind. Tag the stacks first (CONTRACT.md §Tag grammar)."
+        )
+    bad = sorted(e for e in stacks_by_env if not _ENV_RE.fullmatch(e))
+    if bad:
+        raise SystemExit(f"::error::unusable environment name(s): {', '.join(bad)}")
+    return sorted(stacks_by_env)
+
+
+def _repo_root():
+    """The consumer checkout's root.
+
+    Not `cwd`: `gh repo view` resolves the same repository from any subdirectory and
+    `terramate list` still enumerates every stack, so a run from `stacks/` would report six
+    files created under `stacks/.github/workflows/`, where GitHub never looks.
+    """
+    return pathlib.Path(_run(["git", "rev-parse", "--show-toplevel"]).strip())
+
+
+def _repo_facts():
+    facts = json.loads(_run(["gh", "repo", "view", "--json", "nameWithOwner,defaultBranchRef"]))
+    slug = facts.get("nameWithOwner") or ""
+    branch = (facts.get("defaultBranchRef") or {}).get("name") or ""
+    if not slug or not branch:
+        raise SystemExit(
+            "`gh repo view` returned no repository slug or no default branch. Run this from "
+            "inside the consumer checkout, with `gh` authenticated against it."
+        )
+    if not _REPO_RE.fullmatch(slug):
+        raise SystemExit(f"unusable repository slug: {slug!r}")
+    return slug, branch
+
+
+def _engine_pin(engine):
+    """(sha, version) for the engine checkout `engine` is sitting on."""
+    sha = _run(["git", "-C", str(engine), "rev-parse", "HEAD"]).strip()
+    tags = _run(["git", "-C", str(engine), "tag", "--points-at", "HEAD"]).split()
+    version = next((t for t in tags if _VERSION_RE.fullmatch(t)), "")
+    if not version:
+        raise SystemExit(
+            f"the engine checkout at {engine} is on {sha[:7]}, which carries no vX.Y.Z tag. "
+            "Pinning a consumer to a commit with no release is what doctor's pin probe reports "
+            "as staleness, and it then tells the consumer to re-pin backwards. Check out a "
+            "release tag, or cut one first (docs/releasing.md)."
+        )
+    return sha, version
+
+
+def _read_key(path):
+    path = pathlib.Path(path)
+    if not path.is_file():
+        raise SystemExit(f"--key: {path} does not exist.")
+    pem = path.read_text(encoding="utf-8")
+    if not pem.strip():
+        raise SystemExit(f"--key: {path} is empty.")
+    return pem
+
+
+def _split(value):
+    return {part.strip() for part in value.split(",") if part.strip()}
+
+
+def _resolve_shared(flag, variables, envs):
+    """The shared-environment set, from --shared or SHIPMATE_SHARED_ENVS.
+
+    Every name is validated the way a tag-derived one is: these reach the same
+    API paths and `gh --env` arguments, and a typo would otherwise bind nothing
+    and report success.
+    """
+    from_flag = _split(flag)
+    from_var = _split(variables.get("SHIPMATE_SHARED_ENVS", ""))
+    if from_flag and from_var and from_flag != from_var:
+        raise SystemExit(
+            f"--shared ({', '.join(sorted(from_flag))}) and the SHIPMATE_SHARED_ENVS variable "
+            f"({', '.join(sorted(from_var))}) disagree. Reconcile them, or drop --shared."
+        )
+    shared = from_flag or from_var
+    for name in sorted(shared):
+        if not _ENV_RE.fullmatch(name):
+            raise SystemExit(f"unusable shared environment name: {name!r}")
+        if name not in envs:
+            raise SystemExit(
+                f"shared environment {name!r} is not one this repository declares. "
+                f"Its environments are: {', '.join(envs)}."
+            )
+    return shared
+
+
+def _variables():
+    # The API returns variable names uppercased, so every lookup here is on an uppercased key.
+    listed = json.loads(_run(["gh", "variable", "list", "--json", "name,value"]))
+    return {v["name"].upper(): v["value"] for v in listed}
+
+
+# Named `_APP_KEY_NAME`, not `..._SECRET`: ruff's S105 fires on a "SECRET" token in
+# the binding name, and this is a secret's *name*.
+_APP_KEY_NAME = "SHIPMATE_APP_PRIVATE_KEY"
+
+#: An apply environment -- and `shipmate-engine`, which is one -- is scoped to the
+#: default branch alone. A PUT naming only this key is additive: an environment
+#: carrying reviewers, `prevent_self_review` or a `wait_timer` keeps all three.
+_APPLY_BODY = {
+    "deployment_branch_policy": {"protected_branches": False, "custom_branch_policies": True}
+}
+#: A plan environment takes no branch policy: plan cells evaluate at the pull request's
+#: base ref, so a policy blocks every cell whose pull request targets a branch it does
+#: not name (docs/hardening.md row 8).
+_PLAN_BODY = {"deployment_branch_policy": None}
+
+
+def _ensure_policy(ctx, name):
+    """Scope `name` to the default branch alone: POST it when missing, report any other.
+
+    Additive only. Extra names are drift -- `doctor` warns that a workflow on one of
+    them can still claim what the environment scopes -- but removing a policy entry the
+    consumer added is not this script's call, so they are named, not deleted.
+    """
+    path = f"repos/{ctx['repo']}/environments/{name}/deployment-branch-policies"
+    policies = _gh_json_or_none(path)
+    branch = ctx["default_branch"]
+    names = {p.get("name") for p in (policies or {}).get("branch_policies", [])}
+    subject = f"{name} branch policy"
+    if branch in names:
+        report("ok", subject, branch)
+    else:
+        write(
+            "create",
+            subject,
+            ["gh", "api", "-X", "POST", path, "-f", f"name={branch}"],
+            detail=branch,
+        )
+    extra = sorted(n for n in names if n and n != branch)
+    if extra:
+        report(
+            "differs",
+            subject,
+            f"also permits {', '.join(extra)} — a workflow on those branches can still "
+            f"claim what `{name}` scopes. Remove them by hand if that is not intended.",
+        )
+
+
+def _approval_rules(env):
+    """`env`'s protection rules that stop a job from starting.
+
+    GitHub synthesizes a `branch_policy` rule for any environment carrying a deployment
+    branch policy; that is the policy itself, not a second protection, and it stalls
+    nothing.
+    """
+    return sorted(
+        r.get("type") or "?"
+        for r in env.get("protection_rules") or []
+        if r.get("type") != "branch_policy"
+    )
+
+
+def _plan_drift(env):
+    """What disqualifies `env` as a plan environment, as one sentence, or ""."""
+    reasons = []
+    if env.get("deployment_branch_policy"):
+        reasons.append(
+            "it carries a deployment branch policy, which blocks every plan cell whose "
+            "pull request targets a branch the policy does not name"
+        )
+    rules = _approval_rules(env)
+    if rules:
+        reasons.append(f"it carries protection rules ({', '.join(rules)}), which stall plan cells")
+    if not reasons:
+        return ""
+    return (
+        f"{' and '.join(reasons)}. Removing a protection a consumer set is not this "
+        "script's call, so it is reported and left alone."
+    )
+
+
+def _report_shared_approval(ctx, name, env):
+    """Report approval rules on a shared bare environment.
+
+    `_env_names` collapses a shared env to one apply-role environment, but a protection
+    rule there is not the reviewer gate the split naming gives an apply environment: the
+    plan cells and the nightly drift run bind the same environment and GitHub offers no
+    per-job filter, so they stall too. `doctor` warns on it; reported here, never stripped.
+    """
+    approval = _approval_rules(env) if env is not None and name in ctx["shared"] else []
+    if not approval:
+        return
+    report(
+        "differs",
+        name,
+        f"it carries protection rules ({', '.join(approval)}) and is shared, so the plan "
+        "cells and the nightly drift run do not start immediately either. To gate applies "
+        f"alone, split it into `{name}-plan` and `{name}-apply` and drop `{name}` from "
+        "--shared and SHIPMATE_SHARED_ENVS.",
+    )
+
+
+def _reconcile_env(ctx, name, role):
+    """Create or repair one environment. `role` is "plan" or "apply"."""
+    path = f"repos/{ctx['repo']}/environments/{name}"
+    env = _gh_json_or_none(path)
+    body = _APPLY_BODY if role == "apply" else _PLAN_BODY
+    put = ["gh", "api", "-X", "PUT", path, "--input", "-"]
+    if env is None:
+        write("create", name, put, stdin=json.dumps(body))
+    elif role == "plan":
+        drift = _plan_drift(env)
+        report("differs" if drift else "ok", name, drift)
+    elif (env.get("deployment_branch_policy") or {}).get("custom_branch_policies"):
+        report("ok", name)
+    else:
+        write("update", name, put, stdin=json.dumps(body))
+    if role == "apply":
+        _report_shared_approval(ctx, name, env)
+        _ensure_policy(ctx, name)
+
+
+def _reconcile_key(ctx):
+    """Place the App key on `shipmate-engine`, and remove any repository-level copy.
+
+    An existing environment copy is left alone: no REST path returns a secret's
+    value, so overwriting could only destroy a working placement. Rotation is
+    docs/github-app.md.
+    """
+    repo = ctx["repo"]
+    data = _gh_json_or_none(f"repos/{repo}/environments/{ENGINE_ENV}/secrets?per_page=100")
+    subject = f"{ENGINE_ENV} {_APP_KEY_NAME}"
+    if _APP_KEY_NAME in {s.get("name") for s in (data or {}).get("secrets", [])}:
+        report("ok", subject)
+    else:
+        write(
+            "set",
+            subject,
+            ["gh", "secret", "set", _APP_KEY_NAME, "--env", ENGINE_ENV],
+            stdin=ctx["key"],
+            secrets=(ctx["key"],),
+        )
+    listed = json.loads(_run(["gh", "secret", "list", "--json", "name"]))
+    if _APP_KEY_NAME not in {s.get("name") for s in listed}:
+        report("ok", f"no repository-level {_APP_KEY_NAME}")
+        return
+    write(
+        "delete",
+        f"repository secret {_APP_KEY_NAME}",
+        ["gh", "secret", "delete", _APP_KEY_NAME],
+        detail="a repository secret is readable by a workflow on any branch",
+    )
+
+
+def _reconcile_engine_env(ctx):
+    """`shipmate-engine`: the environment, its branch policy, and the key on it.
+
+    It is an apply environment in every respect, so it goes through the same
+    reconciler; only the key placement is its own.
+    """
+    _reconcile_env(ctx, ENGINE_ENV, "apply")
+    _reconcile_key(ctx)
+
+
+def _env_names(env, shared):
+    """[(environment name, role)] for one derived environment."""
+    if env in shared:
+        return [(env, "apply")]
+    return [(f"{env}-plan", "plan"), (f"{env}-apply", "apply")]
+
+
+def _unused_naming(env, shared):
+    """The environment names for the naming this repository does *not* bind."""
+    if env in shared:
+        return [f"{env}-plan", f"{env}-apply"]
+    return [env]
+
+
+def _naming_conflict(ctx, env):
+    """True when the naming this repository does not bind already exists for `env`.
+
+    Probed before the create, not only over what is already there: a check that fires
+    only once both namings exist still lets a repository holding one of them get the
+    other created here and be refused by the next run -- over environments this script
+    itself wrote, falsifying "a second run changes nothing" and leaving the pair
+    unreconcilable from then on. Unlike `doctor`, which cannot read
+    SHIPMATE_SHARED_ENVS, this script resolved it in `_resolve_shared`, so which naming
+    goes unused is known rather than guessed.
+    """
+    base = f"repos/{ctx['repo']}/environments/"
+    unused = [n for n in _unused_naming(env, ctx["shared"]) if _gh_json_or_none(f"{base}{n}")]
+    if not unused:
+        return False
+    names = " and ".join(f"`{n}`" for n in unused)
+    remedy = (
+        f"drop `{env}` from `--shared` and SHIPMATE_SHARED_ENVS"
+        if env in ctx["shared"]
+        else f"pass `--shared {env}` so the engine binds the bare `{env}` instead"
+    )
+    report(
+        "differs",
+        env,
+        f"the engine binds {' / '.join(f'`{n}`' for n, _role in _env_names(env, ctx['shared']))} "
+        f"for `{env}`, and {names} {'is' if len(unused) == 1 else 'are'} also present. Holding "
+        "both namings for one logical environment is the state `shipmate doctor` calls "
+        "ambiguous, "
+        "where which naming each path binds is undetermined, so nothing was created or changed "
+        f"for `{env}`. Delete {names}, or {remedy}.",
+    )
+    return True
+
+
+def _reconcile_envs(ctx):
+    for env in ctx["envs"]:
+        if _naming_conflict(ctx, env):
+            ctx["unresolved"].add(env)
+            continue
+        for name, role in _env_names(env, ctx["shared"]):
+            _reconcile_env(ctx, name, role)
+
+
+def _versions(engine):
+    """{"terramate": ..., "tofu": ...} from the engine checkout's VERSIONS file.
+
+    Nothing else in the repository parses that file, so these two key names are an
+    undocumented coupling; the refusals below are where it is recorded. `main` calls this
+    among its local reads, before the first reconciler: a repository must not end up with
+    half its environments created over a typo in a file that was readable at startup.
+    """
+    path = pathlib.Path(engine) / "VERSIONS"
+    if not path.is_file():
+        raise SystemExit(f"{path} does not exist: TERRAMATE_VERSION and TOFU_VERSION come from it.")
+    pairs = (
+        line.partition("=") for line in path.read_text(encoding="utf-8").splitlines() if "=" in line
+    )
+    versions = {name.strip(): value.strip() for name, _sep, value in pairs}
+    missing = [key for key in ("terramate", "tofu") if not versions.get(key)]
+    if missing:
+        raise SystemExit(
+            f"{path} carries no {' and no '.join(missing)} line: it needs a "
+            "`terramate=` and a `tofu=` line."
+        )
+    return versions
+
+
+def _wanted_variables(ctx):
+    """{name: (value, the flag or file it came from)}, in the order they are written."""
+    versions = ctx["versions"]
+    wanted = {
+        "SHIPMATE_APP_ID": (ctx["app_id"], "--app-id"),
+        "SHIPMATE_APPROVERS_TEAM": (ctx["team"], "--team"),
+        "TERRAMATE_VERSION": (versions["terramate"], "VERSIONS"),
+        "TOFU_VERSION": (versions["tofu"], "VERSIONS"),
+    }
+    if ctx["shared"]:
+        wanted["SHIPMATE_SHARED_ENVS"] = (",".join(sorted(ctx["shared"])), "--shared")
+    return wanted
+
+
+def _matches(name, current, value):
+    # SHIPMATE_SHARED_ENVS is a set written as a list: order and spacing are not drift.
+    if name == "SHIPMATE_SHARED_ENVS":
+        return _split(current) == _split(value)
+    return current == value
+
+
+def _reconcile_variables(ctx):
+    """Set the repository variables the workflows read.
+
+    A variable that exists with another value is reported, never overwritten: a
+    consumer pinning an older tested pair is making a deliberate choice, and moving
+    it silently is this script exceeding its mandate.
+    """
+    existing = ctx["variables"]
+    for name, (value, source) in _wanted_variables(ctx).items():
+        current = existing.get(name)
+        if current is None:
+            write("set", name, ["gh", "variable", "set", name, "--body", value], detail=value)
+        elif _matches(name, current, value):
+            report("ok", name, value)
+        else:
+            report("differs", name, f"repository has {current}, {source} is {value}")
+
+
+def _ruleset_body(ctx):
+    """A ruleset carrying the gate rule alone.
+
+    `docs/branch-protection.md`'s `pull_request`, `non_fast_forward` and `deletion`
+    rules stay a documented choice: a repository already carrying a ruleset with a
+    `pull_request` rule must not get a conflicting second one.
+    """
+    return {
+        "name": "shipmate-gate",
+        "target": "branch",
+        "enforcement": "active",
+        "conditions": {"ref_name": {"include": ["~DEFAULT_BRANCH"], "exclude": []}},
+        "rules": [
+            {
+                "type": "required_status_checks",
+                "parameters": {
+                    "required_status_checks": [
+                        {"context": GATE, "integration_id": int(ctx["app_id"])}
+                    ],
+                    "strict_required_status_checks_policy": True,
+                },
+            }
+        ],
+    }
+
+
+_NAME_TAKEN = (
+    "the rulesets POST was rejected (HTTP 422). Most likely a `shipmate-gate` ruleset "
+    "already exists but requires nothing on this branch, because its enforcement is "
+    "`evaluate` or `disabled` and the effective-rules read cannot see it — 422 has other "
+    "causes, so read `gh api repos/OWNER/REPO/rulesets` before acting. Set it to active, "
+    "or delete it and run this again."
+)
+
+_PLAN_TIER = (
+    "rulesets need GitHub Pro, Team, Enterprise, or a public repository "
+    "(docs/branch-protection.md §Reproducible ruleset). Configure the gate by hand there."
+)
+
+
+def _gate_entry(ctx):
+    """(the `shipmate / gate` status-check entry, its rule parameters), or (None, None).
+
+    The effective rules across every ruleset, read the way `doctor`'s gate probe reads
+    them -- including the assumption, inherited from it and not verified here, that this
+    endpoint answers `[]` rather than 404 when the branch carries no rule. If that is
+    wrong, a repository with no ruleset crashes here instead of reaching the report
+    `_reconcile_ruleset` writes for one that cannot have rulesets at all.
+    """
+    rules = _gh_json(f"repos/{ctx['repo']}/rules/branches/{ctx['default_branch']}?per_page=100")
+    for rule in rules:
+        if rule.get("type") != "required_status_checks":
+            continue
+        params = rule.get("parameters") or {}
+        for chk in params.get("required_status_checks") or []:
+            if chk.get("context") == GATE:
+                return chk, params
+    return None, None
+
+
+def _post_failure(e):
+    """The report detail for a failed rulesets POST, or None when it must re-raise."""
+    if "HTTP 422" in str(e):
+        return _NAME_TAKEN
+    if "HTTP 403" in str(e) or "HTTP 404" in str(e):
+        return _PLAN_TIER
+    return None
+
+
+def _reconcile_ruleset(ctx):
+    """Require `shipmate / gate`, pinned to the App, on the default branch.
+
+    An entry under another `integration_id`, or without `strict`, is reported and left
+    alone: editing a ruleset this script did not create is a policy change it must not
+    make silently.
+    """
+    subject = "gate ruleset"
+    chk, params = _gate_entry(ctx)
+    app_id = int(ctx["app_id"])
+    if chk is None:
+        try:
+            write(
+                "create",
+                subject,
+                ["gh", "api", "-X", "POST", f"repos/{ctx['repo']}/rulesets", "--input", "-"],
+                stdin=json.dumps(_ruleset_body(ctx)),
+                detail=GATE,
+            )
+        except SystemExit as e:
+            detail = _post_failure(e)
+            if detail is None:
+                raise
+            report("differs", subject, detail)
+    elif chk.get("integration_id") != app_id:
+        report(
+            "differs",
+            subject,
+            f"`{GATE}` is required under integration_id {chk.get('integration_id')!r}, not the "
+            f"shipmate App ({app_id}) — a status from another identity satisfies it. "
+            "Change it by hand.",
+        )
+    elif not params.get("strict_required_status_checks_policy"):
+        report(
+            "differs",
+            subject,
+            "it does not require branches to be up to date (strict), so plans can go "
+            "stale against the base before merge. Change it by hand.",
+        )
+    else:
+        report("ok", subject)
+
+
+#: Each consumer workflow file, the docs page publishing it, and the top-level `name:`
+#: selecting its fence. The selector is exact equality: `docs/drift.md` carries a second
+#: drift fence named `shipmate · drift · dev-eu`, which a prefix match would also find.
+SHIMS = {
+    "plan.yml": ("getting-started.md", "shipmate · plan"),
+    "apply.yml": ("getting-started.md", "shipmate · apply"),
+    "comment-ops.yml": ("getting-started.md", "comment-ops"),
+    "unlock.yml": ("getting-started.md", "shipmate · unlock"),
+    "deploy.yml": ("getting-started.md", "shipmate · deploy"),
+    "drift.yml": ("drift.md", "shipmate · drift"),
+}
+
+#: `scripts/tests/test_docs_yaml_parses.py` imports this rather than keeping a second copy:
+#: the shims are rendered from the fences that guard parses, and an indented fence must be
+#: dedented rather than missed.
+_FENCE = re.compile(r"^(?P<indent>[ \t]*)```yaml[ \t]*$\n(?P<body>.*?)^\1```", re.M | re.S)
+_DOC_PIN = re.compile(
+    r"(?P<ref>ship-iac/shipmate/\.github/workflows/[^@\s]+)@<engine-sha>[^\S\n]*#[^\n]*"
+)
+#: Only a 40-hex pin, matching what `dev/repin_consumer.py` rewrites: a file still carrying the
+#: docs placeholder must not be reported `pin-only`, because that names a remedy which would
+#: then find no engine reference to move.
+_ANY_PIN = re.compile(
+    r"(?P<ref>ship-iac/shipmate/\.github/workflows/[^@\s]+)@[0-9a-f]{40}[^\S\n]*(#[^\n]*)?"
+)
+
+
+def _fence(page_text, name):
+    """The dedented body of the one ```yaml fence in `page_text` whose first line is
+    `name: <name>`."""
+    bodies = [
+        body
+        for m in _FENCE.finditer(page_text)
+        for body in [textwrap.dedent(m.group("body"))]
+        if body.partition("\n")[0] == f"name: {name}"
+    ]
+    if len(bodies) != 1:
+        raise SystemExit(
+            f"{len(bodies)} documented fences are named {name!r}; expected exactly one. "
+            "The shims are rendered from the docs, so the docs and this table must agree."
+        )
+    return bodies[0]
+
+
+def _render(engine, filename, sha, version, state_suffix):
+    """The full text of one consumer shim, LF-delimited and newline-terminated."""
+    page, name = SHIMS[filename]
+    text = _fence((pathlib.Path(engine) / "docs" / page).read_text(encoding="utf-8"), name)
+    text = _DOC_PIN.sub(rf"\g<ref>@{sha} # {version}", text)
+    return text.replace('state_suffix: ""', f'state_suffix: "{state_suffix}"')
+
+
+def _depin(text):
+    """`text` with every engine pin and its trailing comment reduced to a placeholder."""
+    return _ANY_PIN.sub(r"\g<ref>@<pin>", text)
+
+
+def _reconcile_shim(ctx, filename):
+    path = pathlib.Path(ctx["root"]) / ".github" / "workflows" / filename
+    text = _render(ctx["engine"], filename, ctx["sha"], ctx["version"], ctx["state_suffix"])
+    if not path.is_file():
+        write_file(path, text, filename)
+        return
+    # Universal-newline read: a CRLF checkout of an otherwise identical file is not drift.
+    current = path.read_text(encoding="utf-8")
+    if current == text:
+        report("ok", filename)
+    elif _depin(current) == _depin(text):
+        report("pin-only", filename, "run dev/repin_consumer.py")
+    elif "<engine-sha>" in current:
+        report("differs", filename, "the published fence, never pinned: delete it and run again")
+    else:
+        report("differs", filename, "differs beyond its pin, not overwritten")
+
+
+def _reconcile_shims(ctx):
+    """Write the six consumer workflow shims, reporting anything already there.
+
+    `pin-only` is not drift: moving a pin is `dev/repin_consumer.py`'s job, driven by
+    docs/releasing.md, so it does not reach `_exit_code`.
+    """
+    for filename in SHIMS:
+        _reconcile_shim(ctx, filename)
+
+
+_LAYOUT = """Per environment, the cloud role and the env identity your layout injects. A
+DRY/dynamic backend needs TF_VAR_env and TF_VAR_region, workspace-per-env needs
+TF_WORKSPACE, folder-per-env needs neither (CONTRACT.md §Env model). On an apply
+environment a cell carrying a workload/<name> tag reads AWS_ROLE_ARN_<WORKLOAD>
+first; the plan path has no such fallback (docs/aws.md §Environment variables)."""
+
+_ENV_VARS = ("AWS_ROLE_ARN", "AWS_REGION", "TF_VAR_env", "TF_VAR_region", "TF_WORKSPACE")
+
+
+def _checklist(ctx):
+    """Print the values and steps this script cannot supply, as commands to fill in.
+
+    Which of `TF_VAR_env`+`TF_VAR_region` or `TF_WORKSPACE` an environment needs is a
+    property of the stacks' layout and is not readable from outside them, so all three
+    are printed with the CONTRACT.md sentence rather than guessed. Every `<...>` is a
+    placeholder to substitute, so no line here runs as printed.
+    """
+    halves = [
+        (env, name, role)
+        for env in ctx["envs"]
+        if env not in ctx["unresolved"]
+        for name, role in _env_names(env, ctx["shared"])
+    ]
+    out = [
+        "",
+        "Still yours — these values are the consumer's, so this script cannot set them.",
+        "",
+        _LAYOUT,
+    ]
+    for _env, name, _role in halves:
+        out.append("")
+        out += [f"  gh variable set {v} --env {name} --body <value>" for v in _ENV_VARS]
+    out += [
+        "",
+        "Repository-wide, both optional:",
+        "",
+        "  gh secret set SHIPMATE_PLAN_PASSPHRASE",
+        "  gh variable set SLACK_WEBHOOK --body <value>",
+        "",
+        "By hand:",
+        "",
+        f"  Add {ctx['repo']} to the App installation's repository selection, at",
+        "  https://github.com/organizations/<org>/settings/apps/shipmate/installations",
+        "  — substitute your org and the App name you registered (docs/github-app.md §4).",
+        "  The add-repository endpoint accepts PAT-classic tokens only, so it stays a UI step.",
+    ]
+    # A reviewer on a shared env's bare environment stalls the plan cells and the drift
+    # run, so it is asked for only where the apply path has an environment of its own.
+    reviewed = [name for env, name, role in halves if role == "apply" and env not in ctx["shared"]]
+    if reviewed:
+        out += [
+            "",
+            f"  Required reviewers and `Prevent self-review` on {', '.join(reviewed)}",
+            "  (docs/getting-started.md §Environment setup).",
+        ]
+    verb = "Re-run without --dry-run, then commit" if _DRY else "Commit"
+    out += [
+        "",
+        "  A CODEOWNERS entry covering /.github/workflows/.",
+        "",
+        f"  {verb} the six shims and open the pull request. `shipmate / gate` cannot be",
+        "  green on that one: the workflows that produce it are not on the default branch",
+        "  yet (CONTRACT.md §Post-plan topology). Merge it with an administrative bypass.",
+    ]
+    print("\n".join(out))
+
+
+def _refuse_diverging_app_id(app_id, variables):
+    """Refuse when SHIPMATE_APP_ID exists and disagrees with --app-id.
+
+    Every other variable is reported and left alone, which is right for a value nothing
+    else derives from. `app_id` has three consumers: the workflows mint their token from
+    the variable, while `--app-id` pins the gate ruleset's `integration_id` and selects
+    whose PEM goes on `shipmate-engine`. Reconciling those separately writes a required
+    check no workflow can satisfy, and the default branch stays blocked until an admin
+    deletes the ruleset. Called before the first reconciler, while failing is still free.
+    """
+    current = variables.get("SHIPMATE_APP_ID")
+    if current is None or current == app_id:
+        return
+    raise SystemExit(
+        f"the SHIPMATE_APP_ID repository variable is {current} and --app-id is {app_id}. "
+        "The workflows mint their token from the variable, so a gate ruleset pinned to "
+        f"{app_id} could never be satisfied and the default branch would be blocked. "
+        f"Re-run with --app-id {current}, or change the variable first."
+    )
+
+
+def _exit_code():
+    """2 when anything differs, else 0.
+
+    Exactly `differs`, never a substring or a not-`would` test: each reconciler
+    names its own verbs, and a verb that merely contains the word is not drift.
+    """
+    return 2 if any(verb == "differs" for verb, _subject, _detail in REPORT) else 0
+
+
+def main(argv=None):
+    global _DRY
+    ap = argparse.ArgumentParser(description="Reconcile a consumer repository to shipmate.")
+    ap.add_argument("--team", required=True, help="team slug whose members may apply and unlock")
+    ap.add_argument("--app-id", required=True, help="the shipmate App's numeric id")
+    ap.add_argument("--key", required=True, help="path to the App's PEM private key")
+    ap.add_argument("--state-suffix", default="", help="suffix for state artifact names")
+    ap.add_argument("--shared", default="", help="environments bound as one bare `<env>`")
+    ap.add_argument("--dry-run", action="store_true", help="report changes, write nothing")
+    args = ap.parse_args(argv)
+    if not _TEAM_RE.fullmatch(args.team):
+        raise SystemExit(f"--team must be a GitHub team slug: {args.team!r}")
+    if not _APP_ID_RE.fullmatch(args.app_id):
+        raise SystemExit(f"--app-id must be all digits: {args.app_id!r}")
+    if not _SUFFIX_RE.fullmatch(args.state_suffix):
+        raise SystemExit(
+            "--state-suffix may use only letters, digits and '.', '_', '/', '-': "
+            f"{args.state_suffix!r}. It is written "
+            'into a `state_suffix: "<value>"` scalar in every shim.'
+        )
+    _DRY = args.dry_run
+
+    # The local reads first: a bad key path or an unusable VERSIONS must fail in under a
+    # second, before the first API call creates anything.
+    key = _read_key(args.key)
+    engine = pathlib.Path(__file__).resolve().parents[1]
+    versions = _versions(engine)
+    sha, version = _engine_pin(engine)
+    root = _repo_root()
+    repo, default_branch = _repo_facts()
+    envs = _derive_envs()
+    variables = _variables()
+    _refuse_diverging_app_id(args.app_id, variables)
+    ctx = {
+        "repo": repo,
+        "default_branch": default_branch,
+        "app_id": args.app_id,
+        "team": args.team,
+        "key": key,
+        "envs": envs,
+        "shared": _resolve_shared(args.shared, variables, envs),
+        "unresolved": set(),
+        "state_suffix": args.state_suffix,
+        "root": root,
+        "engine": engine,
+        "versions": versions,
+        "variables": variables,
+        "sha": sha,
+        "version": version,
+    }
+    print(f"{ctx['repo']} (default branch {ctx['default_branch']})")
+    print(f"environments: {', '.join(ctx['envs'])}")
+    print(f"shared: {', '.join(sorted(ctx['shared'])) or '(none)'}")
+    print(f"engine pin: {ctx['sha']} ({ctx['version']})")
+
+    _reconcile_engine_env(ctx)
+    _reconcile_envs(ctx)
+    _reconcile_variables(ctx)
+    _reconcile_ruleset(ctx)
+    _reconcile_shims(ctx)
+    _checklist(ctx)
+
+    sys.exit(_exit_code())
+
+
+if __name__ == "__main__":
+    main()

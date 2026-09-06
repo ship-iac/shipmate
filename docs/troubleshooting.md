@@ -258,6 +258,49 @@ mitigation. `app/manifest.json` declares
 `"public": false`: the shipmate App is registered per organization and intended
 for repositories the installing organization controls.
 
+## What `scripts/onboard` reports
+
+Every line the reconciler prints is `<verb> <subject>`, optionally `: <detail>`.
+The verbs:
+
+| Verb | Meaning |
+| --- | --- |
+| `ok` | already as shipmate needs it; nothing was written. |
+| `create` / `update` / `set` / `delete` | the write it just performed. |
+| `created` | the workflow shim it just wrote to `.github/workflows/`. |
+| `pin-only` | the shim matches except for the engine pin. Not drift, and it does not affect the exit code — moving a pin is `dev/repin_consumer.py`'s job ([`upgrading.md`](upgrading.md)). |
+| `would …` | `--dry-run`: the write that a real run would perform. |
+| `differs` | it found something it will not change on your behalf. Every one exits the run 2. |
+
+A `differs` line is not a failure of the run: the reconciler is additive, and
+undoing a protection or a value a consumer set deliberately is outside its
+mandate. Each one names what to do.
+
+| `differs` line | What it means |
+| --- | --- |
+| `<name> branch policy` — also permits other branches | the environment — `shipmate-engine`, an `<env>-apply`, or a shared bare `<env>` — has a deployment branch policy naming branches besides the default one, so a workflow on any of them can still claim what that environment scopes. Delete the extra entries in Settings → Environments if they were not deliberate. |
+| `<env>-plan` — it carries a deployment branch policy | a plan environment must have none: plan cells evaluate at the pull request's base ref, so a policy blocks every cell whose pull request targets a branch it does not name ([`hardening.md`](hardening.md) #8). Remove the policy. |
+| `<env>-plan` — it carries protection rules | required reviewers or a wait timer on a plan environment stall every plan cell and the nightly drift run. Remove them ([`hardening.md`](hardening.md) #6). |
+| `<env>` — it carries protection rules and is shared | a shared bare `<env>` is bound by the plan cells and the nightly drift run as well as the applies, and GitHub offers no per-job filter, so a protection rule there stalls all three. To gate applies alone, split it into `<env>-plan` / `<env>-apply` and drop it from `SHIPMATE_SHARED_ENVS`. |
+| `<env>` — the naming the engine does not bind is also present | the naming `SHIPMATE_SHARED_ENVS` does not select already exists: a bare `<env>` where the engine binds the `<env>-plan` / `<env>-apply` pair, or either half where it binds the bare `<env>`. Holding both namings for one logical environment is the state `shipmate doctor` calls ambiguous, so the run creates and changes nothing for that environment — including the naming it does bind, which is why it is reported rather than half-written. Delete the unused naming, or move the environment to the other one with `--shared` / `SHIPMATE_SHARED_ENVS`. |
+| `<VARIABLE>` — repository has one value, the flag or `VERSIONS` has another | the variable exists with another value. A pinned older `TERRAMATE_VERSION` or `TOFU_VERSION` is a deliberate choice, so it is never overwritten. Change it with `gh variable set` if it was not. `SHIPMATE_APP_ID` never reaches this table — see the refusal below. |
+| `gate ruleset` — the rulesets POST was rejected (HTTP 422) | most likely the name is taken by a ruleset whose enforcement is `evaluate` or `disabled`, which the effective-rules read cannot see; 422 has other causes, so read `gh api repos/OWNER/REPO/rulesets` first. Set it to active, or delete it and run again. |
+| `gate ruleset` — rulesets need GitHub Pro, Team, Enterprise, or a public repository | the plan this repository is on has no rulesets. Configure the gate by hand from [`branch-protection.md`](branch-protection.md). |
+| `gate ruleset` — `shipmate / gate` is required under another `integration_id` | the gate is required, but not pinned to the shipmate App, so a status of that name from any other identity satisfies it. Set `integration_id` to `SHIPMATE_APP_ID`. |
+| `gate ruleset` — it does not require branches to be up to date (strict) | plans can go stale against the base before merge. Turn on "Require branches to be up to date before merging". |
+| `<file>.yml` — the published fence, never pinned | the file holds the `@<engine-sha>` placeholder from the docs rather than a pin, which `dev/repin_consumer.py` cannot move. Delete the file and run the script again. |
+| `<file>.yml` — differs beyond its pin, not overwritten | the shim differs from what this engine release publishes by more than its pin — a local edit, a different `state_suffix`, or a fence this release changed while the file stayed on an older one. Diff it against the fence on the page that publishes it and reconcile by hand, or delete it and run again to take the published one. |
+
+One disagreement is refused rather than reported. When the `SHIPMATE_APP_ID`
+repository variable differs from `--app-id`, the run stops before its first
+write and exits 1 — no `differs` line, and nothing else runs. `--app-id` does
+not only set that variable: it pins the gate ruleset's `integration_id` and
+selects whose private key is stored on `shipmate-engine`. Reconciling the two
+separately would require a `shipmate / gate` status the workflows — which mint
+their token from the variable — can never post, and the default branch would
+stay blocked until an admin deleted the ruleset. Re-run with the variable's
+value, or change the variable first.
+
 ## Common failures
 
 ### `Saved plan is stale`, or `does not match the reviewed plan's fingerprint`

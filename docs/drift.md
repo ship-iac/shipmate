@@ -19,7 +19,9 @@ leaving any open Issue for it untouched rather than auto-closing it.
 
 ## The workflow
 
-The drift workflow is a shim: a `schedule`, a `workflow_dispatch`, a
+`scripts/onboard` writes this file, pinned, from the fence below
+([`getting-started.md`](getting-started.md) §Quick path). The drift workflow is a
+shim: a `schedule`, a `workflow_dispatch`, a
 `permissions:` block, and one job named `shipmate` calling the engine's
 reusable drift workflow. Transcribed from
 [repo-example-stacks-aws](https://github.com/ship-iac/repo-example-stacks-aws)

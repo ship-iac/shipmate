@@ -17,8 +17,9 @@ an App named `shipmate-acme` comments as `shipmate-acme[bot]`.
 This is a runbook, not a tutorial: run the commands in order. Steps 1–4 are
 once per GitHub org: register the App and install it, selecting the repositories
 it may act on. Steps 5–6 onboard one repository, and are written for the
-repository you are setting up now. Onboarding several at once is the same
-commands in a loop — see the appendix.
+repository you are setting up now. `scripts/onboard` performs both, plus the rest
+of that repository's setup. Onboarding several at once is that script in a
+loop — see the appendix.
 
 ## Prerequisites
 
@@ -119,7 +120,9 @@ boundary).
 `SHIPMATE_APP_PRIVATE_KEY` is a secret on this environment, never a repository
 or org secret. §Key-exposure boundary explains why that scoping is what keeps the
 key out of a branch-authored workflow. Create it once in your repository, with a
-deployment branch policy naming exactly the default branch:
+deployment branch policy naming exactly the default branch — or run
+`scripts/onboard`, which creates it, scopes it, and does §6 as well
+([`getting-started.md`](getting-started.md) §Quick path):
 
 ```bash
 REPO=<owner>/<repo>
@@ -164,7 +167,7 @@ three API calls — the `PUT` and the `POST` above plus the `gh secret set --env
 in §6 — against one repository-list edit per repository for the org secret, whose
 value itself is written once for the whole org. Rotation becomes N
 `gh secret set --env` writes instead of that one org-secret write. Both scale as
-loops — see the appendix.
+loops — the appendix loops `scripts/onboard` over the checkouts.
 
 ## 6. Set the approvers team + propagate credentials
 
@@ -172,7 +175,8 @@ Each consumer repo needs `SHIPMATE_APPROVERS_TEAM` (the GitHub team slug whose
 members may run `shipmate apply`) plus the app id/key from step 1. `gh` cannot
 read back a secret's value once set (GitHub never exposes it), so this step reads
 the `shipmate-app.private-key.pem` step 1 wrote. Keep that file until every
-consumer repo has it.
+consumer repo has it. `scripts/onboard` does all of this, and additionally
+deletes any repository-level copy of the key.
 
 ```bash
 REPO=<owner>/<repo>
@@ -421,59 +425,54 @@ enough to read the key outright the way an unreviewed branch push once was.
 ## Appendix: onboarding several repositories at once
 
 First add every repository to the installation's selection (§4, one page, no
-loop). Then steps 5 and 6 in a loop. Nothing about them changes per repository
-except the repository, so the guards read the same way — with one difference: a
-repository whose default branch cannot be read is skipped rather than aborting
-the run, so one unreachable repository does not strand the rest half-onboarded.
-Read the PEM once, before the loop, so a wrong filename fails immediately
-instead of writing an empty secret to every repository.
+loop). Then run `scripts/onboard` once per consumer checkout. The script is the
+one implementation of §5 and §6: a second, hand-written loop drifts from it, and
+a repository configured by a drifted loop looks onboarded while the App key sits
+on an environment that admits any ref.
+
+Each run needs the engine checkout on a `vX.Y.Z` release tag, `terramate` on
+`PATH` in the consumer checkout — its `env/<name>` tags are where the
+environment set comes from — and `gh` authenticated with admin on that
+repository. It refuses rather than half-configuring when one of those is missing.
 
 ```bash
-REPOS="<owner>/<repo> <owner>/<repo>"
-TEAM=<approvers-team-slug>          # may differ per repo; set it per repo either way
+ENGINE=<path-to-engine-checkout>    # on a release tag
+CHECKOUTS="<path>/<repo> <path>/<repo>"
+TEAM=<approvers-team-slug>          # may differ per repo; pass it per repo either way
 APP_ID=<app-id-from-step-1-output>
+KEY=$PWD/shipmate-app.private-key.pem
 
-KEY=$(cat shipmate-app.private-key.pem)
-if [ -z "$KEY" ]; then
-  echo "shipmate-app.private-key.pem is missing or empty — not touching any repository" >&2
-  exit 1
-fi
-
-for REPO in $REPOS; do
-  DEFAULT_BRANCH=$(gh repo view "$REPO" --json defaultBranchRef --jq .defaultBranchRef.name)
-  if [ -z "$DEFAULT_BRANCH" ]; then
-    echo "skipping $REPO: could not read its default branch" >&2
-    continue
-  fi
-  gh api -X PUT "repos/$REPO/environments/shipmate-engine" --input - <<'JSON'
-{ "deployment_branch_policy": { "protected_branches": false, "custom_branch_policies": true } }
-JSON
-  gh api -X POST "repos/$REPO/environments/shipmate-engine/deployment-branch-policies" \
-    -f name="$DEFAULT_BRANCH"
-
-  gh variable set SHIPMATE_APPROVERS_TEAM --repo "$REPO" --body "$TEAM"
-  gh variable set SHIPMATE_APP_ID --repo "$REPO" --body "$APP_ID"
-  gh secret set SHIPMATE_APP_PRIVATE_KEY --repo "$REPO" --env shipmate-engine \
-    --body "$KEY"
-  # Removes any same-named repository secret, which would otherwise stay
-  # readable by any workflow on any branch — see §6 for why. No error when
-  # there was none.
-  gh secret delete SHIPMATE_APP_PRIVATE_KEY --repo "$REPO" 2>/dev/null || true
+for DIR in $CHECKOUTS; do
+  echo "== $DIR"
+  ( cd "$DIR" && python3 "$ENGINE/scripts/onboard" --team "$TEAM" --app-id "$APP_ID" --key "$KEY" )
 done
 ```
 
-The `continue` is what makes the skip safe: it comes before the `PUT`, so a
-repository whose default branch could not be read is left with no environment at
-all rather than one carrying an empty branch policy.
+The subshell is what keeps the loop where it started: the script reads the
+repository from `gh` and the environments from the working directory, so a `cd`
+that leaked would reconcile the previous repository a second time. `$KEY` is
+absolute for the same reason.
+
+Read the output, not the exit codes. A run exits 0 when everything matched or was
+created, and 2 when something differs and it was left alone — but `argparse` also
+exits 2 on a usage error, so a loop branching on 2 cannot tell a drifted
+repository from a mistyped flag. Add `--dry-run` for a first pass that reports
+what every repository would get and writes nothing.
+
+Each run ends with the checklist of what it cannot set: the cloud role and
+region, the env identity your layout injects, `SHIPMATE_PLAN_PASSPHRASE`,
+`SLACK_WEBHOOK`, environment reviewers, a `CODEOWNERS` entry, and the pull
+request carrying the six shims.
 
 Then confirm, per repository, that no repository-level
 `SHIPMATE_APP_PRIVATE_KEY` survived — `shipmate doctor` cannot check this for
-you (§6):
+you (§6). The script deletes one and reports the deletion, so this reads back
+what the run claims:
 
 ```bash
-for REPO in $REPOS; do
-  echo "== $REPO"
-  gh secret list --repo "$REPO"
+for DIR in $CHECKOUTS; do
+  echo "== $DIR"
+  ( cd "$DIR" && gh secret list )
 done
 ```
 

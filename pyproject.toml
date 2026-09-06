@@ -60,6 +60,7 @@ extend-include = [
     "scripts/gate-status-body",
     "scripts/lock-info",
     "scripts/mirror-checks",
+    "scripts/onboard",
     "scripts/pending-checks",
     "scripts/plan-cell-summary",
     "scripts/plan-classify",
