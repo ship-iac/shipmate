@@ -831,18 +831,10 @@ the ruleset's review requirement, so *what applies* is what applied before the
 variable existed. This is the opposite direction from `SHIPMATE_SHARED_ENVS`,
 where unset means split.
 
-Opting in takes three things, and the variable alone is not enough:
+Opting in takes two things, and the variable alone is not enough:
 
-1. the repository variable,
-2. `ungated-envs: ${{ vars.SHIPMATE_UNGATED_ENVS }}` on the `comment-ops` step
-   of the consumer's own `comment-ops.yml` — that expression, never a literal
-   list: a composite action cannot read the `vars` context, so the input is
-   comment-ops' only view of the list. It is an ergonomic, not policy — both
-   apply paths read the variable themselves and enforce there — so an input
-   naming an environment the variable omits costs a dispatched run that the
-   engine then refuses, and one omitting an environment the variable names
-   refuses at comment time an apply the engine would have allowed; and
-3. the consumer's `apply.yml` pinning both engine references —
+1. the repository variable, and
+2. the consumer's `apply.yml` pinning both engine references —
    `.github/workflows/apply.yml@` (the targeted job) and
    `.github/workflows/apply-all.yml@` (the bare job) — at or past the release
    that carries this feature. §Consumption's one-change rule already requires
@@ -851,18 +843,20 @@ Opting in takes three things, and the variable alone is not enough:
    `comment-ops.yml` and dispatched into an engine older than the partition
    applies every pending environment with no approving review, and a
    targeted `shipmate apply <env>` dispatched into an engine older than the
-   `review` job applies that environment unreviewed.
+   `review` job applies that environment unreviewed. Both edges need the
+   variable set: no consumer-written input can authorize a dispatch without it.
 
-   The two edges are not equally likely. The bare-apply one needs all three
-   opt-in things aligned — variable set, item 2 correctly wired, only the
-   second pin forgotten. The targeted one needs neither: item 2 written as a
-   literal (never mind the variable) already authorizes the dispatch on its
-   own, so a stale `apply.yml@` alone turns what a fresh pin would downgrade
-   to a wasted run into an unreviewed apply.
-
-With the variable set and that line absent, comment-ops sees an empty list and
-both forms of `shipmate apply` get the unchanged refusal — the omission
-closes, it never silently widens.
+Engine `comment-ops.yml` passes
+`ungated-envs: ${{ vars.SHIPMATE_UNGATED_ENVS }}` to `actions/comment-ops`, and
+`vars` inherit into a called workflow, so that expression resolves in the
+consumer's repository. It is read there rather than in the consumer's file
+because a composite action cannot read the `vars` context, so the input is
+comment-ops' only view of the list, and both apply paths read the same variable
+directly and enforce on it themselves — one source, two readers, with nothing
+between them a consumer can spell differently.
+`scripts/tests/test_engine_comment_ops_workflow.py` pins the whole `with:` block
+of that step; dropping the input refuses every listed environment at comment
+time instead, with nothing naming the cause.
 
 The decision has two seats, because `authorize` returns one verdict per
 dispatch while a bare apply spans many environments:

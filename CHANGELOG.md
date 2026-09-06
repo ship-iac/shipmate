@@ -46,6 +46,12 @@ migration.
   `CONTRACT.md` §AWS OIDC.
 - **`plan.yml` and `drift.yml` take a required `state_suffix` input**, and their
   calling jobs must grant `id-token: write`.
+- **`SHIPMATE_UNGATED_ENVS` is now read by the engine's `comment-ops.yml`.**
+  `vars` inherit into a called workflow, so the variable resolves in the
+  consumer's repository exactly as their own `ungated-envs:` line did. Opting in
+  is now the variable plus the two `apply.yml` pins; the consumer-written input
+  is gone, and with it the mis-wiring where a literal list authorized a dispatch
+  the variable never exempted.
 - **`shipmate doctor` retires five probe halves and gains one.** The summary
   call's fork, draft and on-demand wiring, the `build-matrix` step's
   `head-repo`/`head-sha`, the `no-pull-request` check and the dispatch probe's

@@ -592,9 +592,11 @@ narrows what a `REVIEW_REQUIRED` decision holds; it is the decision that
 decides, so an unreviewed pull request holds every environment in a repository
 that set nothing.
 
-**The apply is refused although the variable is set.** The `comment-ops` step
-needs `ungated-envs: ${{ vars.SHIPMATE_UNGATED_ENVS }}` too; without it
-comment-ops sees an empty list and refuses both forms. See
+**The apply is refused although the variable is set.** Check the entry's
+spelling against the rules below — an entry that matches no environment is
+rejected loudly, but one naming an environment that simply does not exist is
+inert. The engine reads the variable itself, in `comment-ops.yml` and in both
+apply workflows, so there is no consumer wiring left to omit. See
 [`upgrading.md`](upgrading.md) §"Opt-in: per-environment review gating".
 
 **The run failed with a `SHIPMATE_UNGATED_ENVS` error.** An entry that is not a

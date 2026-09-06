@@ -101,12 +101,15 @@ def test_the_authz_step_passes_this_whole_with_block():
     Mutations: delete `comment-user`, and the loop guard sees an empty login, never matches
     `*[bot]`, and shipmate's own help output re-triggers the command grammar; rewire it to a
     constant privileged login, and every commenter's `shipmate apply` passes the membership
-    check; delete `approvers-team`, which fails closed but silently.
+    check; delete `approvers-team`, which fails closed but silently; delete `ungated-envs`, and
+    every environment the repository variable exempts is refused at comment time instead, with
+    nothing naming the cause.
     """
     assert _step("actions/comment-ops@")["with"] == {
         "app-id": "${{ vars.SHIPMATE_APP_ID }}",
         "private-key": "${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}",
         "approvers-team": "${{ vars.SHIPMATE_APPROVERS_TEAM }}",
+        "ungated-envs": "${{ vars.SHIPMATE_UNGATED_ENVS }}",
         "comment-body": "${{ github.event.comment.body }}",
         "comment-user": "${{ github.event.comment.user.login }}",
         "comment-id": "${{ github.event.comment.id }}",

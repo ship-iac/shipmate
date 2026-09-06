@@ -623,30 +623,17 @@ env names, no spaces:
 SHIPMATE_UNGATED_ENVS = dev-eu,dev-us
 ```
 
-and pass it to the `comment-ops` step of the `comment-ops.yml` above:
+Your shims need no line for it. The engine's `ops` job passes
+`ungated-envs: ${{ vars.SHIPMATE_UNGATED_ENVS }}` to `actions/comment-ops`, and
+`vars` inherit into a called workflow, so the variable resolves in your own
+repository. That matters because a composite action cannot read the `vars`
+context itself, so the input is comment-ops' only view of the list — and both
+engine apply workflows read the same variable directly and enforce on it
+themselves. One source, two readers, and nothing between them a consumer can
+write differently. Unset the variable and *what applies* is unchanged: every
+environment keeps the ruleset's requirement.
 
-```yaml
-        with:
-          # ...the inputs above, plus:
-          ungated-envs: ${{ vars.SHIPMATE_UNGATED_ENVS }}
-```
-
-All three parts are needed. With the variable set and the input missing,
-comment-ops sees an empty list and applies are refused exactly as before — the
-omission closes rather than widens. With none of them, *what applies* is
-unchanged: every environment keeps the ruleset's requirement.
-
-Write that input as the variable reference shown above, never as a literal
-list. comment-ops has no access to the `vars` context of its own, so the input
-is its only view of the list — while both engine apply workflows read
-`vars.SHIPMATE_UNGATED_ENVS` directly and enforce on it themselves. The input is
-therefore an ergonomic convenience rather than a policy: a literal naming an
-environment the variable omits buys a dispatched run the engine refuses (a
-wasted run, not an unreviewed apply), and one omitting an environment the
-variable names refuses at comment time an apply the engine would have allowed.
-One source, two readers: keep them the same source.
-
-The third part is a pin, and your `apply.yml` carries two engine
+The second part is a pin, and your `apply.yml` carries two engine
 references — `.github/workflows/apply.yml@` on the targeted job and
 `.github/workflows/apply-all.yml@` on the bare one. Both must sit at the same
 release as `comment-ops.yml` (or later), because an apply is authorized in one
@@ -655,13 +642,8 @@ apply reaches an engine that enforces nothing: through the stale `apply-all.yml@
 it applies every pending environment with no approving review, and through
 the stale `apply.yml@` it applies the named environment unreviewed.
 
-These are not equally likely. The bare-apply edge needs a genuine opt-in —
-the variable set, `comment-ops.yml` correctly wired, only the second pin
-forgotten. The targeted edge does not: write the literal named above in step
-2 and comment-ops authorizes the dispatch with no variable ever set. Under a
-fresh `apply.yml@` that literal only buys a wasted run, as described above;
-under a stale one it is the unreviewed apply — one mis-wiring away, no
-opt-in required.
+Both edges need the variable set — the exemption is opt-in and there is no
+longer any consumer-written input that could authorize a dispatch without it.
 
 What this does and does not do: a listed environment may be applied without an
 approving review; every other apply requirement still decides, including

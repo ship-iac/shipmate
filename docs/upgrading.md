@@ -98,10 +98,8 @@ review while the rest keep the branch ruleset's requirement. The exemption is
 opt-in, and re-pinning exempts nothing on its own (it does change two other
 things for every consumer — see below):
 
-1. set the `SHIPMATE_UNGATED_ENVS` repository variable,
-2. add `ungated-envs: ${{ vars.SHIPMATE_UNGATED_ENVS }}` to the `comment-ops`
-   step in your `comment-ops.yml`, and
-3. re-pin both engine references in your `apply.yml` — the targeted job's
+1. set the `SHIPMATE_UNGATED_ENVS` repository variable, and
+2. re-pin both engine references in your `apply.yml` — the targeted job's
    `.github/workflows/apply.yml@` and the bare job's
    `.github/workflows/apply-all.yml@` — to this release too, not only
    `comment-ops.yml`. The files carry separate pins, and an apply is authorized
@@ -110,11 +108,9 @@ things for every consumer — see below):
    every pending environment applies through a stale `apply-all.yml@`, and
    the named environment applies through a stale `apply.yml@`. This is
    §Re-pinning's one-change rule; on this feature breaking it fails open
-   rather than loudly. The two are not equally likely: the bare-apply edge
-   needs the full opt-in aligned, while the targeted edge is also reached by
-   the step-2 literal mis-wiring below on its own, no opt-in needed — see
+   rather than loudly. Both edges need the variable set — see
    §"Applying chosen environments without an approving review" in
-   [`getting-started.md`](getting-started.md) for that ranking in full.
+   [`getting-started.md`](getting-started.md).
 
 With the variable unset, every environment keeps its review requirement, so
 *what applies* is unchanged. Three things do change for everyone, opted in or
@@ -137,14 +133,12 @@ an unconditional `review` job:
   review decision, so an approval dismissed between the comment and the
   dispatch applied anyway. The engine re-reads it at apply time and holds.
 
-With the variable set but the workflow line left out, `shipmate apply` refuses
-exactly as it does today — comment-ops receives an empty list, so both the
-targeted and the bare form are refused. That is the expected failure mode of a
-half-finished opt-in, and it is the one worth recognizing: the refusal is not a
-bug. Writing it as a literal list rather than the variable reference in
-step 2 now costs a wasted run rather than an unreviewed apply — the engine reads
-the variable itself on both paths and refuses what the variable does not exempt.
-See [`getting-started.md`](getting-started.md) §"Applying chosen environments
+The workflow line this section used to ask for is gone: engine
+`comment-ops.yml` passes `ungated-envs: ${{ vars.SHIPMATE_UNGATED_ENVS }}`
+itself, and `vars` inherit into a called workflow, so the variable resolves in
+your repository with nothing to wire. A consumer moving to the shims deletes
+that line along with the rest of the file's body (§Unreleased). See
+[`getting-started.md`](getting-started.md) §"Applying chosen environments
 without an approving review".
 
 Two things it does not change, worth confirming against your own policy before
