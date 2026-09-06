@@ -95,8 +95,9 @@ def test_only_the_completer_job_reads_the_app_key():
 @pytest.mark.parametrize("job_id", UNTRUSTED_PLAN_JOBS)
 def test_plan_workflow_untrusted_jobs_never_reach_the_app_key(job_id):
     """plan.yml declares the App key so its `summary` job can mint. Declaring it puts the secret
-    in the file's scope, and the three jobs that check out and execute pull-request content must
-    not reference it -- by an `env:` value, a `with:` value or a `run:` body.
+    in the file's scope, and the three untrusted jobs must not reference it -- by an `env:`
+    value, a `with:` value or a `run:` body. Two of them check out and execute pull-request
+    content; `facts` checks nothing out, but it runs on the same untrusted side of the file.
 
     Mutation: add `env: { K: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }} }` to the `plan` job.
     """

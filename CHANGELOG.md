@@ -43,7 +43,14 @@ migration.
   `AWS_ROLE_ARN`, and holds no cloud credential when neither is set. This is a
   widening — the consumer-authored plan workflow it replaces had a credentials
   step only where its author wrote one, and never resolved a per-workload role.
-  `CONTRACT.md` §AWS OIDC.
+  The consequential case is a role set *above* the environment: `vars` resolve
+  organization → repository → environment, so an `AWS_ROLE_ARN` set at
+  repository or organization level for the apply path is now assumed by every
+  plan and drift cell, and a plan cell executes branch-authored HCL. Only the
+  role's own trust policy bounds that — a claim condition naming
+  `environment:<env>-apply` refuses the `<env>-plan` token and the cell fails at
+  the credentials step; a repository-wide one does not.
+  `CONTRACT.md` §AWS OIDC, `docs/hardening.md` §7–9.
 - **`plan.yml` and `drift.yml` take a required `state_suffix` input**, and their
   calling jobs must grant `id-token: write`.
 - **`SHIPMATE_UNGATED_ENVS` is now read by the engine's `comment-ops.yml`.**

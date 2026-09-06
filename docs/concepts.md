@@ -270,16 +270,21 @@ state, and the engine's state restore/save steps are skipped. Omitting it
 altogether is a workflow-resolution error, on purpose — a forgotten state
 configuration must fail loud rather than apply with no state at all.
 
-Credentials are opt-in per GitHub Environment
-through two variables, `AWS_ROLE_ARN` and `AWS_REGION` — unset, and no cloud
-credential ever enters the job, which is how the sample repos run
+Credentials are opt-in through two variables, `AWS_ROLE_ARN` and `AWS_REGION`.
+A GitHub Environment is where they belong, not where GitHub stops looking:
+`vars` resolve organization → repository → environment, so a job whose
+environment names neither still reads whatever the repository or the
+organization sets. Only where no level sets one does the credentials step skip
+and no cloud credential enter the job, which is how the sample repos run
 credential-free. Every job that runs a cell requests `id-token: write`, and GitHub
 caps a called workflow's permissions at each `uses:` boundary. So the calling
 job of every consumer shim but `comment-ops.yml` must grant `id-token: write` —
 including consumers using no cloud credentials at all. The plan and drift cells
-run the same credentials step as the apply waves, reading the role from the plan
-environment each cell binds. See
-[`CONTRACT.md`](../CONTRACT.md) §State backend and §AWS OIDC for the semantics.
+run the same credentials step as the apply waves, so a repository- or
+organization-level role set for the apply path is assumed by every plan and
+drift cell too — bounded by that role's trust policy and nothing in the engine.
+See [`CONTRACT.md`](../CONTRACT.md) §State backend and §AWS OIDC for the
+semantics, and [`hardening.md`](hardening.md) §7–9 for the exposure.
 
 One model note vs a hosted service: with no server-side queue, GHA can drop a
 superseded deploy run — its stacks stay pending + visible and are recovered

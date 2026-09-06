@@ -164,6 +164,27 @@ longer exists as a file.
 `dev/repin_consumer.py` rewrites pins and nothing else, so the body edit is by
 hand.
 
+**Check `AWS_ROLE_ARN` before you re-pin.** The engine's `plan.yml` and
+`drift.yml` run the apply path's `aws-actions/configure-aws-credentials` step in
+every plan and drift cell, gated on `AWS_ROLE_ARN` — or the cell's
+`AWS_ROLE_ARN_<WORKLOAD>` — resolving non-empty. `vars` resolve organization →
+repository → environment, so a repository- or organization-level `AWS_ROLE_ARN`
+set for the apply path is now read by every plan and drift cell as well; before
+this release nothing on the plan path read it. A plan cell executes
+branch-authored HCL — a provider or an `external` data source runs at plan time
+— so that role becomes reachable by anyone who can push a branch (fork pull
+requests are refused in `detect` before a cell exists); a drift cell runs merged
+default-branch code, so what it gains is an apply role where a read-only one
+belongs. Nothing in the engine bounds either; the role's own trust policy does.
+A claim condition naming `repo:<owner>/<repo>:environment:<env>-apply` refuses
+the `<env>-plan` token, so **every plan cell goes red at the credentials step**
+— that failure is the safe configuration announcing itself, and the fix is a
+read-only plan role on each `<env>-plan` ([`aws.md`](aws.md) §Environment
+variables), not a widened trust policy. A repository-wide claim condition does
+not refuse it, and that configuration hands apply credentials to a plan of any
+branch. Check the claim condition on every role a plan environment can now name
+([`hardening.md`](hardening.md) §7–9).
+
 The three bodies are in [`getting-started.md`](getting-started.md) §Required —
 plan and §The apply workflows, and [`drift.md`](drift.md) §The workflow. Replace
 each file's contents with the shim there. For `plan.yml` and `drift.yml`, keep
@@ -194,11 +215,17 @@ so any `with:` block on that shim is the load-time rejection above.
    `terraform.tfstate.d` — or `""` for a remote backend: the same value your
    `deploy.yml` and `apply.yml` shims already pass. `comment-ops.yml` takes no
    input at all.
-6. **Grant `id-token: write` on the `plan.yml` and `drift.yml` calling jobs.**
-   Their callees run cells, so they request it; `comment-ops.yml` does not.
-   Granting less kills the run at startup with no job and no log.
+6. **Grant the whole permission union on the `plan.yml` and `drift.yml` calling
+   jobs.** A called workflow's permissions are capped at the `uses:` boundary,
+   and each callee's jobs request between them `contents: read`,
+   `pull-requests: read` and `id-token: write` for `plan.yml`, and
+   `contents: read`, `id-token: write` and `actions: read` for `drift.yml`.
+   `comment-ops.yml` asks for none of them. Granting less kills the run at
+   startup with no job and no log.
 
-Nothing changes for environments, variables, secrets, the App or the ruleset.
+Nothing changes for environments, secrets or the App. The ruleset changes only
+where it lists a per-cell plan check (step 3), and variables change as the
+`AWS_ROLE_ARN` paragraph above sets out.
 
 ### 0.24.0 — the reviewed plan text is bound to the plan that applies; re-plan open pull requests
 

@@ -2,8 +2,9 @@
 
 It runs on `pull_request_target`, through the consumer's plan workflow, holding the App key. Two
 things keep it safe: its `if:`, and the fact that it executes no repository content. The job now
-lives in `plan.yml` alongside three jobs that check out and execute pull-request content, so the
-job-id list is pinned here too. Every assertion below is on a parsed value -- `yaml.safe_load`,
+lives in `plan.yml` alongside two jobs that check out and execute pull-request content --
+`detect` and `plan`; `facts` checks nothing out -- so the job-id list is pinned here too.
+Every assertion below is on a parsed value -- `yaml.safe_load`,
 then a whole `if:`/`environment:`/`with:` field -- rather than a substring of the raw file text.
 The substring form was proven vacuous: four simultaneous mutations of the summary job (all three
 trust guards inverted, `environment: shipmate-engine` commented out, the draft-skip deleted) left

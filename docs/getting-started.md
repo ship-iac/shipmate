@@ -101,10 +101,15 @@ rules from Settings → Environments → `<name>` (or the API):
   `shipmate doctor` warns on either). Plan-time cloud credentials go here too:
   set `AWS_ROLE_ARN` and `AWS_REGION` on each `<env>-plan`, naming a read-only
   plan role, and the engine's plan and drift cells assume it
-  ([`aws.md`](aws.md) §Environment variables). Leave them unset and no cloud
-  credential enters a plan cell at all. A plan environment can have
-  no protection at all, so anyone who can push a branch can reach whatever it
-  names.
+  ([`aws.md`](aws.md) §Environment variables). Unset *here* is not unset:
+  `vars` resolve organization → repository → environment, so a plan cell whose
+  own `<env>-plan` names no role reads a repository- or organization-level
+  `AWS_ROLE_ARN` instead — including one set for the apply path. Only where no
+  level sets one does the step skip and the cell hold no cloud credential at
+  all. A plan environment can have no protection at all, so anyone who can push
+  a branch can reach whatever role a plan cell resolves; what refuses it is that
+  role's own trust-policy claim condition
+  ([`hardening.md`](hardening.md) §7–9), not where the variable was set.
 - **The variables your layout injects.** On each `<env>-plan` and (in the
   apply tier) each `<env>-apply`: `TF_VAR_env` and `TF_VAR_region` where the backend
   path and resources are built from them, `TF_WORKSPACE` for workspace-per-env,
@@ -204,10 +209,15 @@ than intersecting it, so what the job declares is what the callee is capped at.
 `id-token: write` is there for the plan cells' cloud credentials. The engine
 runs `aws-actions/configure-aws-credentials` in the `plan` job, gated on
 `AWS_ROLE_ARN` — or `AWS_ROLE_ARN_<WORKLOAD>` for a cell carrying a
-`workload/<name>` tag — being set on the environment that cell binds, and skips
-it when neither is, which is how a consumer with no cloud credentials runs. The
-grant is required either way, because the job requests it whether or not the
-step fires.
+`workload/<name>` tag — resolving non-empty. It resolves as any `vars` does,
+organization → repository → environment: the `<env>-plan` environment is where
+the value belongs, not where GitHub stops looking, so a repository- or
+organization-level `AWS_ROLE_ARN` set for the apply path is read by every plan
+cell too. The step is skipped, and the consumer runs with no cloud credentials,
+only where no level sets either variable; where one does, the role's own
+trust-policy claim condition is the bound
+([`hardening.md`](hardening.md) §7–9). The grant is required either way,
+because the job requests it whether or not the step fires.
 
 `state_suffix` is required and may be `""`. It is your flavor's per-stack state
 path suffix when a local backend is materialized in the working tree

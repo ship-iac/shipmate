@@ -170,8 +170,10 @@ nothing in the engine to guard it. The role's trust policy is the real bound.
 
 **The consumer writes no credentials step on any path.** Every engine job that
 runs a cell carries `aws-actions/configure-aws-credentials` itself — after
-`actions/setup`, before the cell action, gated on either role being set —
-reading the variables from the environment that job is bound to. That is the
+`actions/setup`, before the cell action, gated on either role resolving
+non-empty — reading the variables against the environment that job is bound to,
+and, where that environment sets neither, against the repository and the
+organization behind it (§Environment variables above). That is the
 wave jobs of `apply-env-level.yml` and `unlock.yml`'s unlock job on the apply
 side, reading `<env>-apply` (or the bare `<env>` in shared mode), and
 `plan.yml`'s `plan` job and `drift.yml`'s `drift` job on the plan side, reading
@@ -192,9 +194,14 @@ upper-cased with `-` replaced by `_` — and fall back to `AWS_ROLE_ARN`. A
 repository that sets a per-workload variable on a plan environment therefore has
 its plan and drift cells assume that role rather than the bare one.
 
-Every one of these steps is skipped when neither variable is set on the
-environment the cell binds, so an environment that runs credential-free needs no
-opt-out: the job simply holds no cloud credential.
+Every one of these steps is skipped only where neither variable resolves at any
+level — environment, repository or organization. An environment that sets
+neither is therefore not credential-free on its own: a repository- or
+organization-level `AWS_ROLE_ARN` set for the apply path is what every plan and
+drift cell then assumes, and the only thing that refuses it is the role's own
+trust-policy claim condition ([`hardening.md`](hardening.md) §7–9). Where no
+level sets either variable the job holds no cloud credential and the environment
+needs no opt-out.
 
 ## A green plan does not size either policy
 
