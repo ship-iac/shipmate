@@ -39,11 +39,11 @@ Probes:
 - the dispatch wiring of the consumer's `shipmate.yml`: the `workflow_dispatch`
   trigger every commented verb needs, its four inputs, and its call of the
   engine's plan workflow.
-- approvers team resolvability in the repo's org.
-- GitHub App installation permission drift.
 - the event routing of `shipmate.yml`: one job per engine reusable workflow, each
   with the `if:` that selects it — a wrong one sends a verb nowhere and its run
   completes green with every job skipped.
+- approvers team resolvability in the repo's org.
+- GitHub App installation permission drift.
 """
 
 import base64
@@ -1216,10 +1216,10 @@ def _fork_trigger_warnings(ctx):
     access.
 
     The consumer's one workflow file is on this trigger by design and stays exempt with the
-    comment-ops, deploy, drift and apply jobs in it: their `if:` is false under
-    `pull_request_target`, and a job that is skipped never enters its environment and is
-    never handed a token — measured. `_routing_warnings` is what watches those seven `if:`
-    expressions.
+    comment-ops, deploy, drift, apply and unlock jobs in it: every one of those `if:`
+    expressions is false under `pull_request_target`, so those jobs do not run, and a job
+    that does not run binds no environment and is handed no token. `_routing_warnings` is
+    what watches those seven `if:` expressions.
 
     Reads the consumer's workflow files at the commit under examination, the
     same way and for the same reason as the pin probe (`_contents_ref`): a pull
@@ -1654,7 +1654,9 @@ _INPUT_KEYS = {name: re.compile(rf"[\s{{,]{name}[ \t]*:") for name in _DISPATCH_
 #: as a whole value, in order: a list missing `unlock` refuses that verb at the form and at the
 #: API, and one carrying an extra option offers a verb no `if:` selects. KNOWN GAP: only the
 #: flow form is recognised, so a block-style `options:` is reported as differing — the safe
-#: direction, and the published file writes the flow form.
+#: direction, and the published file writes the flow form. Read from `verb`'s own block
+#: (`_input_block`), never the first `options:` in the trigger: a consumer's own input
+#: declared above `verb` would otherwise become the list this compares.
 _VERB_OPTIONS = "[plan, apply, unlock, drift]"
 _VERB_OPTIONS_KEY = re.compile(r"[\s{,]options[ \t]*:[ \t]*(?P<value>\[[^\]]*\])")
 _REQUIRED_TRUE = re.compile(r"""[\s{,]required[ \t]*:[ \t]*["']?true["']?""", re.I)
@@ -1693,35 +1695,42 @@ def _dispatch_wiring_warnings(ctx):
     return _scan_workflow_texts(ctx, ref, finding, DISPATCH_WIRING_UNREADABLE)
 
 
+def _input_block(on_text, input_name):
+    """The lines one input's declaration owns — the remainder of its key line plus every line
+    indented deeper than it — or None when the `on:` block declares no such input.
+
+    One input at a time, because the trigger's keys are not interchangeable: `verb` is the
+    only required input and the only one carrying an `options:` list, so a scan of the whole
+    trigger would read its `required: true` as every other input's and its `options:` as an
+    earlier input's. A consumer may declare inputs of their own — `docs/drift.md` invites one
+    — and one written above `verb` would otherwise become the thing both findings judge.
+
+    KNOWN GAP: a wholly inline `on:` mapping puts every input on one line, so an input's block
+    runs to the end of that line and takes the inputs after it in. The published file writes
+    block style, and either way the finding names a remedy that applies to the file."""
+    lines = on_text.splitlines()
+    for i, line in enumerate(lines):
+        m = _INPUT_KEYS[input_name].search(line)
+        if not m:
+            continue
+        depth = len(line) - len(line.lstrip())
+        body = [line[m.end() :]]
+        for nxt in lines[i + 1 :]:
+            if nxt.strip() and len(nxt) - len(nxt.lstrip()) <= depth:
+                break
+            body.append(nxt)
+        return body
+    return None
+
+
 def _required_inputs(on_text):
     """The `_DISPATCH_INPUTS` other than `verb` that the `on:` block declares `required:
-    true`, block-style or in a flow mapping on the key's own line.
-
-    Each input is judged over its own block alone — its key line's remainder plus the lines
-    indented deeper than it — because `verb` IS required and a scan of the whole trigger
-    would read its `required: true` as every other input's.
-
-    KNOWN GAP: a wholly inline `on:` mapping puts every input on one line, so `verb`'s
-    requiredness reads as the first other input's and that one is reported. The remedy the
-    finding names still applies to the file, and the alternative is silence on the shape
-    that refuses a whole verb."""
-    out = []
-    lines = on_text.splitlines()
-    for input_name in _DISPATCH_INPUTS[1:]:
-        for i, line in enumerate(lines):
-            m = _INPUT_KEYS[input_name].search(line)
-            if not m:
-                continue
-            depth = len(line) - len(line.lstrip())
-            body = [line[m.end() :]]
-            for nxt in lines[i + 1 :]:
-                if nxt.strip() and len(nxt) - len(nxt.lstrip()) <= depth:
-                    break
-                body.append(nxt)
-            if any(_REQUIRED_TRUE.search(f" {b}") for b in body):
-                out.append(input_name)
-            break
-    return out
+    true`, block-style or in a flow mapping on the key's own line."""
+    return [
+        name
+        for name in _DISPATCH_INPUTS[1:]
+        if any(_REQUIRED_TRUE.search(f" {b}") for b in _input_block(on_text, name) or [])
+    ]
 
 
 def _dispatch_input_findings(on_text, name):
@@ -1743,7 +1752,8 @@ def _dispatch_input_findings(on_text, name):
                 "(docs/getting-started.md).",
             )
         )
-    found = _VERB_OPTIONS_KEY.search(on_text)
+    verb = _input_block(on_text, "verb")
+    found = _VERB_OPTIONS_KEY.search("\n".join(verb)) if verb else None
     if not found or " ".join(found.group("value").split()) != _VERB_OPTIONS:
         out.append(
             (
@@ -1800,7 +1810,7 @@ def _dispatch_wiring_finding(text, name):
     extra. The last is not a refusal at all: the file accepts the dispatch and
     then runs nothing that plans.
 
-    The four input findings are examined only where the trigger itself is there: without it
+    The three input findings are examined only where the trigger itself is there: without it
     nothing is dispatched at all, and three further remedies below that one bury it.
 
     `_DISPATCH_TRIGGER` and the `_INPUT_KEYS` are unanchored because ABSENCE is

@@ -1050,12 +1050,12 @@ def _wf_file(text):
 _SHA = "a" * 40
 _OTHER_SHA = "b" * 40
 
-# The consumer workflow file `_quiet_new_probes()` serves, in the shipped shape, and the
-# canonical fixture wherever a correct consumer `shipmate.yml` is needed: seven jobs, one per
-# engine reusable workflow, each with the `if:` that routes its event. Hand-written rather
-# than read from the page, so a drifting page reddens the fence guard and not every test
-# here. Defined here rather than beside that fixture because interpolating `_SHA` happens at
-# import time, while the fixture's own body is evaluated only when a test calls it.
+#: The consumer workflow file `_quiet_new_probes()` serves, in the shipped shape, and the
+#: canonical fixture wherever a correct consumer `shipmate.yml` is needed: seven jobs, one per
+#: engine reusable workflow, each with the `if:` that routes its event. Hand-written rather
+#: than read from the page, so a drifting page reddens the fence guard and not every test
+#: here. Defined here rather than beside that fixture because interpolating `_SHA` happens at
+#: import time, while the fixture's own body is evaluated only when a test calls it.
 _SHIPMATE_WF = (
     "name: shipmate\n"
     "on:\n"
@@ -2172,7 +2172,7 @@ def test_quoted_event_name_comparison_is_silent(monkeypatch):
 
 
 def test_the_consumer_workflow_file_is_not_warned_about(monkeypatch):
-    # `plan.yml` declaring `pull_request_target` IS the shape the engine ships: the job
+    # `shipmate.yml` declaring `pull_request_target` IS the shape the engine ships: the job
     # holding the App key is the engine plan workflow's `summary` job, which checks out
     # nothing. Warning about it trains readers to ignore the dangerous labeler workflow.
     responses = _fork_responses(
@@ -2795,11 +2795,11 @@ def test_the_filename_filter_lives_in_the_dispatcher(monkeypatch):
     assert doctor._plan_run_id_warnings(_ctx()) == []
 
 
-def test_the_documented_apply_wrapper_produces_no_finding(monkeypatch):
-    """The oracle for false positives, and for the page: the wrapper consumers
-    paste, verbatim, through the whole probe. The fence count is asserted first,
-    so a page edit that moves the wrapper out of this selector's reach fails
-    here instead of passing vacuously."""
+def test_the_documented_workflow_file_declares_no_plan_run_id(monkeypatch):
+    """The oracle for false positives, and for the page: the file consumers
+    paste, verbatim, through the whole probe. `_documented_workflow_file()` refuses a page
+    that no longer publishes exactly one such fence, so a page edit fails here instead of
+    passing vacuously."""
     responses = _fork_responses({"shipmate.yml": _documented_workflow_file()})
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
     assert doctor._plan_run_id_warnings(_ctx()) == []
@@ -2993,11 +2993,11 @@ def test_the_filename_filter_lives_in_the_mode_dispatcher(monkeypatch):
     assert doctor._mode_input_warnings(_ctx()) == []
 
 
-def test_the_documented_apply_wrapper_carries_no_mode(monkeypatch):
-    """The oracle for false positives, and for the page: the wrapper consumers
-    paste, verbatim, through the whole probe. The fence count is asserted first,
-    so a page edit that moves the wrapper out of this selector's reach fails
-    here instead of passing vacuously."""
+def test_the_documented_workflow_file_carries_no_mode(monkeypatch):
+    """The oracle for false positives, and for the page: the file consumers
+    paste, verbatim, through the whole probe. `_documented_workflow_file()` refuses a page
+    that no longer publishes exactly one such fence, so a page edit fails here instead of
+    passing vacuously."""
     responses = _fork_responses({"shipmate.yml": _documented_workflow_file()})
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
     assert doctor._mode_input_warnings(_ctx()) == []
@@ -3108,7 +3108,7 @@ _NO_ENGINE_CALL_TEXT = (
 )
 
 
-def test_a_plan_wrapper_without_the_dispatch_trigger_is_reported(monkeypatch):
+def test_a_workflow_file_without_the_dispatch_trigger_is_reported(monkeypatch):
     responses = _fork_responses({"shipmate.yml": _WF_NO_TRIGGER})
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
     out = doctor._dispatch_wiring_warnings(_ctx())
@@ -3159,16 +3159,37 @@ def test_a_workflow_file_that_calls_no_engine_plan_workflow_is_reported(monkeypa
     assert out == [(doctor.WARNING, _NO_ENGINE_CALL_TEXT)]
 
 
-def test_a_dispatchable_shim_is_silent(monkeypatch):
+def test_a_dispatchable_workflow_file_is_silent(monkeypatch):
     responses = _fork_responses({"shipmate.yml": _SHIPMATE_WF})
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
     assert doctor._dispatch_wiring_warnings(_ctx()) == []
 
 
-def test_the_documented_shim_is_dispatchable_and_correctly_named(monkeypatch):
-    """The oracle for false positives and for the page: the shim consumers paste, verbatim,
-    through both probes that read `plan.yml`. The fence count is asserted first, so a page edit
-    moving the shim out of this selector's reach fails here.
+def test_an_input_of_the_consumers_own_is_not_read_as_the_verbs(monkeypatch):
+    """A consumer may declare inputs beside the four -- `docs/drift.md` invites one -- and one
+    written above `verb` carries its own `options:`. The verb list is read from `verb`'s own
+    block, so this file is healthy.
+
+    Mutation: read the first `options:` in the `on:` block, and the consumer's list is what
+    the probe pins."""
+    text = _SHIPMATE_WF.replace(
+        "      verb:\n",
+        "      tags:\n"
+        "        description: Tag query for an ad-hoc sweep\n"
+        "        type: choice\n"
+        "        options: [app, platform]\n"
+        "        required: false\n"
+        "      verb:\n",
+        1,
+    )
+    responses = _fork_responses({"shipmate.yml": text})
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    assert doctor._dispatch_wiring_warnings(_ctx()) == []
+
+
+def test_the_documented_workflow_file_is_dispatchable_and_correctly_named(monkeypatch):
+    """The oracle for false positives and for the page: the file consumers paste,
+    verbatim, through both probes that read `shipmate.yml`.
 
     Mutations: rename the fence's job `name:` away from `shipmate` (the job-name half reddens),
     and delete its `workflow_dispatch:` trigger (the dispatch half reddens).
