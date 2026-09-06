@@ -1,0 +1,298 @@
+#!/usr/bin/env python3
+"""Reconcile one consumer repository to shipmate's per-repository setup.
+
+    python3 <engine>/scripts/onboard --team <team-slug> --app-id <id> \
+        --key shipmate-app.private-key.pem [--state-suffix <s>] \
+        [--shared <env,env>] [--dry-run]
+
+Hand-run from inside the consumer checkout, at its default branch, with `gh`
+authenticated against that repository. It reads what is already there and
+creates or updates only what differs, so a second run over a configured
+repository changes nothing.
+
+Flags:
+
+  --team          GitHub team slug whose members may apply and unlock.
+  --app-id        the shipmate App's numeric id.
+  --key           path to the App's PEM private key (its text, not the path,
+                  is what gets stored).
+  --state-suffix  suffix appended to state artifact names; "" by default.
+  --shared        comma-separated environments bound as one bare `<env>` on
+                  both paths instead of the `<env>-plan` / `<env>-apply` split.
+                  Must agree with the SHIPMATE_SHARED_ENVS repository variable
+                  when both are set.
+  --dry-run       report `would <verb>` for every change and run no write.
+
+Exit codes: 0 clean, 2 at least one item differs, 1 a refusal or a failed
+write. `argparse` also exits 2 on a usage error, so a wrapper branching on 2
+must distinguish the two by output, or validate its own arguments first.
+
+Environments are derived from the repository's own Terramate env/* tags, never
+passed in: the set of environments is a property of the stacks.
+"""
+
+import argparse
+import importlib.util
+import json
+import pathlib
+import re
+import subprocess
+import sys
+from importlib.machinery import SourceFileLoader
+
+ENGINE_ENV = "shipmate-engine"
+GATE = "shipmate / gate"
+REDACTED = "***"
+REPORT = []
+_DRY = False
+
+#: Both halves start alphanumeric, as GitHub logins and repository names do: that
+#: forecloses '.' and '..', and a value beginning with '-' reads to a CLI as a flag.
+_REPO_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9][A-Za-z0-9._-]*")
+#: Environment names are interpolated into API paths and `gh --env` arguments.
+_ENV_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
+#: A team slug is interpolated into an action input and an API path: starting
+#: alphanumeric forecloses a leading '-' reading to a CLI as a flag, and the
+#: character set forecloses '/' and '..'.
+_TEAM_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*")
+_VERSION_RE = re.compile(r"v[0-9]+\.[0-9]+\.[0-9]+")
+_APP_ID_RE = re.compile(r"[0-9]+")
+
+_D = pathlib.Path(__file__).resolve().parent
+
+
+def _load(fname):
+    loader = SourceFileLoader(fname.replace("-", "_"), str(_D / fname))
+    spec = importlib.util.spec_from_loader(loader.name, loader)
+    mod = importlib.util.module_from_spec(spec)
+    loader.exec_module(mod)
+    return mod
+
+
+def _scrub(text, secrets):
+    for secret in secrets:
+        if secret:
+            text = text.replace(secret, REDACTED)
+    return text
+
+
+def _run(args, secrets=(), stdin=None):
+    r"""Run a `gh` or `git` invocation, returning stdout; raise on a nonzero exit.
+
+    `stdin` is sent as UTF-8 bytes rather than through `text=True`, which wraps
+    the child's stdin in a `TextIOWrapper` and rewrites every \n to
+    `os.linesep`. The App private key goes through here on its way to
+    `gh secret set`, and a CRLF-mangled PEM is not the key that was read.
+
+    `secrets` are the live credential values this call carries, scrubbed from
+    the failure message -- which carries the child's stderr, so that
+    `_gh_json_or_none` can swallow a 404 without printing it. Nothing else
+    prints, so a caller that discards the exception discards the noise too.
+    """
+    # args is built here, shell=False. The values interpolated into it passed a
+    # regex first: the team slug and the app id in main(), the repository slug in
+    # _repo_facts(), environment names in _derive_envs(). `default_branch` from
+    # _repo_facts() is unchecked -- GitHub's own value, echoed back into a body.
+    p = subprocess.run(  # noqa: S603
+        args,
+        capture_output=True,
+        input=None if stdin is None else stdin.encode("utf-8"),
+    )
+    if p.returncode != 0:
+        # gh's stderr is the only diagnosis a hand-run reconciler gets.
+        stderr = p.stderr.decode("utf-8", "replace").strip()
+        raise SystemExit(
+            f"command failed ({p.returncode}): {_scrub(' '.join(args), secrets)}"
+            + (f"\n{_scrub(stderr, secrets)}" if stderr else "")
+        )
+    return p.stdout.decode("utf-8", "replace")
+
+
+def _gh_json(path):
+    return json.loads(_run(["gh", "api", path]))
+
+
+def _gh_json_or_none(path):
+    """Parsed `gh api <path>`, or None when `gh` exits nonzero.
+
+    Ceiling: *every* nonzero exit reads as absent, not only a 404, so an expired
+    token or a dropped network makes the caller attempt a create instead of
+    reporting the read failure. That is bounded -- every create it can trigger is
+    additive, and fails loudly on the write -- and it keeps one exit path instead
+    of parsing gh's stderr for `HTTP 404`.
+    """
+    try:
+        return _gh_json(path)
+    except SystemExit:
+        return None
+
+
+def report(verb, subject, detail=""):
+    REPORT.append((verb, subject, detail))
+    print(f"{verb} {subject}" + (f": {detail}" if detail else ""))
+
+
+def write(verb, subject, args, stdin=None, detail="", secrets=()):
+    """Perform one write, or report it as pending under --dry-run.
+
+    `secrets` reaches `_run` unchanged: a write that carries a credential must
+    go through here, not around it, or --dry-run stops being read-only.
+
+    Returns True when the command ran.
+    """
+    if _DRY:
+        report(f"would {verb}", subject, detail)
+        return False
+    _run(args, secrets=secrets, stdin=stdin)
+    report(verb, subject, detail)
+    return True
+
+
+def _env_membership():
+    """Terramate env membership for this checkout. Its own function so tests can
+    replace it without a terramate binary on PATH."""
+    return _load("build-matrix").env_membership(all_stacks=True)
+
+
+def _derive_envs():
+    stacks_by_env, _ = _env_membership()
+    if not stacks_by_env:
+        raise SystemExit(
+            "::error::this repository declares no environment: no stack carries an env/* tag, "
+            "so there is nothing to bind. Tag the stacks first (CONTRACT.md §Tag grammar)."
+        )
+    bad = sorted(e for e in stacks_by_env if not _ENV_RE.fullmatch(e))
+    if bad:
+        raise SystemExit(f"::error::unusable environment name(s): {', '.join(bad)}")
+    return sorted(stacks_by_env)
+
+
+def _repo_facts():
+    facts = json.loads(_run(["gh", "repo", "view", "--json", "nameWithOwner,defaultBranchRef"]))
+    slug = facts.get("nameWithOwner") or ""
+    branch = (facts.get("defaultBranchRef") or {}).get("name") or ""
+    if not slug or not branch:
+        raise SystemExit(
+            "`gh repo view` returned no repository slug or no default branch. Run this from "
+            "inside the consumer checkout, with `gh` authenticated against it."
+        )
+    if not _REPO_RE.fullmatch(slug):
+        raise SystemExit(f"unusable repository slug: {slug!r}")
+    return slug, branch
+
+
+def _engine_pin(engine):
+    """(sha, version) for the engine checkout `engine` is sitting on."""
+    sha = _run(["git", "-C", str(engine), "rev-parse", "HEAD"]).strip()
+    tags = _run(["git", "-C", str(engine), "tag", "--points-at", "HEAD"]).split()
+    version = next((t for t in tags if _VERSION_RE.fullmatch(t)), "")
+    if not version:
+        raise SystemExit(
+            f"the engine checkout at {engine} is on {sha[:7]}, which carries no vX.Y.Z tag. "
+            "Pinning a consumer to a commit with no release is what doctor's pin probe reports "
+            "as staleness, and it then tells the consumer to re-pin backwards. Check out a "
+            "release tag, or cut one first (docs/releasing.md)."
+        )
+    return sha, version
+
+
+def _read_key(path):
+    path = pathlib.Path(path)
+    if not path.is_file():
+        raise SystemExit(f"--key: {path} does not exist.")
+    pem = path.read_text(encoding="utf-8")
+    if not pem.strip():
+        raise SystemExit(f"--key: {path} is empty.")
+    return pem
+
+
+def _split(value):
+    return {part.strip() for part in value.split(",") if part.strip()}
+
+
+def _resolve_shared(flag, variables, envs):
+    """The shared-environment set, from --shared or SHIPMATE_SHARED_ENVS.
+
+    Every name is validated the way a tag-derived one is: these reach the same
+    API paths and `gh --env` arguments, and a typo would otherwise bind nothing
+    and report success.
+    """
+    from_flag = _split(flag)
+    from_var = _split(variables.get("SHIPMATE_SHARED_ENVS", ""))
+    if from_flag and from_var and from_flag != from_var:
+        raise SystemExit(
+            f"--shared ({', '.join(sorted(from_flag))}) and the SHIPMATE_SHARED_ENVS variable "
+            f"({', '.join(sorted(from_var))}) disagree. Reconcile them, or drop --shared."
+        )
+    shared = from_flag or from_var
+    for name in sorted(shared):
+        if not _ENV_RE.fullmatch(name):
+            raise SystemExit(f"unusable shared environment name: {name!r}")
+        if name not in envs:
+            raise SystemExit(
+                f"shared environment {name!r} is not one this repository declares. "
+                f"Its environments are: {', '.join(envs)}."
+            )
+    return shared
+
+
+def _variables():
+    # The API returns variable names uppercased, so every lookup here is on an uppercased key.
+    listed = json.loads(_run(["gh", "variable", "list", "--json", "name,value"]))
+    return {v["name"].upper(): v["value"] for v in listed}
+
+
+def _exit_code():
+    """2 when anything differs, else 0.
+
+    Exactly `differs`, never a substring or a not-`would` test: each reconciler
+    names its own verbs, and a verb that merely contains the word is not drift.
+    """
+    return 2 if any(verb == "differs" for verb, _subject, _detail in REPORT) else 0
+
+
+def main(argv=None):
+    global _DRY
+    ap = argparse.ArgumentParser(description="Reconcile a consumer repository to shipmate.")
+    ap.add_argument("--team", required=True, help="team slug whose members may apply and unlock")
+    ap.add_argument("--app-id", required=True, help="the shipmate App's numeric id")
+    ap.add_argument("--key", required=True, help="path to the App's PEM private key")
+    ap.add_argument("--state-suffix", default="", help="suffix for state artifact names")
+    ap.add_argument("--shared", default="", help="environments bound as one bare `<env>`")
+    ap.add_argument("--dry-run", action="store_true", help="report changes, write nothing")
+    args = ap.parse_args(argv)
+    if not _TEAM_RE.fullmatch(args.team):
+        raise SystemExit(f"--team must be a GitHub team slug: {args.team!r}")
+    if not _APP_ID_RE.fullmatch(args.app_id):
+        raise SystemExit(f"--app-id must be all digits: {args.app_id!r}")
+    _DRY = args.dry_run
+
+    # The key first: a bad path must fail in under a second, before any API call.
+    key = _read_key(args.key)
+    engine = pathlib.Path(__file__).resolve().parents[1]
+    sha, version = _engine_pin(engine)
+    repo, default_branch = _repo_facts()
+    envs = _derive_envs()
+    ctx = {
+        "repo": repo,
+        "default_branch": default_branch,
+        "app_id": args.app_id,
+        "team": args.team,
+        "key": key,
+        "envs": envs,
+        "shared": _resolve_shared(args.shared, _variables(), envs),
+        "state_suffix": args.state_suffix,
+        "engine": engine,
+        "sha": sha,
+        "version": version,
+    }
+    print(f"{ctx['repo']} (default branch {ctx['default_branch']})")
+    print(f"environments: {', '.join(ctx['envs'])}")
+    print(f"shared: {', '.join(sorted(ctx['shared'])) or '(none)'}")
+    print(f"engine pin: {ctx['sha']} ({ctx['version']})")
+
+    sys.exit(_exit_code())
+
+
+if __name__ == "__main__":
+    main()
