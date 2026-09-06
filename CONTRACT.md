@@ -442,12 +442,14 @@ consumer who set `AWS_ROLE_ARN` at repository or organization level and never
 wrote a plan-path credentials step had no plan-time cloud credential at all,
 because nothing read the variable there. Every plan and drift cell now does, and
 a plan cell executes branch-authored Terramate/OpenTofu — a provider or an
-`external` data source runs at plan time. What bounds it is the role's trust
-policy and nothing else: a policy conditioned on
+`external` data source runs at plan time. What *authorizes* it is the role's
+trust policy, and nothing in the engine bounds it further: a policy conditioned
+on
 `repo:<owner>/<repo>:environment:<env>-apply` refuses the `<env>-plan` token, so
 the credentials step fails and the cell fails loudly before `tofu init`. A
 repository-wide claim condition does not refuse it, and that configuration hands
-apply credentials to a plan of a pull request. `docs/hardening.md` §7–9 is the
+apply credentials to a plan of any branch someone with push access can push
+(fork pull requests are refused in `detect` before a cell exists). `docs/hardening.md` §7–9 is the
 threat model; a consumer repinning past this change checks the claim condition
 on every role a plan environment can now name.
 
