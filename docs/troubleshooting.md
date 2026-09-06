@@ -278,7 +278,7 @@ mandate. Each one names what to do.
 
 | `differs` line | What it means |
 | --- | --- |
-| `<env>-apply branch policy` — also permits other branches | the apply environment's deployment branch policy names branches besides the default one, so a workflow on any of them can still claim what that environment scopes. Delete the extra entries in Settings → Environments if they were not deliberate. |
+| `<name> branch policy` — also permits other branches | the environment — `shipmate-engine`, an `<env>-apply`, or a shared bare `<env>` — has a deployment branch policy naming branches besides the default one, so a workflow on any of them can still claim what that environment scopes. Delete the extra entries in Settings → Environments if they were not deliberate. |
 | `<env>-plan` — it carries a deployment branch policy | a plan environment must have none: plan cells evaluate at the pull request's base ref, so a policy blocks every cell whose pull request targets a branch it does not name ([`hardening.md`](hardening.md) #8). Remove the policy. |
 | `<env>-plan` — it carries protection rules | required reviewers or a wait timer on a plan environment stall every plan cell and the nightly drift run. Remove them ([`hardening.md`](hardening.md) #6). |
 | `<env>` — both that name and `<env>-apply` exist | the repository holds both namings for one logical environment, and which the engine binds depends on `SHIPMATE_SHARED_ENVS`. Delete the one you do not want, or pass `--shared <env>` to keep the bare one. |

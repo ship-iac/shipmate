@@ -53,7 +53,7 @@ one-time runbook. It is a prerequisite of this tier, not an optional extra.
 
 ### Quick path
 
-`scripts/onboard` reconciles this tier and the two below in one command. Run it
+`scripts/onboard` reconciles every tier on this page in one command. Run it
 from inside the consumer checkout, on its default branch, with `gh` authenticated
 against that repository, `terramate` on `PATH`, and an engine checkout sitting on
 a `vX.Y.Z` release tag:
@@ -71,7 +71,8 @@ It writes:
   the default branch, with the App key on `shipmate-engine` and any
   repository-level copy of that key deleted;
 - the `SHIPMATE_APP_ID`, `SHIPMATE_APPROVERS_TEAM`, `TERRAMATE_VERSION` and
-  `TOFU_VERSION` repository variables;
+  `TOFU_VERSION` repository variables, plus `SHIPMATE_SHARED_ENVS` when `--shared`
+  names environments bound as a single bare `<env>`;
 - a `shipmate-gate` ruleset requiring `shipmate / gate` under the App;
 - the six workflow shims under `.github/workflows/`, rendered from this page and
   [`drift.md`](drift.md) and pinned to the engine checkout's release.
