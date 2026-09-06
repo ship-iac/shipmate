@@ -409,8 +409,9 @@ def _versions(engine):
     """{"terramate": ..., "tofu": ...} from the engine checkout's VERSIONS file.
 
     Nothing else in the repository parses that file, so these two key names are an
-    undocumented coupling; the refusals below are where it is recorded. Both are
-    `SystemExit` like every other refusal here, and both fire before any write.
+    undocumented coupling; the refusals below are where it is recorded. `main` calls this
+    among its local reads, before the first reconciler: a repository must not end up with
+    half its environments created over a typo in a file that was readable at startup.
     """
     path = pathlib.Path(engine) / "VERSIONS"
     if not path.is_file():
@@ -430,7 +431,7 @@ def _versions(engine):
 
 def _wanted_variables(ctx):
     """{name: (value, the flag or file it came from)}, in the order they are written."""
-    versions = _versions(ctx["engine"])
+    versions = ctx["versions"]
     wanted = {
         "SHIPMATE_APP_ID": (ctx["app_id"], "--app-id"),
         "SHIPMATE_APPROVERS_TEAM": (ctx["team"], "--team"),
@@ -602,9 +603,11 @@ def main(argv=None):
         raise SystemExit(f"--app-id must be all digits: {args.app_id!r}")
     _DRY = args.dry_run
 
-    # The key first: a bad path must fail in under a second, before any API call.
+    # The local reads first: a bad key path or an unusable VERSIONS must fail in under a
+    # second, before the first API call creates anything.
     key = _read_key(args.key)
     engine = pathlib.Path(__file__).resolve().parents[1]
+    versions = _versions(engine)
     sha, version = _engine_pin(engine)
     repo, default_branch = _repo_facts()
     envs = _derive_envs()
@@ -618,6 +621,7 @@ def main(argv=None):
         "shared": _resolve_shared(args.shared, _variables(), envs),
         "state_suffix": args.state_suffix,
         "engine": engine,
+        "versions": versions,
         "sha": sha,
         "version": version,
     }

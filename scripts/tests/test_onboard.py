@@ -84,20 +84,12 @@ def ctx(**over):
         "shared": set(),
         "state_suffix": "",
         "engine": None,
+        "versions": {"terramate": "9.9.9", "tofu": "8.8.8"},
         "sha": "a" * 40,
         "version": "v0.26.0",
     }
     base.update(over)
     return base
-
-
-def engine_with_versions(tmp_path, terramate="9.9.9", tofu="8.8.8"):
-    """An engine checkout carrying a VERSIONS file, with values no real release uses:
-    a constant copied from the repository's own VERSIONS would rot on every bump."""
-    (tmp_path / "VERSIONS").write_text(
-        f"terramate={terramate}\ntofu={tofu}\n", encoding="utf-8", newline="\n"
-    )
-    return tmp_path
 
 
 def body_of(fake, argv):
@@ -429,6 +421,7 @@ def test_main_calls_every_stage_in_order():
         "_TEAM_RE.fullmatch(args.team)",
         "_APP_ID_RE.fullmatch(args.app_id)",
         "_read_key(args.key)",
+        "_versions(engine)",
         "_engine_pin(engine)",
         "_repo_facts()",
         "_derive_envs()",
@@ -868,7 +861,7 @@ def test_a_read_failure_that_is_not_a_404_refuses(monkeypatch):
     assert fake.calls == [["gh", "api", "repos/o/r/environments/dev-eu-plan"]]
 
 
-def test_dry_run_reaches_every_write_path_and_issues_only_reads(monkeypatch, tmp_path):
+def test_dry_run_reaches_every_write_path_and_issues_only_reads(monkeypatch):
     """`test_dry_run_issues_no_write` pins `write` itself; it says nothing about whether
     a reconciler routes through it. This drives every reconciler over a repository shaped
     so that all seven `write(...)` sites are reached -- create, update, the branch-policy
@@ -902,7 +895,7 @@ def test_dry_run_reaches_every_write_path_and_issues_only_reads(monkeypatch, tmp
     monkeypatch.setattr(onboard, "_DRY", True)
     onboard._reconcile_engine_env(ctx())
     onboard._reconcile_envs(ctx())
-    onboard._reconcile_variables(ctx(engine=engine_with_versions(tmp_path)))
+    onboard._reconcile_variables(ctx())
     onboard._reconcile_ruleset(ctx())
     assert fake.calls == [
         ["gh", "api", "repos/o/r/environments/shipmate-engine"],
@@ -932,7 +925,7 @@ def test_dry_run_reaches_every_write_path_and_issues_only_reads(monkeypatch, tmp
     ]
 
 
-def test_absent_variables_are_set_from_versions_and_flags(monkeypatch, tmp_path):
+def test_absent_variables_are_set_from_versions_and_flags(monkeypatch):
     """A repository with no variables gets all four the workflows read, the two version
     pins taken from the engine checkout's VERSIONS file rather than from anything the
     operator retypes.
@@ -945,7 +938,7 @@ def test_absent_variables_are_set_from_versions_and_flags(monkeypatch, tmp_path)
     """
     fake = make_gh({VARIABLE_LIST: []})
     monkeypatch.setattr(onboard, "_run", fake)
-    onboard._reconcile_variables(ctx(engine=engine_with_versions(tmp_path)))
+    onboard._reconcile_variables(ctx())
     assert fake.calls == [
         ["gh", "variable", "list", "--json", "name,value"],
         ["gh", "variable", "set", "SHIPMATE_APP_ID", "--body", "1"],
@@ -955,7 +948,7 @@ def test_absent_variables_are_set_from_versions_and_flags(monkeypatch, tmp_path)
     ]
 
 
-def test_variables_that_exist_with_another_value_are_reported(monkeypatch, tmp_path):
+def test_variables_that_exist_with_another_value_are_reported(monkeypatch):
     """A consumer pinning an older tested pair, or another App, is making a deliberate
     choice: the reconciler names the disagreement and writes nothing over it. Each
     `differs` line names where the value it would have written came from, so two
@@ -974,7 +967,7 @@ def test_variables_that_exist_with_another_value_are_reported(monkeypatch, tmp_p
         }
     )
     monkeypatch.setattr(onboard, "_run", fake)
-    onboard._reconcile_variables(ctx(app_id="456", engine=engine_with_versions(tmp_path)))
+    onboard._reconcile_variables(ctx(app_id="456"))
     assert fake.calls == [
         ["gh", "variable", "list", "--json", "name,value"],
         ["gh", "variable", "set", "SHIPMATE_APPROVERS_TEAM", "--body", "ops"],
@@ -989,7 +982,7 @@ def test_variables_that_exist_with_another_value_are_reported(monkeypatch, tmp_p
     assert onboard._exit_code() == 2
 
 
-def test_variable_names_are_matched_uppercased(monkeypatch, tmp_path):
+def test_variable_names_are_matched_uppercased(monkeypatch):
     """The API returns variable names uppercased whatever case they were created in, so
     a case-sensitive lookup would set a variable that is already there.
 
@@ -997,7 +990,7 @@ def test_variable_names_are_matched_uppercased(monkeypatch, tmp_path):
     """
     fake = make_gh({VARIABLE_LIST: [{"name": "tofu_version", "value": "8.8.8"}]})
     monkeypatch.setattr(onboard, "_run", fake)
-    onboard._reconcile_variables(ctx(engine=engine_with_versions(tmp_path)))
+    onboard._reconcile_variables(ctx())
     assert fake.calls == [
         ["gh", "variable", "list", "--json", "name,value"],
         ["gh", "variable", "set", "SHIPMATE_APP_ID", "--body", "1"],
@@ -1012,7 +1005,7 @@ def test_variable_names_are_matched_uppercased(monkeypatch, tmp_path):
     ]
 
 
-def test_shared_environments_are_written_as_one_sorted_variable(monkeypatch, tmp_path):
+def test_shared_environments_are_written_as_one_sorted_variable(monkeypatch):
     """SHIPMATE_SHARED_ENVS is a set written as a list, so the value written is sorted
     and a repository whose variable lists the same names in another order is not drift.
 
@@ -1029,7 +1022,7 @@ def test_shared_environments_are_written_as_one_sorted_variable(monkeypatch, tmp
     shared = {"dev-us", "dev-eu", "dev-ap"}
     fake = make_gh({VARIABLE_LIST: []})
     monkeypatch.setattr(onboard, "_run", fake)
-    onboard._reconcile_variables(ctx(engine=engine_with_versions(tmp_path), shared=shared))
+    onboard._reconcile_variables(ctx(shared=shared))
     assert fake.calls == [
         ["gh", "variable", "list", "--json", "name,value"],
         ["gh", "variable", "set", "SHIPMATE_APP_ID", "--body", "1"],
@@ -1044,7 +1037,7 @@ def test_shared_environments_are_written_as_one_sorted_variable(monkeypatch, tmp
         {VARIABLE_LIST: [{"name": "SHIPMATE_SHARED_ENVS", "value": "dev-us, dev-ap, dev-eu"}]}
     )
     monkeypatch.setattr(onboard, "_run", fake)
-    onboard._reconcile_variables(ctx(engine=engine_with_versions(tmp_path), shared=shared))
+    onboard._reconcile_variables(ctx(shared=shared))
     assert onboard.REPORT == [
         ("set", "SHIPMATE_APP_ID", "1"),
         ("set", "SHIPMATE_APPROVERS_TEAM", "ops"),
@@ -1055,9 +1048,35 @@ def test_shared_environments_are_written_as_one_sorted_variable(monkeypatch, tmp
     assert onboard._exit_code() == 0
 
 
+def test_an_unusable_versions_file_refuses_before_the_first_call(monkeypatch, tmp_path):
+    """`_versions` reads a local file and depends on nothing the reconcilers do, so its
+    refusal belongs among `main`'s local reads: a repository must not end up with half
+    its environments created over a typo in a file that was readable at startup. Zero
+    recorded calls is the assertion -- the message alone would be satisfied by a refusal
+    from the wrong place.
+
+    Mutation: move the `_versions(engine)` call back below the reconcilers (into
+    `_wanted_variables`, where it started), which records `git` and `gh` calls before
+    the refusal.
+    """
+    fake = make_gh({})
+    monkeypatch.setattr(onboard, "_run", fake)
+
+    def boom(engine):
+        raise SystemExit("bad VERSIONS")
+
+    monkeypatch.setattr(onboard, "_versions", boom)
+    pem = tmp_path / "key.pem"
+    pem.write_text("-----BEGIN-----\npem\n", encoding="utf-8", newline="\n")
+    with pytest.raises(SystemExit) as e:
+        onboard.main(["--team", "ops", "--app-id", "1", "--key", str(pem)])
+    assert "bad VERSIONS" in str(e.value)
+    assert fake.calls == []
+
+
 def test_a_missing_versions_file_is_refused(tmp_path):
-    """Every other refusal in this script is a `SystemExit` naming what to fix, and this
-    one fires before any variable is written.
+    """Every other refusal in this script is a `SystemExit` naming what to fix;
+    `test_an_unusable_versions_file_refuses_before_the_first_call` pins where it fires.
 
     Mutation: drop the `is_file()` check, so a `FileNotFoundError` traceback replaces it.
     """
