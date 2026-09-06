@@ -32,98 +32,23 @@ name: shipmate · drift
 on:
   schedule:
     - cron: "17 3 * * *"   # nightly, off-peak
-  workflow_dispatch: {}     # manual trigger for acceptance
+  workflow_dispatch:
 permissions:
   contents: read
 jobs:
-  detect:
-    # Resolves the default branch from the API rather than trusting
-    # github.event.repository.default_branch: whether that field is
-    # populated on this workflow's `schedule` trigger is exactly the
-    # question this guard must NOT depend on (see `drift`/`issues` below).
-    # This job itself runs no consumer code and holds no secret, so it is
-    # intentionally left ungated -- a `gh workflow run drift.yml --ref
-    # <branch>` dispatch on a feature branch fails visibly at the two gated
-    # jobs below instead of this job silently doing nothing.
-    runs-on: ubuntu-slim
-    outputs:
-      matrix: ${{ steps.m.outputs.matrix }}
-      empty: ${{ steps.m.outputs.empty }}
-      default_branch: ${{ steps.default_branch.outputs.default_branch }}
-    steps:
-      - id: default_branch
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          echo "default_branch=$(gh api "repos/$GITHUB_REPOSITORY" --jq .default_branch)" >> "$GITHUB_OUTPUT"
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with: { fetch-depth: 0 }
-      - uses: ship-iac/shipmate/actions/setup@<engine-sha>  # see the latest release
-        with:
-          terramate-version: ${{ vars.TERRAMATE_VERSION }}
-          tofu-version: ${{ vars.TOFU_VERSION }}
-      - id: m
-        uses: ship-iac/shipmate/actions/build-matrix@<engine-sha>  # see the latest release
-        with:
-          base-sha: ""
-          all-stacks: "true"
-          no-pull-request: "true"
-  drift:
-    needs: detect
-    if: ${{ needs.detect.outputs.empty == 'false' && github.ref == format('refs/heads/{0}', needs.detect.outputs.default_branch) }}
-    runs-on: ubuntu-slim
-    permissions: { contents: read, id-token: write }
-    strategy:
-      fail-fast: false
-      matrix: ${{ fromJSON(needs.detect.outputs.matrix) }}
-    environment: ${{ matrix.environment }}-plan
-    name: ${{ matrix.stack }} / ${{ matrix.environment }}
-    env:
-      TF_VAR_env: ${{ vars.TF_VAR_env }}
-      TF_VAR_region: ${{ vars.TF_VAR_region }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with: { fetch-depth: 0 }
-      - uses: ship-iac/shipmate/actions/setup@<engine-sha>  # see the latest release
-        with:
-          terramate-version: ${{ vars.TERRAMATE_VERSION }}
-          tofu-version: ${{ vars.TOFU_VERSION }}
-      - uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
-        with:
-          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
-          aws-region: ${{ vars.AWS_REGION }}
-      - uses: ship-iac/shipmate/actions/drift-cell@<engine-sha>  # see the latest release
-        with:
-          stack: ${{ matrix.stack }}
-          stack-name: ${{ matrix.stack }}
-          env: ${{ matrix.environment }}
-
-  # Completes the credentialed work drift-cell no longer does: authors/closes
-  # the drift Issues, from downloaded drift-summary cell artifacts, and holds
-  # the only App key on the drift path.
-  issues:
-    needs: [detect, drift]
-    # `detect.outputs.empty == 'false'` replaces the download's
-    # `continue-on-error`. The empty-matrix case (nothing to plan this run)
-    # downloads nothing to match the pattern, and drift-issues returns
-    # silently on an empty cells directory -- indistinguishable from a LOST
-    # artifact, which would then green a drift run that opened no Issue and
-    # closed none. `detect` already tells the two apart, so an empty matrix
-    # skips this job outright and a failed download now fails it.
-    if: ${{ always() && needs.detect.outputs.empty == 'false' && github.ref == format('refs/heads/{0}', needs.detect.outputs.default_branch) }}
-    runs-on: ubuntu-slim
-    environment: shipmate-engine
-    permissions: { actions: read }
-    steps:
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with: { pattern: drift-summary.*, path: drift }
-      - uses: ship-iac/shipmate/actions/drift-issues@<engine-sha>  # see the latest release
-        with:
-          app-id: ${{ vars.SHIPMATE_APP_ID }}
-          private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
-          slack-webhook: ${{ vars.SLACK_WEBHOOK }}
+  shipmate:
+    name: shipmate
+    uses: ship-iac/shipmate/.github/workflows/drift.yml@<engine-sha>  # see the latest release
+    permissions:
+      contents: read
+      id-token: write
+      actions: read
+    secrets:
+      SHIPMATE_APP_PRIVATE_KEY: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
+    with:
+      state_suffix: ""
+      # Empty covers every cell. Split the sweep by adding more files, one tag query each.
+      tags: ""
 ```
 
 **`no-pull-request: "true"` is what makes the nightly run allowed at all.**

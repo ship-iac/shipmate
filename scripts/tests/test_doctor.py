@@ -2348,8 +2348,8 @@ def test_a_capitalised_false_is_silent(monkeypatch):
 
 def test_flow_style_unsafe_pr_checkout_is_warned(monkeypatch):
     """A line-anchored key misses this, and flow style is not exotic authoring: the
-    engine's own `docs/drift.md` fence and all four sample repositories write
-    `with: { fetch-depth: 0 }`, so it is what a consumer copying those pages produces.
+    engine's own `.github/workflows/drift.yml` and all four sample repositories write
+    `with: { fetch-depth: 0 }`, so it is what a consumer copying those files produces.
     Missing it is fail-open on the outermost guard of the whole plan path."""
     responses = _fork_responses(
         {
@@ -3041,6 +3041,27 @@ def test_a_dispatchable_shim_is_silent(monkeypatch):
     responses = _fork_responses({"plan.yml": _PLAN_DISPATCHABLE})
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
     assert doctor._dispatch_wiring_warnings(_ctx()) == []
+
+
+def test_the_documented_shim_is_dispatchable_and_correctly_named(monkeypatch):
+    """The oracle for false positives and for the page: the shim consumers paste, verbatim,
+    through both probes that read `plan.yml`. The fence count is asserted first, so a page edit
+    moving the shim out of this selector's reach fails here.
+
+    Mutations: rename the fence's job `name:` away from `shipmate` (the job-name half reddens),
+    and delete its `workflow_dispatch:` trigger (the dispatch half reddens).
+    """
+    page = (ENGINE / "docs" / "getting-started.md").read_text(encoding="utf-8")
+    fences = [
+        textwrap.dedent(m.group("body"))
+        for m in _YAML_FENCE.finditer(page)
+        if "/.github/workflows/plan.yml@" in m.group("body")
+    ]
+    assert len(fences) == 1, f"documented plan-shim fences: {len(fences)}"
+    responses = _fork_responses({"plan.yml": fences[0]})
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    assert doctor._dispatch_wiring_warnings(_ctx()) == []
+    assert doctor._shim_job_name_warnings(_ctx()) == []
 
 
 def test_a_flow_style_on_value_is_silent(monkeypatch):

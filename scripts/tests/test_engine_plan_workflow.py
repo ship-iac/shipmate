@@ -148,8 +148,22 @@ def test_the_cell_injects_the_three_flavor_variables():
     }
 
 
-def test_the_cell_state_path_is_built_from_the_state_suffix_input():
-    assert _step("plan", "actions/plan-cell@")["with"]["state-path"] == (
-        "${{ inputs.state_suffix != '' && "
-        "format('{0}/{1}', matrix.stack, inputs.state_suffix) || '' }}"
-    )
+def test_the_cell_passes_this_whole_with_block():
+    """The whole mapping against a hand-written constant, not the keys this file happens to
+    reason about elsewhere: a key checked one at a time relocates the hole to whichever key is
+    not named, and a dropped `with:` line reaches a composite action as the empty string rather
+    than as an error. plan-cell refuses an empty `expected-head`; an empty `plan-passphrase`
+    stores every plan artifact in the clear and fails no cell.
+
+    Mutations: `plan-passphrase` deleted, `expected-head: ${{ github.sha }}`, and the state path's
+    `!=` inverted to `==`.
+    """
+    assert _step("plan", "actions/plan-cell@")["with"] == {
+        "stack": "${{ matrix.stack }}",
+        "stack-name": "${{ matrix.stack }}",
+        "env": "${{ matrix.environment }}",
+        "expected-head": "${{ needs.facts.outputs.head-sha }}",
+        "state-path": "${{ inputs.state_suffix != '' && "
+        "format('{0}/{1}', matrix.stack, inputs.state_suffix) || '' }}",
+        "plan-passphrase": "${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}",
+    }

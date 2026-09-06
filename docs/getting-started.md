@@ -164,142 +164,30 @@ on:
         description: Pull request number to plan
         required: true
 concurrency:
-  # `github.event.inputs` is readable under either trigger, unlike the
-  # `inputs` context.
+  # `github.event.inputs` is readable under either trigger, unlike the `inputs` context.
   group: plan-${{ github.event.pull_request.number || github.event.inputs.pr_number }}
   cancel-in-progress: true
 permissions:
   contents: read
 jobs:
-  # `name:` is not decoration: this job's check-run shows on every pull request,
-  # and an on-demand plan mirrors it onto the head, so it needs a name a reviewer
-  # can place — inside the `shipmate / ` namespace with `shipmate / detect`.
-  # One producer for every pull-request fact below. Its own job, not `detect`'s
-  # first step: `detect` can fail (a fmt check, stale codegen), and the summary
-  # job must still be told which head to gate — a summary call with an empty
-  # `head-repo` is refused, which would turn a failing gate into no gate at all.
-  facts:
-    name: shipmate / facts
-    runs-on: ubuntu-slim
+  # `name: shipmate` is not decoration: GitHub names a called workflow's check runs
+  # `<caller job> / <callee job>`, so this is what makes the plan cells
+  # `shipmate / <stack> / <env>` — the names the plan comment's links resolve.
+  shipmate:
+    name: shipmate
+    uses: ship-iac/shipmate/.github/workflows/plan.yml@<engine-sha>  # see the latest release
+    # Not optional — a callee's permissions are capped by this job's, and granting less kills
+    # the run at startup with no job and no log.
     permissions:
+      contents: read
       pull-requests: read
-    outputs:
-      head-sha: ${{ steps.facts.outputs.head-sha }}
-      head-repo: ${{ steps.facts.outputs.head-repo }}
-      base-sha: ${{ steps.facts.outputs.base-sha }}
-      pr-number: ${{ steps.facts.outputs.pr-number }}
-      is-draft: ${{ steps.facts.outputs.is-draft }}
-      on-demand: ${{ steps.facts.outputs.on-demand }}
-    steps:
-      - id: facts
-        uses: ship-iac/shipmate/actions/pr-facts@<engine-sha>  # see the latest release
-
-  detect:
-    name: shipmate / detect
-    needs: facts
-    # Autoplan skips drafts; `shipmate plan` on a draft is an explicit request
-    # and plans it.
-    if: needs.facts.outputs.is-draft == 'false' || needs.facts.outputs.on-demand == 'true'
-    runs-on: ubuntu-slim
-    permissions:
-      contents: read
-    outputs:
-      matrix: ${{ steps.matrix.outputs.matrix }}
-      empty: ${{ steps.matrix.outputs.empty }}
-      count: ${{ steps.matrix.outputs.count }}
-    steps:
-      # Both triggers check out something else by default — the base branch
-      # under `pull_request_target`, the dispatch ref under `workflow_dispatch`.
-      # Naming the head SHA is what makes this a plan of the pull request;
-      # without it `build-matrix` refuses the run, because the alternative is a
-      # clean plan for code it never read.
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ needs.facts.outputs.head-sha }}
-          fetch-depth: 0
-      - uses: ship-iac/shipmate/actions/setup@<engine-sha>  # see the latest release
-        with:
-          terramate-version: ${{ vars.TERRAMATE_VERSION }}
-          tofu-version: ${{ vars.TOFU_VERSION }}
-      # Before the two terramate steps, not after: this step is where a fork's
-      # pull request is refused, and `terramate fmt`/`generate` evaluate the
-      # checked-out HCL. Under `pull_request_target` `actions/checkout` refuses a
-      # fork head itself, so the order only shows on the dispatch leg — which has
-      # no pull-request context for that outer refusal to key on.
-      - id: matrix
-        uses: ship-iac/shipmate/actions/build-matrix@<engine-sha>  # see the latest release
-        with:
-          base-sha: ${{ needs.facts.outputs.base-sha }}
-          head-repo: ${{ needs.facts.outputs.head-repo }}
-          head-sha: ${{ needs.facts.outputs.head-sha }}
-      - name: fmt check
-        run: terramate fmt --check
-      - name: stale codegen check
-        run: terramate generate --detailed-exit-code
-
-  plan:
-    needs: [facts, detect]
-    if: needs.detect.outputs.empty == 'false'
-    runs-on: ubuntu-slim
-    permissions:
-      contents: read
       id-token: write
-    strategy:
-      fail-fast: false
-      matrix: ${{ fromJSON(needs.detect.outputs.matrix) }}
-    environment: ${{ matrix.environment }}-plan
-    name: ${{ matrix.stack }} / ${{ matrix.environment }}
-    env:
-      TF_VAR_env: ${{ vars.TF_VAR_env }}
-      TF_VAR_region: ${{ vars.TF_VAR_region }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ needs.facts.outputs.head-sha }}
-          fetch-depth: 0
-      - uses: ship-iac/shipmate/actions/setup@<engine-sha>  # see the latest release
-        with:
-          terramate-version: ${{ vars.TERRAMATE_VERSION }}
-          tofu-version: ${{ vars.TOFU_VERSION }}
-      - uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
-        with:
-          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
-          aws-region: ${{ vars.AWS_REGION }}
-      - uses: ship-iac/shipmate/actions/plan-cell@<engine-sha>  # see the latest release
-        with:
-          stack: ${{ matrix.stack }}
-          stack-name: ${{ matrix.stack }}
-          env: ${{ matrix.environment }}
-          expected-head: ${{ needs.facts.outputs.head-sha }}
-          plan-passphrase: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
-
-  # Everything trusted happens inside the engine's reusable workflow: one job,
-  # `environment: shipmate-engine`, no checkout, and both trust decisions (the
-  # fork refusal and the draft skip) on its own `if:`. This caller only *states*
-  # the three facts they decide on — `head-repo`, `is-draft` and `on-demand`
-  # below — and it can only fail those decisions closed, never open: an omitted
-  # `head-repo` refuses every run, an omitted `is-draft` every autoplan run, and
-  # an omitted `on-demand` gives up the requested plan of a draft and the mirror
-  # of a requested plan's per-cell checks onto the head.
-  # `permissions` is not optional — a callee's permissions are capped by this
-  # job's, and granting less kills the run at startup with no job and no log.
-  summary:
-    needs: [facts, detect, plan]
-    if: ${{ !cancelled() }}
-    uses: ship-iac/shipmate/.github/workflows/summary.yml@<engine-sha>  # see the latest release
-    permissions:
-      contents: read
     secrets:
       SHIPMATE_APP_PRIVATE_KEY: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
+      SHIPMATE_PLAN_PASSPHRASE: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
     with:
-      pr-number: ${{ needs.facts.outputs.pr-number }}
-      head-sha: ${{ needs.facts.outputs.head-sha }}
-      detect-result: ${{ needs.detect.result }}
-      plan-result: ${{ needs.plan.result }}
-      planned-cells: ${{ needs.detect.outputs.count }}
-      head-repo: ${{ needs.facts.outputs.head-repo }}
-      is-draft: ${{ needs.facts.outputs.is-draft }}
-      on-demand: ${{ needs.facts.outputs.on-demand }}
+      # Your flavor's per-stack state path suffix; "" when a remote backend owns state.
+      state_suffix: ""
 ```
 
 Permissions on this path are narrow: the top level grants `contents: read`, and
@@ -480,34 +368,16 @@ concurrency:
   group: comment-ops-${{ github.event.issue.number }}
   cancel-in-progress: false
 jobs:
-  ops:
-    # Only PR comments (issue_comment fires on issues too).
-    if: ${{ github.event.issue.pull_request }}
-    runs-on: ubuntu-slim
-    environment: shipmate-engine
-    steps:
-      - id: authz
-        uses: ship-iac/shipmate/actions/comment-ops@<engine-sha>  # see the latest release
-        with:
-          app-id: ${{ vars.SHIPMATE_APP_ID }}
-          private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
-          approvers-team: ${{ vars.SHIPMATE_APPROVERS_TEAM }}
-          comment-body: ${{ github.event.comment.body }}
-          comment-user: ${{ github.event.comment.user.login }}
-          comment-id: ${{ github.event.comment.id }}
-          pr-number: ${{ github.event.issue.number }}
-          github-token: ${{ github.token }}
-      - if: ${{ steps.authz.outputs.authorized == 'true' }}
-        uses: ship-iac/shipmate/actions/dispatch@<engine-sha>  # see the latest release
-        with:
-          app-id: ${{ vars.SHIPMATE_APP_ID }}
-          private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
-          environment: ${{ steps.authz.outputs.environment }}
-          verb: ${{ steps.authz.outputs.verb }}
-          ref: ${{ steps.authz.outputs.head-sha }}
-          pr-number: ${{ github.event.issue.number }}
-          dispatch-ref: ${{ github.event.repository.default_branch }}
-          repository: ${{ github.repository }}
+  shipmate:
+    name: shipmate
+    uses: ship-iac/shipmate/.github/workflows/comment-ops.yml@<engine-sha>  # see the latest release
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+      actions: read
+    secrets:
+      SHIPMATE_APP_PRIVATE_KEY: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
 ```
 
 Its `ops` job names `environment: shipmate-engine` directly. `shipmate-engine`
