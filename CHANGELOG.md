@@ -13,7 +13,7 @@ grammar are declared unstable in `README.md`.
 
 ## [0.26.0] — 2026-09-06
 
-Tags `<sha>`.
+Tags `c622ff7`.
 
 Additive. No consumer has to change anything to take this release; the new
 script is hand-run from an engine checkout and is never invoked from a workflow.
