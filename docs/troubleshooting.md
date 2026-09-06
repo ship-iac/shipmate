@@ -81,14 +81,14 @@ live probes.
   every `[plan]` link in the plan comment, which falls back to the workflow-run
   page instead of the cell's own check. A job with no `name:` is judged by its
   job id, which is what GitHub displays then.
-- **Whether the `apply.yml` wrapper still declares or forwards the retired
+- **Whether the `apply.yml` shim still declares or forwards the retired
   `plan_run_id` input.** The engine dispatches no such value and nothing it
   calls accepts one. A `with:` line forwarding it to the engine's reusable
   `apply.yml` or `apply-all.yml` makes GitHub reject the run as it LOADS the
   workflow — the run has no jobs and no logs, only a workflow-validation error
   on the run itself — while the same line on a composite action is only a
   warning.
-- **Whether that same wrapper still carries the retired `mode` input.**
+- **Whether that same shim still carries the retired `mode` input.**
   `shipmate unlock` no longer uses it, now that it dispatches its own
   `unlock.yml`. Declared under `on:` it is dead weight; forwarded to the
   engine's reusable `apply.yml` or `apply-all.yml` it is the same load-time
@@ -329,7 +329,8 @@ the pre-flight and still injects nothing. Two ways to arrive there:
 ### `plan-cell needs the expected-head input`, or `The plan would describe a tree nobody reviewed`
 
 A plan cell fails on its very first step, before `terramate` runs, so the cell
-produces no plan and its `<stack> / <env>` check does not go green. The failing
+produces no plan and its `shipmate / <stack> / <env>` check does not go green.
+The failing
 plan job leaves `shipmate / gate` held red with `plan incomplete (plan job:
 failure)` — a hold, not an absence (§`shipmate / gate` never goes green, "The
 gate is deliberately held") — so nothing merges until the plan cells pass.
@@ -525,21 +526,14 @@ Two locks this verb does not reach:
 Four distinct causes, in the order worth checking.
 
 **No gate status was written at all, as opposed to a red or held one.** The
-trusted summary job decides on three inputs the `plan.yml` wrapper states —
-`head-repo`, `is-draft` and `on-demand` — and reads an absent or empty
-`head-repo` or `is-draft` as a refusal (an absent `on-demand` reads as `false`,
-which is plain autoplan behaviour). A wrapper that calls the engine's
-`summary.yml` without `head-repo` has
-its summary job *skipped* on every run; without `is-draft`, on every automatic
-plan (a commented `shipmate plan` still gates); either way: no gate, no plan
-comment, and nothing on the run page saying why. The pull request cannot
-merge, which is the intended direction, but the cause is only visible in the
-wrapper. Add all three lines (`docs/getting-started.md` §Required — plan,
-`docs/upgrading.md` §0.20.0). Omitting `on-demand` is the quiet one: every
-ordinary pull request is unaffected, and only a `shipmate plan` on a draft
-loses its gate — it plans, uploads its artifacts, and is skipped at the summary,
-so nothing it did is published. `shipmate doctor` reports this wiring,
-including a constant value that would pass the check for every run.
+engine's `summary` job is skipped on a fork pull request, and on a draft nobody
+asked to plan — either way there is no gate, no plan comment, and nothing on the
+run page saying why. The pull request cannot merge, which is the intended
+direction. Both facts come from the `facts` job in the same engine file, so a
+skipped `summary` is not a wiring mistake: check the pull request's head
+repository and its draft state, and re-issue `shipmate plan` if you want a draft
+planned. A pull request whose head is in a fork is refused earlier still, at
+`detect` ("A fork's pull request is refused", below).
 
 **A pending apply check nothing will complete.** `gate-refresh` greens the gate
 only when every shipmate-App-authored check on that commit whose name begins
@@ -643,7 +637,8 @@ not belong in `SHIPMATE_UNGATED_ENVS`.
 
 ### A pull request planned zero cells
 
-No `<stack> / <env>` checks appear, no plan comment is posted — unless there is
+No `shipmate / <stack> / <env>` checks appear, no plan comment is posted — unless
+there is
 already a plan comment to keep current, or `doctor` raised a warning on that
 run, either of which still posts one — and the gate goes green over no work.
 
@@ -664,15 +659,15 @@ request could not merge whatever the plan said. The refusal is loud rather than
 an empty matrix, so an outside contributor is not left waiting on a gate that
 cannot arrive.
 
-The refusal keys on the `head-repo` input the wrapper passes, and it refuses by
-default: a run that states no head repository is refused too, with a message
-naming the input. So the same failure has a second cause — a `plan.yml` that
-re-pinned the engine without adding
-`head-repo: ${{ needs.facts.outputs.head-repo }}` to its
-`build-matrix` step fails every pull request this way, fork or not
-(`docs/upgrading.md` §0.20.0, and §0.18.0 for the release that first required
-the input). A nightly drift wrapper says it has no pull
-request at all with `no-pull-request: "true"` instead (`docs/drift.md`).
+The refusal keys on the `head-repo` input, and it refuses by default: a run
+that states no head repository is refused too, with a message naming the input.
+Engine `plan.yml` fills that input from its own `facts` job, so on a current pin
+the message means what it says — the head really is elsewhere. On a pin
+predating the shims the same message can come from a hand-written `plan.yml`
+whose `build-matrix` step never passed the input (`docs/upgrading.md` §0.20.0,
+and §0.18.0 for the release that first required it). Engine `drift.yml` says it
+has no pull request at all with `no-pull-request: "true"` instead
+(`docs/drift.md`).
 
 No input allows a fork. Push the branch to this repository
 (`gh pr checkout`, then push) and open the pull request there.

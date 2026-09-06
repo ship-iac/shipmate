@@ -159,6 +159,49 @@ names. The entries below `0.2.0` predate the first tagged release, or
 `CHANGELOG.md` does not pin one; they are kept for repositories moving from a
 very old pin.
 
+### Unreleased — `plan.yml`, `drift.yml` and `comment-ops.yml` become shims
+
+**This release is breaking for every consumer.** The pin bump and the body
+rewrite of those three files land in **one commit**. A new shim against an old
+pin is a load-time rejection — no job, no check run and no log, only a
+workflow-validation error on the run itself — and an old inline body against the
+new pin fails the same way, because the engine summary workflow it calls no
+longer exists as a file.
+`dev/repin_consumer.py` rewrites pins and nothing else, so the body edit is by
+hand.
+
+The three bodies are in [`getting-started.md`](getting-started.md) §Required —
+plan and §The apply workflows, and [`drift.md`](drift.md) §The workflow. Replace
+each file's contents with the shim there, keeping your own `state_suffix`, your
+runner label, and any `tags:` value your drift files carry.
+
+1. **Delete the `summary:` job.** It was a job inside your `plan.yml`, not a
+   file of its own, so what goes is the job block — the whole shim replaces it.
+2. **Name the calling job `shipmate`.** GitHub names a called workflow's check
+   runs `<caller job> / <callee job>`, and `scripts/summary-comment` resolves
+   each plan comment row's `[plan]` link by that exact name. Under any other
+   name the plan still runs and the gate is unaffected; every one of those links
+   falls back to the workflow-run page instead of the cell's own check.
+   `shipmate doctor` reports it.
+3. **The per-cell plan check name changes** from `<stack> / <env>` to
+   `shipmate / <stack> / <env>`. Anyone who listed a per-cell plan check as a
+   required status check in a ruleset must update it. The aggregate
+   `shipmate / gate` is unchanged, and it is the only check
+   [`branch-protection.md`](branch-protection.md) asks you to require.
+4. **`drift.yml`'s `workflow_dispatch` `tags` input is gone** from the shipped
+   shape. A manual run sweeps whatever literal that file's `with:` block names;
+   [`drift.md`](drift.md) §An ad-hoc scoped sweep is the shape to add back if
+   you want the prompt.
+5. **Set `state_suffix` on all three.** It is your flavor's per-stack state path
+   suffix — `.state`, `terraform.tfstate`, `terraform.tfstate.d` — or `""` for a
+   remote backend: the same value your `deploy.yml` and `apply.yml` shims
+   already pass. `comment-ops.yml` takes no such input.
+6. **Grant `id-token: write` on the `plan.yml` and `drift.yml` calling jobs.**
+   Their callees run cells, so they request it; `comment-ops.yml` does not.
+   Granting less kills the run at startup with no job and no log.
+
+Nothing changes for environments, variables, secrets, the App or the ruleset.
+
 ### 0.24.0 — the reviewed plan text is bound to the plan that applies; re-plan open pull requests
 
 **Re-pinning is enough.** The trusted `summary` job records the sha256 of each
@@ -435,7 +478,7 @@ both only start working once the edit is merged. If you require
 `shipmate / gate`, the recovery path is §0.18.0's.
 
 **The pin bump and these edits must land in the same commit.** The other order
-fails quietly: a wrapper passing `on-demand` to a `summary.yml` still at the
+fails quietly: a wrapper passing `on-demand` to a summary workflow still at the
 old pin declares no such input, and an undeclared reusable-workflow input is a
 load-time rejection: the run ends as `startup_failure` with no job and no
 retrievable log.
@@ -562,7 +605,8 @@ on the `build-matrix` step of `detect`:
           head-repo: ${{ github.event.pull_request.head.repo.full_name }}
 ```
 
-and on the `summary` job's call of the engine's `summary.yml`:
+and on the `summary` job's call of the engine's summary workflow (folded into
+the engine's plan workflow in §Unreleased):
 
 ```yaml
     with:
@@ -581,17 +625,16 @@ current shape.
 
 **Pass those expressions, not constants.** A literal `is-draft: false` claims
 "not a draft" for every run, and `head-repo: ${{ github.repository }}` passes the
-fork check for every pull request, fork ones included. `shipmate doctor` reports
-either — absent or wrong — on the `summary` call, and reports the `build-matrix`
-step's own `head-repo` the same way. It reads only a file named `plan.yml`, so a
-plan wrapper under another name is checked by review or not at all, and it has
-nothing to say about `is-draft` on `build-matrix`, which takes no such input.
+fork check for every pull request, fork ones included. `shipmate doctor` reported
+each of those while a consumer owned the wiring; §Unreleased moves both the facts
+and the comparison inside the engine, and those probes were retired with it.
 
 If you run the optional nightly drift workflow, add `no-pull-request: "true"`
 to its `build-matrix` step ([`drift.md`](drift.md)). A drift run has no pull
 request to state a head repository for, and this is how it says so. It belongs
-in that file only: `doctor` reports a `no-pull-request` in `plan.yml`, because
-there it turns the fork refusal off for every pull request.
+in that file only: in `plan.yml` it turns the fork refusal off for every pull
+request. As of §Unreleased the engine passes it, and no consumer file carries
+it.
 
 **The pin bump and these edits must land in the same commit.** The three
 failure modes look nothing alike:
@@ -927,8 +970,12 @@ no job and no log:
 
 | Your wrapper job calls | Pass |
 |---|---|
-| `summary.yml` (in `plan.yml`) | `SHIPMATE_APP_PRIVATE_KEY` |
+| the summary workflow (in `plan.yml`) | `SHIPMATE_APP_PRIVATE_KEY` |
 | `apply.yml`, `apply-all.yml`, `deploy.yml` | that and `SHIPMATE_PLAN_PASSPHRASE` |
+
+§Unreleased folds the summary workflow into the engine's `plan.yml` and
+[`getting-started.md`](getting-started.md) §Why the shims name their secrets
+carries the current table.
 
 ```yaml
     secrets:
@@ -957,13 +1004,14 @@ pending `apply / <stack> / <env>` checks, no sticky comment.
 
 ### 0.10.0 — the plan path is one workflow, and re-pinning alone is not enough
 
-You must rewrite `.github/workflows/plan.yml` and delete
+You must rewrite `.github/workflows/plan.yml` and delete your own
 `.github/workflows/summary.yml` in the same change that moves your pins. A
 repository that re-pins without rewriting gets no `shipmate / gate`, so its pull
 requests cannot merge — the old `workflow_run` topology is not supported.
 
 `plan.yml` moves to `pull_request_target` and gains a third job, `summary`,
-which is `uses: <owner>/shipmate/.github/workflows/summary.yml@<sha>` with
+which calls the engine's summary workflow — a file of its own at this release,
+folded into the engine's `plan.yml` in §Unreleased — with
 `secrets: { SHIPMATE_APP_PRIVATE_KEY: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }} }`
 — that secret alone, since a callee rejects a name it does not declare — and
 five inputs (`pr-number`, `head-sha`, `detect-result`,
@@ -973,7 +1021,7 @@ run at startup with no job, no log and no annotation to explain it. Because
 `pull_request_target` checks out the base by default, `detect` and `plan` must
 name the pull request's head SHA on their checkout's `ref:`
 explicitly — without it they plan the base branch and report a clean plan for a
-pull request they never read (refused outright since `0.17.0`). The consumer's own `summary.yml` is deleted; the
+pull request they never read (refused outright since `0.17.0`). The consumer's own summary workflow file is deleted; the
 engine's is a `workflow_call` workflow whose single job binds `shipmate-engine`,
 checks out nothing, and carries both trust conditions (the fork refusal and the
 draft skip) where a consumer cannot drop them. As of `0.18.0` the caller states

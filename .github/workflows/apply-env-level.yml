@@ -54,8 +54,8 @@ jobs:
         include: ${{ fromJSON(inputs.waves_json).wave0 }}
     # SHIPMATE_SHARED_ENVS is a repository variable, not a workflow input: which environment an
     # apply binds decides whether the reviewer gate and the apply role reach it, and branch content
-    # must not choose that. A listed env's applies bind the bare environment, and the consumer's
-    # plan workflow must name the same one (CONTRACT.md). Every wave job binds it this way.
+    # must not choose that. A listed env binds the bare environment on both paths -- plan.yml and
+    # drift.yml read the same variable with `-plan` (CONTRACT.md). Every wave job binds it this way.
     environment: >-
       ${{ contains(format(',{0},', vars.SHIPMATE_SHARED_ENVS), format(',{0},', matrix.environment))
       && matrix.environment || format('{0}-apply', matrix.environment) }}

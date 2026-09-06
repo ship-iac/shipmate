@@ -1429,7 +1429,7 @@ def test_app_permission_failure_warned():
     assert "\n" not in out[0][1]
 
 
-def _ann(level="warning", title="t", message="m", check="shipmate · plan / detect"):
+def _ann(level="warning", title="t", message="m", check="shipmate · plan / shipmate / detect"):
     return {
         "annotation_level": level,
         "title": title,
@@ -1504,7 +1504,7 @@ def test_report_renders_probe_and_harvest_sections():
     assert body.startswith(doctor.DOCTOR_MARKER)
     assert ":warning: gate ruleset is missing" in body
     assert "stale codegen" in body
-    assert "shipmate · plan / detect" in body
+    assert "shipmate · plan / shipmate / detect" in body
     assert _ctx()["head_sha"][:7] in body
     assert "1281" in body
 
@@ -1584,7 +1584,7 @@ def test_report_states_when_a_partial_harvest_still_found_warnings():
     body = doctor.render_report([], [_ann(title="real warning")], _ctx(harvest_failed=True))
     assert doctor.HARVEST_INCOMPLETE in body
     assert "real warning" in body
-    assert "shipmate · plan / detect" in body
+    assert "shipmate · plan / shipmate / detect" in body
 
 
 def test_report_all_clear_when_harvest_did_not_fail():
@@ -2099,7 +2099,7 @@ def test_quoted_event_name_comparison_is_silent(monkeypatch):
 
 def test_the_shipmate_plan_workflow_is_not_warned_about(monkeypatch):
     # `plan.yml` declaring `pull_request_target` IS the shape the engine ships: the job
-    # holding the App key is the engine's reusable summary workflow, which checks out
+    # holding the App key is the engine plan workflow's `summary` job, which checks out
     # nothing. Warning about it trains readers to ignore the dangerous labeler workflow.
     responses = _fork_responses({"plan.yml": "on:\n  pull_request_target:\n    types: [opened]\n"})
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])

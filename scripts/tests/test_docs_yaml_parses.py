@@ -137,6 +137,9 @@ def test_the_wrapper_snippets_are_still_being_found():
         for _, target, _ in _engine_workflow_calls(yaml.safe_load(body))
     )
     assert found == [
+        # Two: the unscoped nightly shim, and the `drift-<slice>.yml` copy under
+        # "Spreading a sweep across the week" that carries a literal `tags:` value.
+        ("docs/drift.md", "drift.yml"),
         ("docs/drift.md", "drift.yml"),
         ("docs/getting-started.md", "apply-all.yml"),
         ("docs/getting-started.md", "apply.yml"),

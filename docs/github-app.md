@@ -269,7 +269,7 @@ every consumer repo, not once for the org.
   `apply / <stack> / <env>` check (create pending, complete on apply), the
   aggregate `shipmate / gate` commit status, the sticky plan comment, the
   `shipmate doctor` sticky report, the apply result comments, and drift
-  issues. The plan matrix job's own `<stack> / <env>` auto check-run stays
+  issues. The plan matrix job's own `shipmate / <stack> / <env>` auto check-run stays
   on the `github-actions` identity — it's the job's own check-run, not
   something a separate API call creates, so there's nothing for the App to
   author there. On an on-demand plan the App does author a copy of it: a
@@ -324,26 +324,29 @@ actual work here:
   `build-matrix` derives from `env/*` Terramate tags in the head checkout, so a
   pull request that tags a stack `env/shipmate-engine` produces a plan cell
   naming an environment of its choosing (`shipmate-engine-plan` with the
-  documented `-plan` suffix on that binding, the bare `shipmate-engine` in a
-  repository that shares one environment between plan and apply). What makes
-  that inert is that `pull_request_target` runs the base copy of `plan.yml`, and
-  in the base copy the only place `secrets.SHIPMATE_APP_PRIVATE_KEY` is named is
-  inside the called reusable workflow — a branch author cannot add a secret
-  reference. A dispatched `shipmate plan` is the same shape one ref along: every
-  job evaluates at the ref the dispatch named (the default branch) and runs that
-  copy of the file, never the pull request's own.
+  `-plan` suffix that binding adds, the bare `shipmate-engine` in a repository
+  that shares one environment between plan and apply). What makes that inert is
+  that the whole job graph is engine-owned: `secrets.SHIPMATE_APP_PRIVATE_KEY`
+  is named in exactly one job of engine `plan.yml`, the one that checks nothing
+  out, and a branch author cannot edit that file. The consumer's shim names the
+  secret once too, in the `secrets:` block of its single job, and
+  `pull_request_target` runs the base copy of that file rather than the pull
+  request's own. A dispatched `shipmate plan` is the same shape one ref along:
+  every job evaluates at the ref the dispatch named (the default branch) and
+  runs that copy of the file.
 
-  **The constraint that follows: no job in `plan.yml` other than the `summary`
-  call may reference a `shipmate-engine` secret.** Adding one hands it to a plan
-  cell whose environment the branch chooses.
+  **The constraint that follows: no job in engine `plan.yml` other than
+  `summary` may reference a `shipmate-engine` secret.** Adding one hands it to a
+  plan cell whose environment the branch chooses.
+  `scripts/tests/test_cells_hold_no_app_key.py` is the guard.
 - **A `push` to a non-default branch cannot reach the key.** Measured, not
   inferred: such a job is refused before its first step, because a branch ref
   matches no pattern the policy names.
 - **The jobs that can reach the key all run at the default-branch ref.** The
   plan workflow's automatic trigger is `pull_request_target`, which evaluates at
   the base branch ref rather than the pull request head, so its trusted `summary`
-  job — the engine's reusable `.github/workflows/summary.yml` — satisfies the
-  policy. Its second trigger, the `workflow_dispatch` a commented
+  job — inside the engine's reusable `.github/workflows/plan.yml` — satisfies
+  the policy. Its second trigger, the `workflow_dispatch` a commented
   `shipmate plan` sends, is dispatched on the default branch and satisfies the
   policy the way `push` does; the dispatch body states a pull request number
   and nothing else, so no ref a commenter picks decides which workflow file runs.
@@ -353,9 +356,9 @@ actual work here:
   deploy paths reach the key the same way: `workflow_dispatch` from
   comment-ops, or `push` to the default branch. Nothing that starts from
   arbitrary branch content ever does.
-- **The one job that holds the key runs no repository content.** The reusable
-  summary workflow has no checkout step, and a consumer cannot add one: they
-  call the workflow, they do not own its steps. Reaching the key from a
+- **The one job that holds the key runs no repository content.** That
+  `summary` job has no checkout step, and a consumer cannot add one: they call
+  the workflow, they do not own its steps. Reaching the key from a
   pull-request-side trigger is safe only in that shape — see `CONTRACT.md`
   §Post-plan topology and `docs/hardening.md`.
 - **The plan-text digest is authored in that job, and does not widen the
@@ -375,17 +378,16 @@ actual work here:
   *other* identity — `GITHUB_TOKEN`'s `github-actions` identity, or a
   different GitHub App — posting a status under the same context, which
   without the pin would satisfy the required check outright.
-- The `summary` workflow's job `if:` is load-bearing rather than
-  belt-and-braces. It refuses when the head repository the caller states
-  (`head-repo`) differs from `github.repository`, and when the caller states the
-  pull request is a draft that nobody explicitly asked to plan (`is-draft`
-  without `on-demand`). The three inputs fall on two sides of the guard's
-  parentheses: `head-repo` is outside them, so an absent or empty value refuses
-  unconditionally and no trigger rescues it; `is-draft` and `on-demand` are
-  the two sides of one disjunct, so an absent `is-draft` refuses every autoplan
-  run and is rescued by a requested plan exactly as an explicit draft is. A
-  caller can therefore only fail this closed — an absent `on-demand` reads as
-  `false`, which is plain autoplan behaviour rather than a refusal. Under
+- The `summary` job's `if:` is load-bearing rather than belt-and-braces. It
+  refuses when the head repository the `facts` job resolved differs from
+  `github.repository`, and when that job reports a draft nobody explicitly asked
+  to plan. The three values fall on two sides of the guard's parentheses: the
+  head repository is outside them, so an empty value — what a failed `facts` job
+  yields — refuses unconditionally and no trigger rescues it; the draft flag and
+  the on-demand flag are the two sides of one disjunct, so a missing draft flag
+  refuses every autoplan run and is rescued by a requested plan exactly as an
+  explicit draft is. All three are produced one job earlier in the same
+  engine-owned file, so nothing a consumer writes can weaken them. Under
   `pull_request_target` a fork's pull request *does* reach the base ref, so
   nothing else would stop that job; and the environment admits a draft's run,
   whose plan jobs an autoplan skips, so without the second clause it would write
@@ -394,7 +396,7 @@ actual work here:
   deployment at all.
 
 What none of this defends against is a change to the trusted workflow files
-themselves (`summary.yml`, `apply.yml`, and the rest) landing on the default
+themselves (`plan.yml`, `apply.yml`, and the rest) landing on the default
 branch, where they *would* satisfy the environment's policy. That path runs
 through an ordinary pull request and merge — no `pull_request`- or
 `pull_request_target`-triggered job that checks out branch content is ever in a

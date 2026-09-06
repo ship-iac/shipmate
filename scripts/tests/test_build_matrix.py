@@ -784,11 +784,11 @@ def test_a_renamed_plan_workflow_is_refused(tmp_path):
         "::error::this repository has no `.github/workflows/plan.yml` — the one path "
         "`CONTRACT.md` lets the plan workflow live at, and this refusal is what enforces it. "
         "That exact filename is matched literally by `shipmate doctor`, which keys its "
-        "plan-wrapper probes on it, and by `actions/dispatch`, which picks the workflow file "
+        "plan-shim probes on it, and by `actions/dispatch`, which picks the workflow file "
         "from the verb — `shipmate plan` dispatches this filename and no other. A plan "
-        "workflow under any other name silently loses the head-repository, head-commit and "
-        "draft wiring checks, draws doctor's own `pull_request_target` warning instead, and "
-        "is reached by no `shipmate plan` at all. "
+        "workflow under any other name silently loses the calling-job-name and "
+        "dispatch-wiring checks, draws doctor's own `pull_request_target` warning instead, "
+        "and is reached by no `shipmate plan` at all. "
         "Move the plan workflow back to `.github/workflows/plan.yml`."
     )
 

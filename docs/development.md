@@ -83,9 +83,10 @@ Two traps when driving a sample repo:
 
 Many tests here are guards: they pin an invariant in a workflow or action
 file rather than exercise a function. A guard that cannot fail is worse than no
-guard, because the next reader trusts it. Once, a four-way sabotage of
-`.github/workflows/summary.yml` — all three trust guards inverted, `environment:`
-commented out, the draft-skip deleted — left the suite byte-identical to green.
+guard, because the next reader trusts it. Once, a four-way sabotage of the
+summary job, then in `.github/workflows/summary.yml` — all three trust guards
+inverted, `environment:` commented out, the draft-skip deleted — left the suite
+byte-identical to green.
 
 - **Assert parsed values, not substrings of file text.** `yaml.safe_load` the
   file, take the job or step, and compare whole expressions. A substring
