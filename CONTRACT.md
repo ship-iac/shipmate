@@ -46,10 +46,13 @@ The consumer's one workflow file gates seven jobs on the event (§Post-plan
 topology), so every run also carries one one-segment check-run per job that did
 not run, named by that job's display name — `shipmate`, `post-merge`,
 `targeted`, `all`, `unlock` — with conclusion `skipped`. They are display
-artefacts of the file's shape, and nothing reads them: `shipmate / gate` is the
-required check, `scripts/summary-comment` resolves plan links by an exact
-three-segment name, and `scripts/mirror-checks` copies only names beginning
-`shipmate / `.
+artefacts of the file's shape, and nothing functional depends on them:
+`shipmate / gate` is the required check, `scripts/summary-comment` resolves plan
+links by an exact three-segment name, and `scripts/mirror-checks` copies only
+names beginning `shipmate / `. `shipmate doctor`'s annotation harvest is the
+one reader that does see them — it takes every `github-actions` run on the
+commit — and takes nothing from them: a skipped run carries no annotations, and
+it counts as completed, so it holds no all-clear back.
 
 The apply check keeps its `apply / ` verb prefix: it is created pending (by
 `actions/summary`) on the same head SHA that carries the plan job's check, and
@@ -119,9 +122,10 @@ one by an invisible character is never satisfied, so every pull request is
 unmergeable while the status itself renders green.
 
 The middot is reserved for the consumer file's `run-name` (`shipmate · plan`,
-`shipmate · deploy`, `shipmate · drift`, one per event or verb) — a run title
-GitHub renders and nothing matches on, where it says which of the seven jobs
-this run is for. The workflow's own `name:` is plain `shipmate`.
+`shipmate · comment`, `shipmate · deploy`, `shipmate · drift`, and the verb of
+a dispatched run) — a run title GitHub renders and nothing matches on, where it
+says which event or verb this run serves. The workflow's own `name:` is plain
+`shipmate`.
 
 `build-matrix` rejects a stack path of exactly `apply` or exactly `shipmate`.
 Neither can be mistaken for an engine surface by the engine itself: a stack
@@ -555,8 +559,8 @@ selects the job: `plan` → the `plan` job, `apply` with an environment → the
 job. That file carries five triggers; `workflow_dispatch` is the one a
 commented verb reaches, and the other four (`pull_request_target`,
 `issue_comment`, `push`, `schedule`) fire from their own events. `doctor` and
-`help` dispatch
-nothing: both are answered inside the comment-ops run itself. A repository whose
+`help` dispatch nothing: both are answered inside the comment-ops run itself. A
+repository whose
 `shipmate.yml` is missing, or which predates this layout, fails at dispatch time
 on that comment-handling run — for every verb alike, since they share the file.
 That run is not visible from the pull request, so every refusal in the dispatch
@@ -1028,9 +1032,9 @@ request head, so `actions/summary` mirrors that run's own completed checks
 whose names begin `shipmate / ` — the cells plus `shipmate / facts` and
 `shipmate / detect`, and none of the consumer file's skipped sibling jobs — onto
 the head as App-authored check-runs holding a fixed line and a link back to the
-original,
-whose step summary keeps the plan text. They exist so the pull request shows the
-cells, a failed one above all — and because the sticky comment resolves each
+original, whose step summary keeps the plan text. They exist so the pull request
+shows the cells, a failed one above all — and because the sticky comment
+resolves each
 row's plan link across the checks on the head, which is why the mirror runs
 before the comment is built. No gate or apply queue reads them: neither the
 cell names nor `shipmate / facts` / `shipmate / detect` fall inside the
@@ -1103,11 +1107,14 @@ switches the trigger therefore satisfies neither — its head no longer declares
 Merge that one pull request with an administrative bypass and restore
 enforcement straight after; every pull request following it gates normally.
 
-The move from six workflow files to this one is ungatable for the same reason,
-and needs the same bypass: the plan that runs on it is the default branch's old
-`plan.yml`, whose `build-matrix` refuses a checkout carrying no
-`.github/workflows/plan.yml` — which the pull request has just deleted. Merge it
-with an administrative bypass; the next pull request gates normally.
+The move from the six files this layout replaces — `plan.yml`,
+`comment-ops.yml`, `deploy.yml`, `drift.yml`, `apply.yml` and `unlock.yml` — to
+this one is
+ungatable for the same reason, and needs the same bypass: the plan that runs on
+it is the old consumer `plan.yml` on the default branch, whose pinned engine
+`build-matrix` refuses a checkout carrying no `.github/workflows/plan.yml` —
+which the pull request has just deleted. Merge it with an administrative bypass;
+the next pull request gates normally.
 
 For a repository migrating from another TACO, that same pull request is
 ungated by both systems at once: the outgoing tool's checks are being removed
@@ -1457,8 +1464,7 @@ verbatim:
 `actions/apply-summary`) are pinned by the same SHA in the consumer's
 `shipmate.yml`, on its `apply.yml` / `apply-all.yml` references, so the schema
 upgrades atomically; the reader fails loud on a `cell.json` missing schema keys
-or carrying an out-of-enum
-`result` rather than rendering around pin skew.
+or carrying an out-of-enum `result` rather than rendering around pin skew.
 
 ## Plan comment
 
@@ -1786,8 +1792,8 @@ merge-deploy path, via the engine `apply-all.yml` for the bare form, and via
 the engine `apply.yml` for the targeted form. Consumers set
 `SHIPMATE_PLAN_PASSPHRASE` as a repository secret and forward it by name
 in the `secrets:` block of their `shipmate.yml`'s `plan`, `deploy`, `targeted`
-and `all` jobs. Never `secrets: inherit`: it hands the engine the caller's whole secret set, and
-across an organization boundary it delivers nothing at all.
+and `all` jobs. Never `secrets: inherit`: it hands the engine the caller's whole
+secret set, and across an organization boundary it delivers nothing at all.
 
 Not an environment secret, and specifically not on `shipmate-engine`: a
 secret on one environment is released only to a job that *names* that
@@ -1818,8 +1824,7 @@ produced, which is any branch; `docs/hardening.md` #7–9 says to treat it so.
 - **Both sides must agree.** `plan-cell` (encrypt) and `apply-cell` (decrypt) are
   pinned independently (the `plan.yml` and `apply.yml` references in the
   consumer's `shipmate.yml`); the passphrase and the engine SHA must match on
-  both. A mismatch surfaces as the fail-safe above, not
-  a silent wrong apply.
+  both. A mismatch surfaces as the fail-safe above, not a silent wrong apply.
 
 ## Engine-owned tofu invocation
 
