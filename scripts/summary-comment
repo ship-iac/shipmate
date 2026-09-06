@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Build the sticky plan comment: overview table + per-cell plan details.
 
-Reads the plan matrix jobs' auto check-runs (named `<stack> / <env>`) as JSON
+Reads the plan matrix jobs' auto check-runs (named `shipmate / <stack> / <env>`) as JSON
 Lines on stdin (as emitted by `gh api --paginate ... --jq '.check_runs[]'`) and
 cell summaries plus rendered plan text from the $CELLS directory (cell-summary.*
 artifacts). Writes comment.md plus pending/count to GITHUB_OUTPUT.
@@ -50,6 +50,12 @@ SIZE_BUDGET = 60_000
 HARD_CAP = 65_536
 MIN_PLAN_CHARS = 500
 CELL_KEYS = ("stack", "stack_path", "environment", "add", "change", "destroy", "changed")
+
+#: The consumer's shim names its calling job `shipmate`, and GitHub names a called workflow's
+#: check runs `<caller job> / <callee job>`. A plan cell's callee job name is already
+#: `<stack> / <env>`, so its check is this prefix plus that. `shipmate doctor` reports a shim
+#: whose job carries another name.
+PLAN_CHECK_PREFIX = "shipmate / "
 
 # A plan line's change sign, possibly indented: `+`, `-`, `~`, or the
 # replace forms `-/+` / `+/-`. The sign moves to column 0 (GitHub's diff
@@ -138,11 +144,13 @@ def _md_escape(s):
 
 
 def check_url(cell, checks, run_url):
-    """Link target for a cell: the latest `<stack-path> / <env>` plan-job check
-    run. Name is built FORWARD from the cell's (stack_path, environment) —
-    the CONTRACT check-name grammar; never parsed back. Falls back to the
-    workflow-run URL when the name is absent (e.g. consumer job renamed)."""
-    run = checks.get(f"{cell['stack_path']} / {cell['environment']}")
+    """Link target for a cell: the latest `shipmate / <stack-path> / <env>` plan-job check run.
+
+    Name is built FORWARD from the cell's (stack_path, environment) — the CONTRACT check-name
+    grammar; never parsed back. Falls back to the workflow-run URL when the name is absent
+    (a shim whose calling job is not named `shipmate`).
+    """
+    run = checks.get(f"{PLAN_CHECK_PREFIX}{cell['stack_path']} / {cell['environment']}")
     return run["html_url"] if run and run.get("html_url") else run_url
 
 
@@ -298,8 +306,8 @@ def load_cells(cells_dir):
 
 def main():
     # prefix="" gathers every check-run on the head SHA: plan jobs, pending apply checks,
-    # detect/summary. Plan check names carry no verb prefix (the workflow is "shipmate · plan"),
-    # so the anchor is check_url's exact `<stack> / <env>` lookup — and `apply / ` never collides.
+    # detect/summary. Plan check names carry the shim's calling job as a `shipmate / ` prefix,
+    # so the anchor is check_url's exact lookup — and `apply / ` never collides.
     checks = ag.latest_by_name(ag.parse_jsonl(sys.stdin), prefix="")
     cells = load_cells(os.environ.get("CELLS", "cells"))
     # This job runs inside the plan run, so this run holds the logs and the

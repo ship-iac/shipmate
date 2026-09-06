@@ -235,17 +235,17 @@ def test_parse_jsonl_truncates_long_offending_line():
 
 def test_latest_by_name_empty_prefix_gathers_all_latest_per_name():
     """summary-comment calls latest_by_name(prefix="") to gather every check-run on the head
-    SHA, because the plan-link anchor is check_url's exact `<stack> / <env>` lookup rather than
-    a prefix filter. Latest-id-per-name still applies, and the coexisting apply check keeps its
-    distinct `apply / ` name."""
+    SHA, because the plan-link anchor is check_url's exact `shipmate / <stack> / <env>` lookup
+    rather than a prefix filter. Latest-id-per-name still applies, and the coexisting apply check
+    keeps its distinct `apply / ` name."""
     runs = [
-        {"name": "stacks/app / dev-eu", "id": 1, "html_url": "u1"},
-        {"name": "stacks/app / dev-eu", "id": 3, "html_url": "u3"},
+        {"name": "shipmate / stacks/app / dev-eu", "id": 1, "html_url": "u1"},
+        {"name": "shipmate / stacks/app / dev-eu", "id": 3, "html_url": "u3"},
         {"name": "apply / stacks/app / dev-eu", "id": 2, "html_url": "u2"},
     ]
     latest = ag.latest_by_name(runs, prefix="")
-    assert set(latest) == {"stacks/app / dev-eu", "apply / stacks/app / dev-eu"}
-    assert latest["stacks/app / dev-eu"]["html_url"] == "u3"
+    assert set(latest) == {"shipmate / stacks/app / dev-eu", "apply / stacks/app / dev-eu"}
+    assert latest["shipmate / stacks/app / dev-eu"]["html_url"] == "u3"
 
 
 def test_latest_by_name_default_prefix_unchanged():

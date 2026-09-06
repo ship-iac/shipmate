@@ -22,19 +22,21 @@ MATRIX_LIMIT = 256
 #: `shipmate plan` to it by name. No plan-run lookup does — each reads a cell's own apply check.
 PLAN_WORKFLOW = ".github/workflows/plan.yml"
 
-#: Stack paths whose verb-less plan check name would land inside a namespace the engine
-#: selects on. `shipmate` fails SILENTLY: summary-comment resolves each row's plan link by an
-#: exact `<stack> / <env>` lookup, so the link points at the wrong check rather than erroring.
+#: Stack paths a reader would take for an engine artifact. Neither can collide any more: a plan
+#: check is `shipmate / <stack> / <env>`, so a stack named `apply` yields `shipmate / apply /
+#: <env>`, which fails apply-gate's `apply / ` prefix filter, and a stack named `shipmate` yields
+#: three segments against `shipmate / gate`'s two. The older two-segment grammar DID collide,
+#: which is why these were reserved; they stay reserved because `apply` is the engine's verb and
+#: `shipmate / ` its namespace, and a stack so named is unreadable in a check list either way.
 RESERVED_STACK_PATHS = {
     "apply": (
-        "::error::a stack path may not be exactly 'apply': its plan check "
-        "'apply / <env>' collides with the apply-check namespace "
-        "('apply / <stack> / <env>'). Rename or nest the stack."
+        "::error::a stack path may not be exactly 'apply': 'apply' is the engine's own "
+        "verb, and its checks are named 'apply / <stack> / <env>'. Rename or nest the stack."
     ),
     "shipmate": (
-        "::error::a stack path may not be exactly 'shipmate': its plan check "
-        "'shipmate / <env>' falls inside the reserved 'shipmate / ' namespace "
-        "(e.g. 'shipmate / gate'). Rename or nest the stack."
+        "::error::a stack path may not be exactly 'shipmate': 'shipmate / ' is the engine's "
+        "own check namespace (e.g. 'shipmate / gate', 'shipmate / summary'). Rename or nest "
+        "the stack."
     ),
 }
 
@@ -369,9 +371,10 @@ def fork_pr_error(repository, head_repo, no_pull_request):
     whatever the plan environment exposes as *variables* -- which are not
     secrets and are not withheld. Fork pull requests are not supported at all.
 
-    Loud rather than an empty matrix: `summary.yml` refuses a head repository it
-    was not told about, so a green "nothing to plan" would leave an outside
-    contributor waiting on a gate that structurally cannot arrive.
+    Loud rather than an empty matrix: the engine plan workflow's `summary` job
+    refuses a head repository it was not told about, so a green "nothing to
+    plan" would leave an outside contributor waiting on a gate that
+    structurally cannot arrive.
 
     REFUSES BY DEFAULT, keyed on the head repository the WRAPPER states -- not
     on the event name. `github.event_name` cannot express the distinction: the

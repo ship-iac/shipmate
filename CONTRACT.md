@@ -11,35 +11,41 @@ comment-ops, tag-based stack selection) and are not free-form prose.
 Every plan and apply unit of work reports as its own GitHub check, using
 these names verbatim:
 
-- plan job check-run: `<stack> / <env>`
+- plan job check-run: `shipmate / <stack> / <env>`
 - apply check-run: `apply / <stack> / <env>`
 
 `<env>` and `<stack>` are placeholders substituted with the actual
 environment name and the Terramate stack path (as emitted by
 `terramate list` / `experimental run-graph --label stack.dir`, e.g.
 `stacks/network`) for that unit of work (for example,
-`stacks/network / staging` and `apply / stacks/network / staging`). Both
-grammars put the stack first, so a reader scans one column; the apply name is
-the plan name with the verb in front. The check name uses the stack path,
-never a display name — so the
-code that *creates* the apply check (`pending-checks`, run by `actions/summary`),
+`shipmate / stacks/network / staging` and
+`apply / stacks/network / staging`). Both grammars lead with one namespace
+segment and then the stack, so a reader scans one column. The check name uses
+the stack path, never a display name — so the code that *creates* the apply
+check (`pending-checks`, run by `actions/summary`),
 *completes* it (`apply-cell`), *filters the still-pending queue*
 (`deploy-detect` / `apply-detect` / `apply-all-detect`, which only ever have the
 path), and *reports it* (`apply-comment`) all reconstruct the identical name
 from the one value they share.
 
-The plan check has no verb prefix: it is the plan matrix job's own
-auto-generated check-run, whose name is the job's `name:` (`<stack> / <env>`).
-The consuming workflow is named `shipmate · plan`, so GitHub's UI already
-shows the verb — `shipmate · plan / <stack> / <env>`. The apply check
-keeps its `apply / ` verb prefix: it is created pending (by
-`actions/summary`) on the same head SHA that carries the plan job's check,
-so with both names now stack-first that prefix is the *only* disambiguator
-keeping the two apart — and it is what keeps `apply-gate` / `gate-refresh`,
-which select the pending-apply queue by the `apply / ` prefix, from ever
-picking up a plan check. For the same reason `build-matrix` rejects a stack
-whose path is exactly `apply` — its plan check `apply / <env>` would fall
-inside the apply-check namespace.
+The engine composes the plan check's name nowhere: it is the plan matrix job's own
+auto-generated check-run, whose name is the job's `name:` (`<stack> / <env>`),
+and GitHub names a called workflow's check runs `<caller job> / <callee job>`.
+The consuming shim names its calling job `shipmate`, so the check is
+`shipmate / <stack> / <env>`; the same rule makes the engine plan workflow's
+summary job report as `shipmate / summary`. The workflow name does not supply
+the verb.
+
+That job name is a contract element a consumer must match. `shipmate doctor`
+reports a shim whose calling job carries another name; until it is fixed,
+`summary-comment` — which resolves each comment row's plan link by an exact
+`shipmate / <stack> / <env>` lookup across every check run on the head SHA —
+finds no match and every `[plan]` link falls back to the workflow-run URL.
+
+The apply check keeps its `apply / ` verb prefix: it is created pending (by
+`actions/summary`) on the same head SHA that carries the plan job's check, and
+it is what keeps `apply-gate` / `gate-refresh`, which select the pending-apply
+queue by the `apply / ` prefix, from ever picking up a plan check.
 
 This same forward-built string is also the apply-env-level job's own `name:`
 (so the job's display name and the apply check-run name coincide), which
@@ -81,17 +87,16 @@ Branch protection rules should require `shipmate / gate`, not the
 individual per-unit checks, so that the set of required checks does not
 need to be edited every time a stack or environment is added or removed.
 
-`shipmate / ` is the namespace for shipmate's aggregate, non-fan-out surfaces.
-`shipmate / gate` is the only verbatim member — it is the required context,
-matched by exact string in a repository ruleset. A consuming repository may
-name its own non-fan-out plan job into the same namespace so the checks list
-identifies the tool — `shipmate / detect` is the recommended name, and the
-reference `plan.yml` in the samples uses it, because a job's check run is
-always created by the GitHub Actions app and its name is the only part that
-can say which tool produced it. (`plan.yml`'s third job, `summary`, is a call
-to an engine-defined reusable workflow, so its jobs are named there rather than
-by the consumer — see §Post-plan topology.) These names are not required checks
-and a consumer may pick others; nothing in the engine reconstructs them.
+`shipmate / ` is the namespace for shipmate's plan checks and its aggregate,
+non-fan-out surfaces. `shipmate / gate` is the only required member — it is
+matched by exact string in a repository ruleset. The rest of the namespace
+comes from the shim's job name rather than being written anywhere: the engine
+plan workflow's own jobs report as `shipmate / facts`, `shipmate / detect` and
+`shipmate / summary`, so the checks list identifies the tool without the
+consumer naming anything (a job's check run is always created by the GitHub
+Actions app, and its name is the only part that can say which tool produced
+it). These are not required checks, and nothing in the engine reconstructs
+them.
 
 Everything in the check/status namespace is ASCII and slash-delimited, which
 is GitHub's own convention for status contexts (`ci/circleci`), and — for
@@ -104,17 +109,16 @@ unmergeable while the status itself renders green.
 The middot is reserved for workflow names (`shipmate · plan`,
 `shipmate · apply`, `shipmate · deploy`) — the one place a shipmate label is
 concatenated onto a check name by GitHub rather than matched by anything, where
-it keeps the seam legible: `shipmate · plan / <stack> / <env>`.
+it keeps the seam legible: `shipmate · plan / shipmate / <stack> / <env>`.
 
-`build-matrix` rejects a stack path of exactly `shipmate`, for the same reason
-it rejects `apply`: that stack's plan check is `shipmate / <env>`, inside this
-namespace. Nothing *prefix*-parses `shipmate / ` — the gate is a commit status,
-a separate namespace from check runs, so no phantom entry can reach a gate
-verdict or an apply queue the way an `apply / ` collision would — but
-`summary-comment` resolves each comment row's plan link by an exact
-`<stack> / <env>` lookup across every check run on the head SHA, so in a
-repository with an environment named after one of these surfaces that cell's
-link would silently resolve to the wrong check. Nest or rename the stack.
+`build-matrix` rejects a stack path of exactly `apply` or exactly `shipmate`.
+Neither can be mistaken for an engine surface by the engine itself: a stack
+`apply` yields `shipmate / apply / <env>`, which fails `apply-gate`'s
+`apply / ` prefix filter, and a stack `shipmate` yields three segments against
+`shipmate / gate`'s two. They stay reserved for the human reader — `apply` is
+the engine's own verb and `shipmate / ` is its own namespace, so a stack so
+named reads as an engine artifact in every check list someone scans. Nest or
+rename the stack.
 
 The gate is a commit status rather than a check-run deliberately: a check-run
 is bound to a check-suite, and an imperatively-created one attaches to an

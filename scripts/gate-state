@@ -47,7 +47,7 @@ def _plan_gap(*, plan_result, planned):
     if plan_result not in ("success", "skipped"):
         return (
             f"plan incomplete (plan job: {plan_result}) — fix the failing "
-            "<stack> / <env> plan check before merging"
+            "shipmate / <stack> / <env> plan check before merging"
         )
     return None
 
