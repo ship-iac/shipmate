@@ -19,8 +19,9 @@ MATRIX_LIMIT = 256
 
 #: Where the consumer's workflow file must live. Three surfaces match this filename
 #: literally: `shipmate doctor` keys its fork-trigger exemption and its shim probes on it,
-#: and `actions/dispatch` sends every commented verb to it by name, choosing the job with the
-#: `verb` it puts in the body. No plan-run lookup does — each reads a cell's own apply check.
+#: `actions/dispatch` sends every commented verb to it by name, choosing the job with the
+#: `verb` it puts in the body, and `scripts/onboard` renders it under this name from its
+#: `SHIMS` table. No plan-run lookup does — each reads a cell's own apply check.
 PLAN_WORKFLOW = ".github/workflows/shipmate.yml"
 
 #: Stack paths a reader would take for an engine artifact. Neither can collide any more: a plan
@@ -460,7 +461,7 @@ def head_checkout_error(head_sha, no_pull_request):
         f"({head_sha}) — `actions/checkout` takes the base branch under "
         "`pull_request_target` and the dispatch ref under `workflow_dispatch` unless its "
         "`ref:` names the head SHA. Add it to every checkout in "
-        "`.github/workflows/plan.yml`; without it planning diffs the wrong tree against the "
+        f"`{PLAN_WORKFLOW}`; without it planning diffs the wrong tree against the "
         "base, silently reports no changes, and the gate greens with nothing queued to apply."
     )
 

@@ -98,7 +98,7 @@ runs:
           # Measured, in order: an absent file answers 404, one with no such trigger `Workflow
           # does not have 'workflow_dispatch' trigger (HTTP 422)`, one declaring fewer inputs
           # than the body names `Unexpected inputs provided`. Anything else is not skew.
-          if [[ "$out" == *"HTTP 404"* || "$out" == *workflow_dispatch* || "$out" == *"Unexpected inputs provided"* ]]; then echo "::error::This repository has no .github/workflows/shipmate.yml, or it predates the single-file layout — it declares no workflow_dispatch trigger, or not the verb/environment/ref/pr_number inputs every dispatch sends. Add or update that file — docs/upgrading.md section 0.27.0 has it; re-pinning cannot create it."; fi
+          if [[ "$out" == *"HTTP 404"* || "$out" == *workflow_dispatch* || "$out" == *"Unexpected inputs provided"* ]]; then echo "::error::This repository has no .github/workflows/shipmate.yml, or it predates the single-file layout — it declares no workflow_dispatch trigger, or not the verb/environment/ref/pr_number inputs every dispatch sends. Add or update that file — docs/upgrading.md has it; re-pinning cannot create it."; fi
           say_no_run_started
           exit "$rc"
         fi
