@@ -13,7 +13,7 @@ grammar are declared unstable in `README.md`.
 
 ## [0.27.0] — 2026-09-07
 
-Tags `<sha>`.
+Tags `457ea2b`.
 
 Breaking for every consumer. The six workflow files become one, and the pin and
 the file must move in the same commit. `docs/upgrading.md` section 0.27.0 has
