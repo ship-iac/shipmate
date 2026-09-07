@@ -302,6 +302,27 @@ def test_documented_wrapper_grants_every_permission_the_callee_requests(page, li
         )
 
 
+def test_the_documented_wrapper_grants_no_permissions_at_the_top_level():
+    """The published file's top-level `permissions` is exactly `{}` -- a floor, not a default
+    to inherit. Every job declares its own block, so one that loses it gets nothing rather
+    than everything the file granted, and the run dies at load instead of applying with a
+    borrowed token. The three engine workflows carry the same guard.
+
+    Whole value against a hand-written constant: `{contents: read}` is also a mapping, also
+    smaller than any job's block, and satisfies every predicate short of equality.
+
+    Mutation: give the fence `permissions: {contents: read}`.
+    """
+    fence = load_script("onboard")._fence(
+        (DOCS / "getting-started.md").read_text(encoding="utf-8"), "shipmate"
+    )
+    doc = yaml.safe_load(fence)
+    assert doc["permissions"] == {}, (
+        f"the documented workflow file grants {doc['permissions']!r} at the top level; a job "
+        "that loses its own block would inherit it"
+    )
+
+
 def _dispatch_inputs(doc):
     """(input name, spec) per `workflow_dispatch` input in a fence.
 

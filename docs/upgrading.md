@@ -198,8 +198,11 @@ for the original trigger switch.
    carries no release tag. It writes and reconciles; it deletes nothing.
 2. **Carry your own values across.** `state_suffix` on the `plan`, `deploy`,
    `drift`, `targeted` and `all` jobs — `unlock` takes none — your runner label,
-   and the `tags:` value on the `drift` job. They are the values your six files
-   pass today.
+   the `tags:` value on the `drift` job, the `branches:` list under `push:`, and
+   the drift `schedule:`'s `cron:`. They are the values your six files carry
+   today, and the fence overwrites two of them silently: its `branches: [main]`
+   stops post-merge deploy on a default branch of another name, and its `cron:`
+   replaces your own sweep time.
 3. **Delete the six files.** All of them, in this commit. A leftover
    `plan.yml` or `drift.yml` keeps its own triggers and plans or sweeps a second
    time.
@@ -217,7 +220,10 @@ they are in one file now instead of six.
 
 What is new in the checks list is six one-segment check-runs per run with
 conclusion `skipped`, one for each job the event did not select. They are
-artefacts of the file's shape; nothing functional reads them.
+display artefacts of the file's shape, and nothing functional depends on them.
+`shipmate doctor`'s annotation harvest is the one reader that does see them, and
+takes nothing from them: a skipped run carries no annotations, and it counts as
+completed, so it holds no all-clear back.
 
 ### 0.25.0 — `plan.yml`, `drift.yml` and `comment-ops.yml` become shims
 
