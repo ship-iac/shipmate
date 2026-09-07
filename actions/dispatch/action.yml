@@ -1,5 +1,5 @@
 name: shipmate dispatch
-description: Mint a short-lived GitHub App installation token and workflow_dispatch the consumer wrapper the verb names — plan.yml, apply.yml or unlock.yml, one file per verb. Passes IDs only (dispatch inputs are size-limited); each verb's body carries exactly the inputs its wrapper declares.
+description: Mint a short-lived GitHub App installation token and workflow_dispatch the consumer's .github/workflows/shipmate.yml, one file for every verb. Passes IDs only (dispatch inputs are size-limited); the body carries the verb, which selects the job that runs, plus exactly the other inputs that verb needs.
 inputs:
   app-id:
     description: GitHub App id (a repo/org variable, not a secret).
@@ -12,13 +12,13 @@ inputs:
     required: false
     default: ''
   verb:
-    description: Which workflow to dispatch — plan, apply or unlock, one consumer file each. No default — a guessed verb dispatches one verb's body at another verb's workflow, and the pull request learns only that a dispatch failed. `actions/comment-ops` exposes this as its `verb` output.
+    description: Which job to run in shipmate.yml — plan, apply or unlock. Sent in the dispatch body, where the jobs' `if:` expressions read it. No default — a guessed verb runs one verb's job with another verb's inputs. `actions/comment-ops` exposes this as its `verb` output.
     required: true
   ref:
     description: PR head SHA to check out and apply. Empty and unused on the plan route, whose dispatched run resolves the head from the pull request itself.
     required: true
   pr-number:
-    description: PR number the dispatched run belongs to — the plan body carries it alone, and the unlock body not at all.
+    description: PR number the dispatched run belongs to — the plan body carries it beside the verb alone, and the unlock body not at all.
     required: true
   dispatch-ref:
     description: Branch whose workflow file runs (usually the default branch).
@@ -75,17 +75,18 @@ runs:
             -f body=":x: shipmate: the command was authorized, but dispatching its workflow failed, so no run started. The error is in [this run]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID)." >/dev/null || true
         }
         # A composite action's `required: true` is not enforced by GitHub, so a caller that omits
-        # the input arrives with the empty string. Refuse rather than default: a default dispatches
-        # one verb's body at another verb's workflow.
+        # the input arrives with the empty string. Refuse rather than default: a default runs one
+        # verb's job with another verb's inputs.
         if [ -z "${VERB:-}" ]; then
-          echo "::error::The calling workflow did not pass a verb to shipmate/actions/dispatch, so there is no workflow to dispatch. Wire that step's verb input to the verb output of the comment-ops step above it (docs/getting-started.md)."
+          echo "::error::The calling workflow did not pass a verb to shipmate/actions/dispatch, so nothing selects a job in shipmate.yml. Wire that step's verb input to the verb output of the comment-ops step above it (docs/getting-started.md)."
           say_no_run_started
           exit 1
         fi
+        # The verb picks a job, not a file. The case survives to refuse a verb `shipmate.yml`
+        # would accept — the input is declared — and then skip every job over, reading as a
+        # successful run that did nothing.
         case "$VERB" in
-          plan) WORKFLOW=plan.yml ;;
-          apply) WORKFLOW=apply.yml ;;
-          unlock) WORKFLOW=unlock.yml ;;
+          plan|apply|unlock) WORKFLOW=shipmate.yml ;;
           *) echo "::error::verb must be plan, apply or unlock (got: $VERB)"; say_no_run_started; exit 1 ;;
         esac
         [[ "$WORKFLOW" =~ ^[A-Za-z0-9._-]+$ ]] || { echo "::error::workflow must match ^[A-Za-z0-9._-]+$ (got: $WORKFLOW)"; exit 1; }
@@ -93,18 +94,11 @@ runs:
         rc=0
         out=$(gh api -X POST "repos/$REPO/actions/workflows/$WORKFLOW/dispatches" --input body.json 2>&1) || rc=$?
         printf '%s\n' "$out"
-        # Only a failure that names the missing surface is version skew. A 403, a rate limit, or
-        # a 422 about a different input is another problem entirely, and explaining it as skew
-        # sends the operator to edit workflows that are fine.
         if [ "$rc" -ne 0 ]; then
-          # Measured for a consumer predating the unlock wrapper: a workflow file that does not
-          # exist answers 404, and one with no such trigger answers `Workflow does not have
-          # 'workflow_dispatch' trigger (HTTP 422)`.
-          if [ "$VERB" = "unlock" ] && [[ "$out" == *"HTTP 404"* || "$out" == *workflow_dispatch* ]]; then echo "::error::This repository has no unlock.yml wrapper, or it declares no workflow_dispatch trigger; its workflows predate shipmate unlock. Add .github/workflows/unlock.yml to this repository — docs/upgrading.md section 0.21.0 step 1 has the file; re-pinning cannot create it."; fi
-          # No input name is ANDed in as a body-shape check would be: the plan body carries one
-          # input, so an unexpected-input 422 there can only be about pr_number, which is what the
-          # message already says.
-          if [ "$VERB" = "plan" ] && [[ "$out" == *"Unexpected inputs provided"* || "$out" == *workflow_dispatch* ]]; then echo "::error::This repository's plan.yml does not accept a dispatched plan — it predates the plan verb, or declares no pr_number input. Edit .github/workflows/plan.yml in this repository — docs/upgrading.md section 0.20.0 lists the edits; re-pinning alone does not make them."; fi
+          # Measured, in order: an absent file answers 404, one with no such trigger `Workflow
+          # does not have 'workflow_dispatch' trigger (HTTP 422)`, one declaring fewer inputs
+          # than the body names `Unexpected inputs provided`. Anything else is not skew.
+          if [[ "$out" == *"HTTP 404"* || "$out" == *workflow_dispatch* || "$out" == *"Unexpected inputs provided"* ]]; then echo "::error::This repository has no .github/workflows/shipmate.yml, or it predates the single-file layout — it declares no workflow_dispatch trigger, or not the verb/environment/ref/pr_number inputs every dispatch sends. Add or update that file — docs/upgrading.md has it; re-pinning cannot create it."; fi
           say_no_run_started
           exit "$rc"
         fi

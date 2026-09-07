@@ -12,7 +12,7 @@ findings as workflow annotations titled `shipmate doctor`
 (`::warning title=shipmate doctor::<text>` / `::notice title=shipmate
 doctor::<text>`) — read-only, never blocking. Comment `shipmate doctor` on a
 pull request for a consolidated report: a sticky comment (marker `<!--
-shipmate:doctor -->`, upserted in place like the plan comment) combining fourteen
+shipmate:doctor -->`, upserted in place like the plan comment) combining fifteen
 live probes.
 
 - **The `shipmate / gate` rule on the default branch is missing or mis-pinned.**
@@ -42,8 +42,8 @@ live probes.
   `SHIPMATE_SHARED_ENVS` — so a shared environment carrying approval rules warns
   that they stall the plan cells and the nightly drift run, its missing approval
   rules are a note, and its branch policy is a note only while no suffixed
-  sibling exists. Once one does, an unmigrated `plan.yml` may still bind the
-  bare environment, so the policy is warned about as the plan-stall it can be.
+  sibling exists. Once one does, a plan side still on the old naming may still
+  bind the bare environment, so the policy is warned about as the plan-stall it can be.
   An env with a bare `<env>` *and* a suffixed sibling warns that which naming
   each path binds is undetermined, so either naming may be bound by nothing with
   its protection rules reading as a control in no code path — and the missing
@@ -60,11 +60,11 @@ live probes.
   `github-app.md` §Key-exposure boundary. This is the probe that catches a
   re-pin that never (re-)creates that environment, which would otherwise leave
   the App key a repository secret again with nothing else to notice.
-- **A workflow file other than `plan.yml` declares the `pull_request_target`
+- **A workflow file other than `shipmate.yml` declares the `pull_request_target`
   trigger.** It runs at the base ref with the repository's secrets, and a
   workflow that also acts on content the pull request author controls from a job
   naming an environment hands those secrets to a fork (`hardening.md`).
-  `plan.yml` is exempt by exact name because it uses the trigger in the one
+  `shipmate.yml` is exempt by exact name because it uses the trigger in the one
   shape that is safe, with the credentialed job checking nothing out. The probe
   reads the same workflow files as the pin probe, at the same commit, so a pull
   request that removes the trigger is not still reported for it.
@@ -74,34 +74,51 @@ live probes.
   repository, which the probe learns at runtime from the running action rather
   than from any hardcoded slug — another org's shared action is not shipmate's
   to report on.
-- **Whether the `plan.yml` shim's calling job is named `shipmate`.** GitHub
+- **Whether `shipmate.yml`'s plan-calling job is named `shipmate`.** GitHub
   names a called workflow's check runs `<caller job> / <callee job>`, so that
   name is what makes the plan cell checks `shipmate / <stack> / <env>`. Under
   another name the plan still runs and the gate is unaffected; what is lost is
   every `[plan]` link in the plan comment, which falls back to the workflow-run
   page instead of the cell's own check. A job with no `name:` is judged by its
   job id, which is what GitHub displays then.
-- **Whether the `apply.yml` shim still declares or forwards the retired
+- **Whether `shipmate.yml` still declares or forwards the retired
   `plan_run_id` input.** The engine dispatches no such value and nothing it
   calls accepts one. A `with:` line forwarding it to the engine's reusable
   `apply.yml` or `apply-all.yml` makes GitHub reject the run as it LOADS the
   workflow — the run has no jobs and no logs, only a workflow-validation error
   on the run itself — while the same line on a composite action is only a
   warning.
-- **Whether that same shim still carries the retired `mode` input.**
-  `shipmate unlock` no longer uses it, now that it dispatches its own
-  `unlock.yml`. Declared under `on:` it is dead weight; forwarded to the
+- **Whether that same file still carries the retired `mode` input.**
+  `shipmate unlock` no longer uses it, now that it routes to its own job and
+  the engine's reusable `unlock.yml`. Declared under `on:` it is dead weight; forwarded to the
   engine's reusable `apply.yml` or `apply-all.yml` it is the same load-time
   rejection. Those two
   placements are what the probe reads, so an ordinary `mode:` elsewhere in the
   file, such as an `actions/state` step's, is not reported.
-- **Whether the `plan.yml` shim can serve a dispatched plan at all.** That needs the
-  `workflow_dispatch` trigger a commented `shipmate plan` dispatches, the
-  `pr_number` input that dispatch body carries, and the call of the engine's plan
-  workflow. The first two are refused at dispatch time with an HTTP 422 and no run
-  created; the pull request gets a comment saying the dispatch failed and linking
-  the comment-handling run that carries the error.
-  Without the third the dispatch is accepted and the run plans nothing.
+- **Whether `shipmate.yml` can serve a dispatched verb at all.** That needs the
+  `workflow_dispatch` trigger every commented verb dispatches; all four inputs
+  those bodies name (`verb`, `environment`, `ref` and `pr_number`); a `verb`
+  offering the whole option list the file routes, since a missing option is
+  refused at the dispatch form and at the API while an extra one offers a verb no
+  job selects; no input but `verb` declared `required: true`, because a body that
+  leaves one empty is refused whole — so a required input of your own refuses
+  every verb, not just the one it was added for; and the call of the engine's
+  plan workflow. All but the last are refused at dispatch time with an HTTP 422
+  and no run created; the pull request gets a comment saying the dispatch failed
+  and linking the comment-handling run that carries the error.
+  Without the last the dispatch is accepted and the run plans nothing.
+- **Whether each of `shipmate.yml`'s jobs is selected by the `if:` its event
+  needs.** One file gates seven jobs, one per engine reusable workflow, and the
+  probe compares each job's whole `if:` against the expression that file's
+  published fence carries. Each finding identifies the job by the engine
+  workflow it calls — "the job calling the engine's `apply.yml`", which is the
+  fence's `targeted` — because a job that is missing or duplicated has no one
+  job id to name. A wrong expression and a missing `if:` are both quoted with
+  the expression to write; a job count other than one is not, since there is no
+  single job to compare. Nothing else observes any of this: a verb whose job
+  never runs completes green with nothing done, and a job whose `if:` is too
+  wide runs on an event it was never meant to see. The fence in
+  [`getting-started.md`](getting-started.md) has every expression.
 - **Whether the configured approvers team resolves in the org.**
 - **Whether the shipmate App installation still grants the manifest's full
   permission set.**
@@ -111,7 +128,7 @@ annotations GitHub already recorded on this commit's workflow runs — shipmate'
 own and any other Actions workflow run on that commit; third-party-app-authored
 check runs are excluded.
 
-Only twelve of the fourteen probes can produce a finding from the plan path's
+Only thirteen of the fifteen probes can produce a finding from the plan path's
 own `annotate`-mode run (`actions/summary`). The approvers-team probe needs the
 `SHIPMATE_TEAM` environment variable, which the plan path does not supply, and
 the App-permission-drift probe only has something to report when a
@@ -267,8 +284,8 @@ The verbs:
 | --- | --- |
 | `ok` | already as shipmate needs it; nothing was written. |
 | `create` / `update` / `set` / `delete` | the write it just performed. |
-| `created` | the workflow shim it just wrote to `.github/workflows/`. |
-| `pin-only` | the shim matches except for the engine pin. Not drift, and it does not affect the exit code — moving a pin is `dev/repin_consumer.py`'s job ([`upgrading.md`](upgrading.md)). |
+| `created` | the workflow file it just wrote to `.github/workflows/`. |
+| `pin-only` | the file matches except for the engine pin. Not drift, and it does not affect the exit code — moving a pin is `dev/repin_consumer.py`'s job ([`upgrading.md`](upgrading.md)). |
 | `would …` | `--dry-run`: the write that a real run would perform. |
 | `differs` | it found something it will not change on your behalf. Every one exits the run 2. |
 
@@ -288,8 +305,9 @@ mandate. Each one names what to do.
 | `gate ruleset` — rulesets need GitHub Pro, Team, Enterprise, or a public repository | the plan this repository is on has no rulesets. Configure the gate by hand from [`branch-protection.md`](branch-protection.md). |
 | `gate ruleset` — `shipmate / gate` is required under another `integration_id` | the gate is required, but not pinned to the shipmate App, so a status of that name from any other identity satisfies it. Set `integration_id` to `SHIPMATE_APP_ID`. |
 | `gate ruleset` — it does not require branches to be up to date (strict) | plans can go stale against the base before merge. Turn on "Require branches to be up to date before merging". |
+| `<file>.yml` — the retired six-file layout | the repository still carries one of the six files `shipmate.yml` replaced (`plan.yml`, `apply.yml`, `comment-ops.yml`, `unlock.yml`, `deploy.yml`, `drift.yml`). It is never deleted for you: it may hold an edit of yours, and one of them still fires on its own trigger, running a job `shipmate.yml` now runs too. Delete the named file by hand. |
 | `<file>.yml` — the published fence, never pinned | the file holds the `@<engine-sha>` placeholder from the docs rather than a pin, which `dev/repin_consumer.py` cannot move. Delete the file and run the script again. |
-| `<file>.yml` — differs beyond its pin, not overwritten | the shim differs from what this engine release publishes by more than its pin — a local edit, a different `state_suffix`, or a fence this release changed while the file stayed on an older one. Diff it against the fence on the page that publishes it and reconcile by hand, or delete it and run again to take the published one. |
+| `<file>.yml` — differs beyond its pin, not overwritten | the file differs from what this engine release publishes by more than its pin — a local edit, a different `state_suffix`, or a fence this release changed while the file stayed on an older one. Diff it against the fence on the page that publishes it and reconcile by hand, or delete it and run again to take the published one. |
 
 One disagreement is refused rather than reported. When the `SHIPMATE_APP_ID`
 repository variable differs from `--app-id`, the run stops before its first
@@ -378,7 +396,7 @@ plan job leaves `shipmate / gate` held red with `plan incomplete (plan job:
 failure)` — a hold, not an absence (§`shipmate / gate` never goes green, "The
 gate is deliberately held") — so nothing merges until the plan cells pass.
 
-Both are wiring errors in your `.github/workflows/plan.yml`, and each names its
+Both are wiring errors in your `.github/workflows/shipmate.yml`, and each names its
 own fix:
 
 - **`expected-head` is missing or empty.** `plan-cell` requires it — the commit
@@ -519,7 +537,7 @@ Two neighbouring failures from the same step, both also fail-closed:
   ceiling around 100 environments, not a transient.
 
 What this does not cover, deliberately: the plan-side binding (that is in
-your own `plan.yml` / `drift.yml`, which the engine cannot read), an environment
+your own `shipmate.yml`, which the engine cannot read), an environment
 that exists but is empty or mis-scoped (the fingerprint and `shipmate doctor`
 cover content), and an environment deleted between the pre-flight and the wave
 that binds it.
@@ -534,11 +552,14 @@ holder was that cell's own most recent apply run — one that was cancelled or
 killed before it could release.
 
 Comment `shipmate unlock <env>`. The environment is required; there is no bare
-form. It dispatches your repository's own `.github/workflows/unlock.yml`
-([`upgrading.md`](upgrading.md) §0.21.0 has the wrapper); wrappers predating that
-file get no run at all — the dispatch is refused with a 404, the comment-handling
-run carries an error saying so, and the pull request gets a comment saying the
-dispatch failed and linking that run. It authorizes on approvers-team
+form. It dispatches your repository's own `.github/workflows/shipmate.yml` with
+`verb: unlock`, which that file's `unlock` job selects
+([`getting-started.md`](getting-started.md) publishes the file). A repository
+carrying no such file gets no run at all — the dispatch is refused with a 404,
+the comment-handling run carries an error saying so, and the pull request gets a
+comment saying the dispatch failed and linking that run. A file GitHub does
+dispatch but whose jobs do not select `unlock` produces a run in which every job
+skips (§A dispatched verb produced a run in which every job was skipped). It authorizes on approvers-team
 membership and the `<env>-apply` environment, not on a review — so a lock
 stranded after the pull request merged is still releasable
 ([`../CONTRACT.md`](../CONTRACT.md) §Comment-ops has the contract). Every cell
@@ -694,6 +715,19 @@ Change detection is `terramate list --changed`, so a pull request that touches
 no stack's own files and changes no generated `.tf` — an engine-pin bump, a docs
 edit — plans nothing. This is expected, not a fault.
 
+### A dispatched verb produced a run in which every job was skipped
+
+The comment was accepted, the dispatch succeeded and the run page shows seven
+skipped jobs and nothing else — which is what a healthy run also shows for the
+six jobs the event did not select.
+
+The job that serves that verb is not selected by its `if:` in
+`.github/workflows/shipmate.yml`, or the file declares a `verb` option its jobs
+do not cover. `shipmate doctor`'s routing probe reports that job on every plan
+run — with the expression to write, unless what it found was a job count other
+than one — and the dispatch comment on the pull request already links the run. Reconcile the job against the fence in
+[`getting-started.md`](getting-started.md) §The workflow file.
+
 ### Fork pull request refused
 
 `detect` fails with `fork pull requests are not supported`, or with
@@ -710,8 +744,8 @@ cannot arrive.
 The refusal keys on the `head-repo` input, and it refuses by default: a run
 that states no head repository is refused too, with a message naming the input.
 Engine `plan.yml` fills that input from its own `facts` job, so on a current pin
-the message means what it says — the head really is elsewhere. On a pin
-predating the shims the same message can come from a hand-written `plan.yml`
+the message means what it says — the head really is elsewhere. On an older pin
+the same message can come from a hand-written consumer workflow
 whose `build-matrix` step never passed the input (`docs/upgrading.md` §0.20.0,
 and §0.18.0 for the release that first required it). Engine `drift.yml` says it
 has no pull request at all with `no-pull-request: "true"` instead
@@ -735,13 +769,13 @@ the environment exists and that its policy actually names the default branch.
 
 ### The post-merge deploy was dropped as superseded
 
-A pull request merged, the deploy run for that merge was cancelled before it
+A pull request merged, the `deploy` job for that merge was cancelled before it
 started, and its stacks are still pending.
 
-There is no server-side queue behind the apply path: the consumer `deploy.yml`
-declares a run-level `concurrency` group (`group: deploy-main`), and GitHub
-drops the older *pending* run whenever a second merge lands while the first is
-still queued. The stacks stay pending and visible, which is the recoverable
-state: re-run that deploy. `deploy-detect` rebuilds its work queue from the
+There is no server-side queue behind the apply path: the consumer's `deploy` job
+declares a `concurrency` group (`group: deploy-main`), and GitHub drops the older
+*pending* job whenever a second merge lands while the first is still queued. The
+stacks stay pending and visible, which is the recoverable state: re-run that
+deploy. `deploy-detect` rebuilds its work queue from the
 apply checks that are still pending, so a re-run is idempotent — anything
 already applied is skipped.

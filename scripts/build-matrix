@@ -12,15 +12,16 @@ import os
 import subprocess
 import sys
 
-#: The two pull-request events `plan_workflow_error` requires a plan workflow on.
+#: The two pull-request events `plan_workflow_error` requires a consumer workflow file on.
 _PR_EVENTS = ("pull_request", "pull_request_target")
 
 MATRIX_LIMIT = 256
 
-#: Where the plan workflow must live. Two surfaces match this filename literally: `shipmate
-#: doctor` keys its plan-shim probes on it, and `actions/dispatch` sends a commented
-#: `shipmate plan` to it by name. No plan-run lookup does — each reads a cell's own apply check.
-PLAN_WORKFLOW = ".github/workflows/plan.yml"
+#: Where the consumer's workflow file must live. Three surfaces match this filename
+#: literally: `shipmate doctor` keys its fork-trigger exemption and its shim probes on it,
+#: `actions/dispatch` sends every commented verb to it, and `scripts/onboard` renders it
+#: under this name. No plan-run lookup does — each reads a cell's own apply check.
+PLAN_WORKFLOW = ".github/workflows/shipmate.yml"
 
 #: Stack paths a reader would take for an engine artifact. Neither can collide any more: a plan
 #: check is `shipmate / <stack> / <env>`, so a stack named `apply` yields `shipmate / apply /
@@ -459,13 +460,13 @@ def head_checkout_error(head_sha, no_pull_request):
         f"({head_sha}) — `actions/checkout` takes the base branch under "
         "`pull_request_target` and the dispatch ref under `workflow_dispatch` unless its "
         "`ref:` names the head SHA. Add it to every checkout in "
-        "`.github/workflows/plan.yml`; without it planning diffs the wrong tree against the "
+        f"`{PLAN_WORKFLOW}`; without it planning diffs the wrong tree against the "
         "base, silently reports no changes, and the gate greens with nothing queued to apply."
     )
 
 
 def plan_workflow_error(event_name, root="."):
-    """The `::error::` line refusing a checkout with no plan workflow at
+    """The `::error::` line refusing a checkout with no consumer workflow file at
     `PLAN_WORKFLOW`, or "" when this run may be planned.
 
     A sparse checkout would fail this falsely; `detect` needs the whole tree for
@@ -477,13 +478,14 @@ def plan_workflow_error(event_name, root="."):
         return ""
     return (
         f"::error::this repository has no `{PLAN_WORKFLOW}` — the one path `CONTRACT.md` "
-        "lets the plan workflow live at, and this refusal is what enforces it. That exact "
-        "filename is matched literally by `shipmate doctor`, which keys its plan-shim "
-        "probes on it, and by `actions/dispatch`, which picks the workflow file from the "
-        "verb — `shipmate plan` dispatches this filename and no other. A plan workflow "
-        "under any other name silently loses the calling-job-name and dispatch-wiring "
-        "checks, draws doctor's own `pull_request_target` warning instead, and is "
-        f"reached by no `shipmate plan` at all. Move the plan workflow back to `{PLAN_WORKFLOW}`."
+        "lets the consumer's workflow file live at, and this refusal is what enforces it. "
+        "That exact filename is matched literally by `shipmate doctor`, which keys its "
+        "calling-job-name, retired `plan_run_id`, retired `mode`, dispatch-wiring and "
+        "routing probes on it, and by "
+        "`actions/dispatch`, which sends every commented verb to it. A consumer workflow "
+        "under any other name silently loses those probes, draws doctor's own "
+        "`pull_request_target` warning instead, and is reached by no `shipmate` command at "
+        f"all. Move the consumer's workflow back to `{PLAN_WORKFLOW}`."
     )
 
 
@@ -492,13 +494,13 @@ def tag_filter_error(tags, no_pull_request):
     request, or "" when it may be honoured.
 
     Keyed on `no-pull-request` alone, and NOT exempted by `all-stacks`: a plan
-    wrapper that sets both would drop changed stacks from the matrix, and a
+    job that sets both would drop changed stacks from the matrix, and a
     dropped stack gets no plan cell, so no apply check is created, `count` and
     the summary's cell count still agree, the gate greens, and the reviewed
     change merges and never applies. `all-stacks` on its own only over-plans,
     which is the safe direction; combined with a filter it stops being safe.
     One marker, one meaning -- `no-pull-request` is the input already documented
-    as never belonging in a plan wrapper."""
+    as never belonging in a plan job."""
     if not tags.strip():
         return ""
     if no_pull_request.strip().lower() == "true":
@@ -506,9 +508,9 @@ def tag_filter_error(tags, no_pull_request):
     return (
         "::error::the `tags` filter is only for a workflow with no pull request at all "
         "(nightly drift), and this run did not pass `no-pull-request: true`. In a plan "
-        "wrapper it would drop changed stacks from the matrix: a dropped stack gets no plan "
+        "job it would drop changed stacks from the matrix: a dropped stack gets no plan "
         "cell and no apply check, `shipmate / gate` greens over it, and the change merges "
-        "and never applies. Remove the input from the plan wrapper."
+        "and never applies. Remove the input from the plan job."
     )
 
 

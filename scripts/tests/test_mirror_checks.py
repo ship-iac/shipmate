@@ -2,8 +2,9 @@
 
 Three of these carry the weight. The suite-id refusal: a run whose own check suite could not be
 identified must mirror nothing, or it copies every check on the commit, other workflows'
-included, onto the pull request head. The `completed` filter: it is what excludes this job's own
-still-running check without matching on a job name the consumer's wrapper chooses. And the fixed
+included, onto the pull request head. The two row filters: `completed` excludes this job's own
+still-running check, and the `shipmate / ` prefix excludes the consumer file's sibling jobs,
+which complete as `skipped` in this same suite. And the fixed
 output text: the plan output is author-controlled, so no cell summary or plan text may reach the
 mirrored check.
 
@@ -47,7 +48,7 @@ def _check(name, **over):
         "status": "completed",
         "conclusion": "success",
         "head_sha": RUN_COMMIT,
-        "html_url": f"https://github.test/runs/{name}",
+        "html_url": f"https://github.test/runs/{name.rsplit(' / ', 1)[-1]}",
         "check_suite": {"id": SUITE},
         "output": {"title": "5 to add", "summary": "plan text a pull request author wrote"},
     }
@@ -64,33 +65,55 @@ def test_only_this_suites_completed_checks_are_mirrored():
     unfinished check in this one are equally out."""
     lines = _lines(
         _check("shipmate / facts"),
-        _check("dns / dev-eu"),
-        _check("some other workflow", check_suite={"id": OTHER_SUITE}),
-        _check("no suite at all", check_suite=None),
+        _check("shipmate / dns / dev-eu"),
+        _check("shipmate / another run's cell", check_suite={"id": OTHER_SUITE}),
+        _check("shipmate / a cell with no suite", check_suite=None),
         _check("shipmate / summary", status="in_progress", conclusion=None),
-        _check("queued cell", status="queued", conclusion=None),
+        _check("shipmate / queued cell", status="queued", conclusion=None),
     )
     got = [b["name"] for b in mc.bodies(lines, SUITE, HEAD)]
-    assert got == ["shipmate / facts", "dns / dev-eu"]
+    assert got == ["shipmate / facts", "shipmate / dns / dev-eu"]
+
+
+def test_only_the_engine_cell_checks_are_mirrored():
+    """A dispatched plan's suite holds the callee's cell checks AND the skipped router jobs of
+    the consumer's one workflow file. Only the first belong on the pull-request head: a grey
+    `targeted` or `post-merge` there says an apply was skipped for this commit, which is not
+    what happened and not what the reviewer is being asked to read.
+
+    Mutation: drop the prefix filter from `bodies`, and the two skipped router rows below are
+    mirrored too.
+    """
+    lines = _lines(
+        _check("shipmate / stacks/network / dev-eu"),
+        _check("targeted", conclusion="skipped"),
+        _check("shipmate", conclusion="skipped"),
+    )
+    got = [b["name"] for b in mc.bodies(lines, SUITE, HEAD)]
+    assert got == ["shipmate / stacks/network / dev-eu"], (
+        f"only the engine's own cell checks belong on the head: {got}"
+    )
 
 
 @pytest.mark.parametrize("suite_id", ["", None, "abc", "12a", " 12", "1.0", "-1", "42\n"])
 def test_an_unidentified_suite_refuses_instead_of_matching_everything(suite_id):
     # `match`, so a refusal raised later for an unrelated reason cannot stand in for this one.
     with pytest.raises(SystemExit, match="check suite could not be identified"):
-        mc.bodies(_lines(_check("dns / dev-eu")), suite_id, HEAD)
+        mc.bodies(_lines(_check("shipmate / dns / dev-eu")), suite_id, HEAD)
 
 
 def test_the_suite_id_is_accepted_as_the_number_the_api_answers():
     """`check_suite_id` comes back from the runs API as a JSON number, and `check_suite.id` in
     the listing likewise, so the comparison must survive both being ints rather than strings."""
-    assert [b["name"] for b in mc.bodies(_lines(_check("dns / dev-eu")), SUITE, HEAD)] == [
-        "dns / dev-eu"
-    ]
+    assert [
+        b["name"] for b in mc.bodies(_lines(_check("shipmate / dns / dev-eu")), SUITE, HEAD)
+    ] == ["shipmate / dns / dev-eu"]
 
 
 def test_every_body_targets_the_head_not_the_runs_own_commit():
-    bodies = mc.bodies(_lines(_check("dns / dev-eu"), _check("app / dev-eu")), SUITE, HEAD)
+    bodies = mc.bodies(
+        _lines(_check("shipmate / dns / dev-eu"), _check("shipmate / app / dev-eu")), SUITE, HEAD
+    )
     assert [b["head_sha"] for b in bodies] == [HEAD, HEAD]
 
 
@@ -99,9 +122,9 @@ def test_a_conclusion_the_create_endpoint_rejects_becomes_neutral():
     still come through unchanged, or every mirrored row reads neutral."""
     bodies = mc.bodies(
         _lines(
-            _check("stale one", conclusion="stale"),
-            _check("none at all", conclusion=None),
-            _check("failed one", conclusion="failure"),
+            _check("shipmate / stale one", conclusion="stale"),
+            _check("shipmate / none at all", conclusion=None),
+            _check("shipmate / failed one", conclusion="failure"),
         ),
         SUITE,
         HEAD,
@@ -114,7 +137,7 @@ def test_the_output_text_is_fixed_and_carries_no_plan_text():
     """The whole mapping against a hand-written constant: the source check's own title and
     summary are author-controlled, and the mirrored check must not become a second rendering
     surface for them."""
-    bodies = mc.bodies(_lines(_check("dns / dev-eu")), SUITE, HEAD)
+    bodies = mc.bodies(_lines(_check("shipmate / dns / dev-eu")), SUITE, HEAD)
     assert [b["output"] for b in bodies] == [EXPECTED_OUTPUT]
 
 
@@ -123,9 +146,9 @@ def test_details_url_is_the_source_check_and_absent_when_it_has_none():
     not one."""
     bodies = mc.bodies(
         _lines(
-            _check("linked"),
-            _check("unlinked", html_url=None),
-            _check("blank", html_url=""),
+            _check("shipmate / linked"),
+            _check("shipmate / unlinked", html_url=None),
+            _check("shipmate / blank", html_url=""),
         ),
         SUITE,
         HEAD,
@@ -152,8 +175,12 @@ def test_a_mirror_that_copied_nothing_says_so(monkeypatch, capsys):
 
 
 def test_main_emits_one_json_body_per_mirrored_check(monkeypatch, capsys):
-    out = _run_main(monkeypatch, capsys, "\n".join(_lines(_check("dns / dev-eu"))) + "\n")
-    assert [json.loads(line)["name"] for line in out.out.splitlines()] == ["dns / dev-eu"]
+    out = _run_main(
+        monkeypatch, capsys, "\n".join(_lines(_check("shipmate / dns / dev-eu"))) + "\n"
+    )
+    assert [json.loads(line)["name"] for line in out.out.splitlines()] == [
+        "shipmate / dns / dev-eu"
+    ]
     assert out.err == ""
 
 

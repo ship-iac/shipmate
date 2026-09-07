@@ -19,44 +19,18 @@ leaving any open Issue for it untouched rather than auto-closing it.
 
 ## The workflow
 
-`scripts/onboard` writes this file, pinned, from the fence below
-([`getting-started.md`](getting-started.md) §Quick path). The drift workflow is a
-shim: a `schedule`, a `workflow_dispatch`, a
-`permissions:` block, and one job named `shipmate` calling the engine's
-reusable drift workflow. Transcribed from
+The unscoped nightly sweep is the `drift` job of `.github/workflows/shipmate.yml`
+([`getting-started.md`](getting-started.md) §The workflow file), which
+`scripts/onboard` writes pinned. Two things reach it: that file's `schedule`
+trigger, and a `workflow_dispatch` carrying `verb: drift`.
+
+The engine's jobs run on `ubuntu-latest` unless the `drift` job passes a
+`runs_on:` input — the published fence omits it, as
 [repo-example-stacks-aws](https://github.com/ship-iac/repo-example-stacks-aws)
-`.github/workflows/drift.yml`.
+does. Pass it only for a different label your plan actually offers; one it does
+not leaves every job waiting for a runner that never arrives.
 
-```yaml
-name: shipmate · drift
-on:
-  schedule:
-    - cron: "17 3 * * *"   # nightly, off-peak
-  workflow_dispatch:
-permissions:
-  contents: read
-jobs:
-  shipmate:
-    name: shipmate
-    uses: ship-iac/shipmate/.github/workflows/drift.yml@<engine-sha>  # see the latest release
-    permissions:
-      contents: read
-      id-token: write
-      actions: read
-    secrets:
-      SHIPMATE_APP_PRIVATE_KEY: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
-    with:
-      state_suffix: ""
-      # Empty covers every cell. Split the sweep by adding more files, one tag query each.
-      tags: ""
-```
-
-The engine's jobs run on `ubuntu-latest` unless the shim passes a `runs_on:`
-input — the fence above omits it, as `repo-example-stacks-aws` does. Pass it
-only for a different label your plan actually offers; one it does not leaves
-every job waiting for a runner that never arrives.
-
-**`state_suffix` is required and may be `""`.** `""` — what the fence above
+**`state_suffix` is required and may be `""`.** `""` — what the published fence
 pastes, because the AWS sample uses a remote backend — means the backend owns
 the state and the engine's state restore step is skipped. A local backend
 materialized in the working tree passes the path segment under each stack
@@ -64,12 +38,13 @@ directory where its state file lives instead: `repo-example-stacks` passes
 `.state`, and each drift cell then restores `<stack>/.state` before planning
 ([`../CONTRACT.md`](../CONTRACT.md) §State backend). Pasting `""` there plans
 every cell against no state and reports the whole repository as drifted, every
-night. It is the same value your `plan.yml` and `apply.yml` shims pass.
+night. It is the same value the file's other jobs pass.
 
-**`id-token: write` and `actions: read` are both required**, cloud credentials
-or not. A called workflow's permissions are capped at the `uses:` boundary: the
-`drift` job requests the first, the `issues` job the second, and a shim granting
-less kills the run at startup with no job and no log.
+**`id-token: write` and `actions: read` are both required** on the `drift` job,
+cloud credentials or not. A called workflow's permissions are capped at the
+`uses:` boundary: the engine's `drift` matrix job requests the first, its
+`issues` job the second, and a calling job granting less kills the run at startup
+with no job and no log.
 
 **The credential split is the point.** The engine's `drift` matrix job binds the
 plan environment of the cell it is planning — the bare `<env>` for an env listed
@@ -95,12 +70,11 @@ default branch, resolved from the API by `detect` rather than read from the
 once.** `build-matrix` refuses by default a run that states neither its head
 repository — the fork refusal on the plan path
 ([`hardening.md`](hardening.md) §"Contributors without push access") — nor the
-commit it is planning, because a `workflow_dispatch` of this workflow and a
-dispatched plan are the same event and the event name cannot tell them apart. A
-sweep has neither to state, so engine `drift.yml` passes
-`no-pull-request: "true"`. It is set in engine-owned YAML, in the one workflow
-with no pull-request context at all; no consumer file can set it, and no plan
-run carries it.
+commit it is planning, because a `workflow_dispatch` of a sweep and a dispatched
+plan are the same event and the event name cannot tell them apart. A sweep has
+neither to state, so engine `drift.yml` passes `no-pull-request: "true"`. It is
+set in engine-owned YAML, in the one workflow with no pull-request context at
+all; no consumer file can set it, and no plan run carries it.
 
 The engine runs `aws-actions/configure-aws-credentials` inside the `drift` job,
 in the same position as on the plan path, gated on `AWS_ROLE_ARN` — or
@@ -117,7 +91,7 @@ role's trust-policy claim condition is what refuses it. See
 
 ## Slack (optional)
 
-Slack needs no line in your shim. The engine's `issues` job passes
+Slack needs no line in your workflow file. The engine's `issues` job passes
 `slack-webhook: ${{ vars.SLACK_WEBHOOK }}` to `drift-issues`, and `vars` inherit
 into a called workflow, so setting that one GitHub variable is the whole
 configuration. Set it at repo or org level, or on the `shipmate-engine`
@@ -147,8 +121,7 @@ one run to a slice of the matrix — [Scoping a sweep](#scoping-a-sweep).
 ## Scoping a sweep
 
 The engine's drift workflow takes an optional `tags` query that narrows the
-cells one run covers. Empty — the default, and the fence above — covers every
-cell.
+cells one run covers. Empty — what the `drift` job passes — covers every cell.
 
 Tags are matched in their on-disk form: `env/dev-eu`, not `env:dev-eu`.
 Terramate forbids `:` inside a tag value, which is what frees `:` to be an
@@ -191,10 +164,18 @@ it, on that slice's next run.
 
 ### Spreading a sweep across the week
 
-One workflow file per slice — `drift-<slice>.yml` — each a copy of the shim
-above with three things changed: the `name:`, the single `cron:`, and the
-literal `tags:` value in its `with:` block. A repository variable cannot differ
-per file, which is why `tags` is an input rather than one.
+One workflow file per slice — `drift-<slice>.yml` — each a copy of the fence
+below. It differs from `shipmate.yml`'s `drift` job in three places:
+
+- a top-level `name:` and `schedule:` of its own;
+- a literal `tags:` value. A repository variable cannot differ per file, which
+  is why `tags` is an input rather than one;
+- **no `if:`**. The job's `if:` tests `github.event.inputs.verb`, which a slice
+  file's bare `workflow_dispatch:` never sets, so copying it across makes a
+  manual re-run skip the job with no error.
+
+The calling job's own `name: shipmate` is the check-name contract literal and
+stays as it is.
 
 ```yaml
 name: shipmate · drift · dev-eu
@@ -236,29 +217,34 @@ unscoped nightly is what makes that check repo-wide
 ([`../CONTRACT.md`](../CONTRACT.md) §Plan artifacts). Slices alone catch such a
 pair in no sweep at all: the first plan run that changes both still refuses, so
 nothing applies under the wrong plan, but the warning arrives in a pull request
-instead of a nightly. Keep the unscoped `drift.yml` on a weekly cron to keep it.
+instead of a nightly. Keep `shipmate.yml`'s own `schedule` on a weekly cron to
+keep it.
 
 ### An ad-hoc scoped sweep
 
-This shape is for the unscoped `drift.yml`. Under its `on:`, replace the bare
-`workflow_dispatch:` with a `tags` input, and forward that input from the shim's
-`with:` block. The input's default is empty, so a dispatch that leaves it blank
-sweeps every cell:
+This shape is for `shipmate.yml`'s own `drift` job. Add a fifth input under the
+file's `workflow_dispatch.inputs`, and forward it from that job's `with:` block.
+The input's default is empty, so a dispatch that leaves it blank sweeps every
+cell:
 
 ```yaml
-workflow_dispatch:
-  inputs:
-    tags:
-      description: "Optional tag query, e.g. env/dev-eu:workload/app"
-      required: false
-      default: ""
+      tags:
+        description: "Optional tag query, e.g. env/dev-eu:workload/app"
+        required: false
+        default: ""
 ```
 
 ```yaml
-with:
-  state_suffix: ""
-  tags: ${{ inputs.tags }}
+    with:
+      state_suffix: ""
+      tags: ${{ inputs.tags }}
 ```
+
+**A fifth input must be `required: false`.** Every verb dispatches this one file,
+and none of the bodies `actions/dispatch` sends carries a `tags` value: GitHub
+reads an omitted value for a `required: true` input as not provided and answers
+HTTP 422, so a required fifth input breaks every commented verb, not just drift.
+`shipmate doctor` reports one that is not.
 
 A `drift-<slice>.yml` keeps its literal `tags:` value instead — its scope is the
 slice it is named for, and its manual trigger re-runs that slice.

@@ -12,7 +12,7 @@ permissions: {}
 jobs:
   ops:
     # Only pull-request comments (issue_comment fires on issues too). On the engine side rather
-    # than the shim's trigger block: a consumer cannot drop it here.
+    # than the consumer file's trigger block: a consumer cannot drop it here.
     if: ${{ github.event.issue.pull_request }}
     runs-on: ubuntu-latest
     environment: shipmate-engine

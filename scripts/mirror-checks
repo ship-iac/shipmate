@@ -12,8 +12,11 @@ else.
 
 Reads the check-runs of the run's OWN commit as JSON Lines on stdin (as emitted
 by `gh api --paginate ... --jq '.check_runs[]'`) and keeps the COMPLETED ones in
-this run's check suite. `completed` is what excludes this job's own still-running
-check without matching on a job name -- a name the consumer's wrapper chooses.
+this run's check suite. `completed` excludes this job's own still-running check,
+and the `shipmate / ` prefix excludes the consumer file's sibling jobs, which
+complete as `skipped` in the same suite. That prefix is the caller job's contract
+name, which `shipmate doctor` reports on and `CONTRACT.md` §Check names states --
+not a name each consumer chooses freely.
 
 Nothing author-controlled is copied. The output is a fixed line plus the link
 back to the original check, whose step summary is where the plan text lives.
@@ -47,6 +50,10 @@ bm = _load("build-matrix")
 _CONCLUSIONS = frozenset(
     {"success", "failure", "neutral", "cancelled", "skipped", "timed_out", "action_required"}
 )
+#: The engine's own check-run namespace: `<caller job> / <callee job>`, where the caller job
+#: is named `shipmate`. Coupled to that job name, which `scripts/doctor` probes and
+#: `CONTRACT.md` §Check names states.
+_MIRRORED_PREFIX = "shipmate / "
 _TITLE = "planned on demand"
 _SUMMARY = (
     "Mirrored onto this commit from this plan run's own check, which is attached to the ref "
@@ -56,7 +63,9 @@ _DECIMAL = re.compile(r"[0-9]+")
 
 
 def bodies(lines, suite_id, head_sha):
-    """One POST body per completed check-run of `suite_id`, aimed at `head_sha`.
+    """One POST body per completed `shipmate / ` check-run of `suite_id`, aimed at
+    `head_sha`. Both conditions: a completed check named outside that namespace is
+    one of the consumer file's skipped router jobs, not a cell.
 
     An empty or non-decimal `suite_id` is refused rather than treated as "match
     everything": a run whose suite could not be identified would otherwise
@@ -73,6 +82,11 @@ def bodies(lines, suite_id, head_sha):
         if str(((run.get("check_suite") or {}).get("id")) or "") != str(suite_id):
             continue
         if run.get("status") != "completed":
+            continue
+        # A job with a false `if:` still completes as a `skipped` check-run in this same
+        # suite, named by the caller job alone; the prefix is what tells those apart from
+        # the engine's own cell checks.
+        if not run.get("name", "").startswith(_MIRRORED_PREFIX):
             continue
         conclusion = run.get("conclusion")
         body = {
@@ -101,9 +115,9 @@ def main():
         # Never silent: a mirror that copied nothing means the reviewer sees no
         # per-cell checks, and the reason is not visible anywhere else.
         print(
-            "::warning::this plan run's own check suite held no completed checks to mirror "
-            "onto the pull request head; the pull request shows no per-cell plan checks for "
-            "this run",
+            "::warning::no `shipmate / ` check completed in this plan run's own check suite, "
+            "so nothing was mirrored onto the pull request head; the pull request shows no "
+            "per-cell plan checks for this run",
             file=sys.stderr,
         )
 

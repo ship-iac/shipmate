@@ -101,7 +101,7 @@ without it.
 ## 4. Install the App in your organization
 
 Registration and installation are separate. One installation per organization
-covers every repository that runs `comment-ops.yml` / `dispatch`:
+covers every repository that runs shipmate's comment-ops and dispatch:
 
 ```
 https://github.com/organizations/<org>/settings/apps/shipmate/installations
@@ -338,12 +338,14 @@ actual work here:
   that shares one environment between plan and apply). What makes that inert is
   that the whole job graph is engine-owned: `secrets.SHIPMATE_APP_PRIVATE_KEY`
   is named in exactly one job of engine `plan.yml`, the one that checks nothing
-  out, and a branch author cannot edit that file. The consumer's shim names the
-  secret once too, in the `secrets:` block of its single job, and
+  out, and a branch author cannot edit that file. The consumer's `shipmate.yml`
+  names the secret in the `secrets:` block of each job that passes it, and
   `pull_request_target` runs the base copy of that file rather than the pull
   request's own. A dispatched `shipmate plan` is the same shape one ref along:
   every job evaluates at the ref the dispatch named (the default branch) and
-  runs that copy of the file.
+  runs that copy of the file. That one file holds every trigger, so which job
+  runs is decided by the `if:` expressions in the base or default-branch copy —
+  never by anything the pull request writes.
 
   **The constraint that follows: no job in engine `plan.yml` other than
   `summary` may reference a `shipmate-engine` secret.** Adding one hands it to a
@@ -353,13 +355,14 @@ actual work here:
   inferred: such a job is refused before its first step, because a branch ref
   matches no pattern the policy names.
 - **The jobs that can reach the key all run at the default-branch ref.** The
-  plan workflow's automatic trigger is `pull_request_target`, which evaluates at
-  the base branch ref rather than the pull request head, so its trusted `summary`
-  job — inside the engine's reusable `.github/workflows/plan.yml` — satisfies
-  the policy. Its second trigger, the `workflow_dispatch` a commented
-  `shipmate plan` sends, is dispatched on the default branch and satisfies the
-  policy the way `push` does; the dispatch body states a pull request number
-  and nothing else, so no ref a commenter picks decides which workflow file runs.
+  autoplan reaches the `plan` job through `pull_request_target`, which evaluates
+  at the base branch ref rather than the pull request head, so its trusted
+  `summary` job — inside the engine's reusable `.github/workflows/plan.yml` —
+  satisfies the policy. The other trigger that reaches it, the
+  `workflow_dispatch` a commented `shipmate plan` sends, is dispatched on the
+  default branch and satisfies the policy the way `push` does; the dispatch body
+  states the verb and a pull request number, and no ref a commenter picks decides
+  which workflow file runs.
   It reads the key from this environment, which resolves in the *calling*
   repository, so the caller passes the secret by name and holds nothing itself
   (that is also what makes a consumer in another organization work). The apply and
@@ -406,7 +409,8 @@ actual work here:
   deployment at all.
 
 What none of this defends against is a change to the trusted workflow files
-themselves (`plan.yml`, `apply.yml`, and the rest) landing on the default
+themselves — the consumer's `shipmate.yml`, and the engine's `plan.yml`,
+`apply.yml` and the rest — landing on the default
 branch, where they *would* satisfy the environment's policy. That path runs
 through an ordinary pull request and merge — no `pull_request`- or
 `pull_request_target`-triggered job that checks out branch content is ever in a
@@ -462,7 +466,7 @@ what every repository would get and writes nothing.
 Each run ends with the checklist of what it cannot set: the cloud role and
 region, the env identity your layout injects, `SHIPMATE_PLAN_PASSPHRASE`,
 `SLACK_WEBHOOK`, environment reviewers, a `CODEOWNERS` entry, and the pull
-request carrying the six shims.
+request carrying the workflow file.
 
 Then confirm, per repository, that no repository-level
 `SHIPMATE_APP_PRIVATE_KEY` survived — `shipmate doctor` cannot check this for

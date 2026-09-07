@@ -38,12 +38,12 @@ refuses by default when the head repository could not be read at all (see
 "Contributors without push access").
 
 **The question is never the trigger but the shape.** `pull_request_target` is
-how the engine reaches the App key. The plan workflow runs on
+how the engine reaches the App key. The consumer's `plan` job runs on
 `pull_request_target`, which evaluates at the base ref — a ref
-`shipmate-engine`'s default-branch-only policy trusts. (Its second trigger, the
-`workflow_dispatch` a commented `shipmate plan` sends, evaluates at the
-default branch itself and raises the same question with the same answer; see
-"Contributors without push access".) That ref choice is deliberate: it is what
+`shipmate-engine`'s default-branch-only policy trusts. (The other trigger that
+reaches it, the `workflow_dispatch` a commented `shipmate plan` sends, evaluates
+at the default branch itself and raises the same question with the same answer;
+see "Contributors without push access".) That ref choice is deliberate: it is what
 lets the plan run's trusted `summary` job mint an App token and write the
 `shipmate / gate` status. What makes it safe is a property of that job, not of
 the trigger: it executes no repository content at all. It is a call to the
@@ -65,8 +65,12 @@ version of the attack this page opens with. It is reachable regardless of the
 fork refusal above, which only governs the plan path. That is the shape a
 labeler or commenter workflow usually takes — don't add one to a repository that
 holds the App key. `shipmate doctor` warns for every workflow file declaring the
-trigger except `plan.yml`, matched by exact name. See "Contributors without push
-access" for the trade-off that follows.
+trigger except `shipmate.yml`, matched by exact name. Every trigger the engine
+uses lives in that one file, so what separates them is no longer which file holds
+which trigger but each job's `if:` — a `pull_request_target` event selects the
+`plan` job and no other. doctor's routing probe compares all seven of those
+expressions, whole, against the fence `getting-started.md` publishes. See
+"Contributors without push access" for the trade-off that follows.
 
 ## Checklist
 
@@ -90,7 +94,7 @@ access" for the trade-off that follows.
 | 16 | `shipmate-engine` Environment exists, deployment branch policy restricted to the default branch | Environment | Repository-secret App key readable by any branch |
 | 17 | Deployment branch policy restricted to the default branch on every `<env>-apply` | Environment | Branch-authored workflow claiming apply-environment secrets directly |
 | 18 | `AWS_ROLE_ARN` + `AWS_REGION` as variables on each environment you want cloud access from — never at repository or organization level | Environment variables | Opting in per environment; set at repo/org level they apply to every environment at once — every plan and drift cell included, so a role scoped no tighter than the repository is assumed by a plan cell running branch-authored HCL (§7–9) |
-| 19 | `id-token: write` on the calling job of every consumer shim but `comment-ops.yml` | Consumer workflow YAML | Nothing — it is required: GitHub caps a called workflow's permissions at each `uses:` boundary, so without it every plan, drift, apply and unlock run fails at workflow-resolution time, cloud or not |
+| 19 | `id-token: write` on every job of `shipmate.yml` but `comment-ops` | Consumer workflow YAML | Nothing — it is required: GitHub caps a called workflow's permissions at each `uses:` boundary, so without it every plan, drift, apply and unlock run fails at workflow-resolution time, cloud or not |
 | 20 | Require actions to be pinned to a full-length commit SHA | Settings → Actions | A tag or branch ref moving under a workflow that was pinned only by convention |
 
 Rows 6, 7, 17 and 18 name `<env>-apply`, which is the apply environment in the
@@ -293,9 +297,9 @@ the other:
   not name are held out of a bare `shipmate apply` and refused on a targeted
   one, their apply checks left pending, so the gate keeps blocking the merge
   until they are applied with a review in hand. Both engine apply workflows read
-  the variable themselves and enforce on it; the `comment-ops.yml` line is an
-  early refusal, not the policy. Opting in also takes one line in
-  `comment-ops.yml` — see `docs/getting-started.md`.
+  the variable themselves and enforce on it; engine `comment-ops.yml`'s read of it
+  is an early refusal, not the policy. Opting in takes no line in your workflow
+  file — see `docs/getting-started.md`.
 - **Environment `required_reviewers` on `<env>-apply` (§6) gates the
   deployment.** A human other than the author releases the environment's
   secrets and lets the apply proceed. It is unforgeable by a holder of the App
@@ -576,7 +580,7 @@ its own.
   with no cloud credential — the shape the three local-backend sample
   repositories run in. Declining
   the grant is not an alternative: `id-token: write` is mandatory on the plan and
-  drift shims, and a shim that omits it is rejected at load with no job and no
+  drift jobs, and a job that omits it is rejected at load with no job and no
   log. GitHub's per-repository `sub`
   customization (adding `job_workflow_ref` to the claim, so the engine's apply
   workflow file is part of what the policy matches) is the escape hatch; it is
@@ -615,9 +619,9 @@ Settings → Actions → General:
   collaborators (the strictest option), and never enable "Send secrets to
   workflows from fork pull requests". In workflow code the rule is about the
   shape rather than the trigger — stated in full at the top of this page, and
-  the reason shipmate's own `plan.yml` may use `pull_request_target` while a
+  the reason shipmate's own `shipmate.yml` may use `pull_request_target` while a
   labeler workflow may not. `shipmate doctor` names any *other* workflow file
-  declaring the trigger; `plan.yml` is exempt by exact name.
+  declaring the trigger; `shipmate.yml` is exempt by exact name.
 - **Allowed actions.** Mode `selected`, with GitHub-owned actions allowed,
   verified-creator actions not, and these patterns:
 
@@ -810,10 +814,10 @@ included, because it compares the policy names against the default branch alone.
 
 ## What the engine receives from your repository
 
-The documented shims pass exactly two secrets by name:
+The documented file's jobs pass exactly two secrets by name:
 `SHIPMATE_APP_PRIVATE_KEY`, and `SHIPMATE_PLAN_PASSPHRASE` wherever the callee
-writes or reads an encrypted plan artifact (`plan.yml` and the apply and deploy
-paths). Nothing else crosses into a called workflow, because
+writes or reads an encrypted plan artifact (the `plan`, `deploy`, `targeted` and
+`all` jobs; `unlock` passes neither). Nothing else crosses into a called workflow, because
 GHA forwards no secret a caller does not name.
 
 `secrets: inherit` forwards every secret the calling repository can see:
@@ -949,8 +953,8 @@ repository the standing residual is arbitrary code execution offered to anyone
 who can open a pull request *from a branch in the repository*.
 
 **The App key is now inside a workflow a fork pull request can start.** The
-reason is the trigger: the plan workflow runs on `pull_request_target`, which
-fires for a fork. Two things keep it out of reach, and they are both structural
+reason is the trigger: the consumer's `plan` job runs on `pull_request_target`,
+which fires for a fork. Two things keep it out of reach, and they are both structural
 rather than conventions. The trusted `summary` job declines unless the head
 repository `facts` reported equals `github.repository`, and an absent or empty
 value is a refusal, not a pass: a job-level `if:`, so the job never starts, no
@@ -960,11 +964,13 @@ the comparison live in engine-owned, SHA-pinned YAML (`CONTRACT.md` §Post-plan
 topology), so a consumer supplies neither and can neither fail it closed nor
 loosen it.
 
-**The third trigger keeps every fact out of a dispatcher's hands.** A commented
-`shipmate plan` `workflow_dispatch`es the same `plan.yml` shim, and a dispatch
-reaches strictly less than a pull-request event does: the body carries one input,
-the pull request's number, and the shim declares no other, so GitHub refuses a
-dispatch that names anything else (HTTP 422, no run). Everything the guards
+**`workflow_dispatch` keeps every fact out of a dispatcher's hands.** A commented
+`shipmate plan` `workflow_dispatch`es the same `shipmate.yml` the autoplan runs
+in, and a dispatch reaches strictly less than a pull-request event does: the body
+carries the verb that selects the `plan` job and the pull request's number,
+GitHub refuses a dispatch naming an input the file does not declare (HTTP 422, no
+run), and the `plan` job forwards none of the file's inputs to the engine — it
+passes its `state_suffix` and nothing else. Everything the guards
 decide on — the head SHA, the head repository, the draft flag — is then derived
 from that number by `actions/pr-facts`, which asks the API for the pull request.
 That derivation is deliberate: the fork refusal keys on the head repository, so

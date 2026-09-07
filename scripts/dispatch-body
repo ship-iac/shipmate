@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build the `workflow_dispatch` request body for actions/dispatch: one input shape per verb.
+"""Build actions/dispatch's `workflow_dispatch` request body: one input shape per verb, on one file.
 
 Printed to stdout, which the step redirects to the file `gh api --input` reads.
 """
@@ -11,23 +11,26 @@ import os
 def main():
     verb = os.environ["VERB"]
     if verb == "plan":
-        # plan.yml declares exactly one input, pr_number. `ref` is not among them: the
+        # `shipmate.yml` declares four inputs; a plan fills two. `ref` is not among them: the
         # dispatched run resolves the head from the pull request itself, so nothing a
         # dispatcher states decides what is planned.
-        inputs = {"pr_number": os.environ["PR_NUMBER"]}
+        inputs = {"verb": verb, "pr_number": os.environ["PR_NUMBER"]}
     elif verb == "unlock":
         # Releasing a stranded lock applies no plan and comments on no pull request, so
-        # unlock.yml declares neither a pr_number nor anything else only the apply body
-        # needs.
-        inputs = {"ref": os.environ["REF"], "environment": os.environ["ENVIRONMENT"]}
+        # nothing on that path reads a pull-request number.
+        inputs = {
+            "verb": verb,
+            "ref": os.environ["REF"],
+            "environment": os.environ["ENVIRONMENT"],
+        }
     else:
         inputs = {
+            "verb": verb,
             "ref": os.environ["REF"],
             "pr_number": os.environ["PR_NUMBER"],
         }
-        # The `environment` key is included only when set: apply.yml declares it optional
-        # (empty = bare `shipmate apply`), and GitHub reads an empty value for a required
-        # workflow_dispatch input as not provided.
+        # The `environment` key is included only when set: an empty value is the bare
+        # `shipmate apply`, which is what selects the `all` job over `targeted`.
         if os.environ.get("ENVIRONMENT"):
             inputs["environment"] = os.environ["ENVIRONMENT"]
     print(json.dumps({"ref": os.environ["DISPATCH_REF"], "inputs": inputs}))

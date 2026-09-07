@@ -70,8 +70,8 @@ jobs:
     if: ${{ !failure() && !cancelled() && needs.detect.outputs.cells != '[]' }}
     runs-on: ubuntu-latest
     # No PR comment, deliberately -- do not "fix" it. Posting one needs pull-requests: write, which
-    # the consumer wrapper does not grant this workflow, and widening a consumer's token for a
-    # prettier message is the wrong trade. comment-ops' reaction acknowledges acceptance, per-cell
+    # the consumer's calling job does not grant this workflow, and widening a consumer's token
+    # for a prettier message is the wrong trade. comment-ops' reaction acknowledges acceptance, per-cell
     # detail lands in each job's step summary, and a failure reds the run and notifies the actor.
     permissions: { contents: read, actions: read, id-token: write }
     strategy:

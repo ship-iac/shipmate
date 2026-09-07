@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Apply detect: a dispatched single-env apply's work set + waves.
 
-The dispatched workflow is the consumer's apply wrapper; the engine's own
-`apply.yml` is `workflow_call` and is what that wrapper calls.
+The dispatched workflow is the consumer's `shipmate.yml`, whose `targeted` job
+the `verb: apply` body selects; the engine's own `apply.yml` is `workflow_call`
+and is what that job calls.
 
 Unlike deploy-detect (merge-driven, all envs), the work set here is scoped to
 ONE environment and sourced from the head's own apply checks: a run-graph stack

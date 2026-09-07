@@ -238,11 +238,12 @@ the release commit, from one sample:
    ```
 
    **`repin_consumer.py` rewrites pins and nothing else.** When a release
-   changes a wrapper's declared input contract, make those body edits on the
-   scratch branch too — a new pin under an old wrapper body is the load-time
+   changes the consumer file's declared input contract, make those body edits on
+   the scratch branch too — a new pin under an old body is the load-time
    rejection described below, not a smoke result. `docs/upgrading.md`'s section
-   for the release names those edits; for this release it is deleting the
-   retired `mode` input and its `with:` line from `apply.yml`.
+   for the release names those edits; for this release it is replacing the six
+   files with the single `.github/workflows/shipmate.yml` that
+   `docs/getting-started.md` publishes.
 
    The same gap has a second form the tool cannot reach at all: a consumer's
    allowed-actions list is a repository setting, not a file. Under
@@ -256,41 +257,44 @@ the release commit, from one sample:
    list, and say so in `docs/upgrading.md`'s section for the release — it is a
    setting the consumer has to change by hand before they re-pin.
 
-2. Drive the wrapper directly at that ref, with the body `actions/dispatch`
+2. Drive the consumer's workflow file directly at that ref — but **skip this
+   step for a release that introduces that file.** `shipmate.yml` is not on any
+   sample's default branch until this release lands, so there is nothing here
+   to drive; it gets its first live exercise after the tag, like every other
+   new path. From the release after, run it with the body `actions/dispatch`
    would build — exactly those keys, and no others:
 
    ```bash
-   gh workflow run apply.yml --repo ship-iac/repo-example-stacks-aws --ref smoke/vX.Y.Z \
-     -f environment=sbx -f ref=<40-char-sha> -f pr_number=<n>
+   gh workflow run shipmate.yml --repo ship-iac/repo-example-stacks-aws --ref smoke/vX.Y.Z \
+     -f verb=apply -f environment=sbx -f ref=<40-char-sha> -f pr_number=<n>
    ```
 
-   **Drive a wrapper the release *changed*, never one it introduces.** A
-   `workflow_dispatch` runs a workflow only if the file exists on the
-   repository's default branch — the same resolution constraint as the
-   paragraph below — so `--ref` picks which branch's copy runs, not whether the
-   file is dispatchable at all. A wrapper the release *adds* is on the scratch
-   branch only, and dispatching it answers a 404 indistinguishable from the
-   failure this exercise exists to detect; it gets its first live exercise after
-   the tag, like every other new path. The command above drives the wrapper this
-   release changed — `apply.yml`, with exactly the keys `actions/dispatch` sends
-   for that verb.
+   **Why the skip, and not a `--ref` away.** A `workflow_dispatch` runs a
+   workflow only if the file exists on the repository's default branch — the
+   same resolution constraint as the paragraph below — so `--ref` picks which
+   branch's copy runs, not whether the file is dispatchable at all. A file the
+   release *adds* is on the scratch branch only, and dispatching it answers a
+   404 indistinguishable from the failure this exercise exists to detect. Drive
+   a file the release *changed*, never one it introduces; the command above
+   sends exactly the keys `actions/dispatch` builds for the verb `-f verb=`
+   names.
 
    **Not by commenting the verb.** An `issue_comment` workflow always runs from
-   the repository's default branch, and the documented `comment-ops.yml` passes
+   the repository's default branch, and the engine's `comment-ops.yml` passes
    `dispatch-ref: ${{ github.event.repository.default_branch }}` — so a comment
-   drives the default branch's `comment-ops.yml` and dispatches the default
-   branch's copy of the verb's wrapper, still on the *old* pin. The scratch
+   drives the default branch's copy of `shipmate.yml` and dispatches that same
+   copy, still on the *old* pin. The scratch
    branch is never read, and the smoke goes green without touching the new
    code.
 3. Throw the branch away and cut the release as below.
 
 **What this catches, and what it cannot.** It catches the class that genuinely
-needs a consumer: the wrapper's `workflow_dispatch` input declarations meeting
-the body the engine sends. Either half of that pair is rejected right here, with
-no job started, and nothing in this repository can see it — an input the engine
-sends that the wrapper does not declare is a 422 "Unexpected inputs provided",
-and a `required: true` wrapper input the engine no longer sends is a 422 "not
-provided". It also resolves and
+needs a consumer: the consumer file's `workflow_dispatch` input declarations
+meeting the body the engine sends. Either half of that pair is rejected right
+here, with no job started, and nothing in this repository can see it — an input
+the engine sends that the file does not declare is a 422 "Unexpected inputs
+provided", and a `required: true` input in that file the engine no longer sends
+is a 422 "not provided". It also resolves and
 parses the engine reusable workflow at the new SHA, because that happens when the
 run graph is built.
 

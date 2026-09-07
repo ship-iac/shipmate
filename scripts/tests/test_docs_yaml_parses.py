@@ -139,14 +139,15 @@ def test_the_wrapper_snippets_are_still_being_found():
         for _, target, _ in _engine_workflow_calls(yaml.safe_load(body))
     )
     assert found == [
-        # Two: the unscoped nightly shim, and the `drift-<slice>.yml` copy under
-        # "Spreading a sweep across the week" that carries a literal `tags:` value.
-        ("docs/drift.md", "drift.yml"),
+        # One: the `drift-<slice>.yml` copy under "Spreading a sweep across the week",
+        # which carries a literal `tags:` value. The unscoped sweep is the `drift` job of
+        # `shipmate.yml` and is published in getting-started.md with the other six.
         ("docs/drift.md", "drift.yml"),
         ("docs/getting-started.md", "apply-all.yml"),
         ("docs/getting-started.md", "apply.yml"),
         ("docs/getting-started.md", "comment-ops.yml"),
         ("docs/getting-started.md", "deploy.yml"),
+        ("docs/getting-started.md", "drift.yml"),
         ("docs/getting-started.md", "plan.yml"),
         ("docs/getting-started.md", "unlock.yml"),
     ], f"documented engine reusable-workflow calls changed: {found}"
@@ -301,6 +302,27 @@ def test_documented_wrapper_grants_every_permission_the_callee_requests(page, li
         )
 
 
+def test_the_documented_wrapper_grants_no_permissions_at_the_top_level():
+    """The published file's top-level `permissions` is exactly `{}` -- a floor, not a default
+    to inherit. Every job declares its own block, so one that loses it gets nothing rather
+    than everything the file granted, and the run dies at load instead of applying with a
+    borrowed token. The three engine workflows carry the same guard.
+
+    Whole value against a hand-written constant: `{contents: read}` is also a mapping, also
+    smaller than any job's block, and satisfies every predicate short of equality.
+
+    Mutation: give the fence `permissions: {contents: read}`.
+    """
+    fence = load_script("onboard")._fence(
+        (DOCS / "getting-started.md").read_text(encoding="utf-8"), "shipmate"
+    )
+    doc = yaml.safe_load(fence)
+    assert doc["permissions"] == {}, (
+        f"the documented workflow file grants {doc['permissions']!r} at the top level; a job "
+        "that loses its own block would inherit it"
+    )
+
+
 def _dispatch_inputs(doc):
     """(input name, spec) per `workflow_dispatch` input in a fence.
 
@@ -314,24 +336,26 @@ def _dispatch_inputs(doc):
 
 
 def test_the_documented_wrapper_inputs_are_exactly_these():
-    """The whole vector of documented `workflow_dispatch` inputs, requiredness
-    and default included.
+    """The whole vector of documented `workflow_dispatch` inputs -- requiredness, default,
+    type and the choice list included.
 
-    An input a dispatch body may send empty is optional with a default. The apply wrapper is
-    dispatched only by `actions/dispatch`, from a body the engine builds and no human fills, so
-    `required: true` protects no caller there. What it does do is turn a value the engine sent
-    empty on purpose into an HTTP 422 before the workflow starts: GitHub reads an empty value for
-    a required `workflow_dispatch` input as "not provided". Every `shipmate unlock` dispatch
-    failed that way while the wrapper still declared the plan-run input the engine has since
-    retired, because unlock applies no plan and so carried no run id. The engine validates
-    instead, where the verb is known. The plan wrapper's `pr_number` is the one required input,
-    and states why: that dispatch carries exactly one input and always fills it, and
-    `required: true` is what makes a hand-dispatched plan name the pull request it plans rather
-    than start a run with nothing to resolve.
+    An input a dispatch body may send empty is optional with a default. The one documented
+    wrapper is dispatched only by `actions/dispatch`, from a body the engine builds and no human
+    fills, so `required: true` protects no caller there. What it does do is turn a value the
+    engine sent empty on purpose into an HTTP 422 before the workflow starts: GitHub reads an
+    empty value for a required `workflow_dispatch` input as "not provided". Every
+    `shipmate unlock` dispatch failed that way while the wrapper still declared the plan-run
+    input the engine has since retired, because unlock applies no plan and so carried no run id.
+    The engine validates instead, where the verb is known. `verb` is the one required input: one
+    schema serves four verbs, every body `actions/dispatch` sends carries a verb, and a run with
+    none has no job to route to.
 
-    Keyed by the fence's own workflow `name:`, not by the page alone: two wrappers on one page
-    declare a `pr_number`, and without the name an exact requiredness swap between them sorts to
-    the same vector and stays green.
+    Keyed by the fence's own workflow `name:` as well as the page, so that a second documented
+    wrapper cannot swap requiredness with this one and sort to the same vector.
+
+    `type` and `options` are in the vector because the routing depends on them and nothing
+    else reads them: drop `unlock` from the choice list and GitHub answers HTTP 422 to every
+    `shipmate unlock` dispatch, with the `unlock` job still sitting in the file.
 
     Whole-vector comparison against a hand-written constant, for the reason
     `docs/development.md` §Guard tests must be able to fail gives: a "no input is required"
@@ -342,19 +366,35 @@ def test_the_documented_wrapper_inputs_are_exactly_these():
     Out of reach: a fence showing an input block as a fragment, with no `on:` above it, of which
     `docs/upgrading.md`'s migration snippet is one. Those are illustrative; the copyable wrapper
     in `getting-started.md` is what consumers paste, and it is what this pins.
+
+    Mutations: drop `unlock` from the fence's `options:` list; swap `verb` to
+    `required: false`.
     """
     found = sorted(
         (page.relative_to(ENGINE).as_posix(), doc.get("name"), name, *shape)
         for page, _, body in _FENCES
         for doc in [yaml.safe_load(body)]
         for name, spec in _dispatch_inputs(doc)
-        for shape in [(spec.get("required"), spec.get("default"))]
+        for shape in [
+            (
+                spec.get("required"),
+                spec.get("default"),
+                spec.get("type"),
+                tuple(spec.get("options") or ()),
+            )
+        ]
     )
     assert found == [
-        ("docs/getting-started.md", "shipmate · apply", "environment", False, ""),
-        ("docs/getting-started.md", "shipmate · apply", "pr_number", False, ""),
-        ("docs/getting-started.md", "shipmate · apply", "ref", False, ""),
-        ("docs/getting-started.md", "shipmate · plan", "pr_number", True, None),
-        ("docs/getting-started.md", "shipmate · unlock", "environment", False, ""),
-        ("docs/getting-started.md", "shipmate · unlock", "ref", False, ""),
+        ("docs/getting-started.md", "shipmate", "environment", False, "", None, ()),
+        ("docs/getting-started.md", "shipmate", "pr_number", False, "", None, ()),
+        ("docs/getting-started.md", "shipmate", "ref", False, "", None, ()),
+        (
+            "docs/getting-started.md",
+            "shipmate",
+            "verb",
+            True,
+            None,
+            "choice",
+            ("plan", "apply", "unlock", "drift"),
+        ),
     ], f"documented workflow_dispatch inputs changed: {found}"

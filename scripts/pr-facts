@@ -141,8 +141,9 @@ def main():
             raise SystemExit(
                 "::error::this run has neither a pull request nor a pr_number input, so there "
                 "is nothing to plan. A pull-request event supplies the first and a dispatched "
-                "plan the second — declare a `pr_number` input on the plan workflow's "
-                "workflow_dispatch trigger (see `docs/getting-started.md`)."
+                "plan the second — declare a `pr_number` input under "
+                "`.github/workflows/shipmate.yml`'s `workflow_dispatch` trigger, and dispatch "
+                "with `verb: plan` (see `docs/getting-started.md`)."
             )
         facts = from_api(number, os.environ.get("GITHUB_REPOSITORY", ""))
     with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
