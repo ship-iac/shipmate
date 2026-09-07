@@ -166,21 +166,16 @@ runs. Adding the new file, deleting the six and bumping every pin land in **one
 commit**. `dev/repin_consumer.py` rewrites pins in files that already exist, so
 the new file and the deletions are by hand.
 
-**Either half alone breaks the repository, in a different place.** New pin
-without the file: the engine's `build-matrix` refuses a checkout that carries
-no `.github/workflows/shipmate.yml` — the one path the consumer's workflow may
-live at — so `detect` fails, `summary` writes a red `shipmate / gate` reading
-`change detection did not succeed (failure) — fix the shipmate / detect job
-before merging`, and the refusal itself is the `::error::` annotation on
-`detect`. A commented verb does not dispatch either: `actions/dispatch` now
-posts to `shipmate.yml`, which is not there, so it prints the missing-file hint
-naming this section and comments that the command was authorized but no run
-started. The file without the new pin fails in the same two places for the
-opposite reason: the pinned engine is still looking for
-`.github/workflows/plan.yml`, which the commit deleted, so every pull request
-draws that same red gate, and the pinned `actions/dispatch` posts to the
-per-verb file the commit deleted, gets a 404, and comments the same refusal —
-with the reason in that run's log either way, never in the comment.
+**Either half alone breaks the repository, in the same two places.** Both
+half-states draw the same red `shipmate / gate`, reading `change detection did
+not succeed (failure) — fix the shipmate / detect job before merging`, with the
+refusal itself as the `::error::` annotation on `detect`. Both leave the reason
+in the failing run's log, never in the pull-request comment.
+
+| Half-state | Plan path | Comment path |
+| --- | --- | --- |
+| New pin, no file | `build-matrix` refuses a checkout carrying no `.github/workflows/shipmate.yml`, the one path the consumer's workflow may live at, so `detect` fails | `actions/dispatch` posts to `shipmate.yml`, which is absent: it prints the missing-file hint naming this section and comments that the command was authorized but no run started |
+| File, old pin | the pinned engine still looks for `.github/workflows/plan.yml`, which the commit deleted, so every pull request fails `detect` | the pinned `actions/dispatch` posts to the per-verb file the commit deleted, gets a 404, and comments the same refusal |
 
 **The migration pull request cannot be gated.** It is planned by the *old*
 `plan.yml` on the default branch at the *old* pin, whose `build-matrix` refuses

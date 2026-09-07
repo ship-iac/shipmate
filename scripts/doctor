@@ -1658,15 +1658,14 @@ _DISPATCH_INPUTS = ("verb", "environment", "ref", "pr_number")
 # One selector per input from one template: two spellings of "is this input declared" disagree
 # eventually.
 _INPUT_KEYS = {name: _input_key(name) for name in _DISPATCH_INPUTS}
-#: The whole option list `actions/dispatch` and the `drift` job between them can send. Compared
-#: as a whole value, in order: a list missing `unlock` refuses that verb at the form and at the
-#: API, and one carrying an extra option offers a verb no `if:` selects. Compared as parsed
-#: options rather than as text, so `[plan,apply,unlock,drift]` — the same YAML sequence — is not
-#: reported and then told to write what it already means. KNOWN GAP: only the
-#: flow form is recognised, so a block-style `options:` is reported as differing — the safe
-#: direction, and the published file writes the flow form. Read from `verb`'s own block
-#: (`_input_block`), never the first `options:` in the trigger: a consumer's own input
-#: declared above `verb` would otherwise become the list this compares.
+#: The whole option list `actions/dispatch` and the `drift` job between them can send, compared
+#: in order and as parsed options: a list missing `unlock` refuses that verb, one carrying an
+#: extra offers a verb no `if:` selects, and a text comparison would report
+#: `[plan,apply,unlock,drift]` — the same sequence — and tell the consumer to write what their
+#: file already means. Read from `verb`'s own block (`_input_block`), never the first `options:`
+#: in the trigger, or a consumer's own input declared above `verb` becomes the list compared.
+#: KNOWN GAP: the flow form only, so a block-style `options:` reports as differing — the safe
+#: direction, and the published file writes the flow form.
 _VERB_OPTION_LIST = ["plan", "apply", "unlock", "drift"]
 #: The same list as the findings render it. Derived, so there is one hand-written copy.
 _VERB_OPTIONS = f"[{', '.join(_VERB_OPTION_LIST)}]"
@@ -1894,9 +1893,10 @@ def _dispatch_wiring_finding(text, name):
 #: The whole `if:` of each job of `shipmate.yml`, keyed by the engine reusable workflow it
 #: calls. The consumer owns these seven expressions and `docs/getting-started.md` publishes
 #: them; a wrong one routes a verb nowhere and its dispatched run completes with every job
-#: skipped, which reads as success everywhere. Compared whole, normalised only for an
-#: enclosing quote pair, the optional `${{ }}` wrapper and whitespace: a subset check would bless
-#: `github.event_name == 'workflow_dispatch'` alone, which sends every verb to every job.
+#: skipped, which reads as success everywhere. Compared whole — normalised only for an
+#: enclosing quote pair, the optional `${{ }}` wrapper and whitespace — because a subset check
+#: would bless `github.event_name == 'workflow_dispatch'` alone, which sends every verb to
+#: every job.
 ROUTING_IFS = {
     "plan.yml": (
         "github.event_name == 'pull_request_target' || "

@@ -19,9 +19,8 @@ MATRIX_LIMIT = 256
 
 #: Where the consumer's workflow file must live. Three surfaces match this filename
 #: literally: `shipmate doctor` keys its fork-trigger exemption and its shim probes on it,
-#: `actions/dispatch` sends every commented verb to it by name, choosing the job with the
-#: `verb` it puts in the body, and `scripts/onboard` renders it under this name from its
-#: `SHIMS` table. No plan-run lookup does — each reads a cell's own apply check.
+#: `actions/dispatch` sends every commented verb to it, and `scripts/onboard` renders it
+#: under this name. No plan-run lookup does — each reads a cell's own apply check.
 PLAN_WORKFLOW = ".github/workflows/shipmate.yml"
 
 #: Stack paths a reader would take for an engine artifact. Neither can collide any more: a plan

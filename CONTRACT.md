@@ -1087,10 +1087,9 @@ issues) is created by a job bound to that fixed GitHub Environment
 (`docs/github-app.md` §Key-exposure boundary), each running at a ref that
 satisfies its default-branch-only policy for a different reason.
 
-**The calling job's name is a contract literal.** Three jobs carry
-`name: shipmate` — `plan`, `comment-ops` and `drift` — and `deploy` carries
-`name: post-merge`; the other three carry no `name:` and display as their
-job id.
+**The calling job's name is a contract literal.** `plan`, `comment-ops` and
+`drift` carry `name: shipmate`; `deploy` carries `name: post-merge`; the other
+three carry no `name:` and display as their job id.
 GitHub names a called workflow's check runs `<caller job> / <callee job>`, so
 only a plan job named `shipmate` produces `shipmate / <stack> / <env>` plan
 cells and the `shipmate / summary`, `shipmate / facts` and `shipmate / detect`
@@ -1127,10 +1126,9 @@ the workflow it calls** — for the `plan` job, `contents: read`,
 jobs. A called workflow's permissions are capped at each `uses:` boundary, so a
 caller that grants less kills the run at startup: no job, no log, no annotation,
 and no `shipmate / gate`. Fail-closed, since the pull request cannot merge
-without the gate, but there is nothing on the run page to say why, and no job
-inside the callee starts either. The file's top-level `permissions: {}` grants
-nothing to fall back on, which is the point: a job that loses its block gets
-nothing rather than everything the file granted.
+without the gate, but nothing on the run page says why. The file's top-level
+`permissions: {}` grants nothing to fall back on, which is the point: a job
+that loses its block gets nothing rather than everything the file granted.
 `scripts/tests/test_docs_yaml_parses.py` compares each published calling job's
 block against the union its callee requests. Copy the reference file whole
 rather than trimming a `permissions:` block.

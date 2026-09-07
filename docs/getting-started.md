@@ -377,14 +377,16 @@ jobs:
 ```
 
 **The `permissions:` block on each calling job is not optional.** A called
-workflow's permissions are capped at the `uses:` boundary, so each block above has
-to grant every scope the callee's own jobs request. Grant less and the run
-dies at startup — no job, no log, no annotation and no `shipmate / gate`. That is
-fail-closed, since nothing merges without the gate, but nothing on the run page
-says why, so copy each block whole rather than trimming it. The top-level
-`permissions: {}` is a floor, not a grant the jobs inherit: a job-level block
-replaces the workflow default rather than intersecting it, so what a job declares
-is what its callee is capped at, and a job that loses its block gets nothing.
+workflow's permissions are capped at the `uses:` boundary, so each block above
+has to grant every scope the callee's own jobs request. Grant less and the run
+dies at startup — no job, no log, no annotation and no `shipmate / gate`. That
+is fail-closed, since nothing merges without the gate, but nothing on the run
+page says why. Copy each block whole rather than trimming it.
+
+The top-level `permissions: {}` is a floor, not a grant the jobs inherit. A
+job-level block replaces the workflow default rather than intersecting it, so
+what a job declares is what its callee is capped at, and a job that loses its
+block gets nothing.
 
 **`verb` is the one required input, and every other is optional with an explicit
 default.** One schema serves four verbs, and GitHub reads an empty value for a
