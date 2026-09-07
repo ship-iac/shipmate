@@ -39,7 +39,7 @@ jobs:
           terramate-version: ${{ vars.TERRAMATE_VERSION }}
           tofu-version: ${{ vars.TOFU_VERSION }}
       - id: m
-        uses: ship-iac/shipmate/actions/build-matrix@44e0692b874f0ac75de1adfac277850fb0288c75
+        uses: ship-iac/shipmate/actions/build-matrix@37d72846f4c77196c3554a86b8cb4124d668762e
         with:
           base-sha: ""
           all-stacks: "true"
