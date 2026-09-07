@@ -11,6 +11,47 @@ section below names the SHA the release tags.
 The version line stays `v0.x` while action inputs, check names, and the comment
 grammar are declared unstable in `README.md`.
 
+## [0.27.0] — 2026-09-07
+
+Tags `<sha>`.
+
+Breaking for every consumer. The six workflow files become one, and the pin and
+the file must move in the same commit. `docs/upgrading.md` section 0.27.0 has
+the migration, the two half-states and why the migration pull request needs an
+administrative bypass.
+
+### Changed
+
+- **One `.github/workflows/shipmate.yml` per consumer, replacing `plan.yml`,
+  `comment-ops.yml`, `deploy.yml`, `drift.yml`, `apply.yml` and `unlock.yml`.**
+  Five triggers and seven jobs, each selected by its own `if:` on the event and,
+  for a dispatch, on a `verb` input. Every job calls the same engine reusable
+  workflow its own file called; no engine reusable workflow changed behaviour.
+  Every check-run name is unchanged — `shipmate / <stack> / <env>`,
+  `apply / <stack> / <env>`, `shipmate / gate` — as are the environments,
+  variables, secrets, and the pin count of seven.
+- **`actions/dispatch` sends every verb to that one filename** and names the
+  verb in the dispatch body; the job whose `if:` matches it runs. The value
+  travels one hop, into a file the consumer owns, and never enters the engine.
+- **`actions/build-matrix` requires `.github/workflows/shipmate.yml`**, the one
+  path `CONTRACT.md` lets the consumer's workflow live at.
+- **`scripts/mirror-checks` copies only check-runs named `shipmate / …`.** The
+  six jobs that do not run complete as `skipped` check-runs in the same suite,
+  and mirroring those onto the pull-request head would read as an apply that
+  was skipped for the commit.
+- **`scripts/onboard` writes the one file** and reports each of the six retired
+  filenames as `differs`, never deleting one.
+
+### Added
+
+- **A routing probe in `shipmate doctor`**, comparing each of the seven `if:`
+  expressions whole against the fence `docs/getting-started.md` publishes. A
+  wrong one routes a verb nowhere and its dispatched run completes with every
+  job skipped, which reads as success everywhere else. The dispatch-wiring
+  probe also now requires all four `workflow_dispatch` inputs, the exact `verb`
+  option list, and no other input declared `required: true` — one that is
+  refuses that verb with HTTP 422 and no run. Fifteen live probes.
+
 ## [0.26.0] — 2026-09-06
 
 Tags `c622ff7`.
