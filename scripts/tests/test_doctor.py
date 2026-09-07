@@ -3181,6 +3181,28 @@ def test_the_dispatch_probe_reports_a_changed_verb_option_list(monkeypatch):
     assert doctor._dispatch_wiring_warnings(_ctx()) == [(doctor.WARNING, _SHORT_OPTIONS_TEXT)]
 
 
+@pytest.mark.parametrize(
+    "options",
+    ["[plan,apply,unlock,drift]", "[ plan, apply, unlock, drift ]", "[plan, apply,  unlock,drift]"],
+)
+def test_the_dispatch_probe_accepts_any_spacing_in_the_option_list(monkeypatch, options):
+    """All three are the same YAML sequence as the fence's, so all three route every verb. A
+    probe that reported them would tell a healthy repository to write what its file already
+    means, and the next finding from this probe would be read as noise too.
+
+    Mutation: compare the whitespace-collapsed `options:` text against `_VERB_OPTIONS`
+    instead of the parsed options against `_VERB_OPTION_LIST`."""
+    assert yaml.safe_load(options) == ["plan", "apply", "unlock", "drift"], (
+        "the fixture must be the same sequence the fence declares, or it proves nothing"
+    )
+    text = _SHIPMATE_WF.replace(
+        "        options: [plan, apply, unlock, drift]\n", f"        options: {options}\n", 1
+    )
+    responses = _fork_responses({"shipmate.yml": text})
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    assert doctor._dispatch_wiring_warnings(_ctx()) == []
+
+
 def test_a_workflow_file_that_calls_no_engine_plan_workflow_is_reported(monkeypatch):
     """The fail-open leg: this file is dispatchable, so the other two findings are
     silent and the run starts — with nothing in it that plans."""

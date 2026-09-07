@@ -1660,12 +1660,16 @@ _DISPATCH_INPUTS = ("verb", "environment", "ref", "pr_number")
 _INPUT_KEYS = {name: _input_key(name) for name in _DISPATCH_INPUTS}
 #: The whole option list `actions/dispatch` and the `drift` job between them can send. Compared
 #: as a whole value, in order: a list missing `unlock` refuses that verb at the form and at the
-#: API, and one carrying an extra option offers a verb no `if:` selects. KNOWN GAP: only the
+#: API, and one carrying an extra option offers a verb no `if:` selects. Compared as parsed
+#: options rather than as text, so `[plan,apply,unlock,drift]` — the same YAML sequence — is not
+#: reported and then told to write what it already means. KNOWN GAP: only the
 #: flow form is recognised, so a block-style `options:` is reported as differing — the safe
 #: direction, and the published file writes the flow form. Read from `verb`'s own block
 #: (`_input_block`), never the first `options:` in the trigger: a consumer's own input
 #: declared above `verb` would otherwise become the list this compares.
-_VERB_OPTIONS = "[plan, apply, unlock, drift]"
+_VERB_OPTION_LIST = ["plan", "apply", "unlock", "drift"]
+#: The same list as the findings render it. Derived, so there is one hand-written copy.
+_VERB_OPTIONS = f"[{', '.join(_VERB_OPTION_LIST)}]"
 _VERB_OPTIONS_KEY = re.compile(r"[\s{,]options[ \t]*:[ \t]*(?P<value>\[[^\]]*\])")
 # One mapping key at the start of a line, for the input names `_declared_inputs` enumerates.
 _INPUT_NAME = re.compile(r"[ \t]*([A-Za-z_][\w-]*)[ \t]*:")
@@ -1786,7 +1790,8 @@ def _dispatch_input_findings(on_text, name):
         )
     verb = _input_block(on_text, "verb")
     found = _VERB_OPTIONS_KEY.search("\n".join(verb)) if verb else None
-    if not found or " ".join(found.group("value").split()) != _VERB_OPTIONS:
+    offered = [o.strip() for o in found.group("value")[1:-1].split(",")] if found else None
+    if offered != _VERB_OPTION_LIST:
         out.append(
             (
                 WARNING,

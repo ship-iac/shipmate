@@ -95,13 +95,18 @@ live probes.
   rejection. Those two
   placements are what the probe reads, so an ordinary `mode:` elsewhere in the
   file, such as an `actions/state` step's, is not reported.
-- **Whether `shipmate.yml` can serve a dispatched plan at all.** That needs the
-  `workflow_dispatch` trigger a commented `shipmate plan` dispatches, the
-  `pr_number` input that dispatch body carries, and the call of the engine's plan
-  workflow. The first two are refused at dispatch time with an HTTP 422 and no run
-  created; the pull request gets a comment saying the dispatch failed and linking
-  the comment-handling run that carries the error.
-  Without the third the dispatch is accepted and the run plans nothing.
+- **Whether `shipmate.yml` can serve a dispatched verb at all.** That needs the
+  `workflow_dispatch` trigger every commented verb dispatches; all four inputs
+  those bodies name (`verb`, `environment`, `ref` and `pr_number`); a `verb`
+  offering the whole option list the file routes, since a missing option is
+  refused at the dispatch form and at the API while an extra one offers a verb no
+  job selects; no input but `verb` declared `required: true`, because a body that
+  leaves one empty is refused whole — so a required input of your own refuses
+  every verb, not just the one it was added for; and the call of the engine's
+  plan workflow. All but the last are refused at dispatch time with an HTTP 422
+  and no run created; the pull request gets a comment saying the dispatch failed
+  and linking the comment-handling run that carries the error.
+  Without the last the dispatch is accepted and the run plans nothing.
 - **Whether each of `shipmate.yml`'s jobs is selected by the `if:` its event
   needs.** One file gates seven jobs, one per engine reusable workflow, and the
   probe compares each job's whole `if:` against the expression that file's
