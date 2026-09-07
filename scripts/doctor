@@ -1642,14 +1642,22 @@ def _mode_input_finding(text, name):
 # The dispatch leg of the consumer's workflow file. NOT line-anchored like `_PLAN_RUN_ID_KEY`,
 # and the polarity is the reason; see `_dispatch_wiring_finding`.
 _DISPATCH_TRIGGER = re.compile(r"[\s{,]workflow_dispatch[ \t]*:")
+
+
+def _input_key(name):
+    """The unanchored selector for one mapping key, `name:`. Unanchored for
+    `_DISPATCH_TRIGGER`'s reason, and escaped because a consumer names their own inputs."""
+    return re.compile(rf"[\s{{,]{re.escape(name)}[ \t]*:")
+
+
 #: Every input `scripts/dispatch-body` can name. An input the file does not declare is
 #: `Unexpected inputs provided` (HTTP 422, no run); one it declares `required: true` that a body
-#: omits is `Required input not provided` (HTTP 422, no run) — which is why the three beside
-#: `verb` must be optional.
+#: omits is `Required input not provided` (HTTP 422, no run) — which is why every input the
+#: file declares beside `verb`, a consumer's own included, must be optional.
 _DISPATCH_INPUTS = ("verb", "environment", "ref", "pr_number")
 # One selector per input from one template: two spellings of "is this input declared" disagree
-# eventually. Unanchored for `_DISPATCH_TRIGGER`'s reason.
-_INPUT_KEYS = {name: re.compile(rf"[\s{{,]{name}[ \t]*:") for name in _DISPATCH_INPUTS}
+# eventually.
+_INPUT_KEYS = {name: _input_key(name) for name in _DISPATCH_INPUTS}
 #: The whole option list `actions/dispatch` and the `drift` job between them can send. Compared
 #: as a whole value, in order: a list missing `unlock` refuses that verb at the form and at the
 #: API, and one carrying an extra option offers a verb no `if:` selects. KNOWN GAP: only the
@@ -1659,6 +1667,8 @@ _INPUT_KEYS = {name: re.compile(rf"[\s{{,]{name}[ \t]*:") for name in _DISPATCH_
 #: declared above `verb` would otherwise become the list this compares.
 _VERB_OPTIONS = "[plan, apply, unlock, drift]"
 _VERB_OPTIONS_KEY = re.compile(r"[\s{,]options[ \t]*:[ \t]*(?P<value>\[[^\]]*\])")
+# One mapping key at the start of a line, for the input names `_declared_inputs` enumerates.
+_INPUT_NAME = re.compile(r"[ \t]*([A-Za-z_][\w-]*)[ \t]*:")
 _REQUIRED_TRUE = re.compile(r"""[\s{,]required[ \t]*:[ \t]*["']?true["']?""", re.I)
 # Same degrade posture and reason as PIN_UNREADABLE.
 DISPATCH_WIRING_UNREADABLE = (
@@ -1710,7 +1720,7 @@ def _input_block(on_text, input_name):
     block style, and either way the finding names a remedy that applies to the file."""
     lines = on_text.splitlines()
     for i, line in enumerate(lines):
-        m = _INPUT_KEYS[input_name].search(line)
+        m = _input_key(input_name).search(line)
         if not m:
             continue
         depth = len(line) - len(line.lstrip())
@@ -1723,13 +1733,35 @@ def _input_block(on_text, input_name):
     return None
 
 
+def _declared_inputs(on_text):
+    """The input names the trigger declares, in file order — a consumer's own beside the four
+    `actions/dispatch` sends.
+
+    The keys of `inputs:`' own block (`_input_block`) at its shallowest indent, so a nested
+    `required:` or `options:` is not read as a name. KNOWN GAP: a wholly inline `on:` mapping
+    puts every key on one line and yields none here, which is why `_required_inputs` adds the
+    four back by name.
+    """
+    body = _input_block(on_text, "inputs") or []
+    keys = [(len(b) - len(b.lstrip()), m) for b in body[1:] if (m := _INPUT_NAME.match(b))]
+    depth = min((d for d, _ in keys), default=0)
+    return [m.group(1) for d, m in keys if d == depth]
+
+
 def _required_inputs(on_text):
-    """The `_DISPATCH_INPUTS` other than `verb` that the `on:` block declares `required:
-    true`, block-style or in a flow mapping on the key's own line."""
+    """Every input the `on:` block declares other than `verb` that it also declares `required:
+    true`, block-style or in a flow mapping on the key's own line.
+
+    Not only `_DISPATCH_INPUTS`: `docs/drift.md` invites a consumer to declare a fifth input
+    for an ad-hoc sweep, and a required one of those refuses every commented verb the same way
+    the retired plan-run input did.
+    """
+    names = dict.fromkeys([*_declared_inputs(on_text), *_DISPATCH_INPUTS[1:]])
     return [
         name
-        for name in _DISPATCH_INPUTS[1:]
-        if any(_REQUIRED_TRUE.search(f" {b}") for b in _input_block(on_text, name) or [])
+        for name in names
+        if name != "verb"
+        and any(_REQUIRED_TRUE.search(f" {b}") for b in _input_block(on_text, name) or [])
     ]
 
 
@@ -1771,11 +1803,11 @@ def _dispatch_input_findings(on_text, name):
         out.append(
             (
                 WARNING,
-                f"`{name}` declares the {_and_list(required)} input `required: true` — every "
-                "dispatch body omits at least one of these, and GitHub reads an omitted or "
-                "empty value for a required input as not provided: `Required input not "
-                "provided`, no run created, so one required input refuses a whole verb. `verb` "
-                "is the only required one; give the rest `required: false` and `default: ''` "
+                f"`{name}` declares the {_and_list(required)} input `required: true` — at "
+                "least one dispatch body leaves it empty, and GitHub reads an omitted or empty "
+                "value for a required input as not provided: `Required input not provided`, "
+                "HTTP 422 and no run, so one required input refuses a whole verb. `verb` is the "
+                "only required one; give the rest `required: false` and `default: ''` "
                 "(docs/getting-started.md).",
             )
         )
@@ -2165,7 +2197,11 @@ def latest_check_ids(lines, app_id=""):
     authors, App-authored rows outside the `apply / ` namespace excluded.
     Ranks by `started_at`, not check-run `id` (unlike
     apply-gate.latest_by_name): a queued run has no `started_at` and no
-    annotations to harvest, so ranking it BELOW a completed run is wanted."""
+    annotations to harvest, so ranking it BELOW a completed run is wanted.
+
+    Carries the consumer file's skipped router jobs too — they are
+    `github-actions`-authored, so about five rows per report cost an annotation
+    fetch that returns nothing."""
     newest = {}
     for line in lines:
         run = _parse_check_run(line, app_id)
