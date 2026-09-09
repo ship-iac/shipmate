@@ -29,8 +29,9 @@ import shutil
 import subprocess
 
 import yaml
-from _shipmate import _load as load_script  # noqa: F401 -- re-exported for the test modules
+from _shipmate import _load
 
+load_script = _load
 _SCRIPTS = pathlib.Path(__file__).resolve().parents[1]
 
 #: The engine repo root, and the trees the source-derived guards read.
