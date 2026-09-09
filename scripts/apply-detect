@@ -25,25 +25,14 @@ definition in the same file. The stronger pin on this `main` stays the
 behavioural test_a_forged_completed_check_does_not_mark_a_cell_applied.
 """
 
-import importlib.util
 import json
 import os
-import pathlib
 import re
 from graphlib import CycleError
-from importlib.machinery import SourceFileLoader
 
-_D = pathlib.Path(__file__).resolve().parent
+from _shipmate import _load
 
 _SHA_RE = re.compile(r"^[0-9a-f]{40}$")
-
-
-def _load(fname):
-    loader = SourceFileLoader(fname.replace("-", "_"), str(_D / fname))
-    spec = importlib.util.spec_from_loader(loader.name, loader)
-    mod = importlib.util.module_from_spec(spec)
-    loader.exec_module(mod)
-    return mod
 
 
 bm = _load("build-matrix")

@@ -32,14 +32,14 @@ passed in: the set of environments is a property of the stacks.
 """
 
 import argparse
-import importlib.util
 import json
 import pathlib
 import re
 import subprocess
 import sys
 import textwrap
-from importlib.machinery import SourceFileLoader
+
+from _shipmate import _load
 
 ENGINE_ENV = "shipmate-engine"
 GATE = "shipmate / gate"
@@ -63,16 +63,6 @@ _APP_ID_RE = re.compile(r"[0-9]+")
 #: are admitted: the value is a fragment of an artifact name, supplied by the operator
 #: running this.
 _SUFFIX_RE = re.compile(r"[A-Za-z0-9._/-]*")
-
-_D = pathlib.Path(__file__).resolve().parent
-
-
-def _load(fname):
-    loader = SourceFileLoader(fname.replace("-", "_"), str(_D / fname))
-    spec = importlib.util.spec_from_loader(loader.name, loader)
-    mod = importlib.util.module_from_spec(spec)
-    loader.exec_module(mod)
-    return mod
 
 
 def _scrub(text, secrets):

@@ -13,8 +13,8 @@ is only as good as the regex's coverage of the thing it counts:
 
 * ``REF`` sees every internal ``ship-iac/shipmate/<path>@<sha>`` self-reference.
 * ``SCRIPT_REF`` sees every action.yml to script invocation.
-* ``LOAD_REF`` sees every script to script cross-load, as a literal
-  ``_load("<name>")`` call.
+* ``LOAD_REF`` sees literal sibling-load calls; ``SHARED_LOADER_IMPORT`` sees
+  the shared loader itself.
 
 A reference of any kind that its regex cannot see silently shrinks the checked surface: the
 change ships, the guard reports pins current, and consumers pinned to that SHA run the old code.
@@ -31,11 +31,36 @@ import tokenize
 
 import pinrefs
 
+
+def test_shared_loader_returns_fresh_sibling_modules():
+    from _shipmate import _load
+
+    first, second = _load("apply-detect"), _load("apply-detect")
+    assert first is not second
+    assert first.bm is not second.bm
+    assert first.bm._run.__module__ == "build_matrix"
+
+
+def test_shared_loader_is_in_the_transitive_pin_dependencies():
+    sources = {
+        "entry": 'from _shipmate import _load\nbm = _load("build-matrix")\n',
+        "build-matrix": "import json\n",
+        "_shipmate.py": "import importlib.util\n",
+    }
+    assert pinrefs.script_closure({"entry"}, sources.get) == {
+        "entry",
+        "build-matrix",
+        "_shipmate.py",
+    }
+    assert pinrefs.load_refs("# from _shipmate import _load\n") == set()
+
+
 #: Cross-loading helpers as of 2026-07-29. Named explicitly so the walk cannot go vacuously
 #: green: if `scripts/` is reorganised -- helpers moved into a subdirectory, pinrefs.ROOT
 #: mis-derived -- the loop would silently iterate nothing and every assert would pass without
 #: checking a single cross-load.
 KNOWN_CROSS_LOADERS = {
+    "_shipmate.py",
     "apply-all-detect",
     "apply-comment",
     "apply-detect",
@@ -47,7 +72,7 @@ KNOWN_CROSS_LOADERS = {
 }
 
 #: Module-loading machinery a helper script may not reach for. The sanctioned shim is
-#: SourceFileLoader inside a local `def _load`, which LOAD_REF can see; every one of these loads
+#: SourceFileLoader inside `def _load` in the shared loader; every one of these loads
 #: a sibling by a route neither derivation regex reads. `importlib.util.spec_from_loader` and
 #: `module_from_spec` are absent on purpose: those are what the sanctioned shim is built from.
 FORBIDDEN_LOADERS = (
@@ -61,15 +86,12 @@ FORBIDDEN_LOADERS = (
 
 
 def _helper_scripts():
-    """The extension-less helper scripts directly under ``scripts/``.
-
-    Extension-less is the filter, not "every file": these run as GHA steps and carry no suffix,
-    whereas anything else there -- ``.gitkeep``, a fixture, an asset -- is not a helper and need
-    not even be UTF-8 text.
-    """
+    """Extension-less helper scripts and their shared Python loader."""
     d = pinrefs.ROOT / "scripts"
     return sorted(
-        p for p in d.iterdir() if p.is_file() and not p.suffix and not p.name.startswith(".")
+        p
+        for p in d.iterdir()
+        if p.is_file() and (not p.suffix or p.name == "_shipmate.py") and not p.name.startswith(".")
     )
 
 
@@ -170,7 +192,7 @@ def test_every_cross_load_in_a_script_is_visible_to_load_ref():
     one happened:
 
     1. the helper reached under another name -- ``_L = _load``, a ``partial``, a dispatch table --
-       caught by requiring every ``_load`` code token to be the definition or a direct call;
+       caught by requiring every ``_load`` code token to be its import, definition or direct call;
     2. a call whose argument is not a plain string literal, a variable or an f-string, caught by
        comparing call sites against LOAD_REF's matches;
     3. a loader built outside ``_load`` at all, caught by tying the construction count to the
@@ -183,7 +205,18 @@ def test_every_cross_load_in_a_script_is_visible_to_load_ref():
 
         mentions = [i for i, t in enumerate(toks) if _is_name(t, "_load")]
         called = [i for i in mentions if i + 1 < len(toks) and _is_op(toks[i + 1], "(")]
-        assert len(mentions) == len(called), (
+        imported = [
+            i
+            for i in mentions
+            if i >= 3 and [t.string for t in toks[i - 3 : i]] == ["from", "_shipmate", "import"]
+        ]
+        shared = [t for t in toks if _is_name(t, "_shipmate")]
+        assert (
+            len(shared)
+            == len(imported)
+            == len(pinrefs.SHARED_LOADER_IMPORT.findall(pinrefs.strip_comments(text)))
+        ), f"{rel}: shared loader imports must use `from _shipmate import _load`"
+        assert len(mentions) == len(called) + len(imported), (
             f"{rel}: {len(mentions)} _load mention(s) in code but only {len(called)} are "
             "direct calls -- the helper is being passed around under another name, and a "
             "cross-load through that name is invisible to the derivation"
@@ -226,5 +259,5 @@ def test_every_cross_load_in_a_script_is_visible_to_load_ref():
             hits = [t for t in toks if _is_name(t, name)]
             assert not hits, (
                 f"{rel}: uses {name} (line {hits[0].start[0]}) -- loading a sibling this way "
-                "is invisible to both derivation regexes; cross-load via the local _load shim"
+                "is invisible to the derivation; cross-load via the shared _load shim"
             )

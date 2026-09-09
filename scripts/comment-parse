@@ -31,12 +31,11 @@ HELP_MARKER = "<!-- shipmate:help -->"
 
 # Single source of truth for the grammar, the help comment and the reject hint: adding a verb is
 # a one-line change here. `args` is the arg shape ("" = the verb takes none, and supplying one
-# is an error, not silently ignored). `route` is the value actions/comment-ops branches on.
+# is an error, not silently ignored). A valid verb becomes the route actions/comment-ops uses.
 VERBS = {
     "apply": {
         "status": ACTIVE,
         "args": "[env]",
-        "route": "apply",
         "desc": (
             "Apply the reviewed plan for one environment, or every non-explicit "
             "environment when the environment is omitted."
@@ -45,7 +44,6 @@ VERBS = {
     "doctor": {
         "status": ACTIVE,
         "args": "",
-        "route": "doctor",
         "desc": (
             "Report setup problems: repository settings, environments, App "
             "permissions, and warnings from this commit's workflow runs."
@@ -54,13 +52,11 @@ VERBS = {
     "help": {
         "status": ACTIVE,
         "args": "",
-        "route": "help",
         "desc": "Show this command list.",
     },
     "plan": {
         "status": ACTIVE,
         "args": "",
-        "route": "plan",
         "desc": (
             "Plan this pull request's changed stacks on demand — the same plan a push "
             "produces, including on a draft. Re-planning is safe and replaces the plan of "
@@ -70,13 +66,11 @@ VERBS = {
     "destroy": {
         "status": RESERVED,
         "args": "[env]",
-        "route": None,
         "desc": "Destroy an environment's stacks — not yet implemented.",
     },
     "unlock": {
         "status": ACTIVE,
         "args": "<env>",
-        "route": "unlock",
         "desc": (
             "Release a state lock stranded by a cancelled or killed apply, so "
             "the environment's stacks can apply again. Does not re-apply, and "
@@ -151,7 +145,7 @@ def parse(body):
     if error is not None:
         result["error"] = error
         return result
-    result["route"] = VERBS[verb]["route"]
+    result["route"] = verb
     result["valid"] = True
     return result
 

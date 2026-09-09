@@ -31,10 +31,8 @@ of the session.
 Tests of the ``dev/`` tooling do not use this. Those are real ``.py`` modules on the pytest
 ``pythonpath`` (``pyproject.toml``), imported by name.
 
-The production scripts keep their own local ``_load`` copies on purpose: the internal-pin guard
-derives each pinned action's transitive script set by matching the literal ``_load("<name>")``
-call pattern (``dev/pinrefs.py``), and a shared module imported rather than named in an
-``action.yml`` would be a dependency no part of that derivation can see.
+Production uses ``scripts/_shipmate.py``; the internal-pin guard tracks both its import
+and literal sibling-load calls. This test loader also loads historical scripts independently.
 """
 
 import copy

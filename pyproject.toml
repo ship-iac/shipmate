@@ -21,7 +21,8 @@ package = false
 # behaviour rather than a declared invariant, and it stops holding the moment
 # anyone adds an __init__.py or passes --import-mode=importlib. Declaring it
 # keeps 20 test modules from failing collection on a config change elsewhere.
-pythonpath = ["dev", "scripts/tests"]
+# scripts/ supplies the runtime loader when a test loads a script by file path.
+pythonpath = ["dev", "scripts", "scripts/tests"]
 
 [dependency-groups]
 dev = [

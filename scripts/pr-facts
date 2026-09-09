@@ -20,22 +20,10 @@ this script emits, and a caller holding `actions: write` must not be able to
 state it.
 """
 
-import importlib.util
 import os
-import pathlib
 import re
-from importlib.machinery import SourceFileLoader
 
-_D = pathlib.Path(__file__).resolve().parent
-
-
-def _load(fname):
-    loader = SourceFileLoader(fname.replace("-", "_"), str(_D / fname))
-    spec = importlib.util.spec_from_loader(loader.name, loader)
-    mod = importlib.util.module_from_spec(spec)
-    loader.exec_module(mod)
-    return mod
-
+from _shipmate import _load
 
 bm = _load("build-matrix")
 
