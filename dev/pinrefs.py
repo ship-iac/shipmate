@@ -256,7 +256,9 @@ def strip_comments(script_text):
 
 
 def load_refs(script_text):
-    """Sibling loads and the shared loader import, including historical local loaders.
+    """Names a script depends on: each literal ``_load("<name>")`` call, whether made through
+    the shared loader or a historical per-script one, plus ``_shipmate.py`` when the shared
+    loader is imported. A ``def _load`` is not a dependency and never matches.
 
     Comments are stripped first: a commented-out or merely documented
     ``_load("waves")`` would put a phantom dependency into the closure, diffed

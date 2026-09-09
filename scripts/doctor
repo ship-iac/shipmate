@@ -1323,8 +1323,14 @@ def _job_key(region, key):
     return values[0] if values else None
 
 
-def _shim_warnings(ctx, per_file, no_commit, unreadable):
-    """Read the consumer file independently for each probe, preserving its failure policy."""
+def _shipmate_yml_warnings(ctx, per_file, no_commit, unreadable):
+    """Findings from `per_file(text, name)` over the consumer's `shipmate.yml` alone, read at
+    the commit under examination (`_contents_ref`); `[no_commit]` when there is none.
+
+    Exact name: `shipmate.yml` is the file `actions/dispatch` targets for every verb and the
+    one whose cells produce the linked checks. The filter lives here rather than in each
+    `_finding` function so that a direct call of one with another file's name still reports —
+    silence there would read as a false positive that is not one."""
     ref = _contents_ref(ctx)
     if ref is None:
         return [no_commit]
@@ -1350,7 +1356,9 @@ def _shim_job_name_warnings(ctx):
     same way and for the same reason as the pin, fork-trigger and dispatch
     probes (`_contents_ref`): a pull request that renames the job must not still
     be reported for the old name."""
-    return _shim_warnings(ctx, _shim_job_name_finding, SHIM_JOB_NO_COMMIT, SHIM_JOB_UNREADABLE)
+    return _shipmate_yml_warnings(
+        ctx, _shim_job_name_finding, SHIM_JOB_NO_COMMIT, SHIM_JOB_UNREADABLE
+    )
 
 
 def _shim_job_name_finding(text, name):
@@ -1417,17 +1425,16 @@ def _plan_run_id_warnings(ctx):
     probes (`_contents_ref`): a pull request that *removes* the input must not
     still be reported for it.
 
-    Judged by exact name, like the shim-job-name exemption above: the file
-    shipped in docs/getting-started.md is `shipmate.yml`, and it is the file that
-    calls the engine's reusable apply workflows. The filter lives in `_shim_warnings`
-    rather than in `_plan_run_id_finding` so that a direct call of that
-    function with another file's name still reports — a direct call bypasses the
-    exemption, and silence there reads as a false positive that is not one.
+    Judged by exact name (`_shipmate_yml_warnings`): the file shipped in
+    docs/getting-started.md is `shipmate.yml`, and it is the file that calls the
+    engine's reusable apply workflows.
 
     The forwarded count `_plan_run_id_finding` derives now spans all seven of that file's
     jobs rather than one file's single job, which widens it: a `plan_run_id` forwarded from
     any of them is a finding, and every one of them is a real breakage."""
-    return _shim_warnings(ctx, _plan_run_id_finding, PLAN_RUN_ID_NO_COMMIT, PLAN_RUN_ID_UNREADABLE)
+    return _shipmate_yml_warnings(
+        ctx, _plan_run_id_finding, PLAN_RUN_ID_NO_COMMIT, PLAN_RUN_ID_UNREADABLE
+    )
 
 
 def _plan_run_id_finding(text, name):
@@ -1516,7 +1523,9 @@ def _mode_input_warnings(ctx):
     same way and for the same reason as the pin, fork-trigger, shim-job-name and
     `plan_run_id` probes (`_contents_ref`): a pull request that *removes* the
     input must not still be reported for it."""
-    return _shim_warnings(ctx, _mode_input_finding, MODE_INPUT_NO_COMMIT, MODE_INPUT_UNREADABLE)
+    return _shipmate_yml_warnings(
+        ctx, _mode_input_finding, MODE_INPUT_NO_COMMIT, MODE_INPUT_UNREADABLE
+    )
 
 
 def _apply_call_regions(lines):
@@ -1661,7 +1670,7 @@ def _dispatch_wiring_warnings(ctx):
     same way and for the same reason as the pin, fork-trigger and shim-job-name
     probes (`_contents_ref`): a pull request that *adds* the trigger must not
     still be reported for lacking it."""
-    return _shim_warnings(
+    return _shipmate_yml_warnings(
         ctx, _dispatch_wiring_finding, DISPATCH_WIRING_NO_COMMIT, DISPATCH_WIRING_UNREADABLE
     )
 
@@ -1963,7 +1972,7 @@ def _routing_warnings(ctx):
     Reads the consumer's workflow files at the commit under examination, the same way and for
     the same reason as the pin, fork-trigger, shim-job-name and dispatch probes
     (`_contents_ref`): a pull request that FIXES an expression must not still be reported."""
-    return _shim_warnings(ctx, _routing_finding, ROUTING_NO_COMMIT, ROUTING_UNREADABLE)
+    return _shipmate_yml_warnings(ctx, _routing_finding, ROUTING_NO_COMMIT, ROUTING_UNREADABLE)
 
 
 def _one_line(s, limit=200):

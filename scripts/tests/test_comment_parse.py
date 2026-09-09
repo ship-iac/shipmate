@@ -68,6 +68,7 @@ def test_plan_rejects_an_env_with_a_tag_filter():
 def test_reserved_verb_destroy_is_rejected():
     r = cp.parse("shipmate destroy dev-eu")
     assert r["is_command"] and not r["valid"] and "reserved" in r["error"]
+    assert r["route"] is None
 
 
 def test_unknown_verb_is_rejected():

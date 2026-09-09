@@ -55,10 +55,10 @@ def test_shared_loader_is_in_the_transitive_pin_dependencies():
     assert pinrefs.load_refs("# from _shipmate import _load\n") == set()
 
 
-#: Cross-loading helpers as of 2026-07-29. Named explicitly so the walk cannot go vacuously
-#: green: if `scripts/` is reorganised -- helpers moved into a subdirectory, pinrefs.ROOT
-#: mis-derived -- the loop would silently iterate nothing and every assert would pass without
-#: checking a single cross-load.
+#: Every cross-loading helper plus the shared loader they import. Named explicitly so the walk
+#: cannot go vacuously green: if `scripts/` is reorganised -- helpers moved into a subdirectory,
+#: pinrefs.ROOT mis-derived -- the loop would silently iterate nothing and every assert would
+#: pass without checking a single cross-load.
 KNOWN_CROSS_LOADERS = {
     "_shipmate.py",
     "apply-all-detect",
@@ -73,7 +73,7 @@ KNOWN_CROSS_LOADERS = {
 
 #: Module-loading machinery a helper script may not reach for. The sanctioned shim is
 #: SourceFileLoader inside `def _load` in the shared loader; every one of these loads
-#: a sibling by a route neither derivation regex reads. `importlib.util.spec_from_loader` and
+#: a sibling by a route no derivation regex reads. `importlib.util.spec_from_loader` and
 #: `module_from_spec` are absent on purpose: those are what the sanctioned shim is built from.
 FORBIDDEN_LOADERS = (
     "spec_from_file_location",
@@ -86,13 +86,25 @@ FORBIDDEN_LOADERS = (
 
 
 def _helper_scripts():
-    """Extension-less helper scripts and their shared Python loader."""
+    """The extension-less helper scripts and the ``.py`` module(s) directly under ``scripts/``.
+
+    Suffix is the filter, not "every file": helpers run as GHA steps and carry no suffix, and
+    anything else there -- ``.gitkeep``, a fixture, an asset -- is not Python source and need
+    not even be UTF-8 text.
+    """
     d = pinrefs.ROOT / "scripts"
     return sorted(
         p
         for p in d.iterdir()
-        if p.is_file() and (not p.suffix or p.name == "_shipmate.py") and not p.name.startswith(".")
+        if p.is_file() and p.suffix in ("", ".py") and not p.name.startswith(".")
     )
+
+
+def test_the_shared_loader_is_the_only_python_module_under_scripts():
+    """A second ``.py`` sibling reached by a plain ``import`` is invisible to ``load_refs``,
+    so its changes would never make a pin stale: extend ``SHARED_LOADER_IMPORT`` and
+    ``load_refs`` before adding one. Reddens on ``touch scripts/_x.py``."""
+    assert {p.name for p in (pinrefs.ROOT / "scripts").glob("*.py")} == {"_shipmate.py"}
 
 
 def _code_tokens(text):
@@ -202,6 +214,7 @@ def test_every_cross_load_in_a_script_is_visible_to_load_ref():
         rel = f"scripts/{script.name}"
         text = script.read_text(encoding="utf-8")
         toks = _code_tokens(text)
+        stripped = pinrefs.strip_comments(text)
 
         mentions = [i for i, t in enumerate(toks) if _is_name(t, "_load")]
         called = [i for i in mentions if i + 1 < len(toks) and _is_op(toks[i + 1], "(")]
@@ -212,9 +225,7 @@ def test_every_cross_load_in_a_script_is_visible_to_load_ref():
         ]
         shared = [t for t in toks if _is_name(t, "_shipmate")]
         assert (
-            len(shared)
-            == len(imported)
-            == len(pinrefs.SHARED_LOADER_IMPORT.findall(pinrefs.strip_comments(text)))
+            len(shared) == len(imported) == len(pinrefs.SHARED_LOADER_IMPORT.findall(stripped))
         ), f"{rel}: shared loader imports must use `from _shipmate import _load`"
         assert len(mentions) == len(called) + len(imported), (
             f"{rel}: {len(mentions)} _load mention(s) in code but only {len(called)} are "
@@ -236,7 +247,7 @@ def test_every_cross_load_in_a_script_is_visible_to_load_ref():
         calls = len(called) - len(defs)
         # Compared against the derivation's own view, comments included or not, so this asserts
         # the two agree rather than re-deriving one from the other.
-        matched = len(pinrefs.LOAD_REF.findall(pinrefs.strip_comments(text)))
+        matched = len(pinrefs.LOAD_REF.findall(stripped))
         assert calls == matched, (
             f"{rel}: {calls} _load( call site(s) in code but LOAD_REF matched {matched} -- "
             "the two disagree, so either a call's argument is not a plain string literal "
