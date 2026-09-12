@@ -318,6 +318,26 @@ def test_main_emits_the_dag_shape_notice(monkeypatch, tmp_path, capsys):
     )
 
 
+def test_main_refuses_a_change_deeper_than_max_waves(monkeypatch, tmp_path):
+    """`main` reaches the guarded writer, so a chain too deep for the pre-declared wave jobs
+    refuses instead of emitting wave0..wave7 with the deepest cells dropped. The AST test that
+    used to pin this caller's reach into `write_waves` is gone; nothing else covers it.
+
+    Mutation: pad and write the waves inline in `main` without `wv.guard_max_waves` -- the run
+    writes eight truncated waves and exits 0.
+    """
+    depth = ad.wv.MAX_WAVES + 1
+    stacks = [f"stacks/s{i}" for i in range(depth)]
+    deps = {s: ({stacks[i - 1]} if i else set()) for i, s in enumerate(stacks)}
+    out = _apply_env(monkeypatch, tmp_path)
+    _stub_apply(monkeypatch, deps, [_apply_check(s) for s in stacks])
+
+    with pytest.raises(SystemExit, match="dependency levels"):
+        ad.main()
+
+    assert "wave0=" not in out.read_text(encoding="utf-8")
+
+
 def test_validate_head_sha_rejects_short():
     with pytest.raises(SystemExit):
         ad.validate_head_sha("abc123")

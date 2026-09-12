@@ -6,8 +6,12 @@ Contribution etiquette and licensing: [`CONTRIBUTING.md`](../CONTRIBUTING.md).
 
 - `actions/` — the composite actions consumers reference.
 - `scripts/` — the Python helpers behind those actions. They run as GitHub
-  Actions steps, so they are executable and have no `.py` extension.
-  `scripts/tests/` holds their unit tests.
+  Actions steps, so they are executable and have no `.py` extension. The one
+  exception is `_shipmate.py`, the loader the helpers import to reach each
+  other; it is never a step, and a second `.py` sibling reddens
+  `scripts/tests/test_pin_derivation_premises.py` because `load_refs` would not
+  see it and its changes would never make a pin stale. `scripts/tests/` holds
+  their unit tests.
 - `dev/` — maintainer tooling you run by hand, never from a workflow. Nothing in
   `actions/` or `.github/workflows/` references it and it adds no action input.
   It exists because the engine pins its own actions by commit SHA (see
