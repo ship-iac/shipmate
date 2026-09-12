@@ -92,6 +92,7 @@ def ctx(**over):
         "variables": {},
         "sha": "a" * 40,
         "version": "v0.26.0",
+        "at_org": set(),
     }
     base.update(over)
     return base
@@ -439,7 +440,10 @@ def test_main_calls_every_stage_in_order():
     `_repo_root()` back to `pathlib.Path.cwd()`; delete
     `_refuse_diverging_app_id(args.app_id, variables)`, which is the only guard against a
     ruleset pinned to an App the workflows do not use; delete `sys.exit(_exit_code())`;
-    swap two reconcilers.
+    swap two reconcilers; delete `_report_org_leftovers(ctx)`; delete the
+    `ctx["at_org"] = _at_org(...)` line, which leaves the key an empty set and every
+    `--vars-at-org` name silently ignored; hoist `_writable_variables(ctx)` to a
+    temporary, which reorders the two entries it contributes.
     """
     tree = ast.parse((ENGINE / "scripts" / "onboard").read_text(encoding="utf-8"))
     main = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "main")
@@ -457,9 +461,12 @@ def test_main_calls_every_stage_in_order():
         "_variables()",
         "_refuse_diverging_app_id(args.app_id, variables)",
         "_resolve_shared(args.shared, variables, envs)",
+        "_at_org(args.vars_at_org, _writable_variables(ctx))",
+        "_writable_variables(ctx)",
         "_reconcile_engine_env(ctx)",
         "_reconcile_envs(ctx)",
         "_reconcile_variables(ctx)",
+        "_report_org_leftovers(ctx)",
         "_reconcile_ruleset(ctx)",
         "_reconcile_shims(ctx)",
         "_checklist(ctx)",
@@ -1130,7 +1137,7 @@ def test_shared_environments_are_written_as_one_sorted_variable(monkeypatch):
     the one probabilistic claim here, not a certain one.
 
     Mutations: join the set unsorted (`",".join(ctx["shared"])`), or drop the
-    SHIPMATE_SHARED_ENVS entry from `_wanted_variables` -- both redden the first case;
+    SHIPMATE_SHARED_ENVS entry from `_writable_variables` -- both redden the first case;
     drop the `_matches` set comparison, which turns the second into a `differs` and a
     rewrite of a variable that already says what it should.
     """
@@ -1163,6 +1170,88 @@ def test_shared_environments_are_written_as_one_sorted_variable(monkeypatch):
     assert onboard._exit_code() == 0
 
 
+#: The names `_writable_variables` can produce, hand-written: derived from the function it
+#: validates, this set would accept whatever that function happens to return.
+WRITABLE = {
+    "SHIPMATE_APP_ID",
+    "SHIPMATE_APPROVERS_TEAM",
+    "TERRAMATE_VERSION",
+    "TOFU_VERSION",
+    "SHIPMATE_SHARED_ENVS",
+}
+
+
+def test_at_org_uppercases_the_names_it_returns():
+    """The API uppercases variable names and every lookup here is on an uppercased key, so
+    an operator typing the lowercase name must still reach the same entry. The whole set is
+    compared against a hand-written literal.
+
+    Mutation: drop the `.upper()` in `_at_org` -- `shipmate_app_id` then matches no key and
+    is silently ignored.
+    """
+    assert onboard._at_org("shipmate_app_id, SHIPMATE_APPROVERS_TEAM", WRITABLE) == {
+        "SHIPMATE_APP_ID",
+        "SHIPMATE_APPROVERS_TEAM",
+    }
+
+
+def test_at_org_refuses_a_name_this_script_does_not_write():
+    """A name `onboard` never sets filters nothing: the repository copy keeps being written
+    and the run still reports success. The whole message is compared, because it is the only
+    thing that tells the operator which name was wrong.
+
+    Mutation: return the names without checking them against the writable set.
+    """
+    with pytest.raises(SystemExit) as excinfo:
+        onboard._at_org("not_a_shipmate_variable", WRITABLE)
+    assert str(excinfo.value) == (
+        "--vars-at-org names NOT_A_SHIPMATE_VARIABLE, which this script does not set. "
+        "It writes: SHIPMATE_APPROVERS_TEAM, SHIPMATE_APP_ID, SHIPMATE_SHARED_ENVS, "
+        "TERRAMATE_VERSION, TOFU_VERSION."
+    )
+
+
+def test_wanted_variables_removes_exactly_the_names_asserted_at_org():
+    """The whole filtered dict is compared against a hand-written constant: a
+    `"SHIPMATE_APP_ID" not in result` assertion is satisfied by a filter that drops
+    everything.
+
+    Mutations: ignore `ctx["at_org"]` and return the unfiltered dict; filter out every
+    entry.
+    """
+    assert onboard._wanted_variables(ctx(at_org={"SHIPMATE_APP_ID"}, shared={"dev-eu"})) == {
+        "SHIPMATE_APPROVERS_TEAM": ("ops", "--team"),
+        "TERRAMATE_VERSION": ("9.9.9", "VERSIONS"),
+        "TOFU_VERSION": ("8.8.8", "VERSIONS"),
+        "SHIPMATE_SHARED_ENVS": ("dev-eu", "--shared"),
+    }
+
+
+def test_a_repository_copy_of_an_org_variable_is_reported_and_never_written(monkeypatch):
+    """Repository resolution beats organization, so a leftover repository copy silently
+    overrides the organization value the operator asserted. It is reported as drift and
+    never deleted -- removing a value this script did not write exceeds its mandate.
+
+    Mutation: report `"ok"` instead of `"differs"` -- the exit code drops to 0 while the
+    message still reads as informative.
+    """
+    fake = make_gh({})
+    monkeypatch.setattr(onboard, "_run", fake)
+    onboard._report_org_leftovers(
+        ctx(at_org={"SHIPMATE_APP_ID"}, variables={"SHIPMATE_APP_ID": "123"})
+    )
+    assert fake.calls == []
+    assert onboard.REPORT == [
+        (
+            "differs",
+            "SHIPMATE_APP_ID",
+            "repository has 123, asserted at organization level — delete it with "
+            "`gh variable delete SHIPMATE_APP_ID` or drop the name from --vars-at-org",
+        )
+    ]
+    assert onboard._exit_code() == 2
+
+
 def test_an_unusable_versions_file_refuses_before_the_first_call(monkeypatch, tmp_path):
     """`_versions` reads a local file and depends on nothing the reconcilers do, so its
     refusal belongs among `main`'s local reads: a repository must not end up with half
@@ -1171,7 +1260,7 @@ def test_an_unusable_versions_file_refuses_before_the_first_call(monkeypatch, tm
     from the wrong place.
 
     Mutation: move the `_versions(engine)` call back below the reconcilers (into
-    `_wanted_variables`, where it started), which records `git` and `gh` calls before
+    `_writable_variables`, where it started), which records `git` and `gh` calls before
     the refusal.
     """
     fake = make_gh({})
@@ -1205,7 +1294,7 @@ def test_a_versions_file_missing_a_key_is_refused(tmp_path):
     nothing else in the repository parses it. A renamed key must name itself, not raise a
     `KeyError` two frames away.
 
-    Mutation: drop the `missing` check, so `_wanted_variables` raises `KeyError: 'tofu'`.
+    Mutation: drop the `missing` check, so `_writable_variables` raises `KeyError: 'tofu'`.
     """
     (tmp_path / "VERSIONS").write_text("terramate=9.9.9\n", encoding="utf-8", newline="\n")
     with pytest.raises(SystemExit) as e:

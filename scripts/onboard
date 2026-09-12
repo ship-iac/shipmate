@@ -235,6 +235,24 @@ def _split(value):
     return {part.strip() for part in value.split(",") if part.strip()}
 
 
+def _at_org(raw, writable):
+    """The variable names the operator asserts are set at organization level.
+
+    Validated against the names this script writes: an unrecognised name would
+    filter nothing and still report success, which is the failure this refusal
+    exists to prevent. Uppercased because the API uppercases variable names and
+    every lookup here is on an uppercased key.
+    """
+    names = {name.upper() for name in _split(raw)}
+    unknown = sorted(names - set(writable))
+    if unknown:
+        raise SystemExit(
+            f"--vars-at-org names {', '.join(unknown)}, which this script does not set. "
+            f"It writes: {', '.join(sorted(writable))}."
+        )
+    return names
+
+
 def _resolve_shared(flag, variables, envs):
     """The shared-environment set, from --shared or SHIPMATE_SHARED_ENVS.
 
@@ -511,7 +529,7 @@ def _versions(engine):
     return versions
 
 
-def _wanted_variables(ctx):
+def _writable_variables(ctx):
     """{name: (value, the flag or file it came from)}, in the order they are written."""
     versions = ctx["versions"]
     wanted = {
@@ -523,6 +541,31 @@ def _wanted_variables(ctx):
     if ctx["shared"]:
         wanted["SHIPMATE_SHARED_ENVS"] = (",".join(sorted(ctx["shared"])), "--shared")
     return wanted
+
+
+def _wanted_variables(ctx):
+    """The writable set minus the names asserted at organization level."""
+    return {k: v for k, v in _writable_variables(ctx).items() if k not in ctx["at_org"]}
+
+
+def _report_org_leftovers(ctx):
+    """Report a repository variable that still exists under --vars-at-org.
+
+    Repository resolution beats organization, so a leftover copy silently
+    overrides the organization value. It is reported and never deleted: removing
+    a value this script did not write exceeds the reconciler's mandate.
+    """
+    for name in sorted(ctx["at_org"]):
+        current = ctx["variables"].get(name)
+        if current is None:
+            report("ok", name, "asserted at organization level")
+        else:
+            report(
+                "differs",
+                name,
+                f"repository has {current}, asserted at organization level — "
+                f"delete it with `gh variable delete {name}` or drop the name from --vars-at-org",
+            )
 
 
 def _matches(name, current, value):
@@ -867,6 +910,11 @@ def main(argv=None):
     ap.add_argument("--key", required=True, help="path to the App's PEM private key")
     ap.add_argument("--state-suffix", default="", help="suffix for state artifact names")
     ap.add_argument("--shared", default="", help="environments bound as one bare `<env>`")
+    ap.add_argument(
+        "--vars-at-org",
+        default="",
+        help="variables already set at organization level; not written here",
+    )
     ap.add_argument("--dry-run", action="store_true", help="report changes, write nothing")
     args = ap.parse_args(argv)
     if not _TEAM_RE.fullmatch(args.team):
@@ -908,7 +956,9 @@ def main(argv=None):
         "variables": variables,
         "sha": sha,
         "version": version,
+        "at_org": set(),
     }
+    ctx["at_org"] = _at_org(args.vars_at_org, _writable_variables(ctx))
     print(f"{ctx['repo']} (default branch {ctx['default_branch']})")
     print(f"environments: {', '.join(ctx['envs'])}")
     print(f"shared: {', '.join(sorted(ctx['shared'])) or '(none)'}")
@@ -917,6 +967,7 @@ def main(argv=None):
     _reconcile_engine_env(ctx)
     _reconcile_envs(ctx)
     _reconcile_variables(ctx)
+    _report_org_leftovers(ctx)
     _reconcile_ruleset(ctx)
     _reconcile_shims(ctx)
     _checklist(ctx)
