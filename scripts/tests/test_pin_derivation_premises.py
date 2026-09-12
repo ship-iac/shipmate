@@ -67,6 +67,7 @@ KNOWN_CROSS_LOADERS = {
     "build-matrix",
     "deploy-detect",
     "doctor",
+    "drift-issues",
     "env-order",
     "summary-comment",
 }
