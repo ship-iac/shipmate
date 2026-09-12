@@ -12,7 +12,7 @@ What it covers, one premise per regex the guard derives from, because a claim ab
 is only as good as the regex's coverage of the thing it counts:
 
 * ``REF`` sees every internal ``ship-iac/shipmate/<path>@<sha>`` self-reference.
-* ``SCRIPT_REF`` sees every action.yml to script invocation.
+* ``ACTION_PATH_REF`` sees every path an action.yml reaches outside its own directory.
 * ``LOAD_REF`` sees literal sibling-load calls; ``SHARED_LOADER_IMPORT`` sees
   the shared loader itself.
 
@@ -147,12 +147,13 @@ def test_the_helper_script_set_is_not_empty_and_holds_the_known_cross_loaders():
     )
 
 
-def test_every_script_invocation_in_an_action_is_visible_to_the_derivation():
-    """The action.yml to script edge: SCRIPT_REF sees every invocation.
+def test_every_outside_reference_in_an_action_is_visible_to_the_derivation():
+    """The action.yml to outside-its-directory edge: ACTION_PATH_REF sees every reference.
 
-    Every claim about pin currency assumes the derivation sees each script a pinned action runs.
-    An action.yml invoking a script by any other spelling -- a variable, a different relative
-    path, a `cd` first -- would be invisible to SCRIPT_REF and would silently shrink the checked
+    Every claim about pin currency assumes the derivation sees each path a pinned action reads --
+    the scripts it runs and files like ``VERSIONS``, which decides the tool versions it installs.
+    An action.yml reaching one by any other spelling -- a variable, a different relative path, a
+    `cd` first -- would be invisible to ACTION_PATH_REF and would silently shrink the checked
     surface. Every $GITHUB_ACTION_PATH mention in every action.yml must be one the regex claims.
     """
     actions = sorted((pinrefs.ROOT / "actions").glob("*/action.yml"))
@@ -163,10 +164,10 @@ def test_every_script_invocation_in_an_action_is_visible_to_the_derivation():
     for action_yaml in actions:
         text = action_yaml.read_text(encoding="utf-8")
         mentions = text.count("$GITHUB_ACTION_PATH")
-        matched = len(pinrefs.SCRIPT_REF.findall(text))
+        matched = len(pinrefs.ACTION_PATH_REF.findall(text))
         assert mentions == matched, (
             f"{action_yaml.relative_to(pinrefs.ROOT).as_posix()}: {mentions} "
-            f"$GITHUB_ACTION_PATH mention(s) but SCRIPT_REF matched {matched} -- "
+            f"$GITHUB_ACTION_PATH mention(s) but ACTION_PATH_REF matched {matched} -- "
             "the script-dependency derivation cannot see the difference"
         )
 
@@ -174,7 +175,7 @@ def test_every_script_invocation_in_an_action_is_visible_to_the_derivation():
 def test_every_internal_ref_in_a_pin_bearing_source_is_visible_to_ref():
     """The pin itself: REF sees every internal self-reference.
 
-    One level up from ``test_every_script_invocation_in_an_action_is_visible_to_the_derivation``.
+    One level up from ``test_every_outside_reference_in_an_action_is_visible_to_the_derivation``.
     REF only matches a 40-lowercase-hex SHA by design, because CONTRACT.md requires internal pins
     to be full SHAs, but that means a non-SHA internal pin -- a tag, a short SHA, an uppercase
     SHA -- is invisible to REF, and so invisible to the guard, to ``dev/pin_status.py``, and to

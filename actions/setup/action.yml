@@ -2,23 +2,55 @@ name: shipmate setup
 description: Install pinned Terramate + OpenTofu and enable a shared provider plugin cache.
 inputs:
   terramate-version:
-    description: Terramate CLI version, e.g. 0.17.1 (pass vars.TERRAMATE_VERSION).
-    required: true
+    description: Override the Terramate CLI version, e.g. 0.17.1. Empty uses the version this release pins.
+    required: false
+    default: ""
   tofu-version:
-    description: OpenTofu version, e.g. 1.12.4 (pass vars.TOFU_VERSION).
-    required: true
+    description: Override the OpenTofu version, e.g. 1.12.4. Empty uses the version this release pins.
+    required: false
+    default: ""
 runs:
   using: composite
   steps:
+    - name: Resolve versions
+      id: versions
+      shell: bash
+      env:
+        TERRAMATE_VERSION: ${{ inputs.terramate-version }}
+        TOFU_VERSION: ${{ inputs.tofu-version }}
+      run: |
+        set -euo pipefail
+        # The whole engine repository is checked out at the pinned SHA, so this reads the
+        # versions this release was tested with. An unresolved version must fail the step:
+        # setup-opentofu reads an empty tofu_version as "latest", which is silent tool drift.
+        versions="$GITHUB_ACTION_PATH/../../VERSIONS"
+        if [ ! -f "$versions" ]; then
+          echo "::error::$versions does not exist: it carries the terramate= and tofu= versions this release pins."
+          exit 1
+        fi
+        [ -n "$TERRAMATE_VERSION" ] || TERRAMATE_VERSION="$(sed -n 's/^terramate=//p' "$versions" | tail -n1 | tr -d '[:space:]')"
+        [ -n "$TOFU_VERSION" ] || TOFU_VERSION="$(sed -n 's/^tofu=//p' "$versions" | tail -n1 | tr -d '[:space:]')"
+        if [ -z "$TERRAMATE_VERSION" ]; then
+          echo "::error::$versions carries no terramate= line: pass terramate-version to actions/setup, or restore the line."
+          exit 1
+        fi
+        if [ -z "$TOFU_VERSION" ]; then
+          echo "::error::$versions carries no tofu= line: pass tofu-version to actions/setup, or restore the line."
+          exit 1
+        fi
+        {
+          echo "terramate=$TERRAMATE_VERSION"
+          echo "tofu=$TOFU_VERSION"
+        } >> "$GITHUB_OUTPUT"
     - name: Install OpenTofu
       uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2.0.2
       with:
-        tofu_version: ${{ inputs.tofu-version }}
+        tofu_version: ${{ steps.versions.outputs.tofu }}
         tofu_wrapper: false
     - name: Install Terramate
       uses: terramate-io/terramate-action@1cc78a548efefaab7762f4d06f51aa6de06ce201 # v3.3.0
       with:
-        version: ${{ inputs.terramate-version }}
+        version: ${{ steps.versions.outputs.terramate }}
     - name: Provider plugin cache
       shell: bash
       run: |
