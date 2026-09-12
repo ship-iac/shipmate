@@ -1156,7 +1156,7 @@ def test_cell_json_result_enum_is_unchanged():
     # Display statuses are a superset of the artifact enum. The normative
     # cell.json grammar in CONTRACT.md must not drift because the comment grew
     # a display state.
-    assert ac._RESULTS == frozenset({"applied", "failed", "blocked"})
+    assert frozenset({"applied", "failed", "blocked"}) == ac._RESULTS
 
 
 def test_unrecorded_note_names_the_cell_and_the_recovery():

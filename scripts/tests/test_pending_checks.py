@@ -46,7 +46,8 @@ def test_changed_cell_yields_queued_body(tmp_path):
         fingerprint="f" * 64,
     )
     (body,) = pc.bodies(str(tmp_path), HEAD)
-    assert json.loads(body.pop("external_id")) == {
+    external_id = body.pop("external_id")
+    assert json.loads(external_id) == {
         "fingerprint": "f" * 64,
         "plan_run": RUN_ID,
         "plan_sha256": SHA_A,

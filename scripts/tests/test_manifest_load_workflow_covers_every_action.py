@@ -19,6 +19,7 @@ leave 19 correct steps that never run.
 
 import glob
 import os
+import pathlib
 
 import yaml
 
@@ -31,7 +32,7 @@ def test_manifest_load_workflow_lists_every_action_as_a_skipped_remote_step():
     )
     assert len(actions) > 15, f"expected the full action set, found {actions}"
 
-    doc = yaml.safe_load(open(WORKFLOW, encoding="utf-8"))
+    doc = yaml.safe_load(pathlib.Path(WORKFLOW).read_text(encoding="utf-8"))
     # `on:` is YAML 1.1's true, hence the doc.get(True) fallback.
     assert doc.get("on", doc.get(True)) == {
         "push": {"branches": ["main"]},

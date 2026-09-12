@@ -12,7 +12,7 @@ import pathlib
 
 
 def main():
-    runs = json.load(open("plan_runs.json", encoding="utf-8"))
+    runs = json.loads(pathlib.Path("plan_runs.json").read_text(encoding="utf-8"))
     for cj in pathlib.Path("doctor-cells").glob("*/**/cell.json"):
         try:
             cell = json.loads(cj.read_text(encoding="utf-8"))
