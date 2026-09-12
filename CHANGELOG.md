@@ -14,7 +14,8 @@ grammar are declared unstable in `README.md`.
 ## [Unreleased]
 
 **Re-pinning is not involved**: this release changes `scripts/onboard`, which is
-run by hand from an engine checkout, and no action, workflow or check name moves.
+run by hand and never pinned by a consumer, and no action, workflow or check
+name moves.
 
 ### Added
 

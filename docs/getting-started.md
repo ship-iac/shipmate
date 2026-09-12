@@ -89,7 +89,7 @@ run over a configured repository changes nothing. What it will not touch — a
 variable holding another value, an environment carrying a protection it did not
 set — it reports as a `differs` line and exits 2
 ([`troubleshooting.md`](troubleshooting.md) §What `scripts/onboard` reports).
-Two disagreements are not reported but refused, both before the first write and
+Some disagreements are not reported but refused, before the first write and
 with exit 1 rather than a `differs` line. A `SHIPMATE_APP_ID` repository variable
 that differs from `--app-id` stops the run, because `--app-id` also pins the gate
 ruleset to an App and a ruleset pinned to one the workflows do not use blocks the

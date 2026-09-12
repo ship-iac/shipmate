@@ -244,7 +244,12 @@ python3 <engine-checkout>/scripts/onboard \
 ```
 
 The flag takes a comma-separated list of names. A name `onboard` does not itself
-set is refused, because it would filter nothing and still report success.
+set is refused, because it would filter nothing and still report success. Name
+only the variables that are correct for this repository: a repository whose
+approving team differs from the organization's keeps its own
+`SHIPMATE_APPROVERS_TEAM` and leaves that name out of the flag. Asserting a name
+whose organization value is not the one this run would write is refused, and the
+repository copy does not satisfy the assertion.
 
 **Every asserted name is verified, not trusted.** `onboard` reads
 `GET /repos/{owner}/{repo}/actions/organization-variables`, which returns
@@ -274,8 +279,12 @@ nobody else.
 A repository-level copy of an asserted name still overrides the organization
 value, because repository resolution wins. `onboard` reports one as a `differs`
 line and exits 2, and never deletes it — removing a value it did not write is
-outside what it reconciles. A `SHIPMATE_APP_ID` copy holding a value other than
-`--app-id` is refused outright before any of this, as it is without the flag.
+outside what it reconciles. A repository already onboarded per repository starts
+in exactly that state, so migrating one is: set the organization variables,
+delete each repository copy with `gh variable delete <NAME>` in the consumer
+repo, and run `onboard` again with the flag. A `SHIPMATE_APP_ID` copy holding a
+value other than `--app-id` is refused outright before any of this, as it is
+without the flag.
 
 `SHIPMATE_APP_PRIVATE_KEY` cannot move to the organization with them:
 environment secrets are scoped to one repository's environment, so it has to be
@@ -491,10 +500,12 @@ Each run needs the engine checkout on a `vX.Y.Z` release tag, `terramate` on
 `PATH` in the consumer checkout — its `env/<name>` tags are where the
 environment set comes from — and `gh` authenticated with admin on that
 repository. It refuses rather than half-configuring when one of those is missing.
-Add `--vars-at-org SHIPMATE_APP_ID,SHIPMATE_APPROVERS_TEAM` to each run when
-those variables live at the organization level (§6); a private consumer then
-needs an organization owner rather than repository admin, because the plan read
-behind that flag answers to nobody else.
+Add `--vars-at-org` to each run when those variables live at the organization
+level (§6), naming per repository only the ones correct for it — a repository
+whose approving team differs keeps its own `SHIPMATE_APPROVERS_TEAM` and passes
+`--vars-at-org SHIPMATE_APP_ID` alone. A private consumer then needs an
+organization owner rather than repository admin, because the plan read behind
+the flag answers to nobody else.
 
 ```bash
 ENGINE=<path-to-engine-checkout>    # on a release tag

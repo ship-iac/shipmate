@@ -300,7 +300,7 @@ mandate. Each one names what to do.
 | `<env>-plan` — it carries protection rules | required reviewers or a wait timer on a plan environment stall every plan cell and the nightly drift run. Remove them ([`hardening.md`](hardening.md) #6). |
 | `<env>` — it carries protection rules and is shared | a shared bare `<env>` is bound by the plan cells and the nightly drift run as well as the applies, and GitHub offers no per-job filter, so a protection rule there stalls all three. To gate applies alone, split it into `<env>-plan` / `<env>-apply` and drop it from `SHIPMATE_SHARED_ENVS`. |
 | `<env>` — the naming the engine does not bind is also present | the naming `SHIPMATE_SHARED_ENVS` does not select already exists: a bare `<env>` where the engine binds the `<env>-plan` / `<env>-apply` pair, or either half where it binds the bare `<env>`. Holding both namings for one logical environment is the state `shipmate doctor` calls ambiguous, so the run creates and changes nothing for that environment — including the naming it does bind, which is why it is reported rather than half-written. Delete the unused naming, or move the environment to the other one with `--shared` / `SHIPMATE_SHARED_ENVS`. |
-| `<VARIABLE>` — repository has one value, the flag or `VERSIONS` has another | the variable exists with another value. A pinned older `TERRAMATE_VERSION` or `TOFU_VERSION` is a deliberate choice, so it is never overwritten. Change it with `gh variable set` if it was not. A `SHIPMATE_APP_ID` disagreeing with `--app-id` never reaches this row — see the refusals below. |
+| `<VARIABLE>` — repository has one value, the flag or `VERSIONS` has another | the variable exists with another value. A pinned older `TERRAMATE_VERSION` or `TOFU_VERSION` is a deliberate choice, so it is never overwritten. Change it with `gh variable set` if it was not. `SHIPMATE_APP_ID` never reaches this row — see the refusals below, and the row beneath it for a repository copy left behind under `--vars-at-org`. |
 | `<VARIABLE>` — repository has one value, asserted at organization level | the name was passed to `--vars-at-org`, and a repository-level copy is still there. Repository resolution beats organization, so that copy is what the workflows read and the organization value contributes nothing. It is never deleted for you — `onboard` did not write it. Delete it with `gh variable delete <VARIABLE>`, or drop the name from `--vars-at-org` ([`github-app.md`](github-app.md) §6). |
 | `gate ruleset` — the rulesets POST was rejected (HTTP 422) | most likely the name is taken by a ruleset whose enforcement is `evaluate` or `disabled`, which the effective-rules read cannot see; 422 has other causes, so read `gh api repos/OWNER/REPO/rulesets` first. Set it to active, or delete it and run again. |
 | `gate ruleset` — rulesets need GitHub Pro, Team, Enterprise, or a public repository | the plan this repository is on has no rulesets. Configure the gate by hand from [`branch-protection.md`](branch-protection.md). |
@@ -327,9 +327,11 @@ not to `SHIPMATE_APP_ID` alone: a name that no organization variable reaching
 this repository carries, and a name whose organization value differs from the
 one this run would have written. Both mean the assertion is wrong and the
 workflows would read an empty or an unexpected value. A private repository
-whose organization is on GitHub Free — or whose plan the token cannot read, as
-only an owner can — is refused ahead of both, because no organization variable
-reaches it at all. Each refusal names the command that fixes it; the procedure
+whose organization is on GitHub Free is refused ahead of both, because
+organization variables do not reach a private repository on that tier at all.
+So is one whose plan the token cannot read: `gh api orgs/<org>` reports the plan
+only to an organization owner, so the tier cannot be told either way — re-run as
+an owner. Each refusal names what fixes it; the procedure
 behind the flag, including why a `private` visibility reaches no public
 repository, is [`github-app.md`](github-app.md) §6.
 
