@@ -70,6 +70,21 @@ def test_guard_max_env_levels_exceeded():
         eo.guard_max_env_levels({"a": 4})
 
 
+def test_waves_by_env_level_refuses_an_env_beyond_the_cap():
+    """The guard is inside the shared function, so no caller can omit it and drop an
+    over-deep env's cells out of every `range(MAX_ENV_LEVELS)` bucket.
+
+    Mutation: delete `guard_max_env_levels(levels)` from `waves_by_env_level` -- the call
+    returns MAX_ENV_LEVELS empty wave dicts instead of raising.
+    """
+    with pytest.raises(SystemExit, match="env order spans"):
+        eo.waves_by_env_level(
+            [{"stack": "stacks/app", "environment": "prod"}],
+            {"stacks/app": set()},
+            {"prod": eo.MAX_ENV_LEVELS},
+        )
+
+
 def test_read_env_order_parses_json(monkeypatch):
     eo_map = eo.read_env_order(run=lambda args: '{"dev-us":["dev-eu"]}')
     assert eo_map == {"dev-us": ["dev-eu"]}
