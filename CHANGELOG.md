@@ -11,6 +11,56 @@ section below names the SHA the release tags.
 The version line stays `v0.x` while action inputs, check names, and the comment
 grammar are declared unstable in `README.md`.
 
+## [0.27.1] — 2026-09-12
+
+Tags `<sha>`.
+
+**Re-pinning is all it takes**: no action input or output, check name, comment
+verb, environment or workflow fragment changes, and there is nothing to migrate.
+This release is an internal refactor of the helper scripts — 247 lines removed
+against 98 added outside the tests. One observable difference, and only inside a
+run that already fails: a change spanning more dependency levels than the
+pre-declared wave jobs can hold now prints the DAG-shape and `apply-detect`
+notices before it refuses, rather than refusing first. Same refusal, same
+message, two more diagnostic lines before it.
+
+### Changed
+
+- **The helper scripts share one module loader.** `scripts/` helpers run as
+  Actions steps, so they carry no `.py` suffix and cannot be imported by name;
+  each one that reached a sibling carried its own copy of the `SourceFileLoader`
+  shim that works around it. They now import `scripts/_shipmate.py`, the first
+  and only `.py` module in that directory. The internal-pin derivation follows
+  the new edge — `dev/pinrefs.py` adds `_shipmate.py` to every pinned action's
+  transitive script set — so a change to the loader makes the pins that run it
+  stale, exactly as a change to any other helper does, and
+  `scripts/tests/test_pin_derivation_premises.py` reddens on a second `.py`
+  sibling, which `load_refs` would not see.
+
+- **The wave and environment-level limits are enforced inside the functions that
+  emit them.** `guard_max_waves` runs inside `pad_waves`, and
+  `guard_max_env_levels` inside `waves_by_env_level`, rather than at each call
+  site. No caller can omit the refusal and write `wave0..wave7` with the deepest
+  cells silently dropped under a run that reports success — previously a
+  structural property of the call sites, asserted by reading their syntax trees,
+  and now a property of the functions themselves.
+
+- **`shipmate doctor`'s five `shipmate.yml` probes share one warning renderer.**
+  Each probe named its own unreadable-file and no-commit findings inline; they
+  now pass that pair to `_shipmate_yml_warnings`, so the five cannot disagree
+  about how an unreadable or uncommitted `shipmate.yml` is reported.
+
+- **Drift reporting reuses the shared command runner**, and onboarding drops the
+  one-entry table that mapped its single rendered file to its documentation
+  fence. Both are fail-closed exactly as before.
+
+### Fixed
+
+- **CodeQL code-quality findings**, and the `SIM` and `RET` ruff rule sets that
+  find them are now enforced in CI. The only semantic change among them is
+  `scripts/doctor-cells` reading its input through `Path.read_text` instead of
+  leaving a file handle to the garbage collector.
+
 ## [0.27.0] — 2026-09-07
 
 Tags `457ea2b`.
