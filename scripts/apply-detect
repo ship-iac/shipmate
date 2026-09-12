@@ -377,7 +377,6 @@ def main():
     pending = with_plan_runs(filter_pending(cells, completed), plan_runs, plan_hashes)
 
     waves = wv.assign_waves(wv.levels(deps), pending)
-    wv.guard_max_waves(waves)
     print(dag_shape_notice(deps))
     print(
         f"::notice title=apply-detect::env={env} head={head} "

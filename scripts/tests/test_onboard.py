@@ -1401,15 +1401,6 @@ def test_an_unrecognised_ruleset_post_failure_propagates(monkeypatch):
     assert "HTTP 500" in str(e.value)
 
 
-def test_the_shim_table_names_one_file_rendered_from_one_fence():
-    """The whole table, hand-written. One file replaced six, and a second entry would write a
-    file `actions/dispatch` no longer reaches and `shipmate doctor` no longer probes.
-
-    Mutation: re-add `("plan.yml", ("getting-started.md", "shipmate · plan"))`.
-    """
-    assert onboard.SHIMS == {"shipmate.yml": ("getting-started.md", "shipmate")}
-
-
 #: Owner-agnostic, like the docs guard's selector: the pages publish `<owner>/shipmate/...`
 #: as well as this organization's own spelling.
 _CALL_PATH = "/shipmate/.github/workflows/"
@@ -1450,10 +1441,7 @@ def test_every_shim_fence_is_found_and_calls_exactly_the_expected_engine_workflo
     - edit the fence's top-level `name:` line -> the locator matches zero fences and refuses;
     - edit a `uses:` filename in the fence -> the callee list differs.
     """
-    found = {
-        name: _callees(onboard._render(ENGINE, name, "c" * 40, "v9.9.9", ""))
-        for name in onboard.SHIMS
-    }
+    found = {"shipmate.yml": _callees(onboard._render(ENGINE, "c" * 40, "v9.9.9", ""))}
     assert found == _EXPECTED_CALLEES
 
 
@@ -1468,23 +1456,18 @@ def test_the_rendered_pin_is_byte_identical_to_what_repin_consumer_writes(tmp_pa
 
     wf = tmp_path / ".github" / "workflows"
     wf.mkdir(parents=True)
-    for name in onboard.SHIMS:
-        (wf / name).write_text(
-            onboard._render(ENGINE, name, "c" * 40, "v9.9.9", ""),
-            encoding="utf-8",
-            newline="\n",
-        )
+    (wf / "shipmate.yml").write_text(
+        onboard._render(ENGINE, "c" * 40, "v9.9.9", ""), encoding="utf-8", newline="\n"
+    )
     # The real release writer, not an imitation of it. `docs/releasing.md` runs
     # `repin_consumer.main`, which reaches this planner through `_rewrite_and_report` and
     # writes the planned text unchanged.
     planned = repin_consumer._plan_consumer(tmp_path, "d" * 40, "v9.9.10")
-    assert len(planned) == len(onboard.SHIMS)
-    for f in planned:
-        name = f.path.rsplit("/", 1)[1]
-        assert f.text == onboard._render(ENGINE, name, "d" * 40, "v9.9.10", ""), (
-            f"{name}: onboard and repin_consumer disagree on the pin line, so a "
-            "re-pinned consumer never reports `ok`"
-        )
+    assert len(planned) == 1
+    assert planned[0].text == onboard._render(ENGINE, "d" * 40, "v9.9.10", ""), (
+        "onboard and repin_consumer disagree on the pin line, so a re-pinned consumer "
+        "never reports `ok`"
+    )
 
 
 _EXPECTED_PINS = {"shipmate.yml": 7}
@@ -1509,9 +1492,7 @@ def test_every_shim_is_pinned_at_every_site():
     `  # see the latest release` from the `plan` job's `uses:` line in the docs, which
     leaves that one call on `@<engine-sha>`.
     """
-    rendered = {
-        name: onboard._render(ENGINE, name, "c" * 40, "v9.9.9", "") for name in onboard.SHIMS
-    }
+    rendered = {"shipmate.yml": onboard._render(ENGINE, "c" * 40, "v9.9.9", "")}
     assert {name: text.count(f"@{'c' * 40} # v9.9.9") for name, text in rendered.items()} == (
         _EXPECTED_PINS
     )
@@ -1528,10 +1509,9 @@ def test_state_suffix_is_substituted_into_every_site():
 
     Mutation: substitute into a copy that is then discarded.
     """
+    doc = yaml.safe_load(onboard._render(ENGINE, "c" * 40, "v9.9.9", ".state"))
     found = [
-        (name, job_id, job["with"]["state_suffix"])
-        for name in onboard.SHIMS
-        for doc in [yaml.safe_load(onboard._render(ENGINE, name, "c" * 40, "v9.9.9", ".state"))]
+        ("shipmate.yml", job_id, job["with"]["state_suffix"])
         for job_id, job in doc["jobs"].items()
         if "state_suffix" in (job.get("with") or {})
     ]
@@ -1552,7 +1532,7 @@ def _plan_shim(tmp_path):
     """(path to the consumer's shipmate.yml, the text this script would render for it)."""
     path = tmp_path / ".github" / "workflows" / "shipmate.yml"
     path.parent.mkdir(parents=True, exist_ok=True)
-    return path, onboard._render(ENGINE, "shipmate.yml", "c" * 40, "v9.9.9", "")
+    return path, onboard._render(ENGINE, "c" * 40, "v9.9.9", "")
 
 
 def test_an_identical_file_reports_ok_through_crlf(tmp_path):
@@ -1565,7 +1545,7 @@ def test_an_identical_file_reports_ok_through_crlf(tmp_path):
     path, text = _plan_shim(tmp_path)
     on_disk = text.replace("\n", "\r\n").encode("utf-8")
     path.write_bytes(on_disk)
-    onboard._reconcile_shim(_shim_ctx(tmp_path), "shipmate.yml")
+    onboard._reconcile_shim(_shim_ctx(tmp_path))
     assert onboard.REPORT == [("ok", "shipmate.yml", "")]
     assert path.read_bytes() == on_disk
 
@@ -1579,9 +1559,9 @@ def test_a_file_differing_only_in_its_pin_reports_pin_only(tmp_path):
     reads as `differs`.
     """
     path, _text = _plan_shim(tmp_path)
-    older = onboard._render(ENGINE, "shipmate.yml", "d" * 40, "v9.9.8", "")
+    older = onboard._render(ENGINE, "d" * 40, "v9.9.8", "")
     path.write_text(older, encoding="utf-8", newline="\n")
-    onboard._reconcile_shim(_shim_ctx(tmp_path), "shipmate.yml")
+    onboard._reconcile_shim(_shim_ctx(tmp_path))
     assert onboard.REPORT == [("pin-only", "shipmate.yml", "run dev/repin_consumer.py")]
     assert path.read_text(encoding="utf-8") == older
     assert onboard._exit_code() == 0
@@ -1596,7 +1576,7 @@ def test_a_locally_edited_file_is_reported_and_not_overwritten(tmp_path):
     path, text = _plan_shim(tmp_path)
     edited = text + "# a local edit\n"
     path.write_text(edited, encoding="utf-8", newline="\n")
-    onboard._reconcile_shim(_shim_ctx(tmp_path), "shipmate.yml")
+    onboard._reconcile_shim(_shim_ctx(tmp_path))
     assert onboard.REPORT == [
         ("differs", "shipmate.yml", "differs beyond its pin, not overwritten")
     ]
@@ -1624,7 +1604,7 @@ def test_an_absent_file_is_created_with_lf_endings(tmp_path, monkeypatch):
 
     monkeypatch.setattr(pathlib.Path, "write_text", fake)
     path, text = _plan_shim(tmp_path)
-    onboard._reconcile_shim(_shim_ctx(tmp_path), "shipmate.yml")
+    onboard._reconcile_shim(_shim_ctx(tmp_path))
     assert onboard.REPORT == [("created", "shipmate.yml", "")]
     assert seen["kwargs"] == {"encoding": "utf-8", "newline": "\n"}
     assert path.read_bytes().decode("utf-8") == text
@@ -1653,7 +1633,7 @@ def test_a_file_still_carrying_the_docs_placeholder_is_not_reported_pin_only(tmp
     path, _text = _plan_shim(tmp_path)
     page = (ENGINE / "docs" / "getting-started.md").read_text(encoding="utf-8")
     path.write_text(onboard._fence(page, "shipmate"), encoding="utf-8", newline="\n")
-    onboard._reconcile_shim(_shim_ctx(tmp_path), "shipmate.yml")
+    onboard._reconcile_shim(_shim_ctx(tmp_path))
     assert onboard.REPORT == [
         ("differs", "shipmate.yml", "the published fence, never pinned: delete it and run again")
     ]
