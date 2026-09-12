@@ -246,14 +246,15 @@ python3 <engine-checkout>/scripts/onboard \
 ```
 
 The flag takes a comma-separated list of names and accepts `SHIPMATE_APP_ID` and
-`SHIPMATE_APPROVERS_TEAM` only; any other name is refused, because it would
-filter nothing and still report success. Name only the variables that are correct
-for this repository: a repository whose approving team differs from the
-organization's keeps its own `SHIPMATE_APPROVERS_TEAM` and leaves that name out
-of the flag, and one in a second App's trust domain does the same with
-`SHIPMATE_APP_ID`. Asserting a name
-whose organization value is not the one this run would write is refused, and the
-repository copy does not satisfy the assertion.
+`SHIPMATE_APPROVERS_TEAM` only; every other name is refused, an unrecognised one
+because it would filter nothing and still report success, and the remaining
+variables `onboard` writes because they are not shareable. Name only the
+variables that are correct for this repository: a repository whose approving team
+differs from the organization's keeps its own `SHIPMATE_APPROVERS_TEAM` and
+leaves that name out of the flag, and one in a second App's trust domain does the
+same with `SHIPMATE_APP_ID`. Asserting a name whose organization value is not the
+one this run would write is refused, and the repository copy does not satisfy the
+assertion.
 
 **Every asserted name is verified, not trusted.** `onboard` reads
 `GET /repos/{owner}/{repo}/actions/organization-variables`, which returns
