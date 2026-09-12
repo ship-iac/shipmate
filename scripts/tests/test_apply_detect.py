@@ -391,7 +391,6 @@ def test_main_wires_the_tag_map_into_the_cells(tmp_path, monkeypatch):
     Fails when the map never reaches the cells: every cell is then role-less and the suite stays
     green. Evaluating `stacks/unrelated` would let a stack this apply never touches block an
     approved plan."""
-    out = tmp_path / "out"
     out = _apply_env(monkeypatch, tmp_path)
     _stub_apply(
         monkeypatch,

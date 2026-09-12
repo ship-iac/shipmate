@@ -344,7 +344,8 @@ def main():
     # Anything that is not exactly "unlock" takes the apply path, which is the
     # stricter of the two — an absent or garbled mode fails closed.
     if os.environ.get("SHIPMATE_MODE", "") == "unlock":
-        return run_unlock(repo, env, head)
+        run_unlock(repo, env, head)
+        return
 
     refuse_unreviewed(
         env,
