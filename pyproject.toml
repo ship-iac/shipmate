@@ -82,6 +82,8 @@ select = [
     "UP",  # pyupgrade
     "S",   # flake8-bandit (security)
     "C90", # mccabe — cyclomatic complexity ceiling
+    "SIM", # flake8-simplify — SIM115 is the one that matters: an unclosed open()
+    "RET", # flake8-return — RET503 catches a fall-through beside an explicit return
 ]
 
 [tool.ruff.lint.mccabe]

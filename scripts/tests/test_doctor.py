@@ -3492,7 +3492,7 @@ def test_the_probe_registry_is_exactly_this(monkeypatch):
     """The whole registry against a hand-written list, not its length: a length
     assertion cannot say WHICH entry changed, so a probe swapped for another
     passes it. Order is the order findings are reported in."""
-    assert doctor.PROBES == (
+    assert (
         doctor._gate_rule_warnings,
         doctor._review_rule_warnings,
         doctor._environment_warnings,
@@ -3508,7 +3508,7 @@ def test_the_probe_registry_is_exactly_this(monkeypatch):
         doctor._routing_warnings,
         doctor._team_warnings,
         doctor._app_permission_warnings,
-    )
+    ) == doctor.PROBES
 
 
 def _rules_only(*rules):
