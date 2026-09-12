@@ -146,7 +146,12 @@ def waves_by_env_level(pending, deps, levels):
     with no predecessors), then stack-wave-ordered within it. Env-levels apply
     fully in order: level 0 entirely before level 1, and so on. No env-order
     global -> every env is level 0 -> a single populated level. Shared by
-    deploy-detect (merge path) and apply-all-detect (bare `shipmate apply`)."""
+    deploy-detect (merge path) and apply-all-detect (bare `shipmate apply`).
+
+    Refuses an env beyond MAX_ENV_LEVELS before bucketing: the loop below keys on
+    `range(MAX_ENV_LEVELS)`, so an over-deep env falls out of every level and its
+    cells apply nothing under a run that still reports success."""
+    guard_max_env_levels(levels)
     stack_levels = wv.levels(deps)
     out = []
     for lvl in range(MAX_ENV_LEVELS):

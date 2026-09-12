@@ -83,7 +83,6 @@ def main():
     deps = ad.run_graph_deps()
     order = eo.read_env_order()
     levels = eo.env_levels(order, {c["environment"] for c in pending})
-    eo.guard_max_env_levels(levels)
     per_level = eo.waves_by_env_level(pending, deps, levels)
     level_counts = [sum(len(waves[f"wave{i}"]) for i in range(wv.MAX_WAVES)) for waves in per_level]
     print(ad.dag_shape_notice(deps))

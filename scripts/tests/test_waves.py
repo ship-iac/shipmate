@@ -144,8 +144,10 @@ def test_padding_and_writing_refuse_overflow_before_emitting_output():
 
 
 def test_env_level_waves_refuses_a_change_deeper_than_max_waves():
-    """The behavioural half: the guard fires through a real caller, rather than dropping the
-    level-8 cells into a silent no-op apply."""
+    """The guard fires through a real caller, rather than dropping the level-8 cells into a
+    silent no-op apply.
+
+    Mutation: delete `guard_max_waves(waves)` from `pad_waves`."""
     deps = w.parse_dot(_linear_chain_dot(w.MAX_WAVES + 1))
     deep = f"stacks/s{w.MAX_WAVES + 1}"
     pending = [{"stack": deep, "environment": "dev-eu"}]
