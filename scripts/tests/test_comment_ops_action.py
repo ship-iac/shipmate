@@ -61,7 +61,7 @@ doctor = load_script("doctor")
 
 def test_every_active_route_has_a_branch():
     routed = set(re.findall(r"outputs\.route == '([a-z]+)'", _ACTION))
-    expected = {s["route"] for s in cp.VERBS.values() if s["route"]}
+    expected = {verb for verb, spec in cp.VERBS.items() if spec["status"] == cp.ACTIVE}
     assert expected <= routed, expected - routed
 
 

@@ -23,23 +23,11 @@ Three exclusions distinguish the bare form from deploy:
   that hold by naming the envs exempt from it.
 """
 
-import importlib.util
 import json
 import os
-import pathlib
 from graphlib import CycleError
-from importlib.machinery import SourceFileLoader
 
-_D = pathlib.Path(__file__).resolve().parent
-
-
-def _load(fname):
-    loader = SourceFileLoader(fname.replace("-", "_"), str(_D / fname))
-    spec = importlib.util.spec_from_loader(loader.name, loader)
-    mod = importlib.util.module_from_spec(spec)
-    loader.exec_module(mod)
-    return mod
-
+from _shipmate import _load
 
 ad = _load("apply-detect")
 bm = _load("build-matrix")

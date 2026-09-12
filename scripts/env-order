@@ -12,24 +12,12 @@ envlevelN job in the engine's apply-all.yml, and one caller job per env-level in
 each consumer deploy.yml.
 """
 
-import importlib.util
 import json
-import pathlib
-from graphlib import TopologicalSorter
-from importlib.machinery import SourceFileLoader
+
+from _shipmate import _load
 
 # Cap on env-DAG depth. COUPLED to fixed GHA job and output slots; see the module docstring.
 MAX_ENV_LEVELS = 4
-
-_D = pathlib.Path(__file__).resolve().parent
-
-
-def _load(fname):
-    loader = SourceFileLoader(fname.replace("-", "_"), str(_D / fname))
-    spec = importlib.util.spec_from_loader(loader.name, loader)
-    mod = importlib.util.module_from_spec(spec)
-    loader.exec_module(mod)
-    return mod
 
 
 # build-matrix's _run (surfaces the tool's stderr, then raises `::error::` on nonzero) and
@@ -138,15 +126,7 @@ def env_levels(order, envs):
     _validate_env_order(order)
     nodes = set(envs) | set(order) | {p for preds in order.values() for p in preds}
     graph = {n: set(order.get(n, [])) for n in nodes}
-    ts = TopologicalSorter(graph)
-    ts.prepare()  # `prepare` raises CycleError on a cycle.
-    level, i = {}, 0
-    while ts.is_active():
-        ready = ts.get_ready()
-        for n in ready:
-            level[n] = i
-            ts.done(n)
-        i += 1
+    level = {n: i for i, ready in enumerate(wv.levels(graph)) for n in ready}
     return {e: level[e] for e in envs}
 
 

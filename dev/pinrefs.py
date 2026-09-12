@@ -38,6 +38,7 @@ SCRIPT_REF = re.compile(r"\$GITHUB_ACTION_PATH/\.\./\.\./scripts/([A-Za-z0-9_-]+
 # a `yaml.safe_load("x")` anywhere in a helper would feed the phantom dependency `scripts/x` into
 # script_closure and redden scripts/tests/test_pin_derivation_premises.py with a wrong diagnosis.
 LOAD_REF = re.compile(r"""(?<![A-Za-z0-9_])_load\(\s*["']([^"']+)["']\s*\)""")
+SHARED_LOADER_IMPORT = re.compile(r"^from _shipmate import _load[ \t]*$", re.M)
 # Any engine ref regardless of shape -- what the SHA-only REF and repin_consumer._CONSUMER_REF
 # cannot see, and would leave behind silently. ``scan_survivors`` says why quotes are excluded
 # from the ref group and captured separately.
@@ -255,17 +256,22 @@ def strip_comments(script_text):
 
 
 def load_refs(script_text):
-    """Script names a helper cross-loads via the repo's ``_load("<name>")`` pattern.
+    """Names a script depends on: each literal ``_load("<name>")`` call, whether made through
+    the shared loader or a historical per-script one, plus ``_shipmate.py`` when the shared
+    loader is imported. A ``def _load`` is not a dependency and never matches.
 
     Comments are stripped first: a commented-out or merely documented
     ``_load("waves")`` would put a phantom dependency into the closure, diffed
     on every pin check against an action that never runs it.
     """
-    return set(LOAD_REF.findall(strip_comments(script_text)))
+    text = strip_comments(script_text)
+    return set(LOAD_REF.findall(text)) | (
+        {"_shipmate.py"} if SHARED_LOADER_IMPORT.search(text) else set()
+    )
 
 
 def script_closure(direct, source_lookup):
-    """Transitive closure of ``direct`` through ``_load`` edges.
+    """Transitive closure of ``direct`` through sibling loads and shared loader imports.
 
     ``source_lookup(name)`` returns the script source or None when it does not
     exist on this side; the name still lands in the result so the caller diffs

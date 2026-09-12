@@ -68,6 +68,7 @@ def test_plan_rejects_an_env_with_a_tag_filter():
 def test_reserved_verb_destroy_is_rejected():
     r = cp.parse("shipmate destroy dev-eu")
     assert r["is_command"] and not r["valid"] and "reserved" in r["error"]
+    assert r["route"] is None
 
 
 def test_unknown_verb_is_rejected():
@@ -182,10 +183,6 @@ def test_registry_shape():
         assert spec["status"] in (cp.ACTIVE, cp.RESERVED), verb
         assert spec["args"] in ("", "[env]", "<env>"), verb
         assert spec["desc"].strip(), verb
-        if spec["status"] == cp.ACTIVE:
-            assert spec["route"], verb
-        else:
-            assert spec["route"] is None, verb
 
 
 def test_route_per_verb():

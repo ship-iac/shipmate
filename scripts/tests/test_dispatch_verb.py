@@ -360,12 +360,12 @@ def test_every_route_comment_ops_can_dispatch_is_accepted_here():
         pytest.skip("bash not available on this platform")
 
     parse = load_script("comment-parse")
-    # `doctor` and `help` are answered in place, and `destroy` is reserved with route None.
+    # `doctor` and `help` are answered in place, and `destroy` is reserved.
     # What is left is exactly what can reach a dispatch.
     routes = {
-        spec["route"]
-        for spec in parse.VERBS.values()
-        if spec["route"] not in (None, "doctor", "help")
+        verb
+        for verb, spec in parse.VERBS.items()
+        if spec["status"] == parse.ACTIVE and verb not in ("doctor", "help")
     }
     assert routes == {"apply", "plan", "unlock"}, (
         f"comment-parse dispatches routes {sorted(routes)}; extend the case list deliberately"

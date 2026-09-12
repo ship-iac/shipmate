@@ -8,10 +8,9 @@ one definition.
 Loading a helper script
 -----------------------
 
-``scripts/*`` run as GHA steps rather than as an importable package, so they carry no ``.py``
-suffix and cannot be imported by name. ``spec_from_file_location`` is no help either: it infers
-the loader from the suffix and returns None for these on every platform, not only Windows.
-Passing ``SourceFileLoader`` explicitly sidesteps the suffix guess.
+``load_script`` is the production loader ``scripts/_shipmate.py`` under the name the test
+modules use; its docstring states why the loader is shaped as it is. The helpers carry no
+``.py`` suffix and cannot be imported by name.
 
 Importable from every test module because ``scripts/tests`` is on the pytest ``pythonpath``
 (``pyproject.toml``). Prepend import mode would put this directory on ``sys.path`` anyway, there
@@ -19,34 +18,20 @@ being no ``__init__.py`` here, but that is pytest's default behaviour rather tha
 invariant, and 20 modules failing collection is a poor way to discover someone changed the import
 mode.
 
-The ``-`` to ``_`` name mapping is load-bearing rather than cosmetic: ``test_env_order.py``
-asserts ``eo.bm._run.__module__ == "build_matrix"``.
-
-Deliberately not cached in ``sys.modules``: every call returns a fresh module object, matching
-what the ``_load`` helpers inside the production scripts do. Several tests depend on that
-isolation -- ``test_env_order.py`` monkeypatches ``eo.bm._run``, and a shared ``build_matrix``
-instance would leak that patch into every other sibling holding a reference to it, for the rest
-of the session.
-
 Tests of the ``dev/`` tooling do not use this. Those are real ``.py`` modules on the pytest
 ``pythonpath`` (``pyproject.toml``), imported by name.
-
-The production scripts keep their own local ``_load`` copies on purpose: the internal-pin guard
-derives each pinned action's transitive script set by matching the literal ``_load("<name>")``
-call pattern (``dev/pinrefs.py``), and a shared module imported rather than named in an
-``action.yml`` would be a dependency no part of that derivation can see.
 """
 
 import copy
 import functools
-import importlib.util
 import pathlib
 import shutil
 import subprocess
-from importlib.machinery import SourceFileLoader
 
 import yaml
+from _shipmate import _load
 
+load_script = _load
 _SCRIPTS = pathlib.Path(__file__).resolve().parents[1]
 
 #: The engine repo root, and the trees the source-derived guards read.
@@ -83,15 +68,6 @@ ENGINE_CALL_SECRETS = {
     # writes no `secrets:` block at all.
     "unlock.yml": None,
 }
-
-
-def load_script(fname):
-    """Load ``scripts/<fname>``, named with ``-`` mapped to ``_``."""
-    loader = SourceFileLoader(fname.replace("-", "_"), str(_SCRIPTS / fname))
-    spec = importlib.util.spec_from_loader(loader.name, loader)
-    mod = importlib.util.module_from_spec(spec)
-    loader.exec_module(mod)
-    return mod
 
 
 @functools.cache
