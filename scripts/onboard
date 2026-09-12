@@ -3,7 +3,7 @@
 
     python3 <engine>/scripts/onboard --team <team-slug> --app-id <id> \
         --key shipmate-app.private-key.pem [--state-suffix <s>] \
-        [--shared <env,env>] [--dry-run]
+        [--shared <env,env>] [--vars-at-org <NAME,NAME>] [--dry-run]
 
 Hand-run from inside the consumer checkout, with `gh` authenticated against that
 repository. It reads what is already there and
@@ -21,6 +21,12 @@ Flags:
                   both paths instead of the `<env>-plan` / `<env>-apply` split.
                   Must agree with the SHIPMATE_SHARED_ENVS repository variable
                   when both are set.
+  --vars-at-org   comma-separated variable names already set at organization
+                  level, so no repository copy is written for them. Accepts
+                  SHIPMATE_APP_ID and SHIPMATE_APPROVERS_TEAM only. Every
+                  name is verified against the organization variables that
+                  reach this repository, and a leftover repository copy is
+                  reported.
   --dry-run       report `would <verb>` for every change and run no write.
 
 Exit codes: 0 clean, 2 at least one item differs, 1 a refusal or a failed
@@ -43,6 +49,7 @@ from _shipmate import _load
 
 ENGINE_ENV = "shipmate-engine"
 GATE = "shipmate / gate"
+AT_ORG_NAMES = ("SHIPMATE_APP_ID", "SHIPMATE_APPROVERS_TEAM")
 REDACTED = "***"
 REPORT = []
 _DRY = False
@@ -193,7 +200,9 @@ def _repo_root():
 
 
 def _repo_facts():
-    facts = json.loads(_run(["gh", "repo", "view", "--json", "nameWithOwner,defaultBranchRef"]))
+    facts = json.loads(
+        _run(["gh", "repo", "view", "--json", "nameWithOwner,defaultBranchRef,isPrivate"])
+    )
     slug = facts.get("nameWithOwner") or ""
     branch = (facts.get("defaultBranchRef") or {}).get("name") or ""
     if not slug or not branch:
@@ -203,7 +212,7 @@ def _repo_facts():
         )
     if not _REPO_RE.fullmatch(slug):
         raise SystemExit(f"unusable repository slug: {slug!r}")
-    return slug, branch
+    return slug, branch, bool(facts.get("isPrivate"))
 
 
 def _engine_pin(engine):
@@ -233,6 +242,28 @@ def _read_key(path):
 
 def _split(value):
     return {part.strip() for part in value.split(",") if part.strip()}
+
+
+def _at_org(raw):
+    """The variable names the operator asserts are set at organization level.
+
+    Validated against AT_ORG_NAMES, not against everything this script writes: an
+    unrecognised name would filter nothing and still report success. The version pins
+    are excluded because `_reconcile_variables` treats a divergent pin as a deliberate
+    choice and reports it as `differs`, so refusing the same divergence here would
+    invert that policy, and their remedy names VERSIONS, a file inside the engine
+    checkout that the operator cannot edit on a release tag. SHIPMATE_SHARED_ENVS is
+    excluded because `--shared` has to be passed either way. Uppercased because the API
+    uppercases variable names and every lookup here is on an uppercased key.
+    """
+    names = {name.upper() for name in _split(raw)}
+    unknown = sorted(names - set(AT_ORG_NAMES))
+    if unknown:
+        raise SystemExit(
+            f"--vars-at-org names {', '.join(unknown)}, which it does not accept. "
+            f"It accepts {' and '.join(AT_ORG_NAMES)}."
+        )
+    return names
 
 
 def _resolve_shared(flag, variables, envs):
@@ -511,7 +542,7 @@ def _versions(engine):
     return versions
 
 
-def _wanted_variables(ctx):
+def _writable_variables(ctx):
     """{name: (value, the flag or file it came from)}, in the order they are written."""
     versions = ctx["versions"]
     wanted = {
@@ -523,6 +554,146 @@ def _wanted_variables(ctx):
     if ctx["shared"]:
         wanted["SHIPMATE_SHARED_ENVS"] = (",".join(sorted(ctx["shared"])), "--shared")
     return wanted
+
+
+def _wanted_variables(ctx):
+    """The writable set minus the names asserted at organization level."""
+    return {k: v for k, v in _writable_variables(ctx).items() if k not in ctx["at_org"]}
+
+
+def _report_org_leftovers(ctx):
+    """Report a repository variable that still exists under --vars-at-org.
+
+    Repository resolution beats organization, so a leftover copy silently
+    overrides the organization value. It is reported and never deleted: removing
+    a value this script did not write exceeds the reconciler's mandate.
+    """
+    for name in sorted(ctx["at_org"]):
+        current = ctx["variables"].get(name)
+        if current is None:
+            report("ok", name, "asserted at organization level")
+        else:
+            report(
+                "differs",
+                name,
+                f"repository has {current}, asserted at organization level — "
+                f"delete it with `gh variable delete {name}` or drop the name from --vars-at-org",
+            )
+
+
+def _org_plan(owner):
+    """The organization's plan name, or "" when the token cannot see it.
+
+    `plan` is present in `GET /orgs/{org}` only for an organization owner, so a
+    token without owner rights reads "". A 404 is not that case: it means `owner` is a
+    personal account, where no organization variable can exist at all, and the raw
+    `gh` failure would leave the operator reading a 404 for an endpoint they never named.
+    """
+    facts = _gh_json_or_none(f"orgs/{owner}")
+    if facts is None:
+        raise SystemExit(
+            f"{owner} is a personal account, not an organization, so no organization "
+            "variable can reach this repository and every asserted name would resolve to "
+            "empty. Drop --vars-at-org."
+        )
+    return (facts.get("plan") or {}).get("name", "")
+
+
+def _refuse_unreachable_org_variables(ctx):
+    """Refuse when no organization variable can reach this repository at all.
+
+    GitHub Free excludes private repositories from organization variables
+    outright, whatever each variable's visibility policy says -- so this bounds
+    every name in `--vars-at-org`. It runs before the endpoint read so the
+    refusal names the tier rather than reporting every name as unshared.
+
+    Deny-list, not allow-list: "free" is the documented exclusion, and an
+    unreadable plan is refused because it cannot be told from it. An allow-list
+    of ("team", "enterprise") would refuse the legacy "business" plans, which
+    GitHub does not exclude.
+    """
+    owner = ctx["repo"].split("/", 1)[0]
+    plan = ctx["org_plan"]
+    if not ctx["at_org"] or not ctx["is_private"] or plan not in ("", "free"):
+        return
+    names = ", ".join(sorted(ctx["at_org"]))
+    raise SystemExit(
+        f"{ctx['repo']} is private and {owner}'s plan reads {plan or 'unknown'}. "
+        "Organization variables do not reach private repositories on GitHub Free, so "
+        f"{names} would resolve to empty and every run would fail. Upgrade the "
+        "organization, keep them as repository variables (drop them from "
+        "--vars-at-org), or -- if the plan reads 'unknown' -- re-run as an "
+        "organization owner, because `gh api orgs/<org>` reports no plan to anyone else."
+    )
+
+
+def _reaching_variables(repo):
+    """{NAME: value} for the organization variables that reach `repo`.
+
+    GitHub applies each variable's visibility policy to this endpoint, so a
+    variable missing here does not reach this repository and contributes nothing
+    to what the workflows resolve -- which is the only question worth asking.
+    The response carries no visibility field, so why it is missing is not knowable.
+    """
+    try:
+        pages = json.loads(
+            _run(
+                [
+                    "gh",
+                    "api",
+                    f"repos/{repo}/actions/organization-variables",
+                    "--paginate",
+                    "--slurp",
+                ]
+            )
+        )
+    except SystemExit as exc:
+        # gh's stderr rides along in `exc`, so a failure that is not a permission
+        # problem still shows its real cause under the hint.
+        raise SystemExit(
+            f"could not read the organization variables reaching {repo}: {exc}\n"
+            "A fine-grained token needs this repository's Variables read permission, and "
+            "`--slurp` needs a recent `gh`. Drop the names from --vars-at-org to skip "
+            "this check."
+        ) from exc
+    return {
+        var["name"].upper(): var["value"] for page in pages for var in page.get("variables", [])
+    }
+
+
+def _refuse_org_assertion_mismatch(ctx):
+    """Refuse when a name asserted at organization level is not there, or differs.
+
+    Checked against the value this run would otherwise have written: `--vars-at-org X`
+    asserts X is already set correctly, so a value that is not that one means the
+    assertion is wrong. A repository-level copy is deliberately not consulted -- it
+    shadows the organization value today and `_report_org_leftovers` already tells the
+    operator to delete it, at which point a disagreeing organization value breaks the
+    repository.
+    """
+    if not ctx["at_org"]:
+        return
+    reaching = _reaching_variables(ctx["repo"])
+    writable = _writable_variables(ctx)
+    for name in sorted(ctx["at_org"]):
+        wanted, source = writable[name]
+        if name not in reaching:
+            raise SystemExit(
+                f"--vars-at-org names {name}, but no organization variable of that name "
+                f"reaches {ctx['repo']} -- it is unset, or its visibility excludes this "
+                f"repository, so it would resolve to empty and every run would fail. Set it "
+                f"with `gh variable set {name} --org {ctx['repo'].split('/', 1)[0]} --body "
+                f"{wanted} --visibility all`, add this repository to its selected list, or "
+                f"drop {name} from --vars-at-org."
+            )
+        if reaching[name] != wanted:
+            raise SystemExit(
+                f"{name} reaches {ctx['repo']} as {reaching[name]}, but {source} says "
+                f"{wanted}. The workflows read the resolved value, so this run would "
+                f"configure one thing and every later run would use another. Re-run with "
+                f"{source} matching, correct the organization variable first, or drop "
+                f"{name} from --vars-at-org."
+            )
 
 
 def _matches(name, current, value):
@@ -867,6 +1038,11 @@ def main(argv=None):
     ap.add_argument("--key", required=True, help="path to the App's PEM private key")
     ap.add_argument("--state-suffix", default="", help="suffix for state artifact names")
     ap.add_argument("--shared", default="", help="environments bound as one bare `<env>`")
+    ap.add_argument(
+        "--vars-at-org",
+        default="",
+        help="variables already set at organization level; not written here",
+    )
     ap.add_argument("--dry-run", action="store_true", help="report changes, write nothing")
     args = ap.parse_args(argv)
     if not _TEAM_RE.fullmatch(args.team):
@@ -879,6 +1055,7 @@ def main(argv=None):
             f"{args.state_suffix!r}. It is written "
             'into every `state_suffix: "<value>"` scalar of the workflow file.'
         )
+    at_org = _at_org(args.vars_at_org)
     _DRY = args.dry_run
 
     # The local reads first: a bad key path or an unusable VERSIONS must fail in under a
@@ -888,7 +1065,7 @@ def main(argv=None):
     versions = _versions(engine)
     sha, version = _engine_pin(engine)
     root = _repo_root()
-    repo, default_branch = _repo_facts()
+    repo, default_branch, is_private = _repo_facts()
     envs = _derive_envs()
     variables = _variables()
     _refuse_diverging_app_id(args.app_id, variables)
@@ -908,7 +1085,19 @@ def main(argv=None):
         "variables": variables,
         "sha": sha,
         "version": version,
+        "at_org": at_org,
+        "is_private": is_private,
+        "org_plan": "",
     }
+    # The tier bounds every name and must be decided before the endpoint read, so a
+    # Free private repository gets the tier message rather than "not shared". Only a
+    # private repository asserting a name pays the read: `orgs/<owner>` is the one
+    # org-scoped call here, and it needs a permission no other run needs.
+    ctx["org_plan"] = (
+        _org_plan(ctx["repo"].split("/", 1)[0]) if ctx["at_org"] and ctx["is_private"] else ""
+    )
+    _refuse_unreachable_org_variables(ctx)
+    _refuse_org_assertion_mismatch(ctx)
     print(f"{ctx['repo']} (default branch {ctx['default_branch']})")
     print(f"environments: {', '.join(ctx['envs'])}")
     print(f"shared: {', '.join(sorted(ctx['shared'])) or '(none)'}")
@@ -917,6 +1106,7 @@ def main(argv=None):
     _reconcile_engine_env(ctx)
     _reconcile_envs(ctx)
     _reconcile_variables(ctx)
+    _report_org_leftovers(ctx)
     _reconcile_ruleset(ctx)
     _reconcile_shims(ctx)
     _checklist(ctx)

@@ -11,6 +11,35 @@ section below names the SHA the release tags.
 The version line stays `v0.x` while action inputs, check names, and the comment
 grammar are declared unstable in `README.md`.
 
+## [Unreleased]
+
+**Re-pinning is not involved**: this release changes `scripts/onboard`, which is
+run by hand and never pinned by a consumer, and no action, workflow or check
+name moves.
+
+### Added
+
+- **`scripts/onboard --vars-at-org` skips the variables an organization already
+  sets.** The flag takes a comma-separated list of variable names the operator
+  asserts are set at organization level — `SHIPMATE_APP_ID` and
+  `SHIPMATE_APPROVERS_TEAM` are the only two it accepts — and `onboard` then
+  writes neither of them per repository. Every other name is refused. Every
+  asserted name is verified rather than trusted: `onboard` reads the
+  organization variables that actually reach the repository and refuses, before
+  its first write, when a name is missing from that list or holds a value other
+  than the one the run would have written. A repository-level copy still
+  overrides the organization value, so one is reported as a `differs` line with
+  exit 2 and never deleted.
+
+  `gh variable set --org` defaults to `--visibility private`, which reaches no
+  public repository; set the variable `--visibility all` or
+  `--visibility selected --repos <list>`. Private consumers need GitHub Team or
+  Enterprise — organization variables do not reach a private repository on
+  GitHub Free at all — and `onboard` refuses there rather than let the empty
+  value reach a run. The flag needs a `gh` carrying `gh api --slurp`, tested with
+  `gh` 2.93.0; nothing else in the engine depends on a `gh` version.
+  `docs/github-app.md` §6 is the procedure.
+
 ## [0.27.1] — 2026-09-12
 
 Tags `55bf06b`.

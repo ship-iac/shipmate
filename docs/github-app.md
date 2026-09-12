@@ -213,20 +213,87 @@ gh secret list --repo "$REPO"
 `SHIPMATE_APP_PRIVATE_KEY` must not appear in that output; it should appear only
 under the environment (`gh secret list --repo "$REPO" --env shipmate-engine`).
 
-`SHIPMATE_APP_ID` (a variable, not a secret) may also be set once at the
-org level with restricted visibility, so every consumer repo inherits it
-without a per-repo copy (`SHIPMATE_APPROVERS_TEAM` may still differ per repo,
-so set it per-repo as above):
+**Both variables (variables, not secrets) may be set once at the organization
+level instead.** `vars` resolve organization → repository → environment, so a
+consumer repo holding neither copy reads the organization value and nothing else
+in the pipeline changes. Set `SHIPMATE_APPROVERS_TEAM` per repository wherever
+the approving team differs, and `SHIPMATE_APP_ID` per repository wherever the App
+differs — one App per trust domain means one id per trust domain
+([`hardening.md`](hardening.md) §13–14).
+
+`gh variable set --org` defaults to `--visibility private`, which reaches
+private repositories only — an organization-wide default leaves every public
+consumer resolving the name as empty. Two visibilities reach a public
+repository, neither preferred over the other: `all` is the simple one,
+`selected` the scoped one. `scripts/onboard` accepts both.
 
 ```bash
-gh variable set SHIPMATE_APP_ID --org <org> --visibility selected \
-  --repos "<repo>,<repo>" \
+# Either visibility works for either variable.
+gh variable set SHIPMATE_APP_ID --org <org> --visibility all \
   --body "<app-id-from-step-1-output>"
+gh variable set SHIPMATE_APPROVERS_TEAM --org <org> --visibility selected \
+  --repos "<repo>,<repo>" --body "<approvers-team-slug>"
 ```
 
-`SHIPMATE_APP_PRIVATE_KEY` cannot follow it there: environment secrets are
-scoped to one repository's environment, so it has to be set per-repo as
-above. That is one more reason step 5 (creating the environment) has to happen in
+Then tell `scripts/onboard` which names are already set there, and it stops
+writing them per repository:
+
+```bash
+python3 <engine-checkout>/scripts/onboard \
+  --team <approvers-team-slug> --app-id <app-id> \
+  --key shipmate-app.private-key.pem \
+  --vars-at-org SHIPMATE_APP_ID,SHIPMATE_APPROVERS_TEAM
+```
+
+The flag takes a comma-separated list of names and accepts `SHIPMATE_APP_ID` and
+`SHIPMATE_APPROVERS_TEAM` only; every other name is refused, an unrecognised one
+because it would filter nothing and still report success, and the remaining
+variables `onboard` writes because they are not shareable. Name only the
+variables that are correct for this repository: a repository whose approving team
+differs from the organization's keeps its own `SHIPMATE_APPROVERS_TEAM` and
+leaves that name out of the flag, and one in a second App's trust domain does the
+same with `SHIPMATE_APP_ID`. Asserting a name whose organization value is not the
+one this run would write is refused, and the repository copy does not satisfy the
+assertion.
+
+**Every asserted name is verified, not trusted.** `onboard` reads
+`GET /repos/{owner}/{repo}/actions/organization-variables`, which returns
+only the organization variables whose visibility reaches this repository, and
+refuses before its first write when an asserted name is missing from that list
+or carries a value other than the one this run would have written. A name left
+on the default `private` visibility for a public consumer is caught here rather
+than at the first run. The read needs no token scope beyond the `repo` access
+onboarding already has. It needs a `gh` carrying `gh api --slurp`; tested with
+`gh` 2.93.0.
+
+**Private consumers need GitHub Team or Enterprise.** Organization variables do
+not reach private repositories on GitHub Free at all, whatever each variable's
+visibility says, and that bounds both names. `onboard` refuses rather than let
+it reach a run. It reads the plan through `gh api orgs/<org>`, which reports it
+only to an organization owner, so a token that cannot read the plan is refused
+the same way, with an instruction to re-run as an owner. Without the refusal the
+failure surfaces at the first `shipmate apply`: an empty
+`SHIPMATE_APPROVERS_TEAM` makes every membership check 404, and the comment is
+rejected as "not a member of the required approvers team ``".
+
+**The residual cost.** Onboarding a public repository this way still needs only
+repository admin, as every other run does. A private one needs an organization
+owner, because the GitHub Free check reads a field `GET /orgs/{org}` shows to
+nobody else.
+
+A repository-level copy of an asserted name still overrides the organization
+value, because repository resolution wins. `onboard` reports one as a `differs`
+line and exits 2, and never deletes it — removing a value it did not write is
+outside what it reconciles. A repository already onboarded per repository starts
+in exactly that state, so migrating one is: set the organization variables,
+delete each repository copy with `gh variable delete <NAME>` in the consumer
+repo, and run `onboard` again with the flag. A `SHIPMATE_APP_ID` copy holding a
+value other than `--app-id` is refused outright before any of this, as it is
+without the flag.
+
+`SHIPMATE_APP_PRIVATE_KEY` cannot move to the organization with them:
+environment secrets are scoped to one repository's environment, so it has to be
+set per-repo as above. That is one more reason step 5 (creating the environment) has to happen in
 every consumer repo, not once for the org.
 
 ## 7. Rotate the private key (on suspicion of compromise)
@@ -438,6 +505,14 @@ Each run needs the engine checkout on a `vX.Y.Z` release tag, `terramate` on
 `PATH` in the consumer checkout — its `env/<name>` tags are where the
 environment set comes from — and `gh` authenticated with admin on that
 repository. It refuses rather than half-configuring when one of those is missing.
+`--vars-at-org` names only the variables correct for the repository at hand (§6),
+so it cannot be a loop constant: a repository whose approving team differs keeps
+its own `SHIPMATE_APPROVERS_TEAM` and asserts `SHIPMATE_APP_ID` alone, and one in
+a second App's trust domain keeps its own `SHIPMATE_APP_ID` and asserts
+`SHIPMATE_APPROVERS_TEAM` alone. The loop below is the shape without the flag;
+add it to the individual runs instead. A private consumer asserting a name then
+needs an organization owner rather than repository admin, because the plan read
+behind the flag answers to nobody else.
 
 ```bash
 ENGINE=<path-to-engine-checkout>    # on a release tag
