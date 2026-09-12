@@ -13,7 +13,7 @@ grammar are declared unstable in `README.md`.
 
 ## [0.27.1] — 2026-09-12
 
-Tags `<sha>`.
+Tags `55bf06b`.
 
 **Re-pinning is all it takes**: no action input or output, check name, comment
 verb, environment or workflow fragment changes, and there is nothing to migrate.
