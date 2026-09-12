@@ -714,10 +714,10 @@ trust to all of them.
   their own App and their own key.
 - Set the key as a `shipmate-engine` environment secret, per repository
   (`docs/github-app.md` steps 5–6) — never at repository or org level, and
-  never shared org-wide the way `SHIPMATE_APP_ID` (a variable, not a secret)
-  may be: environment secrets are scoped to one repository's environment, so
-  each consumer repo needs its own `shipmate-engine` environment and its own
-  copy of the key.
+  never shared org-wide the way `SHIPMATE_APP_ID` and
+  `SHIPMATE_APPROVERS_TEAM` (variables, not secrets) may be: environment
+  secrets are scoped to one repository's environment, so each consumer repo
+  needs its own `shipmate-engine` environment and its own copy of the key.
 - Rotate the key whenever push access is revoked — the runbook is
   `docs/github-app.md` §7. Anyone who had push access could have copied the
   PEM out of a workflow run, and revoking their access does not invalidate it.
