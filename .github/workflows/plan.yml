@@ -31,7 +31,7 @@ jobs:
       on-demand: ${{ steps.facts.outputs.on-demand }}
     steps:
       - id: facts
-        uses: ship-iac/shipmate/actions/pr-facts@37d72846f4c77196c3554a86b8cb4124d668762e
+        uses: ship-iac/shipmate/actions/pr-facts@d9eb0107785248de43eb7aebfce7246c7205777e
 
   detect:
     needs: facts
@@ -142,7 +142,7 @@ jobs:
         with:
           pattern: cell-summary.*
           path: cells
-      - uses: ship-iac/shipmate/actions/summary@37d72846f4c77196c3554a86b8cb4124d668762e
+      - uses: ship-iac/shipmate/actions/summary@d9eb0107785248de43eb7aebfce7246c7205777e
         with:
           pr-number: ${{ needs.facts.outputs.pr-number }}
           head-sha: ${{ needs.facts.outputs.head-sha }}
