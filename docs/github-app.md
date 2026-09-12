@@ -226,6 +226,7 @@ repository, neither preferred over the other: `all` is the simple one,
 `selected` the scoped one. `scripts/onboard` accepts both.
 
 ```bash
+# Either visibility works for either variable.
 gh variable set SHIPMATE_APP_ID --org <org> --visibility all \
   --body "<app-id-from-step-1-output>"
 gh variable set SHIPMATE_APPROVERS_TEAM --org <org> --visibility selected \
@@ -276,9 +277,9 @@ line and exits 2, and never deletes it — removing a value it did not write is
 outside what it reconciles. A `SHIPMATE_APP_ID` copy holding a value other than
 `--app-id` is refused outright before any of this, as it is without the flag.
 
-`SHIPMATE_APP_PRIVATE_KEY` cannot follow it there: environment secrets are
-scoped to one repository's environment, so it has to be set per-repo as
-above. That is one more reason step 5 (creating the environment) has to happen in
+`SHIPMATE_APP_PRIVATE_KEY` cannot move to the organization with them:
+environment secrets are scoped to one repository's environment, so it has to be
+set per-repo as above. That is one more reason step 5 (creating the environment) has to happen in
 every consumer repo, not once for the org.
 
 ## 7. Rotate the private key (on suspicion of compromise)
