@@ -88,7 +88,6 @@ def ctx(**over):
         "state_suffix": "",
         "root": None,
         "engine": None,
-        "versions": {"terramate": "9.9.9", "tofu": "8.8.8"},
         "variables": {},
         "sha": "a" * 40,
         "version": "v0.26.0",
@@ -466,6 +465,8 @@ def test_main_calls_every_stage_in_order():
     `_reconcile_envs(ctx)`; delete `_reconcile_variables(ctx)`; delete
     `_reconcile_ruleset(ctx)`; delete `_reconcile_shims(ctx)`; delete `_checklist(ctx)`;
     `_repo_root()` back to `pathlib.Path.cwd()`; delete
+    `_report_superseded_variables(ctx)`, which leaves a repository carrying an inert version
+    pin with nothing saying so; delete
     `_refuse_diverging_app_id(args.app_id, variables)`, which is the only guard against a
     ruleset pinned to an App the workflows do not use; delete `sys.exit(_exit_code())`;
     swap two reconcilers; delete `_report_org_leftovers(ctx)`; delete the
@@ -485,7 +486,6 @@ def test_main_calls_every_stage_in_order():
         "_SUFFIX_RE.fullmatch(args.state_suffix)",
         "_at_org(args.vars_at_org)",
         "_read_key(args.key)",
-        "_versions(engine)",
         "_engine_pin(engine)",
         "_repo_root()",
         "_repo_facts()",
@@ -500,6 +500,7 @@ def test_main_calls_every_stage_in_order():
         "_reconcile_envs(ctx)",
         "_reconcile_variables(ctx)",
         "_report_org_leftovers(ctx)",
+        "_report_superseded_variables(ctx)",
         "_reconcile_ruleset(ctx)",
         "_reconcile_shims(ctx)",
         "_checklist(ctx)",
@@ -1073,23 +1074,20 @@ def test_dry_run_reaches_every_write_path_and_issues_only_reads(monkeypatch, tmp
         "would create",
         "would set",
         "would set",
-        "would set",
-        "would set",
         "would create",
         "would create",
     ]
 
 
-def test_absent_variables_are_set_from_versions_and_flags(monkeypatch):
-    """A repository with no variables gets all four the workflows read, the two version
-    pins taken from the engine checkout's VERSIONS file rather than from anything the
-    operator retypes.
+def test_absent_variables_are_set_from_the_flags_and_no_tool_version_is_written(monkeypatch):
+    """A repository with no variables gets exactly the two the workflows still read. The
+    tool versions are not among them: `actions/setup` takes both from the release's own
+    VERSIONS file, so a repository copy would only be a second source of truth.
 
-    The whole recorded call list is compared against a hand-written constant: a
-    membership check would pass a run that also set a variable nobody intended.
+    The whole recorded call list is compared against a hand-written constant: an assertion
+    that TERRAMATE_VERSION is absent is satisfied by a run that wrote nothing at all.
 
-    Mutation: read `TOFU_VERSION` from `ctx["version"]` -- the engine release tag --
-    instead of from VERSIONS.
+    Mutation: restore either version entry to `_writable_variables`.
     """
     fake = make_gh({VARIABLE_LIST: []})
     monkeypatch.setattr(onboard, "_run", fake)
@@ -1098,17 +1096,15 @@ def test_absent_variables_are_set_from_versions_and_flags(monkeypatch):
         ["gh", "variable", "list", "--json", "name,value"],
         ["gh", "variable", "set", "SHIPMATE_APP_ID", "--body", "1"],
         ["gh", "variable", "set", "SHIPMATE_APPROVERS_TEAM", "--body", "ops"],
-        ["gh", "variable", "set", "TERRAMATE_VERSION", "--body", "9.9.9"],
-        ["gh", "variable", "set", "TOFU_VERSION", "--body", "8.8.8"],
     ]
 
 
 def test_variables_that_exist_with_another_value_are_reported(monkeypatch):
-    """A consumer pinning an older tested pair, or another App, is making a deliberate
+    """A consumer naming another App, or another approvers team, is making a deliberate
     choice: the reconciler names the disagreement and writes nothing over it. Each
     `differs` line names where the value it would have written came from, so two
     variables from different sources are driven here -- a swap of the `--app-id` and
-    `--team` labels reddens the first line.
+    `--team` labels reddens both lines.
 
     Mutation: overwrite the existing value instead of reporting -- both `differs` tuples
     disappear and `gh variable set` calls for both appear.
@@ -1117,22 +1113,22 @@ def test_variables_that_exist_with_another_value_are_reported(monkeypatch):
         {
             VARIABLE_LIST: [
                 {"name": "SHIPMATE_APP_ID", "value": "123"},
-                {"name": "TERRAMATE_VERSION", "value": "0.16.0"},
+                {"name": "SHIPMATE_APPROVERS_TEAM", "value": "platform"},
             ]
         }
     )
     monkeypatch.setattr(onboard, "_run", fake)
-    onboard._reconcile_variables(ctx(app_id="456", variables=onboard._variables()))
+    onboard._reconcile_variables(
+        ctx(app_id="456", shared={"dev-eu"}, variables=onboard._variables())
+    )
     assert fake.calls == [
         ["gh", "variable", "list", "--json", "name,value"],
-        ["gh", "variable", "set", "SHIPMATE_APPROVERS_TEAM", "--body", "ops"],
-        ["gh", "variable", "set", "TOFU_VERSION", "--body", "8.8.8"],
+        ["gh", "variable", "set", "SHIPMATE_SHARED_ENVS", "--body", "dev-eu"],
     ]
     assert onboard.REPORT == [
         ("differs", "SHIPMATE_APP_ID", "repository has 123, --app-id is 456"),
-        ("set", "SHIPMATE_APPROVERS_TEAM", "ops"),
-        ("differs", "TERRAMATE_VERSION", "repository has 0.16.0, VERSIONS is 9.9.9"),
-        ("set", "TOFU_VERSION", "8.8.8"),
+        ("differs", "SHIPMATE_APPROVERS_TEAM", "repository has platform, --team is ops"),
+        ("set", "SHIPMATE_SHARED_ENVS", "dev-eu"),
     ]
     assert onboard._exit_code() == 2
 
@@ -1143,20 +1139,16 @@ def test_variable_names_are_matched_uppercased(monkeypatch):
 
     Mutation: drop the `.upper()` in `_variables`.
     """
-    fake = make_gh({VARIABLE_LIST: [{"name": "tofu_version", "value": "8.8.8"}]})
+    fake = make_gh({VARIABLE_LIST: [{"name": "shipmate_approvers_team", "value": "ops"}]})
     monkeypatch.setattr(onboard, "_run", fake)
     onboard._reconcile_variables(ctx(variables=onboard._variables()))
     assert fake.calls == [
         ["gh", "variable", "list", "--json", "name,value"],
         ["gh", "variable", "set", "SHIPMATE_APP_ID", "--body", "1"],
-        ["gh", "variable", "set", "SHIPMATE_APPROVERS_TEAM", "--body", "ops"],
-        ["gh", "variable", "set", "TERRAMATE_VERSION", "--body", "9.9.9"],
     ]
     assert onboard.REPORT == [
         ("set", "SHIPMATE_APP_ID", "1"),
-        ("set", "SHIPMATE_APPROVERS_TEAM", "ops"),
-        ("set", "TERRAMATE_VERSION", "9.9.9"),
-        ("ok", "TOFU_VERSION", "8.8.8"),
+        ("ok", "SHIPMATE_APPROVERS_TEAM", "ops"),
     ]
 
 
@@ -1182,8 +1174,6 @@ def test_shared_environments_are_written_as_one_sorted_variable(monkeypatch):
         ["gh", "variable", "list", "--json", "name,value"],
         ["gh", "variable", "set", "SHIPMATE_APP_ID", "--body", "1"],
         ["gh", "variable", "set", "SHIPMATE_APPROVERS_TEAM", "--body", "ops"],
-        ["gh", "variable", "set", "TERRAMATE_VERSION", "--body", "9.9.9"],
-        ["gh", "variable", "set", "TOFU_VERSION", "--body", "8.8.8"],
         ["gh", "variable", "set", "SHIPMATE_SHARED_ENVS", "--body", "dev-ap,dev-eu,dev-us"],
     ]
 
@@ -1196,8 +1186,6 @@ def test_shared_environments_are_written_as_one_sorted_variable(monkeypatch):
     assert onboard.REPORT == [
         ("set", "SHIPMATE_APP_ID", "1"),
         ("set", "SHIPMATE_APPROVERS_TEAM", "ops"),
-        ("set", "TERRAMATE_VERSION", "9.9.9"),
-        ("set", "TOFU_VERSION", "8.8.8"),
         ("ok", "SHIPMATE_SHARED_ENVS", "dev-ap,dev-eu,dev-us"),
     ]
     assert onboard._exit_code() == 0
@@ -1232,15 +1220,13 @@ def test_at_org_refuses_a_name_it_does_not_accept():
     )
 
 
-def test_at_org_refuses_a_version_pin_this_script_does_write():
-    """TERRAMATE_VERSION is written here and still not assertable: `_reconcile_variables`
-    reports a divergent pin as a deliberate `differs`, so refusing the same divergence at
-    organization level would invert that policy, and the mismatch remedy would name
-    VERSIONS -- a file inside the engine checkout on a release tag, which the operator
-    cannot act on.
+def test_at_org_refuses_a_version_pin():
+    """TERRAMATE_VERSION is not assertable at organization level, because nothing writes or
+    reads it any more: the release's own VERSIONS file decides the version. Accepting the
+    name would take `_refuse_org_assertion_mismatch` into a `KeyError` on a
+    `_writable_variables` entry that no longer exists.
 
-    Mutation: widen `AT_ORG_NAMES` to every key `_writable_variables` produces, which is
-    the validation this replaced.
+    Mutation: add "TERRAMATE_VERSION" to `AT_ORG_NAMES`.
     """
     with pytest.raises(SystemExit) as excinfo:
         onboard._at_org("TERRAMATE_VERSION")
@@ -1260,8 +1246,6 @@ def test_wanted_variables_removes_exactly_the_names_asserted_at_org():
     """
     assert onboard._wanted_variables(ctx(at_org={"SHIPMATE_APP_ID"}, shared={"dev-eu"})) == {
         "SHIPMATE_APPROVERS_TEAM": ("ops", "--team"),
-        "TERRAMATE_VERSION": ("9.9.9", "VERSIONS"),
-        "TOFU_VERSION": ("8.8.8", "VERSIONS"),
         "SHIPMATE_SHARED_ENVS": ("dev-eu", "--shared"),
     }
 
@@ -1289,6 +1273,53 @@ def test_a_repository_copy_of_an_org_variable_is_reported_and_never_written(monk
         )
     ]
     assert onboard._exit_code() == 2
+
+
+def test_a_superseded_tool_version_variable_is_reported_and_never_deleted(monkeypatch):
+    """`actions/setup` reads the release's own VERSIONS file, so a repository copy of either
+    pin is inert: an operator bumping it would otherwise get silence. Both names are driven
+    in one call, because a loop reporting only the first passes a one-name fixture. The
+    whole REPORT is compared, and zero recorded calls is the other half -- the remedy is the
+    operator's to run, never this script's.
+
+    Mutation: report `"ok"` instead of `"differs"` -- the exit code drops to 0 while the
+    message still reads as informative.
+    """
+    fake = make_gh({})
+    monkeypatch.setattr(onboard, "_run", fake)
+    onboard._report_superseded_variables(
+        ctx(variables={"TERRAMATE_VERSION": "0.16.0", "TOFU_VERSION": "1.8.0"})
+    )
+    assert fake.calls == []
+    assert onboard.REPORT == [
+        (
+            "differs",
+            "TERRAMATE_VERSION",
+            "repository has 0.16.0, superseded by the version the engine release pins — "
+            "nothing reads it; delete it with `gh variable delete TERRAMATE_VERSION`",
+        ),
+        (
+            "differs",
+            "TOFU_VERSION",
+            "repository has 1.8.0, superseded by the version the engine release pins — "
+            "nothing reads it; delete it with `gh variable delete TOFU_VERSION`",
+        ),
+    ]
+    assert onboard._exit_code() == 2
+
+
+def test_a_repository_without_the_superseded_variables_reports_nothing(monkeypatch):
+    """The other half: a clean repository gets no line at all, or every run of a correctly
+    configured repository exits 2 and the report stops meaning anything.
+
+    Mutation: report unconditionally, using `ctx["variables"].get(name, "")`.
+    """
+    fake = make_gh({})
+    monkeypatch.setattr(onboard, "_run", fake)
+    onboard._report_superseded_variables(ctx(variables={}))
+    assert fake.calls == []
+    assert onboard.REPORT == []
+    assert onboard._exit_code() == 0
 
 
 ORG_VARS = "repos/o/r/actions/organization-variables"
@@ -1349,14 +1380,12 @@ FRESH_ROUTES = {
 def run_main(monkeypatch, tmp_path, extra_routes, argv, is_private=False):
     """Drive `main()` over `FRESH_ROUTES` plus `extra_routes`, returning (fake, SystemExit).
 
-    Only the reads `main` does before its first reconciler are stubbed -- the git, terramate,
-    VERSIONS and `gh repo view` reads, each with its own test. Everything below them runs for
-    real against the fake, which is what makes the order of the organization checks observable.
+    Only the reads `main` does before its first reconciler are stubbed -- the git, terramate
+    and `gh repo view` reads, each with its own test. Everything below them runs for real
+    against the fake, which is what makes the order of the organization checks observable.
     """
     fake = make_gh({**FRESH_ROUTES, **extra_routes})
     monkeypatch.setattr(onboard, "_run", fake)
-    versions = {"terramate": "9.9.9", "tofu": "8.8.8"}
-    monkeypatch.setattr(onboard, "_versions", lambda engine: versions)
     monkeypatch.setattr(onboard, "_engine_pin", lambda engine: ("a" * 40, "v0.26.0"))
     monkeypatch.setattr(onboard, "_repo_root", lambda: tmp_path)
     monkeypatch.setattr(onboard, "_repo_facts", lambda: ("o/r", "main", is_private))
@@ -1460,8 +1489,8 @@ def test_a_repository_copy_does_not_rescue_a_disagreeing_organization_value(monk
 def test_matching_organization_values_pass_and_write_no_variable(monkeypatch, tmp_path):
     """The whole recorded call list is compared against a hand-written constant: an assertion
     that SHIPMATE_APP_ID was not set is satisfied by a run that set nothing at all, and a
-    variable write that should have been filtered cannot hide in a membership check. Only
-    TERRAMATE_VERSION and TOFU_VERSION are written.
+    variable write that should have been filtered cannot hide in a membership check. Both
+    names this script writes are asserted at organization level, so no variable is written.
 
     Mutation: refuse unconditionally, which reds this while the two refusal properties stay
     green.
@@ -1516,8 +1545,6 @@ def test_matching_organization_values_pass_and_write_no_variable(monkeypatch, tm
             "-f",
             "name=main",
         ],
-        ["gh", "variable", "set", "TERRAMATE_VERSION", "--body", "9.9.9"],
-        ["gh", "variable", "set", "TOFU_VERSION", "--body", "8.8.8"],
         ["gh", "api", RULES],
         ["gh", "api", "-X", "POST", "repos/o/r/rulesets", "--input", "-"],
     ]
@@ -1692,56 +1719,6 @@ def test_no_organization_read_happens_without_the_flag(monkeypatch):
     monkeypatch.setattr(onboard, "_run", fake)
     onboard._refuse_org_assertion_mismatch(ctx())
     assert fake.calls == []
-
-
-def test_an_unusable_versions_file_refuses_before_the_first_call(monkeypatch, tmp_path):
-    """`_versions` reads a local file and depends on nothing the reconcilers do, so its
-    refusal belongs among `main`'s local reads: a repository must not end up with half
-    its environments created over a typo in a file that was readable at startup. Zero
-    recorded calls is the assertion -- the message alone would be satisfied by a refusal
-    from the wrong place.
-
-    Mutation: move the `_versions(engine)` call back below the reconcilers (into
-    `_writable_variables`, where it started), which records `git` and `gh` calls before
-    the refusal.
-    """
-    fake = make_gh({})
-    monkeypatch.setattr(onboard, "_run", fake)
-
-    def boom(engine):
-        raise SystemExit("bad VERSIONS")
-
-    monkeypatch.setattr(onboard, "_versions", boom)
-    pem = tmp_path / "key.pem"
-    pem.write_text("-----BEGIN-----\npem\n", encoding="utf-8", newline="\n")
-    with pytest.raises(SystemExit) as e:
-        onboard.main(["--team", "ops", "--app-id", "1", "--key", str(pem)])
-    assert "bad VERSIONS" in str(e.value)
-    assert fake.calls == []
-
-
-def test_a_missing_versions_file_is_refused(tmp_path):
-    """Every other refusal in this script is a `SystemExit` naming what to fix;
-    `test_an_unusable_versions_file_refuses_before_the_first_call` pins where it fires.
-
-    Mutation: drop the `is_file()` check, so a `FileNotFoundError` traceback replaces it.
-    """
-    with pytest.raises(SystemExit) as e:
-        onboard._versions(tmp_path)
-    assert "VERSIONS" in str(e.value)
-
-
-def test_a_versions_file_missing_a_key_is_refused(tmp_path):
-    """`terramate=` and `tofu=` are this script's only coupling to that file's shape, and
-    nothing else in the repository parses it. A renamed key must name itself, not raise a
-    `KeyError` two frames away.
-
-    Mutation: drop the `missing` check, so `_writable_variables` raises `KeyError: 'tofu'`.
-    """
-    (tmp_path / "VERSIONS").write_text("terramate=9.9.9\n", encoding="utf-8", newline="\n")
-    with pytest.raises(SystemExit) as e:
-        onboard._versions(tmp_path)
-    assert "tofu" in str(e.value)
 
 
 def test_missing_gate_rule_creates_the_ruleset(monkeypatch):

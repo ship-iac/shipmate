@@ -58,15 +58,8 @@ would be worse than the duplication it replaces. This module keeps the rationale
 assertions.
 """
 
-import subprocess
-
 import pinrefs
 import pytest
-
-#: The synthetic fixture's VERSIONS, and the same file after a version bump. Never this
-#: repository's own file: the guard must be provable without depending on what it currently says.
-_FIXTURE_VERSIONS = "terramate=0.1.0\ntofu=0.2.0\n"
-_BUMPED_VERSIONS = "terramate=9.9.9\ntofu=0.2.0\n"
 
 
 def test_internal_action_pins_are_current():
@@ -200,101 +193,6 @@ def test_dependent_paths_for_apply_summary_contains_apply_comment():
     assert {"scripts/apply-comment", "scripts/summary-comment", "scripts/apply-gate"} <= dependent
 
 
-def _git_out(root, *args):
-    r = subprocess.run(  # noqa: S603
-        ["git", "-C", str(root), *args],  # noqa: S607
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    return r.stdout.strip()
-
-
-def _synthetic_repo(tmp_path, monkeypatch, versions_after):
-    """A throwaway two-commit repo pinrefs reads instead of this one, and its (first, second) SHA.
-
-    The first commit holds an ``actions/setup`` that reads ``VERSIONS`` and an ``actions/plain``
-    that reads nothing; the second writes ``versions_after`` and always touches an unrelated
-    file, so "VERSIONS unchanged" is a real case rather than an empty commit.
-
-    Synthetic, because this repository cannot produce the case under test: the guard compares
-    against the merge base, so a pin and its baseline agree here by design and a fixture built
-    from real history would prove nothing.
-    """
-
-    def run(*args):
-        _git_out(tmp_path, *args)
-
-    def write(rel, text):
-        path = tmp_path / rel
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(text, encoding="utf-8", newline="\n")
-
-    run("init", "-q")
-    run("config", "user.email", "guard@example.invalid")
-    run("config", "user.name", "guard")
-    run("config", "commit.gpgsign", "false")
-    write(
-        "actions/setup/action.yml",
-        'runs:\n  steps:\n    - run: versions="$GITHUB_ACTION_PATH/../../VERSIONS"\n',
-    )
-    write("actions/plain/action.yml", "runs:\n  using: composite\n  steps: []\n")
-    write("VERSIONS", _FIXTURE_VERSIONS)
-    write("unrelated.md", "one\n")
-    run("add", "-A")
-    run("commit", "-qm", "first")
-    first = _git_out(tmp_path, "rev-parse", "HEAD")
-    write("VERSIONS", versions_after)
-    write("unrelated.md", "two\n")
-    run("add", "-A")
-    run("commit", "-qm", "second")
-    second = _git_out(tmp_path, "rev-parse", "HEAD")
-    monkeypatch.setattr(pinrefs, "ROOT", tmp_path)
-    return first, second
-
-
-def test_an_action_that_reads_versions_carries_it_in_its_dependency_set(tmp_path, monkeypatch):
-    """Reds when the derivation returns script paths only."""
-    first, second = _synthetic_repo(tmp_path, monkeypatch, _BUMPED_VERSIONS)
-    assert pinrefs.dependent_paths("actions/setup", first, second) == {"VERSIONS"}
-
-
-def test_an_action_that_does_not_read_versions_does_not_carry_it(tmp_path, monkeypatch):
-    """Reds when VERSIONS is added to every action's set unconditionally, which would pass the
-    test above while flagging all 20 actions on any version bump."""
-    first, second = _synthetic_repo(tmp_path, monkeypatch, _BUMPED_VERSIONS)
-    assert pinrefs.dependent_paths("actions/plain", first, second) == set()
-
-
-def test_a_versions_change_between_the_pin_and_the_baseline_is_reported_stale(
-    tmp_path, monkeypatch
-):
-    """The property this derivation exists for, and not a restatement of the set above: it reds
-    on its own when VERSIONS is dropped from the staleness loop but kept in the dependency set.
-
-    ``actions/setup`` is byte-identical across the two commits, so the only way to report
-    anything here is through the dependency, never through the direct path diff.
-    """
-    first, second = _synthetic_repo(tmp_path, monkeypatch, _BUMPED_VERSIONS)
-    issues = pinrefs.pin_issues([("actions/setup", first, "w.yml")], second)
-    assert issues == [
-        pinrefs.PinIssue("actions/setup", first, "w.yml", "dep_stale", dep="VERSIONS")
-    ]
-
-
-def test_an_unchanged_versions_is_not_reported_stale(tmp_path, monkeypatch):
-    """The other half: a dependency that did not change stays silent, or the guard cries wolf on
-    every pin and gets ignored. The second commit still changes an unrelated file."""
-    first, second = _synthetic_repo(tmp_path, monkeypatch, _FIXTURE_VERSIONS)
-    assert pinrefs.pin_issues([("actions/setup", first, "w.yml")], second) == []
-
-
-# The premise checks -- ACTION_PATH_REF, REF and LOAD_REF each seeing every reference of its kind --
-# are in scripts/tests/test_pin_derivation_premises.py, a module pull request CI runs because it
-# reads only the working tree. This one is --ignore'd there: it reads git history and is red by
-# design on a pin-bump pull request.
-
-
 def test_unverifiable_pin_fails_when_history_is_present(monkeypatch):
     """A pin whose commit is absent while mainline history is present is a dangling ref, not a
     shallow clone: GitHub cannot resolve it at runtime and every apply job dies. It must fail,
@@ -341,3 +239,10 @@ def test_unverifiable_pin_skips_when_clone_is_shallow(monkeypatch):
 
     with pytest.raises(pytest.skip.Exception, match="shallow"):
         test_internal_action_pins_are_current()
+
+
+# The premise checks -- ACTION_PATH_REF, REF and LOAD_REF each seeing every reference of its kind,
+# and VERSIONS reaching the dependency set and the staleness loop over a synthetic repository --
+# are in scripts/tests/test_pin_derivation_premises.py, a module pull request CI runs because it
+# reads no history of this repository. This one is --ignore'd there: it reads git history and is
+# red by design on a pin-bump pull request.

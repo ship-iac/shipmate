@@ -50,6 +50,8 @@ from _shipmate import _load
 ENGINE_ENV = "shipmate-engine"
 GATE = "shipmate / gate"
 AT_ORG_NAMES = ("SHIPMATE_APP_ID", "SHIPMATE_APPROVERS_TEAM")
+#: Written by releases before the engine pinned its own tool versions; now inert.
+SUPERSEDED_NAMES = ("TERRAMATE_VERSION", "TOFU_VERSION")
 REDACTED = "***"
 REPORT = []
 _DRY = False
@@ -248,11 +250,10 @@ def _at_org(raw):
     """The variable names the operator asserts are set at organization level.
 
     Validated against AT_ORG_NAMES, not against everything this script writes: an
-    unrecognised name would filter nothing and still report success. The version pins
-    are excluded because `_reconcile_variables` treats a divergent pin as a deliberate
-    choice and reports it as `differs`, so refusing the same divergence here would
-    invert that policy, and their remedy names VERSIONS, a file inside the engine
-    checkout that the operator cannot edit on a release tag. SHIPMATE_SHARED_ENVS is
+    unrecognised name would filter nothing and still report success. TERRAMATE_VERSION and
+    TOFU_VERSION are excluded because nothing writes or reads them any more -- the release's
+    own VERSIONS file decides both -- so `_refuse_org_assertion_mismatch` would raise a
+    `KeyError` looking the name up in `_writable_variables`. SHIPMATE_SHARED_ENVS is
     excluded because `--shared` has to be passed either way. Uppercased because the API
     uppercases variable names and every lookup here is on an uppercased key.
     """
@@ -518,38 +519,11 @@ def _reconcile_envs(ctx):
             _reconcile_env(ctx, name, role)
 
 
-def _versions(engine):
-    """{"terramate": ..., "tofu": ...} from the engine checkout's VERSIONS file.
-
-    Nothing else in the repository parses that file, so these two key names are an
-    undocumented coupling; the refusals below are where it is recorded. `main` calls this
-    among its local reads, before the first reconciler: a repository must not end up with
-    half its environments created over a typo in a file that was readable at startup.
-    """
-    path = pathlib.Path(engine) / "VERSIONS"
-    if not path.is_file():
-        raise SystemExit(f"{path} does not exist: TERRAMATE_VERSION and TOFU_VERSION come from it.")
-    pairs = (
-        line.partition("=") for line in path.read_text(encoding="utf-8").splitlines() if "=" in line
-    )
-    versions = {name.strip(): value.strip() for name, _sep, value in pairs}
-    missing = [key for key in ("terramate", "tofu") if not versions.get(key)]
-    if missing:
-        raise SystemExit(
-            f"{path} carries no {' and no '.join(missing)} line: it needs a "
-            "`terramate=` and a `tofu=` line."
-        )
-    return versions
-
-
 def _writable_variables(ctx):
-    """{name: (value, the flag or file it came from)}, in the order they are written."""
-    versions = ctx["versions"]
+    """{name: (value, the flag it came from)}, in the order they are written."""
     wanted = {
         "SHIPMATE_APP_ID": (ctx["app_id"], "--app-id"),
         "SHIPMATE_APPROVERS_TEAM": (ctx["team"], "--team"),
-        "TERRAMATE_VERSION": (versions["terramate"], "VERSIONS"),
-        "TOFU_VERSION": (versions["tofu"], "VERSIONS"),
     }
     if ctx["shared"]:
         wanted["SHIPMATE_SHARED_ENVS"] = (",".join(sorted(ctx["shared"])), "--shared")
@@ -578,6 +552,25 @@ def _report_org_leftovers(ctx):
                 name,
                 f"repository has {current}, asserted at organization level — "
                 f"delete it with `gh variable delete {name}` or drop the name from --vars-at-org",
+            )
+
+
+def _report_superseded_variables(ctx):
+    """Report a repository variable earlier releases wrote that nothing reads any more.
+
+    `actions/setup` takes both tool versions from the release's own VERSIONS file, so a
+    leftover copy is inert and an operator bumping it would otherwise get silence. It is
+    reported and never deleted: this run did not write it, and removing a value the
+    reconciler no longer owns exceeds its mandate.
+    """
+    for name in SUPERSEDED_NAMES:
+        current = ctx["variables"].get(name)
+        if current is not None:
+            report(
+                "differs",
+                name,
+                f"repository has {current}, superseded by the version the engine release "
+                f"pins — nothing reads it; delete it with `gh variable delete {name}`",
             )
 
 
@@ -707,8 +700,8 @@ def _reconcile_variables(ctx):
     """Set the repository variables the workflows read.
 
     A variable that exists with another value is reported, never overwritten: a
-    consumer pinning an older tested pair is making a deliberate choice, and moving
-    it silently is this script exceeding its mandate.
+    consumer naming another App or another approvers team is making a deliberate
+    choice, and moving it silently is this script exceeding its mandate.
     """
     existing = ctx["variables"]
     for name, (value, source) in _wanted_variables(ctx).items():
@@ -1058,11 +1051,10 @@ def main(argv=None):
     at_org = _at_org(args.vars_at_org)
     _DRY = args.dry_run
 
-    # The local reads first: a bad key path or an unusable VERSIONS must fail in under a
-    # second, before the first API call creates anything.
+    # The local reads first: a bad key path or an unreadable engine pin must fail in under
+    # a second, before the first API call creates anything.
     key = _read_key(args.key)
     engine = pathlib.Path(__file__).resolve().parents[1]
-    versions = _versions(engine)
     sha, version = _engine_pin(engine)
     root = _repo_root()
     repo, default_branch, is_private = _repo_facts()
@@ -1081,7 +1073,6 @@ def main(argv=None):
         "state_suffix": args.state_suffix,
         "root": root,
         "engine": engine,
-        "versions": versions,
         "variables": variables,
         "sha": sha,
         "version": version,
@@ -1107,6 +1098,7 @@ def main(argv=None):
     _reconcile_envs(ctx)
     _reconcile_variables(ctx)
     _report_org_leftovers(ctx)
+    _report_superseded_variables(ctx)
     _reconcile_ruleset(ctx)
     _reconcile_shims(ctx)
     _checklist(ctx)

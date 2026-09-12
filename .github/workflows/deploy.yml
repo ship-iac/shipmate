@@ -8,8 +8,8 @@ on:
       # a missing state configuration must be loud, not indistinguishable from a remote backend.
       state_suffix: { required: true, type: string }
     secrets:
-      # Consumers pass this by name. `vars` (TERRAMATE_VERSION, TOFU_VERSION, SLACK_WEBHOOK) are
-      # inherited by a called workflow automatically; secrets are NOT, and an encrypting consumer
+      # Consumers pass this by name. A `vars` entry such as SLACK_WEBHOOK is inherited by a
+      # called workflow automatically; secrets are NOT, and an encrypting consumer
       # that forwards nothing has every env-level apply fail its decrypt fail-safe. No environment
       # can supply it either: the wave jobs bind the env's apply environment, not `shipmate-engine`.
       SHIPMATE_PLAN_PASSPHRASE: { required: false }
@@ -34,9 +34,6 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { fetch-depth: 0 }
       - uses: ship-iac/shipmate/actions/setup@21d05c37ca0199767059abfecd28242460b86a0c
-        with:
-          terramate-version: ${{ vars.TERRAMATE_VERSION }}
-          tofu-version: ${{ vars.TOFU_VERSION }}
       - id: d
         uses: ship-iac/shipmate/actions/deploy-detect@733b56a8490a1acb69f50aab036ebd22cc35edfb
         with:
