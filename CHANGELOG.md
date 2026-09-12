@@ -13,9 +13,14 @@ grammar are declared unstable in `README.md`.
 
 ## [Unreleased]
 
-**Re-pinning is not involved**: this release changes `scripts/onboard`, which is
-run by hand and never pinned by a consumer, and no action, workflow or check
-name moves.
+**Breaking: the engine release declares the Terramate and OpenTofu versions, and
+a consumer no longer can.** A repository that pinned `TERRAMATE_VERSION` or
+`TOFU_VERSION` to hold a tool version back loses that lever — its next pin bump
+installs the versions in the release's own `VERSIONS` file instead, silently. To
+keep an older version, stay on the prior engine release, or raise an issue for a
+per-consumer override. `actions/setup` and the engine's reusable workflows
+changed, so every engine pin moves in one commit as usual; the `scripts/onboard`
+change below is run by hand and never pinned. No check name moves.
 
 ### Added
 
@@ -39,6 +44,30 @@ name moves.
   value reach a run. The flag needs a `gh` carrying `gh api --slurp`, tested with
   `gh` 2.93.0; nothing else in the engine depends on a `gh` version.
   `docs/github-app.md` §6 is the procedure.
+
+### Changed — BREAKING
+
+- **The Terramate and OpenTofu versions come from the engine release, not from
+  repository variables.** `actions/setup` reads the release's own root-level
+  `VERSIONS` file at the commit the consumer pins, and the engine's workflows no
+  longer pass `vars.TERRAMATE_VERSION` / `vars.TOFU_VERSION` to it. A consumer
+  stops maintaining both variables, and moving to other tool versions becomes a
+  pin bump. `scripts/onboard` no longer writes either name: a copy left behind is
+  inert and reported as a `differs` line with exit 2, never deleted. Delete it
+  only once `.github/workflows/shipmate.yml` is on a pin carrying this change —
+  workflows on an older pin still pass the variable to `setup`, so deleting it
+  first blanks an input they read.
+
+  The action's `terramate-version` / `tofu-version` inputs survive as overrides,
+  but a consumer calls the reusable workflows rather than the action, so the
+  override is engine-internal and does not replace the variables. An explicitly
+  empty value is not an override either: it now resolves to the release's pinned
+  version rather than to the installer's latest.
+
+  `actions/setup/action.yml` changed, so every workflow pinning it needs the
+  normal internal-pin bump after merge. `VERSIONS` is now one of that action's
+  pinned dependencies, so a later tool-version bump makes the same pins stale
+  (`docs/releasing.md` §Bumping a tool version is the same cascade).
 
 ## [0.27.1] — 2026-09-12
 

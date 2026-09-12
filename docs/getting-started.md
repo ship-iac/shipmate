@@ -24,10 +24,10 @@ does with that wiring.
   failure lists every untagged stack it found for you to work down. The
   nightly drift run is the repo-wide backstop — it inspects every stack, so it
   fails until the last one is tagged.
-- **The Terramate and OpenTofu versions this release is tested against.** They
-  are in [`../VERSIONS`](../VERSIONS), and the workflows below read them from the
-  repository variables `TERRAMATE_VERSION` and `TOFU_VERSION`. `scripts/onboard`
-  sets both from that file; set them by hand only if you are not running it.
+- **Nothing to set for the Terramate and OpenTofu versions.** They are in
+  [`../VERSIONS`](../VERSIONS), and the `setup` action installs them from the
+  engine commit your workflow file pins. Moving to other versions is a pin bump
+  ([`upgrading.md`](upgrading.md)), not a repository variable.
 - **`gh` authenticated with admin on the repository.** Every tier creates
   environments, variables or rulesets.
 - **Remote state you control, or a local backend materialized in the working
@@ -70,9 +70,9 @@ It writes:
   declare, an `<env>-plan` / `<env>-apply` pair — each apply environment scoped to
   the default branch, with the App key on `shipmate-engine` and any
   repository-level copy of that key deleted;
-- the `SHIPMATE_APP_ID`, `SHIPMATE_APPROVERS_TEAM`, `TERRAMATE_VERSION` and
-  `TOFU_VERSION` repository variables, plus `SHIPMATE_SHARED_ENVS` when `--shared`
-  names environments bound as a single bare `<env>`. A `--shared` environment is an
+- the `SHIPMATE_APP_ID` and `SHIPMATE_APPROVERS_TEAM` repository variables, plus
+  `SHIPMATE_SHARED_ENVS` when `--shared` names environments bound as a single
+  bare `<env>`. A `--shared` environment is an
   apply environment, so it gets the same default-branch policy — on a bare `<env>`
   that policy also refuses plan cells whose pull request targets any other branch,
   and `shipmate doctor` says so afterwards. Pass `--shared` only where every pull

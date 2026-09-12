@@ -66,6 +66,15 @@ which is not validated against the callee — but inherit is evaluated against t
 another organization, and suppresses what the callee's `environment:` would have
 supplied. Named secrets plus this ordering is the trade that works both ways.
 
+### Bumping a tool version is the same cascade
+
+`actions/setup` reads the root-level `VERSIONS` file at its own pinned commit, so
+that file is one of the action's pinned dependencies. Editing it makes every pin
+reaching `actions/setup` stale exactly as editing the action's own `action.yml`
+does, and it runs through the same three steps. Until that cascade converges,
+`test_internal_pins` fails on push to main: that red is the guard working, and
+the fix is the step-2 bump, not an edit to the test.
+
 ### Consumers must bump every engine ref in one change
 
 A consumer's own `uses:` pins are outside the guard's reach, and two of them are
