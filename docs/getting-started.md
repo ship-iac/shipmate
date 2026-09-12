@@ -76,7 +76,10 @@ It writes:
   apply environment, so it gets the same default-branch policy — on a bare `<env>`
   that policy also refuses plan cells whose pull request targets any other branch,
   and `shipmate doctor` says so afterwards. Pass `--shared` only where every pull
-  request targets the default branch ([`hardening.md`](hardening.md) rows 8 and 17);
+  request targets the default branch ([`hardening.md`](hardening.md) rows 8 and 17).
+  `SHIPMATE_APP_ID` and `SHIPMATE_APPROVERS_TEAM` may instead be set once at the
+  organization level and named in `--vars-at-org`, which skips writing them here
+  ([`github-app.md`](github-app.md) §6);
 - a `shipmate-gate` ruleset requiring `shipmate / gate` under the App;
 - `.github/workflows/shipmate.yml`, rendered from the fence on this page and
   pinned to the engine checkout's release.
@@ -86,11 +89,14 @@ run over a configured repository changes nothing. What it will not touch — a
 variable holding another value, an environment carrying a protection it did not
 set — it reports as a `differs` line and exits 2
 ([`troubleshooting.md`](troubleshooting.md) §What `scripts/onboard` reports).
-One disagreement is not reported but refused: a `SHIPMATE_APP_ID` repository
-variable that differs from `--app-id` stops the run before its first write, with
-exit 1 and no `differs` line, because `--app-id` also pins the gate ruleset to an
-App and a ruleset pinned to one the workflows do not use blocks the default
-branch. `--dry-run` reports every change and performs no write.
+Two disagreements are not reported but refused, both before the first write and
+with exit 1 rather than a `differs` line. A `SHIPMATE_APP_ID` repository variable
+that differs from `--app-id` stops the run, because `--app-id` also pins the gate
+ruleset to an App and a ruleset pinned to one the workflows do not use blocks the
+default branch. A name passed to `--vars-at-org` that does not reach this
+repository as an organization variable, or reaches it holding another value,
+stops it too — the assertion is verified rather than trusted
+([`github-app.md`](github-app.md) §6). `--dry-run` reports every change and performs no write.
 
 It then prints what it cannot know, because those values are yours: the cloud
 role and region, the env identity your layout injects, `SHIPMATE_PLAN_PASSPHRASE`,
@@ -452,8 +458,8 @@ of the reviewed plan) and an idempotent post-merge apply on push to the default
 branch.
 
 `shipmate apply` runs only for a member of the team named by
-`SHIPMATE_APPROVERS_TEAM` (set per repository in
-[`github-app.md`](github-app.md) §6), on a pull request that is mergeable and
+`SHIPMATE_APPROVERS_TEAM` (set per repository, or once for the organization,
+in [`github-app.md`](github-app.md) §6), on a pull request that is mergeable and
 satisfies the branch ruleset's review policy, and only against a plan for the
 pull request's current head, and only on a pull request that is not a
 draft — the five apply requirements in
