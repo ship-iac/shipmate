@@ -470,7 +470,7 @@ def test_main_calls_every_stage_in_order():
     ruleset pinned to an App the workflows do not use; delete `sys.exit(_exit_code())`;
     swap two reconcilers; delete `_report_org_leftovers(ctx)`; delete the
     `at_org = _at_org(args.vars_at_org)` line; move that line below `_read_key(args.key)`,
-    which pays every local read before a pure string check can refuse; delete the
+    which pays a filesystem read before a pure string check can refuse; delete the
     `ctx["org_plan"] = _org_plan(...)` line; delete `_refuse_unreachable_org_variables(ctx)`,
     which leaves a private Free repository onboarded with names that resolve to empty; delete
     `_refuse_org_assertion_mismatch(ctx)`, which leaves every `--vars-at-org` name filtered
