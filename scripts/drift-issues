@@ -30,9 +30,12 @@ import glob
 import json
 import os
 import subprocess
-import sys
 import urllib.error
 import urllib.request
+
+from _shipmate import _load
+
+_run = _load("build-matrix")._run
 
 CELL_KEYS = (
     "stack",
@@ -46,15 +49,6 @@ CELL_KEYS = (
 )
 
 LABEL = "drift"
-
-
-def _run(args):
-    # args is a code-controlled `gh` invocation (never user input), shell=False -- safe.
-    p = subprocess.run(args, capture_output=True, text=True)  # noqa: S603
-    if p.returncode != 0:
-        sys.stderr.write(p.stderr)
-        raise SystemExit(f"::error::command failed ({p.returncode}): {' '.join(args)}")
-    return p.stdout
 
 
 def load_cells(cells_dir):

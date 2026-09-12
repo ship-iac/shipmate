@@ -152,7 +152,6 @@ def waves_by_env_level(pending, deps, levels):
     for lvl in range(MAX_ENV_LEVELS):
         cells = [c for c in pending if levels.get(c["environment"], 0) == lvl]
         waves = wv.assign_waves(stack_levels, cells)
-        wv.guard_max_waves(waves)
         out.append(wv.pad_waves(waves))
     return out
 

@@ -662,14 +662,6 @@ def _reconcile_ruleset(ctx):
         report("ok", subject)
 
 
-#: The consumer workflow file, the docs page publishing it, and the top-level `name:`
-#: selecting its fence. `_fence` refuses anything but exactly one match, so a docs edit
-#: renaming the fence, or adding a second one under the same name, fails the run rather
-#: than rendering the wrong body.
-SHIMS = {
-    "shipmate.yml": ("getting-started.md", "shipmate"),
-}
-
 #: The six files `shipmate.yml` replaced. Reported, never deleted: a consumer may have
 #: edited one. A leftover is not inert either — `plan.yml` still fires on
 #: `pull_request_target`, `comment-ops.yml` on `issue_comment`, `deploy.yml` on `push`
@@ -710,16 +702,17 @@ def _fence(page_text, name):
     if len(bodies) != 1:
         raise SystemExit(
             f"{len(bodies)} documented fences are named {name!r}; expected exactly one. "
-            "The workflow file is rendered from the docs, so the docs and this table must "
-            "agree."
+            "The workflow file is rendered from the docs, so its fence name must agree."
         )
     return bodies[0]
 
 
-def _render(engine, filename, sha, version, state_suffix):
+def _render(engine, sha, version, state_suffix):
     """The full text of one consumer workflow file, LF-delimited and newline-terminated."""
-    page, name = SHIMS[filename]
-    text = _fence((pathlib.Path(engine) / "docs" / page).read_text(encoding="utf-8"), name)
+    text = _fence(
+        (pathlib.Path(engine) / "docs" / "getting-started.md").read_text(encoding="utf-8"),
+        "shipmate",
+    )
     text = _DOC_PIN.sub(rf"\g<ref>@{sha} # {version}", text)
     return text.replace('state_suffix: ""', f'state_suffix: "{state_suffix}"')
 
@@ -729,9 +722,10 @@ def _depin(text):
     return _ANY_PIN.sub(r"\g<ref>@<pin>", text)
 
 
-def _reconcile_shim(ctx, filename):
+def _reconcile_shim(ctx):
+    filename = "shipmate.yml"
     path = pathlib.Path(ctx["root"]) / ".github" / "workflows" / filename
-    text = _render(ctx["engine"], filename, ctx["sha"], ctx["version"], ctx["state_suffix"])
+    text = _render(ctx["engine"], ctx["sha"], ctx["version"], ctx["state_suffix"])
     if not path.is_file():
         write_file(path, text, filename)
         return
@@ -755,8 +749,7 @@ def _reconcile_shims(ctx):
     docs/releasing.md, so it does not reach `_exit_code`. A legacy file IS drift: it still
     fires on its own trigger, so it runs a job `shipmate.yml` runs as well.
     """
-    for filename in SHIMS:
-        _reconcile_shim(ctx, filename)
+    _reconcile_shim(ctx)
     workflows = pathlib.Path(ctx["root"]) / ".github" / "workflows"
     for filename in LEGACY_SHIMS:
         if (workflows / filename).is_file():

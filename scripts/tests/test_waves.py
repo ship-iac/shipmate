@@ -1,4 +1,3 @@
-import ast
 import io
 import json
 
@@ -133,39 +132,15 @@ def _linear_chain_dot(n):
     return "\n".join(lines + ["}"])
 
 
-#: Every function that reaches `pad_waves`, and the module it lives in. pad_waves truncates past
-#: MAX_WAVES, so each must call guard_max_waves first, or a too-deep change applies nothing for
-#: the dropped cells and reports success. Add a row here whenever a new caller lands.
-_PAD_CALLERS = (("apply-detect", "main"), ("env-order", "waves_by_env_level"))
-
-
-def _call_order(script, func):
-    """Names of the `wv.`/module-level calls in `func`, in source order."""
-    tree = ast.parse((_dir / script).read_text(encoding="utf-8"))
-    body = next(n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == func)
-    return [
-        node.func.attr if isinstance(node.func, ast.Attribute) else node.func.id
-        for node in ast.walk(body)
-        if isinstance(node, ast.Call) and isinstance(node.func, (ast.Attribute, ast.Name))
-    ]
-
-
-@pytest.mark.parametrize(("script", "func"), _PAD_CALLERS)
-def test_every_pad_waves_caller_guards_first(script, func):
-    """The guard-before-truncate ordering, pinned at the CALL SITE.
-
-    Unit-testing guard_max_waves on hand-built lists does not pin that any production path still
-    calls it: deleting the call from both callers left the whole suite green. Asserted over the
-    parsed AST, so a guard call moved below the pad, or commented out, fails."""
-    order = _call_order(script, func)
-    pad = next(
-        (i for i, name in enumerate(order) if name in ("pad_waves", "write_waves")),
-        None,
-    )
-    assert pad is not None, f"{script}.{func} no longer reaches pad_waves"
-    guard = order.index("guard_max_waves") if "guard_max_waves" in order else None
-    assert guard is not None, f"{script}.{func} does not call guard_max_waves"
-    assert guard < pad, f"{script}.{func} pads before guarding"
+def test_padding_and_writing_refuse_overflow_before_emitting_output():
+    """Removing validation from pad_waves must fail both public output paths."""
+    waves = [[] for _ in range(w.MAX_WAVES)] + [["cell8"]]
+    with pytest.raises(SystemExit, match="dependency levels"):
+        w.pad_waves(waves)
+    fh = io.StringIO()
+    with pytest.raises(SystemExit, match="dependency levels"):
+        w.write_waves(fh, waves)
+    assert fh.getvalue() == ""
 
 
 def test_env_level_waves_refuses_a_change_deeper_than_max_waves():
