@@ -1565,6 +1565,28 @@ def test_an_unreadable_organization_plan_is_refused_like_free(monkeypatch, tmp_p
     assert str(exit_) == UNKNOWN_APP_ID
 
 
+def test_a_personal_account_is_refused_by_name(monkeypatch, tmp_path):
+    """`gh api orgs/<owner>` answers 404 for a personal account, which is not an unreadable
+    plan: no organization variable can exist there at all. Compared whole, because the raw
+    `command failed (1): gh api orgs/o` this replaces names an endpoint the operator never
+    typed and no fix at all.
+
+    Mutation: read the plan with `json.loads(_run([...]))` again, which reds on gh's message.
+    """
+    _fake, exit_ = run_main(
+        monkeypatch,
+        tmp_path,
+        {"orgs/o": ABSENT, ORG_VARS: ORG_APP_ID_MATCHES},
+        ["--vars-at-org", "SHIPMATE_APP_ID"],
+        is_private=True,
+    )
+    assert str(exit_) == (
+        "o is a personal account, not an organization, so no organization variable can "
+        "reach this repository and every asserted name would resolve to empty. Drop "
+        "--vars-at-org."
+    )
+
+
 def test_a_legacy_business_plan_is_not_refused(monkeypatch, tmp_path):
     """The check is a deny-list on "free" plus the unreadable case: an allow-list of
     ("team", "enterprise") would refuse the legacy `business` plans, which GitHub does not

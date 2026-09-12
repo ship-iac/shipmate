@@ -585,9 +585,17 @@ def _org_plan(owner):
     """The organization's plan name, or "" when the token cannot see it.
 
     `plan` is present in `GET /orgs/{org}` only for an organization owner, so a
-    token without owner rights reads "".
+    token without owner rights reads "". A 404 is not that case: it means `owner` is a
+    personal account, where no organization variable can exist at all, and the raw
+    `gh` failure would leave the operator reading a 404 for an endpoint they never named.
     """
-    facts = json.loads(_run(["gh", "api", f"orgs/{owner}"]))
+    facts = _gh_json_or_none(f"orgs/{owner}")
+    if facts is None:
+        raise SystemExit(
+            f"{owner} is a personal account, not an organization, so no organization "
+            "variable can reach this repository and every asserted name would resolve to "
+            "empty. Drop --vars-at-org."
+        )
     return (facts.get("plan") or {}).get("name", "")
 
 
@@ -666,8 +674,9 @@ def _refuse_org_assertion_mismatch(ctx):
     if not ctx["at_org"]:
         return
     reaching = _reaching_variables(ctx["repo"])
+    writable = _writable_variables(ctx)
     for name in sorted(ctx["at_org"]):
-        wanted, source = _writable_variables(ctx)[name]
+        wanted, source = writable[name]
         if name not in reaching:
             raise SystemExit(
                 f"--vars-at-org names {name}, but no organization variable of that name "
