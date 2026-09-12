@@ -22,8 +22,8 @@ name moves.
 - **`scripts/onboard --vars-at-org` skips the variables an organization already
   sets.** The flag takes a comma-separated list of variable names the operator
   asserts are set at organization level — `SHIPMATE_APP_ID` and
-  `SHIPMATE_APPROVERS_TEAM` are the two worth sharing — and `onboard` then writes
-  neither of them per repository. A name it does not itself set is refused.
+  `SHIPMATE_APPROVERS_TEAM` are the only two it accepts — and `onboard` then
+  writes neither of them per repository. Any other name is refused.
   Every asserted name is verified rather than trusted: `onboard` reads the
   organization variables that actually reach the repository and refuses, before
   its first write, when a name is missing from that list or holds a value other
@@ -36,8 +36,9 @@ name moves.
   `--visibility selected --repos <list>`. Private consumers need GitHub Team or
   Enterprise — organization variables do not reach a private repository on
   GitHub Free at all — and `onboard` refuses there rather than let the empty
-  value reach a run. The flag needs `gh` 2.93.0 or newer; nothing else in the
-  engine sets a `gh` floor. `docs/github-app.md` §6 is the procedure.
+  value reach a run. The flag needs a `gh` carrying `gh api --slurp`, tested with
+  `gh` 2.93.0; nothing else in the engine depends on a `gh` version.
+  `docs/github-app.md` §6 is the procedure.
 
 ## [0.27.1] — 2026-09-12
 

@@ -711,11 +711,14 @@ with different levels of push access therefore lifts the weakest repository's
 trust to all of them.
 
 - Register one App per trust domain. Repositories with wide push access get
-  their own App and their own key.
+  their own App and their own key. `SHIPMATE_APP_ID` then differs per trust
+  domain: a repository outside the domain of the organization-level id keeps its
+  own `SHIPMATE_APP_ID` variable and leaves that name out of `--vars-at-org`,
+  which refuses an id that disagrees with `--app-id`.
 - Set the key as a `shipmate-engine` environment secret, per repository
   (`docs/github-app.md` steps 5–6) — never at repository or org level, and
-  never shared org-wide the way `SHIPMATE_APP_ID` and
-  `SHIPMATE_APPROVERS_TEAM` (variables, not secrets) may be: environment
+  never shared the way the `SHIPMATE_APP_ID` and `SHIPMATE_APPROVERS_TEAM`
+  variables (not secrets) may be across one trust domain: environment
   secrets are scoped to one repository's environment, so each consumer repo
   needs its own `shipmate-engine` environment and its own copy of the key.
 - Rotate the key whenever push access is revoked — the runbook is

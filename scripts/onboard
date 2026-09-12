@@ -3,7 +3,7 @@
 
     python3 <engine>/scripts/onboard --team <team-slug> --app-id <id> \
         --key shipmate-app.private-key.pem [--state-suffix <s>] \
-        [--shared <env,env>] [--dry-run]
+        [--shared <env,env>] [--vars-at-org <NAME,NAME>] [--dry-run]
 
 Hand-run from inside the consumer checkout, with `gh` authenticated against that
 repository. It reads what is already there and
@@ -21,6 +21,12 @@ Flags:
                   both paths instead of the `<env>-plan` / `<env>-apply` split.
                   Must agree with the SHIPMATE_SHARED_ENVS repository variable
                   when both are set.
+  --vars-at-org   comma-separated variable names already set at organization
+                  level, so no repository copy is written for them. Accepts
+                  SHIPMATE_APP_ID and SHIPMATE_APPROVERS_TEAM only. Every
+                  name is verified against the organization variables that
+                  reach this repository, and a leftover repository copy is
+                  reported.
   --dry-run       report `would <verb>` for every change and run no write.
 
 Exit codes: 0 clean, 2 at least one item differs, 1 a refusal or a failed
@@ -43,6 +49,7 @@ from _shipmate import _load
 
 ENGINE_ENV = "shipmate-engine"
 GATE = "shipmate / gate"
+AT_ORG_NAMES = ("SHIPMATE_APP_ID", "SHIPMATE_APPROVERS_TEAM")
 REDACTED = "***"
 REPORT = []
 _DRY = False
@@ -237,20 +244,24 @@ def _split(value):
     return {part.strip() for part in value.split(",") if part.strip()}
 
 
-def _at_org(raw, writable):
+def _at_org(raw):
     """The variable names the operator asserts are set at organization level.
 
-    Validated against the names this script writes: an unrecognised name would
-    filter nothing and still report success, which is the failure this refusal
-    exists to prevent. Uppercased because the API uppercases variable names and
-    every lookup here is on an uppercased key.
+    Validated against AT_ORG_NAMES, not against everything this script writes: an
+    unrecognised name would filter nothing and still report success. The version pins
+    are excluded because `_reconcile_variables` treats a divergent pin as a deliberate
+    choice and reports it as `differs`, so refusing the same divergence here would
+    invert that policy, and their remedy names VERSIONS, a file inside the engine
+    checkout that the operator cannot edit on a release tag. SHIPMATE_SHARED_ENVS is
+    excluded because `--shared` has to be passed either way. Uppercased because the API
+    uppercases variable names and every lookup here is on an uppercased key.
     """
     names = {name.upper() for name in _split(raw)}
-    unknown = sorted(names - set(writable))
+    unknown = sorted(names - set(AT_ORG_NAMES))
     if unknown:
         raise SystemExit(
-            f"--vars-at-org names {', '.join(unknown)}, which this script does not set. "
-            f"It writes: {', '.join(sorted(writable))}."
+            f"--vars-at-org names {', '.join(unknown)}, which it does not accept. "
+            f"It accepts {' and '.join(AT_ORG_NAMES)}."
         )
     return names
 
@@ -633,8 +644,9 @@ def _reaching_variables(repo):
         # problem still shows its real cause under the hint.
         raise SystemExit(
             f"could not read the organization variables reaching {repo}: {exc}\n"
-            "A fine-grained token needs this repository's Variables read permission. "
-            "Drop the names from --vars-at-org to skip this check."
+            "A fine-grained token needs this repository's Variables read permission, and "
+            "`--slurp` needs a recent `gh`. Drop the names from --vars-at-org to skip "
+            "this check."
         ) from exc
     return {
         var["name"].upper(): var["value"] for page in pages for var in page.get("variables", [])
@@ -662,14 +674,16 @@ def _refuse_org_assertion_mismatch(ctx):
                 f"reaches {ctx['repo']} -- it is unset, or its visibility excludes this "
                 f"repository, so it would resolve to empty and every run would fail. Set it "
                 f"with `gh variable set {name} --org {ctx['repo'].split('/', 1)[0]} --body "
-                f"{wanted} --visibility all`, or add this repository to its selected list."
+                f"{wanted} --visibility all`, add this repository to its selected list, or "
+                f"drop {name} from --vars-at-org."
             )
         if reaching[name] != wanted:
             raise SystemExit(
                 f"{name} reaches {ctx['repo']} as {reaching[name]}, but {source} says "
                 f"{wanted}. The workflows read the resolved value, so this run would "
                 f"configure one thing and every later run would use another. Re-run with "
-                f"{source} matching, or correct the organization variable first."
+                f"{source} matching, correct the organization variable first, or drop "
+                f"{name} from --vars-at-org."
             )
 
 
@@ -1032,6 +1046,7 @@ def main(argv=None):
             f"{args.state_suffix!r}. It is written "
             'into every `state_suffix: "<value>"` scalar of the workflow file.'
         )
+    at_org = _at_org(args.vars_at_org)
     _DRY = args.dry_run
 
     # The local reads first: a bad key path or an unusable VERSIONS must fail in under a
@@ -1061,11 +1076,10 @@ def main(argv=None):
         "variables": variables,
         "sha": sha,
         "version": version,
-        "at_org": set(),
+        "at_org": at_org,
         "is_private": is_private,
         "org_plan": "",
     }
-    ctx["at_org"] = _at_org(args.vars_at_org, _writable_variables(ctx))
     # The tier bounds every name and must be decided before the endpoint read, so a
     # Free private repository gets the tier message rather than "not shared". Only a
     # private repository asserting a name pays the read: `orgs/<owner>` is the one
