@@ -153,6 +153,20 @@ names. The entries below `0.2.0` predate the first tagged release, or
 `CHANGELOG.md` does not pin one; they are kept for repositories moving from a
 very old pin.
 
+### 0.27.1 — re-pin only: an internal refactor, no behaviour change
+
+**Re-pinning is enough.** This release shares one module loader across the
+helper scripts, moves the wave and environment-level limit checks inside the
+functions that emit waves, and clears a set of CodeQL code-quality findings. No
+input, output, check name, comment verb, runtime message or documented workflow
+fragment changed, so a repository on `0.27.0` behaves identically before and
+after the bump. Re-pin to keep `shipmate doctor`'s pin-freshness probe quiet.
+
+One difference is visible, and only in a run that already fails: a change
+spanning more dependency levels than the pre-declared wave jobs can hold now
+prints the DAG-shape and `apply-detect` notices before refusing, rather than
+refusing first. The refusal and its message are unchanged.
+
 ### 0.27.0 — the six workflow files become one `.github/workflows/shipmate.yml`
 
 **This release is breaking for every consumer.** `plan.yml`, `comment-ops.yml`,
