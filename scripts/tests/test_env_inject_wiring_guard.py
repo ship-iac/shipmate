@@ -217,6 +217,6 @@ def test_each_cell_action_declares_both_consumer_channels(action):
     """
     spec = yaml.safe_load((ACTIONS / action / "action.yml").read_text(encoding="utf-8"))
     for name in _CHANNEL_STEP_WITH:
-        declared = dict(spec["inputs"][name])
+        declared = dict(spec["inputs"].get(name) or {})
         declared.pop("description", None)
-        assert declared == _CHANNEL_INPUT_SPEC, name
+        assert declared == _CHANNEL_INPUT_SPEC, f"{action}: {name} declares {declared}"
