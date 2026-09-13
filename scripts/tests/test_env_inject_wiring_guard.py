@@ -59,20 +59,14 @@ _CELL_ACTIONS = ("plan-cell", "apply-cell", "drift-cell", "unlock-cell")
 
 _INJECT_STEP = "Inject identity variables"
 _INJECT_RUN = 'python3 "$GITHUB_ACTION_PATH/../../scripts/env-inject"'
-_INJECT_ENV = {
-    "SHIPMATE_CONFIG_MODE": "${{ inputs.config-mode }}",
-    "SHIPMATE_TF_VARS": "${{ inputs.tf-vars }}",
-}
+_INJECT_ENV = {"SHIPMATE_TF_VARS": "${{ inputs.tf-vars }}"}
 
-#: The identity inputs every cell step passes, and the only two of its `with:` entries this
-#: file owns. `toJSON` is load-bearing: `tf_vars` is a mapping, and a mapping interpolated
-#: into a string input arrives as GHA's own `Object` rendering, which is not JSON.
-_CELL_STEP_WITH = {
-    "config-mode": "${{ matrix.config_mode }}",
-    "tf-vars": "${{ toJSON(matrix.tf_vars) }}",
-}
+#: The identity input every cell step passes, and the only `with:` entry this file owns.
+#: `toJSON` is load-bearing: `tf_vars` is a mapping, and a mapping interpolated into a string
+#: input arrives as GHA's own `Object` rendering, which is not JSON.
+_CELL_STEP_WITH = {"tf-vars": "${{ toJSON(matrix.tf_vars) }}"}
 
-_IDENTITY_INPUTS = ("config-mode", "tf-vars")
+_IDENTITY_INPUTS = ("tf-vars",)
 
 _ELEVEN = [(wf, job) for wf, jobs in _CELL_JOBS.items() for job in jobs]
 
@@ -151,14 +145,14 @@ def test_no_workflow_binds_the_old_names():
 
 
 @pytest.mark.parametrize(("workflow", "job_id"), _ELEVEN, ids=lambda v: v)
-def test_every_cell_step_passes_the_identity_inputs_from_its_matrix_row(workflow, job_id):
-    """The last hop: `config_mode` and `tf_vars` are stamped on every matrix row, and a cell step
-    that does not forward them hands the action empty inputs, which `env-inject` refuses. A grep
-    run once at authoring time does not stop a twelfth step from omitting one, so the eleven are
-    checked against the same registry every other property here uses.
+def test_every_cell_step_passes_the_identity_input_from_its_matrix_row(workflow, job_id):
+    """The last hop: `tf_vars` is stamped on every matrix row, and a cell step that does not
+    forward it hands the action an empty input, which `env-inject` refuses. A grep run once at
+    authoring time does not stop a twelfth step from omitting it, so the eleven are checked
+    against the same registry every other property here uses.
 
     Mutations: delete the `tf-vars:` line from one wave job's `with:`; drop the `toJSON()` and
-    pass `${{ matrix.tf_vars }}`; bind `config-mode` from `matrix.environment`.
+    pass `${{ matrix.tf_vars }}`.
     """
     steps = [s for s in (_jobs(_doc(workflow))[job_id].get("steps") or []) if _runs_a_cell(s)]
     assert len(steps) == 1, f"{workflow}:{job_id}: {len(steps)} cell steps"
@@ -186,13 +180,12 @@ def test_each_cell_action_injects_before_it_runs_terramate(action):
 
 @pytest.mark.parametrize("action", _CELL_ACTIONS)
 def test_each_cell_action_forwards_its_identity_inputs(action):
-    """The step's whole `env:` mapping, which is these two entries: the six `SHIPMATE_LEGACY_*`
-    names are set on the job and inherited, so they never appear here. This is the second hop and
-    nothing else pins it -- drop a binding and the job still sets all six, the workflow still
-    passes both inputs, and every cell of this action either refuses or injects nothing.
+    """The step's whole `env:` mapping, which is this one entry. This is the second hop and
+    nothing else pins it -- drop the binding and the workflow still passes the input, and every
+    cell of this action refuses.
 
-    Mutations: delete either binding; bind the mode from `env.SHIPMATE_CONFIG_MODE` instead of
-    `inputs.config-mode`.
+    Mutations: delete the binding; bind it from `env.SHIPMATE_TF_VARS` instead of
+    `inputs.tf-vars`.
     """
     hits = [s for s in action_steps(action) if s.get("name") == _INJECT_STEP]
     assert len(hits) == 1, f"{action}: {len(hits)} '{_INJECT_STEP}' steps"
@@ -201,14 +194,12 @@ def test_each_cell_action_forwards_its_identity_inputs(action):
 
 
 @pytest.mark.parametrize("action", _CELL_ACTIONS)
-def test_each_cell_action_declares_the_identity_inputs_without_a_default(action):
-    """No default is what makes an omitted `config-mode:` or `tf-vars:` fail closed. GHA does not
-    enforce `required: true` on a composite action input, so the value arrives empty and
-    `env-inject` refuses -- a default would make it silently run legacy, or inject nothing where
-    the table resolved something.
+def test_each_cell_action_declares_the_identity_input_without_a_default(action):
+    """No default is what makes an omitted `tf-vars:` fail closed. GHA does not enforce
+    `required: true` on a composite action input, so the value arrives empty and `env-inject`
+    refuses -- a default would inject nothing where the table resolved something.
 
-    Mutations: add `default: legacy` to one action's `config-mode`, or `default: "{}"` to its
-    `tf-vars`.
+    Mutation: add `default: "{}"` to one action's `tf-vars`.
     """
     spec = yaml.safe_load((ACTIONS / action / "action.yml").read_text(encoding="utf-8"))
     for name in _IDENTITY_INPUTS:
