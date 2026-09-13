@@ -122,7 +122,7 @@ def envelope_exports(raw, source, table):
             )
         if _is_reserved(name, table):
             raise SystemExit(
-                f"::error::{source} key {name} is reserved: shipmate owns this cell's "
+                f"::error::{source} key {name!r} is reserved: shipmate owns this cell's "
                 "identity variables, its credentials, and OpenTofu's execution controls."
             )
     return parsed

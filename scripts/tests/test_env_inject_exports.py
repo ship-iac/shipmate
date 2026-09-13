@@ -29,7 +29,7 @@ NOT_AN_OBJECT_OF_STRINGS = ENVELOPE_REFUSAL.format(
     source=SECRETS, rule="is not a JSON object of strings"
 )
 RESERVED = (
-    "::error::{source} key {name} is reserved: shipmate owns this cell's "
+    "::error::{source} key '{name}' is reserved: shipmate owns this cell's "
     "identity variables, its credentials, and OpenTofu's execution controls."
 )
 
