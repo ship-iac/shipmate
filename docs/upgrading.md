@@ -153,6 +153,34 @@ names. The entries below `0.2.0` predate the first tagged release, or
 `CHANGELOG.md` does not pin one; they are kept for repositories moving from a
 very old pin.
 
+### Unreleased — the engine release declares the Terramate and OpenTofu versions
+
+**Re-pinning is not enough: two repository variables go away.**
+`actions/setup` reads the release's own root-level `VERSIONS` file at the commit
+you pin, and the engine's reusable workflows no longer pass
+`vars.TERRAMATE_VERSION` / `vars.TOFU_VERSION` to it. Both repository variables
+become inert. Moving to other tool versions is a pin bump.
+
+Order matters, because the two halves live on opposite sides of the re-pin:
+
+1. Re-pin `.github/workflows/shipmate.yml` (§Re-pinning) and merge it.
+2. `gh variable delete TERRAMATE_VERSION` and `gh variable delete TOFU_VERSION`.
+
+Deleting first blanks an input the workflows on your current pin still read, and
+`opentofu/setup-opentofu` resolves an empty `tofu_version` as `latest` — an
+unpinned tool on every plan and apply until the re-pin lands. The same applies in
+reverse: **re-create both variables before rolling a pin back** to a release
+before this one.
+
+Until you delete them, `scripts/onboard` reports each one as `differs` and exits
+2 ([`troubleshooting.md`](troubleshooting.md) §What `scripts/onboard` reports).
+The run writes nothing over them: it did not write them.
+
+**A pinned older version is no longer a per-consumer lever.** A repository that
+held `TOFU_VERSION` back gets the version this release pins on its next bump. To
+stay on the older one, stay on the prior engine release, or open an issue for a
+per-consumer override.
+
 ### 0.27.1 — re-pin only: an internal refactor, no behaviour change
 
 **Re-pinning is enough.** This release shares one module loader across the

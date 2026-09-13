@@ -56,7 +56,8 @@ change below is run by hand and never pinned. No check name moves.
   inert and reported as a `differs` line with exit 2, never deleted. Delete it
   only once `.github/workflows/shipmate.yml` is on a pin carrying this change —
   workflows on an older pin still pass the variable to `setup`, so deleting it
-  first blanks an input they read.
+  first blanks an input they read. `docs/upgrading.md` §Unreleased has the
+  ordered steps and the rollback caveat.
 
   The action's `terramate-version` / `tofu-version` inputs survive as overrides,
   but a consumer calls the reusable workflows rather than the action, so the

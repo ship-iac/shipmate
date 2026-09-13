@@ -4,7 +4,8 @@ Both inputs are overrides now: empty means "use the versions this release pins",
 `$GITHUB_ACTION_PATH/../../VERSIONS` at the SHA the consumer pinned. The structural guards pin
 the shape that makes the fallback reachable -- the resolve step runs before both installers, and
 both installers read its outputs rather than the inputs -- and the behavioural ones execute the
-shipped `run:` body against a hand-written VERSIONS fixture, never the repository's own file.
+shipped `run:` body against a hand-written VERSIONS fixture. One case runs the repository's own
+file, because that is the file every consumer of this release reads.
 
 The fail-closed property is what the behavioural cases exist for: `opentofu/setup-opentofu`
 resolves an empty `tofu_version` as "latest", so a missing file or a missing key must fail the
@@ -13,10 +14,11 @@ checks reds the missing-key case, and deleting the file check reds the missing-f
 """
 
 import os
+import re
 import subprocess
 
 import pytest
-from _loader import action_steps, action_yaml, usable_bash
+from _loader import ENGINE, action_steps, action_yaml, usable_bash
 
 _BASH = usable_bash()
 _ACTION = "setup"
@@ -120,6 +122,24 @@ def test_a_non_empty_input_wins_over_the_file(tmp_path):
     r, out, _ = _resolve(tmp_path, TOFU_VERSION="1.2.3")
     assert r.returncode == 0, f"stdout={r.stdout!r} stderr={r.stderr!r}"
     assert out == "terramate=9.9.9\ntofu=1.2.3\n"
+
+
+@pytest.mark.skipif(_BASH is None, reason="bash not installed")
+def test_the_repositorys_own_versions_file_resolves(tmp_path):
+    """The cases above prove the logic; this one proves the file it runs against.
+
+    `sed -n 's/^terramate=//p'` is stricter than the `line.partition("=")` reader this
+    replaced: a spaced `tofu = 1.13.0`, or a UTF-8 BOM, refuses at runtime in every job of the
+    release, and no other check reads this file. Read as bytes and decoded so a BOM or CRLF
+    reaches the body untranslated. The shape is asserted, never the numbers, or a tool-version
+    bump reds this.
+
+    Mutation: write `tofu = 1.12.4` into VERSIONS.
+    """
+    real = (ENGINE / "VERSIONS").read_bytes().decode("utf-8")
+    r, out, _ = _resolve(tmp_path, versions=real)
+    assert r.returncode == 0, f"stdout={r.stdout!r} stderr={r.stderr!r}"
+    assert re.fullmatch(r"terramate=\S+\ntofu=\S+\n", out), out
 
 
 @pytest.mark.skipif(_BASH is None, reason="bash not installed")

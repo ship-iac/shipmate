@@ -36,8 +36,12 @@ REF = re.compile(r"ship-iac/shipmate/([^@\s]+)@([0-9a-f]{40})")
 # Every path an action.yml reaches outside its own directory, not just scripts/: actions/setup
 # reads the root-level VERSIONS this way, and that file decides which tool versions the pinned
 # SHA installs, so it is a pinned dependency exactly like a script is.
+# The trailing boundary matters: without it a variable-spelled path such as
+# `../../scripts/$NAME` matches its literal prefix `scripts` and scores as seen, so the
+# mention-count premise in scripts/tests/test_pin_derivation_premises.py stays green over a
+# reference the derivation cannot resolve. Every real reference is quoted.
 ACTION_PATH_REF = re.compile(
-    r"\$GITHUB_ACTION_PATH/\.\./\.\./([A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*)"
+    r"\$GITHUB_ACTION_PATH/\.\./\.\./([A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*)(?=[\"'\s]|$)"
 )
 # The lookbehind matters: without it this matches the tail of any identifier ending in _load, so
 # a `yaml.safe_load("x")` anywhere in a helper would feed the phantom dependency `scripts/x` into

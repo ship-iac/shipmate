@@ -176,6 +176,20 @@ def test_every_outside_reference_in_an_action_is_visible_to_the_derivation():
         )
 
 
+def test_a_variable_spelled_path_is_invisible_to_the_derivation():
+    """What makes the count above an assertion rather than a tautology.
+
+    A variable is the first spelling the check above names as one it must catch. Matching a
+    literal prefix would score such a reference as seen while the derivation held only the
+    directory it sits in, so the count would agree with itself and the reference would be
+    checked against the wrong path.
+
+    Mutation: drop the trailing boundary from ``ACTION_PATH_REF``.
+    """
+    text = 'run: python3 "$GITHUB_ACTION_PATH/../../scripts/$NAME"\n'
+    assert pinrefs.ACTION_PATH_REF.findall(text) == []
+
+
 def test_every_internal_ref_in_a_pin_bearing_source_is_visible_to_ref():
     """The pin itself: REF sees every internal self-reference.
 
