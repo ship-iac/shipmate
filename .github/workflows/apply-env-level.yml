@@ -31,7 +31,7 @@ jobs:
       # A cell's variables come from the environment table keyed by matrix.environment, so plan
       # and apply hash identically whatever the job bound and the fingerprint pins nothing about
       # the binding. Existence is the only discriminator.
-      - uses: ship-iac/shipmate/actions/verify-environments@a9be68cc9442bbf03478a7eabbd0afc2847cdd4e
+      - uses: ship-iac/shipmate/actions/verify-environments@94a60ab22beb46a7c7d2f52b858d29a26bc1f101
         with:
           waves-json: ${{ inputs.waves_json }}
           shared-envs: ${{ vars.SHIPMATE_SHARED_ENVS }}
@@ -67,7 +67,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { fetch-depth: 0, ref: "${{ inputs.head_sha }}" }
-      - uses: ship-iac/shipmate/actions/setup@21d05c37ca0199767059abfecd28242460b86a0c
+      - uses: ship-iac/shipmate/actions/setup@94a60ab22beb46a7c7d2f52b858d29a26bc1f101
       # Role and region come from the row the table resolved, never from vars.*: a fallback would
       # hand the cell a role the table did not choose while the run stays green. Every wave job
       # repeats this step unchanged (scripts/tests/test_aws_oidc_wiring_guard.py).
@@ -77,7 +77,7 @@ jobs:
         with:
           role-to-assume: ${{ matrix.role_arn }}
           aws-region: ${{ matrix.cred_region }}
-      - uses: ship-iac/shipmate/actions/apply-cell@463196516076cfbbbbbe5503b3d65352d5eb1bb5
+      - uses: ship-iac/shipmate/actions/apply-cell@94a60ab22beb46a7c7d2f52b858d29a26bc1f101
         with:
           tf-vars: ${{ toJSON(matrix.tf_vars) }}
           stack: ${{ matrix.stack }}
@@ -108,14 +108,14 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { fetch-depth: 0, ref: "${{ inputs.head_sha }}" }
-      - uses: ship-iac/shipmate/actions/setup@21d05c37ca0199767059abfecd28242460b86a0c
+      - uses: ship-iac/shipmate/actions/setup@94a60ab22beb46a7c7d2f52b858d29a26bc1f101
       - name: Configure cloud credentials (AWS OIDC)
         if: ${{ matrix.role_arn != '' }}
         uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4
         with:
           role-to-assume: ${{ matrix.role_arn }}
           aws-region: ${{ matrix.cred_region }}
-      - uses: ship-iac/shipmate/actions/apply-cell@463196516076cfbbbbbe5503b3d65352d5eb1bb5
+      - uses: ship-iac/shipmate/actions/apply-cell@94a60ab22beb46a7c7d2f52b858d29a26bc1f101
         with:
           tf-vars: ${{ toJSON(matrix.tf_vars) }}
           stack: ${{ matrix.stack }}
@@ -146,14 +146,14 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { fetch-depth: 0, ref: "${{ inputs.head_sha }}" }
-      - uses: ship-iac/shipmate/actions/setup@21d05c37ca0199767059abfecd28242460b86a0c
+      - uses: ship-iac/shipmate/actions/setup@94a60ab22beb46a7c7d2f52b858d29a26bc1f101
       - name: Configure cloud credentials (AWS OIDC)
         if: ${{ matrix.role_arn != '' }}
         uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4
         with:
           role-to-assume: ${{ matrix.role_arn }}
           aws-region: ${{ matrix.cred_region }}
-      - uses: ship-iac/shipmate/actions/apply-cell@463196516076cfbbbbbe5503b3d65352d5eb1bb5
+      - uses: ship-iac/shipmate/actions/apply-cell@94a60ab22beb46a7c7d2f52b858d29a26bc1f101
         with:
           tf-vars: ${{ toJSON(matrix.tf_vars) }}
           stack: ${{ matrix.stack }}
@@ -184,14 +184,14 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { fetch-depth: 0, ref: "${{ inputs.head_sha }}" }
-      - uses: ship-iac/shipmate/actions/setup@21d05c37ca0199767059abfecd28242460b86a0c
+      - uses: ship-iac/shipmate/actions/setup@94a60ab22beb46a7c7d2f52b858d29a26bc1f101
       - name: Configure cloud credentials (AWS OIDC)
         if: ${{ matrix.role_arn != '' }}
         uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4
         with:
           role-to-assume: ${{ matrix.role_arn }}
           aws-region: ${{ matrix.cred_region }}
-      - uses: ship-iac/shipmate/actions/apply-cell@463196516076cfbbbbbe5503b3d65352d5eb1bb5
+      - uses: ship-iac/shipmate/actions/apply-cell@94a60ab22beb46a7c7d2f52b858d29a26bc1f101
         with:
           tf-vars: ${{ toJSON(matrix.tf_vars) }}
           stack: ${{ matrix.stack }}
@@ -222,14 +222,14 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { fetch-depth: 0, ref: "${{ inputs.head_sha }}" }
-      - uses: ship-iac/shipmate/actions/setup@21d05c37ca0199767059abfecd28242460b86a0c
+      - uses: ship-iac/shipmate/actions/setup@94a60ab22beb46a7c7d2f52b858d29a26bc1f101
       - name: Configure cloud credentials (AWS OIDC)
         if: ${{ matrix.role_arn != '' }}
         uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4
         with:
           role-to-assume: ${{ matrix.role_arn }}
           aws-region: ${{ matrix.cred_region }}
-      - uses: ship-iac/shipmate/actions/apply-cell@463196516076cfbbbbbe5503b3d65352d5eb1bb5
+      - uses: ship-iac/shipmate/actions/apply-cell@94a60ab22beb46a7c7d2f52b858d29a26bc1f101
         with:
           tf-vars: ${{ toJSON(matrix.tf_vars) }}
           stack: ${{ matrix.stack }}
@@ -260,14 +260,14 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { fetch-depth: 0, ref: "${{ inputs.head_sha }}" }
-      - uses: ship-iac/shipmate/actions/setup@21d05c37ca0199767059abfecd28242460b86a0c
+      - uses: ship-iac/shipmate/actions/setup@94a60ab22beb46a7c7d2f52b858d29a26bc1f101
       - name: Configure cloud credentials (AWS OIDC)
         if: ${{ matrix.role_arn != '' }}
         uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4
         with:
           role-to-assume: ${{ matrix.role_arn }}
           aws-region: ${{ matrix.cred_region }}
-      - uses: ship-iac/shipmate/actions/apply-cell@463196516076cfbbbbbe5503b3d65352d5eb1bb5
+      - uses: ship-iac/shipmate/actions/apply-cell@94a60ab22beb46a7c7d2f52b858d29a26bc1f101
         with:
           tf-vars: ${{ toJSON(matrix.tf_vars) }}
           stack: ${{ matrix.stack }}
@@ -298,14 +298,14 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { fetch-depth: 0, ref: "${{ inputs.head_sha }}" }
-      - uses: ship-iac/shipmate/actions/setup@21d05c37ca0199767059abfecd28242460b86a0c
+      - uses: ship-iac/shipmate/actions/setup@94a60ab22beb46a7c7d2f52b858d29a26bc1f101
       - name: Configure cloud credentials (AWS OIDC)
         if: ${{ matrix.role_arn != '' }}
         uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4
         with:
           role-to-assume: ${{ matrix.role_arn }}
           aws-region: ${{ matrix.cred_region }}
-      - uses: ship-iac/shipmate/actions/apply-cell@463196516076cfbbbbbe5503b3d65352d5eb1bb5
+      - uses: ship-iac/shipmate/actions/apply-cell@94a60ab22beb46a7c7d2f52b858d29a26bc1f101
         with:
           tf-vars: ${{ toJSON(matrix.tf_vars) }}
           stack: ${{ matrix.stack }}
@@ -336,14 +336,14 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { fetch-depth: 0, ref: "${{ inputs.head_sha }}" }
-      - uses: ship-iac/shipmate/actions/setup@21d05c37ca0199767059abfecd28242460b86a0c
+      - uses: ship-iac/shipmate/actions/setup@94a60ab22beb46a7c7d2f52b858d29a26bc1f101
       - name: Configure cloud credentials (AWS OIDC)
         if: ${{ matrix.role_arn != '' }}
         uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4
         with:
           role-to-assume: ${{ matrix.role_arn }}
           aws-region: ${{ matrix.cred_region }}
-      - uses: ship-iac/shipmate/actions/apply-cell@463196516076cfbbbbbe5503b3d65352d5eb1bb5
+      - uses: ship-iac/shipmate/actions/apply-cell@94a60ab22beb46a7c7d2f52b858d29a26bc1f101
         with:
           tf-vars: ${{ toJSON(matrix.tf_vars) }}
           stack: ${{ matrix.stack }}
