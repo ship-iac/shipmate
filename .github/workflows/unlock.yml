@@ -102,15 +102,15 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { fetch-depth: 0, ref: "${{ inputs.ref }}" }
       - uses: ship-iac/shipmate/actions/setup@21d05c37ca0199767059abfecd28242460b86a0c
-      # A consumer opts into AWS OIDC per environment (plan/apply roles may
-      # differ per env/account), and AWS_ROLE_ARN_<WORKLOAD> wins over
-      # AWS_ROLE_ARN so one environment can serve several workloads.
+      # Role and region come from the mode the table resolved: table mode reads the row and never
+      # vars.*, legacy mode keeps AWS_ROLE_ARN_<WORKLOAD> over AWS_ROLE_ARN, and any other mode
+      # selects neither, so the step skips. Byte-identical to the wave jobs' step.
       - name: Configure cloud credentials (AWS OIDC)
-        if: ${{ (matrix.workload_var != '' && vars[format('AWS_ROLE_ARN_{0}', matrix.workload_var)]) != '' || vars.AWS_ROLE_ARN != '' }}
+        if: ${{ matrix.config_mode == 'table' && matrix.role_arn != '' || matrix.config_mode == 'legacy' && ((matrix.workload_var != '' && vars[format('AWS_ROLE_ARN_{0}', matrix.workload_var)]) != '' || vars.AWS_ROLE_ARN != '') }}
         uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4
         with:
-          role-to-assume: ${{ matrix.workload_var != '' && vars[format('AWS_ROLE_ARN_{0}', matrix.workload_var)] || vars.AWS_ROLE_ARN }}
-          aws-region: ${{ vars.AWS_REGION }}
+          role-to-assume: ${{ matrix.config_mode == 'table' && matrix.role_arn || matrix.config_mode == 'legacy' && (matrix.workload_var != '' && vars[format('AWS_ROLE_ARN_{0}', matrix.workload_var)] || vars.AWS_ROLE_ARN) || '' }}
+          aws-region: ${{ matrix.config_mode == 'table' && matrix.cred_region || matrix.config_mode == 'legacy' && vars.AWS_REGION || '' }}
       - uses: ship-iac/shipmate/actions/unlock-cell@a9be68cc9442bbf03478a7eabbd0afc2847cdd4e
         with:
           config-mode: ${{ matrix.config_mode }}
