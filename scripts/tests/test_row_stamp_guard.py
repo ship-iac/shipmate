@@ -68,6 +68,7 @@ def test_the_plan_matrix_rows_carry_the_mode(monkeypatch, tmp_path):
             "stack": "stacks/app",
             "environment": "dev-eu",
             "workload": "",
+            "workload_var": "",
             "config_mode": "legacy",
         }
     ]
@@ -85,6 +86,7 @@ def test_the_drift_matrix_rows_carry_the_mode(monkeypatch, tmp_path):
             "stack": "stacks/app",
             "environment": "dev-eu",
             "workload": "",
+            "workload_var": "",
             "config_mode": "legacy",
         }
     ]
