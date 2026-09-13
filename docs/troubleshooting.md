@@ -543,11 +543,10 @@ Two neighbouring failures from the same step, both also fail-closed:
 
 What this does not cover, deliberately: the plan-side binding (that is in
 your own `shipmate.yml`, which the engine cannot read), an environment
-that exists but is empty or mis-scoped (the fingerprint and `shipmate doctor`
-cover content), and an environment deleted between the pre-flight and the wave
-that binds it.
+that exists but is mis-scoped or unprotected (`shipmate doctor`'s subject), and
+an environment deleted between the pre-flight and the wave that binds it.
 
-### A table-mode cell fails with no AWS credential
+### A cell fails with no AWS credential
 
 The credentials step is skipped and the cell fails at `tofu init` with no role
 assumed, on a `folder` or `workspace` layout. Under `dry` this does not happen:
