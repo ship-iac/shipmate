@@ -11,7 +11,9 @@ section below names the SHA the release tags.
 The version line stays `v0.x` while action inputs, check names, and the comment
 grammar are declared unstable in `README.md`.
 
-## [Unreleased]
+## [0.28.0] — 2026-09-13
+
+Tags `TBD`.
 
 **Breaking: the engine release declares the Terramate and OpenTofu versions, and
 a consumer no longer can.** A repository that pinned `TERRAMATE_VERSION` or
@@ -60,7 +62,7 @@ branch the engine reads it from.
 
   `CONTRACT.md` §Environment table is the schema and the semantics, and its
   §"Adding and removing an environment" has that sequence;
-  `docs/upgrading.md` §Unreleased has the bootstrap order. The four `actions/*-cell/action.yml` gain a `tf-vars` input and the
+  `docs/upgrading.md` §0.28.0 has the bootstrap order. The four `actions/*-cell/action.yml` gain a `tf-vars` input and the
   four detect actions a `shared-envs` one; eight action files and seven reusable
   workflows changed in all, so every workflow pinning them needs the normal
   internal-pin bump after merge.
@@ -124,7 +126,7 @@ branch the engine reads it from.
   inert and reported as a `differs` line with exit 2, never deleted. Delete it
   only once `.github/workflows/shipmate.yml` is on a pin carrying this change —
   workflows on an older pin still pass the variable to `setup`, so deleting it
-  first blanks an input they read. `docs/upgrading.md` §Unreleased has the
+  first blanks an input they read. `docs/upgrading.md` §0.28.0 has the
   ordered steps and the rollback caveat.
 
   The action's `terramate-version` / `tofu-version` inputs survive as overrides,
