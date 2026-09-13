@@ -127,7 +127,7 @@ still links to them from those releases' own entries; the migrations they
 described were between pre-table engine releases and have no consumers left to
 migrate. Each release's `CHANGELOG.md` entry is the record of what changed.
 
-### Unreleased — the engine release declares the tool versions, and a cell's identity comes from the default branch
+### 0.28.0 — the engine release declares the tool versions, and a cell's identity comes from the default branch
 
 **Re-pinning is not enough: two repository variables go away.**
 `actions/setup` reads the release's own root-level `VERSIONS` file at the commit
