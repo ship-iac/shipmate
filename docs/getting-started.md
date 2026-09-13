@@ -178,9 +178,10 @@ creates all of them, including `shipmate-engine` and its branch policy:
   your repository's default branch
   ([`../CONTRACT.md`](../CONTRACT.md) §Environment table); declare none and they
   come from GitHub Environment variables, as the rest of this bullet describes.
-  Both are supported, and a repository that never declares a layout keeps
-  working as it does today. The table is what a pull request cannot rewrite, so
-  it is the one to prefer where the choice is open.
+  Both work in this release, and a repository that declares no layout keeps
+  working as it does today. The table is what a pull request cannot rewrite, and
+  it is where the engine is going — a new repository should start there, and the
+  variables path is deprecated rather than frozen.
 
   With no layout declared, set on each `<env>-plan` and (in the
   apply tier) each `<env>-apply`: `TF_VAR_env` and `TF_VAR_region` where the backend

@@ -221,12 +221,18 @@ names; what `env-inject` writes is not (`TF_VAR_env`, `TF_VAR_region`,
 `TF_WORKSPACE`). A cell that injects the uppercase spelling fingerprints
 differently from the plan that reviewed it, and every apply then fails as stale.
 
-**Optional, and nothing is deprecated: a repository may take its environment
-identity from the default branch instead of from GitHub variables.** Declare
+**Optional in this release: a repository may take its environment identity from
+the default branch instead of from GitHub variables.** Declare
 `global.shipmate.layout` in a `globals "shipmate"` block and the engine resolves
 each cell's identity variables, role and region from that table. Declare none
-and nothing changes: the variables path is fully supported, and a repository
-that never declares a layout needs nothing from this paragraph.
+and nothing breaks: the variables path is unchanged, fully supported here, and a
+repository that stays on it needs nothing from this release.
+
+**Migrating is not urgent, and it is not optional forever.** The variables path
+is deprecated rather than frozen: the engine already reports each superseded
+variable by name, the table is the intended destination, and the window closes
+in a later release. No version or date is fixed for that yet, so plan the move
+rather than schedule it.
 
 **The reason to adopt it is that branch content cannot reach those values.** The
 engine evaluates the table in a detached worktree of `origin/<default>`, so a

@@ -137,9 +137,10 @@ them on the matrix row's `config_mode`
   choose which role its own plan assumes. §The environment table below is the
   AWS half of that schema.
 - **Legacy mode** — the repository declares no layout, and the roles come from
-  GitHub Environment variables, as §Environment variables describes. This stays
-  fully supported; a repository that never declares a layout keeps working
-  exactly as it does today.
+  GitHub Environment variables, as §Environment variables describes. This is
+  fully supported in this release and is also the deprecated path: a repository
+  that declares no layout keeps working exactly as it does today, and the table
+  is where the engine is going.
 
 The sections below are marked by mode where they differ. Everything about the
 trust policy applies to both: the mode decides which role a cell names, never

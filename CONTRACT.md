@@ -409,7 +409,9 @@ a `globals "shipmate"` block — the same Terramate namespace `env_order` alread
 occupies — instead of in GitHub Environment variables.
 `global.shipmate.layout` is the discriminator: a repository that declares it
 runs in table mode, and one that does not runs in legacy mode, the
-variables path §Env model describes. Both are supported. Nothing infers the mode
+variables path §Env model describes. Both are supported in this release; legacy
+mode is deprecated rather than frozen, and the table is where it is going.
+Nothing infers the mode
 from a value being empty, and there is no default anywhere: a cell whose row
 carries no mode refuses rather than taking either path.
 

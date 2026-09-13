@@ -24,7 +24,9 @@ change below is run by hand and never pinned. No check name moves.
 
 The release also adds an opt-in environment table, read from the repository's
 default branch, as an alternative to the GitHub Environment variables that carry
-a cell's identity and roles today. Declaring none keeps the current behaviour.
+a cell's identity and roles today. Declaring none keeps the current behaviour:
+the variables path is unchanged in this release, and is the path the table is
+meant to replace.
 
 ### Added
 
@@ -36,8 +38,11 @@ a cell's identity and roles today. Declaring none keeps the current behaviour.
   so a pull request cannot change which role its own plan assumes, which region
   it authenticates against, or which workspace it plans.
 
-  Opt-in, and nothing is deprecated: a repository that declares no layout keeps
-  the variables path, unchanged and fully supported. Both modes are selected by
+  Opt-in, and nothing breaks on upgrade: a repository that declares no layout
+  keeps the variables path, unchanged and fully supported in this release. That
+  path is deprecated rather than frozen — the engine now reports a superseded
+  variable by name, the table is the intended destination, and the window closes
+  in a later release. Both modes are selected by
   the matrix row's `config_mode`, never by a value being empty, and a row with no
   mode refuses rather than taking either path.
 
