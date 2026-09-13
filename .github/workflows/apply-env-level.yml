@@ -89,6 +89,7 @@ jobs:
       - uses: ship-iac/shipmate/actions/apply-cell@463196516076cfbbbbbe5503b3d65352d5eb1bb5
         with:
           config-mode: ${{ matrix.config_mode }}
+          tf-vars: ${{ toJSON(matrix.tf_vars) }}
           stack: ${{ matrix.stack }}
           stack-name: ${{ matrix.stack }}
           env: ${{ matrix.environment }}
@@ -134,6 +135,7 @@ jobs:
       - uses: ship-iac/shipmate/actions/apply-cell@463196516076cfbbbbbe5503b3d65352d5eb1bb5
         with:
           config-mode: ${{ matrix.config_mode }}
+          tf-vars: ${{ toJSON(matrix.tf_vars) }}
           stack: ${{ matrix.stack }}
           stack-name: ${{ matrix.stack }}
           env: ${{ matrix.environment }}
@@ -179,6 +181,7 @@ jobs:
       - uses: ship-iac/shipmate/actions/apply-cell@463196516076cfbbbbbe5503b3d65352d5eb1bb5
         with:
           config-mode: ${{ matrix.config_mode }}
+          tf-vars: ${{ toJSON(matrix.tf_vars) }}
           stack: ${{ matrix.stack }}
           stack-name: ${{ matrix.stack }}
           env: ${{ matrix.environment }}
@@ -224,6 +227,7 @@ jobs:
       - uses: ship-iac/shipmate/actions/apply-cell@463196516076cfbbbbbe5503b3d65352d5eb1bb5
         with:
           config-mode: ${{ matrix.config_mode }}
+          tf-vars: ${{ toJSON(matrix.tf_vars) }}
           stack: ${{ matrix.stack }}
           stack-name: ${{ matrix.stack }}
           env: ${{ matrix.environment }}
@@ -269,6 +273,7 @@ jobs:
       - uses: ship-iac/shipmate/actions/apply-cell@463196516076cfbbbbbe5503b3d65352d5eb1bb5
         with:
           config-mode: ${{ matrix.config_mode }}
+          tf-vars: ${{ toJSON(matrix.tf_vars) }}
           stack: ${{ matrix.stack }}
           stack-name: ${{ matrix.stack }}
           env: ${{ matrix.environment }}
@@ -314,6 +319,7 @@ jobs:
       - uses: ship-iac/shipmate/actions/apply-cell@463196516076cfbbbbbe5503b3d65352d5eb1bb5
         with:
           config-mode: ${{ matrix.config_mode }}
+          tf-vars: ${{ toJSON(matrix.tf_vars) }}
           stack: ${{ matrix.stack }}
           stack-name: ${{ matrix.stack }}
           env: ${{ matrix.environment }}
@@ -359,6 +365,7 @@ jobs:
       - uses: ship-iac/shipmate/actions/apply-cell@463196516076cfbbbbbe5503b3d65352d5eb1bb5
         with:
           config-mode: ${{ matrix.config_mode }}
+          tf-vars: ${{ toJSON(matrix.tf_vars) }}
           stack: ${{ matrix.stack }}
           stack-name: ${{ matrix.stack }}
           env: ${{ matrix.environment }}
@@ -404,6 +411,7 @@ jobs:
       - uses: ship-iac/shipmate/actions/apply-cell@463196516076cfbbbbbe5503b3d65352d5eb1bb5
         with:
           config-mode: ${{ matrix.config_mode }}
+          tf-vars: ${{ toJSON(matrix.tf_vars) }}
           stack: ${{ matrix.stack }}
           stack-name: ${{ matrix.stack }}
           env: ${{ matrix.environment }}

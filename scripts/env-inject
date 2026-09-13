@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """Write one cell's identity variables into the job environment.
 
-The single writer of `TF_VAR_*` and `TF_WORKSPACE` for a cell. Before this
-script the values arrived as a job-level `env:` block reading `vars.*`; that
-block still exists, renamed to `SHIPMATE_LEGACY_*`, and is read here. Two
-sources for one name would make precedence load-bearing, so there is exactly
-one.
+The single writer of `TF_VAR_*` and `TF_WORKSPACE` for a cell. A legacy-mode
+cell reads the renamed job-level `SHIPMATE_LEGACY_*` bindings; a table-mode one
+reads `SHIPMATE_TF_VARS`, the matrix row's resolved mapping. The mode selects
+one source and never merges them: two sources for one name would make
+precedence load-bearing.
 """
 
+import json
 import os
 import uuid
 
@@ -30,9 +31,42 @@ _RESERVED = (
 
 _ACCEPTED = frozenset(_LEGACY) | frozenset(_RESERVED)
 
+#: The matrix row's resolved `tf_vars`, serialised by `toJSON` at the cell step.
+_TABLE = "SHIPMATE_TF_VARS"
+
+
+def _table_vars(environ):
+    """The identity variables of a table-mode cell, by injected name.
+
+    Only a JSON object of strings is accepted. `{}` is legitimate -- `layout =
+    "folder"` derives none -- but `null` is what `toJSON` renders for a matrix field
+    nothing stamped, and injecting nothing for it would authenticate the cell and then
+    run it against another environment's workspace.
+    """
+    raw = environ.get(_TABLE, "")
+    try:
+        parsed = json.loads(raw)
+    except ValueError as exc:
+        raise SystemExit(
+            f"::error::{_TABLE} must be the JSON object the cell step passes as "
+            f"toJSON(matrix.tf_vars), and {raw!r} is not JSON. An empty value means the "
+            "step omitted the input."
+        ) from exc
+    if not isinstance(parsed, dict) or not all(isinstance(v, str) for v in parsed.values()):
+        raise SystemExit(
+            f"::error::{_TABLE} must be a JSON object of strings, got {raw!r}. "
+            "The empty table is {}; null is what toJSON renders for a matrix field "
+            "nothing stamped, and is not the same thing."
+        )
+    return parsed
+
 
 def resolve(environ):
     """The identity variables this cell should carry, by injected name.
+
+    Table mode reads `SHIPMATE_TF_VARS` and nothing else; the paragraphs below are
+    the legacy source. The mode is read from the row, never inferred from either
+    source being empty: `layout = "folder"` resolves an empty table legitimately.
 
     A binding that is absent produces no entry; one set to the empty string
     produces an empty entry. They are not the same: `plan-classify` excludes a
@@ -48,11 +82,7 @@ def resolve(environ):
     """
     mode = environ.get("SHIPMATE_CONFIG_MODE", "")
     if mode == "table":
-        raise SystemExit(
-            "::error::SHIPMATE_CONFIG_MODE=table, but this engine version resolves "
-            "identity from the legacy variables only. Re-pin to a version that "
-            "implements the environment table, or unset the repository's `layout`."
-        )
+        return _table_vars(environ)
     if mode != "legacy":
         raise SystemExit(
             f"::error::SHIPMATE_CONFIG_MODE must be 'legacy' or 'table', got {mode!r}. "
