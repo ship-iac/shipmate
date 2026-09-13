@@ -358,3 +358,15 @@ def test_a_multi_line_secret_is_masked_line_by_line(capsys):
     """
     env_inject.mask(["-----BEGIN KEY-----\nMIIBOgIB\n"])
     assert capsys.readouterr().out == "::add-mask::-----BEGIN KEY-----\n::add-mask::MIIBOgIB\n"
+
+
+def test_a_percent_in_a_secret_is_escaped_for_the_runner(capsys):
+    r"""The runner unescapes a workflow command's data, so an unescaped `%` registers a mask
+    for a string the value never contains and the value itself stays in the log. `a%25b` is
+    the case that matters: unescaped it registers a mask for `a%b`, and `a%25b` is never
+    masked. `\r` and `\n` need no escape: `splitlines` removed them.
+
+    Mutation: drop the `.replace('%', '%25')` in `mask`.
+    """
+    env_inject.mask(["a%25b", "100%"])
+    assert capsys.readouterr().out == "::add-mask::a%2525b\n::add-mask::100%25\n"

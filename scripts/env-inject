@@ -242,16 +242,22 @@ def compose(environ):
 def mask(values):
     """Emit `::add-mask::` for every line of every `values` entry.
 
-    Per line, because `::add-mask::` matches an exact string and a log line carrying one
-    line of a PEM would otherwise print it whole. Empty lines are skipped: GitHub cannot
-    mask the empty string and warns per attempt. Flushed, because a process that dies
-    between these commands and the `$GITHUB_ENV` write leaves the values unmasked in the
-    next step's environment.
+        Per line, because `::add-mask::` matches an exact string and a log line carrying one
+        line of a PEM would otherwise print it whole. Empty lines are skipped: GitHub cannot
+        mask the empty string and warns per attempt. Flushed, because a process that dies
+        between these commands and the `$GITHUB_ENV` write leaves the values unmasked in the
+        next step's environment.
+
+        The runner unescapes a workflow command's data, so a `%` reaches it as `%25` or a
+        line holding a literal `%25` registers a mask for a string the value never contains.
+        `
+    ` and `
+    ` need no escape here: `splitlines` has already removed them.
     """
     for value in values:
         for line in value.splitlines():
             if line:
-                print(f"::add-mask::{line}", flush=True)
+                print(f"::add-mask::{line.replace('%', '%25')}", flush=True)
 
 
 def main():
