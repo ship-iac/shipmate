@@ -10,9 +10,18 @@ inputs:
   env:
     description: Environment name, e.g. dev-eu.
     required: true
+  config-mode:
+    description: How this cell resolves its identity variables; the matrix row's config_mode. No default -- an omitted value is refused rather than silently treated as legacy.
+    required: true
 runs:
   using: composite
   steps:
+    - name: Inject identity variables
+      shell: bash
+      env:
+        SHIPMATE_CONFIG_MODE: ${{ inputs.config-mode }}
+      run: python3 "$GITHUB_ACTION_PATH/../../scripts/env-inject"
+
     - name: Init
       id: init
       shell: bash

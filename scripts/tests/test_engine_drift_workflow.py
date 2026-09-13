@@ -167,13 +167,23 @@ def test_every_checkout_takes_the_full_history_and_no_ref():
         assert _step(job_id, "actions/checkout@")["with"] == {"fetch-depth": 0}, job_id
 
 
-def test_the_cell_injects_the_three_flavor_variables():
-    """All three unconditionally, as the plan and apply paths do. An unset variable is the empty
-    string, which the TF_VAR fingerprint excludes."""
+def test_the_cell_binds_the_legacy_variables_it_injects_from():
+    """The three flavor variables still reach the cell unconditionally, as the plan and apply
+    paths do; they take the renamed route now, read by `scripts/env-inject` and written to
+    `$GITHUB_ENV` rather than named directly here. An unset variable is still the empty string,
+    which the TF_VAR fingerprint excludes. The last three bindings inject nothing and exist so
+    the renaming happens once.
+
+    Mutation: drop `SHIPMATE_LEGACY_TF_WORKSPACE`, or rename one to the name it injects.
+    """
     assert _job("drift")["env"] == {
-        "TF_VAR_env": "${{ vars.TF_VAR_env }}",
-        "TF_VAR_region": "${{ vars.TF_VAR_region }}",
-        "TF_WORKSPACE": "${{ vars.TF_WORKSPACE }}",
+        "SHIPMATE_LEGACY_TF_VAR_ENV": "${{ vars.TF_VAR_env }}",
+        "SHIPMATE_LEGACY_TF_VAR_REGION": "${{ vars.TF_VAR_region }}",
+        "SHIPMATE_LEGACY_TF_WORKSPACE": "${{ vars.TF_WORKSPACE }}",
+        "SHIPMATE_LEGACY_AWS_ROLE_ARN": "${{ vars.AWS_ROLE_ARN }}",
+        "SHIPMATE_LEGACY_AWS_REGION": "${{ vars.AWS_REGION }}",
+        "SHIPMATE_LEGACY_AWS_ROLE_ARN_WORKLOAD": "${{ matrix.workload_var != '' && "
+        "vars[format('AWS_ROLE_ARN_{0}', matrix.workload_var)] || '' }}",
     }
 
 

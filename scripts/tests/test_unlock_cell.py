@@ -218,5 +218,12 @@ def test_a_failed_force_unlock_fails_the_cell(tmp_path):
 
 def test_the_cell_takes_no_credential_or_artifact_inputs():
     """Inputs are the whole surface, compared as a set: unlock needs no token, no state path, no
-    plan artifact and no passphrase, and gaining one would mean it had grown a second job."""
-    assert set(action_yaml(_ACTION).get("inputs") or {}) == {"stack", "stack-name", "env"}
+    plan artifact and no passphrase, and gaining one would mean it had grown a second job.
+    `config-mode` is the exception every cell action takes -- it selects how the cell resolves
+    its identity variables and reaches no credential."""
+    assert set(action_yaml(_ACTION).get("inputs") or {}) == {
+        "stack",
+        "stack-name",
+        "env",
+        "config-mode",
+    }
