@@ -132,13 +132,16 @@ WAVES = [f"wave{i}" for i in range(8)]
 #: The whole `with:` of unlock's `apply-detect` step. `mode` is a literal, not an expression:
 #: the file is the verb, so nothing may make it configurable. `review-decision` and
 #: `ungated-envs` are absent because `run_unlock` reads neither -- an approval reviews a diff
-#: and unlock applies none.
+#: and unlock applies none. `shared-envs` IS present: the unlock queue's cells are stamped from
+#: the environment table like every other row, and without it a shared env resolves the wrong
+#: tier.
 DETECT_WITH = {
     "environment": "${{ inputs.environment }}",
     "mode": "unlock",
     "head-sha": "${{ inputs.ref }}",
     "github-token": "${{ github.token }}",
     "app-id": "${{ vars.SHIPMATE_APP_ID }}",
+    "shared-envs": "${{ vars.SHIPMATE_SHARED_ENVS }}",
 }
 
 #: The whole `if:` and `with:` of the environment pre-flight. The queue is one flat array and

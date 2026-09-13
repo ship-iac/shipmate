@@ -478,6 +478,7 @@ def _run_main(
     called=None,
     plan_workflow=True,
     head_sha=None,
+    table=None,
 ):
     """main() with GITHUB_OUTPUT redirected, returning (parsed outputs, calls) where calls
     records compute_cells' arguments, so a rejection is observable as the stack enumeration
@@ -507,6 +508,9 @@ def _run_main(
         "SHIPMATE_TAGS",
     ):
         monkeypatch.delenv(k, raising=False)
+    # Set here rather than in each caller's dict: `env_config` reads it hard, so a detect whose
+    # action forgot to bind it fails the run instead of treating every env as unshared.
+    monkeypatch.setenv("SHIPMATE_SHARED_ENVS", "")
     if head_sha is not None:
         monkeypatch.setenv("SHIPMATE_HEAD_SHA", head_sha)
         monkeypatch.setattr(bm, "_run", lambda args: f"{head_sha}\n")
@@ -523,6 +527,7 @@ def _run_main(
         ]
 
     monkeypatch.setattr(bm, "compute_cells", fake_compute)
+    monkeypatch.setattr(bm.ec, "read_table", lambda run=None: dict(table or {}))
     bm.main()
     parsed = dict(line.split("=", 1) for line in out.read_text(encoding="utf-8").splitlines())
     return parsed, called
@@ -859,6 +864,7 @@ def test_build_matrix_action_declares_its_inputs():
         "head-sha": "",
         "no-pull-request": "false",
         "tags": "",
+        "shared-envs": None,
     }
 
 
@@ -876,6 +882,8 @@ def test_build_matrix_action_hands_the_script_the_names_it_reads():
         "SHIPMATE_HEAD_SHA": "${{ inputs.head-sha }}",
         "SHIPMATE_NO_PULL_REQUEST": "${{ inputs.no-pull-request }}",
         "SHIPMATE_TAGS": "${{ inputs.tags }}",
+        "SHIPMATE_SHARED_ENVS": "${{ inputs.shared-envs }}",
+        "GH_TOKEN": "${{ github.token }}",
     }
 
 

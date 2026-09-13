@@ -106,6 +106,7 @@ def test_the_sweep_states_no_pull_request_and_no_head():
         "all-stacks": "true",
         "tags": "${{ inputs.tags }}",
         "no-pull-request": "true",
+        "shared-envs": "${{ vars.SHIPMATE_SHARED_ENVS }}",
     }
 
 

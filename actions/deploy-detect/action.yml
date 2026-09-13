@@ -10,6 +10,9 @@ inputs:
   app-id:
     description: shipmate App id (repo/org variable); only checks authored by this App count as done.
     required: true
+  shared-envs:
+    description: The SHIPMATE_SHARED_ENVS repository variable, verbatim. Passed in because a script cannot read `vars` itself; it decides which envs resolve the apply-tier credential on both paths.
+    required: true
 outputs:
   envlevel0_waves:
     description: JSON wave0..wave7 map for env-level 0.
@@ -48,4 +51,5 @@ runs:
         GH_TOKEN: ${{ inputs.github-token }}
         SHIPMATE_BASE_SHA: ${{ inputs.base-sha }}
         SHIPMATE_APP_ID: ${{ inputs.app-id }}
+        SHIPMATE_SHARED_ENVS: ${{ inputs.shared-envs }}
       run: python3 "$GITHUB_ACTION_PATH/../../scripts/deploy-detect"

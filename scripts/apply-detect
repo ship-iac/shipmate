@@ -62,15 +62,19 @@ def cells_for_env(env, paths, tags_by_stack):
     """Wave cells for `paths` in `env`.
 
     `workload_var` comes from the tags, never from the check name — the name
-    carries no workload. A stack missing from the map carries "" and applies with
+    carries no workload. The raw tag value rides along beside it: `workload_var`
+    is not injective, so the environment table's workload tier can only be keyed
+    on the raw one. A stack missing from the map carries "" and applies with
     the environment's generic role; the map itself is REQUIRED, so a caller that
     stops deriving it raises here instead of silently applying every cell with
     the generic role."""
+    workloads = {p: bm.workload_of(tags_by_stack.get(p, [])) for p in paths}
     return [
         {
             "stack": p,
             "environment": env,
-            "workload_var": bm.workload_var(bm.workload_of(tags_by_stack.get(p, []))),
+            "workload": workloads[p],
+            "workload_var": bm.workload_var(workloads[p]),
         }
         for p in paths
     ]
@@ -314,7 +318,9 @@ def run_unlock(repo, env, head):
     path) because the unlock job's `strategy.matrix.include` is
     `fromJSON(cells)` and `fromJSON('')` is an error."""
     stacks_by_env, tags_by_stack = bm.env_membership(all_stacks=True, require_env_tag=False)
-    cells = bm.stamp_rows(bm.build_matrix([env], stacks_by_env, tags_by_stack), "legacy")
+    cells = bm.build_matrix([env], stacks_by_env, tags_by_stack)
+    table, shared = bm.env_config(cells)
+    cells = bm.stamp_rows(cells, table, "apply", shared)
     names = pending_apply_names(repo, head)
     pending = [c for c in cells if _check_name(c["stack"], c["environment"]) in names]
     print(
@@ -372,7 +378,9 @@ def main():
     # apply checks plus the run-graph, and evaluating the whole tree would let one
     # unrelated stack's unresolvable expression block an approved plan.
     paths = paths_with_checks(env, list(deps.keys()), names)
-    cells = bm.stamp_rows(cells_for_env(env, paths, {p: bm._tags(p) for p in paths}), "legacy")
+    cells = cells_for_env(env, paths, {p: bm._tags(p) for p in paths})
+    table, shared = bm.env_config(cells)
+    cells = bm.stamp_rows(cells, table, "apply", shared)
 
     pending = with_plan_runs(filter_pending(cells, completed), plan_runs, plan_hashes)
 

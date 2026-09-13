@@ -117,6 +117,7 @@ jobs:
           # arrived, and empty refuses the run.
           ungated-envs: ${{ vars.SHIPMATE_UNGATED_ENVS }}
           review-decision: ${{ needs.review.outputs.decision }}
+          shared-envs: ${{ vars.SHIPMATE_SHARED_ENVS }}
 
   # A targeted apply is single-env by design, so its pending wave set is exactly one env-level's
   # wave matrix. It runs through the same engine the deploy and bare-apply paths use, rather than

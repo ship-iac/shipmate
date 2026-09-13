@@ -44,6 +44,7 @@ jobs:
           # Skips build-matrix's head-repository and head-commit refusals. A sweep has no pull
           # request; a plan workflow must never set this.
           no-pull-request: "true"
+          shared-envs: ${{ vars.SHIPMATE_SHARED_ENVS }}
 
   drift:
     needs: detect

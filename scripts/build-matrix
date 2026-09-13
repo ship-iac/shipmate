@@ -4,13 +4,18 @@
 Pure core (build_matrix) is unit-tested; main() gathers inputs from terramate
 (the changed stack set + each stack's tags) and writes GitHub Actions job
 outputs. Environment membership comes purely from stack tags (CONTRACT tag
-grammar: env/<name>) -- no GitHub API or token required.
+grammar: env/<name>). The environment table is a separate read and does need
+GH_TOKEN: it is evaluated on the default branch, not in the checked-out tree.
 """
 
 import json
 import os
 import subprocess
 import sys
+
+from _shipmate import _load
+
+ec = _load("env-config")
 
 #: The two pull-request events `plan_workflow_error` requires a consumer workflow file on.
 _PR_EVENTS = ("pull_request", "pull_request_target")
@@ -345,15 +350,48 @@ def compute_cells(all_stacks=False, base="", require_env_tag=True, tags=""):
     return build_matrix(sorted(stacks_by_env), stacks_by_env, tags_by_stack, tags)
 
 
-def stamp_rows(cells, config_mode):
-    """Add the engine-resolved fields to every matrix row.
+def env_config(cells):
+    """(validated table, shared env names) for `cells`. One read per detect, not per row.
 
-    Applied at each site that emits rows rather than inside `build_matrix`, which stays pure and
-    unit-testable. `run_unlock` returns from `apply-detect`'s `main` early, so a stamp in any
-    `main` tail would skip the unlock path. `config_mode` has no default: a forgotten argument
-    must not be indistinguishable from a correct one. `test_row_stamp_guard.py` pins each site.
+    `SHIPMATE_SHARED_ENVS` is read hard: an action that forgot to bind it would otherwise
+    leave every environment unshared, which resolves the plan role in an environment that
+    binds the bare apply one. Split at commas without stripping, so a padded entry is unlisted
+    here and in `scripts/verify-environments` alike; unlike that reading, this one is
+    case-sensitive. `all_envs` is the whole-tree scan the unused-entry diagnostic will need;
+    validation never reads it.
     """
-    return [{**cell, "config_mode": config_mode} for cell in cells]
+    shared = {e for e in os.environ["SHIPMATE_SHARED_ENVS"].split(",") if e}
+    envs = {c["environment"] for c in cells}
+    return ec.validate(ec.read_table(), envs, shared, all_envs=None), shared
+
+
+def _resolved(table, cell, tier, shared_envs):
+    """What the table resolves for one cell, or the legacy values when there is no table.
+
+    An untabled repository never calls `resolve()`: it has no entry for any environment, so
+    every field would have to be invented. The four cell actions read none of these five in
+    legacy mode.
+    """
+    if "layout" not in table:
+        return {"role_arn": "", "cred_region": "", "tf_vars": {}, "config_path": ""}
+    return ec.resolve(table, cell["environment"], tier, cell["workload"], shared_envs)
+
+
+def stamp_rows(cells, table, tier, shared_envs):
+    """Stamp each row with what the table resolves for it.
+
+    `tier` is the calling detect's path (`plan` or `apply`) and is always passed
+    explicitly: one call site serves both tiers, so nothing may infer it. Applied at each
+    site that emits rows rather than inside `build_matrix`, which stays pure and
+    unit-testable; `run_unlock` returns from `apply-detect`'s `main` early, so a stamp in any
+    `main` tail would skip the unlock path. The mode has no default and is never inferred
+    from a resolved field being empty -- `layout = "folder"` legitimately emits no
+    `tf_vars`. `test_row_stamp_guard.py` pins each site.
+    """
+    mode = "table" if "layout" in table else "legacy"
+    return [
+        {**cell, "config_mode": mode, **_resolved(table, cell, tier, shared_envs)} for cell in cells
+    ]
 
 
 def _event_payload(path):
@@ -547,7 +585,9 @@ def main():
     )
     if rejection:
         raise SystemExit(rejection)
-    cells = stamp_rows(compute_cells(all_stacks, base, tags=tags), "legacy")
+    cells = compute_cells(all_stacks, base, tags=tags)
+    table, shared = env_config(cells)
+    cells = stamp_rows(cells, table, "plan", shared)
     with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
         fh.write(f"matrix={json.dumps({'include': cells})}\n")
         fh.write(f"empty={'true' if not cells else 'false'}\n")

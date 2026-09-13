@@ -96,6 +96,7 @@ def test_build_matrix_reads_the_facts_job_and_states_no_constant():
         "base-sha": "${{ needs.facts.outputs.base-sha }}",
         "head-repo": "${{ needs.facts.outputs.head-repo }}",
         "head-sha": "${{ needs.facts.outputs.head-sha }}",
+        "shared-envs": "${{ vars.SHIPMATE_SHARED_ENVS }}",
     }
 
 

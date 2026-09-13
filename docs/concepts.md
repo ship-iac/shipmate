@@ -167,7 +167,8 @@ produced them. See
   the fork refusal's: `build-matrix` turns a fork's head away before either
   terramate step reads the tree it wrote ([hardening](hardening.md)).
   Environment membership comes purely from stack tags — no environment names in
-  YAML, no GitHub API/token needed.
+  YAML. A repository that declares a `globals "shipmate"` table costs one API
+  call on top, to name the default branch the table is read from.
 - **`plan`** — one matrix job per stack × environment, bound to that GitHub
   Environment (which injects `TF_VAR_*` / `TF_WORKSPACE` / nothing, per
   layout). Each job is the `shipmate / <stack> / <env>` check (shown as

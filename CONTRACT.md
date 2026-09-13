@@ -204,9 +204,12 @@ never used.
     process holds, or hashes, changed with the writer.
   - Every matrix row carries `config_mode`, and each cell action takes it as a
     `config-mode` input with no default. `legacy` — resolve identity from the
-    three bindings above — is the only value this engine version emits, and any
-    other value, an omitted input included, is refused before `terramate run`
-    rather than treated as `legacy`.
+    three bindings above — is what a repository with no `globals "shipmate"`
+    layout emits; a repository that declares one emits `table`, and its rows
+    also carry `role_arn`, `cred_region`, `tf_vars` and `config_path`, resolved
+    from the table on the default branch. Any other value, an omitted input
+    included, is refused before `terramate run` rather than treated as
+    `legacy`.
 - Protected environments (typically anything beyond the lowest-trust
   environment) carry required reviewers configured on the GitHub
   Environment itself, so approval gating is enforced by GitHub, not by
