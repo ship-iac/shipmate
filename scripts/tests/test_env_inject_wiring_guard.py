@@ -1,12 +1,11 @@
-"""The route a cell's identity variables take: job-level `SHIPMATE_LEGACY_*`, then `env-inject`.
+"""The route a cell's identity variables take: the matrix row, then `env-inject`.
 
 `TF_VAR_env`, `TF_VAR_region` and `TF_WORKSPACE` used to be job-level `env:` bindings read
 straight from `vars.*`. They now reach the process through `scripts/env-inject`, which writes
-`$GITHUB_ENV` from one of two sources: the renamed `SHIPMATE_LEGACY_*` bindings, or the matrix
-row's `tf_vars` carried in as `SHIPMATE_TF_VARS`. Three things can silently break that route:
-one of eleven cell jobs missing a binding, a cell step or action dropping one of the two
-identity inputs, and an `env-inject` step that runs after the plan it was supposed to feed. All
-leave a green run and a wrong fingerprint.
+`$GITHUB_ENV` from the matrix row's `tf_vars`, carried in as `SHIPMATE_TF_VARS`. Three things can
+silently break that route: a cell step or action dropping the identity input, a workflow binding
+one of the old names on the job (which beats `$GITHUB_ENV`), and an `env-inject` step that runs
+after the plan it was supposed to feed. All leave a green run and a wrong fingerprint.
 
 Every assertion is a whole hand-written value against `yaml.safe_load` output. A membership check
 passes an entry whose expression was mistyped; a substring check is satisfied by a comment.
@@ -31,23 +30,6 @@ _CELL_JOBS = {
         "wave5",
         "wave6",
         "wave7",
-    ),
-}
-
-#: The whole `env:` block every cell job writes, byte-identical across all eleven. The first
-#: three are what `env-inject` reads; the last three are injected under no name and exist so
-#: the rename happens once. In table mode all six are reported as superseded when non-empty.
-#: Uppercase here because GitHub uppercases variable names -- the names
-#: `env-inject` writes are lowercase after the prefix, and that difference is the fingerprint.
-_LEGACY_ENV = {
-    "SHIPMATE_LEGACY_TF_VAR_ENV": "${{ vars.TF_VAR_env }}",
-    "SHIPMATE_LEGACY_TF_VAR_REGION": "${{ vars.TF_VAR_region }}",
-    "SHIPMATE_LEGACY_TF_WORKSPACE": "${{ vars.TF_WORKSPACE }}",
-    "SHIPMATE_LEGACY_AWS_ROLE_ARN": "${{ vars.AWS_ROLE_ARN }}",
-    "SHIPMATE_LEGACY_AWS_REGION": "${{ vars.AWS_REGION }}",
-    "SHIPMATE_LEGACY_AWS_ROLE_ARN_WORKLOAD": (
-        "${{ matrix.workload_var != '' && "
-        "vars[format('AWS_ROLE_ARN_{0}', matrix.workload_var)] || '' }}"
     ),
 }
 
@@ -100,19 +82,6 @@ def test_the_registry_names_every_job_that_runs_a_cell():
             if any(_runs_a_cell(s) for s in (job.get("steps") or [])):
                 found.add((path.name, job_id))
     assert found == set(_ELEVEN)
-
-
-@pytest.mark.parametrize(("workflow", "job_id"), _ELEVEN, ids=lambda v: v)
-def test_every_cell_job_carries_the_six_legacy_bindings(workflow, job_id):
-    """The whole block against one hand-written constant, so all eleven copies stay identical.
-    A wave job that loses `SHIPMATE_LEGACY_TF_WORKSPACE` injects no workspace and plans the wrong
-    one, and a wave whose expressions drift from the constant is a wave nobody reviewed against
-    the other ten.
-
-    Mutations: delete one binding from one wave job; change one wave's `vars.TF_VAR_env` to
-    `vars.TF_VAR_ENV`.
-    """
-    assert _jobs(_doc(workflow))[job_id]["env"] == _LEGACY_ENV
 
 
 def test_no_workflow_binds_the_old_names():

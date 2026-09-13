@@ -168,26 +168,6 @@ def test_every_checkout_takes_the_full_history_and_no_ref():
         assert _step(job_id, "actions/checkout@")["with"] == {"fetch-depth": 0}, job_id
 
 
-def test_the_cell_binds_the_legacy_variables_it_injects_from():
-    """The three flavor variables still reach the cell unconditionally, as the plan and apply
-    paths do; they take the renamed route now, read by `scripts/env-inject` and written to
-    `$GITHUB_ENV` rather than named directly here. An unset variable is still the empty string,
-    which the TF_VAR fingerprint excludes. The last three bindings inject nothing and exist so
-    the renaming happens once.
-
-    Mutation: drop `SHIPMATE_LEGACY_TF_WORKSPACE`, or rename one to the name it injects.
-    """
-    assert _job("drift")["env"] == {
-        "SHIPMATE_LEGACY_TF_VAR_ENV": "${{ vars.TF_VAR_env }}",
-        "SHIPMATE_LEGACY_TF_VAR_REGION": "${{ vars.TF_VAR_region }}",
-        "SHIPMATE_LEGACY_TF_WORKSPACE": "${{ vars.TF_WORKSPACE }}",
-        "SHIPMATE_LEGACY_AWS_ROLE_ARN": "${{ vars.AWS_ROLE_ARN }}",
-        "SHIPMATE_LEGACY_AWS_REGION": "${{ vars.AWS_REGION }}",
-        "SHIPMATE_LEGACY_AWS_ROLE_ARN_WORKLOAD": "${{ matrix.workload_var != '' && "
-        "vars[format('AWS_ROLE_ARN_{0}', matrix.workload_var)] || '' }}",
-    }
-
-
 def test_the_cell_passes_this_whole_with_block():
     """The whole mapping against a hand-written constant, as the plan side is pinned: a dropped
     `with:` line reaches a composite action as the empty string rather than as an error, so a key
@@ -199,7 +179,6 @@ def test_the_cell_passes_this_whole_with_block():
     S3-backend flavor restoring nothing.
     """
     assert _step("drift", "actions/drift-cell@")["with"] == {
-        "config-mode": "${{ matrix.config_mode }}",
         "tf-vars": "${{ toJSON(matrix.tf_vars) }}",
         "stack": "${{ matrix.stack }}",
         "stack-name": "${{ matrix.stack }}",

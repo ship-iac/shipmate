@@ -294,11 +294,11 @@ def test_an_environment_absent_from_the_table_resolves_no_credential(monkeypatch
     `workspace`, not `dry` -- a matrix environment absent from a `dry` table is refused
     by validation instead.
 
-    Mutation: fall back to `SHIPMATE_LEGACY_AWS_ROLE_ARN`, which is branch-editable and
-    is the whole reason the table is read from the default branch.
+    Mutation: fall back to `AWS_ROLE_ARN`, a repository variable, which is branch-editable
+    and is the whole reason the table is read from the default branch.
     """
-    monkeypatch.setenv("SHIPMATE_LEGACY_AWS_ROLE_ARN", "arn:aws:iam::9817:role/legacy")
-    monkeypatch.setenv("SHIPMATE_LEGACY_AWS_REGION", "us-east-1")
+    monkeypatch.setenv("AWS_ROLE_ARN", "arn:aws:iam::9817:role/loose")
+    monkeypatch.setenv("AWS_REGION", "us-east-1")
     table = {"layout": "workspace", "environments": {"dev-eu": {"region": "eu-west-1"}}}
     assert env_config.resolve(table, "prod-us", "plan", "", ()) == {
         "role_arn": "",
