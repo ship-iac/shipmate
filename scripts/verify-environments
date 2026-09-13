@@ -28,8 +28,9 @@ def apply_binding(env, shared_envs):
     case-insensitive because GitHub's `contains()` is.
 
     This rule exists twice: here, and as the YAML ternary in eight wave jobs.
-    Neither side is derived from the other: both are compared to one hand-written
-    constant in scripts/tests/test_apply_env_binding_guard.py.
+    `scripts/env-config` reads the same variable a third time, to decide which tier
+    a cell resolves. No side is derived from another: all three are compared to one
+    hand-written constant in scripts/tests/test_apply_env_binding_guard.py.
     """
     listed = f",{env},".lower() in f",{shared_envs},".lower()
     return env if listed else f"{env}-apply"

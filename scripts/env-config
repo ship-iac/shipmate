@@ -221,6 +221,16 @@ def _check_vars(entry, env):
             )
 
 
+def shared_env_names(raw):
+    """The environments listed in `SHIPMATE_SHARED_ENVS`, as written.
+
+    Split at commas without stripping, so a padded entry is unlisted here exactly as it is
+    in `scripts/verify-environments` and the wave-job ternaries, which compare whole entries
+    between comma boundaries. Case is normalized by `_is_shared`, not here.
+    """
+    return {e for e in raw.split(",") if e}
+
+
 def _is_shared(env, shared_envs):
     """Whether `env` binds one shared environment rather than a plan/apply pair.
 

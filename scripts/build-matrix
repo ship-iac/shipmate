@@ -355,12 +355,12 @@ def env_config(cells):
 
     `SHIPMATE_SHARED_ENVS` is read hard: an action that forgot to bind it would otherwise
     leave every environment unshared, which resolves the plan role in an environment that
-    binds the bare apply one. Split at commas without stripping, so a padded entry is unlisted
-    here and in `scripts/verify-environments` alike; case is not normalized here because
-    `env-config` compares case-insensitively, as that reading does. `all_envs` is the
-    whole-tree scan the unused-entry diagnostic will need; validation never reads it.
+    binds the bare apply one. `env-config` owns how the value is split and compared, so that
+    reading sits in one place beside the two the workflows use; `test_apply_env_binding_guard.py`
+    compares all three to one hand-written vector. `all_envs` is the whole-tree scan the
+    unused-entry diagnostic will need; validation never reads it.
     """
-    shared = {e for e in os.environ["SHIPMATE_SHARED_ENVS"].split(",") if e}
+    shared = ec.shared_env_names(os.environ["SHIPMATE_SHARED_ENVS"])
     envs = {c["environment"] for c in cells}
     return ec.validate(ec.read_table(), envs, shared, all_envs=None), shared
 
