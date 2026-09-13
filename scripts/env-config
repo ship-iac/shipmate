@@ -352,9 +352,8 @@ def resolve(table, env, path, workload, shared_envs):
 
     `path` is the calling detect's tier, never inferred; a shared environment resolves
     `aws.apply` on both paths, and `config_path` reports the tier actually consulted
-    rather than the one requested. Once `layout` is set there is no fallback to
-    `vars.*`: an environment with no entry resolves an empty role and the caller skips
-    the credentials step.
+    rather than the one requested. There is no fallback to `vars.*`: an environment with
+    no entry resolves an empty role and the caller skips the credentials step.
 
     The workload tier is keyed by the raw `workload` tag value, never by a normalized
     form of it: `net-edge` and `net_edge` are two workloads. The environment's own `vars`

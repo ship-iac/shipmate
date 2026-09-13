@@ -328,14 +328,14 @@ def _missing_half(name, env, role, mode):
         return (
             f"GitHub Environment `{name}` does not exist while `{env}` does — if this "
             f"repository binds the split naming, the {role} jobs for `env:{env}` bind a "
-            "name GitHub auto-creates empty, with none of its variables, secrets or "
-            f"protection rules. Create it, or delete `{env}` if both paths share one "
+            "name GitHub auto-creates empty, with none of its secrets or protection "
+            f"rules. Create it, or delete `{env}` if both paths share one "
             "environment."
         )
     return (
         f"GitHub Environment `{name}` does not exist — the {role} jobs for stacks tagged "
-        f"`env:{env}` bind a name GitHub auto-creates empty, with no variables, no secrets "
-        "and none of its protection rules. Create it."
+        f"`env:{env}` bind a name GitHub auto-creates empty, with no secrets and none "
+        "of its protection rules. Create it."
     )
 
 
@@ -391,8 +391,8 @@ def _environment_warnings(ctx):
                     WARNING,
                     f"neither GitHub Environment `{env}-plan` nor `{env}-apply` exists — "
                     f"every job for stacks tagged `env:{env}` binds a name GitHub "
-                    "auto-creates empty: no variables, no secrets, no reviewers and no "
-                    "branch policy, so nothing gates what runs in it. Create both, or "
+                    "auto-creates empty: no secrets, no reviewers and no branch "
+                    "policy, so nothing gates what runs in it. Create both, or "
                     f"create a single `{env}` and list `{env}` "
                     "in the `SHIPMATE_SHARED_ENVS` repository variable to share one "
                     "environment between plan and apply (which gives up the reviewer gate "

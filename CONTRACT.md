@@ -170,7 +170,7 @@ never used.
   GitHub Environments named after it: `staging-plan` and `staging-apply` by
   default, or a single `staging` in shared mode (both namings below). The
   Environment is always the unit of binding, apply-gating, protection, and the
-  plan/apply split — even when it carries no variables. What it injects
+  plan/apply split; it carries no identity variables. What a cell injects
   depends on how the consumer repo models environments (its IaC layout):
 
   | Repo layout | Env identity injected | Mechanism |
@@ -294,14 +294,12 @@ never used.
   for every cell in the incoming matrix, lists the repository's environments
   once, and fails the run naming every computed binding the repository does not
   have, plus both ways to fix it: create that environment, or correct
-  `SHIPMATE_SHARED_ENVS`. This is a second and independent mechanism from
-  the fingerprint refusal above, and it is the one that covers the layouts the
-  fingerprint cannot: it compares existence, not variable content, so it
-  holds whatever the environment injects, including nothing. It runs once per
-  `apply-env-level.yml` call, so an env-ordered deploy can have completed an
-  earlier level's applies before a later level is refused — a partial deploy, not
-  an unverified apply: every level verifies its own environments before its own
-  waves.
+  `SHIPMATE_SHARED_ENVS`. It is what refuses a mis-binding: it compares
+  existence, not variable content, and a cell resolves its variables from the
+  table whatever it bound. It runs once per `apply-env-level.yml` call, so an
+  env-ordered deploy can have completed an earlier level's applies before a
+  later level is refused — a partial deploy, not an unverified apply: every level
+  verifies its own environments before its own waves.
   - Its own failures are fail-closed as well. A listing that could not be read,
     or one whose `total_count` exceeds the number of environments returned,
     fails the run rather than letting the applies through — a check that did not
@@ -316,10 +314,10 @@ never used.
     involved.
   - Deliberately out of scope, so what it promises stays readable: the
     plan-side environments, which engine `plan.yml` and `drift.yml` bind but
-    this pre-flight does not enumerate; an environment that exists but is wrong
-    (empty, mis-scoped, missing its role — content is the fingerprint's and
-    `shipmate doctor`'s subject); and an environment created or deleted in the
-    window between the pre-flight and the wave jobs.
+    this pre-flight does not enumerate; an environment that exists but is
+    mis-scoped or unprotected, which is `shipmate doctor`'s subject; and an
+    environment created or deleted in the window between the pre-flight and the
+    wave jobs.
 - **No env names in workflow YAML — ever.** Workflow files must not
   hardcode `staging`, `production`, or any other environment name. Workflows
   discover environments dynamically from stack tags (see Tag grammar,

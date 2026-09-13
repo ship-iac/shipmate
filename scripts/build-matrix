@@ -252,7 +252,7 @@ RT_VARS = ("TF_VAR_env", "TF_VAR_region", "TF_WORKSPACE")
 
 def assert_run_env_roundtrip(stack_dir):
     """Fail loud when the consuming repository's `terramate.config.run.env`
-    rewrites one of the three variables the GitHub Environment injects.
+    rewrites one of the three identity variables `scripts/env-inject` writes.
 
     `run.env` is applied to the child process AFTER the ambient environment, so
     it wins. `plan-classify --fingerprint-only` runs outside `terramate run`, so
