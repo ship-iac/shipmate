@@ -535,9 +535,12 @@ def test_a_whole_table_is_returned_unchanged():
 
 def test_a_null_layout_refuses():
     """Terramate drops an attribute it cannot evaluate but keeps an explicit `layout = null`,
-    and the two readers of the key disagree on it: `validate` looked at the value and
-    `stamp_rows` at the key. Reddens on treating a null layout as an undeclared one, which
-    stamps every row `table` while nothing in this module refuses."""
+    which is a declared layout holding a value no layout may hold.
+
+    Mutation: `if not table.get("layout"):` for the no-layout refusal, which reads a null
+    layout as undeclared and answers a repository that did declare one with the message
+    telling it to declare one.
+    """
     assert _refusal({"layout": None}) == (
         '::error::globals "shipmate" layout is None; it must be one of dry, workspace, folder.'
     )
