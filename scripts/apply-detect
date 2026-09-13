@@ -61,10 +61,8 @@ def paths_with_checks(env, candidate_paths, check_names):
 def cells_for_env(env, paths, tags_by_stack):
     """Wave cells for `paths` in `env`.
 
-    `workload_var` comes from the tags, never from the check name — the name
-    carries no workload. The raw tag value rides along beside it: `workload_var`
-    is not injective, so the environment table's workload tier can only be keyed
-    on the raw one. A stack missing from the map carries "" and applies with
+    The workload comes from the tags, never from the check name — the name
+    carries no workload. A stack missing from the map carries "" and applies with
     the environment's generic role; the map itself is REQUIRED, so a caller that
     stops deriving it raises here instead of silently applying every cell with
     the generic role."""
@@ -74,7 +72,6 @@ def cells_for_env(env, paths, tags_by_stack):
             "stack": p,
             "environment": env,
             "workload": workloads[p],
-            "workload_var": bm.workload_var(workloads[p]),
         }
         for p in paths
     ]
@@ -279,7 +276,7 @@ def run_unlock(repo, env, head):
     completed ones: every queued cell takes a real state lock and may force-break
     one, so a stack this pull request never planned — no apply check at all —
     must not be in range. The tree walk still supplies the cells because a
-    check-run name carries no `workload_var`.
+    check-run name carries no workload.
 
     Unlike the apply path it needs no plan run at all: a lock outlives the run
     that stranded it, those plan artifacts may be long expired, and unlock

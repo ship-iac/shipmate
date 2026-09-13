@@ -98,7 +98,6 @@ def test_the_plan_matrix_resolves_the_plan_tier(monkeypatch, tmp_path):
             "stack": "stacks/app",
             "environment": "dev-eu",
             "workload": "",
-            "workload_var": "",
             **_table("plan"),
         }
     ]
@@ -116,7 +115,6 @@ def test_the_drift_matrix_resolves_the_plan_tier(monkeypatch, tmp_path):
             "stack": "stacks/app",
             "environment": "dev-eu",
             "workload": "",
-            "workload_var": "",
             **_table("plan"),
         }
     ]
@@ -141,7 +139,6 @@ def test_the_deploy_rows_resolve_the_apply_tier(monkeypatch, tmp_path):
             "stack": "stacks/app",
             "environment": "dev-eu",
             "workload": "",
-            "workload_var": "",
             **_table("apply"),
             "plan_run_id": "123456",
             "plan_sha256": PLAN_SHA,
@@ -164,7 +161,6 @@ def test_the_unlock_rows_resolve_the_apply_tier(monkeypatch, tmp_path):
         "stack": "stacks/app",
         "environment": "dev-eu",
         "workload": "app",
-        "workload_var": "APP",
         **_table("apply"),
     }
 
@@ -182,7 +178,6 @@ def test_the_targeted_apply_rows_resolve_the_apply_tier(monkeypatch, tmp_path):
             "stack": "stacks/app",
             "environment": "dev-eu",
             "workload": "app",
-            "workload_var": "APP",
             **_table("apply"),
             "plan_run_id": "42",
             "plan_sha256": PLAN_SHA,
@@ -204,7 +199,6 @@ def test_the_bare_apply_all_rows_resolve_the_apply_tier(monkeypatch, tmp_path):
             "stack": "stacks/app",
             "environment": "dev-eu",
             "workload": "",
-            "workload_var": "",
             **_table("apply"),
             "plan_run_id": "123456",
             "plan_sha256": PLAN_SHA,
@@ -238,7 +232,6 @@ def test_a_shared_environment_resolves_the_apply_tier_on_the_plan_path(monkeypat
             "stack": "stacks/app",
             "environment": "dev-eu",
             "workload": "",
-            "workload_var": "",
             **_table("apply"),
         }
     ]

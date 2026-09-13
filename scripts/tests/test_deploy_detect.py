@@ -158,7 +158,7 @@ def _cell(stack, env="dev-eu"):
     # The whole row `build_matrix` emits, `workload` included: a double that omits a key the
     # real builder always adds cannot fail on a guard that pins the row shape, and the table
     # path keys its workload tier on that key.
-    return {"stack": stack, "environment": env, "workload": "", "workload_var": ""}
+    return {"stack": stack, "environment": env, "workload": ""}
 
 
 def _run_main(

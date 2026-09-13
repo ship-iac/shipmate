@@ -46,7 +46,7 @@ def test_cells_forward_construct_the_check_name_and_never_parse_it():
     assert [c["stack"] for c in cells] == ["components/app", "a / b"]
 
 
-def test_cells_take_workload_var_from_the_tags():
+def test_cells_take_the_workload_from_the_tags():
     # Never from the check name, which carries no workload. A stack missing from the map carries
     # "" and applies with the environment's generic role.
     cells = aad.cells_from_checks(
@@ -56,21 +56,19 @@ def test_cells_take_workload_var_from_the_tags():
             "apply / stacks/app / dev-us",
         },
         {"dev-eu": ["stacks/app", "stacks/dns"], "dev-us": ["stacks/app"]},
-        {"stacks/app": ["workload/net-edge"]},  # stacks/dns is absent, so its var is "".
+        {"stacks/app": ["workload/net-edge"]},  # stacks/dns is absent, so its workload is "".
     )
     assert cells == [
         {
             "stack": "stacks/app",
             "environment": "dev-eu",
             "workload": "net-edge",
-            "workload_var": "NET_EDGE",
         },
-        {"stack": "stacks/dns", "environment": "dev-eu", "workload": "", "workload_var": ""},
+        {"stack": "stacks/dns", "environment": "dev-eu", "workload": ""},
         {
             "stack": "stacks/app",
             "environment": "dev-us",
             "workload": "net-edge",
-            "workload_var": "NET_EDGE",
         },
     ]
 
@@ -296,7 +294,6 @@ def test_main_wires_the_tag_map_into_the_cells(tmp_path, monkeypatch):
             "stack": "stacks/app",
             "environment": "dev-eu",
             "workload": "net-edge",
-            "workload_var": "NET_EDGE",
             "role_arn": "",
             "cred_region": "",
             "tf_vars": {},

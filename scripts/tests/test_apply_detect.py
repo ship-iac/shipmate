@@ -36,7 +36,7 @@ def test_workset_forward_constructs_the_name_and_never_parses_it():
     assert ad.paths_with_checks("dev-eu", graph_paths, names) == ["components/app", "a / b"]
 
 
-def test_cells_take_workload_var_from_the_tags():
+def test_cells_take_the_workload_from_the_tags():
     """Never from the check name: the name carries no workload, and a cell that invented one
     from its path would assume the wrong environment role. A stack missing from the map carries
     "", because the map comes from a separate terramate query and must never be able to raise
@@ -51,15 +51,14 @@ def test_cells_take_workload_var_from_the_tags():
             "stack": "stacks/app",
             "environment": "dev-eu",
             "workload": "net-edge",
-            "workload_var": "NET_EDGE",
         },
-        {"stack": "stacks/dns", "environment": "dev-eu", "workload": "", "workload_var": ""},
+        {"stack": "stacks/dns", "environment": "dev-eu", "workload": ""},
     ]
 
 
 _TWO_CELLS = [
-    {"stack": "stacks/app", "environment": "dev-eu", "workload_var": ""},
-    {"stack": "stacks/dns", "environment": "dev-eu", "workload_var": ""},
+    {"stack": "stacks/app", "environment": "dev-eu"},
+    {"stack": "stacks/dns", "environment": "dev-eu"},
 ]
 
 
@@ -77,14 +76,12 @@ def test_each_cell_carries_the_plan_run_and_digest_its_own_check_names():
         {
             "stack": "stacks/app",
             "environment": "dev-eu",
-            "workload_var": "",
             "plan_run_id": "111",
             "plan_sha256": "a" * 64,
         },
         {
             "stack": "stacks/dns",
             "environment": "dev-eu",
-            "workload_var": "",
             "plan_run_id": "222",
             "plan_sha256": "b" * 64,
         },
@@ -443,7 +440,6 @@ def test_main_wires_the_tag_map_into_the_cells(tmp_path, monkeypatch):
             "stack": "stacks/app",
             "environment": "dev-eu",
             "workload": "net-edge",
-            "workload_var": "NET_EDGE",
             "role_arn": "",
             "cred_region": "",
             "tf_vars": {},
@@ -626,10 +622,10 @@ def _stub_unlock_tree(monkeypatch, cells, checks=None):
 
 
 _DEV_EU_CELLS = [
-    {"stack": "stacks/app", "environment": "dev-eu", "workload": "app", "workload_var": "APP"},
-    {"stack": "stacks/dns", "environment": "dev-eu", "workload": "net", "workload_var": "NET"},
-    {"stack": "stacks/db", "environment": "dev-eu", "workload": "app", "workload_var": "APP"},
-    {"stack": "stacks/app", "environment": "prod-eu", "workload": "app", "workload_var": "APP"},
+    {"stack": "stacks/app", "environment": "dev-eu", "workload": "app"},
+    {"stack": "stacks/dns", "environment": "dev-eu", "workload": "net"},
+    {"stack": "stacks/db", "environment": "dev-eu", "workload": "app"},
+    {"stack": "stacks/app", "environment": "prod-eu", "workload": "app"},
 ]
 
 
@@ -667,7 +663,6 @@ def test_unlock_queue_is_the_pending_cells_of_the_target_env(monkeypatch, tmp_pa
             "stack": "stacks/app",
             "environment": "dev-eu",
             "workload": "app",
-            "workload_var": "APP",
             "role_arn": "",
             "cred_region": "",
             "tf_vars": {},
@@ -721,7 +716,6 @@ def test_unlock_is_not_capped_by_the_whole_tree_matrix_limit(monkeypatch, tmp_pa
                 "stack": "stacks/app",
                 "environment": f"env-{i}",
                 "workload": "app",
-                "workload_var": "APP",
             }
             for i in range(ad.bm.MATRIX_LIMIT + 10)
         ]
@@ -733,7 +727,6 @@ def test_unlock_is_not_capped_by_the_whole_tree_matrix_limit(monkeypatch, tmp_pa
             "stack": "stacks/app",
             "environment": "dev-eu",
             "workload": "app",
-            "workload_var": "APP",
             "role_arn": "",
             "cred_region": "",
             "tf_vars": {},
@@ -810,7 +803,7 @@ def test_apply_mode_writes_the_whole_output_file_verbatim(monkeypatch, tmp_path)
     ad.main()
     assert out.read_text(encoding="utf-8") == (
         'waves={"wave0": [{"stack": "stacks/app", "environment": "dev-eu", '
-        '"workload": "app", "workload_var": "APP", '
+        '"workload": "app", '
         '"role_arn": "", "cred_region": "", "tf_vars": {}, "config_path": "apply", '
         '"plan_run_id": "42", '
         '"plan_sha256": "dddddddddddddddd'
@@ -843,7 +836,6 @@ def test_unlock_tolerates_an_untagged_stack_elsewhere_in_the_tree(monkeypatch, t
             "stack": "stacks/app",
             "environment": "dev-eu",
             "workload": "app",
-            "workload_var": "APP",
             "role_arn": "",
             "cred_region": "",
             "tf_vars": {},

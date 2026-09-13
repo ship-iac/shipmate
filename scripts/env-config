@@ -356,8 +356,9 @@ def resolve(table, env, path, workload, shared_envs):
     `vars.*`: an environment with no entry resolves an empty role and the caller skips
     the credentials step.
 
-    The workload tier is keyed by the raw `workload`, never by `workload_var`, which is
-    not injective. The environment's own `vars` merges last, over the derivation.
+    The workload tier is keyed by the raw `workload` tag value, never by a normalized
+    form of it: `net-edge` and `net_edge` are two workloads. The environment's own `vars`
+    merges last, over the derivation.
     """
     environments = _mapping(table.get("environments", {}), "environments")
     entry = _mapping(environments.get(env, {}), f"environment {env}")
