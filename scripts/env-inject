@@ -20,6 +20,16 @@ _LEGACY = {
     "SHIPMATE_LEGACY_TF_WORKSPACE": "TF_WORKSPACE",
 }
 
+#: Bound by every cell job so the rename happened once, and accepted here so no
+#: cell job refuses. They carry no behaviour: this script injects nothing for them.
+_RESERVED = (
+    "SHIPMATE_LEGACY_AWS_ROLE_ARN",
+    "SHIPMATE_LEGACY_AWS_REGION",
+    "SHIPMATE_LEGACY_AWS_ROLE_ARN_WORKLOAD",
+)
+
+_ACCEPTED = frozenset(_LEGACY) | frozenset(_RESERVED)
+
 
 def resolve(environ):
     """The identity variables this cell should carry, by injected name.
@@ -29,6 +39,12 @@ def resolve(environ):
     set-but-empty `TF_VAR_*` from the fingerprint, and a job-level `env:` block
     reading an unset `vars.*` set it to empty — so reproducing today's bytes
     means passing the empty value through rather than dropping it.
+
+    Absence is legitimate — folder-per-environment binds none of them — so it is
+    a misspelled binding that refuses, not a missing one. GitHub uppercases
+    variable names but not workflow `env:` keys, so `SHIPMATE_LEGACY_TF_VAR_env`
+    arrives as its own name, is injected under nothing, and leaves every
+    environment of a `stacks` repository sharing one backend key.
     """
     mode = environ.get("SHIPMATE_CONFIG_MODE", "")
     if mode == "table":
@@ -42,6 +58,16 @@ def resolve(environ):
             f"::error::SHIPMATE_CONFIG_MODE must be 'legacy' or 'table', got {mode!r}. "
             "The detect job sets it; an unexpected value means the cell and the detect "
             "that produced its row disagree."
+        )
+    unknown = sorted(
+        name for name in environ if name.startswith("SHIPMATE_LEGACY_") and name not in _ACCEPTED
+    )
+    if unknown:
+        raise SystemExit(
+            f"::error::unrecognised legacy binding(s): {', '.join(unknown)}. "
+            f"Accepted: {', '.join(sorted(_ACCEPTED))}. A misspelled or wrong-case key is "
+            "injected under no name at all, and a cell carrying no identity shares one "
+            "backend key with every other environment."
         )
     return {target: environ[source] for source, target in _LEGACY.items() if source in environ}
 

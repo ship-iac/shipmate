@@ -201,7 +201,11 @@ edits:**
 2. Rename that job's three identity `env:` keys — `TF_VAR_env`,
    `TF_VAR_region`, `TF_WORKSPACE` — to `SHIPMATE_LEGACY_TF_VAR_ENV`,
    `SHIPMATE_LEGACY_TF_VAR_REGION` and `SHIPMATE_LEGACY_TF_WORKSPACE`, keeping
-   the `${{ vars.… }}` expression each one reads. `env-inject` reads only the
+   the `${{ vars.… }}` expression each one reads. A `SHIPMATE_LEGACY_*` key
+   that is not one of the names the engine defines fails the cell, naming the key:
+   GitHub does not uppercase workflow `env:` keys, so a misspelled or
+   wrong-case rename would otherwise inject nothing and leave every
+   environment sharing one backend key. `env-inject` reads only the
    new names. Under the old ones it writes nothing and the job block still
    exports the values itself, so the cell runs — on the path this release
    replaced, and with the job rather than the engine deciding what a cell's

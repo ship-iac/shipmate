@@ -2,7 +2,8 @@
 
 Reddens on: uppercasing an injected name (`TF_VAR_ENV` for `TF_VAR_env`), defaulting an absent
 legacy binding to the empty string, dropping a set-but-empty one, writing `NAME=value` instead of
-a heredoc, falling through on an unknown or a `table` mode, and returning a fixed heredoc
+a heredoc, falling through on an unknown or a `table` mode, accepting a `SHIPMATE_LEGACY_*` name
+the engine does not define, refusing a job that binds none of them, and returning a fixed heredoc
 delimiter that a value's own text can collide with.
 """
 
@@ -20,6 +21,15 @@ UNKNOWN_REFUSAL = (
     "::error::SHIPMATE_CONFIG_MODE must be 'legacy' or 'table', got 'Legacy'. "
     "The detect job sets it; an unexpected value means the cell and the detect "
     "that produced its row disagree."
+)
+
+UNRECOGNISED_REFUSAL = (
+    "::error::unrecognised legacy binding(s): SHIPMATE_LEGACY_TF_VAR_REGIONS, "
+    "SHIPMATE_LEGACY_TF_VAR_env. Accepted: SHIPMATE_LEGACY_AWS_REGION, "
+    "SHIPMATE_LEGACY_AWS_ROLE_ARN, SHIPMATE_LEGACY_AWS_ROLE_ARN_WORKLOAD, "
+    "SHIPMATE_LEGACY_TF_VAR_ENV, SHIPMATE_LEGACY_TF_VAR_REGION, SHIPMATE_LEGACY_TF_WORKSPACE. "
+    "A misspelled or wrong-case key is injected under no name at all, and a cell carrying no "
+    "identity shares one backend key with every other environment."
 )
 
 
@@ -109,3 +119,33 @@ def test_value_containing_the_delimiter_round_trips_whole(tmp_path):
     path = tmp_path / "github_env"
     env_inject.write_env({"TF_VAR_tags": value}, path)
     assert _read_github_env(path.read_text(encoding="utf-8")) == {"TF_VAR_tags": value}
+
+
+def test_unrecognised_legacy_binding_refuses_by_name():
+    """A misspelled key injects nothing, and nothing downstream notices: `plan-classify`
+    excludes an unset `TF_VAR_*` from the fingerprint, so plan, gate and apply all stay green
+    while every environment writes the same backend key. Both spellings here are the realistic
+    mistake -- a plural, and the workflow `env:` key GitHub does NOT uppercase.
+
+    Mutation: delete the `unknown` check and watch this test red.
+    """
+    with pytest.raises(SystemExit) as excinfo:
+        env_inject.resolve(
+            {
+                "SHIPMATE_CONFIG_MODE": "legacy",
+                "SHIPMATE_LEGACY_TF_VAR_env": "dev-eu",
+                "SHIPMATE_LEGACY_TF_VAR_REGIONS": "eu-west-1",
+            }
+        )
+    assert str(excinfo.value) == UNRECOGNISED_REFUSAL
+
+
+def test_binding_none_of_them_is_not_a_refusal():
+    """Folder-per-environment binds no identity variables at all -- its leaves fix env and
+    region by path -- and `docs/getting-started.md` says that flavor needs none. Refusing
+    absence would hard-fail every such consumer, so the check above refuses an unrecognised
+    name and never a missing one.
+
+    Mutation: make the unknown check also refuse when no accepted name is bound.
+    """
+    assert env_inject.resolve({"SHIPMATE_CONFIG_MODE": "legacy"}) == {}
