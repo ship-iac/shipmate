@@ -7,9 +7,11 @@ Invariants:
   Byte-identity is the property: every cell resolves the same identity, and a collapse to a bare
   `vars.AWS_ROLE_ARN` on any one of them hands that cell a role the table did not choose while
   the run stays green;
-- no expression reaches a `vars.*` value at all. GitHub evaluates `A && B || C` as `C` whenever
-  `B` is falsy, so `matrix.role_arn || vars.AWS_ROLE_ARN` mints real credentials from a
-  branch-editable value for exactly the cell the table declined to give a role;
+- none of the credentials step's three expressions reaches a `vars.*` value. GitHub evaluates
+  `A && B || C` as `C` whenever `B` is falsy, so `matrix.role_arn || vars.AWS_ROLE_ARN` mints
+  real credentials from a branch-editable value for exactly the cell the table declined to give
+  a role. The jobs read repository variables elsewhere -- `environment:` selects on
+  `vars.SHIPMATE_SHARED_ENVS` -- and this says nothing about those;
 - every wave job in apply-env-level.yml carries id-token: write and the empty-suffix state-path
   expression;
 - apply-env-level.yml and unlock.yml declare a workflow-level `permissions: {}` floor, and

@@ -20,10 +20,6 @@ def resolve(environ):
     "folder"` derives none -- but `null` is what `toJSON` renders for a matrix field
     nothing stamped, and injecting nothing for it would authenticate the cell and then
     run it against another environment's workspace.
-
-    The injected names are lowercase after the `TF_VAR_` prefix: GitHub uppercases
-    variable names, the process environment does not, and a mismatch changes every plan
-    fingerprint.
     """
     raw = environ.get(_TABLE, "")
     try:
