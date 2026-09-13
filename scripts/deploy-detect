@@ -65,7 +65,9 @@ def main():
     repo = os.environ["GITHUB_REPOSITORY"]
     merge_sha = os.environ["GITHUB_SHA"]
     head = _merged_head(repo, merge_sha)
-    cells = bm.compute_cells(all_stacks=False, base=os.environ.get("SHIPMATE_BASE_SHA", ""))
+    # `all_stacks=False`: the map covers the changed stacks alone and is no evidence that
+    # an environment is unused, so the unused-entry warning stays silent on this path.
+    _, cells = bm.compute_cells(all_stacks=False, base=os.environ.get("SHIPMATE_BASE_SHA", ""))
     table, shared = bm.env_config(cells)
     cells = bm.stamp_rows(cells, table, "apply", shared)
     app_id = os.environ["SHIPMATE_APP_ID"]

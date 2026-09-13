@@ -344,25 +344,29 @@ def assert_run_env_roundtrip(stack_dir):
 
 
 def compute_cells(all_stacks=False, base="", require_env_tag=True, tags=""):
+    """({env: [stacks...]}, cells). The map is returned as well as consumed because a
+    caller that scanned the whole tree feeds it to `env_config` as `all_envs`, and
+    re-scanning would be a second source that can disagree with this one."""
     stacks_by_env, tags_by_stack = env_membership(all_stacks, base, require_env_tag)
     if tags_by_stack:
         assert_run_env_roundtrip(sorted(tags_by_stack)[0])
-    return build_matrix(sorted(stacks_by_env), stacks_by_env, tags_by_stack, tags)
+    return stacks_by_env, build_matrix(sorted(stacks_by_env), stacks_by_env, tags_by_stack, tags)
 
 
-def env_config(cells):
+def env_config(cells, all_envs=None):
     """(validated table, shared env names) for `cells`. One read per detect, not per row.
 
     `SHIPMATE_SHARED_ENVS` is read hard: an action that forgot to bind it would otherwise
     leave every environment unshared, which resolves the plan role in an environment that
     binds the bare apply one. `env-config` owns how the value is split and compared, so that
     reading sits in one place beside the two the workflows use; `test_apply_env_binding_guard.py`
-    compares all three to one hand-written vector. `all_envs` is the whole-tree scan the
-    unused-entry diagnostic will need; validation never reads it.
+    compares all three to one hand-written vector. `all_envs` is the whole-tree environment
+    scan, which only the unused-entry warning reads; the caller passes it only where it
+    actually scanned the whole tree, and `None` otherwise.
     """
     shared = ec.shared_env_names(os.environ["SHIPMATE_SHARED_ENVS"])
     envs = {c["environment"] for c in cells}
-    return ec.validate(ec.read_table(), envs, shared, all_envs=None), shared
+    return ec.validate(ec.read_table(), envs, shared, all_envs=all_envs), shared
 
 
 def _resolved(table, cell, tier, shared_envs):
@@ -585,8 +589,11 @@ def main():
     )
     if rejection:
         raise SystemExit(rejection)
-    cells = compute_cells(all_stacks, base, tags=tags)
-    table, shared = env_config(cells)
+    stacks_by_env, cells = compute_cells(all_stacks, base, tags=tags)
+    # One call serves plan and drift, and only drift scans the whole tree. Under
+    # `all_stacks=False` the map covers the CHANGED stacks alone, so passing it would
+    # report every unchanged environment as an unused table entry on every plan.
+    table, shared = env_config(cells, set(stacks_by_env) if all_stacks else None)
     cells = stamp_rows(cells, table, "plan", shared)
     with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
         fh.write(f"matrix={json.dumps({'include': cells})}\n")

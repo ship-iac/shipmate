@@ -37,8 +37,9 @@ _CELL_JOBS = {
 }
 
 #: The whole `env:` block every cell job writes, byte-identical across all eleven. The first
-#: three are what `env-inject` reads; the last three carry no behaviour yet and exist so the
-#: rename happens once. Uppercase here because GitHub uppercases variable names -- the names
+#: three are what `env-inject` reads; the last three are injected under no name and exist so
+#: the rename happens once. In table mode all six are reported as superseded when non-empty.
+#: Uppercase here because GitHub uppercases variable names -- the names
 #: `env-inject` writes are lowercase after the prefix, and that difference is the fingerprint.
 _LEGACY_ENV = {
     "SHIPMATE_LEGACY_TF_VAR_ENV": "${{ vars.TF_VAR_env }}",
@@ -131,7 +132,7 @@ def test_the_jobs_bind_exactly_the_names_env_inject_accepts():
     message does.
 
     Mutations: add a seventh name to `_LEGACY_ENV` and to every cell job; or add one to
-    `env-inject`'s `_RESERVED`.
+    `env-inject`'s `_SUPERSEDED`.
     """
     assert set(_LEGACY_ENV) == set(env_inject._ACCEPTED)
 

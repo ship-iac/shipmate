@@ -4,8 +4,9 @@ Reddens on: uppercasing an injected name (`TF_VAR_ENV` for `TF_VAR_env`), defaul
 legacy binding to the empty string, dropping a set-but-empty one, writing `NAME=value` instead of
 a heredoc, falling through on an unknown mode, selecting the source on emptiness rather than on
 the mode, accepting anything but a JSON object of strings as `SHIPMATE_TF_VARS`, accepting a
-`SHIPMATE_LEGACY_*` name the engine does not define, refusing a job that binds none of them, and
-returning a fixed heredoc delimiter that a value's own text can collide with.
+`SHIPMATE_LEGACY_*` name the engine does not define, refusing a job that binds none of them,
+returning a fixed heredoc delimiter that a value's own text can collide with, and dropping or
+narrowing the table-mode warning that names the repository variables the table supersedes.
 """
 
 import json
@@ -239,3 +240,70 @@ def test_binding_none_of_them_is_not_a_refusal():
     Mutation: make the unknown check also refuse when no accepted name is bound.
     """
     assert env_inject.resolve({"SHIPMATE_CONFIG_MODE": "legacy"}) == {}
+
+
+#: All six bindings a cell job carries, non-empty, plus the three reserved ones the table-mode
+#: warning names alongside the injected three.
+ALL_SIX = {
+    "SHIPMATE_LEGACY_TF_VAR_ENV": "from-vars",
+    "SHIPMATE_LEGACY_TF_VAR_REGION": "eu-central-1",
+    "SHIPMATE_LEGACY_TF_WORKSPACE": "from-vars",
+    "SHIPMATE_LEGACY_AWS_ROLE_ARN": "arn:aws:iam::1:role/legacy",
+    "SHIPMATE_LEGACY_AWS_REGION": "eu-central-1",
+    "SHIPMATE_LEGACY_AWS_ROLE_ARN_WORKLOAD": "arn:aws:iam::1:role/legacy-workload",
+}
+
+#: Hand-written and whole, in the order the script prints them. A per-name assertion passes a
+#: script that warns on the role alone; `TF_VAR_env` and `TF_WORKSPACE` are leftovers as much as
+#: `AWS_ROLE_ARN` is. The names are the `vars.` spellings the cell jobs read, so the workload
+#: role -- keyed by the cell's own workload -- is named the way the docs name it.
+_SUPERSEDED_TAIL = (
+    " is superseded by the environment table and is no longer read. Delete it from the "
+    "GitHub Environment, or the repository, that sets it."
+)
+SUPERSEDED_LINES = [
+    "::warning::the variable AWS_REGION" + _SUPERSEDED_TAIL,
+    "::warning::the variable AWS_ROLE_ARN" + _SUPERSEDED_TAIL,
+    "::warning::the variable AWS_ROLE_ARN_<WORKLOAD>" + _SUPERSEDED_TAIL,
+    "::warning::the variable TF_VAR_env" + _SUPERSEDED_TAIL,
+    "::warning::the variable TF_VAR_region" + _SUPERSEDED_TAIL,
+    "::warning::the variable TF_WORKSPACE" + _SUPERSEDED_TAIL,
+]
+
+
+def test_table_mode_names_every_leftover_binding(capsys):
+    """Every non-empty legacy binding is reported, not the role alone, and the report is a
+    warning: a repository mid-migration still runs.
+
+    Mutations: warn on `AWS_ROLE_ARN` only -- a per-name assertion would pass that, the whole
+    list is what catches it; and delete the print, which no other test in this feature reddens
+    on because this is the only behaviour here that is neither a refusal nor silence."""
+    resolved = env_inject.resolve(
+        {"SHIPMATE_CONFIG_MODE": "table", "SHIPMATE_TF_VARS": '{"TF_VAR_env": "dev-eu"}', **ALL_SIX}
+    )
+    assert resolved == {"TF_VAR_env": "dev-eu"}
+    # stdout alone: a combined-stream assertion here has been satisfied by a stub's own stderr.
+    assert capsys.readouterr().out.splitlines() == SUPERSEDED_LINES
+
+
+def test_bindings_present_but_empty_are_not_leftovers(capsys):
+    """Every cell job binds all six from `vars.*`, so an unset variable arrives as the empty
+    string. Mutation: test presence (`name in environ`) instead of a non-empty value -- a
+    repository that never set them then gets six warnings on every table-mode cell forever."""
+    env = {name: "" for name in ALL_SIX}
+    env.update({"SHIPMATE_CONFIG_MODE": "table", "SHIPMATE_TF_VARS": "{}"})
+    assert env_inject.resolve(env) == {}
+    assert capsys.readouterr().out == ""
+
+
+def test_legacy_mode_warns_about_nothing(capsys):
+    """The bindings are the live source in legacy mode; nothing supersedes them there.
+
+    Mutation: warn before the mode is read, or on both branches."""
+    env = {"SHIPMATE_CONFIG_MODE": "legacy", **ALL_SIX}
+    assert env_inject.resolve(env) == {
+        "TF_VAR_env": "from-vars",
+        "TF_VAR_region": "eu-central-1",
+        "TF_WORKSPACE": "from-vars",
+    }
+    assert capsys.readouterr().out == ""

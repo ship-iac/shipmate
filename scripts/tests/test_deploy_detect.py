@@ -187,7 +187,13 @@ def _run_main(
         return jsonl
 
     monkeypatch.setattr(dd, "_merged_head", lambda repo, merge_sha: HEAD)
-    monkeypatch.setattr(dd.bm, "compute_cells", lambda all_stacks, base: cells)
+    # `compute_cells` returns (env->stacks map, rows); a double returning rows alone
+    # unpacks into two names and fails somewhere unrelated.
+    monkeypatch.setattr(
+        dd.bm,
+        "compute_cells",
+        lambda all_stacks, base: ({c["environment"]: [c["stack"]] for c in cells}, cells),
+    )
     # deploy-detect and the apply-detect it loads hold separate build-matrix instances, and
     # the check-run listing is fetched through apply-detect's. Both are stubbed so a `gh api`
     # call from either module lands in `urls`.

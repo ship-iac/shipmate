@@ -278,15 +278,41 @@ def _check_dry_coverage(environments, matrix_envs):
         )
 
 
+def _report_unused(environments, all_envs):
+    """Name the entries no stack tags. A warning, deliberately, and never a refusal.
+
+    The table is read from the default branch and the tags from the feature branch, so
+    adding or removing an environment takes two pull requests; refusing an unused entry
+    would deadlock both. Keys are matched exactly, as `resolve` and `_check_dry_coverage`
+    match them -- an entry differing only in case resolves for nothing, so it is unused.
+    """
+    unused = sorted(set(environments) - set(all_envs))
+    if unused:
+        print(
+            f"::warning::the environment table declares {', '.join(unused)}, which no stack "
+            "tags. Remove the entry, or tag the stacks that belong to it. This is a warning "
+            "rather than a refusal because the table is read from the default branch and the "
+            "tags from this branch, so an environment arrives and leaves over two pull "
+            "requests."
+        )
+
+
 def validate(table, matrix_envs, shared_envs, all_envs=None):
     """The table, or `SystemExit`. Every refusal is gated on `layout` being declared.
 
     A repository with no `layout` has not migrated: it keeps the legacy variables, and
     refusing anything in its table would refuse a configuration that works. `all_envs` is
-    the whole-tree environment scan where one exists; validation never needs it.
+    the whole-tree environment scan where one exists, and only the unused-entry warning
+    reads it; `None` on the paths that scan only a changed set or a workset, where an
+    environment absent from that set is not evidence of anything.
     """
     layout = table.get("layout")
     if layout is None:
+        print(
+            "::warning::this repository takes its environment identity from GitHub "
+            'variables, which the `globals "shipmate"` environment table replaces. Declare '
+            "a layout to migrate; the variables keep working until you do."
+        )
         return table
     if layout not in _LAYOUTS:
         raise SystemExit(
@@ -298,6 +324,8 @@ def validate(table, matrix_envs, shared_envs, all_envs=None):
         _check_environment(environments[env], env, shared_envs)
     if layout == "dry":
         _check_dry_coverage(environments, matrix_envs)
+    if all_envs is not None:
+        _report_unused(environments, all_envs)
     return table
 
 

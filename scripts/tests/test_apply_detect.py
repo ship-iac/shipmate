@@ -701,7 +701,8 @@ def test_unlock_non_empty_queue_does_not_warn(monkeypatch, tmp_path, capsys):
     ad.main()
     out = capsys.readouterr().out
     assert "cells=3 pending=3" in out  # Not vacuous: there is a queue.
-    assert "::warning::" not in out
+    # Scoped to this warning: an untabled repository also gets the migration notice here.
+    assert "no cell in dev-eu has a pending apply check" not in out
 
 
 def test_unlock_is_not_capped_by_the_whole_tree_matrix_limit(monkeypatch, tmp_path):

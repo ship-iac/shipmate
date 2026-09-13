@@ -3,8 +3,8 @@
 Validation is what stops a typo from silently disabling injection or from handing a plan
 tier write credentials. Every condition here refuses -- `raise SystemExit("::error::…")` --
 rather than warning: a warning hands control back to the branch content this feature exists
-to keep out. The one deliberate asymmetry, a table entry nobody uses, warns instead, and is
-not this module's subject.
+to keep out. The two deliberate asymmetries -- a table entry nobody uses, and the migration
+notice an untabled repository gets -- warn instead, and are not this module's subject.
 
 Messages are compared whole against hand-written literals, never by substring and never
 against a constant imported from the script: an operator reading a refusal in a run log has
