@@ -170,8 +170,8 @@ never used.
   GitHub Environments named after it: `staging-plan` and `staging-apply` by
   default, or a single `staging` in shared mode (both namings below). The
   Environment is always the unit of binding, apply-gating, protection, and the
-  plan/apply split; it carries no identity variables. What a cell injects
-  depends on how the consumer repo models environments (its IaC layout):
+  plan/apply split; the engine reads no identity variable from it. What a cell
+  injects depends on how the consumer repo models environments (its IaC layout):
 
   | Repo layout | Env identity injected | Mechanism |
   |-------------|--------------------------------------------------|-----------|
@@ -183,9 +183,9 @@ never used.
   target for real consumer repos and shipmate's internal adoption. The other
   two are proven-generalization layouts (sample repos
   `repo-example-workspaces` / `repo-example-folders`). The folder layout
-  trades away shipmate's "add an env = GitHub Environment + tags, zero code"
-  property: adding an env there means adding leaf directories (a code change).
-  Membership in an environment is always by tag, regardless of layout.
+  trades away shipmate's "add an env = table entry + GitHub Environment + tags,
+  zero code" property: adding an env there means adding leaf directories (a code
+  change). Membership in an environment is always by tag, regardless of layout.
 
   **The environment table supplies those values.** Every repository declares a
   `globals "shipmate"` layout, and every cell takes its identity from the
@@ -193,8 +193,8 @@ never used.
   There is no second source and no repository-variable path.
 - **One writer puts those variables in the cell's process.**
   `scripts/env-inject` reads the row's `tf_vars` and nothing else, and writes
-  `TF_VAR_env`, `TF_VAR_region` and `TF_WORKSPACE` into `$GITHUB_ENV`, in a step
-  that runs before the cell's `terramate run`. Two sources for one name would
+  every entry of it into `$GITHUB_ENV` under the name the table resolved, in a
+  step that runs before the cell's `terramate run`. Two sources for one name would
   make precedence load-bearing, so there is exactly one.
   - **The injected names are lowercase after the prefix.** `TF_VAR_ENV` is a
     different variable from the `TF_VAR_env` OpenTofu reads, and the table's
@@ -294,10 +294,10 @@ never used.
   for every cell in the incoming matrix, lists the repository's environments
   once, and fails the run naming every computed binding the repository does not
   have, plus both ways to fix it: create that environment, or correct
-  `SHIPMATE_SHARED_ENVS`. It is what refuses a mis-binding: it compares
-  existence, not variable content, and a cell resolves its variables from the
-  table whatever it bound. It runs once per `apply-env-level.yml` call, so an
-  env-ordered deploy can have completed an earlier level's applies before a
+  `SHIPMATE_SHARED_ENVS`. It is what refuses a binding naming no environment: it
+  compares existence, not variable content, and a cell resolves its variables
+  from the table whatever it bound. It runs once per `apply-env-level.yml` call,
+  so an env-ordered deploy can have completed an earlier level's applies before a
   later level is refused — a partial deploy, not an unverified apply: every level
   verifies its own environments before its own waves.
   - Its own failures are fail-closed as well. A listing that could not be read,
@@ -322,11 +322,13 @@ never used.
   hardcode `staging`, `production`, or any other environment name. Workflows
   discover environments dynamically from stack tags (see Tag grammar,
   below) and GitHub Environment configuration. Adding a new environment is
-  purely a data change: create its GitHub Environments (`<env>-plan` and
-  `<env>-apply`, or one bare `<env>` listed in `SHIPMATE_SHARED_ENVS`), then tag
-  the stacks that belong to it. No workflow YAML is edited to add or remove an
-  environment — the suffix in `plan.yml`'s binding is written once, for every
-  env. The one carve-out is `shipmate-engine` — a single fixed
+  purely a data change: add its entry to the environment table, create its
+  GitHub Environments (`<env>-plan` and `<env>-apply`, or one bare `<env>`
+  listed in `SHIPMATE_SHARED_ENVS`), then tag the stacks that belong to it. The
+  table entry merges on its own pull request, before the tags — §Adding and
+  removing an environment has why the order is not optional. No workflow YAML is
+  edited to add or remove an environment — the suffix in `plan.yml`'s binding is
+  written once, for every env. The one carve-out is `shipmate-engine` — a single fixed
   environment name, not a logical environment a consumer defines or names
   itself, that exists purely to scope the App private key to the
   default-branch ref (see `docs/github-app.md` §Key-exposure boundary). It

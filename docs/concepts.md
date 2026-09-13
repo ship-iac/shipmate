@@ -121,12 +121,16 @@ organization controls.
 ## Dynamic environments
 
 Environments are not hardcoded into workflow YAML. An environment is
-defined by the GitHub Environments named after it (`<env>-plan` and
-`<env>-apply`, or one shared `<env>` — `../CONTRACT.md` §Env model) plus tags
-applied to the stacks that belong to it. Adding a new environment is a data
-change (create its Environments, tag the relevant stacks), never a workflow code
-change. The number of environments a repository supports is therefore
-independent of the complexity of its CI configuration.
+defined by its entry in the `globals "shipmate"` environment table, the GitHub
+Environments named after it (`<env>-plan` and `<env>-apply`, or one shared
+`<env>` — `../CONTRACT.md` §Env model) plus tags applied to the stacks that
+belong to it. Adding a new environment is a data change (add the table entry,
+create its Environments, tag the relevant stacks), never a workflow code change.
+The table entry merges on its own pull request first, because the engine reads
+the table from the default branch and the tags from the feature branch
+(`../CONTRACT.md` §Adding and removing an environment). The number of
+environments a repository supports is therefore independent of the complexity of
+its CI configuration.
 
 ## The plan path
 
