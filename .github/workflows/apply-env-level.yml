@@ -27,9 +27,10 @@ jobs:
       snapshot: ${{ steps.snap.outputs.snapshot }}
     steps:
       # First, before anything else in this workflow: an apply that binds an environment nobody
-      # created gets one auto-created with no reviewers, no wait timer and no branch policy, and
-      # the fingerprint cannot see it -- an auto-created environment and a legitimately empty
-      # shared one are byte-identical in content. Existence is the only discriminator.
+      # created gets one auto-created with no reviewers, no wait timer and no branch policy.
+      # A cell's variables come from the environment table keyed by matrix.environment, so plan
+      # and apply hash identically whatever the job bound and the fingerprint pins nothing about
+      # the binding. Existence is the only discriminator.
       - uses: ship-iac/shipmate/actions/verify-environments@a9be68cc9442bbf03478a7eabbd0afc2847cdd4e
         with:
           waves-json: ${{ inputs.waves_json }}

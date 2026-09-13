@@ -58,9 +58,9 @@ branch the engine reads it from.
   where a whole-tree scan already happened, so a typo'd key surfaces on the next
   nightly drift run rather than on the pull request that introduced it.
 
-  `CONTRACT.md` §Environment table is the schema and the semantics;
-  `docs/upgrading.md` §Unreleased has the bootstrap order and the add/remove
-  sequence. The four `actions/*-cell/action.yml` gain a `tf-vars` input and the
+  `CONTRACT.md` §Environment table is the schema and the semantics, and its
+  §"Adding and removing an environment" has that sequence;
+  `docs/upgrading.md` §Unreleased has the bootstrap order. The four `actions/*-cell/action.yml` gain a `tf-vars` input and the
   four detect actions a `shared-envs` one; eight action files and seven reusable
   workflows changed in all, so every workflow pinning them needs the normal
   internal-pin bump after merge.

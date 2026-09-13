@@ -1,7 +1,7 @@
 # Upgrading
 
-How a consuming repository moves to a newer shipmate, and what past releases
-needed beyond a pin bump.
+How a consuming repository pins this engine and moves that pin, and what the
+current release needs beyond the move.
 
 ## Re-pinning
 

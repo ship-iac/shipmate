@@ -197,10 +197,11 @@ never used.
   that runs before the cell's `terramate run`. Two sources for one name would
   make precedence load-bearing, so there is exactly one.
   - **The injected names are lowercase after the prefix.** `TF_VAR_ENV` is a
-    different variable from the `TF_VAR_env` OpenTofu reads — one that changes
-    the apply-match fingerprint and fails every apply as stale. The table's
-    `vars` allowlist accepts either spelling, so an entry that upper-cases the
-    name injects a variable OpenTofu never reads.
+    different variable from the `TF_VAR_env` OpenTofu reads, and the table's
+    `vars` allowlist accepts either spelling. Nothing refuses the mis-cased one:
+    plan and apply resolve it from the same table, so it hashes identically on
+    both sides. The variable simply never reaches OpenTofu, and the stack runs on
+    whatever default it declares for the name it does read.
   - A `vars` entry holding the empty string is written through as empty rather
     than dropped, which is what the fingerprint already excludes (see
     Apply-match fingerprint, below).

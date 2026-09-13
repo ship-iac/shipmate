@@ -328,10 +328,10 @@ def test_compute_cells_refuses_a_variable_terramate_run_never_reported(monkeypat
 
 
 def test_compute_cells_warns_and_continues_when_the_probe_cannot_run(monkeypatch, capsys):
-    """detect binds no GitHub Environment, so a `run.env` that only reads a variable the
-    plan/apply Environment supplies cannot evaluate here while every plan cell evaluates it
-    fine. Raising would fail every pull request in such a repository at `detect`, with no
-    plan cells and no gate."""
+    """detect runs no cell, so `scripts/env-inject` has written none of the three identity
+    variables into its environment, and a `run.env` that only reads one of them cannot
+    evaluate here while every plan cell evaluates it fine. Raising would fail every pull
+    request in such a repository at `detect`, with no plan cells and no gate."""
     monkeypatch.setattr(bm, "_list_stacks", lambda all_stacks, base: ["stacks/app"])
     monkeypatch.setattr(bm, "_tags", lambda s: ["env/dev-eu"])
     # Stubbed at `subprocess.run`, not at `_run`: the fact under test is that the probe

@@ -392,9 +392,8 @@ def _environment_warnings(ctx):
                     f"neither GitHub Environment `{env}-plan` nor `{env}-apply` exists — "
                     f"every job for stacks tagged `env:{env}` binds a name GitHub "
                     "auto-creates empty: no variables, no secrets, no reviewers and no "
-                    "branch policy, so a plan describes whatever the layout defaults to "
-                    "rather than this environment. Create both and set their TF_VAR_* "
-                    f"variables, or create a single `{env}` and list `{env}` "
+                    "branch policy, so nothing gates what runs in it. Create both, or "
+                    f"create a single `{env}` and list `{env}` "
                     "in the `SHIPMATE_SHARED_ENVS` repository variable to share one "
                     "environment between plan and apply (which gives up the reviewer gate "
                     "and the OIDC subject split).",

@@ -389,9 +389,9 @@ def test_split_missing_half_does_not_claim_the_jobs_cannot_run(monkeypatch):
 
 def test_missing_mode_says_the_binding_auto_creates_an_empty_environment(monkeypatch):
     """`env:<env>` stacks with neither suffixed environment do NOT stop planning:
-    the binding resolves to a name GitHub auto-creates empty, so the plan runs and
-    describes whatever the layout defaults to. Claiming they "cannot plan or
-    apply" sends the reader looking for a failed run there is none of."""
+    the binding resolves to a name GitHub auto-creates empty, so the plan runs with
+    none of that environment's secrets or protection rules. Claiming they "cannot
+    plan or apply" sends the reader looking for a failed run there is none of."""
     monkeypatch.setattr(doctor, "_gh_json", _existence("shipmate-engine"))
     out = doctor._environment_warnings(_ctx())
     assert len(out) == 1

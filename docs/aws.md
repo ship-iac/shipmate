@@ -152,7 +152,7 @@ globals "shipmate" {
 }
 ```
 
-Four things to know beyond the schema:
+Five things to know beyond the schema:
 
 - **`aws.region` inherits the environment's own `region`.** Set it separately
   only where the credentials step must authenticate against a region the IaC

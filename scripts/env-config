@@ -336,9 +336,9 @@ def validate(table, matrix_envs, shared_envs, all_envs=None):
 def _derived(layout, env, entry):
     """The identity variables a layout derives for one environment.
 
-    The names are lowercase after the `TF_VAR_` prefix: GitHub upper-cases variable
-    names, the process environment does not, and a mismatch changes every fingerprint
-    and fails every apply as stale.
+    The names are lowercase after the `TF_VAR_` prefix, which is what OpenTofu reads.
+    A mis-cased name is not refused anywhere -- plan and apply derive it from the same
+    table, so it hashes identically on both sides -- it just never reaches OpenTofu.
     """
     if layout == "dry":
         return {"TF_VAR_env": env, "TF_VAR_region": entry.get("region", "")}
