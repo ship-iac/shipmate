@@ -1,6 +1,7 @@
 """`scripts/env-inject`'s export policy for consumer variables and secrets.
 
-Reddens on: accepting a key `$GITHUB_ENV` cannot hold, dropping any one rule from the
+Reddens on: accepting a key `$GITHUB_ENV` cannot hold, dropping `TF_WORKSPACE`, the
+`AWS_` prefix, the `TF_CLI_ARGS_` prefix or the per-cell table comparison from the
 reserved set, refusing a table-derived name on a cell whose table does not derive it,
 refusing an absent envelope, accepting `null` in an envelope, refusing `null` or `''`
 from the enumeration, exporting a name two channels supply, lowercasing an envelope key,
@@ -122,8 +123,8 @@ def test_the_enumeration_treats_null_and_empty_as_no_variables(raw):
     """`toJSON(vars)` is engine-built, so an empty rendering is a platform fact: a
     repository reaching no variable is a real consumer.
 
-    Mutation: pass `null_is_empty=False` in `parse_enumeration` (the `null` case); delete
-    `_parse_object`'s `if not raw: return {}` (the other two, shared with the envelope
+    Mutation: pass `null_is_empty=False` in `parse_enumeration` (the `null` case); make
+    `_parse_object`'s `if not raw` case raise (the other two, shared with the envelope
     no-op guard above).
     """
     assert env_inject.parse_enumeration(raw, ENUM) == {}
