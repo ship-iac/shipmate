@@ -7,6 +7,10 @@ from _loader import load_script
 
 dd = load_script("deploy-detect")
 
+#: What a detect reads when a test names no table. `layout` is required, and `folder`
+#: derives no identity variables, so a row carries only the stamp and the tier.
+_MINIMAL_TABLE = {"layout": "folder"}
+
 HEAD = "a" * 40
 CHECK_RUNS_URL = f"repos/acme/iac/commits/{HEAD}/check-runs?filter=all&per_page=100"
 
@@ -175,7 +179,7 @@ def _run_main(
         monkeypatch.setenv(k, v)
     monkeypatch.delenv("SHIPMATE_BASE_SHA", raising=False)
     monkeypatch.setenv("SHIPMATE_SHARED_ENVS", "")
-    monkeypatch.setattr(dd.bm.ec, "read_table", lambda run=None: dict(table or {}))
+    monkeypatch.setattr(dd.bm.ec, "read_table", lambda run=None: dict(table or _MINIMAL_TABLE))
     jsonl = "\n".join(json.dumps(c) for c in checks)
 
     def _run(args):

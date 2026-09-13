@@ -7,6 +7,10 @@ from _loader import load_script
 
 ad = load_script("apply-detect")
 
+#: What a detect reads when a test names no table. `layout` is required, and `folder`
+#: derives no identity variables, so a row carries only the stamp and the tier.
+_MINIMAL_TABLE = {"layout": "folder"}
+
 
 def test_workset_is_the_graph_paths_whose_apply_check_is_present():
     # Membership is the head's apply checks, not one run's artifact names: a stack planned into
@@ -208,7 +212,7 @@ def _apply_env(monkeypatch, tmp_path, table=None, **overrides):
         monkeypatch.setenv(name, value)
     # Every detect reads the environment table from the default branch before it stamps; the
     # real read shells out to gh, git and terramate, none of which CI has.
-    monkeypatch.setattr(ad.bm.ec, "read_table", lambda run=None: dict(table or {}))
+    monkeypatch.setattr(ad.bm.ec, "read_table", lambda run=None: dict(table or _MINIMAL_TABLE))
     return out
 
 
@@ -440,11 +444,11 @@ def test_main_wires_the_tag_map_into_the_cells(tmp_path, monkeypatch):
             "environment": "dev-eu",
             "workload": "net-edge",
             "workload_var": "NET_EDGE",
-            "config_mode": "legacy",
+            "config_mode": "table",
             "role_arn": "",
             "cred_region": "",
             "tf_vars": {},
-            "config_path": "",
+            "config_path": "apply",
             "plan_run_id": "42",
             "plan_sha256": PLAN_SHA,
         }
@@ -566,7 +570,7 @@ def _unlock_env(monkeypatch, tmp_path, table=None, **overrides):
         monkeypatch.setenv(name, value)
     # Every detect reads the environment table from the default branch before it stamps; the
     # real read shells out to gh, git and terramate, none of which CI has.
-    monkeypatch.setattr(ad.bm.ec, "read_table", lambda run=None: dict(table or {}))
+    monkeypatch.setattr(ad.bm.ec, "read_table", lambda run=None: dict(table or _MINIMAL_TABLE))
     return out
 
 
@@ -665,11 +669,11 @@ def test_unlock_queue_is_the_pending_cells_of_the_target_env(monkeypatch, tmp_pa
             "environment": "dev-eu",
             "workload": "app",
             "workload_var": "APP",
-            "config_mode": "legacy",
+            "config_mode": "table",
             "role_arn": "",
             "cred_region": "",
             "tf_vars": {},
-            "config_path": "",
+            "config_path": "apply",
         },
     ]
     assert _parsed(out)["empty"] == "false"
@@ -733,11 +737,11 @@ def test_unlock_is_not_capped_by_the_whole_tree_matrix_limit(monkeypatch, tmp_pa
             "environment": "dev-eu",
             "workload": "app",
             "workload_var": "APP",
-            "config_mode": "legacy",
+            "config_mode": "table",
             "role_arn": "",
             "cred_region": "",
             "tf_vars": {},
-            "config_path": "",
+            "config_path": "apply",
         }
     ]
 
@@ -810,8 +814,8 @@ def test_apply_mode_writes_the_whole_output_file_verbatim(monkeypatch, tmp_path)
     ad.main()
     assert out.read_text(encoding="utf-8") == (
         'waves={"wave0": [{"stack": "stacks/app", "environment": "dev-eu", '
-        '"workload": "app", "workload_var": "APP", "config_mode": "legacy", '
-        '"role_arn": "", "cred_region": "", "tf_vars": {}, "config_path": "", '
+        '"workload": "app", "workload_var": "APP", "config_mode": "table", '
+        '"role_arn": "", "cred_region": "", "tf_vars": {}, "config_path": "apply", '
         '"plan_run_id": "42", '
         '"plan_sha256": "dddddddddddddddd'
         'dddddddddddddddddddddddddddddddddddddddddddddddd"}], "wave1": [], "wave2": [], '
@@ -844,10 +848,10 @@ def test_unlock_tolerates_an_untagged_stack_elsewhere_in_the_tree(monkeypatch, t
             "environment": "dev-eu",
             "workload": "app",
             "workload_var": "APP",
-            "config_mode": "legacy",
+            "config_mode": "table",
             "role_arn": "",
             "cred_region": "",
             "tf_vars": {},
-            "config_path": "",
+            "config_path": "apply",
         }
     ]

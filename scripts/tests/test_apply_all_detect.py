@@ -6,6 +6,10 @@ from _loader import load_script
 
 aad = load_script("apply-all-detect")
 
+#: What a detect reads when a test names no table. `layout` is required, and `folder`
+#: derives no identity variables, so a row carries only the stamp and the tier.
+_MINIMAL_TABLE = {"layout": "folder"}
+
 HEAD = "a" * 40
 CHECK_RUNS_URL = f"repos/o/r/commits/{HEAD}/check-runs?filter=all&per_page=100"
 
@@ -258,7 +262,7 @@ def _run_main(
     monkeypatch.setattr(aad.eo, "read_explicit_envs", lambda: list(explicit))
     monkeypatch.setattr(aad.bm, "env_membership", lambda **kw: (tree, tags or {"stacks/app": []}))
     monkeypatch.setenv("SHIPMATE_SHARED_ENVS", "")
-    monkeypatch.setattr(aad.bm.ec, "read_table", lambda run=None: dict(table or {}))
+    monkeypatch.setattr(aad.bm.ec, "read_table", lambda run=None: dict(table or _MINIMAL_TABLE))
     aad.main()
     return dict(ln.split("=", 1) for ln in out.read_text(encoding="utf-8").splitlines())
 
@@ -293,11 +297,11 @@ def test_main_wires_the_tag_map_into_the_cells(tmp_path, monkeypatch):
             "environment": "dev-eu",
             "workload": "net-edge",
             "workload_var": "NET_EDGE",
-            "config_mode": "legacy",
+            "config_mode": "table",
             "role_arn": "",
             "cred_region": "",
             "tf_vars": {},
-            "config_path": "",
+            "config_path": "apply",
             "plan_run_id": "42",
             "plan_sha256": PLAN_SHA,
         }

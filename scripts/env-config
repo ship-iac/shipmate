@@ -61,7 +61,12 @@ def worktree(branch, path, run):
 
 
 def evaluate(path, run):
-    """`global.shipmate` as evaluated in `path`, or {} when the global is absent."""
+    """`global.shipmate` as evaluated in `path`.
+
+    Read without `tm_try`, so terramate itself refuses a repository that declares no
+    `globals "shipmate"` block: the table is the only source of environment identity, and
+    an absent one has nothing to fall back to.
+    """
     out = run(
         [
             "terramate",
@@ -70,7 +75,7 @@ def evaluate(path, run):
             "--as-json",
             "-C",
             path,
-            "tm_try(global.shipmate, {})",
+            "global.shipmate",
         ]
     )
     try:
@@ -82,12 +87,7 @@ def evaluate(path, run):
 
 
 def read_table(run=None):
-    """`global.shipmate` from the default branch, or {} when the repo has none.
-
-    Every failure here refuses. "This repository has no table" and "the table could
-    not be read" cannot be told apart without reading it, so treating a read failure
-    as absence is the fail-open this design exists to avoid.
-    """
+    """`global.shipmate` from the default branch. Every failure here refuses."""
     run = run or _run
     path = os.path.join(os.environ["RUNNER_TEMP"], _WORKTREE)
     return evaluate(worktree(_default_branch(run), path, run), run)
@@ -298,36 +298,25 @@ def _report_unused(environments, all_envs):
 
 
 def validate(table, matrix_envs, shared_envs, all_envs=None):
-    """The table, or `SystemExit`. Every schema refusal is gated on `layout` being declared.
+    """The table, or `SystemExit`. `layout` is required: it is the only source of a cell's
+    environment identity, so a table without one leaves every cell with nothing to run as.
 
-    A repository with no `layout` has not migrated: it keeps the legacy variables, and
-    refusing anything in its table would refuse a configuration that works. The one refusal
-    outside that gate is a table that declares `environments` and no `layout`, which is not
-    an unmigrated repository but a migrated one whose `layout` did not evaluate. `all_envs` is
-    the whole-tree environment scan where one exists, and only the unused-entry warning
-    reads it; `None` on the paths that scan only a changed set or a workset, where an
-    environment absent from that set is not evidence of anything.
+    Terramate refuses a repository declaring no `globals "shipmate"` block at all; this is
+    the other half, for a block that evaluates but carries no `layout` -- `env_order` shares
+    the same namespace. `all_envs` is the whole-tree environment scan where one exists, and
+    only the unused-entry warning reads it; `None` on the paths that scan only a changed set
+    or a workset, where an environment absent from that set is not evidence of anything.
     """
     if "layout" not in table:
-        # Not "the table is non-empty": `globals "shipmate"` is a shared namespace, and an
-        # `env_order`-only block is a legacy repository with no table at all.
-        if table.get("environments"):
-            raise SystemExit(
-                '::error::globals "shipmate" declares environments but no layout, so every '
-                "cell would take its identity from GitHub variables instead of the table. "
-                "Terramate drops an attribute it cannot evaluate rather than failing, so a "
-                "layout set to an expression that does not resolve disappears from the "
-                "table. Declare layout, or check the expression it is set to."
-            )
-        print(
-            '::warning::no `globals "shipmate"` environment table was found on the default '
-            "branch, so this repository takes its environment identity from GitHub "
-            "variables, which the table replaces. Declare a layout to migrate; the "
-            "variables keep working until you do."
+        raise SystemExit(
+            '::error::globals "shipmate" declares no layout, so no cell can resolve its '
+            'environment identity. Declare layout = "dry", "workspace" or "folder" in '
+            'globals "shipmate" on the default branch, which is where this table is read '
+            "from. Terramate drops an attribute it cannot evaluate rather than failing, so a "
+            "layout set to an expression that does not resolve disappears from the table."
         )
-        return table
-    # Key presence, not a truthy value: `stamp_rows` decides the mode on the key, so a null
-    # layout would be legacy here and table there -- a cell carrying no identity at all.
+    # Key presence, not a truthy value: an explicit `layout = null` survives evaluation and
+    # must refuse here rather than read as undeclared.
     layout = table["layout"]
     if layout not in _LAYOUTS:
         raise SystemExit(

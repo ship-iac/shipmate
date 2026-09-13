@@ -3,8 +3,8 @@
 Validation is what stops a typo from silently disabling injection or from handing a plan
 tier write credentials. Every condition here refuses -- `raise SystemExit("::error::…")` --
 rather than warning: a warning hands control back to the branch content this feature exists
-to keep out. The two deliberate asymmetries -- a table entry nobody uses, and the migration
-notice an untabled repository gets -- warn instead, and are not this module's subject.
+to keep out. The one deliberate asymmetry -- a table entry nobody uses -- warns instead, and
+is not this module's subject.
 
 Messages are compared whole against hand-written literals, never by substring and never
 against a constant imported from the script: an operator reading a refusal in a run log has
@@ -41,36 +41,34 @@ def test_a_non_string_layout_refuses():
     )
 
 
-ENVIRONMENTS_WITHOUT_LAYOUT = (
-    '::error::globals "shipmate" declares environments but no layout, so every cell would '
-    "take its identity from GitHub variables instead of the table. Terramate drops an "
-    "attribute it cannot evaluate rather than failing, so a layout set to an expression "
-    "that does not resolve disappears from the table. Declare layout, or check the "
-    "expression it is set to."
+NO_LAYOUT = (
+    '::error::globals "shipmate" declares no layout, so no cell can resolve its environment '
+    'identity. Declare layout = "dry", "workspace" or "folder" in globals "shipmate" on the '
+    "default branch, which is where this table is read from. Terramate drops an attribute it "
+    "cannot evaluate rather than failing, so a layout set to an expression that does not "
+    "resolve disappears from the table."
 )
 
 
-def test_environments_with_no_layout_refuses():
+def test_a_table_with_no_layout_refuses():
     """Terramate drops an attribute it cannot evaluate and exits 0, so a table whose
-    `layout` references an undefined global arrives carrying only its `environments`. That
-    reads as an unmigrated repository: the rows stamp `legacy` and identity reverts to the
-    branch-editable variables this feature removes.
+    `layout` references an undefined global arrives carrying only its `environments`, and
+    the cells it describes would have no identity to run with.
 
-    Mutation: take the migration-warning path whenever `layout` is absent.
+    Mutation: restore `if "layout" not in table: return table`.
     """
-    assert _refusal({"environments": {"dev-eu": {"region": "eu-west-1"}}}) == (
-        ENVIRONMENTS_WITHOUT_LAYOUT
-    )
+    assert _refusal({"environments": {"dev-eu": {"region": "eu-west-1"}}}) == NO_LAYOUT
 
 
-def test_another_global_does_not_rescue_a_table_with_no_layout():
-    """`globals "shipmate"` is shared with `env_order`, so the refusal keys on
-    `environments` rather than on the table holding anything at all.
+def test_a_block_holding_only_another_global_refuses():
+    """`globals "shipmate"` is shared with `env_order`, so terramate evaluates an
+    `env_order`-only block without complaint and it arrives here. This is the half of the
+    refusal terramate cannot give: it only refuses a block that is absent entirely.
 
-    Mutation: refuse only a table whose sole key is `environments`.
+    Mutation: as above.
     """
-    table = {"env_order": {"prod-us": ["dev-eu"]}, "environments": {"dev-eu": {}}}
-    assert _refusal(table) == ENVIRONMENTS_WITHOUT_LAYOUT
+    table = {"env_order": {"prod-us": ["dev-eu"]}}
+    assert _refusal(table) == NO_LAYOUT
 
 
 # --- 2: dry needs an entry with a region for every matrix environment -----------------
@@ -483,24 +481,13 @@ def test_a_folder_layout_with_no_environments_passes():
     assert env_config.validate(table, ("dev-eu",), ()) == table
 
 
-def test_an_empty_table_passes():
-    """The majority of repositories: no table at all. Every refusal is gated on `layout`.
+def test_an_empty_table_refuses():
+    """An empty `globals "shipmate" {}` evaluates cleanly, so terramate passes it through and
+    this is the only site that can refuse it.
 
-    Mutation: validate an absent layout as if it were `dry`.
+    Mutation: restore `if "layout" not in table: return table`.
     """
-    assert env_config.validate({}, ("dev-eu",), ()) == {}
-
-
-def test_an_untabled_repository_keeps_its_other_globals():
-    """`global.shipmate.env_order` shares this table, and a repository that never
-    migrated declares nothing else here.
-
-    Mutation: treat an absent layout as `dry`. A top-level key allowlist would sit behind
-    the same gate and so cannot be caught by this fixture;
-    `test_a_whole_table_is_returned_unchanged` is the one that reds on it.
-    """
-    table = {"env_order": {"prod-us": ["dev-eu"]}}
-    assert env_config.validate(table, ("dev-eu",), ()) == table
+    assert _refusal({}) == NO_LAYOUT
 
 
 def test_a_whole_table_is_returned_unchanged():

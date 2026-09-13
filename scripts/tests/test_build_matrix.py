@@ -6,6 +6,10 @@ from _loader import load_script
 
 bm = load_script("build-matrix")
 
+#: What a detect reads when a test names no table. `layout` is required, and `folder`
+#: derives no identity variables, so a row carries only the stamp and the tier.
+_MINIMAL_TABLE = {"layout": "folder"}
+
 
 def test_multi_env_stack_yields_one_cell_per_env():
     cells = bm.build_matrix(
@@ -534,7 +538,7 @@ def _run_main(
         return by_env, rows
 
     monkeypatch.setattr(bm, "compute_cells", fake_compute)
-    monkeypatch.setattr(bm.ec, "read_table", lambda run=None: dict(table or {}))
+    monkeypatch.setattr(bm.ec, "read_table", lambda run=None: dict(table or _MINIMAL_TABLE))
     bm.main()
     parsed = dict(line.split("=", 1) for line in out.read_text(encoding="utf-8").splitlines())
     return parsed, called

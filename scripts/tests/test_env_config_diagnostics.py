@@ -1,15 +1,13 @@
-"""The two `env-config` diagnostics that report rather than refuse.
+"""The one `env-config` diagnostic that reports rather than refuses.
 
-Everything else this script does refuses. These two do not, and that asymmetry is the
+Everything else this script does refuses. This one does not, and that asymmetry is the
 subject: an unused table entry warns because the table is read from the default branch
 while the environment list comes from the feature branch, so adding or removing an
 environment is a two-pull-request sequence and refusing the unused entry alongside the
-missing one would deadlock both directions. The migration notice warns because a
-repository with no `layout` is a supported configuration, not a broken one.
+missing one would deadlock both directions.
 
-Reddens on: turning either warning into a refusal, deleting either print, firing the
-unused-entry warning where no whole-tree scan exists, gating the missing-entry refusal on
-that scan, and printing the migration notice once per cell instead of once per detect.
+Reddens on: turning the warning into a refusal, deleting the print, firing it where no
+whole-tree scan exists, and gating the missing-entry refusal on that scan.
 
 Messages are compared whole against hand-written literals: an operator reading a warning
 in a run log has no other source, so the text is part of the contract.
@@ -18,16 +16,10 @@ in a run log has no other source, so the text is part of the contract.
 import pytest
 from _loader import load_script
 
-bm = load_script("build-matrix")
 env_config = load_script("env-config")
 
 #: Hand-written, not imported from the script: a constant derived from the file it checks
 #: passes whatever the file says.
-MIGRATION_NOTICE = (
-    '::warning::no `globals "shipmate"` environment table was found on the default branch, '
-    "so this repository takes its environment identity from GitHub variables, which the "
-    "table replaces. Declare a layout to migrate; the variables keep working until you do."
-)
 UNUSED_DEV_US = (
     "::warning::the environment table declares dev-us, which no stack tags. Remove the "
     "entry, or tag the stacks that belong to it. This is a warning rather than a refusal "
@@ -127,31 +119,3 @@ def test_the_refusal_precedes_the_unused_warning(capsys):
     with pytest.raises(SystemExit):
         _validate(table, matrix_envs=("dev-eu",), all_envs={"dev-eu"})
     assert capsys.readouterr().out == ""
-
-
-# --- 4: the migration notice, once per detect -----------------------------------------
-
-
-def test_a_repository_with_no_layout_is_told_once_what_replaces_its_variables(monkeypatch, capsys):
-    """State 1 of the migration runs unchanged and says so once per detect run, not once per
-    cell: a forty-cell repository printing it forty times teaches people to ignore it.
-
-    Mutations: delete the print; and move it into the per-cell path, which this test's three
-    cells turn into three lines."""
-    monkeypatch.setenv("SHIPMATE_SHARED_ENVS", "")
-    monkeypatch.setattr(bm.ec, "read_table", lambda run=None: {})
-    cells = [
-        {"stack": f"stacks/{n}", "environment": "dev-eu", "workload": "", "workload_var": ""}
-        for n in ("app", "db", "net")
-    ]
-    table, shared = bm.env_config(cells)
-    rows = bm.stamp_rows(cells, table, "plan", shared)
-    assert [r["config_mode"] for r in rows] == ["legacy", "legacy", "legacy"]
-    assert capsys.readouterr().out.splitlines() == [MIGRATION_NOTICE]
-
-
-def test_a_migrated_repository_gets_no_migration_notice(capsys):
-    """Mutation: print the notice unconditionally. The sibling above is what keeps this one
-    from passing with the print deleted."""
-    _validate(TABLE, matrix_envs=("dev-eu",), all_envs={"dev-eu", "dev-us"})
-    assert MIGRATION_NOTICE not in capsys.readouterr().out
