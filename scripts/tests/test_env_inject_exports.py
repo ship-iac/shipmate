@@ -7,7 +7,14 @@ refusing an absent envelope, accepting `null` in an envelope, refusing `null` or
 from the enumeration, exporting a name two channels supply, lowercasing an envelope key,
 not lowercasing an enumerated `TF_VAR_*` suffix, refusing an enumerated reserved name
 instead of skipping it, and quoting the envelope's value in any refusal.
+
+Composition reddens on: writing `$GITHUB_ENV` before a secret value's mask command, masking
+a multi-line value whole instead of per line, filtering the identity table, dropping the
+enumeration channel, and skipping `SHIPMATE_VARS` as a reserved name instead of lifting it
+out of the enumeration and parsing it as an envelope.
 """
+
+import json
 
 import pytest
 from _loader import load_script
@@ -260,3 +267,94 @@ def test_no_envelope_refusal_carries_a_byte_of_the_value(raw, message):
     refusal = _refusal(raw, source=SECRETS)
     assert refusal == message
     assert "s3cr3t" not in refusal
+
+
+def test_a_table_derived_pair_is_never_filtered():
+    """The table is the engine's own identity, so the reserved set -- which exists to keep a
+    consumer from writing those very names -- must not be applied to it. A `workspace` cell
+    derives `TF_WORKSPACE`, which is reserved.
+
+    Mutation: pass the table through `filter_enumeration` in `compose`, which drops the cell's
+    own workspace and runs it against the default one.
+    """
+    assert env_inject.compose({"SHIPMATE_TF_VARS": '{"TF_WORKSPACE": "dev-eu"}'}) == (
+        {"TF_WORKSPACE": "dev-eu"},
+        {},
+    )
+
+
+def test_shipmate_vars_is_lifted_out_of_the_enumeration():
+    """`SHIPMATE_VARS` is itself a GitHub variable, so it arrives inside `toJSON(vars)`. Left
+    there it matches the `SHIPMATE_` prefix and is skipped, and its keys never export.
+
+    Mutation: drop the `enumerated.pop(_VARS, None)` lift, passing `None` to
+    `envelope_exports` instead.
+    """
+    enumeration = {"SHIPMATE_VARS": '{"TF_VAR_myThing": "v"}', "TF_VAR_SIZE": "small"}
+    assert env_inject.compose({"SHIPMATE_TF_VARS": "{}", ENUM: json.dumps(enumeration)}) == (
+        {"TF_VAR_myThing": "v", "TF_VAR_size": "small"},
+        {},
+    )
+
+
+def test_a_plain_variable_supplies_a_tofu_variable_end_to_end(tmp_path, monkeypatch):
+    """The setup promise: a consumer sets the repository variable `TF_VAR_ENDPOINT` and
+    `variable "endpoint"` is populated, with no envelope and no per-cell wiring.
+
+    Mutation: drop the `_ENUM` channel from `compose`'s `merge_exports` list, which leaves the
+    transport wired and exports nothing through it.
+    """
+    path = tmp_path / "github_env"
+    monkeypatch.setenv("GITHUB_ENV", str(path))
+    monkeypatch.setenv("SHIPMATE_TF_VARS", '{"TF_VAR_env": "dev-eu"}')
+    monkeypatch.setenv(ENUM, '{"TF_VAR_ENDPOINT": "https://api.example.com"}')
+    monkeypatch.delenv(VARS, raising=False)
+    monkeypatch.delenv(SECRETS, raising=False)
+    env_inject.main()
+    assert path.read_text(encoding="utf-8") == (
+        "TF_VAR_endpoint<<SHIPMATE_EOF\n"
+        "https://api.example.com\n"
+        "SHIPMATE_EOF\n"
+        "TF_VAR_env<<SHIPMATE_EOF\n"
+        "dev-eu\n"
+        "SHIPMATE_EOF\n"
+    )
+
+
+def test_every_secret_is_masked_before_anything_is_written(tmp_path, monkeypatch, capsys):
+    """A `$GITHUB_ENV` written first survives a process that dies before the mask commands, and
+    the next step then runs with unmasked secret values. The finished file cannot tell the two
+    orders apart, so the assertion is made inside `write_env` itself.
+
+    Mutation: in `main`, move the `mask(...)` call below `write_env(...)`.
+    """
+    calls = []
+
+    def fake_write_env(pairs, path):
+        calls.append((capsys.readouterr().out, pairs, path))
+
+    monkeypatch.setattr(env_inject, "write_env", fake_write_env)
+    monkeypatch.setenv("GITHUB_ENV", str(tmp_path / "github_env"))
+    monkeypatch.setenv("SHIPMATE_TF_VARS", '{"TF_VAR_env": "dev-eu"}')
+    monkeypatch.setenv(SECRETS, '{"TF_VAR_token": "s3cr3t"}')
+    monkeypatch.delenv(ENUM, raising=False)
+    monkeypatch.delenv(VARS, raising=False)
+    env_inject.main()
+    assert calls == [
+        (
+            "::add-mask::s3cr3t\n",
+            {"TF_VAR_env": "dev-eu", "TF_VAR_token": "s3cr3t"},
+            str(tmp_path / "github_env"),
+        )
+    ]
+
+
+def test_a_multi_line_secret_is_masked_line_by_line(capsys):
+    """`::add-mask::` matches an exact string, so a whole-value mask leaves every log line
+    carrying one line of a PEM or an embedded JSON blob unmasked. The trailing newline's empty
+    line is skipped: GitHub cannot mask the empty string and warns on each attempt.
+
+    Mutation: replace the per-line loop in `mask` with one `print` of the whole value.
+    """
+    env_inject.mask(["-----BEGIN KEY-----\nMIIBOgIB\n"])
+    assert capsys.readouterr().out == "::add-mask::-----BEGIN KEY-----\n::add-mask::MIIBOgIB\n"

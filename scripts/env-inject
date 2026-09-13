@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
-"""Write one cell's identity variables into the job environment.
+"""Write one cell's environment variables into the job environment.
 
-The single writer of `TF_VAR_*` and `TF_WORKSPACE` for a cell. The source is
-`SHIPMATE_TF_VARS`, the matrix row's resolved mapping, and nothing else.
+The single writer of the cell's process environment. Four channels compose here:
+the matrix row's resolved identity mapping (`SHIPMATE_TF_VARS`), the consumer's
+enumerated GitHub variables (`SHIPMATE_GITHUB_VARS`), the `SHIPMATE_VARS`
+envelope lifted out of that enumeration, and the `SHIPMATE_SECRETS` envelope,
+whose values are masked before anything is written.
 """
 
 import json
@@ -12,6 +15,14 @@ import uuid
 
 #: The matrix row's resolved `tf_vars`, serialised by `toJSON` at the cell step.
 _TABLE = "SHIPMATE_TF_VARS"
+
+#: The consumer's reachable GitHub variables, as `${{ toJSON(vars) }}` renders them.
+_ENUM = "SHIPMATE_GITHUB_VARS"
+
+#: The case-preserving envelopes. `SHIPMATE_VARS` is itself a GitHub variable, so it
+#: arrives inside the enumeration and is lifted out of it rather than read separately.
+_VARS = "SHIPMATE_VARS"
+_SECRETS = "SHIPMATE_SECRETS"
 
 #: What `$GITHUB_ENV` accepts as a name. `fullmatch` only: a prefix match leaves a
 #: key whose second line is `X=Y` writing further assignments through `write_env`.
@@ -205,8 +216,48 @@ def write_env(pairs, path):
             fh.write(f"{name}<<{delim}\n{value}\n{delim}\n")
 
 
+def compose(environ):
+    """The cell's whole environment, and the subset of it that is secret.
+
+    Channel order is the composition contract: the table is the engine's own identity
+    and is never filtered, the enumeration is consumer configuration swept up wholesale
+    and is, and the two envelopes are written deliberately. `test_env_inject_exports.py`
+    pins both properties.
+    """
+    table = resolve(environ)
+    enumerated = parse_enumeration(environ.get(_ENUM, ""), _ENUM)
+    envelope = envelope_exports(enumerated.pop(_VARS, None), _VARS, table)
+    secrets = envelope_exports(environ.get(_SECRETS, ""), _SECRETS, table)
+    merged = merge_exports(
+        [
+            (_TABLE, table),
+            (_ENUM, filter_enumeration(enumerated, table)),
+            (_VARS, envelope),
+            (_SECRETS, secrets),
+        ]
+    )
+    return merged, secrets
+
+
+def mask(values):
+    """Emit `::add-mask::` for every line of every `values` entry.
+
+    Per line, because `::add-mask::` matches an exact string and a log line carrying one
+    line of a PEM would otherwise print it whole. Empty lines are skipped: GitHub cannot
+    mask the empty string and warns per attempt. Flushed, because a process that dies
+    between these commands and the `$GITHUB_ENV` write leaves the values unmasked in the
+    next step's environment.
+    """
+    for value in values:
+        for line in value.splitlines():
+            if line:
+                print(f"::add-mask::{line}", flush=True)
+
+
 def main():
-    write_env(resolve(os.environ), os.environ["GITHUB_ENV"])
+    pairs, secrets = compose(os.environ)
+    mask(secrets.values())
+    write_env(pairs, os.environ["GITHUB_ENV"])
 
 
 if __name__ == "__main__":
