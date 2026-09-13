@@ -74,7 +74,7 @@ def evaluate(path, run):
         ]
     )
     try:
-        return json.loads(out)
+        return _mapping(json.loads(out), 'globals "shipmate"')
     except json.JSONDecodeError as exc:
         raise SystemExit(
             f"::error::could not parse the environment table from {path}: {exc}"
@@ -306,14 +306,16 @@ def validate(table, matrix_envs, shared_envs, all_envs=None):
     reads it; `None` on the paths that scan only a changed set or a workset, where an
     environment absent from that set is not evidence of anything.
     """
-    layout = table.get("layout")
-    if layout is None:
+    if "layout" not in table:
         print(
             "::warning::this repository takes its environment identity from GitHub "
             'variables, which the `globals "shipmate"` environment table replaces. Declare '
             "a layout to migrate; the variables keep working until you do."
         )
         return table
+    # Key presence, not a truthy value: `stamp_rows` decides the mode on the key, so a null
+    # layout would be legacy here and table there -- a cell carrying no identity at all.
+    layout = table["layout"]
     if layout not in _LAYOUTS:
         raise SystemExit(
             f'::error::globals "shipmate" layout is {layout!r}; it must be one of '

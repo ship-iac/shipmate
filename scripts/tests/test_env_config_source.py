@@ -264,3 +264,14 @@ def test_unparseable_output_refuses(monkeypatch, tmp_path):
     with pytest.raises(SystemExit) as exc:
         ec.read_table(run=_fake_run(stdout={"terramate": "not json"}))
     assert str(exc.value).startswith("::error::")
+
+
+@pytest.mark.parametrize("out", ['"oops"', "null", "[]"], ids=["string", "null", "list"])
+def test_a_table_that_is_not_a_mapping_refuses(out, monkeypatch, tmp_path):
+    """`globals "shipmate"` holding a scalar is JSON, so the parse succeeds and every reader
+    downstream assumes a mapping. Reddens on returning the parsed scalar, which reaches
+    `validate` as `'str' object has no attribute 'get'`."""
+    _env(monkeypatch, tmp_path)
+    with pytest.raises(SystemExit) as exc:
+        ec.read_table(run=_fake_run(stdout={"terramate": out}))
+    assert str(exc.value).startswith("::error::")
