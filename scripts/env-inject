@@ -7,10 +7,31 @@ The single writer of `TF_VAR_*` and `TF_WORKSPACE` for a cell. The source is
 
 import json
 import os
+import re
 import uuid
 
 #: The matrix row's resolved `tf_vars`, serialised by `toJSON` at the cell step.
 _TABLE = "SHIPMATE_TF_VARS"
+
+#: What `$GITHUB_ENV` accepts as a name. `fullmatch` only: a prefix match leaves a
+#: key whose second line is `X=Y` writing further assignments through `write_env`.
+_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+
+#: Names shipmate owns: cell identity, established credentials, OpenTofu execution
+#: controls, and the runner's own loader and search path.
+_RESERVED_NAMES = frozenset(
+    {
+        "TF_WORKSPACE",
+        "TF_CLI_ARGS",
+        "TF_LOG",
+        "TF_DATA_DIR",
+        "TF_PLUGIN_CACHE_DIR",
+        "PATH",
+        "LD_PRELOAD",
+        "LD_LIBRARY_PATH",
+    }
+)
+_RESERVED_PREFIXES = ("TF_CLI_ARGS_", "AWS_", "SHIPMATE_", "GITHUB_", "RUNNER_")
 
 
 def resolve(environ):
@@ -37,6 +58,125 @@ def resolve(environ):
             "nothing stamped, and is not the same thing."
         )
     return parsed
+
+
+def _parse_object(raw, message, null_is_empty=False):
+    """The JSON object of strings `raw` holds, or `{}` when it is absent or empty.
+
+    `message` renders the refusal for a given rule; the envelope channel builds one
+    that carries no byte of `raw`, since the value may be a secret.
+    """
+    if not raw:
+        return {}
+    try:
+        parsed = json.loads(raw)
+    except ValueError as exc:
+        raise SystemExit(message("is not JSON")) from exc
+    if parsed is None and null_is_empty:
+        return {}
+    if not isinstance(parsed, dict) or not all(isinstance(v, str) for v in parsed.values()):
+        raise SystemExit(message("is not a JSON object of strings"))
+    return parsed
+
+
+def parse_enumeration(raw, source):
+    """The consumer's GitHub variables, as `toJSON(vars)` renders them.
+
+    `null` and `''` both mean `{}`: the input is engine-built, so an empty rendering
+    is a platform fact, and a repository reaching no variable is a real consumer.
+    Malformed JSON is an engine bug and still refuses; the enumeration carries no
+    secret, so its refusal may quote the value.
+    """
+
+    def message(rule):
+        return f"::error::{source} must be the object toJSON(vars) renders, and {raw!r} {rule}."
+
+    return _parse_object(raw, message, null_is_empty=True)
+
+
+def envelope_exports(raw, source, table):
+    """The pairs `source` contributes to the cell, refusing anything it may not export.
+
+    Absent or empty is `{}` -- the normal case for a consumer with no extras -- but
+    `null` is a written mistake and refuses, as does any key that is not a legal
+    environment variable name or that shipmate owns. Keys are exported verbatim:
+    preserving case is what the envelope exists for.
+
+    No refusal quotes the value. Key names are not secret and are named; the bytes
+    around them may be.
+    """
+
+    def message(rule):
+        return (
+            f"::error::{source} must be a JSON object of strings, and its value {rule}. "
+            "No part of the value is shown, because it may be a secret. An unset or "
+            "empty envelope exports nothing; null is not the same thing."
+        )
+
+    parsed = _parse_object(raw, message)
+    for name in parsed:
+        if not _NAME.fullmatch(name):
+            raise SystemExit(
+                f"::error::{source} key {name!r} is not an environment variable name; "
+                "keys must match [A-Za-z_][A-Za-z0-9_]*."
+            )
+        if _is_reserved(name, table):
+            raise SystemExit(
+                f"::error::{source} key {name} is reserved: shipmate owns this cell's "
+                "identity variables, its credentials, and OpenTofu's execution controls."
+            )
+    return parsed
+
+
+def _is_reserved(name, table):
+    """Whether shipmate owns `name` for a cell whose identity table is `table`.
+
+    The identity part is per-cell: a `folder` layout derives nothing, so `TF_VAR_env`
+    is an ordinary consumer variable there and a hardcoded list would refuse it.
+    """
+    return name in _RESERVED_NAMES or name.startswith(_RESERVED_PREFIXES) or name in table
+
+
+def _lowercase_tf_var(name):
+    """`TF_VAR_MY_THING` -> `TF_VAR_my_thing`.
+
+    GitHub uppercases variable names on storage, OpenTofu matches `TF_VAR_<name>`
+    case-sensitively, and conventional variable names are lowercase.
+    """
+    prefix = "TF_VAR_"
+    return prefix + name[len(prefix) :].lower() if name.startswith(prefix) else name
+
+
+def filter_enumeration(parsed, table):
+    """The enumerated variables a cell exports, lowercased and with reserved names dropped.
+
+    Skipped, not refused: `toJSON(vars)` sweeps up the consumer's own engine
+    configuration, which they never aimed at a cell, so refusing it fails every run
+    on correct configuration. Lowercasing runs first, or an enumerated `TF_VAR_ENV`
+    would pass the table comparison and then collide with the identity it names.
+    """
+    lowered = ((_lowercase_tf_var(name), value) for name, value in parsed.items())
+    return {name: value for name, value in lowered if not _is_reserved(name, table)}
+
+
+def merge_exports(sources):
+    """One mapping from `(source_name, pairs)` channels, refusing any name two supply.
+
+    A name supplied twice has no defensible precedence, and picking one silently is
+    how a consumer ends up debugging the value that lost.
+    """
+    merged = {}
+    origin = {}
+    for source, pairs in sources:
+        for name, value in pairs.items():
+            if name in merged:
+                raise SystemExit(
+                    f"::error::{name} is supplied by both {origin[name]} and {source}. "
+                    "Remove it from one of them; shipmate will not choose."
+                )
+            merged[name] = value
+            origin[name] = source
+    return merged
 
 
 def _delimiter(value):
