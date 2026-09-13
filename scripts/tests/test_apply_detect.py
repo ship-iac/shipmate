@@ -43,8 +43,13 @@ def test_cells_take_workload_var_from_the_tags():
         {"stacks/app": ["env/dev-eu", "workload/net-edge"], "stacks/dns": ["env/dev-eu"]},
     )
     assert cells == [
-        {"stack": "stacks/app", "environment": "dev-eu", "workload_var": "NET_EDGE"},
-        {"stack": "stacks/dns", "environment": "dev-eu", "workload_var": ""},
+        {
+            "stack": "stacks/app",
+            "environment": "dev-eu",
+            "workload": "net-edge",
+            "workload_var": "NET_EDGE",
+        },
+        {"stack": "stacks/dns", "environment": "dev-eu", "workload": "", "workload_var": ""},
     ]
 
 
@@ -184,7 +189,7 @@ def test_dag_shape_notice_reports_a_layered_graph():
     )
 
 
-def _apply_env(monkeypatch, tmp_path, **overrides):
+def _apply_env(monkeypatch, tmp_path, table=None, **overrides):
     """Env for an apply-mode main() run; returns the GITHUB_OUTPUT path."""
     out = tmp_path / "out.txt"
     env = {
@@ -194,12 +199,16 @@ def _apply_env(monkeypatch, tmp_path, **overrides):
         "GITHUB_OUTPUT": str(out),
         "SHIPMATE_APP_ID": APP_ID,
         "SHIPMATE_REVIEW_DECISION": "APPROVED",
+        "SHIPMATE_SHARED_ENVS": "",
     }
     env.update(overrides)
     for name in ("SHIPMATE_UNGATED_ENVS", "SHIPMATE_MODE"):
         monkeypatch.delenv(name, raising=False)
     for name, value in env.items():
         monkeypatch.setenv(name, value)
+    # Every detect reads the environment table from the default branch before it stamps; the
+    # real read shells out to gh, git and terramate, none of which CI has.
+    monkeypatch.setattr(ad.bm.ec, "read_table", lambda run=None: dict(table or {}))
     return out
 
 
@@ -429,8 +438,13 @@ def test_main_wires_the_tag_map_into_the_cells(tmp_path, monkeypatch):
         {
             "stack": "stacks/app",
             "environment": "dev-eu",
+            "workload": "net-edge",
             "workload_var": "NET_EDGE",
             "config_mode": "legacy",
+            "role_arn": "",
+            "cred_region": "",
+            "tf_vars": {},
+            "config_path": "",
             "plan_run_id": "42",
             "plan_sha256": PLAN_SHA,
         }
@@ -530,7 +544,7 @@ def test_main_refuses_when_the_decision_variable_is_absent(monkeypatch, tmp_path
     assert str(exc_info.value).startswith("::error::not authorized")
 
 
-def _unlock_env(monkeypatch, tmp_path, **overrides):
+def _unlock_env(monkeypatch, tmp_path, table=None, **overrides):
     """Env for a main() run, unlock unless `SHIPMATE_MODE` is overridden. Returns the
     GITHUB_OUTPUT path.
 
@@ -543,12 +557,16 @@ def _unlock_env(monkeypatch, tmp_path, **overrides):
         "SHIPMATE_HEAD_SHA": "a" * 40,
         "SHIPMATE_MODE": "unlock",
         "GITHUB_OUTPUT": str(out),
+        "SHIPMATE_SHARED_ENVS": "",
     }
     env.update(overrides)
     for name in ("SHIPMATE_UNGATED_ENVS", "SHIPMATE_REVIEW_DECISION"):
         monkeypatch.delenv(name, raising=False)
     for name, value in env.items():
         monkeypatch.setenv(name, value)
+    # Every detect reads the environment table from the default branch before it stamps; the
+    # real read shells out to gh, git and terramate, none of which CI has.
+    monkeypatch.setattr(ad.bm.ec, "read_table", lambda run=None: dict(table or {}))
     return out
 
 
@@ -648,6 +666,10 @@ def test_unlock_queue_is_the_pending_cells_of_the_target_env(monkeypatch, tmp_pa
             "workload": "app",
             "workload_var": "APP",
             "config_mode": "legacy",
+            "role_arn": "",
+            "cred_region": "",
+            "tf_vars": {},
+            "config_path": "",
         },
     ]
     assert _parsed(out)["empty"] == "false"
@@ -679,7 +701,8 @@ def test_unlock_non_empty_queue_does_not_warn(monkeypatch, tmp_path, capsys):
     ad.main()
     out = capsys.readouterr().out
     assert "cells=3 pending=3" in out  # Not vacuous: there is a queue.
-    assert "::warning::" not in out
+    # Scoped to this warning: an untabled repository also gets the migration notice here.
+    assert "no cell in dev-eu has a pending apply check" not in out
 
 
 def test_unlock_is_not_capped_by_the_whole_tree_matrix_limit(monkeypatch, tmp_path):
@@ -711,6 +734,10 @@ def test_unlock_is_not_capped_by_the_whole_tree_matrix_limit(monkeypatch, tmp_pa
             "workload": "app",
             "workload_var": "APP",
             "config_mode": "legacy",
+            "role_arn": "",
+            "cred_region": "",
+            "tf_vars": {},
+            "config_path": "",
         }
     ]
 
@@ -783,7 +810,9 @@ def test_apply_mode_writes_the_whole_output_file_verbatim(monkeypatch, tmp_path)
     ad.main()
     assert out.read_text(encoding="utf-8") == (
         'waves={"wave0": [{"stack": "stacks/app", "environment": "dev-eu", '
-        '"workload_var": "APP", "config_mode": "legacy", "plan_run_id": "42", '
+        '"workload": "app", "workload_var": "APP", "config_mode": "legacy", '
+        '"role_arn": "", "cred_region": "", "tf_vars": {}, "config_path": "", '
+        '"plan_run_id": "42", '
         '"plan_sha256": "dddddddddddddddd'
         'dddddddddddddddddddddddddddddddddddddddddddddddd"}], "wave1": [], "wave2": [], '
         '"wave3": [], "wave4": [], "wave5": [], "wave6": [], "wave7": []}\n'
@@ -816,5 +845,9 @@ def test_unlock_tolerates_an_untagged_stack_elsewhere_in_the_tree(monkeypatch, t
             "workload": "app",
             "workload_var": "APP",
             "config_mode": "legacy",
+            "role_arn": "",
+            "cred_region": "",
+            "tf_vars": {},
+            "config_path": "",
         }
     ]

@@ -133,8 +133,10 @@ independent of the complexity of its CI configuration.
 The consumer's `plan` job calls the engine's reusable plan workflow, which has
 four jobs: `facts`, `detect`, `plan`, and `summary`. The shape is the
 same across repo layouts and across repositories — what differs per flavor is
-which variables the plan environment injects (`TF_VAR_*`, `TF_WORKSPACE`, or
-nothing) and whether a role variable is set there at all.
+which identity variables a cell carries (`TF_VAR_*`, `TF_WORKSPACE`, or
+nothing) and whether a role is named for that environment at all. Both come
+either from the repository's environment table on the default branch or, with no
+table declared, from the GitHub Environment the cell binds.
 
 Two of `shipmate.yml`'s five triggers select that job: `pull_request_target` for
 the automatic plan on every push to a pull request, and the `workflow_dispatch`
@@ -167,10 +169,10 @@ produced them. See
   the fork refusal's: `build-matrix` turns a fork's head away before either
   terramate step reads the tree it wrote ([hardening](hardening.md)).
   Environment membership comes purely from stack tags — no environment names in
-  YAML, no GitHub API/token needed.
+  YAML. A repository that declares a `globals "shipmate"` table costs one API
+  call on top, to name the default branch the table is read from.
 - **`plan`** — one matrix job per stack × environment, bound to that GitHub
-  Environment (which injects `TF_VAR_*` / `TF_WORKSPACE` / nothing, per
-  layout). Each job is the `shipmate / <stack> / <env>` check (shown as
+  Environment, carrying `TF_VAR_*` / `TF_WORKSPACE` / nothing per layout. Each job is the `shipmate / <stack> / <env>` check (shown as
   `shipmate · plan / shipmate / <stack> / <env>` in the UI). `actions/plan-cell`
   writes the full plan text to the job's step summary (reachable one click
   from the check), and uploads the `.otplan` + a TF_VAR fingerprint as an
@@ -262,8 +264,8 @@ engine's reusable drift workflow.
 - **Generalization:** deploy + drift run unchanged across all three layouts
   (`repo-example-{stacks,folders,workspaces}`) — same pinned shipmate SHA, only
   the per-flavor state path (each job's `state_suffix`) differs; the per-flavor
-  environment variables come from the GitHub Environment a cell binds (folders
-  inject nothing, workspaces inject `TF_WORKSPACE`).
+  identity variables come from the environment table or the GitHub Environment a
+  cell binds (folders inject nothing, workspaces inject `TF_WORKSPACE`).
 
 **Remote state and cloud credentials.** `state_suffix` is required, but may be
 the empty string. Set it to `''` and a remote backend (for example S3) owns the
@@ -271,11 +273,14 @@ state, and the engine's state restore/save steps are skipped. Omitting it
 altogether is a workflow-resolution error, on purpose — a forgotten state
 configuration must fail loud rather than apply with no state at all.
 
-Credentials are opt-in through two variables, `AWS_ROLE_ARN` and `AWS_REGION`.
-A GitHub Environment is where they belong, not where GitHub stops looking:
+Credentials are opt-in per environment, from the environment table's `aws` tier
+for that environment or, with no table declared, from the `AWS_ROLE_ARN` and
+`AWS_REGION` variables. A GitHub Environment is where those variables belong,
+not where GitHub stops looking:
 `vars` resolve organization → repository → environment, so a job whose
 environment names neither still reads whatever the repository or the
-organization sets. Only where no level sets one does the credentials step skip
+organization sets. A table has no such level above the entry. Only where
+nothing resolves a role does the credentials step skip
 and no cloud credential enter the job, which is how the sample repos run
 credential-free. Every job that runs a cell requests `id-token: write`, and GitHub
 caps a called workflow's permissions at each `uses:` boundary. So every job of

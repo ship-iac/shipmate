@@ -151,10 +151,15 @@ def test_merged_head_gives_up_after_attempts_exhausted_all_empty(monkeypatch):
 
 
 def _cell(stack, env="dev-eu"):
-    return {"stack": stack, "environment": env, "workload_var": ""}
+    # The whole row `build_matrix` emits, `workload` included: a double that omits a key the
+    # real builder always adds cannot fail on a guard that pins the row shape, and the table
+    # path keys its workload tier on that key.
+    return {"stack": stack, "environment": env, "workload": "", "workload_var": ""}
 
 
-def _run_main(tmp_path, monkeypatch, *, cells, checks, urls=None, deps=None, order=None):
+def _run_main(
+    tmp_path, monkeypatch, *, cells, checks, urls=None, deps=None, order=None, table=None
+):
     """main() over the merged pull request's head, with every GitHub and Terramate call
     stubbed. `_merged_head` is stubbed rather than fed, so the only `gh api` paths collected
     into `urls` are the ones the work set itself asks for.
@@ -169,6 +174,8 @@ def _run_main(tmp_path, monkeypatch, *, cells, checks, urls=None, deps=None, ord
     }.items():
         monkeypatch.setenv(k, v)
     monkeypatch.delenv("SHIPMATE_BASE_SHA", raising=False)
+    monkeypatch.setenv("SHIPMATE_SHARED_ENVS", "")
+    monkeypatch.setattr(dd.bm.ec, "read_table", lambda run=None: dict(table or {}))
     jsonl = "\n".join(json.dumps(c) for c in checks)
 
     def _run(args):
@@ -180,7 +187,13 @@ def _run_main(tmp_path, monkeypatch, *, cells, checks, urls=None, deps=None, ord
         return jsonl
 
     monkeypatch.setattr(dd, "_merged_head", lambda repo, merge_sha: HEAD)
-    monkeypatch.setattr(dd.bm, "compute_cells", lambda all_stacks, base: cells)
+    # `compute_cells` returns (env->stacks map, rows); a double returning rows alone
+    # unpacks into two names and fails somewhere unrelated.
+    monkeypatch.setattr(
+        dd.bm,
+        "compute_cells",
+        lambda all_stacks, base: ({c["environment"]: [c["stack"]] for c in cells}, cells),
+    )
     # deploy-detect and the apply-detect it loads hold separate build-matrix instances, and
     # the check-run listing is fetched through apply-detect's. Both are stubbed so a `gh api`
     # call from either module lands in `urls`.

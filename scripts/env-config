@@ -1,0 +1,387 @@
+#!/usr/bin/env python3
+"""Read the environment table from the repository's default branch.
+
+Branch content cannot rewrite these values because they are not read from the
+branch: the table is evaluated in a detached worktree of `origin/<default>`.
+`origin` is the base repository on every path -- no checkout in any workflow
+passes `repository:` -- and a fork pull request is refused before it plans.
+"""
+
+import json
+import os
+import shutil
+import subprocess
+import sys
+
+_WORKTREE = "shipmate-envcfg"
+
+
+def _run(args, check=True):
+    """stdout of `args`, raising ::error:: on a nonzero exit. `check=False` returns
+    the CompletedProcess instead, for the one caller whose failure is tolerated.
+
+    Local rather than `build-matrix`'s: `_shipmate.py` caches nothing and re-executes
+    the module on every `_load`, and `build-matrix` calls this module, so reaching its
+    copy through the loader would not terminate.
+    """
+    # args is a code-controlled tool invocation (gh/git/terramate by PATH name),
+    # never user input, and shell=False -- safe.
+    p = subprocess.run(args, capture_output=True, text=True)  # noqa: S603
+    if not check:
+        return p
+    if p.returncode != 0:
+        # Surface the tool's own error; a swallowed stderr makes CI opaque.
+        sys.stderr.write(p.stderr)
+        raise SystemExit(f"::error::command failed ({p.returncode}): {' '.join(args)}")
+    return p.stdout
+
+
+def _default_branch(run):
+    """The default branch name, from the API rather than the event payload.
+
+    `github.event.repository.default_branch` is not reliably populated under
+    `schedule`; drift.yml resolves it this way for the same reason.
+    """
+    repo = os.environ["GITHUB_REPOSITORY"]
+    return run(["gh", "api", f"repos/{repo}", "--jq", ".default_branch"]).strip()
+
+
+def worktree(branch, path, run):
+    """A detached worktree of `origin/<branch>` at `path`, recreated each run.
+
+    Deleting the directory is not enough: git keeps the registration under
+    `.git/worktrees/`, and `add` to a missing-but-registered path refuses. A runner
+    reusing a workspace hits exactly that.
+    """
+    run(["git", "worktree", "remove", "--force", path], check=False)
+    shutil.rmtree(path, ignore_errors=True)
+    run(["git", "worktree", "prune"])
+    run(["git", "worktree", "add", "--detach", path, f"origin/{branch}"])
+    return path
+
+
+def evaluate(path, run):
+    """`global.shipmate` as evaluated in `path`, or {} when the global is absent."""
+    out = run(
+        [
+            "terramate",
+            "experimental",
+            "eval",
+            "--as-json",
+            "-C",
+            path,
+            "tm_try(global.shipmate, {})",
+        ]
+    )
+    try:
+        return _mapping(json.loads(out), 'globals "shipmate"')
+    except json.JSONDecodeError as exc:
+        raise SystemExit(
+            f"::error::could not parse the environment table from {path}: {exc}"
+        ) from exc
+
+
+def read_table(run=None):
+    """`global.shipmate` from the default branch, or {} when the repo has none.
+
+    Every failure here refuses. "This repository has no table" and "the table could
+    not be read" cannot be told apart without reading it, so treating a read failure
+    as absence is the fail-open this design exists to avoid.
+    """
+    run = run or _run
+    path = os.path.join(os.environ["RUNNER_TEMP"], _WORKTREE)
+    return evaluate(worktree(_default_branch(run), path, run), run)
+
+
+#: The layouts a repository may declare, and the environment-level keys an entry may
+#: hold. `aws` is the only provider implemented; a second one costs a field list here
+#: and one conditional step in each cell action.
+_LAYOUTS = ("dry", "workspace", "folder")
+_AWS_FIELDS = ("region", "role")
+_ENV_KEYS = ("region", "vars", "aws")
+
+#: Reserved at every level: a tier selector, never a provider field.
+_STRUCTURAL = ("plan", "apply", "workloads")
+
+
+def _mapping(value, where):
+    if not isinstance(value, dict):
+        raise SystemExit(f"::error::{where} must be a mapping, got {type(value).__name__}.")
+    return value
+
+
+def _string(value, where):
+    if not isinstance(value, str):
+        raise SystemExit(f"::error::{where} must be a string, got {type(value).__name__}.")
+    return value
+
+
+def _fields(level, env, where, allowed_structural):
+    """The provider fields of one level, refusing anything the schema does not give it."""
+    fields = {}
+    for key, value in level.items():
+        if key in _STRUCTURAL:
+            if key not in allowed_structural:
+                raise SystemExit(
+                    f"::error::environment {env}: {where}.{key} is a reserved key in a "
+                    "position the schema does not give it. plan and apply sit inside a "
+                    "provider block; workloads sits only under plan or apply."
+                )
+            continue
+        if key == "vars":
+            raise SystemExit(
+                f"::error::environment {env}: {where}.vars is not a field the aws provider "
+                "defines. vars sits at environment level: a per-tier one would let plan "
+                "and apply inject different values, and every apply would then fail as "
+                "stale."
+            )
+        if key not in _AWS_FIELDS:
+            raise SystemExit(
+                f"::error::environment {env}: {where}.{key} is not a field the aws "
+                f"provider defines. It defines {', '.join(_AWS_FIELDS)}."
+            )
+        fields[key] = _string(value, f"environment {env}: {where}.{key}")
+    return fields
+
+
+def tiers(block, env, region):
+    """Every tier of one provider block, as `(label, resolved fields)`.
+
+    Block level, then the path, then the workload, each overriding the last field by
+    field -- the merge order resolution repeats. The environment's own `region` inherits
+    into the block, which is the schema's only cross-level default.
+    """
+    base = {"region": region} if region else {}
+    base.update(_fields(_mapping(block, f"environment {env}: aws"), env, "aws", ("plan", "apply")))
+    for path in ("plan", "apply"):
+        where = f"aws.{path}"
+        level = _mapping(block.get(path, {}), f"environment {env}: {where}")
+        merged = {**base, **_fields(level, env, where, ("workloads",))}
+        yield where, merged
+        workloads = _mapping(level.get("workloads", {}), f"environment {env}: {where}.workloads")
+        for name, workload in sorted(workloads.items()):
+            inner = f"{where}.workloads.{name}"
+            level_fields = _fields(
+                _mapping(workload, f"environment {env}: {inner}"), env, inner, ()
+            )
+            yield inner, {**merged, **level_fields}
+
+
+def _check_provider(block, env, region, shared):
+    """Refuse a block that authenticates nothing, or a tier that authenticates
+    incompletely.
+
+    A tier resolving no credential is legal: apply-only cloud access is a supported
+    shape, and its plan path resolves an empty credential and skips the step.
+    """
+    if shared and "plan" in _mapping(block, f"environment {env}: aws"):
+        raise SystemExit(
+            f"::error::environment {env} is shared between the plan and apply paths, so "
+            "aws.plan cannot apply to it: a shared environment resolves aws.apply on both "
+            f"paths. Remove aws.plan, or drop {env} from SHIPMATE_SHARED_ENVS."
+        )
+    resolved = list(tiers(block, env, region))
+    if not any("role" in fields for _, fields in resolved):
+        raise SystemExit(
+            f"::error::environment {env}: the aws block resolves no role on any tier. "
+            "Give aws, aws.plan, aws.apply or a workload a role, or remove the block."
+        )
+    for label, fields in resolved:
+        if fields.get("role") == "":
+            raise SystemExit(
+                f"::error::environment {env}: {label} sets an empty role, which resolves to "
+                "a skipped credentials step rather than to a credential. Give it a role, or "
+                "remove the key."
+            )
+        if "role" in fields and "region" not in fields:
+            raise SystemExit(
+                f"::error::environment {env}: {label} resolves a role but no region, and "
+                "the aws credentials step requires one. Set aws.region, or the "
+                "environment's own region."
+            )
+
+
+def _check_vars(entry, env):
+    """`TF_VAR_*` and `TF_WORKSPACE` only, and strings only.
+
+    A non-string value would otherwise pass here and refuse once per cell at injection
+    time -- forty identical failures in a forty-cell matrix instead of one at the top.
+    """
+    for name, value in sorted(_mapping(entry["vars"], f"environment {env}: vars").items()):
+        if not name.startswith("TF_VAR_") and name != "TF_WORKSPACE":
+            raise SystemExit(
+                f"::error::environment {env}: vars may name only TF_VAR_* and "
+                f"TF_WORKSPACE, and {name} is neither."
+            )
+        if not isinstance(value, str):
+            raise SystemExit(
+                f"::error::environment {env}: vars.{name} must be a string, got "
+                f"{type(value).__name__}. A non-string value would otherwise refuse once "
+                "per cell at injection time."
+            )
+
+
+def shared_env_names(raw):
+    """The environments listed in `SHIPMATE_SHARED_ENVS`, as written.
+
+    Split at commas without stripping, so a padded entry is unlisted here exactly as it is
+    in `scripts/verify-environments` and the wave-job ternaries, which compare whole entries
+    between comma boundaries. Case is normalized by `_is_shared`, not here.
+    """
+    return {e for e in raw.split(",") if e}
+
+
+def _is_shared(env, shared_envs):
+    """Whether `env` binds one shared environment rather than a plan/apply pair.
+
+    Case-insensitive with `.lower()`, not `.casefold()`, to agree with the two readers this
+    variable already has: `scripts/verify-environments` lowers, and the wave ternaries use
+    GitHub's `contains()`. A case-exact reading here resolves the plan tier for a cell the
+    workflow bound to the shared environment.
+    """
+    return env.lower() in {e.lower() for e in shared_envs}
+
+
+def _check_environment(entry, env, shared_envs):
+    entry = _mapping(entry, f"environment {env}")
+    for key in sorted(entry):
+        if key not in _ENV_KEYS:
+            raise SystemExit(
+                f"::error::environment {env}: {key} is not a key this engine implements. "
+                f"An environment holds {', '.join(_ENV_KEYS)}."
+            )
+    if "region" in entry:
+        _string(entry["region"], f"environment {env}: region")
+    if "vars" in entry:
+        _check_vars(entry, env)
+    if "aws" in entry:
+        _check_provider(entry["aws"], env, entry.get("region"), _is_shared(env, shared_envs))
+
+
+def _check_dry_coverage(environments, matrix_envs):
+    """`dry` derives both identity variables from the table, so every cell needs an entry.
+
+    An empty region is no region: `plan-classify` excludes an empty `TF_VAR_*` from the
+    fingerprint, so the layout would derive nothing the cell could be distinguished by.
+    """
+    for env in sorted(matrix_envs):
+        entry = environments.get(env)
+        if entry is None:
+            missing = "no entry in it"
+        elif not _mapping(entry, f"environment {env}").get("region"):
+            missing = "an entry with no region"
+        else:
+            continue
+        raise SystemExit(
+            '::error::layout = "dry" derives TF_VAR_env and TF_VAR_region from the '
+            f"environment table, and {env} has {missing}."
+        )
+
+
+def _report_unused(environments, all_envs):
+    """Name the entries no stack tags. A warning, deliberately, and never a refusal.
+
+    The table is read from the default branch and the tags from the feature branch, so
+    adding or removing an environment takes two pull requests; refusing an unused entry
+    would deadlock both. Keys are matched exactly, as `resolve` and `_check_dry_coverage`
+    match them -- an entry differing only in case resolves for nothing, so it is unused.
+    """
+    unused = sorted(set(environments) - set(all_envs))
+    if unused:
+        print(
+            f"::warning::the environment table declares {', '.join(unused)}, which no stack "
+            "tags. Remove the entry, or tag the stacks that belong to it. This is a warning "
+            "rather than a refusal because the table is read from the default branch and the "
+            "tags from this branch, so an environment arrives and leaves over two pull "
+            "requests."
+        )
+
+
+def validate(table, matrix_envs, shared_envs, all_envs=None):
+    """The table, or `SystemExit`. Every schema refusal is gated on `layout` being declared.
+
+    A repository with no `layout` has not migrated: it keeps the legacy variables, and
+    refusing anything in its table would refuse a configuration that works. The one refusal
+    outside that gate is a table that declares `environments` and no `layout`, which is not
+    an unmigrated repository but a migrated one whose `layout` did not evaluate. `all_envs` is
+    the whole-tree environment scan where one exists, and only the unused-entry warning
+    reads it; `None` on the paths that scan only a changed set or a workset, where an
+    environment absent from that set is not evidence of anything.
+    """
+    if "layout" not in table:
+        # Not "the table is non-empty": `globals "shipmate"` is a shared namespace, and an
+        # `env_order`-only block is a legacy repository with no table at all.
+        if table.get("environments"):
+            raise SystemExit(
+                '::error::globals "shipmate" declares environments but no layout, so every '
+                "cell would take its identity from GitHub variables instead of the table. "
+                "Terramate drops an attribute it cannot evaluate rather than failing, so a "
+                "layout set to an expression that does not resolve disappears from the "
+                "table. Declare layout, or check the expression it is set to."
+            )
+        print(
+            '::warning::no `globals "shipmate"` environment table was found on the default '
+            "branch, so this repository takes its environment identity from GitHub "
+            "variables, which the table replaces. Declare a layout to migrate; the "
+            "variables keep working until you do."
+        )
+        return table
+    # Key presence, not a truthy value: `stamp_rows` decides the mode on the key, so a null
+    # layout would be legacy here and table there -- a cell carrying no identity at all.
+    layout = table["layout"]
+    if layout not in _LAYOUTS:
+        raise SystemExit(
+            f'::error::globals "shipmate" layout is {layout!r}; it must be one of '
+            f"{', '.join(_LAYOUTS)}."
+        )
+    environments = _mapping(table.get("environments", {}), "environments")
+    for env in sorted(environments):
+        _check_environment(environments[env], env, shared_envs)
+    if layout == "dry":
+        _check_dry_coverage(environments, matrix_envs)
+    if all_envs is not None:
+        _report_unused(environments, all_envs)
+    return table
+
+
+def _derived(layout, env, entry):
+    """The identity variables a layout derives for one environment.
+
+    The names are lowercase after the `TF_VAR_` prefix: GitHub upper-cases variable
+    names, the process environment does not, and a mismatch changes every fingerprint
+    and fails every apply as stale.
+    """
+    if layout == "dry":
+        return {"TF_VAR_env": env, "TF_VAR_region": entry.get("region", "")}
+    if layout == "workspace":
+        return {"TF_WORKSPACE": env}
+    return {}
+
+
+def resolve(table, env, path, workload, shared_envs):
+    """What one cell runs with: `role_arn`, `cred_region`, `tf_vars`, `config_path`.
+
+    `path` is the calling detect's tier, never inferred; a shared environment resolves
+    `aws.apply` on both paths, and `config_path` reports the tier actually consulted
+    rather than the one requested. Once `layout` is set there is no fallback to
+    `vars.*`: an environment with no entry resolves an empty role and the caller skips
+    the credentials step.
+
+    The workload tier is keyed by the raw `workload`, never by `workload_var`, which is
+    not injective. The environment's own `vars` merges last, over the derivation.
+    """
+    environments = _mapping(table.get("environments", {}), "environments")
+    entry = _mapping(environments.get(env, {}), f"environment {env}")
+    config_path = "apply" if _is_shared(env, shared_envs) else path
+    fields = {}
+    if "aws" in entry:
+        resolved = dict(tiers(entry["aws"], env, entry.get("region")))
+        label = f"aws.{config_path}"
+        inner = f"{label}.workloads.{workload}"
+        fields = resolved[inner] if inner in resolved else resolved.get(label, {})
+    return {
+        "role_arn": fields.get("role", ""),
+        "cred_region": fields.get("region", ""),
+        "tf_vars": {**_derived(table.get("layout"), env, entry), **entry.get("vars", {})},
+        "config_path": config_path,
+    }

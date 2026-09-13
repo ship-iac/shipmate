@@ -106,6 +106,7 @@ def test_the_sweep_states_no_pull_request_and_no_head():
         "all-stacks": "true",
         "tags": "${{ inputs.tags }}",
         "no-pull-request": "true",
+        "shared-envs": "${{ vars.SHIPMATE_SHARED_ENVS }}",
     }
 
 
@@ -199,6 +200,7 @@ def test_the_cell_passes_this_whole_with_block():
     """
     assert _step("drift", "actions/drift-cell@")["with"] == {
         "config-mode": "${{ matrix.config_mode }}",
+        "tf-vars": "${{ toJSON(matrix.tf_vars) }}",
         "stack": "${{ matrix.stack }}",
         "stack-name": "${{ matrix.stack }}",
         "env": "${{ matrix.environment }}",

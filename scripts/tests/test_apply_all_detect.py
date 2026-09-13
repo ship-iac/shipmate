@@ -55,9 +55,19 @@ def test_cells_take_workload_var_from_the_tags():
         {"stacks/app": ["workload/net-edge"]},  # stacks/dns is absent, so its var is "".
     )
     assert cells == [
-        {"stack": "stacks/app", "environment": "dev-eu", "workload_var": "NET_EDGE"},
-        {"stack": "stacks/dns", "environment": "dev-eu", "workload_var": ""},
-        {"stack": "stacks/app", "environment": "dev-us", "workload_var": "NET_EDGE"},
+        {
+            "stack": "stacks/app",
+            "environment": "dev-eu",
+            "workload": "net-edge",
+            "workload_var": "NET_EDGE",
+        },
+        {"stack": "stacks/dns", "environment": "dev-eu", "workload": "", "workload_var": ""},
+        {
+            "stack": "stacks/app",
+            "environment": "dev-us",
+            "workload": "net-edge",
+            "workload_var": "NET_EDGE",
+        },
     ]
 
 
@@ -209,6 +219,7 @@ def _run_main(
     tree=None,
     tags=None,
     urls=None,
+    table=None,
 ):
     """main() over the head's apply checks, with everything the script reaches from GitHub or
     Terramate stubbed. Defaults to one pending `stacks/app` check per env in `envs`. Returns
@@ -246,6 +257,8 @@ def _run_main(
     monkeypatch.setattr(aad.eo, "read_env_order", lambda: dict(order or {}))
     monkeypatch.setattr(aad.eo, "read_explicit_envs", lambda: list(explicit))
     monkeypatch.setattr(aad.bm, "env_membership", lambda **kw: (tree, tags or {"stacks/app": []}))
+    monkeypatch.setenv("SHIPMATE_SHARED_ENVS", "")
+    monkeypatch.setattr(aad.bm.ec, "read_table", lambda run=None: dict(table or {}))
     aad.main()
     return dict(ln.split("=", 1) for ln in out.read_text(encoding="utf-8").splitlines())
 
@@ -278,8 +291,13 @@ def test_main_wires_the_tag_map_into_the_cells(tmp_path, monkeypatch):
         {
             "stack": "stacks/app",
             "environment": "dev-eu",
+            "workload": "net-edge",
             "workload_var": "NET_EDGE",
             "config_mode": "legacy",
+            "role_arn": "",
+            "cred_region": "",
+            "tf_vars": {},
+            "config_path": "",
             "plan_run_id": "42",
             "plan_sha256": PLAN_SHA,
         }

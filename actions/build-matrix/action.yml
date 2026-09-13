@@ -39,9 +39,12 @@ inputs:
       query matching no cell, both fail the run.
     required: false
     default: ""
+  shared-envs:
+    description: The SHIPMATE_SHARED_ENVS repository variable, verbatim. Passed in because a script cannot read `vars` itself; it decides which envs resolve the apply-tier credential on both paths.
+    required: true
 outputs:
   matrix:
-    description: 'JSON {"include":[{stack,environment,workload,workload_var,config_mode},...]} for the plan matrix.'
+    description: 'JSON {"include":[{stack,environment,workload,workload_var,config_mode,role_arn,cred_region,tf_vars,config_path},...]} for the plan matrix.'
     value: ${{ steps.build.outputs.matrix }}
   empty:
     description: '"true" when no stack changed in any environment.'
@@ -56,10 +59,14 @@ runs:
       id: build
       shell: bash
       env:
+        # The environment table is read from the default branch, which needs an API call
+        # for its name; no permission beyond the job's own contents: read.
+        GH_TOKEN: ${{ github.token }}
         SHIPMATE_BASE_SHA: ${{ inputs.base-sha }}
         SHIPMATE_ALL_STACKS: ${{ inputs.all-stacks }}
         SHIPMATE_HEAD_REPO: ${{ inputs.head-repo }}
         SHIPMATE_HEAD_SHA: ${{ inputs.head-sha }}
         SHIPMATE_NO_PULL_REQUEST: ${{ inputs.no-pull-request }}
         SHIPMATE_TAGS: ${{ inputs.tags }}
+        SHIPMATE_SHARED_ENVS: ${{ inputs.shared-envs }}
       run: python3 "$GITHUB_ACTION_PATH/../../scripts/build-matrix"

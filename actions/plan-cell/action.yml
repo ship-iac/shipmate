@@ -28,6 +28,9 @@ inputs:
   config-mode:
     description: How this cell resolves its identity variables; the matrix row's config_mode. No default -- an omitted value is refused rather than silently treated as legacy.
     required: true
+  tf-vars:
+    description: The matrix row's resolved tf_vars, serialised with toJSON. Read only in table mode, where anything but a JSON object of strings is refused; the empty object is a legitimate value and an omitted input is not.
+    required: true
 runs:
   using: composite
   steps:
@@ -55,6 +58,7 @@ runs:
       shell: bash
       env:
         SHIPMATE_CONFIG_MODE: ${{ inputs.config-mode }}
+        SHIPMATE_TF_VARS: ${{ inputs.tf-vars }}
       run: python3 "$GITHUB_ACTION_PATH/../../scripts/env-inject"
 
     - name: Stack slug

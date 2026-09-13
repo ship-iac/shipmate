@@ -85,7 +85,7 @@ while still planning fine locally. See [`aws.md`](aws.md).
 
 **`terramate.config.run.env` rewriting `TF_VAR_*`.** Terramate applies `run.env`
 after the ambient environment, so an assignment to `TF_VAR_env`, `TF_VAR_region`
-or `TF_WORKSPACE` wins over what the GitHub Environment injected — invisibly,
+or `TF_WORKSPACE` wins over whatever the cell was given — invisibly,
 because the fingerprint is computed outside `terramate run` and so agrees on
 both sides. `detect` injects a sentinel into those three variables and fails the
 run when one comes back changed. [`../CONTRACT.md`](../CONTRACT.md) §Env model
@@ -153,7 +153,7 @@ names. The entries below `0.2.0` predate the first tagged release, or
 `CHANGELOG.md` does not pin one; they are kept for repositories moving from a
 very old pin.
 
-### Unreleased — the engine release declares the tool versions, and one writer sets a cell's identity variables
+### Unreleased — the engine release declares the tool versions, and a cell's identity can come from the default branch
 
 **Re-pinning is not enough: two repository variables go away.**
 `actions/setup` reads the release's own root-level `VERSIONS` file at the commit
@@ -189,7 +189,7 @@ block; they now reach it through `scripts/env-inject`, which writes them into
 `$GITHUB_ENV`. Same variables, same values, same source — the GitHub
 Environment the cell binds.
 
-**A workflow you wrote yourself that calls a cell action directly needs two
+**A workflow you wrote yourself that calls a cell action directly needs three
 edits:**
 
 1. Pass `config-mode: legacy` on the cell step. The input has no default, and a
@@ -198,7 +198,12 @@ edits:**
    than assuming `legacy`. The refusal names `SHIPMATE_CONFIG_MODE`, the
    variable the step sets from the input, not the missing `with:` line — so
    read it as "this step was called without `config-mode`".
-2. Rename that job's three identity `env:` keys — `TF_VAR_env`,
+2. Pass `tf-vars: '{}'` on the same step. It is the second identity input and it
+   also has no default. A legacy-mode cell reads it nowhere — the empty object
+   is there to satisfy the input, not to inject anything — so the value never
+   varies. A table-mode caller passes `${{ toJSON(matrix.tf_vars) }}` instead;
+   `${{ matrix.tf_vars }}` renders the literal `Object` and is refused.
+3. Rename that job's three identity `env:` keys — `TF_VAR_env`,
    `TF_VAR_region`, `TF_WORKSPACE` — to `SHIPMATE_LEGACY_TF_VAR_ENV`,
    `SHIPMATE_LEGACY_TF_VAR_REGION` and `SHIPMATE_LEGACY_TF_WORKSPACE`, keeping
    the `${{ vars.… }}` expression each one reads. A `SHIPMATE_LEGACY_*` key
@@ -215,6 +220,93 @@ The bindings are uppercase after the prefix because GitHub uppercases variable
 names; what `env-inject` writes is not (`TF_VAR_env`, `TF_VAR_region`,
 `TF_WORKSPACE`). A cell that injects the uppercase spelling fingerprints
 differently from the plan that reviewed it, and every apply then fails as stale.
+
+**Optional in this release: a repository may take its environment identity from
+the default branch instead of from GitHub variables.** Declare
+`global.shipmate.layout` in a `globals "shipmate"` block and the engine resolves
+each cell's identity variables, role and region from that table. Declare none
+and nothing breaks: the variables path is unchanged, fully supported here, and a
+repository that stays on it needs nothing from this release.
+
+**Migrating is not urgent, and it is not optional forever.** The variables path
+is deprecated rather than frozen: the engine already reports each superseded
+variable by name, the table is the intended destination, and the window closes
+in a later release. No version or date is fixed for that yet, so plan the move
+rather than schedule it.
+
+**The reason to adopt it is that branch content cannot reach those values.** The
+engine evaluates the table in a detached worktree of `origin/<default>`, so a
+pull request cannot change which role its own plan assumes, which region it
+authenticates against, or which workspace it plans. Under the variables path
+anyone with Write access can change all three, and the run that reads the new
+value is the one they opened. [`../CONTRACT.md`](../CONTRACT.md) §Environment
+table is the schema and the semantics of record.
+
+Adopt it in this order:
+
+1. Merge the table to the default branch, covering every environment your stacks
+   tag. Under `layout = "dry"` an environment with no entry, or an entry with no
+   `region`, refuses at detect from the next run onwards, so the table has to be
+   complete before it is declared.
+
+   **Check the derived values against the variables they replace, and drain
+   pending applies first.** A layout derives the identity from the environment's
+   own key: `dry` gives `TF_VAR_env` the key and `TF_VAR_region` the entry's
+   `region`, `workspace` gives `TF_WORKSPACE` the key. Where a variable held
+   something else — `TF_VAR_env=dev` on a logical environment named `dev-eu`,
+   `TF_WORKSPACE=production` on `prod` — the value moves the moment the table
+   lands. Those are exactly the variables the apply-match fingerprint hashes, so
+   every plan taken before the merge then fails as stale, and under `workspace` a
+   moved value selects a different, empty workspace. Either drain the pending
+   applies before merging the table, as §0.17.0 describes, or keep the old value
+   by pinning it in that environment's `vars`, which merges over the derivation.
+2. Run a plan and check that its cells resolved the roles and regions you
+   expect. The table is authoritative the moment `layout` is set; nothing falls
+   back to the variables.
+3. Delete the GitHub Environment variables the table replaces — `TF_VAR_env`,
+   `TF_VAR_region`, `TF_WORKSPACE`, `AWS_ROLE_ARN`, `AWS_REGION` and any
+   `AWS_ROLE_ARN_<WORKLOAD>`. They are inert from step 1 on, so this is cleanup
+   rather than a cutover, and step 2 is what makes it safe to leave until last.
+
+**Expect the superseded-variable warning in volume until step 3 lands.** A
+table-mode cell warns once for each of those six variables that is still set,
+and the warning is emitted per cell — `scripts/env-inject` runs inside every
+cell and has no view of the others, so there is nowhere to say it once. A
+forty-cell repository still holding all six prints two hundred and forty lines
+in a run. Deleting the variables is what ends it.
+
+**A repository that has not declared a layout gets one line per detect**, naming
+the table as the replacement for its variables. That is once per run rather than
+once per cell, and it is a permanent line in the log of a repository that never
+migrates. It is deliberate, not a defect.
+
+**After adoption, adding or removing an environment that needs a table entry is
+a two-pull-request sequence**, because the table comes from the default branch
+while the list of environments comes from the feature branch's tags. The order
+is configuration first when adding, configuration last when removing:
+
+1. **Adding:** merge the table entry alone. Until the stacks land it is an
+   unused entry, and every whole-tree run warns about it by name.
+2. Then merge the branch that tags the stacks. The warning stops.
+3. **Removing:** merge the branch that untags the stacks first. The entry is now
+   unused and warns.
+4. Then merge the removal of the entry.
+
+The other order fails rather than warns, and not where you would look for a
+sequencing problem: a branch whose stacks produce a matrix row for an
+environment the default branch's table does not name is refused at detect under
+`dry`, while under `folder` or `workspace` nothing refuses it — its credentials
+step resolves no role, skips, and the cell fails at `tofu init`. The sequence applies to every environment
+under `dry`, and under `workspace` or `folder` to any environment declaring a
+provider block. An environment needing no entry at all still lands in one pull
+request.
+
+**A typo in a table key does not surface on the pull request that introduces
+it.** The warning needs the whole-tree tag map, which only the nightly drift
+run, `unlock` and a bare `shipmate apply` have; the plan path sees a changed set
+and stays silent. So a typo'd key surfaces on the next nightly drift run. The
+refusal is unaffected — a tagged environment missing from the table still
+refuses on every path, including a targeted apply.
 
 ### 0.27.1 — re-pin only: an internal refactor, no behaviour change
 

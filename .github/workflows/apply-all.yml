@@ -124,6 +124,7 @@ jobs:
           # arrived, and empty is the hold-everything value.
           ungated-envs: ${{ vars.SHIPMATE_UNGATED_ENVS }}
           review-decision: ${{ needs.review.outputs.decision }}
+          shared-envs: ${{ vars.SHIPMATE_SHARED_ENVS }}
 
   envlevel0:
     # Display name only (job id unchanged) -- see apply.yml's `waves` job.

@@ -96,6 +96,7 @@ def test_build_matrix_reads_the_facts_job_and_states_no_constant():
         "base-sha": "${{ needs.facts.outputs.base-sha }}",
         "head-repo": "${{ needs.facts.outputs.head-repo }}",
         "head-sha": "${{ needs.facts.outputs.head-sha }}",
+        "shared-envs": "${{ vars.SHIPMATE_SHARED_ENVS }}",
     }
 
 
@@ -172,6 +173,7 @@ def test_the_cell_passes_this_whole_with_block():
     """
     assert _step("plan", "actions/plan-cell@")["with"] == {
         "config-mode": "${{ matrix.config_mode }}",
+        "tf-vars": "${{ toJSON(matrix.tf_vars) }}",
         "stack": "${{ matrix.stack }}",
         "stack-name": "${{ matrix.stack }}",
         "env": "${{ matrix.environment }}",

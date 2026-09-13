@@ -180,7 +180,7 @@ def test_compute_cells_fans_out_multi_env(monkeypatch):
     monkeypatch.setattr(bm, "_list_stacks", lambda all_stacks, base: ["stacks/app"])
     monkeypatch.setattr(bm, "_tags", lambda s: ["env/dev-eu", "env/dev-us", "workload/app"])
     monkeypatch.setattr(bm, "assert_run_env_roundtrip", lambda stack_dir: None)
-    cells = bm.compute_cells(all_stacks=True)
+    _, cells = bm.compute_cells(all_stacks=True)
     assert cells == [
         {"stack": "stacks/app", "environment": "dev-eu", "workload": "app", "workload_var": "APP"},
         {"stack": "stacks/app", "environment": "dev-us", "workload": "app", "workload_var": "APP"},
@@ -314,7 +314,7 @@ _TF_VAR_REGION_UNREPORTED = (
 def test_compute_cells_probes_that_the_injected_environment_survives(monkeypatch):
     calls = []
     _stub_terramate(monkeypatch, ["stacks/app"], _SURVIVED, calls)
-    assert bm.compute_cells(all_stacks=True) == [
+    assert bm.compute_cells(all_stacks=True)[1] == [
         {"stack": "stacks/app", "environment": "dev-eu", "workload": "", "workload_var": ""}
     ]
     args, env = calls[0]
@@ -392,7 +392,7 @@ def test_compute_cells_warns_and_continues_when_the_probe_cannot_run(monkeypatch
             "Error: evaluating terramate.config.run.env\n> undefined variable env.TF_VAR_env\n",
         ),
     )
-    cells = bm.compute_cells(all_stacks=True)
+    _, cells = bm.compute_cells(all_stacks=True)
     # The cell dict's own shape is pinned by test_multi_env_stack_yields_one_cell_per_env;
     # what this case adds is that the fan-out happened at all after the probe failed.
     assert [(c["stack"], c["environment"]) for c in cells] == [("stacks/app", "dev-eu")]
@@ -408,7 +408,7 @@ def test_compute_cells_skips_the_probe_with_no_stacks(monkeypatch):
     # Nothing to run the probe in: `terramate run -C` needs a stack directory.
     calls = []
     _stub_terramate(monkeypatch, [], "", calls)
-    assert bm.compute_cells(all_stacks=True) == []
+    assert bm.compute_cells(all_stacks=True)[1] == []
     assert calls == []
 
 
@@ -478,6 +478,7 @@ def _run_main(
     called=None,
     plan_workflow=True,
     head_sha=None,
+    table=None,
 ):
     """main() with GITHUB_OUTPUT redirected, returning (parsed outputs, calls) where calls
     records compute_cells' arguments, so a rejection is observable as the stack enumeration
@@ -507,6 +508,9 @@ def _run_main(
         "SHIPMATE_TAGS",
     ):
         monkeypatch.delenv(k, raising=False)
+    # Set here rather than in each caller's dict: `env_config` reads it hard, so a detect whose
+    # action forgot to bind it fails the run instead of treating every env as unshared.
+    monkeypatch.setenv("SHIPMATE_SHARED_ENVS", "")
     if head_sha is not None:
         monkeypatch.setenv("SHIPMATE_HEAD_SHA", head_sha)
         monkeypatch.setattr(bm, "_run", lambda args: f"{head_sha}\n")
@@ -518,11 +522,19 @@ def _run_main(
         called.append((all_stacks, base, tags))
         # The whole row `build_matrix` emits, `workload_var` included: a double that omits a
         # key the real builder always adds cannot fail on a guard that pins the row shape.
-        return [
+        rows = [
             {"stack": s, "environment": e, "workload": "", "workload_var": ""} for s, e in cells
         ]
+        # The real `compute_cells` returns the env->stacks map beside the rows, and `main`
+        # forwards it as `all_envs` only under `all_stacks`. A double returning rows alone
+        # would unpack into two names and fail somewhere unrelated.
+        by_env = {}
+        for s_, e_ in cells:
+            by_env.setdefault(e_, []).append(s_)
+        return by_env, rows
 
     monkeypatch.setattr(bm, "compute_cells", fake_compute)
+    monkeypatch.setattr(bm.ec, "read_table", lambda run=None: dict(table or {}))
     bm.main()
     parsed = dict(line.split("=", 1) for line in out.read_text(encoding="utf-8").splitlines())
     return parsed, called
@@ -859,6 +871,7 @@ def test_build_matrix_action_declares_its_inputs():
         "head-sha": "",
         "no-pull-request": "false",
         "tags": "",
+        "shared-envs": None,
     }
 
 
@@ -876,6 +889,8 @@ def test_build_matrix_action_hands_the_script_the_names_it_reads():
         "SHIPMATE_HEAD_SHA": "${{ inputs.head-sha }}",
         "SHIPMATE_NO_PULL_REQUEST": "${{ inputs.no-pull-request }}",
         "SHIPMATE_TAGS": "${{ inputs.tags }}",
+        "SHIPMATE_SHARED_ENVS": "${{ inputs.shared-envs }}",
+        "GH_TOKEN": "${{ github.token }}",
     }
 
 
@@ -1201,7 +1216,7 @@ def test_existing_compute_cells_callers_pass_no_tags(monkeypatch):
     monkeypatch.setattr(bm, "_list_stacks", lambda all_stacks, base: ["stacks/app"])
     monkeypatch.setattr(bm, "_tags", lambda s: ["env/dev-eu"])
     monkeypatch.setattr(bm, "assert_run_env_roundtrip", lambda stack_dir: None)
-    assert bm.compute_cells(all_stacks=False, base="abc123") == [
+    assert bm.compute_cells(all_stacks=False, base="abc123")[1] == [
         {"stack": "stacks/app", "environment": "dev-eu", "workload": "", "workload_var": ""}
     ]
 
@@ -1343,3 +1358,61 @@ def test_the_plan_workflow_path_is_the_one_consumer_file():
     Mutation: set it back to `.github/workflows/plan.yml`.
     """
     assert bm.PLAN_WORKFLOW == ".github/workflows/shipmate.yml"
+
+
+#: The plan and drift legs of one call site. Hand-written; `all_stacks` is the only difference
+#: between them, and it is what decides whether an environment absent from the scan is evidence.
+_TWO_ENV_TABLE = {
+    "layout": "folder",
+    "environments": {
+        "dev-eu": {"aws": {"region": "eu-west-1", "apply": {"role": "arn:aws:iam::1:role/a"}}},
+        "dev-us": {"aws": {"region": "us-east-1", "apply": {"role": "arn:aws:iam::1:role/b"}}},
+    },
+}
+_UNUSED_DEV_US = (
+    "::warning::the environment table declares dev-us, which no stack tags. Remove the "
+    "entry, or tag the stacks that belong to it. This is a warning rather than a refusal "
+    "because the table is read from the default branch and the tags from this branch, so "
+    "an environment arrives and leaves over two pull requests."
+)
+
+
+def test_a_plan_run_says_nothing_about_an_environment_outside_the_changed_set(
+    monkeypatch, tmp_path, capsys
+):
+    """`all_stacks=False` scans the CHANGED stacks only, so `dev-us` having no stack in that
+    set says nothing about whether any stack tags it.
+
+    Mutation: pass `set(stacks_by_env)` unconditionally at the call site. Every plan run then
+    warns about every environment with no changed stack. The drift sibling below is what keeps
+    this test from passing with the diagnostic deleted."""
+    _run_main(
+        monkeypatch,
+        tmp_path,
+        {
+            "GITHUB_EVENT_NAME": "pull_request",
+            "GITHUB_REPOSITORY": "acme/iac",
+            "SHIPMATE_HEAD_REPO": "acme/iac",
+        },
+        head_sha="a" * 40,
+        table=_TWO_ENV_TABLE,
+    )
+    assert "dev-us" not in capsys.readouterr().out
+
+
+def test_a_whole_tree_run_does_report_the_unused_entry(monkeypatch, tmp_path, capsys):
+    """The same call site with `all_stacks=true` -- drift -- has scanned the whole tree, so the
+    absence is evidence. Mutation: pass `None` unconditionally there; drift then never reports
+    an unused entry and the diagnostic reaches no production path at all."""
+    _run_main(
+        monkeypatch,
+        tmp_path,
+        {
+            "GITHUB_EVENT_NAME": "schedule",
+            "GITHUB_REPOSITORY": "acme/iac",
+            "SHIPMATE_ALL_STACKS": "true",
+            "SHIPMATE_NO_PULL_REQUEST": "true",
+        },
+        table=_TWO_ENV_TABLE,
+    )
+    assert _UNUSED_DEV_US in capsys.readouterr().out.splitlines()

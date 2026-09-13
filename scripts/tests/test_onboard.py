@@ -2193,9 +2193,15 @@ Still yours — these values are the consumer's, so this script cannot set them.
 
 Per environment, the cloud role and the env identity your layout injects. A
 DRY/dynamic backend needs TF_VAR_env and TF_VAR_region, workspace-per-env needs
-TF_WORKSPACE, folder-per-env needs neither (CONTRACT.md §Env model). On an apply
-environment a cell carrying a workload/<name> tag reads AWS_ROLE_ARN_<WORKLOAD>
-first; the plan path has no such fallback (docs/aws.md §Environment variables).
+TF_WORKSPACE, folder-per-env needs neither (CONTRACT.md §Env model). A cell
+carrying a workload/<name> tag reads AWS_ROLE_ARN_<WORKLOAD> first, on the plan
+and the apply path alike (docs/aws.md §Environment variables).
+
+These variables are one of two sources, and this script writes neither. A
+repository declaring a globals "shipmate" layout takes identity, roles and
+regions from that table on its default branch instead and sets none of the
+variables below; the table is the source branch content cannot rewrite
+(CONTRACT.md §Environment table).
 
   gh variable set AWS_ROLE_ARN --env dev-eu-plan --body <value>
   gh variable set AWS_REGION --env dev-eu-plan --body <value>
@@ -2254,9 +2260,15 @@ Still yours — these values are the consumer's, so this script cannot set them.
 
 Per environment, the cloud role and the env identity your layout injects. A
 DRY/dynamic backend needs TF_VAR_env and TF_VAR_region, workspace-per-env needs
-TF_WORKSPACE, folder-per-env needs neither (CONTRACT.md §Env model). On an apply
-environment a cell carrying a workload/<name> tag reads AWS_ROLE_ARN_<WORKLOAD>
-first; the plan path has no such fallback (docs/aws.md §Environment variables).
+TF_WORKSPACE, folder-per-env needs neither (CONTRACT.md §Env model). A cell
+carrying a workload/<name> tag reads AWS_ROLE_ARN_<WORKLOAD> first, on the plan
+and the apply path alike (docs/aws.md §Environment variables).
+
+These variables are one of two sources, and this script writes neither. A
+repository declaring a globals "shipmate" layout takes identity, roles and
+regions from that table on its default branch instead and sets none of the
+variables below; the table is the source branch content cannot rewrite
+(CONTRACT.md §Environment table).
 
   gh variable set AWS_ROLE_ARN --env dev-eu --body <value>
   gh variable set AWS_REGION --env dev-eu --body <value>
