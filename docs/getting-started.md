@@ -173,8 +173,10 @@ creates all of them, including `shipmate-engine` and its branch policy:
   apply tier) each `<env>-apply`: `TF_VAR_env` and `TF_VAR_region` where the backend
   path and resources are built from them, `TF_WORKSPACE` for workspace-per-env,
   nothing for folder-per-env, whose leaves fix env and region by path. The
-  engine's plan job reads `vars.TF_VAR_env` / `vars.TF_VAR_region` from the
-  environment the cell binds. Unset, they render empty, and an S3 backend `key` built from them collapses to one shared state
+  engine's cell jobs read `vars.TF_VAR_env` / `vars.TF_VAR_region` /
+  `vars.TF_WORKSPACE` from the environment the cell binds, and
+  `scripts/env-inject` writes them into the job environment under the names
+  OpenTofu reads. Unset, they render empty, and an S3 backend `key` built from them collapses to one shared state
   object for every environment.
   [`../CONTRACT.md`](../CONTRACT.md) §Env model is the per-layout table;
   [`concepts.md`](concepts.md) explains where they land.

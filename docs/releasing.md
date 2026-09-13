@@ -421,3 +421,45 @@ past it: every sample plan run's annotations then warn that the pin differs from
 the latest release. The state in between — engine merged, samples not yet
 re-pinned, no release cut — is silent, so do not rely on the alarm to remember
 this step for you.
+
+### Prove the crossing when a release changes what reaches a cell's environment
+
+A release that changes how a cell's `TF_VAR_*` or `TF_WORKSPACE` are set has one
+property worth testing, and it can only be tested once: a plan taken on the
+**old** engine still applies on the **new** one. The apply-match fingerprint
+compares the plan-side variables against the apply-side ones, so any difference
+between the two routes fails the apply as stale — which is the result this
+ordering is built to observe, and which re-pinning first destroys. After that
+the new engine is only ever checked against itself.
+
+Run it after the tag, on each sample that carries the identity the release
+moved, in this order:
+
+1. **On the old pins, record a pending plan.** Open a pull request that bumps
+   `global.version` and runs `terramate generate` + `terramate fmt`, let it
+   plan, and leave it unapplied. A pins-only pull request plans zero cells —
+   change detection is `terramate list --changed` — and `detect` fails the run
+   on stale codegen or bad formatting before any cell starts.
+2. **Merge the sample pin bumps**, waiting for each sample to go quiet first.
+   Commenting an apply while a plan is still running fails the next apply with
+   "saved plan is stale" for an unrelated reason, which reads as this test
+   failing. Merging is not optional: the comment-driven apply runs the **default
+   branch's** workflow, so a bump left on a branch is not the version under
+   test.
+3. **Apply each recorded plan.** Every one must succeed. This is the crossing —
+   plan on the old engine, apply on the new.
+
+**Do not push to a recorded pull request between step 1 and its apply.** "Update
+branch", a rebase and a merge from the default branch all push a new head, which
+fires `synchronize` and re-plans on the new engine: the recorded plan is
+replaced, the crossing disappears, and the apply then passes having proved
+nothing. If a ruleset demands an up-to-date branch before merging, update after
+the apply has run.
+
+This is the one case that overrides "land the re-pin with nothing pending"
+above. That rule exists for a release adding a fail-closed check on data a plan
+writes, where a cell planned by the old engine is refused after the merge; here
+a cell planned by the old engine is the measurement. The re-pin pull request
+itself still stays pins-only — the version bump is its own pull request, opened
+before it. A release in both classes wants both orderings at once, so split it
+into two releases.

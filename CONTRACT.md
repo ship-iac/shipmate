@@ -186,6 +186,27 @@ never used.
   trades away shipmate's "add an env = GitHub Environment + tags, zero code"
   property: adding an env there means adding leaf directories (a code change).
   Membership in an environment is always by tag, regardless of layout.
+- **One writer puts those variables in the cell's process.** The Environment a
+  cell binds still supplies them, and a cell job still binds `vars.TF_VAR_env`,
+  `vars.TF_VAR_region` and `vars.TF_WORKSPACE` — under the names
+  `SHIPMATE_LEGACY_TF_VAR_ENV`, `SHIPMATE_LEGACY_TF_VAR_REGION` and
+  `SHIPMATE_LEGACY_TF_WORKSPACE`. `scripts/env-inject` reads those three and
+  writes `TF_VAR_env`, `TF_VAR_region` and `TF_WORKSPACE` into `$GITHUB_ENV`,
+  in a step that runs before the cell's `terramate run`. Two sources for one
+  name would make precedence load-bearing, so there is exactly one.
+  - **The injected names are lowercase after the prefix.** GitHub uppercases
+    variable names, the process environment does not, and `TF_VAR_ENV` is a
+    different variable from the `TF_VAR_env` OpenTofu reads — one that changes
+    the apply-match fingerprint and fails every apply as stale.
+  - An unset `vars.*` still arrives as the empty string and is written through
+    as empty rather than dropped, which is what the fingerprint already
+    excludes (see Apply-match fingerprint, below). Nothing about what a cell's
+    process holds, or hashes, changed with the writer.
+  - Every matrix row carries `config_mode`, and each cell action takes it as a
+    `config-mode` input with no default. `legacy` — resolve identity from the
+    three bindings above — is the only value this engine version emits, and any
+    other value, an omitted input included, is refused before `terramate run`
+    rather than treated as `legacy`.
 - Protected environments (typically anything beyond the lowest-trust
   environment) carry required reviewers configured on the GitHub
   Environment itself, so approval gating is enforced by GitHub, not by

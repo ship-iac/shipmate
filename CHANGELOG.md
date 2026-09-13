@@ -70,6 +70,39 @@ change below is run by hand and never pinned. No check name moves.
   pinned dependencies, so a later tool-version bump makes the same pins stale
   (`docs/releasing.md` §Bumping a tool version is the same cascade).
 
+### Changed
+
+- **One writer sets a cell's identity variables, and nothing you can observe
+  moves.** `TF_VAR_env`, `TF_VAR_region` and `TF_WORKSPACE` used to reach a cell
+  as a job-level `env:` block; `scripts/env-inject` now writes them into
+  `$GITHUB_ENV` instead. The values come from the same GitHub Environment
+  variables, arrive under the same names, and hash to the same apply-match
+  fingerprint — a plan taken before this release applies after it. Nothing to
+  configure, and no check name or comment verb changes.
+
+  The route is what changed, so that a later release can change where a cell's
+  identity comes from without also changing how it reaches the process.
+
+  A consumer who copied one of the engine's cell jobs into a workflow of their
+  own will see the rename: the three `env:` keys reading `vars.TF_VAR_env`,
+  `vars.TF_VAR_region` and `vars.TF_WORKSPACE` are now
+  `SHIPMATE_LEGACY_TF_VAR_ENV`, `SHIPMATE_LEGACY_TF_VAR_REGION` and
+  `SHIPMATE_LEGACY_TF_WORKSPACE`, and `env-inject` reads only those. Three more
+  bindings — `SHIPMATE_LEGACY_AWS_ROLE_ARN`, `SHIPMATE_LEGACY_AWS_REGION` and
+  `SHIPMATE_LEGACY_AWS_ROLE_ARN_WORKLOAD` — are new and are read by nothing in
+  this release; the credentials step still reads `vars.AWS_*` as it did. Calling
+  a cell action directly also needs the cell actions' new `config-mode` input,
+  set to `legacy`: it has no default, and an omitted value is refused rather than
+  assumed.
+  `docs/upgrading.md` §Unreleased has both edits; a consumer calling the engine's
+  reusable workflows needs neither.
+
+  Every matrix row now carries a `config_mode` field. `legacy` is the only value
+  this release emits.
+
+  The four `actions/*-cell/action.yml` and `apply-env-level.yml` changed, so every
+  workflow pinning them needs the normal internal-pin bump after merge.
+
 ## [0.27.1] — 2026-09-12
 
 Tags `55bf06b`.

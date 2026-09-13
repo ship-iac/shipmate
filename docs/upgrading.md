@@ -153,7 +153,7 @@ names. The entries below `0.2.0` predate the first tagged release, or
 `CHANGELOG.md` does not pin one; they are kept for repositories moving from a
 very old pin.
 
-### Unreleased — the engine release declares the Terramate and OpenTofu versions
+### Unreleased — the engine release declares the tool versions, and one writer sets a cell's identity variables
 
 **Re-pinning is not enough: two repository variables go away.**
 `actions/setup` reads the release's own root-level `VERSIONS` file at the commit
@@ -180,6 +180,37 @@ The run writes nothing over them: it did not write them.
 held `TOFU_VERSION` back gets the version this release pins on its next bump. To
 stay on the older one, stay on the prior engine release, or open an issue for a
 per-consumer override.
+
+**The identity-variable change asks nothing of a consumer on the engine's
+reusable workflows**, which is what `.github/workflows/shipmate.yml` does and
+what [`getting-started.md`](getting-started.md) publishes. `TF_VAR_env`,
+`TF_VAR_region` and `TF_WORKSPACE` used to reach a cell as a job-level `env:`
+block; they now reach it through `scripts/env-inject`, which writes them into
+`$GITHUB_ENV`. Same variables, same values, same source — the GitHub
+Environment the cell binds.
+
+**A workflow you wrote yourself that calls a cell action directly needs two
+edits:**
+
+1. Pass `config-mode: legacy` on the cell step. The input has no default, and a
+   composite action's `required: true` is not enforced by GitHub Actions, so an
+   omitted input arrives as the empty string and the cell refuses to run rather
+   than assuming `legacy`. The refusal names `SHIPMATE_CONFIG_MODE`, the
+   variable the step sets from the input, not the missing `with:` line — so
+   read it as "this step was called without `config-mode`".
+2. Rename that job's three identity `env:` keys — `TF_VAR_env`,
+   `TF_VAR_region`, `TF_WORKSPACE` — to `SHIPMATE_LEGACY_TF_VAR_ENV`,
+   `SHIPMATE_LEGACY_TF_VAR_REGION` and `SHIPMATE_LEGACY_TF_WORKSPACE`, keeping
+   the `${{ vars.… }}` expression each one reads. `env-inject` reads only the
+   new names. Under the old ones it writes nothing and the job block still
+   exports the values itself, so the cell runs — on the path this release
+   replaced, and with the job rather than the engine deciding what a cell's
+   identity is.
+
+The bindings are uppercase after the prefix because GitHub uppercases variable
+names; what `env-inject` writes is not (`TF_VAR_env`, `TF_VAR_region`,
+`TF_WORKSPACE`). A cell that injects the uppercase spelling fingerprints
+differently from the plan that reviewed it, and every apply then fails as stale.
 
 ### 0.27.1 — re-pin only: an internal refactor, no behaviour change
 
