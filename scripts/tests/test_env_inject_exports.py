@@ -36,6 +36,33 @@ RESERVED = (
 #: The identity a `dry` cell derives; a `folder` cell derives none.
 DRY_TABLE = {"TF_VAR_env": "dev-eu", "TF_VAR_region": "eu-west-1"}
 
+#: The static half of the reserved set, hand-written. The behavioural guards below cover
+#: four of these rules; the rest would drop out of the set with the suite still green.
+RESERVED_NAMES = {
+    "TF_WORKSPACE",
+    "TF_CLI_ARGS",
+    "TF_LOG",
+    "TF_DATA_DIR",
+    "TF_PLUGIN_CACHE_DIR",
+    "PATH",
+    "LD_PRELOAD",
+    "LD_LIBRARY_PATH",
+}
+RESERVED_PREFIXES = ("TF_CLI_ARGS_", "AWS_", "SHIPMATE_", "GITHUB_", "RUNNER_")
+
+
+def test_the_reserved_set_is_the_whole_hand_written_set():
+    """Whole-value, because the set is one fully known value and a per-rule guard for
+    each entry would still leave the next addition unpinned. `PATH` and the loader
+    variables execute arbitrary code; `SHIPMATE_`, `GITHUB_` and `RUNNER_` are engine and
+    runner controls; `TF_LOG`, `TF_DATA_DIR` and `TF_PLUGIN_CACHE_DIR` redirect the tool.
+
+    Mutation: remove `"PATH"` from `_RESERVED_NAMES`, or `"RUNNER_"` from
+    `_RESERVED_PREFIXES`.
+    """
+    assert set(env_inject._RESERVED_NAMES) == RESERVED_NAMES
+    assert env_inject._RESERVED_PREFIXES == RESERVED_PREFIXES
+
 
 def _refusal(raw, source=VARS, table=None):
     with pytest.raises(SystemExit) as excinfo:
