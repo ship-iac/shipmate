@@ -387,7 +387,12 @@ is designed to produce on any layout whose environment injects a non-empty
 `TF_VAR_*` or `TF_WORKSPACE`. (A
 folder-per-env layout injects none, hashes the empty set on both sides and so
 never reaches this error at all; see [`../CONTRACT.md`](../CONTRACT.md) §Env
-model for what that layout gives up instead.) In practice the environment
+model for what that layout gives up instead.) A repository taking its identity
+from the environment table is in that same position on every layout: both sides
+derive from `matrix.environment` and hash identically whatever the job bound, so
+the fingerprint still pins plan and apply agreeing on values and no longer pins
+the binding. The environment pre-flight below is then the control that catches a
+mis-binding. In practice the environment
 pre-flight of §`this apply would bind GitHub Environment(s) that do not exist`
 refuses such a run before any wave starts, whatever the layout injects, so
 reaching *this* error from a naming change usually means either the environment

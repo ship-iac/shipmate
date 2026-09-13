@@ -22,7 +22,45 @@ per-consumer override. `actions/setup` and the engine's reusable workflows
 changed, so every engine pin moves in one commit as usual; the `scripts/onboard`
 change below is run by hand and never pinned. No check name moves.
 
+The release also adds an opt-in environment table, read from the repository's
+default branch, as an alternative to the GitHub Environment variables that carry
+a cell's identity and roles today. Declaring none keeps the current behaviour.
+
 ### Added
+
+- **A repository may declare its environment identity, roles and regions in a
+  `globals "shipmate"` table read from the default branch.** Set
+  `global.shipmate.layout` and the engine resolves each cell's identity
+  variables, role and region from that table instead of from GitHub Environment
+  variables. It evaluates the table in a detached worktree of `origin/<default>`,
+  so a pull request cannot change which role its own plan assumes, which region
+  it authenticates against, or which workspace it plans.
+
+  Opt-in, and nothing is deprecated: a repository that declares no layout keeps
+  the variables path, unchanged and fully supported. Both modes are selected by
+  the matrix row's `config_mode`, never by a value being empty, and a row with no
+  mode refuses rather than taking either path.
+
+  An environment that needs a table entry arrives and leaves over two pull
+  requests — configuration first when adding, last when removing — because the
+  table comes from the default branch while the environment list comes from the
+  branch's tags. An unused entry therefore warns instead of refusing; refusing
+  both sides would deadlock every add and every remove. That warning fires only
+  where a whole-tree scan already happened, so a typo'd key surfaces on the next
+  nightly drift run rather than on the pull request that introduced it.
+
+  A table-mode cell that still carries one of the six superseded GitHub variables
+  warns once per cell for each — `env-inject` runs inside each cell and has no
+  view of the others, so a large repository mid-migration sees a lot of it until
+  the variables are deleted. A repository with no layout gets one migration
+  notice per detect.
+
+  `CONTRACT.md` §Environment table is the schema and the semantics;
+  `docs/upgrading.md` §Unreleased has the adoption order and the add/remove
+  sequence. The four `actions/*-cell/action.yml` gain a `tf-vars` input and the
+  four detect actions a `shared-envs` one; eight action files and seven reusable
+  workflows changed in all, so every workflow pinning them needs the normal
+  internal-pin bump after merge.
 
 - **`scripts/onboard --vars-at-org` skips the variables an organization already
   sets.** The flag takes a comma-separated list of variable names the operator
@@ -89,16 +127,17 @@ change below is run by hand and never pinned. No check name moves.
   `SHIPMATE_LEGACY_TF_VAR_ENV`, `SHIPMATE_LEGACY_TF_VAR_REGION` and
   `SHIPMATE_LEGACY_TF_WORKSPACE`, and `env-inject` reads only those. Three more
   bindings — `SHIPMATE_LEGACY_AWS_ROLE_ARN`, `SHIPMATE_LEGACY_AWS_REGION` and
-  `SHIPMATE_LEGACY_AWS_ROLE_ARN_WORKLOAD` — are new and are read by nothing in
-  this release; the credentials step still reads `vars.AWS_*` as it did. Calling
-  a cell action directly also needs the cell actions' new `config-mode` input,
-  set to `legacy`: it has no default, and an omitted value is refused rather than
-  assumed.
-  `docs/upgrading.md` §Unreleased has both edits; a consumer calling the engine's
-  reusable workflows needs neither.
+  `SHIPMATE_LEGACY_AWS_ROLE_ARN_WORKLOAD` — are new, and a table-mode cell reads
+  them only to report a variable the table has superseded; the credentials step
+  still reads `vars.AWS_*` in legacy mode as it did. Calling a cell action
+  directly also needs the cell actions' two new identity inputs, `config-mode`
+  set to `legacy` and `tf-vars` set to `'{}'`: neither has a default, and an
+  omitted value is refused rather than assumed.
+  `docs/upgrading.md` §Unreleased has all three edits; a consumer calling the
+  engine's reusable workflows needs none of them.
 
-  Every matrix row now carries a `config_mode` field. `legacy` is the only value
-  this release emits.
+  Every matrix row now carries a `config_mode` field, plus `role_arn`,
+  `cred_region`, `tf_vars` and `config_path` — empty in legacy mode.
 
   The four `actions/*-cell/action.yml` and `apply-env-level.yml` changed, so every
   workflow pinning them needs the normal internal-pin bump after merge.

@@ -77,9 +77,11 @@ set in engine-owned YAML, in the one workflow with no pull-request context at
 all; no consumer file can set it, and no plan run carries it.
 
 The engine runs `aws-actions/configure-aws-credentials` inside the `drift` job,
-in the same position as on the plan path, gated on `AWS_ROLE_ARN` — or
-`AWS_ROLE_ARN_<WORKLOAD>` for a cell carrying a `workload/<name>` tag —
-resolving non-empty. The plan environment the cell binds is where that value
+in the same position as on the plan path, gated on a role resolving non-empty.
+With a `globals "shipmate"` layout declared that role is the environment's
+`aws.plan` tier in the table. With none, it is `AWS_ROLE_ARN` — or
+`AWS_ROLE_ARN_<WORKLOAD>` for a cell carrying a `workload/<name>` tag — and the
+plan environment the cell binds is where that value
 belongs, not where GitHub stops looking: `vars` resolve organization →
 repository → environment, so a sweep whose plan environments name no role
 assumes a repository- or organization-level `AWS_ROLE_ARN` instead, one set for
@@ -88,6 +90,13 @@ over-scoped role costs here is write access where a read-only one belongs; the
 role's trust-policy claim condition is what refuses it. See
 [`aws.md`](aws.md) §Where the credentials step goes and
 [`hardening.md`](hardening.md) §7–9.
+
+**The nightly sweep is also where a stale table entry surfaces.** It is one of
+the three paths that scan the whole tree, so it is where the engine warns that
+the environment table declares an environment no stack tags — a leftover entry,
+or a typo in a key. A pull request introducing that typo says nothing about it:
+the plan path sees only the changed set
+([`../CONTRACT.md`](../CONTRACT.md) §Environment table).
 
 ## Slack (optional)
 

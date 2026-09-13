@@ -158,9 +158,13 @@ creates all of them, including `shipmate-engine` and its branch policy:
   whose pull request targets a branch it does not name (plan jobs run at the
   pull request's *base* ref) ([`hardening.md`](hardening.md) #8;
   `shipmate doctor` warns on either). Plan-time cloud credentials go here too:
-  set `AWS_ROLE_ARN` and `AWS_REGION` on each `<env>-plan`, naming a read-only
-  plan role, and the engine's plan and drift cells assume it
-  ([`aws.md`](aws.md) §Environment variables). Unset *here* is not unset:
+  with no `globals "shipmate"` layout declared, set `AWS_ROLE_ARN` and
+  `AWS_REGION` on each `<env>-plan`, naming a read-only plan role, and the
+  engine's plan and drift cells assume it
+  ([`aws.md`](aws.md) §Environment variables); with a layout declared, that role
+  is the environment's `aws.plan` tier in the table instead, and the `vars`
+  fallback in the next two sentences does not apply to it. Unset *here* is not
+  unset:
   `vars` resolve organization → repository → environment, so a plan cell whose
   own `<env>-plan` names no role reads a repository- or organization-level
   `AWS_ROLE_ARN` instead — including one set for the apply path. Only where no
@@ -169,7 +173,16 @@ creates all of them, including `shipmate-engine` and its branch policy:
   a branch can reach whatever role a plan cell resolves; what refuses it is that
   role's own trust-policy claim condition
   ([`hardening.md`](hardening.md) §7–9), not where the variable was set.
-- **The variables your layout injects.** On each `<env>-plan` and (in the
+- **The identity your layout injects, from one of two sources.** Declare a
+  `globals "shipmate"` layout and the values come from the environment table on
+  your repository's default branch
+  ([`../CONTRACT.md`](../CONTRACT.md) §Environment table); declare none and they
+  come from GitHub Environment variables, as the rest of this bullet describes.
+  Both are supported, and a repository that never declares a layout keeps
+  working as it does today. The table is what a pull request cannot rewrite, so
+  it is the one to prefer where the choice is open.
+
+  With no layout declared, set on each `<env>-plan` and (in the
   apply tier) each `<env>-apply`: `TF_VAR_env` and `TF_VAR_region` where the backend
   path and resources are built from them, `TF_WORKSPACE` for workspace-per-env,
   nothing for folder-per-env, whose leaves fix env and region by path. The
@@ -418,13 +431,16 @@ default a new input drifts back to, and it reopens this exactly.
 callee runs one — that is every job but `comment-ops`, whose callee asks for no
 such scope, and it applies to consumers with no cloud credentials at all. The
 engine runs `aws-actions/configure-aws-credentials` in the `plan` job, gated on
-`AWS_ROLE_ARN` — or `AWS_ROLE_ARN_<WORKLOAD>` for a cell carrying a
-`workload/<name>` tag — resolving non-empty. It resolves as any `vars` does,
+a role resolving non-empty. With a `globals "shipmate"` layout declared that
+role is the environment's `aws.plan` tier in the table, read from the default
+branch, and nothing outside that entry can supply one. With no layout declared
+it is `AWS_ROLE_ARN` — or `AWS_ROLE_ARN_<WORKLOAD>` for a cell carrying a
+`workload/<name>` tag — resolving as any `vars` does,
 organization → repository → environment: the `<env>-plan` environment is where
 the value belongs, not where GitHub stops looking, so a repository- or
 organization-level `AWS_ROLE_ARN` set for the apply path is read by every plan
 cell too. The step is skipped, and the consumer runs with no cloud credentials,
-only where no level sets either variable; where one does, the role's own
+only where nothing resolves a role; where something does, the role's own
 trust-policy claim condition is the bound
 ([`hardening.md`](hardening.md) §7–9). The grant is required either way,
 because the job requests it whether or not the step fires.
