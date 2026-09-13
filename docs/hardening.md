@@ -82,7 +82,7 @@ expressions, whole, against the fence `getting-started.md` publishes. See
 | 4 | ≥1 approving review, code-owner review, dismiss stale, require approval of most recent push | Branch ruleset | Self-merge; the code-owner review is unforgeable at merge time (an App cannot be a `CODEOWNERS` entry) *provided a `CODEOWNERS` entry actually covers the IaC paths* — the rule is a no-op for changed files with no owner — and the approval *count* never is |
 | 5 | Block force-push and deletion on the default branch | Branch ruleset | History rewrite after apply |
 | 6 | Required reviewers + "Prevent self-review" on the `<env>-apply` environments you decide to gate (§6 states the trade-off; the choice is yours) — on a private repository this rule needs Enterprise, see "Plan prerequisites" | Environment | Unforgeable at apply time — the last line of defense once a merge has happened, on each environment you apply it to |
-| 7 | Cloud credentials scoped to the environment that needs them — the OIDC path's role named per environment, by that environment's `aws` tier in the environment table or, with no table, by `AWS_ROLE_ARN`/`AWS_REGION` on each `<env>-apply` and on each `<env>-plan` that needs a read-only role; any residual static key as an environment secret — never repo- or org-level | Environment table or Environment | Repo-wide exposure (for a secret, bounded *only* on an environment that also carries row 6; for a variable the scoping is advisory, and in the table it is the resolution rule — see §7–9) |
+| 7 | Cloud credentials scoped to the environment that needs them — the OIDC path's role named per environment, by that environment's `aws` tier in the environment table; any residual static key as an environment secret — never repo- or org-level | Environment table (role); Environment (secret) | Repo-wide exposure (for a secret, bounded *only* on an environment that also carries row 6; for the role the table's resolution rule is the scoping — see §7–9) |
 | 8 | Plan environments (`<env>-plan`; in shared mode the bare `<env>`, which must hold the apply role instead — §7–9) hold read-only, blast-radius-free credentials, no approval rules, and no branch policy — except on a shared environment, where a default-branch policy is row 17 doing real work and plan cells still pass it (see below) — ideally no secret at all (`shipmate doctor` reports what it finds) | Environment | Plan-time code execution |
 | 9 | OIDC with an `environment:` claim condition instead of static keys | Cloud IdP | Long-lived credential theft — and, since every cell-running job (plan, drift, apply, unlock) mints OIDC tokens unconditionally, this claim condition is the only thing that decides which role any of them may assume (see §7–9). In shared mode it separates nothing: both tokens carry the same `environment:` claim |
 | 10 | Default `GITHUB_TOKEN` = read-only; Actions may not approve PRs | Settings → Actions | Token privilege creep |
@@ -93,7 +93,7 @@ expressions, whole, against the fence `getting-started.md` publishes. See
 | 15 | Shorten Actions retention | Settings → Actions | `shipmate doctor` report disclosure |
 | 16 | `shipmate-engine` Environment exists, deployment branch policy restricted to the default branch | Environment | Repository-secret App key readable by any branch |
 | 17 | Deployment branch policy restricted to the default branch on every `<env>-apply` | Environment | Branch-authored workflow claiming apply-environment secrets directly |
-| 18 | A role named per environment you want cloud access from — an `aws` tier in the environment table, or `AWS_ROLE_ARN` + `AWS_REGION` as variables, never at repository or organization level | Environment table or Environment variables | Opting in per environment. Variables set at repo/org level apply to every environment at once — every plan and drift cell included, so a role scoped no tighter than the repository is assumed by a plan cell running branch-authored HCL (§7–9). The table has no level above the entry, so this misconfiguration has no table-mode form |
+| 18 | A role named per environment you want cloud access from — an `aws` tier in the environment table | Environment table | Opting in per environment. The table has no level above the entry, so a role cannot be named once and picked up by every environment at a stroke; what each cell may do is bounded by the named role's own trust policy (§7–9) |
 | 19 | `id-token: write` on every job of `shipmate.yml` but `comment-ops` | Consumer workflow YAML | Nothing — it is required: GitHub caps a called workflow's permissions at each `uses:` boundary, so without it every plan, drift, apply and unlock run fails at workflow-resolution time, cloud or not |
 | 20 | Require actions to be pinned to a full-length commit SHA | Settings → Actions | A tag or branch ref moving under a workflow that was pinned only by convention |
 
@@ -454,43 +454,29 @@ branch, and do count it as a control.
 every path.** Every job that runs a cell — the wave jobs of
 `apply-env-level.yml`, `unlock.yml`'s unlock job, `plan.yml`'s `plan` job and
 `drift.yml`'s `drift` job — requests `id-token: write` and runs a credentials
-step gated on a role resolving non-empty. There are two ways to name that role,
-and the engine selects between them on the matrix row's mode
-(`../CONTRACT.md` §Environment table).
+step gated on a role resolving non-empty.
 
-**With an environment table**, the role is the environment's `aws.plan` or
-`aws.apply` tier, read from the repository's default branch. Branch content
-cannot rewrite it, there is no level above the entry to fall back to, and an
-environment with no entry resolves no role and skips the step. The
-repository- and organization-level exposure the rest of this section describes
-has no form in that mode.
-
-**With no table**, a consumer opts in by setting
-`AWS_ROLE_ARN` (or the cell's `AWS_ROLE_ARN_<WORKLOAD>`, which wins) and
-`AWS_REGION` as variables on the environment that job binds — `<env>-apply` for
-a wave or unlock job, `<env>-plan` for a plan or drift cell. The gate reads
-`vars`, and `vars` resolve organization → repository → environment, so a role
-set at repository or organization level satisfies it in *every* one of those
-jobs; that is the whole of Critical exposure §7–9 describes below. With them
-unset the step is skipped and
-no cloud credential exists in the job, which is why the sample repos (null
-resources, local state) still run credential-free. With them set, the assumed
-role's session env vars do reach `tofu` — they are `AWS_*`, so the fingerprint
-excludes them (CONTRACT.md §Apply-match fingerprint). The plan and drift cells
-carry the identical step, reading the role from the `<env>-plan` environment
-they bind, so a read-only plan role is opted into the same way: set the
-variables there (`docs/aws.md` §Where the credentials step goes). Both sides are
-engine-wired, and the only thing that differs between them is which environment
-supplies the role — which is what makes the trust policy, not the wiring, the
-boundary.
+**The role is the environment's `aws.plan` or `aws.apply` tier** in the
+environment table, read from the repository's default branch
+(`../CONTRACT.md` §Environment table). Branch content cannot rewrite it, there
+is no level above the entry to fall back to, and an environment with no entry —
+or an entry whose block resolves nothing on that path's tier — resolves no role,
+so the step is skipped and no cloud credential exists in the job. That is why
+the sample repos (null resources, local state) still run credential-free. Where
+a role does resolve, the assumed role's session env vars reach `tofu` — they are
+`AWS_*`, so the fingerprint excludes them (CONTRACT.md §Apply-match
+fingerprint). The plan and drift cells carry the identical step, resolving the
+`aws.plan` tier, so a read-only plan role is opted into by naming one there
+(`docs/aws.md` §Where the credentials step goes). Both sides are engine-wired,
+and the only thing that differs between them is which tier supplies the role —
+which is what makes the trust policy, not the wiring, the boundary.
 
 No job interpolates a consumer *secret*: do not move a long-lived access key
 into an environment secret expecting the engine to pick it up — it will not,
 and that apply cell will fail at provider init. The role split controls 7 and
 9 describe is therefore the consumer's to configure, by giving the plan path and
-the apply path different roles — an `aws.plan` and an `aws.apply` tier in the
-table, or different `AWS_ROLE_ARN` values on the `<env>-plan` and `<env>-apply`
-environments — and scoping each role's trust policy and permissions accordingly.
+the apply path different roles — an `aws.plan` and an `aws.apply` tier — and
+scoping each role's trust policy and permissions accordingly.
 The engine passes through whatever role each environment resolves; it enforces
 no split of its own.
 
@@ -502,48 +488,26 @@ no split of its own.
   environment with no rules releases it to any branch on demand; the scoping is
   worth nothing without control 6, so treat the two as one setting.
 
-  **For the OIDC path with no environment table the scoping is advisory.**
-  `AWS_ROLE_ARN` and `AWS_REGION`
-  are `vars`, and for `vars` the most specific wins: environment overrides
-  repository overrides organization. A repository- or organization-level
-  `AWS_ROLE_ARN` is therefore picked up identically by every cell-running job in
-  every environment that does not set its own, with no warning and nothing in the
-  engine to guard it — "opt in per environment" (CONTRACT.md §AWS OIDC) is where
-  the value belongs, not something GitHub or shipmate enforces. Set it on each
-  `<env>-apply`, and on each `<env>-plan` you want plan-time or drift-time access
-  from with a read-only plan role (`docs/aws.md` §Environment variables) — never
-  at repository or organization level. The enforcing control is not the
-  variable's location at all: it is the role's trust policy, whose `environment:`
-  claim condition is what decides which environments may assume it.
-  `AWS_REGION` rides along in the same step and appears nowhere in the gate that
-  decides whether it runs, so it bounds nothing.
-
-  **An environment table closes the scoping question and leaves the trust policy
-  exactly where it was.** A table names one role per environment per path, on
-  the default branch, with nothing above the entry to inherit from — so there is
-  no repository- or organization-level value to leave behind, and no pull
-  request can point a cell at a different role. What the table does not do is
-  decide who may assume the role it names: that is still the trust policy's
+  **The environment table settles where the role is named, and leaves the trust
+  policy exactly where it was.** The table names one role per environment per
+  path, on the default branch, with nothing above the entry to inherit from — so
+  there is no repository- or organization-level value to leave behind, and no
+  pull request can point a cell at a different role. What the table does not do
+  is decide who may assume the role it names: that is still the trust policy's
   `environment:` claim condition, and it is the only control that refuses a
-  token. The sentence above is more load-bearing under a table, not less.
+  token.
 
-  **That last sentence is now load-bearing where it used to be advice.** The
-  plan and drift cells read these variables too, so a repository- or
-  organization-level `AWS_ROLE_ARN` set for the apply path is read by every plan
-  and drift cell. (Table mode resolves the plan path's role from its own
-  `aws.plan` tier and reads no variable, so what follows is legacy mode's
-  exposure.) A plan cell executes branch-authored HCL, so the role is
-  exposed to anyone who can push a branch; a drift cell runs only at the default
-  branch ref, so what it gains is an apply role where a read-only one belongs —
-  the over-scoped credential without the untrusted code. A role whose claim
-  condition names `environment:<env>-apply` refuses the `<env>-plan` token and
-  the cell fails loudly at the credentials step, before `tofu init`: fail-closed
-  and diagnosable. A role with a repository-wide claim condition does not refuse
-  it, and a plan of any branch someone with push access can push then holds
-  apply credentials — fork pull requests are refused in `detect` before a cell
-  exists. Repositories
-  repinning past the release that wired the plan path check the claim condition
-  on every role a plan environment can reach.
+  **That last sentence is the load-bearing one.** A plan cell executes
+  branch-authored HCL, so whatever role the `aws.plan` tier names is exposed to
+  anyone who can push a branch; a drift cell runs only at the default branch
+  ref, so naming an apply role there gains an over-scoped credential without the
+  untrusted code. A role whose claim condition names `environment:<env>-apply`
+  refuses the `<env>-plan` token and the cell fails loudly at the credentials
+  step, before `tofu init`: fail-closed and diagnosable. A role with a
+  repository-wide claim condition does not refuse it, and a plan of any branch
+  someone with push access can push then holds apply credentials — fork pull
+  requests are refused in `detect` before a cell exists. Check the claim
+  condition on every role a plan environment can reach.
 - **Plan environments must have no approval-type protection rules (required
   reviewers, wait timers) and no deployment branch policy.** An approval rule
   blocks every plan cell outright, and a branch policy blocks every plan cell
@@ -560,8 +524,8 @@ no split of its own.
   readable by the same people for the same reason.
 
   The strongest version of this control is a plan environment with no secret in
-  it at all, and it is reachable today: put a read-only OIDC role's ARN in the
-  plan environment as a *variable*, which the engine's own
+  it at all, and it is reachable today: name a read-only OIDC role in that
+  environment's `aws.plan` tier, which the engine's own
   `configure-aws-credentials` step in the plan cell assumes (`docs/aws.md`
   §Where the credentials step goes), with the role's trust policy conditioned on
   the plan environment's claim (`repo:<owner>/<repo>:environment:<env>-plan`,
@@ -587,11 +551,10 @@ no split of its own.
   on every role reachable from the repository, not only the apply role: see
   "What none of this fixes" for why it is the only bound that holds.
 - **In shared mode the plan path holds the apply role.** The bare `<env>`
-  resolves one role — one `aws.apply` tier in the table, or one `AWS_ROLE_ARN`
-  (or one `AWS_ROLE_ARN_<WORKLOAD>`) on that environment — and the wave jobs use
+  resolves one role — the environment's `aws.apply` tier — and the wave jobs use
   it, so it must be the apply role or every apply fails at
-  provider init — and the plan and drift cells read the same variable from the
-  same environment. So a read-only plan role is unreachable for
+  provider init, and the plan and drift cells resolve that same tier. So a
+  read-only plan role is unreachable for
   every shared env: plan cells assume the write role while executing
   branch-authored HCL ("Plan-time code execution" — a provider or an `external`
   data source runs at plan time), and the nightly drift run assumes it too,
@@ -599,7 +562,7 @@ no split of its own.
   separate the two paths either: both tokens carry
   `repo:<owner>/<repo>:environment:<env>` — byte-identical `sub` — so no trust
   policy can admit the apply job and refuse the plan job. Naming a second role
-  does not help, whether as a separate variable or as an `aws.plan` tier: the
+  does not help, an `aws.plan` tier included: the
   name is not a boundary, and code running in the job can assume any ARN it
   likes. The environment table refuses an `aws.plan` tier on a shared
   environment for that reason, and resolves `aws.apply` on both paths. The one
