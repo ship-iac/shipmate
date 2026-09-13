@@ -78,16 +78,13 @@ all; no consumer file can set it, and no plan run carries it.
 
 The engine runs `aws-actions/configure-aws-credentials` inside the `drift` job,
 in the same position as on the plan path, gated on a role resolving non-empty.
-With a `globals "shipmate"` layout declared that role is the environment's
-`aws.plan` tier in the table. With none, it is `AWS_ROLE_ARN` — or
-`AWS_ROLE_ARN_<WORKLOAD>` for a cell carrying a `workload/<name>` tag — and the
-plan environment the cell binds is where that value
-belongs, not where GitHub stops looking: `vars` resolve organization →
-repository → environment, so a sweep whose plan environments name no role
-assumes a repository- or organization-level `AWS_ROLE_ARN` instead, one set for
-the apply path included. A drift cell runs only default-branch code, so what an
-over-scoped role costs here is write access where a read-only one belongs; the
-role's trust-policy claim condition is what refuses it. See
+That role is the environment's `aws.plan` tier in the table, or
+`aws.plan.workloads[<name>]` for a cell carrying that `workload/<name>` tag. An
+environment with no entry, or an entry whose block resolves nothing on the plan
+tier, resolves no role and the step is skipped. A drift cell runs only
+default-branch code, so what an over-scoped role costs here is write access
+where a read-only one belongs; the role's trust-policy claim condition is what
+refuses it. See
 [`aws.md`](aws.md) §Where the credentials step goes and
 [`hardening.md`](hardening.md) §7–9.
 

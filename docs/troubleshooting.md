@@ -379,35 +379,19 @@ request's current head records, refusing the command when that head names none.
 These fail-safes are defence in depth behind that control, not the only thing
 behind it.
 
-**If the mismatch names *every* `TF_VAR_*` and it started right after an
-environment-naming or `SHIPMATE_SHARED_ENVS` change, the cause is not the plan.**
-The apply job bound an environment that does not exist, GitHub auto-created it
-empty, and no variables reached the cell — which is the loud failure the naming
-is designed to produce on any layout whose environment injects a non-empty
-`TF_VAR_*` or `TF_WORKSPACE`. (A
-folder-per-env layout injects none, hashes the empty set on both sides and so
-never reaches this error at all; see [`../CONTRACT.md`](../CONTRACT.md) §Env
-model for what that layout gives up instead.) A repository taking its identity
-from the environment table is in that same position on every layout: both sides
-derive from `matrix.environment` and hash identically whatever the job bound, so
-the fingerprint still pins plan and apply agreeing on values and no longer pins
-the binding. The environment pre-flight below is then the control that catches a
-mis-binding. In practice the environment
-pre-flight of §`this apply would bind GitHub Environment(s) that do not exist`
-refuses such a run before any wave starts, whatever the layout injects, so
-reaching *this* error from a naming change usually means either the environment
-went missing after the pre-flight passed, or it exists because an
-earlier mis-set run auto-created it empty — an environment that exists satisfies
-the pre-flight and still injects nothing. Two ways to arrive there:
+**If the mismatch names *every* `TF_VAR_*`, look at the environment table
+rather than the plan.** A cell derives its variables from `matrix.environment`
+and the table on the default branch, so both sides hash identically whatever
+environment the job bound: the fingerprint pins plan and apply agreeing on
+values, and pins nothing about the binding. What moves the whole set is the
+table changing between the plan and the apply — an environment's `vars`, its
+`region`, or the `layout` itself, edited on the default branch in between. A
+re-plan is the fix, as above.
 
-- **The mode disagrees with the names.** Split naming (`<env>-plan` +
-  `<env>-apply`) with the env listed in `SHIPMATE_SHARED_ENVS`, or a single bare
-  `<env>` with it not listed. Check the variable against the environments that
-  actually exist — the failing job's own page names the environment it bound, and
-  an empty one that nobody created is the tell.
-- **Spaces after the commas in `SHIPMATE_SHARED_ENVS`.** `dev-eu, dev-us` matches
-  `dev-eu` only: the second entry is ` dev-us` and the comparison is exact, so
-  that env silently stays split. Same symptom, different cause.
+An environment-naming or `SHIPMATE_SHARED_ENVS` change does not reach this
+error: it changes which environment the job binds, not what the cell injects.
+The pre-flight of §`this apply would bind GitHub Environment(s) that do not
+exist` is what refuses a mis-binding, before any wave starts.
 
 ### `plan-cell needs the expected-head input`, or `The plan would describe a tree nobody reviewed`
 
@@ -427,7 +411,7 @@ own fix:
   `expected-head: ${{ needs.facts.outputs.head-sha }}` to the `plan-cell`
   step ([`getting-started.md`](getting-started.md) §Required — plan). This is the
   first thing a repository meets after re-pinning to the release that introduced
-  the input ([`upgrading.md`](upgrading.md) §0.17.0).
+  the input.
 - **The commit checked out is not the commit the run says it is planning.**
   Neither plan trigger checks out the pull request's head — `pull_request_target`
   takes the base branch, `workflow_dispatch` the dispatch ref — so `detect`
@@ -440,9 +424,9 @@ own fix:
   close. `build-matrix` holds the same line one job earlier, in `detect`, and
   states its half of it two ways: `this run checked out <sha>, which is not the
   commit it is planning` when the `ref:` is missing, and `this run did not state
-  the commit it is planning` when the step's own `head-sha` input is absent
-  ([`upgrading.md`](upgrading.md) §0.20.0). Neither is optional and neither has a
-  quiet mode — a run that cannot name its head is refused, not planned.
+  the commit it is planning` when the step's own `head-sha` input is absent.
+  Neither is optional and neither has a quiet mode — a run that cannot name its
+  head is refused, not planned.
 
 ### `this reviewed plan records no planned commit`, or `the reviewed plan was produced from`
 
@@ -470,8 +454,7 @@ remedy differs:
   deploy path can meet an old-format artifact for a cell that was still pending
   when the re-pin merged, and there is no pull request left to push to — the
   remedy there is a follow-up pull request touching those stacks. The way to
-  avoid meeting it at all is to land the re-pin with nothing pending
-  ([`upgrading.md`](upgrading.md) §0.17.0).
+  avoid meeting it at all is to land the re-pin with nothing pending.
 
 This check is per cell and additive: the apply path's plan-run binding — each
 cell's plan run read from an App-authored apply check on that same head — is
@@ -521,11 +504,11 @@ every environment the applies would have bound that the repository does not have
 
 Why `snapshot` refuses instead of warning: GitHub creates a missing environment
 on demand, with no reviewers, no wait timer and no deployment branch policy, and
-the apply then runs inside it. That environment is the only control over an apply
-on a layout injecting no variables — the apply-match fingerprint compares
-variable *content*, and an auto-created environment is byte-identical to a
-legitimately empty shared one — so existence, checked before the waves, is the
-only thing that can tell them apart.
+the apply then runs inside it. Nothing else catches that: a cell's variables come
+from the environment table and `matrix.environment`, so plan and apply hash
+identically whatever environment the job actually bound, and the apply-match
+fingerprint pins nothing about the binding. Existence, checked before the waves,
+is the only control.
 
 Two fixes, and the error names both because either can be the right one:
 
@@ -560,11 +543,10 @@ Two neighbouring failures from the same step, both also fail-closed:
 
 What this does not cover, deliberately: the plan-side binding (that is in
 your own `shipmate.yml`, which the engine cannot read), an environment
-that exists but is empty or mis-scoped (the fingerprint and `shipmate doctor`
-cover content), and an environment deleted between the pre-flight and the wave
-that binds it.
+that exists but is mis-scoped or unprotected (`shipmate doctor`'s subject), and
+an environment deleted between the pre-flight and the wave that binds it.
 
-### A table-mode cell fails with no AWS credential
+### A cell fails with no AWS credential
 
 The credentials step is skipped and the cell fails at `tofu init` with no role
 assumed, on a `folder` or `workspace` layout. Under `dry` this does not happen:
@@ -586,7 +568,9 @@ terramate debug show globals
 
 That command evaluates every attribute and exits nonzero, naming the file, the
 line and the attribute (`This object does not have an attribute named "..."`).
-The engine's own read is a `tm_try`, which is what makes the drop silent.
+Terramate drops the attribute during globals evaluation, before the engine
+reads anything, which is what makes the drop silent: the engine has no way to
+tell the dropped attribute from one that was never written.
 
 An `environments` that is genuinely empty is a valid shape, so its absence alone
 is not the diagnosis: a credential-free repository declaring `globals "shipmate"
@@ -798,8 +782,7 @@ that states no head repository is refused too, with a message naming the input.
 Engine `plan.yml` fills that input from its own `facts` job, so on a current pin
 the message means what it says — the head really is elsewhere. On an older pin
 the same message can come from a hand-written consumer workflow
-whose `build-matrix` step never passed the input (`docs/upgrading.md` §0.20.0,
-and §0.18.0 for the release that first required it). Engine `drift.yml` says it
+whose `build-matrix` step never passed the input. Engine `drift.yml` says it
 has no pull request at all with `no-pull-request: "true"` instead
 (`docs/drift.md`).
 

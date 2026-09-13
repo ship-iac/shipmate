@@ -2191,36 +2191,20 @@ def test_every_retired_filename_present_is_reported_and_never_deleted(tmp_path):
 SPLIT_CHECKLIST = """
 Still yours — these values are the consumer's, so this script cannot set them.
 
-Per environment, the cloud role and the env identity your layout injects. A
-DRY/dynamic backend needs TF_VAR_env and TF_VAR_region, workspace-per-env needs
-TF_WORKSPACE, folder-per-env needs neither (CONTRACT.md §Env model). A cell
-carrying a workload/<name> tag reads AWS_ROLE_ARN_<WORKLOAD> first, on the plan
-and the apply path alike (docs/aws.md §Environment variables).
-
-These variables are one of two sources, and this script writes neither. A
-repository declaring a globals "shipmate" layout takes identity, roles and
-regions from that table on its default branch instead and sets none of the
-variables below; the table is the source branch content cannot rewrite
-(CONTRACT.md §Environment table).
-
-  gh variable set AWS_ROLE_ARN --env dev-eu-plan --body <value>
-  gh variable set AWS_REGION --env dev-eu-plan --body <value>
-  gh variable set TF_VAR_env --env dev-eu-plan --body <value>
-  gh variable set TF_VAR_region --env dev-eu-plan --body <value>
-  gh variable set TF_WORKSPACE --env dev-eu-plan --body <value>
-
-  gh variable set AWS_ROLE_ARN --env dev-eu-apply --body <value>
-  gh variable set AWS_REGION --env dev-eu-apply --body <value>
-  gh variable set TF_VAR_env --env dev-eu-apply --body <value>
-  gh variable set TF_VAR_region --env dev-eu-apply --body <value>
-  gh variable set TF_WORKSPACE --env dev-eu-apply --body <value>
-
 Repository-wide, both optional:
 
   gh secret set SHIPMATE_PLAN_PASSPHRASE
   gh variable set SLACK_WEBHOOK --body <value>
 
 By hand:
+
+  A `globals "shipmate"` block declaring `layout`, plus an `environments` entry for
+  every environment that needs a region or a cloud role — under `layout = "dry"`
+  every environment needs one, carrying a region, or the run refuses. Entries are
+  keyed by the logical environment name (`dev-eu`), never by its `-plan` /
+  `-apply` half.
+  Each cell resolves its identity from that table on the default branch, and a
+  repository without one refuses (CONTRACT.md §Environment table).
 
   Add o/r to the App installation's repository selection, at
   https://github.com/organizations/<org>/settings/apps/shipmate/installations
@@ -2232,22 +2216,24 @@ By hand:
 
   A CODEOWNERS entry covering /.github/workflows/.
 
-  Commit the workflow file and open the pull request. `shipmate / gate` cannot be
-  green on that one: the workflows that produce it are not on the default branch
-  yet (CONTRACT.md §Post-plan topology). Merge it with an administrative bypass.
+  Commit the workflow file and the table together and open the pull request; the
+  table is read from the default branch, so the first plan needs it merged.
+  `shipmate / gate` cannot be green on that one either: the workflows that produce
+  it are not on the default branch yet (CONTRACT.md §Post-plan topology). Merge it
+  with an administrative bypass.
 """
 
 
 def test_the_checklist_names_every_value_the_script_cannot_set(capsys):
-    """The printed block is the only place a consumer learns which values remain.
-    A name dropped from it is a repository that looks reconciled and cannot plan.
+    """The printed block is the only place a consumer learns what remains to be done.
+    A step dropped from it is a repository that looks reconciled and cannot plan.
 
     The block is compared whole against a hand-written constant, because a membership
-    check would pass a block that silently lost one -- and cannot see a wrong `--env`
-    argument, a dropped `gh` prefix, or a line that lost its command.
+    check would pass a block that silently lost one item -- and cannot see a dropped `gh`
+    prefix or a line that lost its command.
 
-    Mutations, each proven: delete SHIPMATE_PLAN_PASSPHRASE from the block; write
-    `--env dev-eu` where the environment half belongs.
+    Mutations, each proven: delete SHIPMATE_PLAN_PASSPHRASE from the block; delete the
+    environment-table item from the `By hand` list.
     """
     onboard._checklist(ctx(repo="o/r", envs=["dev-eu"], shared=set()))
     assert capsys.readouterr().out == SPLIT_CHECKLIST
@@ -2258,30 +2244,20 @@ def test_the_checklist_names_every_value_the_script_cannot_set(capsys):
 SHARED_CHECKLIST = """
 Still yours — these values are the consumer's, so this script cannot set them.
 
-Per environment, the cloud role and the env identity your layout injects. A
-DRY/dynamic backend needs TF_VAR_env and TF_VAR_region, workspace-per-env needs
-TF_WORKSPACE, folder-per-env needs neither (CONTRACT.md §Env model). A cell
-carrying a workload/<name> tag reads AWS_ROLE_ARN_<WORKLOAD> first, on the plan
-and the apply path alike (docs/aws.md §Environment variables).
-
-These variables are one of two sources, and this script writes neither. A
-repository declaring a globals "shipmate" layout takes identity, roles and
-regions from that table on its default branch instead and sets none of the
-variables below; the table is the source branch content cannot rewrite
-(CONTRACT.md §Environment table).
-
-  gh variable set AWS_ROLE_ARN --env dev-eu --body <value>
-  gh variable set AWS_REGION --env dev-eu --body <value>
-  gh variable set TF_VAR_env --env dev-eu --body <value>
-  gh variable set TF_VAR_region --env dev-eu --body <value>
-  gh variable set TF_WORKSPACE --env dev-eu --body <value>
-
 Repository-wide, both optional:
 
   gh secret set SHIPMATE_PLAN_PASSPHRASE
   gh variable set SLACK_WEBHOOK --body <value>
 
 By hand:
+
+  A `globals "shipmate"` block declaring `layout`, plus an `environments` entry for
+  every environment that needs a region or a cloud role — under `layout = "dry"`
+  every environment needs one, carrying a region, or the run refuses. Entries are
+  keyed by the logical environment name (`dev-eu`), never by its `-plan` /
+  `-apply` half.
+  Each cell resolves its identity from that table on the default branch, and a
+  repository without one refuses (CONTRACT.md §Environment table).
 
   Add o/r to the App installation's repository selection, at
   https://github.com/organizations/<org>/settings/apps/shipmate/installations
@@ -2290,9 +2266,11 @@ By hand:
 
   A CODEOWNERS entry covering /.github/workflows/.
 
-  Commit the workflow file and open the pull request. `shipmate / gate` cannot be
-  green on that one: the workflows that produce it are not on the default branch
-  yet (CONTRACT.md §Post-plan topology). Merge it with an administrative bypass.
+  Commit the workflow file and the table together and open the pull request; the
+  table is read from the default branch, so the first plan needs it merged.
+  `shipmate / gate` cannot be green on that one either: the workflows that produce
+  it are not on the default branch yet (CONTRACT.md §Post-plan topology). Merge it
+  with an administrative bypass.
 """
 
 
@@ -2351,8 +2329,8 @@ def test_a_plan_environment_with_a_branch_policy_reports_the_policy_alone(monkey
 def test_the_checklist_skips_an_environment_the_reconciler_left_alone(capsys):
     """`_reconcile_envs` touches neither half of an environment holding both a bare
     `<env>` and an `<env>-apply`, because which the engine binds is undecided. Naming
-    those halves in the checklist tells a consumer to set variables on environments the
-    run refused to reconcile, one of which it may then delete.
+    those halves in the checklist puts an `<env>-apply` the run refused to reconcile --
+    and may then delete -- on the `Required reviewers` line.
 
     `dev-us` contributes nothing, so the expected block is the split constant unchanged.
 

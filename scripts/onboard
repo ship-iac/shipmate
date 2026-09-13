@@ -926,28 +926,12 @@ def _reconcile_shims(ctx):
             )
 
 
-_LAYOUT = """Per environment, the cloud role and the env identity your layout injects. A
-DRY/dynamic backend needs TF_VAR_env and TF_VAR_region, workspace-per-env needs
-TF_WORKSPACE, folder-per-env needs neither (CONTRACT.md §Env model). A cell
-carrying a workload/<name> tag reads AWS_ROLE_ARN_<WORKLOAD> first, on the plan
-and the apply path alike (docs/aws.md §Environment variables).
-
-These variables are one of two sources, and this script writes neither. A
-repository declaring a globals "shipmate" layout takes identity, roles and
-regions from that table on its default branch instead and sets none of the
-variables below; the table is the source branch content cannot rewrite
-(CONTRACT.md §Environment table)."""
-
-_ENV_VARS = ("AWS_ROLE_ARN", "AWS_REGION", "TF_VAR_env", "TF_VAR_region", "TF_WORKSPACE")
-
-
 def _checklist(ctx):
     """Print the values and steps this script cannot supply, as commands to fill in.
 
-    Which of `TF_VAR_env`+`TF_VAR_region` or `TF_WORKSPACE` an environment needs is a
-    property of the stacks' layout and is not readable from outside them, so all three
-    are printed with the CONTRACT.md sentence rather than guessed. Every `<...>` is a
-    placeholder to substitute, so no line here runs as printed.
+    The environment table is asked for by hand because its layout, roles and regions are
+    values this script cannot know. Every `<value>` is a placeholder to substitute, so no
+    line carrying one runs as printed.
     """
     halves = [
         (env, name, role)
@@ -959,19 +943,20 @@ def _checklist(ctx):
         "",
         "Still yours — these values are the consumer's, so this script cannot set them.",
         "",
-        _LAYOUT,
-    ]
-    for _env, name, _role in halves:
-        out.append("")
-        out += [f"  gh variable set {v} --env {name} --body <value>" for v in _ENV_VARS]
-    out += [
-        "",
         "Repository-wide, both optional:",
         "",
         "  gh secret set SHIPMATE_PLAN_PASSPHRASE",
         "  gh variable set SLACK_WEBHOOK --body <value>",
         "",
         "By hand:",
+        "",
+        '  A `globals "shipmate"` block declaring `layout`, plus an `environments` entry for',
+        '  every environment that needs a region or a cloud role — under `layout = "dry"`',
+        "  every environment needs one, carrying a region, or the run refuses. Entries are",
+        "  keyed by the logical environment name (`dev-eu`), never by its `-plan` /",
+        "  `-apply` half.",
+        "  Each cell resolves its identity from that table on the default branch, and a",
+        "  repository without one refuses (CONTRACT.md §Environment table).",
         "",
         f"  Add {ctx['repo']} to the App installation's repository selection, at",
         "  https://github.com/organizations/<org>/settings/apps/shipmate/installations",
@@ -992,9 +977,11 @@ def _checklist(ctx):
         "",
         "  A CODEOWNERS entry covering /.github/workflows/.",
         "",
-        f"  {verb} the workflow file and open the pull request. `shipmate / gate` cannot be",
-        "  green on that one: the workflows that produce it are not on the default branch",
-        "  yet (CONTRACT.md §Post-plan topology). Merge it with an administrative bypass.",
+        f"  {verb} the workflow file and the table together and open the pull request; the",
+        "  table is read from the default branch, so the first plan needs it merged.",
+        "  `shipmate / gate` cannot be green on that one either: the workflows that produce",
+        "  it are not on the default branch yet (CONTRACT.md §Post-plan topology). Merge it",
+        "  with an administrative bypass.",
     ]
     print("\n".join(out))
 

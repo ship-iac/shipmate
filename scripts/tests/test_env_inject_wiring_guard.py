@@ -1,12 +1,11 @@
-"""The route a cell's identity variables take: job-level `SHIPMATE_LEGACY_*`, then `env-inject`.
+"""The route a cell's identity variables take: the matrix row, then `env-inject`.
 
 `TF_VAR_env`, `TF_VAR_region` and `TF_WORKSPACE` used to be job-level `env:` bindings read
 straight from `vars.*`. They now reach the process through `scripts/env-inject`, which writes
-`$GITHUB_ENV` from one of two sources: the renamed `SHIPMATE_LEGACY_*` bindings, or the matrix
-row's `tf_vars` carried in as `SHIPMATE_TF_VARS`. Three things can silently break that route:
-one of eleven cell jobs missing a binding, a cell step or action dropping one of the two
-identity inputs, and an `env-inject` step that runs after the plan it was supposed to feed. All
-leave a green run and a wrong fingerprint.
+`$GITHUB_ENV` from the matrix row's `tf_vars`, carried in as `SHIPMATE_TF_VARS`. Three things can
+silently break that route: a cell step or action dropping the identity input, a workflow binding
+one of the old names on the job (which beats `$GITHUB_ENV`), and an `env-inject` step that runs
+after the plan it was supposed to feed. All leave a green run and a wrong fingerprint.
 
 Every assertion is a whole hand-written value against `yaml.safe_load` output. A membership check
 passes an entry whose expression was mistyped; a substring check is satisfied by a comment.
@@ -14,9 +13,7 @@ passes an entry whose expression was mistyped; a substring check is satisfied by
 
 import pytest
 import yaml
-from _loader import ACTIONS, WORKFLOWS, action_steps, load_script, run_lines
-
-env_inject = load_script("env-inject")
+from _loader import ACTIONS, WORKFLOWS, action_steps, run_lines
 
 #: The jobs that run a cell, hand-written. `test_the_registry_names_every_job_that_runs_a_cell`
 #: derives the same set from the files, so a twelfth cell job reds rather than going unguarded.
@@ -36,45 +33,22 @@ _CELL_JOBS = {
     ),
 }
 
-#: The whole `env:` block every cell job writes, byte-identical across all eleven. The first
-#: three are what `env-inject` reads; the last three are injected under no name and exist so
-#: the rename happens once. In table mode all six are reported as superseded when non-empty.
-#: Uppercase here because GitHub uppercases variable names -- the names
-#: `env-inject` writes are lowercase after the prefix, and that difference is the fingerprint.
-_LEGACY_ENV = {
-    "SHIPMATE_LEGACY_TF_VAR_ENV": "${{ vars.TF_VAR_env }}",
-    "SHIPMATE_LEGACY_TF_VAR_REGION": "${{ vars.TF_VAR_region }}",
-    "SHIPMATE_LEGACY_TF_WORKSPACE": "${{ vars.TF_WORKSPACE }}",
-    "SHIPMATE_LEGACY_AWS_ROLE_ARN": "${{ vars.AWS_ROLE_ARN }}",
-    "SHIPMATE_LEGACY_AWS_REGION": "${{ vars.AWS_REGION }}",
-    "SHIPMATE_LEGACY_AWS_ROLE_ARN_WORKLOAD": (
-        "${{ matrix.workload_var != '' && "
-        "vars[format('AWS_ROLE_ARN_{0}', matrix.workload_var)] || '' }}"
-    ),
-}
-
-#: The bindings the rename replaced. No workflow may set them again: two writers for one name
-#: would make precedence load-bearing, and the job-level one wins over `$GITHUB_ENV`.
+#: The names `env-inject` writes to `$GITHUB_ENV`. No workflow may bind them on a job: a
+#: job-level `env:` entry wins over `$GITHUB_ENV`, so one would silently outrank the table.
 _OLD_NAMES = ("TF_VAR_env", "TF_VAR_region", "TF_WORKSPACE")
 
 _CELL_ACTIONS = ("plan-cell", "apply-cell", "drift-cell", "unlock-cell")
 
 _INJECT_STEP = "Inject identity variables"
 _INJECT_RUN = 'python3 "$GITHUB_ACTION_PATH/../../scripts/env-inject"'
-_INJECT_ENV = {
-    "SHIPMATE_CONFIG_MODE": "${{ inputs.config-mode }}",
-    "SHIPMATE_TF_VARS": "${{ inputs.tf-vars }}",
-}
+_INJECT_ENV = {"SHIPMATE_TF_VARS": "${{ inputs.tf-vars }}"}
 
-#: The identity inputs every cell step passes, and the only two of its `with:` entries this
-#: file owns. `toJSON` is load-bearing: `tf_vars` is a mapping, and a mapping interpolated
-#: into a string input arrives as GHA's own `Object` rendering, which is not JSON.
-_CELL_STEP_WITH = {
-    "config-mode": "${{ matrix.config_mode }}",
-    "tf-vars": "${{ toJSON(matrix.tf_vars) }}",
-}
+#: The identity input every cell step passes, and the only `with:` entry this file owns.
+#: `toJSON` is load-bearing: `tf_vars` is a mapping, and a mapping interpolated into a string
+#: input arrives as GHA's own `Object` rendering, which is not JSON.
+_CELL_STEP_WITH = {"tf-vars": "${{ toJSON(matrix.tf_vars) }}"}
 
-_IDENTITY_INPUTS = ("config-mode", "tf-vars")
+_IDENTITY_INPUTS = ("tf-vars",)
 
 _ELEVEN = [(wf, job) for wf, jobs in _CELL_JOBS.items() for job in jobs]
 
@@ -110,39 +84,12 @@ def test_the_registry_names_every_job_that_runs_a_cell():
     assert found == set(_ELEVEN)
 
 
-@pytest.mark.parametrize(("workflow", "job_id"), _ELEVEN, ids=lambda v: v)
-def test_every_cell_job_carries_the_six_legacy_bindings(workflow, job_id):
-    """The whole block against one hand-written constant, so all eleven copies stay identical.
-    A wave job that loses `SHIPMATE_LEGACY_TF_WORKSPACE` injects no workspace and plans the wrong
-    one, and a wave whose expressions drift from the constant is a wave nobody reviewed against
-    the other ten.
-
-    Mutations: delete one binding from one wave job; change one wave's `vars.TF_VAR_env` to
-    `vars.TF_VAR_ENV`.
-    """
-    assert _jobs(_doc(workflow))[job_id]["env"] == _LEGACY_ENV
-
-
-def test_the_jobs_bind_exactly_the_names_env_inject_accepts():
-    """The two lists that must move together: `_LEGACY_ENV` is what the eleven cell jobs bind,
-    `_ACCEPTED` is what `env-inject` tolerates. A name in the first and not the second refuses
-    every cell in production; the reverse is a name nothing binds. Neither side notices alone --
-    `test_every_cell_job_carries_the_six_legacy_bindings` reds only if a job drifts from the
-    registry, and `test_unrecognised_legacy_binding_refuses_by_name` only if the script's own
-    message does.
-
-    Mutations: add a seventh name to `_LEGACY_ENV` and to every cell job; or add one to
-    `env-inject`'s `_SUPERSEDED`.
-    """
-    assert set(_LEGACY_ENV) == set(env_inject._ACCEPTED)
-
-
 def test_no_workflow_binds_the_old_names():
     """Absence, across every workflow rather than the four this file otherwise names: a fifth
     workflow that gains one later must red. The coverage assertions below are what keep an
     absence check from passing over an empty scan.
 
-    Mutation: restore `TF_VAR_env: ${{ vars.TF_VAR_env }}` beside its replacement in any job.
+    Mutation: add `TF_VAR_env: ${{ vars.TF_VAR_env }}` to any job's `env:` block.
     """
     visited, offenders = set(), []
 
@@ -167,14 +114,14 @@ def test_no_workflow_binds_the_old_names():
 
 
 @pytest.mark.parametrize(("workflow", "job_id"), _ELEVEN, ids=lambda v: v)
-def test_every_cell_step_passes_the_identity_inputs_from_its_matrix_row(workflow, job_id):
-    """The last hop: `config_mode` and `tf_vars` are stamped on every matrix row, and a cell step
-    that does not forward them hands the action empty inputs, which `env-inject` refuses. A grep
-    run once at authoring time does not stop a twelfth step from omitting one, so the eleven are
-    checked against the same registry every other property here uses.
+def test_every_cell_step_passes_the_identity_input_from_its_matrix_row(workflow, job_id):
+    """The last hop: `tf_vars` is stamped on every matrix row, and a cell step that does not
+    forward it hands the action an empty input, which `env-inject` refuses. A grep run once at
+    authoring time does not stop a twelfth step from omitting it, so the eleven are checked
+    against the same registry every other property here uses.
 
     Mutations: delete the `tf-vars:` line from one wave job's `with:`; drop the `toJSON()` and
-    pass `${{ matrix.tf_vars }}`; bind `config-mode` from `matrix.environment`.
+    pass `${{ matrix.tf_vars }}`.
     """
     steps = [s for s in (_jobs(_doc(workflow))[job_id].get("steps") or []) if _runs_a_cell(s)]
     assert len(steps) == 1, f"{workflow}:{job_id}: {len(steps)} cell steps"
@@ -202,13 +149,12 @@ def test_each_cell_action_injects_before_it_runs_terramate(action):
 
 @pytest.mark.parametrize("action", _CELL_ACTIONS)
 def test_each_cell_action_forwards_its_identity_inputs(action):
-    """The step's whole `env:` mapping, which is these two entries: the six `SHIPMATE_LEGACY_*`
-    names are set on the job and inherited, so they never appear here. This is the second hop and
-    nothing else pins it -- drop a binding and the job still sets all six, the workflow still
-    passes both inputs, and every cell of this action either refuses or injects nothing.
+    """The step's whole `env:` mapping, which is this one entry. This is the second hop and
+    nothing else pins it -- drop the binding and the workflow still passes the input, and every
+    cell of this action refuses.
 
-    Mutations: delete either binding; bind the mode from `env.SHIPMATE_CONFIG_MODE` instead of
-    `inputs.config-mode`.
+    Mutations: delete the binding; bind it from `env.SHIPMATE_TF_VARS` instead of
+    `inputs.tf-vars`.
     """
     hits = [s for s in action_steps(action) if s.get("name") == _INJECT_STEP]
     assert len(hits) == 1, f"{action}: {len(hits)} '{_INJECT_STEP}' steps"
@@ -217,14 +163,12 @@ def test_each_cell_action_forwards_its_identity_inputs(action):
 
 
 @pytest.mark.parametrize("action", _CELL_ACTIONS)
-def test_each_cell_action_declares_the_identity_inputs_without_a_default(action):
-    """No default is what makes an omitted `config-mode:` or `tf-vars:` fail closed. GHA does not
-    enforce `required: true` on a composite action input, so the value arrives empty and
-    `env-inject` refuses -- a default would make it silently run legacy, or inject nothing where
-    the table resolved something.
+def test_each_cell_action_declares_the_identity_input_without_a_default(action):
+    """No default is what makes an omitted `tf-vars:` fail closed. GHA does not enforce
+    `required: true` on a composite action input, so the value arrives empty and `env-inject`
+    refuses -- a default would inject nothing where the table resolved something.
 
-    Mutations: add `default: legacy` to one action's `config-mode`, or `default: "{}"` to its
-    `tf-vars`.
+    Mutation: add `default: "{}"` to one action's `tf-vars`.
     """
     spec = yaml.safe_load((ACTIONS / action / "action.yml").read_text(encoding="utf-8"))
     for name in _IDENTITY_INPUTS:

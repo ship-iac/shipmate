@@ -59,35 +59,6 @@ def workload_of(tags):
     return ""
 
 
-def workload_var(workload):
-    """The `AWS_ROLE_ARN_<WORKLOAD>` suffix for a workload name.
-
-    GitHub upper-cases variable names and GHA expressions have no toUpper, so
-    this key can only be computed here. ONE definition: apply-detect and
-    apply-all-detect attach it to their artifact-derived cells too, and a second
-    copy would eventually disagree with this one."""
-    return workload.upper().replace("-", "_")
-
-
-def guard_workload_var_collisions(cells):
-    """`workload_var` is not injective: `net-edge` and `net_edge` both render
-    NET_EDGE. Fail closed rather than pick one -- the losing workload's cells
-    would apply under an IAM role that is not theirs."""
-    by_var = {}
-    for c in cells:
-        if c["workload"]:
-            by_var.setdefault(c["workload_var"], set()).add(c["workload"])
-    for var, workloads in sorted(by_var.items()):
-        if len(workloads) > 1:
-            tags = ", ".join(f"workload/{w}" for w in sorted(workloads))
-            raise SystemExit(
-                f"::error::{tags} all map to AWS_ROLE_ARN_{var}: the variable name upper-cases "
-                "the tag and replaces '-' with '_', so one Environment variable would have to "
-                "hold every one of those workloads' role ARNs and some cells would apply under "
-                "an IAM identity that is not theirs. Rename one workload tag."
-            )
-
-
 def guard_slug_collisions(cells):
     """A plan artifact is `plan.<env>.<path with '/' replaced by '-'>`, so `a/b`
     and `a-b` in one environment produce ONE artifact name and an apply
@@ -181,7 +152,6 @@ def build_matrix(envs, stacks_by_env, tags_by_stack, tags=""):
                     "stack": stack,
                     "environment": env,
                     "workload": workload,
-                    "workload_var": workload_var(workload),
                 }
             )
     cells.sort(key=lambda c: (c["environment"], c["stack"]))
@@ -189,7 +159,6 @@ def build_matrix(envs, stacks_by_env, tags_by_stack, tags=""):
     for reserved, message in RESERVED_STACK_PATHS.items():
         if any(c["stack"] == reserved for c in cells):
             raise SystemExit(message)
-    guard_workload_var_collisions(cells)
     guard_slug_collisions(cells)
     if len(cells) > MATRIX_LIMIT:
         raise MatrixTooLarge(
@@ -283,7 +252,8 @@ RT_VARS = ("TF_VAR_env", "TF_VAR_region", "TF_WORKSPACE")
 
 def assert_run_env_roundtrip(stack_dir):
     """Fail loud when the consuming repository's `terramate.config.run.env`
-    rewrites one of the three variables the GitHub Environment injects.
+    rewrites one of the three identity variables a `dry` or `workspace` layout
+    derives.
 
     `run.env` is applied to the child process AFTER the ambient environment, so
     it wins. `plan-classify --fingerprint-only` runs outside `terramate run`, so
@@ -296,9 +266,9 @@ def assert_run_env_roundtrip(stack_dir):
 
     A `terramate run` that cannot even start is a different fact from one that
     ran and reported a rewrite, and only the second is this repository's defect:
-    detect binds no GitHub Environment, so a `run.env` merely READING a variable
-    the plan/apply Environment supplies fails to evaluate here while every plan
-    cell evaluates it fine. Warn and move on -- the shape this refuses is a
+    detect runs no cell, so `scripts/env-inject` has written none of the three into
+    its environment, and a `run.env` merely READING one of them fails to evaluate
+    here while every plan cell evaluates it fine. Warn and move on -- the shape this refuses is a
     `run.env` that ASSIGNS one of the three, which always evaluates."""
     p = _run(
         [
@@ -369,18 +339,6 @@ def env_config(cells, all_envs=None):
     return ec.validate(ec.read_table(), envs, shared, all_envs=all_envs), shared
 
 
-def _resolved(table, cell, tier, shared_envs):
-    """What the table resolves for one cell, or the legacy values when there is no table.
-
-    An untabled repository never calls `resolve()`: it has no entry for any environment, so
-    every field would have to be invented. The four cell actions read none of these five in
-    legacy mode.
-    """
-    if "layout" not in table:
-        return {"role_arn": "", "cred_region": "", "tf_vars": {}, "config_path": ""}
-    return ec.resolve(table, cell["environment"], tier, cell["workload"], shared_envs)
-
-
 def stamp_rows(cells, table, tier, shared_envs):
     """Stamp each row with what the table resolves for it.
 
@@ -388,13 +346,11 @@ def stamp_rows(cells, table, tier, shared_envs):
     explicitly: one call site serves both tiers, so nothing may infer it. Applied at each
     site that emits rows rather than inside `build_matrix`, which stays pure and
     unit-testable; `run_unlock` returns from `apply-detect`'s `main` early, so a stamp in any
-    `main` tail would skip the unlock path. The mode has no default and is never inferred
-    from a resolved field being empty -- `layout = "folder"` legitimately emits no
-    `tf_vars`. `test_row_stamp_guard.py` pins each site.
+    `main` tail would skip the unlock path. `test_row_stamp_guard.py` pins each site.
     """
-    mode = "table" if "layout" in table else "legacy"
     return [
-        {**cell, "config_mode": mode, **_resolved(table, cell, tier, shared_envs)} for cell in cells
+        {**cell, **ec.resolve(table, cell["environment"], tier, cell["workload"], shared_envs)}
+        for cell in cells
     ]
 
 

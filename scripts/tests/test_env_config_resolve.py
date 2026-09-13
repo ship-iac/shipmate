@@ -163,9 +163,9 @@ def test_the_provider_region_wins_over_the_environment_region():
 
 # --- 4: the workload tier is keyed by the raw workload --------------------------------
 
-#: `workload_var` is not injective: `net-edge` and `net_edge` both render NET_EDGE, so a
-#: resolution keyed on the mangled name cannot tell these two apart. These are resolve()
-#: unit tests and never reach `build_matrix`, so its collision guard does not fire.
+#: Two workloads whose tag values differ only in '-' against '_'. A resolution that
+#: normalized the key before the lookup could not tell them apart, and one of them would
+#: apply under a role that is not its own.
 _COLLIDING = {
     "layout": "folder",
     "environments": {
@@ -185,9 +185,9 @@ _COLLIDING = {
 }
 
 
-def test_two_workloads_mangling_to_one_name_resolve_separately():
-    """Mutation: key the tier on `workload_var` -- both workloads then resolve to
-    whichever entry sorted last, and one applies under a role that is not its own."""
+def test_two_workloads_differing_only_in_separator_resolve_separately():
+    """Mutation: normalize the key -- `{label}.workloads.{workload.upper().replace('-', '_')}`
+    -- and neither entry matches, so both cells silently take the tier's own apply role."""
     assert env_config.resolve(_COLLIDING, "dev-eu", "apply", "net-edge", ()) == {
         "role_arn": "arn:aws:iam::9817:role/hyphen",
         "cred_region": "eu-west-1",
@@ -294,11 +294,11 @@ def test_an_environment_absent_from_the_table_resolves_no_credential(monkeypatch
     `workspace`, not `dry` -- a matrix environment absent from a `dry` table is refused
     by validation instead.
 
-    Mutation: fall back to `SHIPMATE_LEGACY_AWS_ROLE_ARN`, which is branch-editable and
-    is the whole reason the table is read from the default branch.
+    Mutation: fall back to `AWS_ROLE_ARN`, a repository variable, which is branch-editable
+    and is the whole reason the table is read from the default branch.
     """
-    monkeypatch.setenv("SHIPMATE_LEGACY_AWS_ROLE_ARN", "arn:aws:iam::9817:role/legacy")
-    monkeypatch.setenv("SHIPMATE_LEGACY_AWS_REGION", "us-east-1")
+    monkeypatch.setenv("AWS_ROLE_ARN", "arn:aws:iam::9817:role/loose")
+    monkeypatch.setenv("AWS_REGION", "us-east-1")
     table = {"layout": "workspace", "environments": {"dev-eu": {"region": "eu-west-1"}}}
     assert env_config.resolve(table, "prod-us", "plan", "", ()) == {
         "role_arn": "",

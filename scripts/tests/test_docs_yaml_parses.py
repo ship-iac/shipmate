@@ -363,9 +363,9 @@ def test_the_documented_wrapper_inputs_are_exactly_these():
     cannot see an input that was deleted. Adding an input here is a deliberate edit that must
     state its shape, which is the point, because `required` is what a new input drifts to.
 
-    Out of reach: a fence showing an input block as a fragment, with no `on:` above it, of which
-    `docs/upgrading.md`'s migration snippet is one. Those are illustrative; the copyable wrapper
-    in `getting-started.md` is what consumers paste, and it is what this pins.
+    Out of reach: a fence showing an input block as a fragment, with no `on:` above it. Such a
+    fence is illustrative; the copyable wrapper in `getting-started.md` is what consumers paste,
+    and it is what this pins.
 
     Mutations: drop `unlock` from the fence's `options:` list; swap `verb` to
     `required: false`.

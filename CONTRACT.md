@@ -170,8 +170,8 @@ never used.
   GitHub Environments named after it: `staging-plan` and `staging-apply` by
   default, or a single `staging` in shared mode (both namings below). The
   Environment is always the unit of binding, apply-gating, protection, and the
-  plan/apply split — even when it carries no variables. What it injects
-  depends on how the consumer repo models environments (its IaC layout):
+  plan/apply split; the engine reads no identity variable from it. What a cell
+  injects depends on how the consumer repo models environments (its IaC layout):
 
   | Repo layout | Env identity injected | Mechanism |
   |-------------|--------------------------------------------------|-----------|
@@ -183,45 +183,33 @@ never used.
   target for real consumer repos and shipmate's internal adoption. The other
   two are proven-generalization layouts (sample repos
   `repo-example-workspaces` / `repo-example-folders`). The folder layout
-  trades away shipmate's "add an env = GitHub Environment + tags, zero code"
-  property: adding an env there means adding leaf directories (a code change).
-  Membership in an environment is always by tag, regardless of layout.
+  trades away shipmate's "add an env = table entry + GitHub Environment + tags,
+  zero code" property: adding an env there means adding leaf directories (a code
+  change). Membership in an environment is always by tag, regardless of layout.
 
-  **Which source supplies those values is the consumer's choice.** A repository
-  that declares a `globals "shipmate"` layout takes them from the environment
-  table on the default branch (§Environment table); one that does not takes them
-  from the GitHub Environment variables named in the rest of this section. The
-  layouts, the names and the values are the same either way — only the source
-  differs.
-- **One writer puts those variables in the cell's process.** In legacy mode the
-  Environment a cell binds supplies them, and a cell job binds `vars.TF_VAR_env`,
-  `vars.TF_VAR_region` and `vars.TF_WORKSPACE` — under the names
-  `SHIPMATE_LEGACY_TF_VAR_ENV`, `SHIPMATE_LEGACY_TF_VAR_REGION` and
-  `SHIPMATE_LEGACY_TF_WORKSPACE`. `scripts/env-inject` reads those three — or, in
-  table mode, the row's `tf_vars` and nothing else — and writes `TF_VAR_env`,
-  `TF_VAR_region` and `TF_WORKSPACE` into `$GITHUB_ENV`, in a step that runs
-  before the cell's `terramate run`. Two sources for one name would make
-  precedence load-bearing, so there is exactly one, selected by the mode and
-  never by either source being empty.
-  - **The injected names are lowercase after the prefix.** GitHub uppercases
-    variable names, the process environment does not, and `TF_VAR_ENV` is a
-    different variable from the `TF_VAR_env` OpenTofu reads — one that changes
-    the apply-match fingerprint and fails every apply as stale.
-  - An unset `vars.*` still arrives as the empty string and is written through
-    as empty rather than dropped, which is what the fingerprint already
-    excludes (see Apply-match fingerprint, below). Nothing about what a cell's
-    process holds, or hashes, changed with the writer.
-  - Every matrix row carries `config_mode`, and each cell action takes two
-    identity inputs, neither with a default: `config-mode`, the row's mode, and
-    `tf-vars`, the row's resolved `tf_vars` serialised with `toJSON`. `legacy` —
-    resolve identity from the three bindings above — is what a repository with
-    no `globals "shipmate"` layout emits; a repository that declares one emits
-    `table`, and its rows also carry `role_arn`, `cred_region`, `tf_vars` and
-    `config_path`, resolved from the table on the default branch (§Environment
-    table). Any other mode, an omitted input included, is refused before
-    `terramate run` rather than treated as `legacy`. `tf-vars` is read only in
-    table mode, where anything but a JSON object of strings is refused; the
-    empty object is a legitimate value and an omitted input is not.
+  **The environment table supplies those values.** Every repository declares a
+  `globals "shipmate"` layout, and every cell takes its identity from the
+  environment table on the repository's default branch (§Environment table).
+  There is no second source and no repository-variable path.
+- **One writer puts those variables in the cell's process.**
+  `scripts/env-inject` reads the row's `tf_vars` and nothing else, and writes
+  every entry of it into `$GITHUB_ENV` under the name the table resolved, in a
+  step that runs before the cell's `terramate run`. Two sources for one name would
+  make precedence load-bearing, so there is exactly one.
+  - **The injected names are lowercase after the prefix.** `TF_VAR_ENV` is a
+    different variable from the `TF_VAR_env` OpenTofu reads, and the table's
+    `vars` allowlist accepts either spelling. Nothing refuses the mis-cased one:
+    plan and apply resolve it from the same table, so it hashes identically on
+    both sides. The variable simply never reaches OpenTofu, and the stack runs on
+    whatever default it declares for the name it does read.
+  - A `vars` entry holding the empty string is written through as empty rather
+    than dropped, which is what the fingerprint already excludes (see
+    Apply-match fingerprint, below).
+  - Each cell action takes one identity input, with no default: `tf-vars`, the
+    row's resolved `tf_vars` serialised with `toJSON`. Anything but a JSON
+    object of strings is refused before `terramate run`; the empty object is a
+    legitimate value and an omitted input is not. Each row also carries
+    `role_arn`, `cred_region` and `config_path`, resolved from the same table.
 - Protected environments (typically anything beyond the lowest-trust
   environment) carry required reviewers configured on the GitHub
   Environment itself, so approval gating is enforced by GitHub, not by
@@ -234,9 +222,10 @@ never used.
   `<env>-apply` in split mode and the bare `<env>` in shared mode.
 - **One variable binds both sides, and the engine reads it on both.**
   `SHIPMATE_SHARED_ENVS` is a repository variable, and the same expression reads
-  it in the eight wave jobs of `apply-env-level.yml`, in engine `plan.yml`'s
-  `plan` job and in engine `drift.yml`'s `drift` job — `-apply` as the fallback
-  suffix on the first, `-plan` on the other two:
+  it in the eight wave jobs of `apply-env-level.yml`, in engine `unlock.yml`'s
+  `unlock` job, in engine `plan.yml`'s `plan` job and in engine `drift.yml`'s
+  `drift` job — `-apply` as the fallback suffix on the first nine, `-plan` on the
+  other two:
 
   ```yaml
   environment: >-
@@ -252,16 +241,11 @@ never used.
   and a consumer configures none of it. The failure this arrangement exists to
   prevent was a plan-side binding a consumer wrote by hand: a static bare
   `${{ matrix.environment }}` in a repository where only some envs are shared
-  made the split envs' plan cells bind a bare `<env>` nobody created, GitHub
-  auto-created it empty, and the plan ran with no `TF_VAR_*` — so it silently
-  described the wrong environment and a reviewer approved it. A missing variable
-  default does not make that loud: `${{ vars.X }}` sets the `env:` key to the
-  empty string, a `run.env` `tm_try` chain passes an empty value through instead
-  of falling back, and `TF_VAR_env=` satisfies a variable with no default — so
-  the layouts differed only in *which* wrong environment got planned
-  ([`docs/upgrading.md`](docs/upgrading.md) §0.13.0 has the measurement). The
-  loud refusal only arrived at apply, and only where the environment injects a
-  variable the fingerprint sees (see the fail-loud bullet below).
+  made the split envs' plan cells bind a bare `<env>` nobody created, and GitHub
+  auto-created it empty. What a cell plans no longer depends on that — identity
+  comes from `matrix.environment` and the default-branch table — but the cell
+  still runs inside an environment carrying none of the protection rules the
+  real one has, and nothing about its plan output says so.
 - **A logical env may opt into one shared environment (shared mode).** Listing
   it in the `SHIPMATE_SHARED_ENVS` repository variable makes both paths bind
   the bare `<env>` — one environment, no suffix. The price is stated in
@@ -273,11 +257,9 @@ never used.
     comma boundaries, so `dev-us` does not match an entry `dev-us-2`.
   - **No spaces after the commas.** `dev-eu, dev-us` leaves `dev-us` unmatched:
     the entry is ` dev-us` and each entry is compared whole, spaces included.
-    The direction is fail-safe — the env stays split, and with no `<env>-apply` environment the
-    existence pre-flight refuses the run before any wave applies, and the
-    apply-match fingerprint would refuse the cell too, subject to the condition
-    in the fail-loud bullet below — but it is the mistake consumers actually
-    make.
+    The direction is fail-safe — the env stays split, and with no `<env>-apply`
+    environment the existence pre-flight refuses the run before any wave
+    applies — but it is the mistake consumers actually make.
   - Matching is case-insensitive, because GitHub's `contains()` is:
     `SHIPMATE_SHARED_ENVS=Prod` opts `prod` into shared mode. The expression
     normalizes nothing.
@@ -292,52 +274,33 @@ never used.
     existing `foo-apply` that env's shared environment, or `foo`'s apply
     environment?) and binds `foo-apply-apply` on the apply path. Nothing
     validates this; it is a naming rule.
-- **A mode that disagrees with the environment names fails loud — in legacy
-  mode, on every layout whose GitHub Environment injects at least one non-empty
-  `TF_VAR_*` or `TF_WORKSPACE`.** The binding
-  then resolves to an environment that does not exist, GitHub auto-creates it
-  empty, no `TF_VAR_*` reaches the cell, and the apply-match fingerprint refuses
-  it naming the missing variables. That is the reason for the naming: under an
-  asymmetric naming the dangerous direction was silent, because the environment
-  the apply wave fell back on was the live plan environment.
+- **A binding that disagrees with the environment names is invisible to the
+  fingerprint, on every layout.** Both sides derive a cell's variables from
+  `matrix.environment` and the same default-branch table, so they hash
+  identically whatever environment the job actually bound. The apply-match
+  fingerprint pins plan and apply agreeing on values; it pins nothing about the
+  binding. What catches a mis-binding is the existence pre-flight in the next
+  bullet, which is unconditional on the apply-side binding, plus `shipmate
+  doctor`, which reports a naming mismatch advisorily on a pull request.
 
-  **The condition, stated once for every page that leans on it.** The
-  fingerprint hashes only non-empty `TF_VAR_*` plus `TF_WORKSPACE` (see
-  Apply-match fingerprint, below), so it can only refuse a cell whose
-  environment injects one of those. The DRY layout (`TF_VAR_env`,
-  `TF_VAR_region`) and the workspace layout (`TF_WORKSPACE`) both do, and both
-  get the loud refusal. The folder-per-env layout injects nothing — env
-  identity is the leaf's path — so plan and apply both hash the empty set, the
-  fingerprint matches, and the apply proceeds against the right code and the
-  right state but inside an environment GitHub auto-created with no reviewers,
-  no wait timer and no deployment branch policy. The fingerprint cannot see
-  that on such a layout — it compares variable content, and a legitimately empty
-  shared environment is byte-identical to an auto-created one. What refuses it
-  is the separate existence pre-flight in the next bullet, which is
-  unconditional on the apply-side binding — whatever the environment injects,
-  within the scope its own bullet states; `shipmate doctor` additionally reports the naming mismatch
-  advisorily on a pull request.
-
-  **A table puts every layout in the folder layout's position here.** Both sides
-  derive a cell's variables from `matrix.environment` and the same default-branch
-  table, so they hash identically whatever environment the job actually bound.
-  The fingerprint still pins plan and apply agreeing on values; it no longer pins
-  the binding on any layout. The existence pre-flight in the next bullet is then
-  the control that catches a mis-binding, as it already is for `folder`.
+  That is the reason for the symmetric `-plan` / `-apply` naming: the pre-flight
+  can only refuse a binding that names nothing, and under an asymmetric naming
+  the dangerous direction named something — the environment an apply wave fell
+  back on was the live plan environment, which exists. A cell that applies
+  inside an auto-created environment holds no reviewers, no wait timer and no
+  deployment branch policy, against the right code and the right state.
 - **A binding that names no existing environment is refused before any wave
   applies.** `apply-env-level.yml`'s `snapshot` job — which every apply route
   fans through, and which runs before `wave0` — computes the apply-side binding
   for every cell in the incoming matrix, lists the repository's environments
   once, and fails the run naming every computed binding the repository does not
   have, plus both ways to fix it: create that environment, or correct
-  `SHIPMATE_SHARED_ENVS`. This is a second and independent mechanism from
-  the fingerprint refusal above, and it is the one that covers the layouts the
-  fingerprint cannot: it compares existence, not variable content, so it
-  holds whatever the environment injects, including nothing. It runs once per
-  `apply-env-level.yml` call, so an env-ordered deploy can have completed an
-  earlier level's applies before a later level is refused — a partial deploy, not
-  an unverified apply: every level verifies its own environments before its own
-  waves.
+  `SHIPMATE_SHARED_ENVS`. It is what refuses a binding naming no environment: it
+  compares existence, not variable content, and a cell resolves its variables
+  from the table whatever it bound. It runs once per `apply-env-level.yml` call,
+  so an env-ordered deploy can have completed an earlier level's applies before a
+  later level is refused — a partial deploy, not an unverified apply: every level
+  verifies its own environments before its own waves.
   - Its own failures are fail-closed as well. A listing that could not be read,
     or one whose `total_count` exceeds the number of environments returned,
     fails the run rather than letting the applies through — a check that did not
@@ -352,19 +315,21 @@ never used.
     involved.
   - Deliberately out of scope, so what it promises stays readable: the
     plan-side environments, which engine `plan.yml` and `drift.yml` bind but
-    this pre-flight does not enumerate; an environment that exists but is wrong
-    (empty, mis-scoped, missing its role — content is the fingerprint's and
-    `shipmate doctor`'s subject); and an environment created or deleted in the
-    window between the pre-flight and the wave jobs.
+    this pre-flight does not enumerate; an environment that exists but is
+    mis-scoped or unprotected, which is `shipmate doctor`'s subject; and an
+    environment created or deleted in the window between the pre-flight and the
+    wave jobs.
 - **No env names in workflow YAML — ever.** Workflow files must not
   hardcode `staging`, `production`, or any other environment name. Workflows
   discover environments dynamically from stack tags (see Tag grammar,
   below) and GitHub Environment configuration. Adding a new environment is
-  purely a data change: create its GitHub Environments (`<env>-plan` and
-  `<env>-apply`, or one bare `<env>` listed in `SHIPMATE_SHARED_ENVS`), then tag
-  the stacks that belong to it. No workflow YAML is edited to add or remove an
-  environment — the suffix in `plan.yml`'s binding is written once, for every
-  env. The one carve-out is `shipmate-engine` — a single fixed
+  purely a data change: add its entry to the environment table, create its
+  GitHub Environments (`<env>-plan` and `<env>-apply`, or one bare `<env>`
+  listed in `SHIPMATE_SHARED_ENVS`), then tag the stacks that belong to it. The
+  table entry merges on its own pull request, before the tags — §Adding and
+  removing an environment has why the order is not optional. No workflow YAML is
+  edited to add or remove an environment — the suffix in `plan.yml`'s binding is
+  written once, for every env. The one carve-out is `shipmate-engine` — a single fixed
   environment name, not a logical environment a consumer defines or names
   itself, that exists purely to scope the App private key to the
   default-branch ref (see `docs/github-app.md` §Key-exposure boundary). It
@@ -404,18 +369,16 @@ never used.
 
 ## Environment table
 
-A repository may declare its environments' identity, credentials and regions in
-a `globals "shipmate"` block — the same Terramate namespace `env_order` already
-occupies — instead of in GitHub Environment variables.
-`global.shipmate.layout` is the discriminator: a repository that declares it
-runs in table mode, and one that declares neither it nor `environments` runs in
-legacy mode, the variables path §Env model describes. A block declaring
-`environments` without a `layout` is malformed and refuses (§Refusals). Both
-modes are supported in this release; legacy mode is deprecated rather than
-frozen, and the table is where it is going.
-Nothing infers the mode
-from a value being empty, and there is no default anywhere: a cell whose row
-carries no mode refuses rather than taking either path.
+A repository declares its environments' identity, credentials and regions in a
+`globals "shipmate"` block — the same Terramate namespace `env_order` already
+occupies. The block is required, and so is `global.shipmate.layout`: it is the
+only source of a cell's environment identity, so a repository without one has
+nothing for its cells to run as. The two absences refuse at different sites. A
+repository declaring no `globals "shipmate"` block at all is refused by
+Terramate itself, which reports `This object does not have an attribute named
+"shipmate"` and exits nonzero; a block that evaluates but carries no `layout` —
+the shape a repository using `env_order` alone has — is refused by
+`scripts/env-config` (§Refusals).
 
 **The engine reads the table from the repository's default branch, never from
 the branch under test.** `scripts/env-config` evaluates `global.shipmate` in a
@@ -425,6 +388,11 @@ assumes, which region it authenticates against, or which workspace it plans;
 changing any of those takes a merge to the default branch. `origin` is the base
 repository on every path — no checkout in any workflow passes `repository:` —
 and a fork pull request is refused in `detect` before it plans.
+
+**The table must reach the default branch before the first plan run.** A pull
+request that only *adds* the table is refused, because the branch its plan is
+compared against still has none. For a new consumer the table lands in the same
+commit as the workflow files, on the default branch.
 
 Every failure to read the table refuses the run: unreachable `origin/<default>`,
 a failed `gh api`, a failed `worktree add`, a nonzero `terramate experimental
@@ -462,8 +430,7 @@ structural keys reserved at every level; everything else inside a provider block
 is a provider field. A field may sit at provider-block level, under `plan` or
 `apply`, or under `plan.workloads[<name>]` / `apply.workloads[<name>]`, and each
 tier overrides the last field by field. The workload tier is keyed by the raw
-`workload/<name>` tag, so it replaces the `AWS_ROLE_ARN_<WORKLOAD>` name-mangling
-rule legacy mode needs (`docs/aws.md` §Environment variables). `workloads`
+`workload/<name>` tag, exactly as the tag is written. `workloads`
 directly under a provider block is malformed shape, not a fourth tier: a
 workload role means nothing without the path it applies to.
 
@@ -488,14 +455,11 @@ would stop describing environment identity.
 
 ### Refusals
 
-Every condition below refuses at detect, before any cell starts. All but the
-first are gated on `layout` being declared — a repository that has not migrated
-keeps a configuration that works — and the first is what tells an unmigrated
-repository apart from a migrated one whose `layout` did not evaluate.
+Every condition below refuses at detect, before any cell starts.
 
 | Condition | Why |
 |---|---|
-| `environments` is declared and `layout` is not | Terramate drops an attribute it cannot evaluate rather than failing, so a `layout` set to an expression that does not resolve leaves a table that reads as unmigrated and silently reverts every cell to the GitHub variables |
+| The table declares no `layout` | it is the only source of a cell's environment identity, and Terramate drops an attribute it cannot evaluate rather than failing, so a `layout` set to an expression that does not resolve arrives here as an undeclared one |
 | `layout` is not `dry`, `workspace` or `folder` | a typo would silently disable injection |
 | `dry` and a matrix environment has no entry, or an entry with no region | the layout cannot derive its variables, and an empty region derives nothing the fingerprint can tell apart |
 | A tier resolves a role but no region | the credentials step requires one |
@@ -507,16 +471,24 @@ repository apart from a migrated one whose `layout` did not evaluate.
 | `vars` naming anything outside `TF_VAR_*` / `TF_WORKSPACE`, or holding a non-string | see the allowlist above |
 | Malformed shape, or a structural key in a position the grammar does not give it | a string where a mapping is required, and the reverse |
 
+**One shape refuses nowhere, and it is a limitation rather than a gap to close.**
+An `environments` set to an expression that does not resolve is dropped by
+Terramate during globals evaluation, before the engine reads the table, so it
+arrives as a table with a `layout` and no environments — byte-identical to a
+deliberate one, which `globals "shipmate" { layout = "workspace" }` legitimately
+is. There is nothing to refuse on. Every cell then resolves no role, its
+credentials step is skipped, and it fails at `tofu init`. Probed both with and
+without `tm_try`, and silent either way. `docs/troubleshooting.md` has the
+diagnosis.
+
 ### Resolution
 
-Once `layout` is declared there is no fallback to `vars.*` on any path. An
-environment absent from the table resolves an empty role, and the cell's
-credentials step is skipped explicitly. A shared-mode environment resolves
-`aws.apply` on both paths. Each row carries what its detect resolved:
-`role_arn`, `cred_region`, `tf_vars` and `config_path` — the tier actually
-consulted, which is diagnostic and read by nothing. A legacy-mode row carries
-`""`, `""`, `{}` and `""` for the same four fields, and the cell reads none of
-them.
+There is no fallback to `vars.*` on any path. An environment absent from the
+table resolves an empty role, and the cell's credentials step is skipped
+explicitly. A shared-mode environment resolves `aws.apply` on both paths. Each
+row carries what its detect resolved: `role_arn`, `cred_region`, `tf_vars` and
+`config_path` — the tier actually consulted, which is diagnostic and read by
+nothing.
 
 ### Adding and removing an environment
 
@@ -564,11 +536,6 @@ changed set or a workset and stay silent.
 introduces it.** It surfaces on the next nightly drift run. Refusals are
 unaffected — they need only the environments already in the matrix, so a tagged
 environment missing from the table still refuses on every path.
-
-A repository with no `layout` gets one migration notice per detect, naming the
-table as the replacement for its variables. A table-mode cell that still carries
-a superseded GitHub variable warns once per cell, per variable
-(`docs/upgrading.md` §Unreleased).
 
 ## State backend
 
@@ -618,100 +585,60 @@ it can never be blocked on one.
 
 ## AWS OIDC (optional)
 
-The engine is cloud-agnostic by default and ships no credential of its own.
-A consumer opts in per environment, from one of two sources selected by the
-row's `config_mode` (§Environment table):
+The engine is cloud-agnostic by default and ships no credential of its own. A
+consumer opts in per environment, in that environment's `aws` block on the
+default branch, resolved through the three tiers (§Environment table). There is
+no fallback to a `vars.*` value on any path, and no `vars.*` value can widen
+what the table resolved. The trust policy on each role is the enforcing control
+(`docs/hardening.md` §7–9): the table decides which role a cell names, not who
+may assume it.
 
-- **Table mode** — the role and the region come from that environment's `aws`
-  block on the default branch, resolved through the three tiers. There is no
-  fallback to a `vars.*` value on any path, and no `vars.*` value can widen what
-  the table resolved.
-- **Legacy mode** — the role and the region come from GitHub Environment
-  variables, as the rest of this section describes.
-
-The credentials step selects on the mode alone, never on a value being empty, so
-the two sources never compose. The trust policy on each role is the enforcing
-control either way (`docs/hardening.md` §7–9): the mode decides which role a
-cell names, not who may assume it.
-
-**In legacy mode** a consumer sets two variables on each GitHub Environment it
-wants cloud access from:
-
-- `AWS_ROLE_ARN` — the IAM role the job assumes via GitHub's OIDC provider.
-- `AWS_REGION` — the region passed to the credentials step.
-
-On the apply path a wave job first looks for `AWS_ROLE_ARN_<WORKLOAD>`, where
-`<WORKLOAD>` is the cell's `workload/<name>` tag upper-cased with `-` replaced
-by `_`, and falls back to `AWS_ROLE_ARN` when the cell carries no workload tag
-or that variable is unset — so one apply Environment can serve several
-workloads with a role each.
-
-With no role resolving — no variable set in legacy mode, no provider block or no
-entry in table mode — the credentials step is skipped and the job holds no cloud
-credential at all, which is how the sample repos run credential-free. Every
-cell-running job on every path is wired the same way in both modes: the wave
-jobs of `apply-env-level.yml`, `unlock.yml`'s unlock job, `plan.yml`'s `plan`
-job and `drift.yml`'s `drift` job each request `id-token: write` and run
+With no role resolving — no provider block, or no entry for the environment —
+the credentials step is skipped and the job holds no cloud credential at all,
+which is how the sample repos run credential-free. Every cell-running job on
+every path is wired the same way: the wave jobs of `apply-env-level.yml`,
+`unlock.yml`'s unlock job, `plan.yml`'s `plan` job and `drift.yml`'s `drift`
+job each request `id-token: write` and run
 `aws-actions/configure-aws-credentials`, gated on a role resolving non-empty,
-before the cell step. In legacy mode the step reads the variables from the
-Environment that job is bound to — the apply Environment on the first two, the
-plan Environment on the other two; in table mode it reads the row, which the
-detect resolved from the `apply` tier on the first two and the `plan` tier on
-the other two. The `snapshot` and `complete` jobs deliberately get no token.
+before the cell step. The step reads the row, which the detect resolved from the
+`apply` tier on the first two and the `plan` tier on the other two. The
+`snapshot` and `complete` jobs deliberately get no token.
 
 On the apply path the engine passes through whatever role the environment
 resolves, and nothing more: which role that is — and whether two environments'
 roles live in different AWS accounts — is the consumer's configuration, not
 something the engine resolves further or validates.
 
-**Where the role can be set from is the difference between the two modes.** In
-legacy mode "per Environment" is where the consumer *should* set the variable,
-not an enforcement: `vars` resolve organization → repository → environment, so an
-`AWS_ROLE_ARN` set at repository or organization level is read identically by
-every cell-running job — every wave job, and every plan and drift cell — in
-every environment, with no warning. In table mode there is no such fallback: an
-environment resolves the role its own entry names and nothing else, and an
-environment with no entry resolves none. The only bound on either is the role's
-own trust-policy claim condition (`docs/hardening.md` §7–9).
+**An environment resolves the role its own entry names, and nothing else.** The
+table has no level above the entry, so no role can be set once and picked up by
+every environment at a stroke, and an environment with no entry resolves none.
+The only bound on what a resolved role may do is its own trust-policy claim
+condition (`docs/hardening.md` §7–9).
 
-**The plan and drift paths run that same step, workload override included.**
-Setting `AWS_ROLE_ARN` — or `AWS_ROLE_ARN_<WORKLOAD>` — on a plan Environment is
-therefore all a consumer does for plan-time and drift-time cloud access in
-legacy mode; in table mode the equivalent is an `aws.plan` tier, with a
-`plan.workloads[<name>]` tier for the per-workload role. Either way the engine
-owns the step. This is a widening over the consumer-authored plan
-workflow it replaced, which had a credentials step only where its author wrote
-one and never resolved a per-workload role at all. A repository that set
-`AWS_ROLE_ARN_<WORKLOAD>` for its applies and a bare `AWS_ROLE_ARN` for its
-plans now has its plan cells assume the workload role wherever the cell carries
-a `workload/<name>` tag and that variable is set on the plan Environment. Where
-the two must differ, they differ by *where the variable is set*, as on the apply
-path.
+**The plan and drift paths run that same step, workload tier included.** An
+`aws.plan` tier is what a consumer sets for plan-time and drift-time cloud
+access, with a `plan.workloads[<name>]` tier for the per-workload role. The
+engine owns the step, which is a widening over the consumer-authored plan
+workflow it replaced: that had a credentials step only where its author wrote
+one, and never resolved a per-workload role at all.
 
-**The repository- or organization-level case is the consequential one, and it is
-a legacy-mode case only** — a table names every role explicitly, per
-environment. A
-consumer who set `AWS_ROLE_ARN` at repository or organization level and never
-wrote a plan-path credentials step had no plan-time cloud credential at all,
-because nothing read the variable there. Every plan and drift cell now does, and
-a plan cell executes branch-authored Terramate/OpenTofu — a provider or an
-`external` data source runs at plan time. What *authorizes* it is the role's
-trust policy, and nothing in the engine bounds it further: a policy conditioned
-on
+**A plan cell executes branch-authored Terramate/OpenTofu** — a provider or an
+`external` data source runs at plan time — so whatever the `aws.plan` tier
+names is assumed while running code from the branch under review. What
+*authorizes* it is the role's trust policy, and nothing in the engine bounds it
+further: a policy conditioned on
 `repo:<owner>/<repo>:environment:<env>-apply` refuses the `<env>-plan` token, so
 the credentials step fails and the cell fails loudly before `tofu init`. A
 repository-wide claim condition does not refuse it, and that configuration hands
 apply credentials to a plan of any branch someone with push access can push
-(fork pull requests are refused in `detect` before a cell exists). `docs/hardening.md` §7–9 is the
-threat model; a consumer repinning past this change checks the claim condition
-on every role a plan environment can now name.
+(fork pull requests are refused in `detect` before a cell exists).
+`docs/hardening.md` §7–9 is the threat model.
 
 It follows that the plan/apply role split is the consumer's to configure and to
-enforce in the roles' trust policies: one variable on each Environment in legacy
-mode or an `aws.plan` and an `aws.apply` tier in table mode, and a trust-policy
-claim condition on each role. The engine verifies nothing about either role,
-including whether the two differ. See `docs/hardening.md` §7–9 for the
-threat model this bounds.
+enforce in the roles' trust policies: an `aws.plan` and an `aws.apply` tier, and
+a trust-policy claim condition on each role. The engine verifies nothing about
+either role, including whether the two differ. See `docs/hardening.md` §7–9 for
+the threat model this bounds.
 
 The engine reads no `AWS_*` environment variable itself. The credentials step
 exports the assumed role's short-lived session variables into the job, and

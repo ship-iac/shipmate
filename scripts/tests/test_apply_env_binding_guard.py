@@ -6,10 +6,9 @@ Invariants:
   the logical name, anything else falls through to <env>-apply. The
   fall-through is the fail-safe direction -- the reviewer gate, the OIDC
   environment claim split and any environment secret all live there -- and
-  where that environment does not exist the apply-match fingerprint refuses the
-  cell, on every layout that injects a non-empty TF_VAR_* or TF_WORKSPACE
-  (CONTRACT.md §Env model states the condition and the one layout that gets no
-  refusal);
+  where that environment does not exist, snapshot's pre-flight refuses the run:
+  the fingerprint pins nothing about the binding, because plan and apply resolve
+  a cell's variables from the same table (CONTRACT.md §Env model);
 - snapshot binds no environment at all and complete binds shipmate-engine: a job
   that gains an env-derived binding is the regression;
 - snapshot runs the environment pre-flight before it snapshots the apply checks,

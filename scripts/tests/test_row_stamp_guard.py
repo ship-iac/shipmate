@@ -1,12 +1,13 @@
-"""Every matrix row every detect emits carries the five fields the cell actions resolve a cell's
-identity and credentials from: `config_mode`, `role_arn`, `cred_region`, `tf_vars` and
-`config_path`.
+"""Every matrix row every detect emits carries all four resolved fields: `role_arn`,
+`cred_region`, `tf_vars` and `config_path`. Only `tf_vars` reaches a cell action, as its
+`tf-vars` input; `role_arn` and `cred_region` are read by the job's credentials step, and
+`config_path` is diagnostic and read by nothing (`CONTRACT.md` §Resolution).
 
-`scripts/env-inject` refuses a mode it does not recognise and there is no default anywhere on
-the route, so a row that reaches a cell without `config_mode` fails that cell -- and one call site
-left unstamped fails one workflow while the other five stay green. The stamp is applied at each
-call site rather than inside `build_matrix`, which stays pure, so the sites are an enumeration
-and each one needs its own assertion.
+`scripts/env-inject` refuses anything but a JSON object of strings and there is no default
+anywhere on the route, so a row that reaches a cell without `tf_vars` fails that cell -- and one
+call site left unstamped fails one workflow while the other five stay green. The stamp is applied
+at each call site rather than inside `build_matrix`, which stays pure, so the sites are an
+enumeration and each one needs its own assertion.
 
 Each assertion runs the detect's own `main()` through the stub scaffolding its module already
 owns, and compares the whole first row against a hand-written constant: the stamp wraps whatever
@@ -24,9 +25,7 @@ import test_apply_detect as tad
 import test_build_matrix as tbm
 import test_deploy_detect as tdd
 from _detect_fixtures import PLAN_SHA, _apply_check
-from _loader import SCRIPTS, load_script
-
-bm = load_script("build-matrix")
+from _loader import SCRIPTS
 
 #: The scripts that emit matrix rows, and the call site in each. Hand-written, and derived from
 #: the tree by `test_the_table_names_every_script_that_can_emit_rows` -- a seventh detect script
@@ -50,24 +49,12 @@ _DRIFT_ENV = {
     "GITHUB_REPOSITORY": "acme/iac",
 }
 
-#: The five fields a row carries when the repository has no table. `resolve()` is never called
-#: there: an environment an empty table has never heard of would need an invented default for
-#: every field, and the cell actions read none of the five in legacy mode.
-_LEGACY = {
-    "config_mode": "legacy",
-    "role_arn": "",
-    "cred_region": "",
-    "tf_vars": {},
-    "config_path": "",
-}
-
 _PLAN_ROLE = "arn:aws:iam::1:role/plan"
 _APPLY_ROLE = "arn:aws:iam::1:role/apply"
 
 #: A table whose two tiers hold distinct roles, so a detect resolving the wrong tier is a
-#: different value rather than the same one. `layout = "folder"` derives no `tf_vars`, which is
-#: exactly the legitimate case a mode inferred from an empty `tf_vars` would send down the
-#: legacy path.
+#: different value rather than the same one. `layout = "folder"` derives no `tf_vars`, so an
+#: empty `tf_vars` on a stamped row is legitimate and is not evidence of a missing stamp.
 _TABLE = {
     "layout": "folder",
     "environments": {
@@ -80,9 +67,8 @@ _TABLE = {
 
 
 def _table(tier):
-    """The five fields `_TABLE` resolves for a dev-eu cell on `tier`."""
+    """The four fields `_TABLE` resolves for a dev-eu cell on `tier`."""
     return {
-        "config_mode": "table",
         "role_arn": _PLAN_ROLE if tier == "plan" else _APPLY_ROLE,
         "cred_region": "eu-west-1",
         "tf_vars": {},
@@ -100,133 +86,13 @@ def test_the_table_names_every_script_that_can_emit_rows():
     assert found == set(_PRODUCERS)
 
 
-def test_the_plan_matrix_rows_carry_the_stamp(monkeypatch, tmp_path):
-    """Call site 1: `build-matrix` main(). Without it every plan cell of every pull request
-    refuses.
-
-    Mutation: drop the `stamp_rows` wrapper from that call.
-    """
-    outputs, _ = tbm._run_main(monkeypatch, tmp_path, _PLAN_ENV, head_sha="cafe1234")
-    assert json.loads(outputs["matrix"])["include"] == [
-        {
-            "stack": "stacks/app",
-            "environment": "dev-eu",
-            "workload": "",
-            "workload_var": "",
-            **_LEGACY,
-        }
-    ]
-
-
-def test_the_drift_matrix_rows_carry_the_stamp(monkeypatch, tmp_path):
-    """Call site 2: the same `build-matrix` line, reached with `all-stacks: true`. Same code,
-    a second workflow, and the nightly run is the one nobody watches.
-
-    Mutation: as above -- both this and the plan case red together.
-    """
-    outputs, _ = tbm._run_main(monkeypatch, tmp_path, _DRIFT_ENV)
-    assert json.loads(outputs["matrix"])["include"] == [
-        {
-            "stack": "stacks/app",
-            "environment": "dev-eu",
-            "workload": "",
-            "workload_var": "",
-            **_LEGACY,
-        }
-    ]
-
-
-def test_the_deploy_rows_carry_the_stamp(monkeypatch, tmp_path):
-    """Call site 3: `deploy-detect` main(), which reaches the builder through `compute_cells`
-    and so is invisible to a search for `build_matrix`.
-
-    Mutation: drop the `stamp_rows` wrapper from `deploy-detect`.
-    """
-    parsed = tdd._run_main(
-        tmp_path,
-        monkeypatch,
-        cells=[tdd._cell("stacks/app")],
-        checks=[_apply_check("stacks/app")],
-    )
-    assert json.loads(parsed["envlevel0_waves"])["wave0"] == [
-        {
-            "stack": "stacks/app",
-            "environment": "dev-eu",
-            "workload": "",
-            "workload_var": "",
-            **_LEGACY,
-            "plan_run_id": "123456",
-            "plan_sha256": PLAN_SHA,
-        }
-    ]
-
-
-def test_the_unlock_rows_carry_the_stamp(monkeypatch, tmp_path):
-    """Call site 4: `run_unlock`, which returns from main() early -- a stamp in any main() tail
-    skips the unlock path entirely and unlock is the verb an operator reaches for when the
-    pipeline is already degraded.
-
-    Mutation: drop the `stamp_rows` wrapper from `run_unlock`.
-    """
-    out = tad._unlock_env(monkeypatch, tmp_path)
-    tad._boom_on_plan_path(monkeypatch)
-    tad._stub_unlock_tree(monkeypatch, tad._DEV_EU_CELLS)
-    tad.ad.main()
-    assert json.loads(tad._parsed(out)["cells"])[0] == {
-        "stack": "stacks/app",
-        "environment": "dev-eu",
-        "workload": "app",
-        "workload_var": "APP",
-        **_LEGACY,
-    }
-
-
-def test_the_targeted_apply_rows_carry_the_stamp(monkeypatch, tmp_path):
-    """Call site 5: `apply-detect` main(), the targeted `shipmate apply <env>` path.
-
-    Mutation: drop the `stamp_rows` wrapper from that call.
-    """
-    out = tad._apply_env(monkeypatch, tmp_path)
-    tad._stub_apply(monkeypatch, {"stacks/app": set()}, [_apply_check("stacks/app", plan_run="42")])
-    tad.ad.main()
-    assert json.loads(tad._parsed(out)["waves"])["wave0"] == [
-        {
-            "stack": "stacks/app",
-            "environment": "dev-eu",
-            "workload": "app",
-            "workload_var": "APP",
-            **_LEGACY,
-            "plan_run_id": "42",
-            "plan_sha256": PLAN_SHA,
-        }
-    ]
-
-
-def test_the_bare_apply_all_rows_carry_the_stamp(monkeypatch, tmp_path):
-    """Call site 6: `apply-all-detect` main(), which reaches `cells_for_env` through its own
-    `cells_from_checks`.
-
-    Mutation: drop the `stamp_rows` wrapper from `apply-all-detect`.
-    """
-    parsed = taad._run_main(tmp_path, monkeypatch, envs=["dev-eu"], decision="APPROVED")
-    assert json.loads(parsed["envlevel0_waves"])["wave0"] == [
-        {
-            "stack": "stacks/app",
-            "environment": "dev-eu",
-            "workload": "",
-            "workload_var": "",
-            **_LEGACY,
-            "plan_run_id": "123456",
-            "plan_sha256": PLAN_SHA,
-        }
-    ]
-
-
 def test_the_plan_matrix_resolves_the_plan_tier(monkeypatch, tmp_path):
-    """The plan workflow reads the plan credential. A cell that resolved `apply.role` here would
-    hand a pull request's plan the role that mutates infrastructure.
+    """Call site 1: `build-matrix` main(). The plan workflow reads the plan credential, and a
+    cell that resolved `apply.role` here would hand a pull request's plan the role that
+    mutates infrastructure.
 
-    Mutation: pass `"apply"` at `build-matrix`'s call site.
+    Mutations: pass `"apply"` at `build-matrix`'s call site; drop the `stamp_rows` wrapper
+    from it, which refuses every plan cell of every pull request.
     """
     outputs, _ = tbm._run_main(monkeypatch, tmp_path, _PLAN_ENV, head_sha="cafe1234", table=_TABLE)
     assert json.loads(outputs["matrix"])["include"] == [
@@ -234,16 +100,16 @@ def test_the_plan_matrix_resolves_the_plan_tier(monkeypatch, tmp_path):
             "stack": "stacks/app",
             "environment": "dev-eu",
             "workload": "",
-            "workload_var": "",
             **_table("plan"),
         }
     ]
 
 
 def test_the_drift_matrix_resolves_the_plan_tier(monkeypatch, tmp_path):
-    """The same line, the other workflow: drift plans and never applies.
+    """Call site 2: the same `build-matrix` line, reached with `all-stacks: true`. Drift plans
+    and never applies, and the nightly run is the one nobody watches.
 
-    Mutation: as above -- the tier is one argument, so both red together.
+    Mutations: as above -- one argument and one wrapper, so both cases red together.
     """
     outputs, _ = tbm._run_main(monkeypatch, tmp_path, _DRIFT_ENV, table=_TABLE)
     assert json.loads(outputs["matrix"])["include"] == [
@@ -251,15 +117,18 @@ def test_the_drift_matrix_resolves_the_plan_tier(monkeypatch, tmp_path):
             "stack": "stacks/app",
             "environment": "dev-eu",
             "workload": "",
-            "workload_var": "",
             **_table("plan"),
         }
     ]
 
 
 def test_the_deploy_rows_resolve_the_apply_tier(monkeypatch, tmp_path):
-    """Mutation: pass `"plan"` at `deploy-detect`'s call site, and every post-merge apply runs
-    with the read-only role."""
+    """Call site 3: `deploy-detect` main(), which reaches the builder through `compute_cells`
+    and so is invisible to a search for `build_matrix`.
+
+    Mutations: pass `"plan"` at that call site, and every post-merge apply runs with the
+    read-only role; drop the `stamp_rows` wrapper from it.
+    """
     parsed = tdd._run_main(
         tmp_path,
         monkeypatch,
@@ -272,7 +141,6 @@ def test_the_deploy_rows_resolve_the_apply_tier(monkeypatch, tmp_path):
             "stack": "stacks/app",
             "environment": "dev-eu",
             "workload": "",
-            "workload_var": "",
             **_table("apply"),
             "plan_run_id": "123456",
             "plan_sha256": PLAN_SHA,
@@ -281,9 +149,11 @@ def test_the_deploy_rows_resolve_the_apply_tier(monkeypatch, tmp_path):
 
 
 def test_the_unlock_rows_resolve_the_apply_tier(monkeypatch, tmp_path):
-    """Unlock releases a state lock, which the plan credential cannot do.
+    """Call site 4: `run_unlock`, which returns from main() early -- a stamp in any main() tail
+    skips the unlock path entirely. Unlock releases a state lock, which the plan credential
+    cannot do.
 
-    Mutation: pass `"plan"` in `run_unlock`.
+    Mutations: pass `"plan"` in `run_unlock`; drop its `stamp_rows` wrapper.
     """
     out = tad._unlock_env(monkeypatch, tmp_path, table=_TABLE)
     tad._boom_on_plan_path(monkeypatch)
@@ -293,13 +163,15 @@ def test_the_unlock_rows_resolve_the_apply_tier(monkeypatch, tmp_path):
         "stack": "stacks/app",
         "environment": "dev-eu",
         "workload": "app",
-        "workload_var": "APP",
         **_table("apply"),
     }
 
 
 def test_the_targeted_apply_rows_resolve_the_apply_tier(monkeypatch, tmp_path):
-    """Mutation: pass `"plan"` at `apply-detect`'s main() call site."""
+    """Call site 5: `apply-detect` main(), the targeted `shipmate apply <env>` path.
+
+    Mutations: pass `"plan"` at that call site; drop its `stamp_rows` wrapper.
+    """
     out = tad._apply_env(monkeypatch, tmp_path, table=_TABLE)
     tad._stub_apply(monkeypatch, {"stacks/app": set()}, [_apply_check("stacks/app", plan_run="42")])
     tad.ad.main()
@@ -308,7 +180,6 @@ def test_the_targeted_apply_rows_resolve_the_apply_tier(monkeypatch, tmp_path):
             "stack": "stacks/app",
             "environment": "dev-eu",
             "workload": "app",
-            "workload_var": "APP",
             **_table("apply"),
             "plan_run_id": "42",
             "plan_sha256": PLAN_SHA,
@@ -317,7 +188,11 @@ def test_the_targeted_apply_rows_resolve_the_apply_tier(monkeypatch, tmp_path):
 
 
 def test_the_bare_apply_all_rows_resolve_the_apply_tier(monkeypatch, tmp_path):
-    """Mutation: pass `"plan"` at `apply-all-detect`'s call site."""
+    """Call site 6: `apply-all-detect` main(), which reaches `cells_for_env` through its own
+    `cells_from_checks`.
+
+    Mutations: pass `"plan"` at that call site; drop its `stamp_rows` wrapper.
+    """
     parsed = taad._run_main(
         tmp_path, monkeypatch, envs=["dev-eu"], decision="APPROVED", table=_TABLE
     )
@@ -326,29 +201,10 @@ def test_the_bare_apply_all_rows_resolve_the_apply_tier(monkeypatch, tmp_path):
             "stack": "stacks/app",
             "environment": "dev-eu",
             "workload": "",
-            "workload_var": "",
             **_table("apply"),
             "plan_run_id": "123456",
             "plan_sha256": PLAN_SHA,
         }
-    ]
-
-
-def test_the_mode_is_the_layout_and_never_derived_from_a_resolved_field():
-    """`layout` decides, and nothing else may. `_TABLE` declares `folder`, which derives no
-    identity variables at all, so a mode inferred from `tf_vars` being empty would send an
-    adopted repository's every cell down the legacy path -- the same fail-open as
-    `matrix.role_arn || vars.AWS_ROLE_ARN`, one layer down. The untabled call carries no
-    `layout` and must stay `legacy`.
-
-    Mutation: `"legacy" if not resolved["tf_vars"] else "table"` inside `stamp_rows`.
-    """
-    rows = [{"stack": "stacks/app", "environment": "dev-eu", "workload": ""}]
-    assert bm.stamp_rows(rows, _TABLE, "apply", set()) == [
-        {"stack": "stacks/app", "environment": "dev-eu", "workload": "", **_table("apply")}
-    ]
-    assert bm.stamp_rows(rows, {}, "apply", set()) == [
-        {"stack": "stacks/app", "environment": "dev-eu", "workload": "", **_LEGACY}
     ]
 
 
@@ -378,7 +234,6 @@ def test_a_shared_environment_resolves_the_apply_tier_on_the_plan_path(monkeypat
             "stack": "stacks/app",
             "environment": "dev-eu",
             "workload": "",
-            "workload_var": "",
             **_table("apply"),
         }
     ]

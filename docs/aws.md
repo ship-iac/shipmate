@@ -80,12 +80,11 @@ role's trust policy conditions the `sub` claim on the environment claim
 (`environment:<env>-apply` for an apply role, `environment:<env>-plan` for a
 read-only plan role), which is the only control that decides which environments
 can actually assume it. [`hardening.md`](hardening.md) §7–9 explains why that,
-and not where you put the variable, is the enforcing bound.
+and not where the role is named, is the enforcing bound.
 
 Because the claim is inside the condition, renaming an environment breaks its
 role's trust policy. Add the new subject before the rename and drop the old one
-after; [`upgrading.md`](upgrading.md) §0.13.0 has the ordered steps for both the
-split and the shared migration.
+after.
 
 **Dropping the old subject afterwards is not tidying.** GitHub auto-creates an
 environment the instant a job binds its name, with none of that environment's
@@ -125,87 +124,14 @@ aws cloudtrail lookup-events \
 `userIdentity.userName`. The immutable form is also the stronger condition: a
 repository renamed or recreated under an old name cannot inherit the trust.
 
-## Where the role comes from
-
-A cell resolves its role from one of two sources, and the engine selects between
-them on the matrix row's `config_mode`
-([`../CONTRACT.md`](../CONTRACT.md) §Environment table):
-
-- **Table mode** — the repository declares a `globals "shipmate"` layout, and
-  each environment's `aws` block names its roles and region. The engine reads
-  that block from the repository's default branch, so a pull request cannot
-  choose which role its own plan assumes. §The environment table below is the
-  AWS half of that schema.
-- **Legacy mode** — the repository declares no layout, and the roles come from
-  GitHub Environment variables, as §Environment variables describes. This is
-  fully supported in this release and is also the deprecated path: a repository
-  that declares no layout keeps working exactly as it does today, and the table
-  is where the engine is going.
-
-The sections below are marked by mode where they differ. Everything about the
-trust policy applies to both: the mode decides which role a cell names, never
-who may assume it.
-
-## Environment variables
-
-**Legacy mode.** A consumer opts into AWS OIDC by setting two variables. A
-GitHub Environment is where they belong — see below — but not where GitHub stops
-looking. Neither is a secret:
-
-- `AWS_ROLE_ARN` — the IAM role the job assumes.
-- `AWS_REGION` — the region passed to the credentials step.
-
-On the apply path a third, optional variable takes precedence:
-
-- `AWS_ROLE_ARN_<WORKLOAD>` — the role for cells carrying a `workload/<name>`
-  tag. `<WORKLOAD>` is that tag's name upper-cased with `-` replaced by `_`
-  (`workload/net-edge` → `AWS_ROLE_ARN_NET_EDGE`). When the cell has no workload
-  tag, or that variable is unset, the job falls back to `AWS_ROLE_ARN`.
-
-That mangling rule is a legacy-mode rule, and it is not injective: `net-edge`
-and `net_edge` both render `NET_EDGE`. A table keys its workload tiers by the
-raw tag instead, so two workloads whose names mangle alike resolve separately.
-
-With no role variable set the engine's credentials step is skipped and the job
-holds no cloud credential at all. *Unset* means unset at all three levels:
-`vars` resolve organization → repository → environment, so a job whose
-environment names no role still reads whatever the repository or the
-organization names, and the step fires. The three non-AWS sample repositories
-run credential-free because none of the three levels names a role.
-
-`AWS_ROLE_ARN_<WORKLOAD>` changes the Environment-count arithmetic. Without it,
-one role per workload means one Environment per (env × region × workload). With
-it, a single `<env>-apply` Environment can serve several workloads, each assuming
-its own role.
-
-Set the variables per environment, never at repository or organization level:
-
-- on each `<env>-apply` you want cloud access from — that is the apply path, where
-  the engine reads them ([`hardening.md`](hardening.md) #18);
-- and on each `<env>-plan` environment you want plan-time or drift-time cloud
-  access from, with a read-only plan role. That is what
-  `repo-example-stacks-aws` does: its plan environments name a read-only role
-  and its apply environments name the apply role. A plan
-  environment can have no approval rules and no branch policy at all
-  ([`hardening.md`](hardening.md) #8), so whatever role it names is reachable by
-  anyone who can push a branch.
-
-That per-environment scoping is advisory, not enforced. For `vars` the most
-specific wins — environment overrides repository overrides organization — so an
-`AWS_ROLE_ARN` set at repository or organization level is read identically by
-every job in every environment that does not set its own, with no warning and
-nothing in the engine to guard it. The role's trust policy is the real bound.
-
-**That fallback is legacy mode's, and table mode has none.** A table-mode cell
-resolves the role its own environment's entry names, and an environment with no
-entry resolves no role and skips the step. Nothing at repository or organization
-level can supply one.
-
 ## The environment table
 
-**Table mode.** Each environment's entry carries its region and an `aws` block
-naming the roles. [`../CONTRACT.md`](../CONTRACT.md) §Environment table is the
-schema of record; this is what it looks like for the AWS sample:
+A cell resolves its role from the environment table, and from nothing else. Each
+environment's entry carries its region and an `aws` block naming the roles. The
+engine reads that block from the repository's default branch, so a pull request
+cannot choose which role its own plan assumes.
+[`../CONTRACT.md`](../CONTRACT.md) §Environment table is the schema of record;
+this is what it looks like for the AWS sample:
 
 ```hcl
 globals "shipmate" {
@@ -226,7 +152,7 @@ globals "shipmate" {
 }
 ```
 
-Four things to know beyond the schema:
+Five things to know beyond the schema:
 
 - **`aws.region` inherits the environment's own `region`.** Set it separately
   only where the credentials step must authenticate against a region the IaC
@@ -242,16 +168,19 @@ Four things to know beyond the schema:
   first when adding and last when removing, because the table is read from the
   default branch while the stacks' tags come from the branch under test.
   [`../CONTRACT.md`](../CONTRACT.md) §Environment table has the ordered sequence.
+  The same rule governs the first table of all: it has to be on the default
+  branch before the first plan run, so it lands in the commit that adds the
+  workflow files rather than in a pull request of its own.
+- **A workload tier is keyed by the raw `workload/<name>` tag**, exactly as the
+  tag is written, so two workloads whose names differ only in punctuation
+  resolve separately.
 
 ## Where the credentials step goes
 
 **The consumer writes no credentials step on any path.** Every engine job that
 runs a cell carries `aws-actions/configure-aws-credentials` itself — after
-`actions/setup`, before the cell action, gated on a role resolving non-empty. In
-table mode it reads the role and the region the detect resolved onto the row; in
-legacy mode it reads the variables against the environment that job is bound to,
-and, where that environment sets neither, against the repository and the
-organization behind it (§Environment variables above). That is the
+`actions/setup`, before the cell action, gated on a role resolving non-empty. It
+reads the role and the region the detect resolved onto the row. That is the
 wave jobs of `apply-env-level.yml` and `unlock.yml`'s unlock job on the apply
 side, reading `<env>-apply` (or the bare `<env>` in shared mode), and
 `plan.yml`'s `plan` job and `drift.yml`'s `drift` job on the plan side, reading
@@ -259,33 +188,19 @@ side, reading `<env>-apply` (or the bare `<env>` in shared mode), and
 `id-token: write` on itself (see
 [`getting-started.md`](getting-started.md) §Required — plan).
 
-The plan-side role is the `<env>-plan` environment's variable in legacy mode and
-the `aws.plan` tier in table mode. In shared mode — a logical env listed in
-`SHIPMATE_SHARED_ENVS` binds one bare `<env>` on both paths — there is one role
-for both and the wave jobs use it, so it must be the apply role: plan-time
+The plan-side role is the `aws.plan` tier. In shared mode — a logical env
+listed in `SHIPMATE_SHARED_ENVS` binds one bare `<env>` on both paths — there
+is one role for both and the wave jobs use it, so it must be the apply role: plan-time
 branch code and the drift run then have write access, and the read-only plan
-role is unreachable for that env ([`hardening.md`](hardening.md) §7–9). Table
-mode resolves `aws.apply` on both paths for such an environment, and refuses an
-`aws.plan` tier on it rather than ignoring one.
+role is unreachable for that env ([`hardening.md`](hardening.md) §7–9). Such an
+environment resolves `aws.apply` on both paths, and an `aws.plan` tier on it is
+refused rather than ignored.
 
-**The plan and drift steps resolve a workload role too.** In legacy mode, like
-the wave jobs, they look first for `AWS_ROLE_ARN_<WORKLOAD>` — the cell's
-`workload/<name>` tag upper-cased with `-` replaced by `_` — and fall back to
-`AWS_ROLE_ARN`. A repository that sets a per-workload variable on a plan
-environment therefore has its plan and drift cells assume that role rather than
-the bare one. In table mode the equivalent is `aws.plan.workloads[<name>]`,
-which overrides the `aws.plan` role for cells carrying that tag.
+**The plan and drift steps resolve a workload role too**, like the wave jobs:
+`aws.plan.workloads[<name>]` overrides the `aws.plan` role for cells carrying
+that tag.
 
-**In legacy mode** every one of these steps is skipped only where neither
-variable resolves at any level — environment, repository or organization. An
-environment that sets neither is therefore not credential-free on its own: a
-repository- or organization-level `AWS_ROLE_ARN` set for the apply path is what
-every plan and drift cell then assumes, and the only thing that refuses it is
-the role's own trust-policy claim condition
-([`hardening.md`](hardening.md) §7–9). Where no level sets either variable the
-job holds no cloud credential and the environment needs no opt-out.
-
-**In table mode** a step is skipped wherever the environment's entry resolves no
+**A step is skipped** wherever the environment's entry resolves no
 role on the tier that cell's path consulted — an environment with no entry, an
 entry with no `aws` block, or an apply-only block on the plan path. There is no
 level above the entry to fall back to, so an environment that names no role is

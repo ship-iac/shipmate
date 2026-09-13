@@ -41,11 +41,11 @@ and what it deliberately does not claim.
 | [`docs/README.md`](docs/README.md) | The docs index |
 | [`docs/getting-started.md`](docs/getting-started.md) | Wire shipmate into one repository, in four ordered tiers |
 | [`scripts/onboard`](scripts/onboard) | Hand-run reconciler: one command for the per-repository setup in `docs/getting-started.md` |
-| [`docs/aws.md`](docs/aws.md) | S3 backend, GitHub OIDC roles, per-environment variables |
+| [`docs/aws.md`](docs/aws.md) | S3 backend, GitHub OIDC roles, the environment table's `aws` block |
 | [`docs/github-app.md`](docs/github-app.md) | Register and install the App; the `shipmate-engine` environment |
 | [`docs/branch-protection.md`](docs/branch-protection.md) | Require `shipmate / gate`; the reproducible ruleset |
 | [`docs/drift.md`](docs/drift.md) | Optional nightly drift detection |
-| [`docs/upgrading.md`](docs/upgrading.md) | Re-pinning, Dependabot, past migrations |
+| [`docs/upgrading.md`](docs/upgrading.md) | Re-pinning, Dependabot, arriving from another TACO |
 | [`docs/troubleshooting.md`](docs/troubleshooting.md) | `shipmate doctor` and the failures consumers hit |
 | [`docs/concepts.md`](docs/concepts.md) | How it works: fan-out, checks, comment-ops, the env/tag model |
 | [`docs/hardening.md`](docs/hardening.md) | Who can make the engine act at all, and what none of it fixes |

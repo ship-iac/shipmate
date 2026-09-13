@@ -182,6 +182,10 @@ def _run_dispatch(tmpdir, verb, environment="", gh_stub=RECORDING_GH_STUB):
         env=env,
         capture_output=True,
         text=True,
+        # Explicit, not the locale default: the action's messages hold non-ASCII punctuation,
+        # and decoding them as cp1252 on a Windows checkout would make a whole-message
+        # comparison pass in CI and fail locally.
+        encoding="utf-8",
         cwd=tmpdir,
         timeout=30,
     )
@@ -410,9 +414,17 @@ _UNEXPECTED_INPUTS_STUB = (
 )
 _FORBIDDEN_STUB = "#!/bin/bash\necho 'HTTP 403: Forbidden' >&2\nexit 1\n"
 _LAYOUT_SKEW = "has no .github/workflows/shipmate.yml"
-# The remedy half. The consumer authors that file by hand, a pin bump does not, and
-# `docs/releasing.md` is the maintainer's runbook rather than the page that tells them.
-_LAYOUT_REMEDY = "docs/upgrading.md"
+#: The whole message, hand-written. It carries no interpolation, so there is one fully known
+#: value to compare and a part-check would only relocate the hole -- the remedy half in
+#: particular, which must name the page that publishes the file the consumer has to author:
+#: a pin bump does not write it, and `docs/releasing.md` is the maintainer's runbook.
+#: `_LAYOUT_SKEW` stays a substring for the two tests that assert this message is ABSENT.
+_LAYOUT_MESSAGE = (
+    "::error::This repository has no .github/workflows/shipmate.yml, or it predates the "
+    "single-file layout — it declares no workflow_dispatch trigger, or not the "
+    "verb/environment/ref/pr_number inputs every dispatch sends. Add or update that file "
+    "— docs/getting-started.md publishes it; re-pinning cannot create it."
+)
 
 
 @pytest.mark.parametrize("stub", [_NOT_FOUND_STUB, _NO_TRIGGER_STUB, _UNEXPECTED_INPUTS_STUB])
@@ -426,8 +438,9 @@ def test_a_dispatch_against_a_repo_without_shipmate_yml_prints_the_layout_messag
 
     Mutations: scope the condition to one verb again and the other two stop being explained;
     drop any one of the three message-text halves and its shape stops being explained; point
-    the remedy at `docs/releasing.md` and the remedy assertion reddens; drop the `printf` that
-    echoes `$out` and the hint prints without the answer it explains.
+    the remedy at `docs/releasing.md`, or reword any other part of the message, and the
+    whole-value comparison reddens; drop the `printf` that echoes `$out` and the hint prints
+    without the answer it explains.
     """
     if not usable_bash():
         pytest.skip("bash not available on this platform")
@@ -443,8 +456,9 @@ def test_a_dispatch_against_a_repo_without_shipmate_yml_prints_the_layout_messag
             assert "Workflow does not have" in result.stdout, (
                 f"the API's own answer must still print beside the hint: {output}"
             )
-        assert _LAYOUT_SKEW in output, f"layout message missing: {output}"
-        assert _LAYOUT_REMEDY in output, f"remedy must name the upgrade guide: {output}"
+        assert _LAYOUT_MESSAGE in output.splitlines(), (
+            f"the layout message must be emitted whole and unchanged: {output}"
+        )
 
 
 @pytest.mark.parametrize("verb", ["plan", "apply", "unlock"])

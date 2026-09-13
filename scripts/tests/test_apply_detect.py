@@ -7,6 +7,10 @@ from _loader import load_script
 
 ad = load_script("apply-detect")
 
+#: What a detect reads when a test names no table. `layout` is required, and `folder`
+#: derives no identity variables, so a row carries only the stamp and the tier.
+_MINIMAL_TABLE = {"layout": "folder"}
+
 
 def test_workset_is_the_graph_paths_whose_apply_check_is_present():
     # Membership is the head's apply checks, not one run's artifact names: a stack planned into
@@ -32,7 +36,7 @@ def test_workset_forward_constructs_the_name_and_never_parses_it():
     assert ad.paths_with_checks("dev-eu", graph_paths, names) == ["components/app", "a / b"]
 
 
-def test_cells_take_workload_var_from_the_tags():
+def test_cells_take_the_workload_from_the_tags():
     """Never from the check name: the name carries no workload, and a cell that invented one
     from its path would assume the wrong environment role. A stack missing from the map carries
     "", because the map comes from a separate terramate query and must never be able to raise
@@ -47,15 +51,14 @@ def test_cells_take_workload_var_from_the_tags():
             "stack": "stacks/app",
             "environment": "dev-eu",
             "workload": "net-edge",
-            "workload_var": "NET_EDGE",
         },
-        {"stack": "stacks/dns", "environment": "dev-eu", "workload": "", "workload_var": ""},
+        {"stack": "stacks/dns", "environment": "dev-eu", "workload": ""},
     ]
 
 
 _TWO_CELLS = [
-    {"stack": "stacks/app", "environment": "dev-eu", "workload_var": ""},
-    {"stack": "stacks/dns", "environment": "dev-eu", "workload_var": ""},
+    {"stack": "stacks/app", "environment": "dev-eu"},
+    {"stack": "stacks/dns", "environment": "dev-eu"},
 ]
 
 
@@ -73,14 +76,12 @@ def test_each_cell_carries_the_plan_run_and_digest_its_own_check_names():
         {
             "stack": "stacks/app",
             "environment": "dev-eu",
-            "workload_var": "",
             "plan_run_id": "111",
             "plan_sha256": "a" * 64,
         },
         {
             "stack": "stacks/dns",
             "environment": "dev-eu",
-            "workload_var": "",
             "plan_run_id": "222",
             "plan_sha256": "b" * 64,
         },
@@ -208,7 +209,7 @@ def _apply_env(monkeypatch, tmp_path, table=None, **overrides):
         monkeypatch.setenv(name, value)
     # Every detect reads the environment table from the default branch before it stamps; the
     # real read shells out to gh, git and terramate, none of which CI has.
-    monkeypatch.setattr(ad.bm.ec, "read_table", lambda run=None: dict(table or {}))
+    monkeypatch.setattr(ad.bm.ec, "read_table", lambda run=None: dict(table or _MINIMAL_TABLE))
     return out
 
 
@@ -439,12 +440,10 @@ def test_main_wires_the_tag_map_into_the_cells(tmp_path, monkeypatch):
             "stack": "stacks/app",
             "environment": "dev-eu",
             "workload": "net-edge",
-            "workload_var": "NET_EDGE",
-            "config_mode": "legacy",
             "role_arn": "",
             "cred_region": "",
             "tf_vars": {},
-            "config_path": "",
+            "config_path": "apply",
             "plan_run_id": "42",
             "plan_sha256": PLAN_SHA,
         }
@@ -566,7 +565,7 @@ def _unlock_env(monkeypatch, tmp_path, table=None, **overrides):
         monkeypatch.setenv(name, value)
     # Every detect reads the environment table from the default branch before it stamps; the
     # real read shells out to gh, git and terramate, none of which CI has.
-    monkeypatch.setattr(ad.bm.ec, "read_table", lambda run=None: dict(table or {}))
+    monkeypatch.setattr(ad.bm.ec, "read_table", lambda run=None: dict(table or _MINIMAL_TABLE))
     return out
 
 
@@ -623,10 +622,10 @@ def _stub_unlock_tree(monkeypatch, cells, checks=None):
 
 
 _DEV_EU_CELLS = [
-    {"stack": "stacks/app", "environment": "dev-eu", "workload": "app", "workload_var": "APP"},
-    {"stack": "stacks/dns", "environment": "dev-eu", "workload": "net", "workload_var": "NET"},
-    {"stack": "stacks/db", "environment": "dev-eu", "workload": "app", "workload_var": "APP"},
-    {"stack": "stacks/app", "environment": "prod-eu", "workload": "app", "workload_var": "APP"},
+    {"stack": "stacks/app", "environment": "dev-eu", "workload": "app"},
+    {"stack": "stacks/dns", "environment": "dev-eu", "workload": "net"},
+    {"stack": "stacks/db", "environment": "dev-eu", "workload": "app"},
+    {"stack": "stacks/app", "environment": "prod-eu", "workload": "app"},
 ]
 
 
@@ -664,12 +663,10 @@ def test_unlock_queue_is_the_pending_cells_of_the_target_env(monkeypatch, tmp_pa
             "stack": "stacks/app",
             "environment": "dev-eu",
             "workload": "app",
-            "workload_var": "APP",
-            "config_mode": "legacy",
             "role_arn": "",
             "cred_region": "",
             "tf_vars": {},
-            "config_path": "",
+            "config_path": "apply",
         },
     ]
     assert _parsed(out)["empty"] == "false"
@@ -701,7 +698,6 @@ def test_unlock_non_empty_queue_does_not_warn(monkeypatch, tmp_path, capsys):
     ad.main()
     out = capsys.readouterr().out
     assert "cells=3 pending=3" in out  # Not vacuous: there is a queue.
-    # Scoped to this warning: an untabled repository also gets the migration notice here.
     assert "no cell in dev-eu has a pending apply check" not in out
 
 
@@ -720,7 +716,6 @@ def test_unlock_is_not_capped_by_the_whole_tree_matrix_limit(monkeypatch, tmp_pa
                 "stack": "stacks/app",
                 "environment": f"env-{i}",
                 "workload": "app",
-                "workload_var": "APP",
             }
             for i in range(ad.bm.MATRIX_LIMIT + 10)
         ]
@@ -732,12 +727,10 @@ def test_unlock_is_not_capped_by_the_whole_tree_matrix_limit(monkeypatch, tmp_pa
             "stack": "stacks/app",
             "environment": "dev-eu",
             "workload": "app",
-            "workload_var": "APP",
-            "config_mode": "legacy",
             "role_arn": "",
             "cred_region": "",
             "tf_vars": {},
-            "config_path": "",
+            "config_path": "apply",
         }
     ]
 
@@ -810,8 +803,8 @@ def test_apply_mode_writes_the_whole_output_file_verbatim(monkeypatch, tmp_path)
     ad.main()
     assert out.read_text(encoding="utf-8") == (
         'waves={"wave0": [{"stack": "stacks/app", "environment": "dev-eu", '
-        '"workload": "app", "workload_var": "APP", "config_mode": "legacy", '
-        '"role_arn": "", "cred_region": "", "tf_vars": {}, "config_path": "", '
+        '"workload": "app", '
+        '"role_arn": "", "cred_region": "", "tf_vars": {}, "config_path": "apply", '
         '"plan_run_id": "42", '
         '"plan_sha256": "dddddddddddddddd'
         'dddddddddddddddddddddddddddddddddddddddddddddddd"}], "wave1": [], "wave2": [], '
@@ -843,11 +836,9 @@ def test_unlock_tolerates_an_untagged_stack_elsewhere_in_the_tree(monkeypatch, t
             "stack": "stacks/app",
             "environment": "dev-eu",
             "workload": "app",
-            "workload_var": "APP",
-            "config_mode": "legacy",
             "role_arn": "",
             "cred_region": "",
             "tf_vars": {},
-            "config_path": "",
+            "config_path": "apply",
         }
     ]

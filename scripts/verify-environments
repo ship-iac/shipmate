@@ -3,11 +3,11 @@
 
 GitHub creates a missing environment on demand, with no reviewers, no wait timer
 and no deployment branch policy, and the apply proceeds inside it. Nothing else
-in the engine sees that: the apply-match fingerprint compares variable *content*,
-and a legitimately empty shared environment is byte-identical to an auto-created
-one — a layout injecting no non-empty `TF_VAR_*` or `TF_WORKSPACE` hashes the
-empty set on both sides, matches, and applies. Existence, checked before any wave
-starts, is the only discriminator.
+in the engine sees that: a cell's `TF_VAR_*` and `TF_WORKSPACE` come from the
+environment table keyed by `matrix.environment`, never from the environment the
+job bound, so plan and apply hash identically whatever it bound and the
+apply-match fingerprint pins nothing about the binding. Existence, checked before
+any wave starts, is the only discriminator.
 
 Scope: the apply-side binding only. The plan side is bound in the consumer's
 own `plan.yml`/`drift.yml`, which the engine cannot read.

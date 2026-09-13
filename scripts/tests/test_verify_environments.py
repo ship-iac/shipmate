@@ -25,7 +25,7 @@ vf = load_script("verify-environments")
 
 _BASH = usable_bash()
 
-WAVES = {"wave0": [{"stack": "app", "environment": "dev-eu", "workload_var": "APP"}], "wave1": []}
+WAVES = {"wave0": [{"stack": "app", "environment": "dev-eu"}], "wave1": []}
 
 
 def _listing(names, total=None):

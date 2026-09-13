@@ -186,7 +186,7 @@ def test_read_table_runs_the_whole_command_sequence(monkeypatch, tmp_path):
                 "--as-json",
                 "-C",
                 path,
-                "tm_try(global.shipmate, {})",
+                "global.shipmate",
             ],
             True,
         ),
@@ -210,23 +210,20 @@ def test_evaluate_reads_the_path_worktree_returned(monkeypatch, tmp_path):
             "--as-json",
             "-C",
             elsewhere,
-            "tm_try(global.shipmate, {})",
+            "global.shipmate",
         ],
         True,
     )
 
 
-def test_an_absent_table_is_not_a_refusal(monkeypatch, tmp_path):
-    """`tm_try` answers `{}` for a repository with no table, which is the majority. Reddens on
-    raising when the global is missing."""
+@pytest.mark.parametrize(
+    "table", [{"env": {"dev-eu": {"region": "eu-west-1"}}}, {}], ids=["populated", "empty"]
+)
+def test_the_table_is_returned_as_parsed(table, monkeypatch, tmp_path):
+    """Reddens on returning the raw stdout, or on dropping part of the parsed table. The
+    empty case is `globals "shipmate" {}`, which terramate evaluates and prints as `{}`: it
+    must parse here and be refused by `validate`, not raise in the parser."""
     _env(monkeypatch, tmp_path)
-    assert ec.read_table(run=_fake_run(stdout={"terramate": "{}"})) == {}
-
-
-def test_the_table_is_returned_as_parsed(monkeypatch, tmp_path):
-    """Reddens on returning the raw stdout, or on dropping part of the parsed table."""
-    _env(monkeypatch, tmp_path)
-    table = {"env": {"dev-eu": {"region": "eu-west-1"}}}
     assert ec.read_table(run=_fake_run(stdout={"terramate": json.dumps(table)})) == table
 
 

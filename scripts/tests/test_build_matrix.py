@@ -6,6 +6,10 @@ from _loader import load_script
 
 bm = load_script("build-matrix")
 
+#: What a detect reads when a test names no table. `layout` is required, and `folder`
+#: derives no identity variables, so a row carries only the stamp and the tier.
+_MINIMAL_TABLE = {"layout": "folder"}
+
 
 def test_multi_env_stack_yields_one_cell_per_env():
     cells = bm.build_matrix(
@@ -17,58 +21,12 @@ def test_multi_env_stack_yields_one_cell_per_env():
         },
     )
     assert cells == [
-        {"stack": "stacks/app", "environment": "dev-eu", "workload": "", "workload_var": ""},
-        {"stack": "stacks/app", "environment": "dev-us", "workload": "", "workload_var": ""},
+        {"stack": "stacks/app", "environment": "dev-eu", "workload": ""},
+        {"stack": "stacks/app", "environment": "dev-us", "workload": ""},
         {
             "stack": "stacks/dns",
             "environment": "dev-us",
             "workload": "net-edge",
-            "workload_var": "NET_EDGE",
-        },
-    ]
-
-
-def test_two_workload_tags_collapsing_to_one_variable_fail_loud():
-    # Terramate accepts '_' in a tag value, so `net-edge` and `net_edge` are two
-    # workloads that name one AWS_ROLE_ARN_NET_EDGE -- one of them would apply
-    # real infrastructure under the other's IAM identity.
-    with pytest.raises(SystemExit) as exc_info:
-        bm.build_matrix(
-            envs=["dev-eu"],
-            stacks_by_env={"dev-eu": ["stacks/a", "stacks/b"]},
-            tags_by_stack={
-                "stacks/a": ["env/dev-eu", "workload/net-edge"],
-                "stacks/b": ["env/dev-eu", "workload/net_edge"],
-            },
-        )
-    assert str(exc_info.value) == (
-        "::error::workload/net-edge, workload/net_edge all map to AWS_ROLE_ARN_NET_EDGE: "
-        "the variable name upper-cases the tag and replaces '-' with '_', so one Environment "
-        "variable would have to hold every one of those workloads' role ARNs and some cells "
-        "would apply under an IAM identity that is not theirs. Rename one workload tag."
-    )
-
-
-def test_workloads_with_distinct_variables_build_normally():
-    assert bm.build_matrix(
-        envs=["dev-eu"],
-        stacks_by_env={"dev-eu": ["stacks/a", "stacks/b"]},
-        tags_by_stack={
-            "stacks/a": ["env/dev-eu", "workload/net-edge"],
-            "stacks/b": ["env/dev-eu", "workload/net-core"],
-        },
-    ) == [
-        {
-            "stack": "stacks/a",
-            "environment": "dev-eu",
-            "workload": "net-edge",
-            "workload_var": "NET_EDGE",
-        },
-        {
-            "stack": "stacks/b",
-            "environment": "dev-eu",
-            "workload": "net-core",
-            "workload_var": "NET_CORE",
         },
     ]
 
@@ -114,9 +72,7 @@ def test_nested_apply_stack_is_allowed():
     cells = bm.build_matrix(
         ["dev-eu"], {"dev-eu": ["infra/apply"]}, {"infra/apply": ["env/dev-eu"]}
     )
-    assert cells == [
-        {"stack": "infra/apply", "environment": "dev-eu", "workload": "", "workload_var": ""}
-    ]
+    assert cells == [{"stack": "infra/apply", "environment": "dev-eu", "workload": ""}]
 
 
 def test_rejects_stack_path_exactly_shipmate():
@@ -139,9 +95,7 @@ def test_nested_shipmate_stack_is_allowed():
     cells = bm.build_matrix(
         ["dev-eu"], {"dev-eu": ["infra/shipmate"]}, {"infra/shipmate": ["env/dev-eu"]}
     )
-    assert cells == [
-        {"stack": "infra/shipmate", "environment": "dev-eu", "workload": "", "workload_var": ""}
-    ]
+    assert cells == [{"stack": "infra/shipmate", "environment": "dev-eu", "workload": ""}]
 
 
 def test_list_stacks_changed_uses_changed_flag(monkeypatch):
@@ -182,8 +136,8 @@ def test_compute_cells_fans_out_multi_env(monkeypatch):
     monkeypatch.setattr(bm, "assert_run_env_roundtrip", lambda stack_dir: None)
     _, cells = bm.compute_cells(all_stacks=True)
     assert cells == [
-        {"stack": "stacks/app", "environment": "dev-eu", "workload": "app", "workload_var": "APP"},
-        {"stack": "stacks/app", "environment": "dev-us", "workload": "app", "workload_var": "APP"},
+        {"stack": "stacks/app", "environment": "dev-eu", "workload": "app"},
+        {"stack": "stacks/app", "environment": "dev-us", "workload": "app"},
     ]
 
 
@@ -315,7 +269,7 @@ def test_compute_cells_probes_that_the_injected_environment_survives(monkeypatch
     calls = []
     _stub_terramate(monkeypatch, ["stacks/app"], _SURVIVED, calls)
     assert bm.compute_cells(all_stacks=True)[1] == [
-        {"stack": "stacks/app", "environment": "dev-eu", "workload": "", "workload_var": ""}
+        {"stack": "stacks/app", "environment": "dev-eu", "workload": ""}
     ]
     args, env = calls[0]
     assert args == [
@@ -374,10 +328,10 @@ def test_compute_cells_refuses_a_variable_terramate_run_never_reported(monkeypat
 
 
 def test_compute_cells_warns_and_continues_when_the_probe_cannot_run(monkeypatch, capsys):
-    """detect binds no GitHub Environment, so a `run.env` that only reads a variable the
-    plan/apply Environment supplies cannot evaluate here while every plan cell evaluates it
-    fine. Raising would fail every pull request in such a repository at `detect`, with no
-    plan cells and no gate."""
+    """detect runs no cell, so `scripts/env-inject` has written none of the three identity
+    variables into its environment, and a `run.env` that only reads one of them cannot
+    evaluate here while every plan cell evaluates it fine. Raising would fail every pull
+    request in such a repository at `detect`, with no plan cells and no gate."""
     monkeypatch.setattr(bm, "_list_stacks", lambda all_stacks, base: ["stacks/app"])
     monkeypatch.setattr(bm, "_tags", lambda s: ["env/dev-eu"])
     # Stubbed at `subprocess.run`, not at `_run`: the fact under test is that the probe
@@ -520,11 +474,9 @@ def _run_main(
 
     def fake_compute(all_stacks=False, base="", require_env_tag=True, tags=""):
         called.append((all_stacks, base, tags))
-        # The whole row `build_matrix` emits, `workload_var` included: a double that omits a
+        # The whole row `build_matrix` emits, `workload` included: a double that omits a
         # key the real builder always adds cannot fail on a guard that pins the row shape.
-        rows = [
-            {"stack": s, "environment": e, "workload": "", "workload_var": ""} for s, e in cells
-        ]
+        rows = [{"stack": s, "environment": e, "workload": ""} for s, e in cells]
         # The real `compute_cells` returns the env->stacks map beside the rows, and `main`
         # forwards it as `all_envs` only under `all_stacks`. A double returning rows alone
         # would unpack into two names and fail somewhere unrelated.
@@ -534,7 +486,7 @@ def _run_main(
         return by_env, rows
 
     monkeypatch.setattr(bm, "compute_cells", fake_compute)
-    monkeypatch.setattr(bm.ec, "read_table", lambda run=None: dict(table or {}))
+    monkeypatch.setattr(bm.ec, "read_table", lambda run=None: dict(table or _MINIMAL_TABLE))
     bm.main()
     parsed = dict(line.split("=", 1) for line in out.read_text(encoding="utf-8").splitlines())
     return parsed, called
@@ -959,9 +911,7 @@ def test_tag_filter_matches_a_cell_against_its_own_env_only():
         {"stacks/app": ["env/dev-eu", "env/prod-eu"]},
         tags="env/dev-eu",
     )
-    assert cells == [
-        {"stack": "stacks/app", "environment": "dev-eu", "workload": "", "workload_var": ""}
-    ]
+    assert cells == [{"stack": "stacks/app", "environment": "dev-eu", "workload": ""}]
 
 
 def test_tag_filter_on_a_non_env_tag_keeps_every_env_of_that_stack():
@@ -1180,24 +1130,6 @@ def test_reserved_stack_path_among_filtered_out_cells_does_not_abort():
     assert [c["stack"] for c in cells] == ["stacks/a"]
 
 
-def test_workload_var_collision_among_filtered_out_cells_does_not_abort():
-    """Two workloads collapse onto one AWS_ROLE_ARN_* only if both are in the run.
-
-    Fails when the filter runs after the guards: the collision aborts a run
-    that never applies the second workload.
-    """
-    cells = bm.build_matrix(
-        ["dev-eu"],
-        {"dev-eu": ["stacks/a", "stacks/b"]},
-        {
-            "stacks/a": ["env/dev-eu", "workload/net-edge"],
-            "stacks/b": ["env/dev-eu", "workload/net_edge"],
-        },
-        tags="workload/net-edge",
-    )
-    assert [c["workload_var"] for c in cells] == ["NET_EDGE"]
-
-
 def test_existing_build_matrix_callers_pass_no_tags():
     """`apply-detect` calls `build_matrix` with three positional arguments.
 
@@ -1205,7 +1137,7 @@ def test_existing_build_matrix_callers_pass_no_tags():
     """
     assert bm.build_matrix(
         ["dev-eu"], {"dev-eu": ["stacks/app"]}, {"stacks/app": ["env/dev-eu"]}
-    ) == [{"stack": "stacks/app", "environment": "dev-eu", "workload": "", "workload_var": ""}]
+    ) == [{"stack": "stacks/app", "environment": "dev-eu", "workload": ""}]
 
 
 def test_existing_compute_cells_callers_pass_no_tags(monkeypatch):
@@ -1217,7 +1149,7 @@ def test_existing_compute_cells_callers_pass_no_tags(monkeypatch):
     monkeypatch.setattr(bm, "_tags", lambda s: ["env/dev-eu"])
     monkeypatch.setattr(bm, "assert_run_env_roundtrip", lambda stack_dir: None)
     assert bm.compute_cells(all_stacks=False, base="abc123")[1] == [
-        {"stack": "stacks/app", "environment": "dev-eu", "workload": "", "workload_var": ""}
+        {"stack": "stacks/app", "environment": "dev-eu", "workload": ""}
     ]
 
 
