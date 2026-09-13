@@ -1,9 +1,9 @@
 """Guards the two hops that carry `SHIPMATE_SHARED_ENVS` into the detect scripts.
 
 A script cannot read `vars` itself, so the value travels workflow -> detect action -> process
-environment. Neither hop is pinned by anything else, and the Task-4 row tests set the variable
-in their own fixture environment, so they stay green while a workflow omits the input or an
-action forgets to bind it. The production result of either omission is an empty value: every
+environment. Neither hop is pinned by anything else, and `test_row_stamp_guard.py` sets the
+variable in its own fixture environment, so it stays green while a workflow omits the input or
+an action forgets to bind it. The production result of either omission is an empty value: every
 environment reads as unshared, a shared environment's plan cells resolve `aws.plan` instead of
 `aws.apply`, and `env-config`'s refusal of a shared environment that declares `aws.plan` stops
 firing. Silent, and in the open direction.
