@@ -1962,11 +1962,6 @@ reaches the process.
   by two channels has no defensible precedence, and choosing one silently is how
   a consumer ends up debugging the value that lost.
 
-Reserved-name matching is exact, and only enumerated names are lowercased. An
-envelope key is therefore compared as written: `TF_VAR_ENV` in `SHIPMATE_VARS`
-is not the `dry` table's `TF_VAR_env`, so it is exported alongside it as its own
-variable rather than refused, and OpenTofu reads the table's.
-
 ### Which environment supplies which key
 
 | cell path | binds | tier it receives |

@@ -674,9 +674,9 @@ channel.
 
 **Set shared values once.** A repository-level variable or secret serves both
 tiers, and an organization-level one serves every repository — except that on
-GitHub Free, organization variables and secrets do not reach a **private**
-repository, so a consumer on Free with a private IaC repository holds none of
-this at the organization tier. Add an environment-level value only where one
+GitHub Free, organization **variables** do not reach a **private** repository,
+so a consumer on Free with a private IaC repository holds none of the variable
+side at the organization tier. Add an environment-level value only where one
 genuinely differs, and reserve the `<env>-plan` / `<env>-apply` split for read
 and write credentials.
 

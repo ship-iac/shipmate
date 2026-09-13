@@ -134,7 +134,8 @@ migrate. Each release's `CHANGELOG.md` entry is the record of what changed.
 `SHIPMATE_SECRETS: ${{ secrets.SHIPMATE_SECRETS }}` in their `secrets:` block —
 and `unlock` gains a `secrets:` block, which it did not have before. The fence
 in [`getting-started.md`](getting-started.md) §The workflow file carries the
-line already; `scripts/onboard` reconciles the file against it.
+line already, and `scripts/onboard` reports your file as `differs` until you add
+it — it never overwrites a consumer-edited file, so the edit is yours to make.
 
 The line is harmless for a repository that sets no such secret: each callee
 declares `SHIPMATE_SECRETS` with `required: false`, and an unset secret resolves
