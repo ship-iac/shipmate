@@ -12,7 +12,9 @@ passes an entry whose expression was mistyped; a substring check is satisfied by
 
 import pytest
 import yaml
-from _loader import ACTIONS, WORKFLOWS, action_steps, run_lines
+from _loader import ACTIONS, WORKFLOWS, action_steps, load_script, run_lines
+
+env_inject = load_script("env-inject")
 
 #: The jobs that run a cell, hand-written. `test_the_registry_names_every_job_that_runs_a_cell`
 #: derives the same set from the files, so a twelfth cell job reds rather than going unguarded.
@@ -103,6 +105,20 @@ def test_every_cell_job_carries_the_six_legacy_bindings(workflow, job_id):
     `vars.TF_VAR_ENV`.
     """
     assert _jobs(_doc(workflow))[job_id]["env"] == _LEGACY_ENV
+
+
+def test_the_jobs_bind_exactly_the_names_env_inject_accepts():
+    """The two lists that must move together: `_LEGACY_ENV` is what the eleven cell jobs bind,
+    `_ACCEPTED` is what `env-inject` tolerates. A name in the first and not the second refuses
+    every cell in production; the reverse is a name nothing binds. Neither side notices alone --
+    `test_every_cell_job_carries_the_six_legacy_bindings` reds only if a job drifts from the
+    registry, and `test_unrecognised_legacy_binding_refuses_by_name` only if the script's own
+    message does.
+
+    Mutations: add a seventh name to `_LEGACY_ENV` and to every cell job; or add one to
+    `env-inject`'s `_RESERVED`.
+    """
+    assert set(_LEGACY_ENV) == set(env_inject._ACCEPTED)
 
 
 def test_no_workflow_binds_the_old_names():
