@@ -929,9 +929,9 @@ def _reconcile_shims(ctx):
 def _checklist(ctx):
     """Print the values and steps this script cannot supply, as commands to fill in.
 
-    The environment table is repository content, not a GitHub setting, so it is asked for
-    by hand rather than written here. Every `<...>` is a placeholder to substitute, so no
-    line here runs as printed.
+    The environment table is asked for by hand because its layout, roles and regions are
+    values this script cannot know. Every `<value>` is a placeholder to substitute, so no
+    line carrying one runs as printed.
     """
     halves = [
         (env, name, role)
@@ -950,10 +950,12 @@ def _checklist(ctx):
         "",
         "By hand:",
         "",
-        '  A `globals "shipmate"` block declaring `layout` and, for every environment that',
-        "  needs a region or a cloud role, an `environments` entry naming them. Each cell",
-        "  resolves its identity from that table on the default branch, and a repository",
-        "  without one refuses (CONTRACT.md §Environment table).",
+        '  A `globals "shipmate"` block declaring `layout`, plus an `environments` entry for',
+        '  every environment that needs a region or a cloud role — under `layout = "dry"`',
+        "  every environment needs one, carrying a region, or the run refuses. Entries are",
+        "  keyed by the environment name listed above, never by its `-plan` / `-apply` half.",
+        "  Each cell resolves its identity from that table on the default branch, and a",
+        "  repository without one refuses (CONTRACT.md §Environment table).",
         "",
         f"  Add {ctx['repo']} to the App installation's repository selection, at",
         "  https://github.com/organizations/<org>/settings/apps/shipmate/installations",

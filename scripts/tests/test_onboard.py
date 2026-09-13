@@ -2198,10 +2198,12 @@ Repository-wide, both optional:
 
 By hand:
 
-  A `globals "shipmate"` block declaring `layout` and, for every environment that
-  needs a region or a cloud role, an `environments` entry naming them. Each cell
-  resolves its identity from that table on the default branch, and a repository
-  without one refuses (CONTRACT.md §Environment table).
+  A `globals "shipmate"` block declaring `layout`, plus an `environments` entry for
+  every environment that needs a region or a cloud role — under `layout = "dry"`
+  every environment needs one, carrying a region, or the run refuses. Entries are
+  keyed by the environment name listed above, never by its `-plan` / `-apply` half.
+  Each cell resolves its identity from that table on the default branch, and a
+  repository without one refuses (CONTRACT.md §Environment table).
 
   Add o/r to the App installation's repository selection, at
   https://github.com/organizations/<org>/settings/apps/shipmate/installations
@@ -2226,7 +2228,7 @@ def test_the_checklist_names_every_value_the_script_cannot_set(capsys):
     A step dropped from it is a repository that looks reconciled and cannot plan.
 
     The block is compared whole against a hand-written constant, because a membership
-    check would pass a block that silently lost one -- and cannot see a dropped `gh`
+    check would pass a block that silently lost one item -- and cannot see a dropped `gh`
     prefix or a line that lost its command.
 
     Mutations, each proven: delete SHIPMATE_PLAN_PASSPHRASE from the block; delete the
@@ -2248,10 +2250,12 @@ Repository-wide, both optional:
 
 By hand:
 
-  A `globals "shipmate"` block declaring `layout` and, for every environment that
-  needs a region or a cloud role, an `environments` entry naming them. Each cell
-  resolves its identity from that table on the default branch, and a repository
-  without one refuses (CONTRACT.md §Environment table).
+  A `globals "shipmate"` block declaring `layout`, plus an `environments` entry for
+  every environment that needs a region or a cloud role — under `layout = "dry"`
+  every environment needs one, carrying a region, or the run refuses. Entries are
+  keyed by the environment name listed above, never by its `-plan` / `-apply` half.
+  Each cell resolves its identity from that table on the default branch, and a
+  repository without one refuses (CONTRACT.md §Environment table).
 
   Add o/r to the App installation's repository selection, at
   https://github.com/organizations/<org>/settings/apps/shipmate/installations
@@ -2323,8 +2327,8 @@ def test_a_plan_environment_with_a_branch_policy_reports_the_policy_alone(monkey
 def test_the_checklist_skips_an_environment_the_reconciler_left_alone(capsys):
     """`_reconcile_envs` touches neither half of an environment holding both a bare
     `<env>` and an `<env>-apply`, because which the engine binds is undecided. Naming
-    those halves in the checklist tells a consumer to set variables on environments the
-    run refused to reconcile, one of which it may then delete.
+    those halves in the checklist puts an `<env>-apply` the run refused to reconcile --
+    and may then delete -- on the `Required reviewers` line.
 
     `dev-us` contributes nothing, so the expected block is the split constant unchanged.
 
