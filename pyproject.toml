@@ -56,6 +56,7 @@ extend-include = [
     "scripts/doctor-cells",
     "scripts/drift-cell-summary",
     "scripts/drift-issues",
+    "scripts/env-inject",
     "scripts/env-order",
     "scripts/gate-state",
     "scripts/gate-status-body",

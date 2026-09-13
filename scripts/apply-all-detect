@@ -91,7 +91,10 @@ def main():
     stacks_by_env, tags_by_stack = bm.env_membership(all_stacks=True, require_env_tag=False)
     app_id = os.environ["SHIPMATE_APP_ID"]
     lines = ad._check_run_lines(repo, head)
-    cells = cells_from_checks(ad.apply_check_names(lines, app_id), stacks_by_env, tags_by_stack)
+    cells = bm.stamp_rows(
+        cells_from_checks(ad.apply_check_names(lines, app_id), stacks_by_env, tags_by_stack),
+        "legacy",
+    )
 
     pending = ad.filter_pending(cells, ad.completed_apply_names(lines, app_id))
 

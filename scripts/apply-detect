@@ -314,7 +314,7 @@ def run_unlock(repo, env, head):
     path) because the unlock job's `strategy.matrix.include` is
     `fromJSON(cells)` and `fromJSON('')` is an error."""
     stacks_by_env, tags_by_stack = bm.env_membership(all_stacks=True, require_env_tag=False)
-    cells = bm.build_matrix([env], stacks_by_env, tags_by_stack)
+    cells = bm.stamp_rows(bm.build_matrix([env], stacks_by_env, tags_by_stack), "legacy")
     names = pending_apply_names(repo, head)
     pending = [c for c in cells if _check_name(c["stack"], c["environment"]) in names]
     print(
@@ -372,7 +372,7 @@ def main():
     # apply checks plus the run-graph, and evaluating the whole tree would let one
     # unrelated stack's unresolvable expression block an approved plan.
     paths = paths_with_checks(env, list(deps.keys()), names)
-    cells = cells_for_env(env, paths, {p: bm._tags(p) for p in paths})
+    cells = bm.stamp_rows(cells_for_env(env, paths, {p: bm._tags(p) for p in paths}), "legacy")
 
     pending = with_plan_runs(filter_pending(cells, completed), plan_runs, plan_hashes)
 

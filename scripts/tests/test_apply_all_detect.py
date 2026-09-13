@@ -279,6 +279,7 @@ def test_main_wires_the_tag_map_into_the_cells(tmp_path, monkeypatch):
             "stack": "stacks/app",
             "environment": "dev-eu",
             "workload_var": "NET_EDGE",
+            "config_mode": "legacy",
             "plan_run_id": "42",
             "plan_sha256": PLAN_SHA,
         }

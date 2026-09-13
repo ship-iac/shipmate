@@ -516,7 +516,11 @@ def _run_main(
 
     def fake_compute(all_stacks=False, base="", require_env_tag=True, tags=""):
         called.append((all_stacks, base, tags))
-        return [{"stack": s, "environment": e, "workload": ""} for s, e in cells]
+        # The whole row `build_matrix` emits, `workload_var` included: a double that omits a
+        # key the real builder always adds cannot fail on a guard that pins the row shape.
+        return [
+            {"stack": s, "environment": e, "workload": "", "workload_var": ""} for s, e in cells
+        ]
 
     monkeypatch.setattr(bm, "compute_cells", fake_compute)
     bm.main()

@@ -1,0 +1,106 @@
+#!/usr/bin/env python3
+"""Write one cell's identity variables into the job environment.
+
+The single writer of `TF_VAR_*` and `TF_WORKSPACE` for a cell. Before this
+script the values arrived as a job-level `env:` block reading `vars.*`; that
+block still exists, renamed to `SHIPMATE_LEGACY_*`, and is read here. Two
+sources for one name would make precedence load-bearing, so there is exactly
+one.
+"""
+
+import os
+import uuid
+
+#: Legacy binding -> the name OpenTofu actually reads. The target names are
+#: lowercase after the prefix: GitHub uppercases variable names, the process
+#: environment does not, and a mismatch changes every plan fingerprint.
+_LEGACY = {
+    "SHIPMATE_LEGACY_TF_VAR_ENV": "TF_VAR_env",
+    "SHIPMATE_LEGACY_TF_VAR_REGION": "TF_VAR_region",
+    "SHIPMATE_LEGACY_TF_WORKSPACE": "TF_WORKSPACE",
+}
+
+#: Bound by every cell job so the rename happened once, and accepted here so no
+#: cell job refuses. They carry no behaviour: this script injects nothing for them.
+_RESERVED = (
+    "SHIPMATE_LEGACY_AWS_ROLE_ARN",
+    "SHIPMATE_LEGACY_AWS_REGION",
+    "SHIPMATE_LEGACY_AWS_ROLE_ARN_WORKLOAD",
+)
+
+_ACCEPTED = frozenset(_LEGACY) | frozenset(_RESERVED)
+
+
+def resolve(environ):
+    """The identity variables this cell should carry, by injected name.
+
+    A binding that is absent produces no entry; one set to the empty string
+    produces an empty entry. They are not the same: `plan-classify` excludes a
+    set-but-empty `TF_VAR_*` from the fingerprint, and a job-level `env:` block
+    reading an unset `vars.*` set it to empty — so reproducing today's bytes
+    means passing the empty value through rather than dropping it.
+
+    Absence is legitimate — folder-per-environment binds none of them — so it is
+    a misspelled binding that refuses, not a missing one. GitHub uppercases
+    variable names but not workflow `env:` keys, so `SHIPMATE_LEGACY_TF_VAR_env`
+    arrives as its own name, is injected under nothing, and leaves every
+    environment of a `stacks` repository sharing one backend key.
+    """
+    mode = environ.get("SHIPMATE_CONFIG_MODE", "")
+    if mode == "table":
+        raise SystemExit(
+            "::error::SHIPMATE_CONFIG_MODE=table, but this engine version resolves "
+            "identity from the legacy variables only. Re-pin to a version that "
+            "implements the environment table, or unset the repository's `layout`."
+        )
+    if mode != "legacy":
+        raise SystemExit(
+            f"::error::SHIPMATE_CONFIG_MODE must be 'legacy' or 'table', got {mode!r}. "
+            "The detect job sets it; an unexpected value means the cell and the detect "
+            "that produced its row disagree."
+        )
+    unknown = sorted(
+        name for name in environ if name.startswith("SHIPMATE_LEGACY_") and name not in _ACCEPTED
+    )
+    if unknown:
+        raise SystemExit(
+            f"::error::unrecognised legacy binding(s): {', '.join(unknown)}. "
+            f"Accepted: {', '.join(sorted(_ACCEPTED))}. A misspelled or wrong-case key is "
+            "injected under no name at all, and a cell carrying no identity shares one "
+            "backend key with every other environment."
+        )
+    return {target: environ[source] for source, target in _LEGACY.items() if source in environ}
+
+
+def _delimiter(value):
+    """A heredoc delimiter that does not occur as a line of `value`.
+
+    GitHub requires it: a delimiter appearing on its own line inside the value
+    ends the value there, and the remainder is parsed as further assignments.
+    """
+    delim = "SHIPMATE_EOF"
+    lines = value.splitlines()
+    while delim in lines:
+        delim = f"SHIPMATE_EOF_{uuid.uuid4().hex}"
+    return delim
+
+
+def write_env(pairs, path):
+    """Append `pairs` to the `$GITHUB_ENV` file in heredoc form.
+
+    Heredoc rather than `NAME=value`: an OpenTofu variable may hold JSON or any
+    other multi-line value, and a bare assignment truncates it at the first
+    newline.
+    """
+    with open(path, "a", encoding="utf-8") as fh:
+        for name, value in sorted(pairs.items()):
+            delim = _delimiter(value)
+            fh.write(f"{name}<<{delim}\n{value}\n{delim}\n")
+
+
+def main():
+    write_env(resolve(os.environ), os.environ["GITHUB_ENV"])
+
+
+if __name__ == "__main__":
+    main()

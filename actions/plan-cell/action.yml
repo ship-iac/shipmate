@@ -25,6 +25,9 @@ inputs:
     description: Passphrase to encrypt the .otplan artifact at rest. Empty = plaintext (backward compatible).
     required: false
     default: ""
+  config-mode:
+    description: How this cell resolves its identity variables; the matrix row's config_mode. No default -- an omitted value is refused rather than silently treated as legacy.
+    required: true
 runs:
   using: composite
   steps:
@@ -47,6 +50,12 @@ runs:
           exit 1
         fi
         echo "head=$observed" >> "$GITHUB_OUTPUT"
+
+    - name: Inject identity variables
+      shell: bash
+      env:
+        SHIPMATE_CONFIG_MODE: ${{ inputs.config-mode }}
+      run: python3 "$GITHUB_ACTION_PATH/../../scripts/env-inject"
 
     - name: Stack slug
       id: ids

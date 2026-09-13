@@ -84,9 +84,12 @@ jobs:
       && matrix.environment || format('{0}-plan', matrix.environment) }}
     name: ${{ matrix.stack }} / ${{ matrix.environment }}
     env:
-      TF_VAR_env: ${{ vars.TF_VAR_env }}
-      TF_VAR_region: ${{ vars.TF_VAR_region }}
-      TF_WORKSPACE: ${{ vars.TF_WORKSPACE }}
+      SHIPMATE_LEGACY_TF_VAR_ENV: ${{ vars.TF_VAR_env }}
+      SHIPMATE_LEGACY_TF_VAR_REGION: ${{ vars.TF_VAR_region }}
+      SHIPMATE_LEGACY_TF_WORKSPACE: ${{ vars.TF_WORKSPACE }}
+      SHIPMATE_LEGACY_AWS_ROLE_ARN: ${{ vars.AWS_ROLE_ARN }}
+      SHIPMATE_LEGACY_AWS_REGION: ${{ vars.AWS_REGION }}
+      SHIPMATE_LEGACY_AWS_ROLE_ARN_WORKLOAD: ${{ matrix.workload_var != '' && vars[format('AWS_ROLE_ARN_{0}', matrix.workload_var)] || '' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -101,6 +104,7 @@ jobs:
           aws-region: ${{ vars.AWS_REGION }}
       - uses: ship-iac/shipmate/actions/plan-cell@44e0692b874f0ac75de1adfac277850fb0288c75
         with:
+          config-mode: ${{ matrix.config_mode }}
           stack: ${{ matrix.stack }}
           stack-name: ${{ matrix.stack }}
           env: ${{ matrix.environment }}

@@ -65,7 +65,9 @@ def main():
     repo = os.environ["GITHUB_REPOSITORY"]
     merge_sha = os.environ["GITHUB_SHA"]
     head = _merged_head(repo, merge_sha)
-    cells = bm.compute_cells(all_stacks=False, base=os.environ.get("SHIPMATE_BASE_SHA", ""))
+    cells = bm.stamp_rows(
+        bm.compute_cells(all_stacks=False, base=os.environ.get("SHIPMATE_BASE_SHA", "")), "legacy"
+    )
     app_id = os.environ["SHIPMATE_APP_ID"]
     # One listing answers both questions: which cells are already applied, and which plan
     # run each remaining one applies from. A re-plan landing between two reads makes them

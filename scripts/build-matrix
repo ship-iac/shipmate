@@ -345,6 +345,17 @@ def compute_cells(all_stacks=False, base="", require_env_tag=True, tags=""):
     return build_matrix(sorted(stacks_by_env), stacks_by_env, tags_by_stack, tags)
 
 
+def stamp_rows(cells, config_mode):
+    """Add the engine-resolved fields to every matrix row.
+
+    Applied at each site that emits rows rather than inside `build_matrix`, which stays pure and
+    unit-testable. `run_unlock` returns from `apply-detect`'s `main` early, so a stamp in any
+    `main` tail would skip the unlock path. `config_mode` has no default: a forgotten argument
+    must not be indistinguishable from a correct one. `test_row_stamp_guard.py` pins each site.
+    """
+    return [{**cell, "config_mode": config_mode} for cell in cells]
+
+
 def _event_payload(path):
     """The triggering event's payload, or {} when it cannot be read.
 
@@ -536,7 +547,7 @@ def main():
     )
     if rejection:
         raise SystemExit(rejection)
-    cells = compute_cells(all_stacks, base, tags=tags)
+    cells = stamp_rows(compute_cells(all_stacks, base, tags=tags), "legacy")
     with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
         fh.write(f"matrix={json.dumps({'include': cells})}\n")
         fh.write(f"empty={'true' if not cells else 'false'}\n")
