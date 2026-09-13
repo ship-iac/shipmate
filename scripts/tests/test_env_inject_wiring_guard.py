@@ -33,8 +33,8 @@ _CELL_JOBS = {
     ),
 }
 
-#: The bindings the rename replaced. No workflow may set them again: two writers for one name
-#: would make precedence load-bearing, and the job-level one wins over `$GITHUB_ENV`.
+#: The names `env-inject` writes to `$GITHUB_ENV`. No workflow may bind them on a job: a
+#: job-level `env:` entry wins over `$GITHUB_ENV`, so one would silently outrank the table.
 _OLD_NAMES = ("TF_VAR_env", "TF_VAR_region", "TF_WORKSPACE")
 
 _CELL_ACTIONS = ("plan-cell", "apply-cell", "drift-cell", "unlock-cell")
@@ -89,7 +89,7 @@ def test_no_workflow_binds_the_old_names():
     workflow that gains one later must red. The coverage assertions below are what keep an
     absence check from passing over an empty scan.
 
-    Mutation: restore `TF_VAR_env: ${{ vars.TF_VAR_env }}` beside its replacement in any job.
+    Mutation: add `TF_VAR_env: ${{ vars.TF_VAR_env }}` to any job's `env:` block.
     """
     visited, offenders = set(), []
 
