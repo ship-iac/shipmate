@@ -2201,7 +2201,8 @@ By hand:
   A `globals "shipmate"` block declaring `layout`, plus an `environments` entry for
   every environment that needs a region or a cloud role — under `layout = "dry"`
   every environment needs one, carrying a region, or the run refuses. Entries are
-  keyed by the environment name listed above, never by its `-plan` / `-apply` half.
+  keyed by the logical environment name (`dev-eu`), never by its `-plan` /
+  `-apply` half.
   Each cell resolves its identity from that table on the default branch, and a
   repository without one refuses (CONTRACT.md §Environment table).
 
@@ -2253,7 +2254,8 @@ By hand:
   A `globals "shipmate"` block declaring `layout`, plus an `environments` entry for
   every environment that needs a region or a cloud role — under `layout = "dry"`
   every environment needs one, carrying a region, or the run refuses. Entries are
-  keyed by the environment name listed above, never by its `-plan` / `-apply` half.
+  keyed by the logical environment name (`dev-eu`), never by its `-plan` /
+  `-apply` half.
   Each cell resolves its identity from that table on the default branch, and a
   repository without one refuses (CONTRACT.md §Environment table).
 

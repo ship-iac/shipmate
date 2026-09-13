@@ -222,9 +222,10 @@ never used.
   `<env>-apply` in split mode and the bare `<env>` in shared mode.
 - **One variable binds both sides, and the engine reads it on both.**
   `SHIPMATE_SHARED_ENVS` is a repository variable, and the same expression reads
-  it in the eight wave jobs of `apply-env-level.yml`, in engine `plan.yml`'s
-  `plan` job and in engine `drift.yml`'s `drift` job — `-apply` as the fallback
-  suffix on the first, `-plan` on the other two:
+  it in the eight wave jobs of `apply-env-level.yml`, in engine `unlock.yml`'s
+  `unlock` job, in engine `plan.yml`'s `plan` job and in engine `drift.yml`'s
+  `drift` job — `-apply` as the fallback suffix on the first nine, `-plan` on the
+  other two:
 
   ```yaml
   environment: >-

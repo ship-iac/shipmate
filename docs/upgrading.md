@@ -121,6 +121,12 @@ variable is editable by anyone holding the Write role.
 An entry applies only if you are moving *from* a pin older than the release it
 names.
 
+The per-release sections for `0.13.0` through `0.27.0` were removed when the
+environment table became the only source of a cell's identity. `CHANGELOG.md`
+still links to them from those releases' own entries; the migrations they
+described were between pre-table engine releases and have no consumers left to
+migrate. Each release's `CHANGELOG.md` entry is the record of what changed.
+
 ### Unreleased — the engine release declares the tool versions, and a cell's identity comes from the default branch
 
 **Re-pinning is not enough: two repository variables go away.**

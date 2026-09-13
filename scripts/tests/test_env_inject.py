@@ -1,9 +1,10 @@
 """`scripts/env-inject`: the single writer of a cell's identity variables.
 
-Reddens on: uppercasing an injected name (`TF_VAR_ENV` for `TF_VAR_env`), writing
-`NAME=value` instead of a heredoc, accepting anything but a JSON object of strings as
-`SHIPMATE_TF_VARS`, refusing the empty table, and returning a fixed heredoc delimiter that a
-value's own text can collide with.
+Reddens on: writing `NAME=value` instead of a heredoc, accepting anything but a JSON object
+of strings as `SHIPMATE_TF_VARS`, refusing the empty table, and returning a fixed heredoc
+delimiter that a value's own text can collide with. Not on a name's casing: `resolve` passes
+the mapping through verbatim, so the names are `env_config._derived`'s, pinned by
+`test_env_config_resolve.py`.
 """
 
 import json

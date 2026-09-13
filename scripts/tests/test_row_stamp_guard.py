@@ -1,5 +1,7 @@
-"""Every matrix row every detect emits carries the four fields the cell actions resolve a cell's
-identity and credentials from: `role_arn`, `cred_region`, `tf_vars` and `config_path`.
+"""Every matrix row every detect emits carries all four resolved fields: `role_arn`,
+`cred_region`, `tf_vars` and `config_path`. Only `tf_vars` reaches a cell action, as its
+`tf-vars` input; `role_arn` and `cred_region` are read by the job's credentials step, and
+`config_path` is diagnostic and read by nothing (`CONTRACT.md` §Resolution).
 
 `scripts/env-inject` refuses anything but a JSON object of strings and there is no default
 anywhere on the route, so a row that reaches a cell without `tf_vars` fails that cell -- and one

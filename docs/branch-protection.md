@@ -86,6 +86,17 @@ narrow `CODEOWNERS` — covering `/.github/workflows/` alone, say, so ordinary I
 pull requests need no code-owner approval — or a bypass actor on the ruleset,
 which spends exactly the control a leaked App key cannot get past.
 
+**A narrow `CODEOWNERS` leaves the environment table under ordinary review.**
+The role a cell assumes is a line in the `globals "shipmate"` block on the
+default branch, not a GitHub Environment variable, so changing it is a pull
+request rather than a repository-settings change. Under a `CODEOWNERS` covering
+`/.github/workflows/` alone that pull request needs no code-owner approval — the
+rule is a no-op for changed files with no owner. Nothing is bypassed: the table
+takes effect only once merged to the default branch, and every other control
+still applies. What moved is the bar for naming a role, from settings access to
+ordinary review. Cover the path the table lives on as well if you want the
+code-owner half on it.
+
 **If you narrow `CODEOWNERS`, land that on its own pull request first.** GitHub
 evaluates `CODEOWNERS` from the pull request's base branch, so a narrowing
 committed alongside the change it is meant to unblock does not apply to that
