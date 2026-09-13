@@ -586,7 +586,9 @@ terramate debug show globals
 
 That command evaluates every attribute and exits nonzero, naming the file, the
 line and the attribute (`This object does not have an attribute named "..."`).
-The engine's own read is a `tm_try`, which is what makes the drop silent.
+Terramate drops the attribute during globals evaluation, before the engine
+reads anything, which is what makes the drop silent: the engine has no way to
+tell the dropped attribute from one that was never written.
 
 An `environments` that is genuinely empty is a valid shape, so its absence alone
 is not the diagnosis: a credential-free repository declaring `globals "shipmate"
