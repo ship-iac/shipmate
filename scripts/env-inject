@@ -19,6 +19,11 @@ _TABLE = "SHIPMATE_TF_VARS"
 #: The consumer's reachable GitHub variables, as `${{ toJSON(vars) }}` renders them.
 _ENUM = "SHIPMATE_GITHUB_VARS"
 
+#: How a collision refusal names the enumerated channel. `_ENUM` is the engine's own input
+#: name, which a consumer reading the refusal cannot look up or act on; what they can act on
+#: is the variable they set.
+_ENUM_LABEL = "your GitHub variables"
+
 #: The case-preserving envelopes. `SHIPMATE_VARS` is itself a GitHub variable, so it
 #: arrives inside the enumeration and is lifted out of it rather than read separately.
 _VARS = "SHIPMATE_VARS"
@@ -231,7 +236,7 @@ def compose(environ):
     merged = merge_exports(
         [
             (_TABLE, table),
-            (_ENUM, filter_enumeration(enumerated, table)),
+            (_ENUM_LABEL, filter_enumeration(enumerated, table)),
             (_VARS, envelope),
             (_SECRETS, secrets),
         ]

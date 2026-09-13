@@ -370,3 +370,31 @@ def test_a_percent_in_a_secret_is_escaped_for_the_runner(capsys):
     """
     env_inject.mask(["a%25b", "100%"])
     assert capsys.readouterr().out == "::add-mask::a%2525b\n::add-mask::100%25\n"
+
+
+def test_a_collision_refusal_names_what_the_consumer_can_act_on():
+    """The refusal a consumer actually sees comes from `compose`, not from `merge_exports`
+    called directly, and it must name the thing they set. `SHIPMATE_GITHUB_VARS` is the
+    engine's own input name: it appears in no consumer file and in no GitHub settings page,
+    so a consumer reading it has nothing to look up.
+
+    Mutation: pass `_ENUM` instead of `_ENUM_LABEL` at `compose`'s `merge_exports` call.
+    """
+    with pytest.raises(SystemExit) as excinfo:
+        env_inject.compose(
+            {
+                "SHIPMATE_TF_VARS": "{}",
+                # `SHIPMATE_VARS` is a GitHub variable, so it arrives inside the enumeration
+                # and `compose` lifts it out; it is never read from the process environment.
+                "SHIPMATE_GITHUB_VARS": json.dumps(
+                    {
+                        "TF_VAR_ENDPOINT": "a",
+                        "SHIPMATE_VARS": json.dumps({"TF_VAR_endpoint": "b"}),
+                    }
+                ),
+            }
+        )
+    assert str(excinfo.value) == (
+        "::error::TF_VAR_endpoint is supplied by both your GitHub variables and "
+        "SHIPMATE_VARS. Remove it from one of them; shipmate will not choose."
+    )
