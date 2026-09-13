@@ -564,6 +564,36 @@ that exists but is empty or mis-scoped (the fingerprint and `shipmate doctor`
 cover content), and an environment deleted between the pre-flight and the wave
 that binds it.
 
+### A table-mode cell fails with no AWS credential
+
+The credentials step is skipped and the cell fails at `tofu init` with no role
+assumed, on a `folder` or `workspace` layout. Under `dry` this does not happen:
+`detect` refuses first, because that layout needs an entry with a region for
+every environment in the matrix.
+
+The usual cause is not a missing entry but a dropped one. Terramate drops a
+global attribute it cannot evaluate and exits 0, so an `environments` that
+references an undefined or misspelled global disappears from the table while the
+rest of it — `layout` included — arrives intact. The engine then reads a complete
+table that names no roles, and every cell resolves an empty role and skips its
+credentials step.
+
+Confirm it on the default branch, which is where the engine reads the table:
+
+```bash
+terramate debug show globals
+```
+
+That command evaluates every attribute and exits nonzero, naming the file, the
+line and the attribute (`This object does not have an attribute named "..."`).
+The engine's own read is a `tm_try`, which is what makes the drop silent.
+
+An `environments` that is genuinely empty is a valid shape, so its absence alone
+is not the diagnosis: a credential-free repository declaring `globals "shipmate"
+{ layout = "workspace" }` resolves no role anywhere and is working as documented
+([`../CONTRACT.md`](../CONTRACT.md) §Environment table). The command above is
+what tells the two apart.
+
 ### A state lock is held
 
 Every apply of the cell fails acquiring the lock, and the apply result comment
