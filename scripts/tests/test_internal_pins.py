@@ -38,7 +38,11 @@ pre-fix ``apply-comment``, with the guard reporting no staleness throughout.)
 To close that gap, every ``actions/<name>`` pin also gets its script dependency set derived --
 action.yml's direct ``$GITHUB_ACTION_PATH`` script references, transitively closed over
 ``_load`` -- and each of those ``scripts/<script>`` paths is diffed between the pin and the
-baseline exactly like a top-level ref. See ``pinrefs.dependent_script_paths``. Deliberately not a
+baseline exactly like a top-level ref. The same derivation covers any other path an action.yml
+reaches through ``$GITHUB_ACTION_PATH/../../``: ``actions/setup`` reads the root-level
+``VERSIONS``, which decides the Terramate and OpenTofu versions the pinned SHA installs, so a
+``VERSIONS`` change with no pin bump would leave pinned actions installing the old tools while
+the mainline documents the new ones. See ``pinrefs.dependent_paths``. Deliberately not a
 diff of the whole ``scripts/`` directory: that would flag every pinned action on any unrelated
 script edit, a ``comment-parse`` change reddening ``apply-summary``, which never runs it, for
 instance. A guard that cries wolf gets ignored, which is worse than the gap it closes. The pinned
@@ -98,16 +102,24 @@ def test_internal_action_pins_are_current():
         )
 
 
-def test_direct_script_refs_extracts_names_from_action_yaml():
+def test_direct_refs_extracts_every_path_reached_outside_the_action_directory():
+    """Reds when the derivation goes back to matching only `../../scripts/<name>`: the VERSIONS
+    reference is the one a scripts-only pattern cannot see."""
     text = (
         'run: python3 "$GITHUB_ACTION_PATH/../../scripts/plan-classify" --fingerprint-only\n'
         'run: python3 "$GITHUB_ACTION_PATH/../../scripts/plan-crypt" decrypt "$STACK"\n'
+        'run: versions="$GITHUB_ACTION_PATH/../../VERSIONS"\n'
     )
-    assert pinrefs.direct_script_refs(text) == {"plan-classify", "plan-crypt"}
+    assert pinrefs.direct_refs(text) == {
+        "scripts/plan-classify",
+        "scripts/plan-crypt",
+        "VERSIONS",
+    }
 
 
-def test_direct_script_refs_empty_when_action_runs_no_scripts():
-    assert pinrefs.direct_script_refs("runs:\n  using: composite\n  steps: []\n") == set()
+def test_direct_refs_empty_when_an_action_reaches_outside_nothing():
+    """Reds when a path is added to every action's set unconditionally."""
+    assert pinrefs.direct_refs("runs:\n  using: composite\n  steps: []\n") == set()
 
 
 def test_load_refs_extracts_names_from_load_calls():
@@ -162,30 +174,23 @@ def test_apply_summary_dependent_scripts_include_apply_comment_chain():
     action_yaml = (pinrefs.ROOT / "actions" / "apply-summary" / "action.yml").read_text(
         encoding="utf-8"
     )
-    closure = pinrefs.script_closure(pinrefs.direct_script_refs(action_yaml), source_lookup)
+    direct = {p.removeprefix("scripts/") for p in pinrefs.direct_refs(action_yaml)}
+    closure = pinrefs.script_closure(direct, source_lookup)
 
     assert {"apply-comment", "summary-comment", "apply-gate"} <= closure
 
 
-def test_dependent_script_paths_empty_for_reusable_workflow():
+def test_dependent_paths_empty_for_reusable_workflow():
     # Comparing the reusable workflow file itself is correct on its own. It must not also pull in
     # unrelated scripts because it contains action pins, which are separate ref-list entries.
     head = pinrefs.git("rev-parse", "HEAD").stdout.strip()
-    assert (
-        pinrefs.dependent_script_paths(".github/workflows/apply-env-level.yml", head, head) == set()
-    )
+    assert pinrefs.dependent_paths(".github/workflows/apply-env-level.yml", head, head) == set()
 
 
-def test_dependent_script_paths_for_apply_summary_contains_apply_comment():
+def test_dependent_paths_for_apply_summary_contains_apply_comment():
     head = pinrefs.git("rev-parse", "HEAD").stdout.strip()
-    dependent = pinrefs.dependent_script_paths("actions/apply-summary", head, head)
+    dependent = pinrefs.dependent_paths("actions/apply-summary", head, head)
     assert {"scripts/apply-comment", "scripts/summary-comment", "scripts/apply-gate"} <= dependent
-
-
-# The premise checks -- SCRIPT_REF, REF and LOAD_REF each seeing every reference of its kind --
-# are in scripts/tests/test_pin_derivation_premises.py, a module pull request CI runs because it
-# reads only the working tree. This one is --ignore'd there: it reads git history and is red by
-# design on a pin-bump pull request.
 
 
 def test_unverifiable_pin_fails_when_history_is_present(monkeypatch):
@@ -234,3 +239,10 @@ def test_unverifiable_pin_skips_when_clone_is_shallow(monkeypatch):
 
     with pytest.raises(pytest.skip.Exception, match="shallow"):
         test_internal_action_pins_are_current()
+
+
+# The premise checks -- ACTION_PATH_REF, REF and LOAD_REF each seeing every reference of its kind,
+# and VERSIONS reaching the dependency set and the staleness loop over a synthetic repository --
+# are in scripts/tests/test_pin_derivation_premises.py, a module pull request CI runs because it
+# reads no history of this repository. This one is --ignore'd there: it reads git history and is
+# red by design on a pin-bump pull request.

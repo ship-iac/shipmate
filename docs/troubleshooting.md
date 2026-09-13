@@ -300,8 +300,9 @@ mandate. Each one names what to do.
 | `<env>-plan` — it carries protection rules | required reviewers or a wait timer on a plan environment stall every plan cell and the nightly drift run. Remove them ([`hardening.md`](hardening.md) #6). |
 | `<env>` — it carries protection rules and is shared | a shared bare `<env>` is bound by the plan cells and the nightly drift run as well as the applies, and GitHub offers no per-job filter, so a protection rule there stalls all three. To gate applies alone, split it into `<env>-plan` / `<env>-apply` and drop it from `SHIPMATE_SHARED_ENVS`. |
 | `<env>` — the naming the engine does not bind is also present | the naming `SHIPMATE_SHARED_ENVS` does not select already exists: a bare `<env>` where the engine binds the `<env>-plan` / `<env>-apply` pair, or either half where it binds the bare `<env>`. Holding both namings for one logical environment is the state `shipmate doctor` calls ambiguous, so the run creates and changes nothing for that environment — including the naming it does bind, which is why it is reported rather than half-written. Delete the unused naming, or move the environment to the other one with `--shared` / `SHIPMATE_SHARED_ENVS`. |
-| `<VARIABLE>` — repository has one value, the flag or `VERSIONS` has another | the variable exists with another value. A pinned older `TERRAMATE_VERSION` or `TOFU_VERSION` is a deliberate choice, so it is never overwritten. Change it with `gh variable set` if it was not. `SHIPMATE_APP_ID` never reaches this row — see the refusals below, and the row beneath it for a repository copy left behind under `--vars-at-org`. |
+| `<VARIABLE>` — repository has one value, the flag has another | the variable exists with a value other than the one the flags name, so it is reported rather than overwritten: naming another approvers team is a deliberate choice. Change it with `gh variable set` if it was not. `SHIPMATE_APP_ID` never reaches this row — see the refusals below, and the rows beneath it for a repository copy left behind under `--vars-at-org`, and for a variable an earlier release wrote that nothing reads any more. |
 | `<VARIABLE>` — repository has one value, asserted at organization level | the name was passed to `--vars-at-org`, and a repository-level copy is still there. Repository resolution beats organization, so that copy is what the workflows read and the organization value contributes nothing. It is never deleted for you — `onboard` did not write it. Delete it with `gh variable delete <VARIABLE>`, or drop the name from `--vars-at-org` ([`github-app.md`](github-app.md) §6). |
+| `TERRAMATE_VERSION` / `TOFU_VERSION` — superseded by the version the engine release pins | the `setup` action takes both tool versions from the engine release's own `VERSIONS` file, read at the commit your workflow file pins, so the repository variable is inert. It is never deleted for you — `onboard` did not write it. Delete it with `gh variable delete <VARIABLE>` only once `.github/workflows/shipmate.yml` is on a pin carrying this change: workflows on an older pin still pass the variable to `setup`, and deleting it first blanks an input they read. A `pin-only` line for that file in the same run means you are not there yet — re-pin first ([`upgrading.md`](upgrading.md)), then delete. Re-create both before rolling the pin back to a release that predates this one. |
 | `gate ruleset` — the rulesets POST was rejected (HTTP 422) | most likely the name is taken by a ruleset whose enforcement is `evaluate` or `disabled`, which the effective-rules read cannot see; 422 has other causes, so read `gh api repos/OWNER/REPO/rulesets` first. Set it to active, or delete it and run again. |
 | `gate ruleset` — rulesets need GitHub Pro, Team, Enterprise, or a public repository | the plan this repository is on has no rulesets. Configure the gate by hand from [`branch-protection.md`](branch-protection.md). |
 | `gate ruleset` — `shipmate / gate` is required under another `integration_id` | the gate is required, but not pinned to the shipmate App, so a status of that name from any other identity satisfies it. Set `integration_id` to `SHIPMATE_APP_ID`. |
@@ -497,12 +498,12 @@ cell re-renders the stored plan with the command that wrote it and compares.
   the absent planned-commit record above, and the same remedy.
 - **The render disagrees with the digest.** The error names both digests. Either
   the plan text published for review does not describe the plan that would run,
-  or the tooling moved underneath the artifact. A `TOFU_VERSION` bump between
-  plan and apply reaches `tofu` first and fails earlier with `plan files cannot
-  be transferred between different versions`; a provider that moved fails at the
-  apply with `Inconsistent dependency lock file`. Neither produces this message.
-  There is no force. Re-plan the stack on its pull request and review the fresh
-  plan.
+  or the tooling moved underneath the artifact. A pin bump that moves the tofu
+  version between plan and apply reaches `tofu` first and fails earlier with
+  `plan files cannot be transferred between different versions`; a provider that
+  moved fails at the apply with `Inconsistent dependency lock file`. Neither
+  produces this message. There is no force. Re-plan the stack on its pull request
+  and review the fresh plan.
 
 Nothing has been applied in either case: the comparison runs before
 `tofu apply`, and the pending check is what keeps the gate from greening over

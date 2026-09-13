@@ -33,7 +33,16 @@ class GitFailure(RuntimeError):
 
 
 REF = re.compile(r"ship-iac/shipmate/([^@\s]+)@([0-9a-f]{40})")
-SCRIPT_REF = re.compile(r"\$GITHUB_ACTION_PATH/\.\./\.\./scripts/([A-Za-z0-9_-]+)")
+# Every path an action.yml reaches outside its own directory, not just scripts/: actions/setup
+# reads the root-level VERSIONS this way, and that file decides which tool versions the pinned
+# SHA installs, so it is a pinned dependency exactly like a script is.
+# The trailing boundary matters: without it a variable-spelled path such as
+# `../../scripts/$NAME` matches its literal prefix `scripts` and scores as seen, so the
+# mention-count premise in scripts/tests/test_pin_derivation_premises.py stays green over a
+# reference the derivation cannot resolve. Every real reference is quoted.
+ACTION_PATH_REF = re.compile(
+    r"\$GITHUB_ACTION_PATH/\.\./\.\./([A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*)(?=[\"'\s]|$)"
+)
 # The lookbehind matters: without it this matches the tail of any identifier ending in _load, so
 # a `yaml.safe_load("x")` anywhere in a helper would feed the phantom dependency `scripts/x` into
 # script_closure and redden scripts/tests/test_pin_derivation_premises.py with a wrong diagnosis.
@@ -229,9 +238,14 @@ def refs_at(commit=None):
     return sorted(refs)
 
 
-def direct_script_refs(action_yaml_text):
-    """Script names an action.yml invokes via ``$GITHUB_ACTION_PATH/../../scripts/<name>``."""
-    return set(SCRIPT_REF.findall(action_yaml_text))
+def direct_refs(action_yaml_text):
+    """Repo-relative paths an action.yml reaches through ``$GITHUB_ACTION_PATH/../../``:
+    ``scripts/<name>`` invocations, and root-level files such as ``VERSIONS``.
+
+    Path-shaped, never name-shaped, and never keyed on which action is being read: an action
+    that starts reading a second root-level file is covered without another edit here.
+    """
+    return set(ACTION_PATH_REF.findall(action_yaml_text))
 
 
 def strip_comments(script_text):
@@ -296,9 +310,13 @@ def composite_action_name(path):
     return parts[1] if len(parts) == 2 and parts[0] == "actions" else None
 
 
-def dependent_script_paths(path, sha, baseline):
-    """``scripts/<name>`` paths a pinned ``actions/<name>`` actually executes,
-    transitively, derived from both sides and unioned."""
+def dependent_paths(path, sha, baseline):
+    """Repo-relative paths a pinned ``actions/<name>`` actually reads at runtime, derived from
+    both sides and unioned: the ``scripts/<name>`` it executes, transitively closed over
+    ``_load``, plus every other path it reaches outside its own directory, such as ``VERSIONS``.
+
+    Only scripts get the closure walk -- a data file loads nothing.
+    """
     name = composite_action_name(path)
     if name is None:
         return set()
@@ -308,9 +326,13 @@ def dependent_script_paths(path, sha, baseline):
         action_yaml = git_show(ref, f"actions/{name}/action.yml")
         if action_yaml is None:
             continue
-        direct = direct_script_refs(action_yaml)
-        dependent |= script_closure(direct, lambda n, ref=ref: git_show(ref, f"scripts/{n}"))
-    return {f"scripts/{n}" for n in dependent}
+        refs = direct_refs(action_yaml)
+        scripts = {p.removeprefix("scripts/") for p in refs if p.startswith("scripts/")}
+        closure = script_closure(scripts, lambda n, ref=ref: git_show(ref, f"scripts/{n}"))
+        dependent |= {f"scripts/{n}" for n in closure} | {
+            p for p in refs if not p.startswith("scripts/")
+        }
+    return dependent
 
 
 def diff_status(path, sha, baseline):
@@ -330,7 +352,7 @@ class PinIssue(NamedTuple):
     sha: str  # The pinned commit, as a full SHA.
     src: str  # The file the pin lives in.
     kind: str  # One of "stale", "dep_stale", "missing", "error".
-    dep: str = ""  # scripts/<name>, when the issue is about a dependency.
+    dep: str = ""  # The dependency path, when the issue is about one.
     error: str = ""  # git stderr, when kind == "error".
 
 
@@ -351,7 +373,7 @@ def format_issue(i, baseline_desc="changed on the mainline since"):
     if i.kind == "stale":
         return f"{i.src} pins {i.path}@{i.sha[:12]} but {i.path} {baseline_desc}"
     if i.kind == "dep_stale":
-        return f"{i.src} pins {i.path}@{i.sha[:12]}, which runs {i.dep} -- {i.dep} {baseline_desc}"
+        return f"{i.src} pins {i.path}@{i.sha[:12]}, which reads {i.dep} -- {i.dep} {baseline_desc}"
     if i.kind == "missing":
         return f"{i.src}: {i.path}@{i.sha[:12]} (commit not in this clone)"
     return f"{i.src}: git diff failed for {i.dep or i.path} (pin {i.path}@{i.sha[:12]}): {i.error}"
@@ -368,7 +390,7 @@ def _direct_issue(path, sha, baseline, src):
 
 def _dependency_issues(path, sha, baseline, src):
     out = []
-    for dep in sorted(dependent_script_paths(path, sha, baseline)):
+    for dep in sorted(dependent_paths(path, sha, baseline)):
         r = diff_status(dep, sha, baseline)
         if r.returncode == 1:
             out.append(PinIssue(path, sha, src, "dep_stale", dep=dep))

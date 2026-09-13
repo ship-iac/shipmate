@@ -53,9 +53,6 @@ jobs:
           ref: ${{ needs.facts.outputs.head-sha }}
           fetch-depth: 0
       - uses: ship-iac/shipmate/actions/setup@59ac665afe78a75d4fe1d18bf4349dbbde9b08c2
-        with:
-          terramate-version: ${{ vars.TERRAMATE_VERSION }}
-          tofu-version: ${{ vars.TOFU_VERSION }}
       # Before the two terramate steps, not after: this step is where a fork's pull request is
       # refused, and `terramate fmt`/`generate` evaluate the checked-out HCL.
       - id: matrix
@@ -96,9 +93,6 @@ jobs:
           ref: ${{ needs.facts.outputs.head-sha }}
           fetch-depth: 0
       - uses: ship-iac/shipmate/actions/setup@59ac665afe78a75d4fe1d18bf4349dbbde9b08c2
-        with:
-          terramate-version: ${{ vars.TERRAMATE_VERSION }}
-          tofu-version: ${{ vars.TOFU_VERSION }}
       - name: Configure cloud credentials (AWS OIDC)
         if: ${{ (matrix.workload_var != '' && vars[format('AWS_ROLE_ARN_{0}', matrix.workload_var)]) != '' || vars.AWS_ROLE_ARN != '' }}
         uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4

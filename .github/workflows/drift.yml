@@ -35,9 +35,6 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { fetch-depth: 0 }
       - uses: ship-iac/shipmate/actions/setup@59ac665afe78a75d4fe1d18bf4349dbbde9b08c2
-        with:
-          terramate-version: ${{ vars.TERRAMATE_VERSION }}
-          tofu-version: ${{ vars.TOFU_VERSION }}
       - id: m
         uses: ship-iac/shipmate/actions/build-matrix@37d72846f4c77196c3554a86b8cb4124d668762e
         with:
@@ -71,9 +68,6 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { fetch-depth: 0 }
       - uses: ship-iac/shipmate/actions/setup@59ac665afe78a75d4fe1d18bf4349dbbde9b08c2
-        with:
-          terramate-version: ${{ vars.TERRAMATE_VERSION }}
-          tofu-version: ${{ vars.TOFU_VERSION }}
       - name: Configure cloud credentials (AWS OIDC)
         if: ${{ (matrix.workload_var != '' && vars[format('AWS_ROLE_ARN_{0}', matrix.workload_var)]) != '' || vars.AWS_ROLE_ARN != '' }}
         uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4

@@ -3,30 +3,34 @@
 Separate module from ``test_internal_pins.py`` on purpose. That module reads git
 history and is red by design on a pin-bump PR, so PR CI ``--ignore``s it and it
 runs only on push to main (``.github/workflows/ci.yml``,
-``.github/workflows/internal-pins.yml``). Every check here reads nothing but the
-working tree, so all of them are safe to gate a PR -- and a guard that can only
-go red after the offending change has already landed on main is not blocking
-anything. That is the whole reason this module exists.
+``.github/workflows/internal-pins.yml``). Every check here reads the working tree, or
+a throwaway repository it builds itself, and never this repository's history, so all of
+them are safe to gate a PR -- and a guard that can only go red after the offending
+change has already landed on main is not blocking anything. That is the whole reason
+this module exists.
 
 What it covers, one premise per regex the guard derives from, because a claim about pin currency
 is only as good as the regex's coverage of the thing it counts:
 
 * ``REF`` sees every internal ``ship-iac/shipmate/<path>@<sha>`` self-reference.
-* ``SCRIPT_REF`` sees every action.yml to script invocation.
+* ``ACTION_PATH_REF`` sees every path an action.yml reaches outside its own directory.
 * ``LOAD_REF`` sees literal sibling-load calls; ``SHARED_LOADER_IMPORT`` sees
   the shared loader itself.
+* ``VERSIONS`` reaches the dependency set, and the staleness loop, of exactly the actions
+  that read it -- over a synthetic repository, because this one cannot produce the case.
 
 A reference of any kind that its regex cannot see silently shrinks the checked surface: the
 change ships, the guard reports pins current, and consumers pinned to that SHA run the old code.
 That is the class of gap which once let a ``scripts/apply-comment``-only change ship green.
 
-The asserts key off the Python token stream rather than the regex under test, because comparing a
-regex against itself asserts nothing. They also read code only: ``tokenize`` drops comments, and
-a docstring arrives as one opaque STRING token, so prose mentioning ``_load(`` cannot make this
-red.
+The regex premises' asserts key off the Python token stream rather than the regex under test,
+because comparing a regex against itself asserts nothing. They also read code only:
+``tokenize`` drops comments, and a docstring arrives as one opaque STRING token, so prose
+mentioning ``_load(`` cannot make this red.
 """
 
 import io
+import subprocess
 import tokenize
 
 import pinrefs
@@ -147,12 +151,13 @@ def test_the_helper_script_set_is_not_empty_and_holds_the_known_cross_loaders():
     )
 
 
-def test_every_script_invocation_in_an_action_is_visible_to_the_derivation():
-    """The action.yml to script edge: SCRIPT_REF sees every invocation.
+def test_every_outside_reference_in_an_action_is_visible_to_the_derivation():
+    """The action.yml to outside-its-directory edge: ACTION_PATH_REF sees every reference.
 
-    Every claim about pin currency assumes the derivation sees each script a pinned action runs.
-    An action.yml invoking a script by any other spelling -- a variable, a different relative
-    path, a `cd` first -- would be invisible to SCRIPT_REF and would silently shrink the checked
+    Every claim about pin currency assumes the derivation sees each path a pinned action reads --
+    the scripts it runs and files like ``VERSIONS``, which decides the tool versions it installs.
+    An action.yml reaching one by any other spelling -- a variable, a different relative path, a
+    `cd` first -- would be invisible to ACTION_PATH_REF and would silently shrink the checked
     surface. Every $GITHUB_ACTION_PATH mention in every action.yml must be one the regex claims.
     """
     actions = sorted((pinrefs.ROOT / "actions").glob("*/action.yml"))
@@ -163,18 +168,32 @@ def test_every_script_invocation_in_an_action_is_visible_to_the_derivation():
     for action_yaml in actions:
         text = action_yaml.read_text(encoding="utf-8")
         mentions = text.count("$GITHUB_ACTION_PATH")
-        matched = len(pinrefs.SCRIPT_REF.findall(text))
+        matched = len(pinrefs.ACTION_PATH_REF.findall(text))
         assert mentions == matched, (
             f"{action_yaml.relative_to(pinrefs.ROOT).as_posix()}: {mentions} "
-            f"$GITHUB_ACTION_PATH mention(s) but SCRIPT_REF matched {matched} -- "
+            f"$GITHUB_ACTION_PATH mention(s) but ACTION_PATH_REF matched {matched} -- "
             "the script-dependency derivation cannot see the difference"
         )
+
+
+def test_a_variable_spelled_path_is_invisible_to_the_derivation():
+    """What makes the count above an assertion rather than a tautology.
+
+    A variable is the first spelling the check above names as one it must catch. Matching a
+    literal prefix would score such a reference as seen while the derivation held only the
+    directory it sits in, so the count would agree with itself and the reference would be
+    checked against the wrong path.
+
+    Mutation: drop the trailing boundary from ``ACTION_PATH_REF``.
+    """
+    text = 'run: python3 "$GITHUB_ACTION_PATH/../../scripts/$NAME"\n'
+    assert pinrefs.ACTION_PATH_REF.findall(text) == []
 
 
 def test_every_internal_ref_in_a_pin_bearing_source_is_visible_to_ref():
     """The pin itself: REF sees every internal self-reference.
 
-    One level up from ``test_every_script_invocation_in_an_action_is_visible_to_the_derivation``.
+    One level up from ``test_every_outside_reference_in_an_action_is_visible_to_the_derivation``.
     REF only matches a 40-lowercase-hex SHA by design, because CONTRACT.md requires internal pins
     to be full SHAs, but that means a non-SHA internal pin -- a tag, a short SHA, an uppercase
     SHA -- is invisible to REF, and so invisible to the guard, to ``dev/pin_status.py``, and to
@@ -273,3 +292,98 @@ def test_every_cross_load_in_a_script_is_visible_to_load_ref():
                 f"{rel}: uses {name} (line {hits[0].start[0]}) -- loading a sibling this way "
                 "is invisible to the derivation; cross-load via the shared _load shim"
             )
+
+
+#: The synthetic fixture's VERSIONS, and the same file after a version bump. Never this
+#: repository's own file: the guard must be provable without depending on what it currently says.
+_FIXTURE_VERSIONS = "terramate=0.1.0\ntofu=0.2.0\n"
+_BUMPED_VERSIONS = "terramate=9.9.9\ntofu=0.2.0\n"
+
+
+def _git_out(root, *args):
+    r = subprocess.run(  # noqa: S603
+        ["git", "-C", str(root), *args],  # noqa: S607
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return r.stdout.strip()
+
+
+def _synthetic_repo(tmp_path, monkeypatch, versions_after):
+    """A throwaway two-commit repo pinrefs reads instead of this one, and its (first, second) SHA.
+
+    The first commit holds an ``actions/setup`` that reads ``VERSIONS`` and an ``actions/plain``
+    that reads nothing; the second writes ``versions_after`` and always touches an unrelated
+    file, so "VERSIONS unchanged" is a real case rather than an empty commit.
+
+    Synthetic, because this repository cannot produce the case under test: the guard compares
+    against the merge base, so a pin and its baseline agree here by design and a fixture built
+    from real history would prove nothing.
+    """
+
+    def run(*args):
+        _git_out(tmp_path, *args)
+
+    def write(rel, text):
+        path = tmp_path / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8", newline="\n")
+
+    run("init", "-q")
+    run("config", "user.email", "guard@example.invalid")
+    run("config", "user.name", "guard")
+    run("config", "commit.gpgsign", "false")
+    write(
+        "actions/setup/action.yml",
+        'runs:\n  steps:\n    - run: versions="$GITHUB_ACTION_PATH/../../VERSIONS"\n',
+    )
+    write("actions/plain/action.yml", "runs:\n  using: composite\n  steps: []\n")
+    write("VERSIONS", _FIXTURE_VERSIONS)
+    write("unrelated.md", "one\n")
+    run("add", "-A")
+    run("commit", "-qm", "first")
+    first = _git_out(tmp_path, "rev-parse", "HEAD")
+    write("VERSIONS", versions_after)
+    write("unrelated.md", "two\n")
+    run("add", "-A")
+    run("commit", "-qm", "second")
+    second = _git_out(tmp_path, "rev-parse", "HEAD")
+    monkeypatch.setattr(pinrefs, "ROOT", tmp_path)
+    return first, second
+
+
+def test_an_action_that_reads_versions_carries_it_in_its_dependency_set(tmp_path, monkeypatch):
+    """Reds when the derivation returns script paths only."""
+    first, second = _synthetic_repo(tmp_path, monkeypatch, _BUMPED_VERSIONS)
+    assert pinrefs.dependent_paths("actions/setup", first, second) == {"VERSIONS"}
+
+
+def test_an_action_that_does_not_read_versions_does_not_carry_it(tmp_path, monkeypatch):
+    """Reds when VERSIONS is added to every action's set unconditionally, which would pass the
+    test above while flagging all 20 actions on any version bump."""
+    first, second = _synthetic_repo(tmp_path, monkeypatch, _BUMPED_VERSIONS)
+    assert pinrefs.dependent_paths("actions/plain", first, second) == set()
+
+
+def test_a_versions_change_between_the_pin_and_the_baseline_is_reported_stale(
+    tmp_path, monkeypatch
+):
+    """The property this derivation exists for, and not a restatement of the set above: it reds
+    on its own when VERSIONS is dropped from the staleness loop but kept in the dependency set.
+
+    ``actions/setup`` is byte-identical across the two commits, so the only way to report
+    anything here is through the dependency, never through the direct path diff.
+    """
+    first, second = _synthetic_repo(tmp_path, monkeypatch, _BUMPED_VERSIONS)
+    issues = pinrefs.pin_issues([("actions/setup", first, "w.yml")], second)
+    assert issues == [
+        pinrefs.PinIssue("actions/setup", first, "w.yml", "dep_stale", dep="VERSIONS")
+    ]
+
+
+def test_an_unchanged_versions_is_not_reported_stale(tmp_path, monkeypatch):
+    """The other half: a dependency that did not change stays silent, or the guard cries wolf on
+    every pin and gets ignored. The second commit still changes an unrelated file."""
+    first, second = _synthetic_repo(tmp_path, monkeypatch, _FIXTURE_VERSIONS)
+    assert pinrefs.pin_issues([("actions/setup", first, "w.yml")], second) == []
