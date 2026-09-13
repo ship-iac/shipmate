@@ -11,6 +11,32 @@ section below names the SHA the release tags.
 The version line stays `v0.x` while action inputs, check names, and the comment
 grammar are declared unstable in `README.md`.
 
+## [Unreleased]
+
+### Added
+
+- **A consumer's GitHub variables and a `SHIPMATE_SECRETS` envelope reach every
+  cell.** The variables a calling repository and the bound environment expose are
+  exported into the cell process, with `TF_VAR_*` suffixes lowercased so a
+  conventionally-named OpenTofu variable resolves. `SHIPMATE_VARS` and
+  `SHIPMATE_SECRETS` are JSON envelopes whose keys keep their case; the secret
+  one is masked line by line before anything is written. Reserved names, keys
+  that are not environment variable names, and names two channels supply are
+  refused — while the enumeration skips a reserved name silently, because it
+  sweeps up configuration nobody aimed at a cell. `CONTRACT.md` §Consumer
+  variables and secrets is the policy, and it changes nothing about what
+  shipmate publishes.
+
+### Changed
+
+- **Every callable workflow whose jobs run a cell declares `SHIPMATE_SECRETS`,
+  and the consumer's jobs must map it.** `plan`, `deploy`, `drift`, `targeted`,
+  `all` and `unlock` in `.github/workflows/shipmate.yml` each add
+  `SHIPMATE_SECRETS: ${{ secrets.SHIPMATE_SECRETS }}`, and `unlock` gains a
+  `secrets:` block it did not have. The line is harmless for a repository that
+  sets no such secret; skipping it means the envelope never reaches a cell.
+  `docs/upgrading.md` §Unreleased is the migration.
+
 ## [0.28.0] — 2026-09-13
 
 Tags `b0d9a41`.

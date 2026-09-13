@@ -127,6 +127,23 @@ still links to them from those releases' own entries; the migrations they
 described were between pre-table engine releases and have no consumers left to
 migrate. Each release's `CHANGELOG.md` entry is the record of what changed.
 
+### Unreleased — every cell-running job maps one more secret
+
+**Add one line to six jobs.** In `.github/workflows/shipmate.yml`, the `plan`,
+`deploy`, `drift`, `targeted`, `all` and `unlock` jobs each gain
+`SHIPMATE_SECRETS: ${{ secrets.SHIPMATE_SECRETS }}` in their `secrets:` block —
+and `unlock` gains a `secrets:` block, which it did not have before. The fence
+in [`getting-started.md`](getting-started.md) §The workflow file carries the
+line already; `scripts/onboard` reconciles the file against it.
+
+The line is harmless for a repository that sets no such secret: each callee
+declares `SHIPMATE_SECRETS` with `required: false`, and an unset secret resolves
+empty. Skipping it is what costs. An unmapped secret is simply absent in the
+callee — no error, no annotation — so a `SHIPMATE_SECRETS` envelope set later
+never reaches a cell and nothing says why. What that envelope carries is in
+[`getting-started.md`](getting-started.md) §Variables and secrets your stacks
+need.
+
 ### 0.28.0 — the engine release declares the tool versions, and a cell's identity comes from the default branch
 
 **Re-pinning is not enough: two repository variables go away.**

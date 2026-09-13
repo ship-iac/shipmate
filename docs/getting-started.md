@@ -304,6 +304,9 @@ jobs:
     secrets:
       SHIPMATE_APP_PRIVATE_KEY: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
       SHIPMATE_PLAN_PASSPHRASE: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
+      # Not a no-op when you hold no repository secret of that name: the envelope normally
+      # lives on `<env>-plan` / `<env>-apply`, so this expression resolves empty and the
+      # mapping is what makes the environment's value reachable. Delete it and nothing arrives.
       SHIPMATE_SECRETS: ${{ secrets.SHIPMATE_SECRETS }}
     with:
       # Your flavor's per-stack state path suffix; "" when a remote backend owns state.
@@ -629,6 +632,79 @@ choice you make, so that a repository already carrying a `pull_request` rule
 does not end up with a conflicting second one.
 
 ## Optional
+
+### Variables and secrets your stacks need
+
+Anything a stack needs that the repository does not hold — a provider endpoint,
+an API key — reaches a cell through one of two channels: ordinary GitHub
+variables, and a `SHIPMATE_SECRETS` envelope. Both are optional; a repository
+that needs neither sets nothing.
+
+**Keep configuration in Git.** Native `.tfvars` and Terramate-generated
+configuration stay the first option for endpoints, sizes and resource settings.
+These channels exist for inputs that genuinely come from outside the repository
+— credentials, and values the repository should not hold. Do not re-create your
+configuration as GitHub variables.
+
+What carries what:
+
+| carries | mechanism | your effort |
+| --- | --- | --- |
+| provider environment variables (`CONFLUENT_CLOUD_ENDPOINT`, `DATADOG_SITE`) | a plain GitHub variable, exported under its stored name | set the variable |
+| `TF_VAR_*` for a conventional lower/snake_case OpenTofu name | a plain GitHub variable, suffix lowercased on export | set the variable |
+| `TF_VAR_*` for an upper- or mixed-case OpenTofu name | `SHIPMATE_VARS`, a JSON envelope whose keys keep their case | write one JSON object |
+| secrets, of any name shape | `SHIPMATE_SECRETS`, the same envelope shape held in a secret | write one JSON object |
+
+**`TF_VAR_*` suffixes are lowercased on export**, which is surprising and worth
+one paragraph. GitHub uppercases a variable name when it stores it — whichever
+case you typed, through the API as through `gh` — and OpenTofu matches
+`TF_VAR_<name>` case-sensitively on Linux. Conventional OpenTofu variable names
+are lowercase, so the cell lowercases the suffix: `TF_VAR_ENDPOINT` →
+`TF_VAR_endpoint` → `variable "endpoint"`, and `TF_VAR_MY_THING` reaches
+`variable "my_thing"`. A variable declared with uppercase or mixed-case letters
+— `variable "ENDPOINT"`, `variable "myThing"` — is reachable only through
+`SHIPMATE_VARS`, whose JSON keys are exported exactly as written.
+
+**`SHIPMATE_VARS` costs no workflow edit.** It is a GitHub variable, so it
+arrives like any other one — nothing to declare, nothing to map. Only
+`SHIPMATE_SECRETS` touches `shipmate.yml`, because only secrets cross the
+declaration boundary; the six cell-running jobs of the file above already carry
+its line, and the comment beside that line says why deleting it breaks the
+channel.
+
+**Set shared values once.** A repository-level variable or secret serves both
+tiers, and an organization-level one serves every repository — except that on
+GitHub Free, organization variables and secrets do not reach a **private**
+repository, so a consumer on Free with a private IaC repository holds none of
+this at the organization tier. Add an environment-level value only where one
+genuinely differs, and reserve the `<env>-plan` / `<env>-apply` split for read
+and write credentials.
+
+**Envelopes replace, they do not merge.** An environment-level
+`SHIPMATE_SECRETS` replaces the repository-level one whole, and so does an
+environment-level `SHIPMATE_VARS`. There is no key-by-key merge across tiers, so
+an environment envelope must carry every key that environment needs, not only
+the ones that differ. Repository secret `SHIPMATE_SECRETS`:
+
+```json
+{"CONFLUENT_CLOUD_API_KEY": "read-key", "DATADOG_API_KEY": "dd-key"}
+```
+
+and the same secret on the `prod-apply` environment, meaning to swap in the
+write key:
+
+```json
+{"CONFLUENT_CLOUD_API_KEY": "write-key"}
+```
+
+Cells on `prod-apply` then see no `DATADOG_API_KEY` at all: the repository
+envelope is not consulted, not merged. The environment value has to name both
+keys.
+
+[`../CONTRACT.md`](../CONTRACT.md) §Consumer variables and secrets is the full
+policy — the names shipmate reserves, which environment supplies which key, what
+a value that differs between the two tiers does to the apply-match fingerprint,
+and what masking does and does not cover.
 
 ### Drift detection
 
