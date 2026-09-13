@@ -171,6 +171,7 @@ def test_the_cell_passes_this_whole_with_block():
     `!=` inverted to `==`.
     """
     assert _step("plan", "actions/plan-cell@")["with"] == {
+        "config-mode": "${{ matrix.config_mode }}",
         "stack": "${{ matrix.stack }}",
         "stack-name": "${{ matrix.stack }}",
         "env": "${{ matrix.environment }}",

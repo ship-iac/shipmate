@@ -430,6 +430,7 @@ def test_main_wires_the_tag_map_into_the_cells(tmp_path, monkeypatch):
             "stack": "stacks/app",
             "environment": "dev-eu",
             "workload_var": "NET_EDGE",
+            "config_mode": "legacy",
             "plan_run_id": "42",
             "plan_sha256": PLAN_SHA,
         }
@@ -641,7 +642,13 @@ def test_unlock_queue_is_the_pending_cells_of_the_target_env(monkeypatch, tmp_pa
     # cell that can hold a stranded lock.
     assert seen == {"all_stacks": True, "base": "", "require_env_tag": False}
     assert json.loads(_parsed(out)["cells"]) == [
-        {"stack": "stacks/app", "environment": "dev-eu", "workload": "app", "workload_var": "APP"},
+        {
+            "stack": "stacks/app",
+            "environment": "dev-eu",
+            "workload": "app",
+            "workload_var": "APP",
+            "config_mode": "legacy",
+        },
     ]
     assert _parsed(out)["empty"] == "false"
 
@@ -698,7 +705,13 @@ def test_unlock_is_not_capped_by_the_whole_tree_matrix_limit(monkeypatch, tmp_pa
     )
     ad.main()
     assert json.loads(_parsed(out)["cells"]) == [
-        {"stack": "stacks/app", "environment": "dev-eu", "workload": "app", "workload_var": "APP"}
+        {
+            "stack": "stacks/app",
+            "environment": "dev-eu",
+            "workload": "app",
+            "workload_var": "APP",
+            "config_mode": "legacy",
+        }
     ]
 
 
@@ -770,7 +783,8 @@ def test_apply_mode_writes_the_whole_output_file_verbatim(monkeypatch, tmp_path)
     ad.main()
     assert out.read_text(encoding="utf-8") == (
         'waves={"wave0": [{"stack": "stacks/app", "environment": "dev-eu", '
-        '"workload_var": "APP", "plan_run_id": "42", "plan_sha256": "dddddddddddddddd'
+        '"workload_var": "APP", "config_mode": "legacy", "plan_run_id": "42", '
+        '"plan_sha256": "dddddddddddddddd'
         'dddddddddddddddddddddddddddddddddddddddddddddddd"}], "wave1": [], "wave2": [], '
         '"wave3": [], "wave4": [], "wave5": [], "wave6": [], "wave7": []}\n'
         "empty=false\n"
@@ -796,5 +810,11 @@ def test_unlock_tolerates_an_untagged_stack_elsewhere_in_the_tree(monkeypatch, t
     )
     ad.main()
     assert json.loads(_parsed(out)["cells"]) == [
-        {"stack": "stacks/app", "environment": "dev-eu", "workload": "app", "workload_var": "APP"}
+        {
+            "stack": "stacks/app",
+            "environment": "dev-eu",
+            "workload": "app",
+            "workload_var": "APP",
+            "config_mode": "legacy",
+        }
     ]

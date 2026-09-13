@@ -198,6 +198,7 @@ def test_the_cell_passes_this_whole_with_block():
     S3-backend flavor restoring nothing.
     """
     assert _step("drift", "actions/drift-cell@")["with"] == {
+        "config-mode": "${{ matrix.config_mode }}",
         "stack": "${{ matrix.stack }}",
         "stack-name": "${{ matrix.stack }}",
         "env": "${{ matrix.environment }}",

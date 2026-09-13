@@ -88,6 +88,7 @@ jobs:
           aws-region: ${{ vars.AWS_REGION }}
       - uses: ship-iac/shipmate/actions/apply-cell@463196516076cfbbbbbe5503b3d65352d5eb1bb5
         with:
+          config-mode: ${{ matrix.config_mode }}
           stack: ${{ matrix.stack }}
           stack-name: ${{ matrix.stack }}
           env: ${{ matrix.environment }}
@@ -132,6 +133,7 @@ jobs:
           aws-region: ${{ vars.AWS_REGION }}
       - uses: ship-iac/shipmate/actions/apply-cell@463196516076cfbbbbbe5503b3d65352d5eb1bb5
         with:
+          config-mode: ${{ matrix.config_mode }}
           stack: ${{ matrix.stack }}
           stack-name: ${{ matrix.stack }}
           env: ${{ matrix.environment }}
@@ -176,6 +178,7 @@ jobs:
           aws-region: ${{ vars.AWS_REGION }}
       - uses: ship-iac/shipmate/actions/apply-cell@463196516076cfbbbbbe5503b3d65352d5eb1bb5
         with:
+          config-mode: ${{ matrix.config_mode }}
           stack: ${{ matrix.stack }}
           stack-name: ${{ matrix.stack }}
           env: ${{ matrix.environment }}
@@ -220,6 +223,7 @@ jobs:
           aws-region: ${{ vars.AWS_REGION }}
       - uses: ship-iac/shipmate/actions/apply-cell@463196516076cfbbbbbe5503b3d65352d5eb1bb5
         with:
+          config-mode: ${{ matrix.config_mode }}
           stack: ${{ matrix.stack }}
           stack-name: ${{ matrix.stack }}
           env: ${{ matrix.environment }}
@@ -264,6 +268,7 @@ jobs:
           aws-region: ${{ vars.AWS_REGION }}
       - uses: ship-iac/shipmate/actions/apply-cell@463196516076cfbbbbbe5503b3d65352d5eb1bb5
         with:
+          config-mode: ${{ matrix.config_mode }}
           stack: ${{ matrix.stack }}
           stack-name: ${{ matrix.stack }}
           env: ${{ matrix.environment }}
@@ -308,6 +313,7 @@ jobs:
           aws-region: ${{ vars.AWS_REGION }}
       - uses: ship-iac/shipmate/actions/apply-cell@463196516076cfbbbbbe5503b3d65352d5eb1bb5
         with:
+          config-mode: ${{ matrix.config_mode }}
           stack: ${{ matrix.stack }}
           stack-name: ${{ matrix.stack }}
           env: ${{ matrix.environment }}
@@ -352,6 +358,7 @@ jobs:
           aws-region: ${{ vars.AWS_REGION }}
       - uses: ship-iac/shipmate/actions/apply-cell@463196516076cfbbbbbe5503b3d65352d5eb1bb5
         with:
+          config-mode: ${{ matrix.config_mode }}
           stack: ${{ matrix.stack }}
           stack-name: ${{ matrix.stack }}
           env: ${{ matrix.environment }}
@@ -396,6 +403,7 @@ jobs:
           aws-region: ${{ vars.AWS_REGION }}
       - uses: ship-iac/shipmate/actions/apply-cell@463196516076cfbbbbbe5503b3d65352d5eb1bb5
         with:
+          config-mode: ${{ matrix.config_mode }}
           stack: ${{ matrix.stack }}
           stack-name: ${{ matrix.stack }}
           env: ${{ matrix.environment }}

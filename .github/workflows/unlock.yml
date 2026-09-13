@@ -112,6 +112,7 @@ jobs:
           aws-region: ${{ vars.AWS_REGION }}
       - uses: ship-iac/shipmate/actions/unlock-cell@a9be68cc9442bbf03478a7eabbd0afc2847cdd4e
         with:
+          config-mode: ${{ matrix.config_mode }}
           stack: ${{ matrix.stack }}
           stack-name: ${{ matrix.stack }}
           env: ${{ matrix.environment }}

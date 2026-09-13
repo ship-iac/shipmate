@@ -134,6 +134,21 @@ def test_no_workflow_binds_the_old_names():
     assert offenders == []
 
 
+@pytest.mark.parametrize(("workflow", "job_id"), _ELEVEN, ids=lambda v: v)
+def test_every_cell_step_passes_the_mode_from_its_matrix_row(workflow, job_id):
+    """The last hop: `config_mode` is stamped on every matrix row, and a cell step that does not
+    forward it hands the action an empty input, which `env-inject` refuses. A grep run once at
+    authoring time does not stop a twelfth step from omitting it, so the eleven are checked
+    against the same registry every other property here uses.
+
+    Mutation: delete the `config-mode:` line from one wave job's `with:`, or bind it from
+    `matrix.environment`.
+    """
+    steps = [s for s in (_jobs(_doc(workflow))[job_id].get("steps") or []) if _runs_a_cell(s)]
+    assert len(steps) == 1, f"{workflow}:{job_id}: {len(steps)} cell steps"
+    assert steps[0]["with"]["config-mode"] == "${{ matrix.config_mode }}"
+
+
 @pytest.mark.parametrize("action", _CELL_ACTIONS)
 def test_each_cell_action_injects_before_it_runs_terramate(action):
     """Order is the property, not presence: a correctly written step placed after the plan
