@@ -298,19 +298,32 @@ def _report_unused(environments, all_envs):
 
 
 def validate(table, matrix_envs, shared_envs, all_envs=None):
-    """The table, or `SystemExit`. Every refusal is gated on `layout` being declared.
+    """The table, or `SystemExit`. Every schema refusal is gated on `layout` being declared.
 
     A repository with no `layout` has not migrated: it keeps the legacy variables, and
-    refusing anything in its table would refuse a configuration that works. `all_envs` is
+    refusing anything in its table would refuse a configuration that works. The one refusal
+    outside that gate is a table that declares `environments` and no `layout`, which is not
+    an unmigrated repository but a migrated one whose `layout` did not evaluate. `all_envs` is
     the whole-tree environment scan where one exists, and only the unused-entry warning
     reads it; `None` on the paths that scan only a changed set or a workset, where an
     environment absent from that set is not evidence of anything.
     """
     if "layout" not in table:
+        # Not "the table is non-empty": `globals "shipmate"` is a shared namespace, and an
+        # `env_order`-only block is a legacy repository with no table at all.
+        if table.get("environments"):
+            raise SystemExit(
+                '::error::globals "shipmate" declares environments but no layout, so every '
+                "cell would take its identity from GitHub variables instead of the table. "
+                "Terramate drops an attribute it cannot evaluate rather than failing, so a "
+                "layout set to an expression that does not resolve disappears from the "
+                "table. Declare layout, or check the expression it is set to."
+            )
         print(
-            "::warning::this repository takes its environment identity from GitHub "
-            'variables, which the `globals "shipmate"` environment table replaces. Declare '
-            "a layout to migrate; the variables keep working until you do."
+            '::warning::no `globals "shipmate"` environment table was found on the default '
+            "branch, so this repository takes its environment identity from GitHub "
+            "variables, which the table replaces. Declare a layout to migrate; the "
+            "variables keep working until you do."
         )
         return table
     # Key presence, not a truthy value: `stamp_rows` decides the mode on the key, so a null

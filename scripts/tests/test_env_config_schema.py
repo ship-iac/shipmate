@@ -41,6 +41,38 @@ def test_a_non_string_layout_refuses():
     )
 
 
+ENVIRONMENTS_WITHOUT_LAYOUT = (
+    '::error::globals "shipmate" declares environments but no layout, so every cell would '
+    "take its identity from GitHub variables instead of the table. Terramate drops an "
+    "attribute it cannot evaluate rather than failing, so a layout set to an expression "
+    "that does not resolve disappears from the table. Declare layout, or check the "
+    "expression it is set to."
+)
+
+
+def test_environments_with_no_layout_refuses():
+    """Terramate drops an attribute it cannot evaluate and exits 0, so a table whose
+    `layout` references an undefined global arrives carrying only its `environments`. That
+    reads as an unmigrated repository: the rows stamp `legacy` and identity reverts to the
+    branch-editable variables this feature removes.
+
+    Mutation: take the migration-warning path whenever `layout` is absent.
+    """
+    assert _refusal({"environments": {"dev-eu": {"region": "eu-west-1"}}}) == (
+        ENVIRONMENTS_WITHOUT_LAYOUT
+    )
+
+
+def test_another_global_does_not_rescue_a_table_with_no_layout():
+    """`globals "shipmate"` is shared with `env_order`, so the refusal keys on
+    `environments` rather than on the table holding anything at all.
+
+    Mutation: refuse only a table whose sole key is `environments`.
+    """
+    table = {"env_order": {"prod-us": ["dev-eu"]}, "environments": {"dev-eu": {}}}
+    assert _refusal(table) == ENVIRONMENTS_WITHOUT_LAYOUT
+
+
 # --- 2: dry needs an entry with a region for every matrix environment -----------------
 
 

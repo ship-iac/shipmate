@@ -408,9 +408,11 @@ A repository may declare its environments' identity, credentials and regions in
 a `globals "shipmate"` block — the same Terramate namespace `env_order` already
 occupies — instead of in GitHub Environment variables.
 `global.shipmate.layout` is the discriminator: a repository that declares it
-runs in table mode, and one that does not runs in legacy mode, the
-variables path §Env model describes. Both are supported in this release; legacy
-mode is deprecated rather than frozen, and the table is where it is going.
+runs in table mode, and one that declares neither it nor `environments` runs in
+legacy mode, the variables path §Env model describes. A block declaring
+`environments` without a `layout` is malformed and refuses (§Refusals). Both
+modes are supported in this release; legacy mode is deprecated rather than
+frozen, and the table is where it is going.
 Nothing infers the mode
 from a value being empty, and there is no default anywhere: a cell whose row
 carries no mode refuses rather than taking either path.
@@ -486,12 +488,14 @@ would stop describing environment identity.
 
 ### Refusals
 
-Every condition below refuses at detect, before any cell starts, and only once
-`layout` is declared — a repository that has not migrated keeps a configuration
-that works.
+Every condition below refuses at detect, before any cell starts. All but the
+first are gated on `layout` being declared — a repository that has not migrated
+keeps a configuration that works — and the first is what tells an unmigrated
+repository apart from a migrated one whose `layout` did not evaluate.
 
 | Condition | Why |
 |---|---|
+| `environments` is declared and `layout` is not | Terramate drops an attribute it cannot evaluate rather than failing, so a `layout` set to an expression that does not resolve leaves a table that reads as unmigrated and silently reverts every cell to the GitHub variables |
 | `layout` is not `dry`, `workspace` or `folder` | a typo would silently disable injection |
 | `dry` and a matrix environment has no entry, or an entry with no region | the layout cannot derive its variables, and an empty region derives nothing the fingerprint can tell apart |
 | A tier resolves a role but no region | the credentials step requires one |

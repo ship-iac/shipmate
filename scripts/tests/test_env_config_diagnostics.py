@@ -24,9 +24,9 @@ env_config = load_script("env-config")
 #: Hand-written, not imported from the script: a constant derived from the file it checks
 #: passes whatever the file says.
 MIGRATION_NOTICE = (
-    "::warning::this repository takes its environment identity from GitHub variables, "
-    'which the `globals "shipmate"` environment table replaces. Declare a layout to '
-    "migrate; the variables keep working until you do."
+    '::warning::no `globals "shipmate"` environment table was found on the default branch, '
+    "so this repository takes its environment identity from GitHub variables, which the "
+    "table replaces. Declare a layout to migrate; the variables keep working until you do."
 )
 UNUSED_DEV_US = (
     "::warning::the environment table declares dev-us, which no stack tags. Remove the "

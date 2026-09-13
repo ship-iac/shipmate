@@ -38,8 +38,12 @@ meant to replace.
   so a pull request cannot change which role its own plan assumes, which region
   it authenticates against, or which workspace it plans.
 
-  Opt-in, and nothing breaks on upgrade: a repository that declares no layout
-  keeps the variables path, unchanged and fully supported in this release. That
+  Opt-in, and nothing breaks on upgrade: a repository that declares neither a
+  layout nor an `environments` map keeps the variables path, unchanged and fully
+  supported in this release. A table declaring `environments` and no layout is
+  malformed and refuses: Terramate drops an attribute it cannot evaluate rather
+  than failing, so an unresolvable layout would otherwise revert every cell to
+  the variables silently. That
   path is deprecated rather than frozen — the engine now reports a superseded
   variable by name, the table is the intended destination, and the window closes
   in a later release. Both modes are selected by
