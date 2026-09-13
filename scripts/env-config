@@ -91,3 +91,184 @@ def read_table(run=None):
     run = run or _run
     path = os.path.join(os.environ["RUNNER_TEMP"], _WORKTREE)
     return evaluate(worktree(_default_branch(run), path, run), run)
+
+
+#: The layouts a repository may declare, and the environment-level keys an entry may
+#: hold. `aws` is the only provider implemented; a second one costs a field list here
+#: and one conditional step in each cell action.
+_LAYOUTS = ("dry", "workspace", "folder")
+_AWS_FIELDS = ("region", "role")
+_ENV_KEYS = ("region", "vars", "aws")
+
+#: Reserved at every level: a tier selector, never a provider field.
+_STRUCTURAL = ("plan", "apply", "workloads")
+
+
+def _mapping(value, where):
+    if not isinstance(value, dict):
+        raise SystemExit(f"::error::{where} must be a mapping, got {type(value).__name__}.")
+    return value
+
+
+def _string(value, where):
+    if not isinstance(value, str):
+        raise SystemExit(f"::error::{where} must be a string, got {type(value).__name__}.")
+    return value
+
+
+def _fields(level, env, where, allowed_structural):
+    """The provider fields of one level, refusing anything the schema does not give it."""
+    fields = {}
+    for key, value in level.items():
+        if key in _STRUCTURAL:
+            if key not in allowed_structural:
+                raise SystemExit(
+                    f"::error::environment {env}: {where}.{key} is a reserved key in a "
+                    "position the schema does not give it. plan and apply sit inside a "
+                    "provider block; workloads sits only under plan or apply."
+                )
+            continue
+        if key == "vars":
+            raise SystemExit(
+                f"::error::environment {env}: {where}.vars is not a field the aws provider "
+                "defines. vars sits at environment level: a per-tier one would let plan "
+                "and apply inject different values, and every apply would then fail as "
+                "stale."
+            )
+        if key not in _AWS_FIELDS:
+            raise SystemExit(
+                f"::error::environment {env}: {where}.{key} is not a field the aws "
+                f"provider defines. It defines {', '.join(_AWS_FIELDS)}."
+            )
+        fields[key] = _string(value, f"environment {env}: {where}.{key}")
+    return fields
+
+
+def tiers(block, env, region):
+    """Every tier of one provider block, as `(label, resolved fields)`.
+
+    Block level, then the path, then the workload, each overriding the last field by
+    field -- the merge order resolution repeats. The environment's own `region` inherits
+    into the block, which is the schema's only cross-level default.
+    """
+    base = {"region": region} if region else {}
+    base.update(_fields(_mapping(block, f"environment {env}: aws"), env, "aws", ("plan", "apply")))
+    for path in ("plan", "apply"):
+        where = f"aws.{path}"
+        level = _mapping(block.get(path, {}), f"environment {env}: {where}")
+        merged = {**base, **_fields(level, env, where, ("workloads",))}
+        yield where, merged
+        workloads = _mapping(level.get("workloads", {}), f"environment {env}: {where}.workloads")
+        for name, workload in sorted(workloads.items()):
+            inner = f"{where}.workloads.{name}"
+            level_fields = _fields(
+                _mapping(workload, f"environment {env}: {inner}"), env, inner, ()
+            )
+            yield inner, {**merged, **level_fields}
+
+
+def _check_provider(block, env, region, shared):
+    """Refuse a block that authenticates nothing, or a tier that authenticates
+    incompletely.
+
+    A tier resolving no credential is legal: apply-only cloud access is a supported
+    shape, and its plan path resolves an empty credential and skips the step.
+    """
+    if shared and "plan" in _mapping(block, f"environment {env}: aws"):
+        raise SystemExit(
+            f"::error::environment {env} is shared between the plan and apply paths, so "
+            "aws.plan cannot apply to it: a shared environment resolves aws.apply on both "
+            f"paths. Remove aws.plan, or drop {env} from SHIPMATE_SHARED_ENVS."
+        )
+    resolved = list(tiers(block, env, region))
+    if not any("role" in fields for _, fields in resolved):
+        raise SystemExit(
+            f"::error::environment {env}: the aws block resolves no role on any tier. "
+            "Give aws, aws.plan, aws.apply or a workload a role, or remove the block."
+        )
+    for label, fields in resolved:
+        if "role" in fields and "region" not in fields:
+            raise SystemExit(
+                f"::error::environment {env}: {label} resolves a role but no region, and "
+                "the aws credentials step requires one. Set aws.region, or the "
+                "environment's own region."
+            )
+
+
+def _check_vars(entry, env):
+    """`TF_VAR_*` and `TF_WORKSPACE` only, and strings only.
+
+    A non-string value would otherwise pass here and refuse once per cell at injection
+    time -- forty identical failures in a forty-cell matrix instead of one at the top.
+    """
+    for name, value in sorted(_mapping(entry["vars"], f"environment {env}: vars").items()):
+        if not name.startswith("TF_VAR_") and name != "TF_WORKSPACE":
+            raise SystemExit(
+                f"::error::environment {env}: vars may name only TF_VAR_* and "
+                f"TF_WORKSPACE, and {name} is neither."
+            )
+        if not isinstance(value, str):
+            raise SystemExit(
+                f"::error::environment {env}: vars.{name} must be a string, got "
+                f"{type(value).__name__}. A non-string value would otherwise refuse once "
+                "per cell at injection time."
+            )
+
+
+def _check_environment(entry, env, shared_envs):
+    entry = _mapping(entry, f"environment {env}")
+    for key in sorted(entry):
+        if key not in _ENV_KEYS:
+            raise SystemExit(
+                f"::error::environment {env}: {key} is not a key this engine implements. "
+                f"An environment holds {', '.join(_ENV_KEYS)}."
+            )
+    if "region" in entry:
+        _string(entry["region"], f"environment {env}: region")
+    if "vars" in entry:
+        _check_vars(entry, env)
+    if "aws" in entry:
+        _check_provider(entry["aws"], env, entry.get("region"), env in shared_envs)
+
+
+def _check_dry_coverage(environments, matrix_envs):
+    """`dry` derives both identity variables from the table, so every cell needs an entry.
+
+    An empty region is no region: `plan-classify` excludes an empty `TF_VAR_*` from the
+    fingerprint, so the layout would derive nothing the cell could be distinguished by.
+    """
+    for env in sorted(matrix_envs):
+        entry = environments.get(env)
+        if entry is None:
+            missing = "no entry in it"
+        elif not _mapping(entry, f"environment {env}").get("region"):
+            missing = "an entry with no region"
+        else:
+            continue
+        raise SystemExit(
+            '::error::layout = "dry" derives TF_VAR_env and TF_VAR_region from the '
+            f"environment table, and {env} has {missing}."
+        )
+
+
+def validate(table, matrix_envs, shared_envs, all_envs=None):
+    """The table, or `SystemExit`. Every refusal is gated on `layout` being declared.
+
+    A repository with no `layout` has not migrated: it keeps the legacy variables, and
+    refusing anything in its table would refuse a configuration that works. `all_envs` is
+    the whole-tree environment scan where one exists; validation never needs it.
+    """
+    layout = table.get("layout")
+    if layout is None:
+        return table
+    if layout not in _LAYOUTS:
+        raise SystemExit(
+            f'::error::globals "shipmate" layout is {layout!r}; it must be one of '
+            f"{', '.join(_LAYOUTS)}."
+        )
+    environments = _mapping(table.get("environments", {}), "environments")
+    for env in sorted(environments):
+        _check_environment(environments[env], env, shared_envs)
+    if layout == "dry":
+        _check_dry_coverage(environments, matrix_envs)
+    return table
