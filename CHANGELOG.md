@@ -13,7 +13,7 @@ grammar are declared unstable in `README.md`.
 
 ## [0.28.0] — 2026-09-13
 
-Tags `TBD`.
+Tags `b0d9a41`.
 
 **Breaking: the engine release declares the Terramate and OpenTofu versions, and
 a consumer no longer can.** A repository that pinned `TERRAMATE_VERSION` or
