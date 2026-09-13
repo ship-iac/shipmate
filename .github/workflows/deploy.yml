@@ -16,6 +16,7 @@ on:
       # Feeds the `summary` job's App-token mint for the gate write. An empty key fails loud one
       # step earlier, in that job's `Verify the App key arrived`.
       SHIPMATE_APP_PRIVATE_KEY: { required: false }
+      SHIPMATE_SECRETS: { required: false }
 jobs:
   detect:
     runs-on: ubuntu-latest

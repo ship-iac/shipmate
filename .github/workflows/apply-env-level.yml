@@ -10,6 +10,8 @@ on:
         required: false
       SHIPMATE_APP_PRIVATE_KEY:
         required: false
+      SHIPMATE_SECRETS:
+        required: false
 # Floor, not a default to inherit from: every job here declares its own block, so a job that
 # loses its block gets nothing rather than everything the caller granted, id-token: write included.
 permissions: {}
@@ -80,6 +82,8 @@ jobs:
       - uses: ship-iac/shipmate/actions/apply-cell@94a60ab22beb46a7c7d2f52b858d29a26bc1f101
         with:
           tf-vars: ${{ toJSON(matrix.tf_vars) }}
+          github-vars: ${{ toJSON(vars) }}
+          consumer-secrets: ${{ secrets.SHIPMATE_SECRETS }}
           stack: ${{ matrix.stack }}
           stack-name: ${{ matrix.stack }}
           env: ${{ matrix.environment }}
@@ -118,6 +122,8 @@ jobs:
       - uses: ship-iac/shipmate/actions/apply-cell@94a60ab22beb46a7c7d2f52b858d29a26bc1f101
         with:
           tf-vars: ${{ toJSON(matrix.tf_vars) }}
+          github-vars: ${{ toJSON(vars) }}
+          consumer-secrets: ${{ secrets.SHIPMATE_SECRETS }}
           stack: ${{ matrix.stack }}
           stack-name: ${{ matrix.stack }}
           env: ${{ matrix.environment }}
@@ -156,6 +162,8 @@ jobs:
       - uses: ship-iac/shipmate/actions/apply-cell@94a60ab22beb46a7c7d2f52b858d29a26bc1f101
         with:
           tf-vars: ${{ toJSON(matrix.tf_vars) }}
+          github-vars: ${{ toJSON(vars) }}
+          consumer-secrets: ${{ secrets.SHIPMATE_SECRETS }}
           stack: ${{ matrix.stack }}
           stack-name: ${{ matrix.stack }}
           env: ${{ matrix.environment }}
@@ -194,6 +202,8 @@ jobs:
       - uses: ship-iac/shipmate/actions/apply-cell@94a60ab22beb46a7c7d2f52b858d29a26bc1f101
         with:
           tf-vars: ${{ toJSON(matrix.tf_vars) }}
+          github-vars: ${{ toJSON(vars) }}
+          consumer-secrets: ${{ secrets.SHIPMATE_SECRETS }}
           stack: ${{ matrix.stack }}
           stack-name: ${{ matrix.stack }}
           env: ${{ matrix.environment }}
@@ -232,6 +242,8 @@ jobs:
       - uses: ship-iac/shipmate/actions/apply-cell@94a60ab22beb46a7c7d2f52b858d29a26bc1f101
         with:
           tf-vars: ${{ toJSON(matrix.tf_vars) }}
+          github-vars: ${{ toJSON(vars) }}
+          consumer-secrets: ${{ secrets.SHIPMATE_SECRETS }}
           stack: ${{ matrix.stack }}
           stack-name: ${{ matrix.stack }}
           env: ${{ matrix.environment }}
@@ -270,6 +282,8 @@ jobs:
       - uses: ship-iac/shipmate/actions/apply-cell@94a60ab22beb46a7c7d2f52b858d29a26bc1f101
         with:
           tf-vars: ${{ toJSON(matrix.tf_vars) }}
+          github-vars: ${{ toJSON(vars) }}
+          consumer-secrets: ${{ secrets.SHIPMATE_SECRETS }}
           stack: ${{ matrix.stack }}
           stack-name: ${{ matrix.stack }}
           env: ${{ matrix.environment }}
@@ -308,6 +322,8 @@ jobs:
       - uses: ship-iac/shipmate/actions/apply-cell@94a60ab22beb46a7c7d2f52b858d29a26bc1f101
         with:
           tf-vars: ${{ toJSON(matrix.tf_vars) }}
+          github-vars: ${{ toJSON(vars) }}
+          consumer-secrets: ${{ secrets.SHIPMATE_SECRETS }}
           stack: ${{ matrix.stack }}
           stack-name: ${{ matrix.stack }}
           env: ${{ matrix.environment }}
@@ -346,6 +362,8 @@ jobs:
       - uses: ship-iac/shipmate/actions/apply-cell@94a60ab22beb46a7c7d2f52b858d29a26bc1f101
         with:
           tf-vars: ${{ toJSON(matrix.tf_vars) }}
+          github-vars: ${{ toJSON(vars) }}
+          consumer-secrets: ${{ secrets.SHIPMATE_SECRETS }}
           stack: ${{ matrix.stack }}
           stack-name: ${{ matrix.stack }}
           env: ${{ matrix.environment }}

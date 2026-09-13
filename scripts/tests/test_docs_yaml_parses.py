@@ -15,7 +15,7 @@ import textwrap
 
 import pytest
 import yaml
-from _loader import ENGINE, ENGINE_CALL_SECRETS, WORKFLOWS, load_script
+from _loader import CASCADE_PENDING, ENGINE, ENGINE_CALL_SECRETS, WORKFLOWS, load_script
 
 DOCS = ENGINE / "docs"
 
@@ -228,11 +228,17 @@ def test_the_secrets_registry_holds_each_callees_exact_declaration_set(target):
     retires one leaves every shim the registry blesses dead, with the registry and the shims in
     perfect agreement.
 
+    `_loader.CASCADE_PENDING` is unioned in, and is the only slack: a secret the callee already
+    declares while its SHA-pinned engine-internal callers cannot legally map it yet
+    (docs/releasing.md, step 1 of three). Hand-written like the registry, so it names the
+    cascade rather than hiding a drift.
+
     Mutation: add a key to `_loader._APP_KEY` and "fix" the documented `drift.yml` and
     `comment-ops.yml` shims to match. That agreement is exactly what this refuses as evidence.
     """
     declared = sorted(_workflow_call_secrets(target))
-    assert sorted(ENGINE_CALL_SECRETS[target] or {}) == declared, (
+    expected = sorted(set(ENGINE_CALL_SECRETS[target] or {}) | CASCADE_PENDING.get(target, set()))
+    assert expected == declared, (
         f"_loader.ENGINE_CALL_SECRETS[{target!r}] names "
         f"{sorted(ENGINE_CALL_SECRETS[target] or {})}, but `{target}` declares {declared}"
     )

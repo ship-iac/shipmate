@@ -28,6 +28,14 @@ inputs:
   tf-vars:
     description: The matrix row's resolved tf_vars, serialised with toJSON. Anything but a JSON object of strings is refused; the empty object is a legitimate value and an omitted input is not.
     required: true
+  github-vars:
+    description: The consumer's reachable GitHub variables, serialised with toJSON. Engine-built, so an empty rendering is a platform fact and not a consumer mistake; empty and null are both read as no variables.
+    required: false
+    default: ""
+  consumer-secrets:
+    description: The consumer's SHIPMATE_SECRETS envelope. Empty is the normal case — a consumer forwarding no secrets. Values are masked before anything is written.
+    required: false
+    default: ""
 runs:
   using: composite
   steps:
@@ -55,6 +63,8 @@ runs:
       shell: bash
       env:
         SHIPMATE_TF_VARS: ${{ inputs.tf-vars }}
+        SHIPMATE_GITHUB_VARS: ${{ inputs.github-vars }}
+        SHIPMATE_SECRETS: ${{ inputs.consumer-secrets }}
       run: python3 "$GITHUB_ACTION_PATH/../../scripts/env-inject"
 
     - name: Stack slug

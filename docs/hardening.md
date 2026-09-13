@@ -808,10 +808,11 @@ included, because it compares the policy names against the default branch alone.
 
 ## What the engine receives from your repository
 
-The documented file's jobs pass exactly two secrets by name:
-`SHIPMATE_APP_PRIVATE_KEY`, and `SHIPMATE_PLAN_PASSPHRASE` wherever the callee
+The documented file's jobs pass three secrets by name:
+`SHIPMATE_APP_PRIVATE_KEY`, `SHIPMATE_PLAN_PASSPHRASE` wherever the callee
 writes or reads an encrypted plan artifact (the `plan`, `deploy`, `targeted` and
-`all` jobs; `unlock` passes neither). Nothing else crosses into a called workflow, because
+`all` jobs; `unlock` passes neither engine secret), and `SHIPMATE_SECRETS` on
+every job whose callee runs a cell. Nothing else crosses into a called workflow, because
 GHA forwards no secret a caller does not name.
 
 `secrets: inherit` forwards every secret the calling repository can see:

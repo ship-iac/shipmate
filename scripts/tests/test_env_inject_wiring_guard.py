@@ -41,7 +41,11 @@ _CELL_ACTIONS = ("plan-cell", "apply-cell", "drift-cell", "unlock-cell")
 
 _INJECT_STEP = "Inject identity variables"
 _INJECT_RUN = 'python3 "$GITHUB_ACTION_PATH/../../scripts/env-inject"'
-_INJECT_ENV = {"SHIPMATE_TF_VARS": "${{ inputs.tf-vars }}"}
+_INJECT_ENV = {
+    "SHIPMATE_TF_VARS": "${{ inputs.tf-vars }}",
+    "SHIPMATE_GITHUB_VARS": "${{ inputs.github-vars }}",
+    "SHIPMATE_SECRETS": "${{ inputs.consumer-secrets }}",
+}
 
 #: The identity input every cell step passes, and the only `with:` entry this file owns.
 #: `toJSON` is load-bearing: `tf_vars` is a mapping, and a mapping interpolated into a string
@@ -49,6 +53,18 @@ _INJECT_ENV = {"SHIPMATE_TF_VARS": "${{ inputs.tf-vars }}"}
 _CELL_STEP_WITH = {"tf-vars": "${{ toJSON(matrix.tf_vars) }}"}
 
 _IDENTITY_INPUTS = ("tf-vars",)
+
+#: The two consumer channels every cell step binds beside the identity input, and the whole
+#: `inputs:` shape each cell action must declare for them. `required: false` with an empty
+#: default is the opposite of `tf-vars`: absent is the normal case for a consumer with no extras,
+#: and `env-inject` reads empty as `{}`. `toJSON` is load-bearing on the enumeration for the same
+#: reason it is on `tf_vars` -- `vars` is a context object, and interpolating one into a string
+#: input yields GHA's `Object` rendering rather than JSON.
+_CHANNEL_STEP_WITH = {
+    "github-vars": "${{ toJSON(vars) }}",
+    "consumer-secrets": "${{ secrets.SHIPMATE_SECRETS }}",
+}
+_CHANNEL_INPUT_SPEC = {"required": False, "default": ""}
 
 _ELEVEN = [(wf, job) for wf, jobs in _CELL_JOBS.items() for job in jobs]
 
@@ -174,3 +190,33 @@ def test_each_cell_action_declares_the_identity_input_without_a_default(action):
     for name in _IDENTITY_INPUTS:
         assert "default" not in spec["inputs"][name], name
         assert spec["inputs"][name]["required"] is True, name
+
+
+@pytest.mark.parametrize(("workflow", "job_id"), _ELEVEN, ids=lambda v: v)
+def test_every_cell_step_binds_both_consumer_channels(workflow, job_id):
+    """Both channels, at every one of the eleven sites, from the same registry the identity
+    input is checked against. One job drifting from the other ten is the realistic failure: an
+    unbound channel reaches the action as its empty default, so that cell silently carries none
+    of the consumer's variables or secrets while the other ten do.
+
+    Mutation: delete the `consumer-secrets:` line from ONE wave job's `with:`.
+    """
+    steps = [s for s in (_jobs(_doc(workflow))[job_id].get("steps") or []) if _runs_a_cell(s)]
+    assert len(steps) == 1, f"{workflow}:{job_id}: {len(steps)} cell steps"
+    with_ = steps[0]["with"]
+    assert {k: with_.get(k) for k in _CHANNEL_STEP_WITH} == _CHANNEL_STEP_WITH
+
+
+@pytest.mark.parametrize("action", _CELL_ACTIONS)
+def test_each_cell_action_declares_both_consumer_channels(action):
+    """Each channel's whole `inputs:` entry, description aside. An undeclared `with:` key on a
+    composite action is ignored with a warning rather than refused, so a workflow can bind a
+    channel the action never declares and every cell of it runs without one.
+
+    Mutation: delete the `github-vars:` input block from one action's `inputs:`.
+    """
+    spec = yaml.safe_load((ACTIONS / action / "action.yml").read_text(encoding="utf-8"))
+    for name in _CHANNEL_STEP_WITH:
+        declared = dict(spec["inputs"][name])
+        declared.pop("description", None)
+        assert declared == _CHANNEL_INPUT_SPEC, name

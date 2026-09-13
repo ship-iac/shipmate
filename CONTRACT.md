@@ -2142,12 +2142,14 @@ bare-apply path as `.github/workflows/apply-all.yml` (detect → env-levels
 targeted path as `.github/workflows/apply.yml` (single-env detect → one
 `apply-env-level.yml` call → gate refresh + result comment), and the unlock path
 as `.github/workflows/unlock.yml` (guard → single-env detect → one flat unlock
-matrix; it takes `environment` and `ref` only, and declares no secrets). A
+matrix; it takes `environment` and `ref` only, and declares `SHIPMATE_SECRETS`
+and no engine secret). A
 consuming repo reaches all four from `shipmate.yml`: the `deploy` job (on
 `push` to the default branch; passes only its flavor's `state_suffix`, which it
 sets to `''` on a remote backend), the `targeted` and `all` jobs (dispatched
 `apply`, split on whether an `environment` was given) and the `unlock` job
-(dispatched `unlock`; no `state_suffix` and no `secrets:` block). All four must
+(dispatched `unlock`; no `state_suffix`, and a `secrets:` block naming
+`SHIPMATE_SECRETS` alone). All four must
 grant `id-token: write`, added in the same pull request that repins past the
 change introducing it (see AWS OIDC, above).
 

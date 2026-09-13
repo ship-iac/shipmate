@@ -4,6 +4,11 @@ on:
     inputs:
       environment: { required: true, type: string }
       ref: { required: true, type: string }
+    # Unlock's first and only secret. It carries no engine credential -- unlock reads no plan
+    # artifact and mints no App token -- but `unlock-cell` runs `tofu init`, so a consumer
+    # whose backend configuration reads a plain TF_VAR_* needs the envelope here too.
+    secrets:
+      SHIPMATE_SECRETS: { required: false }
 # Floor, not a default to inherit from: every job here declares its own block, so a job that
 # loses its block gets nothing rather than everything the caller granted, id-token: write included.
 permissions: {}
@@ -107,6 +112,8 @@ jobs:
       - uses: ship-iac/shipmate/actions/unlock-cell@94a60ab22beb46a7c7d2f52b858d29a26bc1f101
         with:
           tf-vars: ${{ toJSON(matrix.tf_vars) }}
+          github-vars: ${{ toJSON(vars) }}
+          consumer-secrets: ${{ secrets.SHIPMATE_SECRETS }}
           stack: ${{ matrix.stack }}
           stack-name: ${{ matrix.stack }}
           env: ${{ matrix.environment }}

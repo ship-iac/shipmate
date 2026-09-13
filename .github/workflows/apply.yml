@@ -14,6 +14,7 @@ on:
       # pass. A required declaration rejects the call before the first callee job binding none
       # (`guard`) runs a step, with "Secret ... is required, but not provided while calling".
       SHIPMATE_APP_PRIVATE_KEY: { required: false }
+      SHIPMATE_SECRETS: { required: false }
       SHIPMATE_PLAN_PASSPHRASE: { required: false }
 jobs:
   # `gh workflow run apply.yml` by a human with write access would otherwise skip every requirement

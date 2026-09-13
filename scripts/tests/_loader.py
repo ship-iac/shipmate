@@ -41,10 +41,13 @@ ACTIONS = ENGINE / "actions"
 WORKFLOWS = ENGINE / ".github" / "workflows"
 
 _APP_KEY = {"SHIPMATE_APP_PRIVATE_KEY": "${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}"}
+_CONSUMER_SECRETS = {"SHIPMATE_SECRETS": "${{ secrets.SHIPMATE_SECRETS }}"}
+_APP_KEY_AND_SECRETS = {**_APP_KEY, **_CONSUMER_SECRETS}
 _APP_KEY_AND_PASSPHRASE = {
     "SHIPMATE_APP_PRIVATE_KEY": "${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}",
     "SHIPMATE_PLAN_PASSPHRASE": "${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}",
 }
+_APP_KEY_PASSPHRASE_AND_SECRETS = {**_APP_KEY_AND_PASSPHRASE, **_CONSUMER_SECRETS}
 
 #: The whole `secrets:` block every caller of an engine reusable workflow must write, keyed by
 #: callee file name. Hand-written, never derived from the callee's own declarations: a guard that
@@ -54,20 +57,31 @@ _APP_KEY_AND_PASSPHRASE = {
 #: delivers nothing across an organization boundary and suppresses what the callee's
 #: `environment:` would otherwise supply. Mapping a secret the callee does not declare is a
 #: load-time failure, which is why each entry is the callee's exact declaration set: `plan.yml`
-#: encrypts plan artifacts and mints the gate, so it takes both; `drift.yml` and
-#: `comment-ops.yml` mint only.
+#: encrypts plan artifacts and mints the gate, so it takes both engine secrets; `drift.yml`
+#: mints only; `comment-ops.yml` runs no cell, so it is the one entry taking no consumer
+#: envelope. Every other callee runs a cell, and `SHIPMATE_SECRETS` is how a consumer's own
+#: secrets reach it.
 ENGINE_CALL_SECRETS = {
-    "plan.yml": _APP_KEY_AND_PASSPHRASE,
-    "drift.yml": _APP_KEY,
+    "plan.yml": _APP_KEY_PASSPHRASE_AND_SECRETS,
+    "drift.yml": _APP_KEY_AND_SECRETS,
     "comment-ops.yml": _APP_KEY,
-    "apply.yml": _APP_KEY_AND_PASSPHRASE,
-    "apply-all.yml": _APP_KEY_AND_PASSPHRASE,
-    "deploy.yml": _APP_KEY_AND_PASSPHRASE,
+    "apply.yml": _APP_KEY_PASSPHRASE_AND_SECRETS,
+    "apply-all.yml": _APP_KEY_PASSPHRASE_AND_SECRETS,
+    "deploy.yml": _APP_KEY_PASSPHRASE_AND_SECRETS,
     "apply-env-level.yml": _APP_KEY_AND_PASSPHRASE,
-    # `None`, not `{}`: unlock reads no plan artifact and mints no App token, so its wrapper
-    # writes no `secrets:` block at all.
-    "unlock.yml": None,
+    # Unlock reads no plan artifact and mints no App token, so the consumer envelope is the
+    # whole block: `unlock-cell` runs `tofu init`, which a consumer's backend may configure
+    # from a plain TF_VAR_*.
+    "unlock.yml": _CONSUMER_SECRETS,
 }
+
+#: Secrets a callee already declares that its engine-internal callers may not map yet, by callee
+#: file name. `apply.yml`, `apply-all.yml` and `deploy.yml` call `apply-env-level.yml` at a SHA,
+#: and mapping a secret the PINNED callee does not declare is a hard load-time error, so
+#: `docs/releasing.md` orders the declaration, the pin bump, and the mapping into three
+#: pull requests. This names what is between step 1 and step 3; the step-3 pull request moves
+#: the name into `ENGINE_CALL_SECRETS` and leaves this empty.
+CASCADE_PENDING = {"apply-env-level.yml": frozenset({"SHIPMATE_SECRETS"})}
 
 
 @functools.cache

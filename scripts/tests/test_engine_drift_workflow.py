@@ -56,7 +56,8 @@ def test_the_workflow_call_inputs_are_exactly_these():
 
 def test_the_workflow_call_secrets_are_exactly_these():
     assert _doc()[True]["workflow_call"]["secrets"] == {
-        "SHIPMATE_APP_PRIVATE_KEY": {"required": False}
+        "SHIPMATE_APP_PRIVATE_KEY": {"required": False},
+        "SHIPMATE_SECRETS": {"required": False},
     }
 
 
@@ -180,6 +181,8 @@ def test_the_cell_passes_this_whole_with_block():
     """
     assert _step("drift", "actions/drift-cell@")["with"] == {
         "tf-vars": "${{ toJSON(matrix.tf_vars) }}",
+        "github-vars": "${{ toJSON(vars) }}",
+        "consumer-secrets": "${{ secrets.SHIPMATE_SECRETS }}",
         "stack": "${{ matrix.stack }}",
         "stack-name": "${{ matrix.stack }}",
         "env": "${{ matrix.environment }}",

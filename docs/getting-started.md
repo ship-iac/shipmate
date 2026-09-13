@@ -304,6 +304,7 @@ jobs:
     secrets:
       SHIPMATE_APP_PRIVATE_KEY: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
       SHIPMATE_PLAN_PASSPHRASE: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
+      SHIPMATE_SECRETS: ${{ secrets.SHIPMATE_SECRETS }}
     with:
       # Your flavor's per-stack state path suffix; "" when a remote backend owns state.
       state_suffix: ""
@@ -336,6 +337,7 @@ jobs:
     secrets:
       SHIPMATE_APP_PRIVATE_KEY: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
       SHIPMATE_PLAN_PASSPHRASE: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
+      SHIPMATE_SECRETS: ${{ secrets.SHIPMATE_SECRETS }}
     with:
       state_suffix: ""
   drift:
@@ -348,6 +350,7 @@ jobs:
       actions: read
     secrets:
       SHIPMATE_APP_PRIVATE_KEY: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
+      SHIPMATE_SECRETS: ${{ secrets.SHIPMATE_SECRETS }}
     with:
       state_suffix: ""
       # Empty covers every cell. Split the sweep by adding more files, one tag query each.
@@ -359,6 +362,7 @@ jobs:
     secrets:
       SHIPMATE_APP_PRIVATE_KEY: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
       SHIPMATE_PLAN_PASSPHRASE: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
+      SHIPMATE_SECRETS: ${{ secrets.SHIPMATE_SECRETS }}
     with:
       environment: ${{ inputs.environment }}
       ref: ${{ inputs.ref }}
@@ -371,6 +375,7 @@ jobs:
     secrets:
       SHIPMATE_APP_PRIVATE_KEY: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
       SHIPMATE_PLAN_PASSPHRASE: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
+      SHIPMATE_SECRETS: ${{ secrets.SHIPMATE_SECRETS }}
     with:
       ref: ${{ inputs.ref }}
       pr_number: ${{ inputs.pr_number }}
@@ -379,6 +384,8 @@ jobs:
     if: github.event_name == 'workflow_dispatch' && inputs.verb == 'unlock'
     uses: ship-iac/shipmate/.github/workflows/unlock.yml@<engine-sha>  # see the latest release
     permissions: { contents: read, checks: read, actions: read, id-token: write }
+    secrets:
+      SHIPMATE_SECRETS: ${{ secrets.SHIPMATE_SECRETS }}
     with:
       environment: ${{ inputs.environment }}
       ref: ${{ inputs.ref }}
@@ -546,11 +553,11 @@ The two apply jobs split on the dispatched `environment`: a targeted
 declared default, which is what makes an omitted key read as the empty string.
 
 `shipmate unlock <env>` lands on the `unlock` job. It calls the engine's
-`unlock.yml`, which takes `environment` and `ref` and no secrets — releasing
-a lock reads no plan artifact, so there is no passphrase to forward, and mapping
-a secret the callee does not declare is a load-time rejection with no job and no
-log. That is why the `unlock` job is the one job of the file with no `secrets:`
-block.
+`unlock.yml`, which takes `environment`, `ref` and `SHIPMATE_SECRETS` — releasing
+a lock reads no plan artifact and mints no App token, so it declares neither
+engine secret, and mapping a secret the callee does not declare is a load-time
+rejection with no job and no log. That is why the `unlock` job is the one job of
+the file whose `secrets:` block names no engine credential.
 
 The `deploy` job applies, on push to the default branch, every reviewed plan
 whose apply check is still pending — so it no-ops when everything was applied
@@ -575,12 +582,14 @@ Two reasons, and the second one is a hard failure:
   surface silently fails to exist — no `shipmate / gate`, no pending
   `apply / <stack> / <env>` checks, no sticky comment.
 
-Pass only what each callee declares. `drift.yml` and `comment-ops.yml` declare
-`SHIPMATE_APP_PRIVATE_KEY` alone — they mint an App token and read no plan
-artifact. `plan.yml`, `apply.yml`, `apply-all.yml` and `deploy.yml` declare
-`SHIPMATE_PLAN_PASSPHRASE` too, because each of them writes or reads an
-encrypted plan artifact. `unlock.yml` declares neither, so the `unlock` job
-writes no `secrets:` block at all. Naming a secret the callee does not declare is a
+Pass only what each callee declares. `comment-ops.yml` declares
+`SHIPMATE_APP_PRIVATE_KEY` alone — it mints an App token, reads no plan
+artifact, and runs no cell. `plan.yml`, `apply.yml`, `apply-all.yml` and
+`deploy.yml` declare `SHIPMATE_PLAN_PASSPHRASE` too, because each of them writes
+or reads an encrypted plan artifact. Every callee that runs a cell —
+`plan.yml`, `drift.yml`, the three apply paths and `unlock.yml` — also declares
+`SHIPMATE_SECRETS`, which is why `unlock.yml` declares neither engine secret and
+still takes a `secrets:` block. Naming a secret the callee does not declare is a
 load-time error that kills the run with no job and no log.
 
 ### Consumers outside the engine's organization
