@@ -1570,7 +1570,7 @@ def _mode_input_finding(text, name):
     logs, only a workflow-validation error on the run itself — which is the
     hardest failure in this system to diagnose from the outside. That asymmetry
     between an undeclared workflow-call input and an undeclared action input is
-    the measured one at `docs/upgrading.md`.
+    measured.
 
     `_MODE_KEY` is line-anchored, like `_PLAN_RUN_ID_KEY` and with the same
     known gap, which applies to BOTH halves: a fully inline flow mapping —

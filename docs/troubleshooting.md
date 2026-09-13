@@ -411,7 +411,7 @@ own fix:
   `expected-head: ${{ needs.facts.outputs.head-sha }}` to the `plan-cell`
   step ([`getting-started.md`](getting-started.md) §Required — plan). This is the
   first thing a repository meets after re-pinning to the release that introduced
-  the input ([`upgrading.md`](upgrading.md) §0.17.0).
+  the input.
 - **The commit checked out is not the commit the run says it is planning.**
   Neither plan trigger checks out the pull request's head — `pull_request_target`
   takes the base branch, `workflow_dispatch` the dispatch ref — so `detect`
@@ -424,9 +424,9 @@ own fix:
   close. `build-matrix` holds the same line one job earlier, in `detect`, and
   states its half of it two ways: `this run checked out <sha>, which is not the
   commit it is planning` when the `ref:` is missing, and `this run did not state
-  the commit it is planning` when the step's own `head-sha` input is absent
-  ([`upgrading.md`](upgrading.md) §0.20.0). Neither is optional and neither has a
-  quiet mode — a run that cannot name its head is refused, not planned.
+  the commit it is planning` when the step's own `head-sha` input is absent.
+  Neither is optional and neither has a quiet mode — a run that cannot name its
+  head is refused, not planned.
 
 ### `this reviewed plan records no planned commit`, or `the reviewed plan was produced from`
 
@@ -454,8 +454,7 @@ remedy differs:
   deploy path can meet an old-format artifact for a cell that was still pending
   when the re-pin merged, and there is no pull request left to push to — the
   remedy there is a follow-up pull request touching those stacks. The way to
-  avoid meeting it at all is to land the re-pin with nothing pending
-  ([`upgrading.md`](upgrading.md) §0.17.0).
+  avoid meeting it at all is to land the re-pin with nothing pending.
 
 This check is per cell and additive: the apply path's plan-run binding — each
 cell's plan run read from an App-authored apply check on that same head — is
@@ -784,8 +783,7 @@ that states no head repository is refused too, with a message naming the input.
 Engine `plan.yml` fills that input from its own `facts` job, so on a current pin
 the message means what it says — the head really is elsewhere. On an older pin
 the same message can come from a hand-written consumer workflow
-whose `build-matrix` step never passed the input (`docs/upgrading.md` §0.20.0,
-and §0.18.0 for the release that first required it). Engine `drift.yml` says it
+whose `build-matrix` step never passed the input. Engine `drift.yml` says it
 has no pull request at all with `no-pull-request: "true"` instead
 (`docs/drift.md`).
 

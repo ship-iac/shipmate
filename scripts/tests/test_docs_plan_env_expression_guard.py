@@ -1,8 +1,8 @@
 """Guards the plan-side `environment:` expression the normative pages document.
 
-`CONTRACT.md` §Env model (normative) and `docs/upgrading.md` §0.13.0 (the migration) hold the
-mixed-mode folded expression. Neither is read by any consumer-facing code, so nothing else
-reddens when they rot. The realistic failures, and the whole threat model here:
+`CONTRACT.md` §Env model holds the mixed-mode folded expression, normatively and as the only
+copy. It is read by no consumer-facing code, so nothing else reddens when it rots. The
+realistic failures, and the whole threat model here:
 
 - the engine's own expression evolves, `test_apply_env_binding_guard.py` goes
   red, its author updates that constant, and the documented copies keep telling
@@ -37,7 +37,7 @@ PLAN_ENV = (
 )
 
 _FENCE = re.compile(r"```yaml\n(.*?)```", re.S)
-PAGES = ("CONTRACT.md", "docs/upgrading.md")
+PAGES = ("CONTRACT.md",)
 
 
 def _fences(page):
@@ -72,7 +72,7 @@ def _documented_binding(page):
     return found[0]
 
 
-def test_both_pages_document_the_plan_side_expression():
+def test_every_page_documents_the_plan_side_expression():
     for page in PAGES:
         assert _documented_binding(page) == PLAN_ENV, (
             f"{page}: the documented plan-side `environment:` must be the engine's "

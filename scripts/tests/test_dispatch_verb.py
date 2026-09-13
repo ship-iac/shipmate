@@ -411,8 +411,8 @@ _UNEXPECTED_INPUTS_STUB = (
 _FORBIDDEN_STUB = "#!/bin/bash\necho 'HTTP 403: Forbidden' >&2\nexit 1\n"
 _LAYOUT_SKEW = "has no .github/workflows/shipmate.yml"
 # The remedy half. The consumer authors that file by hand, a pin bump does not, and
-# `docs/releasing.md` is the maintainer's runbook rather than the page that tells them.
-_LAYOUT_REMEDY = "docs/upgrading.md"
+# `docs/releasing.md` is the maintainer's runbook rather than the page that publishes it.
+_LAYOUT_REMEDY = "docs/getting-started.md"
 
 
 @pytest.mark.parametrize("stub", [_NOT_FOUND_STUB, _NO_TRIGGER_STUB, _UNEXPECTED_INPUTS_STUB])
