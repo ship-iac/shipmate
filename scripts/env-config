@@ -1,0 +1,93 @@
+#!/usr/bin/env python3
+"""Read the environment table from the repository's default branch.
+
+Branch content cannot rewrite these values because they are not read from the
+branch: the table is evaluated in a detached worktree of `origin/<default>`.
+`origin` is the base repository on every path -- no checkout in any workflow
+passes `repository:` -- and a fork pull request is refused before it plans.
+"""
+
+import json
+import os
+import shutil
+import subprocess
+import sys
+
+_WORKTREE = "shipmate-envcfg"
+
+
+def _run(args, check=True):
+    """stdout of `args`, raising ::error:: on a nonzero exit. `check=False` returns
+    the CompletedProcess instead, for the one caller whose failure is tolerated.
+
+    Local rather than `build-matrix`'s: `_shipmate.py` caches nothing and re-executes
+    the module on every `_load`, and `build-matrix` calls this module, so reaching its
+    copy through the loader would not terminate.
+    """
+    # args is a code-controlled tool invocation (gh/git/terramate by PATH name),
+    # never user input, and shell=False -- safe.
+    p = subprocess.run(args, capture_output=True, text=True)  # noqa: S603
+    if not check:
+        return p
+    if p.returncode != 0:
+        # Surface the tool's own error; a swallowed stderr makes CI opaque.
+        sys.stderr.write(p.stderr)
+        raise SystemExit(f"::error::command failed ({p.returncode}): {' '.join(args)}")
+    return p.stdout
+
+
+def _default_branch(run):
+    """The default branch name, from the API rather than the event payload.
+
+    `github.event.repository.default_branch` is not reliably populated under
+    `schedule`; drift.yml resolves it this way for the same reason.
+    """
+    repo = os.environ["GITHUB_REPOSITORY"]
+    return run(["gh", "api", f"repos/{repo}", "--jq", ".default_branch"]).strip()
+
+
+def worktree(branch, path, run):
+    """A detached worktree of `origin/<branch>` at `path`, recreated each run.
+
+    Deleting the directory is not enough: git keeps the registration under
+    `.git/worktrees/`, and `add` to a missing-but-registered path refuses. A runner
+    reusing a workspace hits exactly that.
+    """
+    run(["git", "worktree", "remove", "--force", path], check=False)
+    shutil.rmtree(path, ignore_errors=True)
+    run(["git", "worktree", "prune"])
+    run(["git", "worktree", "add", "--detach", path, f"origin/{branch}"])
+    return path
+
+
+def evaluate(path, run):
+    """`global.shipmate` as evaluated in `path`, or {} when the global is absent."""
+    out = run(
+        [
+            "terramate",
+            "experimental",
+            "eval",
+            "--as-json",
+            "-C",
+            path,
+            "tm_try(global.shipmate, {})",
+        ]
+    )
+    try:
+        return json.loads(out)
+    except json.JSONDecodeError as exc:
+        raise SystemExit(
+            f"::error::could not parse the environment table from {path}: {exc}"
+        ) from exc
+
+
+def read_table(run=None):
+    """`global.shipmate` from the default branch, or {} when the repo has none.
+
+    Every failure here refuses. "This repository has no table" and "the table could
+    not be read" cannot be told apart without reading it, so treating a read failure
+    as absence is the fail-open this design exists to avoid.
+    """
+    run = run or _run
+    path = os.path.join(os.environ["RUNNER_TEMP"], _WORKTREE)
+    return evaluate(worktree(_default_branch(run), path, run), run)
