@@ -1,0 +1,332 @@
+"""`env-config` resolves one cell's identity, credential and region from the table.
+
+Resolution turns a validated table plus a cell's coordinates -- environment, path,
+workload -- into the four values the row carries. Three things here are load-bearing and
+each has its own test: the block -> path -> workload merge order, the layout derivation,
+and that a shared environment resolves `aws.apply` on both paths.
+
+Every assertion compares the whole resolved object against a hand-written literal. A
+membership check on one key cannot see an inverted merge order, which is where the
+fail-open hides: a plan tier silently keeping the block's write role.
+"""
+
+from _loader import load_script
+
+env_config = load_script("env-config")
+
+
+def _three_tier(path, workload, shared_envs=()):
+    """One table carrying a role at all three tiers, and a region only at the block."""
+    table = {
+        "layout": "folder",
+        "environments": {
+            "dev-eu": {
+                "aws": {
+                    "region": "eu-west-1",
+                    "role": "arn:aws:iam::9817:role/block",
+                    "apply": {
+                        "role": "arn:aws:iam::9817:role/apply",
+                        "workloads": {"net-edge": {"role": "arn:aws:iam::9817:role/net-edge"}},
+                    },
+                }
+            }
+        },
+    }
+    return env_config.resolve(table, "dev-eu", path, workload, shared_envs)
+
+
+# --- 1: the three-tier merge, one boundary per test -----------------------------------
+
+
+def test_the_block_tier_resolves_when_no_higher_tier_sets_the_field():
+    """The plan path declares nothing, so the block's role and region stand.
+
+    Mutation: drop the block from the merge -- the plan path resolves no role at all.
+    """
+    assert _three_tier("plan", "") == {
+        "role_arn": "arn:aws:iam::9817:role/block",
+        "cred_region": "eu-west-1",
+        "tf_vars": {},
+        "config_path": "plan",
+    }
+
+
+def test_the_path_tier_overrides_the_block():
+    """Mutation: swap the merge order so the block wins -- the apply path then resolves
+    the block role, and a plan tier could never take a role away from apply either."""
+    assert _three_tier("apply", "") == {
+        "role_arn": "arn:aws:iam::9817:role/apply",
+        "cred_region": "eu-west-1",
+        "tf_vars": {},
+        "config_path": "apply",
+    }
+
+
+def test_the_workload_tier_overrides_the_path():
+    """The workload sets only `role`, so `region` still merges in field by field.
+
+    Mutation: swap the path/workload order, or merge whole levels instead of fields --
+    the region is lost with the second.
+    """
+    assert _three_tier("apply", "net-edge") == {
+        "role_arn": "arn:aws:iam::9817:role/net-edge",
+        "cred_region": "eu-west-1",
+        "tf_vars": {},
+        "config_path": "apply",
+    }
+
+
+def test_a_workload_with_no_tier_of_its_own_resolves_the_path_tier():
+    """Mutation: refuse or resolve empty when the workload is not in the table -- most
+    workloads have no override and must take the path tier's role."""
+    assert _three_tier("apply", "app") == {
+        "role_arn": "arn:aws:iam::9817:role/apply",
+        "cred_region": "eu-west-1",
+        "tf_vars": {},
+        "config_path": "apply",
+    }
+
+
+# --- 2: derivation by layout ----------------------------------------------------------
+
+
+def _layout(layout, entry=None):
+    entry = {"region": "eu-west-1"} if entry is None else entry
+    table = {"layout": layout, "environments": {"dev-eu": entry}}
+    return env_config.resolve(table, "dev-eu", "plan", "", ())
+
+
+def test_dry_derives_both_identity_variables():
+    """Mutation: emit a constant instead of the environment key -- every cell then
+    fingerprints identically and applies against the wrong state."""
+    assert _layout("dry") == {
+        "role_arn": "",
+        "cred_region": "",
+        "tf_vars": {"TF_VAR_env": "dev-eu", "TF_VAR_region": "eu-west-1"},
+        "config_path": "plan",
+    }
+
+
+def test_workspace_derives_the_workspace_name():
+    """Mutation: emit `TF_VAR_env` here too -- the workspace flavor injects neither."""
+    assert _layout("workspace") == {
+        "role_arn": "",
+        "cred_region": "",
+        "tf_vars": {"TF_WORKSPACE": "dev-eu"},
+        "config_path": "plan",
+    }
+
+
+def test_folder_derives_nothing():
+    """Mutation: fall through to the dry derivation -- folders inject nothing at plan
+    and apply alike, and injecting here would change the fingerprint on one side."""
+    assert _layout("folder") == {
+        "role_arn": "",
+        "cred_region": "",
+        "tf_vars": {},
+        "config_path": "plan",
+    }
+
+
+# --- 3: the one cross-level default ---------------------------------------------------
+
+
+def test_the_environment_region_inherits_into_the_block():
+    """Mutation: stop inheriting -- the credentials step loses its required region."""
+    entry = {"region": "eu-west-1", "aws": {"role": "arn:aws:iam::9817:role/block"}}
+    assert _layout("folder", entry) == {
+        "role_arn": "arn:aws:iam::9817:role/block",
+        "cred_region": "eu-west-1",
+        "tf_vars": {},
+        "config_path": "plan",
+    }
+
+
+def test_the_provider_region_wins_over_the_environment_region():
+    """`cred_region` is the credentials step's region; `TF_VAR_region` under dry is the
+    environment's own, and the two are not the same value.
+
+    Mutation: always use the environment-level value -- the credentials step then
+    authenticates in the wrong region.
+    """
+    entry = {
+        "region": "eu-west-1",
+        "aws": {"region": "us-east-1", "role": "arn:aws:iam::9817:role/block"},
+    }
+    assert _layout("dry", entry) == {
+        "role_arn": "arn:aws:iam::9817:role/block",
+        "cred_region": "us-east-1",
+        "tf_vars": {"TF_VAR_env": "dev-eu", "TF_VAR_region": "eu-west-1"},
+        "config_path": "plan",
+    }
+
+
+# --- 4: the workload tier is keyed by the raw workload --------------------------------
+
+#: `workload_var` is not injective: `net-edge` and `net_edge` both render NET_EDGE, so a
+#: resolution keyed on the mangled name cannot tell these two apart. These are resolve()
+#: unit tests and never reach `build_matrix`, so its collision guard does not fire.
+_COLLIDING = {
+    "layout": "folder",
+    "environments": {
+        "dev-eu": {
+            "region": "eu-west-1",
+            "aws": {
+                "apply": {
+                    "role": "arn:aws:iam::9817:role/apply",
+                    "workloads": {
+                        "net-edge": {"role": "arn:aws:iam::9817:role/hyphen"},
+                        "net_edge": {"role": "arn:aws:iam::9817:role/underscore"},
+                    },
+                }
+            },
+        }
+    },
+}
+
+
+def test_two_workloads_mangling_to_one_name_resolve_separately():
+    """Mutation: key the tier on `workload_var` -- both workloads then resolve to
+    whichever entry sorted last, and one applies under a role that is not its own."""
+    assert env_config.resolve(_COLLIDING, "dev-eu", "apply", "net-edge", ()) == {
+        "role_arn": "arn:aws:iam::9817:role/hyphen",
+        "cred_region": "eu-west-1",
+        "tf_vars": {},
+        "config_path": "apply",
+    }
+    assert env_config.resolve(_COLLIDING, "dev-eu", "apply", "net_edge", ()) == {
+        "role_arn": "arn:aws:iam::9817:role/underscore",
+        "cred_region": "eu-west-1",
+        "tf_vars": {},
+        "config_path": "apply",
+    }
+
+
+# --- 5 and 7: shared mode, and the tier the credential came from ----------------------
+
+_SHARED = {
+    "layout": "folder",
+    "environments": {
+        "dev-eu": {
+            "region": "eu-west-1",
+            "aws": {"apply": {"role": "arn:aws:iam::9817:role/apply"}},
+        }
+    },
+}
+
+
+def test_a_shared_environment_resolves_apply_on_the_plan_path():
+    """One environment on both paths means one role, and `config_path` reports the tier
+    it came from rather than the one requested.
+
+    Mutation: resolve `aws.plan` for a shared environment, or ignore `shared_envs`
+    entirely -- the plan cell then resolves an empty role and silently skips the
+    credentials step. Mutation: return the requested path as `config_path`.
+    """
+    assert env_config.resolve(_SHARED, "dev-eu", "plan", "", ("dev-eu",)) == {
+        "role_arn": "arn:aws:iam::9817:role/apply",
+        "cred_region": "eu-west-1",
+        "tf_vars": {},
+        "config_path": "apply",
+    }
+
+
+def test_an_unshared_environment_keeps_the_requested_path():
+    """The same table, the same path, one name out of `shared_envs`: the plan tier
+    declares nothing, so the apply role must not reach the plan path.
+
+    Mutation: treat every environment as shared.
+    """
+    assert env_config.resolve(_SHARED, "dev-eu", "plan", "", ()) == {
+        "role_arn": "",
+        "cred_region": "eu-west-1",
+        "tf_vars": {},
+        "config_path": "plan",
+    }
+
+
+# --- 6: no fallback to vars.* ---------------------------------------------------------
+
+
+def test_an_environment_absent_from_the_table_resolves_no_credential(monkeypatch):
+    """Once `layout` is set there is no fallback: the caller skips the credentials step.
+
+    `workspace`, not `dry` -- a matrix environment absent from a `dry` table is refused
+    by validation instead.
+
+    Mutation: fall back to `SHIPMATE_LEGACY_AWS_ROLE_ARN`, which is branch-editable and
+    is the whole reason the table is read from the default branch.
+    """
+    monkeypatch.setenv("SHIPMATE_LEGACY_AWS_ROLE_ARN", "arn:aws:iam::9817:role/legacy")
+    monkeypatch.setenv("SHIPMATE_LEGACY_AWS_REGION", "us-east-1")
+    table = {"layout": "workspace", "environments": {"dev-eu": {"region": "eu-west-1"}}}
+    assert env_config.resolve(table, "prod-us", "plan", "", ()) == {
+        "role_arn": "",
+        "cred_region": "",
+        "tf_vars": {"TF_WORKSPACE": "prod-us"},
+        "config_path": "plan",
+    }
+
+
+# --- 8: the environment's vars merge over the derivation ------------------------------
+
+
+def _with_vars(variables):
+    table = {
+        "layout": "workspace",
+        "environments": {"dev-eu": {"vars": variables}},
+    }
+    return env_config.resolve(table, "dev-eu", "plan", "", ())["tf_vars"]
+
+
+def test_vars_overrides_the_derived_value():
+    """Mutation: ignore `vars`, or merge it under the derivation instead of over it."""
+    assert _with_vars({"TF_WORKSPACE": "shared-tenant"}) == {"TF_WORKSPACE": "shared-tenant"}
+
+
+def test_vars_extends_the_derived_set():
+    """Mutation: ignore `vars` -- this reds while the override case stays green under a
+    merge-order mutation, which is why the two are written separately."""
+    assert _with_vars({"TF_VAR_team": "core"}) == {
+        "TF_WORKSPACE": "dev-eu",
+        "TF_VAR_team": "core",
+    }
+
+
+def test_vars_may_set_a_value_to_an_explicit_empty_string():
+    """`plan-classify` excludes an empty `TF_VAR_*` from the fingerprint on both sides,
+    so an explicit empty value stays consistent -- but only if it is emitted.
+
+    Mutation: drop empty values while merging.
+    """
+    assert _with_vars({"TF_VAR_region": ""}) == {
+        "TF_WORKSPACE": "dev-eu",
+        "TF_VAR_region": "",
+    }
+
+
+# --- 9: the two paths inject the same variables ---------------------------------------
+
+
+def test_plan_and_apply_resolve_identical_tf_vars():
+    """`plan-classify` hashes the process environment, so a variable that differs
+    between the two paths fails every apply as "saved plan is stale".
+
+    Mutation: derive `TF_VAR_env` on the apply path from a second source -- the entry's
+    region, say, instead of the environment key.
+    """
+    table = {
+        "layout": "dry",
+        "environments": {
+            "dev-eu": {
+                "region": "eu-west-1",
+                "aws": {
+                    "plan": {"role": "arn:aws:iam::9817:role/plan"},
+                    "apply": {"role": "arn:aws:iam::9817:role/apply"},
+                },
+            }
+        },
+    }
+    expected = {"TF_VAR_env": "dev-eu", "TF_VAR_region": "eu-west-1"}
+    assert env_config.resolve(table, "dev-eu", "plan", "", ())["tf_vars"] == expected
+    assert env_config.resolve(table, "dev-eu", "apply", "", ())["tf_vars"] == expected

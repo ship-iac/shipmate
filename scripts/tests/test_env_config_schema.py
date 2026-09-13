@@ -211,6 +211,34 @@ def test_a_provider_block_resolving_no_credential_refuses():
     )
 
 
+def test_a_tier_setting_an_empty_role_refuses():
+    """An empty role is not a credential: it resolves to a silently skipped credentials
+    step, which is the dead configuration refusal 6 exists to stop, reached with an empty
+    string instead of a missing key.
+
+    Mutation: delete this check -- the plan tier then runs uncredentialed with no refusal
+    anywhere. Widening refusal 6 to truth instead does not cover it: the apply tier
+    satisfies `any` on its own.
+    """
+    table = {
+        "layout": "folder",
+        "environments": {
+            "dev-eu": {
+                "aws": {
+                    "region": "eu-west-1",
+                    "apply": {"role": "arn:aws:iam::9817:role/apply"},
+                    "plan": {"role": ""},
+                }
+            }
+        },
+    }
+    assert _refusal(table) == (
+        "::error::environment dev-eu: aws.plan sets an empty role, which resolves to a "
+        "skipped credentials step rather than to a credential. Give it a role, or remove "
+        "the key."
+    )
+
+
 def test_an_apply_only_tier_passes():
     """Apply-only cloud access: the plan path resolves an empty credential and skips the
     step.

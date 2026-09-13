@@ -187,6 +187,12 @@ def _check_provider(block, env, region, shared):
             "Give aws, aws.plan, aws.apply or a workload a role, or remove the block."
         )
     for label, fields in resolved:
+        if fields.get("role") == "":
+            raise SystemExit(
+                f"::error::environment {env}: {label} sets an empty role, which resolves to "
+                "a skipped credentials step rather than to a credential. Give it a role, or "
+                "remove the key."
+            )
         if "role" in fields and "region" not in fields:
             raise SystemExit(
                 f"::error::environment {env}: {label} resolves a role but no region, and "
@@ -272,3 +278,46 @@ def validate(table, matrix_envs, shared_envs, all_envs=None):
     if layout == "dry":
         _check_dry_coverage(environments, matrix_envs)
     return table
+
+
+def _derived(layout, env, entry):
+    """The identity variables a layout derives for one environment.
+
+    The names are lowercase after the `TF_VAR_` prefix: GitHub upper-cases variable
+    names, the process environment does not, and a mismatch changes every fingerprint
+    and fails every apply as stale.
+    """
+    if layout == "dry":
+        return {"TF_VAR_env": env, "TF_VAR_region": entry.get("region", "")}
+    if layout == "workspace":
+        return {"TF_WORKSPACE": env}
+    return {}
+
+
+def resolve(table, env, path, workload, shared_envs):
+    """What one cell runs with: `role_arn`, `cred_region`, `tf_vars`, `config_path`.
+
+    `path` is the calling detect's tier, never inferred; a shared environment resolves
+    `aws.apply` on both paths, and `config_path` reports the tier actually consulted
+    rather than the one requested. Once `layout` is set there is no fallback to
+    `vars.*`: an environment with no entry resolves an empty role and the caller skips
+    the credentials step.
+
+    The workload tier is keyed by the raw `workload`, never by `workload_var`, which is
+    not injective. The environment's own `vars` merges last, over the derivation.
+    """
+    environments = _mapping(table.get("environments", {}), "environments")
+    entry = _mapping(environments.get(env, {}), f"environment {env}")
+    config_path = "apply" if env in shared_envs else path
+    fields = {}
+    if "aws" in entry:
+        resolved = dict(tiers(entry["aws"], env, entry.get("region")))
+        label = f"aws.{config_path}"
+        inner = f"{label}.workloads.{workload}"
+        fields = resolved[inner] if inner in resolved else resolved.get(label, {})
+    return {
+        "role_arn": fields.get("role", ""),
+        "cred_region": fields.get("region", ""),
+        "tf_vars": {**_derived(table.get("layout"), env, entry), **entry.get("vars", {})},
+        "config_path": config_path,
+    }
