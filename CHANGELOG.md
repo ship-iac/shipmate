@@ -22,33 +22,33 @@ per-consumer override. `actions/setup` and the engine's reusable workflows
 changed, so every engine pin moves in one commit as usual; the `scripts/onboard`
 change below is run by hand and never pinned. No check name moves.
 
-The release also adds an opt-in environment table, read from the repository's
-default branch, as an alternative to the GitHub Environment variables that carry
-a cell's identity and roles today. Declaring none keeps the current behaviour:
-the variables path is unchanged in this release, and is the path the table is
-meant to replace.
+**Breaking: a cell's identity and credentials come from an environment table on
+the default branch, and a repository without one is refused.** The GitHub
+Environment variables that carried them are no longer read: `AWS_ROLE_ARN`,
+`AWS_REGION`, `TF_VAR_env`, `TF_VAR_region` and `TF_WORKSPACE`, along with any
+`AWS_ROLE_ARN_<WORKLOAD>`. The table is declared in a `globals "shipmate"` block
+and must be on the default branch before the first plan run, because that is the
+branch the engine reads it from.
 
 ### Added
 
-- **A repository may declare its environment identity, roles and regions in a
-  `globals "shipmate"` table read from the default branch.** Set
-  `global.shipmate.layout` and the engine resolves each cell's identity
-  variables, role and region from that table instead of from GitHub Environment
-  variables. It evaluates the table in a detached worktree of `origin/<default>`,
-  so a pull request cannot change which role its own plan assumes, which region
-  it authenticates against, or which workspace it plans.
+- **A repository declares its environment identity, roles and regions in a
+  `globals "shipmate"` table read from the default branch.**
+  `global.shipmate.layout` is required, and the engine resolves each cell's
+  identity variables, role and region from that table. It evaluates the table in
+  a detached worktree of `origin/<default>`, so a pull request cannot change
+  which role its own plan assumes, which region it authenticates against, or
+  which workspace it plans.
 
-  Opt-in, and nothing breaks on upgrade: a repository that declares neither a
-  layout nor an `environments` map keeps the variables path, unchanged and fully
-  supported in this release. A table declaring `environments` and no layout is
-  malformed and refuses: Terramate drops an attribute it cannot evaluate rather
-  than failing, so an unresolvable layout would otherwise revert every cell to
-  the variables silently. That
-  path is deprecated rather than frozen — the engine now reports a superseded
-  variable by name, the table is the intended destination, and the window closes
-  in a later release. Both modes are selected by
-  the matrix row's `config_mode`, never by a value being empty, and a row with no
-  mode refuses rather than taking either path.
+  A repository declaring no `globals "shipmate"` block is refused by Terramate
+  itself; a block that evaluates but declares no `layout` is refused at detect.
+  Terramate drops an attribute it cannot evaluate rather than failing, so a
+  `layout` set to an expression that does not resolve arrives as an undeclared
+  one and is refused with it. An `environments` that does not resolve is dropped
+  the same way and cannot be refused — it is indistinguishable from a table
+  deliberately declaring none, which a bare `layout` legitimately is. Such a
+  cell resolves no role and fails at `tofu init`; `docs/troubleshooting.md` has
+  the diagnosis.
 
   An environment that needs a table entry arrives and leaves over two pull
   requests — configuration first when adding, last when removing — because the
@@ -58,14 +58,8 @@ meant to replace.
   where a whole-tree scan already happened, so a typo'd key surfaces on the next
   nightly drift run rather than on the pull request that introduced it.
 
-  A table-mode cell that still carries one of the six superseded GitHub variables
-  warns once per cell for each — `env-inject` runs inside each cell and has no
-  view of the others, so a large repository mid-migration sees a lot of it until
-  the variables are deleted. A repository with no layout gets one migration
-  notice per detect.
-
   `CONTRACT.md` §Environment table is the schema and the semantics;
-  `docs/upgrading.md` §Unreleased has the adoption order and the add/remove
+  `docs/upgrading.md` §Unreleased has the bootstrap order and the add/remove
   sequence. The four `actions/*-cell/action.yml` gain a `tf-vars` input and the
   four detect actions a `shared-envs` one; eight action files and seven reusable
   workflows changed in all, so every workflow pinning them needs the normal
@@ -94,6 +88,33 @@ meant to replace.
 
 ### Changed — BREAKING
 
+- **One writer sets a cell's identity variables.** `TF_VAR_env`,
+  `TF_VAR_region` and `TF_WORKSPACE` used to reach a cell as a job-level `env:`
+  block read from the GitHub Environment it binds; `scripts/env-inject` now
+  writes what the table resolved into `$GITHUB_ENV` instead. A consumer calling
+  the engine's reusable workflows configures nothing, and no check name or
+  comment verb changes.
+
+  A consumer who copied one of the engine's cell jobs into a workflow of their
+  own drops those three `env:` keys and passes the cell action's `tf-vars` input
+  instead, as the row's `tf_vars` serialised with `toJSON`. It has no default,
+  and an omitted or malformed value is refused rather than assumed.
+
+  Every matrix row carries `role_arn`, `cred_region`, `tf_vars` and
+  `config_path`. The table's workload tier is keyed by the raw `workload/<name>`
+  tag, so the `AWS_ROLE_ARN_<WORKLOAD>` name-mangling rule and its collision
+  guard are gone with the variables.
+
+  The four `actions/*-cell/action.yml` and `apply-env-level.yml` changed, so every
+  workflow pinning them needs the normal internal-pin bump after merge.
+
+- **`scripts/onboard` no longer tells a consumer to create the five identity
+  variables.** Its checklist asked for `AWS_ROLE_ARN`, `AWS_REGION`,
+  `TF_VAR_env`, `TF_VAR_region` and `TF_WORKSPACE` as `gh variable set` lines;
+  it now names the environment table instead. `onboard` never set them itself,
+  so a repository that followed the old checklist has variables to delete rather
+  than a migration to run.
+
 - **The Terramate and OpenTofu versions come from the engine release, not from
   repository variables.** `actions/setup` reads the release's own root-level
   `VERSIONS` file at the commit the consumer pins, and the engine's workflows no
@@ -116,40 +137,6 @@ meant to replace.
   normal internal-pin bump after merge. `VERSIONS` is now one of that action's
   pinned dependencies, so a later tool-version bump makes the same pins stale
   (`docs/releasing.md` §Bumping a tool version is the same cascade).
-
-### Changed
-
-- **One writer sets a cell's identity variables, and nothing you can observe
-  moves.** `TF_VAR_env`, `TF_VAR_region` and `TF_WORKSPACE` used to reach a cell
-  as a job-level `env:` block; `scripts/env-inject` now writes them into
-  `$GITHUB_ENV` instead. The values come from the same GitHub Environment
-  variables, arrive under the same names, and hash to the same apply-match
-  fingerprint — a plan taken before this release applies after it. Nothing to
-  configure, and no check name or comment verb changes.
-
-  The route is what changed, so that a later release can change where a cell's
-  identity comes from without also changing how it reaches the process.
-
-  A consumer who copied one of the engine's cell jobs into a workflow of their
-  own will see the rename: the three `env:` keys reading `vars.TF_VAR_env`,
-  `vars.TF_VAR_region` and `vars.TF_WORKSPACE` are now
-  `SHIPMATE_LEGACY_TF_VAR_ENV`, `SHIPMATE_LEGACY_TF_VAR_REGION` and
-  `SHIPMATE_LEGACY_TF_WORKSPACE`, and `env-inject` reads only those. Three more
-  bindings — `SHIPMATE_LEGACY_AWS_ROLE_ARN`, `SHIPMATE_LEGACY_AWS_REGION` and
-  `SHIPMATE_LEGACY_AWS_ROLE_ARN_WORKLOAD` — are new, and a table-mode cell reads
-  them only to report a variable the table has superseded; the credentials step
-  still reads `vars.AWS_*` in legacy mode as it did. Calling a cell action
-  directly also needs the cell actions' two new identity inputs, `config-mode`
-  set to `legacy` and `tf-vars` set to `'{}'`: neither has a default, and an
-  omitted value is refused rather than assumed.
-  `docs/upgrading.md` §Unreleased has all three edits; a consumer calling the
-  engine's reusable workflows needs none of them.
-
-  Every matrix row now carries a `config_mode` field, plus `role_arn`,
-  `cred_region`, `tf_vars` and `config_path` — empty in legacy mode.
-
-  The four `actions/*-cell/action.yml` and `apply-env-level.yml` changed, so every
-  workflow pinning them needs the normal internal-pin bump after merge.
 
 ## [0.27.1] — 2026-09-12
 
