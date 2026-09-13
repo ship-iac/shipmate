@@ -261,8 +261,11 @@ def test_an_apply_only_tier_passes():
 # --- 7: a shared environment declaring plan -------------------------------------------
 
 
-def test_a_shared_environment_declaring_plan_refuses():
-    """Mutation: drop the shared check, or ignore `shared_envs` entirely."""
+@pytest.mark.parametrize("listed", ["dev-eu", "Dev-EU"])
+def test_a_shared_environment_declaring_plan_refuses(listed):
+    """Mutation: drop the shared check, or ignore `shared_envs` entirely. Mutation:
+    compare the listed spelling case-exactly -- `Dev-EU` then validates and the refusal
+    the whole check exists for never fires."""
     table = {
         "layout": "folder",
         "environments": {
@@ -275,7 +278,7 @@ def test_a_shared_environment_declaring_plan_refuses():
             }
         },
     }
-    assert _refusal(table, shared_envs=("dev-eu",)) == (
+    assert _refusal(table, shared_envs=(listed,)) == (
         "::error::environment dev-eu is shared between the plan and apply paths, so "
         "aws.plan cannot apply to it: a shared environment resolves aws.apply on both "
         "paths. Remove aws.plan, or drop dev-eu from SHIPMATE_SHARED_ENVS."

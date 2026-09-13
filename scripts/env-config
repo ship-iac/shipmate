@@ -221,6 +221,17 @@ def _check_vars(entry, env):
             )
 
 
+def _is_shared(env, shared_envs):
+    """Whether `env` binds one shared environment rather than a plan/apply pair.
+
+    Case-insensitive with `.lower()`, not `.casefold()`, to agree with the two readers this
+    variable already has: `scripts/verify-environments` lowers, and the wave ternaries use
+    GitHub's `contains()`. A case-exact reading here resolves the plan tier for a cell the
+    workflow bound to the shared environment.
+    """
+    return env.lower() in {e.lower() for e in shared_envs}
+
+
 def _check_environment(entry, env, shared_envs):
     entry = _mapping(entry, f"environment {env}")
     for key in sorted(entry):
@@ -234,7 +245,7 @@ def _check_environment(entry, env, shared_envs):
     if "vars" in entry:
         _check_vars(entry, env)
     if "aws" in entry:
-        _check_provider(entry["aws"], env, entry.get("region"), env in shared_envs)
+        _check_provider(entry["aws"], env, entry.get("region"), _is_shared(env, shared_envs))
 
 
 def _check_dry_coverage(environments, matrix_envs):
@@ -308,7 +319,7 @@ def resolve(table, env, path, workload, shared_envs):
     """
     environments = _mapping(table.get("environments", {}), "environments")
     entry = _mapping(environments.get(env, {}), f"environment {env}")
-    config_path = "apply" if env in shared_envs else path
+    config_path = "apply" if _is_shared(env, shared_envs) else path
     fields = {}
     if "aws" in entry:
         resolved = dict(tiers(entry["aws"], env, entry.get("region")))

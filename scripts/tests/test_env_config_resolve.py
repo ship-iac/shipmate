@@ -231,6 +231,46 @@ def test_a_shared_environment_resolves_apply_on_the_plan_path():
     }
 
 
+_SHARED_MIXED = {
+    "layout": "folder",
+    "environments": {
+        "Dev-EU": {
+            "region": "eu-west-1",
+            "aws": {"apply": {"role": "arn:aws:iam::9817:role/apply"}},
+        }
+    },
+}
+
+
+def test_a_case_only_difference_still_resolves_as_shared():
+    """`SHIPMATE_SHARED_ENVS` is read case-insensitively by the wave ternaries and by
+    `scripts/verify-environments`, so a spelling that binds the bare environment there
+    must resolve the apply tier here; a case-exact reading resolves `plan` instead.
+
+    Mutation: compare the two spellings directly.
+    """
+    assert env_config.resolve(_SHARED, "dev-eu", "plan", "", ("Dev-EU",)) == {
+        "role_arn": "arn:aws:iam::9817:role/apply",
+        "cred_region": "eu-west-1",
+        "tf_vars": {},
+        "config_path": "apply",
+    }
+
+
+def test_the_case_insensitivity_holds_with_the_spellings_swapped():
+    """The same difference the other way round.
+
+    Mutation: lower only the listed names -- this test then resolves `plan` while the
+    forward and exact-case tests stay green.
+    """
+    assert env_config.resolve(_SHARED_MIXED, "Dev-EU", "plan", "", ("dev-eu",)) == {
+        "role_arn": "arn:aws:iam::9817:role/apply",
+        "cred_region": "eu-west-1",
+        "tf_vars": {},
+        "config_path": "apply",
+    }
+
+
 def test_an_unshared_environment_keeps_the_requested_path():
     """The same table, the same path, one name out of `shared_envs`: the plan tier
     declares nothing, so the apply role must not reach the plan path.
