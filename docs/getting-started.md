@@ -570,8 +570,8 @@ Every snippet above that passes secrets at all passes them by name, and none use
 `secrets: inherit`.
 Two reasons, and the second one is a hard failure:
 
-- `inherit` hands the engine every secret your repository can see, not the two
-  it uses ([`hardening.md`](hardening.md) §What the engine receives).
+- `inherit` hands the engine every secret your repository can see, not the three
+  it names ([`hardening.md`](hardening.md) §What the engine receives).
 - **`inherit` works only within one organization or enterprise.** Called from a
   repository outside the engine's organization it delivers nothing. It does
   not fall back, it *suppresses*: the callee job binds
