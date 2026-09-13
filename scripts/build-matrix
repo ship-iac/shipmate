@@ -369,18 +369,6 @@ def env_config(cells, all_envs=None):
     return ec.validate(ec.read_table(), envs, shared, all_envs=all_envs), shared
 
 
-def _resolved(table, cell, tier, shared_envs):
-    """What the table resolves for one cell, or the legacy values when there is no table.
-
-    An untabled repository never calls `resolve()`: it has no entry for any environment, so
-    every field would have to be invented. The four cell actions read none of these five in
-    legacy mode.
-    """
-    if "layout" not in table:
-        return {"role_arn": "", "cred_region": "", "tf_vars": {}, "config_path": ""}
-    return ec.resolve(table, cell["environment"], tier, cell["workload"], shared_envs)
-
-
 def stamp_rows(cells, table, tier, shared_envs):
     """Stamp each row with what the table resolves for it.
 
@@ -388,13 +376,11 @@ def stamp_rows(cells, table, tier, shared_envs):
     explicitly: one call site serves both tiers, so nothing may infer it. Applied at each
     site that emits rows rather than inside `build_matrix`, which stays pure and
     unit-testable; `run_unlock` returns from `apply-detect`'s `main` early, so a stamp in any
-    `main` tail would skip the unlock path. The mode has no default and is never inferred
-    from a resolved field being empty -- `layout = "folder"` legitimately emits no
-    `tf_vars`. `test_row_stamp_guard.py` pins each site.
+    `main` tail would skip the unlock path. `test_row_stamp_guard.py` pins each site.
     """
-    mode = "table" if "layout" in table else "legacy"
     return [
-        {**cell, "config_mode": mode, **_resolved(table, cell, tier, shared_envs)} for cell in cells
+        {**cell, **ec.resolve(table, cell["environment"], tier, cell["workload"], shared_envs)}
+        for cell in cells
     ]
 
 

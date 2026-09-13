@@ -1,12 +1,11 @@
-"""Every matrix row every detect emits carries the five fields the cell actions resolve a cell's
-identity and credentials from: `config_mode`, `role_arn`, `cred_region`, `tf_vars` and
-`config_path`.
+"""Every matrix row every detect emits carries the four fields the cell actions resolve a cell's
+identity and credentials from: `role_arn`, `cred_region`, `tf_vars` and `config_path`.
 
-`scripts/env-inject` refuses a mode it does not recognise and there is no default anywhere on
-the route, so a row that reaches a cell without `config_mode` fails that cell -- and one call site
-left unstamped fails one workflow while the other five stay green. The stamp is applied at each
-call site rather than inside `build_matrix`, which stays pure, so the sites are an enumeration
-and each one needs its own assertion.
+`scripts/env-inject` refuses anything but a JSON object of strings and there is no default
+anywhere on the route, so a row that reaches a cell without `tf_vars` fails that cell -- and one
+call site left unstamped fails one workflow while the other five stay green. The stamp is applied
+at each call site rather than inside `build_matrix`, which stays pure, so the sites are an
+enumeration and each one needs its own assertion.
 
 Each assertion runs the detect's own `main()` through the stub scaffolding its module already
 owns, and compares the whole first row against a hand-written constant: the stamp wraps whatever
@@ -24,9 +23,7 @@ import test_apply_detect as tad
 import test_build_matrix as tbm
 import test_deploy_detect as tdd
 from _detect_fixtures import PLAN_SHA, _apply_check
-from _loader import SCRIPTS, load_script
-
-bm = load_script("build-matrix")
+from _loader import SCRIPTS
 
 #: The scripts that emit matrix rows, and the call site in each. Hand-written, and derived from
 #: the tree by `test_the_table_names_every_script_that_can_emit_rows` -- a seventh detect script
@@ -54,9 +51,8 @@ _PLAN_ROLE = "arn:aws:iam::1:role/plan"
 _APPLY_ROLE = "arn:aws:iam::1:role/apply"
 
 #: A table whose two tiers hold distinct roles, so a detect resolving the wrong tier is a
-#: different value rather than the same one. `layout = "folder"` derives no `tf_vars`, which is
-#: exactly the legitimate case a mode inferred from an empty `tf_vars` would send down the
-#: legacy path.
+#: different value rather than the same one. `layout = "folder"` derives no `tf_vars`, so an
+#: empty `tf_vars` on a stamped row is legitimate and is not evidence of a missing stamp.
 _TABLE = {
     "layout": "folder",
     "environments": {
@@ -69,9 +65,8 @@ _TABLE = {
 
 
 def _table(tier):
-    """The five fields `_TABLE` resolves for a dev-eu cell on `tier`."""
+    """The four fields `_TABLE` resolves for a dev-eu cell on `tier`."""
     return {
-        "config_mode": "table",
         "role_arn": _PLAN_ROLE if tier == "plan" else _APPLY_ROLE,
         "cred_region": "eu-west-1",
         "tf_vars": {},
@@ -214,20 +209,6 @@ def test_the_bare_apply_all_rows_resolve_the_apply_tier(monkeypatch, tmp_path):
             "plan_run_id": "123456",
             "plan_sha256": PLAN_SHA,
         }
-    ]
-
-
-def test_the_mode_is_the_layout_and_never_derived_from_a_resolved_field():
-    """`layout` decides, and nothing else may. `_TABLE` declares `folder`, which derives no
-    identity variables at all, so a mode inferred from `tf_vars` being empty would send an
-    adopted repository's every cell down the legacy path -- the same fail-open as
-    `matrix.role_arn || vars.AWS_ROLE_ARN`, one layer down.
-
-    Mutation: `"legacy" if not resolved["tf_vars"] else "table"` inside `stamp_rows`.
-    """
-    rows = [{"stack": "stacks/app", "environment": "dev-eu", "workload": ""}]
-    assert bm.stamp_rows(rows, _TABLE, "apply", set()) == [
-        {"stack": "stacks/app", "environment": "dev-eu", "workload": "", **_table("apply")}
     ]
 
 

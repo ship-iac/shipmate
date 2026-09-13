@@ -1,73 +1,29 @@
 #!/usr/bin/env python3
 """Write one cell's identity variables into the job environment.
 
-The single writer of `TF_VAR_*` and `TF_WORKSPACE` for a cell. A legacy-mode
-cell reads the renamed job-level `SHIPMATE_LEGACY_*` bindings; a table-mode one
-reads `SHIPMATE_TF_VARS`, the matrix row's resolved mapping. The mode selects
-one source and never merges them: two sources for one name would make
-precedence load-bearing.
+The single writer of `TF_VAR_*` and `TF_WORKSPACE` for a cell. The source is
+`SHIPMATE_TF_VARS`, the matrix row's resolved mapping, and nothing else.
 """
 
 import json
 import os
 import uuid
 
-#: Legacy binding -> the name OpenTofu actually reads. The target names are
-#: lowercase after the prefix: GitHub uppercases variable names, the process
-#: environment does not, and a mismatch changes every plan fingerprint.
-_LEGACY = {
-    "SHIPMATE_LEGACY_TF_VAR_ENV": "TF_VAR_env",
-    "SHIPMATE_LEGACY_TF_VAR_REGION": "TF_VAR_region",
-    "SHIPMATE_LEGACY_TF_WORKSPACE": "TF_WORKSPACE",
-}
-
-#: The prefix every legacy binding carries, stripped to name the repository variable
-#: an operator deletes.
-_PREFIX = "SHIPMATE_LEGACY_"
-
-#: Every binding a cell job carries -> the `vars.` name it reads. The last three are bound
-#: so the rename happened once and are injected under no name; all six are reported as
-#: leftovers in table mode. The workload role is keyed by the cell's own workload, so its
-#: variable has no single name -- `AWS_ROLE_ARN_<WORKLOAD>` is what the docs call it.
-_SUPERSEDED = {
-    "SHIPMATE_LEGACY_TF_VAR_ENV": "TF_VAR_env",
-    "SHIPMATE_LEGACY_TF_VAR_REGION": "TF_VAR_region",
-    "SHIPMATE_LEGACY_TF_WORKSPACE": "TF_WORKSPACE",
-    "SHIPMATE_LEGACY_AWS_ROLE_ARN": "AWS_ROLE_ARN",
-    "SHIPMATE_LEGACY_AWS_REGION": "AWS_REGION",
-    "SHIPMATE_LEGACY_AWS_ROLE_ARN_WORKLOAD": "AWS_ROLE_ARN_<WORKLOAD>",
-}
-
-_ACCEPTED = frozenset(_SUPERSEDED)
-
 #: The matrix row's resolved `tf_vars`, serialised by `toJSON` at the cell step.
 _TABLE = "SHIPMATE_TF_VARS"
 
 
-def _warn_superseded(environ):
-    """Name every variable a table-mode cell still carries and no longer reads.
-
-    Non-empty only: every cell job binds all six from `vars.`, so an unset variable arrives
-    as the empty string and is not a leftover. All six are named, not the role alone --
-    `TF_VAR_env` and `TF_WORKSPACE` are superseded as much as `AWS_ROLE_ARN` is. The
-    identity and credential variables live on the per-environment GitHub Environments, so
-    the message does not call them repository variables.
-    """
-    for name in sorted(v for k, v in _SUPERSEDED.items() if environ.get(k)):
-        print(
-            f"::warning::the variable {name} is superseded by the environment table and is "
-            "no longer read. Delete it from the GitHub Environment, or the repository, that "
-            "sets it."
-        )
-
-
-def _table_vars(environ):
-    """The identity variables of a table-mode cell, by injected name.
+def resolve(environ):
+    """The identity variables this cell should carry, by injected name.
 
     Only a JSON object of strings is accepted. `{}` is legitimate -- `layout =
     "folder"` derives none -- but `null` is what `toJSON` renders for a matrix field
     nothing stamped, and injecting nothing for it would authenticate the cell and then
     run it against another environment's workspace.
+
+    The injected names are lowercase after the `TF_VAR_` prefix: GitHub uppercases
+    variable names, the process environment does not, and a mismatch changes every plan
+    fingerprint.
     """
     raw = environ.get(_TABLE, "")
     try:
@@ -85,46 +41,6 @@ def _table_vars(environ):
             "nothing stamped, and is not the same thing."
         )
     return parsed
-
-
-def resolve(environ):
-    """The identity variables this cell should carry, by injected name.
-
-    Table mode reads `SHIPMATE_TF_VARS` and nothing else; the paragraphs below are
-    the legacy source. The mode is read from the row, never inferred from either
-    source being empty: `layout = "folder"` resolves an empty table legitimately.
-
-    A binding that is absent produces no entry; one set to the empty string
-    produces an empty entry. They are not the same: `plan-classify` excludes a
-    set-but-empty `TF_VAR_*` from the fingerprint, and a job-level `env:` block
-    reading an unset `vars.*` set it to empty — so reproducing today's bytes
-    means passing the empty value through rather than dropping it.
-
-    Absence is legitimate — folder-per-environment binds none of them — so it is
-    a misspelled binding that refuses, not a missing one. GitHub uppercases
-    variable names but not workflow `env:` keys, so `SHIPMATE_LEGACY_TF_VAR_env`
-    arrives as its own name, is injected under nothing, and leaves every
-    environment of a `stacks` repository sharing one backend key.
-    """
-    mode = environ.get("SHIPMATE_CONFIG_MODE", "")
-    if mode == "table":
-        _warn_superseded(environ)
-        return _table_vars(environ)
-    if mode != "legacy":
-        raise SystemExit(
-            f"::error::SHIPMATE_CONFIG_MODE must be 'legacy' or 'table', got {mode!r}. "
-            "The detect job sets it; an unexpected value means the cell and the detect "
-            "that produced its row disagree."
-        )
-    unknown = sorted(name for name in environ if name.startswith(_PREFIX) and name not in _ACCEPTED)
-    if unknown:
-        raise SystemExit(
-            f"::error::unrecognised legacy binding(s): {', '.join(unknown)}. "
-            f"Accepted: {', '.join(sorted(_ACCEPTED))}. A misspelled or wrong-case key is "
-            "injected under no name at all, and a cell carrying no identity shares one "
-            "backend key with every other environment."
-        )
-    return {target: environ[source] for source, target in _LEGACY.items() if source in environ}
 
 
 def _delimiter(value):

@@ -444,7 +444,6 @@ def test_main_wires_the_tag_map_into_the_cells(tmp_path, monkeypatch):
             "environment": "dev-eu",
             "workload": "net-edge",
             "workload_var": "NET_EDGE",
-            "config_mode": "table",
             "role_arn": "",
             "cred_region": "",
             "tf_vars": {},
@@ -669,7 +668,6 @@ def test_unlock_queue_is_the_pending_cells_of_the_target_env(monkeypatch, tmp_pa
             "environment": "dev-eu",
             "workload": "app",
             "workload_var": "APP",
-            "config_mode": "table",
             "role_arn": "",
             "cred_region": "",
             "tf_vars": {},
@@ -736,7 +734,6 @@ def test_unlock_is_not_capped_by_the_whole_tree_matrix_limit(monkeypatch, tmp_pa
             "environment": "dev-eu",
             "workload": "app",
             "workload_var": "APP",
-            "config_mode": "table",
             "role_arn": "",
             "cred_region": "",
             "tf_vars": {},
@@ -813,7 +810,7 @@ def test_apply_mode_writes_the_whole_output_file_verbatim(monkeypatch, tmp_path)
     ad.main()
     assert out.read_text(encoding="utf-8") == (
         'waves={"wave0": [{"stack": "stacks/app", "environment": "dev-eu", '
-        '"workload": "app", "workload_var": "APP", "config_mode": "table", '
+        '"workload": "app", "workload_var": "APP", '
         '"role_arn": "", "cred_region": "", "tf_vars": {}, "config_path": "apply", '
         '"plan_run_id": "42", '
         '"plan_sha256": "dddddddddddddddd'
@@ -847,7 +844,6 @@ def test_unlock_tolerates_an_untagged_stack_elsewhere_in_the_tree(monkeypatch, t
             "environment": "dev-eu",
             "workload": "app",
             "workload_var": "APP",
-            "config_mode": "table",
             "role_arn": "",
             "cred_region": "",
             "tf_vars": {},

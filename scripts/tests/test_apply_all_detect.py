@@ -297,7 +297,6 @@ def test_main_wires_the_tag_map_into_the_cells(tmp_path, monkeypatch):
             "environment": "dev-eu",
             "workload": "net-edge",
             "workload_var": "NET_EDGE",
-            "config_mode": "table",
             "role_arn": "",
             "cred_region": "",
             "tf_vars": {},
