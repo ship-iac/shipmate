@@ -375,8 +375,8 @@ def test_ambiguous_naming_still_reports_the_missing_half(monkeypatch):
 def test_split_missing_half_does_not_claim_the_jobs_cannot_run(monkeypatch):
     """Same correction as the MISSING-mode finding, in the other branch of the
     same helper: with `dev-eu-plan` present and `dev-eu-apply` absent the apply
-    binds a name GitHub auto-creates empty and, on a layout injecting nothing,
-    proceeds. "cannot apply" sends the reader looking for a failed run."""
+    binds a name GitHub auto-creates empty and proceeds. "cannot apply" sends the
+    reader looking for a failed run."""
     monkeypatch.setattr(doctor, "_gh_json", _existence("dev-eu-plan"))
     out = doctor._environment_warnings(_ctx())
     assert len(out) == 1

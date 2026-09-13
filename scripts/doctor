@@ -335,7 +335,7 @@ def _missing_half(name, env, role, mode):
     return (
         f"GitHub Environment `{name}` does not exist — the {role} jobs for stacks tagged "
         f"`env:{env}` bind a name GitHub auto-creates empty, with no variables, no secrets "
-        "and none of its protection rules. Create it and set its TF_VAR_* vars."
+        "and none of its protection rules. Create it."
     )
 
 
