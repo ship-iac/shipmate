@@ -11,7 +11,7 @@ section below names the SHA the release tags.
 The version line stays `v0.x` while action inputs, check names, and the comment
 grammar are declared unstable in `README.md`.
 
-## [Unreleased]
+## [0.29.0] — 2026-09-14
 
 ### Added
 
@@ -35,7 +35,7 @@ grammar are declared unstable in `README.md`.
   `SHIPMATE_SECRETS: ${{ secrets.SHIPMATE_SECRETS }}`, and `unlock` gains a
   `secrets:` block it did not have. The line is harmless for a repository that
   sets no such secret; skipping it means the envelope never reaches a cell.
-  `docs/upgrading.md` §Unreleased is the migration.
+  `docs/upgrading.md` §0.29.0 is the migration.
 
 ## [0.28.0] — 2026-09-13
 

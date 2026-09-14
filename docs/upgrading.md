@@ -127,7 +127,7 @@ still links to them from those releases' own entries; the migrations they
 described were between pre-table engine releases and have no consumers left to
 migrate. Each release's `CHANGELOG.md` entry is the record of what changed.
 
-### Unreleased — every cell-running job maps one more secret
+### 0.29.0 — every cell-running job maps one more secret
 
 **Add one line to six jobs.** In `.github/workflows/shipmate.yml`, the `plan`,
 `deploy`, `drift`, `targeted`, `all` and `unlock` jobs each gain
