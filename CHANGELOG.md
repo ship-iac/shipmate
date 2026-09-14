@@ -13,6 +13,8 @@ grammar are declared unstable in `README.md`.
 
 ## [0.29.0] — 2026-09-14
 
+Tags `1923428`.
+
 ### Added
 
 - **A consumer's GitHub variables and a `SHIPMATE_SECRETS` envelope reach every
