@@ -251,8 +251,8 @@ def test_a_cascade_pending_entry_names_a_secret_the_registry_does_not_yet_hold(t
     the callers pass it, leaving the entry here changes no expected set and nothing reds. The
     scaffold would become permanent and the next secret's cascade would start from a lie.
 
-    Mutation: add `SHIPMATE_SECRETS` to `ENGINE_CALL_SECRETS["apply-env-level.yml"]` and to each
-    caller's `secrets:` block, leaving `CASCADE_PENDING` as it is.
+    Mutation: add a `{callee: frozenset({name})}` entry to `CASCADE_PENDING` for a name
+    `ENGINE_CALL_SECRETS[callee]` already holds.
     """
     converged = sorted(set(ENGINE_CALL_SECRETS[target] or {}) & CASCADE_PENDING[target])
     assert not converged, (

@@ -150,6 +150,7 @@ jobs:
       # ignored (docs/releasing.md).
       SHIPMATE_APP_PRIVATE_KEY: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
       SHIPMATE_PLAN_PASSPHRASE: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
+      SHIPMATE_SECRETS: ${{ secrets.SHIPMATE_SECRETS }}
 
   summary:
     # `review` is in this list because `results:` is `join(needs.*.result, ',')`, which covers only

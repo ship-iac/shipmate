@@ -55,11 +55,11 @@ tree is running" one grep.
 a hard load-time error — unlike an undeclared action input, which is silently
 ignored — so a new secret lands in three steps, in this order:
 
-1. Declare it under `on.workflow_call.secrets` in the callee, and add the name to
-   that callee's `CASCADE_PENDING` entry in `scripts/tests/_loader.py` — the
-   registry guard compares the callee's declaration against
-   `ENGINE_CALL_SECRETS`, and this is what makes the gap between step 1 and
-   step 3 legal. Merge.
+1. Declare it under `on.workflow_call.secrets` in the callee, and name it under
+   that callee in `CASCADE_PENDING` in `scripts/tests/_loader.py`, adding the
+   entry if the dict is empty — the registry guard compares the callee's
+   declaration against `ENGINE_CALL_SECRETS`, and this is what makes the gap
+   between step 1 and step 3 legal. Merge.
 2. Bump the callers' pin to that commit (the cascade above).
 3. Only then add the line to each caller's `secrets:` block, move the name from
    `CASCADE_PENDING` into `ENGINE_CALL_SECRETS`, and leave `CASCADE_PENDING`
