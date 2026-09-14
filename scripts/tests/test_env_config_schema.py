@@ -638,14 +638,17 @@ def test_the_single_entry_point_validates_ordering_and_exclusions(table, message
     assert _refusal(table) == message
 
 
-def test_an_environment_name_merely_containing_a_tier_word_is_accepted():
-    """The other half of the suffix rule. `plan-eu` and `apply-svc` are ordinary logical
-    environment names: only a trailing `-plan` or `-apply` is the tier suffix, so a
-    containment test here would refuse a table that is correct and strand every exclusion the
-    repository declared.
+def test_a_tier_word_that_is_not_the_trailing_suffix_is_accepted():
+    """The other half of the suffix rule: only a trailing `-plan`/`-apply` is the tier
+    suffix. A refusal here would strand every exclusion a repository declared under a name
+    that merely carries one of the two words.
 
-    Mutation: `e.endswith(suffix)` -> `suffix in e` in `validate_explicit_envs` -- this table
-    refuses instead of validating.
+    `eu-plan-1` is the case that discriminates, and it is the only one: the suffixes are
+    matched with their hyphen, so `plan-eu` and `apply-svc` survive a containment test too
+    and pin the leading-word half rather than this one.
+
+    Mutation: `e.endswith(suffix)` -> `suffix in e` in `validate_explicit_envs` -- `eu-plan-1`
+    then refuses.
     """
-    table = {"layout": "folder", "explicit_envs": ["prod", "plan-eu", "apply-svc"]}
+    table = {"layout": "folder", "explicit_envs": ["prod", "plan-eu", "apply-svc", "eu-plan-1"]}
     assert env_config.validate(table, (), ()) == table
