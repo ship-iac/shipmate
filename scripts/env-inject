@@ -274,7 +274,13 @@ def mask(values):
     for value in values:
         for line in value.splitlines():
             if line:
-                print(f"::add-mask::{line.replace('%', '%25')}", flush=True)
+                # Writing the value is the mechanism, not a leak: `::add-mask::` registers an
+                # exact string, so the runner must be handed it. It consumes the command rather
+                # than echoing it, and masks the value everywhere after. Do not "fix" this by
+                # masking a digest or a prefix -- neither registers anything.
+                print(  # codeql[py/clear-text-logging-sensitive-data]
+                    f"::add-mask::{line.replace('%', '%25')}", flush=True
+                )
 
 
 def main():
