@@ -830,7 +830,7 @@ branch's HCL under `pull_request_target`. This is a change in *reach* rather
 than a new disclosure: someone who can push a branch can usually already read
 those variables through the API, and variables are not secrets. Treat it as the
 reason not to keep anything sensitive in a variable, and note that it applies
-per bound environment — a `<env>-plan` variable reaches plan cells, an
+per bound environment — a `<env>-plan` variable reaches plan and drift cells, an
 `<env>-apply` one reaches apply and unlock cells.
 
 `secrets: inherit` forwards every secret the calling repository can see:

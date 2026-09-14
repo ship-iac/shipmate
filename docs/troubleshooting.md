@@ -381,19 +381,20 @@ request's current head records, refusing the command when that head names none.
 These fail-safes are defence in depth behind that control, not the only thing
 behind it.
 
-**If the mismatch names *every* `TF_VAR_*`, look at the environment table
-rather than the plan.** The identity variables come from `matrix.environment`
+**If the mismatch names only variables the table derives — `TF_VAR_env` and
+`TF_VAR_region` under `dry`, `TF_WORKSPACE` under `workspace` — look at the
+environment table rather than the plan.** These come from `matrix.environment`
 and the table on the default branch, and both sides resolve them from that one
 table, so they hash identically whatever environment the job bound. What moves
 the whole set is the table changing between the plan and the apply — an
 environment's `vars`, its `region`, or the `layout` itself, edited on the
 default branch in between. A re-plan is the fix, as above.
 
-**If it names one or two, look at the consumer channels.** What a cell receives
-through a GitHub variable or the `SHIPMATE_SECRETS` envelope resolves against the
-environment the job bound — `<env>-plan` for a plan cell, `<env>-apply` for an
-apply cell — so those `TF_VAR_*` values are part of the fingerprint and the
-binding does reach it. Two causes, both on your side:
+**If it names a variable you set yourself, look at the consumer channels.** What
+a cell receives through a GitHub variable or the `SHIPMATE_SECRETS` envelope
+resolves against the environment the job bound — `<env>-plan` for a plan cell,
+`<env>-apply` for an apply cell — so those `TF_VAR_*` values are part of the
+fingerprint and the binding does reach it. Two causes, both on your side:
 
 - a `TF_VAR_*` whose value differs between `<env>-plan` and `<env>-apply`, which
   fails every apply of that cell until the two are made identical or the value is
