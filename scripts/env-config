@@ -100,6 +100,11 @@ _ENV_KEYS = ("region", "vars", "aws")
 #: Reserved at every level: a tier selector, never a provider field.
 _STRUCTURAL = ("plan", "apply", "workloads")
 
+#: Everything the file may declare at its top level. Also the names reserved inside
+#: `env_order`, which is keyed by environment name and would otherwise accept a
+#: misplaced control as an ordering entry.
+_TOP_KEYS = ("layout", "environments", "env_order", "explicit_envs")
+
 
 def _mapping(value, where):
     if not isinstance(value, dict):
@@ -164,19 +169,13 @@ def tiers(block, env, region):
             yield inner, {**merged, **level_fields}
 
 
-def _check_provider(block, env, region, shared):
+def _check_provider(block, env, region):
     """Refuse a block that authenticates nothing, or a tier that authenticates
     incompletely.
 
     A tier resolving no credential is legal: apply-only cloud access is a supported
     shape, and its plan path resolves an empty credential and skips the step.
     """
-    if shared and "plan" in _mapping(block, f"environment {env}: aws"):
-        raise SystemExit(
-            f"::error::environment {env} is shared between the plan and apply paths, so "
-            "aws.plan cannot apply to it: a shared environment resolves aws.apply on both "
-            f"paths. Remove aws.plan, or drop {env} from SHIPMATE_SHARED_ENVS."
-        )
     resolved = list(tiers(block, env, region))
     if not any("role" in fields for _, fields in resolved):
         raise SystemExit(
@@ -239,7 +238,8 @@ def _is_shared(env, shared_envs):
     return env.lower() in {e.lower() for e in shared_envs}
 
 
-def _check_environment(entry, env, shared_envs):
+def _check_environment(entry, env):
+    """One entry's own shape. Nothing here reads context outside the file."""
     entry = _mapping(entry, f"environment {env}")
     for key in sorted(entry):
         if key not in _ENV_KEYS:
@@ -252,7 +252,25 @@ def _check_environment(entry, env, shared_envs):
     if "vars" in entry:
         _check_vars(entry, env)
     if "aws" in entry:
-        _check_provider(entry["aws"], env, entry.get("region"), _is_shared(env, shared_envs))
+        _check_provider(entry["aws"], env, entry.get("region"))
+
+
+def _check_shared(environments, shared_envs):
+    """The one environment rule that needs context the file does not carry.
+
+    Membership comes from the `SHIPMATE_SHARED_ENVS` repository variable, so
+    `validate_structure` cannot decide it and the structural-only caller skips it.
+    """
+    for env in sorted(environments):
+        block = _mapping(environments[env], f"environment {env}").get("aws")
+        if block is None or not _is_shared(env, shared_envs):
+            continue
+        if "plan" in _mapping(block, f"environment {env}: aws"):
+            raise SystemExit(
+                f"::error::environment {env} is shared between the plan and apply paths, so "
+                "aws.plan cannot apply to it: a shared environment resolves aws.apply on both "
+                f"paths. Remove aws.plan, or drop {env} from SHIPMATE_SHARED_ENVS."
+            )
 
 
 def _check_dry_coverage(environments, matrix_envs):
@@ -294,36 +312,127 @@ def _report_unused(environments, all_envs):
         )
 
 
-def validate(table, matrix_envs, shared_envs, all_envs=None):
-    """The table, or `SystemExit`. `layout` is required: it is the only source of a cell's
-    environment identity, so a table without one leaves every cell with nothing to run as.
+def _validate_predecessors(env, preds):
+    if not isinstance(preds, list):
+        raise SystemExit(
+            f"::error::env_order[{env!r}] must be a list of predecessor envs, "
+            f"got {type(preds).__name__} ({preds!r}); did you mean [{preds!r}]?"
+        )
+    bad = [p for p in preds if not isinstance(p, str)]
+    if bad:
+        raise SystemExit(
+            f"::error::env_order[{env!r}] predecessors must all be env-name "
+            f"strings; got non-string element(s) {bad!r}"
+        )
 
-    Terramate refuses a repository declaring no `globals "shipmate"` block at all; this is
-    the other half, for a block that evaluates but carries no `layout` -- `env_order` shares
-    the same namespace. `all_envs` is the whole-tree environment scan where one exists, and
-    only the unused-entry warning reads it; `None` on the paths that scan only a changed set
-    or a workset, where an environment absent from that set is not evidence of anything.
+
+def validate_env_order(order):
+    """`order`, or `SystemExit` unless it maps env -> list of env-name strings.
+
+    Guards a bare string predecessor, which would otherwise be iterated character by
+    character into an ordering nobody wrote, and a non-mapping value, which reaches the
+    graph builder as a raw `AttributeError`. `env_levels` and `blocked_envs` call this
+    too, so no caller can reach the graph with an unchecked order.
     """
+    if not isinstance(order, dict):
+        raise SystemExit(
+            "::error::env_order must be a mapping of env -> [predecessor envs], "
+            f"got {type(order).__name__} ({order!r})"
+        )
+    for env, preds in order.items():
+        if env in _TOP_KEYS:
+            raise SystemExit(
+                f"::error::env_order[{env!r}] names a top-level setting, not an "
+                "environment. A scalar written below a [table] header lands inside that "
+                f"table, so `{env} = ...` after [env_order] becomes an ordering entry "
+                "instead of a top-level setting. Move it above the first header in "
+                f"{CONFIG_PATH}."
+            )
+        _validate_predecessors(env, preds)
+    return order
+
+
+def validate_explicit_envs(envs):
+    """`envs`, or `SystemExit` unless it is a list of bare env-name strings.
+
+    Guards a bare string, which would otherwise be iterated character by character, a
+    non-list value, and an entry carrying a `-plan`/`-apply` environment suffix -- the
+    value is matched against the bare env name on the apply checks, so a suffixed entry
+    would skip nothing at all.
+    """
+    if not isinstance(envs, list):
+        raise SystemExit(
+            "::error::explicit_envs must be a list of env-name strings, "
+            f"got {type(envs).__name__} ({envs!r}); did you mean [{envs!r}]?"
+        )
+    bad = [e for e in envs if not isinstance(e, str)]
+    if bad:
+        raise SystemExit(
+            f"::error::explicit_envs elements must all be env-name strings; "
+            f"got non-string element(s) {bad!r}"
+        )
+    for e in envs:
+        for suffix in ("-plan", "-apply"):
+            if e.endswith(suffix):
+                raise SystemExit(
+                    f"::error::explicit_envs entry {e!r} carries the environment suffix "
+                    f"{suffix!r}; explicit_envs is matched against the bare logical env "
+                    f"name — write {e[: -len(suffix)]!r} instead."
+                )
+    return envs
+
+
+def validate_structure(table):
+    """Everything the file can be judged on by itself, or `SystemExit`.
+
+    All four top-level fields, so a "valid configuration" verdict cannot hide an ordering
+    or exclusion error until an apply reads it. `doctor` validates a branch's file with
+    this alone: the rules left to `validate` need a checkout, a matrix or a repository
+    variable, none of which a file on its own supplies.
+
+    `layout` is required: it is the only source of a cell's environment identity, so a
+    table without one leaves every cell with nothing to run as.
+    """
+    for key in sorted(table):
+        if key not in _TOP_KEYS:
+            raise SystemExit(
+                f"::error::{key} is not a setting this engine implements. "
+                f"{CONFIG_PATH} holds {', '.join(_TOP_KEYS)}."
+            )
     if "layout" not in table:
         raise SystemExit(
-            '::error::globals "shipmate" declares no layout, so no cell can resolve its '
-            'environment identity. Declare layout = "dry", "workspace" or "folder" in '
-            'globals "shipmate" on the default branch, which is where this table is read '
-            "from. Terramate drops an attribute it cannot evaluate rather than failing, so a "
-            "layout set to an expression that does not resolve disappears from the table."
+            f"::error::{CONFIG_PATH} declares no layout, so no cell can resolve its "
+            'environment identity. Declare layout = "dry", "workspace" or "folder" on the '
+            "default branch, which is where this table is read from. A scalar written below "
+            "a [table] header lands inside that table rather than at the top level, so "
+            "layout must come before the first header."
         )
-    # Key presence, not a truthy value: an explicit `layout = null` survives evaluation and
-    # must refuse here rather than read as undeclared.
+    # Key presence, not a truthy value: an empty layout is a declared layout holding a value
+    # no layout may hold, and must say so rather than read as undeclared.
     layout = table["layout"]
     if layout not in _LAYOUTS:
-        raise SystemExit(
-            f'::error::globals "shipmate" layout is {layout!r}; it must be one of '
-            f"{', '.join(_LAYOUTS)}."
-        )
+        raise SystemExit(f"::error::layout is {layout!r}; it must be one of {', '.join(_LAYOUTS)}.")
     environments = _mapping(table.get("environments", {}), "environments")
     for env in sorted(environments):
-        _check_environment(environments[env], env, shared_envs)
-    if layout == "dry":
+        _check_environment(environments[env], env)
+    validate_env_order(table.get("env_order", {}))
+    validate_explicit_envs(table.get("explicit_envs", []))
+    return table
+
+
+def validate(table, matrix_envs, shared_envs, all_envs=None):
+    """The table, or `SystemExit`. Structure first, then the rules needing run context.
+
+    `matrix_envs` is the environment set this operation resolved, `shared_envs` the
+    `SHIPMATE_SHARED_ENVS` listing, and `all_envs` the whole-tree environment scan where
+    one exists -- only the unused-entry warning reads it, and it is `None` on the paths
+    that scan only a changed set or a workset, where an environment absent from that set
+    is not evidence of anything.
+    """
+    validate_structure(table)
+    environments = _mapping(table.get("environments", {}), "environments")
+    _check_shared(environments, shared_envs)
+    if table["layout"] == "dry":
         _check_dry_coverage(environments, matrix_envs)
     if all_envs is not None:
         _report_unused(environments, all_envs)

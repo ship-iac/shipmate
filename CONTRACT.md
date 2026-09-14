@@ -467,7 +467,7 @@ Every condition below refuses at detect, before any cell starts.
 
 | Condition | Why |
 |---|---|
-| The table declares no `layout` | it is the only source of a cell's environment identity, and Terramate drops an attribute it cannot evaluate rather than failing, so a `layout` set to an expression that does not resolve arrives here as an undeclared one |
+| The table declares no `layout` | it is the only source of a cell's environment identity, and a scalar written below a `[table]` header lands inside that table rather than at the top level, so a misplaced `layout` arrives here as an undeclared one |
 | `layout` is not `dry`, `workspace` or `folder` | a typo would silently disable injection |
 | `dry` and a matrix environment has no entry, or an entry with no region | the layout cannot derive its variables, and an empty region derives nothing the fingerprint can tell apart |
 | A tier resolves a role but no region | the credentials step requires one |
@@ -478,6 +478,9 @@ Every condition below refuses at detect, before any cell starts.
 | A shared environment declaring `aws.plan` | shared mode has one environment, and it resolves `aws.apply` on both paths |
 | `vars` naming anything outside `TF_VAR_*` / `TF_WORKSPACE`, or holding a non-string | see the allowlist above |
 | Malformed shape, or a structural key in a position the grammar does not give it | a string where a mapping is required, and the reverse |
+| A top-level key other than `layout`, `environments`, `env_order`, `explicit_envs` | catches a misspelled `environments`, which would otherwise yield zero environments and skip every cell's credentials step |
+| A top-level control name used as an `env_order` key | a misplaced `explicit_envs` lands inside `[env_order]` as an ordering entry, and its exclusion from a bare apply is silently lost |
+| Malformed `env_order` or `explicit_envs` | one entry point validates all four top-level fields, so an ordering or exclusion error refuses at detect rather than when an apply finally reads it |
 
 **One shape refuses nowhere, and it is a limitation rather than a gap to close.**
 An `environments` set to an expression that does not resolve is dropped by
