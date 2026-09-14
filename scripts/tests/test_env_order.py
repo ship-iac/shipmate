@@ -8,11 +8,12 @@ def _boom(*args, **kwargs):
     raise AssertionError(f"env-order ran a subprocess: {args}")
 
 
-def test_the_ordering_fields_come_from_the_table_and_nothing_is_evaluated(monkeypatch):
+def test_the_ordering_fields_come_from_the_table(monkeypatch):
     """env-order's own Terramate evaluation is gone: both fields come from the mapping the
-    operation already loaded. Both subprocess seams raise, so a reader that fetched anything
-    itself reds here instead of answering; the returned values are populated, so a reader
-    that stopped reading the table and returned its empty default reds too.
+    operation already loaded. The returned values are populated, so a reader that stopped
+    reading the table and returned its empty default reds here. Both shared `_run` wrappers
+    raise as well -- the realistic regression is a reader fetching through one of them, not a
+    hand-rolled `subprocess` call in a module that imports no such thing.
     """
     monkeypatch.setattr(eo.bm, "_run", _boom)
     monkeypatch.setattr(eo.bm.ec, "_run", _boom)
@@ -101,8 +102,9 @@ def test_env_levels_rejects_non_str_predecessor_element():
 
 
 def test_read_env_order_revalidates_the_field():
-    """The docstring claims the field is re-validated rather than trusted, so a caller
-    reaching here with an unvalidated mapping cannot build the graph from a bare string.
+    """The third of the three checks on an order, so a bad one is refused before the first
+    wave is built rather than in the middle of one. `env_levels` and `blocked_envs` hold the
+    other two, which is why this one is belt and the exclusion list's is the whole braces.
     Mutation: drop the `validate_env_order` call -- the string is returned as written."""
     with pytest.raises(SystemExit):
         eo.read_env_order({"env_order": {"dev-us": "dev-eu"}})
@@ -160,9 +162,10 @@ def test_read_explicit_envs_absent_key_is_empty():
 
 
 def test_read_explicit_envs_revalidates_the_field():
-    """The exclusion list is re-validated here for the same reason the ordering map is: a
-    bare string would otherwise be iterated character by character into a set of exclusions
-    nobody wrote. The message cases themselves are `test_env_config_schema.py`'s.
+    """The only check the exclusion list gets on this path: nothing downstream validates it,
+    and `apply-all-detect.partition_envs` intersects it as a set, so a bare string becomes
+    single characters that exclude nothing. The message cases themselves are
+    `test_env_config_schema.py`'s.
     Mutation: drop the `validate_explicit_envs` call -- the string is returned as written."""
     with pytest.raises(SystemExit):
         eo.read_explicit_envs({"explicit_envs": "prod"})

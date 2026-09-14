@@ -612,6 +612,12 @@ _ORDERING = [
         "'-apply'; explicit_envs is matched against the bare logical env name — write "
         "'prod' instead.",
     ),
+    (
+        {"layout": "folder", "explicit_envs": ["prod-plan"]},
+        "::error::explicit_envs entry 'prod-plan' carries the environment suffix "
+        "'-plan'; explicit_envs is matched against the bare logical env name — write "
+        "'prod' instead.",
+    ),
 ]
 
 
@@ -621,7 +627,25 @@ def test_the_single_entry_point_validates_ordering_and_exclusions(table, message
     `environments`, so a "valid configuration" verdict cannot leave an ordering or exclusion
     error to surface when an apply finally reads the field.
 
-    Mutation: delete the `validate_env_order` and `validate_explicit_envs` calls from
-    `validate_structure` -- every case here validates instead of refusing.
+    Both environment suffixes are cases here, not one: the refusal exists because every
+    documented environment name carries `-plan` or `-apply`, and a suffixed entry matches no
+    apply check, excludes nothing and lets prod apply on a bare `shipmate apply`.
+
+    Mutations: delete the `validate_env_order` and `validate_explicit_envs` calls from
+    `validate_structure` -- every case here validates instead of refusing; or drop either
+    entry from the suffix tuple in `validate_explicit_envs` -- that suffix's case validates.
     """
     assert _refusal(table) == message
+
+
+def test_an_environment_name_merely_containing_a_tier_word_is_accepted():
+    """The other half of the suffix rule. `plan-eu` and `apply-svc` are ordinary logical
+    environment names: only a trailing `-plan` or `-apply` is the tier suffix, so a
+    containment test here would refuse a table that is correct and strand every exclusion the
+    repository declared.
+
+    Mutation: `e.endswith(suffix)` -> `suffix in e` in `validate_explicit_envs` -- this table
+    refuses instead of validating.
+    """
+    table = {"layout": "folder", "explicit_envs": ["prod", "plan-eu", "apply-svc"]}
+    assert env_config.validate(table, (), ()) == table
