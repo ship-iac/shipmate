@@ -52,9 +52,9 @@ def test_the_canonical_file_validates():
     """Every top-level key the schema allows, dotted provider keys, a workload tier and an
     environment named only by `env_order`.
 
-    Mutation: add any of the four top-level names to the reserved set the strict-key loop
-    refuses, or make `validate_env_order` require an `environments` entry for each key --
-    `dev-us` has none, deliberately, and the design's own file declares it that way.
+    Mutation: remove any of the four names from the allowed top-level set, or add a check
+    that every `env_order` key has an `environments` entry -- `dev-us` has none,
+    deliberately, and the design's own file declares it that way.
     """
     table = ec.parse_table(CANONICAL)
     assert ec.validate(table, ("dev-eu", "prod"), ()) is table
