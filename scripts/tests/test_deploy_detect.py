@@ -1,7 +1,7 @@
 import json
 
 import pytest
-from _detect_fixtures import APP_ID, _apply_check, completed_names, table_stub
+from _detect_fixtures import APP_ID, _apply_check, completed_names, stub_read_table
 from _detect_fixtures import check_run as _check
 from _loader import load_script
 
@@ -188,7 +188,7 @@ def _run_main(
         monkeypatch.setenv(k, v)
     monkeypatch.delenv("SHIPMATE_BASE_SHA", raising=False)
     monkeypatch.setenv("SHIPMATE_SHARED_ENVS", "")
-    monkeypatch.setattr(dd.bm.ec, "read_table", table_stub(table, order, reads=reads))
+    stub_read_table(monkeypatch, (dd, dd.eo), table, order, reads=reads)
     jsonl = "\n".join(json.dumps(c) for c in checks)
 
     def _run(args):

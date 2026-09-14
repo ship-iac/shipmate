@@ -1,7 +1,14 @@
 import json
 
 import pytest
-from _detect_fixtures import APP_ID, PLAN_SHA, _apply_check, _record, check_run, table_stub
+from _detect_fixtures import (
+    APP_ID,
+    PLAN_SHA,
+    _apply_check,
+    _record,
+    check_run,
+    stub_read_table,
+)
 from _loader import load_script
 
 aad = load_script("apply-all-detect")
@@ -260,7 +267,7 @@ def _run_main(
     monkeypatch.setattr(aad.ad.bm, "_run", _run)
     monkeypatch.setattr(aad.bm, "env_membership", lambda **kw: (tree, tags or {"stacks/app": []}))
     monkeypatch.setenv("SHIPMATE_SHARED_ENVS", "")
-    monkeypatch.setattr(aad.bm.ec, "read_table", table_stub(table, order, explicit, reads))
+    stub_read_table(monkeypatch, (aad, aad.eo), table, order, explicit, reads)
     aad.main()
     return dict(ln.split("=", 1) for ln in out.read_text(encoding="utf-8").splitlines())
 
