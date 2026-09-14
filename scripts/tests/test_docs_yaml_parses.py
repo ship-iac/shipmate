@@ -239,8 +239,26 @@ def test_the_secrets_registry_holds_each_callees_exact_declaration_set(target):
     declared = sorted(_workflow_call_secrets(target))
     expected = sorted(set(ENGINE_CALL_SECRETS[target] or {}) | CASCADE_PENDING.get(target, set()))
     assert expected == declared, (
-        f"_loader.ENGINE_CALL_SECRETS[{target!r}] names "
-        f"{sorted(ENGINE_CALL_SECRETS[target] or {})}, but `{target}` declares {declared}"
+        f"_loader.ENGINE_CALL_SECRETS[{target!r}], with CASCADE_PENDING unioned in, expects "
+        f"{expected}, but `{target}` declares {declared}"
+    )
+
+
+@pytest.mark.parametrize("target", sorted(CASCADE_PENDING))
+def test_a_cascade_pending_entry_names_a_secret_the_registry_does_not_yet_hold(target):
+    """`CASCADE_PENDING` is scaffolding for one in-flight cascade, and the union the guard above
+    takes is idempotent: once the step-3 pull request adds the name to `ENGINE_CALL_SECRETS` and
+    the callers pass it, leaving the entry here changes no expected set and nothing reds. The
+    scaffold would become permanent and the next secret's cascade would start from a lie.
+
+    Mutation: add `SHIPMATE_SECRETS` to `ENGINE_CALL_SECRETS["apply-env-level.yml"]` and to each
+    caller's `secrets:` block, leaving `CASCADE_PENDING` as it is.
+    """
+    converged = sorted(set(ENGINE_CALL_SECRETS[target] or {}) & CASCADE_PENDING[target])
+    assert not converged, (
+        f"scripts/tests/_loader.py: ENGINE_CALL_SECRETS[{target!r}] already names {converged}, "
+        f"so that cascade has converged -- delete {converged} from CASCADE_PENDING[{target!r}], "
+        "and the entry itself once nothing is left in it"
     )
 
 

@@ -55,9 +55,16 @@ tree is running" one grep.
 a hard load-time error — unlike an undeclared action input, which is silently
 ignored — so a new secret lands in three steps, in this order:
 
-1. Declare it under `on.workflow_call.secrets` in the callee, and merge.
+1. Declare it under `on.workflow_call.secrets` in the callee, and add the name to
+   that callee's `CASCADE_PENDING` entry in `scripts/tests/_loader.py` — the
+   registry guard compares the callee's declaration against
+   `ENGINE_CALL_SECRETS`, and this is what makes the gap between step 1 and
+   step 3 legal. Merge.
 2. Bump the callers' pin to that commit (the cascade above).
-3. Only then add the line to each caller's `secrets:` block.
+3. Only then add the line to each caller's `secrets:` block, move the name from
+   `CASCADE_PENDING` into `ENGINE_CALL_SECRETS`, and leave `CASCADE_PENDING`
+   empty. A name left in both is refused by
+   `test_a_cascade_pending_entry_names_a_secret_the_registry_does_not_yet_hold`.
 
 Skipping to step 3 breaks every apply and deploy run at workflow resolution, with
 no job and no log. This ordering is why these calls once used `secrets: inherit`,
