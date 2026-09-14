@@ -19,12 +19,15 @@ import pytest
 from _loader import load_script
 
 ec = load_script("env-config")
+eo = load_script("env-order")
 
 #: Four tables, one per ref the fixture holds, so any read of the wrong one is visible.
-_TABLE_A = 'marker = "default-branch"\n'
-_TABLE_B = 'marker = "branch-head"\n'
-_TABLE_C = 'marker = "working-tree"\n'
-_TABLE_D = 'marker = "other-remote"\n'
+#: Each carries an `env_order` of its own as well as its marker: ordering is read off this
+#: same mapping, so the ref that wins has to be visible in the ordering too.
+_TABLE_A = 'marker = "default-branch"\n[env_order]\nprod = ["dev-eu"]\n'
+_TABLE_B = 'marker = "branch-head"\n[env_order]\ndev-eu = ["prod"]\n'
+_TABLE_C = 'marker = "working-tree"\n[env_order]\nprod = []\n'
+_TABLE_D = 'marker = "other-remote"\n[env_order]\nprod = ["sbx"]\n'
 
 _TABLE_FILE = ec.CONFIG_PATH
 
@@ -115,6 +118,21 @@ def test_read_table_reads_the_default_branch_not_the_checkout(repo, monkeypatch)
     monkeypatch.chdir(work)
     monkeypatch.setattr(ec, "_default_branch", lambda run: "main")
     assert ec.read_table()["marker"] == "default-branch"
+
+
+def test_the_apply_ordering_comes_from_the_default_branch_table(repo, monkeypatch):
+    """The behaviour change this loader makes: `env_order` now comes from the default branch,
+    so a pull request cannot reorder its own apply waves. Real git, and every ref in the
+    fixture carries a different ordering -- the branch head inverts it -- so a read of the
+    checkout returns {"dev-eu": ["prod"]} here rather than an empty map that an
+    "it did not raise" assertion would accept.
+
+    Mutation: spell `read_table`'s ref `HEAD:` instead of `origin/<branch>:`.
+    """
+    work, _ = repo
+    monkeypatch.chdir(work)
+    monkeypatch.setattr(ec, "_default_branch", lambda run: "main")
+    assert eo.read_env_order(ec.read_table()) == {"prod": ["dev-eu"]}
 
 
 def _fake_run(recorder=None, git=None):

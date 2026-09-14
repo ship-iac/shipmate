@@ -61,3 +61,30 @@ def completed_names(apply_detect, monkeypatch, checks, app_id=APP_ID):
     return apply_detect.completed_apply_names(
         apply_detect._check_run_lines("acme/repo", HEAD), app_id
     )
+
+
+#: What a detect reads when a test names no table. `layout` is required, and `folder` derives
+#: no identity variables, so a row carries only the stamp and the tier.
+MINIMAL_TABLE = {"layout": "folder"}
+
+
+def table_stub(base=None, order=None, explicit=(), reads=None):
+    """A `read_table` double carrying `order` and `explicit` as the table fields they are.
+
+    Shared by the two ordering detects so neither can drift back to stubbing `env-order`'s
+    readers: a double there answers whatever the test asked for even when the caller has
+    stopped passing the mapping at all. One entry is appended to `reads` per call, which is
+    how the one-parse-per-operation count is taken.
+    """
+    cfg = dict(base or MINIMAL_TABLE)
+    if order is not None:
+        cfg["env_order"] = dict(order)
+    if explicit:
+        cfg["explicit_envs"] = list(explicit)
+
+    def read_table(run=None):
+        if reads is not None:
+            reads.append(cfg)
+        return dict(cfg)
+
+    return read_table

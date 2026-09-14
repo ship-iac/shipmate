@@ -85,7 +85,7 @@ def main():
         ad.ag.plan_hashes_by_name(lines, app_id),
     )
     deps = ad.run_graph_deps()
-    order = eo.read_env_order()
+    order = eo.read_env_order(table)
     levels = eo.env_levels(order, {c["environment"] for c in pending})
     per_level = eo.waves_by_env_level(pending, deps, levels)
     level_counts = [sum(len(waves[f"wave{i}"]) for i in range(wv.MAX_WAVES)) for waves in per_level]

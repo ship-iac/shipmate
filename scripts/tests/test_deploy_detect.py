@@ -1,15 +1,11 @@
 import json
 
 import pytest
-from _detect_fixtures import APP_ID, _apply_check, completed_names
+from _detect_fixtures import APP_ID, _apply_check, completed_names, table_stub
 from _detect_fixtures import check_run as _check
 from _loader import load_script
 
 dd = load_script("deploy-detect")
-
-#: What a detect reads when a test names no table. `layout` is required, and `folder`
-#: derives no identity variables, so a row carries only the stamp and the tier.
-_MINIMAL_TABLE = {"layout": "folder"}
 
 HEAD = "a" * 40
 CHECK_RUNS_URL = f"repos/acme/iac/commits/{HEAD}/check-runs?filter=all&per_page=100"
@@ -162,11 +158,24 @@ def _cell(stack, env="dev-eu"):
 
 
 def _run_main(
-    tmp_path, monkeypatch, *, cells, checks, urls=None, deps=None, order=None, table=None
+    tmp_path,
+    monkeypatch,
+    *,
+    cells,
+    checks,
+    urls=None,
+    deps=None,
+    order=None,
+    table=None,
+    reads=None,
 ):
     """main() over the merged pull request's head, with every GitHub and Terramate call
     stubbed. `_merged_head` is stubbed rather than fed, so the only `gh api` paths collected
     into `urls` are the ones the work set itself asks for.
+
+    `order` is folded into the stubbed table rather than stubbed on `eo`: the ordering map is
+    a field of the mapping this path loads, so a double on the reader would mask a caller
+    that stopped passing the table. One entry is appended to `reads` per `read_table` call.
 
     Returns the parsed GITHUB_OUTPUT."""
     out = tmp_path / "out.txt"
@@ -179,7 +188,7 @@ def _run_main(
         monkeypatch.setenv(k, v)
     monkeypatch.delenv("SHIPMATE_BASE_SHA", raising=False)
     monkeypatch.setenv("SHIPMATE_SHARED_ENVS", "")
-    monkeypatch.setattr(dd.bm.ec, "read_table", lambda run=None: dict(table or _MINIMAL_TABLE))
+    monkeypatch.setattr(dd.bm.ec, "read_table", table_stub(table, order, reads=reads))
     jsonl = "\n".join(json.dumps(c) for c in checks)
 
     def _run(args):
@@ -204,7 +213,6 @@ def _run_main(
     monkeypatch.setattr(dd.ad.bm, "_run", _run)
     monkeypatch.setattr(dd.bm, "_run", _run)
     monkeypatch.setattr(dd.ad, "run_graph_deps", lambda: deps or {c["stack"]: set() for c in cells})
-    monkeypatch.setattr(dd.eo, "read_env_order", lambda: dict(order or {}))
     dd.main()
     return dict(ln.split("=", 1) for ln in out.read_text(encoding="utf-8").splitlines())
 
@@ -380,3 +388,40 @@ def test_main_emits_the_dag_shape_notice(tmp_path, monkeypatch, capsys):
         "::notice::2 stacks, 1 after edges, 2 wave levels; 1 stacks would apply concurrently"
         in capsys.readouterr().out.splitlines()
     )
+
+
+def test_main_takes_the_ordering_map_from_the_loaded_table(tmp_path, monkeypatch):
+    """The merge path orders its env-levels from the mapping it already loaded, not from the
+    checked-out tree. The assertion is on a populated split, because the broken shape returns
+    an empty ordering rather than raising.
+
+    Mutation: make `env-order.read_env_order` return `{}` -- dev-us joins dev-eu in
+    env-level 0 and envlevel1 is empty.
+    """
+    parsed = _run_main(
+        tmp_path,
+        monkeypatch,
+        cells=[_cell("stacks/app", "dev-eu"), _cell("stacks/app", "dev-us")],
+        checks=[_apply_check("stacks/app", "dev-eu"), _apply_check("stacks/app", "dev-us")],
+        order={"dev-us": ["dev-eu"]},
+    )
+    assert [c["environment"] for c in json.loads(parsed["envlevel0_waves"])["wave0"]] == ["dev-eu"]
+    assert [c["environment"] for c in json.loads(parsed["envlevel1_waves"])["wave0"]] == ["dev-us"]
+
+
+def test_main_loads_the_environment_table_exactly_once(tmp_path, monkeypatch):
+    """One parse per operation: the cells' identity and the ordering map come off the same
+    read of the default branch, so a branch moving mid-run cannot give them different answers.
+
+    Mutation: add `bm.ec.read_table()` inside `read_env_order` -- the count becomes 2.
+    """
+    reads = []
+    _run_main(
+        tmp_path,
+        monkeypatch,
+        cells=[_cell("stacks/app", "dev-eu"), _cell("stacks/app", "dev-us")],
+        checks=[_apply_check("stacks/app", "dev-eu"), _apply_check("stacks/app", "dev-us")],
+        order={"dev-us": ["dev-eu"]},
+        reads=reads,
+    )
+    assert len(reads) == 1

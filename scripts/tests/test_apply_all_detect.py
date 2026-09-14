@@ -1,14 +1,10 @@
 import json
 
 import pytest
-from _detect_fixtures import APP_ID, PLAN_SHA, _apply_check, _record, check_run
+from _detect_fixtures import APP_ID, PLAN_SHA, _apply_check, _record, check_run, table_stub
 from _loader import load_script
 
 aad = load_script("apply-all-detect")
-
-#: What a detect reads when a test names no table. `layout` is required, and `folder`
-#: derives no identity variables, so a row carries only the stamp and the tier.
-_MINIMAL_TABLE = {"layout": "folder"}
 
 HEAD = "a" * 40
 CHECK_RUNS_URL = f"repos/o/r/commits/{HEAD}/check-runs?filter=all&per_page=100"
@@ -222,11 +218,17 @@ def _run_main(
     tags=None,
     urls=None,
     table=None,
+    reads=None,
 ):
     """main() over the head's apply checks, with everything the script reaches from GitHub or
     Terramate stubbed. Defaults to one pending `stacks/app` check per env in `envs`. Returns
     parsed GITHUB_OUTPUT, and appends each `gh api` path requested to `urls` when one is
-    given."""
+    given.
+
+    `order` and `explicit` are folded into the stubbed table rather than stubbed on `eo`:
+    both are fields of the mapping this path loads, so a double on either reader would mask a
+    caller that stopped passing the table. One entry is appended to `reads` per `read_table`
+    call."""
     out = tmp_path / "out"
     for k, v in {
         "GITHUB_REPOSITORY": "o/r",
@@ -256,11 +258,9 @@ def _run_main(
     deps = {p: set() for ps in tree.values() for p in ps}
     monkeypatch.setattr(aad.ad, "run_graph_deps", lambda: deps)
     monkeypatch.setattr(aad.ad.bm, "_run", _run)
-    monkeypatch.setattr(aad.eo, "read_env_order", lambda: dict(order or {}))
-    monkeypatch.setattr(aad.eo, "read_explicit_envs", lambda: list(explicit))
     monkeypatch.setattr(aad.bm, "env_membership", lambda **kw: (tree, tags or {"stacks/app": []}))
     monkeypatch.setenv("SHIPMATE_SHARED_ENVS", "")
-    monkeypatch.setattr(aad.bm.ec, "read_table", lambda run=None: dict(table or _MINIMAL_TABLE))
+    monkeypatch.setattr(aad.bm.ec, "read_table", table_stub(table, order, explicit, reads))
     aad.main()
     return dict(ln.split("=", 1) for ln in out.read_text(encoding="utf-8").splitlines())
 
@@ -588,3 +588,46 @@ def test_main_without_the_variable_holds_every_env_on_changes_requested(tmp_path
     # not tell the developer to run `shipmate apply <env>` instead.
     assert json.loads(parsed["excluded_envs"]) == []
     assert json.loads(parsed["skipped_envs"]) == []
+
+
+def test_main_takes_ordering_and_exclusions_from_the_loaded_table(tmp_path, monkeypatch):
+    """Both optional fields reach this path as fields of the mapping the operation loaded --
+    the same mapping, from the default branch, that supplies every cell's identity.
+
+    Every assertion is on a populated value, because the broken shape returns the empty
+    default rather than raising. Mutation: make `env-order.read_env_order` return `{}` and
+    `read_explicit_envs` return `[]` -- dev-us drops to env-level 0 and prod-eu applies
+    instead of being excluded.
+    """
+    parsed = _run_main(
+        tmp_path,
+        monkeypatch,
+        envs=["dev-eu", "dev-us", "prod-eu"],
+        order={"dev-us": ["dev-eu"]},
+        explicit=["prod-eu"],
+        decision="APPROVED",
+    )
+    assert json.loads(parsed["excluded_envs"]) == ["prod-eu"]
+    assert [c["environment"] for c in json.loads(parsed["envlevel0_waves"])["wave0"]] == ["dev-eu"]
+    assert [c["environment"] for c in json.loads(parsed["envlevel1_waves"])["wave0"]] == ["dev-us"]
+
+
+def test_main_loads_the_environment_table_exactly_once(tmp_path, monkeypatch):
+    """One parse per operation. This path reads three fields off the mapping -- the
+    environment entries, the ordering map and the exclusion list -- and a reader that fetched
+    its own would make that three reads of the default branch, each able to disagree with the
+    others if the branch moves mid-run.
+
+    Mutation: add `bm.ec.read_table()` inside `read_env_order` -- the count becomes 2.
+    """
+    reads = []
+    _run_main(
+        tmp_path,
+        monkeypatch,
+        envs=["dev-eu", "dev-us"],
+        order={"dev-us": ["dev-eu"]},
+        explicit=["dev-us"],
+        decision="APPROVED",
+        reads=reads,
+    )
+    assert len(reads) == 1

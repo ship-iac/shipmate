@@ -1,30 +1,24 @@
-import json
-
 import pytest
 from _loader import load_script
 
 eo = load_script("env-order")
 
 
-def test_env_order_has_no_private_run_and_reuses_build_matrix():
-    # env-order must not define its own subprocess wrapper, which swallowed stderr on failure.
-    # It delegates to build-matrix's _run, which surfaces stderr and raises `::error::` on a
-    # nonzero exit.
-    assert not hasattr(eo, "_run")
-    assert eo.bm._run.__module__ == "build_matrix"
+def _boom(*args, **kwargs):
+    raise AssertionError(f"env-order ran a subprocess: {args}")
 
 
-def test_read_env_order_default_run_is_bm_run(monkeypatch):
-    captured = {}
-    monkeypatch.setattr(eo.bm, "_run", lambda args: captured.update(args=args) or "{}")
-    assert eo.read_env_order() == {}
-    assert captured["args"] == [
-        "terramate",
-        "experimental",
-        "eval",
-        "--as-json",
-        "tm_try(global.shipmate.env_order, {})",
-    ]
+def test_the_ordering_fields_come_from_the_table_and_nothing_is_evaluated(monkeypatch):
+    """env-order's own Terramate evaluation is gone: both fields come from the mapping the
+    operation already loaded. Both subprocess seams raise, so a reader that fetched anything
+    itself reds here instead of answering; the returned values are populated, so a reader
+    that stopped reading the table and returned its empty default reds too.
+    """
+    monkeypatch.setattr(eo.bm, "_run", _boom)
+    monkeypatch.setattr(eo.bm.ec, "_run", _boom)
+    table = {"layout": "folder", "env_order": {"prod": ["dev-eu"]}, "explicit_envs": ["prod"]}
+    assert eo.read_env_order(table) == {"prod": ["dev-eu"]}
+    assert eo.read_explicit_envs(table) == ["prod"]
 
 
 def test_linear_order():
@@ -85,13 +79,8 @@ def test_waves_by_env_level_refuses_an_env_beyond_the_cap():
         )
 
 
-def test_read_env_order_parses_json(monkeypatch):
-    eo_map = eo.read_env_order(run=lambda args: '{"dev-us":["dev-eu"]}')
-    assert eo_map == {"dev-us": ["dev-eu"]}
-
-
-def test_read_env_order_absent_is_empty():
-    assert eo.read_env_order(run=lambda args: "{}") == {}
+def test_read_env_order_absent_key_is_empty():
+    assert eo.read_env_order({"layout": "folder"}) == {}
 
 
 def test_env_levels_rejects_string_predecessor():
@@ -111,19 +100,12 @@ def test_env_levels_rejects_non_str_predecessor_element():
         eo.env_levels({"dev-us": ["dev-eu", 123]}, ["dev-eu", "dev-us"])
 
 
-def test_read_env_order_rejects_string_predecessor():
+def test_read_env_order_revalidates_the_field():
+    """The docstring claims the field is re-validated rather than trusted, so a caller
+    reaching here with an unvalidated mapping cannot build the graph from a bare string.
+    Mutation: drop the `validate_env_order` call -- the string is returned as written."""
     with pytest.raises(SystemExit):
-        eo.read_env_order(run=lambda args: '{"dev-us":"dev-eu"}')
-
-
-def test_read_env_order_rejects_non_dict_global():
-    with pytest.raises(SystemExit):
-        eo.read_env_order(run=lambda args: '["dev-us","dev-eu"]')
-
-
-def test_read_env_order_rejects_non_str_predecessor_element():
-    with pytest.raises(SystemExit):
-        eo.read_env_order(run=lambda args: '{"dev-us":["dev-eu", 123]}')
+        eo.read_env_order({"env_order": {"dev-us": "dev-eu"}})
 
 
 def test_waves_by_env_level_buckets_and_orders():
@@ -173,57 +155,17 @@ def test_write_env_level_waves_emits_waves_and_empty_flags(tmp_path):
     assert "envlevel1_empty=true" in lines
 
 
-def test_read_explicit_envs_default_invocation(monkeypatch):
-    captured = {}
-    monkeypatch.setattr(eo.bm, "_run", lambda args: captured.update(args=args) or "[]")
-    assert eo.read_explicit_envs() == []
-    assert captured["args"] == [
-        "terramate",
-        "experimental",
-        "eval",
-        "--as-json",
-        "tm_try(global.shipmate.explicit_envs, [])",
-    ]
+def test_read_explicit_envs_absent_key_is_empty():
+    assert eo.read_explicit_envs({"layout": "folder"}) == []
 
 
-def test_read_explicit_envs_parses_list():
-    assert eo.read_explicit_envs(run=lambda args: '["prod"]') == ["prod"]
-
-
-def test_read_explicit_envs_absent_is_empty():
-    assert eo.read_explicit_envs(run=lambda args: "[]") == []
-
-
-def test_read_explicit_envs_rejects_bare_string():
-    # HCL author typo, "prod" instead of ["prod"]: it must not silently iterate the string
-    # character by character, mirroring the env_order validation posture.
+def test_read_explicit_envs_revalidates_the_field():
+    """The exclusion list is re-validated here for the same reason the ordering map is: a
+    bare string would otherwise be iterated character by character into a set of exclusions
+    nobody wrote. The message cases themselves are `test_env_config_schema.py`'s.
+    Mutation: drop the `validate_explicit_envs` call -- the string is returned as written."""
     with pytest.raises(SystemExit):
-        eo.read_explicit_envs(run=lambda args: '"prod"')
-
-
-def test_read_explicit_envs_rejects_dict():
-    with pytest.raises(SystemExit):
-        eo.read_explicit_envs(run=lambda args: '{"prod": true}')
-
-
-def test_read_explicit_envs_rejects_non_str_element():
-    with pytest.raises(SystemExit):
-        eo.read_explicit_envs(run=lambda args: '["prod", 123]')
-
-
-def test_read_explicit_envs_rejects_an_environment_suffix():
-    """`explicit_envs` is matched against the bare logical env name the apply checks carry, so
-    `prod-apply` or `prod-plan` would skip nothing while looking right. Every documented
-    environment name carries a suffix, which is what makes the mistake likely. Both suffixes fail
-    loud, naming the offending entry and the bare name to write instead."""
-    for entry in ("prod-apply", "prod-plan"):
-        with pytest.raises(SystemExit) as e:
-            eo.read_explicit_envs(run=lambda args, entry=entry: json.dumps(["dev", entry]))
-        assert entry in str(e.value)
-        assert "'prod'" in str(e.value)
-    # The bare name is still accepted, and a logical env whose name merely contains the word is
-    # not a suffix match.
-    assert eo.read_explicit_envs(run=lambda args: '["prod", "plan-eu"]') == ["prod", "plan-eu"]
+        eo.read_explicit_envs({"explicit_envs": "prod"})
 
 
 def test_blocked_envs_direct_predecessor():
