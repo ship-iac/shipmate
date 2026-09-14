@@ -482,16 +482,6 @@ Every condition below refuses at detect, before any cell starts.
 | A top-level control name used as an `env_order` key | a misplaced `explicit_envs` lands inside `[env_order]` as an ordering entry, and its exclusion from a bare apply is silently lost |
 | Malformed `env_order` or `explicit_envs` | one entry point validates all four top-level fields, so an ordering or exclusion error refuses at detect rather than when an apply finally reads it |
 
-**One shape refuses nowhere, and it is a limitation rather than a gap to close.**
-An `environments` set to an expression that does not resolve is dropped by
-Terramate during globals evaluation, before the engine reads the table, so it
-arrives as a table with a `layout` and no environments — byte-identical to a
-deliberate one, which `globals "shipmate" { layout = "workspace" }` legitimately
-is. There is nothing to refuse on. Every cell then resolves no role, its
-credentials step is skipped, and it fails at `tofu init`. Probed both with and
-without `tm_try`, and silent either way. `docs/troubleshooting.md` has the
-diagnosis.
-
 ### Resolution
 
 There is no fallback to `vars.*` on any path. An environment absent from the

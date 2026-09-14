@@ -488,7 +488,7 @@ def test_an_empty_table_refuses():
 
 
 def test_a_whole_table_is_returned_unchanged():
-    """Validation returns the table it was given, other globals included.
+    """Validation returns the table it was given, every top-level setting included.
 
     Mutation: return only the `environments` mapping.
     """
@@ -564,7 +564,13 @@ def test_every_allowed_top_level_key_is_accepted():
     table using all four must validate. Compared against a hand-written table, never against
     the module's own constant.
 
-    Mutation: remove a name from the allowed set -- one of these four then refuses.
+    This is also where the `explicit_envs` half of "nothing cross-checks a control against
+    `environments`" is pinned: `explicit_envs` names `prod` and `environments` is empty, a
+    shape the canonical-file guard cannot catch because it declares every environment it
+    excludes.
+
+    Mutations: remove a name from the allowed set -- one of these four then refuses; or make
+    `validate_structure` require an `environments` entry for every `explicit_envs` name.
     """
     table = {
         "layout": "folder",
