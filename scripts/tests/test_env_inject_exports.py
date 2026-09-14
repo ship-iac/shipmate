@@ -6,7 +6,8 @@ reserved set, refusing a table-derived name on a cell whose table does not deriv
 refusing an absent envelope, accepting `null` in an envelope, refusing `null` or `''`
 from the enumeration, exporting a name two channels supply, lowercasing an envelope key,
 not lowercasing an enumerated `TF_VAR_*` suffix, refusing an enumerated reserved name
-instead of skipping it, and quoting the envelope's value in any refusal.
+instead of skipping it, skipping an enumerated `SHIPMATE_SECRETS` instead of refusing it,
+and quoting the envelope's value in any refusal.
 
 Composition reddens on: writing `$GITHUB_ENV` before a secret value's mask command, masking
 a multi-line value whole instead of per line, filtering the identity table, dropping the
@@ -294,6 +295,26 @@ def test_shipmate_vars_is_lifted_out_of_the_enumeration():
     assert env_inject.compose({"SHIPMATE_TF_VARS": "{}", ENUM: json.dumps(enumeration)}) == (
         {"TF_VAR_myThing": "v", "TF_VAR_size": "small"},
         {},
+    )
+
+
+def test_the_secret_envelope_set_as_a_variable_is_refused():
+    """`SHIPMATE_SECRETS` is a secret and `SHIPMATE_VARS` a variable, same shape and adjacent
+    names, so setting the secret one on the variable surface is the likely mistake. It arrives
+    in the enumeration, matches the `SHIPMATE_` prefix and is skipped, so the cell exports
+    nothing while the value sits world-readable in the repository UI.
+
+    Mutation: delete the `_SECRETS in parsed` refusal in `filter_enumeration`, and `compose`
+    returns `({}, {})` for this environment.
+    """
+    enumeration = {"SHIPMATE_SECRETS": '{"API_KEY": "leaked-value"}'}
+    with pytest.raises(SystemExit) as exc:
+        env_inject.compose({"SHIPMATE_TF_VARS": "{}", ENUM: json.dumps(enumeration)})
+    assert str(exc.value) == (
+        "::error::SHIPMATE_SECRETS is set as a GitHub variable, and it must be a secret. "
+        "Nothing in it reaches the cell, and its value is readable by anyone who can "
+        "see the repository. Delete the variable, rotate every credential it held, "
+        "and set a secret of that name instead."
     )
 
 

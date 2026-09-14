@@ -168,9 +168,23 @@ def filter_enumeration(parsed, table):
 
     Skipped, not refused: `toJSON(vars)` sweeps up the consumer's own engine
     configuration, which they never aimed at a cell, so refusing it fails every run
-    on correct configuration. Lowercasing runs first, or an enumerated `TF_VAR_ENV`
-    would pass the table comparison and then collide with the identity it names.
+    on correct configuration. `_SECRETS` is the one exception, below. Lowercasing runs
+    first, so an enumerated `TF_VAR_ENV` meets the lowercase name the table derived for
+    the same identity and is skipped as reserved, instead of passing the table
+    comparison under its stored spelling and colliding after export. A table entry
+    spelled `TF_VAR_ENV` is a different case, and CONTRACT.md states its outcome:
+    it never reaches OpenTofu, so nothing collides.
     """
+    if _SECRETS in parsed:
+        # The secret envelope set on the variable surface. It would be skipped by the
+        # SHIPMATE_ prefix below and export nothing, and its value is world-readable
+        # where it is.
+        raise SystemExit(
+            f"::error::{_SECRETS} is set as a GitHub variable, and it must be a secret. "
+            "Nothing in it reaches the cell, and its value is readable by anyone who can "
+            "see the repository. Delete the variable, rotate every credential it held, "
+            "and set a secret of that name instead."
+        )
     lowered = ((_lowercase_tf_var(name), value) for name, value in parsed.items())
     return {name: value for name, value in lowered if not _is_reserved(name, table)}
 
@@ -245,19 +259,17 @@ def compose(environ):
 
 
 def mask(values):
-    """Emit `::add-mask::` for every line of every `values` entry.
+    r"""Emit `::add-mask::` for every line of every `values` entry.
 
-        Per line, because `::add-mask::` matches an exact string and a log line carrying one
-        line of a PEM would otherwise print it whole. Empty lines are skipped: GitHub cannot
-        mask the empty string and warns per attempt. Flushed, because a process that dies
-        between these commands and the `$GITHUB_ENV` write leaves the values unmasked in the
-        next step's environment.
+    Per line, because `::add-mask::` matches an exact string and a log line carrying one
+    line of a PEM would otherwise print it whole. Empty lines are skipped: GitHub cannot
+    mask the empty string and warns per attempt. Flushed, because a process that dies
+    between these commands and the `$GITHUB_ENV` write leaves the values unmasked in the
+    next step's environment.
 
-        The runner unescapes a workflow command's data, so a `%` reaches it as `%25` or a
-        line holding a literal `%25` registers a mask for a string the value never contains.
-        `
-    ` and `
-    ` need no escape here: `splitlines` has already removed them.
+    The runner unescapes a workflow command's data, so a `%` reaches it as `%25` or a
+    line holding a literal `%25` registers a mask for a string the value never contains.
+    `\r` and `\n` need no escape here: `splitlines` has already removed them.
     """
     for value in values:
         for line in value.splitlines():

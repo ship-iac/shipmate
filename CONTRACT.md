@@ -1953,7 +1953,12 @@ reaches the process.
   aimed at a cell, and refusing it would fail every run on correct
   configuration. An envelope key is **refused**: writing `TF_WORKSPACE` into
   `SHIPMATE_VARS` is a deliberate act with one meaning, and a silent drop leaves
-  the author debugging the wrong thing.
+  the author debugging the wrong thing. One enumerated name is **refused** rather
+  than skipped: `SHIPMATE_SECRETS`, which is the secret envelope set on the
+  variable surface. Skipping it would export nothing while its value sat
+  world-readable in the repository UI, and the engine's own namespace has no
+  legitimate reading as a consumer variable. The refusal says to delete the
+  variable, rotate what it held, and set the secret.
 - **Name validation.** Every envelope key must match `[A-Za-z_][A-Za-z0-9_]*`.
   `$GITHUB_ENV` is written in heredoc form, so a key holding a newline would
   inject further assignments; this is the trust boundary, so a bad key is

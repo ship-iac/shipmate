@@ -669,8 +669,15 @@ are lowercase, so the cell lowercases the suffix: `TF_VAR_ENDPOINT` →
 arrives like any other one — nothing to declare, nothing to map. Only
 `SHIPMATE_SECRETS` touches `shipmate.yml`, because only secrets cross the
 declaration boundary; the six cell-running jobs of the file above already carry
-its line, and the comment beside that line says why deleting it breaks the
-channel.
+its line, and the comment on the `plan` job's line says why deleting it breaks
+the channel — the other five carry the same line without a comment.
+
+**One is a variable and one is a secret, and swapping them fails.** Setting
+`SHIPMATE_SECRETS` as a variable is refused by name, because as a variable its
+value is readable by anyone who can see the repository and nothing in it reaches
+a cell; the run fails telling you to rotate what it held. The other direction
+cannot be caught: `SHIPMATE_VARS` set as a secret is never read — nothing maps it
+into a cell — so the keys simply never appear, with no error anywhere.
 
 **Set shared values once.** A repository-level variable or secret serves both
 tiers, and an organization-level one serves every repository — except that on
