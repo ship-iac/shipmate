@@ -2,29 +2,29 @@
 """Read the environment table from the repository's default branch.
 
 Branch content cannot rewrite these values because they are not read from the
-branch: the table is evaluated in a detached worktree of `origin/<default>`.
-`origin` is the base repository on every path -- no checkout in any workflow
-passes `repository:` -- and a fork pull request is refused before it plans.
+branch: the table is `git show`n out of `origin/<default>`. `origin` is the base
+repository on every path -- no checkout in any workflow passes `repository:` -- and
+a fork pull request is refused before it plans.
 """
 
-import json
 import os
-import shutil
 import subprocess
 import sys
 
-_WORKTREE = "shipmate-envcfg"
+#: Where the table lives, and the interpreter floor `tomllib` needs.
+CONFIG_PATH = ".github/shipmate.toml"
+_MIN_PYTHON = (3, 11)
 
 
 def _run(args, check=True):
     """stdout of `args`, raising ::error:: on a nonzero exit. `check=False` returns
-    the CompletedProcess instead, for the one caller whose failure is tolerated.
+    the CompletedProcess instead, for the one caller that reports the failure itself.
 
     Local rather than `build-matrix`'s: `_shipmate.py` caches nothing and re-executes
     the module on every `_load`, and `build-matrix` calls this module, so reaching its
     copy through the loader would not terminate.
     """
-    # args is a code-controlled tool invocation (gh/git/terramate by PATH name),
+    # args is a code-controlled tool invocation (gh/git by PATH name),
     # never user input, and shell=False -- safe.
     p = subprocess.run(args, capture_output=True, text=True)  # noqa: S603
     if not check:
@@ -46,51 +46,46 @@ def _default_branch(run):
     return run(["gh", "api", f"repos/{repo}", "--jq", ".default_branch"]).strip()
 
 
-def worktree(branch, path, run):
-    """A detached worktree of `origin/<branch>` at `path`, recreated each run.
+def parse_table(text):
+    """The table parsed from `text`, or `SystemExit`.
 
-    Deleting the directory is not enough: git keeps the registration under
-    `.git/worktrees/`, and `add` to a missing-but-registered path refuses. A runner
-    reusing a workspace hits exactly that.
+    Shared by both readers: `read_table` below reads the file with `git show`, and
+    `doctor` reads the same bytes through the contents API, having no checkout. The
+    interpreter check sits here, ahead of the import, because a module-level
+    `import tomllib` would raise `ModuleNotFoundError` before any caller could report
+    the real cause -- an older runner image than CONTRACT.md requires.
     """
-    run(["git", "worktree", "remove", "--force", path], check=False)
-    shutil.rmtree(path, ignore_errors=True)
-    run(["git", "worktree", "prune"])
-    run(["git", "worktree", "add", "--detach", path, f"origin/{branch}"])
-    return path
-
-
-def evaluate(path, run):
-    """`global.shipmate` as evaluated in `path`.
-
-    Read without `tm_try`, so terramate itself refuses a repository that declares no
-    `globals "shipmate"` block: the table is the only source of environment identity, and
-    an absent one has nothing to fall back to.
-    """
-    out = run(
-        [
-            "terramate",
-            "experimental",
-            "eval",
-            "--as-json",
-            "-C",
-            path,
-            "global.shipmate",
-        ]
-    )
-    try:
-        return _mapping(json.loads(out), 'globals "shipmate"')
-    except json.JSONDecodeError as exc:
+    if sys.version_info < _MIN_PYTHON:
+        found = ".".join(str(n) for n in sys.version_info[:3])
         raise SystemExit(
-            f"::error::could not parse the environment table from {path}: {exc}"
-        ) from exc
+            f"::error::{CONFIG_PATH} is read with tomllib, which needs Python "
+            f"{_MIN_PYTHON[0]}.{_MIN_PYTHON[1]} or later; this runner has {found}. "
+            "CONTRACT.md section Runner prerequisites requires python3 >= "
+            f"{_MIN_PYTHON[0]}.{_MIN_PYTHON[1]} on every runner. Choose a newer "
+            "runs_on image."
+        )
+    import tomllib
+
+    try:
+        return tomllib.loads(text)
+    except tomllib.TOMLDecodeError as exc:
+        raise SystemExit(f"::error::{CONFIG_PATH} is not valid TOML: {exc}") from exc
 
 
 def read_table(run=None):
-    """`global.shipmate` from the default branch. Every failure here refuses."""
+    """The table from the default branch. Every failure here refuses."""
     run = run or _run
-    path = os.path.join(os.environ["RUNNER_TEMP"], _WORKTREE)
-    return evaluate(worktree(_default_branch(run), path, run), run)
+    ref = f"origin/{_default_branch(run)}:{CONFIG_PATH}"
+    p = run(["git", "show", ref], check=False)
+    if p.returncode != 0:
+        sys.stderr.write(p.stderr)
+        raise SystemExit(
+            f"::error::{CONFIG_PATH} could not be read from the default branch "
+            f"({ref}). The engine reads the environment table from the default "
+            "branch, never from this branch, so the file must be merged there "
+            "before the first plan."
+        )
+    return parse_table(p.stdout)
 
 
 #: The layouts a repository may declare, and the environment-level keys an entry may
