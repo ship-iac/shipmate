@@ -119,13 +119,19 @@ def test_read_table_reads_the_default_branch_not_the_checkout(repo, monkeypatch)
 
 def _fake_run(recorder=None, git=None):
     """A `run` seam recording `(args, check)`, answering `gh` with a branch name and `git`
-    with a CompletedProcess-shaped result."""
+    with a CompletedProcess-shaped result.
+
+    The branch is `trunk`, not `main`: the ref assertions below would otherwise be satisfied
+    by a `read_table` that hardcoded `origin/main` and left `_default_branch` dangling. The
+    real-git fixture keeps `main`, which is the branch git actually creates there, and the two
+    disagreeing is what makes such a hardcode visible in whichever guard sees it.
+    """
     result = git or types.SimpleNamespace(returncode=0, stdout="layout = 'dry'\n", stderr="")
 
     def run(args, check=True):
         if recorder is not None:
             recorder.append((list(args), check))
-        return "main\n" if args[0] == "gh" else result
+        return "trunk\n" if args[0] == "gh" else result
 
     return run
 
@@ -144,7 +150,7 @@ def test_read_table_runs_the_whole_command_sequence(monkeypatch):
     ec.read_table(run=_fake_run(calls))
     assert calls == [
         (["gh", "api", "repos/an-org/a-repo", "--jq", ".default_branch"], True),
-        (["git", "show", "origin/main:.github/shipmate.toml"], False),
+        (["git", "show", "origin/trunk:.github/shipmate.toml"], False),
     ]
 
 
@@ -166,7 +172,7 @@ def test_an_absent_file_refuses(monkeypatch, capsys):
     reach `validate` as a missing-layout message naming the wrong cause."""
     _env(monkeypatch)
     git = types.SimpleNamespace(
-        returncode=128, stdout="", stderr="fatal: path does not exist in 'origin/main'\n"
+        returncode=128, stdout="", stderr="fatal: path does not exist in 'origin/trunk'\n"
     )
     with pytest.raises(SystemExit) as exc:
         ec.read_table(run=_fake_run(git=git))
@@ -174,7 +180,7 @@ def test_an_absent_file_refuses(monkeypatch, capsys):
     assert message.startswith("::error::")
     assert ".github/shipmate.toml" in message
     assert "default branch" in message
-    assert "origin/main:.github/shipmate.toml" in message
+    assert "origin/trunk:.github/shipmate.toml" in message
     # git's own reason, or CI shows only the engine's guess at it.
     assert "fatal: path does not exist" in capsys.readouterr().err
 
@@ -206,3 +212,23 @@ def test_an_interpreter_below_the_floor_refuses_before_the_import(monkeypatch):
     assert "3.11" in message
     assert "3.10.6" in message
     assert "Runner prerequisites" in message
+
+
+def test_a_failing_gh_refuses(monkeypatch):
+    """`_run` itself, which every other test in this module replaces with a fake. Reddens on a
+    `_run` that warns and returns `stdout` instead of raising: a failed `gh api` still prints a
+    usable-looking branch name, so the run would carry on against a ref resolved from a guess.
+    `CONTRACT.md` lists a failed `gh api` as a refusal."""
+    _env(monkeypatch)
+
+    def fake_subprocess_run(args, capture_output=False, text=False):
+        if args[0] == "gh":
+            return types.SimpleNamespace(returncode=1, stdout="trunk\n", stderr="gh: boom\n")
+        # Valid TOML, so a `_run` that stopped refusing would produce a table here rather than
+        # redden this test for an unrelated reason.
+        return types.SimpleNamespace(returncode=0, stdout='layout = "dry"\n', stderr="")
+
+    monkeypatch.setattr(ec.subprocess, "run", fake_subprocess_run)
+    with pytest.raises(SystemExit) as exc:
+        ec.read_table()
+    assert str(exc.value).startswith("::error::")

@@ -11,7 +11,9 @@ import os
 import subprocess
 import sys
 
-#: Where the table lives, and the interpreter floor `tomllib` needs.
+#: The floor is CONTRACT.md section Runner prerequisites, which every runner already
+#: promises; nothing in the engine installs or pins a Python, so this is the only
+#: place it is checked.
 CONFIG_PATH = ".github/shipmate.toml"
 _MIN_PYTHON = (3, 11)
 
