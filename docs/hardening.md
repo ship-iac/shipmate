@@ -532,11 +532,17 @@ no split of its own.
   the plan environment, not `<env>-apply`), so a token minted in a plan cell can
   never assume the apply role. That removes the long-lived key. It does not
   remove the statement above — whatever the plan environment names is reachable
-  by anyone who can push a branch, which is why the role must be read-only.
+  by anyone who can push a branch, which is why the role must be read-only. The
+  same reading covers that environment's **variables**: they are enumerated into
+  the cell's process alongside its secrets (§What the engine receives), so a plan
+  environment with no secret in it is still readable through its variables.
 
-  `shipmate doctor` notes the secrets a plan environment holds — the count is
+  `shipmate doctor` notes the secrets a plan environment holds — including a
+  `SHIPMATE_SECRETS` carrying the read key, which is the configuration
+  `CONTRACT.md` §"Which environment supplies which key" asks for, so that note is
+  expected rather than a finding to act on. The count is
   exact unless the listing was too long to read whole, when it reads `at least
-  N` — and the names it prints (names only, since no GitHub API returns a
+  N`; the names it prints (names only, since no GitHub API returns a
   secret's value) are capped, so a crowded environment's later names are not
   printed; the cap keeps one finding from spending the whole report's size
   budget. It warns if `SHIPMATE_APP_PRIVATE_KEY` is one of them, and says the
@@ -808,11 +814,24 @@ included, because it compares the policy names against the default branch alone.
 
 ## What the engine receives from your repository
 
-The documented file's jobs pass exactly two secrets by name:
-`SHIPMATE_APP_PRIVATE_KEY`, and `SHIPMATE_PLAN_PASSPHRASE` wherever the callee
+The documented file's jobs pass three secrets by name:
+`SHIPMATE_APP_PRIVATE_KEY`, `SHIPMATE_PLAN_PASSPHRASE` wherever the callee
 writes or reads an encrypted plan artifact (the `plan`, `deploy`, `targeted` and
-`all` jobs; `unlock` passes neither). Nothing else crosses into a called workflow, because
+`all` jobs; `unlock` passes neither engine secret), and `SHIPMATE_SECRETS` on
+every job whose callee runs a cell. Nothing else crosses into a called workflow, because
 GHA forwards no secret a caller does not name.
+
+**Variables are a wider surface than that, and they are not named one by one.**
+Each cell is handed `${{ toJSON(vars) }}`, which enumerates every GitHub
+variable the repository, the organization and the environment the job bound
+expose to it, and `scripts/env-inject` writes what survives its filter into the
+cell's OpenTofu process. On the plan path that process runs the pull request
+branch's HCL under `pull_request_target`. This is a change in *reach* rather
+than a new disclosure: someone who can push a branch can usually already read
+those variables through the API, and variables are not secrets. Treat it as the
+reason not to keep anything sensitive in a variable, and note that it applies
+per bound environment — a `<env>-plan` variable reaches plan and drift cells, an
+`<env>-apply` one reaches apply and unlock cells.
 
 `secrets: inherit` forwards every secret the calling repository can see:
 cloud access keys, PATs, third-party API tokens, anything a later, unrelated

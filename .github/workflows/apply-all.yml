@@ -10,6 +10,7 @@ on:
       # that binds no environment holds no value to pass, and a required declaration kills the run
       # at the first callee job that binds none (`guard`).
       SHIPMATE_APP_PRIVATE_KEY: { required: false }
+      SHIPMATE_SECRETS: { required: false }
       SHIPMATE_PLAN_PASSPHRASE: { required: false }
 jobs:
   # `gh workflow run apply-all.yml` by a human with write access would otherwise skip every

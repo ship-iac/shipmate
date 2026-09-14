@@ -171,8 +171,10 @@ creates all of them, including `shipmate-engine` and its branch policy:
   refuses. `layout` is the discriminator — `dry` derives `TF_VAR_env` and
   `TF_VAR_region` from each environment's key and its region, `workspace`
   derives `TF_WORKSPACE`, and `folder` derives nothing, its leaves fixing env
-  and region by path. `scripts/env-inject` writes what the table resolved into
-  the job environment under the names OpenTofu reads.
+  and region by path. `scripts/env-inject` is the cell's one writer of the job
+  environment: it writes what the table resolved under the names OpenTofu reads,
+  and composes your own variables and secrets (§Variables and secrets your stacks
+  need) into the same write, refusing any name two channels supply.
   [`../CONTRACT.md`](../CONTRACT.md) §Env model is the per-layout table;
   [`concepts.md`](concepts.md) explains where they land.
 
@@ -304,6 +306,10 @@ jobs:
     secrets:
       SHIPMATE_APP_PRIVATE_KEY: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
       SHIPMATE_PLAN_PASSPHRASE: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
+      # Not a no-op when you hold no repository secret of that name: the envelope normally
+      # lives on `<env>-plan` / `<env>-apply`, so this expression resolves empty and the
+      # mapping is what makes the environment's value reachable. Delete it and nothing arrives.
+      SHIPMATE_SECRETS: ${{ secrets.SHIPMATE_SECRETS }}
     with:
       # Your flavor's per-stack state path suffix; "" when a remote backend owns state.
       state_suffix: ""
@@ -336,6 +342,7 @@ jobs:
     secrets:
       SHIPMATE_APP_PRIVATE_KEY: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
       SHIPMATE_PLAN_PASSPHRASE: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
+      SHIPMATE_SECRETS: ${{ secrets.SHIPMATE_SECRETS }}
     with:
       state_suffix: ""
   drift:
@@ -348,6 +355,7 @@ jobs:
       actions: read
     secrets:
       SHIPMATE_APP_PRIVATE_KEY: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
+      SHIPMATE_SECRETS: ${{ secrets.SHIPMATE_SECRETS }}
     with:
       state_suffix: ""
       # Empty covers every cell. Split the sweep by adding more files, one tag query each.
@@ -359,6 +367,7 @@ jobs:
     secrets:
       SHIPMATE_APP_PRIVATE_KEY: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
       SHIPMATE_PLAN_PASSPHRASE: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
+      SHIPMATE_SECRETS: ${{ secrets.SHIPMATE_SECRETS }}
     with:
       environment: ${{ inputs.environment }}
       ref: ${{ inputs.ref }}
@@ -371,6 +380,7 @@ jobs:
     secrets:
       SHIPMATE_APP_PRIVATE_KEY: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
       SHIPMATE_PLAN_PASSPHRASE: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
+      SHIPMATE_SECRETS: ${{ secrets.SHIPMATE_SECRETS }}
     with:
       ref: ${{ inputs.ref }}
       pr_number: ${{ inputs.pr_number }}
@@ -379,6 +389,8 @@ jobs:
     if: github.event_name == 'workflow_dispatch' && inputs.verb == 'unlock'
     uses: ship-iac/shipmate/.github/workflows/unlock.yml@<engine-sha>  # see the latest release
     permissions: { contents: read, checks: read, actions: read, id-token: write }
+    secrets:
+      SHIPMATE_SECRETS: ${{ secrets.SHIPMATE_SECRETS }}
     with:
       environment: ${{ inputs.environment }}
       ref: ${{ inputs.ref }}
@@ -546,11 +558,11 @@ The two apply jobs split on the dispatched `environment`: a targeted
 declared default, which is what makes an omitted key read as the empty string.
 
 `shipmate unlock <env>` lands on the `unlock` job. It calls the engine's
-`unlock.yml`, which takes `environment` and `ref` and no secrets — releasing
-a lock reads no plan artifact, so there is no passphrase to forward, and mapping
-a secret the callee does not declare is a load-time rejection with no job and no
-log. That is why the `unlock` job is the one job of the file with no `secrets:`
-block.
+`unlock.yml`, which takes `environment`, `ref` and `SHIPMATE_SECRETS` — releasing
+a lock reads no plan artifact and mints no App token, so it declares neither
+engine secret, and mapping a secret the callee does not declare is a load-time
+rejection with no job and no log. That is why the `unlock` job is the one job of
+the file whose `secrets:` block names no engine credential.
 
 The `deploy` job applies, on push to the default branch, every reviewed plan
 whose apply check is still pending — so it no-ops when everything was applied
@@ -563,8 +575,8 @@ Every snippet above that passes secrets at all passes them by name, and none use
 `secrets: inherit`.
 Two reasons, and the second one is a hard failure:
 
-- `inherit` hands the engine every secret your repository can see, not the two
-  it uses ([`hardening.md`](hardening.md) §What the engine receives).
+- `inherit` hands the engine every secret your repository can see, not the three
+  it names ([`hardening.md`](hardening.md) §What the engine receives).
 - **`inherit` works only within one organization or enterprise.** Called from a
   repository outside the engine's organization it delivers nothing. It does
   not fall back, it *suppresses*: the callee job binds
@@ -575,12 +587,14 @@ Two reasons, and the second one is a hard failure:
   surface silently fails to exist — no `shipmate / gate`, no pending
   `apply / <stack> / <env>` checks, no sticky comment.
 
-Pass only what each callee declares. `drift.yml` and `comment-ops.yml` declare
-`SHIPMATE_APP_PRIVATE_KEY` alone — they mint an App token and read no plan
-artifact. `plan.yml`, `apply.yml`, `apply-all.yml` and `deploy.yml` declare
-`SHIPMATE_PLAN_PASSPHRASE` too, because each of them writes or reads an
-encrypted plan artifact. `unlock.yml` declares neither, so the `unlock` job
-writes no `secrets:` block at all. Naming a secret the callee does not declare is a
+Pass only what each callee declares. `comment-ops.yml` declares
+`SHIPMATE_APP_PRIVATE_KEY` alone — it mints an App token, reads no plan
+artifact, and runs no cell. `plan.yml`, `apply.yml`, `apply-all.yml` and
+`deploy.yml` declare `SHIPMATE_PLAN_PASSPHRASE` too, because each of them writes
+or reads an encrypted plan artifact. Every callee that runs a cell —
+`plan.yml`, `drift.yml`, the three apply paths and `unlock.yml` — also declares
+`SHIPMATE_SECRETS`, which is why `unlock.yml` declares neither engine secret and
+still takes a `secrets:` block. Naming a secret the callee does not declare is a
 load-time error that kills the run with no job and no log.
 
 ### Consumers outside the engine's organization
@@ -620,6 +634,86 @@ choice you make, so that a repository already carrying a `pull_request` rule
 does not end up with a conflicting second one.
 
 ## Optional
+
+### Variables and secrets your stacks need
+
+Anything a stack needs that the repository does not hold — a provider endpoint,
+an API key — reaches a cell through one of two channels: ordinary GitHub
+variables, and a `SHIPMATE_SECRETS` envelope. Both are optional; a repository
+that needs neither sets nothing.
+
+**Keep configuration in Git.** Native `.tfvars` and Terramate-generated
+configuration stay the first option for endpoints, sizes and resource settings.
+These channels exist for inputs that genuinely come from outside the repository
+— credentials, and values the repository should not hold. Do not re-create your
+configuration as GitHub variables.
+
+What carries what:
+
+| carries | mechanism | your effort |
+| --- | --- | --- |
+| provider environment variables (`CONFLUENT_CLOUD_ENDPOINT`, `DATADOG_SITE`) | a plain GitHub variable, exported under its stored name | set the variable |
+| `TF_VAR_*` for a conventional lower/snake_case OpenTofu name | a plain GitHub variable, suffix lowercased on export | set the variable |
+| `TF_VAR_*` for an upper- or mixed-case OpenTofu name | `SHIPMATE_VARS`, a JSON envelope whose keys keep their case | write one JSON object |
+| secrets, of any name shape | `SHIPMATE_SECRETS`, the same envelope shape held in a secret | write one JSON object |
+
+**`TF_VAR_*` suffixes are lowercased on export**, which is surprising and worth
+one paragraph. GitHub uppercases a variable name when it stores it — whichever
+case you typed, through the API as through `gh` — and OpenTofu matches
+`TF_VAR_<name>` case-sensitively on Linux. Conventional OpenTofu variable names
+are lowercase, so the cell lowercases the suffix: `TF_VAR_ENDPOINT` →
+`TF_VAR_endpoint` → `variable "endpoint"`, and `TF_VAR_MY_THING` reaches
+`variable "my_thing"`. A variable declared with uppercase or mixed-case letters
+— `variable "ENDPOINT"`, `variable "myThing"` — is reachable only through
+`SHIPMATE_VARS`, whose JSON keys are exported exactly as written.
+
+**`SHIPMATE_VARS` costs no workflow edit.** It is a GitHub variable, so it
+arrives like any other one — nothing to declare, nothing to map. Only
+`SHIPMATE_SECRETS` touches `shipmate.yml`, because only secrets cross the
+declaration boundary; the six cell-running jobs of the file above already carry
+its line, and the comment on the `plan` job's line says why deleting it breaks
+the channel — the other five carry the same line without a comment.
+
+**One is a variable and one is a secret, and swapping them fails.** Setting
+`SHIPMATE_SECRETS` as a variable is refused by name, because as a variable its
+value is readable by anyone who can see the repository and nothing in it reaches
+a cell; the run fails telling you to rotate what it held. The other direction
+cannot be caught: `SHIPMATE_VARS` set as a secret is never read — nothing maps it
+into a cell — so the keys simply never appear, with no error anywhere.
+
+**Set shared values once.** A repository-level variable or secret serves both
+tiers, and an organization-level one serves every repository — except that on
+GitHub Free, organization **variables** do not reach a **private** repository,
+so a consumer on Free with a private IaC repository holds none of the variable
+side at the organization tier. Add an environment-level value only where one
+genuinely differs, and reserve the `<env>-plan` / `<env>-apply` split for read
+and write credentials.
+
+**Envelopes replace, they do not merge.** An environment-level
+`SHIPMATE_SECRETS` replaces the repository-level one whole, and so does an
+environment-level `SHIPMATE_VARS`. There is no key-by-key merge across tiers, so
+an environment envelope must carry every key that environment needs, not only
+the ones that differ. Repository secret `SHIPMATE_SECRETS`:
+
+```json
+{"CONFLUENT_CLOUD_API_KEY": "read-key", "DATADOG_API_KEY": "dd-key"}
+```
+
+and the same secret on the `prod-apply` environment, meaning to swap in the
+write key:
+
+```json
+{"CONFLUENT_CLOUD_API_KEY": "write-key"}
+```
+
+Cells on `prod-apply` then see no `DATADOG_API_KEY` at all: the repository
+envelope is not consulted, not merged. The environment value has to name both
+keys.
+
+[`../CONTRACT.md`](../CONTRACT.md) §Consumer variables and secrets is the full
+policy — the names shipmate reserves, which environment supplies which key, what
+a value that differs between the two tiers does to the apply-match fingerprint,
+and what masking does and does not cover.
 
 ### Drift detection
 

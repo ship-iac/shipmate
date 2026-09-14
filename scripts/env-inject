@@ -1,16 +1,53 @@
 #!/usr/bin/env python3
-"""Write one cell's identity variables into the job environment.
+"""Write one cell's environment variables into the job environment.
 
-The single writer of `TF_VAR_*` and `TF_WORKSPACE` for a cell. The source is
-`SHIPMATE_TF_VARS`, the matrix row's resolved mapping, and nothing else.
+The single writer of the cell's process environment. Four channels compose here:
+the matrix row's resolved identity mapping (`SHIPMATE_TF_VARS`), the consumer's
+enumerated GitHub variables (`SHIPMATE_GITHUB_VARS`), the `SHIPMATE_VARS`
+envelope lifted out of that enumeration, and the `SHIPMATE_SECRETS` envelope,
+whose values are masked before anything is written.
 """
 
 import json
 import os
+import re
 import uuid
 
 #: The matrix row's resolved `tf_vars`, serialised by `toJSON` at the cell step.
 _TABLE = "SHIPMATE_TF_VARS"
+
+#: The consumer's reachable GitHub variables, as `${{ toJSON(vars) }}` renders them.
+_ENUM = "SHIPMATE_GITHUB_VARS"
+
+#: How a collision refusal names the enumerated channel. `_ENUM` is the engine's own input
+#: name, which a consumer reading the refusal cannot look up or act on; what they can act on
+#: is the variable they set.
+_ENUM_LABEL = "your GitHub variables"
+
+#: The case-preserving envelopes. `SHIPMATE_VARS` is itself a GitHub variable, so it
+#: arrives inside the enumeration and is lifted out of it rather than read separately.
+_VARS = "SHIPMATE_VARS"
+_SECRETS = "SHIPMATE_SECRETS"
+
+#: What `$GITHUB_ENV` accepts as a name. `fullmatch` only: a prefix match leaves a
+#: key whose second line is `X=Y` writing further assignments through `write_env`.
+_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+
+#: Names shipmate owns: cell identity, established credentials, OpenTofu execution
+#: controls, and the runner's own loader and search path.
+_RESERVED_NAMES = frozenset(
+    {
+        "TF_WORKSPACE",
+        "TF_CLI_ARGS",
+        "TF_LOG",
+        "TF_DATA_DIR",
+        "TF_PLUGIN_CACHE_DIR",
+        "PATH",
+        "LD_PRELOAD",
+        "LD_LIBRARY_PATH",
+    }
+)
+_RESERVED_PREFIXES = ("TF_CLI_ARGS_", "AWS_", "SHIPMATE_", "GITHUB_", "RUNNER_")
 
 
 def resolve(environ):
@@ -39,6 +76,139 @@ def resolve(environ):
     return parsed
 
 
+def _parse_object(raw, message, null_is_empty=False):
+    """The JSON object of strings `raw` holds, or `{}` when it is absent or empty.
+
+    `message` renders the refusal for a given rule; the envelope channel builds one
+    that carries no byte of `raw`, since the value may be a secret.
+    """
+    if not raw:
+        return {}
+    try:
+        parsed = json.loads(raw)
+    except ValueError as exc:
+        raise SystemExit(message("is not JSON")) from exc
+    if parsed is None and null_is_empty:
+        return {}
+    if not isinstance(parsed, dict) or not all(isinstance(v, str) for v in parsed.values()):
+        raise SystemExit(message("is not a JSON object of strings"))
+    return parsed
+
+
+def parse_enumeration(raw, source):
+    """The consumer's GitHub variables, as `toJSON(vars)` renders them.
+
+    `null` and `''` both mean `{}`: the input is engine-built, so an empty rendering
+    is a platform fact, and a repository reaching no variable is a real consumer.
+    Malformed JSON is an engine bug and still refuses; the enumeration carries no
+    secret, so its refusal may quote the value.
+    """
+
+    def message(rule):
+        return f"::error::{source} must be the object toJSON(vars) renders, and {raw!r} {rule}."
+
+    return _parse_object(raw, message, null_is_empty=True)
+
+
+def envelope_exports(raw, source, table):
+    """The pairs `source` contributes to the cell, refusing anything it may not export.
+
+    Absent or empty is `{}` -- the normal case for a consumer with no extras -- but
+    `null` is a written mistake and refuses, as does any key that is not a legal
+    environment variable name or that shipmate owns. Keys are exported verbatim:
+    preserving case is what the envelope exists for.
+
+    No refusal quotes the value. Key names are not secret and are named; the bytes
+    around them may be.
+    """
+
+    def message(rule):
+        return (
+            f"::error::{source} must be a JSON object of strings, and its value {rule}. "
+            "No part of the value is shown, because it may be a secret. An unset or "
+            "empty envelope exports nothing; null is not the same thing."
+        )
+
+    parsed = _parse_object(raw, message)
+    for name in parsed:
+        if not _NAME.fullmatch(name):
+            raise SystemExit(
+                f"::error::{source} key {name!r} is not an environment variable name; "
+                "keys must match [A-Za-z_][A-Za-z0-9_]*."
+            )
+        if _is_reserved(name, table):
+            raise SystemExit(
+                f"::error::{source} key {name!r} is reserved: shipmate owns this cell's "
+                "identity variables, its credentials, and OpenTofu's execution controls."
+            )
+    return parsed
+
+
+def _is_reserved(name, table):
+    """Whether shipmate owns `name` for a cell whose identity table is `table`.
+
+    The identity part is per-cell: a `folder` layout derives nothing, so `TF_VAR_env`
+    is an ordinary consumer variable there and a hardcoded list would refuse it.
+    """
+    return name in _RESERVED_NAMES or name.startswith(_RESERVED_PREFIXES) or name in table
+
+
+def _lowercase_tf_var(name):
+    """`TF_VAR_MY_THING` -> `TF_VAR_my_thing`.
+
+    GitHub uppercases variable names on storage, OpenTofu matches `TF_VAR_<name>`
+    case-sensitively, and conventional variable names are lowercase.
+    """
+    prefix = "TF_VAR_"
+    return prefix + name[len(prefix) :].lower() if name.startswith(prefix) else name
+
+
+def filter_enumeration(parsed, table):
+    """The enumerated variables a cell exports, lowercased and with reserved names dropped.
+
+    Skipped, not refused: `toJSON(vars)` sweeps up the consumer's own engine
+    configuration, which they never aimed at a cell, so refusing it fails every run
+    on correct configuration. `_SECRETS` is the one exception, below. Lowercasing runs
+    first, so an enumerated `TF_VAR_ENV` meets the lowercase name the table derived for
+    the same identity and is skipped as reserved, instead of passing the table
+    comparison under its stored spelling and colliding after export. A table entry
+    spelled `TF_VAR_ENV` is a different case, and CONTRACT.md states its outcome:
+    it never reaches OpenTofu, so nothing collides.
+    """
+    if _SECRETS in parsed:
+        # The secret envelope set on the variable surface. It would be skipped by the
+        # SHIPMATE_ prefix below and export nothing, and its value is world-readable
+        # where it is.
+        raise SystemExit(
+            f"::error::{_SECRETS} is set as a GitHub variable, and it must be a secret. "
+            "Nothing in it reaches the cell, and its value is readable by anyone who can "
+            "see the repository. Delete the variable, rotate every credential it held, "
+            "and set a secret of that name instead."
+        )
+    lowered = ((_lowercase_tf_var(name), value) for name, value in parsed.items())
+    return {name: value for name, value in lowered if not _is_reserved(name, table)}
+
+
+def merge_exports(sources):
+    """One mapping from `(source_name, pairs)` channels, refusing any name two supply.
+
+    A name supplied twice has no defensible precedence, and picking one silently is
+    how a consumer ends up debugging the value that lost.
+    """
+    merged = {}
+    origin = {}
+    for source, pairs in sources:
+        for name, value in pairs.items():
+            if name in merged:
+                raise SystemExit(
+                    f"::error::{name} is supplied by both {origin[name]} and {source}. "
+                    "Remove it from one of them; shipmate will not choose."
+                )
+            merged[name] = value
+            origin[name] = source
+    return merged
+
+
 def _delimiter(value):
     """A heredoc delimiter that does not occur as a line of `value`.
 
@@ -65,8 +235,58 @@ def write_env(pairs, path):
             fh.write(f"{name}<<{delim}\n{value}\n{delim}\n")
 
 
+def compose(environ):
+    """The cell's whole environment, and the subset of it that is secret.
+
+    Channel order is the composition contract: the table is the engine's own identity
+    and is never filtered, the enumeration is consumer configuration swept up wholesale
+    and is, and the two envelopes are written deliberately. `test_env_inject_exports.py`
+    pins both properties.
+    """
+    table = resolve(environ)
+    enumerated = parse_enumeration(environ.get(_ENUM, ""), _ENUM)
+    envelope = envelope_exports(enumerated.pop(_VARS, None), _VARS, table)
+    secrets = envelope_exports(environ.get(_SECRETS, ""), _SECRETS, table)
+    merged = merge_exports(
+        [
+            (_TABLE, table),
+            (_ENUM_LABEL, filter_enumeration(enumerated, table)),
+            (_VARS, envelope),
+            (_SECRETS, secrets),
+        ]
+    )
+    return merged, secrets
+
+
+def mask(values):
+    r"""Emit `::add-mask::` for every line of every `values` entry.
+
+    Per line, because `::add-mask::` matches an exact string and a log line carrying one
+    line of a PEM would otherwise print it whole. Empty lines are skipped: GitHub cannot
+    mask the empty string and warns per attempt. Flushed, because a process that dies
+    between these commands and the `$GITHUB_ENV` write leaves the values unmasked in the
+    next step's environment.
+
+    The runner unescapes a workflow command's data, so a `%` reaches it as `%25` or a
+    line holding a literal `%25` registers a mask for a string the value never contains.
+    `\r` and `\n` need no escape here: `splitlines` has already removed them.
+    """
+    for value in values:
+        for line in value.splitlines():
+            if line:
+                # Writing the value is the mechanism, not a leak: `::add-mask::` registers an
+                # exact string, so the runner must be handed it. It consumes the command rather
+                # than echoing it, and masks the value everywhere after. Do not "fix" this by
+                # masking a digest or a prefix -- neither registers anything.
+                print(  # codeql[py/clear-text-logging-sensitive-data]
+                    f"::add-mask::{line.replace('%', '%25')}", flush=True
+                )
+
+
 def main():
-    write_env(resolve(os.environ), os.environ["GITHUB_ENV"])
+    pairs, secrets = compose(os.environ)
+    mask(secrets.values())
+    write_env(pairs, os.environ["GITHUB_ENV"])
 
 
 if __name__ == "__main__":

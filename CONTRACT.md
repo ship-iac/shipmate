@@ -192,10 +192,12 @@ never used.
   environment table on the repository's default branch (§Environment table).
   There is no second source and no repository-variable path.
 - **One writer puts those variables in the cell's process.**
-  `scripts/env-inject` reads the row's `tf_vars` and nothing else, and writes
-  every entry of it into `$GITHUB_ENV` under the name the table resolved, in a
-  step that runs before the cell's `terramate run`. Two sources for one name would
-  make precedence load-bearing, so there is exactly one.
+  `scripts/env-inject` writes every entry of the row's `tf_vars` into
+  `$GITHUB_ENV` under the name the table resolved, in a step that runs before
+  the cell's `terramate run`. It composes the consumer channels of §Consumer
+  variables and secrets into that same write, and refuses any name two channels
+  supply. Two sources for one name would make precedence load-bearing, so there
+  is exactly one writer and no precedence rule.
   - **The injected names are lowercase after the prefix.** `TF_VAR_ENV` is a
     different variable from the `TF_VAR_env` OpenTofu reads, and the table's
     `vars` allowlist accepts either spelling. Nothing refuses the mis-cased one:
@@ -210,6 +212,12 @@ never used.
     object of strings is refused before `terramate run`; the empty object is a
     legitimate value and an omitted input is not. Each row also carries
     `role_arn`, `cred_region` and `config_path`, resolved from the same table.
+  - The consumer channels are two further inputs on the same actions:
+    `github-vars` (`toJSON(vars)`, the enumeration) and `consumer-secrets` (the
+    `SHIPMATE_SECRETS` envelope). Both default to empty and neither is required:
+    a repository using neither channel is the normal case. That asymmetry with
+    `tf-vars` is deliberate — an omitted identity is a cell with no environment
+    and must fail closed, while an omitted channel is a cell with no extras.
 - Protected environments (typically anything beyond the lowest-trust
   environment) carry required reviewers configured on the GitHub
   Environment itself, so approval gating is enforced by GitHub, not by
@@ -1904,6 +1912,127 @@ the remedy is a re-plan. `tofu show` of a stored plan renders identically on any
 runner at one tofu version, and both `show` and `apply` refuse a plan file from
 another version, so the record carries no version field.
 
+## Consumer variables and secrets
+
+A consumer's stacks reach inputs the repository does not hold through two
+channels, and both land in one cell process under one export policy.
+`scripts/env-inject` is the single writer of that process (§Env model).
+
+- **GitHub variables, enumerated.** A called workflow sees the calling
+  repository's variables and those of the environment the cell binds, so every
+  reachable variable is offered to the cell with nothing to declare and nothing
+  to map. A `TF_VAR_*` name has its suffix lowercased on export
+  (`TF_VAR_ENDPOINT` → `TF_VAR_endpoint`), because GitHub uppercases a variable
+  name on storage and OpenTofu matches `TF_VAR_<name>` case-sensitively on
+  Linux.
+- **`SHIPMATE_VARS`**, a GitHub variable holding a JSON object of strings. Its
+  keys are exported verbatim, which is the only way to reach an OpenTofu
+  variable whose declared name is not lowercase. It is itself a variable, so it
+  arrives inside the enumeration and costs no workflow line.
+- **`SHIPMATE_SECRETS`**, the same envelope shape held in a secret. Secrets have
+  no enumeration: every callable workflow whose jobs run a cell declares
+  `SHIPMATE_SECRETS` with `required: false`, and the calling job must also map it
+  by name. An unmapped secret is absent in the callee, with no error.
+
+An unset or empty envelope exports nothing, which is the normal case. `null` is
+a written mistake and is refused, as is malformed JSON. Every extracted secret
+value is masked before anything is written — line by line, because
+`::add-mask::` matches an exact string — and no refusal quotes a byte of an
+envelope's value. Key names are not secret and are named.
+
+### Export policy
+
+One policy, applied to the enumeration and to both envelopes, before any value
+reaches the process.
+
+- **Reserved names.** The names `TF_WORKSPACE`, `TF_CLI_ARGS`, `TF_LOG`,
+  `TF_DATA_DIR`, `TF_PLUGIN_CACHE_DIR`, `PATH`, `LD_PRELOAD` and
+  `LD_LIBRARY_PATH`, the prefixes `TF_CLI_ARGS_`, `AWS_`, `SHIPMATE_`,
+  `GITHUB_` and `RUNNER_`, and — **per cell** — every `TF_VAR_*` name the
+  environment table derived for that cell. The identity part is per cell
+  precisely because it varies: a `folder` layout derives none, so `TF_VAR_env`
+  is an ordinary consumer variable there, and a fixed list would refuse it.
+  These cover cell identity, the credentials the engine established, OpenTofu's
+  execution controls, and the runner's own loader and search path.
+- **Same set, two responses.** The enumeration **skips** a reserved name
+  silently: it sweeps up the consumer's own engine configuration, which nobody
+  aimed at a cell, and refusing it would fail every run on correct
+  configuration. An envelope key is **refused**: writing `TF_WORKSPACE` into
+  `SHIPMATE_VARS` is a deliberate act with one meaning, and a silent drop leaves
+  the author debugging the wrong thing. One enumerated name is **refused** rather
+  than skipped: `SHIPMATE_SECRETS`, which is the secret envelope set on the
+  variable surface. Skipping it would export nothing while its value sat
+  world-readable in the repository UI, and the engine's own namespace has no
+  legitimate reading as a consumer variable. The refusal says to delete the
+  variable, rotate what it held, and set the secret.
+- **Name validation.** Every envelope key must match `[A-Za-z_][A-Za-z0-9_]*`.
+  `$GITHUB_ENV` is written in heredoc form, so a key holding a newline would
+  inject further assignments; this is the trust boundary, so a bad key is
+  refused rather than sanitised.
+- **Cross-channel collisions are refused**, naming both sources. A name supplied
+  by two channels has no defensible precedence, and choosing one silently is how
+  a consumer ends up debugging the value that lost.
+
+### Which environment supplies which key
+
+| cell path | binds | tier it receives |
+| --- | --- | --- |
+| plan cells, drift cells | `<env>-plan` | the read key |
+| apply cells, unlock cells | `<env>-apply` | the write key |
+| any of the above when the env is in `SHIPMATE_SHARED_ENVS` | bare `<env>` | one value for both paths |
+
+Drift reads and unlock writes, so each lands on the tier that matches what it
+does. **The read/write split needs the split environments**: an environment
+opted into `SHIPMATE_SHARED_ENVS` has one key serving both paths and forfeits
+the split, consistent with what it already forfeits in §Env model.
+
+### Values that differ between the two tiers
+
+**Credentials are what should differ between `<env>-plan` and `<env>-apply`;
+anything else that differs is not caught by the plan-match check.**
+
+A non-empty `TF_VAR_*` is a fingerprint input (§Apply-match fingerprint,
+above), so one that differs between the two tiers changes the fingerprint
+between plan and apply, and apply refuses with `current env does not match the
+reviewed plan's fingerprint`. That is fail-closed, but the message names the
+variable and not the cause, so it reads as an engine bug.
+
+**Rule: any tier-varying value uses a non-`TF_VAR_` name** — the provider's own
+variable (`CONFLUENT_CLOUD_API_KEY`), never `TF_VAR_confluent_api_key`. A
+`TF_VAR_` value is identical on both environments.
+
+**The same holds over time: rotating a `TF_VAR_*` secret invalidates every
+outstanding reviewed plan.** The rotation changes no configuration and needs no
+tier difference — the fingerprint recorded before it no longer matches the value
+the apply cell reads, and each held plan fails with the same message until it is
+re-planned. Rotation is the more frequent event of the two, so a `TF_VAR_`-named
+credential costs a re-plan of everything in flight each time it turns over; a
+non-`TF_VAR_` name costs nothing and buys no plan-match check either.
+
+The rule's cost is deliberate and is stated here rather than discovered: it
+sends every tier-varying value into the **unhashed** namespace, where the
+plan-match check cannot see it. A `CONFLUENT_CLOUD_ENDPOINT` that differs
+between the tiers applies against a target nobody reviewed, silently. `AWS_*` is
+already excluded from the fingerprint the same way, so this is existing
+precedent rather than a new hole.
+
+### Envelopes replace, they do not merge
+
+An environment-level `SHIPMATE_SECRETS` replaces the repository-level one whole,
+and the same holds for `SHIPMATE_VARS`: the environment level shadows the
+repository level, per value, and nothing merges them key by key. An environment
+envelope therefore carries every key that environment needs, not only the ones
+that differ.
+
+### These channels change nothing about what gets published
+
+§Secrets in published output, below, is unchanged by them and must not be read
+as relaxed by them. A supported envelope entry such as `TF_VAR_password` is
+masked in the job log and still lands in the sticky plan comment, the step
+summary and the plan artifact whenever the consumer has not marked the variable
+`sensitive = true`. Redaction is the consumer's job, and OpenTofu's `sensitive`
+marking is the mechanism.
+
 ## Secrets in published output
 
 Both text surfaces shipmate publishes — the rendered plan `plan.txt` in the
@@ -2142,12 +2271,14 @@ bare-apply path as `.github/workflows/apply-all.yml` (detect → env-levels
 targeted path as `.github/workflows/apply.yml` (single-env detect → one
 `apply-env-level.yml` call → gate refresh + result comment), and the unlock path
 as `.github/workflows/unlock.yml` (guard → single-env detect → one flat unlock
-matrix; it takes `environment` and `ref` only, and declares no secrets). A
+matrix; it takes `environment` and `ref` only, and declares `SHIPMATE_SECRETS`
+and no engine secret). A
 consuming repo reaches all four from `shipmate.yml`: the `deploy` job (on
 `push` to the default branch; passes only its flavor's `state_suffix`, which it
 sets to `''` on a remote backend), the `targeted` and `all` jobs (dispatched
 `apply`, split on whether an `environment` was given) and the `unlock` job
-(dispatched `unlock`; no `state_suffix` and no `secrets:` block). All four must
+(dispatched `unlock`; no `state_suffix`, and a `secrets:` block naming
+`SHIPMATE_SECRETS` alone). All four must
 grant `id-token: write`, added in the same pull request that repins past the
 change introducing it (see AWS OIDC, above).
 

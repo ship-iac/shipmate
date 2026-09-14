@@ -44,11 +44,13 @@ def test_the_workflow_call_inputs_are_exactly_these():
 
 
 def test_the_workflow_call_secrets_are_exactly_these():
-    """`required: true` on either would fail at load time for every consumer who scopes the key
-    to an environment rather than the repository."""
+    """`required: true` on any of the three would fail at load time: consumers scope the two
+    engine keys to an environment rather than the repository, and a consumer who forwards no
+    secrets of their own holds no `SHIPMATE_SECRETS` to pass at all."""
     assert _doc()[True]["workflow_call"]["secrets"] == {
         "SHIPMATE_APP_PRIVATE_KEY": {"required": False},
         "SHIPMATE_PLAN_PASSPHRASE": {"required": False},
+        "SHIPMATE_SECRETS": {"required": False},
     }
 
 
@@ -153,6 +155,8 @@ def test_the_cell_passes_this_whole_with_block():
     """
     assert _step("plan", "actions/plan-cell@")["with"] == {
         "tf-vars": "${{ toJSON(matrix.tf_vars) }}",
+        "github-vars": "${{ toJSON(vars) }}",
+        "consumer-secrets": "${{ secrets.SHIPMATE_SECRETS }}",
         "stack": "${{ matrix.stack }}",
         "stack-name": "${{ matrix.stack }}",
         "env": "${{ matrix.environment }}",

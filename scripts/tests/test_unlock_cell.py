@@ -217,13 +217,19 @@ def test_a_failed_force_unlock_fails_the_cell(tmp_path):
 
 
 def test_the_cell_takes_no_credential_or_artifact_inputs():
-    """Inputs are the whole surface, compared as a set: unlock needs no token, no state path, no
-    plan artifact and no passphrase, and gaining one would mean it had grown a second job.
-    `tf-vars` is the exception every cell action takes -- it carries the cell's resolved
-    identity variables, and carries no credential."""
+    """Inputs are the whole surface, compared as a set: unlock needs no engine token, no state
+    path and no plan artifact, and gaining one would mean it had grown a second job.
+
+    The three cell-environment inputs every cell action takes are the exception. `tf-vars` and
+    `github-vars` carry no credential at all; `consumer-secrets` carries the consumer's own
+    envelope, which is neither an engine credential nor a plan artifact -- `unlock-cell` runs
+    `tofu init`, so a backend configured from a plain TF_VAR_* needs it here.
+    """
     assert set(action_yaml(_ACTION).get("inputs") or {}) == {
         "stack",
         "stack-name",
         "env",
         "tf-vars",
+        "github-vars",
+        "consumer-secrets",
     }
