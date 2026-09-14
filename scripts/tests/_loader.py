@@ -68,7 +68,7 @@ ENGINE_CALL_SECRETS = {
     "apply.yml": _APP_KEY_PASSPHRASE_AND_SECRETS,
     "apply-all.yml": _APP_KEY_PASSPHRASE_AND_SECRETS,
     "deploy.yml": _APP_KEY_PASSPHRASE_AND_SECRETS,
-    "apply-env-level.yml": _APP_KEY_AND_PASSPHRASE,
+    "apply-env-level.yml": _APP_KEY_PASSPHRASE_AND_SECRETS,
     # Unlock reads no plan artifact and mints no App token, so the consumer envelope is the
     # whole block: `unlock-cell` runs `tofu init`, which a consumer's backend may configure
     # from a plain TF_VAR_*.
@@ -78,10 +78,11 @@ ENGINE_CALL_SECRETS = {
 #: Secrets a callee already declares that its engine-internal callers may not map yet, by callee
 #: file name. `apply.yml`, `apply-all.yml` and `deploy.yml` call `apply-env-level.yml` at a SHA,
 #: and mapping a secret the PINNED callee does not declare is a hard load-time error, so
-#: `docs/releasing.md` orders the declaration, the pin bump, and the mapping into three
-#: pull requests. This names what is between step 1 and step 3; the step-3 pull request moves
-#: the name into `ENGINE_CALL_SECRETS` and leaves this empty.
-CASCADE_PENDING = {"apply-env-level.yml": frozenset({"SHIPMATE_SECRETS"})}
+#: `docs/releasing.md` orders the declaration, the pin bump, and the mapping into three steps,
+#: the first of which must merge before the others. This names what is between step 1 and
+#: step 3, and is empty between cascades: the step-3 change moves the name into
+#: `ENGINE_CALL_SECRETS` and empties this again.
+CASCADE_PENDING = {}
 
 
 @functools.cache

@@ -72,7 +72,7 @@ jobs:
         with:
           role-to-assume: ${{ matrix.role_arn }}
           aws-region: ${{ matrix.cred_region }}
-      - uses: ship-iac/shipmate/actions/drift-cell@94a60ab22beb46a7c7d2f52b858d29a26bc1f101
+      - uses: ship-iac/shipmate/actions/drift-cell@9c73e8f26861e204432de998fb66e011f8a956ce
         with:
           tf-vars: ${{ toJSON(matrix.tf_vars) }}
           github-vars: ${{ toJSON(vars) }}

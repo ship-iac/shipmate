@@ -133,7 +133,7 @@ jobs:
     # a skipped `detect` reads its outputs as empty strings -- which `!= 'true'` fans out on.
     needs: [guard, review, detect]
     if: ${{ !failure() && !cancelled() && needs.detect.outputs.empty != 'true' }}
-    uses: ship-iac/shipmate/.github/workflows/apply-env-level.yml@be1c0a06fc908e9f3fe90e87cbd729367fde4d51 # pinned to a commit on main
+    uses: ship-iac/shipmate/.github/workflows/apply-env-level.yml@9c73e8f26861e204432de998fb66e011f8a956ce # pinned to a commit on main
     permissions: { contents: read, checks: read, actions: read, id-token: write }
     with:
       waves_json: ${{ needs.detect.outputs.waves }}
@@ -150,6 +150,7 @@ jobs:
       # ignored (docs/releasing.md).
       SHIPMATE_APP_PRIVATE_KEY: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
       SHIPMATE_PLAN_PASSPHRASE: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
+      SHIPMATE_SECRETS: ${{ secrets.SHIPMATE_SECRETS }}
 
   summary:
     # `review` is in this list because `results:` is `join(needs.*.result, ',')`, which covers only
