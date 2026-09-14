@@ -171,8 +171,10 @@ creates all of them, including `shipmate-engine` and its branch policy:
   refuses. `layout` is the discriminator — `dry` derives `TF_VAR_env` and
   `TF_VAR_region` from each environment's key and its region, `workspace`
   derives `TF_WORKSPACE`, and `folder` derives nothing, its leaves fixing env
-  and region by path. `scripts/env-inject` writes what the table resolved into
-  the job environment under the names OpenTofu reads.
+  and region by path. `scripts/env-inject` is the cell's one writer of the job
+  environment: it writes what the table resolved under the names OpenTofu reads,
+  and composes your own variables and secrets (§Variables and secrets your stacks
+  need) into the same write, refusing any name two channels supply.
   [`../CONTRACT.md`](../CONTRACT.md) §Env model is the per-layout table;
   [`concepts.md`](concepts.md) explains where they land.
 

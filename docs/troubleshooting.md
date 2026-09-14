@@ -54,7 +54,9 @@ live probes.
   — exact unless the listing was too long to read whole — and a capped list of
   the names. A crowded environment's later names are not printed, so that one
   finding cannot spend the whole report's size budget.
-  `SHIPMATE_APP_PRIVATE_KEY` among them is a warning.
+  `SHIPMATE_APP_PRIVATE_KEY` among them is a warning. A `SHIPMATE_SECRETS`
+  holding the read key is the configuration the tier table asks for, so seeing it
+  named in this note is expected.
 - **Whether the `shipmate-engine` environment exists, and whether its deployment
   branch policy actually names the default branch.** See `hardening.md` #16 and
   `github-app.md` §Key-exposure boundary. This is the probe that catches a
@@ -380,18 +382,34 @@ These fail-safes are defence in depth behind that control, not the only thing
 behind it.
 
 **If the mismatch names *every* `TF_VAR_*`, look at the environment table
-rather than the plan.** A cell derives its variables from `matrix.environment`
-and the table on the default branch, so both sides hash identically whatever
-environment the job bound: the fingerprint pins plan and apply agreeing on
-values, and pins nothing about the binding. What moves the whole set is the
-table changing between the plan and the apply — an environment's `vars`, its
-`region`, or the `layout` itself, edited on the default branch in between. A
-re-plan is the fix, as above.
+rather than the plan.** The identity variables come from `matrix.environment`
+and the table on the default branch, and both sides resolve them from that one
+table, so they hash identically whatever environment the job bound. What moves
+the whole set is the table changing between the plan and the apply — an
+environment's `vars`, its `region`, or the `layout` itself, edited on the
+default branch in between. A re-plan is the fix, as above.
 
-An environment-naming or `SHIPMATE_SHARED_ENVS` change does not reach this
-error: it changes which environment the job binds, not what the cell injects.
-The pre-flight of §`this apply would bind GitHub Environment(s) that do not
-exist` is what refuses a mis-binding, before any wave starts.
+**If it names one or two, look at the consumer channels.** What a cell receives
+through a GitHub variable or the `SHIPMATE_SECRETS` envelope resolves against the
+environment the job bound — `<env>-plan` for a plan cell, `<env>-apply` for an
+apply cell — so those `TF_VAR_*` values are part of the fingerprint and the
+binding does reach it. Two causes, both on your side:
+
+- a `TF_VAR_*` whose value differs between `<env>-plan` and `<env>-apply`, which
+  fails every apply of that cell until the two are made identical or the value is
+  renamed to a non-`TF_VAR_` name ([`../CONTRACT.md`](../CONTRACT.md) §"Values
+  that differ between the two tiers" is the rule and states its cost);
+- a `TF_VAR_*` secret **rotated** between the plan and the apply, which needs no
+  configuration change at all — every plan reviewed before the rotation is
+  invalidated by it. A re-plan clears this one.
+
+An environment-naming or `SHIPMATE_SHARED_ENVS` change does reach this error for
+the same reason. Adding an env to `SHIPMATE_SHARED_ENVS` swaps its two split
+environments for the bare one, so a cell planned before the change and applied
+after it reads its variables and its envelope from a different environment.
+Re-plan after such a change. A mis-binding is a separate failure, refused by the
+pre-flight of §`this apply would bind GitHub Environment(s) that do not exist`
+before any wave starts.
 
 ### `plan-cell needs the expected-head input`, or `The plan would describe a tree nobody reviewed`
 

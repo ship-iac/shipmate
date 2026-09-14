@@ -212,6 +212,12 @@ never used.
     object of strings is refused before `terramate run`; the empty object is a
     legitimate value and an omitted input is not. Each row also carries
     `role_arn`, `cred_region` and `config_path`, resolved from the same table.
+  - The consumer channels are two further inputs on the same actions:
+    `github-vars` (`toJSON(vars)`, the enumeration) and `consumer-secrets` (the
+    `SHIPMATE_SECRETS` envelope). Both default to empty and neither is required:
+    a repository using neither channel is the normal case. That asymmetry with
+    `tf-vars` is deliberate — an omitted identity is a cell with no environment
+    and must fail closed, while an omitted channel is a cell with no extras.
 - Protected environments (typically anything beyond the lowest-trust
   environment) carry required reviewers configured on the GitHub
   Environment itself, so approval gating is enforced by GitHub, not by
@@ -1994,6 +2000,14 @@ variable and not the cause, so it reads as an engine bug.
 **Rule: any tier-varying value uses a non-`TF_VAR_` name** — the provider's own
 variable (`CONFLUENT_CLOUD_API_KEY`), never `TF_VAR_confluent_api_key`. A
 `TF_VAR_` value is identical on both environments.
+
+**The same holds over time: rotating a `TF_VAR_*` secret invalidates every
+outstanding reviewed plan.** The rotation changes no configuration and needs no
+tier difference — the fingerprint recorded before it no longer matches the value
+the apply cell reads, and each held plan fails with the same message until it is
+re-planned. Rotation is the more frequent event of the two, so a `TF_VAR_`-named
+credential costs a re-plan of everything in flight each time it turns over; a
+non-`TF_VAR_` name costs nothing and buys no plan-match check either.
 
 The rule's cost is deliberate and is stated here rather than discovered: it
 sends every tier-varying value into the **unhashed** namespace, where the
