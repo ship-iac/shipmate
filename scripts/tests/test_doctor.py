@@ -231,7 +231,7 @@ def _quiet_new_probes():
     """Healthy responses for the env-protection, engine-environment, plan-env-secret,
     pin-freshness, fork-trigger, shim-job-name, retired-input, dispatch-wiring and routing
     probes, so tests exercising the older gate/environment probes through `warnings()`
-    collect no incidental noise from these ten. The config probe's read is here too, serving
+    collect no incidental noise from these nine. The config probe's read is here too, serving
     the design's canonical file: a sound table is silent in `warnings()`, and its status lines
     are rendered from `config_status` instead.
 
