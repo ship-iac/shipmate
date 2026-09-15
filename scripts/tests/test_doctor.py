@@ -4395,8 +4395,7 @@ def test_the_tolerant_defaults_are_read_back_when_absent(monkeypatch):
         (
             doctor.NOTICE,
             "`explicit_envs`: absent \u2014 every environment applies on a bare "
-            "`shipmate apply`, production included. Name the ones that must always be "
-            "applied by hand.",
+            "`shipmate apply`, production included.",
         ),
     ]
 

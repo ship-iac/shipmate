@@ -2049,8 +2049,7 @@ def _config_defaults(table):
             "`shipmate apply` skips those, and each needs its own `shipmate apply <env>`."
             if envs
             else "`explicit_envs`: absent — every environment applies on a bare "
-            "`shipmate apply`, production included. Name the ones that must always be "
-            "applied by hand.",
+            "`shipmate apply`, production included.",
         ),
     ]
 
@@ -2061,9 +2060,8 @@ def _config_warnings(ctx):
     branch the engine reads it from.
 
     A placement mistake is the case that needs this: `explicit_envs` written below the
-    `[env_order]` header is well-formed TOML and lands inside that table, and until this
-    probe ran on a branch nothing reported it until the exclusion was already lost on the
-    default branch.
+    `[env_order]` header is well-formed TOML and lands inside that table, so before this
+    probe nothing reported it until the exclusion was already lost on the default branch.
 
     Reports only. It passes nothing it reads into `read_table` or `resolve`: execution
     reads the default branch, and a branch's file must never become a value a run uses.
