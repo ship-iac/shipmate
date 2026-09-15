@@ -239,7 +239,7 @@ def test_a_failing_gh_refuses(monkeypatch):
     `CONTRACT.md` lists a failed `gh api` as a refusal."""
     _env(monkeypatch)
 
-    def fake_subprocess_run(args, capture_output=False, text=False):
+    def fake_subprocess_run(args, capture_output=False, text=False, env=None):
         if args[0] == "gh":
             return types.SimpleNamespace(returncode=1, stdout="trunk\n", stderr="gh: boom\n")
         # Valid TOML, so a `_run` that stopped refusing would produce a table here rather than
@@ -250,3 +250,21 @@ def test_a_failing_gh_refuses(monkeypatch):
     with pytest.raises(SystemExit) as exc:
         ec.read_table()
     assert str(exc.value).startswith("::error::")
+
+
+def test_run_forwards_its_env_to_the_subprocess(monkeypatch):
+    """The `env` argument reaches `subprocess.run`, which no caller-side test can show:
+    `build-matrix`'s run.env probe stubs `_run` itself, so it pins that the probe *passes*
+    an environment, not that this wrapper hands it on. Dropping it silently reverts the
+    probe to the ambient environment, where every sentinel comparison passes.
+
+    Mutation: delete `env=env` from the `subprocess.run` call -- `seen` becomes None."""
+    seen = []
+
+    def fake_subprocess_run(args, capture_output=False, text=False, env=None):
+        seen.append(env)
+        return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(ec.subprocess, "run", fake_subprocess_run)
+    ec._run(["gh", "api", "repos/an-org/a-repo"], env={"TF_VAR_env": "SHIPMATE_RT_PROBE"})
+    assert seen == [{"TF_VAR_env": "SHIPMATE_RT_PROBE"}]

@@ -19,17 +19,17 @@ CONFIG_PATH = ".github/shipmate.toml"
 _MIN_PYTHON = (3, 11)
 
 
-def _run(args, check=True):
-    """stdout of `args`, raising ::error:: on a nonzero exit. `check=False` returns
-    the CompletedProcess instead, for the one caller that reports the failure itself.
+def _run(args, env=None, check=True):
+    """stdout of `args`, raising ::error:: on a nonzero exit. `check=False` returns the
+    CompletedProcess instead, for the two callers that report the failure themselves.
 
-    Local rather than `build-matrix`'s: `_shipmate.py` caches nothing and re-executes
-    the module on every `_load`, and `build-matrix` calls this module, so reaching its
-    copy through the loader would not terminate.
+    `build-matrix` aliases this rather than keeping its own copy: this module `_load`s
+    nothing, so reaching it from there terminates. The reverse would not -- `_shipmate.py`
+    caches nothing and re-executes a module on every `_load`.
     """
-    # args is a code-controlled tool invocation (gh/git by PATH name),
+    # args is a code-controlled tool invocation (gh/git/terramate by PATH name),
     # never user input, and shell=False -- safe.
-    p = subprocess.run(args, capture_output=True, text=True)  # noqa: S603
+    p = subprocess.run(args, capture_output=True, text=True, env=env)  # noqa: S603
     if not check:
         return p
     if p.returncode != 0:
