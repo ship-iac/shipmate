@@ -108,4 +108,8 @@ if __name__ == "__main__":
     except bm.MatrixTooLarge as e:
         raise SystemExit(f"::error::{e}") from e
     except CycleError as e:
-        raise SystemExit(f"::error::dependency cycle in run-graph or env-order: {e}") from e
+        raise SystemExit(
+            f"::error::dependency cycle in the Terramate stack run-graph: {e}. Two or more "
+            "stacks order each other through `after`/`before`; break the loop in their stack "
+            "configuration."
+        ) from e
