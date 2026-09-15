@@ -4356,8 +4356,10 @@ def test_a_valid_verdict_names_the_checks_it_did_not_run(monkeypatch):
     It also states that execution reads the default branch's copy, without which the report
     reads as a verdict on what the pull request will do.
 
-    Mutation: call `validate` instead of `validate_structure` and shorten the text to
-    "parses and is valid".
+    Mutation: shorten the text to "parses and is valid". Swapping `validate_structure` for
+    `validate` is NOT a mutation that reds here -- the canonical file passes both -- so this
+    guard pins the words, and `test_the_config_probe_feeds_nothing_a_run_reads` pins that the
+    run-context reader is never reached.
     """
     responses = _config_responses(CANONICAL, on_default=MISPLACED_CONTROL)
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
@@ -4380,8 +4382,7 @@ def test_the_tolerant_defaults_are_read_back_when_absent(monkeypatch):
     and a bare `shipmate apply` then applies every environment -- including the one a
     consumer meant to exclude. Nothing refuses and no validator can, so the report says it.
 
-    Mutation: drop `_config_defaults` from the valid return, or report only the fields that
-    are present.
+    Mutation: drop `_config_defaults` from the valid return.
     """
     responses = {_CONFIG_READ: _wf_file('layout = "folder"\n')}
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
