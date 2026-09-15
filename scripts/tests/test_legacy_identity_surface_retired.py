@@ -1,7 +1,7 @@
 """The two-mode identity surface is gone from the shipped trees and stays gone.
 
-A cell's identity and cloud credentials come from the `globals "shipmate"`
-environment table and from nothing else. The mode selector that chose between
+A cell's identity and cloud credentials come from the environment table in
+`.github/shipmate.toml` and from nothing else. The mode selector that chose between
 that table and a set of GitHub variables, and the `AWS_ROLE_ARN_<WORKLOAD>`
 name-mangling rule that the variable arm needed, were removed outright rather
 than deprecated: there are no consumers to migrate, so nothing may reintroduce

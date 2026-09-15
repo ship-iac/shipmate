@@ -11,6 +11,53 @@ section below names the SHA the release tags.
 The version line stays `v0.x` while action inputs, check names, and the comment
 grammar are declared unstable in `README.md`.
 
+## Unreleased
+
+**Breaking: the environment table moves out of Terramate globals into
+`.github/shipmate.toml`.** A cell's identity, credentials, wave ordering and
+bare-apply exclusions are now four top-level keys — `layout`, `environments`,
+`env_order`, `explicit_envs` — in one flat TOML file on the default branch, read
+with `tomllib`. The engine reads the new location only; there is no dual-support
+window. Migration is two merges per repository — add the file under the current
+pin, then bump the pin and delete the `globals "shipmate"` block —
+`docs/upgrading.md` §Unreleased has the procedure and a worked translation.
+
+### Changed
+
+- **`env_order` and `explicit_envs` are read from the default branch.** They
+  used to be evaluated out of the checked-out tree, so a feature branch could
+  reorder its own apply waves or drop its own production exclusion and have the
+  edit take effect on that branch. Both now come from the same default-branch
+  file as the identity table. An edit takes effect when it merges.
+- **Validation is strict about top-level keys and reserved names.** A fifth
+  top-level key is refused by name — which catches a misspelled `environments`
+  that previously yielded zero environments and skipped every cell's credentials
+  step — and a top-level control name used as an `env_order` key is refused with
+  the TOML placement hazard named as the likely cause.
+- **One validation entry point covers all four fields.** `env_order` and
+  `explicit_envs` are checked wherever the table is, rather than only when an
+  apply operation reads them.
+- **`shipmate doctor` validates the file at the commit under examination**,
+  through the contents API, and echoes the two tolerant defaults. It runs the
+  structural checks only and names the ones it did not run. It reports; nothing
+  it reads reaches a run.
+- **Reading the table needs Python 3.11 on the runner.** `CONTRACT.md` §Runner
+  prerequisites has always required it; `tomllib` is the first thing to exercise
+  it. `scripts/env-config` checks the version ahead of the import and refuses
+  with the version it found.
+- **`scripts/onboard`'s by-hand checklist asks for `.github/shipmate.toml`**, in
+  canonical dotted-key form, instead of a `globals "shipmate"` block.
+
+### Removed
+
+- **The Terramate worktree-and-evaluate read path.** No `git worktree
+  add/remove/prune`, no `terramate experimental eval` subprocess, and no second
+  independent evaluation in `scripts/env-order`. With it goes the defect class
+  behind it: Terramate drops an attribute it cannot evaluate and exits 0, which
+  produced a table byte-identical to a legitimate one naming no roles. There is
+  no lazy evaluation left on this path to drop anything.
+- **The `layout = null` refusal**, which TOML cannot express.
+
 ## [0.29.0] — 2026-09-14
 
 Tags `1923428`.

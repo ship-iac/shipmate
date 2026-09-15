@@ -4266,7 +4266,7 @@ def test_a_refusal_is_the_finding_not_a_skipped_probe(monkeypatch):
     "could not verify ... probe skipped" with the reason cut at 120 characters -- a
     validation refusal misreported as a probe that never ran, and truncated mid-sentence.
 
-    Mutation: drop the `except SystemExit` clause from `_config_warnings`.
+    Mutation: drop the `except SystemExit` clause from `_config_table`.
     """
     responses = {
         f"repos/{_REPO}/rules/branches/{_BRANCH}?per_page=100": _gate_rule(),

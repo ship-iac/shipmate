@@ -164,8 +164,8 @@ creates all of them, including `shipmate-engine` and its branch policy:
   so anyone who can push a branch can reach whatever role a plan cell resolves;
   what refuses it is that role's own trust-policy claim condition
   ([`hardening.md`](hardening.md) §7–9).
-- **The identity your layout injects comes from the environment table**, a
-  `globals "shipmate"` block on your repository's default branch
+- **The identity your layout injects comes from the environment table**,
+  `.github/shipmate.toml` on your repository's default branch
   ([`../CONTRACT.md`](../CONTRACT.md) §Environment table). It is required: a
   repository without one has nothing for its cells to run as, and every run
   refuses. `layout` is the discriminator — `dry` derives `TF_VAR_env` and
@@ -177,6 +177,24 @@ creates all of them, including `shipmate-engine` and its branch policy:
   need) into the same write, refusing any name two channels supply.
   [`../CONTRACT.md`](../CONTRACT.md) §Env model is the per-layout table;
   [`concepts.md`](concepts.md) explains where they land.
+
+  ```toml
+  layout = "dry"
+
+  [environments.dev-eu]
+  region         = "eu-west-1"
+  aws.plan.role  = "arn:aws:iam::9817:role/shipmate-plan"
+  aws.apply.role = "arn:aws:iam::9817:role/shipmate-apply"
+  ```
+
+  Dotted keys are the canonical spelling: one `[environments.<name>]` header per
+  environment, tiers written as `aws.plan.role` inside it. Give the plan and
+  apply paths separate roles — one block-level `aws.role` covers both, and the
+  plan path is reachable from any branch ([`hardening.md`](hardening.md) §7–9).
+  Top-level settings go above the first header: a scalar written below one lands
+  inside that table instead, which TOML accepts and the engine then refuses.
+  A repository that needs no cloud role at all declares `layout` and nothing
+  else.
 
   **The table has to be on the default branch before your first plan run.** The
   engine reads it from `origin/<default>`, so a pull request that only adds the
@@ -517,7 +535,8 @@ rules from Settings → Environments → `<name>` (or the API):
   maximally-hardened position gates every apply environment.
   [`hardening.md`](hardening.md) #6 states what each choice costs — shipmate
   does not make it for you.
-- **Pair a reviewer-gated environment with `global.shipmate.explicit_envs`.**
+- **Pair a reviewer-gated environment with `explicit_envs` in
+  `.github/shipmate.toml`.**
   List the bare env name (`prod` — neither `prod-plan` nor `prod-apply`). A bare
   `shipmate apply` then skips it, and it is only ever reached via the targeted
   `shipmate apply prod`, which pauses for the environment reviewer.
@@ -745,7 +764,7 @@ the last green check, so the PR merges itself:
 Properties that fall out of the existing gate semantics:
 
 - **Explicit environments still gate.** An environment listed in
-  `global.shipmate.explicit_envs` is skipped by the bare `shipmate apply` and its
+  `explicit_envs` is skipped by the bare `shipmate apply` and its
   apply checks stay pending — gate stays pending, so auto-merge waits
   until someone runs the targeted `shipmate apply <env>`. Arming auto-merge never
   weakens the apply-before-merge guarantee; it only removes the final click.

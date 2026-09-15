@@ -93,7 +93,7 @@ expressions, whole, against the fence `getting-started.md` publishes. See
 | 15 | Shorten Actions retention | Settings → Actions | `shipmate doctor` report disclosure |
 | 16 | `shipmate-engine` Environment exists, deployment branch policy restricted to the default branch | Environment | Repository-secret App key readable by any branch |
 | 17 | Deployment branch policy restricted to the default branch on every `<env>-apply` | Environment | Branch-authored workflow claiming apply-environment secrets directly |
-| 18 | A role named per environment you want cloud access from — an `aws` tier in the environment table | Environment table | Opting in per environment. The table has no level above the entry, so a role cannot be named once and picked up by every environment at a stroke; what each cell may do is bounded by the named role's own trust policy (§7–9). The table is default-branch content, so naming a role is an ordinary pull request under row 4 rather than a settings change — and row 4's code-owner half is a no-op unless a `CODEOWNERS` entry covers the table's path (`branch-protection.md`) |
+| 18 | A role named per environment you want cloud access from — an `aws.plan` and an `aws.apply` tier in `.github/shipmate.toml`, never one block-level `aws.role` covering both (§7–9) | Environment table | Opting in per environment. The table has no level above the entry, so a role cannot be named once and picked up by every environment at a stroke; what each cell may do is bounded by the named role's own trust policy (§7–9). The table is default-branch content, so naming a role is an ordinary pull request under row 4 rather than a settings change — and row 4's code-owner half is a no-op unless a `CODEOWNERS` entry covers `/.github/shipmate.toml` (`branch-protection.md`) |
 | 19 | `id-token: write` on every job of `shipmate.yml` but `comment-ops` | Consumer workflow YAML | Nothing — it is required: GitHub caps a called workflow's permissions at each `uses:` boundary, so without it every plan, drift, apply and unlock run fails at workflow-resolution time, cloud or not |
 | 20 | Require actions to be pinned to a full-length commit SHA | Settings → Actions | A tag or branch ref moving under a workflow that was pinned only by convention |
 
@@ -151,9 +151,9 @@ a broken one:
 
 - production absent from `SHIPMATE_UNGATED_ENVS`, so no apply reaches it without
   an approving review on the pull request;
-- production in `global.shipmate.explicit_envs`, so before the merge a bare
-  `shipmate apply` skips it and only the targeted `shipmate apply <env>` reaches
-  it — the global constrains that path only. The post-merge deploy applies every
+- production in `explicit_envs` in `.github/shipmate.toml`, so before the merge
+  a bare `shipmate apply` skips it and only the targeted `shipmate apply <env>`
+  reaches it — the setting constrains that path only. The post-merge deploy applies every
   cell whose apply check is still pending, explicit environments included
   (CONTRACT.md §Comment-ops), and the control it relies on there is exactly row
   6: with row 6 unavailable, a production cell left pending at merge applies on
@@ -331,8 +331,9 @@ code-owner review for a changed file that has an owner; with no `CODEOWNERS`
 file, an entry that does not parse, or IaC paths left unowned, the setting
 is a no-op and the App's own approving review satisfies the count on its own.
 Write a `CODEOWNERS` entry covering the paths the stacks and the Terramate
-configuration live in, and confirm on a real pull request that the reviewer
-requirement appears. `shipmate doctor` warns when the rule requires approvals but
+configuration live in, and `/.github/shipmate.toml` with them — that one file
+names every cloud role the repository can assume. Confirm on a real pull request
+that the reviewer requirement appears. `shipmate doctor` warns when the rule requires approvals but
 not code-owner review — it does not check `CODEOWNERS` coverage, and it never
 fails a run, so that is a warning, not enforcement.
 
@@ -421,18 +422,21 @@ costs, so the choice is made with the price visible:
   while every pull request targets a branch it names. Who may flip this posture
   on is a separate question from what it costs — see §7–9.
 
-Pair every environment you gate with `global.shipmate.explicit_envs`, whichever
-ones those are: list it there so a bare `shipmate apply` skips it and it is
-reached only by the targeted `shipmate apply <env>`. Left off, a bare
+Pair every environment you gate with `explicit_envs` in
+`.github/shipmate.toml`, whichever ones those are: list it there so a bare
+`shipmate apply` skips it and it is reached only by the targeted
+`shipmate apply <env>`. Left off, a bare
 `shipmate apply` fans out into that environment and stalls there waiting for the
 reviewer nobody expected to be asked. Use the bare environment name —
 `staging`, not `staging-plan` or `staging-apply`. The value is matched against
 the environment name carried by the apply checks (see CONTRACT.md), and an entry
 carrying either suffix is a configuration error the engine rejects loudly.
 
-`explicit_envs` is read from the *pull request branch* and can therefore be
-edited by whoever pushed the branch. Treat it as ergonomics; the environment
-reviewer is the enforcement.
+`explicit_envs` is read from the *default branch*, so editing it is a pull
+request under row 4 rather than something the branch being applied can change
+for itself. It is still ergonomics, not enforcement: it decides which command
+reaches an environment, never who may run it. The environment reviewer is the
+enforcement.
 
 What the reviewer sees is a deployment-approval prompt naming the environment —
 not a diff. Approving it means "I have read this pull request's plans", so the
@@ -508,6 +512,36 @@ no split of its own.
   someone with push access can push then holds apply credentials — fork pull
   requests are refused in `detect` before a cell exists. Check the claim
   condition on every role a plan environment can reach.
+
+  **One block-level `aws.role` covering both tiers collapses the split. Write
+  `aws.plan.role` and `aws.apply.role`, always.** A field written at provider-block
+  level inherits into every tier, so `aws.role` resolves for the plan path as
+  well as the apply path — and the plan path is reachable from any branch. The
+  shorthand therefore hands any-branch plan cells the apply role's permissions,
+  which is the whole of what the paragraphs above exist to prevent. It is a
+  regression, not a convenience, and it saves nothing: when the two roles differ,
+  `aws.role` plus `aws.apply.role` is the same two lines as `aws.plan.role` plus
+  `aws.apply.role`. The same applies to `aws.plan.role` naming the apply role's
+  ARN by mistake; `shipmate doctor` does not compare ARNs, so review is what
+  catches either.
+
+  ```toml
+  # Yes.
+  [environments.prod]
+  region         = "eu-west-1"
+  aws.plan.role  = "arn:aws:iam::9817:role/prod-plan"
+  aws.apply.role = "arn:aws:iam::9817:role/prod-apply"
+
+  # No: the plan tier inherits the apply role.
+  [environments.prod]
+  region   = "eu-west-1"
+  aws.role = "arn:aws:iam::9817:role/prod-apply"
+  ```
+
+  Nothing refuses the shorthand: a block-level role is a legitimate shape for an
+  environment whose single role really is meant for both paths, so the engine
+  cannot tell the two intents apart. Decide it here, in the file, and pin it with
+  a `CODEOWNERS` entry over `/.github/shipmate.toml` (§3–5).
 - **Plan environments must have no approval-type protection rules (required
   reviewers, wait timers) and no deployment branch policy.** An approval rule
   blocks every plan cell outright, and a branch policy blocks every plan cell
@@ -1094,9 +1128,12 @@ for exactly the exposure control 1 exists to limit.
 - **Reviewer comprehension.** The exact-plan invariant guarantees the applied
   plan is the reviewed one. It guarantees nothing about the reviewer having
   understood it.
-- **Branch-controlled configuration.** Stack tags, `global.shipmate.env_order`
-  and `explicit_envs` all come from the pull request branch. They shape what the
-  engine does; they do not constrain what it is allowed to do.
+- **Branch-controlled configuration.** Stack tags come from the pull request
+  branch. They shape what the engine does; they do not constrain what it is
+  allowed to do. `env_order` and `explicit_envs` no longer belong on this list:
+  they moved into `.github/shipmate.toml` and are read from the default branch
+  with the rest of it, so a branch can neither reorder its own apply waves nor
+  drop its own exclusion.
 - **The gate is an assertion, not a proof.** The App identity and pull request
   approvals are out of a push-capable developer's reach only because control 16
   keeps the App private key on the `shipmate-engine` environment, unreadable

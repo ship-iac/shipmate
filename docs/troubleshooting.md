@@ -578,6 +578,61 @@ your own `shipmate.yml`, which the engine cannot read), an environment
 that exists but is mis-scoped or unprotected (`shipmate doctor`'s subject), and
 an environment deleted between the pre-flight and the wave that binds it.
 
+### `.github/shipmate.toml` is rejected, or its settings do not take effect
+
+Every failure below refuses at `detect`, before any cell starts, and every one
+of them is reported against the **default branch's** copy of the file — that is
+the only copy execution reads.
+
+| What `detect` says | What it means |
+| --- | --- |
+| `could not be read from the default branch` | the file is not on the default branch yet, or the ref is unfetched. A pull request that only *adds* the file is refused: merge it first ([`upgrading.md`](upgrading.md) has the two-merge procedure) |
+| `is not valid TOML: <message>` | `tomllib`'s own message, with the line and column. See the two parse traps below |
+| `is read with tomllib, which needs Python 3.11 or later; this runner has …` | the `runs_on:` image is older than the floor `../CONTRACT.md` §Runner prerequisites states — `ubuntu-22.04` ships 3.10. Name a newer image |
+| `declares no layout` | either the key is genuinely absent, or it is written below a `[table]` header — see the placement trap below |
+| `<key> is not a setting this engine implements` | a fifth top-level key, most often a misspelled `environments`. Only `layout`, `environments`, `env_order` and `explicit_envs` are accepted |
+| `env_order['explicit_envs'] names a top-level setting, not an environment` | the placement trap, caught by name: `explicit_envs` was written below `[env_order]` and became an ordering entry |
+
+**Trap 1: a top-level setting written below a `[table]` header.** TOML puts a
+scalar into whatever table header precedes it, so the line is well-formed and
+lands in the wrong place. One mistake, three presentations:
+
+- `layout` written after `[environments.dev-eu]` becomes
+  `environments.dev-eu.layout` — reported as an environment key the engine does
+  not implement.
+- `layout` written after `[environments.dev-eu.aws.plan]` becomes a provider
+  field — reported as `aws.plan.layout is not a field the aws provider defines`.
+- `explicit_envs` written after `[env_order]` becomes an ordering entry —
+  reported by the reserved-name check above. Before that check existed, the
+  exclusion was silently lost and a bare `shipmate apply` reached production.
+
+The fix in every case is the same: put the top-level settings above the first
+`[table]` header.
+
+**Trap 2: two notations for one environment.** A dotted `aws.plan.role` under
+`[environments.dev-eu]` and a later `[environments.dev-eu.aws.plan]` header both
+declare the same table, and `tomllib` refuses with `Cannot declare
+('environments', 'dev-eu', 'aws', 'plan') twice`. Pick one notation per
+environment; dotted keys are canonical. A repeated key refuses the same way,
+with `Cannot overwrite a value` — where the old Terramate form let a second
+definition silently win.
+
+A leading byte-order mark is `Invalid statement (at line 1, column 1)`. Save the
+file as UTF-8 without a BOM; nothing strips it, deliberately, so that
+`shipmate doctor` and the run reach the same verdict on the same bytes.
+
+**Two settings refuse nothing when they are absent.** `env_order` and
+`explicit_envs` are optional and take tolerant defaults — no ordering, and no
+exclusions. A file that omits `explicit_envs` is structurally valid, and a bare
+`shipmate apply` then applies every environment, production included. Nothing
+warns. `shipmate doctor` echoes both values on every report for exactly this
+reason; read them before merging.
+
+**Editing them on a branch does not change what that branch applies.** `env_order`
+and `explicit_envs` are read from the default branch with the rest of the file.
+Validate the change with `shipmate doctor` on the pull request, then merge it —
+that is what makes it take effect.
+
 ### A cell fails with no AWS credential
 
 The credentials step is skipped and the cell fails at `tofu init` with no role
@@ -585,30 +640,36 @@ assumed, on a `folder` or `workspace` layout. Under `dry` this does not happen:
 `detect` refuses first, because that layout needs an entry with a region for
 every environment in the matrix.
 
-The usual cause is not a missing entry but a dropped one. Terramate drops a
-global attribute it cannot evaluate and exits 0, so an `environments` that
-references an undefined or misspelled global disappears from the table while the
-rest of it — `layout` included — arrives intact. The engine then reads a complete
-table that names no roles, and every cell resolves an empty role and skips its
-credentials step.
+Three causes, in the order they are worth checking:
 
-Confirm it on the default branch, which is where the engine reads the table:
+1. **The environment has no `[environments.<name>]` table**, or one with no
+   `aws` fields. There is no level above the entry to inherit a role from, so the
+   cell resolves none.
+2. **The block is apply-only and this is a plan cell.** `aws.apply.role` alone
+   resolves nothing on the plan path — a supported shape, and the reason a plan
+   cell can skip credentials while the apply cell of the same environment does
+   not.
+3. **A misplaced line put the fields somewhere else.** A scalar written below a
+   `[table]` header lands inside that header's table, so an `aws.plan.role`
+   written after the *next* environment's header belongs to that environment
+   instead. Read the file top to bottom and check which header each line sits
+   under; §`.github/shipmate.toml` is rejected, or its settings do not take
+   effect has the rest of that hazard.
+
+Confirm the default branch's copy, which is the one the engine reads:
 
 ```bash
-terramate debug show globals
+git show origin/<default-branch>:.github/shipmate.toml
 ```
 
-That command evaluates every attribute and exits nonzero, naming the file, the
-line and the attribute (`This object does not have an attribute named "..."`).
-Terramate drops the attribute during globals evaluation, before the engine
-reads anything, which is what makes the drop silent: the engine has no way to
-tell the dropped attribute from one that was never written.
-
 An `environments` that is genuinely empty is a valid shape, so its absence alone
-is not the diagnosis: a credential-free repository declaring `globals "shipmate"
-{ layout = "workspace" }` resolves no role anywhere and is working as documented
-([`../CONTRACT.md`](../CONTRACT.md) §Environment table). The command above is
-what tells the two apart.
+is not the diagnosis: a credential-free repository whose file holds only
+`layout = "workspace"` resolves no role anywhere and is working as documented
+([`../CONTRACT.md`](../CONTRACT.md) §Environment table).
+
+`shipmate doctor` on the pull request reports whether the file at that commit
+parses and passes the structural checks, which tells a malformed file apart from
+a well-formed one that names no role.
 
 ### A state lock is held
 
@@ -760,7 +821,7 @@ silence points at the variable rather than at the authorization.
 **A held environment is also an explicit environment.** When both causes apply
 it is reported as held, not as excluded, because the review is the thing to get
 first. Getting it does not release the environment into a bare `shipmate
-apply`, though: it is still listed in `global.shipmate.explicit_envs`, so it
+apply`, though: it is still listed in `explicit_envs`, so it
 still needs a targeted `shipmate apply <env>`. That is why the held sentence
 names no command.
 

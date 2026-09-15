@@ -80,7 +80,7 @@ _LOCK_NAMED = 5
 def _not_attempted_note(env_name):
     """The 'apply check stays pending' note, parameterized on the targeted
     environment: a bare `shipmate apply` excludes explicit envs
-    (`global.shipmate.explicit_envs`), so it cannot retry one — the note must
+    (`explicit_envs` in `.github/shipmate.toml`), so it cannot retry one — the note must
     name the targeted form. env_name is author-controlled and escaped."""
     cmd = f"shipmate apply {sc._md_escape(env_name)}" if env_name else "shipmate apply"
     return f"_⏭️ not attempted — the apply check stays pending; retry with `{cmd}`._"

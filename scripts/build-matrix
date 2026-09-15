@@ -5,7 +5,8 @@ Pure core (build_matrix) is unit-tested; main() gathers inputs from terramate
 (the changed stack set + each stack's tags) and writes GitHub Actions job
 outputs. Environment membership comes purely from stack tags (CONTRACT tag
 grammar: env/<name>). The environment table is a separate read and does need
-GH_TOKEN: it is evaluated on the default branch, not in the checked-out tree.
+GH_TOKEN: it is `git show`n from the default branch, not read in the checked-out
+tree, and naming that branch takes an API call.
 """
 
 import json
