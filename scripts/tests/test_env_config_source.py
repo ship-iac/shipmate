@@ -19,7 +19,6 @@ import pytest
 from _loader import load_script
 
 ec = load_script("env-config")
-eo = load_script("env-order")
 
 #: Four tables, one per ref the fixture holds, so any read of the wrong one is visible.
 #: Each carries an `env_order` of its own as well as its marker: ordering is read off this
