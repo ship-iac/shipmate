@@ -1,6 +1,7 @@
 import io
 import json
 import os
+import sys
 
 import pytest
 import yaml
@@ -4278,6 +4279,33 @@ def test_a_refusal_is_the_finding_not_a_skipped_probe(monkeypatch):
     }
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
     assert doctor.warnings(_ctx()) == [_MISPLACED_FINDING]
+
+
+def test_an_interpreter_below_the_floor_is_not_reported_as_an_invalid_file(monkeypatch):
+    """The floor is a property of the runner, not of the file, so the file-validity wrapper
+    would tell a consumer on an old `runs_on` image that their TOML is invalid, that merging
+    it refuses every operation, and that the default branch is unaffected -- three false
+    claims, sending them to read a file that is fine. The fixture holds a VALID file, so a
+    wrapped refusal can only be the floor's.
+
+    Mutation: drop the `interpreter_refusal()` check ahead of `_contents_ref` in
+    `_config_table`, folding the refusal into the file-validity finding.
+    """
+    monkeypatch.setattr(sys, "version_info", (3, 10, 6, "final", 0))
+    responses = _config_responses(CANONICAL)
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    assert doctor._config_warnings(_ctx()) == [
+        (
+            doctor.WARNING,
+            "this runner's Python refuses the environment table before any revision of it "
+            "is read: .github/shipmate.toml is read with tomllib, which needs Python 3.11 "
+            "or later; this runner has 3.10.6. CONTRACT.md section Runner prerequisites "
+            "requires python3 >= 3.11 on every runner. Choose a newer runs_on image. "
+            "Nothing is wrong with the file: merging it changes nothing, and every "
+            "operation that reads the table meets the same refusal on the default branch "
+            "too.",
+        )
+    ]
 
 
 def test_an_unreadable_config_is_a_note_and_no_other_revision_is_read(monkeypatch):

@@ -2064,6 +2064,20 @@ def _config_table(ctx):
     alone — `validate_structure`, not `validate` — because the rest need run context;
     CONFIG_VALID says so rather than letting a reader take the verdict for the whole set.
     """
+    refusal = bm.ec.interpreter_refusal()
+    if refusal:
+        # Ahead of every read, and outside the try below: the floor is a property of this
+        # runner, so no revision of the file can be at fault and none is worth reading.
+        return None, [
+            (
+                WARNING,
+                "this runner's Python refuses the environment table before any revision "
+                f"of it is read: {_one_line(refusal.removeprefix('::error::'), 400)} "
+                "Nothing is wrong with the file: merging it changes nothing, and every "
+                "operation that reads the table meets the same refusal on the default "
+                "branch too.",
+            )
+        ]
     ref = _contents_ref(ctx)
     if ref is None:
         return None, [CONFIG_NO_COMMIT]

@@ -49,28 +49,42 @@ def _default_branch(run):
     return run(["gh", "api", f"repos/{repo}", "--jq", ".default_branch"]).strip()
 
 
+def interpreter_refusal():
+    """The refusal an under-floor interpreter earns, or `None`.
+
+    Separately callable so `doctor` can run it outside the try that turns a `SystemExit`
+    into a "this file is not valid" finding: the floor is a property of the runner, true
+    of the default branch's copy too, and merging anything changes nothing about it. Lazy
+    rather than module level, so an old interpreter can still import this module.
+    """
+    if sys.version_info >= _MIN_PYTHON:
+        return None
+    found = ".".join(str(n) for n in sys.version_info[:3])
+    return (
+        f"::error::{CONFIG_PATH} is read with tomllib, which needs Python "
+        f"{_MIN_PYTHON[0]}.{_MIN_PYTHON[1]} or later; this runner has {found}. "
+        "CONTRACT.md section Runner prerequisites requires python3 >= "
+        f"{_MIN_PYTHON[0]}.{_MIN_PYTHON[1]} on every runner. Choose a newer "
+        "runs_on image."
+    )
+
+
 def parse_table(text):
     """The table parsed from `text`, or `SystemExit`.
 
     Shared by both readers: `read_table` below reads the file with `git show`, and
     `doctor` reads the same bytes through the contents API, having no checkout. The
-    interpreter check sits here, ahead of the import, because a module-level
-    `import tomllib` would raise `ModuleNotFoundError` before any caller could report
-    the real cause -- an older runner image than CONTRACT.md requires.
+    interpreter check runs ahead of the import, because a module-level `import tomllib`
+    would raise `ModuleNotFoundError` before any caller could report the real cause --
+    an older runner image than CONTRACT.md requires.
 
     A leading U+FEFF is refused, not stripped: `tomllib` rejects it, `git show` and the
     contents API both deliver it, and both readers must reach the same verdict on the same
     file. Adding a strip here reddens test_a_byte_order_mark_is_reported_the_way_a_run_sees_it.
     """
-    if sys.version_info < _MIN_PYTHON:
-        found = ".".join(str(n) for n in sys.version_info[:3])
-        raise SystemExit(
-            f"::error::{CONFIG_PATH} is read with tomllib, which needs Python "
-            f"{_MIN_PYTHON[0]}.{_MIN_PYTHON[1]} or later; this runner has {found}. "
-            "CONTRACT.md section Runner prerequisites requires python3 >= "
-            f"{_MIN_PYTHON[0]}.{_MIN_PYTHON[1]} on every runner. Choose a newer "
-            "runs_on image."
-        )
+    refusal = interpreter_refusal()
+    if refusal:
+        raise SystemExit(refusal)
     import tomllib
 
     try:
