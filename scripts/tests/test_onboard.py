@@ -10,12 +10,14 @@ import json
 import pathlib
 import subprocess
 import sys
+import textwrap
 
 import pytest
 import yaml
 from _loader import ENGINE, load_script
 
 onboard = load_script("onboard")
+ec = load_script("env-config")
 
 
 def make_gh(routes):
@@ -2374,6 +2376,27 @@ def test_the_checklist_does_not_tell_a_dry_run_to_commit_a_file_it_did_not_write
         "  Commit the workflow file",
         "  Re-run without --dry-run, then commit the workflow file",
     )
+
+
+def test_the_checklist_toml_example_is_a_configuration_a_consumer_could_merge(capsys):
+    """The by-hand block prints the first `.github/shipmate.toml` a new consumer writes, and
+    it is not a ```toml fence, so `test_docs_toml_parses.py` cannot see it. `docs/hardening.md`
+    shipped an example declaring `[environments.prod]` twice through a full documentation
+    sweep and a green suite, so the class is live.
+
+    The example is read back out of the printed block rather than retyped: a copy here would
+    be a second selector, free to drift from the thing it claims to check.
+
+    Mutation: print a second `[environments.dev-eu]` header in `_checklist`, the duplicate
+    form that shipped -- `tomllib` refuses it as `Cannot declare ... twice`.
+    """
+    onboard._checklist(ctx(repo="o/r", envs=["dev-eu"], shared=set()))
+    lines = capsys.readouterr().out.splitlines()
+    snippet = textwrap.dedent("\n".join(ln for ln in lines if ln.startswith("    ")))
+    # An extraction that finds nothing parses and validates cleanly, so it is green over an
+    # unchecked example.
+    assert snippet.startswith('layout = "dry"'), f"no TOML example found in the block: {snippet!r}"
+    ec.validate_structure(ec.parse_table(snippet))
 
 
 def test_a_bare_env_alongside_only_a_plan_env_is_reported_as_ambiguous(monkeypatch):
