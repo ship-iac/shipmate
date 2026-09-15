@@ -11,7 +11,7 @@ section below names the SHA the release tags.
 The version line stays `v0.x` while action inputs, check names, and the comment
 grammar are declared unstable in `README.md`.
 
-## Unreleased
+## [0.30.0] — 2026-09-15
 
 **Breaking: the environment table moves out of Terramate globals into
 `.github/shipmate.toml`.** A cell's identity, credentials, wave ordering and
