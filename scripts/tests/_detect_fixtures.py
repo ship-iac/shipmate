@@ -80,7 +80,9 @@ def stub_read_table(monkeypatch, modules, base=None, order=None, explicit=(), re
     hold two `env-config` objects and a stub on one of them cannot see a read through the
     other.
     """
-    cfg = dict(base or MINIMAL_TABLE)
+    # Annotated: the table's values are mixed by design -- a string layout, a mapping of
+    # orderings, a list of exclusions -- and `MINIMAL_TABLE` alone infers `dict[str, str]`.
+    cfg: dict[str, object] = dict(base or MINIMAL_TABLE)
     if order is not None:
         cfg["env_order"] = dict(order)
     if explicit:
