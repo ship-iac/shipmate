@@ -2027,8 +2027,8 @@ def _config_defaults(table):
     including the one a consumer meant to hold back; this is the last moment before the
     merge at which reading that costs nothing.
     """
-    order = table.get("env_order") or {}
-    envs = table.get("explicit_envs") or []
+    order = table.get("env_order", {})
+    envs = table.get("explicit_envs", [])
     shown = "; ".join(
         f"{env} after {', '.join(preds) or 'nothing'}" for env, preds in sorted(order.items())
     )
