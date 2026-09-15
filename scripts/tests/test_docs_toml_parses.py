@@ -62,7 +62,10 @@ def test_every_fence_was_discovered():
     closing delimiter would drop a fence out of the parametrization and leave the suite green
     over an unchecked example.
 
-    Mutation: relabel one ```toml opener to ```ini.
+    Mutation: put an info string after one opener (```toml title=x) -- `_OPENER` still counts
+    it and `_FENCE` no longer pairs it. Relabelling an opener outright does NOT red here: that
+    removes the opener too, and the counts stay equal. This guard catches a fence that is
+    *announced* and not parsed, not one that stops being announced.
     """
     openers = sum(len(_OPENER.findall(p.read_text(encoding="utf-8"))) for p in _PAGES)
     # A discovery bug that finds nothing parametrizes zero cases and checks nothing, which is
