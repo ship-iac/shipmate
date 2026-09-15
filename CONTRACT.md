@@ -531,6 +531,7 @@ Every condition below refuses at detect, before any cell starts.
 | A top-level key other than `layout`, `environments`, `env_order`, `explicit_envs` | catches a misspelled `environments`, which would otherwise yield zero environments and skip every cell's credentials step |
 | A top-level control name used as an `env_order` key | a misplaced `explicit_envs` lands inside `[env_order]` as an ordering entry, and its exclusion from a bare apply is silently lost |
 | Malformed `env_order` or `explicit_envs` | one entry point validates all four top-level fields, so an ordering or exclusion error refuses at detect rather than when an apply finally reads it |
+| A cyclic `env_order`, a self-edge included | an ordering with no first environment sorts into no levels at all, and the refusal is decidable from the file alone, so it lands with the other structural checks rather than at the apply that topologically sorts it |
 
 ### Resolution
 

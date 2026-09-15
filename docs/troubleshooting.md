@@ -592,6 +592,7 @@ the only copy execution reads.
 | `declares no layout` | either the key is genuinely absent, or it is written below a `[table]` header — see the placement trap below |
 | `<key> is not a setting this engine implements` | a fifth top-level key, most often a misspelled `environments`. Only `layout`, `environments`, `env_order` and `explicit_envs` are accepted |
 | `env_order['explicit_envs'] names a top-level setting, not an environment` | the placement trap, caught by name: `explicit_envs` was written below `[env_order]` and became an ordering entry |
+| `env_order is cyclic: <a> -> <b> -> <a>` | the environments order each other in a loop, so none of them can go first. The path names the loop in apply order; an env listing itself is the one-node case. Drop one of the entries |
 
 **Trap 1: a top-level setting written below a `[table]` header.** TOML puts a
 scalar into whatever table header precedes it, so the line is well-formed and

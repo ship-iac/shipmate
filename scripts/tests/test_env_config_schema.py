@@ -652,3 +652,49 @@ def test_a_tier_word_that_is_not_the_trailing_suffix_is_accepted():
     """
     table = {"layout": "folder", "explicit_envs": ["prod", "plan-eu", "apply-svc", "eu-plan-1"]}
     assert env_config.validate(table, (), ()) == table
+
+
+_CYCLE_TAIL = (
+    " — each of those must fully apply before the next, so the ordering has no first "
+    "environment and no apply path can sort it. Break the chain in .github/shipmate.toml."
+)
+_CYCLES = [
+    ({"dev": ["prod"], "prod": ["dev"]}, "dev -> prod -> dev"),
+    ({"dev": ["dev"]}, "dev -> dev"),
+    ({"a": ["b"], "b": ["c"], "c": ["a"]}, "a -> c -> b -> a"),
+]
+
+
+@pytest.mark.parametrize(("order", "cycle"), _CYCLES, ids=range(len(_CYCLES)))
+def test_a_cyclic_env_order_refuses_structurally(order, cycle):
+    """Acyclicity is decidable from the file alone, so it belongs with the structural checks:
+    without it `validate_structure` passes a file that `env_levels` later refuses with a raw
+    `CycleError`, and `shipmate doctor` certifies it as sound in the meantime.
+
+    Three cases, because each pins something the others cannot: two nodes for the ordinary
+    cycle, a self-edge (an env listed as its own predecessor is a cycle too), and three nodes
+    for the direction the path is rendered in -- `graphlib` reports each node before its
+    successor, so reversing the join silently mislabels every cycle longer than two.
+
+    Mutation: delete the `TopologicalSorter` block from `validate_env_order` -- all three
+    tables validate.
+    """
+    table = {"layout": "folder", "env_order": order}
+    with pytest.raises(SystemExit) as excinfo:
+        env_config.validate_structure(table)
+    assert str(excinfo.value) == f"::error::env_order is cyclic: {cycle}{_CYCLE_TAIL}"
+
+
+def test_a_deep_acyclic_env_order_still_validates():
+    """The other half of the cycle rule: a legitimate chain must keep validating. A check that
+    refuses a valid ordering is worse than the defect it fixes, and three levels is what the
+    engine's own `MAX_ENV_LEVELS` cap allows.
+
+    Mutation: refuse any env that is both a key and a predecessor rather than a cycle --
+    `stage` is both, and this legitimate chain then refuses.
+    """
+    table = {
+        "layout": "folder",
+        "env_order": {"stage": ["dev"], "prod": ["stage"], "prod-us": ["prod", "stage"]},
+    }
+    assert env_config.validate_structure(table) is table

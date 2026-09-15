@@ -7,6 +7,7 @@ repository on every path -- no checkout in any workflow passes `repository:` -- 
 a fork pull request is refused before it plans.
 """
 
+import graphlib
 import os
 import subprocess
 import sys
@@ -352,9 +353,9 @@ def validate_env_order(order):
     """`order`, or `SystemExit` unless it maps env -> list of env-name strings.
 
     Guards a bare string predecessor, which would otherwise be iterated character by
-    character into an ordering nobody wrote, and a non-mapping value, which reaches the
-    graph builder as a raw `AttributeError`. No caller reaches the graph builder with an
-    unchecked order.
+    character into an ordering nobody wrote, a non-mapping value, which reaches the graph
+    builder as a raw `AttributeError`, and a cycle, which has no topological order at all.
+    No caller reaches the graph builder with an unchecked order.
     """
     if not isinstance(order, dict):
         raise SystemExit(
@@ -371,6 +372,17 @@ def validate_env_order(order):
                 f"{CONFIG_PATH}."
             )
         _validate_predecessors(env, preds)
+    # After the shape checks: a string predecessor would otherwise be iterated into the
+    # sorter character by character, and a non-mapping never reaches here at all.
+    try:
+        graphlib.TopologicalSorter(order).prepare()
+    except graphlib.CycleError as exc:
+        cycle = " -> ".join(exc.args[1])
+        raise SystemExit(
+            f"::error::env_order is cyclic: {cycle} — each of those must fully apply "
+            "before the next, so the ordering has no first environment and no apply path "
+            f"can sort it. Break the chain in {CONFIG_PATH}."
+        ) from exc
     return order
 
 

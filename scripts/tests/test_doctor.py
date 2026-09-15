@@ -4526,6 +4526,43 @@ def test_no_status_section_beside_a_refusal(monkeypatch):
     assert doctor.CONFIG_HEADING not in body
 
 
+#: A cycle is decidable from the file alone, so `doctor` must report it rather than certify
+#: the file. Kept here rather than beside the design's two published files: that module's
+#: subject is the bytes `docs/` publishes, and this is neither of them.
+CYCLIC_ORDER = """layout = "folder"
+
+[env_order]
+dev = ["prod"]
+prod = ["dev"]
+"""
+#: Hand-written whole, like `_MISPLACED_FINDING`: the probe's framing plus
+#: `validate_env_order`'s cycle message with the `::error::` prefix stripped.
+_CYCLIC_FINDING = (
+    doctor.WARNING,
+    "`.github/shipmate.toml` at the commit under examination is not valid: env_order is "
+    "cyclic: dev -> prod -> dev — each of those must fully apply before the next, so the "
+    "ordering has no first environment and no apply path can sort it. Break the chain in "
+    ".github/shipmate.toml. Merging it refuses every operation that reads the table. "
+    "Execution still reads the default branch's copy, which this says nothing about.",
+)
+
+
+def test_a_cyclic_env_order_is_a_finding_and_gets_no_valid_verdict(monkeypatch):
+    """Both halves of the same claim, because either one alone can pass while the file is
+    still certified: the cycle is reported as a finding, and the CONFIG_VALID verdict -- which
+    says the file "passes every check a file can be judged on by itself" -- is withheld. Before
+    the cycle check, `doctor` issued that verdict over an ordering both apply paths refuse.
+
+    Mutation: delete the `TopologicalSorter` block from `validate_env_order` -- the finding
+    list empties and the verdict comes back.
+    """
+    responses = _config_responses(CYCLIC_ORDER)
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    ctx = _ctx()
+    assert doctor._config_warnings(ctx) == [_CYCLIC_FINDING]
+    assert doctor.config_status(ctx) == []
+
+
 def test_status_never_fails_the_run(monkeypatch):
     """`report` mode renders the status outside `warnings()`' degrade handler, so an
     exception here would take down a `shipmate doctor` comment that the probe has already

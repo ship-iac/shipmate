@@ -49,9 +49,17 @@ def test_empty_order_all_level_zero():
 
 
 def test_cycle_raises():
-    from graphlib import CycleError
+    """A cyclic order has no levels, and `env_levels` refuses it — now through
+    `validate_env_order`, which reaches the same `graphlib` verdict one layer earlier so
+    `validate_structure` (and so `shipmate doctor`) reports it before the file merges.
 
-    with pytest.raises(CycleError):
+    The refusal is matched on its message, not on `SystemExit` alone: `env_levels` also
+    exits on a malformed order shape, and that is a different property.
+
+    Mutation: delete the `TopologicalSorter` block from `validate_env_order` -- `wv.levels`
+    then raises `CycleError`, which is a `ValueError` and not a `SystemExit`.
+    """
+    with pytest.raises(SystemExit, match="env_order is cyclic: a -> b -> a"):
         eo.env_levels({"a": ["b"], "b": ["a"]}, ["a", "b"])
 
 
