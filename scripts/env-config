@@ -279,12 +279,15 @@ def _check_shared(environments, shared_envs):
 
     Membership comes from the `SHIPMATE_SHARED_ENVS` repository variable, so
     `validate_structure` cannot decide it and the structural-only caller skips it.
+
+    Runs only after `validate_structure`, its sole caller's first step, which is what has
+    already proven every entry and every `aws` block a mapping.
     """
     for env in sorted(environments):
-        block = _mapping(environments[env], f"environment {env}").get("aws")
+        block = environments[env].get("aws")
         if block is None or not _is_shared(env, shared_envs):
             continue
-        if "plan" in _mapping(block, f"environment {env}: aws"):
+        if "plan" in block:
             raise SystemExit(
                 f"::error::environment {env} is shared between the plan and apply paths, so "
                 "aws.plan cannot apply to it: a shared environment resolves aws.apply on both "
@@ -449,7 +452,7 @@ def validate(table, matrix_envs, shared_envs, all_envs=None):
     is not evidence of anything.
     """
     validate_structure(table)
-    environments = _mapping(table.get("environments", {}), "environments")
+    environments = table.get("environments", {})
     _check_shared(environments, shared_envs)
     if table["layout"] == "dry":
         _check_dry_coverage(environments, matrix_envs)
