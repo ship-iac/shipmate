@@ -372,8 +372,7 @@ def validate_env_order(order):
                 f"{CONFIG_PATH}."
             )
         _validate_predecessors(env, preds)
-    # After the shape checks: a string predecessor would otherwise be iterated into the
-    # sorter character by character, and a non-mapping never reaches here at all.
+    # After the shape checks, or the sorter consumes a string predecessor character by character.
     try:
         graphlib.TopologicalSorter(order).prepare()
     except graphlib.CycleError as exc:

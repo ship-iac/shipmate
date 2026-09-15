@@ -10,7 +10,7 @@ which refuse at `detect` for the consumer who copies them. One such example ship
 `docs/hardening.md` through a full docs sweep and a green suite: a Yes/No pair in one fence
 declaring `[environments.prod]` twice.
 
-**Every fence must be a complete file, not a fragment.** `validate_structure` judges a whole
+Every fence must be a complete file, not a fragment. `validate_structure` judges a whole
 table — it requires `layout` — so a fragment would refuse for a reason that says nothing about
 the example. The rule is not to loosen the assertion for fragments but to write no fragments:
 a snippet worth publishing for this file is a snippet worth being able to merge. A fence that

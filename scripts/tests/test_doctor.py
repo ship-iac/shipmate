@@ -268,9 +268,7 @@ def _quiet_new_probes():
     }
 
 
-#: The config probe's read. A sound table produces no finding at all -- its status lines
-#: render in the report's own section, out of `warnings()`, so that the settings-probe
-#: all-clear stays reachable and the plan path's annotations stay clear of them.
+#: The config probe's read. `_quiet_new_probes` says why a sound table is silent here.
 _CONFIG_READ = f"repos/{_REPO}/contents/{doctor.CONFIG_PATH}{_REF}"
 
 
