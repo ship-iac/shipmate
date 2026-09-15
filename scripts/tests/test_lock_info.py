@@ -158,7 +158,7 @@ def test_parses_real_ansi_coloured_ci_output():
     undetermined and went red while a lock it could have released was sitting
     right there in its own output.
 
-    Mutation: drop `_ANSI_RE.sub` from `_strip` and this reddens while the two
+    Mutation: drop `ANSI_RE.sub` from `_strip` and this reddens while the two
     colour-free captures stay green.
     """
     got = li.parse(_fixture("lock_error_s3_ansi.txt"))

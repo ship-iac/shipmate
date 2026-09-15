@@ -14,7 +14,7 @@ OpenTofu's `|`-prefixed diagnostic box even with no TTY, values are space-padded
 after the colon, and on a GitHub Actions runner every one of those lines is
 ANSI-coloured, because OpenTofu colours its diagnostics whenever the sink looks
 capable and a runner's does: a live cell emits `ESC[31m│ESC[0m ESC[0mLock Info:`
-rather than `│ Lock Info:` (see `_ANSI_RE`). The first fixtures were captured
+rather than `│ Lock Info:` (see `ANSI_RE`). The first fixtures were captured
 through a colour-stripping filter; capture new ones raw.
 
 Fail-closed by construction: anything short of a complete block with an
@@ -34,12 +34,12 @@ _ERROR_LINE = "Error acquiring the state lock"
 _BLOCK_START = "Lock Info:"
 
 # Colour comes off before anything else here: every pattern below anchors at the start of the
-# line, which is exactly where an escape sequence sits. `apply-comment` strips ANSI in
-# `load_cells` before this parser is reached, so only the CLI path meets a coloured block.
-_ANSI_RE = re.compile(
-    r"\x1b\[[0-?]*[ -/]*[@-~]"  # CSI
+# line, which is exactly where an escape sequence sits. `apply-comment` strips ANSI with
+# this same pattern in `load_cells`, so only the CLI path meets a coloured block.
+ANSI_RE = re.compile(
+    r"\x1b\[[0-?]*[ -/]*[@-~]"  # CSI, FIRST so a well-formed run matches whole, incl. final byte
     r"|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)"  # OSC
-    r"|\x1b[@-_]"  # two-character escape
+    r"|\x1b[@-_]"  # two-character escape; it would otherwise match a bare `ESC[`
 )
 
 # The box prefix OpenTofu renders diagnostics with, plus one optional space.
@@ -60,7 +60,7 @@ _OPERATION_RE = re.compile(r"^[A-Za-z]{1,32}$")
 
 
 def _strip(line):
-    return _PREFIX_RE.sub("", _ANSI_RE.sub("", line)).strip()
+    return _PREFIX_RE.sub("", ANSI_RE.sub("", line)).strip()
 
 
 def _fields(lines):

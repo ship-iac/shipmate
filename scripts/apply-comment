@@ -236,19 +236,10 @@ def _read_tail(path, budget):
     return text
 
 
-# CSI is listed FIRST so a well-formed CSI run matches whole, including its
-# final byte; the two-character branch would otherwise match a bare `ESC[`.
-_ANSI_RE = re.compile(
-    r"\x1b\[[0-?]*[ -/]*[@-~]"  # CSI
-    r"|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)"  # OSC
-    r"|\x1b[@-_]"  # two-character escape
-)
-
-
 def _strip_ansi(text):
     """Strip terminal escape sequences from `text`. `\\r` is left alone — not an
     escape sequence."""
-    return _ANSI_RE.sub("", text)
+    return li.ANSI_RE.sub("", text)
 
 
 def load_cells(cells_dir):
