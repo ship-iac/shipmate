@@ -336,8 +336,8 @@ def validate_env_order(order):
 
     Guards a bare string predecessor, which would otherwise be iterated character by
     character into an ordering nobody wrote, and a non-mapping value, which reaches the
-    graph builder as a raw `AttributeError`. `env_levels` and `blocked_envs` call this
-    too, so no caller can reach the graph with an unchecked order.
+    graph builder as a raw `AttributeError`. No caller reaches the graph builder with an
+    unchecked order.
     """
     if not isinstance(order, dict):
         raise SystemExit(

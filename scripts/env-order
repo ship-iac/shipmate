@@ -34,9 +34,8 @@ wv = _load("waves")
 def read_env_order(table):
     """env -> [predecessor envs] from `table`, or {} when the key is absent.
 
-    Validated here as well as in `env_levels` and `blocked_envs`, which each check the order
-    they are handed, so this call is the third and refuses before the first wave is built
-    rather than in the middle of one."""
+    Validated here so the refusal lands before the first wave is built rather than in the
+    middle of one; no caller reaches the graph builder with an unchecked order."""
     return bm.ec.validate_env_order(table.get("env_order", {}))
 
 
