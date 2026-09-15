@@ -12,7 +12,7 @@ findings as workflow annotations titled `shipmate doctor`
 (`::warning title=shipmate doctor::<text>` / `::notice title=shipmate
 doctor::<text>`) — read-only, never blocking. Comment `shipmate doctor` on a
 pull request for a consolidated report: a sticky comment (marker `<!--
-shipmate:doctor -->`, upserted in place like the plan comment) combining fifteen
+shipmate:doctor -->`, upserted in place like the plan comment) combining sixteen
 live probes.
 
 - **The `shipmate / gate` rule on the default branch is missing or mis-pinned.**
@@ -122,6 +122,19 @@ live probes.
   wide runs on an event it was never meant to see. The fence in
   [`getting-started.md`](getting-started.md) has every expression.
 - **Whether the configured approvers team resolves in the org.**
+- **Whether `.github/shipmate.toml` at the commit under examination is valid.**
+  Read through the API at that commit, never from the default branch and never
+  substituted by it, so a malformed or misplaced setting is reported on the pull
+  request that introduces it rather than after it merges. A missing or unreadable
+  file is a note saying so, never an all-clear. Only the checks a file can be judged
+  on by itself run here — the top-level keys, `layout`, the environment entries,
+  `env_order` and `explicit_envs`; `dry`-layout coverage, the shared-environment
+  rule and unused entries need a plan matrix and `SHIPMATE_SHARED_ENVS`, and the
+  verdict names them as unchecked. A valid file also gets its `env_order` and
+  `explicit_envs` values read back, absent ones included: an absent `explicit_envs`
+  is legitimate configuration that no validator can question, and it means a bare
+  `shipmate apply` applies production too. Execution keeps reading the default
+  branch's copy — this reports, it changes nothing a run uses.
 - **Whether the shipmate App installation still grants the manifest's full
   permission set.**
 
@@ -130,7 +143,7 @@ annotations GitHub already recorded on this commit's workflow runs — shipmate'
 own and any other Actions workflow run on that commit; third-party-app-authored
 check runs are excluded.
 
-Only thirteen of the fifteen probes can produce a finding from the plan path's
+Only fourteen of the sixteen probes can produce a finding from the plan path's
 own `annotate`-mode run (`actions/summary`). The approvers-team probe needs the
 `SHIPMATE_TEAM` environment variable, which the plan path does not supply, and
 the App-permission-drift probe only has something to report when a

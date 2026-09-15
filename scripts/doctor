@@ -7,7 +7,7 @@ Three modes, selected via SHIPMATE_DOCTOR_MODE:
   actions/summary right after a plan run. NEVER fails the run: a probe
   error becomes a 'could not verify' note — doctor guards onboarding, it
   must not take down the plan path.
-- report: render the sticky PR comment on demand — the fifteen live probes'
+- report: render the sticky PR comment on demand — the sixteen live probes'
   findings plus a harvest of the warnings GitHub already recorded as
   annotations on this commit's workflow check runs.
 - check-ids: reduce a check-runs JSONL listing to the (id, name) pairs worth
@@ -42,6 +42,9 @@ Probes:
 - the event routing of `shipmate.yml`: one job per engine reusable workflow, each
   with the `if:` that selects it — a wrong one sends a verb nowhere and its run
   completes green with every job skipped.
+- the environment table at the commit under examination: `.github/shipmate.toml`
+  parses and passes the checks a file can be judged on by itself, before it merges
+  to the default branch execution reads it from.
 - approvers team resolvability in the repo's org.
 - GitHub App installation permission drift.
 """
@@ -881,16 +884,14 @@ def _workflow_names(base):
     ], True
 
 
-def _workflow_text(path):
-    """One workflow file's decoded text, or None when it cannot be read.
+def _contents_text(path):
+    """One file's decoded text from the contents API, or None when it cannot be read.
 
     Anything that is not a base64 blob is UNREADABLE, not empty: a >1 MB file
     answers with `encoding: "none"` and empty `content`, which would otherwise
-    decode to a readable EMPTY workflow the probes read as clean.
+    decode to a readable EMPTY file the probes read as clean.
 
-    `errors="replace"` keeps a mis-encoded byte from raising, and one leading
-    U+FEFF is dropped: a BOM sits in front of the column-0 `on:` key, which
-    `_on_block` would otherwise read as no top-level trigger block at all.
+    `errors="replace"` keeps a mis-encoded byte from raising.
     """
     try:
         blob = _gh_json(path)
@@ -898,8 +899,20 @@ def _workflow_text(path):
         return None
     if not isinstance(blob, dict) or blob.get("encoding") != "base64":
         return None
-    text = base64.b64decode(blob.get("content", "")).decode("utf-8", "replace")
-    return text.removeprefix("\ufeff")
+    return base64.b64decode(blob.get("content", "")).decode("utf-8", "replace")
+
+
+def _workflow_text(path):
+    """One workflow file's decoded text, or None when it cannot be read.
+
+    One leading U+FEFF is dropped: a BOM sits in front of the column-0 `on:` key,
+    which `_on_block` would otherwise read as no top-level trigger block at all.
+    The config probe reads its file through `_contents_text` without this step:
+    `tomllib` refuses a BOM, so stripping one there would report a table valid
+    that every run reading it refuses.
+    """
+    text = _contents_text(path)
+    return None if text is None else text.removeprefix("\ufeff")
 
 
 def _scan_workflow_texts(ctx, ref, per_file, unreadable):
@@ -1979,6 +1992,110 @@ def _one_line(s, limit=200):
     return flat if len(flat) <= limit else flat[: limit - 1] + "…"
 
 
+CONFIG_PATH = bm.ec.CONFIG_PATH
+
+# Same degrade posture and reason as PIN_UNREADABLE: a branch need not carry the file
+# at all, and neither an absent one nor a failed read is a misconfiguration. Never an
+# all-clear, and never a read of another revision in its place — whether THIS commit's
+# table is sound is the one question the probe exists to answer.
+CONFIG_UNREADABLE = (
+    NOTICE,
+    f"could not read `{CONFIG_PATH}` at the commit under examination — its settings were "
+    "not validated here. The default branch's copy was not read in its place.",
+)
+CONFIG_NO_COMMIT = (
+    NOTICE,
+    f"`{CONFIG_PATH}` not validated — the commit under examination could not be determined.",
+)
+# The verdict names the checks it did NOT run: each needs the plan matrix, the whole-tree
+# environment scan or SHIPMATE_SHARED_ENVS, none of which doctor has, so a bare "valid"
+# here would claim a clean bill over half the rules.
+CONFIG_VALID = (
+    f"`{CONFIG_PATH}` at the commit under examination parses, and passes every check a "
+    "file can be judged on by itself: its top-level keys, `layout`, the environment "
+    "entries, `env_order` and `explicit_envs`. Not checked here, for want of a plan matrix "
+    "and the SHIPMATE_SHARED_ENVS variable: `dry`-layout coverage of the planned "
+    "environments, the shared-environment rule, and entries no stack tags — `detect` "
+    "checks those on every run. Execution reads the default branch's copy of this file, "
+    "never this branch's."
+)
+
+
+def _config_defaults(table):
+    """The two tolerant defaults, echoed whether they are set or not.
+
+    Neither absence is invalid, so no validator can report either, and both decide what a
+    bare `shipmate apply` does. An omitted `explicit_envs` applies every environment,
+    including the one a consumer meant to hold back; this is the last moment before the
+    merge at which reading that costs nothing.
+    """
+    order = table.get("env_order") or {}
+    envs = table.get("explicit_envs") or []
+    shown = "; ".join(
+        f"{env} after {', '.join(preds) or 'nothing'}" for env, preds in sorted(order.items())
+    )
+    return [
+        (
+            NOTICE,
+            f"`env_order` orders {_one_line(shown, 400)} — a bare `shipmate apply` applies "
+            "one env-level fully before it starts the next."
+            if order
+            else "`env_order`: absent — every environment sits at one level, and a bare "
+            "`shipmate apply` applies them all together.",
+        ),
+        (
+            NOTICE,
+            f"`explicit_envs` names {_one_line(', '.join(envs), 400)} — a bare "
+            "`shipmate apply` skips those, and each needs its own `shipmate apply <env>`."
+            if envs
+            else "`explicit_envs`: absent — every environment applies on a bare "
+            "`shipmate apply`, production included. Name the ones that must always be "
+            "applied by hand.",
+        ),
+    ]
+
+
+def _config_warnings(ctx):
+    """The environment table at the commit under examination, parsed and structurally
+    validated, so a malformed or misplaced setting is reported before it merges to the
+    branch the engine reads it from.
+
+    A placement mistake is the case that needs this: `explicit_envs` written below the
+    `[env_order]` header is well-formed TOML and lands inside that table, and until this
+    probe ran on a branch nothing reported it until the exclusion was already lost on the
+    default branch.
+
+    Reports only. It passes nothing it reads into `read_table` or `resolve`: execution
+    reads the default branch, and a branch's file must never become a value a run uses.
+
+    Reads through the contents API at `_contents_ref`, like the pin probe and for the
+    second reason that comment-ops has no checkout for `git show`. Structural checks
+    alone — `validate_structure`, not `validate` — because the rest need run context;
+    CONFIG_VALID says so rather than letting a reader take the verdict for the whole set.
+    """
+    ref = _contents_ref(ctx)
+    if ref is None:
+        return [CONFIG_NO_COMMIT]
+    text = _contents_text(f"repos/{ctx['repo']}/contents/{CONFIG_PATH}{ref}")
+    if text is None:
+        return [CONFIG_UNREADABLE]
+    try:
+        table = bm.ec.validate_structure(bm.ec.parse_table(text))
+    except SystemExit as exc:
+        # The refusal IS the finding, and it must not reach warnings()'s degrade handler:
+        # that one reports a probe as skipped and truncates the message to 120 characters.
+        return [
+            (
+                WARNING,
+                f"`{CONFIG_PATH}` at the commit under examination is not valid: "
+                f"{_one_line(str(exc).removeprefix('::error::'), 400)} Merging it refuses "
+                "every operation that reads the table. Execution still reads the default "
+                "branch's copy, which this says nothing about.",
+            )
+        ]
+    return [(NOTICE, CONFIG_VALID), *_config_defaults(table)]
+
+
 def _team_warnings(ctx):
     """A typo'd or cross-org SHIPMATE_APPROVERS_TEAM surfaces today only as
     every apply being rejected "not a team member" — one API call names it."""
@@ -2036,6 +2153,7 @@ PROBES = (
     _mode_input_warnings,
     _dispatch_wiring_warnings,
     _routing_warnings,
+    _config_warnings,
     _team_warnings,
     _app_permission_warnings,
 )
