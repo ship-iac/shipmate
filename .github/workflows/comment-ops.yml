@@ -23,7 +23,7 @@ jobs:
       actions: read
     steps:
       - id: authz
-        uses: ship-iac/shipmate/actions/comment-ops@94a60ab22beb46a7c7d2f52b858d29a26bc1f101
+        uses: ship-iac/shipmate/actions/comment-ops@c6ecf20899049692103b09257adeed8c8bc27246
         with:
           app-id: ${{ vars.SHIPMATE_APP_ID }}
           private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
