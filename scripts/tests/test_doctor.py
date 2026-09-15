@@ -230,9 +230,9 @@ def _quiet_new_probes():
     """Healthy responses for the env-protection, engine-environment, plan-env-secret,
     pin-freshness, fork-trigger, shim-job-name, retired-input, dispatch-wiring and routing
     probes, so tests exercising the older gate/environment probes through `warnings()`
-    collect no incidental noise from these ten. The config probe's read is here too, but it
-    reports on a healthy table rather than falling silent -- `CONFIG_NOTES` below is what it
-    adds, and `_other_findings` is how the counting tests set it aside.
+    collect no incidental noise from these ten. The config probe's read is here too, serving
+    the design's canonical file: a sound table is silent in `warnings()`, and its status lines
+    are rendered from `config_status` instead.
 
     The last seven read the same workflow listing. `_SHIPMATE_WF`'s `uses:` lines are engine
     pins -- `_PIN` matches a `.github/workflows/` path as well as an `actions/` one -- so the
@@ -267,35 +267,13 @@ def _quiet_new_probes():
     }
 
 
-#: The config probe's read, and the three notes a VALID table produces. Unlike every
-#: other probe this one reports on a healthy repository as well: the verdict names the
-#: checks it could not run, and the two tolerant defaults are legitimate configuration
-#: nothing else ever states. Hand-written, so a wording change reddens here rather than
-#: passing whatever the module now says.
+#: The config probe's read. A sound table produces no finding at all -- its status lines
+#: render in the report's own section, out of `warnings()`, so that the settings-probe
+#: all-clear stays reachable and the plan path's annotations stay clear of them.
 _CONFIG_READ = f"repos/{_REPO}/contents/{doctor.CONFIG_PATH}{_REF}"
-CONFIG_NOTES = [
-    (doctor.NOTICE, doctor.CONFIG_VALID),
-    (
-        doctor.NOTICE,
-        "`env_order` orders dev-us after dev-eu — a bare `shipmate apply` applies one "
-        "env-level fully before it starts the next.",
-    ),
-    (
-        doctor.NOTICE,
-        "`explicit_envs` names prod — a bare `shipmate apply` skips those, and each "
-        "needs its own `shipmate apply <env>`.",
-    ),
-]
 
 
-def _other_findings(ctx):
-    """`warnings()` without the config probe's notes on the healthy fixture, for the tests
-    that count another probe's findings. Membership is exact, so an unexpected config
-    finding still shows up in their counts."""
-    return [f for f in doctor.warnings(ctx) if f not in CONFIG_NOTES]
-
-
-def test_healthy_repo_emits_only_the_table_notes(monkeypatch):
+def test_healthy_repo_emits_nothing(monkeypatch):
     responses = {
         f"repos/{_REPO}/rules/branches/{_BRANCH}?per_page=100": _gate_rule(),
         f"repos/{_REPO}/environments?per_page=100": _environments(
@@ -304,7 +282,7 @@ def test_healthy_repo_emits_only_the_table_notes(monkeypatch):
         **_quiet_new_probes(),
     }
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
-    assert doctor.warnings(_ctx()) == CONFIG_NOTES
+    assert doctor.warnings(_ctx()) == []
 
 
 def test_missing_environment_of_the_split_pair_warned(monkeypatch):
@@ -319,7 +297,7 @@ def test_missing_environment_of_the_split_pair_warned(monkeypatch):
         **_quiet_new_probes(),
     }
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
-    out = _other_findings(_ctx())
+    out = doctor.warnings(_ctx())
     assert len(out) == 1
     level, text = out[0]
     assert level == doctor.WARNING
@@ -449,7 +427,7 @@ def test_gate_rule_wrong_integration_id_warned(monkeypatch):
         **_quiet_new_probes(),
     }
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
-    out = _other_findings(_ctx())
+    out = doctor.warnings(_ctx())
     assert len(out) == 1
     level, text = out[0]
     assert level == doctor.WARNING
@@ -469,7 +447,7 @@ def test_gate_rule_absent_warned(monkeypatch):
         **_quiet_new_probes(),
     }
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
-    out = _other_findings(_ctx())
+    out = doctor.warnings(_ctx())
     assert len(out) == 1
     level, text = out[0]
     assert level == doctor.WARNING
@@ -485,7 +463,7 @@ def test_strict_policy_off_warned(monkeypatch):
         **_quiet_new_probes(),
     }
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
-    out = _other_findings(_ctx())
+    out = doctor.warnings(_ctx())
     assert len(out) == 1
     level, text = out[0]
     assert level == doctor.WARNING
@@ -509,7 +487,7 @@ def test_probe_403_degrades_to_note_not_failure(monkeypatch):
         )  # `dev-eu-apply` is missing, so that probe adds its own warning.
 
     monkeypatch.setattr(doctor, "_gh_json", fake_gh_json)
-    out = _other_findings(_ctx())
+    out = doctor.warnings(_ctx())
     # Two probes read rules/branches and degrade independently -- that is the
     # point of the per-probe read; one endpoint failing must not let either
     # finding be silently attributed to the other.
@@ -535,7 +513,7 @@ def test_probe_generic_exception_degrades_to_note(monkeypatch):
         return _environments("dev-eu-plan", "dev-eu-apply", "shipmate-engine")
 
     monkeypatch.setattr(doctor, "_gh_json", fake_gh_json)
-    out = _other_findings(_ctx())
+    out = doctor.warnings(_ctx())
     assert len(out) == 2
     assert all(level == doctor.WARNING for level, _ in out)
     assert all("could not verify" in t and "probe skipped" in t for _, t in out)
@@ -556,7 +534,7 @@ def test_degrade_note_names_the_probe_and_drops_the_workflow_command_prefix(monk
         return _environments("dev-eu-plan", "dev-eu-apply", "shipmate-engine")
 
     monkeypatch.setattr(doctor, "_gh_json", gh)
-    out = _other_findings(_ctx())
+    out = doctor.warnings(_ctx())
     assert len(out) == 2
     level, text = next((lv, t) for lv, t in out if "gate rule" in t)
     assert level == doctor.WARNING
@@ -3927,7 +3905,7 @@ def test_no_probe_reads_a_repository_variable(monkeypatch):
         return responses[path]
 
     monkeypatch.setattr(doctor, "_gh_json", fake)
-    assert doctor.warnings(_ctx()) == CONFIG_NOTES
+    assert doctor.warnings(_ctx()) == []
     assert asked, "the probes read nothing, so this would pass vacuously"
     assert not [p for p in asked if "variables" in p], asked
 
@@ -4348,33 +4326,46 @@ def test_the_config_probe_declines_without_a_usable_commit(monkeypatch):
 
 
 def test_a_valid_verdict_names_the_checks_it_did_not_run(monkeypatch):
-    """The whole verdict against a hand-written constant. `doctor` runs `validate_structure`
-    alone -- the remaining rules need a plan matrix and SHIPMATE_SHARED_ENVS -- so a verdict
-    that stopped naming them would report a clean bill over half the checks, and a reader
-    would take "valid" for "this will run".
+    """The whole status section against hand-written text, and no finding beside it.
+    `doctor` runs `validate_structure` alone -- the remaining rules need a plan matrix, a
+    whole-tree environment scan and SHIPMATE_SHARED_ENVS -- so a verdict that stopped naming
+    them would report a clean bill over half the checks, and a reader would take "valid" for
+    "this will run". It also states that execution reads the default branch's copy, without
+    which the report reads as a verdict on what the pull request will do.
 
-    It also states that execution reads the default branch's copy, without which the report
-    reads as a verdict on what the pull request will do.
-
-    Mutation: shorten the text to "parses and is valid". Swapping `validate_structure` for
-    `validate` is NOT a mutation that reds here -- the canonical file passes both -- so this
-    guard pins the words, and `test_the_config_probe_feeds_nothing_a_run_reads` pins that the
-    run-context reader is never reached.
+    Mutation: shorten the verdict to "parses and is valid"; or return it from
+    `_config_warnings` again, which reddens the `== []` line here and the end-to-end
+    all-clear guard. Swapping `validate_structure` for `validate` is NOT a mutation that reds
+    here -- the canonical file passes both -- so this guard pins the words, and
+    `test_the_config_probe_feeds_nothing_a_run_reads` pins that the run-context reader is
+    never reached.
     """
     responses = _config_responses(CANONICAL, on_default=MISPLACED_CONTROL)
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
-    out = doctor._config_warnings(_ctx())
-    assert out[0] == (
-        doctor.NOTICE,
-        "`.github/shipmate.toml` at the commit under examination parses, and passes every "
-        "check a file can be judged on by itself: its top-level keys, `layout`, the "
-        "environment entries, `env_order` and `explicit_envs`. Not checked here, for want "
-        "of a plan matrix and the SHIPMATE_SHARED_ENVS variable: `dry`-layout coverage of "
-        "the planned environments, the shared-environment rule, and entries no stack tags "
-        "\u2014 `detect` checks those on every run. Execution reads the default branch's "
-        "copy of this file, never this branch's.",
-    )
-    assert out == CONFIG_NOTES
+    assert doctor._config_warnings(_ctx()) == []
+    assert doctor.config_status(_ctx()) == [
+        (
+            doctor.NOTICE,
+            "`.github/shipmate.toml` at the commit under examination parses, and passes "
+            "every check a file can be judged on by itself: its top-level keys, `layout`, "
+            "the environment entries, `env_order` and `explicit_envs`. Not checked here, "
+            "for want of a plan matrix, a whole-tree environment scan and the "
+            "SHIPMATE_SHARED_ENVS variable: `dry`-layout coverage of the planned "
+            "environments, the shared-environment rule, and entries that no stack tags "
+            "\u2014 `detect` checks each of those on the runs where it applies. Execution "
+            "reads the default branch's copy of this file, never this branch's.",
+        ),
+        (
+            doctor.NOTICE,
+            "`env_order` orders dev-us after dev-eu \u2014 a bare `shipmate apply` applies "
+            "one env-level fully before it starts the next.",
+        ),
+        (
+            doctor.NOTICE,
+            "`explicit_envs` names prod \u2014 a bare `shipmate apply` skips those, and each "
+            "needs its own `shipmate apply <env>`.",
+        ),
+    ]
 
 
 def test_the_tolerant_defaults_are_read_back_when_absent(monkeypatch):
@@ -4382,11 +4373,11 @@ def test_the_tolerant_defaults_are_read_back_when_absent(monkeypatch):
     and a bare `shipmate apply` then applies every environment -- including the one a
     consumer meant to exclude. Nothing refuses and no validator can, so the report says it.
 
-    Mutation: drop `_config_defaults` from the valid return.
+    Mutation: drop `_config_defaults` from `config_status`.
     """
     responses = {_CONFIG_READ: _wf_file('layout = "folder"\n')}
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
-    assert doctor._config_warnings(_ctx())[1:] == [
+    assert doctor.config_status(_ctx())[1:] == [
         (
             doctor.NOTICE,
             "`env_order`: absent \u2014 every environment sits at one level, and a bare "
@@ -4419,6 +4410,7 @@ def test_the_config_probe_feeds_nothing_a_run_reads(monkeypatch):
         ctx = _ctx()
         before = dict(ctx)
         doctor._config_warnings(ctx)
+        doctor.config_status(ctx)
         assert ctx == before
 
 
@@ -4427,6 +4419,11 @@ def test_a_byte_order_mark_is_reported_the_way_a_run_sees_it(monkeypatch):
     `git show` printed. Stripping the BOM here would report a table valid that every run
     reading it refuses -- two readers of one file disagreeing, which is the class this
     check exists to remove.
+
+    A substring rather than the whole finding, deliberately: `tomllib`'s decode message
+    ends in a position report that is the interpreter's to word, so pinning it whole would
+    pin CPython's phrasing. The framing around it is pinned whole by
+    `test_the_config_probe_reads_the_examined_commit_and_reports_a_misplaced_control`.
 
     Mutation: read the file with `_workflow_text` instead of `_contents_text`.
     """
@@ -4441,3 +4438,73 @@ def test_a_byte_order_mark_is_reported_the_way_a_run_sees_it(monkeypatch):
 
 def test_config_probe_is_registered():
     assert doctor._config_warnings in doctor.PROBES
+
+
+def test_the_all_clear_survives_a_sound_environment_table(monkeypatch):
+    """End to end, the way `main` runs it: healthy fixture -> `warnings()` -> `render_report`.
+
+    Every other all-clear guard hands `[]` straight to the renderer, so none of them can see
+    a probe that reports on a healthy repository -- which is exactly how the status lines
+    suppressed this line while the suite stayed green. The environment-coverage caveat lives
+    only here, so losing the line loses the caveat.
+
+    Mutation: return the status lines from `_config_warnings` again (e.g. append
+    `*config_status(ctx)` to its return).
+    """
+    responses = {
+        f"repos/{_REPO}/rules/branches/{_BRANCH}?per_page=100": _gate_rule(),
+        f"repos/{_REPO}/environments?per_page=100": _environments(
+            "dev-eu-plan", "dev-eu-apply", "shipmate-engine"
+        ),
+        **_quiet_new_probes(),
+    }
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    ctx = _ctx()
+    body = doctor.render_report(doctor.warnings(ctx), [], ctx, doctor.config_status(ctx))
+    assert "no problems found by the settings probes" in body
+    assert "changed in this pull request" in body
+    # The status section renders too, and below the all-clear rather than instead of it.
+    assert doctor.CONFIG_HEADING in body
+    assert body.index("no problems found") < body.index(doctor.CONFIG_HEADING)
+    assert "`explicit_envs` names prod" in body
+
+
+def test_the_report_renders_the_table_status_beside_a_finding(monkeypatch):
+    """A repository with a settings problem still gets the table's status: the two sections
+    are independent, and a reader fixing a gate ruleset must not lose the `explicit_envs`
+    line because of it. Mutation: render the status only in the `else` branch."""
+    responses = _config_responses(CANONICAL)
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    ctx = _ctx()
+    body = doctor.render_report(
+        [(doctor.WARNING, "gate rule missing")], [], ctx, doctor.config_status(ctx)
+    )
+    assert "gate rule missing" in body
+    assert "no problems found" not in body
+    assert "`explicit_envs` names prod" in body
+
+
+def test_no_status_section_beside_a_refusal(monkeypatch):
+    """A refused table has no status to state, and a section saying otherwise beside the
+    refusal would read as a second opinion on the same file.
+
+    Mutation: return `[(NOTICE, CONFIG_VALID)]` from `config_status` whatever the table.
+    """
+    responses = _config_responses(MISPLACED_CONTROL)
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    ctx = _ctx()
+    assert doctor.config_status(ctx) == []
+    body = doctor.render_report(doctor.warnings(ctx), [], ctx, doctor.config_status(ctx))
+    assert doctor.CONFIG_HEADING not in body
+
+
+def test_status_never_fails_the_run(monkeypatch):
+    """`report` mode renders the status outside `warnings()`' degrade handler, so an
+    exception here would take down a `shipmate doctor` comment that the probe has already
+    reported the same failure in. Mutation: drop the `except` clause in `config_status`."""
+
+    def boom(path):
+        raise RuntimeError("connection reset")
+
+    monkeypatch.setattr(doctor, "_contents_text", boom)
+    assert doctor.config_status(_ctx()) == []

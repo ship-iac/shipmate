@@ -850,7 +850,7 @@ PIN_NO_ENGINE = (
 
 
 def _contents_ref(ctx):
-    """`?ref=` suffix for the workflow-file reads — the commit under
+    """`?ref=` suffix for the contents reads — the commit under
     examination — or None when there is no usable one.
 
     Never the default branch: a stale pin is fixed by a PR that bumps the SHA,
@@ -1994,10 +1994,8 @@ def _one_line(s, limit=200):
 
 CONFIG_PATH = bm.ec.CONFIG_PATH
 
-# Same degrade posture and reason as PIN_UNREADABLE: a branch need not carry the file
-# at all, and neither an absent one nor a failed read is a misconfiguration. Never an
-# all-clear, and never a read of another revision in its place — whether THIS commit's
-# table is sound is the one question the probe exists to answer.
+# Same degrade posture and reason as PIN_UNREADABLE: a branch need not carry the file at
+# all. Never an all-clear, and never a read of another revision in its place.
 CONFIG_UNREADABLE = (
     NOTICE,
     f"could not read `{CONFIG_PATH}` at the commit under examination — its settings were "
@@ -2013,11 +2011,11 @@ CONFIG_NO_COMMIT = (
 CONFIG_VALID = (
     f"`{CONFIG_PATH}` at the commit under examination parses, and passes every check a "
     "file can be judged on by itself: its top-level keys, `layout`, the environment "
-    "entries, `env_order` and `explicit_envs`. Not checked here, for want of a plan matrix "
-    "and the SHIPMATE_SHARED_ENVS variable: `dry`-layout coverage of the planned "
-    "environments, the shared-environment rule, and entries no stack tags — `detect` "
-    "checks those on every run. Execution reads the default branch's copy of this file, "
-    "never this branch's."
+    "entries, `env_order` and `explicit_envs`. Not checked here, for want of a plan matrix, "
+    "a whole-tree environment scan and the SHIPMATE_SHARED_ENVS variable: `dry`-layout "
+    "coverage of the planned environments, the shared-environment rule, and entries that no "
+    "stack tags — `detect` checks each of those on the runs where it applies. Execution "
+    "reads the default branch's copy of this file, never this branch's."
 )
 
 
@@ -2054,17 +2052,12 @@ def _config_defaults(table):
     ]
 
 
-def _config_warnings(ctx):
-    """The environment table at the commit under examination, parsed and structurally
-    validated, so a malformed or misplaced setting is reported before it merges to the
-    branch the engine reads it from.
+def _config_table(ctx):
+    """(table, findings) for the file at the commit under examination: a table and no
+    findings, or findings and no table.
 
-    A placement mistake is the case that needs this: `explicit_envs` written below the
-    `[env_order]` header is well-formed TOML and lands inside that table, so before this
-    probe nothing reported it until the exclusion was already lost on the default branch.
-
-    Reports only. It passes nothing it reads into `read_table` or `resolve`: execution
-    reads the default branch, and a branch's file must never become a value a run uses.
+    Reports only. Nothing read here is passed to `read_table` or `resolve`: execution reads
+    the default branch, and a branch's file must never become a value a run uses.
 
     Reads through the contents API at `_contents_ref`, like the pin probe and for the
     second reason that comment-ops has no checkout for `git show`. Structural checks
@@ -2073,16 +2066,16 @@ def _config_warnings(ctx):
     """
     ref = _contents_ref(ctx)
     if ref is None:
-        return [CONFIG_NO_COMMIT]
+        return None, [CONFIG_NO_COMMIT]
     text = _contents_text(f"repos/{ctx['repo']}/contents/{CONFIG_PATH}{ref}")
     if text is None:
-        return [CONFIG_UNREADABLE]
+        return None, [CONFIG_UNREADABLE]
     try:
-        table = bm.ec.validate_structure(bm.ec.parse_table(text))
+        return bm.ec.validate_structure(bm.ec.parse_table(text)), []
     except SystemExit as exc:
         # The refusal IS the finding, and it must not reach warnings()'s degrade handler:
         # that one reports a probe as skipped and truncates the message to 120 characters.
-        return [
+        return None, [
             (
                 WARNING,
                 f"`{CONFIG_PATH}` at the commit under examination is not valid: "
@@ -2091,7 +2084,42 @@ def _config_warnings(ctx):
                 "branch's copy, which this says nothing about.",
             )
         ]
-    return [(NOTICE, CONFIG_VALID), *_config_defaults(table)]
+
+
+def _config_warnings(ctx):
+    """What is wrong with the table at the commit under examination, so a malformed or
+    misplaced setting is reported before it merges to the branch the engine reads it from.
+
+    A placement mistake is the case that needs this: `explicit_envs` written below the
+    `[env_order]` header is well-formed TOML and lands inside that table, so before this
+    probe nothing reported it until the exclusion was already lost on the default branch.
+
+    A sound table is reported by `config_status`, not here. The status lines are not
+    findings: carried in this list they would render on every healthy plan run as
+    annotations, and they would displace the settings-probe all-clear, whose
+    environment-coverage caveat nothing else states.
+    """
+    return _config_table(ctx)[1]
+
+
+def config_status(ctx):
+    """The report's environment-table section: the verdict and the two tolerant defaults,
+    or nothing when there is no sound table to describe — `_config_warnings` reports that
+    case instead, and a status section beside a refusal would read as a second opinion.
+
+    Read a second time rather than shared with the probe: `ctx` cannot carry it
+    (`test_the_config_probe_feeds_nothing_a_run_reads`), and a module-level cache would
+    outlive a single run for the reason `_scan_workflow_texts` gives. `_contents_ref` pins
+    a 40-char SHA, so both reads see the same bytes.
+
+    Never raises: `report` mode renders this outside `warnings()`' degrade handler, and
+    `doctor` must not fail the run over it.
+    """
+    try:
+        table, _ = _config_table(ctx)
+    except (Exception, SystemExit):  # noqa: BLE001 - the probe reports the failure itself
+        return []
+    return [] if table is None else [(NOTICE, CONFIG_VALID), *_config_defaults(table)]
 
 
 def _team_warnings(ctx):
@@ -2575,12 +2603,20 @@ def _harvest_body(sections, annotations, budget, harvest_failed, harvest_pending
     return lines
 
 
-def render_report(findings, annotations, ctx):
+#: Heading of the fixed section `config_status` renders under. Its own section because the
+#: lines are status rather than findings: mixed into `warnings()` they would suppress the
+#: settings-probe all-clear on every repository and annotate every plan run.
+CONFIG_HEADING = "#### the environment table at this commit"
+
+
+def render_report(findings, annotations, ctx, status=()):
     out = _report_head(ctx)
     if findings:
         out += [_finding_row(lvl, text) for lvl, text in findings]
     else:
         out.append(_all_clear_line(ctx))
+    if status:
+        out += ["", CONFIG_HEADING, ""] + [_finding_row(lvl, text) for lvl, text in status]
     heading = ["", "#### warnings from this commit's workflow runs", ""]
     sections = harvest_sections(annotations)
     # The settings-probe section above is never truncated -- it is the part a
@@ -2622,7 +2658,7 @@ def main():
         for line in render_annotations(found):
             print(line)
         return
-    print(render_report(found, load_annotations(ctx), ctx))
+    print(render_report(found, load_annotations(ctx), ctx, config_status(ctx)))
 
 
 if __name__ == "__main__":

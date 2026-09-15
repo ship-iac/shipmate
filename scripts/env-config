@@ -57,6 +57,10 @@ def parse_table(text):
     interpreter check sits here, ahead of the import, because a module-level
     `import tomllib` would raise `ModuleNotFoundError` before any caller could report
     the real cause -- an older runner image than CONTRACT.md requires.
+
+    A leading U+FEFF is refused, not stripped: `tomllib` rejects it, `git show` and the
+    contents API both deliver it, and both readers must reach the same verdict on the same
+    file. Adding a strip here reddens test_a_byte_order_mark_is_reported_the_way_a_run_sees_it.
     """
     if sys.version_info < _MIN_PYTHON:
         found = ".".join(str(n) for n in sys.version_info[:3])
