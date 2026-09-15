@@ -37,7 +37,7 @@ jobs:
         with: { fetch-depth: 0, ref: "${{ inputs.ref }}" }
       - uses: ship-iac/shipmate/actions/setup@94a60ab22beb46a7c7d2f52b858d29a26bc1f101
       - id: d
-        uses: ship-iac/shipmate/actions/apply-detect@94a60ab22beb46a7c7d2f52b858d29a26bc1f101
+        uses: ship-iac/shipmate/actions/apply-detect@c6ecf20899049692103b09257adeed8c8bc27246
         with:
           environment: ${{ inputs.environment }}
           # A literal, not an input: this file is the verb. `run_unlock` reads
@@ -109,7 +109,7 @@ jobs:
         with:
           role-to-assume: ${{ matrix.role_arn }}
           aws-region: ${{ matrix.cred_region }}
-      - uses: ship-iac/shipmate/actions/unlock-cell@9c73e8f26861e204432de998fb66e011f8a956ce
+      - uses: ship-iac/shipmate/actions/unlock-cell@c6ecf20899049692103b09257adeed8c8bc27246
         with:
           tf-vars: ${{ toJSON(matrix.tf_vars) }}
           github-vars: ${{ toJSON(vars) }}
