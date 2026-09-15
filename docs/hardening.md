@@ -153,8 +153,9 @@ a broken one:
   an approving review on the pull request;
 - production in `explicit_envs` in `.github/shipmate.toml`, so before the merge
   a bare `shipmate apply` skips it and only the targeted `shipmate apply <env>`
-  reaches it — the setting constrains that path only. The post-merge deploy applies every
-  cell whose apply check is still pending, explicit environments included
+  reaches it — the setting constrains that path only. The post-merge deploy
+  applies every cell whose apply check is still pending, explicit environments
+  included
   (CONTRACT.md §Comment-ops), and the control it relies on there is exactly row
   6: with row 6 unavailable, a production cell left pending at merge applies on
   the push to the default branch with no approval of any kind;
@@ -333,8 +334,9 @@ is a no-op and the App's own approving review satisfies the count on its own.
 Write a `CODEOWNERS` entry covering the paths the stacks and the Terramate
 configuration live in, and `/.github/shipmate.toml` with them — that one file
 names every cloud role the repository can assume. Confirm on a real pull request
-that the reviewer requirement appears. `shipmate doctor` warns when the rule requires approvals but
-not code-owner review — it does not check `CODEOWNERS` coverage, and it never
+that the reviewer requirement appears. `shipmate doctor` warns when the rule
+requires approvals but not code-owner review — it does not check `CODEOWNERS`
+coverage, and it never
 fails a run, so that is a warning, not enforcement.
 
 **Know which copy of `CODEOWNERS` decides, before you need to change it.** GitHub
@@ -525,14 +527,22 @@ no split of its own.
   ARN by mistake; `shipmate doctor` does not compare ARNs, so review is what
   catches either.
 
+  Yes:
+
   ```toml
-  # Yes.
+  layout = "dry"
+
   [environments.prod]
   region         = "eu-west-1"
   aws.plan.role  = "arn:aws:iam::9817:role/prod-plan"
   aws.apply.role = "arn:aws:iam::9817:role/prod-apply"
+  ```
 
-  # No: the plan tier inherits the apply role.
+  No — the plan tier inherits the apply role:
+
+  ```toml
+  layout = "dry"
+
   [environments.prod]
   region   = "eu-west-1"
   aws.role = "arn:aws:iam::9817:role/prod-apply"
