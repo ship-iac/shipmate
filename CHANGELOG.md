@@ -13,6 +13,8 @@ grammar are declared unstable in `README.md`.
 
 ## [0.30.0] — 2026-09-15
 
+Tags `f1688c0`.
+
 **Breaking: the environment table moves out of Terramate globals into
 `.github/shipmate.toml`.** A cell's identity, credentials, wave ordering and
 bare-apply exclusions are now four top-level keys — `layout`, `environments`,
