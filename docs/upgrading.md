@@ -154,7 +154,7 @@ and takes the tolerant default — no ordering, and no exclusions. A repository
 that had `explicit_envs = ["prod"]` and forgets it here keeps planning and
 applying green, and the first bare `shipmate apply` after step 2 reaches
 production. Nothing refuses, nothing warns. `shipmate doctor` echoes both values
-on every report, which is the check to actually read.
+on every report, which is the check to read.
 
 **Validate the file before merging step 1.** Between the two merges it sits on
 the default branch entirely unvalidated — the old engine never reads it. Parsing
@@ -295,13 +295,13 @@ per-consumer override.
 **Re-pinning is not enough: the environment table is now required.** A cell's
 identity variables, role and region come from a `globals "shipmate"` block on
 your repository's default branch, and from nothing else. (That block later moved
-to `.github/shipmate.toml` — see the Unreleased entry above, which supersedes the
-spelling here.) Declare `global.shipmate.layout` there before re-pinning: a
-repository with no table is
-refused on every run, and a pull request that only *adds* the table is refused
-too, because the engine reads the table from the branch that pull request's plan
-is compared against. [`../CONTRACT.md`](../CONTRACT.md) §Environment table is the
-schema and the semantics of record.
+to `.github/shipmate.toml` — see the Unreleased entry above, which supersedes
+the spelling here.) Declare `global.shipmate.layout` there before re-pinning: a
+repository with no table is refused on every run, and a pull request that only
+*adds* the table is refused too, because the engine reads the table from the
+branch that pull request's plan is compared against.
+[`../CONTRACT.md`](../CONTRACT.md) §Environment table is the schema and the
+semantics of record.
 
 Five GitHub Environment variables stop being read — `AWS_ROLE_ARN`,
 `AWS_REGION`, `TF_VAR_env`, `TF_VAR_region` and `TF_WORKSPACE` — along with any

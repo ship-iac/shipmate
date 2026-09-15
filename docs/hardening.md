@@ -155,10 +155,9 @@ a broken one:
   a bare `shipmate apply` skips it and only the targeted `shipmate apply <env>`
   reaches it — the setting constrains that path only. The post-merge deploy
   applies every cell whose apply check is still pending, explicit environments
-  included
-  (CONTRACT.md §Comment-ops), and the control it relies on there is exactly row
-  6: with row 6 unavailable, a production cell left pending at merge applies on
-  the push to the default branch with no approval of any kind;
+  included (CONTRACT.md §Comment-ops), and the control it relies on there is
+  exactly row 6: with row 6 unavailable, a production cell left pending at merge
+  applies on the push to the default branch with no approval of any kind;
 - row 17's deployment branch policy naming the default branch on every
   `<env>-apply`;
 - rows 7–9's read/write credential split, which is then the only App-unforgeable
@@ -336,8 +335,7 @@ configuration live in, and `/.github/shipmate.toml` with them — that one file
 names every cloud role the repository can assume. Confirm on a real pull request
 that the reviewer requirement appears. `shipmate doctor` warns when the rule
 requires approvals but not code-owner review — it does not check `CODEOWNERS`
-coverage, and it never
-fails a run, so that is a warning, not enforcement.
+coverage, and it never fails a run, so that is a warning, not enforcement.
 
 **Know which copy of `CODEOWNERS` decides, before you need to change it.** GitHub
 evaluates it from the pull request's base branch, so narrowing or widening
@@ -427,12 +425,12 @@ costs, so the choice is made with the price visible:
 Pair every environment you gate with `explicit_envs` in
 `.github/shipmate.toml`, whichever ones those are: list it there so a bare
 `shipmate apply` skips it and it is reached only by the targeted
-`shipmate apply <env>`. Left off, a bare
-`shipmate apply` fans out into that environment and stalls there waiting for the
-reviewer nobody expected to be asked. Use the bare environment name —
-`staging`, not `staging-plan` or `staging-apply`. The value is matched against
-the environment name carried by the apply checks (see CONTRACT.md), and an entry
-carrying either suffix is a configuration error the engine rejects loudly.
+`shipmate apply <env>`. Left off, a bare `shipmate apply` fans out into that
+environment and stalls there waiting for the reviewer nobody expected to be
+asked. Use the bare environment name — `staging`, not `staging-plan` or
+`staging-apply`. The value is matched against the environment name carried by
+the apply checks (see CONTRACT.md), and an entry carrying either suffix is a
+configuration error the engine rejects loudly.
 
 `explicit_envs` is read from the *default branch*, so editing it is a pull
 request under row 4 rather than something the branch being applied can change

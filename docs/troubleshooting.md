@@ -829,10 +829,10 @@ silence points at the variable rather than at the authorization.
 
 **A held environment is also an explicit environment.** When both causes apply
 it is reported as held, not as excluded, because the review is the thing to get
-first. Getting it does not release the environment into a bare `shipmate
-apply`, though: it is still listed in `explicit_envs`, so it
-still needs a targeted `shipmate apply <env>`. That is why the held sentence
-names no command.
+first. Getting it does not release the environment into a bare
+`shipmate apply`, though: it is still listed in `explicit_envs`, so it still
+needs a targeted `shipmate apply <env>`. That is why the held sentence names no
+command.
 
 **A listed environment that is also explicit is not held.** It is reported as
 excluded, with the usual "run `shipmate apply <env>`" — and that targeted apply
