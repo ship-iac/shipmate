@@ -172,7 +172,9 @@ before you merge step 1.
 
 **Translating the block.** The parsed structure is unchanged; only the spelling
 moves. Dotted keys are canonical — one `[environments.<name>]` header per
-environment, tiers written inside it:
+environment, tiers written inside it. Both sides below are abridged to one
+environment: `dev-us` and `prod` carry entries of their own in a real file, and
+under `dry` every environment in the matrix needs one:
 
 ```hcl
 globals "shipmate" {

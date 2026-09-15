@@ -460,10 +460,14 @@ closed.
 - **A top-level setting must come above the first `[table]` header.** A scalar
   written below one lands inside *that* header's table: `layout` written after
   `[environments.dev-eu.aws.plan]` becomes
-  `environments.dev-eu.aws.plan.layout`. So one mistake has two symptoms — the
-  missing-`layout` refusal, or the unknown-provider-field refusal — and
-  `explicit_envs` written after `[env_order]` becomes an ordering entry, which
-  is why the top-level control names are reserved as `env_order` keys.
+  `environments.dev-eu.aws.plan.layout`. One mistake therefore refuses in
+  several places. A misplaced `layout` always reaches the missing-`layout`
+  refusal, which checks before anything reads `environments`; a misplaced
+  `explicit_envs` or `env_order` refuses as an unimplemented environment key or
+  an unknown provider field, depending on the header it fell under — and, after
+  `[env_order]`, as a reserved control name, which is why the top-level names
+  are reserved as `env_order` keys at all. `docs/troubleshooting.md` has the
+  message for each position.
 - **Declaring one table twice is a parse error.** A dotted `aws.plan.role` under
   `[environments.dev-eu]` plus a later `[environments.dev-eu.aws.plan]` header
   refuses with *"Cannot declare ('environments', 'dev-eu', 'aws', 'plan')

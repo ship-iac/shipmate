@@ -595,16 +595,24 @@ the only copy execution reads.
 
 **Trap 1: a top-level setting written below a `[table]` header.** TOML puts a
 scalar into whatever table header precedes it, so the line is well-formed and
-lands in the wrong place. One mistake, three presentations:
+lands in the wrong place. Which message you get depends on *which* setting moved
+and *which* header it landed under.
 
-- `layout` written after `[environments.dev-eu]` becomes
-  `environments.dev-eu.layout` — reported as an environment key the engine does
-  not implement.
-- `layout` written after `[environments.dev-eu.aws.plan]` becomes a provider
-  field — reported as `aws.plan.layout is not a field the aws provider defines`.
-- `explicit_envs` written after `[env_order]` becomes an ordering entry —
-  reported by the reserved-name check above. Before that check existed, the
-  exclusion was silently lost and a bare `shipmate apply` reached production.
+A misplaced `layout` always reports as `declares no layout`, whatever header it
+fell under — the missing-`layout` check runs before anything looks inside
+`environments`, and its message names the placement rule.
+
+A misplaced `explicit_envs` or `env_order` reports differently in each position:
+
+| Where it landed | What `detect` says |
+| --- | --- |
+| after `[env_order]` | `env_order['explicit_envs'] names a top-level setting, not an environment` |
+| after `[environments.dev-eu]` | `environment dev-eu: explicit_envs is not a key this engine implements. An environment holds region, vars, aws.` |
+| after `[environments.dev-eu.aws.plan]` | `environment dev-eu: aws.plan.explicit_envs is not a field the aws provider defines. It defines region, role.` |
+
+The first of those is the one worth knowing about: before the reserved-name
+check existed, a misplaced `explicit_envs` read as a legitimate ordering entry,
+the exclusion was silently lost, and a bare `shipmate apply` reached production.
 
 The fix in every case is the same: put the top-level settings above the first
 `[table]` header.
