@@ -271,12 +271,14 @@ never used.
   - Matching is case-insensitive, because GitHub's `contains()` is:
     `SHIPMATE_SHARED_ENVS=Prod` opts `prod` into shared mode. The expression
     normalizes nothing.
-  - The variable is deliberately repository-level, not a Terramate global and
-    not a workflow input: a global is branch content, so a pull request could
-    flip the mode and bind an environment the reviewer gate is not on, and an
-    input buys nothing a repository variable does not — changing a repository
-    variable needs settings access, the same trust level as the environments and
-    the ruleset it interacts with.
+  - The variable is deliberately repository-level, not a setting in
+    `.github/shipmate.toml` and not a workflow input. The mode is read inside
+    each cell job's `environment:` expression, which GitHub evaluates before any
+    step runs, so it cannot come from a file the engine has to read — that is a
+    platform constraint, not a preference. A workflow input buys nothing a
+    repository variable does not either: changing a repository variable needs
+    settings access, the same trust level as the environments and the ruleset it
+    interacts with.
   - **`-plan` and `-apply` are reserved suffixes for logical env names.** A
     logical env literally named `foo-apply` makes the naming undecidable (is an
     existing `foo-apply` that env's shared environment, or `foo`'s apply
@@ -1146,8 +1148,8 @@ The variable is not an admin boundary. GitHub grants creating, updating and
 deleting Actions variables to the Write role and above, so anyone who can
 push can also edit this list, and `shipmate doctor` does not read it. What it
 does buy is that relaxing the gate is a separate, deliberate act against
-repository settings — it cannot ride inside the pull request that benefits from
-it, the way a Terramate global in the branch could.
+repository settings rather than a line in the pull request that benefits from
+it — a settings change, not a merged commit.
 
 `shipmate unlock <env>` releases an OpenTofu state lock stranded by a cancelled
 or killed apply. The env is required: a destructive verb gets no wildcard,
