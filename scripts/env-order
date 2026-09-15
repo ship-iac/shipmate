@@ -1,9 +1,13 @@
 #!/usr/bin/env python3
-"""Env apply-ordering: read the env-order global and assign env-levels.
+"""Env apply-ordering: read env-levels out of the operation's environment table.
 
-`global.shipmate.env_order` maps an env -> the envs that must fully apply
-before it. Topologically sorted into levels; deploy applies level 0 fully,
-then level 1, etc. Unlisted envs are level 0. Absent global -> {} -> all level 0.
+`env_order` in `.github/shipmate.toml` maps an env -> the envs that must fully
+apply before it. Topologically sorted into levels; deploy applies level 0 fully,
+then level 1, etc. Unlisted envs are level 0. Absent key -> {} -> all level 0.
+
+Nothing here reads anything: the callers pass the mapping `env-config` already
+loaded for the operation, which comes from the default branch. A pull request
+therefore cannot reorder its own apply waves or drop its own exclusion.
 
 `MAX_ENV_LEVELS` is fixed because GHA declares no jobs or outputs dynamically.
 Bumping it needs matching `envlevelN_waves`/`_empty` output slots in
@@ -20,88 +24,11 @@ from _shipmate import _load
 MAX_ENV_LEVELS = 4
 
 
-# build-matrix's _run (surfaces the tool's stderr, then raises `::error::` on nonzero) and
-# waves' level helpers. Both are import-safe -- they only define functions and constants --
-# which matters because deploy-detect loads this module the same way.
+# build-matrix for `bm.ec`, the shared validators, and waves for its level helpers. Neither
+# module runs anything on import -- both only define functions and constants -- which matters
+# because deploy-detect loads this module the same way.
 bm = _load("build-matrix")
 wv = _load("waves")
-
-
-def _validate_predecessors(env, preds):
-    if not isinstance(preds, list):
-        raise SystemExit(
-            f"::error::env_order[{env!r}] must be a list of predecessor envs, "
-            f"got {type(preds).__name__} ({preds!r}); did you mean [{preds!r}]?"
-        )
-    bad = [p for p in preds if not isinstance(p, str)]
-    if bad:
-        raise SystemExit(
-            f"::error::env_order[{env!r}] predecessors must all be env-name "
-            f"strings; got non-string element(s) {bad!r}"
-        )
-
-
-def _validate_env_order(order):
-    """Raise SystemExit if `order` isn't a dict of str -> list[str]. Guards
-    against the HCL author typo of a bare string predecessor (silently
-    iterated character-by-character) and a non-dict global (raw
-    AttributeError)."""
-    if not isinstance(order, dict):
-        raise SystemExit(
-            "::error::env_order global must be a dict mapping env -> "
-            f"[predecessor envs], got {type(order).__name__} ({order!r})"
-        )
-    for env, preds in order.items():
-        _validate_predecessors(env, preds)
-    return order
-
-
-def _read_global(expr, validate, run=None):
-    """`expr` evaluated against the repo's Terramate globals, JSON-decoded and
-    validated -- every `global.shipmate.*` this module reads goes through here."""
-    run = run or bm._run
-    out = run(["terramate", "experimental", "eval", "--as-json", expr])
-    return validate(json.loads(out))
-
-
-def read_env_order(run=None):
-    """env -> [predecessor envs], or {} when the global/config is absent."""
-    return _read_global("tm_try(global.shipmate.env_order, {})", _validate_env_order, run)
-
-
-def _validate_explicit_envs(envs):
-    """Raise SystemExit unless `envs` is a list of bare env-name strings. Guards
-    the HCL author typo of a bare string (silently iterated char-by-char), any
-    non-list global, and an entry carrying a `-plan`/`-apply` environment suffix —
-    the value is matched against the bare env name on the apply checks, so a
-    suffixed entry would skip nothing at all. Same fail-loud posture as
-    env_order."""
-    if not isinstance(envs, list):
-        raise SystemExit(
-            "::error::explicit_envs global must be a list of env-name strings, "
-            f"got {type(envs).__name__} ({envs!r}); did you mean [{envs!r}]?"
-        )
-    bad = [e for e in envs if not isinstance(e, str)]
-    if bad:
-        raise SystemExit(
-            f"::error::explicit_envs elements must all be env-name strings; "
-            f"got non-string element(s) {bad!r}"
-        )
-    for e in envs:
-        for suffix in ("-plan", "-apply"):
-            if e.endswith(suffix):
-                raise SystemExit(
-                    f"::error::explicit_envs entry {e!r} carries the environment suffix "
-                    f"{suffix!r}; explicit_envs is matched against the bare logical env "
-                    f"name — write {e[: -len(suffix)]!r} instead."
-                )
-    return envs
-
-
-def read_explicit_envs(run=None):
-    """Envs excluded from a bare `shipmate apply` (they must be targeted by name:
-    `shipmate apply <env>`), or [] when the global/config is absent."""
-    return _read_global("tm_try(global.shipmate.explicit_envs, [])", _validate_explicit_envs, run)
 
 
 def blocked_envs(order, unavailable, envs):
@@ -109,7 +36,7 @@ def blocked_envs(order, unavailable, envs):
     predecessors (per `order`). The bare-apply path skips these with a notice:
     their ordering precondition cannot be met this run (an explicit env
     upstream was excluded), exactly like a failed predecessor level."""
-    _validate_env_order(order)
+    bm.ec.validate_env_order(order)
 
     def _hit(env, seen):
         if env in seen:
@@ -123,7 +50,7 @@ def blocked_envs(order, unavailable, envs):
 def env_levels(order, envs):
     """Topological level (0-based) per env in `envs`. Predecessors absent from
     `envs` (no changed cells this run) still constrain ordering."""
-    _validate_env_order(order)
+    bm.ec.validate_env_order(order)
     nodes = set(envs) | set(order) | {p for preds in order.values() for p in preds}
     graph = {n: set(order.get(n, [])) for n in nodes}
     level = {n: i for i, ready in enumerate(wv.levels(graph)) for n in ready}

@@ -188,9 +188,9 @@ never used.
   change). Membership in an environment is always by tag, regardless of layout.
 
   **The environment table supplies those values.** Every repository declares a
-  `globals "shipmate"` layout, and every cell takes its identity from the
-  environment table on the repository's default branch (§Environment table).
-  There is no second source and no repository-variable path.
+  `layout` in `.github/shipmate.toml`, and every cell takes its identity from
+  that file on the repository's default branch (§Environment table). There is no
+  second source and no repository-variable path.
 - **One writer puts those variables in the cell's process.**
   `scripts/env-inject` writes every entry of the row's `tf_vars` into
   `$GITHUB_ENV` under the name the table resolved, in a step that runs before
@@ -271,12 +271,14 @@ never used.
   - Matching is case-insensitive, because GitHub's `contains()` is:
     `SHIPMATE_SHARED_ENVS=Prod` opts `prod` into shared mode. The expression
     normalizes nothing.
-  - The variable is deliberately repository-level, not a Terramate global and
-    not a workflow input: a global is branch content, so a pull request could
-    flip the mode and bind an environment the reviewer gate is not on, and an
-    input buys nothing a repository variable does not — changing a repository
-    variable needs settings access, the same trust level as the environments and
-    the ruleset it interacts with.
+  - The variable is deliberately repository-level, not a setting in
+    `.github/shipmate.toml` and not a workflow input. The mode is read inside
+    each cell job's `environment:` expression, which GitHub evaluates before any
+    step runs, so it cannot come from a file the engine has to read — that is a
+    platform constraint, not a preference. A workflow input buys nothing a
+    repository variable does not either: changing a repository variable needs
+    settings access, the same trust level as the environments and the ruleset it
+    interacts with.
   - **`-plan` and `-apply` are reserved suffixes for logical env names.** A
     logical env literally named `foo-apply` makes the naming undecidable (is an
     existing `foo-apply` that env's shared environment, or `foo`'s apply
@@ -377,61 +379,106 @@ never used.
 
 ## Environment table
 
-A repository declares its environments' identity, credentials and regions in a
-`globals "shipmate"` block — the same Terramate namespace `env_order` already
-occupies. The block is required, and so is `global.shipmate.layout`: it is the
-only source of a cell's environment identity, so a repository without one has
-nothing for its cells to run as. The two absences refuse at different sites. A
-repository declaring no `globals "shipmate"` block at all is refused by
-Terramate itself, which reports `This object does not have an attribute named
-"shipmate"` and exits nonzero; a block that evaluates but carries no `layout` —
-the shape a repository using `env_order` alone has — is refused by
-`scripts/env-config` (§Refusals).
+A repository declares its environments' identity, credentials and regions in
+`.github/shipmate.toml`, read with `tomllib` from the standard library. The file
+is required, and so is `layout`: it is the only source of a cell's environment
+identity, so a repository without one has nothing for its cells to run as. The
+two absences refuse at the same site, `scripts/env-config` (§Refusals) — a file
+absent from the default branch, and a file that parses but declares no `layout`.
 
-**The engine reads the table from the repository's default branch, never from
-the branch under test.** `scripts/env-config` evaluates `global.shipmate` in a
-detached `git worktree` of `origin/<default>` and resolves each cell's identity
-and credential from that. A pull request cannot change which role its own plan
-assumes, which region it authenticates against, or which workspace it plans;
-changing any of those takes a merge to the default branch. `origin` is the base
-repository on every path — no checkout in any workflow passes `repository:` —
-and a fork pull request is refused in `detect` before it plans.
+The file holds four top-level settings and no others: `layout`, `environments`,
+`env_order`, `explicit_envs`. Any other top-level key refuses, naming the
+offending key and the four that are allowed.
 
-**The table must reach the default branch before the first plan run.** A pull
-request that only *adds* the table is refused, because the branch its plan is
-compared against still has none. For a new consumer the table lands in the same
-commit as the workflow files, on the default branch.
+Reading it needs Python 3.11, because `tomllib` arrived there. That is the floor
+§Runner prerequisites already states; nothing in the engine installs or pins a
+Python, so `scripts/env-config` checks `sys.version_info` before the import and
+refuses with the required version, the version found and the contract clause.
 
-Every failure to read the table refuses the run: unreachable `origin/<default>`,
-a failed `gh api`, a failed `worktree add`, a nonzero `terramate experimental
-eval`. "This repository has no table" and "the table could not be read" cannot
-be told apart without reading it, so treating a read failure as absence would
-hand the decision back to branch content.
+**The engine reads the file from the repository's default branch, never from the
+branch under test.** `scripts/env-config` runs `git show
+origin/<default-branch>:.github/shipmate.toml` and resolves each cell's identity
+and credential from what that returns. A pull request cannot change which role
+its own plan assumes, which region it authenticates against, or which workspace
+it plans; changing any of those takes a merge to the default branch. `origin` is
+the base repository on every path — no checkout in any workflow passes
+`repository:` — and a fork pull request is refused in `detect` before it plans.
+
+**`env_order` and `explicit_envs` come from the default branch too.** They are
+read from the same parsed mapping as the identity table, and a branch therefore
+cannot reorder its own apply waves or drop its own production exclusion. This
+is a change: `scripts/env-order` used to evaluate both out of the checked-out
+tree, so an edit on a feature branch took effect on that branch's own apply. It
+no longer does. `docs/upgrading.md` carries the consumer-facing note.
+
+**The file must reach the default branch before the first plan run.** A pull
+request that only *adds* it is refused, because the branch its plan is compared
+against still has none. For a new consumer the file lands in the same commit as
+the workflow files, on the default branch.
+
+Every failure to read it refuses the run: unreachable `origin/<default>`, a
+failed `gh api` for the default-branch name, the file absent on the default
+branch, and a body that is not valid TOML — `tomllib`'s message, which carries a
+line number, is surfaced as the refusal. "This repository has no file" and "the
+file could not be read" cannot be told apart without reading it, so treating a
+read failure as absence would hand the decision back to branch content.
 
 ### Keys
 
-```hcl
-globals "shipmate" {
-  layout = "dry"                 # dry | workspace | folder
+Dotted keys are canonical: one `[table]` header per environment, with the tiers
+written as `aws.plan.role` inside it. A separate `[environments.dev-eu.aws.plan]`
+header parses to exactly the same mapping, but mixing the two notations for one
+environment is a parse error (§TOML placement).
 
-  environments = {
-    "dev-eu" = {
-      region = "eu-west-1"       # the layout's TF_VAR_region, cloud-neutral
-      aws = {
-        region = "eu-west-1"     # the credentials step's region; omitted, it inherits the above
-        plan   = { role = "arn:aws:iam::9817:role/shipmate-plan" }
-        apply  = {
-          role      = "arn:aws:iam::9817:role/shipmate-apply"
-          workloads = { net-edge = { role = "arn:aws:iam::9817:role/net-edge" } }
-        }
-      }
-    }
-  }
-}
+```toml
+layout = "dry"                    # dry | workspace | folder
+
+[environments.dev-eu]
+region              = "eu-west-1" # the layout's TF_VAR_region, cloud-neutral
+aws.region          = "eu-west-1" # the credentials step's region; omitted, it inherits the above
+aws.plan.role       = "arn:aws:iam::9817:role/shipmate-plan"
+aws.apply.role      = "arn:aws:iam::9817:role/shipmate-apply"
+aws.apply.workloads.net-edge.role = "arn:aws:iam::9817:role/net-edge"
 ```
 
 An environment entry holds `region`, `vars` and `aws`, and nothing else. `aws`
 is the only provider implemented; any other provider key is refused by name.
+
+TOML bare keys admit letters, digits, `_` and `-`, so an ordinary environment
+name needs no quoting. Quote anything outside that set.
+
+**The file is data, and only data.** TOML has no expression language: no
+substitution, no variables, no functions, no way to derive one entry from
+another. A repository with many environments repeats itself, deliberately — for
+a file that decides which cloud role a job assumes, explicit repetition is the
+safer artifact. There is no `[defaults]` table and no merge rule between
+environments; the only cross-level default is the one named below.
+
+### TOML placement
+
+Two properties of the format decide how a mistake presents, and both fail
+closed.
+
+- **A top-level setting must come above the first `[table]` header.** A scalar
+  written below one lands inside *that* header's table: `layout` written after
+  `[environments.dev-eu.aws.plan]` becomes
+  `environments.dev-eu.aws.plan.layout`. One mistake therefore refuses in
+  several places. A misplaced `layout` always reaches the missing-`layout`
+  refusal, which checks before anything reads `environments`; a misplaced
+  `explicit_envs` or `env_order` refuses as an unimplemented environment key or
+  an unknown provider field, depending on the header it fell under — and, after
+  `[env_order]`, as a reserved control name, which is why the top-level names
+  are reserved as `env_order` keys at all. `docs/troubleshooting.md` has the
+  message for each position.
+- **Declaring one table twice is a parse error.** A dotted `aws.plan.role` under
+  `[environments.dev-eu]` plus a later `[environments.dev-eu.aws.plan]` header
+  refuses with *"Cannot declare ('environments', 'dev-eu', 'aws', 'plan')
+  twice"*. Pick one notation per environment. Duplicate keys refuse the same
+  way, where the old form let a second definition silently win.
+
+A leading UTF-8 byte-order mark refuses: `tomllib` rejects it, and both readers
+— the run's `git show` and `shipmate doctor`'s contents-API read — deliver those
+bytes and reach the same verdict rather than one of them stripping it.
 
 **Three tiers, one resolution rule.** `plan`, `apply` and `workloads` are
 structural keys reserved at every level; everything else inside a provider block
@@ -446,8 +493,8 @@ The environment's own `region` inheriting into `aws.region` is the schema's only
 cross-level default. Every other field resolves inside its own provider block.
 
 **A provider block is optional.** With none, no credentials step runs — which is
-how the three credential-free sample repositories work. `globals "shipmate" {
-layout = "workspace" }` is a complete, warning-free table.
+how the three credential-free sample repositories work. A file holding only
+`layout = "workspace"` is a complete, warning-free table.
 
 **What each layout derives**, before the environment's own `vars` merges over it:
 
@@ -467,7 +514,10 @@ Every condition below refuses at detect, before any cell starts.
 
 | Condition | Why |
 |---|---|
-| The table declares no `layout` | it is the only source of a cell's environment identity, and Terramate drops an attribute it cannot evaluate rather than failing, so a `layout` set to an expression that does not resolve arrives here as an undeclared one |
+| `.github/shipmate.toml` is absent from the default branch, or unreadable | absence and a failed read cannot be told apart, so neither may be read as "this repository has no table" |
+| The file is not valid TOML | `tomllib`'s message, with its line number, is the refusal |
+| The runner's Python is older than 3.11 | `tomllib` arrived there; §Runner prerequisites already requires it, and the refusal names the version found |
+| The table declares no `layout` | it is the only source of a cell's environment identity, and a scalar written below a `[table]` header lands inside that table rather than at the top level, so a misplaced `layout` arrives here as an undeclared one |
 | `layout` is not `dry`, `workspace` or `folder` | a typo would silently disable injection |
 | `dry` and a matrix environment has no entry, or an entry with no region | the layout cannot derive its variables, and an empty region derives nothing the fingerprint can tell apart |
 | A tier resolves a role but no region | the credentials step requires one |
@@ -478,16 +528,10 @@ Every condition below refuses at detect, before any cell starts.
 | A shared environment declaring `aws.plan` | shared mode has one environment, and it resolves `aws.apply` on both paths |
 | `vars` naming anything outside `TF_VAR_*` / `TF_WORKSPACE`, or holding a non-string | see the allowlist above |
 | Malformed shape, or a structural key in a position the grammar does not give it | a string where a mapping is required, and the reverse |
-
-**One shape refuses nowhere, and it is a limitation rather than a gap to close.**
-An `environments` set to an expression that does not resolve is dropped by
-Terramate during globals evaluation, before the engine reads the table, so it
-arrives as a table with a `layout` and no environments — byte-identical to a
-deliberate one, which `globals "shipmate" { layout = "workspace" }` legitimately
-is. There is nothing to refuse on. Every cell then resolves no role, its
-credentials step is skipped, and it fails at `tofu init`. Probed both with and
-without `tm_try`, and silent either way. `docs/troubleshooting.md` has the
-diagnosis.
+| A top-level key other than `layout`, `environments`, `env_order`, `explicit_envs` | catches a misspelled `environments`, which would otherwise yield zero environments and skip every cell's credentials step |
+| A top-level control name used as an `env_order` key | a misplaced `explicit_envs` lands inside `[env_order]` as an ordering entry, and its exclusion from a bare apply is silently lost |
+| Malformed `env_order` or `explicit_envs` | one entry point validates all four top-level fields, so an ordering or exclusion error refuses at detect rather than when an apply finally reads it |
+| A cyclic `env_order`, a self-edge included | an ordering with no first environment sorts into no levels at all, and the refusal is decidable from the file alone, so it lands with the other structural checks rather than at the apply that topologically sorts it |
 
 ### Resolution
 
@@ -787,7 +831,7 @@ only labels the output as shipmate's own.
 `shipmate doctor` posts a consolidated, sticky report — one comment per pull
 request, identified by the HTML marker `<!-- shipmate:doctor -->` (distinct
 from the plan comment's `<!-- shipmate:summary -->`) and upserted in place the
-same way. It combines fifteen live settings probes (gate ruleset,
+same way. It combines sixteen live settings probes (gate ruleset,
 default-branch `pull_request` rule, environment existence, environment
 protection shape, plan-environment secrets, the `shipmate-engine`
 environment's own existence and default-branch scoping, `pull_request_target`
@@ -809,6 +853,10 @@ run that plans nothing; without the first two GitHub refuses the dispatch with a
 HTTP 422 and creates no run at all,
 the event routing of that same file — one job per engine reusable workflow,
 each carrying the `if:` that selects it, so a wrong one sends a verb nowhere,
+the environment table at the commit under examination — `.github/shipmate.toml`
+parsed and checked against every rule a file can be judged on by itself, so a
+malformed or misplaced setting is reported before it merges to the branch
+execution reads it from,
 approvers-team resolvability, and App installation permission
 drift — see `docs/branch-protection.md`) with a harvest of the warning and
 failure annotations GitHub already recorded on this commit's workflow runs
@@ -820,7 +868,7 @@ when the report was rendered, it says so and asks for the command again once
 they have, and if the harvest itself could not be read in full it says that
 too — the two are separate statements, since a run that has not finished has
 recorded nothing yet while a run that could not be read may have recorded
-plenty. Only thirteen of the fifteen
+plenty. Only fourteen of the sixteen
 probes can produce a finding from the plan path's own `annotate`-mode
 invocation: the approvers-team probe needs the `SHIPMATE_TEAM` environment
 variable, which the plan path does not supply, so it silently returns
@@ -931,12 +979,12 @@ and intended for repositories the installing organization controls.
 The env is optional for `apply`. A targeted `shipmate apply <env>` applies one
 environment; a bare `shipmate apply` applies every environment that has a
 reviewed plan for the current PR head, in `env_order` env-levels (see Env
-apply order, below), except environments listed in the Terramate global
-`global.shipmate.explicit_envs` and environments held for review under
+apply order, below), except environments listed in `explicit_envs` in
+`.github/shipmate.toml` and environments held for review under
 `SHIPMATE_UNGATED_ENVS` (below). Explicit environments (typically production)
 must always be named: their `apply / <stack> / <env>` checks stay
 pending under a bare apply — so `shipmate / gate` keeps gating the
-merge — until someone runs `shipmate apply <env>` for them. An absent global
+merge — until someone runs `shipmate apply <env>` for them. An absent key
 (or `[]`) means a bare apply targets everything. Malformed `explicit_envs`
 shapes (not a list of strings) fail loud, like `env_order`, and so does an entry
 carrying a `-plan` or `-apply` suffix: the value is matched against the bare
@@ -946,9 +994,9 @@ logical env name, so a suffixed entry would skip nothing.
 post-merge deploy applies every cell whose apply check is still pending,
 explicit environments included; the control on that path is the apply
 environment's required reviewers — which a shared environment cannot carry (see
-§Env model) — not this global. The asymmetry is deliberate:
+§Env model) — not this setting. The asymmetry is deliberate:
 after merge the pull request is closed, and the apply requirements above include
-mergeable, so a deploy that honoured the global would strand those cells
+mergeable, so a deploy that honoured the exclusion would strand those cells
 with no path to apply at all: their `apply / <stack> / <env>` checks would sit
 pending forever.
 
@@ -1101,8 +1149,8 @@ The variable is not an admin boundary. GitHub grants creating, updating and
 deleting Actions variables to the Write role and above, so anyone who can
 push can also edit this list, and `shipmate doctor` does not read it. What it
 does buy is that relaxing the gate is a separate, deliberate act against
-repository settings — it cannot ride inside the pull request that benefits from
-it, the way a Terramate global in the branch could.
+repository settings rather than a line in the pull request that benefits from
+it — a settings change, not a merged commit.
 
 `shipmate unlock <env>` releases an OpenTofu state lock stranded by a cancelled
 or killed apply. The env is required: a destructive verb gets no wildcard,
@@ -1536,6 +1584,12 @@ trigger alone closes two paths a trigger check alone would not:
 - The Python scripts have no third-party dependencies — nothing is
   `pip install`ed at runtime, so no Python setup step (or network access
   to a package index) is required or performed.
+- The 3.11 floor is load-bearing rather than nominal: `.github/shipmate.toml`
+  is read with `tomllib`, which the standard library gained in 3.11. Nothing in
+  the engine installs or pins a Python, so `scripts/env-config` checks
+  `sys.version_info` ahead of the import and refuses with the version it found
+  and this clause. A `runs_on:` image older than that — `ubuntu-22.04` ships
+  3.10 — fails at `detect`.
 - Terramate and OpenTofu are not assumed to be on the image: the
   `setup` action installs the versions the engine release declares in its own
   root-level `VERSIONS` file, read at the commit the consumer pins. Moving to
@@ -2227,11 +2281,12 @@ of hashing nothing.
 
 A repository may declare a partial order over its GitHub Environments so that
 one environment's stacks fully apply before another's — for example, "`eu`
-fully green, then `us`." The order is a Terramate global,
-`global.shipmate.env_order`: a map from an environment name to the list of
+fully green, then `us`." The order is the `env_order` table in
+`.github/shipmate.toml`: a map from an environment name to the list of
 environments that must complete their applies first (its predecessors). An
-environment absent from the map, or the whole global absent, is unordered
-relative to everything else.
+environment absent from the map, or the whole key absent, is unordered relative
+to everything else. It is read from the default branch, like every other setting
+in that file, so a feature branch cannot reorder its own applies.
 
 The merge-deploy path topologically sorts this map into `env-levels`
 (level 0 = no predecessors, or not listed at all): all pending applies whose

@@ -127,6 +127,125 @@ still links to them from those releases' own entries; the migrations they
 described were between pre-table engine releases and have no consumers left to
 migrate. Each release's `CHANGELOG.md` entry is the record of what changed.
 
+### Unreleased — the environment table moves to `.github/shipmate.toml`
+
+**The whole table leaves Terramate.** What was a `globals "shipmate"` block in
+your HCL is now a flat TOML file at `.github/shipmate.toml`, read with `tomllib`
+from the standard library. There is no dual-support window: this engine reads
+the new location and nothing else. An older pin keeps reading the old form, so
+the two coexist only across the pin boundary, not inside one release.
+
+**This takes two merges per repository, not one.** A single pull request doing
+both halves cannot pass its own checks: the new engine reads
+`.github/shipmate.toml` from the **default branch**, where the file does not
+exist until that pull request merges, so its own `detect` refuses.
+
+1. **Add `.github/shipmate.toml`.** Keep the HCL table and keep the current
+   engine pin. Checks run the old engine against the old table and stay green.
+   Merging puts the file where the new engine will look for it.
+2. **Switch.** Bump the engine pin and delete the `globals "shipmate"` block in
+   the same pull request. The new engine now finds the file already on the
+   default branch.
+
+**Carry all four top-level keys in step 1**, not just `layout` and
+`environments`. `env_order` and `explicit_envs` moved into the same file, and
+both are **silent when absent**: a file that omits them is structurally valid
+and takes the tolerant default — no ordering, and no exclusions. A repository
+that had `explicit_envs = ["prod"]` and forgets it here keeps planning and
+applying green, and the first bare `shipmate apply` after step 2 reaches
+production. Nothing refuses, nothing warns. `shipmate doctor` echoes both values
+on every report, which is the check to read.
+
+**Validate the file before merging step 1.** Between the two merges it sits on
+the default branch entirely unvalidated — the old engine never reads it. Parsing
+it locally is the part you can do today:
+
+```console
+$ python3 -c "import tomllib,pathlib; tomllib.loads(pathlib.Path('.github/shipmate.toml').read_text(encoding='utf-8'))"
+```
+
+That catches a syntax error and a duplicate table. It does not catch a misplaced
+setting, which is well-formed TOML — the engine's structural checks are what
+catch that, and they first run after step 2 merges. Read the file top to bottom
+against the schema in [`../CONTRACT.md`](../CONTRACT.md) §Environment table
+before you merge step 1.
+
+**Translating the block.** The parsed structure is unchanged; only the spelling
+moves. Dotted keys are canonical — one `[environments.<name>]` header per
+environment, tiers written inside it. Both sides below are abridged to one
+environment: `dev-us` and `prod` carry entries of their own in a real file, and
+under `dry` every environment in the matrix needs one:
+
+```hcl
+globals "shipmate" {
+  layout = "dry"
+  environments = {
+    "dev-eu" = {
+      region = "eu-west-1"
+      aws = {
+        plan  = { role = "arn:aws:iam::9817:role/shipmate-plan" }
+        apply = { role = "arn:aws:iam::9817:role/shipmate-apply" }
+      }
+    }
+  }
+  env_order     = { "dev-us" = ["dev-eu"] }
+  explicit_envs = ["prod"]
+}
+```
+
+becomes
+
+```toml
+layout        = "dry"
+explicit_envs = ["prod"]
+
+[env_order]
+dev-us = ["dev-eu"]
+
+[environments.dev-eu]
+region         = "eu-west-1"
+aws.plan.role  = "arn:aws:iam::9817:role/shipmate-plan"
+aws.apply.role = "arn:aws:iam::9817:role/shipmate-apply"
+```
+
+Two rules the old form did not have. Top-level settings go **above the first
+`[table]` header**, because a scalar written below one lands inside that table.
+And one notation per environment: dotted keys plus a later
+`[environments.dev-eu.aws.plan]` header is a parse error.
+[`troubleshooting.md`](troubleshooting.md) §`.github/shipmate.toml` is rejected,
+or its settings do not take effect has both traps and the messages they produce.
+
+**Give the plan and apply tiers separate roles.** Dotted keys make a block-level
+`aws.role` easy to write, and it covers the plan path as well as the apply path —
+the plan path being reachable from any branch. Write `aws.plan.role` and
+`aws.apply.role`; it is the same two lines ([`hardening.md`](hardening.md) §7–9).
+
+**`env_order` and `explicit_envs` now come from the default branch.** This is a
+behaviour change, not a spelling change. They used to be evaluated out of the
+checked-out tree, so a feature branch could reorder its own apply waves or drop
+its own production exclusion, and the edit took effect on that branch. It no
+longer does: both are read from the same default-branch file as the identity
+table, for the same reason — a pull request must not choose what its own applies
+do. An edit to either takes effect when it merges.
+
+**Reading the file needs Python 3.11**, which
+[`../CONTRACT.md`](../CONTRACT.md) §Runner prerequisites has always required and
+nothing previously exercised. If your workflow names a `runs_on:` image older
+than that — `ubuntu-22.04` ships 3.10 — `detect` refuses with the version it
+found. Nothing in the engine installs or pins a Python.
+
+**A Terramate global that referenced the table is now on its own.** No sample
+repository read `global.shipmate` outside the file that declared it; if yours
+does, keep your own globals for that purpose. The engine's configuration and
+your stack configuration are separate concerns from here on, and a consumer that
+wants Terramate to see an environment value uses `terramate.config.run.env` with
+`env.*`.
+
+**Also gone: programmatic construction.** TOML has no expressions, functions or
+references, so a table that was generated or merged in HCL becomes explicit
+repetition. That is deliberate for a file deciding which cloud role a job
+assumes, and it is a real loss for a repository with many environments.
+
 ### 0.29.0 — every cell-running job maps one more secret
 
 **Add one line to six jobs.** In `.github/workflows/shipmate.yml`, the `plan`,
@@ -175,12 +294,14 @@ per-consumer override.
 
 **Re-pinning is not enough: the environment table is now required.** A cell's
 identity variables, role and region come from a `globals "shipmate"` block on
-your repository's default branch, and from nothing else. Declare
-`global.shipmate.layout` there before re-pinning: a repository with no table is
-refused on every run, and a pull request that only *adds* the table is refused
-too, because the engine reads the table from the branch that pull request's plan
-is compared against. [`../CONTRACT.md`](../CONTRACT.md) §Environment table is the
-schema and the semantics of record.
+your repository's default branch, and from nothing else. (That block later moved
+to `.github/shipmate.toml` — see the Unreleased entry above, which supersedes
+the spelling here.) Declare `global.shipmate.layout` there before re-pinning: a
+repository with no table is refused on every run, and a pull request that only
+*adds* the table is refused too, because the engine reads the table from the
+branch that pull request's plan is compared against.
+[`../CONTRACT.md`](../CONTRACT.md) §Environment table is the schema and the
+semantics of record.
 
 Five GitHub Environment variables stop being read — `AWS_ROLE_ARN`,
 `AWS_REGION`, `TF_VAR_env`, `TF_VAR_region` and `TF_WORKSPACE` — along with any

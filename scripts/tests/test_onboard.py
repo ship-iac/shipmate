@@ -10,12 +10,14 @@ import json
 import pathlib
 import subprocess
 import sys
+import textwrap
 
 import pytest
 import yaml
 from _loader import ENGINE, load_script
 
 onboard = load_script("onboard")
+ec = load_script("env-config")
 
 
 def make_gh(routes):
@@ -2187,8 +2189,9 @@ def test_every_retired_filename_present_is_reported_and_never_deleted(tmp_path):
 
 
 #: Hand-written, not captured from the implementation: a constant pasted from the output
-#: passes whatever the output says.
-SPLIT_CHECKLIST = """
+#: passes whatever the output says. The two checklists differ in one item, so they are
+#: assembled from the same hand-written pieces rather than carrying two copies of the rest.
+_CHECKLIST_HEAD = """
 Still yours — these values are the consumer's, so this script cannot set them.
 
 Repository-wide, both optional:
@@ -2198,12 +2201,23 @@ Repository-wide, both optional:
 
 By hand:
 
-  A `globals "shipmate"` block declaring `layout`, plus an `environments` entry for
-  every environment that needs a region or a cloud role — under `layout = "dry"`
-  every environment needs one, carrying a region, or the run refuses. Entries are
-  keyed by the logical environment name (`dev-eu`), never by its `-plan` /
-  `-apply` half.
-  Each cell resolves its identity from that table on the default branch, and a
+  A `.github/shipmate.toml` declaring `layout`, plus an `[environments.<name>]`
+  table for every environment that needs a region or a cloud role — under `layout
+  = "dry"` every environment needs one, carrying a region, or the run refuses.
+  Tables are keyed by the logical environment name (`dev-eu`), never by its
+  `-plan` / `-apply` half. Top-level settings go above the first table header: a
+  scalar written below one lands inside that table instead.
+
+    layout = "dry"
+
+    [environments.dev-eu]
+    region         = "eu-west-1"
+    aws.plan.role  = "arn:aws:iam::<account>:role/shipmate-plan"
+    aws.apply.role = "arn:aws:iam::<account>:role/shipmate-apply"
+
+  Give the plan and apply tiers separate roles. One `aws.role` covering both
+  hands any-branch plan cells the apply role's permissions (docs/hardening.md).
+  Each cell resolves its identity from that file on the default branch, and a
   repository without one refuses (CONTRACT.md §Environment table).
 
   Add o/r to the App installation's repository selection, at
@@ -2211,10 +2225,14 @@ By hand:
   — substitute your org and the App name you registered (docs/github-app.md §4).
   The add-repository endpoint accepts PAT-classic tokens only, so it stays a UI step.
 
-  Required reviewers and `Prevent self-review` on dev-eu-apply
+"""
+
+_CHECKLIST_REVIEWERS = """  Required reviewers and `Prevent self-review` on dev-eu-apply
   (docs/getting-started.md §Environment setup).
 
-  A CODEOWNERS entry covering /.github/workflows/.
+"""
+
+_CHECKLIST_TAIL = """  A CODEOWNERS entry covering /.github/workflows/.
 
   Commit the workflow file and the table together and open the pull request; the
   table is read from the default branch, so the first plan needs it merged.
@@ -2222,6 +2240,8 @@ By hand:
   it are not on the default branch yet (CONTRACT.md §Post-plan topology). Merge it
   with an administrative bypass.
 """
+
+SPLIT_CHECKLIST = _CHECKLIST_HEAD + _CHECKLIST_REVIEWERS + _CHECKLIST_TAIL
 
 
 def test_the_checklist_names_every_value_the_script_cannot_set(capsys):
@@ -2241,37 +2261,7 @@ def test_the_checklist_names_every_value_the_script_cannot_set(capsys):
 
 #: The shared half of the same block. `_env_names` returns one bare `<env>` for a shared
 #: environment, and a reviewer on it stalls every plan cell, so no reviewer line is due.
-SHARED_CHECKLIST = """
-Still yours — these values are the consumer's, so this script cannot set them.
-
-Repository-wide, both optional:
-
-  gh secret set SHIPMATE_PLAN_PASSPHRASE
-  gh variable set SLACK_WEBHOOK --body <value>
-
-By hand:
-
-  A `globals "shipmate"` block declaring `layout`, plus an `environments` entry for
-  every environment that needs a region or a cloud role — under `layout = "dry"`
-  every environment needs one, carrying a region, or the run refuses. Entries are
-  keyed by the logical environment name (`dev-eu`), never by its `-plan` /
-  `-apply` half.
-  Each cell resolves its identity from that table on the default branch, and a
-  repository without one refuses (CONTRACT.md §Environment table).
-
-  Add o/r to the App installation's repository selection, at
-  https://github.com/organizations/<org>/settings/apps/shipmate/installations
-  — substitute your org and the App name you registered (docs/github-app.md §4).
-  The add-repository endpoint accepts PAT-classic tokens only, so it stays a UI step.
-
-  A CODEOWNERS entry covering /.github/workflows/.
-
-  Commit the workflow file and the table together and open the pull request; the
-  table is read from the default branch, so the first plan needs it merged.
-  `shipmate / gate` cannot be green on that one either: the workflows that produce
-  it are not on the default branch yet (CONTRACT.md §Post-plan topology). Merge it
-  with an administrative bypass.
-"""
+SHARED_CHECKLIST = _CHECKLIST_HEAD + _CHECKLIST_TAIL
 
 
 def test_the_checklist_asks_for_no_reviewer_on_a_shared_environment(capsys):
@@ -2352,6 +2342,27 @@ def test_the_checklist_does_not_tell_a_dry_run_to_commit_a_file_it_did_not_write
         "  Commit the workflow file",
         "  Re-run without --dry-run, then commit the workflow file",
     )
+
+
+def test_the_checklist_toml_example_is_a_configuration_a_consumer_could_merge(capsys):
+    """The by-hand block prints the first `.github/shipmate.toml` a new consumer writes, and
+    it is not a ```toml fence, so `test_docs_toml_parses.py` cannot see it. `docs/hardening.md`
+    shipped an example declaring `[environments.prod]` twice through a full documentation
+    sweep and a green suite, so the class is live.
+
+    The example is read back out of the printed block rather than retyped: a copy here would
+    be a second selector, free to drift from the thing it claims to check.
+
+    Mutation: print a second `[environments.dev-eu]` header in `_checklist`, the duplicate
+    form that shipped -- `tomllib` refuses it as `Cannot declare ... twice`.
+    """
+    onboard._checklist(ctx(repo="o/r", envs=["dev-eu"], shared=set()))
+    lines = capsys.readouterr().out.splitlines()
+    snippet = textwrap.dedent("\n".join(ln for ln in lines if ln.startswith("    ")))
+    # An extraction that finds nothing parses and validates cleanly, so it is green over an
+    # unchecked example.
+    assert snippet.startswith('layout = "dry"'), f"no TOML example found in the block: {snippet!r}"
+    ec.validate_structure(ec.parse_table(snippet))
 
 
 def test_a_bare_env_alongside_only_a_plan_env_is_reported_as_ambiguous(monkeypatch):

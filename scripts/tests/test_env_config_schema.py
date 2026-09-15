@@ -29,41 +29,38 @@ def _refusal(table, matrix_envs=(), shared_envs=()):
 def test_an_unknown_layout_refuses():
     """Mutation: drop the layout membership check -- a typo disables injection silently."""
     assert _refusal({"layout": "drys"}) == (
-        "::error::globals \"shipmate\" layout is 'drys'; it must be one of dry, workspace, folder."
+        "::error::layout is 'drys'; it must be one of dry, workspace, folder."
     )
 
 
 def test_a_non_string_layout_refuses():
     """Mutation: as above; a mapping is not one of the three names either."""
     assert _refusal({"layout": {"dry": True}}) == (
-        "::error::globals \"shipmate\" layout is {'dry': True}; it must be one of "
-        "dry, workspace, folder."
+        "::error::layout is {'dry': True}; it must be one of dry, workspace, folder."
     )
 
 
 NO_LAYOUT = (
-    '::error::globals "shipmate" declares no layout, so no cell can resolve its environment '
-    'identity. Declare layout = "dry", "workspace" or "folder" in globals "shipmate" on the '
-    "default branch, which is where this table is read from. Terramate drops an attribute it "
-    "cannot evaluate rather than failing, so a layout set to an expression that does not "
-    "resolve disappears from the table."
+    "::error::.github/shipmate.toml declares no layout, so no cell can resolve its "
+    'environment identity. Declare layout = "dry", "workspace" or "folder" on the default '
+    "branch, which is where this table is read from. A scalar written below a [table] header "
+    "lands inside that table rather than at the top level, so layout must come before the "
+    "first header."
 )
 
 
 def test_a_table_with_no_layout_refuses():
-    """Terramate drops an attribute it cannot evaluate and exits 0, so a table whose
-    `layout` references an undefined global arrives carrying only its `environments`, and
-    the cells it describes would have no identity to run with.
+    """Without a layout no cell has an identity to run with, so the file is refused rather
+    than read as a repository that injects nothing.
 
     Mutation: restore `if "layout" not in table: return table`.
     """
     assert _refusal({"environments": {"dev-eu": {"region": "eu-west-1"}}}) == NO_LAYOUT
 
 
-def test_a_block_holding_only_another_global_refuses():
-    """`globals "shipmate"` is shared with `env_order`, so terramate evaluates an
-    `env_order`-only block without complaint and it arrives here. This is the half of the
-    refusal terramate cannot give: it only refuses a block that is absent entirely.
+def test_a_file_holding_only_an_ordering_refuses():
+    """`env_order` is a legal top-level key, so a file carrying only that parses cleanly and
+    reaches validation. The layout refusal is the only thing that can stop it.
 
     Mutation: as above.
     """
@@ -482,8 +479,8 @@ def test_a_folder_layout_with_no_environments_passes():
 
 
 def test_an_empty_table_refuses():
-    """An empty `globals "shipmate" {}` evaluates cleanly, so terramate passes it through and
-    this is the only site that can refuse it.
+    """An empty file is valid TOML, so the parser passes it through and this is the only site
+    that can refuse it.
 
     Mutation: restore `if "layout" not in table: return table`.
     """
@@ -491,7 +488,7 @@ def test_an_empty_table_refuses():
 
 
 def test_a_whole_table_is_returned_unchanged():
-    """Validation returns the table it was given, other globals included.
+    """Validation returns the table it was given, every top-level setting included.
 
     Mutation: return only the `environments` mapping.
     """
@@ -533,14 +530,171 @@ def test_a_whole_table_is_returned_unchanged():
     }
 
 
-def test_a_null_layout_refuses():
-    """Terramate drops an attribute it cannot evaluate but keeps an explicit `layout = null`,
-    which is a declared layout holding a value no layout may hold.
+def test_an_empty_layout_refuses():
+    """TOML has no null, so the unreachable `layout = null` case is retired. An empty string
+    is the reachable neighbour: a declared layout holding a value no layout may hold.
 
-    Mutation: `if not table.get("layout"):` for the no-layout refusal, which reads a null
+    Mutation: `if not table.get("layout"):` for the no-layout refusal, which reads an empty
     layout as undeclared and answers a repository that did declare one with the message
     telling it to declare one.
     """
-    assert _refusal({"layout": None}) == (
-        '::error::globals "shipmate" layout is None; it must be one of dry, workspace, folder.'
+    assert _refusal({"layout": ""}) == (
+        "::error::layout is ''; it must be one of dry, workspace, folder."
     )
+
+
+# --- 10: the top level ------------------------------------------------------------------
+
+
+def test_a_misspelled_top_level_key_refuses():
+    """A misspelled `environments` yields zero environments, and under folder and workspace
+    that resolves an empty role and skips the credentials step -- a cell applying real
+    infrastructure with no cloud identity, reached by a typo.
+
+    Mutation: drop the strict top-level key loop -- the table validates and injects nothing.
+    """
+    assert _refusal({"layout": "folder", "enviroments": {}}) == (
+        "::error::enviroments is not a setting this engine implements. "
+        ".github/shipmate.toml holds layout, environments, env_order, explicit_envs."
+    )
+
+
+def test_every_allowed_top_level_key_is_accepted():
+    """The other half of the strict-key rule: the four names are the whole allowed set, so a
+    table using all four must validate. Compared against a hand-written table, never against
+    the module's own constant.
+
+    This is also where the `explicit_envs` half of "nothing cross-checks a control against
+    `environments`" is pinned: `explicit_envs` names `prod` and `environments` is empty, a
+    shape the canonical-file guard cannot catch because it declares every environment it
+    excludes.
+
+    Mutations: remove a name from the allowed set -- one of these four then refuses; or make
+    `validate_structure` require an `environments` entry for every `explicit_envs` name.
+    """
+    table = {
+        "layout": "folder",
+        "environments": {},
+        "env_order": {"prod": ["dev-eu"]},
+        "explicit_envs": ["prod"],
+    }
+    assert env_config.validate(table, (), ()) == table
+
+
+_ORDERING = [
+    (
+        {"layout": "folder", "env_order": "dev-eu"},
+        "::error::env_order must be a mapping of env -> [predecessor envs], got str ('dev-eu')",
+    ),
+    (
+        {"layout": "folder", "env_order": {"prod": "dev-eu"}},
+        "::error::env_order['prod'] must be a list of predecessor envs, got str "
+        "('dev-eu'); did you mean ['dev-eu']?",
+    ),
+    (
+        {"layout": "folder", "env_order": {"prod": ["dev-eu", 123]}},
+        "::error::env_order['prod'] predecessors must all be env-name strings; "
+        "got non-string element(s) [123]",
+    ),
+    (
+        {"layout": "folder", "explicit_envs": "prod"},
+        "::error::explicit_envs must be a list of env-name strings, got str ('prod'); "
+        "did you mean ['prod']?",
+    ),
+    (
+        {"layout": "folder", "explicit_envs": ["prod", 123]},
+        "::error::explicit_envs elements must all be env-name strings; "
+        "got non-string element(s) [123]",
+    ),
+    (
+        {"layout": "folder", "explicit_envs": ["prod-apply"]},
+        "::error::explicit_envs entry 'prod-apply' carries the environment suffix "
+        "'-apply'; explicit_envs is matched against the bare logical env name — write "
+        "'prod' instead.",
+    ),
+    (
+        {"layout": "folder", "explicit_envs": ["prod-plan"]},
+        "::error::explicit_envs entry 'prod-plan' carries the environment suffix "
+        "'-plan'; explicit_envs is matched against the bare logical env name — write "
+        "'prod' instead.",
+    ),
+]
+
+
+@pytest.mark.parametrize(("table", "message"), _ORDERING, ids=range(len(_ORDERING)))
+def test_the_single_entry_point_validates_ordering_and_exclusions(table, message):
+    """`env_order` and `explicit_envs` are checked by the same entry point as `layout` and
+    `environments`, so a "valid configuration" verdict cannot leave an ordering or exclusion
+    error to surface when an apply finally reads the field.
+
+    Both environment suffixes are cases here, not one: the refusal exists because every
+    documented environment name carries `-plan` or `-apply`, and a suffixed entry matches no
+    apply check, excludes nothing and lets prod apply on a bare `shipmate apply`.
+
+    Mutations: delete the `validate_env_order` and `validate_explicit_envs` calls from
+    `validate_structure` -- every case here validates instead of refusing; or drop either
+    entry from the suffix tuple in `validate_explicit_envs` -- that suffix's case validates.
+    """
+    assert _refusal(table) == message
+
+
+def test_a_tier_word_that_is_not_the_trailing_suffix_is_accepted():
+    """The other half of the suffix rule: only a trailing `-plan`/`-apply` is the tier
+    suffix. A refusal here would strand every exclusion a repository declared under a name
+    that merely carries one of the two words.
+
+    `eu-plan-1` is the case that discriminates, and it is the only one: the suffixes are
+    matched with their hyphen, so `plan-eu` and `apply-svc` survive a containment test too
+    and pin the leading-word half rather than this one.
+
+    Mutation: `e.endswith(suffix)` -> `suffix in e` in `validate_explicit_envs` -- `eu-plan-1`
+    then refuses.
+    """
+    table = {"layout": "folder", "explicit_envs": ["prod", "plan-eu", "apply-svc", "eu-plan-1"]}
+    assert env_config.validate(table, (), ()) == table
+
+
+_CYCLE_TAIL = (
+    " — each of those must fully apply before the next, so the ordering has no first "
+    "environment and no apply path can sort it. Break the chain in .github/shipmate.toml."
+)
+_CYCLES = [
+    ({"dev": ["prod"], "prod": ["dev"]}, "dev -> prod -> dev"),
+    ({"dev": ["dev"]}, "dev -> dev"),
+    ({"a": ["b"], "b": ["c"], "c": ["a"]}, "a -> c -> b -> a"),
+]
+
+
+@pytest.mark.parametrize(("order", "cycle"), _CYCLES, ids=range(len(_CYCLES)))
+def test_a_cyclic_env_order_refuses_structurally(order, cycle):
+    """Acyclicity is decidable from the file alone, so it belongs with the structural checks:
+    without it `validate_structure` passes a file that `env_levels` later refuses with a raw
+    `CycleError`, and `shipmate doctor` certifies it as sound in the meantime.
+
+    Three cases, because each pins something the others cannot: two nodes for the ordinary
+    cycle, a self-edge (an env listed as its own predecessor is a cycle too), and three nodes
+    for the direction the path is rendered in -- `graphlib` reports each node before its
+    successor, so reversing the join silently mislabels every cycle longer than two.
+
+    Mutation: delete the `TopologicalSorter` block from `validate_env_order` -- all three
+    tables validate.
+    """
+    table = {"layout": "folder", "env_order": order}
+    with pytest.raises(SystemExit) as excinfo:
+        env_config.validate_structure(table)
+    assert str(excinfo.value) == f"::error::env_order is cyclic: {cycle}{_CYCLE_TAIL}"
+
+
+def test_a_deep_acyclic_env_order_still_validates():
+    """The other half of the cycle rule: a legitimate chain must keep validating. A check that
+    refuses a valid ordering is worse than the defect it fixes, and three levels is what the
+    engine's own `MAX_ENV_LEVELS` cap allows.
+
+    Mutation: refuse any env that is both a key and a predecessor rather than a cycle --
+    `stage` is both, and this legitimate chain then refuses.
+    """
+    table = {
+        "layout": "folder",
+        "env_order": {"stage": ["dev"], "prod": ["stage"], "prod-us": ["prod", "stage"]},
+    }
+    assert env_config.validate_structure(table) is table

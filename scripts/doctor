@@ -7,7 +7,7 @@ Three modes, selected via SHIPMATE_DOCTOR_MODE:
   actions/summary right after a plan run. NEVER fails the run: a probe
   error becomes a 'could not verify' note — doctor guards onboarding, it
   must not take down the plan path.
-- report: render the sticky PR comment on demand — the fifteen live probes'
+- report: render the sticky PR comment on demand — the sixteen live probes'
   findings plus a harvest of the warnings GitHub already recorded as
   annotations on this commit's workflow check runs.
 - check-ids: reduce a check-runs JSONL listing to the (id, name) pairs worth
@@ -42,6 +42,9 @@ Probes:
 - the event routing of `shipmate.yml`: one job per engine reusable workflow, each
   with the `if:` that selects it — a wrong one sends a verb nowhere and its run
   completes green with every job skipped.
+- the environment table at the commit under examination: `.github/shipmate.toml`
+  parses and passes the checks a file can be judged on by itself, before it merges
+  to the default branch execution reads it from.
 - approvers team resolvability in the repo's org.
 - GitHub App installation permission drift.
 """
@@ -847,7 +850,7 @@ PIN_NO_ENGINE = (
 
 
 def _contents_ref(ctx):
-    """`?ref=` suffix for the workflow-file reads — the commit under
+    """`?ref=` suffix for the contents reads — the commit under
     examination — or None when there is no usable one.
 
     Never the default branch: a stale pin is fixed by a PR that bumps the SHA,
@@ -881,16 +884,14 @@ def _workflow_names(base):
     ], True
 
 
-def _workflow_text(path):
-    """One workflow file's decoded text, or None when it cannot be read.
+def _contents_text(path):
+    """One file's decoded text from the contents API, or None when it cannot be read.
 
     Anything that is not a base64 blob is UNREADABLE, not empty: a >1 MB file
     answers with `encoding: "none"` and empty `content`, which would otherwise
-    decode to a readable EMPTY workflow the probes read as clean.
+    decode to a readable EMPTY file the probes read as clean.
 
-    `errors="replace"` keeps a mis-encoded byte from raising, and one leading
-    U+FEFF is dropped: a BOM sits in front of the column-0 `on:` key, which
-    `_on_block` would otherwise read as no top-level trigger block at all.
+    `errors="replace"` keeps a mis-encoded byte from raising.
     """
     try:
         blob = _gh_json(path)
@@ -898,8 +899,20 @@ def _workflow_text(path):
         return None
     if not isinstance(blob, dict) or blob.get("encoding") != "base64":
         return None
-    text = base64.b64decode(blob.get("content", "")).decode("utf-8", "replace")
-    return text.removeprefix("\ufeff")
+    return base64.b64decode(blob.get("content", "")).decode("utf-8", "replace")
+
+
+def _workflow_text(path):
+    """One workflow file's decoded text, or None when it cannot be read.
+
+    One leading U+FEFF is dropped: a BOM sits in front of the column-0 `on:` key,
+    which `_on_block` would otherwise read as no top-level trigger block at all.
+    The config probe reads its file through `_contents_text` without this step:
+    `tomllib` refuses a BOM, so stripping one there would report a table valid
+    that every run reading it refuses.
+    """
+    text = _contents_text(path)
+    return None if text is None else text.removeprefix("\ufeff")
 
 
 def _scan_workflow_texts(ctx, ref, per_file, unreadable):
@@ -1979,6 +1992,150 @@ def _one_line(s, limit=200):
     return flat if len(flat) <= limit else flat[: limit - 1] + "…"
 
 
+CONFIG_PATH = bm.ec.CONFIG_PATH
+
+# Same degrade posture and reason as PIN_UNREADABLE: a branch need not carry the file at
+# all. Never an all-clear, and never a read of another revision in its place.
+CONFIG_UNREADABLE = (
+    NOTICE,
+    f"could not read `{CONFIG_PATH}` at the commit under examination — its settings were "
+    "not validated here. The default branch's copy was not read in its place.",
+)
+CONFIG_NO_COMMIT = (
+    NOTICE,
+    f"`{CONFIG_PATH}` not validated — the commit under examination could not be determined.",
+)
+# The verdict names the checks it did NOT run: each needs the plan matrix, the whole-tree
+# environment scan or SHIPMATE_SHARED_ENVS, none of which doctor has, so a bare "valid"
+# here would claim a clean bill over half the rules.
+CONFIG_VALID = (
+    f"`{CONFIG_PATH}` at the commit under examination parses, and passes every check a "
+    "file can be judged on by itself: its top-level keys, `layout`, the environment "
+    "entries, `env_order` and `explicit_envs`. Not checked here, for want of a plan matrix, "
+    "a whole-tree environment scan and the SHIPMATE_SHARED_ENVS variable: `dry`-layout "
+    "coverage of the planned environments, the shared-environment rule, and entries that no "
+    "stack tags — `detect` checks each of those on the runs where it applies. Execution "
+    "reads the default branch's copy of this file, never this branch's."
+)
+
+
+def _config_defaults(table):
+    """The two tolerant defaults, echoed whether they are set or not.
+
+    Neither absence is invalid, so no validator can report either, and both decide what a
+    bare `shipmate apply` does. An omitted `explicit_envs` applies every environment,
+    including the one a consumer meant to hold back; this is the last moment before the
+    merge at which reading that costs nothing.
+    """
+    order = table.get("env_order", {})
+    envs = table.get("explicit_envs", [])
+    shown = "; ".join(
+        f"{env} after {', '.join(preds) or 'nothing'}" for env, preds in sorted(order.items())
+    )
+    return [
+        (
+            NOTICE,
+            f"`env_order` orders {_one_line(shown, 400)} — a bare `shipmate apply` applies "
+            "one env-level fully before it starts the next."
+            if order
+            else "`env_order`: absent — every environment sits at one level, and a bare "
+            "`shipmate apply` applies them all together.",
+        ),
+        (
+            NOTICE,
+            f"`explicit_envs` names {_one_line(', '.join(envs), 400)} — a bare "
+            "`shipmate apply` skips those, and each needs its own `shipmate apply <env>`."
+            if envs
+            else "`explicit_envs`: absent — every environment applies on a bare "
+            "`shipmate apply`, production included.",
+        ),
+    ]
+
+
+def _config_table(ctx):
+    """(table, findings) for the file at the commit under examination: a table and no
+    findings, or findings and no table.
+
+    Reports only. Nothing read here is passed to `read_table` or `resolve`: execution reads
+    the default branch, and a branch's file must never become a value a run uses.
+
+    Reads through the contents API at `_contents_ref`, like the pin probe and for the
+    second reason that comment-ops has no checkout for `git show`. Structural checks
+    alone — `validate_structure`, not `validate` — because the rest need run context;
+    CONFIG_VALID says so rather than letting a reader take the verdict for the whole set.
+    """
+    refusal = bm.ec.interpreter_refusal()
+    if refusal:
+        # Ahead of every read, and outside the try below: the floor is a property of this
+        # runner, so no revision of the file can be at fault and none is worth reading.
+        return None, [
+            (
+                WARNING,
+                "this runner's Python refuses the environment table before any revision "
+                f"of it is read: {_one_line(refusal.removeprefix('::error::'), 400)} "
+                "Nothing is wrong with the file: merging it changes nothing, and every "
+                "operation that reads the table meets the same refusal on the default "
+                "branch too.",
+            )
+        ]
+    ref = _contents_ref(ctx)
+    if ref is None:
+        return None, [CONFIG_NO_COMMIT]
+    text = _contents_text(f"repos/{ctx['repo']}/contents/{CONFIG_PATH}{ref}")
+    if text is None:
+        return None, [CONFIG_UNREADABLE]
+    try:
+        return bm.ec.validate_structure(bm.ec.parse_table(text)), []
+    except SystemExit as exc:
+        # The refusal IS the finding, and it must not reach warnings()'s degrade handler:
+        # that one reports a probe as skipped and truncates the message to 120 characters.
+        return None, [
+            (
+                WARNING,
+                f"`{CONFIG_PATH}` at the commit under examination is not valid: "
+                f"{_one_line(str(exc).removeprefix('::error::'), 400)} Merging it refuses "
+                "every operation that reads the table. Execution still reads the default "
+                "branch's copy, which this says nothing about.",
+            )
+        ]
+
+
+def _config_warnings(ctx):
+    """What is wrong with the table at the commit under examination, so a malformed or
+    misplaced setting is reported before it merges to the branch the engine reads it from.
+
+    A placement mistake is the case that needs this: `explicit_envs` written below the
+    `[env_order]` header is well-formed TOML and lands inside that table, so before this
+    probe nothing reported it until the exclusion was already lost on the default branch.
+
+    A sound table is reported by `config_status`, not here. The status lines are not
+    findings: carried in this list they would render on every healthy plan run as
+    annotations, and they would displace the settings-probe all-clear, whose
+    environment-coverage caveat nothing else states.
+    """
+    return _config_table(ctx)[1]
+
+
+def config_status(ctx):
+    """The report's environment-table section: the verdict and the two tolerant defaults,
+    or nothing when there is no sound table to describe — `_config_warnings` reports that
+    case instead, and a status section beside a refusal would read as a second opinion.
+
+    Read a second time rather than shared with the probe: `ctx` cannot carry it
+    (`test_the_config_probe_feeds_nothing_a_run_reads`), and a module-level cache would
+    outlive a single run for the reason `_scan_workflow_texts` gives. `_contents_ref` pins
+    a 40-char SHA, so both reads see the same bytes.
+
+    Never raises: `report` mode renders this outside `warnings()`' degrade handler, and
+    `doctor` must not fail the run over it.
+    """
+    try:
+        table, _ = _config_table(ctx)
+    except (Exception, SystemExit):  # noqa: BLE001 - the probe reports the failure itself
+        return []
+    return [] if table is None else [(NOTICE, CONFIG_VALID), *_config_defaults(table)]
+
+
 def _team_warnings(ctx):
     """A typo'd or cross-org SHIPMATE_APPROVERS_TEAM surfaces today only as
     every apply being rejected "not a team member" — one API call names it."""
@@ -2036,6 +2193,7 @@ PROBES = (
     _mode_input_warnings,
     _dispatch_wiring_warnings,
     _routing_warnings,
+    _config_warnings,
     _team_warnings,
     _app_permission_warnings,
 )
@@ -2459,12 +2617,20 @@ def _harvest_body(sections, annotations, budget, harvest_failed, harvest_pending
     return lines
 
 
-def render_report(findings, annotations, ctx):
+#: Heading of the fixed section `config_status` renders under. Its own section because the
+#: lines are status rather than findings: mixed into `warnings()` they would suppress the
+#: settings-probe all-clear on every repository and annotate every plan run.
+CONFIG_HEADING = "#### the environment table at this commit"
+
+
+def render_report(findings, annotations, ctx, status=()):
     out = _report_head(ctx)
     if findings:
         out += [_finding_row(lvl, text) for lvl, text in findings]
     else:
         out.append(_all_clear_line(ctx))
+    if status:
+        out += ["", CONFIG_HEADING, ""] + [_finding_row(lvl, text) for lvl, text in status]
     heading = ["", "#### warnings from this commit's workflow runs", ""]
     sections = harvest_sections(annotations)
     # The settings-probe section above is never truncated -- it is the part a
@@ -2506,7 +2672,7 @@ def main():
         for line in render_annotations(found):
             print(line)
         return
-    print(render_report(found, load_annotations(ctx), ctx))
+    print(render_report(found, load_annotations(ctx), ctx, config_status(ctx)))
 
 
 if __name__ == "__main__":

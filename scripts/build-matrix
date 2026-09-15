@@ -5,17 +5,20 @@ Pure core (build_matrix) is unit-tested; main() gathers inputs from terramate
 (the changed stack set + each stack's tags) and writes GitHub Actions job
 outputs. Environment membership comes purely from stack tags (CONTRACT tag
 grammar: env/<name>). The environment table is a separate read and does need
-GH_TOKEN: it is evaluated on the default branch, not in the checked-out tree.
+GH_TOKEN: it is `git show`n from the default branch, not read in the checked-out
+tree, and naming that branch takes an API call.
 """
 
 import json
 import os
-import subprocess
 import sys
 
 from _shipmate import _load
 
 ec = _load("env-config")
+# One subprocess wrapper for both modules, homed in the one that `_load`s nothing;
+# its docstring says why that direction is the terminating one.
+_run = ec._run
 
 #: The two pull-request events `plan_workflow_error` requires a consumer workflow file on.
 _PR_EVENTS = ("pull_request", "pull_request_target")
@@ -169,22 +172,6 @@ def build_matrix(envs, stacks_by_env, tags_by_stack, tags=""):
             "only lever is to reduce the number of environments in play."
         )
     return cells
-
-
-def _run(args, env=None, check=True):
-    """stdout of `args`, raising ::error:: on a nonzero exit. `check=False`
-    returns the CompletedProcess instead, for the one caller whose failure is
-    not the consumer's defect to fix."""
-    # args is a code-controlled tool invocation (gh/terramate/tofu by PATH name),
-    # never user input, and shell=False — safe.
-    p = subprocess.run(args, capture_output=True, text=True, env=env)  # noqa: S603
-    if not check:
-        return p
-    if p.returncode != 0:
-        # Surface the tool's own error; a swallowed stderr makes CI opaque.
-        sys.stderr.write(p.stderr)
-        raise SystemExit(f"::error::command failed ({p.returncode}): {' '.join(args)}")
-    return p.stdout
 
 
 def gh_json(path):

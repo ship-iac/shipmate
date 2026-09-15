@@ -335,9 +335,10 @@ def test_compute_cells_warns_and_continues_when_the_probe_cannot_run(monkeypatch
     monkeypatch.setattr(bm, "_list_stacks", lambda all_stacks, base: ["stacks/app"])
     monkeypatch.setattr(bm, "_tags", lambda s: ["env/dev-eu"])
     # Stubbed at `subprocess.run`, not at `_run`: the fact under test is that the probe
-    # asks _run not to raise, and a stubbed _run cannot show that.
+    # asks _run not to raise, and a stubbed _run cannot show that. Reached through `bm.ec`,
+    # which is where the one `_run` build-matrix aliases lives.
     monkeypatch.setattr(
-        bm.subprocess,
+        bm.ec.subprocess,
         "run",
         lambda *a, **kw: subprocess.CompletedProcess(
             a[0],

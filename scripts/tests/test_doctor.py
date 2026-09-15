@@ -1,10 +1,12 @@
 import io
 import json
 import os
+import sys
 
 import pytest
 import yaml
 from _loader import ACTIONS, ENGINE, SCRIPTS, load_script
+from test_env_config_toml_fixtures import CANONICAL, MISPLACED_CONTROL
 
 doctor = load_script("doctor")
 
@@ -229,7 +231,9 @@ def _quiet_new_probes():
     """Healthy responses for the env-protection, engine-environment, plan-env-secret,
     pin-freshness, fork-trigger, shim-job-name, retired-input, dispatch-wiring and routing
     probes, so tests exercising the older gate/environment probes through `warnings()`
-    collect no incidental noise from these ten.
+    collect no incidental noise from these nine. The config probe's read is here too, serving
+    the design's canonical file: a sound table is silent in `warnings()`, and its status lines
+    are rendered from `config_status` instead.
 
     The last seven read the same workflow listing. `_SHIPMATE_WF`'s `uses:` lines are engine
     pins -- `_PIN` matches a `.github/workflows/` path as well as an `actions/` one -- so the
@@ -260,7 +264,12 @@ def _quiet_new_probes():
         f"{_WF_DIR}/shipmate.yml{_REF}": _wf_file(_SHIPMATE_WF),
         f"repos/{_ENGINE_REPO}/releases/latest": {"tag_name": "v9.9.9"},
         f"repos/{_ENGINE_REPO}/commits/v9.9.9": {"sha": _SHA},
+        _CONFIG_READ: _wf_file(CANONICAL),
     }
+
+
+#: The config probe's read. `_quiet_new_probes` says why a sound table is silent here.
+_CONFIG_READ = f"repos/{_REPO}/contents/{doctor.CONFIG_PATH}{_REF}"
 
 
 def test_healthy_repo_emits_nothing(monkeypatch):
@@ -3506,6 +3515,7 @@ def test_the_probe_registry_is_exactly_this(monkeypatch):
         doctor._mode_input_warnings,
         doctor._dispatch_wiring_warnings,
         doctor._routing_warnings,
+        doctor._config_warnings,
         doctor._team_warnings,
         doctor._app_permission_warnings,
     )
@@ -3624,6 +3634,7 @@ _COUNT_WORDS = {
     13: "thirteen",
     14: "fourteen",
     15: "fifteen",
+    16: "sixteen",
 }
 
 
@@ -4201,3 +4212,362 @@ def test_declared_envs_reads_a_flat_single_artifact_download(tmp_path):
     # the nested layout empties the declared-env set, skipping every environment probe.
     (tmp_path / "cell.json").write_text(json.dumps({"environment": "dev-eu"}), encoding="utf-8")
     assert doctor._declared_envs(tmp_path) == {"dev-eu"}
+
+
+_CONFIG_ON_DEFAULT = f"repos/{_REPO}/contents/{doctor.CONFIG_PATH}?ref={_BRANCH}"
+#: The refusal the design's misplaced control earns, whole: the probe's own framing plus
+#: `validate_env_order`'s message with the `::error::` prefix stripped. Hand-written, not
+#: read back from the module, so a probe that reported a different refusal -- or reported
+#: this one as a skipped probe -- reddens here.
+_MISPLACED_FINDING = (
+    doctor.WARNING,
+    "`.github/shipmate.toml` at the commit under examination is not valid: "
+    "env_order['explicit_envs'] names a top-level setting, not an environment. A scalar "
+    "written below a [table] header lands inside that table, so `explicit_envs = ...` after "
+    "[env_order] becomes an ordering entry instead of a top-level setting. Move it above the "
+    "first header in .github/shipmate.toml. Merging it refuses every operation that reads "
+    "the table. Execution still reads the default branch's copy, which this says nothing "
+    "about.",
+)
+
+
+def _config_responses(at_head, on_default=CANONICAL):
+    """The file the probe should read, and a healthy one on the default branch it must not.
+
+    The two differ in verdict, so a probe reading the wrong ref does not merely read the
+    wrong bytes -- it reports the opposite finding.
+    """
+    return {
+        _CONFIG_READ: _wf_file(at_head),
+        _CONFIG_ON_DEFAULT: _wf_file(on_default),
+    }
+
+
+def test_the_config_probe_reads_the_examined_commit_and_reports_a_misplaced_control(
+    monkeypatch,
+):
+    """Two claims, one fixture. The design's misplaced control sits at the commit under
+    examination and a valid file on the default branch, so:
+
+    - reading `?ref=<head sha>` is what produces a finding at all (mutation: build the ref
+      from `ctx["default_branch"]` -- the probe then reports the valid file's notes);
+    - the placement mistake is reported, whole (mutation: return the parsed table without
+      calling `validate_structure` -- the file is well-formed TOML and every finding here
+      disappears).
+    """
+    responses = _config_responses(MISPLACED_CONTROL)
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    assert doctor._config_warnings(_ctx()) == [_MISPLACED_FINDING]
+
+
+def test_a_refusal_is_the_finding_not_a_skipped_probe(monkeypatch):
+    """`validate_structure` raises SystemExit, and `warnings()` turns an escaped one into
+    "could not verify ... probe skipped" with the reason cut at 120 characters -- a
+    validation refusal misreported as a probe that never ran, and truncated mid-sentence.
+
+    Mutation: drop the `except SystemExit` clause from `_config_table`.
+    """
+    responses = {
+        f"repos/{_REPO}/rules/branches/{_BRANCH}?per_page=100": _gate_rule(),
+        f"repos/{_REPO}/environments?per_page=100": _environments(
+            "dev-eu-plan", "dev-eu-apply", "shipmate-engine"
+        ),
+        **_quiet_new_probes(),
+        **_config_responses(MISPLACED_CONTROL),
+    }
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    assert doctor.warnings(_ctx()) == [_MISPLACED_FINDING]
+
+
+def test_an_interpreter_below_the_floor_is_not_reported_as_an_invalid_file(monkeypatch):
+    """The floor is a property of the runner, not of the file, so the file-validity wrapper
+    would tell a consumer on an old `runs_on` image that their TOML is invalid, that merging
+    it refuses every operation, and that the default branch is unaffected -- three false
+    claims, sending them to read a file that is fine. The fixture holds a VALID file, so a
+    wrapped refusal can only be the floor's.
+
+    Mutation: drop the `interpreter_refusal()` check ahead of `_contents_ref` in
+    `_config_table`, folding the refusal into the file-validity finding.
+    """
+    monkeypatch.setattr(sys, "version_info", (3, 10, 6, "final", 0))
+    responses = _config_responses(CANONICAL)
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    assert doctor._config_warnings(_ctx()) == [
+        (
+            doctor.WARNING,
+            "this runner's Python refuses the environment table before any revision of it "
+            "is read: .github/shipmate.toml is read with tomllib, which needs Python 3.11 "
+            "or later; this runner has 3.10.6. CONTRACT.md section Runner prerequisites "
+            "requires python3 >= 3.11 on every runner. Choose a newer runs_on image. "
+            "Nothing is wrong with the file: merging it changes nothing, and every "
+            "operation that reads the table meets the same refusal on the default branch "
+            "too.",
+        )
+    ]
+
+
+def test_an_unreadable_config_is_a_note_and_no_other_revision_is_read(monkeypatch):
+    """Two claims, one fixture, and the default branch holds a VALID file so that a
+    fallback would read as an all-clear rather than as an error:
+
+    - an unreadable file is reported (mutation: `return []` when the read fails -- the
+      probe then says nothing at all, which a reader takes for a clean table);
+    - nothing else is read in its place (mutation: fall back to the default-branch ref --
+      the probe reports the valid file's notes for a commit whose file it never read).
+    """
+    asked = []
+
+    def gh(path):
+        asked.append(path)
+        if path == _CONFIG_READ:
+            raise SystemExit("::error::command failed (1): gh api ...")
+        return _wf_file(CANONICAL)
+
+    monkeypatch.setattr(doctor, "_gh_json", gh)
+    assert doctor._config_warnings(_ctx()) == [doctor.CONFIG_UNREADABLE]
+    assert asked == [_CONFIG_READ]
+
+
+def test_an_unencoded_config_blob_is_unreadable_not_empty(monkeypatch):
+    """A file over 1 MB answers with `encoding: "none"` and empty content. Decoded anyway
+    that is an empty table, which parses and would fail only on the absent `layout` -- a
+    refusal about a file nobody wrote. Mutation: decode a blob whatever its encoding."""
+    responses = {_CONFIG_READ: {"encoding": "none", "content": ""}}
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    assert doctor._config_warnings(_ctx()) == [doctor.CONFIG_UNREADABLE]
+
+
+def test_the_config_probe_declines_without_a_usable_commit(monkeypatch):
+    """No commit is a reason to skip, never to read the default branch instead, and the
+    ref is not interpolated into a `gh api` path unless it is a 40-char hex SHA -- the same
+    guard the pin probe carries. Mutation: drop the `ref is None` branch."""
+
+    def gh(path):
+        pytest.fail(f"the config probe hit the API with an unusable head SHA: {path}")
+
+    monkeypatch.setattr(doctor, "_gh_json", gh)
+    assert doctor._config_warnings(_ctx(head_sha="main?per_page=1&x=/../")) == [
+        doctor.CONFIG_NO_COMMIT
+    ]
+
+
+def test_a_valid_verdict_names_the_checks_it_did_not_run(monkeypatch):
+    """The whole status section against hand-written text, and no finding beside it.
+    `doctor` runs `validate_structure` alone -- the remaining rules need a plan matrix, a
+    whole-tree environment scan and SHIPMATE_SHARED_ENVS -- so a verdict that stopped naming
+    them would report a clean bill over half the checks, and a reader would take "valid" for
+    "this will run". It also states that execution reads the default branch's copy, without
+    which the report reads as a verdict on what the pull request will do.
+
+    Mutation: shorten the verdict to "parses and is valid"; or return it from
+    `_config_warnings` again, which reddens the `== []` line here and the end-to-end
+    all-clear guard. Swapping `validate_structure` for `validate` is NOT a mutation that reds
+    here -- the canonical file passes both -- so this guard pins the words, and
+    `test_the_config_probe_feeds_nothing_a_run_reads` pins that the run-context reader is
+    never reached.
+    """
+    responses = _config_responses(CANONICAL, on_default=MISPLACED_CONTROL)
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    assert doctor._config_warnings(_ctx()) == []
+    assert doctor.config_status(_ctx()) == [
+        (
+            doctor.NOTICE,
+            "`.github/shipmate.toml` at the commit under examination parses, and passes "
+            "every check a file can be judged on by itself: its top-level keys, `layout`, "
+            "the environment entries, `env_order` and `explicit_envs`. Not checked here, "
+            "for want of a plan matrix, a whole-tree environment scan and the "
+            "SHIPMATE_SHARED_ENVS variable: `dry`-layout coverage of the planned "
+            "environments, the shared-environment rule, and entries that no stack tags "
+            "\u2014 `detect` checks each of those on the runs where it applies. Execution "
+            "reads the default branch's copy of this file, never this branch's.",
+        ),
+        (
+            doctor.NOTICE,
+            "`env_order` orders dev-us after dev-eu \u2014 a bare `shipmate apply` applies "
+            "one env-level fully before it starts the next.",
+        ),
+        (
+            doctor.NOTICE,
+            "`explicit_envs` names prod \u2014 a bare `shipmate apply` skips those, and each "
+            "needs its own `shipmate apply <env>`.",
+        ),
+    ]
+
+
+def test_the_tolerant_defaults_are_read_back_when_absent(monkeypatch):
+    """A table omitting `env_order` and `explicit_envs` is valid, takes the empty default,
+    and a bare `shipmate apply` then applies every environment -- including the one a
+    consumer meant to exclude. Nothing refuses and no validator can, so the report says it.
+
+    Mutation: drop `_config_defaults` from `config_status`.
+    """
+    responses = {_CONFIG_READ: _wf_file('layout = "folder"\n')}
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    assert doctor.config_status(_ctx())[1:] == [
+        (
+            doctor.NOTICE,
+            "`env_order`: absent \u2014 every environment sits at one level, and a bare "
+            "`shipmate apply` applies them all together.",
+        ),
+        (
+            doctor.NOTICE,
+            "`explicit_envs`: absent \u2014 every environment applies on a bare "
+            "`shipmate apply`, production included.",
+        ),
+    ]
+
+
+def test_the_config_probe_feeds_nothing_a_run_reads(monkeypatch):
+    """Validation follows the branch in hand; authority stays with the default branch. The
+    probe therefore touches neither the execution reader nor the resolver, and leaves the
+    context it was handed alone.
+
+    Mutation: resolve a cell from the parsed table, or call `read_table`.
+    """
+
+    def forbidden(*a, **kw):
+        pytest.fail("the config probe reached the execution path")
+
+    monkeypatch.setattr(doctor.bm.ec, "read_table", forbidden)
+    monkeypatch.setattr(doctor.bm.ec, "resolve", forbidden)
+    for text in (CANONICAL, MISPLACED_CONTROL):
+        responses = _config_responses(text)
+        monkeypatch.setattr(doctor, "_gh_json", lambda path, r=responses: r[path])
+        ctx = _ctx()
+        before = dict(ctx)
+        doctor._config_warnings(ctx)
+        doctor.config_status(ctx)
+        assert ctx == before
+
+
+def test_a_byte_order_mark_is_reported_the_way_a_run_sees_it(monkeypatch):
+    """`tomllib` refuses a leading U+FEFF, and the execution reader hands it the bytes
+    `git show` printed. Stripping the BOM here would report a table valid that every run
+    reading it refuses -- two readers of one file disagreeing, which is the class this
+    check exists to remove.
+
+    A substring rather than the whole finding, deliberately: `tomllib`'s decode message
+    ends in a position report that is the interpreter's to word, so pinning it whole would
+    pin CPython's phrasing. The framing around it is pinned whole by
+    `test_the_config_probe_reads_the_examined_commit_and_reports_a_misplaced_control`.
+
+    Mutation: read the file with `_workflow_text` instead of `_contents_text`.
+    """
+    responses = {_CONFIG_READ: _wf_file("\ufeff" + CANONICAL)}
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    out = doctor._config_warnings(_ctx())
+    assert len(out) == 1
+    level, text = out[0]
+    assert level == doctor.WARNING
+    assert "is not valid: .github/shipmate.toml is not valid TOML" in text
+
+
+def test_config_probe_is_registered():
+    assert doctor._config_warnings in doctor.PROBES
+
+
+def test_the_all_clear_survives_a_sound_environment_table(monkeypatch):
+    """End to end, the way `main` runs it: healthy fixture -> `warnings()` -> `render_report`.
+
+    Every other all-clear guard hands `[]` straight to the renderer, so none of them can see
+    a probe that reports on a healthy repository -- which is exactly how the status lines
+    suppressed this line while the suite stayed green. The environment-coverage caveat lives
+    only here, so losing the line loses the caveat.
+
+    Mutation: return the status lines from `_config_warnings` again (e.g. append
+    `*config_status(ctx)` to its return).
+    """
+    responses = {
+        f"repos/{_REPO}/rules/branches/{_BRANCH}?per_page=100": _gate_rule(),
+        f"repos/{_REPO}/environments?per_page=100": _environments(
+            "dev-eu-plan", "dev-eu-apply", "shipmate-engine"
+        ),
+        **_quiet_new_probes(),
+    }
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    ctx = _ctx()
+    body = doctor.render_report(doctor.warnings(ctx), [], ctx, doctor.config_status(ctx))
+    assert "no problems found by the settings probes" in body
+    assert "changed in this pull request" in body
+    # The status section renders too, and below the all-clear rather than instead of it.
+    assert doctor.CONFIG_HEADING in body
+    assert body.index("no problems found") < body.index(doctor.CONFIG_HEADING)
+    assert "`explicit_envs` names prod" in body
+
+
+def test_the_report_renders_the_table_status_beside_a_finding(monkeypatch):
+    """A repository with a settings problem still gets the table's status: the two sections
+    are independent, and a reader fixing a gate ruleset must not lose the `explicit_envs`
+    line because of it. Mutation: render the status only in the `else` branch."""
+    responses = _config_responses(CANONICAL)
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    ctx = _ctx()
+    body = doctor.render_report(
+        [(doctor.WARNING, "gate rule missing")], [], ctx, doctor.config_status(ctx)
+    )
+    assert "gate rule missing" in body
+    assert "no problems found" not in body
+    assert "`explicit_envs` names prod" in body
+
+
+def test_no_status_section_beside_a_refusal(monkeypatch):
+    """A refused table has no status to state, and a section saying otherwise beside the
+    refusal would read as a second opinion on the same file.
+
+    Mutation: return `[(NOTICE, CONFIG_VALID)]` from `config_status` whatever the table.
+    """
+    responses = _config_responses(MISPLACED_CONTROL)
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    ctx = _ctx()
+    assert doctor.config_status(ctx) == []
+    body = doctor.render_report(doctor.warnings(ctx), [], ctx, doctor.config_status(ctx))
+    assert doctor.CONFIG_HEADING not in body
+
+
+#: A cycle is decidable from the file alone, so `doctor` must report it rather than certify
+#: the file. Kept here rather than beside the design's two published files: that module's
+#: subject is the bytes `docs/` publishes, and this is neither of them.
+CYCLIC_ORDER = """layout = "folder"
+
+[env_order]
+dev = ["prod"]
+prod = ["dev"]
+"""
+#: Hand-written whole, like `_MISPLACED_FINDING`: the probe's framing plus
+#: `validate_env_order`'s cycle message with the `::error::` prefix stripped.
+_CYCLIC_FINDING = (
+    doctor.WARNING,
+    "`.github/shipmate.toml` at the commit under examination is not valid: env_order is "
+    "cyclic: dev -> prod -> dev — each of those must fully apply before the next, so the "
+    "ordering has no first environment and no apply path can sort it. Break the chain in "
+    ".github/shipmate.toml. Merging it refuses every operation that reads the table. "
+    "Execution still reads the default branch's copy, which this says nothing about.",
+)
+
+
+def test_a_cyclic_env_order_is_a_finding_and_gets_no_valid_verdict(monkeypatch):
+    """Both halves of the same claim, because either one alone can pass while the file is
+    still certified: the cycle is reported as a finding, and the CONFIG_VALID verdict -- which
+    says the file "passes every check a file can be judged on by itself" -- is withheld. Before
+    the cycle check, `doctor` issued that verdict over an ordering both apply paths refuse.
+
+    Mutation: delete the `TopologicalSorter` block from `validate_env_order` -- the finding
+    list empties and the verdict comes back.
+    """
+    responses = _config_responses(CYCLIC_ORDER)
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    ctx = _ctx()
+    assert doctor._config_warnings(ctx) == [_CYCLIC_FINDING]
+    assert doctor.config_status(ctx) == []
+
+
+def test_status_never_fails_the_run(monkeypatch):
+    """`report` mode renders the status outside `warnings()`' degrade handler, so an
+    exception here would take down a `shipmate doctor` comment that the probe has already
+    reported the same failure in. Mutation: drop the `except` clause in `config_status`."""
+
+    def boom(path):
+        raise RuntimeError("connection reset")
+
+    monkeypatch.setattr(doctor, "_contents_text", boom)
+    assert doctor.config_status(_ctx()) == []

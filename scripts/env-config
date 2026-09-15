@@ -2,31 +2,35 @@
 """Read the environment table from the repository's default branch.
 
 Branch content cannot rewrite these values because they are not read from the
-branch: the table is evaluated in a detached worktree of `origin/<default>`.
-`origin` is the base repository on every path -- no checkout in any workflow
-passes `repository:` -- and a fork pull request is refused before it plans.
+branch: the table is `git show`n out of `origin/<default>`. `origin` is the base
+repository on every path -- no checkout in any workflow passes `repository:` -- and
+a fork pull request is refused before it plans.
 """
 
-import json
+import graphlib
 import os
-import shutil
 import subprocess
 import sys
 
-_WORKTREE = "shipmate-envcfg"
+#: The file the engine reads its settings from, and the interpreter floor that reading it
+#: needs. The floor is CONTRACT.md section Runner prerequisites, which every runner already
+#: promises; nothing in the engine installs or pins a Python, so this is the only place it
+#: is checked.
+CONFIG_PATH = ".github/shipmate.toml"
+_MIN_PYTHON = (3, 11)
 
 
-def _run(args, check=True):
-    """stdout of `args`, raising ::error:: on a nonzero exit. `check=False` returns
-    the CompletedProcess instead, for the one caller whose failure is tolerated.
+def _run(args, env=None, check=True):
+    """stdout of `args`, raising ::error:: on a nonzero exit. `check=False` returns the
+    CompletedProcess instead, for the two callers that report the failure themselves.
 
-    Local rather than `build-matrix`'s: `_shipmate.py` caches nothing and re-executes
-    the module on every `_load`, and `build-matrix` calls this module, so reaching its
-    copy through the loader would not terminate.
+    `build-matrix` aliases this rather than keeping its own copy: this module `_load`s
+    nothing, so reaching it from there terminates. The reverse would not -- `_shipmate.py`
+    caches nothing and re-executes a module on every `_load`.
     """
     # args is a code-controlled tool invocation (gh/git/terramate by PATH name),
     # never user input, and shell=False -- safe.
-    p = subprocess.run(args, capture_output=True, text=True)  # noqa: S603
+    p = subprocess.run(args, capture_output=True, text=True, env=env)  # noqa: S603
     if not check:
         return p
     if p.returncode != 0:
@@ -46,51 +50,64 @@ def _default_branch(run):
     return run(["gh", "api", f"repos/{repo}", "--jq", ".default_branch"]).strip()
 
 
-def worktree(branch, path, run):
-    """A detached worktree of `origin/<branch>` at `path`, recreated each run.
+def interpreter_refusal():
+    """The refusal an under-floor interpreter earns, or `None`.
 
-    Deleting the directory is not enough: git keeps the registration under
-    `.git/worktrees/`, and `add` to a missing-but-registered path refuses. A runner
-    reusing a workspace hits exactly that.
+    Separately callable so `doctor` can run it outside the try that turns a `SystemExit`
+    into a "this file is not valid" finding: the floor is a property of the runner, true
+    of the default branch's copy too, and merging anything changes nothing about it. Lazy
+    rather than module level, so an old interpreter can still import this module.
     """
-    run(["git", "worktree", "remove", "--force", path], check=False)
-    shutil.rmtree(path, ignore_errors=True)
-    run(["git", "worktree", "prune"])
-    run(["git", "worktree", "add", "--detach", path, f"origin/{branch}"])
-    return path
-
-
-def evaluate(path, run):
-    """`global.shipmate` as evaluated in `path`.
-
-    Read without `tm_try`, so terramate itself refuses a repository that declares no
-    `globals "shipmate"` block: the table is the only source of environment identity, and
-    an absent one has nothing to fall back to.
-    """
-    out = run(
-        [
-            "terramate",
-            "experimental",
-            "eval",
-            "--as-json",
-            "-C",
-            path,
-            "global.shipmate",
-        ]
+    if sys.version_info >= _MIN_PYTHON:
+        return None
+    found = ".".join(str(n) for n in sys.version_info[:3])
+    return (
+        f"::error::{CONFIG_PATH} is read with tomllib, which needs Python "
+        f"{_MIN_PYTHON[0]}.{_MIN_PYTHON[1]} or later; this runner has {found}. "
+        "CONTRACT.md section Runner prerequisites requires python3 >= "
+        f"{_MIN_PYTHON[0]}.{_MIN_PYTHON[1]} on every runner. Choose a newer "
+        "runs_on image."
     )
+
+
+def parse_table(text):
+    """The table parsed from `text`, or `SystemExit`.
+
+    Shared by both readers: `read_table` below reads the file with `git show`, and
+    `doctor` reads the same bytes through the contents API, having no checkout. The
+    interpreter check runs ahead of the import, because a module-level `import tomllib`
+    would raise `ModuleNotFoundError` before any caller could report the real cause --
+    an older runner image than CONTRACT.md requires.
+
+    A leading U+FEFF is refused, not stripped: `tomllib` rejects it, `git show` and the
+    contents API both deliver it, and both readers must reach the same verdict on the same
+    file. Adding a strip here reddens test_a_byte_order_mark_is_reported_the_way_a_run_sees_it.
+    """
+    refusal = interpreter_refusal()
+    if refusal:
+        raise SystemExit(refusal)
+    import tomllib
+
     try:
-        return _mapping(json.loads(out), 'globals "shipmate"')
-    except json.JSONDecodeError as exc:
-        raise SystemExit(
-            f"::error::could not parse the environment table from {path}: {exc}"
-        ) from exc
+        return tomllib.loads(text)
+    except tomllib.TOMLDecodeError as exc:
+        raise SystemExit(f"::error::{CONFIG_PATH} is not valid TOML: {exc}") from exc
 
 
 def read_table(run=None):
-    """`global.shipmate` from the default branch. Every failure here refuses."""
+    """The table from the default branch. Every failure here refuses."""
     run = run or _run
-    path = os.path.join(os.environ["RUNNER_TEMP"], _WORKTREE)
-    return evaluate(worktree(_default_branch(run), path, run), run)
+    ref = f"origin/{_default_branch(run)}:{CONFIG_PATH}"
+    p = run(["git", "show", ref], check=False)
+    if p.returncode != 0:
+        sys.stderr.write(p.stderr)
+        raise SystemExit(
+            f"::error::{CONFIG_PATH} could not be read from the default branch "
+            f"({ref}). The engine reads the environment table from the default "
+            "branch, never from this branch, so the file must be merged there "
+            "before the first plan."
+        )
+    return parse_table(p.stdout)
 
 
 #: The layouts a repository may declare, and the environment-level keys an entry may
@@ -102,6 +119,11 @@ _ENV_KEYS = ("region", "vars", "aws")
 
 #: Reserved at every level: a tier selector, never a provider field.
 _STRUCTURAL = ("plan", "apply", "workloads")
+
+#: Everything the file may declare at its top level. Also the names reserved inside
+#: `env_order`, which is keyed by environment name and would otherwise accept a
+#: misplaced control as an ordering entry.
+_TOP_KEYS = ("layout", "environments", "env_order", "explicit_envs")
 
 
 def _mapping(value, where):
@@ -167,19 +189,13 @@ def tiers(block, env, region):
             yield inner, {**merged, **level_fields}
 
 
-def _check_provider(block, env, region, shared):
+def _check_provider(block, env, region):
     """Refuse a block that authenticates nothing, or a tier that authenticates
     incompletely.
 
     A tier resolving no credential is legal: apply-only cloud access is a supported
     shape, and its plan path resolves an empty credential and skips the step.
     """
-    if shared and "plan" in _mapping(block, f"environment {env}: aws"):
-        raise SystemExit(
-            f"::error::environment {env} is shared between the plan and apply paths, so "
-            "aws.plan cannot apply to it: a shared environment resolves aws.apply on both "
-            f"paths. Remove aws.plan, or drop {env} from SHIPMATE_SHARED_ENVS."
-        )
     resolved = list(tiers(block, env, region))
     if not any("role" in fields for _, fields in resolved):
         raise SystemExit(
@@ -242,7 +258,8 @@ def _is_shared(env, shared_envs):
     return env.lower() in {e.lower() for e in shared_envs}
 
 
-def _check_environment(entry, env, shared_envs):
+def _check_environment(entry, env):
+    """One entry's own shape. Nothing here reads context outside the file."""
     entry = _mapping(entry, f"environment {env}")
     for key in sorted(entry):
         if key not in _ENV_KEYS:
@@ -255,7 +272,28 @@ def _check_environment(entry, env, shared_envs):
     if "vars" in entry:
         _check_vars(entry, env)
     if "aws" in entry:
-        _check_provider(entry["aws"], env, entry.get("region"), _is_shared(env, shared_envs))
+        _check_provider(entry["aws"], env, entry.get("region"))
+
+
+def _check_shared(environments, shared_envs):
+    """The one environment rule that needs context the file does not carry.
+
+    Membership comes from the `SHIPMATE_SHARED_ENVS` repository variable, so
+    `validate_structure` cannot decide it and the structural-only caller skips it.
+
+    Runs only after `validate_structure`, its sole caller's first step, which is what has
+    already proven every entry and every `aws` block a mapping.
+    """
+    for env in sorted(environments):
+        block = environments[env].get("aws")
+        if block is None or not _is_shared(env, shared_envs):
+            continue
+        if "plan" in block:
+            raise SystemExit(
+                f"::error::environment {env} is shared between the plan and apply paths, so "
+                "aws.plan cannot apply to it: a shared environment resolves aws.apply on both "
+                f"paths. Remove aws.plan, or drop {env} from SHIPMATE_SHARED_ENVS."
+            )
 
 
 def _check_dry_coverage(environments, matrix_envs):
@@ -297,36 +335,137 @@ def _report_unused(environments, all_envs):
         )
 
 
-def validate(table, matrix_envs, shared_envs, all_envs=None):
-    """The table, or `SystemExit`. `layout` is required: it is the only source of a cell's
-    environment identity, so a table without one leaves every cell with nothing to run as.
+def _validate_predecessors(env, preds):
+    if not isinstance(preds, list):
+        raise SystemExit(
+            f"::error::env_order[{env!r}] must be a list of predecessor envs, "
+            f"got {type(preds).__name__} ({preds!r}); did you mean [{preds!r}]?"
+        )
+    bad = [p for p in preds if not isinstance(p, str)]
+    if bad:
+        raise SystemExit(
+            f"::error::env_order[{env!r}] predecessors must all be env-name "
+            f"strings; got non-string element(s) {bad!r}"
+        )
 
-    Terramate refuses a repository declaring no `globals "shipmate"` block at all; this is
-    the other half, for a block that evaluates but carries no `layout` -- `env_order` shares
-    the same namespace. `all_envs` is the whole-tree environment scan where one exists, and
-    only the unused-entry warning reads it; `None` on the paths that scan only a changed set
-    or a workset, where an environment absent from that set is not evidence of anything.
+
+def validate_env_order(order):
+    """`order`, or `SystemExit` unless it maps env -> list of env-name strings.
+
+    Guards a bare string predecessor, which would otherwise be iterated character by
+    character into an ordering nobody wrote, a non-mapping value, which reaches the graph
+    builder as a raw `AttributeError`, and a cycle, which has no topological order at all.
+    No caller reaches the graph builder with an unchecked order.
     """
+    if not isinstance(order, dict):
+        raise SystemExit(
+            "::error::env_order must be a mapping of env -> [predecessor envs], "
+            f"got {type(order).__name__} ({order!r})"
+        )
+    for env, preds in order.items():
+        if env in _TOP_KEYS:
+            raise SystemExit(
+                f"::error::env_order[{env!r}] names a top-level setting, not an "
+                "environment. A scalar written below a [table] header lands inside that "
+                f"table, so `{env} = ...` after [env_order] becomes an ordering entry "
+                "instead of a top-level setting. Move it above the first header in "
+                f"{CONFIG_PATH}."
+            )
+        _validate_predecessors(env, preds)
+    # After the shape checks, or the sorter consumes a string predecessor character by character.
+    try:
+        graphlib.TopologicalSorter(order).prepare()
+    except graphlib.CycleError as exc:
+        cycle = " -> ".join(exc.args[1])
+        raise SystemExit(
+            f"::error::env_order is cyclic: {cycle} — each of those must fully apply "
+            "before the next, so the ordering has no first environment and no apply path "
+            f"can sort it. Break the chain in {CONFIG_PATH}."
+        ) from exc
+    return order
+
+
+def validate_explicit_envs(envs):
+    """`envs`, or `SystemExit` unless it is a list of bare env-name strings.
+
+    Guards a bare string, which would otherwise be iterated character by character, a
+    non-list value, and an entry carrying a `-plan`/`-apply` environment suffix -- the
+    value is matched against the bare env name on the apply checks, so a suffixed entry
+    would skip nothing at all.
+    """
+    if not isinstance(envs, list):
+        raise SystemExit(
+            "::error::explicit_envs must be a list of env-name strings, "
+            f"got {type(envs).__name__} ({envs!r}); did you mean [{envs!r}]?"
+        )
+    bad = [e for e in envs if not isinstance(e, str)]
+    if bad:
+        raise SystemExit(
+            f"::error::explicit_envs elements must all be env-name strings; "
+            f"got non-string element(s) {bad!r}"
+        )
+    for e in envs:
+        for suffix in ("-plan", "-apply"):
+            if e.endswith(suffix):
+                raise SystemExit(
+                    f"::error::explicit_envs entry {e!r} carries the environment suffix "
+                    f"{suffix!r}; explicit_envs is matched against the bare logical env "
+                    f"name — write {e[: -len(suffix)]!r} instead."
+                )
+    return envs
+
+
+def validate_structure(table):
+    """Everything the file can be judged on by itself, or `SystemExit`.
+
+    All four top-level fields, so a "valid configuration" verdict cannot hide an ordering
+    or exclusion error until an apply reads it. `doctor` validates a branch's file with
+    this alone: the rules left to `validate` need a checkout, a matrix or a repository
+    variable, none of which a file on its own supplies.
+
+    `layout` is required: it is the only source of a cell's environment identity, so a
+    table without one leaves every cell with nothing to run as.
+    """
+    for key in sorted(table):
+        if key not in _TOP_KEYS:
+            raise SystemExit(
+                f"::error::{key} is not a setting this engine implements. "
+                f"{CONFIG_PATH} holds {', '.join(_TOP_KEYS)}."
+            )
     if "layout" not in table:
         raise SystemExit(
-            '::error::globals "shipmate" declares no layout, so no cell can resolve its '
-            'environment identity. Declare layout = "dry", "workspace" or "folder" in '
-            'globals "shipmate" on the default branch, which is where this table is read '
-            "from. Terramate drops an attribute it cannot evaluate rather than failing, so a "
-            "layout set to an expression that does not resolve disappears from the table."
+            f"::error::{CONFIG_PATH} declares no layout, so no cell can resolve its "
+            'environment identity. Declare layout = "dry", "workspace" or "folder" on the '
+            "default branch, which is where this table is read from. A scalar written below "
+            "a [table] header lands inside that table rather than at the top level, so "
+            "layout must come before the first header."
         )
-    # Key presence, not a truthy value: an explicit `layout = null` survives evaluation and
-    # must refuse here rather than read as undeclared.
+    # Key presence, not a truthy value: an empty layout is a declared layout holding a value
+    # no layout may hold, and must say so rather than read as undeclared.
     layout = table["layout"]
     if layout not in _LAYOUTS:
-        raise SystemExit(
-            f'::error::globals "shipmate" layout is {layout!r}; it must be one of '
-            f"{', '.join(_LAYOUTS)}."
-        )
+        raise SystemExit(f"::error::layout is {layout!r}; it must be one of {', '.join(_LAYOUTS)}.")
     environments = _mapping(table.get("environments", {}), "environments")
     for env in sorted(environments):
-        _check_environment(environments[env], env, shared_envs)
-    if layout == "dry":
+        _check_environment(environments[env], env)
+    validate_env_order(table.get("env_order", {}))
+    validate_explicit_envs(table.get("explicit_envs", []))
+    return table
+
+
+def validate(table, matrix_envs, shared_envs, all_envs=None):
+    """The table, or `SystemExit`. Structure first, then the rules needing run context.
+
+    `matrix_envs` is the environment set this operation resolved, `shared_envs` the
+    `SHIPMATE_SHARED_ENVS` listing, and `all_envs` the whole-tree environment scan where
+    one exists -- only the unused-entry warning reads it, and it is `None` on the paths
+    that scan only a changed set or a workset, where an environment absent from that set
+    is not evidence of anything.
+    """
+    validate_structure(table)
+    environments = table.get("environments", {})
+    _check_shared(environments, shared_envs)
+    if table["layout"] == "dry":
         _check_dry_coverage(environments, matrix_envs)
     if all_envs is not None:
         _report_unused(environments, all_envs)

@@ -3,14 +3,14 @@
 
 The pre-merge equivalent of deploy-detect, sourced like apply-detect: cells are
 the tree's stacks whose `apply / <stack> / <env>` check is on the head, each
-applying from the plan run its own check records, and
-`global.shipmate.env_order` buckets the pending ones into env-levels exactly as
-on the merge-deploy path. Env membership comes from stack tags
+applying from the plan run its own check records, and the environment table's
+`env_order` buckets the pending ones into env-levels exactly as on the
+merge-deploy path. Env membership comes from stack tags
 (build-matrix.env_membership) so check names are only ever constructed forward,
 never reverse-parsed.
 
 Three exclusions distinguish the bare form from deploy:
-- envs listed in `global.shipmate.explicit_envs` (typically prod) are removed
+- envs listed in the table's `explicit_envs` (typically prod) are removed
   before env-levels are built; their apply checks stay pending, so
   `shipmate / gate` keeps gating the merge until a targeted
   `shipmate apply <env>` completes them;
@@ -97,12 +97,12 @@ def main():
 
     pending = ad.filter_pending(cells, ad.completed_apply_names(lines, app_id))
 
-    order = eo.read_env_order()
+    order = table.get("env_order", {})
     pending_envs = {c["environment"] for c in pending}
     ungated = az.parse_ungated_envs(os.environ.get("SHIPMATE_UNGATED_ENVS", ""))
     decision = os.environ.get("SHIPMATE_REVIEW_DECISION", "")
     held = review_held(pending_envs, ungated, decision)
-    excluded, skipped = partition_envs(pending_envs, eo.read_explicit_envs() + held, order)
+    excluded, skipped = partition_envs(pending_envs, table.get("explicit_envs", []) + held, order)
     # An explicit env is "run `shipmate apply <env>`", a held one is "get a
     # review" -- two causes, two outputs, or the comment names the wrong fix.
     excluded = sorted(set(excluded) - set(held))
@@ -151,4 +151,8 @@ if __name__ == "__main__":
     try:
         main()
     except CycleError as e:
-        raise SystemExit(f"::error::dependency cycle in run-graph or env-order: {e}") from e
+        raise SystemExit(
+            f"::error::dependency cycle in the Terramate stack run-graph: {e}. Two or more "
+            "stacks order each other through `after`/`before`; break the loop in their stack "
+            "configuration."
+        ) from e

@@ -121,8 +121,8 @@ organization controls.
 ## Dynamic environments
 
 Environments are not hardcoded into workflow YAML. An environment is
-defined by its entry in the `globals "shipmate"` environment table, the GitHub
-Environments named after it (`<env>-plan` and `<env>-apply`, or one shared
+defined by its `[environments.<name>]` table in `.github/shipmate.toml`, the
+GitHub Environments named after it (`<env>-plan` and `<env>-apply`, or one shared
 `<env>` — `../CONTRACT.md` §Env model) plus tags applied to the stacks that
 belong to it. Adding a new environment is a data change (add the table entry,
 create its Environments, tag the relevant stacks), never a workflow code change.

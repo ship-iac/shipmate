@@ -126,33 +126,29 @@ repository renamed or recreated under an old name cannot inherit the trust.
 
 ## The environment table
 
-A cell resolves its role from the environment table, and from nothing else. Each
-environment's entry carries its region and an `aws` block naming the roles. The
-engine reads that block from the repository's default branch, so a pull request
-cannot choose which role its own plan assumes.
+A cell resolves its role from the environment table — `.github/shipmate.toml` —
+and from nothing else. Each environment's table carries its region and the `aws`
+fields naming the roles. The engine reads the file from the repository's default
+branch, so a pull request cannot choose which role its own plan assumes.
 [`../CONTRACT.md`](../CONTRACT.md) §Environment table is the schema of record;
 this is what it looks like for the AWS sample:
 
-```hcl
-globals "shipmate" {
-  layout = "dry"
+```toml
+layout = "dry"
 
-  environments = {
-    "dev-eu" = {
-      region = "eu-west-1"
-      aws = {
-        plan  = { role = "arn:aws:iam::9817:role/shipmate-plan" }
-        apply = {
-          role      = "arn:aws:iam::9817:role/shipmate-apply"
-          workloads = { net-edge = { role = "arn:aws:iam::9817:role/net-edge" } }
-        }
-      }
-    }
-  }
-}
+[environments.dev-eu]
+region         = "eu-west-1"
+aws.plan.role  = "arn:aws:iam::9817:role/shipmate-plan"
+aws.apply.role = "arn:aws:iam::9817:role/shipmate-apply"
+aws.apply.workloads.net-edge.role = "arn:aws:iam::9817:role/net-edge"
 ```
 
-Five things to know beyond the schema:
+Six things to know beyond the schema:
+
+- **Name the two tiers separately, always.** A single block-level `aws.role`
+  covers the plan path as well as the apply path, and the plan path is reachable
+  from any branch — see [`hardening.md`](hardening.md) §7–9, which has the whole
+  argument. It saves no lines either.
 
 - **`aws.region` inherits the environment's own `region`.** Set it separately
   only where the credentials step must authenticate against a region the IaC

@@ -61,3 +61,37 @@ def completed_names(apply_detect, monkeypatch, checks, app_id=APP_ID):
     return apply_detect.completed_apply_names(
         apply_detect._check_run_lines("acme/repo", HEAD), app_id
     )
+
+
+#: What a detect reads when a test names no table. `layout` is required, and `folder` derives
+#: no identity variables, so a row carries only the stamp and the tier.
+MINIMAL_TABLE = {"layout": "folder"}
+
+
+def stub_read_table(monkeypatch, modules, base=None, order=None, explicit=(), reads=None):
+    """Stub `read_table` on every `env-config` instance `modules` can reach, carrying `order`
+    and `explicit` as the table fields they are.
+
+    Shared by the two ordering detects so neither can drift back to stubbing `env-order`'s
+    readers: a double there answers whatever the test asked for even when the caller has
+    stopped passing the mapping at all. One entry is appended to `reads` per call, which is
+    how the one-parse-per-operation count is taken -- and the count needs every instance,
+    because `_load` re-executes a module per caller, so a detect and the `env-order` it loads
+    hold two `env-config` objects and a stub on one of them cannot see a read through the
+    other.
+    """
+    # Annotated: the table's values are mixed by design -- a string layout, a mapping of
+    # orderings, a list of exclusions -- and `MINIMAL_TABLE` alone infers `dict[str, str]`.
+    cfg: dict[str, object] = dict(base or MINIMAL_TABLE)
+    if order is not None:
+        cfg["env_order"] = dict(order)
+    if explicit:
+        cfg["explicit_envs"] = list(explicit)
+
+    def read_table(run=None):
+        if reads is not None:
+            reads.append(cfg)
+        return dict(cfg)
+
+    for module in modules:
+        monkeypatch.setattr(module.bm.ec, "read_table", read_table)
