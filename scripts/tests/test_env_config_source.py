@@ -132,7 +132,7 @@ def test_the_apply_ordering_comes_from_the_default_branch_table(repo, monkeypatc
     work, _ = repo
     monkeypatch.chdir(work)
     monkeypatch.setattr(ec, "_default_branch", lambda run: "main")
-    assert eo.read_env_order(ec.read_table()) == {"prod": ["dev-eu"]}
+    assert ec.read_table()["env_order"] == {"prod": ["dev-eu"]}
 
 
 def _fake_run(recorder=None, git=None):

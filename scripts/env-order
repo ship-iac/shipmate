@@ -31,24 +31,6 @@ bm = _load("build-matrix")
 wv = _load("waves")
 
 
-def read_env_order(table):
-    """env -> [predecessor envs] from `table`, or {} when the key is absent.
-
-    Validated here so the refusal lands before the first wave is built rather than in the
-    middle of one; no caller reaches the graph builder with an unchecked order."""
-    return bm.ec.validate_env_order(table.get("env_order", {}))
-
-
-def read_explicit_envs(table):
-    """Envs excluded from a bare `shipmate apply` (they must be targeted by name:
-    `shipmate apply <env>`), or [] when the key is absent.
-
-    This validation is the only one the exclusion list gets: `apply-all-detect.partition_envs`
-    intersects it as a set, so a bare `"prod"` would become four single characters, intersect
-    to nothing, exclude nothing and let prod apply."""
-    return bm.ec.validate_explicit_envs(table.get("explicit_envs", []))
-
-
 def blocked_envs(order, unavailable, envs):
     """Envs in `envs` with an unavailable env among their transitive
     predecessors (per `order`). The bare-apply path skips these with a notice:

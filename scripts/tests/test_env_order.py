@@ -8,18 +8,17 @@ def _boom(*args, **kwargs):
     raise AssertionError(f"env-order ran a subprocess: {args}")
 
 
-def test_the_ordering_fields_come_from_the_table(monkeypatch):
-    """env-order's own Terramate evaluation is gone: both fields come from the mapping the
-    operation already loaded. The returned values are populated, so a reader that stopped
-    reading the table and returned its empty default reds here. Both shared `_run` wrappers
-    raise as well -- the realistic regression is a reader fetching through one of them, not a
+def test_the_level_computation_reads_nothing(monkeypatch):
+    """env-order's own Terramate evaluation is gone: the ordering map arrives as an argument
+    from the mapping the operation already loaded. Both shared `_run` wrappers raise -- the
+    realistic regression is this module fetching its own order through one of them, not a
     hand-rolled `subprocess` call in a module that imports no such thing.
+
+    Mutation: add `bm.ec.read_table()` to `env_levels` -- `_boom` fires.
     """
     monkeypatch.setattr(eo.bm, "_run", _boom)
     monkeypatch.setattr(eo.bm.ec, "_run", _boom)
-    table = {"layout": "folder", "env_order": {"prod": ["dev-eu"]}, "explicit_envs": ["prod"]}
-    assert eo.read_env_order(table) == {"prod": ["dev-eu"]}
-    assert eo.read_explicit_envs(table) == ["prod"]
+    assert eo.env_levels({"prod": ["dev-eu"]}, ["dev-eu", "prod"]) == {"dev-eu": 0, "prod": 1}
 
 
 def test_linear_order():
@@ -80,10 +79,6 @@ def test_waves_by_env_level_refuses_an_env_beyond_the_cap():
         )
 
 
-def test_read_env_order_absent_key_is_empty():
-    assert eo.read_env_order({"layout": "folder"}) == {}
-
-
 def test_env_levels_rejects_string_predecessor():
     # HCL author typo, "dev-eu" instead of ["dev-eu"]: it must not silently iterate the string
     # character by character.
@@ -99,15 +94,6 @@ def test_env_levels_rejects_non_dict_order():
 def test_env_levels_rejects_non_str_predecessor_element():
     with pytest.raises(SystemExit):
         eo.env_levels({"dev-us": ["dev-eu", 123]}, ["dev-eu", "dev-us"])
-
-
-def test_read_env_order_revalidates_the_field():
-    """The third of the three checks on an order, so a bad one is refused before the first
-    wave is built rather than in the middle of one. `env_levels` and `blocked_envs` hold the
-    other two, which is why this one is belt and the exclusion list's is the whole braces.
-    Mutation: drop the `validate_env_order` call -- the string is returned as written."""
-    with pytest.raises(SystemExit):
-        eo.read_env_order({"env_order": {"dev-us": "dev-eu"}})
 
 
 def test_waves_by_env_level_buckets_and_orders():
@@ -155,20 +141,6 @@ def test_write_env_level_waves_emits_waves_and_empty_flags(tmp_path):
     assert 'envlevel0_waves={"wave0": [{"stack": "s", "environment": "dev-eu"}]' in lines[0]
     assert "envlevel0_empty=false" in lines
     assert "envlevel1_empty=true" in lines
-
-
-def test_read_explicit_envs_absent_key_is_empty():
-    assert eo.read_explicit_envs({"layout": "folder"}) == []
-
-
-def test_read_explicit_envs_revalidates_the_field():
-    """The only check the exclusion list gets on this path: nothing downstream validates it,
-    and `apply-all-detect.partition_envs` intersects it as a set, so a bare string becomes
-    single characters that exclude nothing. The message cases themselves are
-    `test_env_config_schema.py`'s.
-    Mutation: drop the `validate_explicit_envs` call -- the string is returned as written."""
-    with pytest.raises(SystemExit):
-        eo.read_explicit_envs({"explicit_envs": "prod"})
 
 
 def test_blocked_envs_direct_predecessor():

@@ -97,12 +97,12 @@ def main():
 
     pending = ad.filter_pending(cells, ad.completed_apply_names(lines, app_id))
 
-    order = eo.read_env_order(table)
+    order = table.get("env_order", {})
     pending_envs = {c["environment"] for c in pending}
     ungated = az.parse_ungated_envs(os.environ.get("SHIPMATE_UNGATED_ENVS", ""))
     decision = os.environ.get("SHIPMATE_REVIEW_DECISION", "")
     held = review_held(pending_envs, ungated, decision)
-    excluded, skipped = partition_envs(pending_envs, eo.read_explicit_envs(table) + held, order)
+    excluded, skipped = partition_envs(pending_envs, table.get("explicit_envs", []) + held, order)
     # An explicit env is "run `shipmate apply <env>`", a held one is "get a
     # review" -- two causes, two outputs, or the comment names the wrong fix.
     excluded = sorted(set(excluded) - set(held))
