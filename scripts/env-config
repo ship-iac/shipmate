@@ -9,6 +9,7 @@ a fork pull request is refused before it plans.
 
 import graphlib
 import os
+import re
 import subprocess
 import sys
 
@@ -123,7 +124,15 @@ _STRUCTURAL = ("plan", "apply", "workloads")
 #: Everything the file may declare at its top level. Also the names reserved inside
 #: `env_order`, which is keyed by environment name and would otherwise accept a
 #: misplaced control as an ordering entry.
-_TOP_KEYS = ("layout", "environments", "env_order", "explicit_envs")
+_TOP_KEYS = ("layout", "environments", "env_order", "explicit_envs", "gate", "version")
+
+#: Everything a `[gate]` table may declare.
+_GATE_KEYS = ("approvers_team", "ungated_envs")
+
+#: Env names come from Terramate `env/<name>` tags, so the charset is comment-parse's env
+#: grammar plus `_`, a legal tag character no `shipmate apply <env>` can name. Both cases are
+#: accepted; the readers that compare an env name against this list do so case-insensitively.
+_ENV_ENTRY = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*")
 
 
 def _mapping(value, where):
@@ -385,40 +394,90 @@ def validate_env_order(order):
     return order
 
 
-def validate_explicit_envs(envs):
+def validate_env_name_list(envs, key):
     """`envs`, or `SystemExit` unless it is a list of bare env-name strings.
 
-    Guards a bare string, which would otherwise be iterated character by character, a
-    non-list value, and an entry carrying a `-plan`/`-apply` environment suffix -- the
-    value is matched against the bare env name on the apply checks, so a suffixed entry
-    would skip nothing at all.
+    The one env-name rule, shared by `explicit_envs`, `gate.ungated_envs` and the
+    `SHIPMATE_UNGATED_ENVS` variable that `scripts/authorize` reads. `key` names the setting
+    in every message. Guards a bare string, which would otherwise be iterated character by
+    character, a non-list value, an entry no environment name can match, and an entry
+    carrying a `-plan`/`-apply` environment suffix -- each of the last two is matched against
+    the bare logical env name, matches nothing, and so excludes or exempts nothing while
+    reading as if it did.
+
+    Charset before suffix: a suffixed name passes the charset, so the two are separate
+    checks, and this order gives `"dev eu-plan"` the message about its space.
     """
     if not isinstance(envs, list):
         raise SystemExit(
-            "::error::explicit_envs must be a list of env-name strings, "
+            f"::error::{key} must be a list of env-name strings, "
             f"got {type(envs).__name__} ({envs!r}); did you mean [{envs!r}]?"
         )
     bad = [e for e in envs if not isinstance(e, str)]
     if bad:
         raise SystemExit(
-            f"::error::explicit_envs elements must all be env-name strings; "
+            f"::error::{key} elements must all be env-name strings; "
             f"got non-string element(s) {bad!r}"
         )
     for e in envs:
+        if not _ENV_ENTRY.fullmatch(e):
+            raise SystemExit(
+                f"::error::{key} entry {e!r} is not an environment name; entries are bare "
+                f"logical env names (letters, digits, '-' and '_'), with no quotes, spaces "
+                f"or path separators."
+            )
         for suffix in ("-plan", "-apply"):
             if e.endswith(suffix):
                 raise SystemExit(
-                    f"::error::explicit_envs entry {e!r} carries the environment suffix "
-                    f"{suffix!r}; explicit_envs is matched against the bare logical env "
-                    f"name — write {e[: -len(suffix)]!r} instead."
+                    f"::error::{key} entry {e!r} carries the environment suffix "
+                    f"{suffix!r}; {key} is matched against the bare logical env name — "
+                    f"write {e[: -len(suffix)]!r} instead."
                 )
     return envs
+
+
+def validate_explicit_envs(envs):
+    """`envs`, or `SystemExit`: the shared env-name rule, reported under this key."""
+    return validate_env_name_list(envs, "explicit_envs")
+
+
+def validate_gate(gate):
+    """One `[gate]` table's shape, or `SystemExit`.
+
+    Strict keys, as an environment entry is: a misspelled gate key leaves the setting at its
+    default while the repository believes it declared one.
+    """
+    gate = _mapping(gate, "gate")
+    for key in sorted(gate):
+        if key not in _GATE_KEYS:
+            raise SystemExit(
+                f"::error::gate.{key} is not a key this engine implements. "
+                f"The gate table holds {', '.join(_GATE_KEYS)}."
+            )
+    if "approvers_team" in gate:
+        _string(gate["approvers_team"], "gate.approvers_team")
+    if "ungated_envs" in gate:
+        validate_env_name_list(gate["ungated_envs"], "gate.ungated_envs")
+    return gate
+
+
+def _check_version(table):
+    """Refuse a file declaring a schema version this engine does not implement.
+
+    A bool is excluded explicitly: `True == 1` in Python, so a plain comparison reads
+    `version = true` as version 1.
+    """
+    found = table["version"]
+    if not (isinstance(found, int) and not isinstance(found, bool) and found == 1):
+        raise SystemExit(
+            f"::error::version is {found!r}; this engine implements version 1 of {CONFIG_PATH}."
+        )
 
 
 def validate_structure(table):
     """Everything the file can be judged on by itself, or `SystemExit`.
 
-    All four top-level fields, so a "valid configuration" verdict cannot hide an ordering
+    Every top-level field, so a "valid configuration" verdict cannot hide an ordering
     or exclusion error until an apply reads it. `doctor` validates a branch's file with
     this alone: the rules left to `validate` need a checkout, a matrix or a repository
     variable, none of which a file on its own supplies.
@@ -432,6 +491,8 @@ def validate_structure(table):
                 f"::error::{key} is not a setting this engine implements. "
                 f"{CONFIG_PATH} holds {', '.join(_TOP_KEYS)}."
             )
+    if "version" in table:
+        _check_version(table)
     if "layout" not in table:
         raise SystemExit(
             f"::error::{CONFIG_PATH} declares no layout, so no cell can resolve its "
@@ -450,6 +511,7 @@ def validate_structure(table):
         _check_environment(environments[env], env)
     validate_env_order(table.get("env_order", {}))
     validate_explicit_envs(table.get("explicit_envs", []))
+    validate_gate(table.get("gate", {}))
     return table
 
 

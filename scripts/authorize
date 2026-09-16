@@ -24,12 +24,13 @@ applies nothing, so it must never carry this record).
 
 import json
 import os
-import re
 
-#: Env names come from Terramate `env/<name>` tags, so the charset is comment-parse's env
-#: grammar plus `_`, a legal tag character no `shipmate apply <env>` can name. Both cases are
-#: accepted, since the match itself is case-insensitive.
-_ENV_ENTRY = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*")
+from _shipmate import _load
+
+#: The env-name rule this variable shares with `explicit_envs` and `gate.ungated_envs` in
+#: the configuration file. `env-config` loads no sibling of its own, so reaching it from
+#: here terminates; it reads no file and runs no command at import.
+ec = _load("env-config")
 
 
 def parse_ungated_envs(raw):
@@ -52,20 +53,7 @@ def parse_ungated_envs(raw):
                 f"whitespace; the list is comma-separated with no spaces — "
                 f"write {e.strip()!r}."
             )
-        if not _ENV_ENTRY.fullmatch(e):
-            raise SystemExit(
-                f"::error::SHIPMATE_UNGATED_ENVS entry {e!r} is not an "
-                f"environment name; entries are bare logical env names "
-                f"(letters, digits, '-' and '_'), comma-separated, with no "
-                f"quotes, spaces or path separators."
-            )
-        for suffix in ("-plan", "-apply"):
-            if e.endswith(suffix):
-                raise SystemExit(
-                    f"::error::SHIPMATE_UNGATED_ENVS entry {e!r} carries the "
-                    f"environment suffix {suffix!r}; the list is matched against "
-                    f"the bare logical env name — write {e[: -len(suffix)]!r} instead."
-                )
+    ec.validate_env_name_list(envs, "SHIPMATE_UNGATED_ENVS")
     return frozenset(e.casefold() for e in envs)
 
 
