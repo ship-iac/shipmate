@@ -130,8 +130,10 @@ _TOP_KEYS = ("layout", "environments", "env_order", "explicit_envs", "gate", "ve
 _GATE_KEYS = ("approvers_team", "ungated_envs")
 
 #: Env names come from Terramate `env/<name>` tags, so the charset is comment-parse's env
-#: grammar plus `_`, a legal tag character no `shipmate apply <env>` can name. Both cases are
-#: accepted; the readers that compare an env name against this list do so case-insensitively.
+#: grammar plus `_`, a legal tag character no `shipmate apply <env>` can name. Both cases
+#: match, and the readers disagree: SHIPMATE_UNGATED_ENVS is casefolded on both sides, while
+#: `explicit_envs` is intersected case-sensitively in `apply-all-detect:partition_envs`, so an
+#: entry whose case differs from its environment excludes nothing.
 _ENV_ENTRY = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*")
 
 

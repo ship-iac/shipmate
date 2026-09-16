@@ -4373,13 +4373,13 @@ def test_a_valid_verdict_names_the_checks_it_did_not_run(monkeypatch):
         (
             doctor.NOTICE,
             "`.github/shipmate.toml` at the commit under examination parses, and passes "
-            "every check a file can be judged on by itself: its top-level keys, `layout`, "
-            "the environment entries, `env_order` and `explicit_envs`. Not checked here, "
-            "for want of a plan matrix, a whole-tree environment scan and the "
-            "SHIPMATE_SHARED_ENVS variable: `dry`-layout coverage of the planned "
-            "environments, the shared-environment rule, and entries that no stack tags "
-            "\u2014 `detect` checks each of those on the runs where it applies. Execution "
-            "reads the default branch's copy of this file, never this branch's.",
+            "every check a file can be judged on by itself: its top-level keys, `version`, "
+            "`layout`, the environment entries, `env_order`, `explicit_envs` and the "
+            "`[gate]` table. Not checked here, for want of a plan matrix, a whole-tree "
+            "environment scan and the SHIPMATE_SHARED_ENVS variable: `dry`-layout coverage "
+            "of the planned environments, the shared-environment rule, and entries that no "
+            "stack tags \u2014 `detect` checks each of those on the runs where it applies. "
+            "Execution reads the default branch's copy of this file, never this branch's.",
         ),
         (
             doctor.NOTICE,
