@@ -530,9 +530,10 @@ closed.
   twice"*. Pick one notation per environment. Duplicate keys refuse the same
   way, where the old form let a second definition silently win.
 
-A leading UTF-8 byte-order mark refuses: `tomllib` rejects it, and both readers
-— the run's `git show` and `shipmate doctor`'s contents-API read — deliver those
-bytes and reach the same verdict rather than one of them stripping it.
+A leading UTF-8 byte-order mark refuses: `tomllib` rejects it, and both read
+mechanisms — the cell paths' `git show`, and the contents-API read that
+`shipmate doctor` and comment-ops' gate resolve share — deliver those bytes and
+reach the same verdict rather than one of them stripping it.
 
 **Three tiers, one resolution rule.** `plan`, `apply` and `workloads` are
 structural keys reserved at every level; everything else inside a provider block

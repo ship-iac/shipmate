@@ -122,8 +122,10 @@ def _gh_json(path, run=None):
 def contents_text(path, fetch=None):
     """One file's decoded text from the contents API, or None when it cannot be read.
 
-    The reader for a job with no checkout: an engine job holding the GitHub App key
-    executes no repository content, so it has no working tree for `git show`.
+    The read for a job with no checkout, which is every job that decides something before a
+    cell runs: `doctor`'s probes and comment-ops' gate resolve. Neither has a working tree
+    for `git show`, and an engine job holding the GitHub App key executes no repository
+    content on purpose.
 
     Anything that is not a base64 blob is UNREADABLE, not empty: a >1 MB file answers with
     `encoding: "none"` and empty `content`, which would otherwise decode to a readable
@@ -187,7 +189,7 @@ _GATE_KEYS = ("approvers_team", "ungated_envs")
 
 #: Env names come from Terramate `env/<name>` tags, so the charset is comment-parse's env
 #: grammar plus `_`, a legal tag character no `shipmate apply <env>` can name. Both cases
-#: match, and the readers disagree: SHIPMATE_UNGATED_ENVS is casefolded on both sides, while
+#: match, and the readers disagree: `gate.ungated_envs` is casefolded on both sides, while
 #: `explicit_envs` is intersected case-sensitively in `apply-all-detect:partition_envs`, so an
 #: entry whose case differs from its environment excludes nothing.
 _ENV_ENTRY = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*")
@@ -350,7 +352,7 @@ def _check_shared(environments, shared_envs):
     """The one environment rule that needs context the file does not carry.
 
     Membership comes from the `SHIPMATE_SHARED_ENVS` repository variable, so
-    `validate_structure` cannot decide it and the structural-only caller skips it.
+    `validate_structure` cannot decide it and the structural-only callers skip it.
 
     Runs only after `validate_structure`, its sole caller's first step, which is what has
     already proven every entry and every `aws` block a mapping.
@@ -460,7 +462,7 @@ def validate_env_name_list(envs, key):
     """`envs`, or `SystemExit` unless it is a list of bare env-name strings.
 
     The one env-name rule, shared by `explicit_envs`, `gate.ungated_envs` and the
-    `SHIPMATE_UNGATED_ENVS` variable that `scripts/authorize` reads. `key` names the setting
+    `SHIPMATE_UNGATED_ENVS` variable `gate_ungated_envs` falls back to. `key` names the setting
     in every message. Guards a bare string, which would otherwise be iterated character by
     character, a non-list value, an entry no environment name can match, and an entry
     carrying a `-plan`/`-apply` environment suffix -- each of the last two is matched against
@@ -614,9 +616,9 @@ def validate_structure(table):
     """Everything the file can be judged on by itself, or `SystemExit`.
 
     Every top-level field, so a "valid configuration" verdict cannot hide an ordering
-    or exclusion error until an apply reads it. `doctor` validates a branch's file with
+    or exclusion error until an apply reads it. `doctor` and `gate-config` validate with
     this alone: the rules left to `validate` need a checkout, a matrix or a repository
-    variable, none of which a file on its own supplies.
+    variable, none of which either of them has.
 
     `layout` is required: it is the only source of a cell's environment identity, so a
     table without one leaves every cell with nothing to run as.
