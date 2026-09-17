@@ -12,7 +12,10 @@ repository changes nothing.
 
 Flags:
 
-  --team          GitHub team slug whose members may apply and unlock.
+  --team          GitHub team slug whose members may apply and unlock. Not
+                  written anywhere: it belongs in `.github/shipmate.toml`,
+                  which this script does not write, so it is printed in the
+                  closing checklist instead.
   --app-id        the shipmate App's numeric id.
   --key           path to the App's PEM private key (its text, not the path,
                   is what gets stored).
@@ -23,10 +26,9 @@ Flags:
                   when both are set.
   --vars-at-org   comma-separated variable names already set at organization
                   level, so no repository copy is written for them. Accepts
-                  SHIPMATE_APP_ID and SHIPMATE_APPROVERS_TEAM only. Every
-                  name is verified against the organization variables that
-                  reach this repository, and a leftover repository copy is
-                  reported.
+                  SHIPMATE_APP_ID only. The name is verified against the
+                  organization variables that reach this repository, and a
+                  leftover repository copy is reported.
   --dry-run       report `would <verb>` for every change and run no write.
 
 Exit codes: 0 clean, 2 at least one item differs, 1 a refusal or a failed
@@ -49,7 +51,7 @@ from _shipmate import _load
 
 ENGINE_ENV = "shipmate-engine"
 GATE = "shipmate / gate"
-AT_ORG_NAMES = ("SHIPMATE_APP_ID", "SHIPMATE_APPROVERS_TEAM")
+AT_ORG_NAMES = ("SHIPMATE_APP_ID",)
 #: Written by releases before the engine pinned its own tool versions; now inert.
 SUPERSEDED_NAMES = ("TERRAMATE_VERSION", "TOFU_VERSION")
 REDACTED = "***"
@@ -253,9 +255,12 @@ def _at_org(raw):
     unrecognised name would filter nothing and still report success. TERRAMATE_VERSION and
     TOFU_VERSION are excluded because nothing writes or reads them any more -- the release's
     own VERSIONS file decides both -- so `_refuse_org_assertion_mismatch` would raise a
-    `KeyError` looking the name up in `_writable_variables`. SHIPMATE_SHARED_ENVS is
-    excluded because `--shared` has to be passed either way. Uppercased because the API
-    uppercases variable names and every lookup here is on an uppercased key.
+    `KeyError` looking the name up in `_writable_variables`. SHIPMATE_APPROVERS_TEAM is
+    excluded for the same reason: the approvers team is declared in
+    `.github/shipmate.toml`, so nothing writes a variable of that name any more.
+    SHIPMATE_SHARED_ENVS is excluded because `--shared` has to be passed either way.
+    Uppercased because the API uppercases variable names and every lookup here is on an
+    uppercased key.
     """
     names = {name.upper() for name in _split(raw)}
     unknown = sorted(names - set(AT_ORG_NAMES))
@@ -523,7 +528,6 @@ def _writable_variables(ctx):
     """{name: (value, the flag it came from)}, in the order they are written."""
     wanted = {
         "SHIPMATE_APP_ID": (ctx["app_id"], "--app-id"),
-        "SHIPMATE_APPROVERS_TEAM": (ctx["team"], "--team"),
     }
     if ctx["shared"]:
         wanted["SHIPMATE_SHARED_ENVS"] = (",".join(sorted(ctx["shared"])), "--shared")
@@ -700,8 +704,8 @@ def _reconcile_variables(ctx):
     """Set the repository variables the workflows read.
 
     A variable that exists with another value is reported, never overwritten: a
-    consumer naming another App or another approvers team is making a deliberate
-    choice, and moving it silently is this script exceeding its mandate.
+    consumer naming another App or another set of shared environments is making a
+    deliberate choice, and moving it silently is this script exceeding its mandate.
     """
     existing = ctx["variables"]
     for name, (value, source) in _wanted_variables(ctx).items():
@@ -957,7 +961,16 @@ def _checklist(ctx):
         "  `-plan` / `-apply` half. Top-level settings go above the first table header: a",
         "  scalar written below one lands inside that table instead.",
         "",
+        "  `[gate] approvers_team` names the team whose members may drive shipmate by pull",
+        f"  request comment — `{ctx['team']}` here. A whole table header goes above the first",
+        "  `[environments.*]` one for the same reason a scalar does. Add it only once this",
+        "  repository's pin names an engine that accepts the key: an older one refuses the",
+        "  whole file, and moving a pin is not this script's job.",
+        "",
         '    layout = "dry"',
+        "",
+        "    [gate]",
+        f'    approvers_team = "{ctx["team"]}"',
         "",
         "    [environments.dev-eu]",
         '    region         = "eu-west-1"',

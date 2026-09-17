@@ -41,6 +41,7 @@ def _ctx(**over):
         "envs": set(_ENVS),
         "envs_available": True,
         "team": None,
+        "report_mode": True,
         "app_permissions_checked": False,
         "app_permission_error": "",
         "head_sha": _HEAD,
@@ -1447,37 +1448,116 @@ def test_release_lookup_restores_gh_token_unset(monkeypatch):
     assert "GH_TOKEN" not in os.environ
 
 
+#: The design's canonical file with a `[gate]` table, placed above the first header the way
+#: `onboard`'s checklist prints it. Built from that file rather than retyped, so the fixture
+#: cannot drift from the bytes the docs publish; an insertion that found no anchor leaves the
+#: key undeclared, which every assertion below reads as a lookup of the wrong team.
+_GATE_TABLE = CANONICAL.replace(
+    "[env_order]", '[gate]\napprovers_team = "platform"\n\n[env_order]', 1
+)
+
+
+def _team_probe(monkeypatch, team=None, table=CANONICAL, found=None, report_mode=True):
+    """(findings, the team lookups the probe made) over one configuration file.
+
+    The recorded paths are the point. `_team_warnings` returns `[]` both when the team
+    resolves and when nothing was ever checked, so an empty finding list on its own cannot
+    tell a working probe from one that silently stopped running.
+    """
+    looked_up = []
+
+    def gh(path):
+        if path == _CONFIG_READ:
+            return _wf_file(table)
+        looked_up.append(path)
+        if isinstance(found, BaseException):
+            raise found
+        return {"slug": "ops"} if found is None else found
+
+    monkeypatch.setattr(doctor, "_gh_json", gh)
+    return doctor._team_warnings(_ctx(team=team, report_mode=report_mode)), looked_up
+
+
+#: The remedy, whole and hand-written: it is the only line telling an operator where the
+#: team that governs is declared, and naming the retired variable sends them to a value no
+#: apply reads.
+def _unresolved(team):
+    return (
+        doctor.WARNING,
+        f"approvers team `{team}` does not resolve in org `o` — every `shipmate apply` "
+        'will be rejected as "not a team member". Check `[gate] approvers_team` in '
+        "`.github/shipmate.toml` and that the App has members:read.",
+    )
+
+
 def test_team_probe_skipped_without_team(monkeypatch):
-    monkeypatch.setattr(doctor, "_gh_json", lambda path: (_ for _ in ()).throw(AssertionError))
-    assert doctor._team_warnings(_ctx(team=None)) == []
+    """No `[gate]` table and no variable: nothing declares a team, so there is nothing to
+    look up and no finding to make.
+
+    Mutation: probe unconditionally -- the lookup path is recorded as `orgs/o/teams/`.
+    """
+    assert _team_probe(monkeypatch) == ([], [])
+
+
+def test_the_team_probe_reads_the_file_not_the_variable(monkeypatch):
+    """The file is what comment-ops authorizes against, so a probe reading the variable
+    reports on a value no apply uses -- it can call a typo'd file healthy, or warn about a
+    stale variable nothing reads. The lookup is compared whole, not merely counted.
+
+    Mutation: resolve the team as `ctx["team"]` -- the probe asks for `ops`.
+    """
+    out, looked_up = _team_probe(monkeypatch, team="ops", table=_GATE_TABLE)
+    assert looked_up == ["orgs/o/teams/platform"]
+    assert out == []
+
+
+def test_the_team_probe_survives_the_variable_being_deleted(monkeypatch):
+    """The migration's end state: the key is declared and SHIPMATE_APPROVERS_TEAM is gone,
+    so `ctx["team"]` is None. The probe that exists to catch a typo'd team must not go
+    silent exactly when the team moved.
+
+    Mutation: restore the `if not ctx["team"]: return []` short circuit -- no lookup is
+    recorded, and a reader cannot tell that from a team that resolved.
+    """
+    out, looked_up = _team_probe(monkeypatch, team=None, table=_GATE_TABLE)
+    assert looked_up == ["orgs/o/teams/platform"]
+    assert out == []
+
+
+def test_the_team_probe_does_not_run_on_the_plan_path(monkeypatch):
+    """`actions/summary` mints its App token without `members: read`, so the lookup fails
+    there for every repository alike. A probe that ran would report every declared team as
+    unresolvable on every plan run -- a warning about a correctly configured repository.
+
+    Mutation: drop the `report_mode` guard.
+    """
+    assert _team_probe(monkeypatch, team="ops", table=_GATE_TABLE, report_mode=False) == ([], [])
 
 
 def test_unresolvable_team_warned(monkeypatch):
-    def boom(path):
-        assert path == "orgs/o/teams/ops-tem"
-        raise SystemExit("404 Not Found")
+    """The fallback's own path: the file declares no `[gate]`, so the variable still
+    decides, and the remedy names the file key the operator should be declaring instead.
 
-    monkeypatch.setattr(doctor, "_gh_json", boom)
-    out = doctor._team_warnings(_ctx(team="ops-tem"))
-    assert len(out) == 1
-    assert out[0][0] == doctor.WARNING
-    assert "ops-tem" in out[0][1]
-    assert "SHIPMATE_APPROVERS_TEAM" in out[0][1]
+    Mutations: return the file's absent key rather than the fallback -- the probe goes
+    silent on the mid-migration repository it exists for; name the variable in the remedy.
+    """
+    out, looked_up = _team_probe(monkeypatch, team="ops-tem", found=SystemExit("404 Not Found"))
+    assert looked_up == ["orgs/o/teams/ops-tem"]
+    assert out == [_unresolved("ops-tem")]
 
 
 def test_resolvable_team_silent(monkeypatch):
-    monkeypatch.setattr(doctor, "_gh_json", lambda path: {"slug": "ops"})
-    assert doctor._team_warnings(_ctx(team="ops")) == []
+    out, looked_up = _team_probe(monkeypatch, team="ops")
+    assert looked_up == ["orgs/o/teams/ops"]
+    assert out == []
 
 
 def test_team_response_without_slug_warned(monkeypatch):
     """A 200 response that isn't actually the team resource (e.g. the team-slug
     input carrying a path segment that happens to hit some other list endpoint)
     must not be mistaken for a resolved team."""
-    monkeypatch.setattr(doctor, "_gh_json", lambda path: {"id": 1})
-    out = doctor._team_warnings(_ctx(team="ops"))
-    assert len(out) == 1
-    assert out[0][0] == doctor.WARNING
+    out, _looked_up = _team_probe(monkeypatch, team="ops", found={"id": 1})
+    assert out == [_unresolved("ops")]
 
 
 def test_one_line_flattens_and_pins_the_truncation_boundary():

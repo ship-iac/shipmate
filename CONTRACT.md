@@ -870,9 +870,9 @@ too — the two are separate statements, since a run that has not finished has
 recorded nothing yet while a run that could not be read may have recorded
 plenty. Only fourteen of the sixteen
 probes can produce a finding from the plan path's own `annotate`-mode
-invocation: the approvers-team probe needs the `SHIPMATE_TEAM` environment
-variable, which the plan path does not supply, so it silently returns
-nothing; the
+invocation: the approvers-team probe runs only in `report` mode, because the
+plan path's App token is minted without `members: read` and could not look a
+team up; the
 App-permission-drift probe only has something to report when a
 full-manifest permission-set mint was actually attempted, which only
 `shipmate doctor` does. Both probes are effectively comment-path-only —

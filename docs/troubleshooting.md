@@ -144,8 +144,9 @@ own and any other Actions workflow run on that commit; third-party-app-authored
 check runs are excluded.
 
 Only fourteen of the sixteen probes can produce a finding from the plan path's
-own `annotate`-mode run (`actions/summary`). The approvers-team probe needs the
-`SHIPMATE_TEAM` environment variable, which the plan path does not supply, and
+own `annotate`-mode run (`actions/summary`). The approvers-team probe runs only
+in `report` mode, because the plan path's App token is minted without
+`members: read` and could not look a team up, and
 the App-permission-drift probe only has something to report when a
 full-manifest permission-set mint was actually attempted, which only
 `shipmate doctor` does. Both are effectively comment-path-only. `doctor`

@@ -49,6 +49,8 @@ Probes:
 - GitHub App installation permission drift.
 """
 
+import contextlib
+import io
 import json
 import os
 import pathlib
@@ -2127,14 +2129,42 @@ def config_status(ctx):
     return [] if table is None else [(NOTICE, CONFIG_VALID), *_config_defaults(table)]
 
 
+def _governing_team(ctx):
+    """The approvers team an apply is actually authorized against: `[gate] approvers_team`
+    in the file at the commit under examination, or the SHIPMATE_APPROVERS_TEAM variable
+    while the migration fallback still reads it.
+
+    Resolved the way comment-ops resolves it, so the probe cannot report on a value no
+    apply reads: a repository declaring the key authorizes against the file whatever the
+    variable says, and one that has deleted the variable has no other source.
+
+    The fallback's migration warning is swallowed. stdout carries the rendered report, and
+    a workflow command written into it lands in the pull request comment.
+    """
+    table, _ = _config_table(ctx)
+    fallback = ctx["team"] or ""
+    if table is None:
+        return fallback
+    with contextlib.redirect_stdout(io.StringIO()):
+        return bm.ec.gate_approvers_team(table, fallback)
+
+
 def _team_warnings(ctx):
-    """A typo'd or cross-org SHIPMATE_APPROVERS_TEAM surfaces today only as
-    every apply being rejected "not a team member" — one API call names it."""
-    if not ctx["team"]:
+    """A typo'd or cross-org approvers team surfaces today only as every apply being
+    rejected "not a team member" — one API call names it.
+
+    Comment-path-only, and by the token rather than by the value: the plan path's App
+    token is minted without `members: read` (actions/summary), so the lookup below would
+    fail there for every repository and report a healthy team as unresolvable.
+    """
+    if not ctx["report_mode"]:
+        return []
+    team = _governing_team(ctx)
+    if not team:
         return []
     try:
-        team = _gh_json(f"orgs/{ctx['owner']}/teams/{ctx['team']}")
-        resolved = isinstance(team, dict) and bool(team.get("slug"))
+        found = _gh_json(f"orgs/{ctx['owner']}/teams/{team}")
+        resolved = isinstance(found, dict) and bool(found.get("slug"))
     except (Exception, SystemExit):  # noqa: BLE001 - a failed lookup IS the finding
         resolved = False
     if resolved:
@@ -2142,9 +2172,9 @@ def _team_warnings(ctx):
     return [
         (
             WARNING,
-            f"approvers team `{ctx['team']}` does not resolve in org `{ctx['owner']}` — "
-            'every `shipmate apply` will be rejected as "not a team member". Check the '
-            "SHIPMATE_APPROVERS_TEAM variable and that the App has members:read.",
+            f"approvers team `{team}` does not resolve in org `{ctx['owner']}` — "
+            'every `shipmate apply` will be rejected as "not a team member". Check '
+            f"`[gate] approvers_team` in `{CONFIG_PATH}` and that the App has members:read.",
         )
     ]
 
@@ -2265,6 +2295,9 @@ def ctx_from_env():
         "envs": envs,
         "envs_available": bool(envs),
         "team": os.environ.get("SHIPMATE_TEAM") or None,
+        # The team probe's route marker: only the comment path's token requests
+        # `members: read`, and only `report` mode runs there.
+        "report_mode": os.environ.get("SHIPMATE_DOCTOR_MODE") == "report",
         "app_permissions_checked": os.environ.get("SHIPMATE_APP_PERMISSIONS_CHECKED") == "true",
         "app_permission_error": os.environ.get("SHIPMATE_APP_PERMISSION_ERROR", ""),
         "head_sha": os.environ.get("SHIPMATE_HEAD_SHA", ""),

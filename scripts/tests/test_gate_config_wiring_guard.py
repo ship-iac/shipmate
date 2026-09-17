@@ -83,21 +83,19 @@ def test_gather_and_authorize_read_one_identical_team_expression():
     assert gather == authorize
 
 
-#: The doctor step's own team binding, hand-written. `doctor` reads the team from
-#: SHIPMATE_TEAM and from nowhere else -- it fetches the table for its configuration
-#: findings but takes no team from it -- so this input is still its only channel, and it
-#: cannot read the resolve step's output: that step's `if:` admits only apply and unlock.
-#: Named here so a sweep of `inputs.approvers-team` readers does not mistake it for a site
-#: this wiring missed. Not an endorsement of the binding: from this commit on, a repository
-#: declaring `gate.approvers_team` has `doctor` probing SHIPMATE_APPROVERS_TEAM, a value
-#: that no longer governs any apply -- a later change gives `doctor` the table's team and
-#: retires this line.
+#: The doctor step's own team binding, hand-written. `doctor` resolves the team from the
+#: table it already fetches and reads this only as the migration fallback, exactly as
+#: `gate-config` does above -- so the binding must stay until the fallback goes, and it
+#: cannot come from the resolve step's output: that step's `if:` admits only apply and
+#: unlock. Named here so a sweep of `inputs.approvers-team` readers does not mistake it for
+#: a site this wiring missed.
 _DOCTOR_TEAM = "${{ inputs.approvers-team }}"
 
 
 def test_the_doctor_step_keeps_its_own_team_binding():
     """Mutation: point it at `steps.gate.outputs.approvers_team`, which is unset on the doctor
-    route, so doctor's team probe would report every team as unresolvable."""
+    route, so a repository still relying on the fallback would have its team probe go
+    silent."""
     assert _step("Doctor — render and upsert the sticky comment")["env"]["SHIPMATE_TEAM"] == (
         _DOCTOR_TEAM
     )
