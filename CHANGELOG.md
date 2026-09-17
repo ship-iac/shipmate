@@ -11,6 +11,45 @@ section below names the SHA the release tags.
 The version line stays `v0.x` while action inputs, check names, and the comment
 grammar are declared unstable in `README.md`.
 
+## [Unreleased]
+
+**Breaking: the approvers team and the ungated-environment list move into
+`.github/shipmate.toml`.** `SHIPMATE_APPROVERS_TEAM` becomes
+`gate.approvers_team` and `SHIPMATE_UNGATED_ENVS` becomes `gate.ungated_envs`,
+in a `[gate]` table read from the default branch with the rest of that file. Both
+variables are still read when the file declares no key of its own, with a warning
+naming the replacement, for this release only. Migration is two merges per
+repository and **the order is the reverse of 0.30.0's** — bump the pin, then add
+the keys — because an engine that predates a top-level key refuses the whole
+file. `docs/upgrading.md` §Unreleased has the procedure.
+
+### Added
+
+- **`[gate]` in `.github/shipmate.toml`**, holding `approvers_team` (a bare
+  GitHub team slug) and `ungated_envs` (a list of bare logical env names). Both
+  are optional, both are strict about their key names, and a declared empty value
+  means what it says: `approvers_team = ""` authorizes nobody, `ungated_envs = []`
+  exempts nothing, and neither falls back to its variable.
+- **An optional `version` key.** Written, it must be the integer `1`; absent, it
+  reads as 1. `version = true` is refused by name rather than read as 1.
+
+### Changed
+
+- **Three readers, one source.** `actions/comment-ops` and both apply paths'
+  detect each resolve `gate.ungated_envs` from the default branch's file. The
+  comment-ops job holds no checkout, so it reads through the contents API — same
+  file, same branch, same refusal wording as `git show`.
+- **The user-facing sentences name the setting, not the variable**: the apply
+  comment's ungated-audit line, the comment-ops exemption comment, and
+  `authorize`'s refusal for an env that is not listed.
+- **`shipmate doctor` reports the approvers team from the file** at the commit
+  under examination, so a bad slug is warned about before it merges. The probe
+  runs in `report` mode only; the plan path's App token lacks `members: read`.
+- **`scripts/onboard` no longer writes `SHIPMATE_APPROVERS_TEAM`.** `--team` is
+  printed in the closing by-hand checklist, with the file the key belongs in and
+  the pin it needs first. `--vars-at-org` accepts `SHIPMATE_APP_ID` only; the
+  two-name form now exits with an error.
+
 ## [0.30.0] — 2026-09-15
 
 Tags `f1688c0`.
@@ -22,7 +61,7 @@ bare-apply exclusions are now four top-level keys — `layout`, `environments`,
 with `tomllib`. The engine reads the new location only; there is no dual-support
 window. Migration is two merges per repository — add the file under the current
 pin, then bump the pin and delete the `globals "shipmate"` block —
-`docs/upgrading.md` §Unreleased has the procedure and a worked translation.
+`docs/upgrading.md` §0.30.0 has the procedure and a worked translation.
 
 ### Changed
 

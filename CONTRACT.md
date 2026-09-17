@@ -386,9 +386,11 @@ identity, so a repository without one has nothing for its cells to run as. The
 two absences refuse at the same site, `scripts/env-config` (§Refusals) — a file
 absent from the default branch, and a file that parses but declares no `layout`.
 
-The file holds four top-level settings and no others: `layout`, `environments`,
-`env_order`, `explicit_envs`. Any other top-level key refuses, naming the
-offending key and the four that are allowed.
+The file holds six top-level settings and no others: `layout`, `environments`,
+`env_order`, `explicit_envs`, `gate`, `version`. Any other top-level key refuses,
+naming the offending key and the six that are allowed. A key a *newer* engine
+implements is refused by an older one on that same check, which is why a
+repository moves its pin before it adds a key (`docs/upgrading.md`).
 
 Reading it needs Python 3.11, because `tomllib` arrived there. That is the floor
 §Runner prerequisites already states; nothing in the engine installs or pins a
@@ -403,13 +405,19 @@ its own plan assumes, which region it authenticates against, or which workspace
 it plans; changing any of those takes a merge to the default branch. `origin` is
 the base repository on every path — no checkout in any workflow passes
 `repository:` — and a fork pull request is refused in `detect` before it plans.
+A job holding no checkout reads the same file over the contents API instead —
+comment-ops, resolving `[gate]` before it authorizes — with the same branch and
+the same refusal wording, so a consumer never gets two accounts of one problem
+depending on which job read it.
 
-**`env_order` and `explicit_envs` come from the default branch too.** They are
-read from the same parsed mapping as the identity table, and a branch therefore
-cannot reorder its own apply waves or drop its own production exclusion. This
-is a change: `scripts/env-order` used to evaluate both out of the checked-out
-tree, so an edit on a feature branch took effect on that branch's own apply. It
-no longer does. `docs/upgrading.md` carries the consumer-facing note.
+**`env_order`, `explicit_envs` and `[gate]` come from the default branch too.**
+They are read from the same parsed mapping as the identity table, and a branch
+therefore cannot reorder its own apply waves, drop its own production exclusion,
+exempt itself from the review requirement or name the team that authorizes it.
+For the first two this is a change: `scripts/env-order` used to evaluate both out
+of the checked-out tree, so an edit on a feature branch took effect on that
+branch's own apply. It no longer does. `docs/upgrading.md` carries the
+consumer-facing note.
 
 **The file must reach the default branch before the first plan run.** A pull
 request that only *adds* it is refused, because the branch its plan is compared
@@ -454,6 +462,52 @@ a file that decides which cloud role a job assumes, explicit repetition is the
 safer artifact. There is no `[defaults]` table and no merge rule between
 environments; the only cross-level default is the one named below.
 
+### The gate table
+
+`[gate]` holds the two settings that decide who may drive shipmate by pull
+request comment and which environments apply without an approving review. Both
+are optional, both are strict about their own key names, and a misspelled one is
+refused rather than left at its default:
+
+```toml
+layout = "dry"
+
+[gate]
+approvers_team = "platform-approvers"
+ungated_envs   = ["dev-eu", "dev-us"]
+```
+
+- **`approvers_team`** — the bare GitHub team slug from the team's URL, not a
+  display name and not an `@org/team` reference. Its members are the ones the
+  `shipmate team` apply requirement admits (§Comment-ops). A value that is not a
+  slug is refused, because it would 404 in the membership lookup and refuse every
+  commenter under a message naming the team as though it had resolved.
+- **`ungated_envs`** — a list of bare logical env names, under the rule
+  `explicit_envs` already follows: no `-plan` / `-apply` suffix, nothing outside
+  the env charset. §Comment-ops has what the list exempts and what it does not.
+
+**A declared empty value means what it says.** `approvers_team = ""` authorizes
+nobody and `ungated_envs = []` exempts nothing; neither reads as undeclared. Key
+presence, not truthiness, is what the engine tests, so emptying a setting removes
+the thing it granted instead of falling back to a repository variable that still
+grants it.
+
+The two settings previously lived in the `SHIPMATE_APPROVERS_TEAM` and
+`SHIPMATE_UNGATED_ENVS` repository variables. Each variable is still read when
+the file declares no key of its own, with a warning naming its replacement, for
+the migration release only — `docs/upgrading.md` has the procedure.
+
+### The schema version
+
+`version` is optional and, when written, must be the integer `1`. An absent
+`version` reads as 1, so no existing file has to gain the line. `version = true`
+is refused explicitly: Python compares `True == 1`, and a bool left to a plain
+comparison would read as version 1.
+
+The key exists so that a future incompatible schema can be told from this one by
+a file that has not yet been migrated. It is not a pin and it grants nothing: an
+engine still refuses every key it does not implement, whatever `version` says.
+
 ### TOML placement
 
 Two properties of the format decide how a mistake presents, and both fail
@@ -465,7 +519,7 @@ closed.
   `environments.dev-eu.aws.plan.layout`. One mistake therefore refuses in
   several places. A misplaced `layout` always reaches the missing-`layout`
   refusal, which checks before anything reads `environments`; a misplaced
-  `explicit_envs` or `env_order` refuses as an unimplemented environment key or
+  `explicit_envs`, `env_order` or `version` refuses as an unimplemented environment key or
   an unknown provider field, depending on the header it fell under — and, after
   `[env_order]`, as a reserved control name, which is why the top-level names
   are reserved as `env_order` keys at all. `docs/troubleshooting.md` has the
@@ -528,10 +582,14 @@ Every condition below refuses at detect, before any cell starts.
 | A shared environment declaring `aws.plan` | shared mode has one environment, and it resolves `aws.apply` on both paths |
 | `vars` naming anything outside `TF_VAR_*` / `TF_WORKSPACE`, or holding a non-string | see the allowlist above |
 | Malformed shape, or a structural key in a position the grammar does not give it | a string where a mapping is required, and the reverse |
-| A top-level key other than `layout`, `environments`, `env_order`, `explicit_envs` | catches a misspelled `environments`, which would otherwise yield zero environments and skip every cell's credentials step |
+| A top-level key other than `layout`, `environments`, `env_order`, `explicit_envs`, `gate`, `version` | catches a misspelled `environments`, which would otherwise yield zero environments and skip every cell's credentials step — and, on an engine that predates a key, catches a file written for a newer one before it decides anything |
 | A top-level control name used as an `env_order` key | a misplaced `explicit_envs` lands inside `[env_order]` as an ordering entry, and its exclusion from a bare apply is silently lost |
-| Malformed `env_order` or `explicit_envs` | one entry point validates all four top-level fields, so an ordering or exclusion error refuses at detect rather than when an apply finally reads it |
+| Malformed `env_order` or `explicit_envs` | one entry point validates every top-level field, so an ordering or exclusion error refuses at detect rather than when an apply finally reads it |
 | A cyclic `env_order`, a self-edge included | an ordering with no first environment sorts into no levels at all, and the refusal is decidable from the file alone, so it lands with the other structural checks rather than at the apply that topologically sorts it |
+| A `[gate]` key other than `approvers_team`, `ungated_envs` | a misspelled gate key leaves the setting at its default while the repository believes it declared one |
+| `gate.approvers_team` that is not a GitHub team slug | a display name, an `@org/team` reference or a stray quote 404s in the membership lookup, refusing every commenter under a message naming the team as though it had resolved |
+| Malformed `gate.ungated_envs` | the `explicit_envs` env-name rule, on the setting that decides which environments apply unreviewed |
+| `version` other than the integer `1` | this engine implements version 1; a bool is refused explicitly, since `True == 1` would otherwise read `version = true` as it |
 
 ### Resolution
 
@@ -981,7 +1039,7 @@ environment; a bare `shipmate apply` applies every environment that has a
 reviewed plan for the current PR head, in `env_order` env-levels (see Env
 apply order, below), except environments listed in `explicit_envs` in
 `.github/shipmate.toml` and environments held for review under
-`SHIPMATE_UNGATED_ENVS` (below). Explicit environments (typically production)
+`gate.ungated_envs` (below). Explicit environments (typically production)
 must always be named: their `apply / <stack> / <env>` checks stay
 pending under a bare apply — so `shipmate / gate` keeps gating the
 merge — until someone runs `shipmate apply <env>` for them. An absent key
@@ -1004,9 +1062,11 @@ A parsed `shipmate apply <env>` command is authorized only when it satisfies
 apply requirements — named, Atlantis-style, checked in order, each with
 its own actionable rejection reason:
 
-- **shipmate team**: the commenter is a member of the configured approvers
-  team (checked via a short-lived GitHub App installation token,
-  `members:read`);
+- **shipmate team**: the commenter is a member of the team `gate.approvers_team`
+  names in `.github/shipmate.toml` on the default branch (checked via a
+  short-lived GitHub App installation token, `members:read`). A repository that
+  declares no team, and whose `SHIPMATE_APPROVERS_TEAM` fallback is also unset,
+  authorizes nobody: every apply and unlock comment is refused;
 - **not a draft**: the pull request is not a draft. `shipmate plan` plans a
   draft on request, so a draft head can carry apply checks with plan runs on
   them; a draft says the change is not ready for review, and applying it is
@@ -1022,8 +1082,8 @@ its own actionable rejection reason:
   requiring zero approvals reports no decision even when an approval exists,
   but a `CHANGES_REQUESTED` review still blocks. Any other value — including
   an absent or empty decision — fails closed with a wiring-error reason. An
-  environment listed in the `SHIPMATE_UNGATED_ENVS` repository variable is
-  exempt from this requirement, and from no other (below);
+  environment listed in `gate.ungated_envs` is exempt from this requirement, and
+  from no other (below);
 - **undiverged**: at least one `apply / <stack> / <env>` check on the pull
   request's current head names the plan run its plan came from (each check
   records that run at plan time). The records are read from that head's own
@@ -1056,12 +1116,15 @@ dispatch the consumer's `shipmate.yml` with `verb: apply`; the optional
 share the same App-minted `workflow_dispatch` mechanism and the same per-env
 `apply-<env>-<stack>` concurrency groups.
 
-The repository variable `SHIPMATE_UNGATED_ENVS` lists the environments that
-may be applied without an approving review — comma-separated bare logical
-env names, matched case-insensitively against the env on the apply checks:
+`gate.ungated_envs` in `.github/shipmate.toml` lists the environments that
+may be applied without an approving review — bare logical env names, matched
+case-insensitively against the env on the apply checks:
 
-```
-SHIPMATE_UNGATED_ENVS = dev-eu,dev-us
+```toml
+layout = "dry"
+
+[gate]
+ungated_envs = ["dev-eu", "dev-us"]
 ```
 
 It exempts one requirement, `reviewed`, and only its `REVIEW_REQUIRED`
@@ -1073,26 +1136,26 @@ absent decision still fails closed. Nor does it touch the `<env>-apply`
 environment's required reviewers — that is a different control, gating the
 deployment rather than the code review (see `docs/hardening.md`).
 
-The comma grammar is `SHIPMATE_SHARED_ENVS`' (§Env model): entries are compared
-whole between comma boundaries, so there are no spaces around them. What
-differs is the failure mode — where a mistyped entry there is silently
-un-listed, here it is refused. An entry that is not a bare env name is a
-loud configuration error naming the entry: surrounding whitespace and a
-`-plan` / `-apply` suffix each get their own message naming the value to write
-instead, and anything outside the env charset (letters, digits, `-`, `_`) —
-a pasted quote, an internal space, a path separator — is refused as not an
-environment name. None of them would match anything, and a silently inert
-entry would leave an operator believing an environment is ungated when it is
-not.
+An entry that is not a bare env name is a loud configuration error naming the
+entry: a `-plan` / `-apply` suffix gets its own message naming the value to write
+instead, and anything outside the env charset (letters, digits, `-`, `_`) — a
+leading space, an internal space, a path separator — is refused as not an
+environment name. None of them would match anything, and a silently inert entry
+would leave an operator believing an environment is ungated when it is not. This
+is `explicit_envs`' rule, in `validate_env_name_list`, and the opposite of
+`SHIPMATE_SHARED_ENVS` (§Env model), where a mistyped entry is silently
+un-listed.
 
-**Unset or empty is the default and exempts nothing**: every environment keeps
-the ruleset's review requirement, so *what applies* is what applied before the
-variable existed. This is the opposite direction from `SHIPMATE_SHARED_ENVS`,
-where unset means split.
+**Absent or empty exempts nothing**: every environment keeps the ruleset's review
+requirement, so *what applies* is what applied before the setting existed. This
+is the opposite direction from `SHIPMATE_SHARED_ENVS`, where unset means split.
+Absent and `ungated_envs = []` differ in one way only, and only during the
+migration release: an absent key falls back to `SHIPMATE_UNGATED_ENVS`, a
+declared empty list does not.
 
-Opting in takes two things, and the variable alone is not enough:
+Opting in takes two things, and the setting alone is not enough:
 
-1. the repository variable, and
+1. `gate.ungated_envs` on the default branch, and
 2. the consumer's `shipmate.yml` pinning both engine references —
    `.github/workflows/apply.yml@` (the `targeted` job) and
    `.github/workflows/apply-all.yml@` (the `all` job) — at or past the release
@@ -1102,33 +1165,38 @@ Opting in takes two things, and the variable alone is not enough:
    `comment-ops.yml` and dispatched into an engine older than the partition
    applies every pending environment with no approving review, and a
    targeted `shipmate apply <env>` dispatched into an engine older than the
-   `review` job applies that environment unreviewed. Both edges need the
-   variable set: no consumer-written input can authorize a dispatch without it.
+   `review` job applies that environment unreviewed. Both edges need the list
+   declared: no consumer-written input can authorize a dispatch without it.
 
-Engine `comment-ops.yml` passes
-`ungated-envs: ${{ vars.SHIPMATE_UNGATED_ENVS }}` to `actions/comment-ops`, and
-`vars` inherit into a called workflow, so that expression resolves in the
-consumer's repository. It is read there rather than in the consumer's file
-because a composite action cannot read the `vars` context, so the input is
-comment-ops' only view of the list, and both apply paths read the same variable
-directly and enforce on it themselves — one source, two readers, with nothing
-between them a consumer can spell differently.
+**One source, three readers.** `actions/comment-ops` resolves the list before it
+authorizes, and each apply path's detect resolves it again before it enforces —
+`scripts/gate-config`, `scripts/apply-detect` and `scripts/apply-all-detect`, all
+three reading `.github/shipmate.toml` on the **default branch** through the same
+`gate_ungated_envs`. The comment-ops job holds no checkout, so it reads the file
+through the contents API rather than `git show`; same file, same branch, same
+refusal wording. What keeps the three from disagreeing is not a shared spelling
+but a shared reader: the strict top-level key check refuses a misspelled setting
+outright, and `validate_env_name_list` refuses an entry that would match nothing,
+so there is no value a consumer can write that one reader honours and another
+ignores. A pull request cannot grant itself the exemption, because its own edit
+to the file is not read until it merges.
 `scripts/tests/test_engine_comment_ops_workflow.py` pins the whole `with:` block
-of that step; dropping the input refuses every listed environment at comment
-time instead, with nothing naming the cause.
+of the step carrying the migration fallback; dropping that input, in a repository
+still relying on the variable, refuses every listed environment at comment time
+instead, with nothing naming the cause.
 
 The decision has two seats, because `authorize` returns one verdict per
 dispatch while a bare apply spans many environments:
 
 Both engine workflows re-read `reviewDecision` themselves in a `review` job
 rather than trusting a dispatch input, and that job is unconditional — the
-repository variable is the only source of this policy, and only engine-owned
-workflows read it.
+default branch's `gate.ungated_envs` is the only source of this policy, and only
+engine-owned scripts read it.
 
 - **Targeted `shipmate apply <env>`** — the env is known at comment time, so
   `actions/comment-ops` refuses early: `REVIEW_REQUIRED` on a listed env
   authorizes, on any other env it refuses with the usual message extended to
-  name the variable the env is missing from. The engine's `apply.yml` then
+  name the setting the env is missing from. The engine's `apply.yml` then
   re-applies the identical rule to the freshly read decision and refuses the
   run before any wave, leaving every apply check — and the gate — pending.
 - **Bare `shipmate apply`** — authorized at comment time whenever the list is
@@ -1145,12 +1213,16 @@ stays blocked — and environments ordered after it are skipped. The apply resul
 comment names both halves: which environments were held for review, and which
 applied under the exemption (§Apply result comment).
 
-The variable is not an admin boundary. GitHub grants creating, updating and
-deleting Actions variables to the Write role and above, so anyone who can
-push can also edit this list, and `shipmate doctor` does not read it. What it
-does buy is that relaxing the gate is a separate, deliberate act against
-repository settings rather than a line in the pull request that benefits from
-it — a settings change, not a merged commit.
+What bounds the list is the default branch, not an admin boundary. Anyone who can
+open a pull request can propose an entry; what they cannot do is have it take
+effect on that pull request, because all three readers resolve the file from the
+default branch. Relaxing the gate is therefore a merged commit, under whatever
+the branch ruleset requires of one, rather than a line in the pull request that
+benefits from it. This is the inverse of the reasoning that held while the list
+was a repository variable, where the point was that it could *not* be a commit:
+the variable was editable by anyone holding the Write role and reviewed by
+nobody. `shipmate doctor` validates the file it is in and reports a malformed
+entry, but does not echo the list itself.
 
 `shipmate unlock <env>` releases an OpenTofu state lock stranded by a cancelled
 or killed apply. The env is required: a destructive verb gets no wildcard,
@@ -1837,7 +1909,7 @@ two review sentences (see §Comment-ops) are:
   absent decision), and only the run's own apply-all-detect notice carries
   which one, since the decision never reaches this renderer;
 - **applied ungated** — the environments the run was permitted to apply
-  without an approving review, per `SHIPMATE_UNGATED_ENVS`. It is the only
+  without an approving review, per `gate.ungated_envs`. It is the only
   audit trail an unreviewed apply leaves: `reviewDecision` is a live value
   with no history, so once the review lands nothing else in a run
   distinguishes an apply that waited for it from one that did not. It states a

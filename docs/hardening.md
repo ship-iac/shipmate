@@ -149,8 +149,8 @@ row 6 — the one row that is unforgeable at apply time.
 **What is left when row 6 is unavailable.** It is a coherent posture rather than
 a broken one:
 
-- production absent from `SHIPMATE_UNGATED_ENVS`, so no apply reaches it without
-  an approving review on the pull request;
+- production absent from `gate.ungated_envs` in `.github/shipmate.toml`, so no
+  apply reaches it without an approving review on the pull request;
 - production in `explicit_envs` in `.github/shipmate.toml`, so before the merge
   a bare `shipmate apply` skips it and only the targeted `shipmate apply <env>`
   reaches it — the setting constrains that path only. The post-merge deploy
@@ -178,7 +178,7 @@ unreviewed, because that is what it amounts to. This is the only control that
 closes the branch-authored-workflow path outright; everything else narrows it.
 
 Review the list whenever the approvers team changes — write access and
-`SHIPMATE_APPROVERS_TEAM` membership are separate grants, and the first one is
+`gate.approvers_team` membership are separate grants, and the first one is
 the stronger of the two.
 
 ## 2. Restrict pushes that touch executable paths
@@ -289,15 +289,16 @@ get self-service applies on a low-blast-radius tier. The two per-environment
 controls below do different jobs, and an organization can want either without
 the other:
 
-- **`SHIPMATE_UNGATED_ENVS` exempts named environments from the code review
-  before apply, and from nothing else.** It is a repository variable. The
+- **`gate.ungated_envs` exempts named environments from the code review
+  before apply, and from nothing else.** It is a setting in
+  `.github/shipmate.toml` on the default branch. The
   ruleset still requires the review before the merge, `CHANGES_REQUESTED`
   still refuses, and the approvers-team, not-a-draft, mergeable and exact-plan
   requirements are untouched (CONTRACT.md §Comment-ops). Environments it does
   not name are held out of a bare `shipmate apply` and refused on a targeted
   one, their apply checks left pending, so the gate keeps blocking the merge
-  until they are applied with a review in hand. Both engine apply workflows read
-  the variable themselves and enforce on it; engine `comment-ops.yml`'s read of it
+  until they are applied with a review in hand. Both engine apply paths resolve
+  the setting themselves and enforce on it; engine `comment-ops.yml`'s read of it
   is an early refusal, not the policy. Opting in takes no line in your workflow
   file — see `docs/getting-started.md`.
 - **Environment `required_reviewers` on `<env>-apply` (§6) gates the
@@ -305,18 +306,18 @@ the other:
   secrets and lets the apply proceed. It is unforgeable by a holder of the App
   private key, which the review requirement above is not.
 
-Two things to know before relying on the variable:
+Two things to know before relying on it:
 
-- **The variable is not an admin boundary.** GitHub grants *"Create, update, and
-  delete GitHub Actions variables"* to Write and above, so anyone who can push
-  can also edit the list, and `shipmate doctor` does not read it. What it buys is
-  that relaxing the gate is a separate, deliberate act against repository
-  settings, with no plan attached and no reviewer reading it as code — it
-  cannot ride inside the pull request that benefits from it. Do not carry
-  control 1's grant over to it by assumption.
-- **The variable is inert at `required_approving_review_count: 0`.** Every
-  environment is already ungated there, so listing some narrows nothing. The
-  variable can only relax an existing requirement, never create one, and nothing
+- **What bounds the list is the default branch.** All three readers resolve the
+  file there, so the pull request that benefits from an exemption cannot also
+  grant it: adding an entry is a commit, under whatever your ruleset requires of
+  one, and a reviewer reads it as code. Anyone who can push a branch can still
+  *propose* the entry, so this bounds when it takes effect, not who may ask.
+  `shipmate doctor` validates the file and reports a malformed entry, but does not
+  echo the list.
+- **The setting is inert at `required_approving_review_count: 0`.** Every
+  environment is already ungated there, so listing some narrows nothing. It
+  can only relax an existing requirement, never create one, and nothing
   warns about the combination — a repository that sets both, and believes prod is
   gated, gets no signal that it is not.
 
@@ -756,8 +757,8 @@ trust to all of them.
   which refuses an id that disagrees with `--app-id`.
 - Set the key as a `shipmate-engine` environment secret, per repository
   (`docs/github-app.md` steps 5–6) — never at repository or org level, and
-  never shared the way the `SHIPMATE_APP_ID` and `SHIPMATE_APPROVERS_TEAM`
-  variables (not secrets) may be across one trust domain: environment
+  never shared the way the `SHIPMATE_APP_ID` variable (not a secret)
+  may be across one trust domain: environment
   secrets are scoped to one repository's environment, so each consumer repo
   needs its own `shipmate-engine` environment and its own copy of the key.
 - Rotate the key whenever push access is revoked — the runbook is
