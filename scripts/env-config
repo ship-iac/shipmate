@@ -519,6 +519,55 @@ def validate_gate(gate):
     return gate
 
 
+def _migration_warning(key, old):
+    """The one sentence both fallbacks owe a consumer: what replaces the old setting, and
+    that this reading of it goes away. No release is named because none is decided."""
+    print(
+        f"::warning::{CONFIG_PATH} on the default branch declares no {key}, so {old} was "
+        f"read instead. Declare {key} on the default branch and delete {old} — a later "
+        "release removes this fallback."
+    )
+
+
+def gate_ungated_envs(table, fallback_raw):
+    """The environments exempt from the review requirement, casefolded.
+
+    `gate.ungated_envs` when the file declares it, otherwise the comma-separated
+    `SHIPMATE_UNGATED_ENVS` variable, which exists for the migration release only.
+
+    Key presence, not a truthy value: an emptied list is a declared empty list, and
+    falling back there hands back exemptions an operator deliberately removed. The file's
+    entries came through `validate_structure`; the variable is unvalidated input, so only
+    that path validates.
+    """
+    gate = table.get("gate", {})
+    if "ungated_envs" in gate:
+        return frozenset(e.casefold() for e in gate["ungated_envs"])
+    envs = [e for e in (fallback_raw or "").split(",") if e]
+    validate_env_name_list(envs, "SHIPMATE_UNGATED_ENVS")
+    if envs:
+        _migration_warning("gate.ungated_envs", "the SHIPMATE_UNGATED_ENVS repository variable")
+    return frozenset(e.casefold() for e in envs)
+
+
+def gate_approvers_team(table, fallback):
+    """The team slug whose members may drive shipmate by comment.
+
+    `gate.approvers_team` when the file declares it, otherwise the `approvers-team` input
+    carrying `vars.SHIPMATE_APPROVERS_TEAM`, for the migration release only. Key presence
+    again: a declared empty team authorizes nobody, and must not read as undeclared.
+
+    Neither resolver warns on an empty fallback: a repository that never set the variable
+    and has not yet added the key is mid-migration, not misconfigured.
+    """
+    gate = table.get("gate", {})
+    if "approvers_team" in gate:
+        return gate["approvers_team"]
+    if fallback:
+        _migration_warning("gate.approvers_team", "the SHIPMATE_APPROVERS_TEAM repository variable")
+    return fallback or ""
+
+
 def _check_version(table):
     """Refuse a file declaring a schema version this engine does not implement.
 

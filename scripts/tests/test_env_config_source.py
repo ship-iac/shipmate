@@ -393,3 +393,93 @@ def test_both_readers_return_the_same_table_for_the_same_bytes(monkeypatch):
     git = types.SimpleNamespace(returncode=0, stdout=_SHARED_TEXT, stderr="")
     assert ec.read_table(run=_fake_run(git=git)) == _SHARED_TABLE
     assert ec.read_table_at_default_branch(run=_contents_run(_SHARED_TEXT)) == _SHARED_TABLE
+
+
+def _gate(**keys):
+    """A validated-shaped table carrying one `[gate]` table. `_SHARED_TABLE` itself is the
+    no-gate case, so the two differ only in the key under test."""
+    return {**_SHARED_TABLE, "gate": keys}
+
+
+def _warnings(capsys):
+    """Only this module's own annotations, so a line of ordinary output cannot be counted
+    as a warning and an emitted one cannot hide in it."""
+    return [ln for ln in capsys.readouterr().out.splitlines() if ln.startswith("::warning::")]
+
+
+def test_a_declared_ungated_envs_list_wins_over_the_variable(capsys):
+    """The precedence the migration inverts if it is written the other way round: the file
+    is the setting, the variable is what it replaces. Reddens on reading the variable first
+    -- `prod` is then exempt and `sbx` is not -- and on warning about a fallback that did
+    not happen."""
+    assert ec.gate_ungated_envs(_gate(ungated_envs=["sbx"]), "prod") == frozenset({"sbx"})
+    assert _warnings(capsys) == []
+
+
+def test_a_declared_empty_ungated_envs_list_exempts_nothing(capsys):
+    """The fail-open this task exists to avoid: `[]` is a declared empty list, not an
+    absent key. Reddens on `gate.get("ungated_envs")` tested for truthiness, which reads
+    the variable instead and hands back the exemptions an operator deliberately removed."""
+    assert ec.gate_ungated_envs(_gate(ungated_envs=[]), "prod") == frozenset()
+    assert _warnings(capsys) == []
+
+
+def test_the_variable_is_read_when_the_file_declares_no_gate(capsys):
+    """The migration release's fallback, casefolded the way the apply paths compare it.
+    Reddens on returning an empty frozenset for an absent key, which exempts nothing and
+    holds every environment of a consumer that has not migrated yet."""
+    assert ec.gate_ungated_envs(_SHARED_TABLE, "Dev-EU,sbx") == frozenset({"dev-eu", "sbx"})
+    assert len(_warnings(capsys)) == 1
+
+
+def test_the_ungated_envs_fallback_warns_once_and_names_the_migration(capsys):
+    """The only signal a consumer gets that it is still on the old mechanism. Reddens on
+    dropping the warning, on emitting it per entry, and on a text that names neither the
+    key that replaces the variable nor the fallback's removal."""
+    ec.gate_ungated_envs(_SHARED_TABLE, "sbx,dev-eu")
+    warnings = _warnings(capsys)
+    assert len(warnings) == 1
+    assert "gate.ungated_envs" in warnings[0]
+    assert "SHIPMATE_UNGATED_ENVS" in warnings[0]
+    assert "removes this fallback" in warnings[0]
+
+
+def test_an_empty_ungated_envs_variable_warns_nothing(capsys):
+    """A repository that never set the variable and has not yet added the key is
+    mid-migration, not misconfigured. Reddens on warning unconditionally on the fallback
+    path, which trains an operator to ignore the warning that does mean something."""
+    assert ec.gate_ungated_envs(_SHARED_TABLE, "") == frozenset()
+    assert _warnings(capsys) == []
+
+
+def test_a_padded_variable_entry_is_refused_rather_than_silently_inert():
+    """The variable is unvalidated input on this path, where the file's entries have been
+    through `validate_structure`. Reddens on returning the entry, which matches no
+    environment and so exempts nothing while reading as if it did."""
+    with pytest.raises(SystemExit) as exc:
+        ec.gate_ungated_envs(_SHARED_TABLE, "sbx, dev-eu")
+    assert str(exc.value).startswith("::error::SHIPMATE_UNGATED_ENVS")
+
+
+def test_a_declared_approvers_team_wins_over_the_input(capsys):
+    """Same precedence over a string. Reddens on preferring the input, which authorizes
+    comments against the team the repository migrated away from."""
+    assert ec.gate_approvers_team(_gate(approvers_team="platform"), "old-team") == "platform"
+    assert _warnings(capsys) == []
+
+
+def test_the_approvers_team_input_is_read_when_the_file_declares_no_gate(capsys):
+    """Reddens on dropping the warning, and on a text naming neither the key nor the
+    variable the input carries."""
+    assert ec.gate_approvers_team(_SHARED_TABLE, "old-team") == "old-team"
+    warnings = _warnings(capsys)
+    assert len(warnings) == 1
+    assert "gate.approvers_team" in warnings[0]
+    assert "SHIPMATE_APPROVERS_TEAM" in warnings[0]
+    assert "removes this fallback" in warnings[0]
+
+
+def test_an_empty_approvers_team_input_warns_nothing(capsys):
+    """The team's half of the mid-migration case. Reddens on warning unconditionally."""
+    assert ec.gate_approvers_team(_SHARED_TABLE, "") == ""
+    assert _warnings(capsys) == []
