@@ -42,6 +42,32 @@ def test_the_resolve_step_runs_the_gate_config_script_on_the_workflow_token():
     assert step["run"].strip() == 'python3 "$GITHUB_ACTION_PATH/../../scripts/gate-config"'
 
 
+def test_the_resolve_step_carries_the_id_its_three_readers_name():
+    """The producer end of the coupling. Three expressions hard-code `steps.gate.outputs.…`
+    and every guard here compares them to hand-written constants, so a renamed or deleted
+    `id:` leaves all three resolving to the empty string with nothing to compare against:
+    membership is looked up in a team named `""`, the API 404s, and every commenter is
+    refused -- the failure this whole step exists to prevent.
+
+    Mutation: rename the step's `id:` to `gateconfig`, or delete it.
+    """
+    assert _step("Resolve gate configuration").get("id") == "gate"
+
+
+def test_the_resolve_step_and_gather_share_one_condition():
+    """Byte-identity between two `if:`s, asserted as a comparison rather than stated in a
+    comment beside them. `_SHARED_ROUTE_IFS` in test_comment_ops_action.py owns the VALUE and
+    reddens on either single-sided edit; what it cannot see is a coordinated one -- change
+    `gather`'s condition and its constant together and the two steps diverge while every
+    guard stays green. Resolve then skips where `gather` runs, `TEAM` is empty, and every
+    commenter is refused under a message naming the file's team.
+
+    Mutation: append ` && github.event_name == 'issue_comment'` to `gather`'s `if:` and to
+    its `_SHARED_ROUTE_IFS` entry, leaving the resolve step alone.
+    """
+    assert _step("Resolve gate configuration")["if"] == _step("Gather authorization inputs")["if"]
+
+
 def test_gather_and_authorize_read_one_identical_team_expression():
     """The P1's guard. Both against one hand-written constant, and against each other, so
     neither the membership lookup nor the refusal label can be moved back to the input on its
@@ -57,16 +83,21 @@ def test_gather_and_authorize_read_one_identical_team_expression():
     assert gather == authorize
 
 
-#: The doctor step's own team binding, hand-written. It is a separate reader with a separate
-#: source and is deliberately NOT the resolve step's output: `doctor` fetches the file itself.
+#: The doctor step's own team binding, hand-written. `doctor` reads the team from
+#: SHIPMATE_TEAM and from nowhere else -- it fetches the table for its configuration
+#: findings but takes no team from it -- so this input is still its only channel, and it
+#: cannot read the resolve step's output: that step's `if:` admits only apply and unlock.
 #: Named here so a sweep of `inputs.approvers-team` readers does not mistake it for a site
-#: this wiring missed.
+#: this wiring missed. Not an endorsement of the binding: from this commit on, a repository
+#: declaring `gate.approvers_team` has `doctor` probing SHIPMATE_APPROVERS_TEAM, a value
+#: that no longer governs any apply -- a later change gives `doctor` the table's team and
+#: retires this line.
 _DOCTOR_TEAM = "${{ inputs.approvers-team }}"
 
 
 def test_the_doctor_step_keeps_its_own_team_binding():
     """Mutation: point it at `steps.gate.outputs.approvers_team`, which is unset on the doctor
-    route -- the resolve step's `if:` admits only apply and unlock."""
+    route, so doctor's team probe would report every team as unresolvable."""
     assert _step("Doctor — render and upsert the sticky comment")["env"]["SHIPMATE_TEAM"] == (
         _DOCTOR_TEAM
     )

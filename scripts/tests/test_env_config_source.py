@@ -485,6 +485,18 @@ def test_an_empty_approvers_team_input_warns_nothing(capsys):
     assert _warnings(capsys) == []
 
 
+def test_a_variable_team_that_is_not_a_slug_is_refused_rather_than_silently_inert():
+    """The team's half of the variable-side charset rule, the shape `gate.ungated_envs`
+    already has at its own fallback. A display name 404s in the membership lookup and
+    refuses every commenter under a message that names it as though it had resolved.
+
+    Reddens on returning the fallback unvalidated.
+    """
+    with pytest.raises(SystemExit) as exc:
+        ec.gate_approvers_team(_SHARED_TABLE, "Platform Team")
+    assert str(exc.value).startswith("::error::SHIPMATE_APPROVERS_TEAM is 'Platform Team'")
+
+
 def test_a_declared_empty_approvers_team_authorizes_nobody(capsys):
     """The `[]` fail-open on the other value: an empty slug is a declared empty team, which
     404s to `is_member=false` downstream, not an undeclared one. Reddens on

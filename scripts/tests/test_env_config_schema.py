@@ -773,11 +773,41 @@ def test_an_unknown_key_in_the_gate_table_refuses_by_name():
 
 
 def test_a_non_string_approvers_team_refuses():
-    """Mutation: drop the `_string` call on `gate.approvers_team` -- a non-string team slug
+    """Mutation: drop the `_string` call inside `validate_team_slug` -- a non-string team slug
     validates here and fails once per membership query instead."""
     assert _refusal({"layout": "folder", "gate": {"approvers_team": 1}}) == (
         "::error::gate.approvers_team must be a string, got int."
     )
+
+
+_NOT_A_TEAM_SLUG = (
+    "is {team!r}, which is not a GitHub team slug; use the bare slug from the team's URL "
+    "(letters, digits, '-' and '_'), not a display name or an @org/team reference."
+)
+
+
+@pytest.mark.parametrize("team", ["Platform Team", "@ship-iac/platform", "platform ", '"platform"'])
+def test_an_approvers_team_that_is_not_a_slug_refuses(team):
+    """The charset rule `gate.ungated_envs` already has, on the setting beside it. A display
+    name, an `@org/team` reference or a padded slug 404s in the membership lookup, so every
+    commenter is refused under a message naming the team as though it had resolved -- the
+    same failure a missing team produces, with no diagnostic distinguishing them.
+
+    Mutation: drop the `_TEAM_SLUG.fullmatch` check, or widen the pattern to `.*`.
+    """
+    assert _refusal({"layout": "folder", "gate": {"approvers_team": team}}) == (
+        f"::error::gate.approvers_team {_NOT_A_TEAM_SLUG.format(team=team)}"
+    )
+
+
+def test_a_declared_empty_approvers_team_still_validates():
+    """An empty team is legal and authorizes nobody, so the charset rule must not refuse it.
+
+    Mutation: drop the `if team and` guard -- a repository deliberately closing the comment
+    path is then refused at every read of its file, including `doctor`'s.
+    """
+    table = {"layout": "folder", "gate": {"approvers_team": ""}}
+    assert env_config.validate_structure(table) == table
 
 
 _NOT_AN_ENV_NAME = (
