@@ -26,7 +26,7 @@ inputs:
     description: 'GITHUB_TOKEN with issues:write and pull-requests:write (reactions + reject comments + PR reads).'
     required: true
   ungated-envs:
-    description: 'Transitional fallback for `gate.ungated_envs` in .github/shipmate.toml, which is authoritative: this input is read only when the file on the default branch declares no list, and a later release removes it. SHIPMATE_UNGATED_ENVS verbatim (comma-separated bare env names). Environments listed here may be applied without an approving review; every other environment keeps the branch ruleset requirement. Omitted or empty = every environment keeps it. Ergonomics, not policy: the engine reads vars.SHIPMATE_UNGATED_ENVS itself on both apply paths and enforces there, so this input only buys a PR-comment refusal instead of a dispatched run that refuses inside the engine. The supported caller is engine comment-ops.yml, which passes the repository variable.'
+    description: 'Transitional fallback for `gate.ungated_envs` in .github/shipmate.toml, which is authoritative: this input is read only when the file on the default branch declares no list, and a later release removes it. SHIPMATE_UNGATED_ENVS verbatim (comma-separated bare env names). Environments named by whichever source wins may be applied without an approving review; every other environment keeps the branch ruleset requirement. When neither source names an env, every environment keeps it. Ergonomics, not policy: each apply path resolves the same setting again and enforces there, so this input only buys a PR-comment refusal instead of a dispatched run that refuses inside the engine. The supported caller is engine comment-ops.yml, which passes the repository variable.'
     required: false
     default: ''
 outputs:
@@ -630,7 +630,7 @@ runs:
         ENVIRONMENT: ${{ steps.authz.outputs.environment }}
       run: |
         set -euo pipefail
-        gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -f body=":memo: shipmate: environment \`$ENVIRONMENT\` is permitted to apply without an approving review, per the \`SHIPMATE_UNGATED_ENVS\` repository variable — see the apply result comment for what actually applied." >/dev/null
+        gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -f body=":memo: shipmate: environment \`$ENVIRONMENT\` is permitted to apply without an approving review, per \`gate.ungated_envs\` in \`.github/shipmate.toml\` — see the apply result comment for what actually applied." >/dev/null
 
     - name: Reject with reason
       if: ${{ (steps.parse.outputs.route == 'apply' || steps.parse.outputs.route == 'unlock') && steps.apptoken.outcome == 'success' && steps.authz.outputs.authorized != 'true' }}

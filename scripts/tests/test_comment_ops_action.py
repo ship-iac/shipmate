@@ -737,8 +737,8 @@ def test_the_ungated_envs_input_is_optional_and_defaults_to_empty():
 #: about the outcome would be a claim this step cannot make.
 _EXEMPTION_BODY = (
     ":memo: shipmate: environment \\`$ENVIRONMENT\\` is permitted to apply "
-    "without an approving review, per the \\`SHIPMATE_UNGATED_ENVS\\` repository "
-    "variable — see the apply result comment for what actually applied."
+    "without an approving review, per \\`gate.ungated_envs\\` in "
+    "\\`.github/shipmate.toml\\` — see the apply result comment for what actually applied."
 )
 
 

@@ -12,7 +12,7 @@ pass values `NONE` (comment-ops' sentinel for a null
 decision — no review required by the ruleset) and `APPROVED` authorize; any
 other value — including an absent/empty one — fails closed, except that
 `REVIEW_REQUIRED` also authorizes for an environment listed in
-`SHIPMATE_UNGATED_ENVS`.
+`gate.ungated_envs`.
 
 The `ungated_exemption` output is the targeted path's audit trail: `reviewDecision`
 is a live value with no history, so once the review lands nothing else distinguishes
@@ -62,7 +62,7 @@ def _review_reason(review_decision, environment="", ungated_envs=frozenset()):
 
     Only the explicit pass values authorize: NONE (comment-ops' sentinel for a
     null decision — no review required by the ruleset) and APPROVED. Anything
-    else fails closed. An environment listed in SHIPMATE_UNGATED_ENVS is exempt
+    else fails closed. An environment listed in `gate.ungated_envs` is exempt
     from REVIEW_REQUIRED and from nothing else; a bare apply passes here when
     any env is listed and is partitioned per env in apply-all-detect."""
     if review_decision == "REVIEW_REQUIRED":
@@ -72,7 +72,7 @@ def _review_reason(review_decision, environment="", ungated_envs=frozenset()):
             return (
                 f"not authorized: PR review is required by the branch ruleset "
                 f"and has not been satisfied, and `{environment}` is not listed "
-                f"in the SHIPMATE_UNGATED_ENVS repository variable; obtain the "
+                f"in `gate.ungated_envs` in `.github/shipmate.toml`; obtain the "
                 f"required approving review(s), then re-run `shipmate apply`."
             )
         return (

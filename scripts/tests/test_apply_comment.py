@@ -677,7 +677,7 @@ _HELD_SENTENCE = (
 )
 _UNGATED_SENTENCE = (
     "Ungated environment(s) permitted to apply without an approving review, "
-    "per the `SHIPMATE_UNGATED_ENVS` repository variable: `dev-eu` — "
+    "per `gate.ungated_envs` in `.github/shipmate.toml`: `dev-eu` — "
     "see this run for what actually applied."
 )
 
@@ -691,11 +691,12 @@ def test_held_line_names_review_and_never_a_targeted_apply_command():
     assert "shipmate apply prod" not in line
 
 
-def test_applied_ungated_line_states_no_review_and_names_the_variable():
+def test_applied_ungated_line_states_no_review_and_names_the_setting():
     """The audit sentence, pinned whole. `reviewDecision` keeps no history, so once the review lands
     nothing else in the run distinguishes an apply that waited for it from one that did not.
     Whole-value also because no clause may claim the named envs COMPLETED: detect derives the set
-    from `runnable`, so a failed wave leaves a named env unapplied."""
+    from `runnable`, so a failed wave leaves a named env unapplied, and because the sentence must
+    name the setting that governs -- naming a source an operator has deleted is a false record."""
     (line,) = ac._env_disposition_lines([], [], [], ["dev-eu"])
     assert line == _UNGATED_SENTENCE
 
