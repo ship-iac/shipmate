@@ -6,10 +6,15 @@ runs real git against a real repository -- a mocked git passes with either ref -
 the marker in the table it parsed. If those are the default branch's bytes, everything
 downstream can only see them.
 
-The remaining tests fake the subprocess seam, and one of them compares the whole command
+The remaining tests fake the subprocess seam, and two of them compare the whole command
 sequence against a hand-written constant: a partial check leaves the ref spelling open.
+
+The no-checkout reader is here for the same reason: it reads the same file over the same
+ref by a different mechanism, so the divergence guard below drives both over one fixture.
 """
 
+import base64
+import json
 import os
 import subprocess
 import sys
@@ -267,3 +272,124 @@ def test_run_forwards_its_env_to_the_subprocess(monkeypatch):
     monkeypatch.setattr(ec.subprocess, "run", fake_subprocess_run)
     ec._run(["gh", "api", "repos/an-org/a-repo"], env={"TF_VAR_env": "SHIPMATE_RT_PROBE"})
     assert seen == [{"TF_VAR_env": "SHIPMATE_RT_PROBE"}]
+
+
+#: One fixture both readers are driven over. The multi-line string's indentation is the
+#: part a transformation applied by one reader and not the other shows up in.
+_SHARED_TEXT = (
+    'layout = "dry"\n'
+    "version = 1\n"
+    "\n"
+    "[environments.dev-eu]\n"
+    'region = "eu-west-1"\n'
+    'note = """\n'
+    "  indented\n"
+    '"""\n'
+    "\n"
+    "[env_order]\n"
+    'prod = ["dev-eu"]\n'
+)
+
+#: Hand-written, never derived from `_SHARED_TEXT`: a derived expectation agrees with
+#: whatever the parser did.
+_SHARED_TABLE = {
+    "layout": "dry",
+    "version": 1,
+    "environments": {"dev-eu": {"region": "eu-west-1", "note": "  indented\n"}},
+    "env_order": {"prod": ["dev-eu"]},
+}
+
+#: The one explanation both refusals owe a consumer, spelled out here rather than read off
+#: either reader.
+_REFUSAL_STORY = (
+    "The engine reads the environment table from the default branch, never from this "
+    "branch, so the file must be merged there before the first plan."
+)
+
+
+def _blob(text, encoding="base64"):
+    content = "" if text is None else base64.b64encode(text.encode("utf-8")).decode("ascii")
+    return {"encoding": encoding, "content": content}
+
+
+def _contents_run(text, recorder=None, encoding="base64"):
+    """A `run` seam answering the default-branch query with `trunk` and the contents API
+    with `text` as a blob. `gh api` output is text, so the blob is handed back as JSON."""
+
+    def run(args, check=True):
+        if recorder is not None:
+            recorder.append((list(args), check))
+        if "--jq" in args:
+            return "trunk\n"
+        return json.dumps(_blob(text, encoding))
+
+    return run
+
+
+def test_a_non_base64_answer_is_unreadable_not_empty():
+    """A file over 1 MB answers with `encoding: "none"` and empty content. Reddens on
+    accepting any encoding: that empty content decodes to a readable EMPTY file, which a
+    caller reads as a repository whose settings are simply all absent."""
+    path = "repos/an-org/a-repo/contents/x"
+    assert ec.contents_text(path, fetch=lambda _p: _blob(None, "none")) is None
+
+
+def test_contents_text_decodes_the_blob_to_its_exact_text():
+    """Reddens on returning the blob as delivered: base64 of valid TOML is not valid TOML,
+    and nothing between here and `parse_table` would notice on its own."""
+    blob = _blob(_SHARED_TEXT)
+    assert ec.contents_text("p", fetch=lambda _path: blob) == _SHARED_TEXT
+
+
+def test_contents_text_leaves_a_leading_byte_order_mark_in_place():
+    """`tomllib` refuses a U+FEFF and `git show` delivers one, so this reader must too, or
+    two readers reach different verdicts on one file. Reddens on adding the
+    U+FEFF `removeprefix` that `_workflow_text` needs and this must not have."""
+    text = "﻿" + _SHARED_TEXT
+    blob = _blob(text)
+    assert ec.contents_text("p", fetch=lambda _path: blob) == text
+
+
+def test_read_table_at_default_branch_runs_the_whole_command_sequence(monkeypatch):
+    """The whole argv of every call, in order, against a hand-written constant. Reddens on
+    any change to the ref, which is the point: a later change making the ref a parameter a
+    caller can point at a feature branch would let branch content decide its own
+    authorization."""
+    _env(monkeypatch)
+    calls = []
+    ec.read_table_at_default_branch(run=_contents_run(_SHARED_TEXT, calls))
+    assert calls == [
+        (["gh", "api", "repos/an-org/a-repo", "--jq", ".default_branch"], True),
+        (["gh", "api", "repos/an-org/a-repo/contents/.github/shipmate.toml?ref=trunk"], True),
+    ]
+
+
+def test_an_unreadable_file_refuses_with_read_tables_own_story(monkeypatch):
+    """Reddens on returning `None` for an unreadable file: a caller then proceeds against a
+    table nobody read. The explanation is asserted against `read_table`'s too -- one file,
+    one story, whichever job hit the wall."""
+    _env(monkeypatch)
+    with pytest.raises(SystemExit) as exc:
+        ec.read_table_at_default_branch(run=_contents_run(None, encoding="none"))
+    message = str(exc.value)
+    assert message.startswith("::error::.github/shipmate.toml could not be read from the ")
+    assert "default branch (trunk)" in message
+    assert _REFUSAL_STORY in " ".join(message.split())
+
+    git = types.SimpleNamespace(returncode=128, stdout="", stderr="fatal: no such path\n")
+    with pytest.raises(SystemExit) as show_exc:
+        ec.read_table(run=_fake_run(git=git))
+    assert _REFUSAL_STORY in " ".join(str(show_exc.value).split())
+
+
+def test_both_readers_return_the_same_table_for_the_same_bytes(monkeypatch):
+    """The divergence guard. One fixture, two mechanisms, and the WHOLE parsed table
+    compared to a hand-written constant on each side -- not a subset, not a key count.
+
+    Reddens on any transformation one reader applies and the other does not: strip each
+    line of the decoded text in `contents_text` and `note` loses its indentation here.
+    """
+    _env(monkeypatch)
+    git = types.SimpleNamespace(returncode=0, stdout=_SHARED_TEXT, stderr="")
+    assert ec.read_table(run=_fake_run(git=git)) == _SHARED_TABLE
+    assert ec.read_table_at_default_branch(run=_contents_run(_SHARED_TEXT)) == _SHARED_TABLE
