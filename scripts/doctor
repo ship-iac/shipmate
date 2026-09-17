@@ -2130,16 +2130,24 @@ def config_status(ctx):
 
 
 def _governing_team(ctx):
-    """The approvers team an apply is actually authorized against: `[gate] approvers_team`
-    in the file at the commit under examination, or the SHIPMATE_APPROVERS_TEAM variable
-    while the migration fallback still reads it.
+    """The approvers team the file at the commit under examination declares — the value
+    that governs every apply once it merges — or the SHIPMATE_APPROVERS_TEAM variable while
+    the migration fallback still reads it.
 
-    Resolved the way comment-ops resolves it, so the probe cannot report on a value no
-    apply reads: a repository declaring the key authorizes against the file whatever the
-    variable says, and one that has deleted the variable has no other source.
+    The file rather than the variable, because a repository declaring the key authorizes
+    against it whatever the variable says, and one that has deleted the variable has no
+    other source: probing the variable reports on a value no apply reads.
 
-    The fallback's migration warning is swallowed. stdout carries the rendered report, and
-    a workflow command written into it lands in the pull request comment.
+    The ref is NOT comment-ops'. `_config_table` reads the commit under examination, as
+    every other reading of this file here does, while `gate-config` resolves from the
+    default branch. On a pull request that edits the gate table the two diverge: this
+    reports the branch's team while that pull request's own applies are still authorized
+    against the default branch's. That is the direction worth having — a bad team slug is
+    warned about before it merges, which a default-branch read cannot do.
+
+    The fallback's migration warning is swallowed
+    (`test_the_team_probe_prints_nothing_into_the_report`). stdout carries the rendered
+    report, so a workflow command written to it lands in the pull request comment.
     """
     table, _ = _config_table(ctx)
     fallback = ctx["team"] or ""

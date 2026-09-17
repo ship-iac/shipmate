@@ -1298,6 +1298,33 @@ def test_ctx_from_env_reads_the_engine_repo_and_the_harvest_flags(monkeypatch, t
     assert ctx["harvest_pending"] is False
 
 
+def test_ctx_from_env_marks_only_report_mode_as_the_route_that_can_probe_a_team(
+    monkeypatch, tmp_path
+):
+    """The producer end of the team probe's route gate. `actions/summary` mints its App token
+    without `members: read`, so the lookup fails there for every repository alike and a probe
+    running on the plan path would report every declared team as unresolvable. The guard on
+    the consumer side cannot see this: it is handed `report_mode` already decided.
+
+    All three modes are driven, and against the mode strings `MODES` declares rather than a
+    single positive case -- `annotate` is the one that must be false, and it is the one a
+    wrong comparison would select.
+
+    Mutation: compare against "annotate" in `ctx_from_env`, or against any truthy constant.
+    """
+    monkeypatch.setenv("GITHUB_REPOSITORY", _REPO)
+    monkeypatch.setenv("SHIPMATE_APP_ID", _APP_ID)
+    monkeypatch.setenv("SHIPMATE_DEFAULT_BRANCH", _BRANCH)
+    monkeypatch.setenv("SHIPMATE_CELLS_DIR", str(tmp_path))
+    modes = {}
+    for mode in doctor.MODES:
+        monkeypatch.setenv("SHIPMATE_DOCTOR_MODE", mode)
+        modes[mode] = doctor.ctx_from_env()["report_mode"]
+    assert modes == {"annotate": False, "report": True, "check-ids": False}
+    monkeypatch.delenv("SHIPMATE_DOCTOR_MODE")
+    assert doctor.ctx_from_env()["report_mode"] is False
+
+
 def test_unreadable_release_degrades_to_note(monkeypatch):
     responses = {
         f"{_WF_DIR}{_REF}": _wf_listing("plan.yml"),
@@ -1522,6 +1549,21 @@ def test_the_team_probe_survives_the_variable_being_deleted(monkeypatch):
     out, looked_up = _team_probe(monkeypatch, team=None, table=_GATE_TABLE)
     assert looked_up == ["orgs/o/teams/platform"]
     assert out == []
+
+
+def test_the_team_probe_prints_nothing_into_the_report(monkeypatch, capsys):
+    """`report` mode is run as `python3 scripts/doctor > doctor.md`, so this module's stdout
+    IS the sticky comment's body. `gate_approvers_team` prints a `::warning::` whenever the
+    file declares no key and the variable is read instead -- which is every `shipmate doctor`
+    on a repository that has not migrated yet, the common case. Unredirected, that workflow
+    command is pasted into the comment.
+
+    Mutation: delete the `contextlib.redirect_stdout` in `_governing_team`.
+    """
+    out, looked_up = _team_probe(monkeypatch, team="ops")
+    assert looked_up == ["orgs/o/teams/ops"]
+    assert out == []
+    assert capsys.readouterr().out == ""
 
 
 def test_the_team_probe_does_not_run_on_the_plan_path(monkeypatch):

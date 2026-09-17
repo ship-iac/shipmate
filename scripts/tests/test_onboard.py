@@ -2184,10 +2184,11 @@ By hand:
   scalar written below one lands inside that table instead.
 
   `[gate] approvers_team` names the team whose members may drive shipmate by pull
-  request comment — `ops` here. A whole table header goes above the first
-  `[environments.*]` one for the same reason a scalar does. Add it only once this
-  repository's pin names an engine that accepts the key: an older one refuses the
-  whole file, and moving a pin is not this script's job.
+  request comment — `ops` here. Keep it above the first
+  `[environments.*]` header, where it reads with the other repository-wide
+  settings. Add it only once this repository's pin names an engine that accepts
+  the key: an older one refuses the whole file, and moving a pin is not this
+  script's job.
 
     layout = "dry"
 

@@ -84,11 +84,13 @@ def test_gather_and_authorize_read_one_identical_team_expression():
 
 
 #: The doctor step's own team binding, hand-written. `doctor` resolves the team from the
-#: table it already fetches and reads this only as the migration fallback, exactly as
-#: `gate-config` does above -- so the binding must stay until the fallback goes, and it
-#: cannot come from the resolve step's output: that step's `if:` admits only apply and
-#: unlock. Named here so a sweep of `inputs.approvers-team` readers does not mistake it for
-#: a site this wiring missed.
+#: table it already fetches and reads this only as the migration fallback -- so the binding
+#: must stay until the fallback goes, and it cannot come from the resolve step's output:
+#: that step's `if:` admits only apply and unlock. Not the same READ, though: `doctor` takes
+#: the file at the commit under examination and this step's script takes the default
+#: branch's, which is what lets `shipmate doctor` warn about a gate table before it merges.
+#: Named here so a sweep of `inputs.approvers-team` readers does not mistake it for a site
+#: this wiring missed.
 _DOCTOR_TEAM = "${{ inputs.approvers-team }}"
 
 
