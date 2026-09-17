@@ -1517,6 +1517,39 @@ def _unresolved(team):
     )
 
 
+#: The migration finding, whole and hand-written: it names which source governs and the two
+#: steps that end the fallback, and nothing else in the report says the variable is in play.
+def _from_variable(team):
+    return (
+        doctor.WARNING,
+        f"the approvers team `{team}` comes from the SHIPMATE_APPROVERS_TEAM repository "
+        "variable, not from `[gate] approvers_team` in `.github/shipmate.toml` — a later "
+        "release stops reading the variable, and every `shipmate apply` is refused from the "
+        "day it does. Declare the key on the default branch, then delete the variable.",
+    )
+
+
+def test_the_report_says_when_the_variable_is_still_what_governs(monkeypatch):
+    """`gate_approvers_team`'s own `::warning::` is swallowed here on purpose -- stdout IS
+    the comment body -- so without this finding the only signal that a repository is
+    mid-migration is an annotation on an otherwise-green run, and `shipmate doctor` reports
+    a healthy team without saying which source it came from.
+
+    Mutations: return `declared=True` unconditionally from `_governing_team`; drop the
+    `findings` prefix from the resolved-team return, which is the common case.
+    """
+    out, looked_up = _team_probe(monkeypatch, team="ops")
+    assert looked_up == ["orgs/o/teams/ops"]
+    assert out == [_from_variable("ops")]
+
+
+def test_the_report_is_silent_once_the_key_is_declared(monkeypatch):
+    """The migration's end state earns no finding: the file governs and there is nothing to
+    do. Mutation: key the finding on anything but the file declaring `approvers_team`.
+    """
+    assert _team_probe(monkeypatch, team="ops", table=_GATE_TABLE)[0] == []
+
+
 def test_team_probe_skipped_without_team(monkeypatch):
     """No `[gate]` table and no variable: nothing declares a team, so there is nothing to
     look up and no finding to make.
@@ -1562,7 +1595,7 @@ def test_the_team_probe_prints_nothing_into_the_report(monkeypatch, capsys):
     """
     out, looked_up = _team_probe(monkeypatch, team="ops")
     assert looked_up == ["orgs/o/teams/ops"]
-    assert out == []
+    assert out == [_from_variable("ops")]
     assert capsys.readouterr().out == ""
 
 
@@ -1585,12 +1618,12 @@ def test_unresolvable_team_warned(monkeypatch):
     """
     out, looked_up = _team_probe(monkeypatch, team="ops-tem", found=SystemExit("404 Not Found"))
     assert looked_up == ["orgs/o/teams/ops-tem"]
-    assert out == [_unresolved("ops-tem")]
+    assert out == [_from_variable("ops-tem"), _unresolved("ops-tem")]
 
 
 def test_resolvable_team_silent(monkeypatch):
-    out, looked_up = _team_probe(monkeypatch, team="ops")
-    assert looked_up == ["orgs/o/teams/ops"]
+    out, looked_up = _team_probe(monkeypatch, team="ops", table=_GATE_TABLE)
+    assert looked_up == ["orgs/o/teams/platform"]
     assert out == []
 
 
@@ -1598,8 +1631,8 @@ def test_team_response_without_slug_warned(monkeypatch):
     """A 200 response that isn't actually the team resource (e.g. the team-slug
     input carrying a path segment that happens to hit some other list endpoint)
     must not be mistaken for a resolved team."""
-    out, _looked_up = _team_probe(monkeypatch, team="ops", found={"id": 1})
-    assert out == [_unresolved("ops")]
+    out, _looked_up = _team_probe(monkeypatch, table=_GATE_TABLE, found={"id": 1})
+    assert out == [_unresolved("platform")]
 
 
 def test_one_line_flattens_and_pins_the_truncation_boundary():

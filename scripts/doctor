@@ -886,7 +886,9 @@ def _workflow_names(base):
 
 
 def _contents_text(path):
-    """`env-config`'s contents-API read, bound to this module's `_gh_json`.
+    """`env-config`'s contents-API read, bound to this module's `_gh_json`. `None` when the
+    file cannot be read, which every caller here degrades on rather than failing — see
+    PIN_UNREADABLE for why.
 
     The binding is what keeps this module's tests intercepting the read: they patch
     `_gh_json`, which a call reaching `gh` through `env-config` would bypass.
@@ -2145,21 +2147,38 @@ def _governing_team(ctx):
     against the default branch's. That is the direction worth having — a bad team slug is
     warned about before it merges, which a default-branch read cannot do.
 
-    The fallback's migration warning is swallowed
-    (`test_the_team_probe_prints_nothing_into_the_report`). stdout carries the rendered
-    report, so a workflow command written to it lands in the pull request comment.
+    Returned as `(team, declared)`, `declared` being whether the file is what governs. The
+    fallback's own migration warning is swallowed
+    (`test_the_team_probe_prints_nothing_into_the_report`) — stdout carries the rendered
+    report, so a workflow command written to it lands in the pull request comment — which
+    leaves this flag as the only way the report can say a fallback is governing.
     """
     table, _ = _config_table(ctx)
     fallback = ctx["team"] or ""
     if table is None:
-        return fallback
+        return fallback, False
     with contextlib.redirect_stdout(io.StringIO()):
-        return bm.ec.gate_approvers_team(table, fallback)
+        team = bm.ec.gate_approvers_team(table, fallback)
+    return team, "approvers_team" in table.get("gate", {})
+
+
+def _fallback_team_finding(team):
+    """The migration state the report would otherwise not mention at all."""
+    return (
+        WARNING,
+        f"the approvers team `{team}` comes from the SHIPMATE_APPROVERS_TEAM repository "
+        f"variable, not from `[gate] approvers_team` in `{CONFIG_PATH}` — a later release "
+        "stops reading the variable, and every `shipmate apply` is refused from the day it "
+        "does. Declare the key on the default branch, then delete the variable.",
+    )
 
 
 def _team_warnings(ctx):
     """A typo'd or cross-org approvers team surfaces today only as every apply being
-    rejected "not a team member" — one API call names it.
+    rejected "not a team member" — one API call names it. A team still governing from the
+    repository variable is reported beside it: the resolver's `::warning::` reaches a run log
+    only, and this report is the surface an operator opens to find a setting a later release
+    stops reading.
 
     Comment-path-only, and by the token rather than by the value: the plan path's App
     token is minted without `members: read` (actions/summary), so the lookup below would
@@ -2167,23 +2186,25 @@ def _team_warnings(ctx):
     """
     if not ctx["report_mode"]:
         return []
-    team = _governing_team(ctx)
+    team, declared = _governing_team(ctx)
     if not team:
         return []
+    findings = [] if declared else [_fallback_team_finding(team)]
     try:
         found = _gh_json(f"orgs/{ctx['owner']}/teams/{team}")
         resolved = isinstance(found, dict) and bool(found.get("slug"))
     except (Exception, SystemExit):  # noqa: BLE001 - a failed lookup IS the finding
         resolved = False
     if resolved:
-        return []
+        return findings
     return [
+        *findings,
         (
             WARNING,
             f"approvers team `{team}` does not resolve in org `{ctx['owner']}` — "
             'every `shipmate apply` will be rejected as "not a team member". Check '
             f"`[gate] approvers_team` in `{CONFIG_PATH}` and that the App has members:read.",
-        )
+        ),
     ]
 
 
@@ -2304,7 +2325,7 @@ def ctx_from_env():
         "envs_available": bool(envs),
         "team": os.environ.get("SHIPMATE_TEAM") or None,
         # The team probe's route marker: only the comment path's token requests
-        # `members: read`, and only `report` mode runs there.
+        # `members: read`, and `report` mode runs nowhere else.
         "report_mode": os.environ.get("SHIPMATE_DOCTOR_MODE") == "report",
         "app_permissions_checked": os.environ.get("SHIPMATE_APP_PERMISSIONS_CHECKED") == "true",
         "app_permission_error": os.environ.get("SHIPMATE_APP_PERMISSION_ERROR", ""),
