@@ -11,6 +11,11 @@ bm = load_script("build-matrix")
 _MINIMAL_TABLE = {"layout": "folder"}
 
 
+def _no_read(run=None):
+    """A supplied table must reach validation without a second read of the file."""
+    raise AssertionError("env_config read the table although one was supplied")
+
+
 def test_multi_env_stack_yields_one_cell_per_env():
     cells = bm.build_matrix(
         envs=["dev-eu", "dev-us"],
@@ -1349,3 +1354,20 @@ def test_a_whole_tree_run_does_report_the_unused_entry(monkeypatch, tmp_path, ca
         table=_TWO_ENV_TABLE,
     )
     assert _UNUSED_DEV_US in capsys.readouterr().out.splitlines()
+
+
+def test_a_supplied_table_is_validated_exactly_as_a_read_one_is(monkeypatch):
+    """`table=` exists to spare a second read, not to skip the checks. `validate_structure`
+    alone supplies neither `_check_shared` nor `_check_dry_coverage`, so a supplied `dry`
+    table with no entry for a cell's environment would derive neither identity variable and
+    the cell would plan undistinguished from every other environment's.
+
+    Mutation: on the supplied-table branch return `ec.validate_structure(table), shared`
+    instead of routing through `ec.validate`.
+    """
+    monkeypatch.setenv("SHIPMATE_SHARED_ENVS", "")
+    monkeypatch.setattr(bm.ec, "read_table", _no_read)
+    cells = [{"stack": "stacks/app", "environment": "dev-eu", "workload": ""}]
+    with pytest.raises(SystemExit) as exc:
+        bm.env_config(cells, table={"layout": "dry", "environments": {}})
+    assert "dev-eu" in str(exc.value) and "no entry in it" in str(exc.value)
