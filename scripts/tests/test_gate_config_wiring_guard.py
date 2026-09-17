@@ -42,6 +42,28 @@ def test_the_resolve_step_runs_the_gate_config_script_on_the_workflow_token():
     assert step["run"].strip() == 'python3 "$GITHUB_ACTION_PATH/../../scripts/gate-config"'
 
 
+def test_a_failed_resolve_reports_to_the_commenter_and_still_fails_the_job():
+    """An unreadable file refuses, and every later step is `success()`-gated -- so the
+    reaction, the exemption report and the refusal all skipped, and the commenter got no
+    reaction and no comment at all, `unlock` included. The resolve step now survives its own
+    failure just long enough for the report step to post one, which then re-raises it: a
+    green run over a command this action never authorized is not a verdict it may render.
+
+    Mutations: delete `continue-on-error` from the resolve step, so the report never runs;
+    delete the `exit 1`, so the job ends green with nothing applied and nothing refused.
+    """
+    assert _step("Resolve gate configuration")["continue-on-error"] is True
+    report = _step("Gate configuration unreadable")
+    assert report["env"] == {
+        "GH_TOKEN": "${{ inputs.github-token }}",
+        "PR_NUMBER": "${{ inputs.pr-number }}",
+    }
+    run = report["run"]
+    assert 'gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments"' in run
+    assert r"\`.github/shipmate.toml\`" in run
+    assert run.strip().endswith("exit 1")
+
+
 def test_the_resolve_step_carries_the_id_its_three_readers_name():
     """The producer end of the coupling. Three expressions hard-code `steps.gate.outputs.…`
     and every guard here compares them to hand-written constants, so a renamed or deleted

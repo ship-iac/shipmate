@@ -789,6 +789,10 @@ _SHARED_ROUTE_IFS = {
         "${{ (steps.parse.outputs.route == 'apply' || steps.parse.outputs.route == 'unlock')"
         " && steps.apptoken.outcome == 'success' }}"
     ),
+    "Gate configuration unreadable": (
+        "${{ (steps.parse.outputs.route == 'apply' || steps.parse.outputs.route == 'unlock')"
+        " && steps.apptoken.outcome == 'success' && steps.gate.outcome != 'success' }}"
+    ),
     "Gather authorization inputs": (
         "${{ (steps.parse.outputs.route == 'apply' || steps.parse.outputs.route == 'unlock')"
         " && steps.apptoken.outcome == 'success' }}"
@@ -885,6 +889,7 @@ _STEP_NAMES = [
     "Mint App token (members:read, checks:read)",
     "App token unavailable (App not installed?)",
     "Resolve gate configuration",
+    "Gate configuration unreadable",
     "Gather authorization inputs",
     "Authorize",
     "Combine the route verdicts",

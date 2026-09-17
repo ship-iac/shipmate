@@ -493,6 +493,11 @@ runs:
       # resolve and the membership lookup that consumes it. A resolve that can skip while
       # gather runs hands gather an empty team, and every commenter is refused.
       if: ${{ (steps.parse.outputs.route == 'apply' || steps.parse.outputs.route == 'unlock') && steps.apptoken.outcome == 'success' }}
+      # A failed resolve must not hard-fail the step: every later step is `success()`-gated,
+      # so the reaction, the exemption report and the refusal would all skip and the
+      # commenter would get nothing at all -- including for `unlock`, the recovery verb.
+      # `Gate configuration unreadable` reports it and then fails the job in its place.
+      continue-on-error: true
       shell: bash
       env:
         # The workflow token, not the App token: this reads repository contents only.
@@ -500,6 +505,20 @@ runs:
         SHIPMATE_UNGATED_ENVS: ${{ inputs.ungated-envs }}
         APPROVERS_TEAM: ${{ inputs.approvers-team }}
       run: python3 "$GITHUB_ACTION_PATH/../../scripts/gate-config"
+
+    - name: Gate configuration unreadable
+      if: ${{ (steps.parse.outputs.route == 'apply' || steps.parse.outputs.route == 'unlock') && steps.apptoken.outcome == 'success' && steps.gate.outcome != 'success' }}
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        PR_NUMBER: ${{ inputs.pr-number }}
+      run: |
+        set -euo pipefail
+        gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -f body=":x: shipmate: could not read \`.github/shipmate.toml\` from the default branch, so this command was not run. Either it is not merged there yet, or the read failed — this run's log says which. Fix that and comment again." >/dev/null
+        # The resolve's own failure, re-raised: `continue-on-error` above kept the job alive
+        # long enough to post this, and a green run over an unauthorized command is not a
+        # verdict this action may render.
+        exit 1
 
     - name: Gather authorization inputs
       id: gather
