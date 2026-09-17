@@ -5,9 +5,11 @@ pf = load_script("pr-facts")
 bm = load_script("build-matrix")
 
 
-def test_build_matrix_has_gh_json():
-    # gh_json lives once, next to _run, in build-matrix.
-    assert callable(bm.gh_json)
+def test_gh_json_lives_in_env_config():
+    # gh_json lives once, next to _run, in the module that `_load`s nothing; build-matrix
+    # aliases it the same way, so its own callers cannot fork a second copy.
+    # Mutation: give build-matrix its own `def gh_json`.
+    assert bm.gh_json is bm.ec.gh_json
 
 
 def test_deploy_detect_gh_json_is_the_single_source():

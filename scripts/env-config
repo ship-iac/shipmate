@@ -78,10 +78,9 @@ def parse_table(text):
 
     Shared by every reader: `read_table` below reads the file with `git show`, while
     `contents_text` reads the same bytes through the contents API for the jobs that have
-    no checkout. The
-    interpreter check runs ahead of the import, because a module-level `import tomllib`
-    would raise `ModuleNotFoundError` before any caller could report the real cause --
-    an older runner image than CONTRACT.md requires.
+    no checkout. The interpreter check runs ahead of the import, because a module-level
+    `import tomllib` would raise `ModuleNotFoundError` before any caller could report the
+    real cause -- an older runner image than CONTRACT.md requires.
 
     A leading U+FEFF is refused, not stripped: `tomllib` rejects it, `git show` and the
     contents API both deliver it, and every reader must reach the same verdict on the same
@@ -114,8 +113,14 @@ def read_table(run=None):
     return parse_table(p.stdout)
 
 
-def _gh_json(path, run=None):
-    """`gh api <path>` -> parsed JSON, through `run` so a nonzero exit refuses."""
+def gh_json(path, run=None):
+    """`gh api <path>` -> parsed JSON, through `run` so a nonzero exit surfaces the tool's
+    stderr then raises ::error:: from a single definition. Callers alias it as `_gh_json`
+    rather than repeating the `json.loads(_run(...))` pair.
+
+    Homed here for the reason `_run` gives: `build-matrix` aliases it, and this module
+    cannot alias upward.
+    """
     return json.loads((run or _run)(["gh", "api", path]))
 
 
@@ -138,7 +143,7 @@ def contents_text(path, fetch=None):
 
     `errors="replace"` keeps a mis-encoded byte from raising.
     """
-    fetch = fetch or _gh_json
+    fetch = fetch or gh_json
     try:
         blob = fetch(path)
     except (Exception, SystemExit):  # noqa: BLE001 - unreadable is the contract, not a failure
@@ -158,7 +163,7 @@ def read_table_at_default_branch(run=None):
     branch = _default_branch(run)
     repo = os.environ["GITHUB_REPOSITORY"]
     path = f"repos/{repo}/contents/{CONFIG_PATH}?ref={branch}"
-    text = contents_text(path, fetch=lambda p: _gh_json(p, run))
+    text = contents_text(path, fetch=lambda p: gh_json(p, run))
     if text is None:
         raise SystemExit(
             f"::error::{CONFIG_PATH} could not be read from the default branch "

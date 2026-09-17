@@ -16,9 +16,10 @@ import sys
 from _shipmate import _load
 
 ec = _load("env-config")
-# One subprocess wrapper for both modules, homed in the one that `_load`s nothing;
-# its docstring says why that direction is the terminating one.
+# One subprocess wrapper and one `gh api` reader for both modules, homed in the one
+# that `_load`s nothing; `_run`'s docstring says why that direction is the terminating one.
 _run = ec._run
+gh_json = ec.gh_json
 
 #: The two pull-request events `plan_workflow_error` requires a consumer workflow file on.
 _PR_EVENTS = ("pull_request", "pull_request_target")
@@ -172,14 +173,6 @@ def build_matrix(envs, stacks_by_env, tags_by_stack, tags=""):
             "only lever is to reduce the number of environments in play."
         )
     return cells
-
-
-def gh_json(path):
-    """`gh api <path>` -> parsed JSON, through _run so a nonzero exit surfaces
-    the tool's stderr then raises ::error:: from a single definition. Callers
-    alias it as `_gh_json` rather than repeating the `json.loads(_run(...))`
-    pair."""
-    return json.loads(_run(["gh", "api", path]))
 
 
 _ZERO_SHA = "0" * 40

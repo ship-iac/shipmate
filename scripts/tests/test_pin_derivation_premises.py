@@ -42,7 +42,7 @@ def test_shared_loader_returns_fresh_sibling_modules():
     first, second = _load("apply-detect"), _load("apply-detect")
     assert first is not second
     assert first.bm is not second.bm
-    assert first.bm.gh_json.__module__ == "build_matrix"
+    assert first.bm.build_matrix.__module__ == "build_matrix"
 
 
 def test_shared_loader_is_in_the_transitive_pin_dependencies():
