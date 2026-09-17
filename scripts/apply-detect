@@ -16,7 +16,7 @@ envs is handled separately on the apply-all path.
 
 Before any of that, the PR's review decision — read server-side by the `review`
 job, narrowed by the `[gate]` table's `ungated_envs` — must authorize this
-the run refuses.
+environment, or the run refuses.
 
 `completed_apply_names` lives here and this module's `main` calls it, so
 test_detect_app_scoping's textual guard covers all three detects — but for this

@@ -520,12 +520,24 @@ def test_refuse_unreviewed_reuses_authorizes_selector_verbatim():
 
 
 def test_refuse_unreviewed_rejects_a_malformed_variable_entry(monkeypatch):
-    # The variable is still read when the table declares no gate list, and it fails closed on
-    # an entry that could never match an env name: a silently inert entry leaves an operator
-    # believing an environment is exempt when it is not.
+    """The variable is still read when the table declares no gate list, and it fails closed on
+    an entry that could never match an env name: a silently inert entry leaves an operator
+    believing an environment is exempt when it is not.
+
+    Which refusal is the whole assertion. A bare `pytest.raises(SystemExit)` here is satisfied
+    by the ordinary "not authorized" refusal that REVIEW_REQUIRED raises anyway, so it stays
+    green with the name check removed entirely.
+
+    Mutation: drop the `validate_env_name_list` call from `gate_ungated_envs` -- the message
+    becomes the authorization refusal."""
     monkeypatch.setenv("SHIPMATE_UNGATED_ENVS", "dev-eu-apply")
-    with pytest.raises(SystemExit):
+    with pytest.raises(SystemExit) as exc_info:
         ad.refuse_unreviewed("dev-eu", {"layout": "folder"}, "REVIEW_REQUIRED")
+    assert str(exc_info.value) == (
+        "::error::SHIPMATE_UNGATED_ENVS entry 'dev-eu-apply' carries the environment suffix "
+        "'-apply'; SHIPMATE_UNGATED_ENVS is matched against the bare logical env name — "
+        "write 'dev-eu' instead."
+    )
 
 
 def test_refuse_unreviewed_takes_the_gate_list_over_the_variable(monkeypatch):
