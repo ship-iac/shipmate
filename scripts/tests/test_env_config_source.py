@@ -483,3 +483,24 @@ def test_an_empty_approvers_team_input_warns_nothing(capsys):
     """The team's half of the mid-migration case. Reddens on warning unconditionally."""
     assert ec.gate_approvers_team(_SHARED_TABLE, "") == ""
     assert _warnings(capsys) == []
+
+
+def test_a_declared_empty_approvers_team_authorizes_nobody(capsys):
+    """The `[]` fail-open on the other value: an empty slug is a declared empty team, which
+    404s to `is_member=false` downstream, not an undeclared one. Reddens on
+    `gate.get("approvers_team")` tested for truthiness, which falls back to the variable and
+    authorizes comments against the team the repository just migrated away from. The
+    fallback is non-empty deliberately -- an empty one passes under either reading."""
+    assert ec.gate_approvers_team(_gate(approvers_team=""), "old-team") == ""
+    assert _warnings(capsys) == []
+
+
+def test_a_gate_declaring_one_key_still_falls_back_for_the_other(capsys):
+    """The migration shape a repository lands mid-way: one key present, the other still on
+    its variable. Reddens on testing the `[gate]` table's presence rather than the key's --
+    the declared key then answers for both, so every exemption silently disappears and the
+    warning that names the remaining migration goes quiet."""
+    assert ec.gate_ungated_envs(_gate(approvers_team="platform"), "sbx") == frozenset({"sbx"})
+    assert len(_warnings(capsys)) == 1
+    assert ec.gate_approvers_team(_gate(ungated_envs=["sbx"]), "old-team") == "old-team"
+    assert len(_warnings(capsys)) == 1
