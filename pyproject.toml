@@ -59,6 +59,7 @@ extend-include = [
     "scripts/env-config",
     "scripts/env-inject",
     "scripts/env-order",
+    "scripts/gate-config",
     "scripts/gate-state",
     "scripts/gate-status-body",
     "scripts/lock-info",

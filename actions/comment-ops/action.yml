@@ -8,7 +8,7 @@ inputs:
     description: GitHub App private key (from the shipmate-engine environment secret).
     required: true
   approvers-team:
-    description: GitHub team slug whose members may apply and unlock.
+    description: 'Transitional fallback for `gate.approvers_team` in .github/shipmate.toml, which is authoritative: this input is read only when the file on the default branch declares no team, and a later release removes it. Carries vars.SHIPMATE_APPROVERS_TEAM, because a composite action cannot read the vars context itself. GitHub team slug whose members may apply and unlock.'
     required: true
   comment-body:
     description: The PR comment body (author-controlled; never interpolated into a shell).
@@ -26,7 +26,7 @@ inputs:
     description: 'GITHUB_TOKEN with issues:write and pull-requests:write (reactions + reject comments + PR reads).'
     required: true
   ungated-envs:
-    description: 'SHIPMATE_UNGATED_ENVS verbatim (comma-separated bare env names). Environments listed here may be applied without an approving review; every other environment keeps the branch ruleset requirement. Omitted or empty = every environment keeps it. Ergonomics, not policy: the engine reads vars.SHIPMATE_UNGATED_ENVS itself on both apply paths and enforces there, so this input only buys a PR-comment refusal instead of a dispatched run that refuses inside the engine. The supported caller is engine comment-ops.yml, which passes the repository variable.'
+    description: 'Transitional fallback for `gate.ungated_envs` in .github/shipmate.toml, which is authoritative: this input is read only when the file on the default branch declares no list, and a later release removes it. SHIPMATE_UNGATED_ENVS verbatim (comma-separated bare env names). Environments listed here may be applied without an approving review; every other environment keeps the branch ruleset requirement. Omitted or empty = every environment keeps it. Ergonomics, not policy: the engine reads vars.SHIPMATE_UNGATED_ENVS itself on both apply paths and enforces there, so this input only buys a PR-comment refusal instead of a dispatched run that refuses inside the engine. The supported caller is engine comment-ops.yml, which passes the repository variable.'
     required: false
     default: ''
 outputs:
@@ -487,6 +487,20 @@ runs:
         set -euo pipefail
         gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -f body=":x: shipmate: could not mint a GitHub App token — is the shipmate App installed on this repository (with members:read and checks:read)? Ask an org admin to install it, then retry." >/dev/null
 
+    - name: Resolve gate configuration
+      id: gate
+      # Byte-identical to `Gather authorization inputs` below, so one condition governs the
+      # resolve and the membership lookup that consumes it. A resolve that can skip while
+      # gather runs hands gather an empty team, and every commenter is refused.
+      if: ${{ (steps.parse.outputs.route == 'apply' || steps.parse.outputs.route == 'unlock') && steps.apptoken.outcome == 'success' }}
+      shell: bash
+      env:
+        # The workflow token, not the App token: this reads repository contents only.
+        GH_TOKEN: ${{ inputs.github-token }}
+        SHIPMATE_UNGATED_ENVS: ${{ inputs.ungated-envs }}
+        APPROVERS_TEAM: ${{ inputs.approvers-team }}
+      run: python3 "$GITHUB_ACTION_PATH/../../scripts/gate-config"
+
     - name: Gather authorization inputs
       id: gather
       if: ${{ (steps.parse.outputs.route == 'apply' || steps.parse.outputs.route == 'unlock') && steps.apptoken.outcome == 'success' }}
@@ -495,7 +509,9 @@ runs:
         GH_TOKEN: ${{ inputs.github-token }}
         APP_TOKEN: ${{ steps.apptoken.outputs.token }}
         OWNER: ${{ github.repository_owner }}
-        TEAM: ${{ inputs.approvers-team }}
+        # The membership lookup below is where the team decides anything; `Authorize` only
+        # labels a refusal with it. Both steps must read this one expression.
+        TEAM: ${{ steps.gate.outputs.approvers_team }}
         USER: ${{ inputs.comment-user }}
         PR_NUMBER: ${{ inputs.pr-number }}
         SHIPMATE_VERB: ${{ steps.parse.outputs.route }}
@@ -561,12 +577,12 @@ runs:
       shell: bash
       env:
         IS_MEMBER: ${{ steps.gather.outputs.is_member }}
-        APPROVERS_TEAM: ${{ inputs.approvers-team }}
+        APPROVERS_TEAM: ${{ steps.gate.outputs.approvers_team }}
         REVIEW_DECISION: ${{ steps.gather.outputs.review_decision }}
         PR_JSON: pr.json
         PLAN_RUN_JSON: plan_run.json
         SHIPMATE_ENV: ${{ steps.parse.outputs.env }}
-        SHIPMATE_UNGATED_ENVS: ${{ inputs.ungated-envs }}
+        SHIPMATE_UNGATED_ENVS: ${{ steps.gate.outputs.ungated_envs }}
         SHIPMATE_VERB: ${{ steps.parse.outputs.route }}
       run: python3 "$GITHUB_ACTION_PATH/../../scripts/authorize"
 

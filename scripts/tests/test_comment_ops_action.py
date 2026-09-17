@@ -711,8 +711,16 @@ def test_the_gather_step_receives_the_app_id_the_plan_run_lookup_scopes_on():
     assert _gather_step()["env"]["SHIPMATE_APP_ID"] == "${{ inputs.app-id }}"
 
 
-def test_authorize_step_receives_the_ungated_envs_input():
-    assert _authorize_step()["env"]["SHIPMATE_UNGATED_ENVS"] == "${{ inputs.ungated-envs }}"
+def test_authorize_step_receives_the_resolved_ungated_envs():
+    """The resolve step's output, never the input: the input is the fallback's channel into
+    that step, and reading it here would authorize on the repository variable while the file
+    declares something else.
+
+    Mutation: restore `${{ inputs.ungated-envs }}`."""
+    assert (
+        _authorize_step()["env"]["SHIPMATE_UNGATED_ENVS"]
+        == "${{ steps.gate.outputs.ungated_envs }}"
+    )
 
 
 def test_the_ungated_envs_input_is_optional_and_defaults_to_empty():
@@ -776,6 +784,10 @@ _SHARED_ROUTE_IFS = {
     "App token unavailable (App not installed?)": (
         "${{ (steps.parse.outputs.route == 'apply' || steps.parse.outputs.route == 'unlock')"
         " && steps.apptoken.outcome != 'success' }}"
+    ),
+    "Resolve gate configuration": (
+        "${{ (steps.parse.outputs.route == 'apply' || steps.parse.outputs.route == 'unlock')"
+        " && steps.apptoken.outcome == 'success' }}"
     ),
     "Gather authorization inputs": (
         "${{ (steps.parse.outputs.route == 'apply' || steps.parse.outputs.route == 'unlock')"
@@ -872,6 +884,7 @@ _STEP_NAMES = [
     "Doctor \u2014 render and upsert the sticky comment",
     "Mint App token (members:read, checks:read)",
     "App token unavailable (App not installed?)",
+    "Resolve gate configuration",
     "Gather authorization inputs",
     "Authorize",
     "Combine the route verdicts",
