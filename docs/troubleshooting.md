@@ -825,16 +825,19 @@ The same message appears with `SHIPMATE_UNGATED_ENVS` in place of
 the list is one comma-separated string, so an entry may also be refused for
 surrounding whitespace (`dev-eu, dev-us` is an entry `" dev-us"`).
 
-**`shipmate apply` answers with nothing at all — no reaction, no comment.** A
-malformed entry — or any refusal of the file — is raised while comment-ops
-resolves the gate settings, which is before both the 🚀 reaction and the refusal
-comment. So a repository-wide breakage of `shipmate apply` and `shipmate unlock`
-(every command, every environment, however well-formed) is invisible on the pull
-request itself. The real error is the `::error::` annotation on the comment-ops
-workflow run; open that run from the Actions tab. A
-targeted apply that was genuinely refused always comments its reason, so
-silence points at the file rather than at the authorization. A file broken this
-way also refuses every plan run, which is the louder signal of the two.
+**`shipmate apply` answers “could not resolve the gate settings” and carries no
+🚀 reaction.** A malformed entry — or any refusal of the file, or a malformed
+`SHIPMATE_APPROVERS_TEAM` / `SHIPMATE_UNGATED_ENVS` fallback value — is raised
+while comment-ops resolves the gate settings, which is before both the 🚀
+reaction and the authorization refusal. So a repository-wide breakage of
+`shipmate apply` and `shipmate unlock` (every command, every environment,
+however well-formed) arrives as that one comment, whatever the command said, and
+the comment-ops run then fails. Which of the three causes it was is the
+`::error::` annotation on that run; open it from the Actions tab. A targeted
+apply that was genuinely refused comments its own authorization reason instead,
+so this comment points at the configuration rather than at the authorization. A
+file broken this way also refuses every plan run, which is the louder signal of
+the two.
 
 **A held environment is also an explicit environment.** When both causes apply
 it is reported as held, not as excluded, because the review is the thing to get

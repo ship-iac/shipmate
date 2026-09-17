@@ -39,6 +39,11 @@ file. `docs/upgrading.md` §Unreleased has the procedure.
   detect each resolve `gate.ungated_envs` from the default branch's file. The
   comment-ops job holds no checkout, so it reads through the contents API — same
   file, same branch, same refusal wording as `git show`.
+- **An unresolvable gate table refuses the comment.** `shipmate apply` and
+  `shipmate unlock` now read `.github/shipmate.toml` from the default branch
+  before they authorize, so a file that is missing there, does not parse or does
+  not validate refuses every such comment — an `:x:` comment naming the cause,
+  no 🚀 reaction, and a failed comment-ops run.
 - **The user-facing sentences name the setting, not the variable**: the apply
   comment's ungated-audit line, the comment-ops exemption comment, and
   `authorize`'s refusal for an env that is not listed.

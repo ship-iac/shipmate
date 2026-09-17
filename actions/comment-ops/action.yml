@@ -514,7 +514,7 @@ runs:
         PR_NUMBER: ${{ inputs.pr-number }}
       run: |
         set -euo pipefail
-        gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -f body=":x: shipmate: could not read \`.github/shipmate.toml\` from the default branch, so this command was not run. Either it is not merged there yet, or the read failed — this run's log says which. Fix that and comment again." >/dev/null
+        gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -f body=":x: shipmate: could not resolve the gate settings from \`.github/shipmate.toml\` on the default branch, so this command was not run. The file is not merged there, or it does not validate, or a \`SHIPMATE_APPROVERS_TEAM\` / \`SHIPMATE_UNGATED_ENVS\` fallback value is malformed — this run's log says which. Fix that and comment again." >/dev/null
         # The resolve's own failure, re-raised: `continue-on-error` above kept the job alive
         # long enough to post this, and a green run over an unauthorized command is not a
         # verdict this action may render.
