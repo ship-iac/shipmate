@@ -201,8 +201,8 @@ creates all of them, including `shipmate-engine` and its branch policy:
   A repository that needs no cloud role at all declares `layout` and nothing
   else.
 
-  The same file carries `[gate]`, which names the team whose members may drive
-  shipmate by pull request comment and the environments that apply without an
+  The same file carries `[gate]`, which names the team whose members may apply
+  and unlock by pull request comment and the environments that apply without an
   approving review (§Required — apply). Put it above the first
   `[environments.*]` header, with the other repository-wide settings:
 

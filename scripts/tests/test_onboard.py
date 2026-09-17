@@ -1192,8 +1192,8 @@ def test_at_org_uppercases_the_names_it_returns():
     an operator typing the lowercase name must still reach the same entry. The whole set is
     compared against a hand-written literal.
 
-    Mutation: drop the `.upper()` in `_at_org` -- `shipmate_app_id` then matches no key and
-    is silently ignored.
+    Mutation: drop the `.upper()` in `_at_org` -- `shipmate_app_id` then matches no entry in
+    AT_ORG_NAMES and the call exits with the unrecognised-name refusal.
     """
     assert onboard._at_org("shipmate_app_id") == {"SHIPMATE_APP_ID"}
 
@@ -2183,8 +2183,8 @@ By hand:
   `-plan` / `-apply` half. Top-level settings go above the first table header: a
   scalar written below one lands inside that table instead.
 
-  `[gate] approvers_team` names the team whose members may drive shipmate by pull
-  request comment — `ops` here. Keep it above the first
+  `[gate] approvers_team` names the team whose members may apply and unlock by
+  pull request comment — `ops` here. Keep it above the first
   `[environments.*]` header, where it reads with the other repository-wide
   settings. Add it only once this repository's pin names an engine that accepts
   the key: an older one refuses the whole file, and moving a pin is not this

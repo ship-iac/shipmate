@@ -128,8 +128,8 @@ live probes.
   request that introduces it rather than after it merges. A missing or unreadable
   file is a note saying so, never an all-clear. Only the checks a file can be judged
   on by itself run here — the top-level keys, `version`, `layout`, the environment
-  entries, `env_order`, `explicit_envs` and `[gate]`; `dry`-layout coverage, the shared-environment
-  rule and unused entries need a plan matrix and `SHIPMATE_SHARED_ENVS`, and the
+  entries, `env_order`, `explicit_envs` and `[gate]`; `dry`-layout coverage, the
+  shared-environment rule and unused entries need a plan matrix and `SHIPMATE_SHARED_ENVS`, and the
   verdict names them as unchecked. A valid file also gets its `env_order` and
   `explicit_envs` values read back, absent ones included: an absent `explicit_envs`
   is legitimate configuration that no validator can question, and it means a bare

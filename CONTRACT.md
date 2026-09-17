@@ -464,7 +464,7 @@ environments; the only cross-level default is the one named below.
 
 ### The gate table
 
-`[gate]` holds the two settings that decide who may drive shipmate by pull
+`[gate]` holds the two settings that decide who may apply and unlock by pull
 request comment and which environments apply without an approving review. Both
 are optional, both are strict about their own key names, and a misspelled one is
 refused rather than left at its default:
@@ -519,8 +519,8 @@ closed.
   `environments.dev-eu.aws.plan.layout`. One mistake therefore refuses in
   several places. A misplaced `layout` always reaches the missing-`layout`
   refusal, which checks before anything reads `environments`; a misplaced
-  `explicit_envs`, `env_order` or `version` refuses as an unimplemented environment key or
-  an unknown provider field, depending on the header it fell under — and, after
+  `explicit_envs`, `env_order` or `version` refuses as an unimplemented environment
+  key or an unknown provider field, depending on the header it fell under — and, after
   `[env_order]`, as a reserved control name, which is why the top-level names
   are reserved as `env_order` keys at all. `docs/troubleshooting.md` has the
   message for each position.

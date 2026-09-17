@@ -961,8 +961,8 @@ def _checklist(ctx):
         "  `-plan` / `-apply` half. Top-level settings go above the first table header: a",
         "  scalar written below one lands inside that table instead.",
         "",
-        "  `[gate] approvers_team` names the team whose members may drive shipmate by pull",
-        f"  request comment — `{ctx['team']}` here. Keep it above the first",
+        "  `[gate] approvers_team` names the team whose members may apply and unlock by",
+        f"  pull request comment — `{ctx['team']}` here. Keep it above the first",
         "  `[environments.*]` header, where it reads with the other repository-wide",
         "  settings. Add it only once this repository's pin names an engine that accepts",
         "  the key: an older one refuses the whole file, and moving a pin is not this",
@@ -1044,7 +1044,12 @@ def _exit_code():
 def main(argv=None):
     global _DRY
     ap = argparse.ArgumentParser(description="Reconcile a consumer repository to shipmate.")
-    ap.add_argument("--team", required=True, help="team slug whose members may apply and unlock")
+    ap.add_argument(
+        "--team",
+        required=True,
+        help="team slug whose members may apply and unlock; not written anywhere, "
+        "printed in the closing checklist for `.github/shipmate.toml`",
+    )
     ap.add_argument("--app-id", required=True, help="the shipmate App's numeric id")
     ap.add_argument("--key", required=True, help="path to the App's PEM private key")
     ap.add_argument("--state-suffix", default="", help="suffix for state artifact names")
