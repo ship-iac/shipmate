@@ -310,7 +310,7 @@ def compute_cells(all_stacks=False, base="", require_env_tag=True, tags=""):
     return stacks_by_env, build_matrix(sorted(stacks_by_env), stacks_by_env, tags_by_stack, tags)
 
 
-def env_config(cells, all_envs=None):
+def env_config(cells, all_envs=None, table=None):
     """(validated table, shared env names) for `cells`. One read per detect, not per row.
 
     `SHIPMATE_SHARED_ENVS` is read hard: an action that forgot to bind it would otherwise
@@ -319,11 +319,14 @@ def env_config(cells, all_envs=None):
     reading sits in one place beside the two the workflows use; `test_apply_env_binding_guard.py`
     compares all three to one hand-written vector. `all_envs` is the whole-tree environment
     scan, which only the unused-entry warning reads; the caller passes it only where it
-    actually scanned the whole tree, and `None` otherwise.
+    actually scanned the whole tree, and `None` otherwise. `table` is a mapping the caller
+    already read from the default branch, for a path needing a field of it before its cells
+    exist; passing it here is what keeps that path on one read.
     """
     shared = ec.shared_env_names(os.environ["SHIPMATE_SHARED_ENVS"])
     envs = {c["environment"] for c in cells}
-    return ec.validate(ec.read_table(), envs, shared, all_envs=all_envs), shared
+    table = ec.read_table() if table is None else table
+    return ec.validate(table, envs, shared, all_envs=all_envs), shared
 
 
 def stamp_rows(cells, table, tier, shared_envs):

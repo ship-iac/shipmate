@@ -190,7 +190,7 @@ def test_dag_shape_notice_reports_a_layered_graph():
     )
 
 
-def _apply_env(monkeypatch, tmp_path, table=None, **overrides):
+def _apply_env(monkeypatch, tmp_path, table=None, reads=None, **overrides):
     """Env for an apply-mode main() run; returns the GITHUB_OUTPUT path."""
     out = tmp_path / "out.txt"
     env = {
@@ -204,13 +204,25 @@ def _apply_env(monkeypatch, tmp_path, table=None, **overrides):
     }
     env.update(overrides)
     for name in ("SHIPMATE_UNGATED_ENVS", "SHIPMATE_MODE"):
-        monkeypatch.delenv(name, raising=False)
+        if name not in env:
+            monkeypatch.delenv(name, raising=False)
     for name, value in env.items():
         monkeypatch.setenv(name, value)
-    # Every detect reads the environment table from the default branch before it stamps; the
-    # real read shells out to gh, git and terramate, none of which CI has.
-    monkeypatch.setattr(ad.bm.ec, "read_table", lambda run=None: dict(table or _MINIMAL_TABLE))
+    _stub_read_table(monkeypatch, table, reads)
     return out
+
+
+def _stub_read_table(monkeypatch, table, reads):
+    """Every detect reads the environment table from the default branch before it stamps; the
+    real read shells out to gh, git and terramate, none of which CI has. One entry is appended
+    to `reads` per call, which is how the one-parse-per-operation count is taken."""
+
+    def read_table(run=None):
+        if reads is not None:
+            reads.append(1)
+        return dict(table or _MINIMAL_TABLE)
+
+    monkeypatch.setattr(ad.bm.ec, "read_table", read_table)
 
 
 def _stub_apply(monkeypatch, deps, checks):
@@ -451,8 +463,14 @@ def test_main_wires_the_tag_map_into_the_cells(tmp_path, monkeypatch):
     assert evaluated == ["stacks/app"]
 
 
-# The engine reads vars.SHIPMATE_UNGATED_ENVS itself and refuses on it, because an
-# `ungated-envs` input wider than the variable would otherwise apply unreviewed on the
+def _gate(ungated):
+    """A structure-valid table exempting `ungated`, a comma-separated string for symmetry
+    with the variable the same names used to arrive in."""
+    return {"layout": "folder", "gate": {"ungated_envs": [e for e in ungated.split(",") if e]}}
+
+
+# The engine resolves the exemption list itself and refuses on it, because an `ungated-envs`
+# input wider than the repository's own configuration would otherwise apply unreviewed on the
 # targeted path unconditionally.
 @pytest.mark.parametrize(
     ("decision", "ungated"),
@@ -465,7 +483,7 @@ def test_main_wires_the_tag_map_into_the_cells(tmp_path, monkeypatch):
     ],
 )
 def test_refuse_unreviewed_lets_an_authorized_apply_through(decision, ungated):
-    ad.refuse_unreviewed("dev-eu", ungated, decision)  # must not raise
+    ad.refuse_unreviewed("dev-eu", _gate(ungated), decision)  # must not raise
 
 
 @pytest.mark.parametrize(
@@ -487,7 +505,7 @@ def test_refuse_unreviewed_lets_an_authorized_apply_through(decision, ungated):
 )
 def test_refuse_unreviewed_refuses_everything_else(decision, ungated):
     with pytest.raises(SystemExit) as exc_info:
-        ad.refuse_unreviewed("dev-eu", ungated, decision)
+        ad.refuse_unreviewed("dev-eu", _gate(ungated), decision)
     assert str(exc_info.value).startswith("::error::not authorized")
 
 
@@ -497,16 +515,32 @@ def test_refuse_unreviewed_reuses_authorizes_selector_verbatim():
     # text is compared whole, not paraphrased.
     reason = ad.az._review_reason("REVIEW_REQUIRED", "dev-eu", frozenset({"prod-eu"}))
     with pytest.raises(SystemExit) as exc_info:
-        ad.refuse_unreviewed("dev-eu", "prod-eu", "REVIEW_REQUIRED")
+        ad.refuse_unreviewed("dev-eu", _gate("prod-eu"), "REVIEW_REQUIRED")
     assert str(exc_info.value) == f"::error::{reason}"
 
 
-def test_refuse_unreviewed_rejects_a_malformed_variable_entry():
-    # parse_ungated_envs fails closed on an entry that could never match an env name: a
-    # silently inert entry leaves an operator believing an environment is exempt when it is
-    # not.
+def test_refuse_unreviewed_rejects_a_malformed_variable_entry(monkeypatch):
+    # The variable is still read when the table declares no gate list, and it fails closed on
+    # an entry that could never match an env name: a silently inert entry leaves an operator
+    # believing an environment is exempt when it is not.
+    monkeypatch.setenv("SHIPMATE_UNGATED_ENVS", "dev-eu-apply")
     with pytest.raises(SystemExit):
-        ad.refuse_unreviewed("dev-eu", "dev-eu-apply", "REVIEW_REQUIRED")
+        ad.refuse_unreviewed("dev-eu", {"layout": "folder"}, "REVIEW_REQUIRED")
+
+
+def test_refuse_unreviewed_takes_the_gate_list_over_the_variable(monkeypatch):
+    """The file is the authority: a variable an operator forgot to delete must not exempt an
+    environment the table dropped from `gate.ungated_envs`.
+
+    Mutation: resolve the exemption from `SHIPMATE_UNGATED_ENVS` instead of the table --
+    dev-eu is exempted and nothing refuses."""
+    monkeypatch.setenv("SHIPMATE_UNGATED_ENVS", "dev-eu")
+    with pytest.raises(SystemExit) as exc_info:
+        ad.refuse_unreviewed("dev-eu", _gate("prod-eu"), "REVIEW_REQUIRED")
+    assert str(exc_info.value).startswith("::error::not authorized")
+    # The empty list is a declared empty list, not an absent one.
+    with pytest.raises(SystemExit):
+        ad.refuse_unreviewed("dev-eu", _gate(""), "REVIEW_REQUIRED")
 
 
 def _boom_on_the_workset(monkeypatch):
@@ -543,7 +577,78 @@ def test_main_refuses_when_the_decision_variable_is_absent(monkeypatch, tmp_path
     assert str(exc_info.value).startswith("::error::not authorized")
 
 
-def _unlock_env(monkeypatch, tmp_path, table=None, **overrides):
+def test_main_refuses_an_env_the_gate_table_does_not_exempt(monkeypatch, tmp_path):
+    """The table reaches the refusal, and it outranks the variable: a stale
+    SHIPMATE_UNGATED_ENVS naming dev-eu must not exempt it once the file has stopped.
+
+    Mutation: pass `os.environ.get("SHIPMATE_UNGATED_ENVS", "")` to the refusal instead of
+    the table -- dev-eu is exempted and main() runs to completion."""
+    _apply_env(
+        monkeypatch,
+        tmp_path,
+        table=_gate("prod-eu"),
+        SHIPMATE_REVIEW_DECISION="REVIEW_REQUIRED",
+        SHIPMATE_UNGATED_ENVS="dev-eu",
+    )
+    _boom_on_the_workset(monkeypatch)
+    with pytest.raises(SystemExit) as exc_info:
+        ad.main()
+    assert str(exc_info.value).startswith("::error::not authorized")
+
+
+def test_main_exempts_an_env_the_gate_table_lists(monkeypatch, tmp_path):
+    """The other half: an unreviewed apply of a listed env runs, and the variable naming a
+    different env cannot be what let it through.
+
+    Mutation: drop the gate read and resolve from SHIPMATE_UNGATED_ENVS -- dev-eu is no
+    longer exempt and main() refuses."""
+    out = _apply_env(
+        monkeypatch,
+        tmp_path,
+        table=_gate("dev-eu"),
+        SHIPMATE_REVIEW_DECISION="REVIEW_REQUIRED",
+        SHIPMATE_UNGATED_ENVS="prod-eu",
+    )
+    _stub_apply(monkeypatch, {"stacks/app": set()}, [_apply_check("stacks/app", plan_run="42")])
+    ad.main()
+    assert json.loads(_parsed(out)["waves"])["wave0"][0]["stack"] == "stacks/app"
+
+
+def test_main_validates_the_table_before_it_reads_the_gate(monkeypatch, tmp_path):
+    """A bare string in `gate.ungated_envs` iterates character by character into a set of
+    single letters, exempting nothing while reading as though it did. The run must die on the
+    configuration error instead.
+
+    Mutation: drop `bm.ec.validate_structure(table)` from main -- the refusal passes the
+    unvalidated table on and raises "not authorized" over `{'d','e','v','-','u'}` rather than
+    naming the malformed setting."""
+    _apply_env(
+        monkeypatch,
+        tmp_path,
+        table={"layout": "folder", "gate": {"ungated_envs": "dev-eu"}},
+        SHIPMATE_REVIEW_DECISION="REVIEW_REQUIRED",
+    )
+    _boom_on_the_workset(monkeypatch)
+    with pytest.raises(SystemExit) as exc_info:
+        ad.main()
+    assert str(exc_info.value).startswith("::error::gate.ungated_envs must be a list")
+
+
+def test_apply_path_loads_the_environment_table_exactly_once(monkeypatch, tmp_path):
+    """One parse per operation. The refusal needs the table before the cells exist and
+    `env_config` needs it after, and two reads of the default branch can disagree if the
+    branch moves mid-run.
+
+    Mutation: drop `table=table` from main's `bm.env_config` call, so `env_config` re-reads
+    -- the count becomes 2."""
+    reads = []
+    _apply_env(monkeypatch, tmp_path, reads=reads)
+    _stub_apply(monkeypatch, {"stacks/app": set()}, [_apply_check("stacks/app", plan_run="42")])
+    ad.main()
+    assert len(reads) == 1
+
+
+def _unlock_env(monkeypatch, tmp_path, table=None, reads=None, **overrides):
     """Env for a main() run, unlock unless `SHIPMATE_MODE` is overridden. Returns the
     GITHUB_OUTPUT path.
 
@@ -560,12 +665,11 @@ def _unlock_env(monkeypatch, tmp_path, table=None, **overrides):
     }
     env.update(overrides)
     for name in ("SHIPMATE_UNGATED_ENVS", "SHIPMATE_REVIEW_DECISION"):
-        monkeypatch.delenv(name, raising=False)
+        if name not in env:
+            monkeypatch.delenv(name, raising=False)
     for name, value in env.items():
         monkeypatch.setenv(name, value)
-    # Every detect reads the environment table from the default branch before it stamps; the
-    # real read shells out to gh, git and terramate, none of which CI has.
-    monkeypatch.setattr(ad.bm.ec, "read_table", lambda run=None: dict(table or _MINIMAL_TABLE))
+    _stub_read_table(monkeypatch, table, reads)
     return out
 
 
@@ -762,6 +866,21 @@ def test_unlock_does_not_refuse_an_unreviewed_pr(monkeypatch, tmp_path):
     _stub_unlock_tree(monkeypatch, _DEV_EU_CELLS)
     ad.main()
     assert len(json.loads(_parsed(out)["cells"])) == 3
+
+
+def test_unlock_path_loads_the_environment_table_exactly_once(monkeypatch, tmp_path):
+    """Unlock has always read the table -- `run_unlock`'s own `env_config` is where an unlock
+    cell gets its identity and its credentials. The invariant is one read on this path, not
+    none, and the apply path's read is placed after the unlock return to keep it so.
+
+    Mutation: move `table = bm.ec.read_table()` above the `SHIPMATE_MODE == "unlock"` return
+    -- the count becomes 2."""
+    reads = []
+    _unlock_env(monkeypatch, tmp_path, reads=reads)
+    _boom_on_plan_path(monkeypatch)
+    _stub_unlock_tree(monkeypatch, _DEV_EU_CELLS)
+    ad.main()
+    assert len(reads) == 1
 
 
 @pytest.mark.parametrize("mode", ["", "apply", "APPLY", "unlock-ish", "banana"])

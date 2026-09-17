@@ -206,8 +206,8 @@ def test_review_held_holds_everything_unreviewed_when_the_variable_is_unset(deci
     assert aad.review_held(PENDING, frozenset(), decision) == expected
 
 
-def test_review_held_matches_the_variable_case_insensitively():
-    ungated = aad.az.parse_ungated_envs("DEV-EU")
+def test_review_held_matches_the_exemption_list_case_insensitively():
+    ungated = aad.bm.ec.gate_ungated_envs({"gate": {"ungated_envs": ["DEV-EU"]}}, "")
     assert aad.review_held({"dev-eu", "prod-eu"}, ungated, "REVIEW_REQUIRED") == ["prod-eu"]
 
 
@@ -490,6 +490,26 @@ def test_main_holds_unlisted_envs_and_skips_their_successors(tmp_path, monkeypat
     assert json.loads(parsed["applied_ungated_envs"]) == ["dev-eu"]
     assert json.loads(parsed["excluded_envs"]) == []
     assert json.loads(parsed["skipped_envs"]) == ["dev-us"]
+
+
+def test_main_takes_the_exemption_list_from_the_gate_table(tmp_path, monkeypatch):
+    """The hold and the applied-ungated report both resolve from `[gate]`, and the file
+    outranks a SHIPMATE_UNGATED_ENVS an operator forgot to delete: prod-eu is exempted by the
+    variable alone and must still be held.
+
+    Mutation: resolve `ungated` from the variable instead of the table -- prod-eu applies
+    unreviewed and dev-eu is held."""
+    parsed = _run_main(
+        tmp_path,
+        monkeypatch,
+        envs=["dev-eu", "prod-eu"],
+        table={"layout": "folder", "gate": {"ungated_envs": ["dev-eu"]}},
+        ungated="prod-eu",
+        decision="REVIEW_REQUIRED",
+    )
+    assert _wave_envs(parsed) == ["dev-eu"]
+    assert json.loads(parsed["review_held_envs"]) == ["prod-eu"]
+    assert json.loads(parsed["applied_ungated_envs"]) == ["dev-eu"]
 
 
 def test_main_reports_every_env_applied_when_all_of_them_are_listed(tmp_path, monkeypatch):

@@ -15,7 +15,7 @@ design — it never blocks on other environments; region-level sequencing across
 envs is handled separately on the apply-all path.
 
 Before any of that, the PR's review decision — read server-side by the `review`
-job, narrowed by `SHIPMATE_UNGATED_ENVS` — must authorize this environment, or
+job, narrowed by the `[gate]` table's `ungated_envs` — must authorize this
 the run refuses.
 
 `completed_apply_names` lives here and this module's `main` calls it, so
@@ -254,7 +254,7 @@ def validate_env(value):
         )
 
 
-def refuse_unreviewed(env, raw_ungated, decision):
+def refuse_unreviewed(env, table, decision):
     """Refuse a targeted apply the PR's review decision does not authorize.
 
     The same `authorize._review_reason` comment-ops evaluated, re-run against the
@@ -262,8 +262,12 @@ def refuse_unreviewed(env, raw_ungated, decision):
     at comment time, and an approval dismissed since then must not still apply.
     Refusing here rather than in workflow YAML is deliberate — the review job has
     no checkout, so it holds no scripts. The run dies before any wave, the apply
-    checks stay pending, and the gate stays pending with them."""
-    reason = az._review_reason(decision, env, az.parse_ungated_envs(raw_ungated))
+    checks stay pending, and the gate stays pending with them.
+
+    `table` must have been through `validate_structure`: `gate_ungated_envs` iterates
+    whatever `ungated_envs` holds, and a bare string there exempts single letters."""
+    ungated = bm.ec.gate_ungated_envs(table, os.environ.get("SHIPMATE_UNGATED_ENVS", ""))
+    reason = az._review_reason(decision, env, ungated)
     if reason:
         raise SystemExit(f"::error::{reason}")
 
@@ -349,11 +353,12 @@ def main():
         run_unlock(repo, env, head)
         return
 
-    refuse_unreviewed(
-        env,
-        os.environ.get("SHIPMATE_UNGATED_ENVS", ""),
-        os.environ.get("SHIPMATE_REVIEW_DECISION", ""),
-    )
+    # Read after the unlock return, so `run_unlock`'s own `env_config` stays that
+    # path's single read. Structure-validated before the refusal reads `[gate]`;
+    # `validate` re-runs it below, which costs nothing and parses nothing again.
+    table = bm.ec.read_table()
+    bm.ec.validate_structure(table)
+    refuse_unreviewed(env, table, os.environ.get("SHIPMATE_REVIEW_DECISION", ""))
 
     deps = run_graph_deps()
 
@@ -375,7 +380,7 @@ def main():
     # unrelated stack's unresolvable expression block an approved plan.
     paths = paths_with_checks(env, list(deps.keys()), names)
     cells = cells_for_env(env, paths, {p: bm._tags(p) for p in paths})
-    table, shared = bm.env_config(cells)
+    table, shared = bm.env_config(cells, table=table)
     cells = bm.stamp_rows(cells, table, "apply", shared)
 
     pending = with_plan_runs(filter_pending(cells, completed), plan_runs, plan_hashes)
