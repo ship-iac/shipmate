@@ -13,10 +13,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        # Full history: scripts/tests/test_pin_status.py and test_repin.py are fixtured on real
-        # historical commits. A shallow clone omits those commits, which fails those tests -- or
-        # passes them vacuously, since refs_at() on an absent commit returns [] and "safe to pin"
-        # then holds for the wrong reason.
+        # Full history: scripts/tests/test_repin.py is fixtured on a real historical commit,
+        # which a shallow clone omits -- those tests then skip loudly instead of running.
         with: { fetch-depth: 0 }
       - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
 
@@ -34,10 +32,8 @@ jobs:
       - name: Ruff format check
         run: uv run ruff format --check .
 
-      # The internal-pin guard runs in its own workflow (internal-pins.yml) on push to main
-      # only, so it is excluded here. docs/releasing.md § The guard has the tradeoff.
       - name: Unit tests
-        run: uv run pytest scripts/tests -q --ignore=scripts/tests/test_internal_pins.py
+        run: uv run pytest scripts/tests -q
 
       # ty is still beta; surface type findings without gating CI on them.
       - name: Type check (ty, beta)

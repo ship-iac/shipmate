@@ -23,6 +23,9 @@ MANIFEST_LOAD = "manifest-load.yml"
 CHECKOUT = "actions/checkout"
 LOCAL_PREFIX = f"./{ENGINE_DIR}/actions/"
 REMOTE_PREFIX = "ship-iac/shipmate/"
+#: Composite actions today. Hand-written: the two tests globbing `actions/*/action.yml` assert
+#: nothing at all if that glob matches nothing.
+ACTION_COUNT = 20
 SHA_PIN = re.compile(r"ship-iac/shipmate/[^@\s'\"]+@[0-9a-f]{40}")
 
 
@@ -38,8 +41,10 @@ def _uses(step):
 def test_no_engine_reference_is_pinned_by_sha():
     """Mutation: put `ship-iac/shipmate/actions/setup@` + 40 hex back into any workflow or
     action.yml."""
+    manifests = sorted(ACTIONS.glob("*/action.yml"))
+    assert len(manifests) == ACTION_COUNT, f"{len(manifests)} action manifests"
     offenders = []
-    for path in sorted(WORKFLOWS.glob("*.yml")) + sorted(ACTIONS.glob("*/action.yml")):
+    for path in sorted(WORKFLOWS.glob("*.yml")) + manifests:
         for m in SHA_PIN.finditer(path.read_text(encoding="utf-8")):
             offenders.append(f"{path.relative_to(ENGINE).as_posix()}: {m.group(0)[:64]}")
     assert offenders == [], "\n".join(offenders)
@@ -83,7 +88,9 @@ def test_every_checkout_of_another_repository_is_the_engine_checkout():
 
 def test_every_job_running_a_local_engine_action_checks_the_engine_out_first():
     """Mutations: delete the engine checkout from `complete` in apply-env-level.yml; move it
-    below the first local step; add a second one."""
+    below the first local step; add a second one. The count reddens on a job losing its local
+    steps, and on the `*.yml` glob in `_docs` becoming `*.yaml`, which matches nothing and
+    leaves every assertion below unreached."""
     covered = 0
     for name, doc in _docs():
         if name == MANIFEST_LOAD:
@@ -101,10 +108,9 @@ def test_every_job_running_a_local_engine_action_checks_the_engine_out_first():
             ]
             assert len(engine) == 1, f"{name}:{job_name}: {len(engine)} engine checkouts"
             assert engine[0] < local[0], f"{name}:{job_name}: local step before engine checkout"
-    # Every assertion above is inside the loop, so a glob that matches nothing -- a renamed
-    # directory, a changed suffix -- passes this and the four tests around it while checking
-    # nothing. 25 jobs run a local engine action today.
-    assert covered > 20, f"only {covered} jobs run a local engine action"
+    # Hand-written, never derived: every assertion above is inside the loop, so a glob that
+    # matches nothing passes this and the four tests around it while checking nothing.
+    assert covered == 25, f"{covered} jobs run a local engine action"
 
 
 def test_a_consumer_checkout_precedes_the_engine_checkout():
@@ -137,8 +143,10 @@ def test_nested_reusable_calls_are_local():
 
 def test_composite_actions_reach_state_through_the_local_path_only():
     """Mutation: `uses: ./actions/state` in plan-cell."""
+    manifests = sorted(ACTIONS.glob("*/action.yml"))
+    assert len(manifests) == ACTION_COUNT, f"{len(manifests)} action manifests"
     local = set()
-    for path in sorted(ACTIONS.glob("*/action.yml")):
+    for path in manifests:
         doc = yaml.safe_load(path.read_text(encoding="utf-8"))
         for step in doc["runs"].get("steps") or []:
             if _uses(step).startswith("./"):

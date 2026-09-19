@@ -92,15 +92,6 @@ ENGINE_CALL_SECRETS = {
     "unlock.yml": _CONSUMER_SECRETS,
 }
 
-#: Secrets a callee already declares that its engine-internal callers may not map yet, by callee
-#: file name. `apply.yml`, `apply-all.yml` and `deploy.yml` call `apply-env-level.yml` at a SHA,
-#: and mapping a secret the PINNED callee does not declare is a hard load-time error, so
-#: `docs/releasing.md` orders the declaration, the pin bump, and the mapping into three steps,
-#: the first of which must merge before the others. This names what is between step 1 and
-#: step 3, and is empty between cascades: the step-3 change moves the name into
-#: `ENGINE_CALL_SECRETS` and empties this again.
-CASCADE_PENDING = {}
-
 
 @functools.cache
 def _parse_action(path):
