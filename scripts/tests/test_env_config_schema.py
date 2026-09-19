@@ -840,7 +840,7 @@ def test_an_ungated_env_carrying_a_pasted_quote_refuses():
 
 @pytest.mark.parametrize("key", ["gate.ungated_envs", "explicit_envs"])
 def test_an_uppercase_entry_refuses(key):
-    """Terramate permits only `[a-z0-9._/-]` in a tag, and env names come from `env/<name>`
+    """Terramate refuses an uppercase letter in a tag, and env names come from `env/<name>`
     tags, so an entry carrying an uppercase letter can never name an environment. Accepting
     it is fail-open twice over: `explicit_envs = ["Prod"]` excludes nothing, so a bare
     `shipmate apply` applies production while the operator reads the file as holding it,

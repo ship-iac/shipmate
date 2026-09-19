@@ -59,7 +59,7 @@ file. `docs/upgrading.md` §Unreleased has the procedure.
 
 - **An uppercase entry in `explicit_envs`, `gate.ungated_envs` or
   `SHIPMATE_UNGATED_ENVS` is refused rather than silently matching nothing.**
-  Terramate permits only `[a-z0-9._/-]` in a tag and env names come from
+  Terramate refuses an uppercase letter in a tag and env names come from
   `env/<name>` tags, so an uppercase entry could never name an environment.
   `explicit_envs` is intersected case-sensitively, so `explicit_envs = ["Prod"]`
   excluded nothing and a bare `shipmate apply` applied production while the file
@@ -71,7 +71,6 @@ file. `docs/upgrading.md` §Unreleased has the procedure.
   under the same whole-tree-scan rule, and each names what the entry therefore
   fails to do. The charset refusal catches only entries no environment name could
   take; a plain misspelling reached nothing at all before this.
-
 
 ## [0.30.0] — 2026-09-15
 

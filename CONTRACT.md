@@ -799,10 +799,13 @@ must appear in Terramate stack tag lists is the `env/<name>` /
 example, a shared stack tagged both `env/staging` and `env/production`)
 when the same stack participates in more than one environment.
 
-Terramate permits only `[a-z0-9._/-]` in a tag, so an environment name is
-lowercase letters, digits, `-` and `_` — never uppercase. Every key and entry
-naming an environment is held to that charset, and an uppercase one is refused
-rather than left to match nothing.
+Terramate refuses an uppercase letter in a tag, so an environment name is
+lowercase letters, digits, `-` and `_` — never uppercase. `explicit_envs`,
+`gate.ungated_envs` and the `SHIPMATE_UNGATED_ENVS` variable are held to that
+charset, and an uppercase entry is refused rather than left to match nothing.
+The `environments` table's own keys and `env_order`'s keys and predecessors are
+not charset-checked; a mis-cased one matches no stack tag and reaches the
+unused-entry warning below.
 
 An `env/<name>` tag is mandatory for every stack a run inspects, and an
 untagged one fails the whole run rather than being skipped. Which stacks
@@ -1133,8 +1136,8 @@ share the same App-minted `workflow_dispatch` mechanism and the same per-env
 `apply-<env>-<stack>` concurrency groups.
 
 `gate.ungated_envs` in `.github/shipmate.toml` lists the environments that
-may be applied without an approving review — bare logical env names, matched
-case-insensitively against the env on the apply checks:
+may be applied without an approving review — bare logical env names, lowercase
+as every environment name is, matched against the env on the apply checks:
 
 ```toml
 layout = "dry"

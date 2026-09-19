@@ -194,7 +194,7 @@ _GATE_KEYS = ("approvers_team", "ungated_envs")
 
 #: Env names come from Terramate `env/<name>` tags, so the charset is comment-parse's env
 #: grammar plus `_`, a legal tag character no `shipmate apply <env>` can name. Lowercase
-#: because Terramate permits only `[a-z0-9._/-]` in a tag: an entry carrying an uppercase
+#: because Terramate refuses an uppercase letter in a tag: an entry carrying an uppercase
 #: letter can never name an environment, and the readers would not agree about it --
 #: `gate.ungated_envs` casefolds both sides, while `explicit_envs` is intersected
 #: case-sensitively in `apply-all-detect:partition_envs` and would exclude nothing.
@@ -436,14 +436,16 @@ def _report_unused(table, all_envs):
     `partition_envs` match them -- an entry differing only in case resolves for nothing, so
     it is unused.
     """
-    unused = sorted(set(table.get("environments", {})) - set(all_envs))
+    tagged = set(all_envs)
+    unused = sorted(set(table.get("environments", {})) - tagged)
     if unused:
         print(
             f"::warning::the environment table declares {', '.join(unused)}, which no stack "
             "tags. Remove the entry, or tag the stacks that belong to it. " + _TWO_PULL_REQUESTS
         )
+    referenced = _referenced_envs(table)
     for key, consequence in _REFERENCE_KEYS.items():
-        stale = sorted(_referenced_envs(table)[key] - set(all_envs))
+        stale = sorted(referenced[key] - tagged)
         if stale:
             print(
                 f"::warning::{key} names {', '.join(stale)}, which no stack tags, "
