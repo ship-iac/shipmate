@@ -27,6 +27,7 @@ _ACTION = "setup"
 #: whole-list comparison pins that ordering without a second selector to disagree with.
 _EXPECTED_STEPS = [
     "Resolve versions",
+    "Hide the engine checkout from the consumer's git",
     "Install OpenTofu",
     "Install Terramate",
     "Provider plugin cache",

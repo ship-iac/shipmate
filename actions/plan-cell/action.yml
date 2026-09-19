@@ -80,7 +80,7 @@ runs:
 
     - name: Restore state
       if: ${{ inputs.state-path != '' }}
-      uses: ship-iac/shipmate/actions/state@a9be68cc9442bbf03478a7eabbd0afc2847cdd4e # pinned to a commit on main
+      uses: ./.shipmate-engine/actions/state
       with:
         stack-slug: ${{ steps.ids.outputs.slug }}
         env: ${{ inputs.env }}

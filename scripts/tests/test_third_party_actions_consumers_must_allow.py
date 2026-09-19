@@ -6,6 +6,9 @@ actions in `THIRD_PARTY`. Adding a new third-party action here is therefore not 
 until every consumer's list names it too, their next run dies in `Set up job`, and the engine's
 own suite stays green while it happens.
 
+A `./` reference resolves inside the engine checkout, so it needs no entry on any consumer's
+list and is excluded here.
+
 Version bumps are free, the patterns ending `@*`, so the set is compared by action path without
 refs. Hand-written, never derived from the files it checks: a derived vector passes whatever the
 tree says.
@@ -60,7 +63,7 @@ def test_engine_uses_no_third_party_action_consumers_do_not_allow():
         "and an empty set would compare green against an empty expectation"
     )
 
-    assert {r for r in refs if not r.startswith("ship-iac/")} == THIRD_PARTY, (
+    assert {r for r in refs if not r.startswith(("ship-iac/", "./"))} == THIRD_PARTY, (
         "the engine's third-party action set changed. Updating this constant is "
         "not the fix: add the action's `owner/repo@*` pattern to the allowed-actions "
         "list in docs/hardening.md AND in every consumer repository's Actions "

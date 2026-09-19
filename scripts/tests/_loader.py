@@ -40,6 +40,23 @@ SCRIPTS = _SCRIPTS
 ACTIONS = ENGINE / "actions"
 WORKFLOWS = ENGINE / ".github" / "workflows"
 
+#: Where every engine job checks the engine out, at the commit that defines the job. One constant
+#: for the checkout `path:`, every local `uses:` and the exclude line in actions/setup.
+ENGINE_DIR = ".shipmate-engine"
+ENGINE_CHECKOUT_WITH = {
+    "repository": "ship-iac/shipmate",
+    "ref": "${{ job.workflow_sha }}",
+    "path": ENGINE_DIR,
+    "persist-credentials": False,
+}
+SETUP_EXCLUDE_RUN = f'[ -d .git ] && echo "/{ENGINE_DIR}/" >> .git/info/exclude || true'
+
+
+def local_action(name):
+    """The `uses:` an engine workflow or composite action writes for engine action `name`."""
+    return f"./{ENGINE_DIR}/actions/{name}"
+
+
 _APP_KEY = {"SHIPMATE_APP_PRIVATE_KEY": "${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}"}
 _CONSUMER_SECRETS = {"SHIPMATE_SECRETS": "${{ secrets.SHIPMATE_SECRETS }}"}
 _APP_KEY_AND_SECRETS = {**_APP_KEY, **_CONSUMER_SECRETS}
