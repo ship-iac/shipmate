@@ -8,18 +8,11 @@ Contribution etiquette and licensing: [`CONTRIBUTING.md`](../CONTRIBUTING.md).
 - `scripts/` — the Python helpers behind those actions. They run as GitHub
   Actions steps, so they are executable and have no `.py` extension. The one
   exception is `_shipmate.py`, the loader the helpers import to reach each
-  other; it is never a step, and a second `.py` sibling reddens
-  `scripts/tests/test_pin_derivation_premises.py` because `load_refs` would not
-  see it and its changes would never make a pin stale. `scripts/tests/` holds
-  their unit tests.
+  other; it is never a step. `scripts/tests/` holds their unit tests.
 - `dev/` — maintainer tooling you run by hand, never from a workflow. Nothing in
   `actions/` or `.github/workflows/` references it and it adds no action input.
-  It exists because the engine pins its own actions by commit SHA (see
-  [`CONTRACT.md`](../CONTRACT.md)), so those pins need maintaining:
-  - `pinrefs.py` — the shared model: finds the pins, works out what each one
-    runs, and diffs a pin against a baseline commit.
-  - `pin_status.py` — is a given commit safe to pin?
-  - `repin_internal.py` — bump the engine's own stale pins.
+  It exists because consumers pin by SHA and all seven refs move together:
+  - `pinrefs.py` — the shared file and git helpers.
   - `repin_consumer.py` — re-pin a consuming repo, refusing an unsafe target.
 
   [`releasing.md`](releasing.md) is the runbook that drives them.

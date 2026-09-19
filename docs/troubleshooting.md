@@ -224,10 +224,8 @@ author filter.
 
 Expect the warnings to persist for a while regardless. Adoption is re-pin-only
 and staggered, so a repository pinned to an earlier engine SHA keeps emitting
-them until it re-pins; and the engine's own reusable workflows pin the composite
-actions they call by SHA too, so the deploy and apply paths keep emitting them
-until those internal pins are bumped. Seeing the line is not evidence that your
-wiring is wrong.
+them until it re-pins. Seeing the line is not evidence that your wiring is
+wrong.
 
 `shipmate doctor` never blocks the gate, and it needs no team membership,
 review or reviewed plan, unlike `shipmate apply` — but because it reports this

@@ -40,7 +40,7 @@ def _uses(step):
 
 def test_no_engine_reference_is_pinned_by_sha():
     """Mutation: put `ship-iac/shipmate/actions/setup@` + 40 hex back into any workflow or
-    action.yml."""
+    action.yml; or glob `*/action.yaml`, which matches nothing and trips ACTION_COUNT."""
     manifests = sorted(ACTIONS.glob("*/action.yml"))
     assert len(manifests) == ACTION_COUNT, f"{len(manifests)} action manifests"
     offenders = []
@@ -142,7 +142,8 @@ def test_nested_reusable_calls_are_local():
 
 
 def test_composite_actions_reach_state_through_the_local_path_only():
-    """Mutation: `uses: ./actions/state` in plan-cell."""
+    """Mutation: `uses: ./actions/state` in plan-cell; or glob `*/action.yaml`, which matches
+    nothing and trips ACTION_COUNT."""
     manifests = sorted(ACTIONS.glob("*/action.yml"))
     assert len(manifests) == ACTION_COUNT, f"{len(manifests)} action manifests"
     local = set()

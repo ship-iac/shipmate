@@ -1638,13 +1638,10 @@ trigger alone closes two paths a trigger check alone would not:
   applies. Restricting who can push, and restricting pushes that touch
   `.github/workflows/**`, are the controls that act at push time; see
   `docs/hardening.md`.
-- The engine applies this same rule to itself: it references its own actions
-  internally by full commit SHA, because GitHub resolves a local `./actions/...`
-  reference against the *consuming* repo once it crosses the reusable-workflow
-  boundary. Maintaining those internal pins — and deciding which commits are
-  safe for a consumer to pin — is what the hand-run tooling in `dev/` is for;
-  `docs/releasing.md` is its runbook. None of it is referenced from `actions/`
-  or `.github/workflows/`, and it adds no action input.
+- The engine holds no pins of itself. Each job of a reusable workflow checks the engine out at
+  `job.workflow_sha` — the commit the consumer's `uses:` resolved to — and runs its actions from
+  that checkout, so the consumer's one pin names the whole tree that runs.
+  `dev/repin_consumer.py` is the hand-run tool that moves a consumer's pins together.
 - **Upgrade path.** shipmate publishes a GitHub Release per release SHA. A
   consumer with Dependabot's `github-actions` ecosystem enabled therefore
   receives a pull request bumping its shipmate pins to the new release's SHA —

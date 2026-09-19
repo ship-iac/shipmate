@@ -159,9 +159,8 @@ def test_rewrite_consumer_writes_lf_not_crlf(tmp_path):
 
 
 def test_rewrite_consumer_preserves_existing_crlf(tmp_path):
-    # Same mirror-image regression as test_rewrite_preserves_existing_crlf, higher stakes here
-    # since this rewriter targets arbitrary consumer repos. Fails when write_text emits LF only:
-    # this file's 2 CRLFs become 0.
+    # This rewriter targets arbitrary consumer repos. Fails when atomic_write_text emits LF
+    # only: this file's 2 CRLFs become 0.
     root = _repo(
         tmp_path,
         {".github/workflows/plan.yml": f"      - uses: ship-iac/shipmate/actions/setup@{OLD}\n"},

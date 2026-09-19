@@ -40,8 +40,7 @@ def scan_survivors(path_text_pairs, new_sha):
 
 
 def git(*args):
-    # encoding="utf-8": scripts/ sources carry non-ASCII (emoji status markers);
-    # Windows' cp1252 default cannot decode `git show` output for them.
+    # encoding="utf-8": Windows' cp1252 default cannot decode non-ASCII git output.
     # argv is a fixed literal list, no shell, no user-controlled executable name.
     return subprocess.run(  # noqa: S603
         ["git", "-C", str(ROOT), *args],  # noqa: S607
