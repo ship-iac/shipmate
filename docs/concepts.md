@@ -265,10 +265,10 @@ engine's reusable drift workflow.
   on the next clean run that covers it. Optional Slack. Setup is in
   [drift.md](drift.md).
 - **Generalization:** deploy + drift run unchanged across all three layouts
-  (`repo-example-{stacks,folders,workspaces}`) — same pinned shipmate SHA, only
-  the per-flavor state path (each job's `state_suffix`) differs; the per-flavor
-  identity variables come from the environment table (folders inject nothing,
-  workspaces inject `TF_WORKSPACE`).
+  (`repo-example-{stacks,folders,workspaces}`) — same engine, referenced at
+  `@main`, only the per-flavor state path (each job's `state_suffix`) differs;
+  the per-flavor identity variables come from the environment table (folders
+  inject nothing, workspaces inject `TF_WORKSPACE`).
 
 **Remote state and cloud credentials.** `state_suffix` is required, but may be
 the empty string. Set it to `''` and a remote backend (for example S3) owns the
