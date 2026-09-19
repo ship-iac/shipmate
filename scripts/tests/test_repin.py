@@ -26,7 +26,7 @@ OTHER = "c" * 40
 REAL = "4914d074df71f8c3d0b4ccb73a22c153cacaca7c"
 
 pytestmark = pytest.mark.skipif(
-    not pinrefs.commit_present(REAL),
+    pinrefs.resolve(REAL) is None,
     reason=(
         f"history fixture commit {REAL[:12]} not in this clone -- these tests read real "
         "history; check out with fetch-depth: 0"

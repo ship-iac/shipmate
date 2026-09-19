@@ -91,7 +91,3 @@ def resolve(commitish):
     not resolve here. Without the peel a tag or tree-ish resolves too."""
     r = git("rev-parse", "--verify", f"{commitish}^{{commit}}")
     return r.stdout.strip() if r.returncode == 0 else None
-
-
-def commit_present(sha):
-    return git("cat-file", "-e", f"{sha}^{{commit}}").returncode == 0

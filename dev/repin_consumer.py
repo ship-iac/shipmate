@@ -7,11 +7,10 @@ Run from an engine clone (it needs engine history to judge the target):
 
 Two rules from docs/releasing.md are enforced here:
 
-* Every engine ref moves together. actions/summary creates the pending apply
-  check and actions/apply-cell -- pinned indirectly inside apply-env-level.yml --
-  completes it, each building the name independently. A pin pair straddling a
-  change to that grammar creates one name and looks for another, and every wave
-  job dies before restoring state. There is deliberately no stale-only mode.
+* Every engine ref moves together. The seven reusable workflows share inputs
+  and secrets across a release, so a repository holding two engine versions
+  against one contract is a load-time or run-time failure, not a partial
+  upgrade. There is deliberately no stale-only mode.
 * A target must be on main. A commit reachable only from a branch stops existing
   when GitHub garbage-collects a force-push, and the pin no longer resolves.
 
@@ -150,7 +149,10 @@ def main(argv=None):
         return 3
 
     if unreachable_from_main(new_sha):
-        print(f"refusing to pin {new_sha[:12]}: it is not an ancestor of main -- a pin to it")
+        print(
+            f"refusing to pin {new_sha[:12]}: it is not an ancestor of main (fetch origin "
+            "first) -- a pin to it"
+        )
         print("can stop resolving once the branch it lives on is force-pushed or deleted.")
         return 1
 

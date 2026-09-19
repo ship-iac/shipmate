@@ -35,12 +35,14 @@ requirement.
 
 ### Changed
 
-- **The engine pins nothing of itself.** Every job of a reusable workflow checks
-  `ship-iac/shipmate` out at `job.workflow_sha` and runs its actions from that checkout, so the
-  commit you pin is the whole tree that runs. One `actions/checkout` step is added to every job;
-  `actions/checkout` is GitHub-owned, so an `allowed_actions` list needs no new pattern. The
-  internal pin cascade, `internal-pins.yml`, `dev/pin_status.py` and `dev/repin_internal.py`
-  are gone.
+- **The engine pins nothing of itself.** Every job that runs an engine action
+  checks `ship-iac/shipmate` out at `job.workflow_sha` and runs its actions from
+  that checkout, so the commit you pin is the whole tree that runs. One
+  `actions/checkout` step is added to each of those jobs; `actions/checkout` is
+  GitHub-owned, so an `allowed_actions` list needs no new pattern. The ref falls
+  back to an all-zero SHA, so a runner without that context fails the checkout
+  instead of fetching the engine's default branch. The internal pin cascade,
+  `internal-pins.yml`, `dev/pin_status.py` and `dev/repin_internal.py` are gone.
 - **Three readers, one source.** `actions/comment-ops` and both apply paths'
   detect each resolve `gate.ungated_envs` from the default branch's file. The
   comment-ops job holds no checkout, so it reads through the contents API — same

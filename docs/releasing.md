@@ -49,9 +49,8 @@ failure being hunted.
 Three limits, all deliberate:
 
 - **Merge-time, not PR-time.** `uses:` takes no expressions, so the ref cannot
-  follow a PR head, and `@main` is the only ref that stays correct. Like `## The
-  guard` above this runs on push to main, so it must never be a required
-  status check. It still runs before any tag is cut, which is where `v0.16.0`
+  follow a PR head, and `@main` is the only ref that stays correct. This runs on
+  push to `main`, so it must never be a required status check. It still runs before any tag is cut, which is where `v0.16.0`
   escaped — but its push run covers whichever commit was the tip then, not
   necessarily the release SHA, so `## Publishing the release` below checks that
   commit and dispatches the workflow when nothing covers it.
@@ -118,7 +117,7 @@ action manifest GitHub could not parse (apply and deploy dead), a dispatch that
 could not reach the engine at all (empty `required: true` input, HTTP 422), and a
 parser blind to the ANSI colour OpenTofu emits on a runner. All three are
 boundary behaviours no unit test reaches, and each surfaced in the first minutes
-of live use — three patch releases, each with its own pin cascade.
+of live use — three patch releases.
 
 So before cutting the tag, run the thinnest live exercise of the new path, on
 the release commit, from `repo-example-stacks-aws`:
@@ -194,10 +193,10 @@ is a 422 "not provided". It also resolves and
 parses the engine reusable workflow at the new SHA, because that happens when the
 run graph is built.
 
-It cannot reach a composite action's manifest — not because those refs are
-local (the engine's reusable workflows reach every action at a remote SHA
-pin, which is exactly why `v0.16.0` died in `Set up job`), but because the job
-holding them never starts: `detect` runs only behind `guard`, and `guard`
+It cannot reach a composite action's manifest. The engine's actions are local
+`./.shipmate-engine/` refs, which GitHub parses only when their step executes
+(`v0.16.0` died in `Set up job` because its refs were remote), and the job
+holding them never starts anyway: `detect` runs only behind `guard`, and `guard`
 rejects any actor not ending in `[bot]` — correctly, since a direct human
 dispatch is what it exists to refuse. A skipped job sets nothing up, so nothing
 fetches or parses its actions. `v0.16.0`'s unparseable `apply-detect/action.yml`
@@ -211,9 +210,6 @@ Smoke proves the dispatch wiring resolves; acceptance proves the behaviour is
 right.
 
 Then cut the release:
-
-`dev/repin_consumer.py` refuses a target not reachable from `origin/main`, so a
-re-pin to a branch commit exits 1.
 
 Confirm `manifest-load` is green on that exact commit. Its push-to-main run
 covers whichever commit was `main`'s tip at the time, and a run that was

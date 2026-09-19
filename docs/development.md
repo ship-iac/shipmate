@@ -13,7 +13,8 @@ Contribution etiquette and licensing: [`CONTRIBUTING.md`](../CONTRIBUTING.md).
   `actions/` or `.github/workflows/` references it and it adds no action input.
   It exists because consumers pin by SHA and all seven refs move together:
   - `pinrefs.py` — the shared file and git helpers.
-  - `repin_consumer.py` — re-pin a consuming repo, refusing an unsafe target.
+  - `repin_consumer.py` — re-pin a consuming repo, refusing a target not reachable from
+    `origin/main`.
 
   [`releasing.md`](releasing.md) is the runbook that drives them.
   `pyproject.toml` puts `dev/` on the pytest `pythonpath`. That is how the

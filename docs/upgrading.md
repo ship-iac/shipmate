@@ -5,12 +5,13 @@ current release needs beyond the move.
 
 ## Re-pinning
 
-**Every engine reference moves in one change.** A repository that bumps some
-pins and leaves others behind is running two engine versions against one
-contract — the actions, the reusable workflow calls, and any pin inside a
-composite action you wrap all name the same SHA, or they disagree.
-[`../CONTRACT.md`](../CONTRACT.md) §Consumption is the rule;
-[`releasing.md`](releasing.md) is the maintainer side of the same cascade.
+**Every engine reference moves in one change.** The consumer surface is the
+seven reusable workflows, and they share inputs and secrets across a release: a
+repository that bumps some of those refs and leaves others behind is running two
+engine versions against one contract. No composite action carries a pin — the
+actions are engine-internal and run from the engine checkout at
+`.shipmate-engine/`, so nothing inside them has to move.
+[`../CONTRACT.md`](../CONTRACT.md) §Consumption is the rule.
 
 Consumers pin by commit SHA, never by tag or branch name, optionally with a
 trailing `# vX.Y.Z` comment naming the release that SHA belongs to

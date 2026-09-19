@@ -3,9 +3,7 @@
 ``spec_from_file_location`` infers the loader from the suffix and returns None for a
 suffix-less file, so the ``SourceFileLoader`` is passed explicitly. Nothing is cached in
 ``sys.modules``: every call returns a fresh module, so a test that monkeypatches one sibling's
-``bm._run`` cannot leak the patch into every other holder of ``build_matrix``. The ``-`` to
-``_`` module-name mapping is asserted by
-``test_pin_derivation_premises.py::test_shared_loader_returns_fresh_sibling_modules``.
+``bm._run`` cannot leak the patch into every other holder of ``build_matrix``.
 """
 
 import importlib.util

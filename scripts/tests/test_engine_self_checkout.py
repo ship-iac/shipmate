@@ -160,3 +160,43 @@ def test_setup_hides_the_engine_directory_from_the_consumers_git():
     doc = yaml.safe_load((ACTIONS / "setup" / "action.yml").read_text(encoding="utf-8"))
     runs = [s["run"] for s in doc["runs"]["steps"] if "info/exclude" in str(s.get("run", ""))]
     assert runs == [SETUP_EXCLUDE_RUN]
+
+
+#: Every engine action referenced from a workflow step or a composite action step, hand-written
+#: rather than derived from the files under test.
+LOCAL_ACTIONS = {
+    "apply-all-detect",
+    "apply-cell",
+    "apply-complete",
+    "apply-detect",
+    "apply-snapshot",
+    "apply-summary",
+    "build-matrix",
+    "comment-ops",
+    "deploy-detect",
+    "dispatch",
+    "drift-cell",
+    "drift-issues",
+    "gate-refresh",
+    "plan-cell",
+    "pr-facts",
+    "setup",
+    "state",
+    "summary",
+    "unlock-cell",
+    "verify-environments",
+}
+
+
+def test_every_local_action_reference_names_an_action_that_exists():
+    """The whole set of referenced names, and each one's manifest. A `uses:` naming a directory
+    that is not there fails only at run time, in the job that needed it. Mutation: add a step
+    `uses: ./.shipmate-engine/actions/stat` to any workflow."""
+    referenced = {
+        _uses(step)[len(LOCAL_PREFIX) :]
+        for _, step in _steps()
+        if _uses(step).startswith(LOCAL_PREFIX)
+    }
+    assert referenced == LOCAL_ACTIONS
+    missing = [n for n in sorted(LOCAL_ACTIONS) if not (ACTIONS / n / "action.yml").is_file()]
+    assert missing == [], missing

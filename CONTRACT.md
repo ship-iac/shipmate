@@ -403,8 +403,9 @@ origin/<default-branch>:.github/shipmate.toml` and resolves each cell's identity
 and credential from what that returns. A pull request cannot change which role
 its own plan assumes, which region it authenticates against, or which workspace
 it plans; changing any of those takes a merge to the default branch. `origin` is
-the base repository on every path — no checkout in any workflow passes
-`repository:` — and a fork pull request is refused in `detect` before it plans.
+the base repository on every path — the only checkouts passing `repository:` are
+the engine's self-checkouts of `ship-iac/shipmate` — and a fork pull request is
+refused in `detect` before it plans.
 A job holding no checkout reads the same file over the contents API instead —
 comment-ops, resolving `[gate]` before it authorizes — with the same branch and
 the same refusal wording, so a consumer never gets two accounts of one problem
@@ -1389,7 +1390,8 @@ Engine `plan.yml` is four jobs: `facts`, `detect`, `plan`, `summary`. `facts`
 is `actions/pr-facts`, the single producer of every pull-request fact the other
 three decide on. `detect` and `plan` are untrusted: they check out the pull
 request's own head and hold no App credential. `summary` is the one trusted job
-— `environment: shipmate-engine`, no checkout at all. Every App-authored
+— `environment: shipmate-engine`, and its only checkout is the engine itself at
+`job.workflow_sha`. Every App-authored
 surface listed above (apply checks, the gate, the sticky comments, drift
 issues) is created by a job bound to that fixed GitHub Environment
 (`docs/github-app.md` §Key-exposure boundary), each running at a ref that
