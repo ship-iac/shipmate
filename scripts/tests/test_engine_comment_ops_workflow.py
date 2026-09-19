@@ -1,14 +1,15 @@
 """Engine `comment-ops.yml`: the dispatch runs only after the authorization step said yes.
 
-The two steps are one gate and one privileged action. `scripts/authorize` writes `head_sha`,
-`environment` and a verdict of `false` on the same run, and the verb comes from the parse step
+After the engine checkout the two steps are one gate and one privileged action.
+`scripts/authorize` writes `head_sha`, `environment` and a verdict of `false` on the same run,
+and the verb comes from the parse step
 either way -- so a refused `shipmate apply` carries everything a dispatch needs. If the `if:` on
 the dispatch step is lost, any commenter's apply reaches the apply path with an App token. The
 authorization decision is made exactly once, in the first step, and read exactly once, here.
 """
 
 import yaml
-from _loader import WORKFLOWS
+from _loader import WORKFLOWS, local_action
 
 WF = WORKFLOWS / "comment-ops.yml"
 
@@ -45,7 +46,7 @@ def test_only_pull_request_comments_are_handled():
 
 def test_the_dispatch_step_runs_only_when_the_guard_authorized():
     """Mutation: delete the dispatch step's `if:`, or change `'true'` to `'false'`."""
-    assert _step("actions/dispatch@")["if"] == "${{ steps.authz.outputs.authorized == 'true' }}"
+    assert _step("actions/dispatch")["if"] == "${{ steps.authz.outputs.authorized == 'true' }}"
 
 
 def test_the_guard_step_runs_before_the_dispatch_step():
@@ -54,8 +55,9 @@ def test_the_guard_step_runs_before_the_dispatch_step():
     property."""
     uses = [str(s.get("uses", "")).split("@")[0] for s in _job()["steps"]]
     assert uses == [
-        "ship-iac/shipmate/actions/comment-ops",
-        "ship-iac/shipmate/actions/dispatch",
+        "actions/checkout",
+        local_action("comment-ops"),
+        local_action("dispatch"),
     ]
 
 
@@ -104,7 +106,7 @@ def test_the_authz_step_passes_this_whole_with_block():
     check; add an `approvers-team` or `ungated-envs` back, and the gate settings acquire a
     second source that a repository variable can set without a pull request.
     """
-    assert _step("actions/comment-ops@")["with"] == {
+    assert _step("actions/comment-ops")["with"] == {
         "app-id": "${{ vars.SHIPMATE_APP_ID }}",
         "private-key": "${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}",
         "comment-body": "${{ github.event.comment.body }}",
@@ -121,7 +123,7 @@ def test_the_dispatch_step_passes_this_whole_with_block():
 
     Mutation: `dispatch-ref: ${{ github.head_ref }}`.
     """
-    assert _step("actions/dispatch@")["with"] == {
+    assert _step("actions/dispatch")["with"] == {
         "app-id": "${{ vars.SHIPMATE_APP_ID }}",
         "private-key": "${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}",
         "verb": "${{ steps.authz.outputs.verb }}",

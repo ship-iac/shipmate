@@ -34,9 +34,15 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { fetch-depth: 0 }
-      - uses: ship-iac/shipmate/actions/setup@94a60ab22beb46a7c7d2f52b858d29a26bc1f101
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ship-iac/shipmate
+          ref: ${{ job.workflow_sha }}
+          path: .shipmate-engine
+          persist-credentials: false
+      - uses: ./.shipmate-engine/actions/setup
       - id: d
-        uses: ship-iac/shipmate/actions/deploy-detect@154a5fc8e7a1d6cd7e89adba9b7c0b93bb688117
+        uses: ./.shipmate-engine/actions/deploy-detect
         with:
           # The caller is `on: push` to the default branch; its event payload
           # (and so the previous main tip) is visible here.
@@ -50,7 +56,7 @@ jobs:
     name: L0
     needs: [detect]
     if: ${{ !failure() && !cancelled() && needs.detect.outputs.envlevel0_empty != 'true' && !contains(join(needs.*.result, ','), 'cancelled') }}
-    uses: ship-iac/shipmate/.github/workflows/apply-env-level.yml@dadab6c3c41f3d5bdedff17dc21a242039d615b3 # pinned to a commit on main
+    uses: ./.github/workflows/apply-env-level.yml
     permissions: { contents: read, checks: read, actions: read, id-token: write }
     with:
       waves_json: ${{ needs.detect.outputs.envlevel0_waves }}
@@ -73,7 +79,7 @@ jobs:
     name: L1
     needs: [detect, envlevel0]
     if: ${{ !failure() && !cancelled() && needs.detect.outputs.envlevel1_empty != 'true' && !contains(join(needs.*.result, ','), 'cancelled') }}
-    uses: ship-iac/shipmate/.github/workflows/apply-env-level.yml@dadab6c3c41f3d5bdedff17dc21a242039d615b3 # pinned to a commit on main
+    uses: ./.github/workflows/apply-env-level.yml
     permissions: { contents: read, checks: read, actions: read, id-token: write }
     with:
       waves_json: ${{ needs.detect.outputs.envlevel1_waves }}
@@ -88,7 +94,7 @@ jobs:
     name: L2
     needs: [detect, envlevel0, envlevel1]
     if: ${{ !failure() && !cancelled() && needs.detect.outputs.envlevel2_empty != 'true' && !contains(join(needs.*.result, ','), 'cancelled') }}
-    uses: ship-iac/shipmate/.github/workflows/apply-env-level.yml@dadab6c3c41f3d5bdedff17dc21a242039d615b3 # pinned to a commit on main
+    uses: ./.github/workflows/apply-env-level.yml
     permissions: { contents: read, checks: read, actions: read, id-token: write }
     with:
       waves_json: ${{ needs.detect.outputs.envlevel2_waves }}
@@ -103,7 +109,7 @@ jobs:
     name: L3
     needs: [detect, envlevel0, envlevel1, envlevel2]
     if: ${{ !failure() && !cancelled() && needs.detect.outputs.envlevel3_empty != 'true' && !contains(join(needs.*.result, ','), 'cancelled') }}
-    uses: ship-iac/shipmate/.github/workflows/apply-env-level.yml@dadab6c3c41f3d5bdedff17dc21a242039d615b3 # pinned to a commit on main
+    uses: ./.github/workflows/apply-env-level.yml
     permissions: { contents: read, checks: read, actions: read, id-token: write }
     with:
       waves_json: ${{ needs.detect.outputs.envlevel3_waves }}

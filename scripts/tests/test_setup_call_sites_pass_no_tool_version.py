@@ -11,9 +11,11 @@ site that genuinely needs an input changes the constant below deliberately.
 """
 
 import yaml
-from _loader import WORKFLOWS
+from _loader import WORKFLOWS, local_action
 
-SETUP = "ship-iac/shipmate/actions/setup"
+#: Both spellings of the action: every engine job reaches it through the engine checkout, and
+#: `manifest-load.yml`'s remote `@main` probe is the one call site that cannot.
+SETUP = {local_action("setup"), "ship-iac/shipmate/actions/setup"}
 
 #: Setup call sites per workflow file. Hand-written: a count read back from the tree agrees
 #: with whatever the tree says. This reds when a call site appears or disappears, which is
@@ -33,8 +35,7 @@ EXPECTED_CALL_SITES = {
 def _setup_steps():
     """Every `actions/setup` step in the engine's workflows, keyed by file name.
 
-    Matched on the repo part alone, so a re-pin or the manifest-load probe's `@main` cannot
-    slip past.
+    Matched on the path part alone, so the manifest-load probe's `@main` cannot slip past.
     """
     found = {}
     for path in sorted(WORKFLOWS.glob("*.yml")):
@@ -42,7 +43,7 @@ def _setup_steps():
         assert isinstance(doc, dict), f"{path} did not parse to a mapping ({doc!r})"
         for job in (doc.get("jobs") or {}).values():
             for step in job.get("steps") or []:
-                if str(step.get("uses", "")).split("@")[0] == SETUP:
+                if str(step.get("uses", "")).split("@")[0] in SETUP:
                     found.setdefault(path.name, []).append(step)
     return found
 

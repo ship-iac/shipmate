@@ -31,8 +31,14 @@ jobs:
       is-draft: ${{ steps.facts.outputs.is-draft }}
       on-demand: ${{ steps.facts.outputs.on-demand }}
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ship-iac/shipmate
+          ref: ${{ job.workflow_sha }}
+          path: .shipmate-engine
+          persist-credentials: false
       - id: facts
-        uses: ship-iac/shipmate/actions/pr-facts@154a5fc8e7a1d6cd7e89adba9b7c0b93bb688117
+        uses: ./.shipmate-engine/actions/pr-facts
 
   detect:
     needs: facts
@@ -53,11 +59,17 @@ jobs:
         with:
           ref: ${{ needs.facts.outputs.head-sha }}
           fetch-depth: 0
-      - uses: ship-iac/shipmate/actions/setup@94a60ab22beb46a7c7d2f52b858d29a26bc1f101
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ship-iac/shipmate
+          ref: ${{ job.workflow_sha }}
+          path: .shipmate-engine
+          persist-credentials: false
+      - uses: ./.shipmate-engine/actions/setup
       # Before the two terramate steps, not after: this step is where a fork's pull request is
       # refused, and `terramate fmt`/`generate` evaluate the checked-out HCL.
       - id: matrix
-        uses: ship-iac/shipmate/actions/build-matrix@154a5fc8e7a1d6cd7e89adba9b7c0b93bb688117
+        uses: ./.shipmate-engine/actions/build-matrix
         with:
           base-sha: ${{ needs.facts.outputs.base-sha }}
           head-repo: ${{ needs.facts.outputs.head-repo }}
@@ -90,14 +102,20 @@ jobs:
         with:
           ref: ${{ needs.facts.outputs.head-sha }}
           fetch-depth: 0
-      - uses: ship-iac/shipmate/actions/setup@94a60ab22beb46a7c7d2f52b858d29a26bc1f101
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ship-iac/shipmate
+          ref: ${{ job.workflow_sha }}
+          path: .shipmate-engine
+          persist-credentials: false
+      - uses: ./.shipmate-engine/actions/setup
       - name: Configure cloud credentials (AWS OIDC)
         if: ${{ matrix.role_arn != '' }}
         uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4
         with:
           role-to-assume: ${{ matrix.role_arn }}
           aws-region: ${{ matrix.cred_region }}
-      - uses: ship-iac/shipmate/actions/plan-cell@9c73e8f26861e204432de998fb66e011f8a956ce
+      - uses: ./.shipmate-engine/actions/plan-cell
         with:
           tf-vars: ${{ toJSON(matrix.tf_vars) }}
           github-vars: ${{ toJSON(vars) }}
@@ -128,6 +146,12 @@ jobs:
     permissions:
       contents: read
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ship-iac/shipmate
+          ref: ${{ job.workflow_sha }}
+          path: .shipmate-engine
+          persist-credentials: false
       # Unconditional: skipping it when zero cells were planned would make gate-state's "more
       # cells than planned" branch unreachable. A `pattern:` matching nothing is a no-op here.
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -137,7 +161,7 @@ jobs:
         with:
           pattern: cell-summary.*
           path: cells
-      - uses: ship-iac/shipmate/actions/summary@868954a34e51d09e3539cf859eb51faec93869f5
+      - uses: ./.shipmate-engine/actions/summary
         with:
           pr-number: ${{ needs.facts.outputs.pr-number }}
           head-sha: ${{ needs.facts.outputs.head-sha }}

@@ -22,6 +22,7 @@ from _loader import (
 MANIFEST_LOAD = "manifest-load.yml"
 CHECKOUT = "actions/checkout"
 LOCAL_PREFIX = f"./{ENGINE_DIR}/actions/"
+REMOTE_PREFIX = "ship-iac/shipmate/"
 SHA_PIN = re.compile(r"ship-iac/shipmate/[^@\s'\"]+@[0-9a-f]{40}")
 
 
@@ -44,6 +45,32 @@ def test_no_engine_reference_is_pinned_by_sha():
     assert offenders == [], "\n".join(offenders)
 
 
+def _steps():
+    """(where, step) for every step of every workflow but the manifest probe, then of every
+    composite action."""
+    for name, doc in _docs():
+        if name == MANIFEST_LOAD:
+            continue
+        for job_name, job in (doc.get("jobs") or {}).items():
+            for step in job.get("steps") or []:
+                yield f"{name}:{job_name}", step
+    for path in sorted(ACTIONS.glob("*/action.yml")):
+        doc = yaml.safe_load(path.read_text(encoding="utf-8"))
+        for step in doc["runs"].get("steps") or []:
+            yield path.relative_to(ENGINE).as_posix(), step
+
+
+def test_no_step_outside_the_manifest_probe_reaches_the_engine_remotely():
+    """The SHA scan above reads only 40-hex pins, and a step can name the engine by branch or
+    tag instead. Mutation: `uses: ship-iac/shipmate/actions/setup@main` in plan.yml."""
+    offenders = [
+        f"{where}: {_uses(step)}"
+        for where, step in _steps()
+        if _uses(step).startswith(REMOTE_PREFIX)
+    ]
+    assert offenders == [], "\n".join(offenders)
+
+
 def test_every_checkout_of_another_repository_is_the_engine_checkout():
     """Whole `with:` block. Mutations: drop `persist-credentials`; `ref: main`; `path: engine`."""
     for name, doc in _docs():
@@ -57,6 +84,7 @@ def test_every_checkout_of_another_repository_is_the_engine_checkout():
 def test_every_job_running_a_local_engine_action_checks_the_engine_out_first():
     """Mutations: delete the engine checkout from `complete` in apply-env-level.yml; move it
     below the first local step; add a second one."""
+    covered = 0
     for name, doc in _docs():
         if name == MANIFEST_LOAD:
             continue
@@ -65,6 +93,7 @@ def test_every_job_running_a_local_engine_action_checks_the_engine_out_first():
             local = [i for i, s in enumerate(steps) if _uses(s).startswith(LOCAL_PREFIX)]
             if not local:
                 continue
+            covered += 1
             engine = [
                 i
                 for i, s in enumerate(steps)
@@ -72,6 +101,10 @@ def test_every_job_running_a_local_engine_action_checks_the_engine_out_first():
             ]
             assert len(engine) == 1, f"{name}:{job_name}: {len(engine)} engine checkouts"
             assert engine[0] < local[0], f"{name}:{job_name}: local step before engine checkout"
+    # Every assertion above is inside the loop, so a glob that matches nothing -- a renamed
+    # directory, a changed suffix -- passes this and the four tests around it while checking
+    # nothing. 25 jobs run a local engine action today.
+    assert covered > 20, f"only {covered} jobs run a local engine action"
 
 
 def test_a_consumer_checkout_precedes_the_engine_checkout():

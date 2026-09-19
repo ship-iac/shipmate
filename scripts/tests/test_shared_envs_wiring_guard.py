@@ -84,7 +84,7 @@ def _detect_action(step):
     if step.get("if") is False:
         return None
     uses = str(step.get("uses", ""))
-    return next((a for a in _DETECT_ACTIONS if f"/actions/{a}@" in uses), None)
+    return next((a for a in _DETECT_ACTIONS if f"/actions/{a}" in uses), None)
 
 
 def _found_steps():

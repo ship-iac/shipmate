@@ -83,7 +83,7 @@ def _runs_a_cell(step):
     `manifest-load.yml` references all four under `if: false`, purely so GitHub parses their
     manifests; that job runs no cell and carries no identity variables.
     """
-    return "-cell@" in str(step.get("uses", "")) and step.get("if") is not False
+    return str(step.get("uses", "")).split("@")[0].endswith("-cell") and step.get("if") is not False
 
 
 def test_the_registry_names_every_job_that_runs_a_cell():
