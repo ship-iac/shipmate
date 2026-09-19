@@ -53,6 +53,7 @@ import json
 import os
 import pathlib
 import re
+import subprocess
 import sys
 
 from _shipmate import _load
@@ -976,8 +977,8 @@ def _pins_in_text(text, fname, ctx, seen):
 def _pins_in_workflows(ctx):
     """(warnings, {slug: {(file, sha)}}) for every engine action pin found in
     the consumer's workflow files at the commit under examination. The engine's
-    owner/repo comes from `ctx["engine_repo"]`, discovered at runtime from
-    `github.action_repository` — shipmate never hardcodes an org. Either
+    owner/repo comes from `ctx["engine_repo"]`, discovered at runtime from the
+    engine checkout's origin — shipmate never hardcodes an org. Either
     precondition missing, or an unreadable listing or file, degrades to a NOTICE
     rather than an error; the preconditions are checked before any API call,
     since without them no read could be interpreted anyway."""
@@ -2291,6 +2292,36 @@ def _declared_envs(cells_dir):
     return envs
 
 
+_REMOTE_SLUG = re.compile(r"^(?:https://github\.com/|git@github\.com:)([^/]+/[^/]+?)(?:\.git)?$")
+
+
+def _slug_from_remote_url(url):
+    """`owner/repo` from a GitHub remote URL in either form, or `""` when it is neither."""
+    m = _REMOTE_SLUG.match(url.strip())
+    return m.group(1) if m else ""
+
+
+def _engine_repo_from_action_path():
+    """The engine's own `owner/repo`, read from the origin of the checkout the running action
+    lives in — `.shipmate-engine/`, which `actions/checkout` fetched from the engine repository.
+    `github.action_repository` is empty for a local `./` action, so this is the only runtime
+    source left, and it keeps the pin probe org-agnostic. Any failure gives `""`, which the
+    probe reports as pin freshness not verified."""
+    path = os.environ.get("GITHUB_ACTION_PATH", "")
+    if not path:
+        return ""
+    try:
+        done = subprocess.run(  # noqa: S603 - fixed argv, no shell, path is not a command
+            ["git", "-C", path, "config", "--get", "remote.origin.url"],  # noqa: S607
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError:  # no git on the runner
+        return ""
+    return _slug_from_remote_url(done.stdout) if done.returncode == 0 else ""
+
+
 def ctx_from_env():
     repo = os.environ["GITHUB_REPOSITORY"]
     cells = pathlib.Path(os.environ.get("SHIPMATE_CELLS_DIR", "cells"))
@@ -2308,10 +2339,11 @@ def ctx_from_env():
         "app_permissions_checked": os.environ.get("SHIPMATE_APP_PERMISSIONS_CHECKED") == "true",
         "app_permission_error": os.environ.get("SHIPMATE_APP_PERMISSION_ERROR", ""),
         "head_sha": os.environ.get("SHIPMATE_HEAD_SHA", ""),
-        # github.action_repository: the owner/repo of the running action, i.e.
-        # the engine's own slug, resolved by GitHub at runtime. Empty when the
-        # action runs from a local path instead of a pinned slug.
-        "engine_repo": os.environ.get("SHIPMATE_ENGINE_REPO", ""),
+        # The engine's own slug, discovered at runtime rather than hardcoded:
+        # SHIPMATE_ENGINE_REPO is an override, and otherwise it comes from the
+        # origin of the engine checkout the running action lives in.
+        "engine_repo": os.environ.get("SHIPMATE_ENGINE_REPO", "")
+        or _engine_repo_from_action_path(),
         # A set, not one id: each cell's plan run comes from that cell's own
         # apply check, so one head's cells can come from several plan runs.
         "plan_run_ids": os.environ.get("SHIPMATE_PLAN_RUN_IDS", "").split(),

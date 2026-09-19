@@ -962,9 +962,9 @@ says plainly when the set was empty. An environment that is in the repository's
 environments listing but whose own settings cannot be read becomes a note
 naming it, rather than being silently skipped the way a nonexistent
 environment is. The engine-pin probe reports only on pins of the engine's
-own repository, which it learns at runtime from the running action's
-`github.action_repository` (threaded in as `SHIPMATE_ENGINE_REPO`, never
-hardcoded — a consumer's other shared actions belong to whoever ships them);
+own repository, which it learns at runtime from the origin of the engine
+checkout the action runs from (`SHIPMATE_ENGINE_REPO` overrides it, and nothing
+is hardcoded — a consumer's other shared actions belong to whoever ships them);
 when either that or the commit under examination is unavailable it says pin
 freshness was not verified rather than falling back to a weaker read.
 

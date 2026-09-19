@@ -73,12 +73,19 @@ def test_bot_authored_comments_are_ignored():
     assert "steps.guard.outputs.skip != 'true'" in _ACTION
 
 
+#: The one SHIPMATE_* name doctor reads that no action supplies: it is an operator override for
+#: a value doctor otherwise derives itself, and supplying it empty would defeat the derivation
+#: (test_neither_doctor_step_passes_the_engine_repo).
+_NOT_SUPPLIED = {"SHIPMATE_ENGINE_REPO"}
+
+
 def test_doctor_step_supplies_every_env_var_doctor_reads():
     """comment-ops' doctor steps must supply every SHIPMATE_* name `doctor` reads at all (subscript
     or .get), report mode's full env contract."""
     src = (SCRIPTS / "doctor").read_text(encoding="utf-8")
     read = set(re.findall(r"os\.environ(?:\.get)?[\[(]['\"](SHIPMATE_[A-Z_]+)['\"]", src))
-    for name in read:
+    assert read >= _NOT_SUPPLIED, "exemption names a variable doctor no longer reads"
+    for name in read - _NOT_SUPPLIED:
         assert name in _ACTION, name
 
 
@@ -96,19 +103,14 @@ def test_summary_action_supplies_every_env_var_doctor_requires_in_annotate_mode(
         assert name in _SUMMARY_ACTION, name
 
 
-def test_both_doctor_steps_supply_the_engine_repo_from_the_action_context():
-    """The pin probe reports only on the engine's own pins and learns which repository that is at
-    runtime: `github.action_repository` is the running action's owner/repo, so the value stays
-    org-agnostic and is never hardcoded. Both doctor call sites must supply it -- `actions/summary`
-    drives `annotate` mode on every plan run, `actions/comment-ops` drives `report` mode on demand
-    -- and a site that omits it degrades that path's pin probe to "not verified".
-
-    test_doctor_step_supplies_every_env_var_doctor_reads covers the comment-ops side by derivation
-    but reads nothing about `actions/summary`, whose own guard demands only doctor's subscript
-    reads; this name is read with `.get`."""
-    expected = "SHIPMATE_ENGINE_REPO: ${{ github.action_repository }}"
-    assert expected in _ACTION
-    assert expected in _SUMMARY_ACTION
+def test_neither_doctor_step_passes_the_engine_repo():
+    """Every engine action now runs from `./.shipmate-engine/`, and `github.action_repository`
+    is empty for a local action, so passing it fed doctor an empty slug and degraded the pin
+    probe to "not verified" on both paths. doctor derives the slug from that checkout's origin
+    instead; an action re-introducing the variable would override the derivation with "".
+    Mutation: add `SHIPMATE_ENGINE_REPO:` back to either action."""
+    assert "SHIPMATE_ENGINE_REPO" not in _ACTION
+    assert "SHIPMATE_ENGINE_REPO" not in _SUMMARY_ACTION
 
 
 def test_doctor_runs_in_report_mode_with_the_app_token():
