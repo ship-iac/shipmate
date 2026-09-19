@@ -223,10 +223,9 @@ it. A commit cannot name its own SHA, so the section's SHA line is backfilled by
 the first commit after the tag.
 
 If the tree carries an `Unreleased` heading — `## [Unreleased]` in
-`CHANGELOG.md`, `### Unreleased — …` in `docs/upgrading.md` — rename both to the
-version in that same PR and `grep -rn "Unreleased" CHANGELOG.md docs/` for the
-cross-references that name the section (`docs/upgrading.md` §Unreleased), or the
-release ships pointing at a heading that no longer exists.
+`CHANGELOG.md` — rename it to the version in that same PR and
+`grep -rn "Unreleased" CHANGELOG.md docs/` for the cross-references that name the
+section, or the release ships pointing at a heading that no longer exists.
 
 ### Smoke the live path before the tag
 

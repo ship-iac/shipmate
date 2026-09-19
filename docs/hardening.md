@@ -315,14 +315,7 @@ Two things to know before relying on it:
   one, and a reviewer reads it as code. Anyone who can push a branch can still
   *propose* the entry, so this bounds when it takes effect, not who may ask.
   `shipmate doctor` validates the file and reports a malformed entry, but does not
-  echo the list. **This bound does not exist while the migration fallback is
-  what governs.** A repository that has bumped its pin but not yet declared
-  `gate.ungated_envs` is still exempting environments by the
-  `SHIPMATE_UNGATED_ENVS` repository variable, which GitHub grants to the Write
-  role and above — no commit, no reviewer, nothing to read as code. Between the
-  two migration merges this control is the old one, not this one; declare the
-  key and delete the variable to acquire the bound
-  (`docs/upgrading.md` §Unreleased).
+  echo the list.
 - **The setting is inert at `required_approving_review_count: 0`.** Every
   environment is already ungated there, so listing some narrows nothing. It
   can only relax an existing requirement, never create one, and nothing

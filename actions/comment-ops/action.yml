@@ -7,9 +7,6 @@ inputs:
   private-key:
     description: GitHub App private key (from the shipmate-engine environment secret).
     required: true
-  approvers-team:
-    description: 'Transitional fallback for `gate.approvers_team` in .github/shipmate.toml, which is authoritative: this input is read only when the file on the default branch declares no team, and a later release removes it. Carries vars.SHIPMATE_APPROVERS_TEAM, because a composite action cannot read the vars context itself. GitHub team slug whose members may apply and unlock.'
-    required: true
   comment-body:
     description: The PR comment body (author-controlled; never interpolated into a shell).
     required: true
@@ -25,10 +22,6 @@ inputs:
   github-token:
     description: 'GITHUB_TOKEN with issues:write and pull-requests:write (reactions + reject comments + PR reads).'
     required: true
-  ungated-envs:
-    description: 'Transitional fallback for `gate.ungated_envs` in .github/shipmate.toml, which is authoritative: this input is read only when the file on the default branch declares no list, and a later release removes it. SHIPMATE_UNGATED_ENVS verbatim (comma-separated bare env names). Environments named by whichever source wins may be applied without an approving review; every other environment keeps the branch ruleset requirement. When neither source names an env, every environment keeps it. Ergonomics, not policy: each apply path resolves the same setting again and enforces there, so this input only buys a PR-comment refusal instead of a dispatched run that refuses inside the engine. The supported caller is engine comment-ops.yml, which passes the repository variable.'
-    required: false
-    default: ''
 outputs:
   authorized:
     description: true when the command is valid and authorized.
@@ -374,7 +367,6 @@ runs:
         SHIPMATE_APP_ID: ${{ inputs.app-id }}
         SHIPMATE_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         SHIPMATE_CELLS_DIR: doctor-cells
-        SHIPMATE_TEAM: ${{ inputs.approvers-team }}
         SHIPMATE_HEAD_SHA: ${{ steps.gatherdoc.outputs.head_sha }}
         SHIPMATE_PLAN_RUN_IDS: ${{ steps.gatherdoc.outputs.plan_run_ids }}
         # The engine's own owner/repo, so the pin probe reports on shipmate's pins and not on
@@ -502,8 +494,6 @@ runs:
       env:
         # The workflow token, not the App token: this reads repository contents only.
         GH_TOKEN: ${{ inputs.github-token }}
-        SHIPMATE_UNGATED_ENVS: ${{ inputs.ungated-envs }}
-        APPROVERS_TEAM: ${{ inputs.approvers-team }}
       run: python3 "$GITHUB_ACTION_PATH/../../scripts/gate-config"
 
     - name: Gate configuration unreadable
@@ -514,7 +504,7 @@ runs:
         PR_NUMBER: ${{ inputs.pr-number }}
       run: |
         set -euo pipefail
-        gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -f body=":x: shipmate: could not resolve the gate settings from \`.github/shipmate.toml\` on the default branch, so this command was not run. The file is not merged there, or it does not validate, or a \`SHIPMATE_APPROVERS_TEAM\` / \`SHIPMATE_UNGATED_ENVS\` fallback value is malformed — this run's log says which. Fix that and comment again." >/dev/null
+        gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -f body=":x: shipmate: could not resolve the gate settings from \`.github/shipmate.toml\` on the default branch, so this command was not run. The file is not merged there, or it does not validate — this run's log says which. Fix that and comment again." >/dev/null
         # The resolve's own failure, re-raised: `continue-on-error` above kept the job alive
         # long enough to post this, and a green run over an unauthorized command is not a
         # verdict this action may render.
@@ -601,7 +591,7 @@ runs:
         PR_JSON: pr.json
         PLAN_RUN_JSON: plan_run.json
         SHIPMATE_ENV: ${{ steps.parse.outputs.env }}
-        SHIPMATE_UNGATED_ENVS: ${{ steps.gate.outputs.ungated_envs }}
+        SHIPMATE_GATE_UNGATED_ENVS: ${{ steps.gate.outputs.ungated_envs }}
         SHIPMATE_VERB: ${{ steps.parse.outputs.route }}
       run: python3 "$GITHUB_ACTION_PATH/../../scripts/authorize"
 

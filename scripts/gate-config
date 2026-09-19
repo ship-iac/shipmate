@@ -24,8 +24,8 @@ ec = _load("env-config")
 
 def main():
     table = ec.validate_structure(ec.read_table_at_default_branch())
-    ungated = ec.gate_ungated_envs(table, os.environ.get("SHIPMATE_UNGATED_ENVS", ""))
-    team = ec.gate_approvers_team(table, os.environ.get("APPROVERS_TEAM", ""))
+    ungated = ec.gate_ungated_envs(table)
+    team = ec.gate_approvers_team(table)
     with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
         # Sorted, so two runs over one file cannot produce two different output strings.
         fh.write(f"ungated_envs={','.join(sorted(ungated))}\n")

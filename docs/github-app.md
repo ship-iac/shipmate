@@ -180,9 +180,8 @@ deletes any repository-level copy of the key.
 The approvers team is not set here. It is `gate.approvers_team` in
 `.github/shipmate.toml` on the consumer's default branch, committed with the rest
 of that repository's configuration ([`../CONTRACT.md`](../CONTRACT.md) §The gate
-table). A repository migrating from the `SHIPMATE_APPROVERS_TEAM` variable —
-including one that never set it and read the organization's copy instead — has
-one line to write; [`upgrading.md`](upgrading.md) has the order.
+table). Every repository declares its own, including one that would previously
+have read an organization-level default.
 
 ```bash
 REPO=<owner>/<repo>
@@ -226,10 +225,8 @@ App differs — one App per trust domain means one id per trust domain
 
 It is the only name that shares this way. The approvers team used to be the
 second, and the file replaced that: `gate.approvers_team` is per repository by
-construction, so a repository that read the organization's
-`SHIPMATE_APPROVERS_TEAM` and never wrote one of its own now declares the team
-itself. That is the one line this change costs — without it, comment-driven apply
-and unlock stop the moment the fallback is removed.
+construction, so every repository declares its own team, and one that declares
+none authorizes nobody by comment.
 
 `gh variable set --org` defaults to `--visibility private`, which reaches
 private repositories only — an organization-wide default leaves every public
@@ -256,9 +253,7 @@ python3 <engine-checkout>/scripts/onboard \
 The flag takes a comma-separated list of names and accepts `SHIPMATE_APP_ID`
 only; every other name is refused, an unrecognised one because it would filter
 nothing and still report success, and the remaining variables `onboard` writes
-because they are not shareable. `SHIPMATE_APPROVERS_TEAM` was accepted here until
-the team moved into `.github/shipmate.toml`; passing it now exits with an error
-naming what the flag accepts. Name it only where it is correct for this
+because they are not shareable. Name it only where it is correct for this
 repository: one in a second App's trust domain keeps its own `SHIPMATE_APP_ID`
 and leaves the flag off. Asserting a name whose organization value is not the one
 this run would write is refused, and the repository copy does not satisfy the

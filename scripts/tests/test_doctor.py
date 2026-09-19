@@ -40,7 +40,6 @@ def _ctx(**over):
         "default_branch": _BRANCH,
         "envs": set(_ENVS),
         "envs_available": True,
-        "team": None,
         "report_mode": True,
         "app_permissions_checked": False,
         "app_permission_error": "",
@@ -1484,7 +1483,7 @@ _GATE_TABLE = CANONICAL.replace(
 )
 
 
-def _team_probe(monkeypatch, team=None, table=CANONICAL, found=None, report_mode=True):
+def _team_probe(monkeypatch, table=CANONICAL, found=None, report_mode=True):
     """(findings, the team lookups the probe made) over one configuration file.
 
     The recorded paths are the point. `_team_warnings` returns `[]` both when the team
@@ -1502,7 +1501,7 @@ def _team_probe(monkeypatch, team=None, table=CANONICAL, found=None, report_mode
         return {"slug": "ops"} if found is None else found
 
     monkeypatch.setattr(doctor, "_gh_json", gh)
-    return doctor._team_warnings(_ctx(team=team, report_mode=report_mode)), looked_up
+    return doctor._team_warnings(_ctx(report_mode=report_mode)), looked_up
 
 
 #: The remedy, whole and hand-written: it is the only line telling an operator where the
@@ -1517,85 +1516,38 @@ def _unresolved(team):
     )
 
 
-#: The migration finding, whole and hand-written: it names which source governs and the two
-#: steps that end the fallback, and nothing else in the report says the variable is in play.
-def _from_variable(team):
-    return (
-        doctor.WARNING,
-        f"the approvers team `{team}` comes from the SHIPMATE_APPROVERS_TEAM repository "
-        "variable, not from `[gate] approvers_team` in `.github/shipmate.toml` — a later "
-        "release stops reading the variable, and every `shipmate apply` is refused from the "
-        "day it does. Declare the key on the default branch, then delete the variable.",
-    )
-
-
-def test_the_report_says_when_the_variable_is_still_what_governs(monkeypatch):
-    """`gate_approvers_team`'s own `::warning::` is swallowed here on purpose -- stdout IS
-    the comment body -- so without this finding the only signal that a repository is
-    mid-migration is an annotation on an otherwise-green run, and `shipmate doctor` reports
-    a healthy team without saying which source it came from.
-
-    Mutations: return `declared=True` unconditionally from `_governing_team`; drop the
-    `findings` prefix from the resolved-team return, which is the common case.
-    """
-    out, looked_up = _team_probe(monkeypatch, team="ops")
-    assert looked_up == ["orgs/o/teams/ops"]
-    assert out == [_from_variable("ops")]
-
-
-def test_the_report_is_silent_once_the_key_is_declared(monkeypatch):
-    """The migration's end state earns no finding: the file governs and there is nothing to
-    do. Mutation: key the finding on anything but the file declaring `approvers_team`.
-    """
-    assert _team_probe(monkeypatch, team="ops", table=_GATE_TABLE)[0] == []
-
-
-def test_team_probe_skipped_without_team(monkeypatch):
-    """No `[gate]` table and no variable: nothing declares a team, so there is nothing to
-    look up and no finding to make.
+def test_team_probe_skipped_when_the_file_declares_no_team(monkeypatch):
+    """No `[gate]` table means nothing declares a team, so there is nothing to look up and
+    no finding to make.
 
     Mutation: probe unconditionally -- the lookup path is recorded as `orgs/o/teams/`.
     """
     assert _team_probe(monkeypatch) == ([], [])
 
 
-def test_the_team_probe_reads_the_file_not_the_variable(monkeypatch):
-    """The file is what comment-ops authorizes against, so a probe reading the variable
-    reports on a value no apply uses -- it can call a typo'd file healthy, or warn about a
-    stale variable nothing reads. The lookup is compared whole, not merely counted.
+def test_the_team_probe_reads_the_file(monkeypatch):
+    """The file is what comment-ops authorizes against, and it is now the only source. The
+    lookup is compared whole, not merely counted: an empty finding list cannot tell a
+    working probe from one that silently stopped running.
 
-    Mutation: resolve the team as `ctx["team"]` -- the probe asks for `ops`.
+    Mutation: resolve the team from anything but the table -- the lookup then asks for a
+    different team, or records none at all.
     """
-    out, looked_up = _team_probe(monkeypatch, team="ops", table=_GATE_TABLE)
-    assert looked_up == ["orgs/o/teams/platform"]
-    assert out == []
-
-
-def test_the_team_probe_survives_the_variable_being_deleted(monkeypatch):
-    """The migration's end state: the key is declared and SHIPMATE_APPROVERS_TEAM is gone,
-    so `ctx["team"]` is None. The probe that exists to catch a typo'd team must not go
-    silent exactly when the team moved.
-
-    Mutation: restore the `if not ctx["team"]: return []` short circuit -- no lookup is
-    recorded, and a reader cannot tell that from a team that resolved.
-    """
-    out, looked_up = _team_probe(monkeypatch, team=None, table=_GATE_TABLE)
+    out, looked_up = _team_probe(monkeypatch, table=_GATE_TABLE)
     assert looked_up == ["orgs/o/teams/platform"]
     assert out == []
 
 
 def test_the_team_probe_prints_nothing_into_the_report(monkeypatch, capsys):
     """`report` mode is run as `python3 scripts/doctor > doctor.md`, so this module's stdout
-    IS the sticky comment's body. `gate_approvers_team` prints a `::warning::` whenever the
-    file declares no key and the variable is read instead -- which is every `shipmate doctor`
-    on a repository that has not migrated yet, the common case. Unredirected, that workflow
-    command is pasted into the comment.
+    IS the sticky comment's body, and a workflow command written there is pasted into the
+    pull request comment.
 
-    Mutation: delete the `contextlib.redirect_stdout` in `_governing_team`.
+    Mutation: `print()` anything from `_governing_team`.
     """
-    out, looked_up = _team_probe(monkeypatch, team="ops")
-    assert looked_up == ["orgs/o/teams/ops"]
-    assert out == [_from_variable("ops")]
+    out, looked_up = _team_probe(monkeypatch, table=_GATE_TABLE)
+    assert looked_up == ["orgs/o/teams/platform"]
+    assert out == []
     assert capsys.readouterr().out == ""
 
 
@@ -1606,25 +1558,20 @@ def test_the_team_probe_does_not_run_on_the_plan_path(monkeypatch):
 
     Mutation: drop the `report_mode` guard.
     """
-    assert _team_probe(monkeypatch, team="ops", table=_GATE_TABLE, report_mode=False) == ([], [])
+    assert _team_probe(monkeypatch, table=_GATE_TABLE, report_mode=False) == ([], [])
 
 
 def test_unresolvable_team_warned(monkeypatch):
-    """The fallback's own path: the file declares no `[gate]`, so the variable still
-    decides, and the remedy names the file key the operator should be declaring instead.
+    """A typo'd slug in the file 404s in the membership lookup, which refuses every
+    commenter under a message naming the team as though it had resolved. The remedy names
+    the file key, the only place the team is declared.
 
-    Mutations: return the file's absent key rather than the fallback -- the probe goes
-    silent on the mid-migration repository it exists for; name the variable in the remedy.
+    Mutation: swallow the lookup failure -- a typo'd team then reports healthy.
     """
-    out, looked_up = _team_probe(monkeypatch, team="ops-tem", found=SystemExit("404 Not Found"))
-    assert looked_up == ["orgs/o/teams/ops-tem"]
-    assert out == [_from_variable("ops-tem"), _unresolved("ops-tem")]
-
-
-def test_resolvable_team_silent(monkeypatch):
-    out, looked_up = _team_probe(monkeypatch, team="ops", table=_GATE_TABLE)
-    assert looked_up == ["orgs/o/teams/platform"]
-    assert out == []
+    bad = _GATE_TABLE.replace('approvers_team = "platform"', 'approvers_team = "platfrom"')
+    out, looked_up = _team_probe(monkeypatch, table=bad, found=SystemExit("404 Not Found"))
+    assert looked_up == ["orgs/o/teams/platfrom"]
+    assert out == [_unresolved("platfrom")]
 
 
 def test_team_response_without_slug_warned(monkeypatch):

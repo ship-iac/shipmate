@@ -507,10 +507,9 @@ def validate_env_order(order):
 def validate_env_name_list(envs, key):
     """`envs`, or `SystemExit` unless it is a list of bare env-name strings.
 
-    The one env-name rule, shared by `explicit_envs`, `gate.ungated_envs` and the
-    `SHIPMATE_UNGATED_ENVS` variable `gate_ungated_envs` falls back to. `key` names the setting
-    in every message. Guards a bare string, which would otherwise be iterated character by
-    character, a non-list value, an entry no environment name can match, and an entry
+    The one env-name rule, shared by `explicit_envs` and `gate.ungated_envs`. `key` names
+    the setting in every message. Guards a bare string, which would otherwise be iterated
+    character by character, a non-list value, an entry no environment name can match, and an entry
     carrying a `-plan`/`-apply` environment suffix -- each of the last two is matched against
     the bare logical env name, matches nothing, and so excludes or exempts nothing while
     reading as if it did.
@@ -549,8 +548,8 @@ def validate_env_name_list(envs, key):
 def validate_team_slug(team, key):
     """`team`, or `SystemExit` unless it is a GitHub team slug or the empty string.
 
-    The charset rule `gate.ungated_envs` already has, applied to the setting beside it, on
-    both of that setting's sources. An empty team is legal and authorizes nobody. Anything
+    The charset rule `gate.ungated_envs` already has, applied to the setting beside it. An
+    empty team is legal and authorizes nobody. Anything
     else that is not a slug -- a display name carrying a space, an `@org/team` reference, a
     pasted quote, a trailing space -- 404s in the membership lookup that decides
     `is_member`, so every commenter is refused under a message naming the team as though it
@@ -591,61 +590,25 @@ def validate_gate(gate):
     return gate
 
 
-def _migration_warning(key, old):
-    """The one sentence both fallbacks owe a consumer: what replaces the old setting, and
-    that this reading of it goes away. No release is named because none is decided."""
-    print(
-        f"::warning::{CONFIG_PATH} on the default branch declares no {key}, so {old} was "
-        f"read instead. Declare {key} on the default branch and delete {old} — a later "
-        "release removes this fallback."
-    )
-
-
-def gate_ungated_envs(table, fallback_raw):
+def gate_ungated_envs(table):
     """The environments exempt from the review requirement, casefolded.
 
-    `gate.ungated_envs` when the file declares it, otherwise the comma-separated
-    `SHIPMATE_UNGATED_ENVS` variable, which exists for the migration release only.
-
-    Key presence, not a truthy value: an emptied list is a declared empty list, and
-    falling back there hands back exemptions an operator deliberately removed. The file's
-    entries came through `validate_structure`; the variable is unvalidated input, so only
-    that path validates.
+    Entries came through `validate_structure`, so the charset rule has already run. An
+    absent key and a declared empty list both exempt nothing; they differ nowhere now that
+    there is no second source for an absent key to fall through to.
     """
-    gate = table.get("gate", {})
-    if "ungated_envs" in gate:
-        return frozenset(e.casefold() for e in gate["ungated_envs"])
-    envs = [e for e in (fallback_raw or "").split(",") if e]
-    validate_env_name_list(envs, "SHIPMATE_UNGATED_ENVS")
-    if envs:
-        _migration_warning("gate.ungated_envs", "the SHIPMATE_UNGATED_ENVS repository variable")
-    return frozenset(e.casefold() for e in envs)
+    return frozenset(e.casefold() for e in table.get("gate", {}).get("ungated_envs", []))
 
 
-def gate_approvers_team(table, fallback):
+def gate_approvers_team(table):
     """The team slug whose members may `apply` and `unlock` by comment.
 
     Those two verbs only: `plan`, `doctor` and `help` are gated by the commenter's
     `author_association`, not by this team.
 
-    `gate.approvers_team` when the file declares it, otherwise the `approvers-team` input
-    carrying `vars.SHIPMATE_APPROVERS_TEAM`, for the migration release only. Key presence
-    again: a declared empty team authorizes nobody, and must not read as undeclared.
-
-    Neither resolver warns on an empty fallback: a repository that never set the variable
-    and has not yet added the key is mid-migration, not misconfigured.
-
-    Both sources are charset-checked, unlike `gate_ungated_envs`, whose variable is the only
-    side it validates here: a team that is not a slug resolves to nobody rather than to a
-    wider set, so the refusal is the diagnostic, not a barrier.
+    A declared empty team authorizes nobody, which is what an absent key does too.
     """
-    gate = table.get("gate", {})
-    if "approvers_team" in gate:
-        return gate["approvers_team"]
-    if fallback:
-        validate_team_slug(fallback, "SHIPMATE_APPROVERS_TEAM")
-        _migration_warning("gate.approvers_team", "the SHIPMATE_APPROVERS_TEAM repository variable")
-    return fallback or ""
+    return table.get("gate", {}).get("approvers_team", "")
 
 
 def _check_version(table):

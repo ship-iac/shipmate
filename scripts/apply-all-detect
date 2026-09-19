@@ -98,7 +98,7 @@ def main():
 
     order = table.get("env_order", {})
     pending_envs = {c["environment"] for c in pending}
-    ungated = bm.ec.gate_ungated_envs(table, os.environ.get("SHIPMATE_UNGATED_ENVS", ""))
+    ungated = bm.ec.gate_ungated_envs(table)
     decision = os.environ.get("SHIPMATE_REVIEW_DECISION", "")
     held = review_held(pending_envs, ungated, decision)
     excluded, skipped = partition_envs(pending_envs, table.get("explicit_envs", []) + held, order)

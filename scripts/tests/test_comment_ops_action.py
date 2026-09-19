@@ -712,24 +712,18 @@ def test_the_gather_step_receives_the_app_id_the_plan_run_lookup_scopes_on():
 
 
 def test_authorize_step_receives_the_resolved_ungated_envs():
-    """The resolve step's output, never the input: the input is the fallback's channel into
-    that step, and reading it here would authorize on the repository variable while the file
-    declares something else.
+    """The resolve step's output is the only channel: `authorize` gets the list the gate
+    step read from the default branch's file, in the same job, and the action takes no
+    input a caller could supply a different one through.
 
-    Mutation: restore `${{ inputs.ungated-envs }}`."""
+    Mutation: add an `ungated-envs` input to the manifest and bind it here instead.
+    """
     assert (
-        _authorize_step()["env"]["SHIPMATE_UNGATED_ENVS"]
+        _authorize_step()["env"]["SHIPMATE_GATE_UNGATED_ENVS"]
         == "${{ steps.gate.outputs.ungated_envs }}"
     )
-
-
-def test_the_ungated_envs_input_is_optional_and_defaults_to_empty():
-    """A consumer who never writes the `ungated-envs:` line must keep the branch ruleset's review
-    requirement on every environment, so the input has to be optional AND default to the empty
-    string that `parse_ungated_envs` reads as "nothing is exempt"."""
-    spec = action_yaml("comment-ops")["inputs"]["ungated-envs"]
-    assert spec["required"] is False
-    assert spec["default"] == ""
+    assert "ungated-envs" not in action_yaml("comment-ops")["inputs"]
+    assert "approvers-team" not in action_yaml("comment-ops")["inputs"]
 
 
 #: The exemption report's whole body, hand-written. It claims PERMISSION and

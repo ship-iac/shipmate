@@ -79,9 +79,8 @@ def test_the_review_job_checks_nothing_out():
 
 def test_the_review_job_carries_no_if_and_so_always_runs():
     """The absence is the property, and an absence nothing asserts is fail-open by construction.
-    A conditional review job can be skipped, a skipped job yields an empty decision, and the
-    condition this replaced -- `vars.SHIPMATE_UNGATED_ENVS != ''` -- is what let a literal
-    `ungated-envs` input apply every environment unreviewed."""
+    A conditional review job can be skipped, and a skipped job yields an empty decision --
+    which detect must read as hold-everything rather than as no-review-required."""
     for name in _APPLY_PATHS:
         assert "if" not in _review(name), (
             f"{name}: the review job grew an `if:` ({_review(name).get('if')!r}); a review "
@@ -111,21 +110,25 @@ def test_detect_needs_review_and_refuses_to_run_after_it_failed():
     assert detect.get("if") == _DETECT_IF
 
 
-#: workflow -> the detect action it calls, which is also the script name. Both apply paths
-#: thread the same two values, and neither may be supplied without the other, because a list with
-#: no decision exempts envs from a check nothing ran.
+#: workflow -> the detect action it calls, which is also the script name.
 _DETECTS = {"apply-all.yml": "apply-all-detect", "apply.yml": "apply-detect"}
 
 
 @pytest.mark.parametrize(("workflow", "detect"), sorted(_DETECTS.items()))
-def test_detect_sources_both_new_inputs_from_the_server_side_values(workflow, detect):
+def test_detect_sources_the_review_decision_from_the_server_side_value(workflow, detect):
+    """The exemption list comes from the default branch's file, inside detect. What the
+    workflow still has to thread is the decision, and it must arrive raw.
+
+    Mutation: add `ungated-envs: ${{ vars.SHIPMATE_UNGATED_ENVS }}` back, which gives the
+    exemption a branch-independent second source an admin can set without a pull request.
+    """
     step = next(
         s
         for s in _jobs(workflow)["detect"]["steps"]
         if f"actions/{detect}@" in str(s.get("uses") or "")
     )
     with_ = step["with"]
-    assert with_["ungated-envs"] == "${{ vars.SHIPMATE_UNGATED_ENVS }}"
+    assert "ungated-envs" not in with_
     # Raw, never `|| 'NONE'`: a decision that never arrived must arrive empty, which is the
     # hold-everything, refuse-the-run value.
     assert with_["review-decision"] == "${{ needs.review.outputs.decision }}"
@@ -137,8 +140,8 @@ def test_the_action_feeds_every_shipmate_env_var_the_script_reads(detect):
     either side is the regression this catches."""
     src = (ENGINE / "scripts" / detect).read_text(encoding="utf-8")
     read = set(re.findall(r'os\.environ(?:\.get)?\(?\[?["\'](SHIPMATE_[A-Z0-9_]+)["\']', src))
-    assert {"SHIPMATE_UNGATED_ENVS", "SHIPMATE_REVIEW_DECISION"} <= read, (
-        f"{detect} no longer reads both review variables: {sorted(read)}"
+    assert "SHIPMATE_REVIEW_DECISION" in read, (
+        f"{detect} no longer reads the review decision: {sorted(read)}"
     )
     step = action_yaml(detect)["runs"]["steps"][0]
     missing = read - set(step["env"])

@@ -266,7 +266,7 @@ def refuse_unreviewed(env, table, decision):
 
     `table` must have been through `validate_structure`: `gate_ungated_envs` iterates
     whatever `ungated_envs` holds, and a bare string there exempts single letters."""
-    ungated = bm.ec.gate_ungated_envs(table, os.environ.get("SHIPMATE_UNGATED_ENVS", ""))
+    ungated = bm.ec.gate_ungated_envs(table)
     reason = az._review_reason(decision, env, ungated)
     if reason:
         raise SystemExit(f"::error::{reason}")

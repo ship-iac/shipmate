@@ -183,38 +183,16 @@ def test_parse_ungated_envs_ignores_empty_fields():
     assert az.parse_ungated_envs("dev-eu,") == frozenset({"dev-eu"})
 
 
-def test_an_uppercase_ungated_entry_is_refused():
-    # Terramate forbids uppercase in a tag and env names come from `env/<name>` tags, so an
-    # uppercase entry can name no environment. The variable took it and the casefolded match
-    # made it appear to work; the refusal names it instead.
-    with pytest.raises(SystemExit) as exc:
-        az.parse_ungated_envs("DEV-EU")
-    assert repr("DEV-EU") in str(exc.value)
+def test_parse_ungated_envs_casefolds_every_entry():
+    """`gate-config` casefolds before joining, so this is defence at a cross-process string
+    boundary rather than the only casefold. Kept because dropping it makes an authorization
+    decision depend on an invariant held in another script, and pinned because an unpinned
+    defence is the one a later simplification deletes.
 
-
-def test_parse_ungated_envs_rejects_environment_suffix():
-    # A `-plan` or `-apply` suffixed entry would exempt nothing, so refuse loudly and name the
-    # bare env to write instead.
-    for entry, suffix in (("dev-eu-plan", "-plan"), ("dev-eu-apply", "-apply")):
-        with pytest.raises(SystemExit) as exc:
-            az.parse_ungated_envs(entry)
-        message = str(exc.value)
-        assert repr(entry) in message
-        assert repr(suffix) in message
-        assert repr("dev-eu") in message
-
-
-@pytest.mark.parametrize(
-    "entry", ['"dev-eu"', "dev eu", "dev/eu", "dev.eu", "-dev-eu", "$dev", "Dev-eu"]
-)
-def test_parse_ungated_envs_rejects_an_entry_that_is_not_an_env_name(entry):
-    """The suffix and whitespace checks name two shapes of silently inert entry, and the promise
-    ("no silently inert entry") covers the class. A pasted quote, an internal space or a path
-    separator matches no environment either, and the operator would believe the environment is
-    ungated when it is not."""
-    with pytest.raises(SystemExit) as exc:
-        az.parse_ungated_envs(f"dev-us,{entry}")
-    assert repr(entry) in str(exc.value)
+    Mutation: return the entries verbatim -- `DEV-EU` then matches no environment, and the
+    exemption silently stops applying.
+    """
+    assert az.parse_ungated_envs("DEV-EU,Dev-Us") == frozenset({"dev-eu", "dev-us"})
 
 
 @pytest.mark.parametrize("entry", ["dev-eu", "dev_eu", "env1", "2dev"])
@@ -222,16 +200,6 @@ def test_parse_ungated_envs_accepts_every_env_name_shape(entry):
     # The other half of the allow-list: refusing a legal env name would refuse applies the
     # operator opted in for. Probed against Terramate, which accepts each of these as a tag.
     assert az.parse_ungated_envs(entry) == frozenset({entry})
-
-
-def test_parse_ungated_envs_rejects_padded_entry():
-    # A space-padded entry would silently match nothing; refuse and name it.
-    for entry in (" dev-eu", "dev-eu "):
-        with pytest.raises(SystemExit) as exc:
-            az.parse_ungated_envs(f"dev-us,{entry}")
-        message = str(exc.value)
-        assert repr(entry) in message
-        assert repr("dev-eu") in message
 
 
 @pytest.mark.parametrize(
@@ -314,7 +282,7 @@ def test_exemption_does_not_reach_the_other_checks():
 
 
 def test_main_reads_ungated_envs_and_environment(tmp_path, monkeypatch):
-    # Pins that both SHIPMATE_UNGATED_ENVS and SHIPMATE_ENV reach decide(). The env is
+    # Pins that both SHIPMATE_GATE_UNGATED_ENVS and SHIPMATE_ENV reach decide(). The env is
     # deliberately not in the list, so the refusal carries the list-aware message only if
     # both values arrived.
     pr_json = tmp_path / "pr.json"
@@ -331,7 +299,7 @@ def test_main_reads_ungated_envs_and_environment(tmp_path, monkeypatch):
         "GITHUB_OUTPUT": str(out),
         "REVIEW_DECISION": "REVIEW_REQUIRED",
         "SHIPMATE_ENV": "prod-eu",
-        "SHIPMATE_UNGATED_ENVS": "dev-eu",
+        "SHIPMATE_GATE_UNGATED_ENVS": "dev-eu",
     }.items():
         monkeypatch.setenv(key, value)
     az.main()
@@ -357,7 +325,7 @@ def _main_output(tmp_path, monkeypatch, *, pr=PR_OK, plan_runs=RUNS_OK, **env):
         "GITHUB_OUTPUT": str(out),
         "REVIEW_DECISION": "NONE",
         "SHIPMATE_ENV": "",
-        "SHIPMATE_UNGATED_ENVS": "",
+        "SHIPMATE_GATE_UNGATED_ENVS": "",
     }
     base.update(env)
     for key, value in base.items():
@@ -378,7 +346,7 @@ def test_ungated_exemption_is_not_reported_when_a_later_requirement_refused(tmp_
         plan_runs={},
         REVIEW_DECISION="REVIEW_REQUIRED",
         SHIPMATE_ENV="dev-eu",
-        SHIPMATE_UNGATED_ENVS="dev-eu",
+        SHIPMATE_GATE_UNGATED_ENVS="dev-eu",
     )
     assert parsed["authorized"] == "false"
     assert parsed["ungated_exemption"] == "false"
@@ -419,7 +387,7 @@ def test_ungated_exemption_output_is_set_only_when_the_exemption_fired(
         pr=pr,
         REVIEW_DECISION=decision,
         SHIPMATE_ENV=environment,
-        SHIPMATE_UNGATED_ENVS=ungated,
+        SHIPMATE_GATE_UNGATED_ENVS=ungated,
     )
     assert parsed["ungated_exemption"] == expected
 
@@ -521,7 +489,7 @@ def test_unlock_with_ungated_exemption_does_not_produce_false_audit_line(tmp_pat
         "GITHUB_OUTPUT": str(out),
         "REVIEW_DECISION": "REVIEW_REQUIRED",
         "SHIPMATE_ENV": "dev-eu",
-        "SHIPMATE_UNGATED_ENVS": "dev-eu",
+        "SHIPMATE_GATE_UNGATED_ENVS": "dev-eu",
         "SHIPMATE_VERB": "unlock",
     }.items():
         monkeypatch.setenv(key, value)
@@ -549,7 +517,7 @@ def test_apply_with_ungated_exemption_still_produces_audit_line(tmp_path, monkey
         "GITHUB_OUTPUT": str(out),
         "REVIEW_DECISION": "REVIEW_REQUIRED",
         "SHIPMATE_ENV": "dev-eu",
-        "SHIPMATE_UNGATED_ENVS": "dev-eu",
+        "SHIPMATE_GATE_UNGATED_ENVS": "dev-eu",
         "SHIPMATE_VERB": "apply",
     }.items():
         monkeypatch.setenv(key, value)

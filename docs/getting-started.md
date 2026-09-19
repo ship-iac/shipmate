@@ -845,9 +845,7 @@ environments and holds the rest — their apply checks stay pending, so
 `shipmate / gate` stays pending and the merge stays blocked until they are
 applied with a review in hand. Adding an environment to the list is a commit to
 the default branch, under whatever your ruleset requires of one, so the pull
-request that benefits from the exemption cannot also grant it — which holds once
-the file declares the list, and not while the `SHIPMATE_UNGATED_ENVS` fallback
-is still what governs ([`upgrading.md`](upgrading.md) §Unreleased). That is all
+request that benefits from the exemption cannot also grant it. That is all
 it claims. Full semantics in [`../CONTRACT.md`](../CONTRACT.md)
 §Comment-ops; the trade-off against environment reviewers is in
 [`hardening.md`](hardening.md) §3–5.
