@@ -250,8 +250,11 @@ def _run_main(
     else:
         monkeypatch.setenv("SHIPMATE_REVIEW_DECISION", decision)
     if ungated is not None:
-        table = dict(table or MINIMAL_TABLE)
-        table["gate"] = {"ungated_envs": ungated.split(",")}
+        # Annotated for the same reason `stub_read_table` annotates its own copy: the
+        # table's values are mixed by design and `MINIMAL_TABLE` alone infers dict[str, str].
+        gated: dict[str, object] = dict(table or MINIMAL_TABLE)
+        gated["gate"] = {"ungated_envs": ungated.split(",")}
+        table = gated
     if checks is None:
         checks = [_apply_check("stacks/app", e) for e in envs]
     jsonl = "\n".join(json.dumps(c) for c in checks)
