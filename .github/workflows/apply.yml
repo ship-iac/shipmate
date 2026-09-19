@@ -108,7 +108,7 @@ jobs:
         with: { fetch-depth: 0, ref: "${{ inputs.ref }}" }
       - uses: ship-iac/shipmate/actions/setup@94a60ab22beb46a7c7d2f52b858d29a26bc1f101
       - id: d
-        uses: ship-iac/shipmate/actions/apply-detect@c6ecf20899049692103b09257adeed8c8bc27246
+        uses: ship-iac/shipmate/actions/apply-detect@adf3b6b24965be76a8815e7a03e26f4d8b3a307d
         with:
           environment: ${{ inputs.environment }}
           head-sha: ${{ inputs.ref }}
@@ -182,7 +182,7 @@ jobs:
           app-id: ${{ vars.SHIPMATE_APP_ID }}
           private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
       - name: Post apply result comment
-        uses: ship-iac/shipmate/actions/apply-summary@c6ecf20899049692103b09257adeed8c8bc27246
+        uses: ship-iac/shipmate/actions/apply-summary@adf3b6b24965be76a8815e7a03e26f4d8b3a307d
         with:
           pr-number: ${{ inputs.pr_number }}
           head-sha: ${{ inputs.ref }}
