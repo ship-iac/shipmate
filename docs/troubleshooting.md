@@ -634,12 +634,14 @@ A leading byte-order mark is `Invalid statement (at line 1, column 1)`. Save the
 file as UTF-8 without a BOM; nothing strips it, deliberately, so that
 `shipmate doctor` and the run reach the same verdict on the same bytes.
 
-**Two settings refuse nothing when they are absent.** `env_order` and
-`explicit_envs` are optional and take tolerant defaults — no ordering, and no
-exclusions. A file that omits `explicit_envs` is structurally valid, and a bare
-`shipmate apply` then applies every environment, production included. Nothing
-warns. `shipmate doctor` echoes both values on every report for exactly this
-reason; read them before merging.
+**Three settings refuse nothing when they are absent.** `env_order`,
+`explicit_envs` and `gate.approvers_team` are optional and take tolerant
+defaults — no ordering, no exclusions, and no one authorized. A file that omits
+`explicit_envs` is structurally valid, and a bare `shipmate apply` then applies
+every environment, production included; one that omits `approvers_team` refuses
+every `shipmate apply` and `shipmate unlock` as though the commenter were an
+outsider. Nothing warns. `shipmate doctor` echoes all three on every report for
+exactly this reason; read them before merging.
 
 **Editing them on a branch does not change what that branch applies.** `env_order`
 and `explicit_envs` are read from the default branch with the rest of the file.

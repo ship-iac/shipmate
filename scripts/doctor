@@ -2013,15 +2013,20 @@ CONFIG_VALID = (
 
 
 def _config_defaults(table):
-    """The two tolerant defaults, echoed whether they are set or not.
+    """The three tolerant defaults, echoed whether they are set or not.
 
-    Neither absence is invalid, so no validator can report either, and both decide what a
-    bare `shipmate apply` does. An omitted `explicit_envs` applies every environment,
-    including the one a consumer meant to hold back; this is the last moment before the
-    merge at which reading that costs nothing.
+    No absence here is invalid, so no validator can report any of them, and each decides
+    what a comment can do. An omitted `explicit_envs` applies every environment, including
+    the one a consumer meant to hold back; an omitted `approvers_team` authorizes nobody, so
+    every `shipmate apply` is refused as though the commenter were an outsider. This is the
+    last moment before the merge at which reading either costs nothing.
+
+    `gate.ungated_envs` gets no line: its absence exempts nothing, which is the safe
+    direction and the one a reader already assumes.
     """
     order = table.get("env_order", {})
     envs = table.get("explicit_envs", [])
+    team = bm.ec.gate_approvers_team(table)
     shown = "; ".join(
         f"{env} after {', '.join(preds) or 'nothing'}" for env, preds in sorted(order.items())
     )
@@ -2041,6 +2046,14 @@ def _config_defaults(table):
             if envs
             else "`explicit_envs`: absent — every environment applies on a bare "
             "`shipmate apply`, production included.",
+        ),
+        (
+            NOTICE,
+            f"`gate.approvers_team` is `{_one_line(team, 400)}` — its members may "
+            "`shipmate apply` and `shipmate unlock` by comment."
+            if team
+            else "`gate.approvers_team`: absent — nobody may `shipmate apply` or "
+            "`shipmate unlock` by comment.",
         ),
     ]
 

@@ -4493,13 +4493,19 @@ def test_a_valid_verdict_names_the_checks_it_did_not_run(monkeypatch):
             "`explicit_envs` names prod \u2014 a bare `shipmate apply` skips those, and each "
             "needs its own `shipmate apply <env>`.",
         ),
+        (
+            doctor.NOTICE,
+            "`gate.approvers_team`: absent \u2014 nobody may `shipmate apply` or "
+            "`shipmate unlock` by comment.",
+        ),
     ]
 
 
 def test_the_tolerant_defaults_are_read_back_when_absent(monkeypatch):
-    """A table omitting `env_order` and `explicit_envs` is valid, takes the empty default,
-    and a bare `shipmate apply` then applies every environment -- including the one a
-    consumer meant to exclude. Nothing refuses and no validator can, so the report says it.
+    """A table omitting `env_order`, `explicit_envs` and `[gate]` is valid and takes the
+    empty default for each: a bare `shipmate apply` applies every environment -- including
+    the one a consumer meant to exclude -- and no commenter may apply at all. Nothing
+    refuses and no validator can, so the report says it.
 
     Mutation: drop `_config_defaults` from `config_status`.
     """
@@ -4516,7 +4522,28 @@ def test_the_tolerant_defaults_are_read_back_when_absent(monkeypatch):
             "`explicit_envs`: absent \u2014 every environment applies on a bare "
             "`shipmate apply`, production included.",
         ),
+        (
+            doctor.NOTICE,
+            "`gate.approvers_team`: absent \u2014 nobody may `shipmate apply` or "
+            "`shipmate unlock` by comment.",
+        ),
     ]
+
+
+def test_the_declared_approvers_team_is_reported(monkeypatch):
+    """The team the file declares reaches the report by name. `_team_warnings` says nothing
+    about a team that resolves, so without this line a reader cannot tell a repository
+    whose gate is wired from one whose `[gate]` table never merged.
+
+    Mutation: echo a constant, or read the team from anywhere but the parsed table.
+    """
+    responses = {_CONFIG_READ: _wf_file(_GATE_TABLE)}
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    assert doctor.config_status(_ctx())[-1] == (
+        doctor.NOTICE,
+        "`gate.approvers_team` is `platform` \u2014 its members may `shipmate apply` and "
+        "`shipmate unlock` by comment.",
+    )
 
 
 def test_the_config_probe_feeds_nothing_a_run_reads(monkeypatch):
