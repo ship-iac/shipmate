@@ -93,8 +93,9 @@ that straddles a change to that grammar creates one name and looks for another:
 apply-cell then fails with `no apply check named ... nothing to complete` and
 every wave job dies before restoring state.
 
-So re-pin all engine references in a single commit (as the sample repos do),
-and never merge a Dependabot PR that bumps one engine `uses:` line in isolation.
+So re-pin all engine references in a single commit (as
+`repo-example-stacks-aws` does), and never merge a Dependabot PR that bumps one
+engine `uses:` line in isolation.
 The same applies while a cascade is in flight in this repo: an intermediate
 commit of the cascade above is not a release SHA, and nothing should ever be
 pinned to one.
@@ -207,6 +208,11 @@ staleness comparison work for consumers, and what lets a consumer's Dependabot
 propose a pin bump — Dependabot resolves a SHA-pinned action through this
 repository's tag namespace.
 
+Only `repo-example-stacks-aws` is re-pinned at release. The other three samples
+reference the engine at `@main` and exercise it on their own triggers (pull
+requests, merges, the nightly drift run); they carry no pin to move and no
+release-freshness alarm.
+
 Releases on this repository are immutable, so a published tag cannot later be
 re-pointed at a different commit. It is a repository setting, not a property of
 the release, toggled with `PUT` / `DELETE` on that same API path rather than a
@@ -240,12 +246,12 @@ boundary behaviours no unit test reaches, and each surfaced in the first minutes
 of live use — three patch releases, each with its own pin cascade.
 
 So before cutting the tag, run the thinnest live exercise of the new path, on
-the release commit, from one sample:
+the release commit, from `repo-example-stacks-aws`:
 
-1. Re-pin one sample to the release commit on a scratch branch, never its
-   default branch — a re-pin on `main` with no release cut yet is exactly the
-   backwards staleness that makes the pin probe report correctly-pinned
-   consumers as stale and tell them to re-pin backwards.
+1. Re-pin `repo-example-stacks-aws` to the release commit on a scratch branch,
+   never its default branch — a re-pin on `main` with no release cut yet is
+   exactly the backwards staleness that makes the pin probe report
+   correctly-pinned consumers as stale and tell them to re-pin backwards.
 
    ```bash
    git -C ../repo-example-stacks-aws checkout -b smoke/vX.Y.Z
@@ -368,8 +374,9 @@ inventing a tag when the push did not land.
 Three constraints, each with a specific failure mode:
 
 - **Tag the commit consumers pin.** That is the release SHA, meaning `main`'s
-  tip once the cascade above has converged, which is also the commit the sample
-  repos are re-pinned to — not the action commit that started the cascade.
+  tip once the cascade above has converged, which is also the commit
+  `repo-example-stacks-aws` is re-pinned to — not the action commit that started
+  the cascade.
   `doctor` resolves the tag with `repos/{slug}/commits/{tag}` and compares that
   SHA against each consumer pin; tagging the action commit instead reports
   correctly-pinned consumers as stale.
@@ -384,15 +391,13 @@ Three constraints, each with a specific failure mode:
   never ran against — the guard runs on push to `main`, so a side-branch commit
   has never had its self-pins verified.
 
-The order matters. Cut the release first, then re-pin the sample repos to that
-same SHA, annotating each pin `# vX.Y.Z`. Re-pinning first would leave the
-samples on a commit with no release, which is exactly the state the probe reads
-as staleness.
+The order matters. Cut the release first, then re-pin `repo-example-stacks-aws`
+to that same SHA, annotating the pin `# vX.Y.Z`. Re-pinning first would leave
+the sample on a commit with no release, which is exactly the state the probe
+reads as staleness.
 
 ```bash
-for d in repo-example-stacks repo-example-folders repo-example-workspaces repo-example-stacks-aws; do
-  python dev/repin_consumer.py --repo "../$d" --sha <release-sha> --label vX.Y.Z
-done
+python dev/repin_consumer.py --repo ../repo-example-stacks-aws --sha <release-sha> --label vX.Y.Z
 ```
 
 `dev/repin_consumer.py` moves every engine reference in one pass (see
@@ -422,11 +427,13 @@ are still declared unstable in `README.md`. `--generate-notes` diffs against the
 previous tag; the first release used hand-written notes because it had no
 predecessor.
 
-If a release is skipped, the probe is the alarm — but only once the samples move
-past it: every sample plan run's annotations then warn that the pin differs from
-the latest release. The state in between — engine merged, samples not yet
-re-pinned, no release cut — is silent, so do not rely on the alarm to remember
-this step for you.
+If a release is skipped, the probe is the alarm — but only on
+`repo-example-stacks-aws`, and only once it moves past the release: its plan
+runs' annotations then warn that the pin differs from the latest release. The
+three `@main` samples carry a standing branch-ref warning instead and never
+compare against a release. The state in between — engine merged, the sample not
+yet re-pinned, no release cut — is silent, so do not rely on the alarm to
+remember this step for you.
 
 ### Prove the crossing when a release changes what reaches a cell's environment
 
@@ -438,15 +445,17 @@ between the two routes fails the apply as stale — which is the result this
 ordering is built to observe, and which re-pinning first destroys. After that
 the new engine is only ever checked against itself.
 
-Run it after the tag, on each sample that carries the identity the release
-moved, in this order:
+Run it after the tag on `repo-example-stacks-aws` when it carries the identity
+the release moved. On a `@main` sample the crossing happens when the engine
+pull request merges, so record step 1's plan there before that merge. In this
+order:
 
 1. **On the old pins, record a pending plan.** Open a pull request that bumps
    `global.version` and runs `terramate generate` + `terramate fmt`, let it
    plan, and leave it unapplied. A pins-only pull request plans zero cells —
    change detection is `terramate list --changed` — and `detect` fails the run
    on stale codegen or bad formatting before any cell starts.
-2. **Merge the sample pin bumps**, waiting for each sample to go quiet first.
+2. **Merge the pin bump**, waiting for the sample to go quiet first.
    Commenting an apply while a plan is still running fails the next apply with
    "saved plan is stale" for an unrelated reason, which reads as this test
    failing. Merging is not optional: the comment-driven apply runs the **default
