@@ -823,20 +823,14 @@ of these would ever match an environment:
 - anything that is not a list of strings at all — `ungated_envs = "dev-eu"` is
   refused rather than iterated character by character.
 
-The same message appears with `SHIPMATE_UNGATED_ENVS` in place of
-`gate.ungated_envs` when the repository is still on the migration fallback; there
-the list is one comma-separated string, so an entry may also be refused for
-surrounding whitespace (`dev-eu, dev-us` is an entry `" dev-us"`).
-
 **`shipmate apply` answers “could not resolve the gate settings” and carries no
-🚀 reaction.** A malformed entry — or any refusal of the file, or a malformed
-`SHIPMATE_APPROVERS_TEAM` / `SHIPMATE_UNGATED_ENVS` fallback value — is raised
+🚀 reaction.** A malformed entry, or any other refusal of the file, is raised
 while comment-ops resolves the gate settings, which is before both the 🚀
 reaction and the authorization refusal. So a repository-wide breakage of
 `shipmate apply` and `shipmate unlock` (every command, every environment,
 however well-formed) arrives as that one comment, whatever the command said, and
-the comment-ops run then fails. Which of the three causes it was is the
-`::error::` annotation on that run; open it from the Actions tab. A targeted
+the comment-ops run then fails. Which cause it was is the `::error::` annotation
+on that run; open it from the Actions tab. A targeted
 apply that was genuinely refused comments its own authorization reason instead,
 so this comment points at the configuration rather than at the authorization. A
 file broken this way also refuses every plan run, which is the louder signal of

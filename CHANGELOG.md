@@ -16,20 +16,20 @@ grammar are declared unstable in `README.md`.
 **Breaking: the approvers team and the ungated-environment list move into
 `.github/shipmate.toml`.** `SHIPMATE_APPROVERS_TEAM` becomes
 `gate.approvers_team` and `SHIPMATE_UNGATED_ENVS` becomes `gate.ungated_envs`,
-in a `[gate]` table read from the default branch with the rest of that file. Both
-variables are still read when the file declares no key of its own, with a warning
-naming the replacement, for this release only. Migration is two merges per
-repository and **the order is the reverse of 0.30.0's** — bump the pin, then add
-the keys — because an engine that predates a top-level key refuses the whole
-file. `docs/upgrading.md` §Unreleased has the procedure.
+in a `[gate]` table read from the default branch with the rest of that file.
+Neither variable is read any more, at any level: the file is the only source.
+A repository that declares no `approvers_team` authorizes nobody by comment, and
+one that declares no `ungated_envs` exempts no environment from the review
+requirement.
 
 ### Added
 
 - **`[gate]` in `.github/shipmate.toml`**, holding `approvers_team` (a bare
   GitHub team slug) and `ungated_envs` (a list of bare logical env names). Both
   are optional, both are strict about their key names, and a declared empty value
-  means what it says: `approvers_team = ""` authorizes nobody, `ungated_envs = []`
-  exempts nothing, and neither falls back to its variable.
+  means what it says: `approvers_team = ""` authorizes nobody and
+  `ungated_envs = []` exempts nothing — indistinguishable from an absent key,
+  because there is no second source to fall through to.
 - **An optional `version` key.** Written, it must be the integer `1`; absent, it
   reads as 1. `version = true` is refused by name rather than read as 1.
 
@@ -55,10 +55,27 @@ file. `docs/upgrading.md` §Unreleased has the procedure.
   the pin it needs first. `--vars-at-org` accepts `SHIPMATE_APP_ID` only; the
   two-name form now exits with an error.
 
+### Removed
+
+- **The `SHIPMATE_APPROVERS_TEAM` and `SHIPMATE_UNGATED_ENVS` repository
+  variables, and the action inputs that carried them.** `actions/comment-ops`
+  drops `approvers-team` and `ungated-envs`; `actions/apply-detect` and
+  `actions/apply-all-detect` drop `ungated-envs`. A caller still passing one gets
+  the usual unknown-input behaviour. Nothing reads a `vars.*` value for either
+  setting on any path.
+- **`scripts/onboard` stops reporting the retired six-file workflow layout** —
+  `plan.yml`, `apply.yml`, `comment-ops.yml`, `unlock.yml`, `deploy.yml`,
+  `drift.yml` beside `shipmate.yml` — **and the superseded `TERRAMATE_VERSION`
+  and `TOFU_VERSION` repository variables.** Both detected a state predating
+  `shipmate.yml` and the release-pinned tool versions.
+- **`docs/upgrading.md` §Past migrations.** The per-release procedures for
+  `0.28.0` through this release described moves between engine versions, and
+  each release's `CHANGELOG.md` entry remains the record of what changed.
+
 ### Fixed
 
-- **An uppercase entry in `explicit_envs`, `gate.ungated_envs` or
-  `SHIPMATE_UNGATED_ENVS` is refused rather than silently matching nothing.**
+- **An uppercase entry in `explicit_envs` or `gate.ungated_envs` is refused
+  rather than silently matching nothing.**
   Terramate refuses an uppercase letter in a tag and env names come from
   `env/<name>` tags, so an uppercase entry could never name an environment.
   `explicit_envs` is intersected case-sensitively, so `explicit_envs = ["Prod"]`

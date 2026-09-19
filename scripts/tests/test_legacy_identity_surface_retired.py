@@ -13,6 +13,11 @@ release history and the upgrade note must be able to name what was retired, and
 `test_aws_oidc_wiring_guard.py` names `vars.AWS_ROLE_ARN` as the mutation it
 reds on.
 
+The gate settings the migration release read from `SHIPMATE_APPROVERS_TEAM` and
+`SHIPMATE_UNGATED_ENVS` are retired the same way and for the same reason: the
+fallback is gone, so a shipped file naming either variable is reading a source
+no consumer sets and no resolver consults.
+
 The trees are walked by directory listing, never by a `*.py` glob: the helpers
 under `scripts/` carry no extension, and a glob that reaches none of them
 reports a clean tree for a tree it never read. The reach test below is what
@@ -21,9 +26,10 @@ keeps a broken walk from passing by reading nothing.
 
 from _loader import ACTIONS, ENGINE, SCRIPTS, WORKFLOWS
 
-#: Every name the table-only model retired, hand-written. `config-mode` is the action-input
-#: spelling of `config_mode`. `AWS_ROLE_ARN_` carries its trailing underscore because the bare
-#: `vars.AWS_ROLE_ARN` is a live fallback that `test_aws_oidc_wiring_guard.py` owns.
+#: Every name the table-only model and the gate-fallback removal retired, hand-written.
+#: `config-mode` is the action-input spelling of `config_mode`. `AWS_ROLE_ARN` is the bare
+#: name, not a prefix: nothing shipped reads any variable of that name, and
+#: `test_aws_oidc_wiring_guard.py` owns it as the mutation its wiring must red on.
 RETIRED = (
     "config_mode",
     "config-mode",
@@ -31,7 +37,9 @@ RETIRED = (
     "SHIPMATE_LEGACY",
     "workload_var",
     "guard_workload_var_collisions",
-    "AWS_ROLE_ARN_",
+    "AWS_ROLE_ARN",
+    "SHIPMATE_APPROVERS_TEAM",
+    "SHIPMATE_UNGATED_ENVS",
 )
 
 

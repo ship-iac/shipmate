@@ -487,15 +487,13 @@ ungated_envs   = ["dev-eu", "dev-us"]
   the env charset. §Comment-ops has what the list exempts and what it does not.
 
 **A declared empty value means what it says.** `approvers_team = ""` authorizes
-nobody and `ungated_envs = []` exempts nothing; neither reads as undeclared. Key
-presence, not truthiness, is what the engine tests, so emptying a setting removes
-the thing it granted instead of falling back to a repository variable that still
-grants it.
+nobody and `ungated_envs = []` exempts nothing — which is also what an absent key
+does. The file is the only source, so emptying a setting removes the thing it
+granted and nothing else grants it back.
 
-The two settings previously lived in the `SHIPMATE_APPROVERS_TEAM` and
-`SHIPMATE_UNGATED_ENVS` repository variables. Each variable is still read when
-the file declares no key of its own, with a warning naming its replacement, for
-the migration release only — `docs/upgrading.md` has the procedure.
+The two settings once lived in the `SHIPMATE_APPROVERS_TEAM` and
+`SHIPMATE_UNGATED_ENVS` repository variables. Neither is read any more, at any
+level — `docs/upgrading.md` has the procedure.
 
 ### The schema version
 
@@ -800,9 +798,8 @@ example, a shared stack tagged both `env/staging` and `env/production`)
 when the same stack participates in more than one environment.
 
 Terramate refuses an uppercase letter in a tag, so an environment name is
-lowercase letters, digits, `-` and `_` — never uppercase. `explicit_envs`,
-`gate.ungated_envs` and the `SHIPMATE_UNGATED_ENVS` variable are held to that
-charset, and an uppercase entry is refused rather than left to match nothing.
+lowercase letters, digits, `-` and `_` — never uppercase. `explicit_envs` and
+`gate.ungated_envs` are held to that charset, and an uppercase entry is refused rather than left to match nothing.
 The `environments` table's own keys and `env_order`'s keys and predecessors are
 not charset-checked; a mis-cased one matches no stack tag and reaches the
 unused-entry warning below.
@@ -1084,8 +1081,8 @@ its own actionable rejection reason:
 - **shipmate team**: the commenter is a member of the team `gate.approvers_team`
   names in `.github/shipmate.toml` on the default branch (checked via a
   short-lived GitHub App installation token, `members:read`). A repository that
-  declares no team, and whose `SHIPMATE_APPROVERS_TEAM` fallback is also unset,
-  authorizes nobody: every apply and unlock comment is refused;
+  declares no team authorizes nobody: every apply and unlock comment is
+  refused;
 - **not a draft**: the pull request is not a draft. `shipmate plan` plans a
   draft on request, so a draft head can carry apply checks with plan runs on
   them; a draft says the change is not ready for review, and applying it is
@@ -1169,9 +1166,8 @@ un-listed.
 **Absent or empty exempts nothing**: every environment keeps the ruleset's review
 requirement, so *what applies* is what applied before the setting existed. This
 is the opposite direction from `SHIPMATE_SHARED_ENVS`, where unset means split.
-Absent and `ungated_envs = []` differ in one way only, and only during the
-migration release: an absent key falls back to `SHIPMATE_UNGATED_ENVS`, a
-declared empty list does not.
+An absent key and `ungated_envs = []` are indistinguishable: both exempt nothing,
+and there is no second source for the absent one to fall through to.
 
 Opting in takes two things, and the setting alone is not enough:
 
@@ -1201,9 +1197,8 @@ so there is no value a consumer can write that one reader honours and another
 ignores. A pull request cannot grant itself the exemption, because its own edit
 to the file is not read until it merges.
 `scripts/tests/test_engine_comment_ops_workflow.py` pins the whole `with:` block
-of the step carrying the migration fallback; dropping that input, in a repository
-still relying on the variable, refuses every listed environment at comment time
-instead, with nothing naming the cause.
+of the step that resolves it, so a second source cannot be threaded back in as an
+input without failing there.
 
 The decision has two seats, because `authorize` returns one verdict per
 dispatch while a bare apply spans many environments:

@@ -407,112 +407,36 @@ def _warnings(capsys):
     return [ln for ln in capsys.readouterr().out.splitlines() if ln.startswith("::warning::")]
 
 
-def test_a_declared_ungated_envs_list_wins_over_the_variable(capsys):
-    """The precedence the migration inverts if it is written the other way round: the file
-    is the setting, the variable is what it replaces. Reddens on reading the variable first
-    -- `prod` is then exempt and `sbx` is not -- and on warning about a fallback that did
-    not happen."""
-    assert ec.gate_ungated_envs(_gate(ungated_envs=["sbx"]), "prod") == frozenset({"sbx"})
+def test_a_declared_ungated_envs_list_resolves_casefolded(capsys):
+    """The resolver's whole job. Casefolded because the apply paths compare a casefolded
+    env name against it, and an entry that survives with its own case matches nothing while
+    reading as if it did. Reddens on returning the entries verbatim, and on any output at
+    all -- this resolver is silent now that it has one source."""
+    assert ec.gate_ungated_envs(_gate(ungated_envs=["SBX", "dev-eu"])) == frozenset(
+        {"sbx", "dev-eu"}
+    )
     assert _warnings(capsys) == []
 
 
 def test_a_declared_empty_ungated_envs_list_exempts_nothing(capsys):
-    """The fail-open this task exists to avoid: `[]` is a declared empty list, not an
-    absent key. Reddens on `gate.get("ungated_envs")` tested for truthiness, which reads
-    the variable instead and hands back the exemptions an operator deliberately removed."""
-    assert ec.gate_ungated_envs(_gate(ungated_envs=[]), "prod") == frozenset()
+    """A declared empty list exempts nothing, which is what an absent key does too.
+    Reddens on any reading that hands back a non-empty set for `[]` -- every environment of
+    a repository that deliberately emptied the list would apply unreviewed."""
+    assert ec.gate_ungated_envs(_gate(ungated_envs=[])) == frozenset()
+    assert ec.gate_ungated_envs(_SHARED_TABLE) == frozenset()
     assert _warnings(capsys) == []
 
 
-def test_the_variable_is_read_when_the_file_declares_no_gate(capsys):
-    """The migration release's fallback, casefolded the way the apply paths compare it.
-    Reddens on returning an empty frozenset for an absent key, which exempts nothing and
-    holds every environment of a consumer that has not migrated yet."""
-    assert ec.gate_ungated_envs(_SHARED_TABLE, "dev-eu,sbx") == frozenset({"dev-eu", "sbx"})
-    assert len(_warnings(capsys)) == 1
-
-
-def test_the_ungated_envs_fallback_warns_once_and_names_the_migration(capsys):
-    """The only signal a consumer gets that it is still on the old mechanism. Reddens on
-    dropping the warning, on emitting it per entry, and on a text that names neither the
-    key that replaces the variable nor the fallback's removal."""
-    ec.gate_ungated_envs(_SHARED_TABLE, "sbx,dev-eu")
-    warnings = _warnings(capsys)
-    assert len(warnings) == 1
-    assert "gate.ungated_envs" in warnings[0]
-    assert "SHIPMATE_UNGATED_ENVS" in warnings[0]
-    assert "removes this fallback" in warnings[0]
-
-
-def test_an_empty_ungated_envs_variable_warns_nothing(capsys):
-    """A repository that never set the variable and has not yet added the key is
-    mid-migration, not misconfigured. Reddens on warning unconditionally on the fallback
-    path, which trains an operator to ignore the warning that does mean something."""
-    assert ec.gate_ungated_envs(_SHARED_TABLE, "") == frozenset()
+def test_a_declared_approvers_team_resolves(capsys):
+    """Reddens on returning anything but the declared slug, and on any output."""
+    assert ec.gate_approvers_team(_gate(approvers_team="platform")) == "platform"
     assert _warnings(capsys) == []
-
-
-def test_a_padded_variable_entry_is_refused_rather_than_silently_inert():
-    """The variable is unvalidated input on this path, where the file's entries have been
-    through `validate_structure`. Reddens on returning the entry, which matches no
-    environment and so exempts nothing while reading as if it did."""
-    with pytest.raises(SystemExit) as exc:
-        ec.gate_ungated_envs(_SHARED_TABLE, "sbx, dev-eu")
-    assert str(exc.value).startswith("::error::SHIPMATE_UNGATED_ENVS")
-
-
-def test_a_declared_approvers_team_wins_over_the_input(capsys):
-    """Same precedence over a string. Reddens on preferring the input, which authorizes
-    comments against the team the repository migrated away from."""
-    assert ec.gate_approvers_team(_gate(approvers_team="platform"), "old-team") == "platform"
-    assert _warnings(capsys) == []
-
-
-def test_the_approvers_team_input_is_read_when_the_file_declares_no_gate(capsys):
-    """Reddens on dropping the warning, and on a text naming neither the key nor the
-    variable the input carries."""
-    assert ec.gate_approvers_team(_SHARED_TABLE, "old-team") == "old-team"
-    warnings = _warnings(capsys)
-    assert len(warnings) == 1
-    assert "gate.approvers_team" in warnings[0]
-    assert "SHIPMATE_APPROVERS_TEAM" in warnings[0]
-    assert "removes this fallback" in warnings[0]
-
-
-def test_an_empty_approvers_team_input_warns_nothing(capsys):
-    """The team's half of the mid-migration case. Reddens on warning unconditionally."""
-    assert ec.gate_approvers_team(_SHARED_TABLE, "") == ""
-    assert _warnings(capsys) == []
-
-
-def test_a_variable_team_that_is_not_a_slug_is_refused_rather_than_silently_inert():
-    """The team's half of the variable-side charset rule, the shape `gate.ungated_envs`
-    already has at its own fallback. A display name 404s in the membership lookup and
-    refuses every commenter under a message that names it as though it had resolved.
-
-    Reddens on returning the fallback unvalidated.
-    """
-    with pytest.raises(SystemExit) as exc:
-        ec.gate_approvers_team(_SHARED_TABLE, "Platform Team")
-    assert str(exc.value).startswith("::error::SHIPMATE_APPROVERS_TEAM is 'Platform Team'")
 
 
 def test_a_declared_empty_approvers_team_authorizes_nobody(capsys):
-    """The `[]` fail-open on the other value: an empty slug is a declared empty team, which
-    404s to `is_member=false` downstream, not an undeclared one. Reddens on
-    `gate.get("approvers_team")` tested for truthiness, which falls back to the variable and
-    authorizes comments against the team the repository just migrated away from. The
-    fallback is non-empty deliberately -- an empty one passes under either reading."""
-    assert ec.gate_approvers_team(_gate(approvers_team=""), "old-team") == ""
+    """An empty slug is a declared empty team, which 404s to `is_member=false` downstream.
+    An absent key resolves the same way. Reddens on any reading that yields a non-empty
+    team for either, which authorizes comments against a team the file does not name."""
+    assert ec.gate_approvers_team(_gate(approvers_team="")) == ""
+    assert ec.gate_approvers_team(_SHARED_TABLE) == ""
     assert _warnings(capsys) == []
-
-
-def test_a_gate_declaring_one_key_still_falls_back_for_the_other(capsys):
-    """The migration shape a repository lands mid-way: one key present, the other still on
-    its variable. Reddens on testing the `[gate]` table's presence rather than the key's --
-    the declared key then answers for both, so every exemption silently disappears and the
-    warning that names the remaining migration goes quiet."""
-    assert ec.gate_ungated_envs(_gate(approvers_team="platform"), "sbx") == frozenset({"sbx"})
-    assert len(_warnings(capsys)) == 1
-    assert ec.gate_approvers_team(_gate(ungated_envs=["sbx"]), "old-team") == "old-team"
-    assert len(_warnings(capsys)) == 1

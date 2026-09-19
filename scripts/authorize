@@ -25,36 +25,15 @@ applies nothing, so it must never carry this record).
 import json
 import os
 
-from _shipmate import _load
-
-#: The env-name rule this variable shares with `explicit_envs` and `gate.ungated_envs` in
-#: the configuration file. `env-config` loads no sibling of its own, so reaching it from
-#: here terminates; it reads no file and runs no command at import.
-ec = _load("env-config")
-
 
 def parse_ungated_envs(raw):
     """Env names exempt from the review requirement, casefolded.
 
-    Comma-separated bare logical env names, matched case-insensitively against
-    the env on the apply checks. Anything that is not a bare env name — a
-    `-plan`/`-apply` suffix, a stray space, a pasted quote — would exempt nothing
-    at all, and a silently inert entry leaves an operator believing an environment
-    is ungated when it is not, so each is a configuration error.
-
-    Allow-listed rather than deny-listed: naming only the two shapes that go wrong
-    most often (a padded entry, a suffixed one) left every other shape — a pasted
-    `"dev-eu"`, an internal space, a slash — silently inert."""
-    envs = [e for e in (raw or "").split(",") if e]
-    for e in envs:
-        if e != e.strip():
-            raise SystemExit(
-                f"::error::SHIPMATE_UNGATED_ENVS entry {e!r} has surrounding "
-                f"whitespace; the list is comma-separated with no spaces — "
-                f"write {e.strip()!r}."
-            )
-    ec.validate_env_name_list(envs, "SHIPMATE_UNGATED_ENVS")
-    return frozenset(e.casefold() for e in envs)
+    `SHIPMATE_GATE_UNGATED_ENVS` carries `gate-config`'s own step output:
+    a sorted, comma-joined list that `validate_env_name_list` already refused every bad
+    shape of, in the same job. This undoes the join and nothing else.
+    """
+    return frozenset(e.casefold() for e in (raw or "").split(",") if e)
 
 
 def _review_reason(review_decision, environment="", ungated_envs=frozenset()):
@@ -189,7 +168,7 @@ def main():
     # One read, used for both the decision and the reported output — the value
     # the decision used and the value reported can never differ.
     environment = os.environ.get("SHIPMATE_ENV", "")
-    ungated_envs = parse_ungated_envs(os.environ.get("SHIPMATE_UNGATED_ENVS", ""))
+    ungated_envs = parse_ungated_envs(os.environ.get("SHIPMATE_GATE_UNGATED_ENVS", ""))
     verb = os.environ.get("SHIPMATE_VERB", "apply")
     if verb not in ("apply", "unlock"):
         raise SystemExit(f"::error::unknown verb {verb!r}")

@@ -203,9 +203,8 @@ def _apply_env(monkeypatch, tmp_path, table=None, reads=None, **overrides):
         "SHIPMATE_SHARED_ENVS": "",
     }
     env.update(overrides)
-    for name in ("SHIPMATE_UNGATED_ENVS", "SHIPMATE_MODE"):
-        if name not in env:
-            monkeypatch.delenv(name, raising=False)
+    if "SHIPMATE_MODE" not in env:
+        monkeypatch.delenv("SHIPMATE_MODE", raising=False)
     for name, value in env.items():
         monkeypatch.setenv(name, value)
     _stub_read_table(monkeypatch, table, reads)
@@ -519,34 +518,12 @@ def test_refuse_unreviewed_reuses_authorizes_selector_verbatim():
     assert str(exc_info.value) == f"::error::{reason}"
 
 
-def test_refuse_unreviewed_rejects_a_malformed_variable_entry(monkeypatch):
-    """The variable is still read when the table declares no gate list, and it fails closed on
-    an entry that could never match an env name: a silently inert entry leaves an operator
-    believing an environment is exempt when it is not.
+def test_refuse_unreviewed_refuses_an_env_the_gate_list_does_not_name():
+    """`gate.ungated_envs` on the default branch is the only source, so an environment it
+    does not name is refused whatever else is set.
 
-    Which refusal is the whole assertion. A bare `pytest.raises(SystemExit)` here is satisfied
-    by the ordinary "not authorized" refusal that REVIEW_REQUIRED raises anyway, so it stays
-    green with the name check removed entirely.
-
-    Mutation: drop the `validate_env_name_list` call from `gate_ungated_envs` -- the message
-    becomes the authorization refusal."""
-    monkeypatch.setenv("SHIPMATE_UNGATED_ENVS", "dev-eu-apply")
-    with pytest.raises(SystemExit) as exc_info:
-        ad.refuse_unreviewed("dev-eu", {"layout": "folder"}, "REVIEW_REQUIRED")
-    assert str(exc_info.value) == (
-        "::error::SHIPMATE_UNGATED_ENVS entry 'dev-eu-apply' carries the environment suffix "
-        "'-apply'; SHIPMATE_UNGATED_ENVS is matched against the bare logical env name — "
-        "write 'dev-eu' instead."
-    )
-
-
-def test_refuse_unreviewed_takes_the_gate_list_over_the_variable(monkeypatch):
-    """The file is the authority: a variable an operator forgot to delete must not exempt an
-    environment the table dropped from `gate.ungated_envs`.
-
-    Mutation: resolve the exemption from `SHIPMATE_UNGATED_ENVS` instead of the table --
-    dev-eu is exempted and nothing refuses."""
-    monkeypatch.setenv("SHIPMATE_UNGATED_ENVS", "dev-eu")
+    Mutation: resolve the exemption from the process environment -- nothing sets it, so this
+    stays green while the refusal it pins stops depending on the table at all."""
     with pytest.raises(SystemExit) as exc_info:
         ad.refuse_unreviewed("dev-eu", _gate("prod-eu"), "REVIEW_REQUIRED")
     assert str(exc_info.value).startswith("::error::not authorized")
@@ -590,17 +567,16 @@ def test_main_refuses_when_the_decision_variable_is_absent(monkeypatch, tmp_path
 
 
 def test_main_refuses_an_env_the_gate_table_does_not_exempt(monkeypatch, tmp_path):
-    """The table reaches the refusal, and it outranks the variable: a stale
-    SHIPMATE_UNGATED_ENVS naming dev-eu must not exempt it once the file has stopped.
+    """The table reaches the refusal. `main` resolves the env under test from the table the
+    run loaded, so an env the table exempts elsewhere is still refused here.
 
-    Mutation: pass `os.environ.get("SHIPMATE_UNGATED_ENVS", "")` to the refusal instead of
-    the table -- dev-eu is exempted and main() runs to completion."""
+    Mutation: exempt unconditionally once the table declares any list -- dev-eu is then
+    exempted by prod-eu's entry and main() runs to completion."""
     _apply_env(
         monkeypatch,
         tmp_path,
         table=_gate("prod-eu"),
         SHIPMATE_REVIEW_DECISION="REVIEW_REQUIRED",
-        SHIPMATE_UNGATED_ENVS="dev-eu",
     )
     _boom_on_the_workset(monkeypatch)
     with pytest.raises(SystemExit) as exc_info:
@@ -609,17 +585,14 @@ def test_main_refuses_an_env_the_gate_table_does_not_exempt(monkeypatch, tmp_pat
 
 
 def test_main_exempts_an_env_the_gate_table_lists(monkeypatch, tmp_path):
-    """The other half: an unreviewed apply of a listed env runs, and the variable naming a
-    different env cannot be what let it through.
+    """The other half: an unreviewed apply of a listed env runs.
 
-    Mutation: drop the gate read and resolve from SHIPMATE_UNGATED_ENVS -- dev-eu is no
-    longer exempt and main() refuses."""
+    Mutation: drop the gate read -- dev-eu is no longer exempt and main() refuses."""
     out = _apply_env(
         monkeypatch,
         tmp_path,
         table=_gate("dev-eu"),
         SHIPMATE_REVIEW_DECISION="REVIEW_REQUIRED",
-        SHIPMATE_UNGATED_ENVS="prod-eu",
     )
     _stub_apply(monkeypatch, {"stacks/app": set()}, [_apply_check("stacks/app", plan_run="42")])
     ad.main()
@@ -676,9 +649,8 @@ def _unlock_env(monkeypatch, tmp_path, table=None, reads=None, **overrides):
         "SHIPMATE_SHARED_ENVS": "",
     }
     env.update(overrides)
-    for name in ("SHIPMATE_UNGATED_ENVS", "SHIPMATE_REVIEW_DECISION"):
-        if name not in env:
-            monkeypatch.delenv(name, raising=False)
+    if "SHIPMATE_REVIEW_DECISION" not in env:
+        monkeypatch.delenv("SHIPMATE_REVIEW_DECISION", raising=False)
     for name, value in env.items():
         monkeypatch.setenv(name, value)
     _stub_read_table(monkeypatch, table, reads)

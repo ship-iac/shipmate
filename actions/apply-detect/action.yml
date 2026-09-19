@@ -17,10 +17,6 @@ inputs:
   app-id:
     description: shipmate App id (repo/org variable); only checks authored by this App count as done.
     required: true
-  ungated-envs:
-    description: 'Transitional fallback for `gate.ungated_envs` in .github/shipmate.toml, which is authoritative: this input is read only when the file on the default branch declares no list, and a later release removes it. SHIPMATE_UNGATED_ENVS verbatim (comma-separated bare env names), the envs applied without waiting for an approving review. Supply it together with review-decision, never one without the other.'
-    required: false
-    default: ''
   review-decision:
     description: The PR's reviewDecision, from the review job. Only NONE and APPROVED authorize; an empty value means the decision never arrived and refuses the run.
     required: false
@@ -44,7 +40,6 @@ runs:
         SHIPMATE_ENV: ${{ inputs.environment }}
         SHIPMATE_HEAD_SHA: ${{ inputs.head-sha }}
         SHIPMATE_APP_ID: ${{ inputs.app-id }}
-        SHIPMATE_UNGATED_ENVS: ${{ inputs.ungated-envs }}
         SHIPMATE_REVIEW_DECISION: ${{ inputs.review-decision }}
         SHIPMATE_MODE: ${{ inputs.mode }}
         SHIPMATE_SHARED_ENVS: ${{ inputs.shared-envs }}

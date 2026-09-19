@@ -3,6 +3,7 @@ import json
 import pytest
 from _detect_fixtures import (
     APP_ID,
+    MINIMAL_TABLE,
     PLAN_SHA,
     _apply_check,
     _record,
@@ -207,7 +208,7 @@ def test_review_held_holds_everything_unreviewed_when_the_variable_is_unset(deci
 
 
 def test_review_held_matches_the_exemption_list_case_insensitively():
-    ungated = aad.bm.ec.gate_ungated_envs({"gate": {"ungated_envs": ["DEV-EU"]}}, "")
+    ungated = aad.bm.ec.gate_ungated_envs({"gate": {"ungated_envs": ["DEV-EU"]}})
     assert aad.review_held({"dev-eu", "prod-eu"}, ungated, "REVIEW_REQUIRED") == ["prod-eu"]
 
 
@@ -232,10 +233,10 @@ def _run_main(
     parsed GITHUB_OUTPUT, and appends each `gh api` path requested to `urls` when one is
     given.
 
-    `order` and `explicit` are folded into the stubbed table rather than stubbed on `eo`:
-    both are fields of the mapping this path loads, so a double on either reader would mask a
-    caller that stopped passing the table. One entry is appended to `reads` per `read_table`
-    call."""
+    `order`, `explicit` and `ungated` are folded into the stubbed table rather than stubbed
+    on `eo`: all three are fields of the mapping this path loads, so a double on any reader
+    would mask a caller that stopped passing the table. One entry is appended to `reads` per
+    `read_table` call."""
     out = tmp_path / "out"
     for k, v in {
         "GITHUB_REPOSITORY": "o/r",
@@ -244,11 +245,13 @@ def _run_main(
         "SHIPMATE_APP_ID": APP_ID,
     }.items():
         monkeypatch.setenv(k, v)
-    for k, v in (("SHIPMATE_UNGATED_ENVS", ungated), ("SHIPMATE_REVIEW_DECISION", decision)):
-        if v is None:
-            monkeypatch.delenv(k, raising=False)
-        else:
-            monkeypatch.setenv(k, v)
+    if decision is None:
+        monkeypatch.delenv("SHIPMATE_REVIEW_DECISION", raising=False)
+    else:
+        monkeypatch.setenv("SHIPMATE_REVIEW_DECISION", decision)
+    if ungated is not None:
+        table = dict(table or MINIMAL_TABLE)
+        table["gate"] = {"ungated_envs": ungated.split(",")}
     if checks is None:
         checks = [_apply_check("stacks/app", e) for e in envs]
     jsonl = "\n".join(json.dumps(c) for c in checks)
@@ -493,18 +496,16 @@ def test_main_holds_unlisted_envs_and_skips_their_successors(tmp_path, monkeypat
 
 
 def test_main_takes_the_exemption_list_from_the_gate_table(tmp_path, monkeypatch):
-    """The hold and the applied-ungated report both resolve from `[gate]`, and the file
-    outranks a SHIPMATE_UNGATED_ENVS an operator forgot to delete: prod-eu is exempted by the
-    variable alone and must still be held.
+    """The hold and the applied-ungated report both resolve from `[gate]` on the default
+    branch, which is the only source: an environment the table does not name is held.
 
-    Mutation: resolve `ungated` from the variable instead of the table -- prod-eu applies
-    unreviewed and dev-eu is held."""
+    Mutation: resolve `ungated` from the process environment -- nothing sets it, so every
+    environment is held and the applied report goes empty."""
     parsed = _run_main(
         tmp_path,
         monkeypatch,
         envs=["dev-eu", "prod-eu"],
         table={"layout": "folder", "gate": {"ungated_envs": ["dev-eu"]}},
-        ungated="prod-eu",
         decision="REVIEW_REQUIRED",
     )
     assert _wave_envs(parsed) == ["dev-eu"]
@@ -541,7 +542,7 @@ def test_main_omits_a_listed_explicit_env_from_the_applied_report(tmp_path, monk
     assert _wave_envs(parsed) == ["dev-eu"]
 
 
-def test_main_holds_every_env_unreviewed_when_the_variable_is_unset(tmp_path, monkeypatch):
+def test_main_holds_every_env_unreviewed_when_the_list_is_unset(tmp_path, monkeypatch):
     # REVIEW_REQUIRED with no list exempts nothing, so nothing applies. The audit line stays
     # empty, because no env was permitted to apply without a review.
     parsed = _run_main(
@@ -585,9 +586,9 @@ def test_main_applies_every_env_on_an_approved_pr_with_no_variable(tmp_path, mon
 
 
 def test_main_claims_nothing_applied_ungated_on_a_reviewed_pull_request(tmp_path, monkeypatch):
-    # The variable is set and the envs are listed, but the pull request was APPROVED, so the
-    # exemption never fired: "permitted to apply without an approving review" over a reviewed
-    # run would be a false audit line.
+    # The envs are listed, but the pull request was APPROVED, so the exemption never fired:
+    # "permitted to apply without an approving review" over a reviewed run would be a false
+    # audit line.
     parsed = _run_main(
         tmp_path,
         monkeypatch,

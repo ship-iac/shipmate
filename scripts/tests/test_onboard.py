@@ -467,8 +467,6 @@ def test_main_calls_every_stage_in_order():
     `_reconcile_envs(ctx)`; delete `_reconcile_variables(ctx)`; delete
     `_reconcile_ruleset(ctx)`; delete `_reconcile_shims(ctx)`; delete `_checklist(ctx)`;
     `_repo_root()` back to `pathlib.Path.cwd()`; delete
-    `_report_superseded_variables(ctx)`, which leaves a repository carrying an inert version
-    pin with nothing saying so; delete
     `_refuse_diverging_app_id(args.app_id, variables)`, which is the only guard against a
     ruleset pinned to an App the workflows do not use; delete `sys.exit(_exit_code())`;
     swap two reconcilers; delete `_report_org_leftovers(ctx)`; delete the
@@ -502,7 +500,6 @@ def test_main_calls_every_stage_in_order():
         "_reconcile_envs(ctx)",
         "_reconcile_variables(ctx)",
         "_report_org_leftovers(ctx)",
-        "_report_superseded_variables(ctx)",
         "_reconcile_ruleset(ctx)",
         "_reconcile_shims(ctx)",
         "_checklist(ctx)",
@@ -1281,53 +1278,6 @@ def test_a_repository_copy_of_an_org_variable_is_reported_and_never_written(monk
         )
     ]
     assert onboard._exit_code() == 2
-
-
-def test_a_superseded_tool_version_variable_is_reported_and_never_deleted(monkeypatch):
-    """`actions/setup` reads the release's own VERSIONS file, so a repository copy of either
-    pin is inert: an operator bumping it would otherwise get silence. Both names are driven
-    in one call, because a loop reporting only the first passes a one-name fixture. The
-    whole REPORT is compared, and zero recorded calls is the other half -- the remedy is the
-    operator's to run, never this script's.
-
-    Mutation: report `"ok"` instead of `"differs"` -- the exit code drops to 0 while the
-    message still reads as informative.
-    """
-    fake = make_gh({})
-    monkeypatch.setattr(onboard, "_run", fake)
-    onboard._report_superseded_variables(
-        ctx(variables={"TERRAMATE_VERSION": "0.16.0", "TOFU_VERSION": "1.8.0"})
-    )
-    assert fake.calls == []
-    assert onboard.REPORT == [
-        (
-            "differs",
-            "TERRAMATE_VERSION",
-            "repository has 0.16.0, superseded by the version the engine release pins — "
-            "nothing reads it; delete it with `gh variable delete TERRAMATE_VERSION`",
-        ),
-        (
-            "differs",
-            "TOFU_VERSION",
-            "repository has 1.8.0, superseded by the version the engine release pins — "
-            "nothing reads it; delete it with `gh variable delete TOFU_VERSION`",
-        ),
-    ]
-    assert onboard._exit_code() == 2
-
-
-def test_a_repository_without_the_superseded_variables_reports_nothing(monkeypatch):
-    """The other half: a clean repository gets no line at all, or every run of a correctly
-    configured repository exits 2 and the report stops meaning anything.
-
-    Mutation: report unconditionally, using `ctx["variables"].get(name, "")`.
-    """
-    fake = make_gh({})
-    monkeypatch.setattr(onboard, "_run", fake)
-    onboard._report_superseded_variables(ctx(variables={}))
-    assert fake.calls == []
-    assert onboard.REPORT == []
-    assert onboard._exit_code() == 0
 
 
 ORG_VARS = "repos/o/r/actions/organization-variables"
@@ -2122,45 +2072,6 @@ def test_a_file_still_carrying_the_docs_placeholder_is_not_reported_pin_only(tmp
     assert onboard.REPORT == [
         ("differs", "shipmate.yml", "the published fence, never pinned: delete it and run again")
     ]
-
-
-#: Hand-written, not read back from `_reconcile_shims`: a detail string taken from the code
-#: it checks passes whatever that code says.
-_LEGACY_DETAIL = (
-    "the retired six-file layout: `shipmate.yml` carries this file's job now, "
-    "so a leftover still firing on its own trigger runs it twice. Delete it by hand."
-)
-
-
-def test_every_retired_filename_present_is_reported_and_never_deleted(tmp_path):
-    """A consumer upgrading from the six-file layout keeps those files until they remove them
-    by hand: each still fires on its own trigger and so runs a job `shipmate.yml` now runs as
-    well, and deleting one for them would discard an edit that is theirs.
-
-    Both halves in one test, because each is satisfied by the wrong reconciler alone: one
-    that deleted the files would still emit the rows, and one that reported nothing would
-    still leave the files. The whole REPORT is compared against a hand-written constant
-    rather than filtered for `differs`, so a row that goes missing and a row for a file that
-    is not there both fail.
-
-    Mutation: delete the legacy loop from `_reconcile_shims`. The REPORT assertion reddens
-    and the on-disk assertion stays green.
-    """
-    wf = tmp_path / ".github" / "workflows"
-    wf.mkdir(parents=True)
-    for filename in onboard.LEGACY_SHIMS:
-        (wf / filename).write_text("# left over\n", encoding="utf-8", newline="\n")
-    onboard._reconcile_shims(_shim_ctx(tmp_path))
-    assert onboard.REPORT == [
-        ("created", "shipmate.yml", ""),
-        ("differs", "plan.yml", _LEGACY_DETAIL),
-        ("differs", "apply.yml", _LEGACY_DETAIL),
-        ("differs", "comment-ops.yml", _LEGACY_DETAIL),
-        ("differs", "unlock.yml", _LEGACY_DETAIL),
-        ("differs", "deploy.yml", _LEGACY_DETAIL),
-        ("differs", "drift.yml", _LEGACY_DETAIL),
-    ]
-    assert sorted(f.name for f in wf.iterdir()) == sorted(["shipmate.yml", *onboard.LEGACY_SHIMS])
 
 
 #: Hand-written, not captured from the implementation: a constant pasted from the output

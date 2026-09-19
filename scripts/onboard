@@ -52,8 +52,6 @@ from _shipmate import _load
 ENGINE_ENV = "shipmate-engine"
 GATE = "shipmate / gate"
 AT_ORG_NAMES = ("SHIPMATE_APP_ID",)
-#: Written by releases before the engine pinned its own tool versions; now inert.
-SUPERSEDED_NAMES = ("TERRAMATE_VERSION", "TOFU_VERSION")
 REDACTED = "***"
 REPORT = []
 _DRY = False
@@ -252,15 +250,11 @@ def _at_org(raw):
     """The variable names the operator asserts are set at organization level.
 
     Validated against AT_ORG_NAMES, not against everything this script writes: an
-    unrecognised name would filter nothing and still report success. TERRAMATE_VERSION and
-    TOFU_VERSION are excluded because nothing writes or reads them any more -- the release's
-    own VERSIONS file decides both -- so `_refuse_org_assertion_mismatch` would raise a
-    `KeyError` looking the name up in `_writable_variables`. SHIPMATE_APPROVERS_TEAM is
-    excluded for the same reason: the approvers team is declared in
-    `.github/shipmate.toml`, so nothing writes a variable of that name any more.
-    SHIPMATE_SHARED_ENVS is excluded because `--shared` has to be passed either way.
-    Uppercased because the API uppercases variable names and every lookup here is on an
-    uppercased key.
+    unrecognised name would filter nothing and still report success, and a name nothing
+    writes any more would make `_refuse_org_assertion_mismatch` raise a `KeyError` looking
+    it up in `_writable_variables`. SHIPMATE_SHARED_ENVS is excluded for a different
+    reason: `--shared` has to be passed either way. Uppercased because the API uppercases
+    variable names and every lookup here is on an uppercased key.
     """
     names = {name.upper() for name in _split(raw)}
     unknown = sorted(names - set(AT_ORG_NAMES))
@@ -559,25 +553,6 @@ def _report_org_leftovers(ctx):
             )
 
 
-def _report_superseded_variables(ctx):
-    """Report a repository variable earlier releases wrote that nothing reads any more.
-
-    `actions/setup` takes both tool versions from the release's own VERSIONS file, so a
-    leftover copy is inert and an operator bumping it would otherwise get silence. It is
-    reported and never deleted: this run did not write it, and removing a value the
-    reconciler no longer owns exceeds its mandate.
-    """
-    for name in SUPERSEDED_NAMES:
-        current = ctx["variables"].get(name)
-        if current is not None:
-            report(
-                "differs",
-                name,
-                f"repository has {current}, superseded by the version the engine release "
-                f"pins — nothing reads it; delete it with `gh variable delete {name}`",
-            )
-
-
 def _org_plan(owner):
     """The organization's plan name, or "" when the token cannot see it.
 
@@ -830,19 +805,6 @@ def _reconcile_ruleset(ctx):
         report("ok", subject)
 
 
-#: The six files `shipmate.yml` replaced. Reported, never deleted: a consumer may have
-#: edited one. A leftover is not inert either — `plan.yml` still fires on
-#: `pull_request_target`, `comment-ops.yml` on `issue_comment`, `deploy.yml` on `push`
-#: and `drift.yml` on its own `schedule`, each running a job `shipmate.yml` now runs too.
-LEGACY_SHIMS = (
-    "plan.yml",
-    "apply.yml",
-    "comment-ops.yml",
-    "unlock.yml",
-    "deploy.yml",
-    "drift.yml",
-)
-
 #: `scripts/tests/test_docs_yaml_parses.py` imports this rather than keeping a second copy:
 #: the workflow file is rendered from a fence that guard parses, and an indented fence must
 #: be dedented rather than missed.
@@ -910,24 +872,12 @@ def _reconcile_shim(ctx):
 
 
 def _reconcile_shims(ctx):
-    """Write the consumer workflow file, reporting anything already there, and report each
-    file of the retired six-file layout that is still present.
+    """Write the consumer workflow file, reporting anything already there.
 
     `pin-only` is not drift: moving a pin is `dev/repin_consumer.py`'s job, driven by
-    docs/releasing.md, so it does not reach `_exit_code`. A legacy file IS drift: it still
-    fires on its own trigger, so it runs a job `shipmate.yml` runs as well.
+    docs/releasing.md, so it does not reach `_exit_code`.
     """
     _reconcile_shim(ctx)
-    workflows = pathlib.Path(ctx["root"]) / ".github" / "workflows"
-    for filename in LEGACY_SHIMS:
-        if (workflows / filename).is_file():
-            report(
-                "differs",
-                filename,
-                "the retired six-file layout: `shipmate.yml` carries this file's job now, "
-                "so a leftover still firing on its own trigger runs it twice. Delete it by "
-                "hand.",
-            )
 
 
 def _checklist(ctx):
@@ -1121,7 +1071,6 @@ def main(argv=None):
     _reconcile_envs(ctx)
     _reconcile_variables(ctx)
     _report_org_leftovers(ctx)
-    _report_superseded_variables(ctx)
     _reconcile_ruleset(ctx)
     _reconcile_shims(ctx)
     _checklist(ctx)

@@ -157,9 +157,7 @@ fails closed rather than proceeding unreviewed.)
   keeps blocking the merge. With the list absent or empty, "the rest" is
   every environment, since the engine enforces on the setting itself. Opting in
   takes no line in your workflow file; the engine reads the file from the
-  default branch, so an edit takes effect when it merges — unless the repository
-  is still on the `SHIPMATE_UNGATED_ENVS` fallback, which any Write-role holder
-  edits without a commit (`upgrading.md` §Unreleased). Semantics:
+  default branch, so an edit takes effect when it merges. Semantics:
   `../CONTRACT.md` §Comment-ops. What it costs against the deployment-side
   gate: `hardening.md` §3–5.
 - **Per-environment approval** — which environments require a human is your

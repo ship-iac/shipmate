@@ -49,8 +49,6 @@ Probes:
 - GitHub App installation permission drift.
 """
 
-import contextlib
-import io
 import json
 import os
 import pathlib
@@ -2133,12 +2131,7 @@ def config_status(ctx):
 
 def _governing_team(ctx):
     """The approvers team the file at the commit under examination declares — the value
-    that governs every apply once it merges — or the SHIPMATE_APPROVERS_TEAM variable while
-    the migration fallback still reads it.
-
-    The file rather than the variable, because a repository declaring the key authorizes
-    against it whatever the variable says, and one that has deleted the variable has no
-    other source: probing the variable reports on a value no apply reads.
+    that governs every apply once it merges.
 
     The ref is NOT comment-ops'. `_config_table` reads the commit under examination, as
     every other reading of this file here does, while `gate-config` resolves from the
@@ -2146,39 +2139,14 @@ def _governing_team(ctx):
     reports the branch's team while that pull request's own applies are still authorized
     against the default branch's. That is the direction worth having — a bad team slug is
     warned about before it merges, which a default-branch read cannot do.
-
-    Returned as `(team, declared)`, `declared` being whether the file is what governs. The
-    fallback's own migration warning is swallowed
-    (`test_the_team_probe_prints_nothing_into_the_report`) — stdout carries the rendered
-    report, so a workflow command written to it lands in the pull request comment — which
-    leaves this flag as the only way the report can say a fallback is governing.
     """
     table, _ = _config_table(ctx)
-    fallback = ctx["team"] or ""
-    if table is None:
-        return fallback, False
-    with contextlib.redirect_stdout(io.StringIO()):
-        team = bm.ec.gate_approvers_team(table, fallback)
-    return team, "approvers_team" in table.get("gate", {})
-
-
-def _fallback_team_finding(team):
-    """The migration state the report would otherwise not mention at all."""
-    return (
-        WARNING,
-        f"the approvers team `{team}` comes from the SHIPMATE_APPROVERS_TEAM repository "
-        f"variable, not from `[gate] approvers_team` in `{CONFIG_PATH}` — a later release "
-        "stops reading the variable, and every `shipmate apply` is refused from the day it "
-        "does. Declare the key on the default branch, then delete the variable.",
-    )
+    return "" if table is None else bm.ec.gate_approvers_team(table)
 
 
 def _team_warnings(ctx):
     """A typo'd or cross-org approvers team surfaces today only as every apply being
-    rejected "not a team member" — one API call names it. A team still governing from the
-    repository variable is reported beside it: the resolver's `::warning::` reaches a run log
-    only, and this report is the surface an operator opens to find a setting a later release
-    stops reading.
+    rejected "not a team member" — one API call names it.
 
     Comment-path-only, and by the token rather than by the value: the plan path's App
     token is minted without `members: read` (actions/summary), so the lookup below would
@@ -2186,19 +2154,17 @@ def _team_warnings(ctx):
     """
     if not ctx["report_mode"]:
         return []
-    team, declared = _governing_team(ctx)
+    team = _governing_team(ctx)
     if not team:
         return []
-    findings = [] if declared else [_fallback_team_finding(team)]
     try:
         found = _gh_json(f"orgs/{ctx['owner']}/teams/{team}")
         resolved = isinstance(found, dict) and bool(found.get("slug"))
     except (Exception, SystemExit):  # noqa: BLE001 - a failed lookup IS the finding
         resolved = False
     if resolved:
-        return findings
+        return []
     return [
-        *findings,
         (
             WARNING,
             f"approvers team `{team}` does not resolve in org `{ctx['owner']}` — "
@@ -2323,7 +2289,6 @@ def ctx_from_env():
         "default_branch": os.environ["SHIPMATE_DEFAULT_BRANCH"],
         "envs": envs,
         "envs_available": bool(envs),
-        "team": os.environ.get("SHIPMATE_TEAM") or None,
         # The team probe's route marker: only the comment path's token requests
         # `members: read`, and `report` mode runs nowhere else.
         "report_mode": os.environ.get("SHIPMATE_DOCTOR_MODE") == "report",

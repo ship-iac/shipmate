@@ -22,13 +22,9 @@ from _loader import action_steps, load_script
 _TEAM = "${{ steps.gate.outputs.approvers_team }}"
 
 #: The whole `env:` of the resolve step, hand-written. `GH_TOKEN` is the workflow token: the
-#: contents read needs no App token. Both fallback inputs are bound here and nowhere else on
-#: the apply path, so this block is the migration's only channel.
-_GATE_ENV = {
-    "GH_TOKEN": "${{ inputs.github-token }}",
-    "SHIPMATE_UNGATED_ENVS": "${{ inputs.ungated-envs }}",
-    "APPROVERS_TEAM": "${{ inputs.approvers-team }}",
-}
+#: contents read needs no App token. Nothing else is bound: the file on the default branch
+#: is the only source, so a second binding here would be a second source.
+_GATE_ENV = {"GH_TOKEN": "${{ inputs.github-token }}"}
 
 
 def _step(name):
@@ -105,55 +101,47 @@ def test_gather_and_authorize_read_one_identical_team_expression():
     assert gather == authorize
 
 
-#: The doctor step's own team binding, hand-written. `doctor` resolves the team from the
-#: table it already fetches and reads this only as the migration fallback -- so the binding
-#: must stay until the fallback goes, and it cannot come from the resolve step's output:
-#: that step's `if:` admits only apply and unlock. Not the same READ, though: `doctor` takes
-#: the file at the commit under examination and this step's script takes the default
-#: branch's, which is what lets `shipmate doctor` warn about a gate table before it merges.
-#: Named here so a sweep of `inputs.approvers-team` readers does not mistake it for a site
-#: this wiring missed.
-_DOCTOR_TEAM = "${{ inputs.approvers-team }}"
+def test_the_doctor_step_takes_no_team_binding():
+    """`doctor` resolves the team from the table it already fetches, at the commit under
+    examination -- which is what lets `shipmate doctor` warn about a gate table before it
+    merges, where the resolve step's default-branch read cannot.
+
+    Mutation: bind `SHIPMATE_TEAM` here again. Nothing reads it, so a binding is a second
+    source for a value that has one.
+    """
+    assert "SHIPMATE_TEAM" not in _step("Doctor — render and upsert the sticky comment")["env"]
 
 
-def test_the_doctor_step_keeps_its_own_team_binding():
-    """Mutation: point it at `steps.gate.outputs.approvers_team`, which is unset on the doctor
-    route, so a repository still relying on the fallback would have its team probe go
-    silent."""
-    assert _step("Doctor — render and upsert the sticky comment")["env"]["SHIPMATE_TEAM"] == (
-        _DOCTOR_TEAM
-    )
-
-
-def _resolve(monkeypatch, tmp_path, table, ungated="", team=""):
+def _resolve(monkeypatch, tmp_path, table):
     gc = load_script("gate-config")
     monkeypatch.setattr(gc.ec, "read_table_at_default_branch", lambda *a, **k: table)
-    monkeypatch.setenv("SHIPMATE_UNGATED_ENVS", ungated)
-    monkeypatch.setenv("APPROVERS_TEAM", team)
     out = tmp_path / "out.txt"
     monkeypatch.setenv("GITHUB_OUTPUT", str(out))
     gc.main()
     return dict(ln.split("=", 1) for ln in out.read_text(encoding="utf-8").splitlines())
 
 
-def test_the_file_wins_over_both_fallbacks(monkeypatch, tmp_path):
-    """Mutation: swap either resolver's arguments, or return the fallback unconditionally."""
+def test_the_file_is_the_only_source(monkeypatch, tmp_path):
+    """Both outputs come from the table, sorted. Mutation: read either value from the
+    process environment -- there is no variable left to read, so the output goes empty and
+    every environment holds while the file says otherwise."""
     table = {
         "layout": "dry",
         "gate": {"approvers_team": "platform", "ungated_envs": ["dev-us", "dev-eu"]},
     }
-    assert _resolve(monkeypatch, tmp_path, table, ungated="stale", team="stale") == {
+    assert _resolve(monkeypatch, tmp_path, table) == {
         "ungated_envs": "dev-eu,dev-us",
         "approvers_team": "platform",
     }
 
 
-def test_the_variables_are_read_when_the_file_declares_no_gate(monkeypatch, tmp_path):
-    """The migration's whole point: a repository that has not yet added the table keeps
-    working. Mutation: drop the fallback argument from either call."""
-    assert _resolve(
-        monkeypatch, tmp_path, {"layout": "dry"}, ungated="dev-eu", team="deployers"
-    ) == {"ungated_envs": "dev-eu", "approvers_team": "deployers"}
+def test_a_file_declaring_no_gate_resolves_to_empty(monkeypatch, tmp_path):
+    """The minimum configuration: a file with no `[gate]` is valid, authorizes nobody by
+    team and exempts no environment. Mutation: return a non-empty default for either."""
+    assert _resolve(monkeypatch, tmp_path, {"layout": "dry"}) == {
+        "ungated_envs": "",
+        "approvers_team": "",
+    }
 
 
 def test_the_table_is_validated_before_it_is_resolved(monkeypatch, tmp_path):
