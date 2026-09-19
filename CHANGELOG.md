@@ -48,8 +48,11 @@ requirement.
   comment's ungated-audit line, the comment-ops exemption comment, and
   `authorize`'s refusal for an env that is not listed.
 - **`shipmate doctor` reports the approvers team from the file** at the commit
-  under examination, so a bad slug is warned about before it merges. The probe
-  runs in `report` mode only; the plan path's App token lacks `members: read`.
+  under examination — named in the report beside `env_order` and
+  `explicit_envs`, since an absent `approvers_team` authorizes nobody and no
+  validator can say so — and warns when the slug does not resolve in the org, so
+  a bad one is caught before it merges. The resolvability probe runs in `report`
+  mode only; the plan path's App token lacks `members: read`.
 - **`scripts/onboard` no longer writes `SHIPMATE_APPROVERS_TEAM`.** `--team` is
   printed in the closing by-hand checklist, with the file the key belongs in and
   the pin it needs first. `--vars-at-org` accepts `SHIPMATE_APP_ID` only; the
