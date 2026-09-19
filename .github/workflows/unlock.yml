@@ -37,7 +37,7 @@ jobs:
         with: { fetch-depth: 0, ref: "${{ inputs.ref }}" }
       - uses: ship-iac/shipmate/actions/setup@94a60ab22beb46a7c7d2f52b858d29a26bc1f101
       - id: d
-        uses: ship-iac/shipmate/actions/apply-detect@49a06844943df9bd23a2e22721beacd95de9b4d5
+        uses: ship-iac/shipmate/actions/apply-detect@154a5fc8e7a1d6cd7e89adba9b7c0b93bb688117
         with:
           environment: ${{ inputs.environment }}
           # A literal, not an input: this file is the verb. `run_unlock` reads
