@@ -267,18 +267,25 @@ def test_ungated_env_decision_table(review_decision, environment, ungated_envs, 
     assert (reason == "") is authorized
 
 
-def test_unlisted_env_reason_names_the_variable():
+def test_unlisted_env_reason_names_the_setting():
+    """Compared whole, against a hand-written constant: the refusal has to name both the
+    environment the commenter asked for and the setting that would exempt it, and a partial
+    check leaves whichever half it does not read free to go stale."""
     ok, reason = _decide(
         review_decision="REVIEW_REQUIRED", environment="prod-eu", ungated_envs=UNGATED_DEV
     )
     assert not ok
-    assert "SHIPMATE_UNGATED_ENVS" in reason
-    assert "`prod-eu`" in reason
+    assert reason == (
+        "not authorized: PR review is required by the branch ruleset and has not been "
+        "satisfied, and `prod-eu` is not listed in `gate.ungated_envs` in "
+        "`.github/shipmate.toml`; obtain the required approving review(s), then re-run "
+        "`shipmate apply`."
+    )
 
 
 @pytest.mark.parametrize("environment", ["dev-eu", ""])
 def test_empty_list_keeps_todays_review_required_message(environment):
-    # With no variable set, the message must not mention the opt-out at all.
+    # With nothing exempted, the message must not mention the opt-out at all.
     ok, reason = _decide(review_decision="REVIEW_REQUIRED", environment=environment)
     assert not ok
     assert reason == (
@@ -304,7 +311,7 @@ def test_exemption_does_not_reach_the_other_checks():
 
 def test_main_reads_ungated_envs_and_environment(tmp_path, monkeypatch):
     # Pins that both SHIPMATE_UNGATED_ENVS and SHIPMATE_ENV reach decide(). The env is
-    # deliberately not in the list, so the refusal carries the variable-aware message only if
+    # deliberately not in the list, so the refusal carries the list-aware message only if
     # both values arrived.
     pr_json = tmp_path / "pr.json"
     pr_json.write_text(json.dumps(PR_OK), encoding="utf-8")
@@ -326,7 +333,7 @@ def test_main_reads_ungated_envs_and_environment(tmp_path, monkeypatch):
     az.main()
     text = out.read_text(encoding="utf-8")
     assert "authorized=false" in text
-    assert "SHIPMATE_UNGATED_ENVS" in text
+    assert "`gate.ungated_envs`" in text
     assert "`prod-eu`" in text
     assert "environment=prod-eu" in text
 

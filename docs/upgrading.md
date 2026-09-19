@@ -93,12 +93,11 @@ has the rule and the `tm_try` form that keeps a local default.
 
 ## Opt-in: per-environment review gating
 
-`SHIPMATE_UNGATED_ENVS` lets named environments be applied without an approving
-review while the rest keep the branch ruleset's requirement. Set the
-`SHIPMATE_UNGATED_ENVS` repository variable and nothing else: engine
-`comment-ops.yml` passes `ungated-envs: ${{ vars.SHIPMATE_UNGATED_ENVS }}`
-itself, and `vars` inherit into a called workflow, so the variable resolves in
-your repository with no line to wire. See
+`gate.ungated_envs` lets named environments be applied without an approving
+review while the rest keep the branch ruleset's requirement. Declare it in
+`.github/shipmate.toml` and nothing else — no repository setting, no workflow
+line: comment-ops and both apply paths each read the file from your default
+branch themselves. See
 [`getting-started.md`](getting-started.md) §"Applying chosen environments
 without an approving review".
 
@@ -113,8 +112,9 @@ enforced by nothing.
 
 Two things it does not change, worth confirming against your own policy before
 you set it: an environment's `required_reviewers` still gates the deployment
-(a separate control — see [`hardening.md`](hardening.md) §3–5), and the
-variable is editable by anyone holding the Write role.
+(a separate control — see [`hardening.md`](hardening.md) §3–5), and anyone who
+can open a pull request can propose an entry — what they cannot do is have it
+take effect before it merges.
 
 ## Past migrations
 
@@ -127,7 +127,70 @@ still links to them from those releases' own entries; the migrations they
 described were between pre-table engine releases and have no consumers left to
 migrate. Each release's `CHANGELOG.md` entry is the record of what changed.
 
-### Unreleased — the environment table moves to `.github/shipmate.toml`
+### Unreleased — the gate settings move into `.github/shipmate.toml`
+
+**The approvers team and the ungated-environment list leave repository
+variables.** `SHIPMATE_APPROVERS_TEAM` becomes `gate.approvers_team` and
+`SHIPMATE_UNGATED_ENVS` becomes `gate.ungated_envs`, both in a `[gate]` table in
+the file you already have. Both variables are still read when the file declares
+no key of its own, with a warning naming the replacement, for this release only.
+
+**This takes two merges per repository, and the order is the reverse of the
+previous migration's.**
+
+1. **Bump the engine pin.** Change nothing else. Your file is unchanged and still
+   valid, and the new engine falls back to the variables with a warning on each
+   run that reads one.
+2. **Add the keys, then delete the variables.** Write `[gate]` — and `version`,
+   if you want it — in `.github/shipmate.toml`, merge, and delete
+   `SHIPMATE_APPROVERS_TEAM` and `SHIPMATE_UNGATED_ENVS` from the repository's
+   variables.
+
+**Why the order inverts.** The engine refuses a file carrying a top-level key it
+does not implement, by name, before it decides anything. An engine that predates
+`gate` therefore refuses the whole file the moment `[gate]` lands on the default
+branch — every plan run, not just the apply path. The previous migration could
+add the file first only because the engine of that day ignored it entirely; this
+one cannot. Adding a key under an old pin is the one sequence that breaks the
+repository, and it breaks it loudly and immediately.
+
+**A repository that inherited its team from the organization must now declare
+one.** `SHIPMATE_APPROVERS_TEAM` could be set once for the whole organization;
+`gate.approvers_team` is per repository, in that repository's own file. If you
+never wrote the variable locally and read the organization's copy, step 2 is
+where you write the team slug down for the first time — and if you skip it,
+`shipmate apply` and `shipmate unlock` stop authorizing anyone once the fallback
+is removed. This is the one line this change costs a consumer who was not
+already writing it. `--vars-at-org` no longer accepts the name, for the same
+reason: it takes `SHIPMATE_APP_ID` only, and the two-name form now exits with an
+error ([`github-app.md`](github-app.md) §6).
+
+```toml
+layout = "dry"
+version = 1
+
+[gate]
+approvers_team = "platform-approvers"
+ungated_envs   = ["dev-eu", "dev-us"]
+```
+
+**A declared empty value is not the same as an absent one.** `ungated_envs = []`
+exempts nothing and `approvers_team = ""` authorizes nobody; an absent key falls
+back to the variable. So emptying a list means emptying it, not reverting to
+whatever the variable still holds — which matters most in the window where both
+exist.
+
+**`version` is optional.** Written, it must be the integer `1`; absent, it reads
+as 1. It exists so a future incompatible schema can be told from this one, and it
+grants nothing: an engine still refuses every key it does not implement,
+whatever `version` says.
+
+**`shipmate doctor` reports the team from the file** at the commit under
+examination, so a bad slug is warned about on the pull request that introduces
+it. The probe runs in `report` mode only — the plan path's App token is minted
+without `members: read` and cannot look a team up — so ask for it by comment.
+
+### 0.30.0 — the environment table moves to `.github/shipmate.toml`
 
 **The whole table leaves Terramate.** What was a `globals "shipmate"` block in
 your HCL is now a flat TOML file at `.github/shipmate.toml`, read with `tomllib`
@@ -147,7 +210,7 @@ exist until that pull request merges, so its own `detect` refuses.
    the same pull request. The new engine now finds the file already on the
    default branch.
 
-**Carry all four top-level keys in step 1**, not just `layout` and
+**Carry all four of the keys that moved in step 1**, not just `layout` and
 `environments`. `env_order` and `explicit_envs` moved into the same file, and
 both are **silent when absent**: a file that omits them is structurally valid
 and takes the tolerant default — no ordering, and no exclusions. A repository
@@ -295,7 +358,7 @@ per-consumer override.
 **Re-pinning is not enough: the environment table is now required.** A cell's
 identity variables, role and region come from a `globals "shipmate"` block on
 your repository's default branch, and from nothing else. (That block later moved
-to `.github/shipmate.toml` — see the Unreleased entry above, which supersedes
+to `.github/shipmate.toml` — see the 0.30.0 entry above, which supersedes
 the spelling here.) Declare `global.shipmate.layout` there before re-pinning: a
 repository with no table is refused on every run, and a pull request that only
 *adds* the table is refused too, because the engine reads the table from the

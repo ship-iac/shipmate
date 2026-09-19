@@ -41,7 +41,7 @@ inputs:
     required: false
     default: ""
   applied-ungated-envs:
-    description: "JSON array of environments applied without an approving review, per SHIPMATE_UNGATED_ENVS (all-environments form only). Empty = []."
+    description: "JSON array of environments applied without an approving review, per `gate.ungated_envs` or the SHIPMATE_UNGATED_ENVS fallback (all-environments form only). Empty = []."
     required: false
     default: ""
   results:

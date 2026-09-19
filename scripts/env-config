@@ -7,8 +7,11 @@ repository on every path -- no checkout in any workflow passes `repository:` -- 
 a fork pull request is refused before it plans.
 """
 
+import base64
 import graphlib
+import json
 import os
+import re
 import subprocess
 import sys
 
@@ -73,14 +76,14 @@ def interpreter_refusal():
 def parse_table(text):
     """The table parsed from `text`, or `SystemExit`.
 
-    Shared by both readers: `read_table` below reads the file with `git show`, and
-    `doctor` reads the same bytes through the contents API, having no checkout. The
-    interpreter check runs ahead of the import, because a module-level `import tomllib`
-    would raise `ModuleNotFoundError` before any caller could report the real cause --
-    an older runner image than CONTRACT.md requires.
+    Shared by every reader: `read_table` below reads the file with `git show`, while
+    `contents_text` reads the same bytes through the contents API for the jobs that have
+    no checkout. The interpreter check runs ahead of the import, because a module-level
+    `import tomllib` would raise `ModuleNotFoundError` before any caller could report the
+    real cause -- an older runner image than CONTRACT.md requires.
 
     A leading U+FEFF is refused, not stripped: `tomllib` rejects it, `git show` and the
-    contents API both deliver it, and both readers must reach the same verdict on the same
+    contents API both deliver it, and every reader must reach the same verdict on the same
     file. Adding a strip here reddens test_a_byte_order_mark_is_reported_the_way_a_run_sees_it.
     """
     refusal = interpreter_refusal()
@@ -110,6 +113,67 @@ def read_table(run=None):
     return parse_table(p.stdout)
 
 
+def gh_json(path, run=None):
+    """`gh api <path>` -> parsed JSON, through `run` so a nonzero exit surfaces the tool's
+    stderr then raises ::error:: from a single definition. Callers alias it as `_gh_json`
+    rather than repeating the `json.loads(_run(...))` pair.
+
+    Homed here for the reason `_run` gives: `build-matrix` aliases it, and this module
+    cannot alias upward.
+    """
+    return json.loads((run or _run)(["gh", "api", path]))
+
+
+def contents_text(path, fetch=None):
+    """One file's decoded text from the contents API, or None when it cannot be read.
+
+    The read for a job with no checkout, which is every job that decides something before a
+    cell runs: `doctor`'s probes and comment-ops' gate resolve. Neither has a working tree
+    for `git show`, and an engine job holding the GitHub App key executes no repository
+    content on purpose.
+
+    Anything that is not a base64 blob is UNREADABLE, not empty: a >1 MB file answers with
+    `encoding: "none"` and empty `content`, which would otherwise decode to a readable
+    EMPTY file a caller reads as clean. A leading U+FEFF is left in place for the reason
+    `parse_table` gives.
+
+    `fetch` reads the JSON, defaulting to this module's `gh api` call. It is a seam, not
+    flexibility: `doctor` passes its own reader so that the mocks in its tests keep
+    intercepting this read.
+
+    `errors="replace"` keeps a mis-encoded byte from raising.
+    """
+    fetch = fetch or gh_json
+    try:
+        blob = fetch(path)
+    except (Exception, SystemExit):  # noqa: BLE001 - unreadable is the contract, not a failure
+        return None
+    if not isinstance(blob, dict) or blob.get("encoding") != "base64":
+        return None
+    return base64.b64decode(blob.get("content", "")).decode("utf-8", "replace")
+
+
+def read_table_at_default_branch(run=None):
+    """The table from the default branch, read without a checkout. Every failure refuses.
+
+    The twin of `read_table`: same file, same branch, same refusal wording, because a
+    consumer must not get two accounts of one problem depending on which job read it.
+    """
+    run = run or _run
+    branch = _default_branch(run)
+    repo = os.environ["GITHUB_REPOSITORY"]
+    path = f"repos/{repo}/contents/{CONFIG_PATH}?ref={branch}"
+    text = contents_text(path, fetch=lambda p: gh_json(p, run))
+    if text is None:
+        raise SystemExit(
+            f"::error::{CONFIG_PATH} could not be read from the default branch "
+            f"({branch}). The engine reads the environment table from the default "
+            "branch, never from this branch, so the file must be merged there "
+            "before the first plan."
+        )
+    return parse_table(text)
+
+
 #: The layouts a repository may declare, and the environment-level keys an entry may
 #: hold. `aws` is the only provider implemented; a second one costs a field list here
 #: and one conditional step in each cell action.
@@ -123,7 +187,21 @@ _STRUCTURAL = ("plan", "apply", "workloads")
 #: Everything the file may declare at its top level. Also the names reserved inside
 #: `env_order`, which is keyed by environment name and would otherwise accept a
 #: misplaced control as an ordering entry.
-_TOP_KEYS = ("layout", "environments", "env_order", "explicit_envs")
+_TOP_KEYS = ("layout", "environments", "env_order", "explicit_envs", "gate", "version")
+
+#: Everything a `[gate]` table may declare.
+_GATE_KEYS = ("approvers_team", "ungated_envs")
+
+#: Env names come from Terramate `env/<name>` tags, so the charset is comment-parse's env
+#: grammar plus `_`, a legal tag character no `shipmate apply <env>` can name. Both cases
+#: match, and the readers disagree: `gate.ungated_envs` is casefolded on both sides, while
+#: `explicit_envs` is intersected case-sensitively in `apply-all-detect:partition_envs`, so an
+#: entry whose case differs from its environment excludes nothing.
+_ENV_ENTRY = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*")
+
+#: A GitHub team slug: the bare name from the team's URL. Same charset as an env entry, and
+#: the empty string is legal separately -- a declared empty team authorizes nobody.
+_TEAM_SLUG = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*")
 
 
 def _mapping(value, where):
@@ -279,7 +357,7 @@ def _check_shared(environments, shared_envs):
     """The one environment rule that needs context the file does not carry.
 
     Membership comes from the `SHIPMATE_SHARED_ENVS` repository variable, so
-    `validate_structure` cannot decide it and the structural-only caller skips it.
+    `validate_structure` cannot decide it and the structural-only callers skip it.
 
     Runs only after `validate_structure`, its sole caller's first step, which is what has
     already proven every entry and every `aws` block a mapping.
@@ -385,43 +463,167 @@ def validate_env_order(order):
     return order
 
 
-def validate_explicit_envs(envs):
+def validate_env_name_list(envs, key):
     """`envs`, or `SystemExit` unless it is a list of bare env-name strings.
 
-    Guards a bare string, which would otherwise be iterated character by character, a
-    non-list value, and an entry carrying a `-plan`/`-apply` environment suffix -- the
-    value is matched against the bare env name on the apply checks, so a suffixed entry
-    would skip nothing at all.
+    The one env-name rule, shared by `explicit_envs`, `gate.ungated_envs` and the
+    `SHIPMATE_UNGATED_ENVS` variable `gate_ungated_envs` falls back to. `key` names the setting
+    in every message. Guards a bare string, which would otherwise be iterated character by
+    character, a non-list value, an entry no environment name can match, and an entry
+    carrying a `-plan`/`-apply` environment suffix -- each of the last two is matched against
+    the bare logical env name, matches nothing, and so excludes or exempts nothing while
+    reading as if it did.
+
+    Charset before suffix: a suffixed name passes the charset, so the two are separate
+    checks, and this order gives `"dev eu-plan"` the message about its space.
     """
     if not isinstance(envs, list):
         raise SystemExit(
-            "::error::explicit_envs must be a list of env-name strings, "
+            f"::error::{key} must be a list of env-name strings, "
             f"got {type(envs).__name__} ({envs!r}); did you mean [{envs!r}]?"
         )
     bad = [e for e in envs if not isinstance(e, str)]
     if bad:
         raise SystemExit(
-            f"::error::explicit_envs elements must all be env-name strings; "
+            f"::error::{key} elements must all be env-name strings; "
             f"got non-string element(s) {bad!r}"
         )
     for e in envs:
+        if not _ENV_ENTRY.fullmatch(e):
+            raise SystemExit(
+                f"::error::{key} entry {e!r} is not an environment name; entries are bare "
+                f"logical env names (letters, digits, '-' and '_'), with no quotes, spaces "
+                f"or path separators."
+            )
         for suffix in ("-plan", "-apply"):
             if e.endswith(suffix):
                 raise SystemExit(
-                    f"::error::explicit_envs entry {e!r} carries the environment suffix "
-                    f"{suffix!r}; explicit_envs is matched against the bare logical env "
-                    f"name — write {e[: -len(suffix)]!r} instead."
+                    f"::error::{key} entry {e!r} carries the environment suffix "
+                    f"{suffix!r}; {key} is matched against the bare logical env name — "
+                    f"write {e[: -len(suffix)]!r} instead."
                 )
     return envs
+
+
+def validate_team_slug(team, key):
+    """`team`, or `SystemExit` unless it is a GitHub team slug or the empty string.
+
+    The charset rule `gate.ungated_envs` already has, applied to the setting beside it, on
+    both of that setting's sources. An empty team is legal and authorizes nobody. Anything
+    else that is not a slug -- a display name carrying a space, an `@org/team` reference, a
+    pasted quote, a trailing space -- 404s in the membership lookup that decides
+    `is_member`, so every commenter is refused under a message naming the team as though it
+    had resolved.
+    """
+    _string(team, key)
+    if team and not _TEAM_SLUG.fullmatch(team):
+        raise SystemExit(
+            f"::error::{key} is {team!r}, which is not a GitHub team slug; use the bare "
+            f"slug from the team's URL (letters, digits, '-' and '_'), not a display name "
+            f"or an @org/team reference."
+        )
+    return team
+
+
+def validate_explicit_envs(envs):
+    """`envs`, or `SystemExit`: the shared env-name rule, reported under this key."""
+    return validate_env_name_list(envs, "explicit_envs")
+
+
+def validate_gate(gate):
+    """One `[gate]` table's shape, or `SystemExit`.
+
+    Strict keys, as an environment entry is: a misspelled gate key leaves the setting at its
+    default while the repository believes it declared one.
+    """
+    gate = _mapping(gate, "gate")
+    for key in sorted(gate):
+        if key not in _GATE_KEYS:
+            raise SystemExit(
+                f"::error::gate.{key} is not a key this engine implements. "
+                f"The gate table holds {', '.join(_GATE_KEYS)}."
+            )
+    if "approvers_team" in gate:
+        validate_team_slug(gate["approvers_team"], "gate.approvers_team")
+    if "ungated_envs" in gate:
+        validate_env_name_list(gate["ungated_envs"], "gate.ungated_envs")
+    return gate
+
+
+def _migration_warning(key, old):
+    """The one sentence both fallbacks owe a consumer: what replaces the old setting, and
+    that this reading of it goes away. No release is named because none is decided."""
+    print(
+        f"::warning::{CONFIG_PATH} on the default branch declares no {key}, so {old} was "
+        f"read instead. Declare {key} on the default branch and delete {old} — a later "
+        "release removes this fallback."
+    )
+
+
+def gate_ungated_envs(table, fallback_raw):
+    """The environments exempt from the review requirement, casefolded.
+
+    `gate.ungated_envs` when the file declares it, otherwise the comma-separated
+    `SHIPMATE_UNGATED_ENVS` variable, which exists for the migration release only.
+
+    Key presence, not a truthy value: an emptied list is a declared empty list, and
+    falling back there hands back exemptions an operator deliberately removed. The file's
+    entries came through `validate_structure`; the variable is unvalidated input, so only
+    that path validates.
+    """
+    gate = table.get("gate", {})
+    if "ungated_envs" in gate:
+        return frozenset(e.casefold() for e in gate["ungated_envs"])
+    envs = [e for e in (fallback_raw or "").split(",") if e]
+    validate_env_name_list(envs, "SHIPMATE_UNGATED_ENVS")
+    if envs:
+        _migration_warning("gate.ungated_envs", "the SHIPMATE_UNGATED_ENVS repository variable")
+    return frozenset(e.casefold() for e in envs)
+
+
+def gate_approvers_team(table, fallback):
+    """The team slug whose members may drive shipmate by comment.
+
+    `gate.approvers_team` when the file declares it, otherwise the `approvers-team` input
+    carrying `vars.SHIPMATE_APPROVERS_TEAM`, for the migration release only. Key presence
+    again: a declared empty team authorizes nobody, and must not read as undeclared.
+
+    Neither resolver warns on an empty fallback: a repository that never set the variable
+    and has not yet added the key is mid-migration, not misconfigured.
+
+    Both sources are charset-checked, unlike `gate_ungated_envs`, whose variable is the only
+    side it validates here: a team that is not a slug resolves to nobody rather than to a
+    wider set, so the refusal is the diagnostic, not a barrier.
+    """
+    gate = table.get("gate", {})
+    if "approvers_team" in gate:
+        return gate["approvers_team"]
+    if fallback:
+        validate_team_slug(fallback, "SHIPMATE_APPROVERS_TEAM")
+        _migration_warning("gate.approvers_team", "the SHIPMATE_APPROVERS_TEAM repository variable")
+    return fallback or ""
+
+
+def _check_version(table):
+    """Refuse a file declaring a schema version this engine does not implement.
+
+    A bool is excluded explicitly: `True == 1` in Python, so a plain comparison reads
+    `version = true` as version 1.
+    """
+    found = table["version"]
+    if not (isinstance(found, int) and not isinstance(found, bool) and found == 1):
+        raise SystemExit(
+            f"::error::version is {found!r}; this engine implements version 1 of {CONFIG_PATH}."
+        )
 
 
 def validate_structure(table):
     """Everything the file can be judged on by itself, or `SystemExit`.
 
-    All four top-level fields, so a "valid configuration" verdict cannot hide an ordering
-    or exclusion error until an apply reads it. `doctor` validates a branch's file with
+    Every top-level field, so a "valid configuration" verdict cannot hide an ordering
+    or exclusion error until an apply reads it. `doctor` and `gate-config` validate with
     this alone: the rules left to `validate` need a checkout, a matrix or a repository
-    variable, none of which a file on its own supplies.
+    variable, none of which either of them has.
 
     `layout` is required: it is the only source of a cell's environment identity, so a
     table without one leaves every cell with nothing to run as.
@@ -432,6 +634,8 @@ def validate_structure(table):
                 f"::error::{key} is not a setting this engine implements. "
                 f"{CONFIG_PATH} holds {', '.join(_TOP_KEYS)}."
             )
+    if "version" in table:
+        _check_version(table)
     if "layout" not in table:
         raise SystemExit(
             f"::error::{CONFIG_PATH} declares no layout, so no cell can resolve its "
@@ -450,6 +654,7 @@ def validate_structure(table):
         _check_environment(environments[env], env)
     validate_env_order(table.get("env_order", {}))
     validate_explicit_envs(table.get("explicit_envs", []))
+    validate_gate(table.get("gate", {}))
     return table
 
 

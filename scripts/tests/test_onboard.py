@@ -1075,21 +1075,22 @@ def test_dry_run_reaches_every_write_path_and_issues_only_reads(monkeypatch, tmp
         "would create",
         "would create",
         "would set",
-        "would set",
         "would create",
         "would create",
     ]
 
 
 def test_absent_variables_are_set_from_the_flags_and_no_tool_version_is_written(monkeypatch):
-    """A repository with no variables gets exactly the two the workflows still read. The
-    tool versions are not among them: `actions/setup` takes both from the release's own
-    VERSIONS file, so a repository copy would only be a second source of truth.
+    """A repository with no variables gets exactly the one the workflows still read. Neither
+    the approvers team -- it is declared in `.github/shipmate.toml`, which this script does
+    not write -- nor the tool versions are among them: `actions/setup` takes both from the
+    release's own VERSIONS file, so a repository copy would only be a second source of truth.
 
     The whole recorded call list is compared against a hand-written constant: an assertion
     that TERRAMATE_VERSION is absent is satisfied by a run that wrote nothing at all.
 
-    Mutation: restore either version entry to `_writable_variables`.
+    Mutations: restore either version entry to `_writable_variables`; restore the
+    SHIPMATE_APPROVERS_TEAM entry.
     """
     fake = make_gh({VARIABLE_LIST: []})
     monkeypatch.setattr(onboard, "_run", fake)
@@ -1097,16 +1098,15 @@ def test_absent_variables_are_set_from_the_flags_and_no_tool_version_is_written(
     assert fake.calls == [
         ["gh", "variable", "list", "--json", "name,value"],
         ["gh", "variable", "set", "SHIPMATE_APP_ID", "--body", "1"],
-        ["gh", "variable", "set", "SHIPMATE_APPROVERS_TEAM", "--body", "ops"],
     ]
 
 
 def test_variables_that_exist_with_another_value_are_reported(monkeypatch):
-    """A consumer naming another App, or another approvers team, is making a deliberate
-    choice: the reconciler names the disagreement and writes nothing over it. Each
-    `differs` line names where the value it would have written came from, so two
+    """A consumer naming another App, or another set of shared environments, is making a
+    deliberate choice: the reconciler names the disagreement and writes nothing over it.
+    Each `differs` line names where the value it would have written came from, so two
     variables from different sources are driven here -- a swap of the `--app-id` and
-    `--team` labels reddens both lines.
+    `--shared` labels reddens both lines.
 
     Mutation: overwrite the existing value instead of reporting -- both `differs` tuples
     disappear and `gh variable set` calls for both appear.
@@ -1115,7 +1115,7 @@ def test_variables_that_exist_with_another_value_are_reported(monkeypatch):
         {
             VARIABLE_LIST: [
                 {"name": "SHIPMATE_APP_ID", "value": "123"},
-                {"name": "SHIPMATE_APPROVERS_TEAM", "value": "platform"},
+                {"name": "SHIPMATE_SHARED_ENVS", "value": "dev-us"},
             ]
         }
     )
@@ -1123,14 +1123,10 @@ def test_variables_that_exist_with_another_value_are_reported(monkeypatch):
     onboard._reconcile_variables(
         ctx(app_id="456", shared={"dev-eu"}, variables=onboard._variables())
     )
-    assert fake.calls == [
-        ["gh", "variable", "list", "--json", "name,value"],
-        ["gh", "variable", "set", "SHIPMATE_SHARED_ENVS", "--body", "dev-eu"],
-    ]
+    assert fake.calls == [["gh", "variable", "list", "--json", "name,value"]]
     assert onboard.REPORT == [
         ("differs", "SHIPMATE_APP_ID", "repository has 123, --app-id is 456"),
-        ("differs", "SHIPMATE_APPROVERS_TEAM", "repository has platform, --team is ops"),
-        ("set", "SHIPMATE_SHARED_ENVS", "dev-eu"),
+        ("differs", "SHIPMATE_SHARED_ENVS", "repository has dev-us, --shared is dev-eu"),
     ]
     assert onboard._exit_code() == 2
 
@@ -1141,16 +1137,16 @@ def test_variable_names_are_matched_uppercased(monkeypatch):
 
     Mutation: drop the `.upper()` in `_variables`.
     """
-    fake = make_gh({VARIABLE_LIST: [{"name": "shipmate_approvers_team", "value": "ops"}]})
+    fake = make_gh({VARIABLE_LIST: [{"name": "shipmate_app_id", "value": "1"}]})
     monkeypatch.setattr(onboard, "_run", fake)
-    onboard._reconcile_variables(ctx(variables=onboard._variables()))
+    onboard._reconcile_variables(ctx(shared={"dev-eu"}, variables=onboard._variables()))
     assert fake.calls == [
         ["gh", "variable", "list", "--json", "name,value"],
-        ["gh", "variable", "set", "SHIPMATE_APP_ID", "--body", "1"],
+        ["gh", "variable", "set", "SHIPMATE_SHARED_ENVS", "--body", "dev-eu"],
     ]
     assert onboard.REPORT == [
-        ("set", "SHIPMATE_APP_ID", "1"),
-        ("ok", "SHIPMATE_APPROVERS_TEAM", "ops"),
+        ("ok", "SHIPMATE_APP_ID", "1"),
+        ("set", "SHIPMATE_SHARED_ENVS", "dev-eu"),
     ]
 
 
@@ -1175,7 +1171,6 @@ def test_shared_environments_are_written_as_one_sorted_variable(monkeypatch):
     assert fake.calls == [
         ["gh", "variable", "list", "--json", "name,value"],
         ["gh", "variable", "set", "SHIPMATE_APP_ID", "--body", "1"],
-        ["gh", "variable", "set", "SHIPMATE_APPROVERS_TEAM", "--body", "ops"],
         ["gh", "variable", "set", "SHIPMATE_SHARED_ENVS", "--body", "dev-ap,dev-eu,dev-us"],
     ]
 
@@ -1187,7 +1182,6 @@ def test_shared_environments_are_written_as_one_sorted_variable(monkeypatch):
     onboard._reconcile_variables(ctx(shared=shared, variables=onboard._variables()))
     assert onboard.REPORT == [
         ("set", "SHIPMATE_APP_ID", "1"),
-        ("set", "SHIPMATE_APPROVERS_TEAM", "ops"),
         ("ok", "SHIPMATE_SHARED_ENVS", "dev-ap,dev-eu,dev-us"),
     ]
     assert onboard._exit_code() == 0
@@ -1198,13 +1192,10 @@ def test_at_org_uppercases_the_names_it_returns():
     an operator typing the lowercase name must still reach the same entry. The whole set is
     compared against a hand-written literal.
 
-    Mutation: drop the `.upper()` in `_at_org` -- `shipmate_app_id` then matches no key and
-    is silently ignored.
+    Mutation: drop the `.upper()` in `_at_org` -- `shipmate_app_id` then matches no entry in
+    AT_ORG_NAMES and the call exits with the unrecognised-name refusal.
     """
-    assert onboard._at_org("shipmate_app_id, SHIPMATE_APPROVERS_TEAM") == {
-        "SHIPMATE_APP_ID",
-        "SHIPMATE_APPROVERS_TEAM",
-    }
+    assert onboard._at_org("shipmate_app_id") == {"SHIPMATE_APP_ID"}
 
 
 def test_at_org_refuses_a_name_it_does_not_accept():
@@ -1218,7 +1209,23 @@ def test_at_org_refuses_a_name_it_does_not_accept():
         onboard._at_org("not_a_shipmate_variable")
     assert str(excinfo.value) == (
         "--vars-at-org names NOT_A_SHIPMATE_VARIABLE, which it does not accept. "
-        "It accepts SHIPMATE_APP_ID and SHIPMATE_APPROVERS_TEAM."
+        "It accepts SHIPMATE_APP_ID."
+    )
+
+
+def test_at_org_refuses_the_approvers_team():
+    """The name a consumer is most likely to type, because earlier releases accepted it.
+    Nothing writes a repository copy of it any more -- the team is declared in
+    `.github/shipmate.toml` -- so accepting it would take `_refuse_org_assertion_mismatch`
+    into a `KeyError` on a `_writable_variables` entry that is gone.
+
+    Mutation: leave "SHIPMATE_APPROVERS_TEAM" in `AT_ORG_NAMES`.
+    """
+    with pytest.raises(SystemExit) as excinfo:
+        onboard._at_org("SHIPMATE_APPROVERS_TEAM")
+    assert str(excinfo.value) == (
+        "--vars-at-org names SHIPMATE_APPROVERS_TEAM, which it does not accept. "
+        "It accepts SHIPMATE_APP_ID."
     )
 
 
@@ -1234,7 +1241,7 @@ def test_at_org_refuses_a_version_pin():
         onboard._at_org("TERRAMATE_VERSION")
     assert str(excinfo.value) == (
         "--vars-at-org names TERRAMATE_VERSION, which it does not accept. "
-        "It accepts SHIPMATE_APP_ID and SHIPMATE_APPROVERS_TEAM."
+        "It accepts SHIPMATE_APP_ID."
     )
 
 
@@ -1247,7 +1254,6 @@ def test_wanted_variables_removes_exactly_the_names_asserted_at_org():
     entry.
     """
     assert onboard._wanted_variables(ctx(at_org={"SHIPMATE_APP_ID"}, shared={"dev-eu"})) == {
-        "SHIPMATE_APPROVERS_TEAM": ("ops", "--team"),
         "SHIPMATE_SHARED_ENVS": ("dev-eu", "--shared"),
     }
 
@@ -1330,10 +1336,6 @@ ORG_PLAN_READ = ["gh", "api", "orgs/o"]
 ABSENT = SystemExit("gh: Not Found (HTTP 404)")
 NO_ORG_VARS = [{"variables": [], "total_count": 0}]
 ORG_APP_ID_MATCHES = [{"variables": [{"name": "SHIPMATE_APP_ID", "value": "1"}], "total_count": 1}]
-ORG_TEAM_MATCHES = [
-    {"variables": [{"name": "SHIPMATE_APPROVERS_TEAM", "value": "ops"}], "total_count": 1}
-]
-
 # Hand-written, and compared whole wherever these refusals are asserted: the message is the
 # only thing that tells the operator which of the two fixes applies.
 UNREACHED_APP_ID = (
@@ -1347,13 +1349,6 @@ FREE_APP_ID = (
     "o/r is private and o's plan reads free. Organization variables do not reach private "
     "repositories on GitHub Free, so SHIPMATE_APP_ID would resolve to empty and every run "
     "would fail. Upgrade the organization, keep them as repository variables (drop them "
-    "from --vars-at-org), or -- if the plan reads 'unknown' -- re-run as an organization "
-    "owner, because `gh api orgs/<org>` reports no plan to anyone else."
-)
-FREE_TEAM = (
-    "o/r is private and o's plan reads free. Organization variables do not reach private "
-    "repositories on GitHub Free, so SHIPMATE_APPROVERS_TEAM would resolve to empty and every "
-    "run would fail. Upgrade the organization, keep them as repository variables (drop them "
     "from --vars-at-org), or -- if the plan reads 'unknown' -- re-run as an organization "
     "owner, because `gh api orgs/<org>` reports no plan to anyone else."
 )
@@ -1399,35 +1394,43 @@ def run_main(monkeypatch, tmp_path, extra_routes, argv, is_private=False):
     return fake, excinfo.value
 
 
+def test_a_whole_run_writes_one_file_and_no_configuration(monkeypatch, tmp_path):
+    """`onboard` moves no pin -- `_reconcile_shim` reports `pin-only` and leaves it, and that
+    status never reaches `_exit_code`. A `.github/shipmate.toml` written here could therefore
+    hand a repository still pinned to an older engine a file that engine refuses, silently,
+    because a top-level key it predates is rejected outright. So the file stays a checklist
+    item for a human who merges it in the right order.
+
+    The whole set of files under the checkout is compared against a hand-written constant
+    rather than the absence of one name: a write added under any other name reddens here.
+    `key.pem` is this harness's own input, not something the run created.
+
+    Mutation: write the checklist's table to `.github/shipmate.toml` from `_checklist`.
+    """
+    run_main(monkeypatch, tmp_path, {}, [])
+    assert sorted(
+        p.relative_to(tmp_path).as_posix() for p in tmp_path.rglob("*") if p.is_file()
+    ) == [".github/workflows/shipmate.yml", "key.pem"]
+
+
 def test_an_asserted_name_the_organization_does_not_reach_refuses(monkeypatch):
     """`--vars-at-org X` stops X being written here, so an X that is unset at organization
     level -- or set with a visibility excluding this repository -- leaves every workflow
-    resolving it to empty. Both names are driven against the same empty response: a check
-    scoped to SHIPMATE_APP_ID passes the second fixture.
+    resolving it to empty.
 
-    Mutations: delete the `raise`; gate the check on `SHIPMATE_APP_ID` alone.
+    Mutation: delete the `raise`.
     """
     fake = make_gh({ORG_VARS: NO_ORG_VARS})
     monkeypatch.setattr(onboard, "_run", fake)
     with pytest.raises(SystemExit) as excinfo:
         onboard._refuse_org_assertion_mismatch(ctx(at_org={"SHIPMATE_APP_ID"}))
     assert str(excinfo.value) == UNREACHED_APP_ID
-    with pytest.raises(SystemExit) as excinfo:
-        onboard._refuse_org_assertion_mismatch(ctx(at_org={"SHIPMATE_APPROVERS_TEAM"}))
-    assert str(excinfo.value) == (
-        "--vars-at-org names SHIPMATE_APPROVERS_TEAM, but no organization variable of that "
-        "name reaches o/r -- it is unset, or its visibility excludes this repository, so it "
-        "would resolve to empty and every run would fail. Set it with `gh variable set "
-        "SHIPMATE_APPROVERS_TEAM --org o --body ops --visibility all`, add this "
-        "repository to its selected list, or drop SHIPMATE_APPROVERS_TEAM from "
-        "--vars-at-org."
-    )
 
 
 def test_an_organization_value_disagreeing_with_this_run_refuses_naming_both(monkeypatch):
     """The assertion is that the name is already set *correctly*: a value that is not the one
     this run would have written means this run configures one thing and every later run
-    resolves another. Both names are driven, because one proves nothing about the loop.
+    resolves another.
 
     Mutations: delete the `raise`; compare against the wrong side of the pair.
     """
@@ -1442,25 +1445,6 @@ def test_an_organization_value_disagreeing_with_this_run_refuses_naming_both(mon
         "resolved value, so this run would configure one thing and every later run would use "
         "another. Re-run with --app-id matching, correct the organization variable first, "
         "or drop SHIPMATE_APP_ID from --vars-at-org."
-    )
-    fake = make_gh(
-        {
-            ORG_VARS: [
-                {
-                    "variables": [{"name": "SHIPMATE_APPROVERS_TEAM", "value": "platform"}],
-                    "total_count": 1,
-                }
-            ]
-        }
-    )
-    monkeypatch.setattr(onboard, "_run", fake)
-    with pytest.raises(SystemExit) as excinfo:
-        onboard._refuse_org_assertion_mismatch(ctx(at_org={"SHIPMATE_APPROVERS_TEAM"}, team="ops"))
-    assert str(excinfo.value) == (
-        "SHIPMATE_APPROVERS_TEAM reaches o/r as platform, but --team says ops. The workflows "
-        "read the resolved value, so this run would configure one thing and every later run "
-        "would use another. Re-run with --team matching, correct the organization variable "
-        "first, or drop SHIPMATE_APPROVERS_TEAM from --vars-at-org."
     )
 
 
@@ -1491,8 +1475,8 @@ def test_a_repository_copy_does_not_rescue_a_disagreeing_organization_value(monk
 def test_matching_organization_values_pass_and_write_no_variable(monkeypatch, tmp_path):
     """The whole recorded call list is compared against a hand-written constant: an assertion
     that SHIPMATE_APP_ID was not set is satisfied by a run that set nothing at all, and a
-    variable write that should have been filtered cannot hide in a membership check. Both
-    names this script writes are asserted at organization level, so no variable is written.
+    variable write that should have been filtered cannot hide in a membership check. The one
+    name this script writes is asserted at organization level, so no variable is written.
 
     Mutation: refuse unconditionally, which reds this while the two refusal properties stay
     green.
@@ -1501,17 +1485,9 @@ def test_matching_organization_values_pass_and_write_no_variable(monkeypatch, tm
         monkeypatch,
         tmp_path,
         {
-            ORG_VARS: [
-                {
-                    "variables": [
-                        {"name": "SHIPMATE_APP_ID", "value": "1"},
-                        {"name": "SHIPMATE_APPROVERS_TEAM", "value": "ops"},
-                    ],
-                    "total_count": 2,
-                }
-            ]
+            ORG_VARS: ORG_APP_ID_MATCHES,
         },
-        ["--vars-at-org", "SHIPMATE_APP_ID,SHIPMATE_APPROVERS_TEAM"],
+        ["--vars-at-org", "SHIPMATE_APP_ID"],
     )
     assert exit_.code == 0
     assert fake.calls == [
@@ -1554,18 +1530,17 @@ def test_matching_organization_values_pass_and_write_no_variable(monkeypatch, tm
 
 def test_a_private_repository_on_free_refuses_every_asserted_name(monkeypatch, tmp_path):
     """GitHub Free excludes private repositories from organization variables outright, so the
-    tier bounds every name rather than any one of them. The first two fixtures carry a
-    *matching* organization value, so only the plan check can produce a refusal; the third
+    tier bounds the name rather than the value behind it. The first fixture carries a
+    *matching* organization value, so only the plan check can produce a refusal; the second
     carries none, which is the realistic Free shape and the only one that can tell the two
     refusals apart when they are reordered. Its endpoint route is dead under the correct
     order, and exists so that reordering reds on the message rather than on an unrouted read.
 
     Mutations: delete the `raise`; order the plan check after the endpoint read, which makes
-    the third fixture refuse with "no organization variable of that name reaches".
+    the second fixture refuse with "no organization variable of that name reaches".
     """
     for name, org_vars, expected in (
         ("SHIPMATE_APP_ID", ORG_APP_ID_MATCHES, FREE_APP_ID),
-        ("SHIPMATE_APPROVERS_TEAM", ORG_TEAM_MATCHES, FREE_TEAM),
         ("SHIPMATE_APP_ID", NO_ORG_VARS, FREE_APP_ID),
     ):
         _fake, exit_ = run_main(
@@ -2208,7 +2183,17 @@ By hand:
   `-plan` / `-apply` half. Top-level settings go above the first table header: a
   scalar written below one lands inside that table instead.
 
+  `[gate] approvers_team` names the team whose members may apply and unlock by
+  pull request comment — `ops` here. Keep it above the first
+  `[environments.*]` header, where it reads with the other repository-wide
+  settings. Add it only once this repository's pin names an engine that accepts
+  the key: an older one refuses the whole file, and moving a pin is not this
+  script's job.
+
     layout = "dry"
+
+    [gate]
+    approvers_team = "ops"
 
     [environments.dev-eu]
     region         = "eu-west-1"

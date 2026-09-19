@@ -19,8 +19,8 @@ Three exclusions distinguish the bare form from deploy:
   precondition cannot be met this run, exactly like a failed predecessor
   level;
 - envs the PR's review decision does not authorize are held until it carries
-  an approving review, dropped the same way; `SHIPMATE_UNGATED_ENVS` narrows
-  that hold by naming the envs exempt from it.
+  an approving review, dropped the same way; the `[gate]` table's
+  `ungated_envs` narrows that hold by naming the envs exempt from it.
 """
 
 import json
@@ -33,7 +33,6 @@ ad = _load("apply-detect")
 bm = _load("build-matrix")
 wv = _load("waves")
 eo = _load("env-order")
-az = _load("authorize")
 # No apply-gate alias -- see deploy-detect and test_detect_app_scoping. The one
 # apply-gate function this path needs is reached through `ad`, so there is no
 # second route to the done predicate and no second apply-gate instance.
@@ -99,7 +98,7 @@ def main():
 
     order = table.get("env_order", {})
     pending_envs = {c["environment"] for c in pending}
-    ungated = az.parse_ungated_envs(os.environ.get("SHIPMATE_UNGATED_ENVS", ""))
+    ungated = bm.ec.gate_ungated_envs(table, os.environ.get("SHIPMATE_UNGATED_ENVS", ""))
     decision = os.environ.get("SHIPMATE_REVIEW_DECISION", "")
     held = review_held(pending_envs, ungated, decision)
     excluded, skipped = partition_envs(pending_envs, table.get("explicit_envs", []) + held, order)

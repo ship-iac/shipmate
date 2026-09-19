@@ -70,19 +70,24 @@ It writes:
   declare, an `<env>-plan` / `<env>-apply` pair — each apply environment scoped to
   the default branch, with the App key on `shipmate-engine` and any
   repository-level copy of that key deleted;
-- the `SHIPMATE_APP_ID` and `SHIPMATE_APPROVERS_TEAM` repository variables, plus
+- the `SHIPMATE_APP_ID` repository variable, plus
   `SHIPMATE_SHARED_ENVS` when `--shared` names environments bound as a single
   bare `<env>`. A `--shared` environment is an
   apply environment, so it gets the same default-branch policy — on a bare `<env>`
   that policy also refuses plan cells whose pull request targets any other branch,
   and `shipmate doctor` says so afterwards. Pass `--shared` only where every pull
   request targets the default branch ([`hardening.md`](hardening.md) rows 8 and 17).
-  `SHIPMATE_APP_ID` and `SHIPMATE_APPROVERS_TEAM` may instead be set once at the
-  organization level and named in `--vars-at-org`, which skips writing them here
+  `SHIPMATE_APP_ID` may instead be set once at the
+  organization level and named in `--vars-at-org`, which skips writing it here
   ([`github-app.md`](github-app.md) §6);
 - a `shipmate-gate` ruleset requiring `shipmate / gate` under the App;
 - `.github/workflows/shipmate.yml`, rendered from the fence on this page and
   pinned to the engine checkout's release.
+
+`--team` writes nothing. The approvers team is `gate.approvers_team` in
+`.github/shipmate.toml`, which this script does not write, so the slug you pass
+is printed in the closing by-hand checklist instead — with the file it belongs
+in and the pin it needs first.
 
 It reads before it writes and creates or updates only what differs, so a second
 run over a configured repository changes nothing. What it will not touch — a
@@ -195,6 +200,21 @@ creates all of them, including `shipmate-engine` and its branch policy:
   inside that table instead, which TOML accepts and the engine then refuses.
   A repository that needs no cloud role at all declares `layout` and nothing
   else.
+
+  The same file carries `[gate]`, which names the team whose members may apply
+  and unlock by pull request comment and the environments that apply without an
+  approving review (§Required — apply). Put it above the first
+  `[environments.*]` header, with the other repository-wide settings:
+
+  ```toml
+  layout = "dry"
+
+  [gate]
+  approvers_team = "platform-approvers"
+
+  [environments.dev-eu]
+  region = "eu-west-1"
+  ```
 
   **The table has to be on the default branch before your first plan run.** The
   engine reads it from `origin/<default>`, so a pull request that only adds the
@@ -487,8 +507,8 @@ of the reviewed plan) and an idempotent post-merge apply on push to the default
 branch.
 
 `shipmate apply` runs only for a member of the team named by
-`SHIPMATE_APPROVERS_TEAM` (set per repository, or once for the organization,
-in [`github-app.md`](github-app.md) §6), on a pull request that is mergeable and
+`gate.approvers_team` in `.github/shipmate.toml` on your default branch
+(§Environments for this tier), on a pull request that is mergeable and
 satisfies the branch ruleset's review policy, and only against a plan for the
 pull request's current head, and only on a pull request that is not a
 draft — the five apply requirements in
@@ -791,23 +811,21 @@ Properties that fall out of the existing gate semantics:
 
 The branch ruleset's review requirement is repository-wide, so requiring an
 approval before merge also requires one before every apply. To keep a low-tier
-environment self-service while the rest stay gated, name it in the
-`SHIPMATE_UNGATED_ENVS` repository variable — comma-separated bare logical
-env names, no spaces:
+environment self-service while the rest stay gated, name it in
+`gate.ungated_envs` in `.github/shipmate.toml` — bare logical env names:
 
-```
-SHIPMATE_UNGATED_ENVS = dev-eu,dev-us
+```toml
+layout = "dry"
+
+[gate]
+ungated_envs = ["dev-eu", "dev-us"]
 ```
 
-Your workflow file needs no line for it. The engine's `ops` job passes
-`ungated-envs: ${{ vars.SHIPMATE_UNGATED_ENVS }}` to `actions/comment-ops`, and
-`vars` inherit into a called workflow, so the variable resolves in your own
-repository. That matters because a composite action cannot read the `vars`
-context itself, so the input is comment-ops' only view of the list — and both
-engine apply workflows read the same variable directly and enforce on it
-themselves. One source, two readers, and nothing between them a consumer can
-write differently. Unset the variable and *what applies* is unchanged: every
-environment keeps the ruleset's requirement.
+Your workflow file needs no line for it, and neither does a repository setting.
+Comment-ops and both apply paths each resolve the list themselves, from the file
+on your **default branch** — so an edit takes effect when it merges, and a pull
+request cannot exempt itself. Declare no list and *what applies* is unchanged:
+every environment keeps the ruleset's requirement.
 
 The second part is a pin. An apply is authorized by the engine
 `comment-ops.yml` the `comment-ops` job calls and enforced by the engine
@@ -816,8 +834,8 @@ three pins must sit at the same release (or the enforcing two later). One file
 carrying all seven pins is what makes that automatic: `dev/repin_consumer.py`
 moves them together, and there is no longer a second file to bump on its own.
 
-Both edges need the variable set — the exemption is opt-in and there is no
-longer any consumer-written input that could authorize a dispatch without it.
+Both edges need the list declared — the exemption is opt-in and there is no
+consumer-written input that could authorize a dispatch without it.
 
 What this does and does not do: a listed environment may be applied without an
 approving review; every other apply requirement still decides, including
@@ -825,10 +843,12 @@ approving review; every other apply requirement still decides, including
 bare `shipmate apply` on an unreviewed pull request applies the listed
 environments and holds the rest — their apply checks stay pending, so
 `shipmate / gate` stays pending and the merge stays blocked until they are
-applied with a review in hand. The variable is editable by anyone with the
-Write role. It makes relaxing the gate a deliberate change to repository
-settings rather than something a pull request can do to itself, and claims
-nothing beyond that. Full semantics in [`../CONTRACT.md`](../CONTRACT.md)
+applied with a review in hand. Adding an environment to the list is a commit to
+the default branch, under whatever your ruleset requires of one, so the pull
+request that benefits from the exemption cannot also grant it — which holds once
+the file declares the list, and not while the `SHIPMATE_UNGATED_ENVS` fallback
+is still what governs ([`upgrading.md`](upgrading.md) §Unreleased). That is all
+it claims. Full semantics in [`../CONTRACT.md`](../CONTRACT.md)
 §Comment-ops; the trade-off against environment reviewers is in
 [`hardening.md`](hardening.md) §3–5.
 

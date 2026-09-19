@@ -12,7 +12,7 @@ pass values `NONE` (comment-ops' sentinel for a null
 decision — no review required by the ruleset) and `APPROVED` authorize; any
 other value — including an absent/empty one — fails closed, except that
 `REVIEW_REQUIRED` also authorizes for an environment listed in
-`SHIPMATE_UNGATED_ENVS`.
+`gate.ungated_envs`.
 
 The `ungated_exemption` output is the targeted path's audit trail: `reviewDecision`
 is a live value with no history, so once the review lands nothing else distinguishes
@@ -24,12 +24,13 @@ applies nothing, so it must never carry this record).
 
 import json
 import os
-import re
 
-#: Env names come from Terramate `env/<name>` tags, so the charset is comment-parse's env
-#: grammar plus `_`, a legal tag character no `shipmate apply <env>` can name. Both cases are
-#: accepted, since the match itself is case-insensitive.
-_ENV_ENTRY = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*")
+from _shipmate import _load
+
+#: The env-name rule this variable shares with `explicit_envs` and `gate.ungated_envs` in
+#: the configuration file. `env-config` loads no sibling of its own, so reaching it from
+#: here terminates; it reads no file and runs no command at import.
+ec = _load("env-config")
 
 
 def parse_ungated_envs(raw):
@@ -52,20 +53,7 @@ def parse_ungated_envs(raw):
                 f"whitespace; the list is comma-separated with no spaces — "
                 f"write {e.strip()!r}."
             )
-        if not _ENV_ENTRY.fullmatch(e):
-            raise SystemExit(
-                f"::error::SHIPMATE_UNGATED_ENVS entry {e!r} is not an "
-                f"environment name; entries are bare logical env names "
-                f"(letters, digits, '-' and '_'), comma-separated, with no "
-                f"quotes, spaces or path separators."
-            )
-        for suffix in ("-plan", "-apply"):
-            if e.endswith(suffix):
-                raise SystemExit(
-                    f"::error::SHIPMATE_UNGATED_ENVS entry {e!r} carries the "
-                    f"environment suffix {suffix!r}; the list is matched against "
-                    f"the bare logical env name — write {e[: -len(suffix)]!r} instead."
-                )
+    ec.validate_env_name_list(envs, "SHIPMATE_UNGATED_ENVS")
     return frozenset(e.casefold() for e in envs)
 
 
@@ -74,7 +62,7 @@ def _review_reason(review_decision, environment="", ungated_envs=frozenset()):
 
     Only the explicit pass values authorize: NONE (comment-ops' sentinel for a
     null decision — no review required by the ruleset) and APPROVED. Anything
-    else fails closed. An environment listed in SHIPMATE_UNGATED_ENVS is exempt
+    else fails closed. An environment listed in `gate.ungated_envs` is exempt
     from REVIEW_REQUIRED and from nothing else; a bare apply passes here when
     any env is listed and is partitioned per env in apply-all-detect."""
     if review_decision == "REVIEW_REQUIRED":
@@ -84,7 +72,7 @@ def _review_reason(review_decision, environment="", ungated_envs=frozenset()):
             return (
                 f"not authorized: PR review is required by the branch ruleset "
                 f"and has not been satisfied, and `{environment}` is not listed "
-                f"in the SHIPMATE_UNGATED_ENVS repository variable; obtain the "
+                f"in `gate.ungated_envs` in `.github/shipmate.toml`; obtain the "
                 f"required approving review(s), then re-run `shipmate apply`."
             )
         return (

@@ -18,7 +18,7 @@ inputs:
     description: shipmate App id (repo/org variable); only checks authored by this App count as done.
     required: true
   ungated-envs:
-    description: SHIPMATE_UNGATED_ENVS verbatim — comma-separated envs applied without waiting for an approving review. Supply it together with review-decision, never one without the other.
+    description: 'Transitional fallback for `gate.ungated_envs` in .github/shipmate.toml, which is authoritative: this input is read only when the file on the default branch declares no list, and a later release removes it. SHIPMATE_UNGATED_ENVS verbatim (comma-separated bare env names), the envs applied without waiting for an approving review. Supply it together with review-decision, never one without the other.'
     required: false
     default: ''
   review-decision:

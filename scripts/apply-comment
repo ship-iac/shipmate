@@ -566,7 +566,7 @@ def _env_disposition_lines(excluded, skipped, held=(), applied_ungated=()):
 
     An empty `applied_ungated` renders NOTHING, and never "zero environments
     applied" -- it is populated only under a REVIEW_REQUIRED decision with
-    SHIPMATE_UNGATED_ENVS set. That sentence is the only audit trail an
+    `gate.ungated_envs` naming an env. That sentence is the only audit trail an
     unreviewed apply leaves: `reviewDecision` is a live value with no history,
     so once the review lands nothing in the run tells an apply that waited for
     it from one that did not. No clause of it uses a completion
@@ -597,7 +597,7 @@ def _env_disposition_lines(excluded, skipped, held=(), applied_ungated=()):
         envs = ", ".join(f"`{sc._md_escape(e)}`" for e in applied_ungated)
         lines.append(
             "Ungated environment(s) permitted to apply without an approving review, "
-            f"per the `SHIPMATE_UNGATED_ENVS` repository variable: {envs} — "
+            f"per `gate.ungated_envs` in `.github/shipmate.toml`: {envs} — "
             "see this run for what actually applied."
         )
     return lines

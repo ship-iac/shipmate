@@ -127,9 +127,9 @@ live probes.
   substituted by it, so a malformed or misplaced setting is reported on the pull
   request that introduces it rather than after it merges. A missing or unreadable
   file is a note saying so, never an all-clear. Only the checks a file can be judged
-  on by itself run here — the top-level keys, `layout`, the environment entries,
-  `env_order` and `explicit_envs`; `dry`-layout coverage, the shared-environment
-  rule and unused entries need a plan matrix and `SHIPMATE_SHARED_ENVS`, and the
+  on by itself run here — the top-level keys, `version`, `layout`, the environment
+  entries, `env_order`, `explicit_envs` and `[gate]`; `dry`-layout coverage, the
+  shared-environment rule and unused entries need a plan matrix and `SHIPMATE_SHARED_ENVS`, and the
   verdict names them as unchecked. A valid file also gets its `env_order` and
   `explicit_envs` values read back, absent ones included: an absent `explicit_envs`
   is legitimate configuration that no validator can question, and it means a bare
@@ -144,8 +144,9 @@ own and any other Actions workflow run on that commit; third-party-app-authored
 check runs are excluded.
 
 Only fourteen of the sixteen probes can produce a finding from the plan path's
-own `annotate`-mode run (`actions/summary`). The approvers-team probe needs the
-`SHIPMATE_TEAM` environment variable, which the plan path does not supply, and
+own `annotate`-mode run (`actions/summary`). The approvers-team probe runs only
+in `report` mode, because the plan path's App token is minted without
+`members: read` and could not look a team up, and
 the App-permission-drift probe only has something to report when a
 full-manifest permission-set mint was actually attempted, which only
 `shipmate doctor` does. Both are effectively comment-path-only. `doctor`
@@ -315,7 +316,7 @@ mandate. Each one names what to do.
 | `<env>-plan` — it carries protection rules | required reviewers or a wait timer on a plan environment stall every plan cell and the nightly drift run. Remove them ([`hardening.md`](hardening.md) #6). |
 | `<env>` — it carries protection rules and is shared | a shared bare `<env>` is bound by the plan cells and the nightly drift run as well as the applies, and GitHub offers no per-job filter, so a protection rule there stalls all three. To gate applies alone, split it into `<env>-plan` / `<env>-apply` and drop it from `SHIPMATE_SHARED_ENVS`. |
 | `<env>` — the naming the engine does not bind is also present | the naming `SHIPMATE_SHARED_ENVS` does not select already exists: a bare `<env>` where the engine binds the `<env>-plan` / `<env>-apply` pair, or either half where it binds the bare `<env>`. Holding both namings for one logical environment is the state `shipmate doctor` calls ambiguous, so the run creates and changes nothing for that environment — including the naming it does bind, which is why it is reported rather than half-written. Delete the unused naming, or move the environment to the other one with `--shared` / `SHIPMATE_SHARED_ENVS`. |
-| `<VARIABLE>` — repository has one value, the flag has another | the variable exists with a value other than the one the flags name, so it is reported rather than overwritten: naming another approvers team is a deliberate choice. Change it with `gh variable set` if it was not. `SHIPMATE_APP_ID` never reaches this row — see the refusals below, and the rows beneath it for a repository copy left behind under `--vars-at-org`, and for a variable an earlier release wrote that nothing reads any more. |
+| `<VARIABLE>` — repository has one value, the flag has another | the variable exists with a value other than the one the flags name, so it is reported rather than overwritten: naming a different shared-environment set is a deliberate choice. Change it with `gh variable set` if it was not. `SHIPMATE_APP_ID` never reaches this row — see the refusals below, and the rows beneath it for a repository copy left behind under `--vars-at-org`, and for a variable an earlier release wrote that nothing reads any more. |
 | `<VARIABLE>` — repository has one value, asserted at organization level | the name was passed to `--vars-at-org`, and a repository-level copy is still there. Repository resolution beats organization, so that copy is what the workflows read and the organization value contributes nothing. It is never deleted for you — `onboard` did not write it. Delete it with `gh variable delete <VARIABLE>`, or drop the name from `--vars-at-org` ([`github-app.md`](github-app.md) §6). |
 | `TERRAMATE_VERSION` / `TOFU_VERSION` — superseded by the version the engine release pins | the `setup` action takes both tool versions from the engine release's own `VERSIONS` file, read at the commit your workflow file pins, so the repository variable is inert. It is never deleted for you — `onboard` did not write it. Delete it with `gh variable delete <VARIABLE>` only once `.github/workflows/shipmate.yml` is on a pin carrying this change: workflows on an older pin still pass the variable to `setup`, and deleting it first blanks an input they read. A `pin-only` line for that file in the same run means you are not there yet — re-pin first ([`upgrading.md`](upgrading.md)), then delete. Re-create both before rolling the pin back to a release that predates this one. |
 | `gate ruleset` — the rulesets POST was rejected (HTTP 422) | most likely the name is taken by a ruleset whose enforcement is `evaluate` or `disabled`, which the effective-rules read cannot see; 422 has other causes, so read `gh api repos/OWNER/REPO/rulesets` first. Set it to active, or delete it and run again. |
@@ -338,10 +339,10 @@ variable — can never post, and the default branch would stay blocked until an
 admin deleted the ruleset. Re-run with the variable's value, or change the
 variable first.
 
-The others come with `--vars-at-org`, and they apply to every name it lists,
-not to `SHIPMATE_APP_ID` alone: a name that no organization variable reaching
-this repository carries, and a name whose organization value differs from the
-one this run would have written. Both mean the assertion is wrong and the
+The others come with `--vars-at-org`, which accepts `SHIPMATE_APP_ID` and no
+other name: an asserted name that no organization variable reaching
+this repository carries, and one whose organization value differs from the
+value this run would have written. Both mean the assertion is wrong and the
 workflows would read an empty or an unexpected value. A private repository
 whose organization is on GitHub Free is refused ahead of both, because
 organization variables do not reach a private repository on that tier at all.
@@ -590,7 +591,9 @@ the only copy execution reads.
 | `is not valid TOML: <message>` | `tomllib`'s own message, with the line and column. See the two parse traps below |
 | `is read with tomllib, which needs Python 3.11 or later; this runner has …` | the `runs_on:` image is older than the floor `../CONTRACT.md` §Runner prerequisites states — `ubuntu-22.04` ships 3.10. Name a newer image |
 | `declares no layout` | either the key is genuinely absent, or it is written below a `[table]` header — see the placement trap below |
-| `<key> is not a setting this engine implements` | a fifth top-level key, most often a misspelled `environments`. Only `layout`, `environments`, `env_order` and `explicit_envs` are accepted |
+| `<key> is not a setting this engine implements` | a top-level key this engine does not have, most often a misspelled `environments`. Only `layout`, `environments`, `env_order`, `explicit_envs`, `gate` and `version` are accepted — the message lists them. A *newer* engine's key lands here too, which is why a pin moves before a key does ([`upgrading.md`](upgrading.md)) |
+| `gate.<key> is not a key this engine implements` | the `[gate]` table holds `approvers_team` and `ungated_envs`. A misspelled one would leave the setting at its default while the repository believed it declared one |
+| `version is <value>; this engine implements version 1` | `version` is optional and, written, must be the integer `1`. `version = true` is refused by name rather than read as 1 |
 | `env_order['explicit_envs'] names a top-level setting, not an environment` | the placement trap, caught by name: `explicit_envs` was written below `[env_order]` and became an ordering entry |
 | `env_order is cyclic: <a> -> <b> -> <a>` | the environments order each other in a loop, so none of them can go first. The path names the loop in apply order; an env listing itself is the one-node case. Drop one of the entries |
 
@@ -772,10 +775,10 @@ ruleset.
 The apply comment says *"Held — the pull request's review state does not
 permit applying"*, or `shipmate apply` was refused with a review reason.
 
-`SHIPMATE_UNGATED_ENVS` exempts the environments it names from the review
-requirement and nothing else. A targeted `shipmate apply <env>` is decided
-at comment time: an unlisted env gets the usual refusal, extended to say the
-env is not listed in the variable, and the engine re-applies the same rule to
+`gate.ungated_envs` in `.github/shipmate.toml` exempts the environments it names
+from the review requirement and nothing else. A targeted `shipmate apply <env>`
+is decided at comment time: an unlisted env gets the usual refusal, extended to
+say the env is not listed in that setting, and the engine re-applies the same rule to
 the decision it reads at apply time — a run refused there dies before any wave,
 leaving the apply checks pending. A bare `shipmate apply` is partitioned
 per environment on the apply path, from the review decision read there:
@@ -783,49 +786,58 @@ per environment on the apply path, from the review decision read there:
 | `reviewDecision` when the apply runs | what applies |
 |---|---|
 | `NONE` (the ruleset requires no review) or `APPROVED` | everything pending — no partition |
-| `REVIEW_REQUIRED` | the listed environments; every other pending environment is held — all of them when the variable is unset or empty |
+| `REVIEW_REQUIRED` | the listed environments; every other pending environment is held — all of them when the list is absent or empty |
 | `CHANGES_REQUESTED` | nothing — every environment is held, listed ones included |
 | anything else, or no decision arrived | nothing — every environment is held |
 
 Held environments keep their `apply / <stack> / <env>` checks pending, so
 `shipmate / gate` stays pending and the merge stays blocked; environments
-ordered after a held one are skipped for the same run. The variable only ever
+ordered after a held one are skipped for the same run. The list only ever
 narrows what a `REVIEW_REQUIRED` decision holds; it is the decision that
 decides, so an unreviewed pull request holds every environment in a repository
-that set nothing.
+that declares nothing.
 
-**The apply is refused although the variable is set.** Check the entry against
-the rules below. The refusal is by *shape*: a suffix, surrounding whitespace or a
-character outside the env charset is rejected loudly, naming the entry. Spelling
+**The apply is refused although the environment is listed.** Check which copy of
+the file you edited: all three readers resolve `gate.ungated_envs` from the
+**default branch**, so an entry added on the pull request asking for the apply
+does nothing until it merges. Then check the entry against the rules below. The
+refusal is by *shape*: a suffix or a character outside the env charset is
+rejected loudly, naming the entry. Spelling
 is not checked against anything — nothing compares the list to the repository's
 real environments — so `dev-eu2` for `dev-eu` is accepted, matches no cell, and
-that environment simply keeps its review requirement. The engine reads the
-variable itself, in `comment-ops.yml` and in both apply workflows, so there is no
-consumer wiring left to omit. See
+that environment simply keeps its review requirement. See
 [`upgrading.md`](upgrading.md) §"Opt-in: per-environment review gating".
 
-**The run failed with a `SHIPMATE_UNGATED_ENVS` error.** An entry that is not a
+**The run failed with a `gate.ungated_envs` error.** An entry that is not a
 bare env name is rejected loudly rather than left silently inert, because none
 of these would ever match an environment:
 
 - a `-plan` / `-apply` suffix — the list is matched against the bare logical
   env name carried by the apply checks, so write `dev-eu`, not `dev-eu-apply`;
-- surrounding whitespace — `dev-eu, dev-us` is an entry `" dev-us"`. The list is
-  comma-separated with no spaces; the error names the entry and the exact
-  value to write;
-- anything outside the env charset (letters, digits, `-`, `_`) — a pasted
-  `"dev-eu"` with its quotes, an internal space, a `/`. The variable holds the
-  bare list, unquoted.
+- anything outside the env charset (letters, digits, `-`, `_`) — a leading or
+  internal space, a `/`, a nested quote. The entries are bare names, quoted once
+  as TOML strings and nothing more;
+- anything that is not a list of strings at all — `ungated_envs = "dev-eu"` is
+  refused rather than iterated character by character.
 
-**`shipmate apply` answers with nothing at all — no reaction, no comment.** A
-malformed entry is rejected inside the Authorize step, which fails the run
-before either the 🚀 reaction or the refusal comment is reached. So a
-repository-wide breakage of `shipmate apply` (every command, every environment,
-however well-formed) is invisible on the pull request itself. The real error is
-the `::error::SHIPMATE_UNGATED_ENVS entry ...` annotation on the comment-ops
-workflow run; open that run from the Actions tab and fix the variable. A
-targeted apply that was genuinely refused always comments its reason, so
-silence points at the variable rather than at the authorization.
+The same message appears with `SHIPMATE_UNGATED_ENVS` in place of
+`gate.ungated_envs` when the repository is still on the migration fallback; there
+the list is one comma-separated string, so an entry may also be refused for
+surrounding whitespace (`dev-eu, dev-us` is an entry `" dev-us"`).
+
+**`shipmate apply` answers “could not resolve the gate settings” and carries no
+🚀 reaction.** A malformed entry — or any refusal of the file, or a malformed
+`SHIPMATE_APPROVERS_TEAM` / `SHIPMATE_UNGATED_ENVS` fallback value — is raised
+while comment-ops resolves the gate settings, which is before both the 🚀
+reaction and the authorization refusal. So a repository-wide breakage of
+`shipmate apply` and `shipmate unlock` (every command, every environment,
+however well-formed) arrives as that one comment, whatever the command said, and
+the comment-ops run then fails. Which of the three causes it was is the
+`::error::` annotation on that run; open it from the Actions tab. A targeted
+apply that was genuinely refused comments its own authorization reason instead,
+so this comment points at the configuration rather than at the authorization. A
+file broken this way also refuses every plan run, which is the louder signal of
+the two.
 
 **A held environment is also an explicit environment.** When both causes apply
 it is reported as held, not as excluded, because the review is the thing to get
@@ -840,7 +852,7 @@ then succeeds without an approving review, because the environment is
 listed. Listing an environment and marking it explicit are independent: the
 first decides whether a review is required, the second only decides that a bare
 apply will not reach it. An environment that must never apply unreviewed does
-not belong in `SHIPMATE_UNGATED_ENVS`.
+not belong in `gate.ungated_envs`.
 
 ### A pull request planned zero cells
 

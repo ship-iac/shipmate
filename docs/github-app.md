@@ -169,18 +169,23 @@ value itself is written once for the whole org. Rotation becomes N
 `gh secret set --env` writes instead of that one org-secret write. Both scale as
 loops — the appendix loops `scripts/onboard` over the checkouts.
 
-## 6. Set the approvers team + propagate credentials
+## 6. Propagate credentials
 
-Each consumer repo needs `SHIPMATE_APPROVERS_TEAM` (the GitHub team slug whose
-members may run `shipmate apply`) plus the app id/key from step 1. `gh` cannot
+Each consumer repo needs the app id and key from step 1. `gh` cannot
 read back a secret's value once set (GitHub never exposes it), so this step reads
 the `shipmate-app.private-key.pem` step 1 wrote. Keep that file until every
 consumer repo has it. `scripts/onboard` does all of this, and additionally
 deletes any repository-level copy of the key.
 
+The approvers team is not set here. It is `gate.approvers_team` in
+`.github/shipmate.toml` on the consumer's default branch, committed with the rest
+of that repository's configuration ([`../CONTRACT.md`](../CONTRACT.md) §The gate
+table). A repository migrating from the `SHIPMATE_APPROVERS_TEAM` variable —
+including one that never set it and read the organization's copy instead — has
+one line to write; [`upgrading.md`](upgrading.md) has the order.
+
 ```bash
 REPO=<owner>/<repo>
-TEAM=<approvers-team-slug>          # the GitHub team slug, not a display name
 APP_ID=<app-id-from-step-1-output>
 
 KEY=$(cat shipmate-app.private-key.pem)
@@ -189,7 +194,6 @@ if [ -z "$KEY" ]; then
   exit 1
 fi
 
-gh variable set SHIPMATE_APPROVERS_TEAM --repo "$REPO" --body "$TEAM"
 gh variable set SHIPMATE_APP_ID --repo "$REPO" --body "$APP_ID"
 gh secret set SHIPMATE_APP_PRIVATE_KEY --repo "$REPO" --env shipmate-engine \
   --body "$KEY"
@@ -213,13 +217,19 @@ gh secret list --repo "$REPO"
 `SHIPMATE_APP_PRIVATE_KEY` must not appear in that output; it should appear only
 under the environment (`gh secret list --repo "$REPO" --env shipmate-engine`).
 
-**Both variables (variables, not secrets) may be set once at the organization
-level instead.** `vars` resolve organization → repository → environment, so a
-consumer repo holding neither copy reads the organization value and nothing else
-in the pipeline changes. Set `SHIPMATE_APPROVERS_TEAM` per repository wherever
-the approving team differs, and `SHIPMATE_APP_ID` per repository wherever the App
-differs — one App per trust domain means one id per trust domain
+**`SHIPMATE_APP_ID` (a variable, not a secret) may be set once at the
+organization level instead.** `vars` resolve organization → repository →
+environment, so a consumer repo holding no copy of its own reads the organization
+value and nothing else in the pipeline changes. Set it per repository wherever the
+App differs — one App per trust domain means one id per trust domain
 ([`hardening.md`](hardening.md) §13–14).
+
+It is the only name that shares this way. The approvers team used to be the
+second, and the file replaced that: `gate.approvers_team` is per repository by
+construction, so a repository that read the organization's
+`SHIPMATE_APPROVERS_TEAM` and never wrote one of its own now declares the team
+itself. That is the one line this change costs — without it, comment-driven apply
+and unlock stop the moment the fallback is removed.
 
 `gh variable set --org` defaults to `--visibility private`, which reaches
 private repositories only — an organization-wide default leaves every public
@@ -228,32 +238,30 @@ repository, neither preferred over the other: `all` is the simple one,
 `selected` the scoped one. `scripts/onboard` accepts both.
 
 ```bash
-# Either visibility works for either variable.
+# Either visibility works.
 gh variable set SHIPMATE_APP_ID --org <org> --visibility all \
   --body "<app-id-from-step-1-output>"
-gh variable set SHIPMATE_APPROVERS_TEAM --org <org> --visibility selected \
-  --repos "<repo>,<repo>" --body "<approvers-team-slug>"
 ```
 
-Then tell `scripts/onboard` which names are already set there, and it stops
-writing them per repository:
+Then tell `scripts/onboard` the name is already set there, and it stops writing
+it per repository:
 
 ```bash
 python3 <engine-checkout>/scripts/onboard \
   --team <approvers-team-slug> --app-id <app-id> \
   --key shipmate-app.private-key.pem \
-  --vars-at-org SHIPMATE_APP_ID,SHIPMATE_APPROVERS_TEAM
+  --vars-at-org SHIPMATE_APP_ID
 ```
 
-The flag takes a comma-separated list of names and accepts `SHIPMATE_APP_ID` and
-`SHIPMATE_APPROVERS_TEAM` only; every other name is refused, an unrecognised one
-because it would filter nothing and still report success, and the remaining
-variables `onboard` writes because they are not shareable. Name only the
-variables that are correct for this repository: a repository whose approving team
-differs from the organization's keeps its own `SHIPMATE_APPROVERS_TEAM` and
-leaves that name out of the flag, and one in a second App's trust domain does the
-same with `SHIPMATE_APP_ID`. Asserting a name whose organization value is not the
-one this run would write is refused, and the repository copy does not satisfy the
+The flag takes a comma-separated list of names and accepts `SHIPMATE_APP_ID`
+only; every other name is refused, an unrecognised one because it would filter
+nothing and still report success, and the remaining variables `onboard` writes
+because they are not shareable. `SHIPMATE_APPROVERS_TEAM` was accepted here until
+the team moved into `.github/shipmate.toml`; passing it now exits with an error
+naming what the flag accepts. Name it only where it is correct for this
+repository: one in a second App's trust domain keeps its own `SHIPMATE_APP_ID`
+and leaves the flag off. Asserting a name whose organization value is not the one
+this run would write is refused, and the repository copy does not satisfy the
 assertion.
 
 **Every asserted name is verified, not trusted.** `onboard` reads
@@ -267,14 +275,14 @@ onboarding already has. It needs a `gh` carrying `gh api --slurp`; tested with
 `gh` 2.93.0.
 
 **Private consumers need GitHub Team or Enterprise.** Organization variables do
-not reach private repositories on GitHub Free at all, whatever each variable's
-visibility says, and that bounds both names. `onboard` refuses rather than let
+not reach private repositories on GitHub Free at all, whatever the variable's
+visibility says. `onboard` refuses rather than let
 it reach a run. It reads the plan through `gh api orgs/<org>`, which reports it
 only to an organization owner, so a token that cannot read the plan is refused
 the same way, with an instruction to re-run as an owner. Without the refusal the
-failure surfaces at the first `shipmate apply`: an empty
-`SHIPMATE_APPROVERS_TEAM` makes every membership check 404, and the comment is
-rejected as "not a member of the required approvers team ``".
+failure surfaces at the first `shipmate apply`: `SHIPMATE_APP_ID` resolves empty,
+no App installation token can be minted, and the comment is answered with "could
+not mint a GitHub App token".
 
 **The residual cost.** Onboarding a public repository this way still needs only
 repository admin, as every other run does. A private one needs an organization
@@ -505,11 +513,10 @@ Each run needs the engine checkout on a `vX.Y.Z` release tag, `terramate` on
 `PATH` in the consumer checkout — its `env/<name>` tags are where the
 environment set comes from — and `gh` authenticated with admin on that
 repository. It refuses rather than half-configuring when one of those is missing.
-`--vars-at-org` names only the variables correct for the repository at hand (§6),
-so it cannot be a loop constant: a repository whose approving team differs keeps
-its own `SHIPMATE_APPROVERS_TEAM` and asserts `SHIPMATE_APP_ID` alone, and one in
-a second App's trust domain keeps its own `SHIPMATE_APP_ID` and asserts
-`SHIPMATE_APPROVERS_TEAM` alone. The loop below is the shape without the flag;
+`--vars-at-org` is correct only for a repository the organization's
+`SHIPMATE_APP_ID` is right for (§6), so it cannot be a loop constant: one in a
+second App's trust domain keeps its own copy and takes the flag off. The loop
+below is the shape without the flag;
 add it to the individual runs instead. A private consumer asserting a name then
 needs an organization owner rather than repository admin, because the plan read
 behind the flag answers to nobody else.
