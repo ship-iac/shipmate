@@ -36,7 +36,7 @@ jobs:
         with: { fetch-depth: 0 }
       - uses: ship-iac/shipmate/actions/setup@94a60ab22beb46a7c7d2f52b858d29a26bc1f101
       - id: d
-        uses: ship-iac/shipmate/actions/deploy-detect@adf3b6b24965be76a8815e7a03e26f4d8b3a307d
+        uses: ship-iac/shipmate/actions/deploy-detect@49a06844943df9bd23a2e22721beacd95de9b4d5
         with:
           # The caller is `on: push` to the default branch; its event payload
           # (and so the previous main tip) is visible here.

@@ -32,7 +32,7 @@ jobs:
       on-demand: ${{ steps.facts.outputs.on-demand }}
     steps:
       - id: facts
-        uses: ship-iac/shipmate/actions/pr-facts@adf3b6b24965be76a8815e7a03e26f4d8b3a307d
+        uses: ship-iac/shipmate/actions/pr-facts@49a06844943df9bd23a2e22721beacd95de9b4d5
 
   detect:
     needs: facts
@@ -57,7 +57,7 @@ jobs:
       # Before the two terramate steps, not after: this step is where a fork's pull request is
       # refused, and `terramate fmt`/`generate` evaluate the checked-out HCL.
       - id: matrix
-        uses: ship-iac/shipmate/actions/build-matrix@adf3b6b24965be76a8815e7a03e26f4d8b3a307d
+        uses: ship-iac/shipmate/actions/build-matrix@49a06844943df9bd23a2e22721beacd95de9b4d5
         with:
           base-sha: ${{ needs.facts.outputs.base-sha }}
           head-repo: ${{ needs.facts.outputs.head-repo }}
@@ -137,7 +137,7 @@ jobs:
         with:
           pattern: cell-summary.*
           path: cells
-      - uses: ship-iac/shipmate/actions/summary@adf3b6b24965be76a8815e7a03e26f4d8b3a307d
+      - uses: ship-iac/shipmate/actions/summary@49a06844943df9bd23a2e22721beacd95de9b4d5
         with:
           pr-number: ${{ needs.facts.outputs.pr-number }}
           head-sha: ${{ needs.facts.outputs.head-sha }}
