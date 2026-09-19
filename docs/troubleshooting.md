@@ -127,10 +127,11 @@ live probes.
   substituted by it, so a malformed or misplaced setting is reported on the pull
   request that introduces it rather than after it merges. A missing or unreadable
   file is a note saying so, never an all-clear. Only the checks a file can be judged
-  on by itself run here — the top-level keys, `version`, `layout`, the environment
-  entries, `env_order`, `explicit_envs` and `[gate]`; `dry`-layout coverage, the
-  shared-environment rule and unused entries need a plan matrix and `SHIPMATE_SHARED_ENVS`, and the
-  verdict names them as unchecked. A valid file also gets its `env_order` and
+  on by itself run here — the top-level keys, `version`, `layout`, the
+  environment entries, `env_order`, `explicit_envs` and `[gate]`; `dry`-layout
+  coverage, the shared-environment rule and unused entries need a plan matrix
+  and `SHIPMATE_SHARED_ENVS`, and the verdict names them as unchecked. A valid
+  file also gets its `env_order` and
   `explicit_envs` values read back, absent ones included: an absent `explicit_envs`
   is legitimate configuration that no validator can question, and it means a bare
   `shipmate apply` applies production too. Execution keeps reading the default
@@ -802,10 +803,12 @@ the file you edited: all three readers resolve `gate.ungated_envs` from the
 **default branch**, so an entry added on the pull request asking for the apply
 does nothing until it merges. Then check the entry against the rules below. The
 refusal is by *shape*: a suffix or a character outside the env charset is
-rejected loudly, naming the entry. Spelling
-is not checked against anything — nothing compares the list to the repository's
-real environments — so `dev-eu2` for `dev-eu` is accepted, matches no cell, and
-that environment simply keeps its review requirement. See
+rejected loudly, naming the entry. Spelling is never refused, and it warns only
+where a run has already scanned the whole tree: `dev-eu2` for `dev-eu` is
+accepted and that environment simply keeps its review requirement, but a run
+that scanned the tree names the entry as matching no stack tag
+([`../CONTRACT.md`](../CONTRACT.md) §What the diagnostics can and cannot see).
+See
 [`upgrading.md`](upgrading.md) §"Opt-in: per-environment review gating".
 
 **The run failed with a `gate.ungated_envs` error.** An entry that is not a
@@ -814,9 +817,9 @@ of these would ever match an environment:
 
 - a `-plan` / `-apply` suffix — the list is matched against the bare logical
   env name carried by the apply checks, so write `dev-eu`, not `dev-eu-apply`;
-- anything outside the env charset (letters, digits, `-`, `_`) — a leading or
-  internal space, a `/`, a nested quote. The entries are bare names, quoted once
-  as TOML strings and nothing more;
+- anything outside the env charset (lowercase letters, digits, `-`, `_`) — an
+  uppercase letter, a leading or internal space, a `/`, a nested quote. The
+  entries are bare names, quoted once as TOML strings and nothing more;
 - anything that is not a list of strings at all — `ungated_envs = "dev-eu"` is
   refused rather than iterated character by character.
 

@@ -119,3 +119,89 @@ def test_the_refusal_precedes_the_unused_warning(capsys):
     with pytest.raises(SystemExit):
         _validate(table, matrix_envs=("dev-eu",), all_envs={"dev-eu"})
     assert capsys.readouterr().out == ""
+
+
+# --- 4: a reference key naming no environment warns too -------------------------------
+
+
+#: Hand-written, whole: the consequence clause is the warning's entire value, and a partial
+#: match would pass a message that named the key and dropped what it fails to do.
+UNUSED_EXPLICIT = (
+    "::warning::explicit_envs names prd, which no stack tags, so it holds nothing back "
+    "from a bare `shipmate apply`. Remove the entry, or tag the stacks that belong to it. "
+    "This is a warning rather than a refusal because the table is read from the default "
+    "branch and the tags from this branch, so an environment arrives and leaves over two "
+    "pull requests."
+)
+UNUSED_UNGATED = (
+    "::warning::gate.ungated_envs names prd, which no stack tags, so it exempts nothing "
+    "from the review requirement. Remove the entry, or tag the stacks that belong to it. "
+    "This is a warning rather than a refusal because the table is read from the default "
+    "branch and the tags from this branch, so an environment arrives and leaves over two "
+    "pull requests."
+)
+UNUSED_ORDER = (
+    "::warning::env_order names prd, which no stack tags, so it orders nothing. Remove "
+    "the entry, or tag the stacks that belong to it. This is a warning rather than a "
+    "refusal because the table is read from the default branch and the tags from this "
+    "branch, so an environment arrives and leaves over two pull requests."
+)
+
+USED = {"layout": "folder", "environments": {}}
+
+
+def test_an_explicit_env_naming_no_environment_warns(capsys):
+    """The fail-open this whole diagnostic exists for: `explicit_envs` is the only thing
+    holding an environment back from a bare `shipmate apply`, and `partition_envs`
+    intersects it with the pending set, so an entry matching nothing excludes nothing and
+    the apply runs. The charset rule cannot catch a plain typo.
+
+    Mutation: drop `explicit_envs` from the reference-key mapping."""
+    _validate({**USED, "explicit_envs": ["prd"]}, all_envs={"prod"})
+    assert capsys.readouterr().out.splitlines() == [UNUSED_EXPLICIT]
+
+
+def test_an_ungated_env_naming_no_environment_warns(capsys):
+    """Mutation: drop `gate.ungated_envs` from the mapping."""
+    _validate({**USED, "gate": {"ungated_envs": ["prd"]}}, all_envs={"prod"})
+    assert capsys.readouterr().out.splitlines() == [UNUSED_UNGATED]
+
+
+def test_an_env_order_key_naming_no_environment_warns(capsys):
+    """`env_order` is never charset-checked at all, so this warning is its only diagnostic.
+    An unmatched key leaves a phantom graph node while the real environment stays at level
+    0 and applies alongside the predecessor it was ordered after.
+
+    Mutation: collect only the mapping's values, not its keys."""
+    _validate({**USED, "env_order": {"prd": []}}, all_envs={"prod"})
+    assert capsys.readouterr().out.splitlines() == [UNUSED_ORDER]
+
+
+def test_an_env_order_predecessor_naming_no_environment_warns(capsys):
+    """A predecessor matching nothing is the same hole from the other side: the ordering
+    reads as declared and constrains nothing.
+
+    Mutation: collect only the mapping's keys, not its values."""
+    _validate({**USED, "env_order": {"prod": ["prd"]}}, all_envs={"prod"})
+    assert capsys.readouterr().out.splitlines() == [UNUSED_ORDER]
+
+
+def test_reference_keys_naming_real_environments_say_nothing(capsys):
+    """Mutation: warn whenever a reference key is present."""
+    table = {
+        **USED,
+        "explicit_envs": ["prod"],
+        "gate": {"ungated_envs": ["prod"]},
+        "env_order": {"prod": ["dev"]},
+    }
+    _validate(table, all_envs={"prod", "dev"})
+    assert capsys.readouterr().out == ""
+
+
+def test_a_reference_key_warns_only_under_a_whole_tree_scan(capsys):
+    """Same rule as the table's own entries: a changed set or a workset is no evidence that
+    an environment does not exist.
+
+    Mutation: report reference keys regardless of `all_envs`."""
+    _validate({**USED, "explicit_envs": ["prd"]}, all_envs=None)
+    assert capsys.readouterr().out == ""

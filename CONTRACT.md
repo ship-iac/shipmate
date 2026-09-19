@@ -519,11 +519,11 @@ closed.
   `environments.dev-eu.aws.plan.layout`. One mistake therefore refuses in
   several places. A misplaced `layout` always reaches the missing-`layout`
   refusal, which checks before anything reads `environments`; a misplaced
-  `explicit_envs`, `env_order` or `version` refuses as an unimplemented environment
-  key or an unknown provider field, depending on the header it fell under — and, after
-  `[env_order]`, as a reserved control name, which is why the top-level names
-  are reserved as `env_order` keys at all. `docs/troubleshooting.md` has the
-  message for each position.
+  `explicit_envs`, `env_order` or `version` refuses as an unimplemented
+  environment key or an unknown provider field, depending on the header it fell
+  under — and, after `[env_order]`, as a reserved control name, which is why the
+  top-level names are reserved as `env_order` keys at all.
+  `docs/troubleshooting.md` has the message for each position.
 - **Declaring one table twice is a parse error.** A dotted `aws.plan.role` under
   `[environments.dev-eu]` plus a later `[environments.dev-eu.aws.plan]` header
   refuses with *"Cannot declare ('environments', 'dev-eu', 'aws', 'plan')
@@ -642,6 +642,16 @@ unrelated stack's unresolvable expression block an approved plan. So it fires
 only where a whole-tree scan already happened: the nightly drift run, `unlock`,
 and a bare `shipmate apply`. The plan, deploy and targeted-apply paths see a
 changed set or a workset and stay silent.
+
+**The keys that reference an environment are checked the same way.**
+`explicit_envs`, `env_order` — both its keys and its predecessors — and
+`gate.ungated_envs` name environments rather than declaring them, and an entry
+matching no tag warns by name under the same whole-tree rule. Each names what it
+therefore fails to do, because all three are fail-open: an unmatched
+`explicit_envs` entry holds nothing back from a bare `shipmate apply`, an
+unmatched `env_order` entry orders nothing, and an unmatched `gate.ungated_envs`
+entry exempts nothing. The charset refusal catches only entries no environment
+name could take; a plain misspelling reaches this warning instead.
 
 **A typo'd table key therefore does not surface on the pull request that
 introduces it.** It surfaces on the next nightly drift run. Refusals are
@@ -788,6 +798,14 @@ must appear in Terramate stack tag lists is the `env/<name>` /
 `workload/<name>` form. A stack may carry several `env/*` tags at once (for
 example, a shared stack tagged both `env/staging` and `env/production`)
 when the same stack participates in more than one environment.
+
+Terramate refuses an uppercase letter in a tag, so an environment name is
+lowercase letters, digits, `-` and `_` — never uppercase. `explicit_envs`,
+`gate.ungated_envs` and the `SHIPMATE_UNGATED_ENVS` variable are held to that
+charset, and an uppercase entry is refused rather than left to match nothing.
+The `environments` table's own keys and `env_order`'s keys and predecessors are
+not charset-checked; a mis-cased one matches no stack tag and reaches the
+unused-entry warning below.
 
 An `env/<name>` tag is mandatory for every stack a run inspects, and an
 untagged one fails the whole run rather than being skipped. Which stacks
@@ -1118,8 +1136,8 @@ share the same App-minted `workflow_dispatch` mechanism and the same per-env
 `apply-<env>-<stack>` concurrency groups.
 
 `gate.ungated_envs` in `.github/shipmate.toml` lists the environments that
-may be applied without an approving review — bare logical env names, matched
-case-insensitively against the env on the apply checks:
+may be applied without an approving review — bare logical env names, lowercase
+as every environment name is, matched against the env on the apply checks:
 
 ```toml
 layout = "dry"
@@ -1139,7 +1157,8 @@ deployment rather than the code review (see `docs/hardening.md`).
 
 An entry that is not a bare env name is a loud configuration error naming the
 entry: a `-plan` / `-apply` suffix gets its own message naming the value to write
-instead, and anything outside the env charset (letters, digits, `-`, `_`) — a
+instead, and anything outside the env charset (lowercase letters, digits, `-`,
+`_`) — an uppercase letter, a
 leading space, an internal space, a path separator — is refused as not an
 environment name. None of them would match anything, and a silently inert entry
 would leave an operator believing an environment is ungated when it is not. This

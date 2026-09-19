@@ -140,7 +140,13 @@ previous migration's.**
 
 1. **Bump the engine pin.** Change nothing else. Your file is unchanged and still
    valid, and the new engine falls back to the variables with a warning on each
-   run that reads one.
+   run that reads one. One exception, and it is worth checking before you merge:
+   an uppercase letter in an `explicit_envs` entry or in the
+   `SHIPMATE_UNGATED_ENVS` variable is now refused rather than silently matching
+   nothing. Such an entry excluded or exempted no environment under the old pin
+   either, so lowercase it in the same merge as the bump — an uppercase
+   `explicit_envs` entry refuses every plan run, and an uppercase variable entry
+   refuses every `shipmate apply` and `shipmate unlock` comment.
 2. **Add the keys, then delete the variables.** Write `[gate]` — and `version`,
    if you want it — in `.github/shipmate.toml`, merge, and delete
    `SHIPMATE_APPROVERS_TEAM` and `SHIPMATE_UNGATED_ENVS` from the repository's
