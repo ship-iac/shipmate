@@ -193,14 +193,16 @@ _TOP_KEYS = ("layout", "environments", "env_order", "explicit_envs", "gate", "ve
 _GATE_KEYS = ("approvers_team", "ungated_envs")
 
 #: Env names come from Terramate `env/<name>` tags, so the charset is comment-parse's env
-#: grammar plus `_`, a legal tag character no `shipmate apply <env>` can name. Both cases
-#: match, and the readers disagree: `gate.ungated_envs` is casefolded on both sides, while
-#: `explicit_envs` is intersected case-sensitively in `apply-all-detect:partition_envs`, so an
-#: entry whose case differs from its environment excludes nothing.
-_ENV_ENTRY = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*")
+#: grammar plus `_`, a legal tag character no `shipmate apply <env>` can name. Lowercase
+#: because Terramate permits only `[a-z0-9._/-]` in a tag: an entry carrying an uppercase
+#: letter can never name an environment, and the readers would not agree about it --
+#: `gate.ungated_envs` casefolds both sides, while `explicit_envs` is intersected
+#: case-sensitively in `apply-all-detect:partition_envs` and would exclude nothing.
+_ENV_ENTRY = re.compile(r"[a-z0-9][a-z0-9_-]*")
 
-#: A GitHub team slug: the bare name from the team's URL. Same charset as an env entry, and
-#: the empty string is legal separately -- a declared empty team authorizes nobody.
+#: A GitHub team slug: the bare name from the team's URL. Wider than an env entry, which is
+#: lowercase-only because its source forbids uppercase; a team slug has no such source. The
+#: empty string is legal separately -- a declared empty team authorizes nobody.
 _TEAM_SLUG = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*")
 
 
@@ -394,23 +396,60 @@ def _check_dry_coverage(environments, matrix_envs):
         )
 
 
-def _report_unused(environments, all_envs):
+#: Why the unused-entry diagnostics warn instead of refusing. One wording, because the
+#: reasoning is one reasoning.
+_TWO_PULL_REQUESTS = (
+    "This is a warning rather than a refusal because the table is read from the default "
+    "branch and the tags from this branch, so an environment arrives and leaves over two "
+    "pull requests."
+)
+
+#: The keys that reference an environment rather than declaring one, and what an entry
+#: naming no environment silently fails to do. The consequence is the diagnostic's whole
+#: value: every one of these is fail-open, so the entry reads as holding, exempting or
+#: ordering something while the run does none of it. The charset rule catches only entries
+#: no env name could take; a plain typo passes it and lands here.
+_REFERENCE_KEYS = {
+    "env_order": "so it orders nothing",
+    "explicit_envs": "so it holds nothing back from a bare `shipmate apply`",
+    "gate.ungated_envs": "so it exempts nothing from the review requirement",
+}
+
+
+def _referenced_envs(table):
+    """Env names per reference key. `env_order` references from both sides -- an unmatched
+    key and an unmatched predecessor each leave the ordering declared and unenforced."""
+    order = table.get("env_order", {})
+    return {
+        "env_order": set(order) | {p for preds in order.values() for p in preds},
+        "explicit_envs": set(table.get("explicit_envs", [])),
+        "gate.ungated_envs": set(table.get("gate", {}).get("ungated_envs", [])),
+    }
+
+
+def _report_unused(table, all_envs):
     """Name the entries no stack tags. A warning, deliberately, and never a refusal.
 
     The table is read from the default branch and the tags from the feature branch, so
     adding or removing an environment takes two pull requests; refusing an unused entry
-    would deadlock both. Keys are matched exactly, as `resolve` and `_check_dry_coverage`
-    match them -- an entry differing only in case resolves for nothing, so it is unused.
+    would deadlock both. Names are matched exactly, as `resolve`, `_check_dry_coverage` and
+    `partition_envs` match them -- an entry differing only in case resolves for nothing, so
+    it is unused.
     """
-    unused = sorted(set(environments) - set(all_envs))
+    unused = sorted(set(table.get("environments", {})) - set(all_envs))
     if unused:
         print(
             f"::warning::the environment table declares {', '.join(unused)}, which no stack "
-            "tags. Remove the entry, or tag the stacks that belong to it. This is a warning "
-            "rather than a refusal because the table is read from the default branch and the "
-            "tags from this branch, so an environment arrives and leaves over two pull "
-            "requests."
+            "tags. Remove the entry, or tag the stacks that belong to it. " + _TWO_PULL_REQUESTS
         )
+    for key, consequence in _REFERENCE_KEYS.items():
+        stale = sorted(_referenced_envs(table)[key] - set(all_envs))
+        if stale:
+            print(
+                f"::warning::{key} names {', '.join(stale)}, which no stack tags, "
+                f"{consequence}. Remove the entry, or tag the stacks that belong to it. "
+                + _TWO_PULL_REQUESTS
+            )
 
 
 def _validate_predecessors(env, preds):
@@ -492,8 +531,8 @@ def validate_env_name_list(envs, key):
         if not _ENV_ENTRY.fullmatch(e):
             raise SystemExit(
                 f"::error::{key} entry {e!r} is not an environment name; entries are bare "
-                f"logical env names (letters, digits, '-' and '_'), with no quotes, spaces "
-                f"or path separators."
+                f"logical env names (lowercase letters, digits, '-' and '_'), with no "
+                f"quotes, spaces or path separators."
             )
         for suffix in ("-plan", "-apply"):
             if e.endswith(suffix):
@@ -582,7 +621,10 @@ def gate_ungated_envs(table, fallback_raw):
 
 
 def gate_approvers_team(table, fallback):
-    """The team slug whose members may drive shipmate by comment.
+    """The team slug whose members may `apply` and `unlock` by comment.
+
+    Those two verbs only: `plan`, `doctor` and `help` are gated by the commenter's
+    `author_association`, not by this team.
 
     `gate.approvers_team` when the file declares it, otherwise the `approvers-team` input
     carrying `vars.SHIPMATE_APPROVERS_TEAM`, for the migration release only. Key presence
@@ -673,7 +715,7 @@ def validate(table, matrix_envs, shared_envs, all_envs=None):
     if table["layout"] == "dry":
         _check_dry_coverage(environments, matrix_envs)
     if all_envs is not None:
-        _report_unused(environments, all_envs)
+        _report_unused(table, all_envs)
     return table
 
 

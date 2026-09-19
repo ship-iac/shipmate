@@ -183,11 +183,13 @@ def test_parse_ungated_envs_ignores_empty_fields():
     assert az.parse_ungated_envs("dev-eu,") == frozenset({"dev-eu"})
 
 
-def test_ungated_env_match_is_case_insensitive():
-    # Pinned through _review_reason, where the match is used: an uppercase variable entry must
-    # exempt a lowercase env and vice versa.
-    assert az._review_reason("REVIEW_REQUIRED", "dev-eu", az.parse_ungated_envs("DEV-EU")) is None
-    assert az._review_reason("REVIEW_REQUIRED", "DEV-EU", az.parse_ungated_envs("dev-eu")) is None
+def test_an_uppercase_ungated_entry_is_refused():
+    # Terramate forbids uppercase in a tag and env names come from `env/<name>` tags, so an
+    # uppercase entry can name no environment. The variable took it and the casefolded match
+    # made it appear to work; the refusal names it instead.
+    with pytest.raises(SystemExit) as exc:
+        az.parse_ungated_envs("DEV-EU")
+    assert repr("DEV-EU") in str(exc.value)
 
 
 def test_parse_ungated_envs_rejects_environment_suffix():
@@ -202,7 +204,9 @@ def test_parse_ungated_envs_rejects_environment_suffix():
         assert repr("dev-eu") in message
 
 
-@pytest.mark.parametrize("entry", ['"dev-eu"', "dev eu", "dev/eu", "dev.eu", "-dev-eu", "$dev"])
+@pytest.mark.parametrize(
+    "entry", ['"dev-eu"', "dev eu", "dev/eu", "dev.eu", "-dev-eu", "$dev", "Dev-eu"]
+)
 def test_parse_ungated_envs_rejects_an_entry_that_is_not_an_env_name(entry):
     """The suffix and whitespace checks name two shapes of silently inert entry, and the promise
     ("no silently inert entry") covers the class. A pasted quote, an internal space or a path
@@ -213,11 +217,11 @@ def test_parse_ungated_envs_rejects_an_entry_that_is_not_an_env_name(entry):
     assert repr(entry) in str(exc.value)
 
 
-@pytest.mark.parametrize("entry", ["dev-eu", "DEV-EU", "dev_eu", "env1"])
+@pytest.mark.parametrize("entry", ["dev-eu", "dev_eu", "env1", "2dev"])
 def test_parse_ungated_envs_accepts_every_env_name_shape(entry):
     # The other half of the allow-list: refusing a legal env name would refuse applies the
-    # operator opted in for.
-    assert az.parse_ungated_envs(entry) == frozenset({entry.casefold()})
+    # operator opted in for. Probed against Terramate, which accepts each of these as a tag.
+    assert az.parse_ungated_envs(entry) == frozenset({entry})
 
 
 def test_parse_ungated_envs_rejects_padded_entry():

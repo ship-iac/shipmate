@@ -428,7 +428,7 @@ def test_the_variable_is_read_when_the_file_declares_no_gate(capsys):
     """The migration release's fallback, casefolded the way the apply paths compare it.
     Reddens on returning an empty frozenset for an absent key, which exempts nothing and
     holds every environment of a consumer that has not migrated yet."""
-    assert ec.gate_ungated_envs(_SHARED_TABLE, "Dev-EU,sbx") == frozenset({"dev-eu", "sbx"})
+    assert ec.gate_ungated_envs(_SHARED_TABLE, "dev-eu,sbx") == frozenset({"dev-eu", "sbx"})
     assert len(_warnings(capsys)) == 1
 
 

@@ -812,7 +812,7 @@ def test_a_declared_empty_approvers_team_still_validates():
 
 _NOT_AN_ENV_NAME = (
     "entry {entry!r} is not an environment name; entries are bare logical env names "
-    "(letters, digits, '-' and '_'), with no quotes, spaces or path separators."
+    "(lowercase letters, digits, '-' and '_'), with no quotes, spaces or path separators."
 )
 
 
@@ -836,6 +836,24 @@ def test_an_ungated_env_carrying_a_pasted_quote_refuses():
     assert _refusal({"layout": "folder", "gate": {"ungated_envs": ['"dev-eu"']}}) == (
         "::error::gate.ungated_envs " + _NOT_AN_ENV_NAME.format(entry='"dev-eu"')
     )
+
+
+@pytest.mark.parametrize("key", ["gate.ungated_envs", "explicit_envs"])
+def test_an_uppercase_entry_refuses(key):
+    """Terramate permits only `[a-z0-9._/-]` in a tag, and env names come from `env/<name>`
+    tags, so an entry carrying an uppercase letter can never name an environment. Accepting
+    it is fail-open twice over: `explicit_envs = ["Prod"]` excludes nothing, so a bare
+    `shipmate apply` applies production while the operator reads the file as holding it,
+    and `gate.ungated_envs` only appears to work because it casefolds a misspelling.
+
+    Mutation: restore `A-Za-z` in `_ENV_ENTRY`.
+    """
+    table = (
+        {"layout": "folder", "gate": {"ungated_envs": ["Prod"]}}
+        if key == "gate.ungated_envs"
+        else {"layout": "folder", "explicit_envs": ["Prod"]}
+    )
+    assert _refusal(table) == f"::error::{key} " + _NOT_AN_ENV_NAME.format(entry="Prod")
 
 
 def test_an_ungated_env_carrying_an_environment_suffix_refuses():

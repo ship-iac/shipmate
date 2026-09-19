@@ -91,7 +91,10 @@ refuses it. See
 **The nightly sweep is also where a stale table entry surfaces.** It is one of
 the three paths that scan the whole tree, so it is where the engine warns that
 the environment table declares an environment no stack tags — a leftover entry,
-or a typo in a key. A pull request introducing that typo says nothing about it:
+or a typo in a key. It reports the keys that *reference* an environment the same
+way: an `explicit_envs`, `env_order` or `gate.ungated_envs` entry matching no tag
+is inert, and each warning names what the entry therefore fails to do. A pull
+request introducing that typo says nothing about it:
 the plan path sees only the changed set
 ([`../CONTRACT.md`](../CONTRACT.md) §Environment table).
 
