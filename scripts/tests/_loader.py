@@ -45,11 +45,15 @@ WORKFLOWS = ENGINE / ".github" / "workflows"
 ENGINE_DIR = ".shipmate-engine"
 ENGINE_CHECKOUT_WITH = {
     "repository": "ship-iac/shipmate",
-    "ref": "${{ job.workflow_sha }}",
+    #: A missing context yields a nonexistent commit, so the checkout fails instead of fetching
+    #: the engine's default branch. `job.workflow_sha` is unavailable on GitHub Enterprise Server.
+    "ref": "${{ job.workflow_sha || '0000000000000000000000000000000000000000' }}",
     "path": ENGINE_DIR,
     "persist-credentials": False,
 }
-SETUP_EXCLUDE_RUN = f'[ -d .git ] && echo "/{ENGINE_DIR}/" >> .git/info/exclude || true'
+SETUP_EXCLUDE_RUN = (
+    f'if [ -d .git ]; then mkdir -p .git/info && echo "/{ENGINE_DIR}/" >> .git/info/exclude; fi'
+)
 
 
 def local_action(name):

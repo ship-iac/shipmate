@@ -1,12 +1,16 @@
 # Releasing
 
-Consumers pin shipmate's reusable workflows by commit SHA. The engine itself has no pins: every
-job checks `ship-iac/shipmate` out at `${{ job.workflow_sha }}` — the commit of the reusable
-workflow the consumer pinned — into `.shipmate-engine/` and calls its actions as
-`./.shipmate-engine/actions/<name>`, and the three callers of `apply-env-level.yml` reach it as
-`./.github/workflows/apply-env-level.yml`. One commit, one tree.
-`scripts/tests/test_engine_self_checkout.py` refuses a `ship-iac/shipmate/<path>@<sha>` reference
-anywhere in the engine.
+Consumers pin shipmate's reusable workflows by commit SHA. The engine itself has
+no pins: every job that runs an engine action checks `ship-iac/shipmate` out at
+`${{ job.workflow_sha }}` — the commit of the reusable workflow the consumer
+pinned — into `.shipmate-engine/` and calls its actions as
+`./.shipmate-engine/actions/<name>`, and the three callers of
+`apply-env-level.yml` reach it as `./.github/workflows/apply-env-level.yml`. One
+commit, one tree. The ref falls back to an all-zero SHA, which no repository
+holds, so a runner without that context fails at the engine checkout instead of
+fetching the engine's default branch.
+`scripts/tests/test_engine_self_checkout.py` refuses a
+`ship-iac/shipmate/<path>@<sha>` reference in any workflow or action manifest.
 
 ## Consumers move every engine ref in one change
 

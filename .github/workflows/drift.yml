@@ -38,7 +38,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ship-iac/shipmate
-          ref: ${{ job.workflow_sha }}
+          ref: ${{ job.workflow_sha || '0000000000000000000000000000000000000000' }}
           path: .shipmate-engine
           persist-credentials: false
       - uses: ./.shipmate-engine/actions/setup
@@ -74,7 +74,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ship-iac/shipmate
-          ref: ${{ job.workflow_sha }}
+          ref: ${{ job.workflow_sha || '0000000000000000000000000000000000000000' }}
           path: .shipmate-engine
           persist-credentials: false
       - uses: ./.shipmate-engine/actions/setup
@@ -109,7 +109,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ship-iac/shipmate
-          ref: ${{ job.workflow_sha }}
+          ref: ${{ job.workflow_sha || '0000000000000000000000000000000000000000' }}
           path: .shipmate-engine
           persist-credentials: false
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1

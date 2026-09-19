@@ -1638,9 +1638,12 @@ trigger alone closes two paths a trigger check alone would not:
   applies. Restricting who can push, and restricting pushes that touch
   `.github/workflows/**`, are the controls that act at push time; see
   `docs/hardening.md`.
-- The engine holds no pins of itself. Each job of a reusable workflow checks the engine out at
-  `job.workflow_sha` — the commit the consumer's `uses:` resolved to — and runs its actions from
-  that checkout, so the consumer's one pin names the whole tree that runs.
+- The engine holds no pins of itself. Each job that runs an engine action checks the engine out
+  at `job.workflow_sha` — the commit the consumer's `uses:` resolved to — and runs its actions
+  from that checkout, so the consumer's one pin names the whole tree that runs. The ref falls
+  back to an all-zero SHA, so a missing context fails the checkout rather than fetching the
+  engine's default branch. The consumer surface is the seven reusable workflows; the composite
+  actions are engine-internal and expect that checkout at `.shipmate-engine/`.
   `dev/repin_consumer.py` is the hand-run tool that moves a consumer's pins together.
 - **Upgrade path.** shipmate publishes a GitHub Release per release SHA. A
   consumer with Dependabot's `github-actions` ecosystem enabled therefore
@@ -1674,6 +1677,9 @@ trigger alone closes two paths a trigger check alone would not:
   `sys.version_info` ahead of the import and refuses with the version it found
   and this clause. A `runs_on:` image older than that — `ubuntu-22.04` ships
   3.10 — fails at `detect`.
+- The engine reads `job.workflow_sha` for its own checkout, and GitHub documents that context
+  as unavailable on GitHub Enterprise Server; there every engine job fails at its engine
+  checkout.
 - Terramate and OpenTofu are not assumed to be on the image: the
   `setup` action installs the versions the engine release declares in its own
   root-level `VERSIONS` file, read at the commit the consumer pins. Moving to

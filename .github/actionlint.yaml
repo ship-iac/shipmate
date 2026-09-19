@@ -5,3 +5,8 @@ paths:
   .github/workflows/manifest-load.yml:
     ignore:
       - 'constant expression "false" in condition'
+  .github/workflows/*.yml:
+    ignore:
+      # `job.workflow_sha` is documented and measured live; actionlint 1.7.12 types the `job`
+      # context without it. The 25 sites are pinned whole by test_engine_self_checkout.py.
+      - 'property "workflow_sha" is not defined in object type'
