@@ -46,9 +46,10 @@ runs:
       env:
         GH_TOKEN: ${{ steps.token.outputs.token }}
         # `gh issue list/create/edit/close` and `gh label` are repository-scoped and resolve their
-        # repository from a checkout's git remote. The job that runs this holds the App key and so
-        # deliberately has no checkout, and without GH_REPO every one of those calls fails with
-        # "failed to determine base repository".
+        # repository from a checkout's git remote. The job that runs this checks out only the
+        # engine, into `.shipmate-engine/`, so the workspace root carries no consumer remote and
+        # without GH_REPO every one of those calls fails with "failed to determine base
+        # repository".
         GH_REPO: ${{ github.repository }}
         SHIPMATE_CELLS_DIR: ${{ inputs.cells-dir }}
         SHIPMATE_SLACK_WEBHOOK: ${{ inputs.slack-webhook }}

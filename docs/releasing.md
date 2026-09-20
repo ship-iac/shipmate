@@ -50,10 +50,11 @@ Three limits, all deliberate:
 
 - **Merge-time, not PR-time.** `uses:` takes no expressions, so the ref cannot
   follow a PR head, and `@main` is the only ref that stays correct. This runs on
-  push to `main`, so it must never be a required status check. It still runs before any tag is cut, which is where `v0.16.0`
-  escaped — but its push run covers whichever commit was the tip then, not
-  necessarily the release SHA, so `## Publishing the release` below checks that
-  commit and dispatches the workflow when nothing covers it.
+  push to `main`, so it must never be a required status check. It still runs
+  before any tag is cut, which is where `v0.16.0` escaped — but its push run
+  covers whichever commit was the tip then, not necessarily the release SHA, so
+  `## Publishing the release` below checks that commit and dispatches the
+  workflow when nothing covers it.
 - **Coverage is asserted locally.** The workflow is silent about actions it does
   not list, so `scripts/tests/test_manifest_load_workflow_covers_every_action.py`
   compares its whole step list against the `actions/*/` tree — a new action with

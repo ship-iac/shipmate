@@ -46,7 +46,7 @@ at the default branch itself and raises the same question with the same answer;
 see "Contributors without push access".) That ref choice is deliberate: it is what
 lets the plan run's trusted `summary` job mint an App token and write the
 `shipmate / gate` status. What makes it safe is a property of that job, not of
-the trigger: it executes no repository content at all. It is a call to the
+the trigger: it executes no *consumer* repository content. It is a call to the
 engine's own reusable workflow, and its only checkout is the engine itself at
 `job.workflow_sha`. A consumer cannot add another, because they do not own that
 job's steps. The two jobs that *do* check

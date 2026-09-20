@@ -293,10 +293,10 @@ def test_no_webhook_never_calls_notify_slack(tmp_path, monkeypatch):
 
 def test_action_names_the_repository_for_gh():
     """`gh issue list/create/edit/close` and `gh label` are repository-scoped and otherwise
-    resolve their repository from a checkout's git remote. The job running this holds the App
-    key and so has no checkout at all, so without GH_REPO every one of those calls fails with
-    "failed to determine base repository" and `_run` raises, killing the first nightly drift
-    run."""
+    resolve their repository from a checkout's git remote. The job running this checks out only
+    the engine, into `.shipmate-engine/`, so the workspace root has no consumer remote to infer
+    from: without GH_REPO every one of those calls fails with "failed to determine base
+    repository" and `_run` raises, killing the first nightly drift run."""
     steps = action_steps("drift-issues")
     step = next(s for s in steps if "scripts/drift-issues" in str(s.get("run", "")))
     assert step.get("env", {}).get("GH_REPO") == "${{ github.repository }}", (

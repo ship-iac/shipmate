@@ -15,10 +15,10 @@ actions are engine-internal and run from the engine checkout at
 
 Consumers pin by commit SHA, never by tag or branch name, optionally with a
 trailing `# vX.Y.Z` comment naming the release that SHA belongs to
-(`uses: <owner>/shipmate/actions/state@<sha> # v0.1.0`). The comment is for
-human readers and for Dependabot's bookkeeping; the ref that resolves is always
-the SHA. The SHA of record for a release is named in that release's section of
-[`../CHANGELOG.md`](../CHANGELOG.md).
+(`uses: <owner>/shipmate/.github/workflows/plan.yml@<sha> # v0.1.0`). The
+comment is for human readers and for Dependabot's bookkeeping; the ref that
+resolves is always the SHA. The SHA of record for a release is named in that
+release's section of [`../CHANGELOG.md`](../CHANGELOG.md).
 
 **Resolving a tag to its commit takes the dereferencing call.** Releases from
 `v0.14.2` on are *annotated* tags, so `git/ref/tags/<tag>` returns the tag

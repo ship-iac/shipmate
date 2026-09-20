@@ -3,8 +3,9 @@
 
 Branch content cannot rewrite these values because they are not read from the
 branch: the table is `git show`n out of `origin/<default>`. `origin` is the base
-repository on every path -- no checkout in any workflow passes `repository:` -- and
-a fork pull request is refused before it plans.
+repository on every path -- the engine's own checkout is the only one that passes
+`repository:`, and it lands in `.shipmate-engine/` rather than the workspace root --
+and a fork pull request is refused before it plans.
 """
 
 import base64
