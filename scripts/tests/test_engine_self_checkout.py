@@ -14,7 +14,6 @@ from _loader import (
     ENGINE,
     ENGINE_CHECKOUT_WITH,
     ENGINE_DIR,
-    SETUP_EXCLUDE_RUN,
     WORKFLOWS,
     local_action,
 )
@@ -183,13 +182,6 @@ def test_composite_actions_reach_state_through_the_local_path_only():
             if _uses(step).startswith("./"):
                 local.add(_uses(step))
     assert local == {local_action("state")}
-
-
-def test_setup_hides_the_engine_directory_from_the_consumers_git():
-    """Whole run string. Mutation: rename the directory in the exclude line."""
-    doc = yaml.safe_load((ACTIONS / "setup" / "action.yml").read_text(encoding="utf-8"))
-    runs = [s["run"] for s in doc["runs"]["steps"] if "info/exclude" in str(s.get("run", ""))]
-    assert runs == [SETUP_EXCLUDE_RUN]
 
 
 #: Every engine action referenced from a workflow step or a composite action step, hand-written

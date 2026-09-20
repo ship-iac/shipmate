@@ -41,7 +41,7 @@ ACTIONS = ENGINE / "actions"
 WORKFLOWS = ENGINE / ".github" / "workflows"
 
 #: Where every engine job checks the engine out, at the commit that defines the job. One constant
-#: for the checkout `path:`, every local `uses:` and the exclude line in actions/setup.
+#: for the checkout `path:` and every local `uses:`.
 ENGINE_DIR = ".shipmate-engine"
 ENGINE_CHECKOUT_WITH = {
     "repository": "ship-iac/shipmate",
@@ -51,9 +51,6 @@ ENGINE_CHECKOUT_WITH = {
     "path": ENGINE_DIR,
     "persist-credentials": False,
 }
-SETUP_EXCLUDE_RUN = (
-    f'if [ -d .git ]; then mkdir -p .git/info && echo "/{ENGINE_DIR}/" >> .git/info/exclude; fi'
-)
 
 
 def local_action(name):
