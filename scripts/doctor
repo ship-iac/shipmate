@@ -976,8 +976,8 @@ def _pins_in_text(text, fname, ctx, seen):
 def _pins_in_workflows(ctx):
     """(warnings, {slug: {(file, sha)}}) for every engine action pin found in
     the consumer's workflow files at the commit under examination. The engine's
-    owner/repo comes from `ctx["engine_repo"]`, which the calling job passes in
-    from `job.workflow_repository` — shipmate never hardcodes an org. Either
+    owner/repo comes from `ctx["engine_repo"]`, which the step that runs this action
+    passes in from `job.workflow_repository` — shipmate never hardcodes an org. Either
     precondition missing, or an unreadable listing or file, degrades to a NOTICE
     rather than an error; the preconditions are checked before any API call,
     since without them no read could be interpreted anyway."""
@@ -2308,7 +2308,7 @@ def ctx_from_env():
         "app_permissions_checked": os.environ.get("SHIPMATE_APP_PERMISSIONS_CHECKED") == "true",
         "app_permission_error": os.environ.get("SHIPMATE_APP_PERMISSION_ERROR", ""),
         "head_sha": os.environ.get("SHIPMATE_HEAD_SHA", ""),
-        # The engine's own slug, passed down as a job-level env var from
+        # The engine's own slug, passed in by the calling step from
         # `job.workflow_repository` -- never hardcoded, so the probe stays
         # org-agnostic. Empty degrades to pin freshness not verified.
         "engine_repo": os.environ.get("SHIPMATE_ENGINE_REPO", ""),

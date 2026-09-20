@@ -134,30 +134,36 @@ def test_the_engine_checkout_is_the_last_checkout_in_its_job():
             )
 
 
-#: The jobs that run a local engine action calling `scripts/doctor`, and so must hand it the
+#: The steps that run a local engine action calling `scripts/doctor`, and so must hand it the
 #: engine's own slug. Hand-written whole-set, never derived from the workflows.
-DOCTOR_JOBS = {"comment-ops.yml:ops", "plan.yml:summary"}
+DOCTOR_STEPS = {
+    "comment-ops.yml:ops:" + local_action("comment-ops"),
+    "plan.yml:summary:" + local_action("summary"),
+}
 DOCTOR_ACTIONS = {local_action("comment-ops"), local_action("summary")}
 ENGINE_REPO_ENV = {"SHIPMATE_ENGINE_REPO": "${{ job.workflow_repository }}"}
 
 
-def test_the_doctor_jobs_pass_the_engine_repository():
+def test_the_doctor_steps_pass_the_engine_repository():
     """`scripts/doctor`'s pin probe reads `SHIPMATE_ENGINE_REPO`; a composite action cannot read
-    the `job` context, so the job supplies it. Both sets are compared whole, so a job that gains
-    a doctor action without the env entry, or keeps the entry after losing the action, reddens.
-    Mutation: drop the `env:` block from plan.yml's `summary` job."""
+    the `job` context, and the `job` context is unavailable in a job-level `env:` -- GitHub
+    rejects such a workflow file at load, measured on this branch. The calling step carries it
+    instead, and the composite's `run` steps inherit it. Both sets are compared whole, so a step
+    that gains a doctor action without the env entry, or keeps the entry after losing the action,
+    reddens. Mutation: delete the `env:` block from plan.yml's summary step."""
     runs_doctor, carries_env = set(), set()
     for name, doc in _docs():
         if name == MANIFEST_LOAD:
             continue
         for job_name, job in (doc.get("jobs") or {}).items():
-            where = f"{name}:{job_name}"
-            if any(_uses(s) in DOCTOR_ACTIONS for s in job.get("steps") or []):
-                runs_doctor.add(where)
-            if (job.get("env") or {}) == ENGINE_REPO_ENV:
-                carries_env.add(where)
-    assert runs_doctor == DOCTOR_JOBS
-    assert carries_env == DOCTOR_JOBS
+            for step in job.get("steps") or []:
+                where = f"{name}:{job_name}:{_uses(step)}"
+                if _uses(step) in DOCTOR_ACTIONS:
+                    runs_doctor.add(where)
+                if (step.get("env") or {}) == ENGINE_REPO_ENV:
+                    carries_env.add(where)
+    assert runs_doctor == DOCTOR_STEPS
+    assert carries_env == DOCTOR_STEPS
 
 
 def test_nested_reusable_calls_are_local():

@@ -49,7 +49,7 @@ def _ctx(**over):
         "check_ids_path": "check-ids.tsv",
         "harvest_failed": False,
         "harvest_pending": False,
-        # The engine's own owner/repo, passed in by the calling job from
+        # The engine's own owner/repo, passed in by the calling step from
         # `job.workflow_repository` -- never hardcoded, so the probe stays
         # org-agnostic while only ever reporting on shipmate's own pins.
         "engine_repo": _ENGINE_REPO,
@@ -1266,7 +1266,7 @@ def test_pin_probe_ignores_another_orgs_shared_action(monkeypatch):
 
 
 def test_pin_probe_without_the_engine_repo_degrades_to_a_note(monkeypatch):
-    """The slug is empty when the calling job supplied no `SHIPMATE_ENGINE_REPO`. Without it
+    """The slug is empty when the calling step supplied no `SHIPMATE_ENGINE_REPO`. Without it
     the probe cannot tell shipmate's pins from anyone else's, so it
     says pin freshness was not verified instead of falling back to warning about every
     cross-repo pin it can see."""

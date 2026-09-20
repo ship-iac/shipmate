@@ -964,7 +964,8 @@ environments listing but whose own settings cannot be read becomes a note
 naming it, rather than being silently skipped the way a nonexistent
 environment is. The engine-pin probe reports only on pins of the engine's
 own repository, which the calling engine job passes in as
-`SHIPMATE_ENGINE_REPO` from `job.workflow_repository` (nothing is hardcoded — a
+`SHIPMATE_ENGINE_REPO` from `job.workflow_repository` on the step that runs the
+action (nothing is hardcoded — a
 consumer's other shared actions belong to whoever ships them);
 when either that or the commit under examination is unavailable it says pin
 freshness was not verified rather than falling back to a weaker read.

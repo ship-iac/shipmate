@@ -145,11 +145,6 @@ jobs:
     environment: shipmate-engine
     permissions:
       contents: read
-    # `scripts/doctor` reads the engine's own slug for its pin probe, but a composite action
-    # cannot read the `job` context and `github.action_repository` is empty for a local `./`
-    # action, so the job passes it down; job-level env reaches a composite action's `run` steps.
-    env:
-      SHIPMATE_ENGINE_REPO: ${{ job.workflow_repository }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -167,6 +162,12 @@ jobs:
           pattern: cell-summary.*
           path: cells
       - uses: ./.shipmate-engine/actions/summary
+        # `scripts/doctor` reads the engine's own slug for its pin probe. The `job` context is
+        # unavailable in a job-level `env:` -- GitHub rejects the whole workflow file at load --
+        # and `github.action_repository` is empty for a local `./` action, so the calling step
+        # passes it; a composite action's `run` steps inherit the caller step's env.
+        env:
+          SHIPMATE_ENGINE_REPO: ${{ job.workflow_repository }}
         with:
           pr-number: ${{ needs.facts.outputs.pr-number }}
           head-sha: ${{ needs.facts.outputs.head-sha }}
