@@ -22,7 +22,7 @@ body:
     attributes:
       label: Engine pin
       description: The full commit SHA your workflows pin shipmate to.
-      placeholder: ship-iac/shipmate/actions/plan-cell@<sha>
+      placeholder: ship-iac/shipmate/.github/workflows/plan.yml@<sha>
     validations:
       required: true
 

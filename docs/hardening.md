@@ -46,9 +46,10 @@ at the default branch itself and raises the same question with the same answer;
 see "Contributors without push access".) That ref choice is deliberate: it is what
 lets the plan run's trusted `summary` job mint an App token and write the
 `shipmate / gate` status. What makes it safe is a property of that job, not of
-the trigger: it executes no repository content at all. It is a call to the
-engine's own reusable workflow, and it has no checkout step. A consumer cannot
-add one, because they do not own that job's steps. The two jobs that *do* check
+the trigger: it executes no *consumer* repository content. It is a call to the
+engine's own reusable workflow, and its only checkout is the engine itself at
+`job.workflow_sha`. A consumer cannot add another, because they do not own that
+job's steps. The two jobs that *do* check
 out the pull request's head — `detect` and `plan` — reach no credentialed
 environment: `detect` binds none, and `plan` binds only the *plan* environment
 for the cell it is planning, which by design holds no App key and no
@@ -689,18 +690,20 @@ Settings → Actions → General:
   files produces a list that fails at "Set up job" the first time an engine
   action runs.
 
-  `<owner>/shipmate/*@*` covers every shape the engine is referenced in — worth
-  stating because GitHub does not document whether a pattern reaches an action
-  stored in a *subdirectory*, which is what every shipmate action is
-  (`<owner>/shipmate/actions/setup@<sha>`). Measured under that single pattern:
-  a subdirectory action, a reusable-workflow call
+  `<owner>/shipmate/*@*` covers every shape the engine is referenced in.
+  Consumers reference only `<owner>/shipmate/.github/workflows/*.yml@<sha>`; the
+  engine runs its actions from a local checkout, and `manifest-load.yml` is its
+  one `@main` self-reference. The pattern is stated in that width because GitHub
+  does not document whether a pattern reaches an action stored in a
+  *subdirectory*. Measured under that single pattern: a subdirectory action, a
+  reusable-workflow call
   (`<owner>/shipmate/.github/workflows/unlock.yml@<sha>`), and the engine
   repository referencing its own actions at `@main`, all resolved.
 
-  The cost is that this list is a second place pins live: an action the
-  engine adds or renames in a pin bump has to be added here too, in every
-  repository, or the next run stops at "Set up job" — loudly, naming the action
-  it refused.
+  The cost is that this list is a second place pins live: a third-party action
+  the engine adds has to be added here too, in every repository, or the next run
+  stops at "Set up job" — loudly, naming the action it refused. Engine actions
+  run from a local checkout and need no entry.
 
   This is supply-chain hygiene; it does not constrain `run:` steps.
 - **Require actions to be pinned to a full-length commit SHA.** The platform

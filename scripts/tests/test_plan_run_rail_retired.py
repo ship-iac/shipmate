@@ -22,7 +22,6 @@ EXPECTED_INPUTS = {
     "comment-ops.yml": {},
     "deploy.yml": {"workflow_call": ["state_suffix"]},
     "drift.yml": {"workflow_call": ["runs_on", "state_suffix", "tags"]},
-    "internal-pins.yml": {},
     "manifest-load.yml": {},
     "plan.yml": {"workflow_call": ["runs_on", "state_suffix"]},
     "unlock.yml": {"workflow_call": ["environment", "ref"]},

@@ -9,7 +9,7 @@ matrix (skip) from a lost artifact (fail); collapsing the two greens a run that 
 """
 
 import yaml
-from _loader import WORKFLOWS
+from _loader import ENGINE_CHECKOUT_WITH, WORKFLOWS
 
 WF = WORKFLOWS / "drift.yml"
 
@@ -89,7 +89,7 @@ def test_the_artifact_download_has_no_continue_on_error():
     step = next(
         s
         for s in _doc()["jobs"]["issues"]["steps"]
-        if "actions/download-artifact@" in str(s.get("uses", ""))
+        if "actions/download-artifact" in str(s.get("uses", ""))
     )
     assert "continue-on-error" not in step
 
@@ -100,7 +100,7 @@ def test_the_sweep_states_no_pull_request_and_no_head():
     step = next(
         s
         for s in _doc()["jobs"]["detect"]["steps"]
-        if "actions/build-matrix@" in str(s.get("uses", ""))
+        if "actions/build-matrix" in str(s.get("uses", ""))
     )
     assert step["with"] == {
         "base-sha": "",
@@ -161,12 +161,18 @@ def test_every_checkout_takes_the_full_history_and_no_ref():
     then be the only thing left refusing it. `fetch-depth: 0` is load-bearing: without the full
     history `terramate list` sees no stacks.
 
-    Mutations: add `ref: ${{ github.sha }}` to either checkout, and delete `fetch-depth` from
-    either.
+    Mutations: add `ref: ${{ github.sha }}` to either consumer checkout, delete `fetch-depth`
+    from either, and swap the two checkouts in either job -- the workspace-root checkout wipes a
+    directory that is not the repository it is taking, so the engine's must come second.
     """
     # PyYAML gives the int 0, not "0".
     for job_id in ("detect", "drift"):
-        assert _step(job_id, "actions/checkout@")["with"] == {"fetch-depth": 0}, job_id
+        checkouts = [
+            s.get("with")
+            for s in _doc()["jobs"][job_id]["steps"]
+            if str(s.get("uses", "")).split("@")[0] == "actions/checkout"
+        ]
+        assert checkouts == [{"fetch-depth": 0}, ENGINE_CHECKOUT_WITH], job_id
 
 
 def test_the_cell_passes_this_whole_with_block():
@@ -179,7 +185,7 @@ def test_the_cell_passes_this_whole_with_block():
     is the per-flavor value the input exists to carry, and the `|| ''` branch is what keeps the
     S3-backend flavor restoring nothing.
     """
-    assert _step("drift", "actions/drift-cell@")["with"] == {
+    assert _step("drift", "actions/drift-cell")["with"] == {
         "tf-vars": "${{ toJSON(matrix.tf_vars) }}",
         "github-vars": "${{ toJSON(vars) }}",
         "consumer-secrets": "${{ secrets.SHIPMATE_SECRETS }}",

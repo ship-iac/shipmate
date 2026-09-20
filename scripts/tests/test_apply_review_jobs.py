@@ -125,7 +125,7 @@ def test_detect_sources_the_review_decision_from_the_server_side_value(workflow,
     step = next(
         s
         for s in _jobs(workflow)["detect"]["steps"]
-        if f"actions/{detect}@" in str(s.get("uses") or "")
+        if f"actions/{detect}" in str(s.get("uses") or "")
     )
     with_ = step["with"]
     assert "ungated-envs" not in with_

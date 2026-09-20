@@ -337,11 +337,11 @@ runs:
         fi
         run_ids=$(python3 -c 'import json,sys; print("\n".join(sorted(set(json.load(sys.stdin).values()))))' \
                     < plan_runs.json || echo "")
-        # -R is required: this job has no checkout, so gh cannot infer the repo from a git
-        # remote and `gh run download` would fail every time. One directory per run, never a
-        # shared one: a cell replanned in a later run carries the same artifact name in both,
-        # and a shared directory would let extraction order decide which plan doctor reports
-        # on.
+        # -R is required: the only checkout here is the engine's own, so the workspace root
+        # holds no consumer git remote for gh to infer the repo from, and `gh run download`
+        # would fail every time. One directory per run, never a shared one: a cell replanned
+        # in a later run carries the same artifact name in both, and a shared directory would
+        # let extraction order decide which plan doctor reports on.
         mkdir -p doctor-cells
         while read -r rid; do
           [ -n "$rid" ] || continue
@@ -369,12 +369,6 @@ runs:
         SHIPMATE_CELLS_DIR: doctor-cells
         SHIPMATE_HEAD_SHA: ${{ steps.gatherdoc.outputs.head_sha }}
         SHIPMATE_PLAN_RUN_IDS: ${{ steps.gatherdoc.outputs.plan_run_ids }}
-        # The engine's own owner/repo, so the pin probe reports on shipmate's pins and not on
-        # some other org's shared action the consumer also uses. `github.action_repository` is
-        # the running action's slug, resolved by GitHub at runtime -- org-agnostic, never
-        # hardcoded. Empty when the action runs from a local path, and doctor then says pin
-        # freshness was not verified rather than guessing.
-        SHIPMATE_ENGINE_REPO: ${{ github.action_repository }}
         SHIPMATE_ANNOTATIONS_DIR: ann
         SHIPMATE_CHECK_IDS: check-ids.tsv
         # `|| 'true'`: this step's `if:` does not key on gatherdoc's outcome, so a red or

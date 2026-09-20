@@ -15,7 +15,7 @@ import textwrap
 
 import pytest
 import yaml
-from _loader import CASCADE_PENDING, ENGINE, ENGINE_CALL_SECRETS, WORKFLOWS, load_script
+from _loader import ENGINE, ENGINE_CALL_SECRETS, WORKFLOWS, load_script
 
 DOCS = ENGINE / "docs"
 
@@ -228,37 +228,14 @@ def test_the_secrets_registry_holds_each_callees_exact_declaration_set(target):
     retires one leaves every shim the registry blesses dead, with the registry and the shims in
     perfect agreement.
 
-    `_loader.CASCADE_PENDING` is unioned in, and is the only slack: a secret the callee already
-    declares while its SHA-pinned engine-internal callers cannot legally map it yet
-    (docs/releasing.md, step 1 of three). Hand-written like the registry, so it names the
-    cascade rather than hiding a drift.
-
     Mutation: add a key to `_loader._APP_KEY` and "fix" the documented `drift.yml` and
     `comment-ops.yml` shims to match. That agreement is exactly what this refuses as evidence.
     """
     declared = sorted(_workflow_call_secrets(target))
-    expected = sorted(set(ENGINE_CALL_SECRETS[target] or {}) | CASCADE_PENDING.get(target, set()))
+    expected = sorted(ENGINE_CALL_SECRETS[target] or {})
     assert expected == declared, (
-        f"_loader.ENGINE_CALL_SECRETS[{target!r}], with CASCADE_PENDING unioned in, expects "
-        f"{expected}, but `{target}` declares {declared}"
-    )
-
-
-@pytest.mark.parametrize("target", sorted(CASCADE_PENDING))
-def test_a_cascade_pending_entry_names_a_secret_the_registry_does_not_yet_hold(target):
-    """`CASCADE_PENDING` is scaffolding for one in-flight cascade, and the union the guard above
-    takes is idempotent: once the step-3 pull request adds the name to `ENGINE_CALL_SECRETS` and
-    the callers pass it, leaving the entry here changes no expected set and nothing reds. The
-    scaffold would become permanent and the next secret's cascade would start from a lie.
-
-    Mutation: add a `{callee: frozenset({name})}` entry to `CASCADE_PENDING` for a name
-    `ENGINE_CALL_SECRETS[callee]` already holds.
-    """
-    converged = sorted(set(ENGINE_CALL_SECRETS[target] or {}) & CASCADE_PENDING[target])
-    assert not converged, (
-        f"scripts/tests/_loader.py: ENGINE_CALL_SECRETS[{target!r}] already names {converged}, "
-        f"so that cascade has converged -- delete {converged} from CASCADE_PENDING[{target!r}], "
-        "and the entry itself once nothing is left in it"
+        f"_loader.ENGINE_CALL_SECRETS[{target!r}] expects {expected}, "
+        f"but `{target}` declares {declared}"
     )
 
 

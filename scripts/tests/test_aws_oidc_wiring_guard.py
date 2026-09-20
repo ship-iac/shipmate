@@ -54,7 +54,7 @@ def _load(name):
 
 
 def _is_cell(step, action="apply-cell"):
-    return f"/actions/{action}@" in str(step.get("uses", ""))
+    return f"/actions/{action}" in str(step.get("uses", ""))
 
 
 def _cell_jobs(workflow, job_ids):

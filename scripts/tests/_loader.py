@@ -40,6 +40,24 @@ SCRIPTS = _SCRIPTS
 ACTIONS = ENGINE / "actions"
 WORKFLOWS = ENGINE / ".github" / "workflows"
 
+#: Where every engine job checks the engine out, at the commit that defines the job. One constant
+#: for the checkout `path:` and every local `uses:`.
+ENGINE_DIR = ".shipmate-engine"
+ENGINE_CHECKOUT_WITH = {
+    "repository": "ship-iac/shipmate",
+    #: A missing context yields a nonexistent commit, so the checkout fails instead of fetching
+    #: the engine's default branch. `job.workflow_sha` is unavailable on GitHub Enterprise Server.
+    "ref": "${{ job.workflow_sha || '0000000000000000000000000000000000000000' }}",
+    "path": ENGINE_DIR,
+    "persist-credentials": False,
+}
+
+
+def local_action(name):
+    """The `uses:` an engine workflow or composite action writes for engine action `name`."""
+    return f"./{ENGINE_DIR}/actions/{name}"
+
+
 _APP_KEY = {"SHIPMATE_APP_PRIVATE_KEY": "${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}"}
 _CONSUMER_SECRETS = {"SHIPMATE_SECRETS": "${{ secrets.SHIPMATE_SECRETS }}"}
 _APP_KEY_AND_SECRETS = {**_APP_KEY, **_CONSUMER_SECRETS}
@@ -74,15 +92,6 @@ ENGINE_CALL_SECRETS = {
     # from a plain TF_VAR_*.
     "unlock.yml": _CONSUMER_SECRETS,
 }
-
-#: Secrets a callee already declares that its engine-internal callers may not map yet, by callee
-#: file name. `apply.yml`, `apply-all.yml` and `deploy.yml` call `apply-env-level.yml` at a SHA,
-#: and mapping a secret the PINNED callee does not declare is a hard load-time error, so
-#: `docs/releasing.md` orders the declaration, the pin bump, and the mapping into three steps,
-#: the first of which must merge before the others. This names what is between step 1 and
-#: step 3, and is empty between cascades: the step-3 change moves the name into
-#: `ENGINE_CALL_SECRETS` and empties this again.
-CASCADE_PENDING = {}
 
 
 @functools.cache

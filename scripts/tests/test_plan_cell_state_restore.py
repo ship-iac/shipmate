@@ -15,9 +15,9 @@ Assertions are on the parsed action.yml. A substring form is satisfied by a comm
 `actions/state`, and by a restore step whose `if:` was inverted.
 """
 
-from _loader import action_steps
+from _loader import action_steps, local_action
 
-_STATE = "ship-iac/shipmate/actions/state"
+_STATE = local_action("state")
 
 
 def _step_index(steps, predicate, what):

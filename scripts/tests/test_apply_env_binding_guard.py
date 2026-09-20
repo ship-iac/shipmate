@@ -38,7 +38,7 @@ Whole parsed values against hand-written constants, never substrings. The YAML f
 """
 
 import yaml
-from _loader import WORKFLOWS, load_script
+from _loader import WORKFLOWS, load_script, local_action
 
 env_config = load_script("env-config")
 verify_environments = load_script("verify-environments")
@@ -54,7 +54,7 @@ WAVES = [f"wave{i}" for i in range(8)]
 #: The apply cell, and the matrix field carrying the digest of the plan text a reviewer approved.
 #: A composite action's `required: true` is not enforced, so a dropped `with:` line arrives as the
 #: empty string; apply-cell refuses that, which turns a wiring slip into eight failed applies.
-APPLY_CELL = "ship-iac/shipmate/actions/apply-cell"
+APPLY_CELL = local_action("apply-cell")
 PLAN_SHA256 = "${{ matrix.plan_sha256 }}"
 
 #: workflow file -> the jobs in it that bind an env derived from a cell, written by hand.
@@ -78,11 +78,13 @@ BINDINGS = {
     ("dev-us", "dev-us-2"): "dev-us-apply",  # comma boundaries: no prefix match
 }
 
-#: snapshot's steps, in order, by action path with the SHA dropped: a repin must not redden
-#: this, a reorder must.
+#: snapshot's steps, in order, by action path with the SHA dropped: a checkout repin must not
+#: redden this, a reorder must. The engine checkout comes first because the two steps after it
+#: are local paths inside it.
 SNAPSHOT_STEPS = [
-    "ship-iac/shipmate/actions/verify-environments",
-    "ship-iac/shipmate/actions/apply-snapshot",
+    "actions/checkout",
+    local_action("verify-environments"),
+    local_action("apply-snapshot"),
 ]
 
 
@@ -160,7 +162,7 @@ def test_snapshot_verifies_the_environments_before_snapshotting_the_checks():
         "the whole job before wave0, or the applies it exists to refuse have "
         "already started"
     )
-    assert steps[0].get("continue-on-error") in (None, False), (
+    assert steps[1].get("continue-on-error") in (None, False), (
         "the pre-flight step is continue-on-error: it would name the missing "
         "environments and let the waves apply into them anyway"
     )

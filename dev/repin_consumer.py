@@ -7,13 +7,14 @@ Run from an engine clone (it needs engine history to judge the target):
 
 Two rules from docs/releasing.md are enforced here:
 
-* Every engine ref moves together. actions/summary creates the pending apply
-  check and actions/apply-cell -- pinned indirectly inside apply-env-level.yml --
-  completes it, each building the name independently. A pin pair straddling a
-  change to that grammar creates one name and looks for another, and every wave
-  job dies before restoring state. There is deliberately no stale-only mode.
-* An intermediate commit of the internal-pin cascade is never a valid target.
-  dev/pin_status.py decides; --force overrides it deliberately and loudly.
+* Every engine ref moves together. The seven reusable workflows share inputs
+  and secrets across a release, so a repository holding two engine versions
+  against one contract is a load-time or run-time failure, not a partial
+  upgrade. There is deliberately no stale-only mode.
+* A target must be provably on main. A commit reachable only from a branch stops
+  existing when GitHub garbage-collects a force-push, and the pin no longer
+  resolves. A clone where no mainline ref resolves cannot prove it either way,
+  and is refused too.
 
 Exit: 0 wrote, 1 refused, 3 bad target or repo path.
 """
@@ -24,12 +25,26 @@ import re
 import sys
 from typing import NamedTuple
 
-import pin_status as _ps
 import pinrefs
 
-pin_status = _ps.pin_status
-unreachable_from_main = _ps.unreachable_from_main
-format_issue = pinrefs.format_issue
+
+def unreachable_from_main(sha):
+    """True when ``sha`` is not an ancestor of the mainline, False when it is, and
+    None when no mainline ref resolved here (git failed on every base).
+
+    None is a refusal, not a pass. This is the only check standing between the tool
+    and rewriting every engine pin in a consumer repo, so a clone that cannot judge
+    the target must not rewrite against it -- the target may be branch-only and
+    garbage-collectable. The caller tells the two refusals apart.
+    """
+    for base in ("origin/main", "main"):
+        r = pinrefs.git("merge-base", "--is-ancestor", sha, base)
+        if r.returncode == 0:
+            return False
+        if r.returncode == 1:
+            return True
+    return None
+
 
 # A consumer ref is any path under the engine slug, pinned by SHA, optionally wrapped in a quote
 # (quoted `uses:` scalars are legal YAML), optionally carrying a trailing comment this tool owns
@@ -102,8 +117,6 @@ def _commit_consumer(root, planned):
     every match was already at ``new_sha``/``label`` -- the caller needs that to tell
     "matched nothing" (wrong --repo) apart from "matched N, all already current" (a
     safe re-run).
-
-    Same shape as ``repin_internal._commit``.
     """
     changed = []
     matched = 0
@@ -123,43 +136,11 @@ def _resolve_sha(sha):
     return resolved
 
 
-def _safe_to_pin(new_sha, force):
-    """True if ``new_sha`` may be pinned, printing a refusal or override notice."""
-    issues = pin_status(new_sha)
-    if not issues:
-        return True
-    problems = [format_issue(i, pinrefs.SELF_BASELINE_DESC) for i in issues]
-    if not force:
-        print(f"refusing to pin {new_sha[:12]}: its own internal pins are not current --")
-        for m in problems:
-            print(f"  {m}")
-        if any(i.kind in pinrefs.ACTIONABLE for i in issues):
-            print("this is an intermediate commit of the internal-pin cascade; pin the")
-            print("converged commit instead (docs/releasing.md), or pass --force.")
-        else:
-            print("the target's pins could not be verified in this clone -- investigate")
-            print("before pinning, or pass --force.")
-        return False
-    print(f"overriding: {new_sha[:12]} has {len(problems)} internal pin problem(s)")
-    return True
-
-
-def _refuse_git_failure(new_sha, exc):
-    # A git failure leaves the target's pins unknown, so refuse like an unsafe-to-pin verdict
-    # (exit 1), distinct from "no self-references" (exit 3, a bad-target shape). --force must not
-    # bypass this: it overrides "your pins are stale", never "your pins cannot be judged."
-    print(f"{new_sha[:12]}: its pins could not be verified -- git failed: {exc.stderr}")
-    return 1
-
-
 def main(argv=None):
     ap = argparse.ArgumentParser(description="Re-pin a consumer repo to one engine commit.")
     ap.add_argument("--repo", required=True, help="path to the consumer repo checkout")
     ap.add_argument("--sha", required=True, help="engine commit-ish to pin to")
     ap.add_argument("--label", help="trailing comment to write, e.g. v0.2.0")
-    ap.add_argument(
-        "--force", action="store_true", help="pin even if the target is not safe to pin"
-    )
     args = ap.parse_args(argv)
 
     root = pathlib.Path(args.repo).resolve()
@@ -171,28 +152,19 @@ def main(argv=None):
     if new_sha is None:
         return 3
 
-    # A bad-target check, not a staleness call. An empty refs_at means this commit's tree has no
-    # shipmate self-references (an old commit predating today's actions/ layout, or an orphan
-    # commit), so pin_status would vacuously report zero issues over a pin no one can evaluate.
-    try:
-        has_refs = bool(pinrefs.refs_at(new_sha))
-    except pinrefs.GitFailure as exc:
-        return _refuse_git_failure(new_sha, exc)
-    if not has_refs:
+    verdict = unreachable_from_main(new_sha)
+    if verdict is None:
         print(
-            f"{new_sha[:12]} has no shipmate self-references in this clone -- its pins "
-            "cannot be judged, so it is not a valid re-pin target"
+            f"refusing to pin {new_sha[:12]}: no mainline ref resolved here -- neither "
+            "origin/main nor main. Fetch origin, or run from a clone that has main."
         )
-        return 3
-
-    if unreachable_from_main(new_sha):
-        print(f"warning: {new_sha[:12]} is not an ancestor of main -- this pin can stop resolving")
-
-    try:
-        safe = _safe_to_pin(new_sha, args.force)
-    except pinrefs.GitFailure as exc:
-        return _refuse_git_failure(new_sha, exc)
-    if not safe:
+        return 1
+    if verdict:
+        print(
+            f"refusing to pin {new_sha[:12]}: it is not an ancestor of main (fetch origin "
+            "first) -- a pin to it"
+        )
+        print("can stop resolving once the branch it lives on is force-pushed or deleted.")
         return 1
 
     return _rewrite_and_report(root, new_sha, args.label)
@@ -200,9 +172,7 @@ def main(argv=None):
 
 def _rewrite_and_report(root, new_sha, label):
     """Plan every workflow file in memory, validate the all-or-nothing rule
-    against that plan, and only then commit to disk -- same plan/validate/commit
-    contract as ``repin_internal._write_and_report``.
-    """
+    against that plan, and only then commit to disk."""
     planned = _plan_consumer(root, new_sha, label)
 
     survivors = pinrefs.scan_survivors([(p.path, p.text) for p in planned], new_sha)

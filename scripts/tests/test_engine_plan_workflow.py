@@ -12,7 +12,7 @@ passes an entry whose expression was mistyped; a substring test is satisfied by 
 import re
 
 import yaml
-from _loader import WORKFLOWS
+from _loader import ENGINE_CHECKOUT_WITH, WORKFLOWS
 
 WF = WORKFLOWS / "plan.yml"
 
@@ -78,7 +78,7 @@ def test_facts_is_the_single_producer_of_every_pull_request_fact():
         job_id
         for job_id, job in doc["jobs"].items()
         for s in (job.get("steps") or [])
-        if "actions/pr-facts@" in str(s.get("uses", ""))
+        if "actions/pr-facts" in str(s.get("uses", ""))
     ]
     assert producers == ["facts"]
     assert _job("facts")["outputs"] == {
@@ -94,7 +94,7 @@ def test_facts_is_the_single_producer_of_every_pull_request_fact():
 def test_build_matrix_reads_the_facts_job_and_states_no_constant():
     """The half that matters more than the summary call's: a wrong value here passes the fork
     refusal itself. Mutation: `head-repo: ${{ github.repository }}`."""
-    assert _step("detect", "actions/build-matrix@")["with"] == {
+    assert _step("detect", "actions/build-matrix")["with"] == {
         "base-sha": "${{ needs.facts.outputs.base-sha }}",
         "head-repo": "${{ needs.facts.outputs.head-repo }}",
         "head-sha": "${{ needs.facts.outputs.head-sha }}",
@@ -111,21 +111,27 @@ def test_the_plan_workflow_never_sets_no_pull_request():
 
 
 def test_every_checkout_takes_the_head_the_facts_job_named():
-    """Both jobs that check out, compared whole. plan-cell refuses a checkout that is not
-    `expected-head`, so its cell and its checkout must agree; `detect` has no such refusal, and a
-    `github.sha` there builds the matrix from base-branch content while build-matrix's own
-    refusals still pass, because they read the facts job. `fetch-depth: 0` is load-bearing in
-    both: without the full history `terramate list --changed` finds nothing and reports it as no
-    change.
+    """Both jobs that check out, every checkout compared whole and in order. plan-cell refuses a
+    checkout that is not `expected-head`, so its cell and its checkout must agree; `detect` has
+    no such refusal, and a `github.sha` there builds the matrix from base-branch content while
+    build-matrix's own refusals still pass, because they read the facts job. `fetch-depth: 0` is
+    load-bearing in both: without the full history `terramate list --changed` finds nothing and
+    reports it as no change. The engine checkout follows the consumer's, because the
+    workspace-root checkout wipes a directory that is not the repository it is taking.
 
     Mutations: `ref: ${{ github.sha }}` on `detect`, the same on `plan`, `fetch-depth` deleted
-    from each, and `expected-head: ${{ github.sha }}` on the cell.
+    from each, the two checkouts swapped, and `expected-head: ${{ github.sha }}` on the cell.
     """
     # PyYAML gives the int 0, not "0".
     expected = {"ref": "${{ needs.facts.outputs.head-sha }}", "fetch-depth": 0}
     for job_id in ("detect", "plan"):
-        assert _step(job_id, "actions/checkout@")["with"] == expected, job_id
-    cell = _step("plan", "actions/plan-cell@")
+        checkouts = [
+            s.get("with")
+            for s in _job(job_id)["steps"]
+            if str(s.get("uses", "")).split("@")[0] == "actions/checkout"
+        ]
+        assert checkouts == [expected, ENGINE_CHECKOUT_WITH], job_id
+    cell = _step("plan", "actions/plan-cell")
     assert cell["with"]["expected-head"] == "${{ needs.facts.outputs.head-sha }}"
 
 
@@ -153,7 +159,7 @@ def test_the_cell_passes_this_whole_with_block():
     Mutations: `plan-passphrase` deleted, `expected-head: ${{ github.sha }}`, and the state path's
     `!=` inverted to `==`.
     """
-    assert _step("plan", "actions/plan-cell@")["with"] == {
+    assert _step("plan", "actions/plan-cell")["with"] == {
         "tf-vars": "${{ toJSON(matrix.tf_vars) }}",
         "github-vars": "${{ toJSON(vars) }}",
         "consumer-secrets": "${{ secrets.SHIPMATE_SECRETS }}",

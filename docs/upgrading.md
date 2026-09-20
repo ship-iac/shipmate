@@ -5,19 +5,20 @@ current release needs beyond the move.
 
 ## Re-pinning
 
-**Every engine reference moves in one change.** A repository that bumps some
-pins and leaves others behind is running two engine versions against one
-contract — the actions, the reusable workflow calls, and any pin inside a
-composite action you wrap all name the same SHA, or they disagree.
-[`../CONTRACT.md`](../CONTRACT.md) §Consumption is the rule;
-[`releasing.md`](releasing.md) is the maintainer side of the same cascade.
+**Every engine reference moves in one change.** The consumer surface is the
+seven reusable workflows, and they share inputs and secrets across a release: a
+repository that bumps some of those refs and leaves others behind is running two
+engine versions against one contract. No composite action carries a pin — the
+actions are engine-internal and run from the engine checkout at
+`.shipmate-engine/`, so nothing inside them has to move.
+[`../CONTRACT.md`](../CONTRACT.md) §Consumption is the rule.
 
 Consumers pin by commit SHA, never by tag or branch name, optionally with a
 trailing `# vX.Y.Z` comment naming the release that SHA belongs to
-(`uses: <owner>/shipmate/actions/state@<sha> # v0.1.0`). The comment is for
-human readers and for Dependabot's bookkeeping; the ref that resolves is always
-the SHA. The SHA of record for a release is named in that release's section of
-[`../CHANGELOG.md`](../CHANGELOG.md).
+(`uses: <owner>/shipmate/.github/workflows/plan.yml@<sha> # v0.1.0`). The
+comment is for human readers and for Dependabot's bookkeeping; the ref that
+resolves is always the SHA. The SHA of record for a release is named in that
+release's section of [`../CHANGELOG.md`](../CHANGELOG.md).
 
 **Resolving a tag to its commit takes the dereferencing call.** Releases from
 `v0.14.2` on are *annotated* tags, so `git/ref/tags/<tag>` returns the tag
@@ -34,6 +35,21 @@ $ gh api repos/<owner>/shipmate/commits/v0.14.2 --jq .sha
 
 Locally, `git rev-parse v0.14.2^{commit}` — the `^{commit}` is the same
 dereference.
+
+## Gitignore the engine checkout
+
+Every engine job checks this repository out into `.shipmate-engine/` inside your
+working tree. Add it to your `.gitignore` in the same change as the re-pin:
+
+```gitignore
+.shipmate-engine/
+```
+
+Left untracked, a `terramate run` of your own that omits `--no-recursive`
+refuses on it (`git-untracked`). It joins the per-run machine artifacts shipmate
+already materializes — `*.otplan`, `fingerprint.txt`, `planned-head.txt`,
+`.terraform/`, and the flavor's state path when it has one.
+[`../CONTRACT.md`](../CONTRACT.md) §Consumer gitignore requirement is the rule.
 
 ## Dependabot
 

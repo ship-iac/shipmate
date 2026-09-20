@@ -49,8 +49,8 @@ def _ctx(**over):
         "check_ids_path": "check-ids.tsv",
         "harvest_failed": False,
         "harvest_pending": False,
-        # The engine's own owner/repo, discovered at runtime from
-        # github.action_repository -- never hardcoded, so the probe stays
+        # The engine's own owner/repo, passed in by the calling step from
+        # `job.workflow_repository` -- never hardcoded, so the probe stays
         # org-agnostic while only ever reporting on shipmate's own pins.
         "engine_repo": _ENGINE_REPO,
     }
@@ -1266,10 +1266,10 @@ def test_pin_probe_ignores_another_orgs_shared_action(monkeypatch):
 
 
 def test_pin_probe_without_the_engine_repo_degrades_to_a_note(monkeypatch):
-    """`github.action_repository` is empty when the action runs from a local
-    path rather than a pinned slug. Without it the probe cannot tell shipmate's
-    pins from anyone else's, so it says pin freshness was not verified instead
-    of falling back to warning about every cross-repo pin it can see."""
+    """The slug is empty when the calling step supplied no `SHIPMATE_ENGINE_REPO`. Without it
+    the probe cannot tell shipmate's pins from anyone else's, so it
+    says pin freshness was not verified instead of falling back to warning about every
+    cross-repo pin it can see."""
 
     def gh(path):
         pytest.fail(f"the pin probe hit the API with no engine repo: {path}")
@@ -2285,8 +2285,8 @@ def test_quoted_event_name_comparison_is_silent(monkeypatch):
 
 def test_the_consumer_workflow_file_is_not_warned_about(monkeypatch):
     # `shipmate.yml` declaring `pull_request_target` IS the shape the engine ships: the job
-    # holding the App key is the engine plan workflow's `summary` job, which checks out
-    # nothing. Warning about it trains readers to ignore the dangerous labeler workflow.
+    # holding the App key is the engine plan workflow's `summary` job, which checks out no
+    # consumer content. Warning about it trains readers to ignore the dangerous labeler workflow.
     responses = _fork_responses(
         {"shipmate.yml": "on:\n  pull_request_target:\n    types: [opened]\n"}
     )

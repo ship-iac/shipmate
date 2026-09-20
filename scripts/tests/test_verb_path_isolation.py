@@ -11,7 +11,8 @@ Pinned on the apply side:
   an absence nothing compares is fail-open by construction;
 - its job ids, whole, and that no step anywhere in the file calls `unlock-cell`;
 - the waves job's `if:`, which must carry no verb clause;
-- both `summary` steps running unconditionally: an `if:` there was only ever the unlock skip.
+- both `summary` action steps running unconditionally: an `if:` there was only ever the unlock
+  skip.
 
 Pinned on the unlock side:
 
@@ -45,7 +46,7 @@ reviews.
 """
 
 import yaml
-from _loader import WORKFLOWS
+from _loader import WORKFLOWS, local_action
 
 APPLY = "apply.yml"
 UNLOCK = "unlock.yml"
@@ -74,20 +75,23 @@ UNLOCK_JOBS = {"guard", "detect", "unlock"}
 
 #: Every `uses:` each unlock job declares, in order, SHA dropped: a repin must not redden this,
 #: a reordered or added step must. This is the positive form of "calls nothing from the apply
-#: family" -- there is no room in the list for one.
+#: family" -- there is no room in the list for one. The two checkouts are the consumer's tree
+#: and then the engine, in that order.
 UNLOCK_STEP_ACTIONS = {
     "guard": [],
     "detect": [
         "actions/checkout",
-        "ship-iac/shipmate/actions/setup",
-        "ship-iac/shipmate/actions/apply-detect",
-        "ship-iac/shipmate/actions/verify-environments",
+        "actions/checkout",
+        local_action("setup"),
+        local_action("apply-detect"),
+        local_action("verify-environments"),
     ],
     "unlock": [
         "actions/checkout",
-        "ship-iac/shipmate/actions/setup",
+        "actions/checkout",
+        local_action("setup"),
         "aws-actions/configure-aws-credentials",
-        "ship-iac/shipmate/actions/unlock-cell",
+        local_action("unlock-cell"),
     ],
 }
 
@@ -147,7 +151,7 @@ DETECT_WITH = {
 #: The whole `if:` and `with:` of the environment pre-flight. The queue is one flat array and
 #: the script's input shape is the waves object, hence the single-wave wrapper. `!= '[]'` is
 #: load-bearing because the script refuses an empty cell set by design.
-PREFLIGHT_ACTION = "ship-iac/shipmate/actions/verify-environments"
+PREFLIGHT_ACTION = local_action("verify-environments")
 PREFLIGHT_IF = "${{ steps.d.outputs.cells != '[]' }}"
 PREFLIGHT_WITH = {
     "waves-json": "${{ format('{{\"wave0\":{0}}}', steps.d.outputs.cells) }}",
@@ -203,7 +207,7 @@ def test_the_apply_workflow_can_release_no_lock():
         "back in this file force-unlocks state on the apply dispatch's authority"
     )
     leaked = {
-        job_id: [u for u in _uses(job) if "/actions/unlock-cell@" in u]
+        job_id: [u for u in _uses(job) if "/actions/unlock-cell" in u]
         for job_id, job in jobs.items()
     }
     leaked = {k: v for k, v in leaked.items() if v}
@@ -223,9 +227,9 @@ def test_the_waves_job_runs_on_every_apply_dispatch():
 
 def test_both_summary_steps_run_on_every_apply_dispatch():
     steps = _job(APPLY, "summary")["steps"]
-    assert len(steps) == 2, f"summary no longer has exactly two steps: {len(steps)}"
+    assert len(steps) == 3, f"summary no longer has exactly three steps: {len(steps)}"
     conditions = [s.get("if") for s in steps]
-    assert conditions == [None, None], (
+    assert conditions == [None, None, None], (
         f"summary's steps carry `if:` {conditions!r} -- the only condition they ever had "
         "was the unlock skip, and a gate refresh or result comment that silently stops "
         "running leaves the developer no feedback and the gate unrefreshed"
@@ -325,7 +329,7 @@ def test_the_unlock_job_shares_the_wave_jobs_serialization_queue():
 
 def test_the_unlock_detect_passes_the_verb_as_a_literal():
     step = next(
-        s for s in _job(UNLOCK, "detect")["steps"] if "/actions/apply-detect@" in str(s.get("uses"))
+        s for s in _job(UNLOCK, "detect")["steps"] if "/actions/apply-detect" in str(s.get("uses"))
     )
     got = step.get("with")
     assert got == DETECT_WITH, (

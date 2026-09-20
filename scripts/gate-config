@@ -2,8 +2,8 @@
 """Resolve the gate settings the comment-ops authorization path runs on.
 
 `gate.approvers_team` and `gate.ungated_envs` from `.github/shipmate.toml` on the default
-branch, and from nowhere else. The comment-ops job holds no checkout, so the file is read
-through the contents API.
+branch, and from nowhere else. The comment-ops job checks out no consumer content, so the
+file is read through the contents API.
 
 This runs BEFORE `Gather authorization inputs` because that step is where team membership
 is established -- `authorize` receives `IS_MEMBER` and uses the team only to label a

@@ -35,10 +35,26 @@ requirement.
 
 ### Changed
 
+- **The engine pins nothing of itself.** Every job that runs an engine action
+  checks `ship-iac/shipmate` out at `job.workflow_sha` and runs its actions from
+  that checkout, so the commit you pin is the whole tree that runs. One
+  `actions/checkout` step is added to each of those jobs; `actions/checkout` is
+  GitHub-owned, so an `allowed_actions` list needs no new pattern. The ref falls
+  back to an all-zero SHA, so a runner without that context fails the checkout
+  instead of fetching the engine's default branch. The supported consumer
+  surface is the seven reusable workflows; the composite actions are
+  engine-internal and unsupported as a consumer entry point, and `apply-cell`,
+  `plan-cell` and `drift-cell` now fail outright where they reach
+  `./.shipmate-engine/actions/state`. A consumer must gitignore
+  `.shipmate-engine/`, the directory every engine job now writes into its
+  checkout, or its own recursive `terramate run` refuses on untracked files
+  (`docs/upgrading.md` §Gitignore the engine checkout).
+  The internal pin cascade, `internal-pins.yml`, `dev/pin_status.py` and
+  `dev/repin_internal.py` are gone.
 - **Three readers, one source.** `actions/comment-ops` and both apply paths'
   detect each resolve `gate.ungated_envs` from the default branch's file. The
-  comment-ops job holds no checkout, so it reads through the contents API — same
-  file, same branch, same refusal wording as `git show`.
+  comment-ops job checks out no consumer content, so it reads through the
+  contents API — same file, same branch, same refusal wording as `git show`.
 - **An unresolvable gate table refuses the comment.** `shipmate apply` and
   `shipmate unlock` now read `.github/shipmate.toml` from the default branch
   before they authorize, so a file that is missing there, does not parse or does

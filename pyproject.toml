@@ -10,10 +10,10 @@ requires-python = ">=3.11"
 package = false
 
 [tool.pytest.ini_options]
-# dev/ holds dev-time tooling (the internal-pin model and its CLIs), not shipped
-# runtime surface, so it is not importable from scripts/. Tests of that tooling
-# import it by name; this is what makes `import pinrefs` resolve without a
-# sys.path hack in every test module.
+# dev/ holds dev-time tooling (the consumer re-pin CLI and its helpers), not
+# shipped runtime surface, so it is not importable from scripts/. Tests of that
+# tooling import it by name; this is what makes `import repin_consumer` resolve
+# without a sys.path hack in every test module.
 #
 # scripts/tests/ is listed for the same reason, for `from _loader import
 # load_script`. Prepend import mode happens to put a test's own directory on
@@ -105,6 +105,6 @@ max-complexity = 8
 
 [tool.ty.environment]
 # dev/ is on the pytest pythonpath, not on ty's module path, so `import pinrefs`
-# / `import pin_status` read as unresolved without this. Same list, one consumer
-# each: pytest resolves them at runtime, ty at check time.
+# / `import repin_consumer` read as unresolved without this. Same list, one
+# consumer each: pytest resolves them at runtime, ty at check time.
 extra-paths = ["dev"]

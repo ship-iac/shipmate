@@ -976,8 +976,8 @@ def _pins_in_text(text, fname, ctx, seen):
 def _pins_in_workflows(ctx):
     """(warnings, {slug: {(file, sha)}}) for every engine action pin found in
     the consumer's workflow files at the commit under examination. The engine's
-    owner/repo comes from `ctx["engine_repo"]`, discovered at runtime from
-    `github.action_repository` — shipmate never hardcodes an org. Either
+    owner/repo comes from `ctx["engine_repo"]`, which the step that runs this action
+    passes in from `job.workflow_repository` — shipmate never hardcodes an org. Either
     precondition missing, or an unreadable listing or file, degrades to a NOTICE
     rather than an error; the preconditions are checked before any API call,
     since without them no read could be interpreted anyway."""
@@ -1240,7 +1240,7 @@ def _fork_trigger_warnings(ctx):
                 "policy trusts, so a fork can reach them. shipmate's own `shipmate.yml` "
                 "uses this trigger safely because the job holding the App key — the "
                 "`summary` job inside the engine's reusable plan workflow — runs "
-                "no repository content at all. If this workflow checks out or acts "
+                "no *consumer* repository content. If this workflow checks out or acts "
                 "on the pull request's own code in a job binding a CREDENTIALED "
                 "environment — one holding the App key or cloud credentials — it "
                 "does not have that property. Remove the trigger or split those "
@@ -1455,10 +1455,9 @@ def _plan_run_id_finding(text, name):
     fills it in. A forward to the engine's reusable `apply.yml`/`apply-all.yml`
     is a LOAD-TIME rejection of the whole run: no jobs, no logs, only a
     workflow-validation error on the run itself — which is the hardest failure in
-    this system to diagnose from the outside. Only that much is claimed, and it
-    was MEASURED: `docs/releasing.md` establishes the load-time rejection for an
-    undeclared SECRET and says an undeclared ACTION input is silently ignored, so
-    the workflow-call case was checked rather than inferred — `conclusion:
+    this system to diagnose from the outside. Only that much is claimed, and the
+    workflow-call case was MEASURED rather than inferred from the action case
+    (where an undeclared input is silently ignored): `conclusion:
     startup_failure`, `jobs` reporting `total_count: 0`, no check runs on the
     commit, and `gh run view --log` answering that the log is not found.
 
@@ -2066,7 +2065,7 @@ def _config_table(ctx):
     the default branch, and a branch's file must never become a value a run uses.
 
     Reads through the contents API at `_contents_ref`, like the pin probe and for the
-    second reason that comment-ops has no checkout for `git show`. Structural checks
+    second reason that comment-ops has no consumer checkout for `git show`. Structural checks
     alone — `validate_structure`, not `validate` — because the rest need run context;
     CONFIG_VALID says so rather than letting a reader take the verdict for the whole set.
     """
@@ -2308,9 +2307,9 @@ def ctx_from_env():
         "app_permissions_checked": os.environ.get("SHIPMATE_APP_PERMISSIONS_CHECKED") == "true",
         "app_permission_error": os.environ.get("SHIPMATE_APP_PERMISSION_ERROR", ""),
         "head_sha": os.environ.get("SHIPMATE_HEAD_SHA", ""),
-        # github.action_repository: the owner/repo of the running action, i.e.
-        # the engine's own slug, resolved by GitHub at runtime. Empty when the
-        # action runs from a local path instead of a pinned slug.
+        # The engine's own slug, passed in by the calling step from
+        # `job.workflow_repository` -- never hardcoded, so the probe stays
+        # org-agnostic. Empty degrades to pin freshness not verified.
         "engine_repo": os.environ.get("SHIPMATE_ENGINE_REPO", ""),
         # A set, not one id: each cell's plan run comes from that cell's own
         # apply check, so one head's cells can come from several plan runs.

@@ -403,12 +403,13 @@ origin/<default-branch>:.github/shipmate.toml` and resolves each cell's identity
 and credential from what that returns. A pull request cannot change which role
 its own plan assumes, which region it authenticates against, or which workspace
 it plans; changing any of those takes a merge to the default branch. `origin` is
-the base repository on every path — no checkout in any workflow passes
-`repository:` — and a fork pull request is refused in `detect` before it plans.
-A job holding no checkout reads the same file over the contents API instead —
-comment-ops, resolving `[gate]` before it authorizes — with the same branch and
-the same refusal wording, so a consumer never gets two accounts of one problem
-depending on which job read it.
+the base repository on every path — the only checkouts passing `repository:` are
+the engine's self-checkouts of `ship-iac/shipmate` — and a fork pull request is
+refused in `detect` before it plans.
+A job that checks out no consumer content reads the same file over the contents
+API instead — comment-ops, resolving `[gate]` before it authorizes — with the
+same branch and the same refusal wording, so a consumer never gets two accounts
+of one problem depending on which job read it.
 
 **`env_order`, `explicit_envs` and `[gate]` come from the default branch too.**
 They are read from the same parsed mapping as the identity table, and a branch
@@ -962,9 +963,10 @@ says plainly when the set was empty. An environment that is in the repository's
 environments listing but whose own settings cannot be read becomes a note
 naming it, rather than being silently skipped the way a nonexistent
 environment is. The engine-pin probe reports only on pins of the engine's
-own repository, which it learns at runtime from the running action's
-`github.action_repository` (threaded in as `SHIPMATE_ENGINE_REPO`, never
-hardcoded — a consumer's other shared actions belong to whoever ships them);
+own repository, which the calling engine job passes in as
+`SHIPMATE_ENGINE_REPO` from `job.workflow_repository` on the step that runs the
+action (nothing is hardcoded — a
+consumer's other shared actions belong to whoever ships them);
 when either that or the commit under examination is unavailable it says pin
 freshness was not verified rather than falling back to a weaker read.
 
@@ -1002,8 +1004,8 @@ failed listing of the pull request's comments, on which the report is skipped
 for that run rather than posted as a second sticky comment. Those annotations
 land on the
 `issue_comment` workflow run that is executing `shipmate doctor` itself, at
-`github.sha` (this job does no checkout at all — it reads entirely through
-`gh api`/`gh run download -R` — so `github.sha` is the default
+`github.sha` (this job checks out no consumer content — it reads entirely
+through `gh api`/`gh run download -R` — so `github.sha` is the default
 branch's tip, not a checked-out commit), not on the PR head SHA whose check
 runs the harvest reads — so there is no self-harvest loop. `shipmate doctor`
 never affects `shipmate / gate`.
@@ -1188,14 +1190,14 @@ Opting in takes two things, and the setting alone is not enough:
 authorizes, and each apply path's detect resolves it again before it enforces —
 `scripts/gate-config`, `scripts/apply-detect` and `scripts/apply-all-detect`, all
 three reading `.github/shipmate.toml` on the **default branch** through the same
-`gate_ungated_envs`. The comment-ops job holds no checkout, so it reads the file
-through the contents API rather than `git show`; same file, same branch, same
-refusal wording. What keeps the three from disagreeing is not a shared spelling
-but a shared reader: the strict top-level key check refuses a misspelled setting
-outright, and `validate_env_name_list` refuses an entry that would match nothing,
-so there is no value a consumer can write that one reader honours and another
-ignores. A pull request cannot grant itself the exemption, because its own edit
-to the file is not read until it merges.
+`gate_ungated_envs`. The comment-ops job checks out no consumer content, so it
+reads the file through the contents API rather than `git show`; same file, same
+branch, same refusal wording. What keeps the three from disagreeing is not a
+shared spelling but a shared reader: the strict top-level key check refuses a
+misspelled setting outright, and `validate_env_name_list` refuses an entry that
+would match nothing, so there is no value a consumer can write that one reader
+honours and another ignores. A pull request cannot grant itself the exemption,
+because its own edit to the file is not read until it merges.
 `scripts/tests/test_engine_comment_ops_workflow.py` pins the whole `with:` block
 of the step that resolves it, so a second source cannot be threaded back in as an
 input without failing there.
@@ -1389,7 +1391,8 @@ Engine `plan.yml` is four jobs: `facts`, `detect`, `plan`, `summary`. `facts`
 is `actions/pr-facts`, the single producer of every pull-request fact the other
 three decide on. `detect` and `plan` are untrusted: they check out the pull
 request's own head and hold no App credential. `summary` is the one trusted job
-— `environment: shipmate-engine`, no checkout at all. Every App-authored
+— `environment: shipmate-engine`, and its only checkout is the engine itself at
+`job.workflow_sha`. Every App-authored
 surface listed above (apply checks, the gate, the sticky comments, drift
 issues) is created by a job bound to that fixed GitHub Environment
 (`docs/github-app.md` §Key-exposure boundary), each running at a ref that
@@ -1619,14 +1622,15 @@ trigger alone closes two paths a trigger check alone would not:
 
 ## Consumption
 
-- Consuming repositories and workflows pin every shipmate action by
+- Consuming repositories and workflows pin every shipmate reusable workflow by
   commit SHA, never by a tag or branch name (for example,
-  `uses: <owner>/shipmate/actions/state@<full-commit-sha>`, not `@v1` or
-  `@main`). This guarantees that a workflow's behavior cannot change
+  `uses: <owner>/shipmate/.github/workflows/plan.yml@<full-commit-sha>`, not
+  `@v1` or `@main`). This guarantees that a workflow's behavior cannot change
   without an explicit, reviewed bump of the pinned SHA in the consuming
   repository.
 - A pinned SHA may carry a trailing `# vX.Y.Z` comment naming the release
-  that SHA belongs to (`uses: <owner>/shipmate/actions/state@<sha> # v0.1.0`).
+  that SHA belongs to
+  (`uses: <owner>/shipmate/.github/workflows/plan.yml@<sha> # v0.1.0`).
   The comment is for human readers and for Dependabot's own bookkeeping; the ref
   that resolves is always the SHA. shipmate applies the same convention to the
   third-party actions it pins internally.
@@ -1638,13 +1642,13 @@ trigger alone closes two paths a trigger check alone would not:
   applies. Restricting who can push, and restricting pushes that touch
   `.github/workflows/**`, are the controls that act at push time; see
   `docs/hardening.md`.
-- The engine applies this same rule to itself: it references its own actions
-  internally by full commit SHA, because GitHub resolves a local `./actions/...`
-  reference against the *consuming* repo once it crosses the reusable-workflow
-  boundary. Maintaining those internal pins — and deciding which commits are
-  safe for a consumer to pin — is what the hand-run tooling in `dev/` is for;
-  `docs/releasing.md` is its runbook. None of it is referenced from `actions/`
-  or `.github/workflows/`, and it adds no action input.
+- The engine holds no pins of itself. Each job that runs an engine action checks the engine out
+  at `job.workflow_sha` — the commit the consumer's `uses:` resolved to — and runs its actions
+  from that checkout, so the consumer's one pin names the whole tree that runs. The ref falls
+  back to an all-zero SHA, so a missing context fails the checkout rather than fetching the
+  engine's default branch. The consumer surface is the seven reusable workflows; the composite
+  actions are engine-internal and expect that checkout at `.shipmate-engine/`.
+  `dev/repin_consumer.py` is the hand-run tool that moves a consumer's pins together.
 - **Upgrade path.** shipmate publishes a GitHub Release per release SHA. A
   consumer with Dependabot's `github-actions` ecosystem enabled therefore
   receives a pull request bumping its shipmate pins to the new release's SHA —
@@ -1677,6 +1681,10 @@ trigger alone closes two paths a trigger check alone would not:
   `sys.version_info` ahead of the import and refuses with the version it found
   and this clause. A `runs_on:` image older than that — `ubuntu-22.04` ships
   3.10 — fails at `detect`.
+- The engine reads `job.workflow_sha` for its own checkout, and GitHub documents that context
+  as unavailable on GitHub Enterprise Server; there every engine job fails at its engine
+  checkout. A runner too old to populate the `job` context fails the same way, with the
+  same all-zero ref.
 - Terramate and OpenTofu are not assumed to be on the image: the
   `setup` action installs the versions the engine release declares in its own
   root-level `VERSIONS` file, read at the commit the consumer pins. Moving to
@@ -2351,10 +2359,12 @@ TF_VAR fingerprint).
 per-run machine artifacts shipmate materializes in its working tree — the
 reviewed plan (`*.otplan`), the fingerprint (`fingerprint.txt`), the planned
 commit record (`planned-head.txt`), OpenTofu's working directory in each stack
-(`.terraform/`), and the flavor's state path when it has one (a remote backend materializes none — see State backend, above). The
-reason is not a safeguard: shipmate writes into the consumer's own checkout, none
-of those belong in a commit, and a `terramate run` of the consumer's own that
-omits `--no-recursive` refuses on them (`git-untracked` *does* fire there).
+(`.terraform/`), the engine checkout every job makes (`.shipmate-engine/`), and
+the flavor's state path when it has one (a remote backend materializes none —
+see State backend, above). The reason is not a safeguard: shipmate writes into
+the consumer's own checkout, none of those belong in a commit, and a
+`terramate run` of the consumer's own that omits `--no-recursive` refuses on
+them (`git-untracked` *does* fire there).
 
 `.terraform.lock.hcl` is the consumer's call, not shipmate's: committing it is
 OpenTofu's own recommendation for pinning provider versions and hashes, and a

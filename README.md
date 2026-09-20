@@ -50,7 +50,7 @@ and what it deliberately does not claim.
 | [`docs/concepts.md`](docs/concepts.md) | How it works: fan-out, checks, comment-ops, the env/tag model |
 | [`docs/hardening.md`](docs/hardening.md) | Who can make the engine act at all, and what none of it fixes |
 | [`docs/development.md`](docs/development.md) | Repo layout, toolchain, testing model (maintainers) |
-| [`docs/releasing.md`](docs/releasing.md) | Cutting a release and re-pinning internally (maintainers) |
+| [`docs/releasing.md`](docs/releasing.md) | Cutting a release: manifest load, publishing, smoking the live path (maintainers) |
 | [`CONTRACT.md`](CONTRACT.md) | The spec: check names, env model, tag grammar, pinning |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | Contributing |
 
