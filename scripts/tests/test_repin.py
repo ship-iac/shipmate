@@ -379,9 +379,9 @@ def test_git_error_on_origin_main_falls_through_to_main(monkeypatch):
     It does not catch the `== 1` -> `!= 0` collapse: under that mutation returncode 128 on the
     first base is itself misread as "not an ancestor" and the function still returns True, so
     this test passes for the wrong reason.
-    test_git_error_on_every_base_is_not_reported_unreachable discriminates that one, every base
+    test_git_error_on_every_base_reports_cannot_judge discriminates that one, every base
     erroring so the collapsed version returns True on the first base instead of the correct
-    False."""
+    None."""
 
     class _R:
         def __init__(self, returncode):
@@ -399,16 +399,46 @@ def test_git_error_on_origin_main_falls_through_to_main(monkeypatch):
     assert rc.unreachable_from_main("0" * 40) is True
 
 
-def test_git_error_on_every_base_is_not_reported_unreachable(monkeypatch):
-    # Every base ref erroring out, with no mainline ref resolving at all, is "cannot judge" and
-    # not "unreachable". It must return False, never misreport a git failure as a positive
-    # "not an ancestor" finding -- which here would refuse every pin in such a clone.
+def test_git_error_on_every_base_reports_cannot_judge(monkeypatch):
+    # Every base ref erroring out, with no mainline ref resolving at all, is "cannot judge":
+    # None, distinct from the True that means a positive "not an ancestor" finding. Both are
+    # refusals at the caller, but they name different causes and different remedies.
     class _R:
         def __init__(self, returncode):
             self.returncode = returncode
 
     monkeypatch.setattr(pinrefs, "git", lambda *a: _R(128))
-    assert rc.unreachable_from_main("0" * 40) is False
+    assert rc.unreachable_from_main("0" * 40) is None
+
+
+def test_main_refuses_when_no_mainline_ref_resolves(tmp_path, capsys, monkeypatch):
+    """No mainline ref resolving is a refusal, not a pass: the tool would otherwise rewrite
+    every pin in the consumer repo to a commit it could not prove is on main.
+
+    Mutation: return False instead of None from ``unreachable_from_main``'s fall-through -- the
+    rewrite then succeeds (exit 0) and the file carries the new SHA.
+    """
+    real_git = pinrefs.git
+
+    class _R:
+        returncode = 128
+
+    def fake_git(*args):
+        # Only the mainline probe fails; --sha still resolves against this clone's history.
+        return _R() if args[0] == "merge-base" else real_git(*args)
+
+    root = _repo(
+        tmp_path,
+        {".github/workflows/plan.yml": f"      - uses: ship-iac/shipmate/actions/setup@{OLD}\n"},
+    )
+    monkeypatch.setattr(pinrefs, "git", fake_git)
+
+    code = rc.main(["--repo", str(root), "--sha", REAL])
+
+    out = capsys.readouterr().out
+    assert code == 1
+    assert "no mainline ref resolved here" in out
+    assert OLD in (root / ".github/workflows/plan.yml").read_text(encoding="utf-8")
 
 
 def test_main_refuses_a_target_that_is_not_an_ancestor_of_main(tmp_path, capsys, monkeypatch):

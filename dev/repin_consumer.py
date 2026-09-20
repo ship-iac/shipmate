@@ -11,8 +11,10 @@ Two rules from docs/releasing.md are enforced here:
   and secrets across a release, so a repository holding two engine versions
   against one contract is a load-time or run-time failure, not a partial
   upgrade. There is deliberately no stale-only mode.
-* A target must be on main. A commit reachable only from a branch stops existing
-  when GitHub garbage-collects a force-push, and the pin no longer resolves.
+* A target must be provably on main. A commit reachable only from a branch stops
+  existing when GitHub garbage-collects a force-push, and the pin no longer
+  resolves. A clone where no mainline ref resolves cannot prove it either way,
+  and is refused too.
 
 Exit: 0 wrote, 1 refused, 3 bad target or repo path.
 """
@@ -27,11 +29,13 @@ import pinrefs
 
 
 def unreachable_from_main(sha):
-    """True when ``sha`` is not an ancestor of the mainline.
+    """True when ``sha`` is not an ancestor of the mainline, False when it is, and
+    None when no mainline ref resolved here (git failed on every base).
 
-    A git failure on every base means no mainline ref resolves here, which is
-    "cannot judge" and not "unreachable" -- reporting it as unreachable would
-    refuse every pin in a clone without an ``origin/main``.
+    None is a refusal, not a pass. This is the only check standing between the tool
+    and rewriting every engine pin in a consumer repo, so a clone that cannot judge
+    the target must not rewrite against it -- the target may be branch-only and
+    garbage-collectable. The caller tells the two refusals apart.
     """
     for base in ("origin/main", "main"):
         r = pinrefs.git("merge-base", "--is-ancestor", sha, base)
@@ -39,7 +43,7 @@ def unreachable_from_main(sha):
             return False
         if r.returncode == 1:
             return True
-    return False
+    return None
 
 
 # A consumer ref is any path under the engine slug, pinned by SHA, optionally wrapped in a quote
@@ -148,7 +152,14 @@ def main(argv=None):
     if new_sha is None:
         return 3
 
-    if unreachable_from_main(new_sha):
+    verdict = unreachable_from_main(new_sha)
+    if verdict is None:
+        print(
+            f"refusing to pin {new_sha[:12]}: no mainline ref resolved here -- neither "
+            "origin/main nor main. Fetch origin, or run from a clone that has main."
+        )
+        return 1
+    if verdict:
         print(
             f"refusing to pin {new_sha[:12]}: it is not an ancestor of main (fetch origin "
             "first) -- a pin to it"
