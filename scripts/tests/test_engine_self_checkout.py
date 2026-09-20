@@ -113,22 +113,26 @@ def test_every_job_running_a_local_engine_action_checks_the_engine_out_first():
     assert covered == 25, f"{covered} jobs run a local engine action"
 
 
-def test_a_consumer_checkout_precedes_the_engine_checkout():
-    """The workspace-root checkout deletes what is already there when the directory is not that
-    repository, so an engine checkout placed first is wiped. Mutation: swap the two checkouts
-    in any wave job."""
+def test_the_engine_checkout_is_the_last_checkout_in_its_job():
+    """A workspace-root checkout deletes what is already there when the directory is not that
+    repository, so any consumer checkout running after the engine checkout wipes
+    `.shipmate-engine`. The rule is positional, not a two-checkout special case: a job with
+    three checkouts is where the hazard is easiest to hit. Mutation: move the engine checkout
+    above a consumer checkout in any wave job."""
     for name, doc in _docs():
         for job_name, job in (doc.get("jobs") or {}).items():
             steps = job.get("steps") or []
-            checkouts = [
-                (i, "repository" in (s.get("with") or {}))
+            engine = [
+                i
                 for i, s in enumerate(steps)
-                if _uses(s).split("@")[0] == CHECKOUT
+                if _uses(s).split("@")[0] == CHECKOUT and "repository" in (s.get("with") or {})
             ]
-            if len(checkouts) == 2:
-                assert [is_engine for _, is_engine in checkouts] == [False, True], (
-                    f"{name}:{job_name}: engine checkout must follow the consumer checkout"
-                )
+            if not engine:
+                continue
+            last = max(i for i, s in enumerate(steps) if _uses(s).split("@")[0] == CHECKOUT)
+            assert engine[-1] == last, (
+                f"{name}:{job_name}: the engine checkout must be the job's last checkout"
+            )
 
 
 def test_nested_reusable_calls_are_local():
