@@ -11,7 +11,7 @@ section below names the SHA the release tags.
 The version line stays `v0.x` while action inputs, check names, and the comment
 grammar are declared unstable in `README.md`.
 
-## [Unreleased]
+## [0.31.0] — 2026-09-20
 
 **Breaking: the approvers team and the ungated-environment list move into
 `.github/shipmate.toml`.** `SHIPMATE_APPROVERS_TEAM` becomes
