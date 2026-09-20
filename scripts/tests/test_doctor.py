@@ -1,7 +1,6 @@
 import io
 import json
 import os
-import subprocess
 import sys
 
 import pytest
@@ -50,9 +49,9 @@ def _ctx(**over):
         "check_ids_path": "check-ids.tsv",
         "harvest_failed": False,
         "harvest_pending": False,
-        # The engine's own owner/repo, discovered at runtime from the engine
-        # checkout's origin -- never hardcoded, so the probe stays org-agnostic
-        # while only ever reporting on shipmate's own pins.
+        # The engine's own owner/repo, passed in by the calling job from
+        # `job.workflow_repository` -- never hardcoded, so the probe stays
+        # org-agnostic while only ever reporting on shipmate's own pins.
         "engine_repo": _ENGINE_REPO,
     }
     ctx.update(over)
@@ -1267,8 +1266,8 @@ def test_pin_probe_ignores_another_orgs_shared_action(monkeypatch):
 
 
 def test_pin_probe_without_the_engine_repo_degrades_to_a_note(monkeypatch):
-    """The slug is empty when no origin can be derived from the engine checkout the action
-    runs from. Without it the probe cannot tell shipmate's pins from anyone else's, so it
+    """The slug is empty when the calling job supplied no `SHIPMATE_ENGINE_REPO`. Without it
+    the probe cannot tell shipmate's pins from anyone else's, so it
     says pin freshness was not verified instead of falling back to warning about every
     cross-repo pin it can see."""
 
@@ -1296,68 +1295,6 @@ def test_ctx_from_env_reads_the_engine_repo_and_the_harvest_flags(monkeypatch, t
     ctx = doctor.ctx_from_env()
     assert ctx["engine_repo"] == ""
     assert ctx["harvest_pending"] is False
-
-
-@pytest.mark.parametrize(
-    ("url", "slug"),
-    [
-        ("https://github.com/ship-iac/shipmate", "ship-iac/shipmate"),
-        ("https://github.com/ship-iac/shipmate.git", "ship-iac/shipmate"),
-        ("git@github.com:ship-iac/shipmate.git", "ship-iac/shipmate"),
-        ("git@github.com:ship-iac/shipmate", "ship-iac/shipmate"),
-        ("https://github.com/ship-iac", ""),
-        ("not a remote url", ""),
-        ("", ""),
-    ],
-)
-def test_slug_from_remote_url_reads_both_github_url_forms(url, slug):
-    """Mutation: drop either alternative from the pattern, or stop stripping `.git`; the
-    garbage cases redden a pattern loosened into matching anything."""
-    assert doctor._slug_from_remote_url(url) == slug
-
-
-def test_ctx_from_env_derives_the_engine_repo_from_the_action_checkouts_origin(
-    monkeypatch, tmp_path
-):
-    """`github.action_repository` is empty for a local `./` action, so the engine's slug comes
-    from the origin of the checkout the action runs from. Mutation: return "" from
-    `_engine_repo_from_action_path`, or point GITHUB_ACTION_PATH outside the repository."""
-    repo = tmp_path / "engine"
-    (repo / "actions" / "summary").mkdir(parents=True)
-    subprocess.run(["git", "init", "-q", str(repo)], check=True)
-    subprocess.run(
-        ["git", "-C", str(repo), "remote", "add", "origin", "https://github.com/acme/engine.git"],
-        check=True,
-    )
-    monkeypatch.setenv("GITHUB_REPOSITORY", _REPO)
-    monkeypatch.setenv("SHIPMATE_APP_ID", _APP_ID)
-    monkeypatch.setenv("SHIPMATE_DEFAULT_BRANCH", _BRANCH)
-    monkeypatch.setenv("SHIPMATE_CELLS_DIR", str(tmp_path / "cells"))
-    monkeypatch.delenv("SHIPMATE_ENGINE_REPO", raising=False)
-    monkeypatch.setenv("GITHUB_ACTION_PATH", str(repo / "actions" / "summary"))
-    assert doctor.ctx_from_env()["engine_repo"] == _ENGINE_REPO
-
-    # An explicit value still wins over the derivation.
-    monkeypatch.setenv("SHIPMATE_ENGINE_REPO", "other/override")
-    assert doctor.ctx_from_env()["engine_repo"] == "other/override"
-
-
-def test_ctx_from_env_yields_no_engine_repo_without_a_derivable_origin(monkeypatch, tmp_path):
-    """Every failure -- no action path, no repository, no origin, unparseable URL -- leaves the
-    slug empty, so the pin probe's "not verified" NOTICE stands. Mutation: raise instead of
-    returning "" when git fails."""
-    monkeypatch.setenv("GITHUB_REPOSITORY", _REPO)
-    monkeypatch.setenv("SHIPMATE_APP_ID", _APP_ID)
-    monkeypatch.setenv("SHIPMATE_DEFAULT_BRANCH", _BRANCH)
-    monkeypatch.setenv("SHIPMATE_CELLS_DIR", str(tmp_path / "cells"))
-    monkeypatch.delenv("SHIPMATE_ENGINE_REPO", raising=False)
-    monkeypatch.delenv("GITHUB_ACTION_PATH", raising=False)
-    assert doctor.ctx_from_env()["engine_repo"] == ""
-    # A directory that is not a git repository, and one that does not exist at all.
-    monkeypatch.setenv("GITHUB_ACTION_PATH", str(tmp_path))
-    assert doctor.ctx_from_env()["engine_repo"] == ""
-    monkeypatch.setenv("GITHUB_ACTION_PATH", str(tmp_path / "absent"))
-    assert doctor.ctx_from_env()["engine_repo"] == ""
 
 
 def test_ctx_from_env_marks_only_report_mode_as_the_route_that_can_probe_a_team(

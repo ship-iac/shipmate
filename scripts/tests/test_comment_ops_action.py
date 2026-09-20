@@ -73,8 +73,8 @@ def test_bot_authored_comments_are_ignored():
     assert "steps.guard.outputs.skip != 'true'" in _ACTION
 
 
-#: The one SHIPMATE_* name doctor reads that no action supplies: it is an operator override for
-#: a value doctor otherwise derives itself, and supplying it empty would defeat the derivation
+#: The one SHIPMATE_* name doctor reads that no action supplies: the calling workflow job sets
+#: it from `job.workflow_repository`, a context no composite action can read
 #: (test_neither_doctor_step_passes_the_engine_repo).
 _NOT_SUPPLIED = {"SHIPMATE_ENGINE_REPO"}
 
@@ -104,10 +104,11 @@ def test_summary_action_supplies_every_env_var_doctor_requires_in_annotate_mode(
 
 
 def test_neither_doctor_step_passes_the_engine_repo():
-    """Every engine action now runs from `./.shipmate-engine/`, and `github.action_repository`
-    is empty for a local action, so passing it fed doctor an empty slug and degraded the pin
-    probe to "not verified" on both paths. doctor derives the slug from that checkout's origin
-    instead; an action re-introducing the variable would override the derivation with "".
+    """Every engine action now runs from `./.shipmate-engine/`, where `github.action_repository`
+    is empty, so passing it fed doctor an empty slug and degraded the pin probe to "not verified"
+    on both paths. The calling job supplies the slug from `job.workflow_repository` instead
+    (test_engine_self_checkout.py::test_the_doctor_jobs_pass_the_engine_repository); an action
+    re-introducing the variable would shadow it.
     Mutation: add `SHIPMATE_ENGINE_REPO:` back to either action."""
     assert "SHIPMATE_ENGINE_REPO" not in _ACTION
     assert "SHIPMATE_ENGINE_REPO" not in _SUMMARY_ACTION

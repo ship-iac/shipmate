@@ -963,9 +963,9 @@ says plainly when the set was empty. An environment that is in the repository's
 environments listing but whose own settings cannot be read becomes a note
 naming it, rather than being silently skipped the way a nonexistent
 environment is. The engine-pin probe reports only on pins of the engine's
-own repository, which it learns at runtime from the origin of the engine
-checkout the action runs from (`SHIPMATE_ENGINE_REPO` overrides it, and nothing
-is hardcoded — a consumer's other shared actions belong to whoever ships them);
+own repository, which the calling engine job passes in as
+`SHIPMATE_ENGINE_REPO` from `job.workflow_repository` (nothing is hardcoded — a
+consumer's other shared actions belong to whoever ships them);
 when either that or the commit under examination is unavailable it says pin
 freshness was not verified rather than falling back to a weaker read.
 
@@ -1621,14 +1621,15 @@ trigger alone closes two paths a trigger check alone would not:
 
 ## Consumption
 
-- Consuming repositories and workflows pin every shipmate action by
+- Consuming repositories and workflows pin every shipmate reusable workflow by
   commit SHA, never by a tag or branch name (for example,
-  `uses: <owner>/shipmate/actions/state@<full-commit-sha>`, not `@v1` or
-  `@main`). This guarantees that a workflow's behavior cannot change
+  `uses: <owner>/shipmate/.github/workflows/plan.yml@<full-commit-sha>`, not
+  `@v1` or `@main`). This guarantees that a workflow's behavior cannot change
   without an explicit, reviewed bump of the pinned SHA in the consuming
   repository.
 - A pinned SHA may carry a trailing `# vX.Y.Z` comment naming the release
-  that SHA belongs to (`uses: <owner>/shipmate/actions/state@<sha> # v0.1.0`).
+  that SHA belongs to
+  (`uses: <owner>/shipmate/.github/workflows/plan.yml@<sha> # v0.1.0`).
   The comment is for human readers and for Dependabot's own bookkeeping; the ref
   that resolves is always the SHA. shipmate applies the same convention to the
   third-party actions it pins internally.

@@ -135,6 +135,32 @@ def test_the_engine_checkout_is_the_last_checkout_in_its_job():
             )
 
 
+#: The jobs that run a local engine action calling `scripts/doctor`, and so must hand it the
+#: engine's own slug. Hand-written whole-set, never derived from the workflows.
+DOCTOR_JOBS = {"comment-ops.yml:ops", "plan.yml:summary"}
+DOCTOR_ACTIONS = {local_action("comment-ops"), local_action("summary")}
+ENGINE_REPO_ENV = {"SHIPMATE_ENGINE_REPO": "${{ job.workflow_repository }}"}
+
+
+def test_the_doctor_jobs_pass_the_engine_repository():
+    """`scripts/doctor`'s pin probe reads `SHIPMATE_ENGINE_REPO`; a composite action cannot read
+    the `job` context, so the job supplies it. Both sets are compared whole, so a job that gains
+    a doctor action without the env entry, or keeps the entry after losing the action, reddens.
+    Mutation: drop the `env:` block from plan.yml's `summary` job."""
+    runs_doctor, carries_env = set(), set()
+    for name, doc in _docs():
+        if name == MANIFEST_LOAD:
+            continue
+        for job_name, job in (doc.get("jobs") or {}).items():
+            where = f"{name}:{job_name}"
+            if any(_uses(s) in DOCTOR_ACTIONS for s in job.get("steps") or []):
+                runs_doctor.add(where)
+            if (job.get("env") or {}) == ENGINE_REPO_ENV:
+                carries_env.add(where)
+    assert runs_doctor == DOCTOR_JOBS
+    assert carries_env == DOCTOR_JOBS
+
+
 def test_nested_reusable_calls_are_local():
     """Mutation: `uses: ship-iac/shipmate/.github/workflows/apply-env-level.yml@main`."""
     for name, doc in _docs():
