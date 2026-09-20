@@ -363,9 +363,8 @@ def load_check_maps(path, app_id):
     or corruption.
 
     A MISSING file is silent no-data: the scan step degrades a failed fetch to
-    an empty file, so absence means an older pinned apply-summary with no scan
-    step at all (the two-step pin window in docs/releasing.md) — expected, not
-    an error.
+    an empty file, so absence means a consumer pinned to an engine commit whose
+    apply-summary predates the scan step — expected, not an error.
 
     Every other failure degrades to no data WITH a warning, never propagates:
     for comment-ops the comment IS the feedback channel, so losing this one

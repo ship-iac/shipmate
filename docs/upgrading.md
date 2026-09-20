@@ -36,6 +36,21 @@ $ gh api repos/<owner>/shipmate/commits/v0.14.2 --jq .sha
 Locally, `git rev-parse v0.14.2^{commit}` — the `^{commit}` is the same
 dereference.
 
+## Gitignore the engine checkout
+
+Every engine job checks this repository out into `.shipmate-engine/` inside your
+working tree. Add it to your `.gitignore` in the same change as the re-pin:
+
+```gitignore
+.shipmate-engine/
+```
+
+Left untracked, a `terramate run` of your own that omits `--no-recursive`
+refuses on it (`git-untracked`). It joins the per-run machine artifacts shipmate
+already materializes — `*.otplan`, `fingerprint.txt`, `planned-head.txt`,
+`.terraform/`, and the flavor's state path when it has one.
+[`../CONTRACT.md`](../CONTRACT.md) §Consumer gitignore requirement is the rule.
+
 ## Dependabot
 
 shipmate publishes a GitHub Release per release SHA, so a consumer with

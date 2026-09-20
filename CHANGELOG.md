@@ -43,8 +43,12 @@ requirement.
   back to an all-zero SHA, so a runner without that context fails the checkout
   instead of fetching the engine's default branch. The supported consumer
   surface is the seven reusable workflows; the composite actions are
-  engine-internal, and a consumer `uses:` pointing at one now fails with
-  `Can't find 'action.yml'`.
+  engine-internal and unsupported as a consumer entry point, and `apply-cell`,
+  `plan-cell` and `drift-cell` now fail outright where they reach
+  `./.shipmate-engine/actions/state`. A consumer must gitignore
+  `.shipmate-engine/`, the directory every engine job now writes into its
+  checkout, or its own recursive `terramate run` refuses on untracked files
+  (`docs/upgrading.md` §Gitignore the engine checkout).
   The internal pin cascade, `internal-pins.yml`, `dev/pin_status.py` and
   `dev/repin_internal.py` are gone.
 - **Three readers, one source.** `actions/comment-ops` and both apply paths'

@@ -1455,10 +1455,9 @@ def _plan_run_id_finding(text, name):
     fills it in. A forward to the engine's reusable `apply.yml`/`apply-all.yml`
     is a LOAD-TIME rejection of the whole run: no jobs, no logs, only a
     workflow-validation error on the run itself — which is the hardest failure in
-    this system to diagnose from the outside. Only that much is claimed, and it
-    was MEASURED: `docs/releasing.md` establishes the load-time rejection for an
-    undeclared SECRET and says an undeclared ACTION input is silently ignored, so
-    the workflow-call case was checked rather than inferred — `conclusion:
+    this system to diagnose from the outside. Only that much is claimed, and the
+    workflow-call case was MEASURED rather than inferred from the action case
+    (where an undeclared input is silently ignored): `conclusion:
     startup_failure`, `jobs` reporting `total_count: 0`, no check runs on the
     commit, and `gh run view --log` answering that the log is not found.
 
