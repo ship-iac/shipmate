@@ -13,6 +13,8 @@ grammar are declared unstable in `README.md`.
 
 ## [0.31.0] — 2026-09-20
 
+Tags `4172108`.
+
 **Breaking: the approvers team and the ungated-environment list move into
 `.github/shipmate.toml`.** `SHIPMATE_APPROVERS_TEAM` becomes
 `gate.approvers_team` and `SHIPMATE_UNGATED_ENVS` becomes `gate.ungated_envs`,
