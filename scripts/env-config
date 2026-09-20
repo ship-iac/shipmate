@@ -78,8 +78,8 @@ def parse_table(text):
     """The table parsed from `text`, or `SystemExit`.
 
     Shared by every reader: `read_table` below reads the file with `git show`, while
-    `contents_text` reads the same bytes through the contents API for the jobs that have
-    no checkout. The interpreter check runs ahead of the import, because a module-level
+    `contents_text` reads the same bytes through the contents API for the jobs that check
+    out no consumer content. The interpreter check runs ahead of the import, because a module-level
     `import tomllib` would raise `ModuleNotFoundError` before any caller could report the
     real cause -- an older runner image than CONTRACT.md requires.
 
@@ -128,10 +128,10 @@ def gh_json(path, run=None):
 def contents_text(path, fetch=None):
     """One file's decoded text from the contents API, or None when it cannot be read.
 
-    The read for a job with no checkout, which is every job that decides something before a
-    cell runs: `doctor`'s probes and comment-ops' gate resolve. Neither has a working tree
-    for `git show`, and an engine job holding the GitHub App key executes no repository
-    content on purpose.
+    The read for a job that checks out no consumer content, which is every job that decides
+    something before a cell runs: `doctor`'s probes and comment-ops' gate resolve. Neither has
+    a consumer working tree for `git show`, and an engine job holding the GitHub App key
+    executes no consumer repository content on purpose.
 
     Anything that is not a base64 blob is UNREADABLE, not empty: a >1 MB file answers with
     `encoding: "none"` and empty `content`, which would otherwise decode to a readable
@@ -155,7 +155,7 @@ def contents_text(path, fetch=None):
 
 
 def read_table_at_default_branch(run=None):
-    """The table from the default branch, read without a checkout. Every failure refuses.
+    """The table from the default branch, read without a consumer checkout. Every failure refuses.
 
     The twin of `read_table`: same file, same branch, same refusal wording, because a
     consumer must not get two accounts of one problem depending on which job read it.

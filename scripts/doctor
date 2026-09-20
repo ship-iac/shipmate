@@ -1240,7 +1240,7 @@ def _fork_trigger_warnings(ctx):
                 "policy trusts, so a fork can reach them. shipmate's own `shipmate.yml` "
                 "uses this trigger safely because the job holding the App key — the "
                 "`summary` job inside the engine's reusable plan workflow — runs "
-                "no repository content at all. If this workflow checks out or acts "
+                "no *consumer* repository content. If this workflow checks out or acts "
                 "on the pull request's own code in a job binding a CREDENTIALED "
                 "environment — one holding the App key or cloud credentials — it "
                 "does not have that property. Remove the trigger or split those "
@@ -2066,7 +2066,7 @@ def _config_table(ctx):
     the default branch, and a branch's file must never become a value a run uses.
 
     Reads through the contents API at `_contents_ref`, like the pin probe and for the
-    second reason that comment-ops has no checkout for `git show`. Structural checks
+    second reason that comment-ops has no consumer checkout for `git show`. Structural checks
     alone — `validate_structure`, not `validate` — because the rest need run context;
     CONFIG_VALID says so rather than letting a reader take the verdict for the whole set.
     """

@@ -127,9 +127,9 @@ jobs:
           state-path: ${{ inputs.state_suffix != '' && format('{0}/{1}', matrix.stack, inputs.state_suffix) || '' }}
           plan-passphrase: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
 
-  # The only job here that holds the App key. It checks out nothing and runs no repository
-  # content, which is what makes `pull_request_target` safe for this file. All three trust
-  # decisions are on its own `if:`, reading the one producer above.
+  # The only job here that holds the App key. Its only checkout is the engine itself, so it
+  # runs no consumer repository content, which is what makes `pull_request_target` safe for
+  # this file. All three trust decisions are on its own `if:`, reading the one producer above.
   summary:
     needs: [facts, detect, plan]
     # The fork clause yields to no trigger; it alone guards App-key exposure over fork-authored

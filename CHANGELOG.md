@@ -41,12 +41,16 @@ requirement.
   `actions/checkout` step is added to each of those jobs; `actions/checkout` is
   GitHub-owned, so an `allowed_actions` list needs no new pattern. The ref falls
   back to an all-zero SHA, so a runner without that context fails the checkout
-  instead of fetching the engine's default branch. The internal pin cascade,
-  `internal-pins.yml`, `dev/pin_status.py` and `dev/repin_internal.py` are gone.
+  instead of fetching the engine's default branch. The supported consumer
+  surface is the seven reusable workflows; the composite actions are
+  engine-internal, and a consumer `uses:` pointing at one now fails with
+  `Can't find 'action.yml'`.
+  The internal pin cascade, `internal-pins.yml`, `dev/pin_status.py` and
+  `dev/repin_internal.py` are gone.
 - **Three readers, one source.** `actions/comment-ops` and both apply paths'
   detect each resolve `gate.ungated_envs` from the default branch's file. The
-  comment-ops job holds no checkout, so it reads through the contents API — same
-  file, same branch, same refusal wording as `git show`.
+  comment-ops job checks out no consumer content, so it reads through the
+  contents API — same file, same branch, same refusal wording as `git show`.
 - **An unresolvable gate table refuses the comment.** `shipmate apply` and
   `shipmate unlock` now read `.github/shipmate.toml` from the default branch
   before they authorize, so a file that is missing there, does not parse or does

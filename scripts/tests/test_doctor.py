@@ -2285,8 +2285,8 @@ def test_quoted_event_name_comparison_is_silent(monkeypatch):
 
 def test_the_consumer_workflow_file_is_not_warned_about(monkeypatch):
     # `shipmate.yml` declaring `pull_request_target` IS the shape the engine ships: the job
-    # holding the App key is the engine plan workflow's `summary` job, which checks out
-    # nothing. Warning about it trains readers to ignore the dangerous labeler workflow.
+    # holding the App key is the engine plan workflow's `summary` job, which checks out no
+    # consumer content. Warning about it trains readers to ignore the dangerous labeler workflow.
     responses = _fork_responses(
         {"shipmate.yml": "on:\n  pull_request_target:\n    types: [opened]\n"}
     )

@@ -406,10 +406,10 @@ it plans; changing any of those takes a merge to the default branch. `origin` is
 the base repository on every path — the only checkouts passing `repository:` are
 the engine's self-checkouts of `ship-iac/shipmate` — and a fork pull request is
 refused in `detect` before it plans.
-A job holding no checkout reads the same file over the contents API instead —
-comment-ops, resolving `[gate]` before it authorizes — with the same branch and
-the same refusal wording, so a consumer never gets two accounts of one problem
-depending on which job read it.
+A job that checks out no consumer content reads the same file over the contents
+API instead — comment-ops, resolving `[gate]` before it authorizes — with the
+same branch and the same refusal wording, so a consumer never gets two accounts
+of one problem depending on which job read it.
 
 **`env_order`, `explicit_envs` and `[gate]` come from the default branch too.**
 They are read from the same parsed mapping as the identity table, and a branch
@@ -1004,8 +1004,8 @@ failed listing of the pull request's comments, on which the report is skipped
 for that run rather than posted as a second sticky comment. Those annotations
 land on the
 `issue_comment` workflow run that is executing `shipmate doctor` itself, at
-`github.sha` (this job does no checkout at all — it reads entirely through
-`gh api`/`gh run download -R` — so `github.sha` is the default
+`github.sha` (this job checks out no consumer content — it reads entirely
+through `gh api`/`gh run download -R` — so `github.sha` is the default
 branch's tip, not a checked-out commit), not on the PR head SHA whose check
 runs the harvest reads — so there is no self-harvest loop. `shipmate doctor`
 never affects `shipmate / gate`.
@@ -1190,14 +1190,14 @@ Opting in takes two things, and the setting alone is not enough:
 authorizes, and each apply path's detect resolves it again before it enforces —
 `scripts/gate-config`, `scripts/apply-detect` and `scripts/apply-all-detect`, all
 three reading `.github/shipmate.toml` on the **default branch** through the same
-`gate_ungated_envs`. The comment-ops job holds no checkout, so it reads the file
-through the contents API rather than `git show`; same file, same branch, same
-refusal wording. What keeps the three from disagreeing is not a shared spelling
-but a shared reader: the strict top-level key check refuses a misspelled setting
-outright, and `validate_env_name_list` refuses an entry that would match nothing,
-so there is no value a consumer can write that one reader honours and another
-ignores. A pull request cannot grant itself the exemption, because its own edit
-to the file is not read until it merges.
+`gate_ungated_envs`. The comment-ops job checks out no consumer content, so it
+reads the file through the contents API rather than `git show`; same file, same
+branch, same refusal wording. What keeps the three from disagreeing is not a
+shared spelling but a shared reader: the strict top-level key check refuses a
+misspelled setting outright, and `validate_env_name_list` refuses an entry that
+would match nothing, so there is no value a consumer can write that one reader
+honours and another ignores. A pull request cannot grant itself the exemption,
+because its own edit to the file is not read until it merges.
 `scripts/tests/test_engine_comment_ops_workflow.py` pins the whole `with:` block
 of the step that resolves it, so a second source cannot be threaded back in as an
 input without failing there.
@@ -1683,7 +1683,8 @@ trigger alone closes two paths a trigger check alone would not:
   3.10 — fails at `detect`.
 - The engine reads `job.workflow_sha` for its own checkout, and GitHub documents that context
   as unavailable on GitHub Enterprise Server; there every engine job fails at its engine
-  checkout.
+  checkout. A runner too old to populate the `job` context fails the same way, with the
+  same all-zero ref.
 - Terramate and OpenTofu are not assumed to be on the image: the
   `setup` action installs the versions the engine release declares in its own
   root-level `VERSIONS` file, read at the commit the consumer pins. Moving to
@@ -2358,10 +2359,12 @@ TF_VAR fingerprint).
 per-run machine artifacts shipmate materializes in its working tree — the
 reviewed plan (`*.otplan`), the fingerprint (`fingerprint.txt`), the planned
 commit record (`planned-head.txt`), OpenTofu's working directory in each stack
-(`.terraform/`), and the flavor's state path when it has one (a remote backend materializes none — see State backend, above). The
-reason is not a safeguard: shipmate writes into the consumer's own checkout, none
-of those belong in a commit, and a `terramate run` of the consumer's own that
-omits `--no-recursive` refuses on them (`git-untracked` *does* fire there).
+(`.terraform/`), the engine checkout every job makes (`.shipmate-engine/`), and
+the flavor's state path when it has one (a remote backend materializes none —
+see State backend, above). The reason is not a safeguard: shipmate writes into
+the consumer's own checkout, none of those belong in a commit, and a
+`terramate run` of the consumer's own that omits `--no-recursive` refuses on
+them (`git-untracked` *does* fire there).
 
 `.terraform.lock.hcl` is the consumer's call, not shipmate's: committing it is
 OpenTofu's own recommendation for pinning provider versions and hashes, and a
