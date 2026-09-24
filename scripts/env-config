@@ -3,7 +3,7 @@
 
 Branch content cannot rewrite these values because they are not read from the
 branch: the table is `git show`n out of `origin/<default>`. `origin` is the base
-repository on every path -- no engine checkout passes `repository:` -- and a fork pull
+repository on every path -- no checkout passes `repository:` -- and a fork pull
 request is refused before it plans.
 """
 

@@ -702,8 +702,8 @@ Settings → Actions → General:
   The cost is that this list is a second place pins live: a third-party action
   the engine adds has to be added here too, in every repository, or the next run
   stops at "Set up job" — loudly, naming the action it refused. Engine actions
-  are `$/` references, covered by the `<owner>/shipmate/*@*` entry the reusable
-  workflows already need.
+  are `$/` references, which pass with the `<owner>/shipmate/*@*` entry the
+  reusable workflows already need, measured.
 
   This is supply-chain hygiene; it does not constrain `run:` steps.
 - **Require actions to be pinned to a full-length commit SHA.** The platform

@@ -3,9 +3,9 @@
 It runs on `pull_request_target`, through the consumer's plan workflow, holding the App key. Two
 things keep it safe: its `if:`, and the fact that it executes no consumer repository content. The
 job now lives in `plan.yml` alongside two jobs that check out and execute pull-request content --
-`detect` and `plan` -- so the job-id list is pinned here too. The one checkout it does run is
-the engine at the workflow's own commit; a checkout without `repository:` here would take the
-pull request head under `pull_request_target`, which the whole-block comparison below refuses.
+`detect` and `plan` -- so the job-id list is pinned here too. The job checks out nothing; any
+checkout step, which under `pull_request_target` would take the pull request head, changes the
+step list the whole-block comparison below pins.
 Every assertion below is on a parsed value -- `yaml.safe_load`,
 then a whole `if:`/`environment:`/`with:` field -- rather than a substring of the raw file text.
 The substring form was proven vacuous: four simultaneous mutations of the summary job (all three
