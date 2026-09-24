@@ -32,6 +32,13 @@ does with that wiring.
   environments, variables or rulesets.
 - **Remote state you control, or a local backend materialized in the working
   tree.** AWS S3 is what [`aws.md`](aws.md) covers.
+- **A `.gitignore` covering what shipmate writes into your working tree:**
+  `.shipmate-engine/` (the engine checkout every job makes), `*.otplan`,
+  `fingerprint.txt`, `planned-head.txt`, `.terraform/`, and the flavor's state
+  path when it has one. Left untracked, they show up as something to commit, and
+  a `terramate run` of your own that omits `--no-recursive` refuses on them
+  (`git-untracked`). [`../CONTRACT.md`](../CONTRACT.md) §Consumer gitignore
+  requirement is the rule.
 
 The four tiers are ordered and each depends on the one before. Tier 1 alone is
 not a working installation; read tier 2's first paragraphs before deciding to
