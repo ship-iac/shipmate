@@ -12,7 +12,7 @@ passes an entry whose expression was mistyped; a substring test is satisfied by 
 import re
 
 import yaml
-from _loader import ENGINE_CHECKOUT_WITH, WORKFLOWS
+from _loader import WORKFLOWS
 
 WF = WORKFLOWS / "plan.yml"
 
@@ -116,11 +116,10 @@ def test_every_checkout_takes_the_head_the_facts_job_named():
     no such refusal, and a `github.sha` there builds the matrix from base-branch content while
     build-matrix's own refusals still pass, because they read the facts job. `fetch-depth: 0` is
     load-bearing in both: without the full history `terramate list --changed` finds nothing and
-    reports it as no change. The engine checkout follows the consumer's, because the
-    workspace-root checkout wipes a directory that is not the repository it is taking.
+    reports it as no change.
 
     Mutations: `ref: ${{ github.sha }}` on `detect`, the same on `plan`, `fetch-depth` deleted
-    from each, the two checkouts swapped, and `expected-head: ${{ github.sha }}` on the cell.
+    from each, and `expected-head: ${{ github.sha }}` on the cell.
     """
     # PyYAML gives the int 0, not "0".
     expected = {"ref": "${{ needs.facts.outputs.head-sha }}", "fetch-depth": 0}
@@ -130,7 +129,7 @@ def test_every_checkout_takes_the_head_the_facts_job_named():
             for s in _job(job_id)["steps"]
             if str(s.get("uses", "")).split("@")[0] == "actions/checkout"
         ]
-        assert checkouts == [expected, ENGINE_CHECKOUT_WITH], job_id
+        assert checkouts == [expected], job_id
     cell = _step("plan", "actions/plan-cell")
     assert cell["with"]["expected-head"] == "${{ needs.facts.outputs.head-sha }}"
 

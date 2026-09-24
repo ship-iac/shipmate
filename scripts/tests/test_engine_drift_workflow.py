@@ -9,7 +9,7 @@ matrix (skip) from a lost artifact (fail); collapsing the two greens a run that 
 """
 
 import yaml
-from _loader import ENGINE_CHECKOUT_WITH, WORKFLOWS
+from _loader import WORKFLOWS
 
 WF = WORKFLOWS / "drift.yml"
 
@@ -161,9 +161,8 @@ def test_every_checkout_takes_the_full_history_and_no_ref():
     then be the only thing left refusing it. `fetch-depth: 0` is load-bearing: without the full
     history `terramate list` sees no stacks.
 
-    Mutations: add `ref: ${{ github.sha }}` to either consumer checkout, delete `fetch-depth`
-    from either, and swap the two checkouts in either job -- the workspace-root checkout wipes a
-    directory that is not the repository it is taking, so the engine's must come second.
+    Mutations: add `ref: ${{ github.sha }}` to either consumer checkout, and delete
+    `fetch-depth` from either.
     """
     # PyYAML gives the int 0, not "0".
     for job_id in ("detect", "drift"):
@@ -172,7 +171,7 @@ def test_every_checkout_takes_the_full_history_and_no_ref():
             for s in _doc()["jobs"][job_id]["steps"]
             if str(s.get("uses", "")).split("@")[0] == "actions/checkout"
         ]
-        assert checkouts == [{"fetch-depth": 0}, ENGINE_CHECKOUT_WITH], job_id
+        assert checkouts == [{"fetch-depth": 0}], job_id
 
 
 def test_the_cell_passes_this_whole_with_block():

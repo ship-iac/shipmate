@@ -189,8 +189,7 @@ produced them. See
   opt-out says the run has no pull request at all, and only the drift workflow
   sets it.
 - **`summary`** — the one trusted job, bound to the fixed `shipmate-engine`
-  GitHub Environment (`docs/github-app.md`), its only checkout being the engine
-  itself at `job.workflow_sha`: it
+  GitHub Environment (`docs/github-app.md`), with no checkout at all: it
   downloads this run's cell summaries and calls
   `actions/summary`, which creates the matching
   `apply / <stack> / <env>` check pending (or completed "no changes"), and

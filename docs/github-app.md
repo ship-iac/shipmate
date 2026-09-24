@@ -440,8 +440,8 @@ actual work here:
   comment-ops, or `push` to the default branch. Nothing that starts from
   arbitrary branch content ever does.
 - **The one job that holds the key runs no consumer repository content.** That
-  `summary` job's only checkout is the engine itself at `job.workflow_sha`, and a
-  consumer cannot add another: they call the workflow, they do not own its steps.
+  `summary` job checks out nothing, and a consumer cannot add a checkout: they
+  call the workflow, they do not own its steps.
   Reaching the key from a pull-request-side trigger is safe only in that shape —
   see `CONTRACT.md`
   §Post-plan topology and `docs/hardening.md`.

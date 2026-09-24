@@ -28,24 +28,18 @@ jobs:
     outputs:
       snapshot: ${{ steps.snap.outputs.snapshot }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: ship-iac/shipmate
-          ref: ${{ job.workflow_sha || '0000000000000000000000000000000000000000' }}
-          path: .shipmate-engine
-          persist-credentials: false
       # First, before anything else in this workflow: an apply that binds an environment nobody
       # created gets one auto-created with no reviewers, no wait timer and no branch policy.
       # A cell's variables come from the environment table keyed by matrix.environment, so plan
       # and apply hash identically whatever the job bound and the fingerprint pins nothing about
       # the binding. Existence is the only discriminator.
-      - uses: ./.shipmate-engine/actions/verify-environments
+      - uses: $/actions/verify-environments
         with:
           waves-json: ${{ inputs.waves_json }}
           shared-envs: ${{ vars.SHIPMATE_SHARED_ENVS }}
           github-token: ${{ github.token }}
       - id: snap
-        uses: ./.shipmate-engine/actions/apply-snapshot
+        uses: $/actions/apply-snapshot
         with:
           head-sha: ${{ inputs.head_sha }}
           waves-json: ${{ inputs.waves_json }}
@@ -75,13 +69,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { fetch-depth: 0, ref: "${{ inputs.head_sha }}" }
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: ship-iac/shipmate
-          ref: ${{ job.workflow_sha || '0000000000000000000000000000000000000000' }}
-          path: .shipmate-engine
-          persist-credentials: false
-      - uses: ./.shipmate-engine/actions/setup
+      - uses: $/actions/setup
       # Role and region come from the row the table resolved, never from vars.*: a fallback would
       # hand the cell a role the table did not choose while the run stays green. Every wave job
       # repeats this step unchanged (scripts/tests/test_aws_oidc_wiring_guard.py).
@@ -91,7 +79,7 @@ jobs:
         with:
           role-to-assume: ${{ matrix.role_arn }}
           aws-region: ${{ matrix.cred_region }}
-      - uses: ./.shipmate-engine/actions/apply-cell
+      - uses: $/actions/apply-cell
         with:
           tf-vars: ${{ toJSON(matrix.tf_vars) }}
           github-vars: ${{ toJSON(vars) }}
@@ -124,20 +112,14 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { fetch-depth: 0, ref: "${{ inputs.head_sha }}" }
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: ship-iac/shipmate
-          ref: ${{ job.workflow_sha || '0000000000000000000000000000000000000000' }}
-          path: .shipmate-engine
-          persist-credentials: false
-      - uses: ./.shipmate-engine/actions/setup
+      - uses: $/actions/setup
       - name: Configure cloud credentials (AWS OIDC)
         if: ${{ matrix.role_arn != '' }}
         uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4
         with:
           role-to-assume: ${{ matrix.role_arn }}
           aws-region: ${{ matrix.cred_region }}
-      - uses: ./.shipmate-engine/actions/apply-cell
+      - uses: $/actions/apply-cell
         with:
           tf-vars: ${{ toJSON(matrix.tf_vars) }}
           github-vars: ${{ toJSON(vars) }}
@@ -170,20 +152,14 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { fetch-depth: 0, ref: "${{ inputs.head_sha }}" }
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: ship-iac/shipmate
-          ref: ${{ job.workflow_sha || '0000000000000000000000000000000000000000' }}
-          path: .shipmate-engine
-          persist-credentials: false
-      - uses: ./.shipmate-engine/actions/setup
+      - uses: $/actions/setup
       - name: Configure cloud credentials (AWS OIDC)
         if: ${{ matrix.role_arn != '' }}
         uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4
         with:
           role-to-assume: ${{ matrix.role_arn }}
           aws-region: ${{ matrix.cred_region }}
-      - uses: ./.shipmate-engine/actions/apply-cell
+      - uses: $/actions/apply-cell
         with:
           tf-vars: ${{ toJSON(matrix.tf_vars) }}
           github-vars: ${{ toJSON(vars) }}
@@ -216,20 +192,14 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { fetch-depth: 0, ref: "${{ inputs.head_sha }}" }
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: ship-iac/shipmate
-          ref: ${{ job.workflow_sha || '0000000000000000000000000000000000000000' }}
-          path: .shipmate-engine
-          persist-credentials: false
-      - uses: ./.shipmate-engine/actions/setup
+      - uses: $/actions/setup
       - name: Configure cloud credentials (AWS OIDC)
         if: ${{ matrix.role_arn != '' }}
         uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4
         with:
           role-to-assume: ${{ matrix.role_arn }}
           aws-region: ${{ matrix.cred_region }}
-      - uses: ./.shipmate-engine/actions/apply-cell
+      - uses: $/actions/apply-cell
         with:
           tf-vars: ${{ toJSON(matrix.tf_vars) }}
           github-vars: ${{ toJSON(vars) }}
@@ -262,20 +232,14 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { fetch-depth: 0, ref: "${{ inputs.head_sha }}" }
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: ship-iac/shipmate
-          ref: ${{ job.workflow_sha || '0000000000000000000000000000000000000000' }}
-          path: .shipmate-engine
-          persist-credentials: false
-      - uses: ./.shipmate-engine/actions/setup
+      - uses: $/actions/setup
       - name: Configure cloud credentials (AWS OIDC)
         if: ${{ matrix.role_arn != '' }}
         uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4
         with:
           role-to-assume: ${{ matrix.role_arn }}
           aws-region: ${{ matrix.cred_region }}
-      - uses: ./.shipmate-engine/actions/apply-cell
+      - uses: $/actions/apply-cell
         with:
           tf-vars: ${{ toJSON(matrix.tf_vars) }}
           github-vars: ${{ toJSON(vars) }}
@@ -308,20 +272,14 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { fetch-depth: 0, ref: "${{ inputs.head_sha }}" }
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: ship-iac/shipmate
-          ref: ${{ job.workflow_sha || '0000000000000000000000000000000000000000' }}
-          path: .shipmate-engine
-          persist-credentials: false
-      - uses: ./.shipmate-engine/actions/setup
+      - uses: $/actions/setup
       - name: Configure cloud credentials (AWS OIDC)
         if: ${{ matrix.role_arn != '' }}
         uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4
         with:
           role-to-assume: ${{ matrix.role_arn }}
           aws-region: ${{ matrix.cred_region }}
-      - uses: ./.shipmate-engine/actions/apply-cell
+      - uses: $/actions/apply-cell
         with:
           tf-vars: ${{ toJSON(matrix.tf_vars) }}
           github-vars: ${{ toJSON(vars) }}
@@ -354,20 +312,14 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { fetch-depth: 0, ref: "${{ inputs.head_sha }}" }
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: ship-iac/shipmate
-          ref: ${{ job.workflow_sha || '0000000000000000000000000000000000000000' }}
-          path: .shipmate-engine
-          persist-credentials: false
-      - uses: ./.shipmate-engine/actions/setup
+      - uses: $/actions/setup
       - name: Configure cloud credentials (AWS OIDC)
         if: ${{ matrix.role_arn != '' }}
         uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4
         with:
           role-to-assume: ${{ matrix.role_arn }}
           aws-region: ${{ matrix.cred_region }}
-      - uses: ./.shipmate-engine/actions/apply-cell
+      - uses: $/actions/apply-cell
         with:
           tf-vars: ${{ toJSON(matrix.tf_vars) }}
           github-vars: ${{ toJSON(vars) }}
@@ -400,20 +352,14 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { fetch-depth: 0, ref: "${{ inputs.head_sha }}" }
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: ship-iac/shipmate
-          ref: ${{ job.workflow_sha || '0000000000000000000000000000000000000000' }}
-          path: .shipmate-engine
-          persist-credentials: false
-      - uses: ./.shipmate-engine/actions/setup
+      - uses: $/actions/setup
       - name: Configure cloud credentials (AWS OIDC)
         if: ${{ matrix.role_arn != '' }}
         uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4
         with:
           role-to-assume: ${{ matrix.role_arn }}
           aws-region: ${{ matrix.cred_region }}
-      - uses: ./.shipmate-engine/actions/apply-cell
+      - uses: $/actions/apply-cell
         with:
           tf-vars: ${{ toJSON(matrix.tf_vars) }}
           github-vars: ${{ toJSON(vars) }}
@@ -439,13 +385,7 @@ jobs:
     permissions: { actions: read }
     environment: shipmate-engine
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: ship-iac/shipmate
-          ref: ${{ job.workflow_sha || '0000000000000000000000000000000000000000' }}
-          path: .shipmate-engine
-          persist-credentials: false
-      - uses: ./.shipmate-engine/actions/apply-complete
+      - uses: $/actions/apply-complete
         with:
           snapshot: ${{ needs.snapshot.outputs.snapshot }}
           app-id: ${{ vars.SHIPMATE_APP_ID }}

@@ -1,9 +1,8 @@
-"""Every engine action an engine job runs comes from the engine checked out at the commit that
-defines the job, and from nowhere else.
+"""Every engine action an engine job runs resolves through `$/` to the commit that defines the
+job, and from nowhere else.
 
-`job.workflow_sha` names the reusable workflow's own commit, so the checkout below is the engine
-at exactly the SHA the consumer pinned. A `ship-iac/shipmate/<path>@<sha>` reference would
-reintroduce a second commit into the run and, with it, the pin cascade this replaced.
+A `ship-iac/shipmate/<path>@<sha>` step would reintroduce a second commit into the run and, with
+it, the pin cascade this replaced. A `./` step would resolve in the consumer's workspace.
 """
 
 import re
@@ -12,15 +11,13 @@ import yaml
 from _loader import (
     ACTIONS,
     ENGINE,
-    ENGINE_CHECKOUT_WITH,
-    ENGINE_DIR,
     WORKFLOWS,
     local_action,
 )
 
 MANIFEST_LOAD = "manifest-load.yml"
 CHECKOUT = "actions/checkout"
-LOCAL_PREFIX = f"./{ENGINE_DIR}/actions/"
+LOCAL_PREFIX = "$/actions/"
 REMOTE_PREFIX = "ship-iac/shipmate/"
 #: Composite actions today. Hand-written: the two tests globbing `actions/*/action.yml` assert
 #: nothing at all if that glob matches nothing.
@@ -49,11 +46,11 @@ def test_no_engine_reference_is_pinned_by_sha():
     assert offenders == [], "\n".join(offenders)
 
 
-def _steps():
-    """(where, step) for every step of every workflow but the manifest probe, then of every
-    composite action."""
+def _steps(skip=MANIFEST_LOAD):
+    """(where, step) for every step of every workflow but `skip`, then of every composite
+    action."""
     for name, doc in _docs():
-        if name == MANIFEST_LOAD:
+        if name == skip:
             continue
         for job_name, job in (doc.get("jobs") or {}).items():
             for step in job.get("steps") or []:
@@ -75,66 +72,44 @@ def test_no_step_outside_the_manifest_probe_reaches_the_engine_remotely():
     assert offenders == [], "\n".join(offenders)
 
 
-def test_every_checkout_of_another_repository_is_the_engine_checkout():
-    """Whole `with:` block. Mutations: drop `persist-credentials`; `ref: main`; `path: engine`."""
-    for name, doc in _docs():
-        for job_name, job in (doc.get("jobs") or {}).items():
-            for step in job.get("steps") or []:
-                with_ = step.get("with") or {}
-                if _uses(step).split("@")[0] == CHECKOUT and "repository" in with_:
-                    assert with_ == ENGINE_CHECKOUT_WITH, f"{name}:{job_name}: {with_}"
+def test_no_step_checks_out_another_repository():
+    """`$/` fetches the engine itself, so no job checks it out. Mutation: restore the engine
+    checkout (`repository: ship-iac/shipmate`) to the `complete` job of apply-env-level.yml."""
+    offenders = [
+        f"{where}: {step['with']}"
+        for where, step in _steps(skip=None)
+        if _uses(step).split("@")[0] == CHECKOUT and "repository" in (step.get("with") or {})
+    ]
+    assert offenders == [], "\n".join(offenders)
 
 
-def test_every_job_running_a_local_engine_action_checks_the_engine_out_first():
-    """Mutations: delete the engine checkout from `complete` in apply-env-level.yml; move it
-    below the first local step; add a second one. The count reddens on a job losing its local
-    steps, and on the `*.yml` glob in `_docs` becoming `*.yaml`, which matches nothing and
-    leaves every assertion below unreached."""
-    covered = 0
-    for name, doc in _docs():
-        if name == MANIFEST_LOAD:
-            continue
-        for job_name, job in (doc.get("jobs") or {}).items():
-            steps = job.get("steps") or []
-            local = [i for i, s in enumerate(steps) if _uses(s).startswith(LOCAL_PREFIX)]
-            if not local:
-                continue
-            covered += 1
-            engine = [
-                i
-                for i, s in enumerate(steps)
-                if _uses(s).split("@")[0] == CHECKOUT and "repository" in (s.get("with") or {})
-            ]
-            assert len(engine) == 1, f"{name}:{job_name}: {len(engine)} engine checkouts"
-            assert engine[0] < local[0], f"{name}:{job_name}: local step before engine checkout"
-    # Hand-written, never derived: every assertion above is inside the loop, so a glob that
-    # matches nothing passes this and the four tests around it while checking nothing.
-    assert covered == 25, f"{covered} jobs run a local engine action"
+def test_no_step_resolves_in_the_consumer_workspace():
+    """A `./` step resolves against the workspace, which holds the consumer's checkout, not the
+    engine. Job-level nested workflow calls are not steps and stay `./`. Mutations:
+    `uses: ./actions/setup` in plan.yml's `plan` job; `uses: ./actions/state` in plan-cell."""
+    offenders = [
+        f"{where}: {_uses(step)}"
+        for where, step in _steps(skip=None)
+        if _uses(step).startswith("./")
+    ]
+    assert offenders == [], "\n".join(offenders)
 
 
-def test_the_engine_checkout_is_the_last_checkout_in_its_job():
-    """A workspace-root checkout deletes what is already there when the directory is not that
-    repository, so any consumer checkout running after the engine checkout wipes
-    `.shipmate-engine`. The rule is positional, not a two-checkout special case: a job with
-    three checkouts is where the hazard is easiest to hit. Mutation: move the engine checkout
-    above a consumer checkout in any wave job."""
-    for name, doc in _docs():
-        for job_name, job in (doc.get("jobs") or {}).items():
-            steps = job.get("steps") or []
-            engine = [
-                i
-                for i, s in enumerate(steps)
-                if _uses(s).split("@")[0] == CHECKOUT and "repository" in (s.get("with") or {})
-            ]
-            if not engine:
-                continue
-            last = max(i for i, s in enumerate(steps) if _uses(s).split("@")[0] == CHECKOUT)
-            assert engine[-1] == last, (
-                f"{name}:{job_name}: the engine checkout must be the job's last checkout"
-            )
+def test_every_job_running_an_engine_action_is_counted():
+    """Hand-written, never derived: the tests around this one assert inside loops, so a glob that
+    matches nothing passes them while checking nothing. Mutations: the `_docs` glob as `*.yaml`;
+    every `$/` step deleted from unlock.yml's `detect` job."""
+    covered = [
+        f"{name}:{job_name}"
+        for name, doc in _docs()
+        if name != MANIFEST_LOAD
+        for job_name, job in (doc.get("jobs") or {}).items()
+        if any(_uses(s).startswith(LOCAL_PREFIX) for s in job.get("steps") or [])
+    ]
+    assert len(covered) == 25, f"{len(covered)} jobs run an engine action: {covered}"
 
 
-#: The steps that run a local engine action calling `scripts/doctor`, and so must hand it the
+#: The steps that run an engine action calling `scripts/doctor`, and so must hand it the
 #: engine's own slug. Hand-written whole-set, never derived from the workflows.
 DOCTOR_STEPS = {
     "comment-ops.yml:ops:" + local_action("comment-ops"),
@@ -177,7 +152,7 @@ def test_nested_reusable_calls_are_local():
 
 
 def test_composite_actions_reach_state_through_the_local_path_only():
-    """Mutation: `uses: ./actions/state` in plan-cell; or glob `*/action.yaml`, which matches
+    """Mutation: `uses: $/actions/stat` in plan-cell; or glob `*/action.yaml`, which matches
     nothing and trips ACTION_COUNT."""
     manifests = sorted(ACTIONS.glob("*/action.yml"))
     assert len(manifests) == ACTION_COUNT, f"{len(manifests)} action manifests"
@@ -185,7 +160,7 @@ def test_composite_actions_reach_state_through_the_local_path_only():
     for path in manifests:
         doc = yaml.safe_load(path.read_text(encoding="utf-8"))
         for step in doc["runs"].get("steps") or []:
-            if _uses(step).startswith("./"):
+            if _uses(step).startswith("$/"):
                 local.add(_uses(step))
     assert local == {local_action("state")}
 
@@ -219,7 +194,7 @@ LOCAL_ACTIONS = {
 def test_every_local_action_reference_names_an_action_that_exists():
     """The whole set of referenced names, and each one's manifest. A `uses:` naming a directory
     that is not there fails only at run time, in the job that needed it. Mutation: add a step
-    `uses: ./.shipmate-engine/actions/stat` to any workflow."""
+    `uses: $/actions/stat` to any workflow."""
     referenced = {
         _uses(step)[len(LOCAL_PREFIX) :]
         for _, step in _steps()

@@ -925,17 +925,3 @@ stacks stay pending and visible, which is the recoverable state: re-run that
 deploy. `deploy-detect` rebuilds its work queue from the
 apply checks that are still pending, so a re-run is idempotent — anything
 already applied is skipped.
-
-### Every engine job fails at its engine checkout
-
-Each job dies in its `actions/checkout` of `ship-iac/shipmate` with
-`fatal: couldn't find remote ref 0000000000000000000000000000000000000000`, and
-no engine step runs.
-
-`job.workflow_sha` resolved to nothing, so the checkout fell back to the
-all-zero SHA rather than to the engine's default branch — fail-closed by design,
-because a silent fallback would run an unpinned tree. GitHub documents the
-`job` context's workflow properties as unavailable on GitHub Enterprise Server,
-and a runner too old to populate that context fails the same way. shipmate runs
-on github.com; there is no workaround on a host that does not supply the
-property.

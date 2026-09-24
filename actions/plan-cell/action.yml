@@ -80,7 +80,7 @@ runs:
 
     - name: Restore state
       if: ${{ inputs.state-path != '' }}
-      uses: ./.shipmate-engine/actions/state
+      uses: $/actions/state
       with:
         stack-slug: ${{ steps.ids.outputs.slug }}
         env: ${{ inputs.env }}

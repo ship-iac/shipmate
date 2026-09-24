@@ -43,14 +43,13 @@ how the engine reaches the App key. The consumer's `plan` job runs on
 `shipmate-engine`'s default-branch-only policy trusts. (The other trigger that
 reaches it, the `workflow_dispatch` a commented `shipmate plan` sends, evaluates
 at the default branch itself and raises the same question with the same answer;
-see "Contributors without push access".) That ref choice is deliberate: it is what
-lets the plan run's trusted `summary` job mint an App token and write the
+see "Contributors without push access".) That ref choice is deliberate: it is
+what lets the plan run's trusted `summary` job mint an App token and write the
 `shipmate / gate` status. What makes it safe is a property of that job, not of
 the trigger: it executes no *consumer* repository content. It is a call to the
-engine's own reusable workflow, and its only checkout is the engine itself at
-`job.workflow_sha`. A consumer cannot add another, because they do not own that
-job's steps. The two jobs that *do* check
-out the pull request's head — `detect` and `plan` — reach no credentialed
+engine's own reusable workflow, and it checks out nothing. A consumer cannot add
+a checkout, because they do not own that job's steps. The two jobs that *do*
+check out the pull request's head — `detect` and `plan` — reach no credentialed
 environment: `detect` binds none, and `plan` binds only the *plan* environment
 for the cell it is planning, which by design holds no App key and no
 apply-capable secret (controls 8, 6 and 17). What a plan environment does hold
@@ -692,7 +691,7 @@ Settings → Actions → General:
 
   `<owner>/shipmate/*@*` covers every shape the engine is referenced in.
   Consumers reference only `<owner>/shipmate/.github/workflows/*.yml@<sha>`; the
-  engine runs its actions from a local checkout, and `manifest-load.yml` is its
+  engine runs its actions through `$/`, and `manifest-load.yml` is its
   one `@main` self-reference. The pattern is stated in that width because GitHub
   does not document whether a pattern reaches an action stored in a
   *subdirectory*. Measured under that single pattern: a subdirectory action, a
@@ -703,18 +702,20 @@ Settings → Actions → General:
   The cost is that this list is a second place pins live: a third-party action
   the engine adds has to be added here too, in every repository, or the next run
   stops at "Set up job" — loudly, naming the action it refused. Engine actions
-  run from a local checkout and need no entry.
+  are `$/` references, which pass with the `<owner>/shipmate/*@*` entry the
+  reusable workflows already need, measured.
 
   This is supply-chain hygiene; it does not constrain `run:` steps.
 - **Require actions to be pinned to a full-length commit SHA.** The platform
-  then enforces what this engine already asks of you, so a `uses:` naming a
-  tag or a branch is refused during "Set up job" instead of being caught in
-  review. GitHub documents exemptions for local `./path` actions and for
-  reusable workflows referenced by tag; an `owner/repo/path@ref` reference is
-  not exempt — measured here, even when `owner/repo` is the repository
-  running the workflow. On a repository that already pins by SHA this costs
-  nothing — it is the engine's own repository that cannot enable it, for the
-  reason in `docs/releasing.md` § Manifest load.
+  then enforces what this engine already asks of you, so a `uses:` naming a tag
+  or a branch is refused during "Set up job" instead of being caught in review.
+  GitHub documents exemptions for local `./path` actions and for reusable
+  workflows referenced by tag; the engine's `$/` steps pass the setting too,
+  measured; an `owner/repo/path@ref` reference is not exempt — measured here,
+  even when `owner/repo` is the repository running the workflow. On a repository
+  that already pins by SHA this costs nothing — it is the engine's own
+  repository that cannot enable it, for the reason in `docs/releasing.md` §
+  Manifest load.
 
 **None of the settings in this section is probed by `shipmate doctor`, and none
 can be.** The shipmate App's installation token is refused with `Resource not

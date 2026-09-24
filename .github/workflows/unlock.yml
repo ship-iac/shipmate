@@ -35,15 +35,9 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { fetch-depth: 0, ref: "${{ inputs.ref }}" }
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: ship-iac/shipmate
-          ref: ${{ job.workflow_sha || '0000000000000000000000000000000000000000' }}
-          path: .shipmate-engine
-          persist-credentials: false
-      - uses: ./.shipmate-engine/actions/setup
+      - uses: $/actions/setup
       - id: d
-        uses: ./.shipmate-engine/actions/apply-detect
+        uses: $/actions/apply-detect
         with:
           environment: ${{ inputs.environment }}
           # A literal, not an input: this file is the verb. `run_unlock` reads
@@ -63,7 +57,7 @@ jobs:
         # GitHub creates a missing environment on demand with no reviewers, no wait timer and no
         # branch policy, and that created environment then satisfies the apply path's own
         # pre-flight -- so an unlock into a missing one silently retires that env's reviewer gate.
-        uses: ./.shipmate-engine/actions/verify-environments
+        uses: $/actions/verify-environments
         with:
           # The flat queue is wrapped as one wave because the action's input shape is the waves
           # object. It refuses an empty cell set by design, which is why the step's `if:` filters
@@ -105,13 +99,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { fetch-depth: 0, ref: "${{ inputs.ref }}" }
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: ship-iac/shipmate
-          ref: ${{ job.workflow_sha || '0000000000000000000000000000000000000000' }}
-          path: .shipmate-engine
-          persist-credentials: false
-      - uses: ./.shipmate-engine/actions/setup
+      - uses: $/actions/setup
       # Role and region come from the row the table resolved, never from vars.*: a fallback would
       # hand the cell a role the table did not choose while the run stays green. Byte-identical
       # to the wave jobs' step (scripts/tests/test_aws_oidc_wiring_guard.py).
@@ -121,7 +109,7 @@ jobs:
         with:
           role-to-assume: ${{ matrix.role_arn }}
           aws-region: ${{ matrix.cred_region }}
-      - uses: ./.shipmate-engine/actions/unlock-cell
+      - uses: $/actions/unlock-cell
         with:
           tf-vars: ${{ toJSON(matrix.tf_vars) }}
           github-vars: ${{ toJSON(vars) }}

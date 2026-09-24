@@ -3,9 +3,9 @@
 It runs on `pull_request_target`, through the consumer's plan workflow, holding the App key. Two
 things keep it safe: its `if:`, and the fact that it executes no consumer repository content. The
 job now lives in `plan.yml` alongside two jobs that check out and execute pull-request content --
-`detect` and `plan` -- so the job-id list is pinned here too. The one checkout it does run is
-the engine at the workflow's own commit; a checkout without `repository:` here would take the
-pull request head under `pull_request_target`, which the whole-block comparison below refuses.
+`detect` and `plan` -- so the job-id list is pinned here too. The job checks out nothing; any
+checkout step, which under `pull_request_target` would take the pull request head, changes the
+ordered step list below pins.
 Every assertion below is on a parsed value -- `yaml.safe_load`,
 then a whole `if:`/`environment:`/`with:` field -- rather than a substring of the raw file text.
 The substring form was proven vacuous: four simultaneous mutations of the summary job (all three
@@ -16,7 +16,7 @@ value.
 """
 
 import yaml
-from _loader import ENGINE_CHECKOUT_WITH, WORKFLOWS, local_action
+from _loader import WORKFLOWS, local_action
 
 WF = WORKFLOWS / "plan.yml"
 
@@ -27,11 +27,10 @@ EXPECTED_IF = (
     "needs.facts.outputs.head-repo == github.repository && "
     "(needs.facts.outputs.is-draft == 'false' || needs.facts.outputs.on-demand == 'true') }}"
 )
-#: The whole job, as an ordered list of what each step runs. A second checkout step, a `run:`
+#: The whole job, as an ordered list of what each step runs. A checkout step, a `run:`
 #: step, or any extra step at all changes this list, where a substring scan would miss every one
 #: of those.
 EXPECTED_STEP_USES = [
-    "actions/checkout",
     "actions/download-artifact",
     local_action("summary"),
 ]
@@ -79,14 +78,13 @@ def test_the_trusted_job_binds_the_engine_environment():
     assert job["environment"] == "shipmate-engine"
 
 
-def test_the_trusted_job_checks_out_the_engine_only_and_runs_exactly_these_steps():
+def test_the_trusted_job_checks_out_nothing_and_runs_exactly_these_steps():
     """It runs at the base ref holding the App key. A checkout of the pull request head here
     would make it the canonical pull_request_target vulnerability, and so would any step that
-    executes repository content by another route, which is why the step list is whole and the
-    checkout's `with:` block is compared entire."""
+    executes repository content by another route, which is why the step list is compared whole:
+    any checkout step at all reddens it."""
     job, _ = _summary_job()
     assert [str(s["uses"]).split("@")[0] for s in job["steps"]] == EXPECTED_STEP_USES
-    assert job["steps"][0]["with"] == ENGINE_CHECKOUT_WITH
 
 
 def test_the_workflow_passes_exactly_these_values_to_the_summary_action():

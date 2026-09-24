@@ -20,7 +20,7 @@ runs:
         TOFU_VERSION: ${{ inputs.tofu-version }}
       run: |
         set -euo pipefail
-        # The whole engine repository is checked out at the pinned SHA, so this reads the
+        # `$/` fetches the whole engine repository at the pinned SHA, so this reads the
         # versions this release was tested with. An unresolved version must fail the step:
         # setup-opentofu reads an empty tofu_version as "latest", which is silent tool drift.
         versions="$GITHUB_ACTION_PATH/../../VERSIONS"

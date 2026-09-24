@@ -34,15 +34,9 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { fetch-depth: 0 }
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: ship-iac/shipmate
-          ref: ${{ job.workflow_sha || '0000000000000000000000000000000000000000' }}
-          path: .shipmate-engine
-          persist-credentials: false
-      - uses: ./.shipmate-engine/actions/setup
+      - uses: $/actions/setup
       - id: d
-        uses: ./.shipmate-engine/actions/deploy-detect
+        uses: $/actions/deploy-detect
         with:
           # The caller is `on: push` to the default branch; its event payload
           # (and so the previous main tip) is visible here.

@@ -75,19 +75,16 @@ UNLOCK_JOBS = {"guard", "detect", "unlock"}
 
 #: Every `uses:` each unlock job declares, in order, SHA dropped: a repin must not redden this,
 #: a reordered or added step must. This is the positive form of "calls nothing from the apply
-#: family" -- there is no room in the list for one. The two checkouts are the consumer's tree
-#: and then the engine, in that order.
+#: family" -- there is no room in the list for one. The one checkout is the consumer's tree.
 UNLOCK_STEP_ACTIONS = {
     "guard": [],
     "detect": [
-        "actions/checkout",
         "actions/checkout",
         local_action("setup"),
         local_action("apply-detect"),
         local_action("verify-environments"),
     ],
     "unlock": [
-        "actions/checkout",
         "actions/checkout",
         local_action("setup"),
         "aws-actions/configure-aws-credentials",
@@ -227,9 +224,9 @@ def test_the_waves_job_runs_on_every_apply_dispatch():
 
 def test_both_summary_steps_run_on_every_apply_dispatch():
     steps = _job(APPLY, "summary")["steps"]
-    assert len(steps) == 3, f"summary no longer has exactly three steps: {len(steps)}"
+    assert len(steps) == 2, f"summary no longer has exactly two steps: {len(steps)}"
     conditions = [s.get("if") for s in steps]
-    assert conditions == [None, None, None], (
+    assert conditions == [None, None], (
         f"summary's steps carry `if:` {conditions!r} -- the only condition they ever had "
         "was the unlock skip, and a gate refresh or result comment that silently stops "
         "running leaves the developer no feedback and the gate unrefreshed"

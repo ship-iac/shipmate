@@ -38,7 +38,7 @@ after apply. Pass the same `path` both times:
 
 ```yaml
 - name: Restore state
-  uses: ./actions/state
+  uses: $/actions/state
   with:
     stack-slug: ${{ matrix.stack-slug }}
     env: dev-eu
@@ -48,7 +48,7 @@ after apply. Pass the same `path` both times:
 # ... run `tofu plan` / `tofu apply` (state lives under the path above) ...
 
 - name: Save state
-  uses: ./actions/state
+  uses: $/actions/state
   with:
     stack-slug: ${{ matrix.stack-slug }}
     env: dev-eu

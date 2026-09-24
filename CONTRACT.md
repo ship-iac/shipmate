@@ -403,9 +403,8 @@ origin/<default-branch>:.github/shipmate.toml` and resolves each cell's identity
 and credential from what that returns. A pull request cannot change which role
 its own plan assumes, which region it authenticates against, or which workspace
 it plans; changing any of those takes a merge to the default branch. `origin` is
-the base repository on every path — the only checkouts passing `repository:` are
-the engine's self-checkouts of `ship-iac/shipmate` — and a fork pull request is
-refused in `detect` before it plans.
+the base repository on every path — no checkout passes `repository:` — and a fork
+pull request is refused in `detect` before it plans.
 A job that checks out no consumer content reads the same file over the contents
 API instead — comment-ops, resolving `[gate]` before it authorizes — with the
 same branch and the same refusal wording, so a consumer never gets two accounts
@@ -1391,8 +1390,7 @@ Engine `plan.yml` is four jobs: `facts`, `detect`, `plan`, `summary`. `facts`
 is `actions/pr-facts`, the single producer of every pull-request fact the other
 three decide on. `detect` and `plan` are untrusted: they check out the pull
 request's own head and hold no App credential. `summary` is the one trusted job
-— `environment: shipmate-engine`, and its only checkout is the engine itself at
-`job.workflow_sha`. Every App-authored
+— `environment: shipmate-engine`, and it checks out nothing. Every App-authored
 surface listed above (apply checks, the gate, the sticky comments, drift
 issues) is created by a job bound to that fixed GitHub Environment
 (`docs/github-app.md` §Key-exposure boundary), each running at a ref that
@@ -1642,12 +1640,10 @@ trigger alone closes two paths a trigger check alone would not:
   applies. Restricting who can push, and restricting pushes that touch
   `.github/workflows/**`, are the controls that act at push time; see
   `docs/hardening.md`.
-- The engine holds no pins of itself. Each job that runs an engine action checks the engine out
-  at `job.workflow_sha` — the commit the consumer's `uses:` resolved to — and runs its actions
-  from that checkout, so the consumer's one pin names the whole tree that runs. The ref falls
-  back to an all-zero SHA, so a missing context fails the checkout rather than fetching the
-  engine's default branch. The consumer surface is the seven reusable workflows; the composite
-  actions are engine-internal and expect that checkout at `.shipmate-engine/`.
+- The engine holds no pins of itself. Every engine step calls its action as `$/actions/<name>`,
+  which GitHub resolves in this repository at the commit the consumer's `uses:` resolved to, so
+  the consumer's one pin names the whole tree that runs. The consumer surface is the seven
+  reusable workflows; the composite actions are engine-internal.
   `dev/repin_consumer.py` is the hand-run tool that moves a consumer's pins together.
 - **Upgrade path.** shipmate publishes a GitHub Release per release SHA. A
   consumer with Dependabot's `github-actions` ecosystem enabled therefore
@@ -1681,10 +1677,9 @@ trigger alone closes two paths a trigger check alone would not:
   `sys.version_info` ahead of the import and refuses with the version it found
   and this clause. A `runs_on:` image older than that — `ubuntu-22.04` ships
   3.10 — fails at `detect`.
-- The engine reads `job.workflow_sha` for its own checkout, and GitHub documents that context
-  as unavailable on GitHub Enterprise Server; there every engine job fails at its engine
-  checkout. A runner too old to populate the `job` context fails the same way, with the
-  same all-zero ref.
+- Engine steps use GitHub's `$/` self-repository syntax, which needs runner 2.336.0 or newer,
+  and shipmate supports it on github.com only. A self-hosted runner below that version, and
+  GitHub Enterprise Server, cannot run the engine. The error such a runner shows is unmeasured.
 - Terramate and OpenTofu are not assumed to be on the image: the
   `setup` action installs the versions the engine release declares in its own
   root-level `VERSIONS` file, read at the commit the consumer pins. Moving to
@@ -2359,12 +2354,11 @@ TF_VAR fingerprint).
 per-run machine artifacts shipmate materializes in its working tree — the
 reviewed plan (`*.otplan`), the fingerprint (`fingerprint.txt`), the planned
 commit record (`planned-head.txt`), OpenTofu's working directory in each stack
-(`.terraform/`), the engine checkout every job makes (`.shipmate-engine/`), and
-the flavor's state path when it has one (a remote backend materializes none —
-see State backend, above). The reason is not a safeguard: shipmate writes into
-the consumer's own checkout, none of those belong in a commit, and a
-`terramate run` of the consumer's own that omits `--no-recursive` refuses on
-them (`git-untracked` *does* fire there).
+(`.terraform/`), and the flavor's state path when it has one (a remote backend
+materializes none — see State backend, above). The reason is not a safeguard:
+shipmate writes into the consumer's own checkout, none of those belong in a
+commit, and a `terramate run` of the consumer's own that omits `--no-recursive`
+refuses on them (`git-untracked` *does* fire there).
 
 `.terraform.lock.hcl` is the consumer's call, not shipmate's: committing it is
 OpenTofu's own recommendation for pinning provider versions and hashes, and a

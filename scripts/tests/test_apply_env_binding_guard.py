@@ -78,11 +78,8 @@ BINDINGS = {
     ("dev-us", "dev-us-2"): "dev-us-apply",  # comma boundaries: no prefix match
 }
 
-#: snapshot's steps, in order, by action path with the SHA dropped: a checkout repin must not
-#: redden this, a reorder must. The engine checkout comes first because the two steps after it
-#: are local paths inside it.
+#: snapshot's steps, in order, by action path: a reorder must redden this.
 SNAPSHOT_STEPS = [
-    "actions/checkout",
     local_action("verify-environments"),
     local_action("apply-snapshot"),
 ]
@@ -162,7 +159,7 @@ def test_snapshot_verifies_the_environments_before_snapshotting_the_checks():
         "the whole job before wave0, or the applies it exists to refuse have "
         "already started"
     )
-    assert steps[1].get("continue-on-error") in (None, False), (
+    assert steps[0].get("continue-on-error") in (None, False), (
         "the pre-flight step is continue-on-error: it would name the missing "
         "environments and let the waves apply into them anyway"
     )
