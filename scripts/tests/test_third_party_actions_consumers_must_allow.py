@@ -6,9 +6,9 @@ actions in `THIRD_PARTY`. Adding a new third-party action here is therefore not 
 until every consumer's list names it too, their next run dies in `Set up job`, and the engine's
 own suite stays green while it happens.
 
-A `$/` reference resolves in the engine repository and falls under the `<owner>/shipmate/*@*`
-pattern consumers already list, so it needs no additional allowlist pattern. A `./` reference
-resolves in the running workspace, never a third party's. Both are excluded here.
+A `$/` reference resolves in the engine repository and passes with the `<owner>/shipmate/*@*`
+entry consumers already list (measured), so it needs no additional allowlist pattern. A `./`
+reference resolves in the running workspace, never a third party's. Both are excluded here.
 
 Version bumps are free, the patterns ending `@*`, so the set is compared by action path without
 refs. Hand-written, never derived from the files it checks: a derived vector passes whatever the

@@ -1677,9 +1677,9 @@ trigger alone closes two paths a trigger check alone would not:
   `sys.version_info` ahead of the import and refuses with the version it found
   and this clause. A `runs_on:` image older than that — `ubuntu-22.04` ships
   3.10 — fails at `detect`.
-- Engine steps use GitHub's `$/` self-repository syntax, which needs runner 2.336.0 or newer
-  and exists on github.com only. A self-hosted runner below that version, and GitHub Enterprise
-  Server, cannot run the engine. The error such a runner shows is unmeasured.
+- Engine steps use GitHub's `$/` self-repository syntax, which needs runner 2.336.0 or newer,
+  and shipmate supports it on github.com only. A self-hosted runner below that version, and
+  GitHub Enterprise Server, cannot run the engine. The error such a runner shows is unmeasured.
 - Terramate and OpenTofu are not assumed to be on the image: the
   `setup` action installs the versions the engine release declares in its own
   root-level `VERSIONS` file, read at the commit the consumer pins. Moving to

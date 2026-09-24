@@ -5,7 +5,7 @@ things keep it safe: its `if:`, and the fact that it executes no consumer reposi
 job now lives in `plan.yml` alongside two jobs that check out and execute pull-request content --
 `detect` and `plan` -- so the job-id list is pinned here too. The job checks out nothing; any
 checkout step, which under `pull_request_target` would take the pull request head, changes the
-step list the whole-block comparison below pins.
+ordered step list below pins.
 Every assertion below is on a parsed value -- `yaml.safe_load`,
 then a whole `if:`/`environment:`/`with:` field -- rather than a substring of the raw file text.
 The substring form was proven vacuous: four simultaneous mutations of the summary job (all three
