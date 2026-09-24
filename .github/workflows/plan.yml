@@ -140,7 +140,7 @@ jobs:
       - uses: $/actions/summary
         # `scripts/doctor` reads the engine's own slug for its pin probe. The `job` context is
         # unavailable in a job-level `env:` -- GitHub rejects the whole workflow file at load --
-        # and `github.action_repository` is empty for a local `./` action, so the calling step
+        # and `github.action_repository` is empty for a `$/` action, so the calling step
         # passes it; a composite action's `run` steps inherit the caller step's env.
         env:
           SHIPMATE_ENGINE_REPO: ${{ job.workflow_repository }}

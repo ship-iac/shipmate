@@ -27,7 +27,7 @@ EXPECTED_IF = (
     "needs.facts.outputs.head-repo == github.repository && "
     "(needs.facts.outputs.is-draft == 'false' || needs.facts.outputs.on-demand == 'true') }}"
 )
-#: The whole job, as an ordered list of what each step runs. A second checkout step, a `run:`
+#: The whole job, as an ordered list of what each step runs. A checkout step, a `run:`
 #: step, or any extra step at all changes this list, where a substring scan would miss every one
 #: of those.
 EXPECTED_STEP_USES = [

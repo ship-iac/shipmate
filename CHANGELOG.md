@@ -11,6 +11,16 @@ section below names the SHA the release tags.
 The version line stays `v0.x` while action inputs, check names, and the comment
 grammar are declared unstable in `README.md`.
 
+## [Unreleased]
+
+### Changed
+
+- **Engine actions resolve through `$/`, with no checkout.** Every engine step calls
+  `$/actions/<name>`, GitHub's self-repository syntax, so the 25 `actions/checkout` steps and
+  the `.shipmate-engine/` directory are gone. The commit you pin is still the whole tree that
+  runs. Self-hosted runners need 2.336.0 or newer; github.com only, as before. The
+  `.shipmate-engine/` gitignore entry is no longer needed and is harmless if left.
+
 ## [0.31.0] — 2026-09-20
 
 Tags `4172108`.

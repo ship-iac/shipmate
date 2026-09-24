@@ -9,8 +9,8 @@ current release needs beyond the move.
 seven reusable workflows, and they share inputs and secrets across a release: a
 repository that bumps some of those refs and leaves others behind is running two
 engine versions against one contract. No composite action carries a pin — the
-actions are engine-internal and run from the engine checkout at
-`.shipmate-engine/`, so nothing inside them has to move.
+actions are engine-internal and resolve through `$/` at the commit you pin, so
+nothing inside them has to move.
 [`../CONTRACT.md`](../CONTRACT.md) §Consumption is the rule.
 
 Consumers pin by commit SHA, never by tag or branch name, optionally with a
@@ -35,21 +35,6 @@ $ gh api repos/<owner>/shipmate/commits/v0.14.2 --jq .sha
 
 Locally, `git rev-parse v0.14.2^{commit}` — the `^{commit}` is the same
 dereference.
-
-## Gitignore the engine checkout
-
-Every engine job checks this repository out into `.shipmate-engine/` inside your
-working tree. Add it to your `.gitignore` in the same change as the re-pin:
-
-```gitignore
-.shipmate-engine/
-```
-
-Left untracked, a `terramate run` of your own that omits `--no-recursive`
-refuses on it (`git-untracked`). It joins the per-run machine artifacts shipmate
-already materializes — `*.otplan`, `fingerprint.txt`, `planned-head.txt`,
-`.terraform/`, and the flavor's state path when it has one.
-[`../CONTRACT.md`](../CONTRACT.md) §Consumer gitignore requirement is the rule.
 
 ## Dependabot
 

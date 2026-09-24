@@ -1,15 +1,11 @@
 # Releasing
 
 Consumers pin shipmate's reusable workflows by commit SHA. The engine itself has
-no pins: every job that runs an engine action checks `ship-iac/shipmate` out at
-`${{ job.workflow_sha }}` — the commit of the reusable workflow the consumer
-pinned — into `.shipmate-engine/` and calls its actions as
-`./.shipmate-engine/actions/<name>`, and the three callers of
-`apply-env-level.yml` reach it as `./.github/workflows/apply-env-level.yml`. One
-commit, one tree. The ref falls back to an all-zero SHA, which no repository
-holds, so a runner without that context fails at the engine checkout instead of
-fetching the engine's default branch.
-`scripts/tests/test_engine_self_checkout.py` refuses a
+no pins: every engine step calls its action as `$/actions/<name>`, which GitHub
+resolves in this repository at the commit of the reusable workflow the consumer
+pinned, and the three callers of `apply-env-level.yml` reach it as
+`./.github/workflows/apply-env-level.yml`. One commit, one tree.
+`scripts/tests/test_engine_self_reference.py` refuses a
 `ship-iac/shipmate/<path>@<sha>` reference in any workflow or action manifest.
 
 ## Consumers move every engine ref in one change
@@ -194,10 +190,8 @@ is a 422 "not provided". It also resolves and
 parses the engine reusable workflow at the new SHA, because that happens when the
 run graph is built.
 
-It cannot reach a composite action's manifest. The engine's actions are local
-`./.shipmate-engine/` refs, which GitHub parses only when their step executes
-(`v0.16.0` died in `Set up job` because its refs were remote), and the job
-holding them never starts anyway: `detect` runs only behind `guard`, and `guard`
+It cannot reach a composite action's manifest. The job holding the engine's `$/`
+action refs never starts: `detect` runs only behind `guard`, and `guard`
 rejects any actor not ending in `[bot]` — correctly, since a direct human
 dispatch is what it exists to refuse. A skipped job sets nothing up, so nothing
 fetches or parses its actions. `v0.16.0`'s unparseable `apply-detect/action.yml`
