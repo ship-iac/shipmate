@@ -1,6 +1,6 @@
 """Engine `comment-ops.yml`: the dispatch runs only after the authorization step said yes.
 
-After the engine checkout the two steps are one gate and one privileged action.
+The job's two steps are one gate and one privileged action.
 `scripts/authorize` writes `head_sha`, `environment` and a verdict of `false` on the same run,
 and the verb comes from the parse step
 either way -- so a refused `shipmate apply` carries everything a dispatch needs. If the `if:` on
@@ -55,7 +55,6 @@ def test_the_guard_step_runs_before_the_dispatch_step():
     property."""
     uses = [str(s.get("uses", "")).split("@")[0] for s in _job()["steps"]]
     assert uses == [
-        "actions/checkout",
         local_action("comment-ops"),
         local_action("dispatch"),
     ]

@@ -104,10 +104,10 @@ def test_summary_action_supplies_every_env_var_doctor_requires_in_annotate_mode(
 
 
 def test_neither_doctor_step_passes_the_engine_repo():
-    """Every engine action now runs from `./.shipmate-engine/`, where `github.action_repository`
-    is empty, so passing it fed doctor an empty slug and degraded the pin probe to "not verified"
-    on both paths. The calling step supplies the slug from `job.workflow_repository` instead
-    (test_engine_self_checkout.py::test_the_doctor_steps_pass_the_engine_repository); an action
+    """`github.action_repository` is empty for a `$/` action, so passing it fed doctor an empty
+    slug and degraded the pin probe to "not verified" on both paths. The calling step supplies
+    the slug from `job.workflow_repository` instead
+    (test_engine_self_reference.py::test_the_doctor_steps_pass_the_engine_repository); an action
     re-introducing the variable would shadow it.
     Mutation: add `SHIPMATE_ENGINE_REPO:` back to either action."""
     assert "SHIPMATE_ENGINE_REPO" not in _ACTION

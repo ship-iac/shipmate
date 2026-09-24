@@ -13,7 +13,7 @@ site that genuinely needs an input changes the constant below deliberately.
 import yaml
 from _loader import WORKFLOWS, local_action
 
-#: Both spellings of the action: every engine job reaches it through the engine checkout, and
+#: Both spellings of the action: every engine job reaches it through `$/`, and
 #: `manifest-load.yml`'s remote `@main` probe is the one call site that cannot.
 SETUP = {local_action("setup"), "ship-iac/shipmate/actions/setup"}
 

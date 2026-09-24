@@ -40,22 +40,10 @@ SCRIPTS = _SCRIPTS
 ACTIONS = ENGINE / "actions"
 WORKFLOWS = ENGINE / ".github" / "workflows"
 
-#: Where every engine job checks the engine out, at the commit that defines the job. One constant
-#: for the checkout `path:` and every local `uses:`.
-ENGINE_DIR = ".shipmate-engine"
-ENGINE_CHECKOUT_WITH = {
-    "repository": "ship-iac/shipmate",
-    #: A missing context yields a nonexistent commit, so the checkout fails instead of fetching
-    #: the engine's default branch. `job.workflow_sha` is unavailable on GitHub Enterprise Server.
-    "ref": "${{ job.workflow_sha || '0000000000000000000000000000000000000000' }}",
-    "path": ENGINE_DIR,
-    "persist-credentials": False,
-}
-
 
 def local_action(name):
     """The `uses:` an engine workflow or composite action writes for engine action `name`."""
-    return f"./{ENGINE_DIR}/actions/{name}"
+    return f"$/actions/{name}"
 
 
 _APP_KEY = {"SHIPMATE_APP_PRIVATE_KEY": "${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}"}

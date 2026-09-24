@@ -7,9 +7,10 @@ paths:
       - 'constant expression "false" in condition'
   .github/workflows/*.yml:
     ignore:
-      # `job.workflow_sha` is documented and measured live; actionlint 1.7.12 types the `job`
-      # context without it. The 25 sites are pinned whole by test_engine_self_checkout.py.
-      - 'property "workflow_sha" is not defined in object type'
-      # `job.workflow_repository` likewise: the two doctor steps are pinned whole by
-      # test_engine_self_checkout.py.
+      # actionlint 1.7.12 has no `$/` self-repository syntax (GitHub, 2026-07-30) and reads
+      # `$/actions/<name>` as a remote ref missing its `@`. Remove when a release parses it.
+      - 'specifying action "\$/actions/[a-z-]+" in invalid format because ref is missing'
+      # `job.workflow_repository` is documented and measured live; actionlint 1.7.12 types the
+      # `job` context without it. The two doctor steps are pinned whole by
+      # test_engine_self_reference.py.
       - 'property "workflow_repository" is not defined in object type'

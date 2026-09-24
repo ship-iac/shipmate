@@ -22,14 +22,8 @@ jobs:
       pull-requests: write
       actions: read
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: ship-iac/shipmate
-          ref: ${{ job.workflow_sha || '0000000000000000000000000000000000000000' }}
-          path: .shipmate-engine
-          persist-credentials: false
       - id: authz
-        uses: ./.shipmate-engine/actions/comment-ops
+        uses: $/actions/comment-ops
         # `scripts/doctor` reads the engine's own slug for its pin probe. The `job` context is
         # unavailable in a job-level `env:` -- GitHub rejects the whole workflow file at load --
         # and `github.action_repository` is empty for a local `./` action, so the calling step
@@ -48,7 +42,7 @@ jobs:
       # the real head SHA out of the step above, so a dispatch reaching this action would be
       # indistinguishable from an authorized one.
       - if: ${{ steps.authz.outputs.authorized == 'true' }}
-        uses: ./.shipmate-engine/actions/dispatch
+        uses: $/actions/dispatch
         with:
           app-id: ${{ vars.SHIPMATE_APP_ID }}
           private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}

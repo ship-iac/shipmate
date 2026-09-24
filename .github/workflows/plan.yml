@@ -31,14 +31,8 @@ jobs:
       is-draft: ${{ steps.facts.outputs.is-draft }}
       on-demand: ${{ steps.facts.outputs.on-demand }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: ship-iac/shipmate
-          ref: ${{ job.workflow_sha || '0000000000000000000000000000000000000000' }}
-          path: .shipmate-engine
-          persist-credentials: false
       - id: facts
-        uses: ./.shipmate-engine/actions/pr-facts
+        uses: $/actions/pr-facts
 
   detect:
     needs: facts
@@ -59,17 +53,11 @@ jobs:
         with:
           ref: ${{ needs.facts.outputs.head-sha }}
           fetch-depth: 0
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: ship-iac/shipmate
-          ref: ${{ job.workflow_sha || '0000000000000000000000000000000000000000' }}
-          path: .shipmate-engine
-          persist-credentials: false
-      - uses: ./.shipmate-engine/actions/setup
+      - uses: $/actions/setup
       # Before the two terramate steps, not after: this step is where a fork's pull request is
       # refused, and `terramate fmt`/`generate` evaluate the checked-out HCL.
       - id: matrix
-        uses: ./.shipmate-engine/actions/build-matrix
+        uses: $/actions/build-matrix
         with:
           base-sha: ${{ needs.facts.outputs.base-sha }}
           head-repo: ${{ needs.facts.outputs.head-repo }}
@@ -102,20 +90,14 @@ jobs:
         with:
           ref: ${{ needs.facts.outputs.head-sha }}
           fetch-depth: 0
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: ship-iac/shipmate
-          ref: ${{ job.workflow_sha || '0000000000000000000000000000000000000000' }}
-          path: .shipmate-engine
-          persist-credentials: false
-      - uses: ./.shipmate-engine/actions/setup
+      - uses: $/actions/setup
       - name: Configure cloud credentials (AWS OIDC)
         if: ${{ matrix.role_arn != '' }}
         uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4
         with:
           role-to-assume: ${{ matrix.role_arn }}
           aws-region: ${{ matrix.cred_region }}
-      - uses: ./.shipmate-engine/actions/plan-cell
+      - uses: $/actions/plan-cell
         with:
           tf-vars: ${{ toJSON(matrix.tf_vars) }}
           github-vars: ${{ toJSON(vars) }}
@@ -127,9 +109,9 @@ jobs:
           state-path: ${{ inputs.state_suffix != '' && format('{0}/{1}', matrix.stack, inputs.state_suffix) || '' }}
           plan-passphrase: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
 
-  # The only job here that holds the App key. Its only checkout is the engine itself, so it
-  # runs no consumer repository content, which is what makes `pull_request_target` safe for
-  # this file. All three trust decisions are on its own `if:`, reading the one producer above.
+  # The only job here that holds the App key. It checks out nothing, so it runs no consumer
+  # repository content, which is what makes `pull_request_target` safe for this file. All three
+  # trust decisions are on its own `if:`, reading the one producer above.
   summary:
     needs: [facts, detect, plan]
     # The fork clause yields to no trigger; it alone guards App-key exposure over fork-authored
@@ -146,12 +128,6 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: ship-iac/shipmate
-          ref: ${{ job.workflow_sha || '0000000000000000000000000000000000000000' }}
-          path: .shipmate-engine
-          persist-credentials: false
       # Unconditional: skipping it when zero cells were planned would make gate-state's "more
       # cells than planned" branch unreachable. A `pattern:` matching nothing is a no-op here.
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -161,7 +137,7 @@ jobs:
         with:
           pattern: cell-summary.*
           path: cells
-      - uses: ./.shipmate-engine/actions/summary
+      - uses: $/actions/summary
         # `scripts/doctor` reads the engine's own slug for its pin probe. The `job` context is
         # unavailable in a job-level `env:` -- GitHub rejects the whole workflow file at load --
         # and `github.action_repository` is empty for a local `./` action, so the calling step

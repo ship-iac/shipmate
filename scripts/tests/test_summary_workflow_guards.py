@@ -16,7 +16,7 @@ value.
 """
 
 import yaml
-from _loader import ENGINE_CHECKOUT_WITH, WORKFLOWS, local_action
+from _loader import WORKFLOWS, local_action
 
 WF = WORKFLOWS / "plan.yml"
 
@@ -31,7 +31,6 @@ EXPECTED_IF = (
 #: step, or any extra step at all changes this list, where a substring scan would miss every one
 #: of those.
 EXPECTED_STEP_USES = [
-    "actions/checkout",
     "actions/download-artifact",
     local_action("summary"),
 ]
@@ -79,14 +78,13 @@ def test_the_trusted_job_binds_the_engine_environment():
     assert job["environment"] == "shipmate-engine"
 
 
-def test_the_trusted_job_checks_out_the_engine_only_and_runs_exactly_these_steps():
+def test_the_trusted_job_checks_out_nothing_and_runs_exactly_these_steps():
     """It runs at the base ref holding the App key. A checkout of the pull request head here
     would make it the canonical pull_request_target vulnerability, and so would any step that
-    executes repository content by another route, which is why the step list is whole and the
-    checkout's `with:` block is compared entire."""
+    executes repository content by another route, which is why the step list is compared whole:
+    any checkout step at all reddens it."""
     job, _ = _summary_job()
     assert [str(s["uses"]).split("@")[0] for s in job["steps"]] == EXPECTED_STEP_USES
-    assert job["steps"][0]["with"] == ENGINE_CHECKOUT_WITH
 
 
 def test_the_workflow_passes_exactly_these_values_to_the_summary_action():
