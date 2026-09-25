@@ -179,7 +179,7 @@ def read_table_at_default_branch(run=None):
 #: and one conditional step in each cell action.
 _LAYOUTS = ("dry", "workspace", "folder")
 _AWS_FIELDS = ("region", "role")
-_ENV_KEYS = ("region", "vars", "aws")
+_ENV_KEYS = ("region", "vars", "aws", "shared")
 
 #: Reserved at every level: a tier selector, never a provider field.
 _STRUCTURAL = ("plan", "apply", "workloads")
@@ -317,25 +317,35 @@ def _check_vars(entry, env):
             )
 
 
-def shared_env_names(raw):
-    """The environments listed in `SHIPMATE_SHARED_ENVS`, as written.
+def _check_shared_key(entry, env):
+    """`shared` is a TOML boolean, and a shared entry declares no `aws.plan`.
 
-    Split at commas without stripping, so a padded entry is unlisted here exactly as it is
-    in `scripts/verify-environments` and the wave-job ternaries, which compare whole entries
-    between comma boundaries. Case is normalized by `_is_shared`, not here.
+    Runs after `_check_provider`, which is what has proven the `aws` block a mapping.
     """
-    return {e for e in raw.split(",") if e}
+    value = entry["shared"]
+    if not isinstance(value, bool):
+        raise SystemExit(
+            f"::error::environment {env}: shared must be a boolean, got "
+            f"{type(value).__name__}. Write shared = true or shared = false, unquoted."
+        )
+    if value and "plan" in entry.get("aws", {}):
+        raise SystemExit(
+            f"::error::environment {env} is shared between the plan and apply paths, so "
+            "aws.plan cannot apply to it: a shared environment resolves aws.apply on both "
+            "paths. Remove aws.plan, or set shared = false."
+        )
 
 
-def _is_shared(env, shared_envs):
-    """Whether `env` binds one shared environment rather than a plan/apply pair.
+def shared_envs(table):
+    """The environments whose entry holds `shared = true`.
 
-    Case-insensitive with `.lower()`, not `.casefold()`, to agree with the two readers this
-    variable already has: `scripts/verify-environments` lowers, and the wave ternaries use
-    GitHub's `contains()`. A case-exact reading here resolves the plan tier for a cell the
-    workflow bound to the shared environment.
+    Such an environment binds one bare GitHub Environment on both paths instead of the
+    `<env>-plan` / `<env>-apply` pair. Anything but `true` is unshared, the protected
+    direction; `validate_structure` refuses a non-boolean value before a run reads it.
     """
-    return env.lower() in {e.lower() for e in shared_envs}
+    return {
+        env for env, entry in table.get("environments", {}).items() if entry.get("shared") is True
+    }
 
 
 def _check_environment(entry, env):
@@ -353,27 +363,8 @@ def _check_environment(entry, env):
         _check_vars(entry, env)
     if "aws" in entry:
         _check_provider(entry["aws"], env, entry.get("region"))
-
-
-def _check_shared(environments, shared_envs):
-    """The one environment rule that needs context the file does not carry.
-
-    Membership comes from the `SHIPMATE_SHARED_ENVS` repository variable, so
-    `validate_structure` cannot decide it and the structural-only callers skip it.
-
-    Runs only after `validate_structure`, its sole caller's first step, which is what has
-    already proven every entry and every `aws` block a mapping.
-    """
-    for env in sorted(environments):
-        block = environments[env].get("aws")
-        if block is None or not _is_shared(env, shared_envs):
-            continue
-        if "plan" in block:
-            raise SystemExit(
-                f"::error::environment {env} is shared between the plan and apply paths, so "
-                "aws.plan cannot apply to it: a shared environment resolves aws.apply on both "
-                f"paths. Remove aws.plan, or drop {env} from SHIPMATE_SHARED_ENVS."
-            )
+    if "shared" in entry:
+        _check_shared_key(entry, env)
 
 
 def _check_dry_coverage(environments, matrix_envs):
@@ -629,8 +620,8 @@ def validate_structure(table):
 
     Every top-level field, so a "valid configuration" verdict cannot hide an ordering
     or exclusion error until an apply reads it. `doctor` and `gate-config` validate with
-    this alone: the rules left to `validate` need a checkout, a matrix or a repository
-    variable, none of which either of them has.
+    this alone: the rules left to `validate` need a matrix or a whole-tree environment scan,
+    neither of which either of them has.
 
     `layout` is required: it is the only source of a cell's environment identity, so a
     table without one leaves every cell with nothing to run as.
@@ -665,18 +656,16 @@ def validate_structure(table):
     return table
 
 
-def validate(table, matrix_envs, shared_envs, all_envs=None):
+def validate(table, matrix_envs, all_envs=None):
     """The table, or `SystemExit`. Structure first, then the rules needing run context.
 
-    `matrix_envs` is the environment set this operation resolved, `shared_envs` the
-    `SHIPMATE_SHARED_ENVS` listing, and `all_envs` the whole-tree environment scan where
-    one exists -- only the unused-entry warning reads it, and it is `None` on the paths
-    that scan only a changed set or a workset, where an environment absent from that set
-    is not evidence of anything.
+    `matrix_envs` is the environment set this operation resolved, and `all_envs` the
+    whole-tree environment scan where one exists -- only the unused-entry warning reads it,
+    and it is `None` on the paths that scan only a changed set or a workset, where an
+    environment absent from that set is not evidence of anything.
     """
     validate_structure(table)
     environments = table.get("environments", {})
-    _check_shared(environments, shared_envs)
     if table["layout"] == "dry":
         _check_dry_coverage(environments, matrix_envs)
     if all_envs is not None:
@@ -698,13 +687,16 @@ def _derived(layout, env, entry):
     return {}
 
 
-def resolve(table, env, path, workload, shared_envs):
-    """What one cell runs with: `role_arn`, `cred_region`, `tf_vars`, `config_path`.
+def resolve(table, env, path, workload):
+    """What one cell runs with: `role_arn`, `cred_region`, `tf_vars`, `config_path`,
+    `env_binding`.
 
     `path` is the calling detect's tier, never inferred; a shared environment resolves
     `aws.apply` on both paths, and `config_path` reports the tier actually consulted
-    rather than the one requested. There is no fallback to `vars.*`: an environment with
-    no entry resolves an empty role and the caller skips the credentials step.
+    rather than the one requested. `env_binding` is the GitHub Environment the cell's job
+    binds: the bare `env` when shared, `<env>-<path>` otherwise. There is no fallback to
+    `vars.*`: an environment with no entry resolves an empty role and the caller skips the
+    credentials step.
 
     The workload tier is keyed by the raw `workload` tag value, never by a normalized
     form of it: `net-edge` and `net_edge` are two workloads. The environment's own `vars`
@@ -712,7 +704,8 @@ def resolve(table, env, path, workload, shared_envs):
     """
     environments = _mapping(table.get("environments", {}), "environments")
     entry = _mapping(environments.get(env, {}), f"environment {env}")
-    config_path = "apply" if _is_shared(env, shared_envs) else path
+    shared = env in shared_envs(table)
+    config_path = "apply" if shared else path
     fields = {}
     if "aws" in entry:
         resolved = dict(tiers(entry["aws"], env, entry.get("region")))
@@ -724,4 +717,5 @@ def resolve(table, env, path, workload, shared_envs):
         "cred_region": fields.get("region", ""),
         "tf_vars": {**_derived(table.get("layout"), env, entry), **entry.get("vars", {})},
         "config_path": config_path,
+        "env_binding": env if shared else f"{env}-{path}",
     }

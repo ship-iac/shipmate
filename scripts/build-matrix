@@ -304,37 +304,44 @@ def compute_cells(all_stacks=False, base="", require_env_tag=True, tags=""):
 
 
 def env_config(cells, all_envs=None, table=None):
-    """(validated table, shared env names) for `cells`. One read per detect, not per row.
+    """The validated table for `cells`. One read per detect, not per row.
 
-    `SHIPMATE_SHARED_ENVS` is read hard: an action that forgot to bind it would otherwise
-    leave every environment unshared, which resolves the plan role in an environment that
-    binds the bare apply one. `env-config` owns how the value is split and compared, so that
-    reading sits in one place beside the two the workflows use; `test_apply_env_binding_guard.py`
-    compares all three to one hand-written vector. `all_envs` is the whole-tree environment
-    scan, which only the unused-entry warning reads; the caller passes it only where it
-    actually scanned the whole tree, and `None` otherwise. `table` is a mapping the caller
-    already read from the default branch, for a path needing a field of it before its cells
-    exist; passing it here is what keeps that path on one read.
+    `all_envs` is the whole-tree environment scan, which only the unused-entry warning
+    reads; the caller passes it only where it actually scanned the whole tree, and `None`
+    otherwise. `table` is a mapping the caller already read from the default branch, for a
+    path needing a field of it before its cells exist; passing it here is what keeps that
+    path on one read.
     """
-    shared = ec.shared_env_names(os.environ["SHIPMATE_SHARED_ENVS"])
     envs = {c["environment"] for c in cells}
     table = ec.read_table() if table is None else table
-    return ec.validate(table, envs, shared, all_envs=all_envs), shared
+    return ec.validate(table, envs, all_envs=all_envs)
 
 
-def stamp_rows(cells, table, tier, shared_envs):
-    """Stamp each row with what the table resolves for it.
+def stamp_rows(cells, table, tier):
+    """Stamp each row with what the table resolves for it, or `SystemExit`.
 
     `tier` is the calling detect's path (`plan` or `apply`) and is always passed
     explicitly: one call site serves both tiers, so nothing may infer it. Applied at each
     site that emits rows rather than inside `build_matrix`, which stays pure and
     unit-testable; `run_unlock` returns from `apply-detect`'s `main` early, so a stamp in any
     `main` tail would skip the unlock path. `test_row_stamp_guard.py` pins each site.
+
+    A row whose `env_binding` is not a non-empty string refuses before any caller writes a
+    matrix: every cell job binds `environment:` from it, and GitHub binds no environment for
+    an empty one, so the cell would run outside every environment control.
     """
-    return [
-        {**cell, **ec.resolve(table, cell["environment"], tier, cell["workload"], shared_envs)}
-        for cell in cells
+    rows = [
+        {**cell, **ec.resolve(table, cell["environment"], tier, cell["workload"])} for cell in cells
     ]
+    for row in rows:
+        binding = row.get("env_binding")
+        if not isinstance(binding, str) or not binding:
+            raise SystemExit(
+                f"::error::{row['stack']} in {row['environment']} resolved env_binding "
+                f"{binding!r}, which names no GitHub Environment. A job bound to it would run "
+                "outside every environment control, so no matrix is written."
+            )
+    return rows
 
 
 def _event_payload(path):
@@ -532,8 +539,8 @@ def main():
     # One call serves plan and drift, and only drift scans the whole tree. Under
     # `all_stacks=False` the map covers the CHANGED stacks alone, so passing it would
     # report every unchanged environment as an unused table entry on every plan.
-    table, shared = env_config(cells, set(stacks_by_env) if all_stacks else None)
-    cells = stamp_rows(cells, table, "plan", shared)
+    table = env_config(cells, set(stacks_by_env) if all_stacks else None)
+    cells = stamp_rows(cells, table, "plan")
     with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
         fh.write(f"matrix={json.dumps({'include': cells})}\n")
         fh.write(f"empty={'true' if not cells else 'false'}\n")

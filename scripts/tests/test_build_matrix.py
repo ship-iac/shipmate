@@ -468,9 +468,6 @@ def _run_main(
         "SHIPMATE_TAGS",
     ):
         monkeypatch.delenv(k, raising=False)
-    # Set here rather than in each caller's dict: `env_config` reads it hard, so a detect whose
-    # action forgot to bind it fails the run instead of treating every env as unshared.
-    monkeypatch.setenv("SHIPMATE_SHARED_ENVS", "")
     if head_sha is not None:
         monkeypatch.setenv("SHIPMATE_HEAD_SHA", head_sha)
         monkeypatch.setattr(bm, "_run", lambda args: f"{head_sha}\n")
@@ -1358,16 +1355,70 @@ def test_a_whole_tree_run_does_report_the_unused_entry(monkeypatch, tmp_path, ca
 
 def test_a_supplied_table_is_validated_exactly_as_a_read_one_is(monkeypatch):
     """`table=` exists to spare a second read, not to skip the checks. `validate_structure`
-    alone supplies neither `_check_shared` nor `_check_dry_coverage`, so a supplied `dry`
+    alone does not supply `_check_dry_coverage`, so a supplied `dry`
     table with no entry for a cell's environment would derive neither identity variable and
     the cell would plan undistinguished from every other environment's.
 
-    Mutation: on the supplied-table branch return `ec.validate_structure(table), shared`
-    instead of routing through `ec.validate`.
+    Mutation: on the supplied-table branch return `ec.validate_structure(table)` instead of
+    routing through `ec.validate`.
     """
-    monkeypatch.setenv("SHIPMATE_SHARED_ENVS", "")
     monkeypatch.setattr(bm.ec, "read_table", _no_read)
     cells = [{"stack": "stacks/app", "environment": "dev-eu", "workload": ""}]
     with pytest.raises(SystemExit) as exc:
         bm.env_config(cells, table={"layout": "dry", "environments": {}})
     assert "dev-eu" in str(exc.value) and "no entry in it" in str(exc.value)
+
+
+_MISSING = object()
+
+
+def _resolving(binding):
+    """A `resolve` double, matching its signature, whose row carries `binding` as its
+    `env_binding`, or no such key for `_MISSING`."""
+
+    def resolve(table, env, path, workload):
+        row = {"role_arn": "", "cred_region": "", "tf_vars": {}, "config_path": path}
+        if binding is not _MISSING:
+            row["env_binding"] = binding
+        return row
+
+    return resolve
+
+
+@pytest.mark.parametrize(
+    ("binding", "shown"),
+    [(_MISSING, "None"), (42, "42"), ("", "''")],
+    ids=["missing", "int", "empty"],
+)
+def test_a_row_without_a_usable_binding_refuses(monkeypatch, binding, shown):
+    """Every cell job binds `environment:` from the row, and GitHub binds no environment for an
+    empty one: the cell would run outside every environment control.
+
+    Mutation: delete the `env_binding` check from `stamp_rows` -- all three cases red.
+    """
+    monkeypatch.setattr(bm.ec, "resolve", _resolving(binding))
+    cells = [{"stack": "stacks/app", "environment": "dev-eu", "workload": ""}]
+    with pytest.raises(SystemExit) as exc:
+        bm.stamp_rows(cells, _MINIMAL_TABLE, "plan")
+    assert str(exc.value) == (
+        f"::error::stacks/app in dev-eu resolved env_binding {shown}, which names no GitHub "
+        "Environment. A job bound to it would run outside every environment control, so no "
+        "matrix is written."
+    )
+
+
+def test_main_writes_no_matrix_when_a_binding_refuses(monkeypatch, tmp_path):
+    """The refusal lands before `GITHUB_OUTPUT` is opened, so no half-written matrix reaches a
+    job that would bind it.
+
+    Mutation: delete the `env_binding` check from `stamp_rows` -- main writes the matrix.
+    """
+    monkeypatch.setattr(bm.ec, "resolve", _resolving(""))
+    env = {
+        "GITHUB_EVENT_NAME": "pull_request",
+        "GITHUB_REPOSITORY": "acme/iac",
+        "SHIPMATE_HEAD_REPO": "acme/iac",
+    }
+    with pytest.raises(SystemExit):
+        _run_main(monkeypatch, tmp_path, env, head_sha="cafe1234")
+    assert (tmp_path / "out.txt").read_text(encoding="utf-8") == ""

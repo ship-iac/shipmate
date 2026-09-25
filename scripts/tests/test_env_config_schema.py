@@ -17,9 +17,9 @@ from _loader import load_script
 env_config = load_script("env-config")
 
 
-def _refusal(table, matrix_envs=(), shared_envs=()):
+def _refusal(table, matrix_envs=()):
     with pytest.raises(SystemExit) as excinfo:
-        env_config.validate(table, matrix_envs, shared_envs)
+        env_config.validate(table, matrix_envs)
     return str(excinfo.value)
 
 
@@ -104,7 +104,7 @@ def test_dry_refuses_an_empty_region():
 def test_a_non_dry_layout_needs_no_entry():
     """Mutation: run the coverage check for every layout."""
     table = {"layout": "workspace", "environments": {}}
-    assert env_config.validate(table, ("dev-eu",), ()) == table
+    assert env_config.validate(table, ("dev-eu",)) == table
 
 
 # --- 3: a tier that resolves a credential resolves every required field ---------------
@@ -157,7 +157,7 @@ def test_the_environment_region_satisfies_the_required_field():
             }
         },
     }
-    assert env_config.validate(table, (), ()) == table
+    assert env_config.validate(table, ()) == table
 
 
 # --- 4: a field the provider does not define ------------------------------------------
@@ -203,7 +203,7 @@ def test_an_unimplemented_provider_key_refuses():
     }
     assert _refusal(table) == (
         "::error::environment dev-eu: azure is not a key this engine implements. "
-        "An environment holds region, vars, aws."
+        "An environment holds region, vars, aws, shared."
     )
 
 
@@ -215,7 +215,7 @@ def test_a_misspelled_environment_key_refuses():
     table = {"layout": "folder", "environments": {"dev-eu": {"regoin": "eu-west-1"}}}
     assert _refusal(table) == (
         "::error::environment dev-eu: regoin is not a key this engine implements. "
-        "An environment holds region, vars, aws."
+        "An environment holds region, vars, aws, shared."
     )
 
 
@@ -282,48 +282,79 @@ def test_an_apply_only_tier_passes():
             }
         },
     }
-    assert env_config.validate(table, (), ()) == table
+    assert env_config.validate(table, ()) == table
 
 
-# --- 7: a shared environment declaring plan -------------------------------------------
+# --- 7: the shared key ----------------------------------------------------------------
+
+_PLAN_AND_APPLY = {
+    "region": "eu-west-1",
+    "aws": {
+        "plan": {"role": "arn:aws:iam::9817:role/p"},
+        "apply": {"role": "arn:aws:iam::9817:role/a"},
+    },
+}
 
 
-@pytest.mark.parametrize("listed", ["dev-eu", "Dev-EU"])
-def test_a_shared_environment_declaring_plan_refuses(listed):
-    """Mutation: drop the shared check, or ignore `shared_envs` entirely. Mutation:
-    compare the listed spelling case-exactly -- `Dev-EU` then validates and the refusal
-    the whole check exists for never fires."""
-    table = {
-        "layout": "folder",
-        "environments": {
-            "dev-eu": {
-                "region": "eu-west-1",
-                "aws": {
-                    "plan": {"role": "arn:aws:iam::9817:role/p"},
-                    "apply": {"role": "arn:aws:iam::9817:role/a"},
-                },
-            }
-        },
-    }
-    assert _refusal(table, shared_envs=(listed,)) == (
+@pytest.mark.parametrize("value", [True, False])
+def test_a_boolean_shared_key_validates(value):
+    """Mutation: drop `shared` from the implemented environment keys."""
+    table = {"layout": "folder", "environments": {"dev-eu": {"shared": value}}}
+    assert env_config.validate_structure(table) is table
+
+
+@pytest.mark.parametrize(("value", "found"), [("true", "str"), (1, "int"), ("yes", "str")])
+def test_a_shared_key_that_is_not_a_boolean_refuses(value, found):
+    """A quoted `"true"` reads as shared to a person and would resolve as unshared.
+
+    Mutation: replace the boolean check with `bool(value)` -- all three values then validate.
+    """
+    table = {"layout": "folder", "environments": {"dev-eu": {"shared": value}}}
+    assert _refusal(table) == (
+        f"::error::environment dev-eu: shared must be a boolean, got {found}. Write "
+        "shared = true or shared = false, unquoted."
+    )
+
+
+def test_a_shared_environment_declaring_plan_refuses_without_run_context():
+    """The contradiction is structural, so `validate_structure` alone refuses it: `shipmate
+    doctor` validates a branch with nothing else.
+
+    Mutation: move the check out of `_check_environment` into `validate` -- this table then
+    passes `validate_structure`.
+    """
+    table = {"layout": "folder", "environments": {"dev-eu": {**_PLAN_AND_APPLY, "shared": True}}}
+    with pytest.raises(SystemExit) as excinfo:
+        env_config.validate_structure(table)
+    assert str(excinfo.value) == (
         "::error::environment dev-eu is shared between the plan and apply paths, so "
         "aws.plan cannot apply to it: a shared environment resolves aws.apply on both "
-        "paths. Remove aws.plan, or drop dev-eu from SHIPMATE_SHARED_ENVS."
+        "paths. Remove aws.plan, or set shared = false."
     )
 
 
 def test_an_unshared_environment_may_declare_plan():
-    """Mutation: refuse `plan` for every environment, shared or not."""
+    """`shared = false` is the second remedy the refusal above names, so it must validate.
+
+    Mutation: refuse `aws.plan` whenever the key is present, whatever its value.
+    """
+    table = {"layout": "folder", "environments": {"dev-eu": {**_PLAN_AND_APPLY, "shared": False}}}
+    assert env_config.validate_structure(table) is table
+
+
+def test_a_shared_environment_declaring_only_apply_validates():
+    """Mutation: refuse any `aws` block in a shared environment."""
     table = {
         "layout": "folder",
         "environments": {
             "dev-eu": {
                 "region": "eu-west-1",
-                "aws": {"plan": {"role": "arn:aws:iam::9817:role/p"}},
+                "shared": True,
+                "aws": {"apply": {"role": "arn:aws:iam::9817:role/a"}},
             }
         },
     }
-    assert env_config.validate(table, (), ("prod-us",)) == table
+    assert env_config.validate_structure(table) is table
 
 
 # --- 8: vars names and values ----------------------------------------------------------
@@ -366,7 +397,7 @@ def test_vars_may_hold_an_empty_string():
         "layout": "folder",
         "environments": {"dev-eu": {"vars": {"TF_VAR_region": "", "TF_WORKSPACE": "w"}}},
     }
-    assert env_config.validate(table, (), ()) == table
+    assert env_config.validate(table, ()) == table
 
 
 # --- 9: malformed shape ----------------------------------------------------------------
@@ -475,7 +506,7 @@ def test_a_folder_layout_with_no_environments_passes():
     Mutation: require an `environments` key.
     """
     table = {"layout": "folder"}
-    assert env_config.validate(table, ("dev-eu",), ()) == table
+    assert env_config.validate(table, ("dev-eu",)) == table
 
 
 def test_an_empty_table_refuses():
@@ -510,7 +541,7 @@ def test_a_whole_table_is_returned_unchanged():
             }
         },
     }
-    assert env_config.validate(table, ("dev-eu",), ()) == {
+    assert env_config.validate(table, ("dev-eu",)) == {
         "layout": "dry",
         "env_order": {"prod-us": ["dev-eu"]},
         "environments": {
@@ -581,7 +612,7 @@ def test_every_allowed_top_level_key_is_accepted():
         "gate": {"approvers_team": "deployers", "ungated_envs": ["dev-eu"]},
         "version": 1,
     }
-    assert env_config.validate(table, (), ()) == table
+    assert env_config.validate(table, ()) == table
 
 
 _ORDERING = [
@@ -654,7 +685,7 @@ def test_a_tier_word_that_is_not_the_trailing_suffix_is_accepted():
     then refuses.
     """
     table = {"layout": "folder", "explicit_envs": ["prod", "plan-eu", "apply-svc", "eu-plan-1"]}
-    assert env_config.validate(table, (), ()) == table
+    assert env_config.validate(table, ()) == table
 
 
 _CYCLE_TAIL = (
@@ -710,7 +741,7 @@ def test_a_declared_version_1_is_accepted():
     """Mutation: remove `"version"` from `_TOP_KEYS` -- the strict top-level loop then
     refuses a file declaring the version this engine implements."""
     table = {"layout": "folder", "version": 1}
-    assert env_config.validate(table, (), ()) == table
+    assert env_config.validate(table, ()) == table
 
 
 def test_an_absent_version_is_accepted():
@@ -721,7 +752,7 @@ def test_an_absent_version_is_accepted():
     every file that omits it.
     """
     table = {"layout": "folder"}
-    assert env_config.validate(table, (), ()) == table
+    assert env_config.validate(table, ()) == table
 
 
 def test_a_future_version_refuses_naming_the_one_implemented():
@@ -750,14 +781,14 @@ def test_a_gate_table_holding_both_keys_is_accepted():
         "layout": "folder",
         "gate": {"approvers_team": "deployers", "ungated_envs": ["dev-eu", "dev_us"]},
     }
-    assert env_config.validate(table, (), ()) == table
+    assert env_config.validate(table, ()) == table
 
 
 def test_an_absent_gate_table_is_accepted():
     """Mutation: `table.get("gate", {})` -> `table["gate"]` -- every file that declares no
     gate then raises instead of validating."""
     table = {"layout": "folder", "environments": {}}
-    assert env_config.validate(table, (), ()) == table
+    assert env_config.validate(table, ()) == table
 
 
 def test_an_unknown_key_in_the_gate_table_refuses_by_name():
