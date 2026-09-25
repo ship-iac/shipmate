@@ -493,11 +493,9 @@ def _naming_conflict(ctx, env):
         "differs",
         env,
         f"the engine binds {' / '.join(f'`{n}`' for n, _role in _env_names(env, ctx['shared']))} "
-        f"for `{env}`, and {names} {'is' if len(unused) == 1 else 'are'} also present. Holding "
-        "both namings for one logical environment is the state `shipmate doctor` calls "
-        "ambiguous, "
-        "where which naming each path binds is undetermined, so nothing was created or changed "
-        f"for `{env}`. Delete {names}, or {remedy}.",
+        f"for `{env}`, and {names} {'is' if len(unused) == 1 else 'are'} also present. Nothing "
+        f"binds {names}, which `shipmate doctor` reports as unused, so nothing was created or "
+        f"changed for `{env}`. Delete {names}, or {remedy}.",
     )
     return True
 

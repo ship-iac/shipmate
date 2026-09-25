@@ -83,13 +83,13 @@ def test_the_cell_jobs_are_exactly_the_hand_written_set():
     """Derived from every workflow file against the hand-written set, so a twelfth cell job
     reddens here rather than binding whatever it computes.
 
-    Mutation: add a job with a `strategy.matrix` and a hand-rolled `environment:`.
+    Mutation: add a job with a `strategy.matrix` and no `environment:`.
     """
     found = {
         (path.name, job_id)
         for path in sorted(WORKFLOWS.glob("*.yml"))
         for job_id, job in _jobs(path.name).items()
-        if "environment" in job and (job.get("strategy") or {}).get("matrix") is not None
+        if (job.get("strategy") or {}).get("matrix") is not None
     }
     assert found == CELL_BOUND
 

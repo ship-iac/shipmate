@@ -836,23 +836,21 @@ SPLIT_CONFLICT = (
     "differs",
     "dev-eu",
     "the engine binds `dev-eu-plan` / `dev-eu-apply` for `dev-eu`, and `dev-eu` is also "
-    "present. Holding both namings for one logical environment is the state `shipmate doctor` "
-    "calls ambiguous, where which naming each path binds is undetermined, so nothing was "
-    "created or changed for `dev-eu`. Delete `dev-eu`, or set `shared = true` in "
+    "present. Nothing binds `dev-eu`, which `shipmate doctor` reports as unused, so nothing "
+    "was created or changed for `dev-eu`. Delete `dev-eu`, or set `shared = true` in "
     "`[environments.dev-eu]` so the engine binds the bare `dev-eu` instead.",
 )
 SHARED_CONFLICT = (
     "differs",
     "dev-eu",
     "the engine binds `dev-eu` for `dev-eu`, and `dev-eu-plan` and `dev-eu-apply` are "
-    "also present. Holding both namings for one logical environment is the state `shipmate "
-    "doctor` calls ambiguous, where which naming each path binds is undetermined, so "
-    "nothing was created or changed for `dev-eu`. Delete `dev-eu-plan` and "
+    "also present. Nothing binds `dev-eu-plan` and `dev-eu-apply`, which `shipmate doctor` "
+    "reports as unused, so nothing was created or changed for `dev-eu`. Delete `dev-eu-plan` and "
     "`dev-eu-apply`, or drop `shared = true` from `[environments.dev-eu]`.",
 )
 
 
-def test_a_bare_env_alongside_an_apply_env_is_reported_as_ambiguous(monkeypatch):
+def test_a_bare_env_alongside_an_apply_env_is_reported_as_unused(monkeypatch):
     """Which naming the engine binds depends on the table's `shared` key, so a repository
     holding both is a state the script must not resolve by guessing: it reports and
     writes nothing.
@@ -883,7 +881,7 @@ def test_a_bare_env_alone_is_refused_before_the_split_pair_is_created(monkeypatc
     """The conflict is probed before the create, so this script never manufactures the
     state its own next run refuses. A repository carrying a plain `dev-eu` from before it
     adopted shipmate would otherwise have `dev-eu-plan` / `dev-eu-apply` created beside
-    it, exit 0, and then be reported ambiguous by every later run and by `shipmate
+    it, exit 0, and then be refused by every later run and reported unused by `shipmate
     doctor` -- with the pair it just wrote never reconciled again.
 
     Mutation: `_naming_conflict` back to returning False unless a suffixed half already
@@ -909,8 +907,8 @@ def test_a_bare_env_alone_is_refused_before_the_split_pair_is_created(monkeypatc
 
 def test_the_split_pair_alone_is_refused_before_the_bare_env_is_created(monkeypatch):
     """The mirror of the case above, reached by marking a split repository's environment
-    `shared = true`: creating the bare `dev-eu` beside the pair is the same self-inflicted
-    ambiguity, so it is refused rather than written.
+    `shared = true`: creating the bare `dev-eu` beside the pair leaves the same unused
+    naming behind, so it is refused rather than written.
 
     Mutation: `_unused_naming` returning `[env]` unconditionally, which reads the bare
     name, finds it absent, and creates it beside the pair.
@@ -2262,7 +2260,7 @@ def test_the_checklist_toml_example_is_a_configuration_a_consumer_could_merge(ca
     ec.validate_structure(ec.parse_table(snippet))
 
 
-def test_a_bare_env_alongside_only_a_plan_env_is_reported_as_ambiguous(monkeypatch):
+def test_a_bare_env_alongside_only_a_plan_env_is_reported_as_unused(monkeypatch):
     """The half-migrated repository: `dev-eu` and `dev-eu-plan`, no `dev-eu-apply`. The
     probe reads the unused naming alone, so it refuses on `dev-eu` without ever looking
     at the half that is there -- and the remedy it names is deleting `dev-eu`, never the
@@ -2293,10 +2291,10 @@ def test_a_bare_env_alongside_only_a_plan_env_is_reported_as_ambiguous(monkeypat
     assert context["unresolved"] == {"dev-eu"}
 
 
-def test_shared_mode_reports_the_ambiguity_too(monkeypatch):
+def test_shared_mode_reports_the_unused_naming_too(monkeypatch):
     """Running once without `shared = true` and once with it produces all three environments.
-    The second run must not silently bind the bare one: the ambiguity is doctor's
-    shared-mode warning, so the probe runs in shared mode as well.
+    The second run must not silently bind the bare one: the pair is what doctor reports as
+    unused in shared mode, so the probe runs in shared mode as well.
 
     Mutation: guard the probe with `if env not in ctx["shared"]`, which reconciles
     `dev-eu` and reports nothing.
