@@ -654,10 +654,10 @@ environment missing from the table still refuses on every path.
 
 A consumer declares nothing about where state lives. Each cell reads it from the
 record `tofu init` wrote, `${TF_DATA_DIR:-.terraform}/terraform.tfstate` in the
-stack, and from `TF_WORKSPACE` (unset means `default`). `scripts/state-path` runs
-after a successful init, inside the same `terramate run` wrapper, so it sees the
-`TF_DATA_DIR` and `TF_WORKSPACE` OpenTofu saw. It yields one path relative to the
-repository root, or none:
+stack, and from `TF_WORKSPACE` (unset means `default`). `scripts/state-path`
+runs after a successful init, inside `terramate run`, as init is, so it sees the
+`TF_DATA_DIR` and `TF_WORKSPACE` OpenTofu saw. It yields one path relative to
+the repository root, or none:
 
 | init record | workspace | state path |
 | --- | --- | --- |
@@ -686,17 +686,18 @@ green gate over infrastructure nothing recorded. So:
 - Only a backend `type` other than `local` yields no path.
 - Any record shape the derivation does not recognize refuses, naming the stack.
   So does a path that is absolute, one that normalizes outside the stack
-  directory, and one holding a character outside `[A-Za-z0-9._/-]` (`actions/cache`
-  reads a newline in `path:` as a second path and `!` or `*` as a pattern).
+  directory or to the directory itself, and one holding a character outside
+  `[A-Za-z0-9._/-]` (`actions/cache` reads a newline in `path:` as a second path
+  and `!` or `*` as a pattern).
 - A failed init fails the cell before the derivation runs. A refused derivation
   blocks an apply cell with the reason `shipmate cannot tell where this stack's
   local state lives — see the job log`.
 
 **Trust.** The path comes from the checked-out commit's backend configuration.
-`plan-cell` and `drift-cell` never save state, and `actions/cache` keys an entry
-on its path string, so a branch that points its backend elsewhere plans against
-empty state, visibly. `apply-cell` saves, and it runs the reviewed commit, whose
-backend block was part of the review.
+`plan-cell` and `drift-cell` never save state, and `actions/cache` versions an
+entry on its path string, so a branch that points its backend elsewhere plans
+against empty state, visibly. `apply-cell` saves, and it runs the reviewed
+commit, whose backend block was part of the review.
 
 **On the state key.** Where the consumer's backend derives a key per stack,
 derive it from `terramate.stack.path.absolute` (as `docs/aws.md` does), which
@@ -2401,13 +2402,13 @@ env-level ordering entirely — there is nothing to order across.
 A bare `shipmate apply` is the pre-merge equivalent of the merge-deploy path: it
 buckets the pending applies of every non-explicit environment into the same
 env-levels and applies level 0 fully before level 1, with the same
-failure-skips-successor-levels rule. An environment excluded as explicit
-keeps its position in the order: environments that do not depend on it run
-normally at their own level, while environments ordered (transitively) after
-an environment not applying this run — held for review or excluded as
-explicit — are skipped with a notice — their ordering precondition cannot be
-met in that run, exactly like a failed predecessor level. Completed cells skip idempotently, so re-commenting `shipmate apply`
-resumes where the previous run stopped.
+failure-skips-successor-levels rule. An environment excluded as explicit keeps
+its position in the order: environments that do not depend on it run normally at
+their own level, while environments ordered (transitively) after an environment
+not applying this run — held for review or excluded as explicit — are skipped
+with a notice — their ordering precondition cannot be met in that run, exactly
+like a failed predecessor level. Completed cells skip idempotently, so
+re-commenting `shipmate apply` resumes where the previous run stopped.
 
 The engine ships this as a reusable, parameterized workflow
 (`.github/workflows/apply-env-level.yml`) that the engine's own `deploy.yml`
