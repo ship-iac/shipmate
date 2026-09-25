@@ -13,6 +13,8 @@ grammar are declared unstable in `README.md`.
 
 ## [0.34.0] — 2026-09-25
 
+Tags `3c9c71e`.
+
 ### Changed — BREAKING
 
 - **The state path is read from `tofu init`, not declared.** `state_suffix` is removed from
