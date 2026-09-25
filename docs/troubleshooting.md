@@ -44,8 +44,9 @@ live probes.
   cells and the nightly drift run; its missing approval rules and its branch
   policy are notes. An environment of the naming the table does not select —
   a bare `<env>` beside a split env's pair, or either half beside a shared
-  env's bare `<env>` — warns as unused: no job binds it, so its protection
-  rules and secrets apply to nothing.
+  env's bare `<env>` — warns as unused under that file: once the file is on the
+  default branch, no job binds it, so its protection rules and secrets apply to
+  nothing. Until that merge, runs still bind it; delete it only after.
 - **The secrets a plan environment holds, names only.** The API never returns a
   value. A plan cell runs branch code with whatever that environment releases
   and control 8 forbids protecting it, so the finding is a note giving the count

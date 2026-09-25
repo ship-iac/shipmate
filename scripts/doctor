@@ -307,8 +307,9 @@ def _unused(name, env, mode):
         )
         alt = f"set `shared = true` in `[environments.{env}]` to bind `{env}` on both paths"
     return (
-        f"GitHub Environment `{name}` is unused — no job binds it, so its protection rules "
-        f"and secrets apply to nothing: {why}. Delete it, or {alt}."
+        f"GitHub Environment `{name}` is unused under this file — once the file is on the "
+        "default branch, no job binds it, so its protection rules and secrets apply to "
+        f"nothing: {why}. Delete it after that merge, or {alt}."
     )
 
 

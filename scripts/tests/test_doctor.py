@@ -340,9 +340,10 @@ _MISSING_SHARED = (
 )
 _UNUSED_BARE = (
     doctor.WARNING,
-    "GitHub Environment `dev-eu` is unused \u2014 no job binds it, so its protection rules and "
-    "secrets apply to nothing: `[environments.dev-eu]` does not set `shared = true`, so plan "
-    "binds `dev-eu-plan` and apply binds `dev-eu-apply`. Delete it, or set `shared = true` in "
+    "GitHub Environment `dev-eu` is unused under this file \u2014 once the file is on the "
+    "default branch, no job binds it, so its protection rules and secrets apply to nothing: "
+    "`[environments.dev-eu]` does not set `shared = true`, so plan binds `dev-eu-plan` and "
+    "apply binds `dev-eu-apply`. Delete it after that merge, or set `shared = true` in "
     "`[environments.dev-eu]` to bind `dev-eu` on both paths.",
 )
 
@@ -350,9 +351,10 @@ _UNUSED_BARE = (
 def _unused_suffixed(name):
     return (
         doctor.WARNING,
-        f"GitHub Environment `{name}` is unused \u2014 no job binds it, so its protection "
-        "rules and secrets apply to nothing: `[environments.dev-eu]` sets `shared = true`, so "
-        "plan and apply both bind `dev-eu`. Delete it, or remove `shared = true` from "
+        f"GitHub Environment `{name}` is unused under this file \u2014 once the file is on the "
+        "default branch, no job binds it, so its protection rules and secrets apply to nothing: "
+        "`[environments.dev-eu]` sets `shared = true`, so plan and apply both bind `dev-eu`. "
+        "Delete it after that merge, or remove `shared = true` from "
         "`[environments.dev-eu]` to bind the split pair.",
     )
 
