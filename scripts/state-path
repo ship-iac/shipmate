@@ -53,6 +53,8 @@ def state_path(stack, record, workspace):
     rel = posixpath.normpath(_local_rel(stack, backend.get("config"), workspace))
     if posixpath.isabs(rel) or rel == ".." or rel.startswith("../"):
         _refuse(stack, f"its local state path {rel!r} leaves the stack directory")
+    if rel == ".":
+        _refuse(stack, "its local state path names the stack directory itself")
     if not _SAFE.fullmatch(rel):
         _refuse(stack, f"its local state path {rel!r} holds a character outside [A-Za-z0-9._/-]")
     return posixpath.join(stack, rel)

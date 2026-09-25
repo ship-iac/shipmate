@@ -79,6 +79,8 @@ REFUSALS = [
     _local(path="/etc/x"),
     _local(path="../x"),
     _local(path="a/../../x"),
+    _local(path="."),
+    _local(path="sub/.."),
     _local(path="a\nb"),
     _local(path="!x"),
     _local(path="*.tfstate"),
@@ -90,7 +92,8 @@ REFUSALS = [
 @pytest.mark.parametrize("record", REFUSALS, ids=repr)
 def test_refuses_unrecognized_shapes(record):
     """Mutations: a `backend.get("type") != "local"` check returns "" for the missing-type rows;
-    dropping `.strip()` or the truthiness test returns "" for the empty-type rows."""
+    dropping `.strip()` or the truthiness test returns "" for the empty-type rows; dropping the
+    `rel == "."` check returns the stack directory for the `.` and `sub/..` rows."""
     with pytest.raises(SystemExit) as exc:
         sp.state_path(STACK, record, "")
     assert str(exc.value).startswith(f"::error::{STACK}: ")
