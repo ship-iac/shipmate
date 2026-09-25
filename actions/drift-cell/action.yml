@@ -10,10 +10,6 @@ inputs:
   env:
     description: Environment name, e.g. dev-eu.
     required: true
-  state-path:
-    description: Flavor state path, e.g. stacks/app/.state. Empty = remote backend owns state; the restore step is skipped.
-    required: false
-    default: ""
   tf-vars:
     description: The matrix row's resolved tf_vars, serialised with toJSON. Anything but a JSON object of strings is refused; the empty object is a legitimate value and an omitted input is not.
     required: true
@@ -47,14 +43,30 @@ runs:
         [[ "$slug" =~ ^[A-Za-z0-9._-]+$ ]] || { echo "::error::stack path produced invalid slug"; exit 1; }
         echo "slug=$slug" >> "$GITHUB_OUTPUT"
 
+    - name: Initialize the stack
+      shell: bash
+      env:
+        STACK: ${{ inputs.stack }}
+      run: terramate run --disable-safeguards=git-out-of-sync --no-recursive -C "$STACK" -- tofu init -input=false -reconfigure
+
+    - name: Locate state
+      id: locate-state
+      shell: bash
+      env:
+        STACK: ${{ inputs.stack }}
+      # Inside `terramate run` so a consumer's run.env TF_DATA_DIR or TF_WORKSPACE applies, as it
+      # did for init.
+      run: terramate run --disable-safeguards=git-out-of-sync --no-recursive -C "$STACK" -- python3 "$GITHUB_ACTION_PATH/../../scripts/state-path"
+
     - name: Restore state
-      if: ${{ inputs.state-path != '' }}
+      id: restore-state
+      if: ${{ steps.locate-state.outputs.path != '' }}
       uses: $/actions/state
       with:
         stack-slug: ${{ steps.ids.outputs.slug }}
         env: ${{ inputs.env }}
         mode: restore
-        path: ${{ inputs.state-path }}
+        path: ${{ steps.locate-state.outputs.path }}
 
     - name: Plan + classify drift
       id: plan
@@ -63,26 +75,6 @@ runs:
         STACK: ${{ inputs.stack }}
       run: |
         set -euo pipefail
-        # Restored local-backend workspace state carries no `.terraform` record marking the
-        # backend initialised, so `init` reads it as legacy state awaiting migration and
-        # `-input=false` turns that question into a hard error.
-        ws="$STACK/terraform.tfstate.d"
-        hidden=$(mktemp -du "$RUNNER_TEMP/tfstate.d.XXXXXX")
-        # The workspace state is hidden across the init and put back either way: under
-        # `-reconfigure` a migration is never intended, and non-interactively it could never
-        # have been answered.
-        if [ -d "$ws" ]; then mv "$ws" "$hidden"; fi
-        # errexit is lifted only so the workspace restore runs even on a failed init.
-        set +e
-        # `init` sits above the group marker: its output is setup noise, not plan output.
-        terramate run --disable-safeguards=git-out-of-sync --no-recursive -C "$STACK" -- tofu init -input=false -reconfigure
-        init_status=$?
-        set -e
-        # init recreates $ws empty; drop that so the real state replaces it
-        # rather than being moved inside it.
-        if [ -d "$hidden" ]; then rm -rf "$ws"; mv "$hidden" "$ws"; fi
-        # Fatal: nothing is planned against state the engine could not initialise.
-        [ "$init_status" -eq 0 ] || exit "$init_status"
         echo "::group::terramate plan: $STACK"
         # errexit is lifted for the plan itself so the group is closed on a failing plan too --
         # tofu's error text is the one thing a reader needs here, and an unclosed `::group::`

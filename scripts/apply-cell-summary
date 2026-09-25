@@ -24,12 +24,16 @@ FAILSAFES = [
         "FINGERPRINT_OUTCOME",
         "environment does not match the reviewed plan's fingerprint — re-plan",
     ),
-    ("RESTORE_OUTCOME", "state restore failed"),
     (
         "DIGEST_INPUT_OUTCOME",
         "no plan-text digest reached this action — re-pin every engine reference to one commit",
     ),
     ("INIT_OUTCOME", "tofu init failed — see the job log"),
+    (
+        "LOCATE_OUTCOME",
+        "shipmate cannot tell where this stack's local state lives — see the job log",
+    ),
+    ("RESTORE_OUTCOME", "state restore failed"),
     (
         "PLAN_DIGEST_OUTCOME",
         "the stored plan does not render to the plan text that was reviewed — re-plan",

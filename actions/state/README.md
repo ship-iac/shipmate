@@ -3,14 +3,12 @@
 Persists per-(stack × environment) OpenTofu local state across CI runs, using
 `actions/cache` as the backing store instead of a remote backend.
 
-**`path` is required and has no default** — pass the state location your
-flavor's backend writes to, or nothing is persisted:
-
-| Flavor | `path` to pass |
-|--------|----------------|
-| stacks (env-agnostic, `.state/<env>/<region>/…`) | `.state` |
-| folders (state beside each leaf) | `<leaf-dir>/terraform.tfstate` |
-| workspaces (`terraform.tfstate.d/<ws>`) | `terraform.tfstate.d` |
+**`path` is required and has no default.** The cell actions pass the path
+`scripts/state-path` derived from the stack's `tofu init` record: the local
+backend's `path` for the default workspace, or
+`<workspace_dir>/<workspace>/terraform.tfstate` for a named one, relative to
+the repository root. A backend other than `local` yields no path, and the cell
+skips both steps.
 
 Cache keys are scoped per stack and env and delimited with `/` so one env
 name cannot prefix-match another. The save key is
@@ -33,25 +31,28 @@ locking guarantees.
 
 ## Usage
 
-Call once with `mode: restore` before plan/apply, and once with `mode: save`
-after apply. Pass the same `path` both times:
+Call once with `mode: restore` after `tofu init` and before plan/apply, and
+once with `mode: save` after apply. Pass the same `path` both times:
 
 ```yaml
 - name: Restore state
+  id: restore-state
+  if: ${{ steps.locate-state.outputs.path != '' }}
   uses: $/actions/state
   with:
-    stack-slug: ${{ matrix.stack-slug }}
+    stack-slug: ${{ steps.ids.outputs.slug }}
     env: dev-eu
     mode: restore
-    path: .state          # stacks flavor; see the table above for others
+    path: ${{ steps.locate-state.outputs.path }}
 
 # ... run `tofu plan` / `tofu apply` (state lives under the path above) ...
 
 - name: Save state
+  if: ${{ always() && steps.restore-state.outcome == 'success' }}
   uses: $/actions/state
   with:
-    stack-slug: ${{ matrix.stack-slug }}
+    stack-slug: ${{ steps.ids.outputs.slug }}
     env: dev-eu
     mode: save
-    path: .state
+    path: ${{ steps.locate-state.outputs.path }}
 ```

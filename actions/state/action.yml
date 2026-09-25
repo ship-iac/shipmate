@@ -12,9 +12,8 @@ inputs:
     required: true
   path:
     description: >-
-      State path to cache. No default: pass the location the flavor's backend writes to
-      (stacks ".state", folders "<leaf>/terraform.tfstate", workspaces
-      "terraform.tfstate.d"), or nothing is persisted.
+      State path to cache, relative to the repository root. No default: the cell actions pass
+      the path scripts/state-path read from the stack's `tofu init` record.
     required: true
 runs:
   using: composite
