@@ -10,8 +10,7 @@ Invariants:
 - none of the credentials step's three expressions reaches a `vars.*` value. GitHub evaluates
   `A && B || C` as `C` whenever `B` is falsy, so `matrix.role_arn || vars.AWS_ROLE_ARN` mints
   real credentials from a branch-editable value for exactly the cell the table declined to give
-  a role. The jobs read repository variables elsewhere -- `environment:` selects on
-  `vars.SHIPMATE_SHARED_ENVS` -- and this says nothing about those;
+  a role. The jobs may read repository variables elsewhere, and this says nothing about those;
 - every wave job in apply-env-level.yml carries id-token: write and the empty-suffix state-path
   expression;
 - apply-env-level.yml and unlock.yml declare a workflow-level `permissions: {}` floor, and

@@ -109,8 +109,8 @@ def test_plan_workflow_untrusted_jobs_never_reach_the_app_key(job_id):
 @pytest.mark.parametrize("job_id", UNTRUSTED_PLAN_JOBS)
 def test_plan_workflow_untrusted_jobs_bind_no_engine_environment(job_id):
     """`shipmate-engine` alone, not every credentialed environment: the `plan` job binds a shared
-    bare `<env>` whenever the consumer lists it in SHIPMATE_SHARED_ENVS, which is the documented
-    shared-envs trade-off. `shipmate-engine` holds the App key and its branch policy trusts the
+    bare `<env>` whenever its table entry sets `shared = true`, which is the documented shared
+    trade-off. `shipmate-engine` holds the App key and its branch policy trusts the
     base ref -- exactly the ref `pull_request_target` runs at -- so a job that binds it and checks
     out the pull request head is the canonical pull_request_target vulnerability.
 

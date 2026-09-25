@@ -36,7 +36,6 @@ jobs:
       - uses: $/actions/verify-environments
         with:
           waves-json: ${{ inputs.waves_json }}
-          shared-envs: ${{ vars.SHIPMATE_SHARED_ENVS }}
           github-token: ${{ github.token }}
       - id: snap
         uses: $/actions/apply-snapshot
@@ -55,13 +54,7 @@ jobs:
       fail-fast: false
       matrix:
         include: ${{ fromJSON(inputs.waves_json).wave0 }}
-    # SHIPMATE_SHARED_ENVS is a repository variable, not a workflow input: which environment an
-    # apply binds decides whether the reviewer gate and the apply role reach it, and branch content
-    # must not choose that. A listed env binds the bare environment on both paths -- plan.yml and
-    # drift.yml read the same variable with `-plan` (CONTRACT.md). Every wave job binds it this way.
-    environment: >-
-      ${{ contains(format(',{0},', vars.SHIPMATE_SHARED_ENVS), format(',{0},', matrix.environment))
-      && matrix.environment || format('{0}-apply', matrix.environment) }}
+    environment: ${{ matrix.env_binding }}
     concurrency:
       group: apply-${{ matrix.environment }}-${{ matrix.stack }}
       cancel-in-progress: false
@@ -102,9 +95,7 @@ jobs:
       fail-fast: false
       matrix:
         include: ${{ fromJSON(inputs.waves_json).wave1 }}
-    environment: >-
-      ${{ contains(format(',{0},', vars.SHIPMATE_SHARED_ENVS), format(',{0},', matrix.environment))
-      && matrix.environment || format('{0}-apply', matrix.environment) }}
+    environment: ${{ matrix.env_binding }}
     concurrency:
       group: apply-${{ matrix.environment }}-${{ matrix.stack }}
       cancel-in-progress: false
@@ -142,9 +133,7 @@ jobs:
       fail-fast: false
       matrix:
         include: ${{ fromJSON(inputs.waves_json).wave2 }}
-    environment: >-
-      ${{ contains(format(',{0},', vars.SHIPMATE_SHARED_ENVS), format(',{0},', matrix.environment))
-      && matrix.environment || format('{0}-apply', matrix.environment) }}
+    environment: ${{ matrix.env_binding }}
     concurrency:
       group: apply-${{ matrix.environment }}-${{ matrix.stack }}
       cancel-in-progress: false
@@ -182,9 +171,7 @@ jobs:
       fail-fast: false
       matrix:
         include: ${{ fromJSON(inputs.waves_json).wave3 }}
-    environment: >-
-      ${{ contains(format(',{0},', vars.SHIPMATE_SHARED_ENVS), format(',{0},', matrix.environment))
-      && matrix.environment || format('{0}-apply', matrix.environment) }}
+    environment: ${{ matrix.env_binding }}
     concurrency:
       group: apply-${{ matrix.environment }}-${{ matrix.stack }}
       cancel-in-progress: false
@@ -222,9 +209,7 @@ jobs:
       fail-fast: false
       matrix:
         include: ${{ fromJSON(inputs.waves_json).wave4 }}
-    environment: >-
-      ${{ contains(format(',{0},', vars.SHIPMATE_SHARED_ENVS), format(',{0},', matrix.environment))
-      && matrix.environment || format('{0}-apply', matrix.environment) }}
+    environment: ${{ matrix.env_binding }}
     concurrency:
       group: apply-${{ matrix.environment }}-${{ matrix.stack }}
       cancel-in-progress: false
@@ -262,9 +247,7 @@ jobs:
       fail-fast: false
       matrix:
         include: ${{ fromJSON(inputs.waves_json).wave5 }}
-    environment: >-
-      ${{ contains(format(',{0},', vars.SHIPMATE_SHARED_ENVS), format(',{0},', matrix.environment))
-      && matrix.environment || format('{0}-apply', matrix.environment) }}
+    environment: ${{ matrix.env_binding }}
     concurrency:
       group: apply-${{ matrix.environment }}-${{ matrix.stack }}
       cancel-in-progress: false
@@ -302,9 +285,7 @@ jobs:
       fail-fast: false
       matrix:
         include: ${{ fromJSON(inputs.waves_json).wave6 }}
-    environment: >-
-      ${{ contains(format(',{0},', vars.SHIPMATE_SHARED_ENVS), format(',{0},', matrix.environment))
-      && matrix.environment || format('{0}-apply', matrix.environment) }}
+    environment: ${{ matrix.env_binding }}
     concurrency:
       group: apply-${{ matrix.environment }}-${{ matrix.stack }}
       cancel-in-progress: false
@@ -342,9 +323,7 @@ jobs:
       fail-fast: false
       matrix:
         include: ${{ fromJSON(inputs.waves_json).wave7 }}
-    environment: >-
-      ${{ contains(format(',{0},', vars.SHIPMATE_SHARED_ENVS), format(',{0},', matrix.environment))
-      && matrix.environment || format('{0}-apply', matrix.environment) }}
+    environment: ${{ matrix.env_binding }}
     concurrency:
       group: apply-${{ matrix.environment }}-${{ matrix.stack }}
       cancel-in-progress: false

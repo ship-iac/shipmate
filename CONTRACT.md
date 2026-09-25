@@ -236,9 +236,7 @@ never used.
   other two:
 
   ```yaml
-  environment: >-
-    ${{ contains(format(',{0},', vars.SHIPMATE_SHARED_ENVS), format(',{0},', matrix.environment))
-    && matrix.environment || format('{0}-plan', matrix.environment) }}
+  environment: ${{ matrix.env_binding }}
   ```
 
   Both content lines sit at the same indent: a folded scalar keeps a newline

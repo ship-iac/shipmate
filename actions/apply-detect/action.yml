@@ -21,9 +21,6 @@ inputs:
     description: The PR's reviewDecision, from the review job. Only NONE and APPROVED authorize; an empty value means the decision never arrived and refuses the run.
     required: false
     default: ''
-  shared-envs:
-    description: The SHIPMATE_SHARED_ENVS repository variable, verbatim. Passed in because a script cannot read `vars` itself; it decides which envs resolve the apply-tier credential on both paths.
-    required: true
 outputs:
   waves: { description: "Apply mode only: all waves as one JSON object {wave0..wave7} (apply-env-level.yml waves_json shape). In unlock mode nothing is written and this resolves to the empty string, NOT {} — a consumer must not fromJSON it there; use `cells` instead.", value: "${{ steps.d.outputs.waves }}" }
   cells: { description: "Flat JSON array of cells — the unlock queue in unlock mode, [] in apply mode. Always valid JSON, never empty: consumers fromJSON it unconditionally.", value: "${{ steps.d.outputs.cells }}" }
@@ -42,5 +39,4 @@ runs:
         SHIPMATE_APP_ID: ${{ inputs.app-id }}
         SHIPMATE_REVIEW_DECISION: ${{ inputs.review-decision }}
         SHIPMATE_MODE: ${{ inputs.mode }}
-        SHIPMATE_SHARED_ENVS: ${{ inputs.shared-envs }}
       run: python3 "$GITHUB_ACTION_PATH/../../scripts/apply-detect"

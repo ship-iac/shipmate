@@ -1,50 +1,37 @@
 """Guards how every job that touches a cell's state binds a GitHub Environment.
 
 Invariants:
-- all eight wave jobs, and unlock.yml's `unlock` job, bind the shared-mode
-  expression and nothing else: an env listed in vars.SHIPMATE_SHARED_ENVS binds
-  the logical name, anything else falls through to <env>-apply. The
-  fall-through is the fail-safe direction -- the reviewer gate, the OIDC
-  environment claim split and any environment secret all live there -- and
-  where that environment does not exist, snapshot's pre-flight refuses the run:
-  the fingerprint pins nothing about the binding, because plan and apply resolve
-  a cell's variables from the same table (CONTRACT.md §Env model);
+- every cell job -- `plan`, `drift`, `unlock` and the eight waves -- binds
+  `${{ matrix.env_binding }}` and nothing else. `env-config`'s `resolve` stamps that value on
+  every detect row, so the binding is decided in one place, from the default branch's
+  environment table; a job that computes its own is the regression. Where the bound
+  environment does not exist, snapshot's pre-flight refuses the run: the fingerprint pins
+  nothing about the binding, because plan and apply resolve a cell's variables from the same
+  table (CONTRACT.md §Env model);
 - snapshot binds no environment at all and complete binds shipmate-engine: a job
   that gains an env-derived binding is the regression;
 - snapshot runs the environment pre-flight before it snapshots the apply checks,
   and both before any wave: the pre-flight is only a control while it can still
   refuse the run;
-- scripts/verify-environments computes the same binding those jobs bind;
 - every apply-cell invocation passes the reviewed plan text's digest, which the
   action refuses to apply without.
 
-That is the price of the pre-flight: the binding rule exists twice, as the YAML ternary above
-and as `verify-environments.apply_binding`. Selectors for one property disagree eventually, so
-neither side is derived from the other and they are not compared to each other. `APPLY_ENV` pins
-the YAML whole, `BINDINGS` states the rule's outcome for the cases that distinguish it, and the
-script is compared to that. `env-config` no longer reads the variable: which tier a cell resolves
-is pinned by `test_env_config_resolve.py::test_the_binding_and_tier_follow_the_shared_key`.
+The binding guard used to pin a ternary over a repository variable, with its comma-boundary
+and case-insensitive matching rules, and a second copy of that rule in `verify-environments`.
+Both rules are gone: which environment is shared is `shared = true` in the table, and which
+tier that resolves is pinned by
+`test_env_config_resolve.py::test_the_binding_and_tier_follow_the_shared_key`.
 
-The realistic failure is accidental regression -- a reverted expression, one missed wave, a new
-job that never got the binding, an inverted ternary -- not a hostile edit to these SHA-pinned
-files, so one whole-value comparison per job covers it.
-
-Whole parsed values against hand-written constants, never substrings. The YAML folded scalar
-(`>-`) collapses the expression's two source lines into one space-joined string, which is why
-`APPLY_ENV` is a single line.
+The realistic failure is accidental regression -- a restored expression, one missed wave, a new
+cell job with a hand-rolled binding -- not a hostile edit to these SHA-pinned files, so one
+whole-value comparison per job, plus a derived job set compared to the hand-written one, covers
+it.
 """
 
 import yaml
-from _loader import WORKFLOWS, load_script, local_action
+from _loader import WORKFLOWS, local_action
 
-verify_environments = load_script("verify-environments")
-
-APPLY_ENV = (
-    "${{ contains(format(',{0},', vars.SHIPMATE_SHARED_ENVS), "
-    "format(',{0},', matrix.environment)) "
-    "&& matrix.environment "
-    "|| format('{0}-apply', matrix.environment) }}"
-)
+CELL_ENV = "${{ matrix.env_binding }}"
 WAVES = [f"wave{i}" for i in range(8)]
 
 #: The apply cell, and the matrix field carrying the digest of the plan text a reviewer approved.
@@ -53,25 +40,12 @@ WAVES = [f"wave{i}" for i in range(8)]
 APPLY_CELL = local_action("apply-cell")
 PLAN_SHA256 = "${{ matrix.plan_sha256 }}"
 
-#: workflow file -> the jobs in it that bind an env derived from a cell, written by hand.
-#: `unlock` is here, and not only in test_verb_path_isolation.py, because this is one property
-#: with one constant: the `<env>-apply` environment is half of what bounds `shipmate unlock`
-#: (CONTRACT.md §Comment-ops), and the folded expression is byte-identical to the waves'.
+#: (workflow file, job) for every job that binds a cell's environment, written by hand.
 CELL_BOUND = {
-    "apply-env-level.yml": WAVES,
-    "unlock.yml": ["unlock"],
-}
-
-#: (logical env, SHIPMATE_SHARED_ENVS value) -> the environment the apply binds. Hand-written,
-#: and the single source for both readers: never generated from the YAML expression, never
-#: generated by running the script.
-BINDINGS = {
-    ("dev-eu", ""): "dev-eu-apply",  # nothing listed -> split
-    ("dev-eu", "dev-eu"): "dev-eu",  # listed -> shared
-    ("dev-eu", "prod,dev-eu,stage"): "dev-eu",  # listed among others -> shared
-    ("dev-us", "dev-eu, dev-us"): "dev-us-apply",  # the space un-lists the entry
-    ("prod", "Prod"): "prod",  # contains() is case-insensitive
-    ("dev-us", "dev-us-2"): "dev-us-apply",  # comma boundaries: no prefix match
+    ("plan.yml", "plan"),
+    ("drift.yml", "drift"),
+    ("unlock.yml", "unlock"),
+    *(("apply-env-level.yml", w) for w in WAVES),
 }
 
 #: snapshot's steps, in order, by action path: a reorder must redden this.
@@ -94,21 +68,30 @@ def _wave_jobs():
     return {w: jobs[w] for w in WAVES}
 
 
-def test_every_cell_bound_job_binds_the_shared_or_apply_environment():
-    for workflow, job_ids in CELL_BOUND.items():
+def test_every_cell_job_binds_the_resolved_environment():
+    """Mutations: restore the ternary in one wave; bind `${{ matrix.environment }}` in `wave7`."""
+    for workflow, job_id in sorted(CELL_BOUND):
         jobs = _jobs(workflow)
-        missing = [j for j in job_ids if j not in jobs]
-        assert not missing, (
-            f"{workflow} no longer declares {missing} -- either they were renamed "
-            "(update CELL_BOUND) or the cells they bound are now unguarded"
+        assert job_id in jobs, f"{workflow} no longer declares {job_id!r} (update CELL_BOUND)"
+        assert jobs[job_id].get("environment") == CELL_ENV, (
+            f"{workflow} job {job_id!r} must bind the environment detect resolved -- the "
+            "reviewer gate, the OIDC claim split and the environment secrets live there"
         )
-        for job_id in job_ids:
-            assert jobs[job_id].get("environment") == APPLY_ENV, (
-                f"{workflow} job {job_id!r}: environment must resolve to the logical env "
-                "only when it is listed in vars.SHIPMATE_SHARED_ENVS, and to <env>-apply "
-                "otherwise -- the apply environment is where the reviewer gate, the OIDC "
-                "claim split and the environment secrets live"
-            )
+
+
+def test_the_cell_jobs_are_exactly_the_hand_written_set():
+    """Derived from every workflow file against the hand-written set, so a twelfth cell job
+    reddens here rather than binding whatever it computes.
+
+    Mutation: add a job with a `strategy.matrix` and a hand-rolled `environment:`.
+    """
+    found = {
+        (path.name, job_id)
+        for path in sorted(WORKFLOWS.glob("*.yml"))
+        for job_id, job in _jobs(path.name).items()
+        if "environment" in job and (job.get("strategy") or {}).get("matrix") is not None
+    }
+    assert found == CELL_BOUND
 
 
 def test_snapshot_binds_no_environment_and_complete_binds_the_engine_environment():
@@ -120,15 +103,6 @@ def test_snapshot_binds_no_environment_and_complete_binds_the_engine_environment
         "env-derived binding would subject the check snapshot to protection rules"
     )
     assert jobs["complete"].get("environment") == "shipmate-engine"
-
-
-def test_the_preflight_script_computes_the_binding_the_waves_bind():
-    for (env, shared_envs), expected in BINDINGS.items():
-        assert verify_environments.apply_binding(env, shared_envs) == expected, (
-            f"verify-environments resolved {env!r} against SHIPMATE_SHARED_ENVS="
-            f"{shared_envs!r} to something other than {expected!r} -- the pre-flight "
-            "would check an environment the waves do not bind"
-        )
 
 
 def test_snapshot_verifies_the_environments_before_snapshotting_the_checks():
