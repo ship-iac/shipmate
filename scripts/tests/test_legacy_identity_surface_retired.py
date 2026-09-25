@@ -18,6 +18,9 @@ The gate settings the migration release read from `SHIPMATE_APPROVERS_TEAM` and
 fallback is gone, so a shipped file naming either variable is reading a source
 no consumer sets and no resolver consults.
 
+`SHIPMATE_SHARED_ENVS` is retired the same way: `shared = true` in an environment's
+table entry replaced it.
+
 The trees are walked by directory listing, never by a `*.py` glob: the helpers
 under `scripts/` carry no extension, and a glob that reaches none of them
 reports a clean tree for a tree it never read. The reach test below is what
@@ -26,7 +29,8 @@ keeps a broken walk from passing by reading nothing.
 
 from _loader import ACTIONS, ENGINE, SCRIPTS, WORKFLOWS
 
-#: Every name the table-only model and the gate-fallback removal retired, hand-written.
+#: Every name the table-only model, the gate-fallback removal and the shared-environment key
+#: retired, hand-written.
 #: `config-mode` is the action-input spelling of `config_mode`. `AWS_ROLE_ARN` is the bare
 #: name, not a prefix: nothing shipped reads any variable of that name, and
 #: `test_aws_oidc_wiring_guard.py` owns it as the mutation its wiring must red on.
@@ -40,6 +44,7 @@ RETIRED = (
     "AWS_ROLE_ARN",
     "SHIPMATE_APPROVERS_TEAM",
     "SHIPMATE_UNGATED_ENVS",
+    "SHIPMATE_SHARED_ENVS",
 )
 
 

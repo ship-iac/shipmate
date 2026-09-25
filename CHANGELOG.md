@@ -11,6 +11,17 @@ section below names the SHA the release tags.
 The version line stays `v0.x` while action inputs, check names, and the comment
 grammar are declared unstable in `README.md`.
 
+## [Unreleased]
+
+### Changed — BREAKING
+
+- **A shared environment is declared in the table.** `shared = true` in an
+  `[environments.<env>]` entry of `.github/shipmate.toml`, read from the default branch,
+  binds one bare `<env>` on both paths. The `SHIPMATE_SHARED_ENVS` repository variable is
+  no longer read, the `shared-envs` action inputs are gone, and `scripts/onboard` drops
+  `--shared` and reads the key from the checkout's file. Every cell job binds
+  `${{ matrix.env_binding }}`, which detect stamps on each row.
+
 ## [0.32.0] — 2026-09-25
 
 Tags `10d16e0`.

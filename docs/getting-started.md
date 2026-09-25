@@ -75,15 +75,14 @@ It writes:
 - `shipmate-engine` and, for every environment your stacks' `env/<name>` tags
   declare, an `<env>-plan` / `<env>-apply` pair — each apply environment scoped to
   the default branch, with the App key on `shipmate-engine` and any
-  repository-level copy of that key deleted;
-- the `SHIPMATE_APP_ID` repository variable, plus
-  `SHIPMATE_SHARED_ENVS` when `--shared` names environments bound as a single
-  bare `<env>`. A `--shared` environment is an
-  apply environment, so it gets the same default-branch policy — on a bare `<env>`
-  that policy also refuses plan cells whose pull request targets any other branch,
-  and `shipmate doctor` says so afterwards. Pass `--shared` only where every pull
-  request targets the default branch ([`hardening.md`](hardening.md) rows 8 and 17).
-  `SHIPMATE_APP_ID` may instead be set once at the
+  repository-level copy of that key deleted. An environment whose entry in the
+  checkout's `.github/shipmate.toml` holds `shared = true` gets one bare `<env>`
+  instead. A shared environment is an apply environment, so it gets the same
+  default-branch policy — on a bare `<env>` that policy also refuses plan cells
+  whose pull request targets any other branch, and `shipmate doctor` says so
+  afterwards. Set `shared = true` only where every pull request targets the
+  default branch ([`hardening.md`](hardening.md) rows 8 and 17);
+- the `SHIPMATE_APP_ID` repository variable. It may instead be set once at the
   organization level and named in `--vars-at-org`, which skips writing it here
   ([`github-app.md`](github-app.md) §6);
 - a `shipmate-gate` ruleset requiring `shipmate / gate` under the App;
@@ -125,31 +124,31 @@ Every logical environment needs a GitHub Environment pair (`<env>-plan`,
 `<env>-apply`), plus the one fixed `shipmate-engine` environment that holds the
 App key ([`github-app.md`](github-app.md)). Neither half is ever named in
 workflow YAML: the logical env comes from Terramate stack tags at runtime, and
-the suffix is added where the job binds the environment.
+detect adds the suffix when it stamps the cell's binding.
 
 This tier needs `<env>-plan` and `shipmate-engine`. `<env>-apply` is the apply
 tier's, but create it now anyway — unless that env shares one environment
-(below), where creating both a bare `<env>` and an `<env>-apply` is the
-ambiguous naming doctor warns about.
+(below), where an `<env>-apply` beside the bare `<env>` is an unused
+environment doctor warns about.
 
 `shipmate doctor` runs on every plan run and warns for each half of a
 pair that does not exist, so tier 1 with only `<env>-plan` annotates every pull
 request with "GitHub Environment `<env>-apply` does not exist" until the apply
-tier is done. (With neither half created you get one warning naming both, and
-the shared alternative below.)
+tier is done.
 
 **One environment instead of two.** A logical env may share a single bare
 `<env>` between plan and apply: create `<env>` alone (no `-plan`, no `-apply`),
-list it in the `SHIPMATE_SHARED_ENVS` repository variable (comma-separated, no
-spaces). It costs the reviewer gate and the OIDC subject split for that env.
-Those are not recoverable without splitting the environment again. Read
+and set `shared = true` in its `[environments.<env>]` entry of
+`.github/shipmate.toml`. It costs the reviewer gate and the OIDC subject split
+for that env. Those are not recoverable without splitting the environment again. Read
 [`hardening.md`](hardening.md) §6 and §7–9 for the full price before choosing
 it.
 
-The variable is the whole configuration: the engine reads it on both sides — the
-apply waves with an `-apply` fallback suffix, the plan and drift cells with
-`-plan` — so a repository may share some envs and split others with nothing to
-edit in a workflow file ([`../CONTRACT.md`](../CONTRACT.md) §Env model).
+The key is the whole configuration: detect reads it from the default branch's
+table and stamps the binding on each cell, so a repository may share some envs
+and split others with nothing to edit in a workflow file
+([`../CONTRACT.md`](../CONTRACT.md) §Env model). The entry merges before the
+first plan that needs it, like any other change to the table.
 
 Create each environment with
 `gh api -X PUT repos/<owner>/<repo>/environments/<name>`, then set protection

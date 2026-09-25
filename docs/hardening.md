@@ -98,9 +98,9 @@ expressions, whole, against the fence `getting-started.md` publishes. See
 | 20 | Require actions to be pinned to a full-length commit SHA | Settings → Actions | A tag or branch ref moving under a workflow that was pinned only by convention |
 
 Rows 6, 7, 17 and 18 name `<env>-apply`, which is the apply environment in the
-default split naming (`<env>-plan` + `<env>-apply`). A logical env listed in
-the `SHIPMATE_SHARED_ENVS` repository variable binds one bare `<env>` on both
-paths instead (CONTRACT.md §Env model). On such an environment:
+default split naming (`<env>-plan` + `<env>-apply`). A logical env whose
+`[environments.<env>]` entry holds `shared = true` binds one bare `<env>` on
+both paths instead (CONTRACT.md §Env model). On such an environment:
 
 - **Row 6 is forfeited.** A protection rule gates every job that binds the
   environment, with no per-job filter, so a required reviewer or a wait timer
@@ -413,8 +413,8 @@ costs, so the choice is made with the price visible:
   secret with extra steps. Row 17's deployment branch policy narrows that to
   jobs running at the default branch, which is a real bound and not a reviewer
   gate: no human sees the deployment before its secrets are released.
-- **Shared mode is the strongest form of ungated.** A logical env listed in
-  `SHIPMATE_SHARED_ENVS` binds one bare `<env>` for plan and apply, and a
+- **Shared mode is the strongest form of ungated.** A logical env holding
+  `shared = true` binds one bare `<env>` for plan and apply, and a
   reviewer on it stalls every plan cell and the nightly drift run — so the gate
   is not merely unset, it is unavailable, and no later decision can turn it on
   without splitting the environment again. The same environment is what plan-time
@@ -626,28 +626,26 @@ no split of its own.
   customization (adding `job_workflow_ref` to the claim, so the engine's apply
   workflow file is part of what the policy matches) is the escape hatch; it is
   consumer-side, unsupported by the engine, and out of scope here.
-- **Read the toggle at the granularity of what it spends, not of where it is
-  set.** `SHIPMATE_SHARED_ENVS` is a list of environments, which invites reading
-  a shared cell as a setting you can revisit. The OIDC consequence is not
-  revisitable. What each listed cell gives up is not a knob on that cell — it is
-  shipmate's ability to say *plan may read, apply may write* for that cell, and
-  the only way back is splitting the environment again. A repository that lists
-  every cell cannot express the read/write split anywhere, for any environment,
-  and the variable looks identical in both cases. So decide it as a posture, per
-  cell, before the migration rather than after: shared where plan-time branch
-  code holding the write role is genuinely acceptable, split everywhere you
-  would ever want a reviewer or a read-only plan role.
-- **The toggle is not admin-gated.** `SHIPMATE_SHARED_ENVS` is a repository
-  variable, and GitHub grants *"Create, update, and delete GitHub Actions
-  variables"* to Write and above — this posture decision is not scoped to
-  control 1's grant, it is reachable by anyone holding it. One comma-separated
-  entry moves plan cells running unreviewed branch code onto the apply role, and
-  the nightly drift run with them — including on a repository that set no
-  plan-side role at all, because the cell reads the role off the bare `<env>` it
-  now binds. `shipmate doctor` cannot warn about it either: it infers the
-  mode from environment names and never reads the variable, which would need a
-  permission the App manifest does not declare. Control 2 restricts a branch;
-  this restricts none of it — do not carry that protection over by assumption.
+- **Read the key at the granularity of what it spends, not of where it is
+  set.** `shared = true` is one line per environment entry, which invites
+  reading a shared cell as a setting you can revisit. The OIDC consequence is
+  not revisitable. What each shared cell gives up is not a knob on that cell —
+  it is shipmate's ability to say *plan may read, apply may write* for that
+  cell, and the only way back is splitting the environment again. A repository
+  that shares every cell cannot express the read/write split anywhere, for any
+  environment. So decide it as a posture, per cell, before the migration rather
+  than after: shared where plan-time branch code holding the write role is
+  genuinely acceptable, split everywhere you would ever want a reviewer or a
+  read-only plan role.
+- **The key is default-branch content.** The engine reads `shared` from the
+  default branch's `.github/shipmate.toml`, so sharing an environment is a
+  merged pull request under row 4, like naming a role in row 18 — and row 4's
+  code-owner half is a no-op unless a `CODEOWNERS` entry covers
+  `/.github/shipmate.toml`. One line moves plan cells running unreviewed branch
+  code onto the apply role, and the nightly drift run with them — including on a
+  repository that set no plan-side role at all, because the cell resolves the
+  `aws.apply` tier of the bare `<env>` it now binds. `shipmate doctor` reads the
+  key and reports a shared environment's protection shape and secrets.
 
 ## 10–12 and 20. Actions settings
 

@@ -38,16 +38,14 @@ live probes.
   only a note, and "no approval rule" is deliberately not "no protection rules":
   GitHub synthesizes a `branch_policy` protection rule for any environment with
   a deployment branch policy, and a branch policy is not a review. The role each
-  environment plays is inferred from the environment names — doctor never reads
-  `SHIPMATE_SHARED_ENVS` — so a shared environment carrying approval rules warns
-  that they stall the plan cells and the nightly drift run, its missing approval
-  rules are a note, and its branch policy is a note only while no suffixed
-  sibling exists. Once one does, a plan side still on the old naming may still
-  bind the bare environment, so the policy is warned about as the plan-stall it can be.
-  An env with a bare `<env>` *and* a suffixed sibling warns that which naming
-  each path binds is undetermined, so either naming may be bound by nothing with
-  its protection rules reading as a control in no code path — and the missing
-  half of the suffixed pair is still reported.
+  environment plays comes from `shared = true` in its `[environments.<env>]`
+  entry of `.github/shipmate.toml`, read at the commit under examination. A
+  shared environment carrying approval rules warns that they stall the plan
+  cells and the nightly drift run; its missing approval rules and its branch
+  policy are notes. An environment of the naming the table does not select —
+  a bare `<env>` beside a split env's pair, or either half beside a shared
+  env's bare `<env>` — warns as unused: no job binds it, so its protection
+  rules and secrets apply to nothing.
 - **The secrets a plan environment holds, names only.** The API never returns a
   value. A plan cell runs branch code with whatever that environment releases
   and control 8 forbids protecting it, so the finding is a note giving the count
@@ -129,8 +127,8 @@ live probes.
   file is a note saying so, never an all-clear. Only the checks a file can be judged
   on by itself run here — the top-level keys, `version`, `layout`, the
   environment entries, `env_order`, `explicit_envs` and `[gate]`; `dry`-layout
-  coverage, the shared-environment rule and unused entries need a plan matrix
-  and `SHIPMATE_SHARED_ENVS`, and the verdict names them as unchecked. A valid
+  coverage and unused entries need a plan matrix or a whole-tree environment
+  scan, and the verdict names them as unchecked. A valid
   file also gets its `env_order` and
   `explicit_envs` values read back, absent ones included: an absent `explicit_envs`
   is legitimate configuration that no validator can question, and it means a bare
@@ -186,14 +184,6 @@ secret probe says nothing about an environment this pull request did not touch.
 The declared set is the cell summaries of the plan runs this commit's own apply
 checks record, so a run whose summaries cannot be downloaded is warned about and
 its environments are absent from the set.
-
-**One check is exempt and reported anyway.** The ambiguous-naming warning (a
-bare `<env>` beside `<env>-plan` or `<env>-apply`) compares environment names
-against each other and needs no declared set, so it covers every logical
-environment in the repository, not only this pull request's. That is
-deliberate: the moment the warning is most wanted is mid-migration, between the
-merge and the delete, when a fan-out is at its most likely to lose a cell to
-something unrelated.
 
 Separately, the report states plainly when some of the commit's workflow runs
 had not finished yet, and when the warnings harvest itself could not complete
@@ -313,9 +303,9 @@ mandate. Each one names what to do.
 | `<name> branch policy` — also permits other branches | the environment — `shipmate-engine`, an `<env>-apply`, or a shared bare `<env>` — has a deployment branch policy naming branches besides the default one, so a workflow on any of them can still claim what that environment scopes. Delete the extra entries in Settings → Environments if they were not deliberate. |
 | `<env>-plan` — it carries a deployment branch policy | a plan environment must have none: plan cells evaluate at the pull request's base ref, so a policy blocks every cell whose pull request targets a branch it does not name ([`hardening.md`](hardening.md) #8). Remove the policy. |
 | `<env>-plan` — it carries protection rules | required reviewers or a wait timer on a plan environment stall every plan cell and the nightly drift run. Remove them ([`hardening.md`](hardening.md) #6). |
-| `<env>` — it carries protection rules and is shared | a shared bare `<env>` is bound by the plan cells and the nightly drift run as well as the applies, and GitHub offers no per-job filter, so a protection rule there stalls all three. To gate applies alone, split it into `<env>-plan` / `<env>-apply` and drop it from `SHIPMATE_SHARED_ENVS`. |
-| `<env>` — the naming the engine does not bind is also present | the naming `SHIPMATE_SHARED_ENVS` does not select already exists: a bare `<env>` where the engine binds the `<env>-plan` / `<env>-apply` pair, or either half where it binds the bare `<env>`. Holding both namings for one logical environment is the state `shipmate doctor` calls ambiguous, so the run creates and changes nothing for that environment — including the naming it does bind, which is why it is reported rather than half-written. Delete the unused naming, or move the environment to the other one with `--shared` / `SHIPMATE_SHARED_ENVS`. |
-| `<VARIABLE>` — repository has one value, the flag has another | the variable exists with a value other than the one the flags name, so it is reported rather than overwritten: naming a different shared-environment set is a deliberate choice. Change it with `gh variable set` if it was not. `SHIPMATE_APP_ID` never reaches this row — see the refusals below, and the rows beneath it for a repository copy left behind under `--vars-at-org`, and for a variable an earlier release wrote that nothing reads any more. |
+| `<env>` — it carries protection rules and is shared | a shared bare `<env>` is bound by the plan cells and the nightly drift run as well as the applies, and GitHub offers no per-job filter, so a protection rule there stalls all three. To gate applies alone, split it into `<env>-plan` / `<env>-apply` and drop `shared = true` from `[environments.<env>]`. |
+| `<env>` — the naming the engine does not bind is also present | the naming `shared = true` in `[environments.<env>]` does not select already exists: a bare `<env>` where the engine binds the `<env>-plan` / `<env>-apply` pair, or either half where it binds the bare `<env>`. Nothing binds the unused naming, so the run creates and changes nothing for that environment — including the naming it does bind, which is why it is reported rather than half-written. Delete the unused naming, or move the environment to the other one by setting or dropping `shared = true` in its entry of the checkout's `.github/shipmate.toml`. |
+| `<VARIABLE>` — repository has one value, the flag has another | the variable exists with a value other than the one the flags name, so it is reported rather than overwritten: naming a different App is a deliberate choice. Change it with `gh variable set` if it was not. `SHIPMATE_APP_ID` never reaches this row — see the refusals below, and the rows beneath it for a repository copy left behind under `--vars-at-org`, and for a variable an earlier release wrote that nothing reads any more. |
 | `<VARIABLE>` — repository has one value, asserted at organization level | the name was passed to `--vars-at-org`, and a repository-level copy is still there. Repository resolution beats organization, so that copy is what the workflows read and the organization value contributes nothing. It is never deleted for you — `onboard` did not write it. Delete it with `gh variable delete <VARIABLE>`, or drop the name from `--vars-at-org` ([`github-app.md`](github-app.md) §6). |
 | `TERRAMATE_VERSION` / `TOFU_VERSION` — superseded by the version the engine release pins | the `setup` action takes both tool versions from the engine release's own `VERSIONS` file, read at the commit your workflow file pins, so the repository variable is inert. It is never deleted for you — `onboard` did not write it. Delete it with `gh variable delete <VARIABLE>` only once `.github/workflows/shipmate.yml` is on a pin carrying this change: workflows on an older pin still pass the variable to `setup`, and deleting it first blanks an input they read. A `pin-only` line for that file in the same run means you are not there yet — re-pin first ([`upgrading.md`](upgrading.md)), then delete. Re-create both before rolling the pin back to a release that predates this one. |
 | `gate ruleset` — the rulesets POST was rejected (HTTP 422) | most likely the name is taken by a ruleset whose enforcement is `evaluate` or `disabled`, which the effective-rules read cannot see; 422 has other causes, so read `gh api repos/OWNER/REPO/rulesets` first. Set it to active, or delete it and run again. |
@@ -417,9 +407,9 @@ fingerprint and the binding does reach it. Two causes, both on your side:
   configuration change at all — every plan reviewed before the rotation is
   invalidated by it. A re-plan clears this one.
 
-An environment-naming or `SHIPMATE_SHARED_ENVS` change does reach this error for
-the same reason. Adding an env to `SHIPMATE_SHARED_ENVS` swaps its two split
-environments for the bare one, so a cell planned before the change and applied
+An environment-naming or `shared = true` change does reach this error for the
+same reason. Setting `shared = true` on an env swaps its two split environments
+for the bare one, so a cell planned before the change and applied
 after it reads its variables and its envelope from a different environment.
 Re-plan after such a change. A mis-binding is a separate failure, refused by the
 pre-flight of §`this apply would bind GitHub Environment(s) that do not exist`
@@ -545,19 +535,19 @@ is the only control.
 Two fixes, and the error names both because either can be the right one:
 
 - **Create each environment named.** The apply path binds `<env>-apply` for a
-  split env and the bare `<env>` for one listed in the `SHIPMATE_SHARED_ENVS`
-  repository variable. Existence is matched case-exactly against the stack's
-  env tag, while the `SHIPMATE_SHARED_ENVS` listing is case-insensitive — so an
-  environment differing from the named binding only in case does not satisfy the
-  pre-flight, and GitHub may reject a second one as a duplicate. Rename the
-  existing environment (or the tag) to match rather than creating another.
-- **Correct `SHIPMATE_SHARED_ENVS`.** If the environments you created are the
-  ones you meant, the variable is what disagrees with them: an entry for an env
-  that is really split, a missing entry for one that is really shared, a typo, or
-  a space after a comma (`dev-eu, dev-us` leaves ` dev-us` as the entry, and
-  entries are compared whole). `shipmate doctor` on a pull request reports what
-  the environment names imply per env, which is the fastest way to see which side
-  is wrong.
+  split env and the bare `<env>` for one whose `[environments.<env>]` entry holds
+  `shared = true`. Existence is matched case-exactly against the stack's env
+  tag, so an environment differing from the named binding only in case does not
+  satisfy the pre-flight, and GitHub may reject a second one as a duplicate.
+  Rename the existing environment (or the tag) to match rather than creating
+  another.
+- **Correct the environment's entry in `.github/shipmate.toml`.** If the
+  environments you created are the ones you meant, the table is what disagrees
+  with them: `shared = true` on an env that is really split, or missing on one
+  that is really shared. The engine reads the default branch's copy, so the fix
+  takes a merged pull request. `shipmate doctor` on a pull request reports, per
+  env, which naming the table selects and which environments of it are missing,
+  which is the fastest way to see which side is wrong.
 
 Two neighbouring failures from the same step, both also fail-closed:
 
@@ -610,7 +600,7 @@ A misplaced `explicit_envs` or `env_order` reports differently in each position:
 | Where it landed | What `detect` says |
 | --- | --- |
 | after `[env_order]` | `env_order['explicit_envs'] names a top-level setting, not an environment` |
-| after `[environments.dev-eu]` | `environment dev-eu: explicit_envs is not a key this engine implements. An environment holds region, vars, aws.` |
+| after `[environments.dev-eu]` | `environment dev-eu: explicit_envs is not a key this engine implements. An environment holds region, vars, aws, shared.` |
 | after `[environments.dev-eu.aws.plan]` | `environment dev-eu: aws.plan.explicit_envs is not a field the aws provider defines. It defines region, role.` |
 
 The first of those is the one worth knowing about: before the reserved-name
