@@ -55,7 +55,7 @@ def state_path(stack, record, workspace):
         _refuse(stack, f"its local state path {rel!r} leaves the stack directory")
     if not _SAFE.fullmatch(rel):
         _refuse(stack, f"its local state path {rel!r} holds a character outside [A-Za-z0-9._/-]")
-    return f"{stack}/{rel}"
+    return posixpath.join(stack, rel)
 
 
 def _read_record(stack, data_dir):
@@ -64,8 +64,8 @@ def _read_record(stack, data_dir):
             record = json.load(fh)
     except FileNotFoundError:
         return None
-    except ValueError as exc:
-        _refuse(stack, f"its init record does not parse ({exc})")
+    except (OSError, ValueError) as exc:
+        _refuse(stack, f"its init record cannot be read ({exc})")
     # A JSON `null` must not read as "no record", which means the default local backend.
     if not isinstance(record, dict):
         _refuse(stack, f"its init record is {record!r}, not an object")

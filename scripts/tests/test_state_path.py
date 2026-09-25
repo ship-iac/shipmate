@@ -97,6 +97,7 @@ def test_refuses_unrecognized_shapes(record):
 
 
 def test_refuses_a_named_workspace_leaving_the_stack():
+    """Mutation: dropping the `..` / `../` escape check lets `../../dev-eu/...` through."""
     with pytest.raises(SystemExit):
         sp.state_path(STACK, _local(workspace_dir="../.."), "dev-eu")
 
@@ -121,6 +122,7 @@ def _write_record(directory, content):
 
 
 def test_main_writes_exactly_the_path(tmp_path, monkeypatch):
+    """Mutation: prefixing the output with `./` reddens this."""
     _write_record(tmp_path / ".terraform", json.dumps(_local(path=".state/x.tfstate")))
     got = _run_main(tmp_path, monkeypatch, {})
     assert got == "path=envs/dev-eu/eu-west-1/app/.state/x.tfstate\n"
@@ -135,18 +137,21 @@ def test_main_reads_the_record_from_tf_data_dir(tmp_path, monkeypatch):
 
 
 def test_main_without_a_record_writes_the_default_path(tmp_path, monkeypatch):
+    """Mutation: reading an absent record as "" (the fail-open) reddens this."""
     got = _run_main(tmp_path, monkeypatch, {"TF_WORKSPACE": "dev-eu"})
     assert got == "path=envs/dev-eu/eu-west-1/app/terraform.tfstate.d/dev-eu/terraform.tfstate\n"
 
 
 def test_main_writes_empty_for_a_remote_backend(tmp_path, monkeypatch):
+    """Mutation: deleting the non-local `return ""` derives a local path for s3 and reddens this."""
     _write_record(tmp_path / ".terraform", json.dumps({"backend": {"type": "s3", "config": {}}}))
     assert _run_main(tmp_path, monkeypatch, {}) == "path=\n"
 
 
 @pytest.mark.parametrize("content", ["{not json", "null", "[]", '"local"', ""])
 def test_main_refuses_an_unreadable_record_and_writes_nothing(tmp_path, monkeypatch, content):
-    """A JSON `null` read as "no record" would pick the default local path over a real one."""
+    """A JSON `null` read as "no record" would pick the default local path over a real one.
+    Mutation: deleting the top-level object check reddens the `null` row."""
     _write_record(tmp_path / ".terraform", content)
     with pytest.raises(SystemExit) as exc:
         _run_main(tmp_path, monkeypatch, {})
@@ -154,7 +159,18 @@ def test_main_refuses_an_unreadable_record_and_writes_nothing(tmp_path, monkeypa
     assert (tmp_path / "github_output").read_text(encoding="utf-8") == ""
 
 
+def test_main_refuses_a_record_it_cannot_open(tmp_path, monkeypatch):
+    """A directory where the record belongs. Mutation: catching only ValueError lets the OSError
+    escape as a traceback instead of an `::error::` naming the stack."""
+    (tmp_path / ".terraform" / "terraform.tfstate").mkdir(parents=True)
+    with pytest.raises(SystemExit) as exc:
+        _run_main(tmp_path, monkeypatch, {})
+    assert str(exc.value).startswith(f"::error::{STACK}: ")
+    assert (tmp_path / "github_output").read_text(encoding="utf-8") == ""
+
+
 def test_main_refuses_an_empty_stack(tmp_path, monkeypatch):
+    """Mutation: deleting the empty-STACK check reddens this."""
     with pytest.raises(SystemExit):
         _run_main(tmp_path, monkeypatch, {"STACK": ""})
     assert (tmp_path / "github_output").read_text(encoding="utf-8") == ""
