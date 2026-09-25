@@ -226,7 +226,7 @@ def test_real_tofu_init_records_what_main_reads(tmp_path, monkeypatch):
         (stack_dir / "main.tf").write_text(config, encoding="utf-8")
         run_env = {k: v for k, v in os.environ.items() if not k.startswith("TF_")}
         subprocess.run(
-            [shutil.which("tofu"), "init", "-input=false", "-no-color"],
+            [str(shutil.which("tofu")), "init", "-input=false", "-no-color"],
             cwd=stack_dir,
             env={**run_env, **env},
             check=True,
