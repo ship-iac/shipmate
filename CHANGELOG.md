@@ -13,6 +13,8 @@ grammar are declared unstable in `README.md`.
 
 ## [0.33.0] — 2026-09-25
 
+Tags `c22c2c3`.
+
 ### Changed — BREAKING
 
 - **A shared environment is declared in the table.** `shared = true` in an
