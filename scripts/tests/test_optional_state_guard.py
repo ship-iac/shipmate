@@ -67,20 +67,24 @@ def _step(action, name):
 
 @pytest.mark.parametrize("cell", _CELLS)
 def test_no_cell_takes_a_state_path_input(cell):
+    """Mutation: re-declare `state-path` under a cell's `inputs`."""
     assert "state-path" not in action_yaml(cell)["inputs"]
 
 
 @pytest.mark.parametrize("cell", _CELLS)
 def test_locate_state_reads_the_init_record_inside_terramate_run(cell):
+    """Mutation: run `python3 .../scripts/state-path` bare, outside `terramate run`."""
     assert _step(cell, "Locate state") == _LOCATE
 
 
 @pytest.mark.parametrize("cell", _CELLS)
 def test_restore_state_uses_the_located_path(cell):
+    """Mutation: restore `path: ${{ inputs.state-path }}`, or `env: ${{ inputs.stack }}`."""
     assert _step(cell, "Restore state") == _RESTORE
 
 
 def test_apply_cell_saves_state_to_the_located_path():
+    """Mutation: drop `always()` from the `if`, or save with `mode: restore`."""
     assert _step("apply-cell", "Save state") == _SAVE
 
 
@@ -88,7 +92,7 @@ def test_apply_cell_saves_state_to_the_located_path():
 def test_a_failed_init_skips_locate_and_restore(cell):
     """A one-line `run:` fails the step on a non-zero init, so the default `success()` condition
     skips what follows. An `always()` or `failure()` on either would locate or restore state for
-    a stack init could not set up."""
+    a stack init could not set up. Mutation: `if: always()` on `Locate state`."""
     init = _step(cell, "Initialize the stack")
     assert init["run"] == _INIT_RUN
     assert "if" not in init

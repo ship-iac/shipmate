@@ -193,12 +193,13 @@ def test_failed_apply_and_failed_tee_still_fails_the_step(tmp_path):
 @pytest.mark.skipif(_BASH is None, reason="bash not installed")
 def test_failed_init_fails_the_step_before_the_apply(tmp_path):
     """init runs outside the pipeline, and errexit must stop the step there rather than fall
-    through to an apply of a plan against an uninitialized directory.
+    through to an apply of a plan against an uninitialized directory. On the runner errexit comes
+    from `shell: bash` (`bash -e`); in this harness, from digest-input's `set -euo pipefail`.
+    Mutation: append `|| true` to init's one-line `run:`.
 
     The stub uses `return 5`, not `exit 5`: the init line is a plain function call in the current
-    shell, so an `exit` body terminates the script whatever the ordering, and this test could
-    then not fail on the regression it names -- moving `set +e` above the init line. Returning
-    leaves errexit to do the work."""
+    shell, so an `exit` body terminates the script whatever the init line says, and this test
+    could then not fail on that mutation. Returning leaves errexit to do the work."""
     r = _run_step(
         tmp_path,
         terramate_body="echo applied ; exit 0",

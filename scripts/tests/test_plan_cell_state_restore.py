@@ -7,9 +7,8 @@ error -- and AFTER `Stack slug`, because a forward `steps.<id>` reference render
 empty slug builds a `restore-keys:` prefix matching no real key, so the cell plans against empty
 state and reports it clean.
 
-`test_optional_state_guard.py` owns the located path and the skipped-when-empty property, for
-all three cells against hand-written constants; what stays here is the wiring the registry does
-not reach.
+`test_optional_state_guard.py` owns the whole restore step, located path and skipped-when-empty
+condition included, for all three cells; what stays here is the slug-before-restore order.
 
 Assertions are on the parsed action.yml. A substring form is satisfied by a comment naming
 `actions/state`, and by a restore step whose `if:` was inverted.
@@ -37,14 +36,3 @@ def test_the_slug_is_computed_before_the_restore_and_the_restore_before_the_plan
     restore = _restore_index(steps)
     plan = _step_index(steps, lambda s: s.get("name") == "Plan", "name: Plan")
     assert slug < restore < plan, f"slug at {slug}, restore at {restore}, Plan at {plan}"
-
-
-def test_the_restore_call_passes_the_whole_expected_with_block():
-    """Hand-written whole-value comparison: a derived expectation passes whatever the file says."""
-    steps = action_steps("plan-cell")
-    assert steps[_restore_index(steps)]["with"] == {
-        "stack-slug": "${{ steps.ids.outputs.slug }}",
-        "env": "${{ inputs.env }}",
-        "mode": "restore",
-        "path": "${{ steps.locate-state.outputs.path }}",
-    }

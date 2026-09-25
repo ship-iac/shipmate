@@ -91,7 +91,7 @@ runs:
         python3 "$GITHUB_ACTION_PATH/../../scripts/plan-classify" plan.json
 
     - name: Compose cell summary
-      # always(): a state restore or the plan itself may have failed, and the aggregator needs
+      # always(): an earlier step or the plan itself may have failed, and the aggregator needs
       # a result for every attempted-or-blocked cell. drift-issues must never silently auto-close
       # an existing Issue for a stack x env whose plan attempt itself did not succeed.
       if: always()

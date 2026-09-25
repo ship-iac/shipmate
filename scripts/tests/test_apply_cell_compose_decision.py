@@ -129,6 +129,7 @@ def test_init_failure_blocks_with_its_own_reason(monkeypatch, tmp_path):
 
 
 def test_locate_state_failure_blocks_with_its_own_reason(monkeypatch, tmp_path):
+    """Mutation: drop the `LOCATE_OUTCOME` row from FAILSAFES."""
     cell = _run_compose(monkeypatch, tmp_path, locate="failure")
     assert cell["result"] == "blocked"
     assert (
