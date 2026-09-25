@@ -431,6 +431,50 @@ def test_an_unreadable_default_table_is_not_read_as_split(monkeypatch):
     assert found == [_DEFAULT_TABLE_SKIPPED]
 
 
+def _environment_probes(monkeypatch, ctx):
+    """(the three environment probes' findings, every path they asked for)."""
+    responses = {
+        f"repos/{_REPO}/environments?per_page=100": _environments("dev-eu"),
+        _CONFIG_ON_DEFAULT: _wf_file(_SHARED_TABLE),
+    }
+    asked = []
+
+    def gh(path):
+        asked.append(path)
+        return responses[path]
+
+    monkeypatch.setattr(doctor, "_gh_json", gh)
+    found = (
+        doctor._environment_warnings(ctx)
+        + doctor._env_protection_warnings(ctx)
+        + doctor._plan_env_secret_warnings(ctx)
+    )
+    return found, asked
+
+
+def test_an_interpreter_below_the_floor_skips_the_environment_probes_silently(monkeypatch):
+    """Below the Python floor no revision of the table is at fault, and the config probe's
+    WARNING already says so: a NOTICE blaming the default branch's file would contradict it.
+
+    Mutation: drop the `interpreter_refusal()` check in `_bound_names` -- `parse_table`
+    refuses and the probes report DEFAULT_TABLE_UNREADABLE."""
+    monkeypatch.setattr(sys, "version_info", (3, 10, 6, "final", 0))
+    found, asked = _environment_probes(monkeypatch, _ctx())
+    assert found == []
+    assert asked == [f"repos/{_REPO}/environments?per_page=100"] * 3
+
+
+def test_no_declared_env_reads_nothing_in_the_environment_probes(monkeypatch):
+    """With no env to probe there is no binding to select, so neither the listing nor the
+    default branch's table is read, and a failed read cannot report probes that had no work.
+
+    Mutation: remove `_environment_warnings`' early return on an empty `ctx["envs"]` -- it
+    reads the listing and the table."""
+    found, asked = _environment_probes(monkeypatch, _ctx(envs=set()))
+    assert found == []
+    assert asked == []
+
+
 @pytest.mark.parametrize(
     ("at_head", "branch", "ref"),
     [(CANONICAL, "main", "main"), (_UNSHARED_TABLE, "release/v1", "release%2Fv1")],

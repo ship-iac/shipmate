@@ -271,7 +271,13 @@ def _role_names(env, mode, roles=None):
 
 def _bound_names(ctx, roles=None):
     """[(env, environment name, role)] the default branch's table binds for each declared
-    env, narrowed like `_role_names`, or `None` when `_shared_envs` cannot tell."""
+    env, narrowed like `_role_names`, or `None` when `_shared_envs` cannot tell.
+
+    Empty under an interpreter refusal: no revision of the file is at fault, and the config
+    probe's WARNING already names the cause.
+    """
+    if bm.ec.interpreter_refusal():
+        return []
     shared = _shared_envs(ctx)
     if shared is None:
         return None
@@ -326,6 +332,8 @@ def _environment_warnings(ctx):
                 "environment set is unknown, so the environment probes were skipped.",
             )
         ]
+    if not ctx["envs"]:
+        return []
     names = _existing_env_names(ctx)
     bound = _bound_names(ctx)
     if bound is None:
