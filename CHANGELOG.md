@@ -13,6 +13,8 @@ grammar are declared unstable in `README.md`.
 
 ## [0.32.0] — 2026-09-25
 
+Tags `10d16e0`.
+
 ### Changed
 
 - **Engine actions resolve through `$/`, with no checkout.** Every engine step calls
