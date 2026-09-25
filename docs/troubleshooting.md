@@ -312,7 +312,7 @@ mandate. Each one names what to do.
 | `gate ruleset` — it does not require branches to be up to date (strict) | plans can go stale against the base before merge. Turn on "Require branches to be up to date before merging". |
 | `<file>.yml` — the retired six-file layout | the repository still carries one of the six files `shipmate.yml` replaced (`plan.yml`, `apply.yml`, `comment-ops.yml`, `unlock.yml`, `deploy.yml`, `drift.yml`). It is never deleted for you: it may hold an edit of yours, and one of them still fires on its own trigger, running a job `shipmate.yml` now runs too. Delete the named file by hand. |
 | `<file>.yml` — the published fence, never pinned | the file holds the `@<engine-sha>` placeholder from the docs rather than a pin, which `dev/repin_consumer.py` cannot move. Delete the file and run the script again. |
-| `<file>.yml` — differs beyond its pin, not overwritten | the file differs from what this engine release publishes by more than its pin — a local edit, a different `state_suffix`, or a fence this release changed while the file stayed on an older one. Diff it against the fence on the page that publishes it and reconcile by hand, or delete it and run again to take the published one. |
+| `<file>.yml` — differs beyond its pin, not overwritten | the file differs from what this engine release publishes by more than its pin — a local edit, or a fence this release changed while the file stayed on an older one. Diff it against the fence on the page that publishes it and reconcile by hand, or delete it and run again to take the published one. |
 
 Some disagreements are refused rather than reported: the run stops before its
 first write and exits 1 — no `differs` line, and nothing else runs.

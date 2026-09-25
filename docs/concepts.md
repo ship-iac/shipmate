@@ -239,9 +239,8 @@ settings that bound that, see [`hardening.md`](hardening.md).
 
 shipmate follows a serverless plan→store→review→apply model: the reviewed plan
 is stored and applied verbatim, with no server or database.
-The consumer's `deploy` job calls the engine's reusable deploy workflow, passing
-only its flavor's `state_suffix`; its `drift` job is the same shape over the
-engine's reusable drift workflow.
+The consumer's `deploy` job calls the engine's reusable deploy workflow, and its
+`drift` job the engine's reusable drift workflow.
 
 - **`deploy`** (selected by `push` to the default branch, engine reusable
   `.github/workflows/deploy.yml`) is the exact-plan apply path.
@@ -266,15 +265,14 @@ engine's reusable drift workflow.
   [drift.md](drift.md).
 - **Generalization:** deploy + drift run unchanged across all three layouts
   (`repo-example-{stacks,folders,workspaces}`) — same engine, referenced at
-  `@main`, only the per-flavor state path (each job's `state_suffix`) differs;
+  `@main`; each stack's state path is read from its own `tofu init` record, and
   the per-flavor identity variables come from the environment table (folders
   inject nothing, workspaces inject `TF_WORKSPACE`).
 
-**Remote state and cloud credentials.** `state_suffix` is required, but may be
-the empty string. Set it to `''` and a remote backend (for example S3) owns the
-state, and the engine's state restore/save steps are skipped. Omitting it
-altogether is a workflow-resolution error, on purpose — a forgotten state
-configuration must fail loud rather than apply with no state at all.
+**Remote state and cloud credentials.** Nothing configures state. A local
+backend's state is cached at the path `tofu init` records; a remote backend (for
+example S3) owns its state, and the engine's state restore/save steps are
+skipped.
 
 Credentials are opt-in per environment, from that environment's `aws` tier in
 the environment table. The table has no level above the entry, so an environment

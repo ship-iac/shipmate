@@ -652,36 +652,51 @@ environment missing from the table still refuses on every path.
 
 ## State backend
 
-Every reusable workflow that runs a cell — `deploy.yml`, `apply-all.yml`,
-`apply.yml` and the `apply-env-level.yml` they call, plus `plan.yml` and
-`drift.yml` — takes a required `state_suffix` input, and the `apply-cell` /
-`drift-cell` / `plan-cell` actions an optional `state-path`:
+A consumer declares nothing about where state lives. Each cell reads it from the
+record `tofu init` wrote, `${TF_DATA_DIR:-.terraform}/terraform.tfstate` in the
+stack, and from `TF_WORKSPACE` (unset means `default`). `scripts/state-path` runs
+after a successful init, inside the same `terramate run` wrapper, so it sees the
+`TF_DATA_DIR` and `TF_WORKSPACE` OpenTofu saw. It yields one path relative to the
+repository root, or none:
 
-- **Non-empty** — the consumer's state is a local backend materialized in the
-  working tree. The cell's job passes `<stack>/<state_suffix>` as `state-path`
-  from one expression each of those five workflows shares, and the cell restores
-  that path via
-  `actions/state` before the run and saves it after (`drift-cell` and
-  `plan-cell` restore only; neither writes state).
-- **Explicitly empty** (`state_suffix: ''`) — a remote backend (for example
-  S3) owns the state. Both `actions/state` steps are skipped entirely and
-  shipmate never handles a state file; the backend and its locking are the
-  consumer's configuration.
+| init record | workspace | state path |
+| --- | --- | --- |
+| absent | `default` | `<stack>/terraform.tfstate` |
+| absent | `<ws>` | `<stack>/terraform.tfstate.d/<ws>/terraform.tfstate` |
+| `type: local` | `default` | `<stack>/<path or "terraform.tfstate">` |
+| `type: local` | `<ws>` | `<stack>/<workspace_dir or "terraform.tfstate.d">/<ws>/terraform.tfstate` |
+| any other `type` | any | none: the backend owns its state |
 
-`state_suffix` declares no default, so omitting it is a workflow-resolution
-error, not a third mode. That loudness is deliberate: a calling job that forgot
-its state configuration would otherwise restore nothing, apply, discard the
-state, and still report `applied` — a green gate over infrastructure nothing
-recorded. A remote backend opts in by writing the empty string. `unlock.yml` is
-the one reusable workflow that declares no such input: it releases locks and
-applies nothing, so passing one is a load-time rejection.
+- **A path** — a local backend. The cell restores that path through
+  `actions/state` before it plans or applies, and `apply-cell` saves it after the
+  apply (`plan-cell` and `drift-cell` restore only; neither writes state).
+- **None** — a backend such as S3 owns the state. Both `actions/state` steps are
+  skipped, shipmate never handles a state file, and the backend and its locking
+  are the consumer's configuration.
 
-The input is repo-wide. A repository mixing local- and remote-backend stacks
-has no correct value — non-empty makes `actions/cache/save` target a nonexistent
-path for the remote stacks, empty silently discards the local ones — so a mixed
-repository is unsupported. That forecloses a gradual migration in which one
-workload moves to a remote backend first: the backend move has to be repo-wide
-and land with the `state_suffix` change in every calling job in the same step.
+`.terraform/environment` is never read: the engine selects a
+workspace through `TF_WORKSPACE` alone and never runs `tofu workspace select`.
+
+**The derivation fails closed.** A cell that reads a local backend as remote
+restores nothing, applies, discards the state and still reports `applied` — a
+green gate over infrastructure nothing recorded. So:
+
+- An absent record after a successful init is the default local backend, never
+  "no state".
+- Only a backend `type` other than `local` yields no path.
+- Any record shape the derivation does not recognize refuses, naming the stack.
+  So does a path that is absolute, one that normalizes outside the stack
+  directory, and one holding a character outside `[A-Za-z0-9._/-]` (`actions/cache`
+  reads a newline in `path:` as a second path and `!` or `*` as a pattern).
+- A failed init fails the cell before the derivation runs. A refused derivation
+  blocks an apply cell with the reason `shipmate cannot tell where this stack's
+  local state lives — see the job log`.
+
+**Trust.** The path comes from the checked-out commit's backend configuration.
+`plan-cell` and `drift-cell` never save state, and `actions/cache` keys an entry
+on its path string, so a branch that points its backend elsewhere plans against
+empty state, visibly. `apply-cell` saves, and it runs the reviewed commit, whose
+backend block was part of the review.
 
 **On the state key.** Where the consumer's backend derives a key per stack,
 derive it from `terramate.stack.path.absolute` (as `docs/aws.md` does), which
@@ -691,10 +706,10 @@ basename, so `accounts/sandbox/network` and `stacks/prod/network` both name
 `network` and, when both carry the same `workload/<name>` tag, render one key
 and share one state file.
 
-Nothing else differs between the two modes. The exact-plan `.otplan` artifact
-flow, the fingerprint verification, the wave ordering, and the apply checks are
-identical either way — a remote-backend cell has no state artifact, so
-it can never be blocked on one.
+Nothing else differs between a local and a non-local backend. The exact-plan
+`.otplan` artifact flow, the fingerprint verification, the wave ordering, and the
+apply checks are identical either way — a non-local-backend cell has no state
+artifact, so it can never be blocked on one.
 
 ## AWS OIDC (optional)
 
@@ -1358,8 +1373,8 @@ The consumer's workflow is one file, `.github/workflows/shipmate.yml`: five
 triggers, and seven jobs each gated on the event with an `if:` and each calling
 one engine reusable workflow, SHA-pinned. Top-level `permissions: {}`; every job
 declares its own. The plan job passes `SHIPMATE_APP_PRIVATE_KEY` and
-`SHIPMATE_PLAN_PASSPHRASE` by name (never `secrets: inherit`) and `state_suffix`
-as its one required input. Everything a `uses:` line reaches is engine-owned,
+`SHIPMATE_PLAN_PASSPHRASE` by name (never `secrets: inherit`) and no input.
+Everything a `uses:` line reaches is engine-owned,
 SHA-pinned YAML.
 
 | event or verb | job | engine callee |
@@ -1582,7 +1597,7 @@ mis-wirings this contract used to enumerate — a constant
 `head-repo: ${{ github.repository }}`, a literal `is-draft: false`, a literal
 `on-demand: true`, each of which stated the safe answer for every run, forks and
 drafts included — have no site left to be written at. The consumer's file passes
-secrets, permissions and `state_suffix`; the engine decides everything else.
+secrets and permissions; the engine decides everything else.
 
 `summary` deliberately does not require `detect` or `plan` to have succeeded: a
 failed detect or plan must still produce a red gate with an explanation, because
@@ -2345,7 +2360,7 @@ TF_VAR fingerprint).
 per-run machine artifacts shipmate materializes in its working tree — the
 reviewed plan (`*.otplan`), the fingerprint (`fingerprint.txt`), the planned
 commit record (`planned-head.txt`), OpenTofu's working directory in each stack
-(`.terraform/`), and the flavor's state path when it has one (a remote backend
+(`.terraform/`), and a local backend's state path (a non-local backend
 materializes none — see State backend, above). The reason is not a safeguard:
 shipmate writes into the consumer's own checkout, none of those belong in a
 commit, and a `terramate run` of the consumer's own that omits `--no-recursive`
@@ -2411,10 +2426,9 @@ as `.github/workflows/unlock.yml` (guard → single-env detect → one flat unlo
 matrix; it takes `environment` and `ref` only, and declares `SHIPMATE_SECRETS`
 and no engine secret). A
 consuming repo reaches all four from `shipmate.yml`: the `deploy` job (on
-`push` to the default branch; passes only its flavor's `state_suffix`, which it
-sets to `''` on a remote backend), the `targeted` and `all` jobs (dispatched
+`push` to the default branch; passes secrets and no input), the `targeted` and `all` jobs (dispatched
 `apply`, split on whether an `environment` was given) and the `unlock` job
-(dispatched `unlock`; no `state_suffix`, and a `secrets:` block naming
+(dispatched `unlock`; a `secrets:` block naming
 `SHIPMATE_SECRETS` alone). All four must
 grant `id-token: write`, added in the same pull request that repins past the
 change introducing it (see AWS OIDC, above).

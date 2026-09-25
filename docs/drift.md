@@ -30,15 +30,10 @@ The engine's jobs run on `ubuntu-latest` unless the `drift` job passes a
 does. Pass it only for a different label your plan actually offers; one it does
 not leaves every job waiting for a runner that never arrives.
 
-**`state_suffix` is required and may be `""`.** `""` — what the published fence
-pastes, because the AWS sample uses a remote backend — means the backend owns
-the state and the engine's state restore step is skipped. A local backend
-materialized in the working tree passes the path segment under each stack
-directory where its state file lives instead: `repo-example-stacks` passes
-`.state`, and each drift cell then restores `<stack>/.state` before planning
-([`../CONTRACT.md`](../CONTRACT.md) §State backend). Pasting `""` there plans
-every cell against no state and reports the whole repository as drifted, every
-night. It is the same value the file's other jobs pass.
+**The state path is read from `tofu init`, not configured.** A local backend's
+state is restored from the path `tofu init` records before each drift cell
+plans; a remote backend owns its state and the restore is skipped
+([`../CONTRACT.md`](../CONTRACT.md) §State backend).
 
 **`id-token: write` and `actions: read` are both required** on the `drift` job,
 cloud credentials or not. A called workflow's permissions are capped at the

@@ -50,14 +50,9 @@ rather than one conditional attribute because Terramate 0.17.1 has no
 `tm_unset()`, and a bare `unset` emits `assume_role = unset`, which survives
 `fmt` and `validate` and dies at `init`.
 
-Because the backend owns the state, the `plan`, `drift`, `targeted`, `all` and
-`deploy` jobs all pass `state_suffix: ""`. That is the explicitly-empty mode of
-[`../CONTRACT.md`](../CONTRACT.md) §State backend: both `actions/state` steps are
-skipped entirely and shipmate never handles a state file. The input declares no
-default, so omitting it is a workflow-resolution error rather than a third mode.
-The `unlock` job is the exception. The engine's `unlock.yml` declares no such
-input, because it releases locks and applies nothing, and passing one is a
-load-time rejection.
+Because the backend owns the state, `tofu init` records an `s3` backend and every
+cell skips both `actions/state` steps: shipmate never handles a state file
+([`../CONTRACT.md`](../CONTRACT.md) §State backend).
 
 ## Named profiles must be conditional
 
