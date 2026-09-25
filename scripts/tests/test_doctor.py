@@ -452,16 +452,25 @@ def _environment_probes(monkeypatch, ctx):
     return found, asked
 
 
-def test_an_interpreter_below_the_floor_skips_the_environment_probes_silently(monkeypatch):
+def test_an_interpreter_below_the_floor_skips_the_environment_probes(monkeypatch):
     """Below the Python floor no revision of the table is at fault, and the config probe's
-    WARNING already says so: a NOTICE blaming the default branch's file would contradict it.
+    WARNING already says so: the skip NOTICE blames the runner, not the file, and nothing is
+    read for probes that cannot select a naming.
 
-    Mutation: drop the `interpreter_refusal()` check in `_bound_names` -- `parse_table`
-    refuses and the probes report DEFAULT_TABLE_UNREADABLE."""
+    Mutation: drop the NOTICE (`return []`) -- an empty list reads as every environment
+    existing; or move the refusal check after `_existing_env_names` in any probe -- the
+    listing is read."""
     monkeypatch.setattr(sys, "version_info", (3, 10, 6, "final", 0))
     found, asked = _environment_probes(monkeypatch, _ctx())
-    assert found == []
-    assert asked == [f"repos/{_REPO}/environments?per_page=100"] * 3
+    assert found == [
+        (
+            doctor.NOTICE,
+            "the environment probes were skipped — this runner's Python refuses the "
+            "environment table, so which GitHub Environments a run binds cannot be "
+            "determined here.",
+        )
+    ]
+    assert asked == []
 
 
 def test_no_declared_env_reads_nothing_in_the_environment_probes(monkeypatch):
