@@ -15,15 +15,15 @@ from _loader import WORKFLOWS
 #: inputs is listed as `{}`, so a new workflow reaching for the retired rail cannot dodge the
 #: comparison.
 EXPECTED_INPUTS = {
-    "apply-all.yml": {"workflow_call": ["pr_number", "ref", "state_suffix"]},
-    "apply-env-level.yml": {"workflow_call": ["head_sha", "state_suffix", "waves_json"]},
-    "apply.yml": {"workflow_call": ["environment", "pr_number", "ref", "state_suffix"]},
+    "apply-all.yml": {"workflow_call": ["pr_number", "ref"]},
+    "apply-env-level.yml": {"workflow_call": ["head_sha", "waves_json"]},
+    "apply.yml": {"workflow_call": ["environment", "pr_number", "ref"]},
     "ci.yml": {},
     "comment-ops.yml": {},
-    "deploy.yml": {"workflow_call": ["state_suffix"]},
-    "drift.yml": {"workflow_call": ["runs_on", "state_suffix", "tags"]},
+    "deploy.yml": {},
+    "drift.yml": {"workflow_call": ["runs_on", "tags"]},
     "manifest-load.yml": {},
-    "plan.yml": {"workflow_call": ["runs_on", "state_suffix"]},
+    "plan.yml": {"workflow_call": ["runs_on"]},
     "unlock.yml": {"workflow_call": ["environment", "ref"]},
 }
 

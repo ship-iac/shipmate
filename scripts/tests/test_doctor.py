@@ -1217,8 +1217,6 @@ _SHIPMATE_WF = (
     "    secrets:\n"
     "      SHIPMATE_APP_PRIVATE_KEY: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}\n"
     "      SHIPMATE_PLAN_PASSPHRASE: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}\n"
-    "    with:\n"
-    '      state_suffix: ""\n'
     "  comment-ops:\n"
     "    name: shipmate\n"
     "    if: github.event_name == 'issue_comment'\n"
@@ -2830,8 +2828,9 @@ def test_a_name_below_the_uses_line_is_still_the_jobs_name(monkeypatch):
 def test_a_name_deeper_in_the_block_is_not_the_jobs_name(monkeypatch):
     """Only a direct child of the job is its name. A `name:` under `with:` is an input, and
     taking it would silence the finding for a job called something else entirely."""
+    anchor = "      SHIPMATE_PLAN_PASSPHRASE: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}\n"
     text = _SHIPMATE_WF.replace("    name: shipmate\n", "", 1).replace(
-        '      state_suffix: ""\n', '      state_suffix: ""\n      name: shipmate\n'
+        anchor, f"{anchor}    with:\n      name: shipmate\n", 1
     )
     responses = _fork_responses({"shipmate.yml": text})
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
@@ -3265,7 +3264,9 @@ _WF_NO_PR_NUMBER = _SHIPMATE_WF.replace(
     "        default: ''\n",
     "",
 ).replace(
-    '      state_suffix: ""\n',
+    "      SHIPMATE_PLAN_PASSPHRASE: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}\n",
+    "      SHIPMATE_PLAN_PASSPHRASE: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}\n"
+    "    with:\n"
     "      pr_number: ${{ github.event.inputs.pr_number }}\n",
     1,
 )

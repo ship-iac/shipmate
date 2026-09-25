@@ -1,0 +1,89 @@
+#!/usr/bin/env python3
+"""Where a cell's local backend keeps state, read from the record `tofu init` wrote.
+
+Runs inside `terramate run` after init, so `TF_DATA_DIR` and `TF_WORKSPACE` are the values
+OpenTofu saw. No record means no backend block, which is the default local backend and never
+"no state": reading it as remote would restore nothing, apply, and discard the state.
+
+Prints the path relative to the repository root, or an empty line for a backend other than
+`local`, and appends `path=<value>` to `GITHUB_OUTPUT`. Every shape it does not recognize exits
+with an `::error::` naming the stack.
+"""
+
+import json
+import os
+import posixpath
+import re
+
+#: `actions/cache` reads a newline in `path:` as a second path and `!` or `*` as patterns.
+_SAFE = re.compile(r"[A-Za-z0-9._/-]+")
+
+
+def _refuse(stack, why):
+    raise SystemExit(f"::error::{stack}: {why}, so shipmate cannot tell where its state lives.")
+
+
+def _local_rel(stack, config, workspace):
+    if not isinstance(config, dict):
+        _refuse(stack, f"the init record's backend config is {config!r}")
+    path, ws_dir = config.get("path"), config.get("workspace_dir")
+    for value in (path, ws_dir):
+        if value is not None and not isinstance(value, str):
+            _refuse(stack, f"the init record holds a local path of {value!r}")
+    if workspace in ("", "default"):
+        return path or "terraform.tfstate"
+    return f"{ws_dir or 'terraform.tfstate.d'}/{workspace}/terraform.tfstate"
+
+
+def state_path(stack, record, workspace):
+    """The state path for `stack` relative to the repository root, or "" for a non-local backend.
+
+    `record` is the parsed init record, None when init wrote none. Raises SystemExit on any
+    record shape it does not recognize and on a path that leaves the stack or that
+    `actions/cache` would misread.
+    """
+    if record is None:
+        record = {"backend": {"type": "local", "config": {}}}
+    backend = record.get("backend") if isinstance(record, dict) else None
+    kind = backend.get("type") if isinstance(backend, dict) else None
+    if not isinstance(kind, str) or not kind.strip():
+        _refuse(stack, f"the init record names no backend type: {record!r}")
+    if kind != "local":
+        return ""
+    rel = posixpath.normpath(_local_rel(stack, backend.get("config"), workspace))
+    if posixpath.isabs(rel) or rel == ".." or rel.startswith("../"):
+        _refuse(stack, f"its local state path {rel!r} leaves the stack directory")
+    if rel == ".":
+        _refuse(stack, "its local state path names the stack directory itself")
+    if not _SAFE.fullmatch(rel):
+        _refuse(stack, f"its local state path {rel!r} holds a character outside [A-Za-z0-9._/-]")
+    return posixpath.join(stack, rel)
+
+
+def _read_record(stack, data_dir):
+    try:
+        with open(os.path.join(data_dir, "terraform.tfstate"), encoding="utf-8") as fh:
+            record = json.load(fh)
+    except FileNotFoundError:
+        return None
+    except (OSError, ValueError) as exc:
+        _refuse(stack, f"its init record cannot be read ({exc})")
+    # A JSON `null` must not read as "no record", which means the default local backend.
+    if not isinstance(record, dict):
+        _refuse(stack, f"its init record is {record!r}, not an object")
+    return record
+
+
+def main():
+    stack = os.environ.get("STACK", "")
+    if not stack:
+        _refuse("state-path", "STACK is empty")
+    record = _read_record(stack, os.environ.get("TF_DATA_DIR") or ".terraform")
+    path = state_path(stack, record, os.environ.get("TF_WORKSPACE", ""))
+    print(path)
+    with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
+        fh.write(f"path={path}\n")
+
+
+if __name__ == "__main__":
+    main()

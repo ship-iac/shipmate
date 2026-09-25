@@ -19,10 +19,6 @@ inputs:
   plan-sha256:
     description: sha256 of the reviewed plan text, recorded on the apply check by the trusted summary job. The apply re-renders the stored plan and refuses if it does not match.
     required: true
-  state-path:
-    description: Flavor state path, e.g. stacks/app/.state. Empty = remote backend owns state; both actions/state steps are skipped, and `skipped` never matches the Compose cell summary step's 'failure' checks, so a remote-backend cell can never be blocked on artifact state.
-    required: false
-    default: ""
   github-token:
     description: GITHUB_TOKEN with actions:read (reviewed-plan artifact download).
     required: true
@@ -140,16 +136,6 @@ runs:
           exit 1
         fi
 
-    - name: Restore state
-      id: restore-state
-      if: ${{ inputs.state-path != '' }}
-      uses: $/actions/state
-      with:
-        stack-slug: ${{ steps.ids.outputs.slug }}
-        env: ${{ inputs.env }}
-        mode: restore
-        path: ${{ inputs.state-path }}
-
     - name: Check the reviewed plan text's digest reached this action
       id: digest-input
       shell: bash
@@ -173,29 +159,28 @@ runs:
       shell: bash
       env:
         STACK: ${{ inputs.stack }}
-      run: |
-        set -euo pipefail
-        # Restored local-backend workspace state carries no `.terraform` record marking the
-        # backend initialised, so `init` reads it as legacy state awaiting migration and
-        # `-input=false` turns that question into a hard error.
-        ws="$STACK/terraform.tfstate.d"
-        hidden=$(mktemp -du "$RUNNER_TEMP/tfstate.d.XXXXXX")
-        # The workspace state is hidden across the init and put back either way: under
-        # `-reconfigure` a migration is never intended, and non-interactively it could never
-        # have been answered.
-        if [ -d "$ws" ]; then mv "$ws" "$hidden"; fi
-        # errexit is lifted only so the workspace restore runs even on a failed init.
-        set +e
-        # `init` output is setup noise and stays out of the apply step's teed pipeline, apply.txt
-        # being reviewer-facing comment data.
-        terramate run --disable-safeguards=git-out-of-sync --no-recursive -C "$STACK" -- tofu init -input=false -reconfigure
-        init_status=$?
-        set -e
-        # init recreates $ws empty; drop that so the real state replaces it
-        # rather than being moved inside it.
-        if [ -d "$hidden" ]; then rm -rf "$ws"; mv "$hidden" "$ws"; fi
-        # Fatal: nothing applies against state the engine could not initialise.
-        [ "$init_status" -eq 0 ] || exit "$init_status"
+      # Its own step: init output is setup noise and stays out of the apply step's teed pipeline,
+      # apply.txt being reviewer-facing comment data.
+      run: terramate run --disable-safeguards=git-out-of-sync --no-recursive -C "$STACK" -- tofu init -input=false -reconfigure
+
+    - name: Locate state
+      id: locate-state
+      shell: bash
+      env:
+        STACK: ${{ inputs.stack }}
+      # Inside `terramate run` so a consumer's run.env TF_DATA_DIR or TF_WORKSPACE applies, as it
+      # did for init.
+      run: terramate run --disable-safeguards=git-out-of-sync --no-recursive -C "$STACK" -- python3 "$GITHUB_ACTION_PATH/../../scripts/state-path"
+
+    - name: Restore state
+      id: restore-state
+      if: ${{ steps.locate-state.outputs.path != '' }}
+      uses: $/actions/state
+      with:
+        stack-slug: ${{ steps.ids.outputs.slug }}
+        env: ${{ inputs.env }}
+        mode: restore
+        path: ${{ steps.locate-state.outputs.path }}
 
     - name: Verify the stored plan renders as the reviewed plan text
       id: plan-digest
@@ -266,13 +251,13 @@ runs:
       # saved. On cancellation this job's own conclusion reads cancelled, so the trusted
       # trailing job -- which completes a check only when the job that applied it succeeded --
       # leaves the check pending and the work is re-detected.
-      if: ${{ always() && inputs.state-path != '' && steps.restore-state.outcome == 'success' }}
+      if: ${{ always() && steps.restore-state.outcome == 'success' }}
       uses: $/actions/state
       with:
         stack-slug: ${{ steps.ids.outputs.slug }}
         env: ${{ inputs.env }}
         mode: save
-        path: ${{ inputs.state-path }}
+        path: ${{ steps.locate-state.outputs.path }}
 
     - name: Compose cell summary
       # Runs even when a fail-safe or the apply itself failed or was cancelled: the
@@ -294,9 +279,10 @@ runs:
         PLANNED_HEAD_OUTCOME: ${{ steps.planned-head.outcome }}
         DECRYPT_OUTCOME: ${{ steps.decrypt.outcome }}
         FINGERPRINT_OUTCOME: ${{ steps.fingerprint.outcome }}
-        RESTORE_OUTCOME: ${{ steps.restore-state.outcome }}
         DIGEST_INPUT_OUTCOME: ${{ steps.digest-input.outcome }}
         INIT_OUTCOME: ${{ steps.init.outcome }}
+        LOCATE_OUTCOME: ${{ steps.locate-state.outcome }}
+        RESTORE_OUTCOME: ${{ steps.restore-state.outcome }}
         PLAN_DIGEST_OUTCOME: ${{ steps.plan-digest.outcome }}
         APPLY_OUTCOME: ${{ steps.apply.outcome }}
       run: |

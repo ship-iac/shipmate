@@ -11,6 +11,17 @@ section below names the SHA the release tags.
 The version line stays `v0.x` while action inputs, check names, and the comment
 grammar are declared unstable in `README.md`.
 
+## [Unreleased]
+
+### Changed — BREAKING
+
+- **The state path is read from `tofu init`, not declared.** `state_suffix` is removed from
+  every reusable workflow; delete it from each calling job's `with:`, and a `with:` it leaves
+  empty. The `plan-cell`, `drift-cell` and `apply-cell` actions' `state-path` input is gone.
+  Each cell reads its local backend's state path from the record `tofu init` writes
+  and `TF_WORKSPACE`; a backend other than `local` skips the state steps, as `state_suffix: ""`
+  did. `scripts/onboard` drops `--state-suffix`.
+
 ## [0.33.0] — 2026-09-25
 
 Tags `c22c2c3`.

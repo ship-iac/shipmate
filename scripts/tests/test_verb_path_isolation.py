@@ -60,7 +60,6 @@ APPLY_INPUTS = {
     "environment": {"required": True, "type": "string"},
     "ref": {"required": True, "type": "string"},
     "pr_number": {"required": True, "type": "string"},
-    "state_suffix": {"required": True, "type": "string"},
 }
 UNLOCK_INPUTS = {
     "environment": {"required": True, "type": "string"},

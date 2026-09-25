@@ -62,8 +62,17 @@ def test_the_apply_half_is_split_across_its_four_attributable_steps():
     start = ids.index("digest-input")
     # Written out here rather than compared against _STEP_IDS: the harness concatenates the
     # bodies in that constant's order, so a swap made in both places would leave every runtime
-    # assertion in this file green and this the only test able to catch it.
-    assert tuple(ids[start : start + 4]) == ("digest-input", "init", "plan-digest", "apply")
+    # assertion in this file green and this the only test able to catch it. Locating and
+    # restoring state sit between init and the render, and the harness leaves them out: neither
+    # touches the stored plan.
+    assert tuple(ids[start : start + 6]) == (
+        "digest-input",
+        "init",
+        "locate-state",
+        "restore-state",
+        "plan-digest",
+        "apply",
+    )
 
 
 def test_apply_step_captures_pipestatus_and_exits_on_it():
@@ -184,12 +193,13 @@ def test_failed_apply_and_failed_tee_still_fails_the_step(tmp_path):
 @pytest.mark.skipif(_BASH is None, reason="bash not installed")
 def test_failed_init_fails_the_step_before_the_apply(tmp_path):
     """init runs outside the pipeline, and errexit must stop the step there rather than fall
-    through to an apply of a plan against an uninitialized directory.
+    through to an apply of a plan against an uninitialized directory. On the runner errexit comes
+    from `shell: bash` (`bash -e`); in this harness, from digest-input's `set -euo pipefail`.
+    Mutation: append `|| true` to init's one-line `run:`.
 
     The stub uses `return 5`, not `exit 5`: the init line is a plain function call in the current
-    shell, so an `exit` body terminates the script whatever the ordering, and this test could
-    then not fail on the regression it names -- moving `set +e` above the init line. Returning
-    leaves errexit to do the work."""
+    shell, so an `exit` body terminates the script whatever the init line says, and this test
+    could then not fail on that mutation. Returning leaves errexit to do the work."""
     r = _run_step(
         tmp_path,
         terramate_body="echo applied ; exit 0",

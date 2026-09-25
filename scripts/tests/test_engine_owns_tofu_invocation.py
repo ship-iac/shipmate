@@ -41,6 +41,8 @@ _WRAPPER = [
     "--",
 ]
 _INIT = [*_WRAPPER, "tofu", "init", "-input=false", "-reconfigure"]
+#: Reads the init record inside the wrapper, so it sees the TF_DATA_DIR and TF_WORKSPACE tofu saw.
+_LOCATE = [*_WRAPPER, "python3", "$GITHUB_ACTION_PATH/../../scripts/state-path"]
 _PLAN = [*_WRAPPER, "tofu", "plan", "-input=false", "-lock=false", "-out=stack.otplan"]
 #: The apply takes the backend's lock, so no -lock=false, and applies the reviewed plan file. No
 #: -auto-approve either: a stored plan never prompts, so the flag would be inert, and without it
@@ -80,9 +82,9 @@ _FORCE_UNLOCK = [*_WRAPPER, "tofu", "force-unlock", "-force", "$LOCK_ID"]
 
 #: Every `terramate run` each cell is expected to make, in order.
 _EXPECTED = {
-    "plan-cell": [_INIT, _PLAN],
-    "drift-cell": [_INIT, _PLAN],
-    "apply-cell": [_INIT, _APPLY],
+    "plan-cell": [_INIT, _LOCATE, _PLAN],
+    "drift-cell": [_INIT, _LOCATE, _PLAN],
+    "apply-cell": [_INIT, _LOCATE, _APPLY],
     "unlock-cell": [_INIT, _PROBE, _FORCE_UNLOCK],
 }
 #: The plan-text render, one constant for the two sides of the plan-text binding: plan-cell writes

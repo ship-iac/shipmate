@@ -11,13 +11,10 @@ Invariants:
   `A && B || C` as `C` whenever `B` is falsy, so `matrix.role_arn || vars.AWS_ROLE_ARN` mints
   real credentials from a branch-editable value for exactly the cell the table declined to give
   a role. The jobs may read repository variables elsewhere, and this says nothing about those;
-- every wave job in apply-env-level.yml carries id-token: write and the empty-suffix state-path
-  expression;
+- every wave job in apply-env-level.yml carries id-token: write;
 - apply-env-level.yml and unlock.yml declare a workflow-level `permissions: {}` floor, and
   apply-env-level's snapshot and complete jobs declare exactly the scopes they need. Neither gets
-  id-token: neither touches the cloud, and complete holds the App key;
-- state_suffix stays required with no default on all four apply-path workflows, so omitting it is
-  a workflow-resolution error rather than a silent no-state apply.
+  id-token: neither touches the cloud, and complete holds the App key.
 
 Whole parsed values, never substrings. An inverted gate must fail here.
 """
@@ -32,9 +29,6 @@ CRED_ACTION = "aws-actions/configure-aws-credentials"
 CRED_IF = "${{ matrix.role_arn != '' }}"
 ROLE_TO_ASSUME = "${{ matrix.role_arn }}"
 AWS_REGION = "${{ matrix.cred_region }}"
-STATE_PATH_EXPR = (
-    "${{ inputs.state_suffix != '' && format('{0}/{1}', matrix.stack, inputs.state_suffix) || '' }}"
-)
 WAVES = [f"wave{i}" for i in range(8)]
 #: (workflow, cell-running job ids, cell action) -- the four files that must agree. unlock.yml
 #: carries the same step doing the same job; leaving it out is how byte-identity stops being true.
@@ -128,44 +122,6 @@ def test_every_cell_job_has_exactly_one_gated_cred_step_before_its_cell(workflow
         cell_idx = [i for i, s in enumerate(steps) if _is_cell(s, action)]
         assert len(cell_idx) == 1, f"{where}: expected exactly one {action} step"
         assert cred_idx[0] < cell_idx[0], f"{where}: credentials must be configured before {action}"
-
-
-def test_every_wave_passes_empty_state_path_when_suffix_empty():
-    for wave, job in _wave_jobs().items():
-        cell = next(s for s in job["steps"] if _is_cell(s))
-        assert cell["with"]["state-path"] == STATE_PATH_EXPR, (
-            f"{wave}: state-path must collapse to '' when state_suffix is empty "
-            "(a bare trailing-slash path would defeat the optional-state skip)"
-        )
-
-
-def _state_suffix_input(workflow):
-    spec = _load(workflow)
-    on = spec.get("on") or spec.get(True)  # pyyaml parses bare `on:` as boolean True
-    return on["workflow_call"]["inputs"]["state_suffix"]
-
-
-def _assert_state_suffix_required_with_no_default(workflow):
-    inp = _state_suffix_input(workflow)
-    assert inp.get("required") is True, (
-        f"{workflow}: state_suffix must stay required: true -- a remote-backend "
-        "consumer opts in by passing '' explicitly, so omission stays a "
-        "workflow-resolution error instead of silently skipping state"
-    )
-    assert "default" not in inp, (
-        f"{workflow}: state_suffix must declare no default -- a default '' turns "
-        "a forgotten state configuration into a silent no-state apply that the "
-        "gate then reports green"
-    )
-
-
-def test_apply_env_level_state_suffix_is_required_with_no_default():
-    _assert_state_suffix_required_with_no_default("apply-env-level.yml")
-
-
-def test_state_suffix_inputs_are_required_with_no_default_everywhere():
-    for wf in ("apply.yml", "apply-all.yml", "deploy.yml"):
-        _assert_state_suffix_required_with_no_default(wf)
 
 
 @pytest.mark.parametrize(

@@ -2,7 +2,6 @@ name: drift
 on:
   workflow_call:
     inputs:
-      state_suffix: { required: true, type: string }
       runs_on: { required: false, default: ubuntu-latest, type: string }
       # An input, not a repository variable: a consumer may spread the sweep across several
       # drift files with one literal tag query each, and a variable cannot differ per file.
@@ -74,7 +73,6 @@ jobs:
           stack: ${{ matrix.stack }}
           stack-name: ${{ matrix.stack }}
           env: ${{ matrix.environment }}
-          state-path: ${{ inputs.state_suffix != '' && format('{0}/{1}', matrix.stack, inputs.state_suffix) || '' }}
 
   # Completes the credentialed work drift-cell does not do: authors and closes the drift Issues
   # from the downloaded cell artifacts, and holds the only App key on this path.

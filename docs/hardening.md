@@ -1029,7 +1029,7 @@ in, and a dispatch reaches strictly less than a pull-request event does: the bod
 carries the verb that selects the `plan` job and the pull request's number,
 GitHub refuses a dispatch naming an input the file does not declare (HTTP 422, no
 run), and the `plan` job forwards none of the file's inputs to the engine — it
-passes its `state_suffix` and nothing else. Everything the guards
+passes secrets and no input. Everything the guards
 decide on — the head SHA, the head repository, the draft flag — is then derived
 from that number by `actions/pr-facts`, which asks the API for the pull request.
 That derivation is deliberate: the fork refusal keys on the head repository, so

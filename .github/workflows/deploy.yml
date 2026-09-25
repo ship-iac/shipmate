@@ -1,12 +1,6 @@
 name: deploy
 on:
   workflow_call:
-    inputs:
-      # The flavor's state filename suffix under actions/state (`.state`, `terraform.tfstate`,
-      # `terraform.tfstate.d`). A remote backend passes the empty string explicitly, which skips
-      # actions/state entirely. Omitting the input fails at workflow-resolution time, deliberately:
-      # a missing state configuration must be loud, not indistinguishable from a remote backend.
-      state_suffix: { required: true, type: string }
     secrets:
       # Consumers pass this by name. A `vars` entry such as SLACK_WEBHOOK is inherited by a
       # called workflow automatically; secrets are NOT, and an encrypting consumer
@@ -54,7 +48,6 @@ jobs:
     with:
       waves_json: ${{ needs.detect.outputs.envlevel0_waves }}
       head_sha: ${{ needs.detect.outputs.head_sha }}
-      state_suffix: ${{ inputs.state_suffix }}
     # Named, never `inherit`: these two files sit in one organization but the RUN belongs to the
     # consumer, and `inherit` is evaluated against the run -- so a cross-organization consumer's
     # `complete` job would hold no key, its applies would execute, and their apply checks would
@@ -77,7 +70,6 @@ jobs:
     with:
       waves_json: ${{ needs.detect.outputs.envlevel1_waves }}
       head_sha: ${{ needs.detect.outputs.head_sha }}
-      state_suffix: ${{ inputs.state_suffix }}
     secrets:
       SHIPMATE_APP_PRIVATE_KEY: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
       SHIPMATE_PLAN_PASSPHRASE: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
@@ -92,7 +84,6 @@ jobs:
     with:
       waves_json: ${{ needs.detect.outputs.envlevel2_waves }}
       head_sha: ${{ needs.detect.outputs.head_sha }}
-      state_suffix: ${{ inputs.state_suffix }}
     secrets:
       SHIPMATE_APP_PRIVATE_KEY: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
       SHIPMATE_PLAN_PASSPHRASE: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
@@ -107,7 +98,6 @@ jobs:
     with:
       waves_json: ${{ needs.detect.outputs.envlevel3_waves }}
       head_sha: ${{ needs.detect.outputs.head_sha }}
-      state_suffix: ${{ inputs.state_suffix }}
     secrets:
       SHIPMATE_APP_PRIVATE_KEY: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
       SHIPMATE_PLAN_PASSPHRASE: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}

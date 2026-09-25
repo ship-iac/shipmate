@@ -87,7 +87,6 @@ def ctx(**over):
         "envs": ["dev-eu"],
         "shared": set(),
         "unresolved": set(),
-        "state_suffix": "",
         "root": None,
         "engine": None,
         "variables": {},
@@ -473,7 +472,6 @@ def test_main_calls_every_stage_in_order():
     assert stages == [
         "_TEAM_RE.fullmatch(args.team)",
         "_APP_ID_RE.fullmatch(args.app_id)",
-        "_SUFFIX_RE.fullmatch(args.state_suffix)",
         "_at_org(args.vars_at_org)",
         "_read_key(args.key)",
         "_engine_pin(engine)",
@@ -1871,8 +1869,33 @@ def test_every_shim_fence_is_found_and_calls_exactly_the_expected_engine_workflo
     - edit the fence's top-level `name:` line -> the locator matches zero fences and refuses;
     - edit a `uses:` filename in the fence -> the callee list differs.
     """
-    found = {"shipmate.yml": _callees(onboard._render(ENGINE, "c" * 40, "v9.9.9", ""))}
+    found = {"shipmate.yml": _callees(onboard._render(ENGINE, "c" * 40, "v9.9.9"))}
     assert found == _EXPECTED_CALLEES
+
+
+def test_the_rendered_file_passes_no_state_setting_to_any_engine_call():
+    """The engine derives each cell's state path from `tofu init`, so no calling job carries
+    a `state_suffix`. `_render` reads the published fence itself, so a comparison against the
+    fence moves with it; this reads the parsed rendered file instead. The job-name set is
+    hand-written, so a parse that finds no engine calls cannot pass vacuously.
+
+    Mutation: add `state_suffix: ""` to the `drift` job's `with:` in the
+    `docs/getting-started.md` fence.
+    """
+    jobs = yaml.safe_load(onboard._render(ENGINE, "c" * 40, "v9.9.9"))["jobs"]
+    callers = {name for name, job in jobs.items() if _CALL_PATH in (job.get("uses") or "")}
+    assert callers == {"plan", "comment-ops", "deploy", "drift", "targeted", "all", "unlock"}
+    assert [n for n in sorted(callers) if "state_suffix" in (jobs[n].get("with") or {})] == []
+
+
+def test_main_rejects_the_retired_state_suffix_flag(capsys):
+    """Mutation: add back `ap.add_argument("--state-suffix", default="")`. `--key k` does not
+    exist, so `_read_key` would exit too; the assertion is on argparse's usage error.
+    """
+    with pytest.raises(SystemExit) as e:
+        onboard.main(["--team", "ops", "--app-id", "1", "--key", "k", "--state-suffix", ""])
+    assert e.value.code == 2
+    assert "unrecognized arguments: --state-suffix" in capsys.readouterr().err
 
 
 def test_the_rendered_pin_is_byte_identical_to_what_repin_consumer_writes(tmp_path):
@@ -1887,14 +1910,14 @@ def test_the_rendered_pin_is_byte_identical_to_what_repin_consumer_writes(tmp_pa
     wf = tmp_path / ".github" / "workflows"
     wf.mkdir(parents=True)
     (wf / "shipmate.yml").write_text(
-        onboard._render(ENGINE, "c" * 40, "v9.9.9", ""), encoding="utf-8", newline="\n"
+        onboard._render(ENGINE, "c" * 40, "v9.9.9"), encoding="utf-8", newline="\n"
     )
     # The real release writer, not an imitation of it. `docs/releasing.md` runs
     # `repin_consumer.main`, which reaches this planner through `_rewrite_and_report` and
     # writes the planned text unchanged.
     planned = repin_consumer._plan_consumer(tmp_path, "d" * 40, "v9.9.10")
     assert len(planned) == 1
-    assert planned[0].text == onboard._render(ENGINE, "d" * 40, "v9.9.10", ""), (
+    assert planned[0].text == onboard._render(ENGINE, "d" * 40, "v9.9.10"), (
         "onboard and repin_consumer disagree on the pin line, so a re-pinned consumer "
         "never reports `ok`"
     )
@@ -1922,36 +1945,11 @@ def test_every_shim_is_pinned_at_every_site():
     `  # see the latest release` from the `plan` job's `uses:` line in the docs, which
     leaves that one call on `@<engine-sha>`.
     """
-    rendered = {"shipmate.yml": onboard._render(ENGINE, "c" * 40, "v9.9.9", "")}
+    rendered = {"shipmate.yml": onboard._render(ENGINE, "c" * 40, "v9.9.9")}
     assert {name: text.count(f"@{'c' * 40} # v9.9.9") for name, text in rendered.items()} == (
         _EXPECTED_PINS
     )
     assert [name for name, text in rendered.items() if "<engine-sha>" in text] == []
-
-
-def test_state_suffix_is_substituted_into_every_site():
-    """Every documented `state_suffix: ""` becomes the operator's value, and the two jobs
-    that carry none stay that way.
-
-    The whole vector of (file, job, parsed value) is compared against a hand-written
-    constant: asserting one site would leave the other four unpinned, and asserting on a
-    substring would be satisfied by the same words appearing in a comment.
-
-    Mutation: substitute into a copy that is then discarded.
-    """
-    doc = yaml.safe_load(onboard._render(ENGINE, "c" * 40, "v9.9.9", ".state"))
-    found = [
-        ("shipmate.yml", job_id, job["with"]["state_suffix"])
-        for job_id, job in doc["jobs"].items()
-        if "state_suffix" in (job.get("with") or {})
-    ]
-    assert found == [
-        ("shipmate.yml", "plan", ".state"),
-        ("shipmate.yml", "deploy", ".state"),
-        ("shipmate.yml", "drift", ".state"),
-        ("shipmate.yml", "targeted", ".state"),
-        ("shipmate.yml", "all", ".state"),
-    ]
 
 
 def _shim_ctx(tmp_path):
@@ -1962,7 +1960,7 @@ def _plan_shim(tmp_path):
     """(path to the consumer's shipmate.yml, the text this script would render for it)."""
     path = tmp_path / ".github" / "workflows" / "shipmate.yml"
     path.parent.mkdir(parents=True, exist_ok=True)
-    return path, onboard._render(ENGINE, "c" * 40, "v9.9.9", "")
+    return path, onboard._render(ENGINE, "c" * 40, "v9.9.9")
 
 
 def test_an_identical_file_reports_ok_through_crlf(tmp_path):
@@ -1989,7 +1987,7 @@ def test_a_file_differing_only_in_its_pin_reports_pin_only(tmp_path):
     reads as `differs`.
     """
     path, _text = _plan_shim(tmp_path)
-    older = onboard._render(ENGINE, "d" * 40, "v9.9.8", "")
+    older = onboard._render(ENGINE, "d" * 40, "v9.9.8")
     path.write_text(older, encoding="utf-8", newline="\n")
     onboard._reconcile_shim(_shim_ctx(tmp_path))
     assert onboard.REPORT == [("pin-only", "shipmate.yml", "run dev/repin_consumer.py")]
@@ -2038,18 +2036,6 @@ def test_an_absent_file_is_created_with_lf_endings(tmp_path, monkeypatch):
     assert onboard.REPORT == [("created", "shipmate.yml", "")]
     assert seen["kwargs"] == {"encoding": "utf-8", "newline": "\n"}
     assert path.read_bytes().decode("utf-8") == text
-
-
-def test_main_refuses_a_state_suffix_that_cannot_sit_in_a_yaml_scalar():
-    """The suffix is interpolated into every `state_suffix: "<value>"` of the rendered
-    workflow file, so a `"` in it writes a file GitHub cannot load.
-
-    Mutation: drop the `_SUFFIX_RE` check. `--key k` does not exist, so `_read_key` raises
-    `SystemExit` too -- the assertion is on the message, not on the exception.
-    """
-    with pytest.raises(SystemExit) as e:
-        onboard.main(["--team", "ops", "--app-id", "1", "--key", "k", "--state-suffix", '." #'])
-    assert "--state-suffix" in str(e.value)
 
 
 def test_a_file_still_carrying_the_docs_placeholder_is_not_reported_pin_only(tmp_path):

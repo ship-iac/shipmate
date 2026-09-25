@@ -33,12 +33,9 @@ def _step(job_id, needle):
 
 
 def test_the_workflow_call_inputs_are_exactly_these():
-    """A `default:` on `state_suffix` is what makes a caller that stops passing it silent: the
-    local-backend flavors would plan against no restored state, so every existing resource reads
-    as absent and the cell plans a full create. `runs_on` is the deliberate inverse."""
+    """Mutation: re-declare `state_suffix: { required: true, type: string }`."""
     # `doc[True]` is not a typo: PyYAML parses the bare key `on:` as the boolean True.
     assert _doc()[True]["workflow_call"]["inputs"] == {
-        "state_suffix": {"required": True, "type": "string"},
         "runs_on": {"required": False, "default": "ubuntu-latest", "type": "string"},
     }
 
@@ -147,8 +144,7 @@ def test_the_cell_passes_this_whole_with_block():
     than as an error. plan-cell refuses an empty `expected-head`; an empty `plan-passphrase`
     stores every plan artifact in the clear and fails no cell.
 
-    Mutations: `plan-passphrase` deleted, `expected-head: ${{ github.sha }}`, and the state path's
-    `!=` inverted to `==`.
+    Mutations: `plan-passphrase` deleted, and `expected-head: ${{ github.sha }}`.
     """
     assert _step("plan", "actions/plan-cell")["with"] == {
         "tf-vars": "${{ toJSON(matrix.tf_vars) }}",
@@ -158,8 +154,6 @@ def test_the_cell_passes_this_whole_with_block():
         "stack-name": "${{ matrix.stack }}",
         "env": "${{ matrix.environment }}",
         "expected-head": "${{ needs.facts.outputs.head-sha }}",
-        "state-path": "${{ inputs.state_suffix != '' && "
-        "format('{0}/{1}', matrix.stack, inputs.state_suffix) || '' }}",
         "plan-passphrase": "${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}",
     }
 

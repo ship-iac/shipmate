@@ -33,8 +33,8 @@ does with that wiring.
 - **Remote state you control, or a local backend materialized in the working
   tree.** AWS S3 is what [`aws.md`](aws.md) covers.
 - **A `.gitignore` covering what shipmate writes into your working tree:**
-  `*.otplan`, `fingerprint.txt`, `planned-head.txt`, `.terraform/`, and the
-  flavor's state path when it has one. Left untracked, they show up as something
+  `*.otplan`, `fingerprint.txt`, `planned-head.txt`, `.terraform/`, and a
+  local backend's state path. Left untracked, they show up as something
   to commit, and a `terramate run` of your own that omits `--no-recursive`
   refuses on them (`git-untracked`). [`../CONTRACT.md`](../CONTRACT.md)
   §Consumer gitignore requirement is the rule.
@@ -352,9 +352,6 @@ jobs:
       # lives on `<env>-plan` / `<env>-apply`, so this expression resolves empty and the
       # mapping is what makes the environment's value reachable. Delete it and nothing arrives.
       SHIPMATE_SECRETS: ${{ secrets.SHIPMATE_SECRETS }}
-    with:
-      # Your flavor's per-stack state path suffix; "" when a remote backend owns state.
-      state_suffix: ""
   comment-ops:
     name: shipmate
     # `issue_comment` fires on issues too; the engine's own `ops` job carries that filter, so
@@ -385,8 +382,6 @@ jobs:
       SHIPMATE_APP_PRIVATE_KEY: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
       SHIPMATE_PLAN_PASSPHRASE: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
       SHIPMATE_SECRETS: ${{ secrets.SHIPMATE_SECRETS }}
-    with:
-      state_suffix: ""
   drift:
     name: shipmate
     if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.event.inputs.verb == 'drift')
@@ -399,7 +394,6 @@ jobs:
       SHIPMATE_APP_PRIVATE_KEY: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
       SHIPMATE_SECRETS: ${{ secrets.SHIPMATE_SECRETS }}
     with:
-      state_suffix: ""
       # Empty covers every cell. Split the sweep by adding more files, one tag query each.
       tags: ""
   targeted:
@@ -414,7 +408,6 @@ jobs:
       environment: ${{ inputs.environment }}
       ref: ${{ inputs.ref }}
       pr_number: ${{ inputs.pr_number }}
-      state_suffix: ""
   all:
     if: github.event_name == 'workflow_dispatch' && inputs.verb == 'apply' && inputs.environment == ''
     uses: ship-iac/shipmate/.github/workflows/apply-all.yml@<engine-sha>  # see the latest release
@@ -426,7 +419,6 @@ jobs:
     with:
       ref: ${{ inputs.ref }}
       pr_number: ${{ inputs.pr_number }}
-      state_suffix: ""
   unlock:
     if: github.event_name == 'workflow_dispatch' && inputs.verb == 'unlock'
     uses: ship-iac/shipmate/.github/workflows/unlock.yml@<engine-sha>  # see the latest release
@@ -480,22 +472,11 @@ role's own trust-policy claim condition is the bound
 ([`hardening.md`](hardening.md) §7–9). The grant is required either way,
 because the job requests it whether or not the step fires.
 
-**`state_suffix` is required and may be `""`.** It is a `required: true` input of
-every engine reusable workflow that runs a cell — `plan.yml`, `drift.yml`,
-`apply.yml`, `apply-all.yml`, `deploy.yml` and the `apply-env-level.yml` they
-call. `unlock.yml` is the exception and declares no such input: it releases locks
-and applies nothing, and passing one is a load-time rejection with no job and no
-log.
-
-`""` — what the fence above pastes, because this page's worked example is S3 —
-means a remote backend owns the state, and the engine's state restore/save steps
-are skipped. A local backend materialized in the working tree passes instead the
-path segment under each stack directory where its state file lives:
-`repo-example-stacks` passes `.state`, and the engine then restores and saves
-`<stack>/.state` around every apply ([`../CONTRACT.md`](../CONTRACT.md) §State
-backend). Pasting `""` there applies against no state at all. Omitting the input
-entirely is a workflow-resolution error on purpose: a forgotten state
-configuration must fail loud rather than apply with no state at all.
+**The state path is read from `tofu init`, not configured.** A local backend's
+state is cached at the path `tofu init` records for each stack, and restored
+before every plan and saved after every apply; a remote backend such as this
+page's S3 example owns its state, and the engine's state steps are skipped
+([`../CONTRACT.md`](../CONTRACT.md) §State backend).
 
 `SHIPMATE_PLAN_PASSPHRASE` is optional — unset, plan artifacts are stored
 unencrypted. If you set it, it must be a repository secret, not an

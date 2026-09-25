@@ -4,7 +4,6 @@ on:
     inputs:
       ref: { required: true, type: string }
       pr_number: { required: true, type: string }
-      state_suffix: { required: true, type: string }
     secrets:
       # `required: false` is load-bearing -- apply.yml's `secrets:` note has the argument. A caller
       # that binds no environment holds no value to pass, and a required declaration kills the run
@@ -138,7 +137,6 @@ jobs:
     with:
       waves_json: ${{ needs.detect.outputs.envlevel0_waves }}
       head_sha: ${{ needs.detect.outputs.head_sha }}
-      state_suffix: ${{ inputs.state_suffix }}
     # Named, never `inherit`: these two files sit in one organization but the RUN belongs to the
     # consumer, and `inherit` is evaluated against the run -- so a cross-organization consumer's
     # `complete` job would hold no key, its applies would execute, and their apply checks would
@@ -161,7 +159,6 @@ jobs:
     with:
       waves_json: ${{ needs.detect.outputs.envlevel1_waves }}
       head_sha: ${{ needs.detect.outputs.head_sha }}
-      state_suffix: ${{ inputs.state_suffix }}
     secrets:
       SHIPMATE_APP_PRIVATE_KEY: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
       SHIPMATE_PLAN_PASSPHRASE: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
@@ -176,7 +173,6 @@ jobs:
     with:
       waves_json: ${{ needs.detect.outputs.envlevel2_waves }}
       head_sha: ${{ needs.detect.outputs.head_sha }}
-      state_suffix: ${{ inputs.state_suffix }}
     secrets:
       SHIPMATE_APP_PRIVATE_KEY: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
       SHIPMATE_PLAN_PASSPHRASE: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
@@ -191,7 +187,6 @@ jobs:
     with:
       waves_json: ${{ needs.detect.outputs.envlevel3_waves }}
       head_sha: ${{ needs.detect.outputs.head_sha }}
-      state_suffix: ${{ inputs.state_suffix }}
     secrets:
       SHIPMATE_APP_PRIVATE_KEY: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
       SHIPMATE_PLAN_PASSPHRASE: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}

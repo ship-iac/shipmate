@@ -44,7 +44,6 @@ def _step(job_id, needle):
 
 def test_the_workflow_call_inputs_are_exactly_these():
     assert _doc()[True]["workflow_call"]["inputs"] == {
-        "state_suffix": {"required": True, "type": "string"},
         "runs_on": {"required": False, "default": "ubuntu-latest", "type": "string"},
         "tags": {"required": False, "default": "", "type": "string"},
     }
@@ -175,9 +174,7 @@ def test_the_cell_passes_this_whole_with_block():
     checked one at a time leaves the hole wherever it does not look. An empty `env` here plans
     every cell against the wrong environment and fails nothing.
 
-    Mutations: `env` deleted, and `state-path: ${{ matrix.stack }}/.state` — a hard-coded suffix
-    is the per-flavor value the input exists to carry, and the `|| ''` branch is what keeps the
-    S3-backend flavor restoring nothing.
+    Mutations: `env` deleted, and a `state-path:` key added back.
     """
     assert _step("drift", "actions/drift-cell")["with"] == {
         "tf-vars": "${{ toJSON(matrix.tf_vars) }}",
@@ -186,6 +183,4 @@ def test_the_cell_passes_this_whole_with_block():
         "stack": "${{ matrix.stack }}",
         "stack-name": "${{ matrix.stack }}",
         "env": "${{ matrix.environment }}",
-        "state-path": "${{ inputs.state_suffix != '' && "
-        "format('{0}/{1}', matrix.stack, inputs.state_suffix) || '' }}",
     }

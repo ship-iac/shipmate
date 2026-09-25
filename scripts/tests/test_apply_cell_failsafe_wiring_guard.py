@@ -138,16 +138,17 @@ def test_every_failsafes_entry_maps_back_to_a_current_idd_step_in_range():
         )
 
 
-def test_current_failsafe_set_is_exactly_the_eight_known_ids():
-    # Not a substitute for the structural guards: this one needs updating the moment a ninth
+def test_current_failsafe_set_is_exactly_the_nine_known_ids():
+    # Not a substitute for the structural guards: this one needs updating the moment a tenth
     # fail-safe is added, deliberately, as a tripwire so that addition is noticed here too.
     assert set(_ids_between_slug_and_apply()) - NOT_A_FAILSAFE == {
         "download",
         "planned-head",
         "decrypt",
         "fingerprint",
-        "restore-state",
         "digest-input",
         "init",
+        "locate-state",
+        "restore-state",
         "plan-digest",
     }

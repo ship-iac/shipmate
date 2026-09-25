@@ -43,9 +43,10 @@ def _run_compose(
     planned_head="skipped",
     decrypt="skipped",
     fingerprint="skipped",
-    restore="skipped",
     digest_input="skipped",
     init="skipped",
+    locate="skipped",
+    restore="skipped",
     plan_digest="skipped",
     apply="skipped",
     stack="stacks/app",
@@ -61,9 +62,10 @@ def _run_compose(
     monkeypatch.setenv("PLANNED_HEAD_OUTCOME", planned_head)
     monkeypatch.setenv("DECRYPT_OUTCOME", decrypt)
     monkeypatch.setenv("FINGERPRINT_OUTCOME", fingerprint)
-    monkeypatch.setenv("RESTORE_OUTCOME", restore)
     monkeypatch.setenv("DIGEST_INPUT_OUTCOME", digest_input)
     monkeypatch.setenv("INIT_OUTCOME", init)
+    monkeypatch.setenv("LOCATE_OUTCOME", locate)
+    monkeypatch.setenv("RESTORE_OUTCOME", restore)
     monkeypatch.setenv("PLAN_DIGEST_OUTCOME", plan_digest)
     monkeypatch.setenv("APPLY_OUTCOME", apply)
     monkeypatch.setenv("RUNNER_TEMP", str(tmp_path))
@@ -126,6 +128,16 @@ def test_init_failure_blocks_with_its_own_reason(monkeypatch, tmp_path):
     assert cell["reason"] == "tofu init failed — see the job log"
 
 
+def test_locate_state_failure_blocks_with_its_own_reason(monkeypatch, tmp_path):
+    """Mutation: drop the `LOCATE_OUTCOME` row from FAILSAFES."""
+    cell = _run_compose(monkeypatch, tmp_path, locate="failure")
+    assert cell["result"] == "blocked"
+    assert (
+        cell["reason"]
+        == "shipmate cannot tell where this stack's local state lives — see the job log"
+    )
+
+
 def test_plan_digest_failure_blocks_with_its_own_reason(monkeypatch, tmp_path):
     cell = _run_compose(monkeypatch, tmp_path, plan_digest="failure")
     assert cell["result"] == "blocked"
@@ -146,6 +158,7 @@ def test_apply_success_is_applied_with_empty_reason(monkeypatch, tmp_path):
         restore="success",
         digest_input="success",
         init="success",
+        locate="success",
         plan_digest="success",
         apply="success",
     )
@@ -154,7 +167,7 @@ def test_apply_success_is_applied_with_empty_reason(monkeypatch, tmp_path):
 
 
 def test_remote_backend_skipped_restore_is_applied_with_empty_reason(monkeypatch, tmp_path):
-    # The remote-backend happy path: with an empty state-path both actions/state steps skip, so
+    # The remote-backend happy path: with an empty located path both actions/state steps skip, so
     # restore reads 'skipped' while everything else succeeded. 'skipped' matches no fail-safe,
     # which match 'failure' exactly, and that is what makes a remote-backend cell unblockable on
     # artifact state.
@@ -168,6 +181,7 @@ def test_remote_backend_skipped_restore_is_applied_with_empty_reason(monkeypatch
         restore="skipped",
         digest_input="success",
         init="success",
+        locate="success",
         plan_digest="success",
         apply="success",
     )
@@ -186,6 +200,7 @@ def test_apply_failure_is_failed_with_empty_reason(monkeypatch, tmp_path):
         restore="success",
         digest_input="success",
         init="success",
+        locate="success",
         plan_digest="success",
         apply="failure",
     )
@@ -204,6 +219,7 @@ def test_apply_cancelled_is_failed_with_empty_reason(monkeypatch, tmp_path):
         restore="success",
         digest_input="success",
         init="success",
+        locate="success",
         plan_digest="success",
         apply="cancelled",
     )
@@ -211,13 +227,10 @@ def test_apply_cancelled_is_failed_with_empty_reason(monkeypatch, tmp_path):
     assert cell["reason"] == ""
 
 
-def test_unrelated_step_failed_between_fingerprint_and_restore_reads_as_generic_blocked(
-    monkeypatch, tmp_path
-):
-    # An un-id'd step failing between fingerprint and
-    # restore-state: every fail-safe up to it reads 'success' and restore-state and
-    # apply never ran, reading 'skipped'. The decision must not misattribute that to
-    # restore-state.
+def test_unrelated_step_failed_after_fingerprint_reads_as_generic_blocked(monkeypatch, tmp_path):
+    # An un-id'd step failing after fingerprint: every fail-safe up to it reads 'success' and
+    # every later one and the apply never ran, reading 'skipped'. The decision must not
+    # misattribute that to a later fail-safe.
     cell = _run_compose(
         monkeypatch,
         tmp_path,
@@ -263,6 +276,7 @@ def test_two_failsafes_failing_together_the_earlier_in_pipeline_order_wins(monke
             "restore": "success",
             "digest_input": "success",
             "init": "success",
+            "locate": "success",
             "plan_digest": "success",
             "apply": "success",
         },
@@ -274,6 +288,7 @@ def test_two_failsafes_failing_together_the_earlier_in_pipeline_order_wins(monke
             "restore": "success",
             "digest_input": "success",
             "init": "success",
+            "locate": "success",
             "plan_digest": "success",
             "apply": "failure",
         },
