@@ -2,7 +2,6 @@ name: plan
 on:
   workflow_call:
     inputs:
-      state_suffix: { required: true, type: string }
       # The three local samples run a slimmer image than the apply path's fixed ubuntu-latest.
       runs_on: { required: false, default: ubuntu-latest, type: string }
     secrets:
@@ -102,7 +101,6 @@ jobs:
           stack-name: ${{ matrix.stack }}
           env: ${{ matrix.environment }}
           expected-head: ${{ needs.facts.outputs.head-sha }}
-          state-path: ${{ inputs.state_suffix != '' && format('{0}/{1}', matrix.stack, inputs.state_suffix) || '' }}
           plan-passphrase: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
 
   # The only job here that holds the App key. It checks out nothing, so it runs no consumer

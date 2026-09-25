@@ -1929,31 +1929,6 @@ def test_every_shim_is_pinned_at_every_site():
     assert [name for name, text in rendered.items() if "<engine-sha>" in text] == []
 
 
-def test_state_suffix_is_substituted_into_every_site():
-    """Every documented `state_suffix: ""` becomes the operator's value, and the two jobs
-    that carry none stay that way.
-
-    The whole vector of (file, job, parsed value) is compared against a hand-written
-    constant: asserting one site would leave the other four unpinned, and asserting on a
-    substring would be satisfied by the same words appearing in a comment.
-
-    Mutation: substitute into a copy that is then discarded.
-    """
-    doc = yaml.safe_load(onboard._render(ENGINE, "c" * 40, "v9.9.9", ".state"))
-    found = [
-        ("shipmate.yml", job_id, job["with"]["state_suffix"])
-        for job_id, job in doc["jobs"].items()
-        if "state_suffix" in (job.get("with") or {})
-    ]
-    assert found == [
-        ("shipmate.yml", "plan", ".state"),
-        ("shipmate.yml", "deploy", ".state"),
-        ("shipmate.yml", "drift", ".state"),
-        ("shipmate.yml", "targeted", ".state"),
-        ("shipmate.yml", "all", ".state"),
-    ]
-
-
 def _shim_ctx(tmp_path):
     return ctx(root=tmp_path, engine=ENGINE, sha="c" * 40, version="v9.9.9")
 

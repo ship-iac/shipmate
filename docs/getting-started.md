@@ -354,7 +354,6 @@ jobs:
       SHIPMATE_SECRETS: ${{ secrets.SHIPMATE_SECRETS }}
     with:
       # Your flavor's per-stack state path suffix; "" when a remote backend owns state.
-      state_suffix: ""
   comment-ops:
     name: shipmate
     # `issue_comment` fires on issues too; the engine's own `ops` job carries that filter, so
@@ -386,7 +385,6 @@ jobs:
       SHIPMATE_PLAN_PASSPHRASE: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
       SHIPMATE_SECRETS: ${{ secrets.SHIPMATE_SECRETS }}
     with:
-      state_suffix: ""
   drift:
     name: shipmate
     if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.event.inputs.verb == 'drift')
@@ -399,7 +397,6 @@ jobs:
       SHIPMATE_APP_PRIVATE_KEY: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
       SHIPMATE_SECRETS: ${{ secrets.SHIPMATE_SECRETS }}
     with:
-      state_suffix: ""
       # Empty covers every cell. Split the sweep by adding more files, one tag query each.
       tags: ""
   targeted:
@@ -414,7 +411,6 @@ jobs:
       environment: ${{ inputs.environment }}
       ref: ${{ inputs.ref }}
       pr_number: ${{ inputs.pr_number }}
-      state_suffix: ""
   all:
     if: github.event_name == 'workflow_dispatch' && inputs.verb == 'apply' && inputs.environment == ''
     uses: ship-iac/shipmate/.github/workflows/apply-all.yml@<engine-sha>  # see the latest release
@@ -426,7 +422,6 @@ jobs:
     with:
       ref: ${{ inputs.ref }}
       pr_number: ${{ inputs.pr_number }}
-      state_suffix: ""
   unlock:
     if: github.event_name == 'workflow_dispatch' && inputs.verb == 'unlock'
     uses: ship-iac/shipmate/.github/workflows/unlock.yml@<engine-sha>  # see the latest release

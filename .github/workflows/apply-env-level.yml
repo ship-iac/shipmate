@@ -4,7 +4,6 @@ on:
     inputs:
       waves_json: { required: true, type: string }
       head_sha: { required: true, type: string }
-      state_suffix: { required: true, type: string }
     secrets:
       SHIPMATE_PLAN_PASSPHRASE:
         required: false
@@ -83,7 +82,6 @@ jobs:
           head-sha: ${{ inputs.head_sha }}
           plan-run-id: ${{ matrix.plan_run_id }}
           plan-sha256: ${{ matrix.plan_sha256 }}
-          state-path: ${{ inputs.state_suffix != '' && format('{0}/{1}', matrix.stack, inputs.state_suffix) || '' }}
           github-token: ${{ github.token }}
           plan-passphrase: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
   wave1:
@@ -121,7 +119,6 @@ jobs:
           head-sha: ${{ inputs.head_sha }}
           plan-run-id: ${{ matrix.plan_run_id }}
           plan-sha256: ${{ matrix.plan_sha256 }}
-          state-path: ${{ inputs.state_suffix != '' && format('{0}/{1}', matrix.stack, inputs.state_suffix) || '' }}
           github-token: ${{ github.token }}
           plan-passphrase: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
   wave2:
@@ -159,7 +156,6 @@ jobs:
           head-sha: ${{ inputs.head_sha }}
           plan-run-id: ${{ matrix.plan_run_id }}
           plan-sha256: ${{ matrix.plan_sha256 }}
-          state-path: ${{ inputs.state_suffix != '' && format('{0}/{1}', matrix.stack, inputs.state_suffix) || '' }}
           github-token: ${{ github.token }}
           plan-passphrase: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
   wave3:
@@ -197,7 +193,6 @@ jobs:
           head-sha: ${{ inputs.head_sha }}
           plan-run-id: ${{ matrix.plan_run_id }}
           plan-sha256: ${{ matrix.plan_sha256 }}
-          state-path: ${{ inputs.state_suffix != '' && format('{0}/{1}', matrix.stack, inputs.state_suffix) || '' }}
           github-token: ${{ github.token }}
           plan-passphrase: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
   wave4:
@@ -235,7 +230,6 @@ jobs:
           head-sha: ${{ inputs.head_sha }}
           plan-run-id: ${{ matrix.plan_run_id }}
           plan-sha256: ${{ matrix.plan_sha256 }}
-          state-path: ${{ inputs.state_suffix != '' && format('{0}/{1}', matrix.stack, inputs.state_suffix) || '' }}
           github-token: ${{ github.token }}
           plan-passphrase: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
   wave5:
@@ -273,7 +267,6 @@ jobs:
           head-sha: ${{ inputs.head_sha }}
           plan-run-id: ${{ matrix.plan_run_id }}
           plan-sha256: ${{ matrix.plan_sha256 }}
-          state-path: ${{ inputs.state_suffix != '' && format('{0}/{1}', matrix.stack, inputs.state_suffix) || '' }}
           github-token: ${{ github.token }}
           plan-passphrase: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
   wave6:
@@ -311,7 +304,6 @@ jobs:
           head-sha: ${{ inputs.head_sha }}
           plan-run-id: ${{ matrix.plan_run_id }}
           plan-sha256: ${{ matrix.plan_sha256 }}
-          state-path: ${{ inputs.state_suffix != '' && format('{0}/{1}', matrix.stack, inputs.state_suffix) || '' }}
           github-token: ${{ github.token }}
           plan-passphrase: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
   wave7:
@@ -349,7 +341,6 @@ jobs:
           head-sha: ${{ inputs.head_sha }}
           plan-run-id: ${{ matrix.plan_run_id }}
           plan-sha256: ${{ matrix.plan_sha256 }}
-          state-path: ${{ inputs.state_suffix != '' && format('{0}/{1}', matrix.stack, inputs.state_suffix) || '' }}
           github-token: ${{ github.token }}
           plan-passphrase: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
 

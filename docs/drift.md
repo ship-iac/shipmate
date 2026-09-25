@@ -206,7 +206,6 @@ jobs:
       SHIPMATE_APP_PRIVATE_KEY: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
       SHIPMATE_SECRETS: ${{ secrets.SHIPMATE_SECRETS }}
     with:
-      state_suffix: ""
       tags: "env/dev-eu"
 ```
 
@@ -246,7 +245,6 @@ cell:
 
 ```yaml
     with:
-      state_suffix: ""
       tags: ${{ inputs.tags }}
 ```
 
