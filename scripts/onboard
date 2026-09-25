@@ -2,7 +2,7 @@
 """Reconcile one consumer repository to shipmate's per-repository setup.
 
     python3 <engine>/scripts/onboard --team <team-slug> --app-id <id> \
-        --key shipmate-app.private-key.pem [--state-suffix <s>] \
+        --key shipmate-app.private-key.pem \
         [--vars-at-org <NAME,NAME>] [--dry-run]
 
 Hand-run from inside the consumer checkout, with `gh` authenticated against that
@@ -19,7 +19,6 @@ Flags:
   --app-id        the shipmate App's numeric id.
   --key           path to the App's PEM private key (its text, not the path,
                   is what gets stored).
-  --state-suffix  suffix appended to state artifact names; "" by default.
   --vars-at-org   comma-separated variable names already set at organization
                   level, so no repository copy is written for them. Accepts
                   SHIPMATE_APP_ID only. The name is verified against the
@@ -65,11 +64,6 @@ _ENV_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 _TEAM_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*")
 _VERSION_RE = re.compile(r"v[0-9]+\.[0-9]+\.[0-9]+")
 _APP_ID_RE = re.compile(r"[0-9]+")
-#: The suffix is interpolated into a double-quoted YAML scalar in the rendered workflow
-#: file, so a '"' or a backslash would break the file the consumer then runs. '/' and '.'
-#: are admitted: the value is a fragment of an artifact name, supplied by the operator
-#: running this.
-_SUFFIX_RE = re.compile(r"[A-Za-z0-9._/-]*")
 
 
 def _scrub(text, secrets):
@@ -818,14 +812,13 @@ def _fence(page_text, name):
     return bodies[0]
 
 
-def _render(engine, sha, version, state_suffix):
+def _render(engine, sha, version):
     """The full text of one consumer workflow file, LF-delimited and newline-terminated."""
     text = _fence(
         (pathlib.Path(engine) / "docs" / "getting-started.md").read_text(encoding="utf-8"),
         "shipmate",
     )
-    text = _DOC_PIN.sub(rf"\g<ref>@{sha} # {version}", text)
-    return text.replace('state_suffix: ""', f'state_suffix: "{state_suffix}"')
+    return _DOC_PIN.sub(rf"\g<ref>@{sha} # {version}", text)
 
 
 def _depin(text):
@@ -836,7 +829,7 @@ def _depin(text):
 def _reconcile_shim(ctx):
     filename = "shipmate.yml"
     path = pathlib.Path(ctx["root"]) / ".github" / "workflows" / filename
-    text = _render(ctx["engine"], ctx["sha"], ctx["version"], ctx["state_suffix"])
+    text = _render(ctx["engine"], ctx["sha"], ctx["version"])
     if not path.is_file():
         write_file(path, text, filename)
         return
@@ -987,7 +980,6 @@ def main(argv=None):
     )
     ap.add_argument("--app-id", required=True, help="the shipmate App's numeric id")
     ap.add_argument("--key", required=True, help="path to the App's PEM private key")
-    ap.add_argument("--state-suffix", default="", help="suffix for state artifact names")
     ap.add_argument(
         "--vars-at-org",
         default="",
@@ -999,12 +991,6 @@ def main(argv=None):
         raise SystemExit(f"--team must be a GitHub team slug: {args.team!r}")
     if not _APP_ID_RE.fullmatch(args.app_id):
         raise SystemExit(f"--app-id must be all digits: {args.app_id!r}")
-    if not _SUFFIX_RE.fullmatch(args.state_suffix):
-        raise SystemExit(
-            "--state-suffix may use only letters, digits and '.', '_', '/', '-': "
-            f"{args.state_suffix!r}. It is written "
-            'into every `state_suffix: "<value>"` scalar of the workflow file.'
-        )
     at_org = _at_org(args.vars_at_org)
     _DRY = args.dry_run
 
@@ -1027,7 +1013,6 @@ def main(argv=None):
         "envs": envs,
         "shared": _resolve_shared(root, envs),
         "unresolved": set(),
-        "state_suffix": args.state_suffix,
         "root": root,
         "engine": engine,
         "variables": variables,
