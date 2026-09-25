@@ -211,7 +211,8 @@ never used.
     row's resolved `tf_vars` serialised with `toJSON`. Anything but a JSON
     object of strings is refused before `terramate run`; the empty object is a
     legitimate value and an omitted input is not. Each row also carries
-    `role_arn`, `cred_region` and `config_path`, resolved from the same table.
+    `role_arn`, `cred_region`, `config_path` and `env_binding`, resolved from the
+    same table.
   - The consumer channels are two further inputs on the same actions:
     `github-vars` (`toJSON(vars)`, the enumeration) and `consumer-secrets` (the
     `SHIPMATE_SECRETS` envelope). Both default to empty and neither is required:

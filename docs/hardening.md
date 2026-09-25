@@ -616,8 +616,8 @@ no split of its own.
   name is not a boundary, and code running in the job can assume any ARN it
   likes. The environment table refuses an `aws.plan` tier on a shared
   environment for that reason, and resolves `aws.apply` on both paths. The one
-  way out is to name no role for that environment at all — both role variables
-  unset, or no `aws` block in its entry — which skips the credentials step and
+  way out is to name no role for that environment at all — no role named for
+  either tier, or no `aws` block in its entry — which skips the credentials step and
   leaves the cell with no cloud credential — the shape the three local-backend sample
   repositories run in. Declining
   the grant is not an alternative: `id-token: write` is mandatory on the plan and

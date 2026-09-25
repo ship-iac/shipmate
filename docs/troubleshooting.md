@@ -563,8 +563,9 @@ Two neighbouring failures from the same step, both also fail-closed:
   unread one. Reduce the number of environments, or re-run — this is a hard
   ceiling around 100 environments, not a transient.
 
-What this does not cover, deliberately: the plan-side binding (that is in
-your own `shipmate.yml`, which the engine cannot read), an environment
+What this does not cover, deliberately: the plan and drift bindings (those jobs
+bind the row's `env_binding`; detect refuses an unusable one, but nothing on those
+paths checks that the environment exists), an environment
 that exists but is mis-scoped or unprotected (`shipmate doctor`'s subject), and
 an environment deleted between the pre-flight and the wave that binds it.
 
