@@ -352,8 +352,6 @@ jobs:
       # lives on `<env>-plan` / `<env>-apply`, so this expression resolves empty and the
       # mapping is what makes the environment's value reachable. Delete it and nothing arrives.
       SHIPMATE_SECRETS: ${{ secrets.SHIPMATE_SECRETS }}
-    with:
-      # Your flavor's per-stack state path suffix; "" when a remote backend owns state.
   comment-ops:
     name: shipmate
     # `issue_comment` fires on issues too; the engine's own `ops` job carries that filter, so
@@ -384,7 +382,6 @@ jobs:
       SHIPMATE_APP_PRIVATE_KEY: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
       SHIPMATE_PLAN_PASSPHRASE: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
       SHIPMATE_SECRETS: ${{ secrets.SHIPMATE_SECRETS }}
-    with:
   drift:
     name: shipmate
     if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.event.inputs.verb == 'drift')

@@ -180,6 +180,8 @@ def test_documented_wrapper_passes_exactly_the_declared_engine_inputs(page, line
     pasting the documented wrapper after an input is retired gets a dead pipeline.
 
     The requiredness half is the mirror image, and equally fatal at call time.
+
+    Mutation: a bare `with:` under the getting-started `plan` job.
     """
     for job_name, target, job in _engine_workflow_calls(yaml.safe_load(body)):
         where = f"{page.relative_to(ENGINE).as_posix()}:{line} job `{job_name}`"
@@ -188,7 +190,11 @@ def test_documented_wrapper_passes_exactly_the_declared_engine_inputs(page, line
             "wrapper cannot resolve it"
         )
         declared = _workflow_call_inputs(target)
-        passed = job.get("with") or {}
+        passed = job.get("with", {})
+        assert isinstance(passed, dict), (
+            f"{where} has `with: {passed!r}`, not a mapping -- a bare `with:` left behind by a "
+            "deleted input parses to null, and onboard writes it into every consumer's file"
+        )
         undeclared = sorted(set(passed) - set(declared))
         assert not undeclared, (
             f"{where} passes {undeclared} to `{target}`, which declares no such "
