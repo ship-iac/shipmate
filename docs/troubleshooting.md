@@ -39,8 +39,9 @@ live probes.
   GitHub synthesizes a `branch_policy` protection rule for any environment with
   a deployment branch policy, and a branch policy is not a review. The role each
   environment plays comes from `shared = true` in its `[environments.<env>]`
-  entry of `.github/shipmate.toml`, read at the commit under examination. A
-  shared environment carrying approval rules warns that they stall the plan
+  entry of `.github/shipmate.toml`, read from the default branch's copy that every
+  run binds from; when that copy cannot be read or is invalid, these environment
+  probes are skipped with a note. A shared environment carrying approval rules warns that they stall the plan
   cells and the nightly drift run; its missing approval rules and its branch
   policy are notes.
 - **The secrets a plan environment holds, names only.** The API never returns a
@@ -543,8 +544,8 @@ Two fixes, and the error names both because either can be the right one:
   with them: `shared = true` on an env that is really split, or missing on one
   that is really shared. The engine reads the default branch's copy, so the fix
   takes a merged pull request. `shipmate doctor` on a pull request reports, per
-  env, which naming the table selects and which environments of it are missing,
-  which is the fastest way to see which side is wrong.
+  env, which naming the default branch's table selects and which environments of
+  it are missing, which is the fastest way to see which side is wrong.
 
 Two neighbouring failures from the same step, both also fail-closed:
 

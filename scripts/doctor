@@ -54,6 +54,7 @@ import os
 import pathlib
 import re
 import sys
+import urllib.parse
 
 from _shipmate import _load
 
@@ -268,6 +269,19 @@ def _role_names(env, mode, roles=None):
     ]
 
 
+def _bound_names(ctx, roles=None):
+    """[(env, environment name, role)] the default branch's table binds for each declared
+    env, narrowed like `_role_names`, or `None` when `_shared_envs` cannot tell."""
+    shared = _shared_envs(ctx)
+    if shared is None:
+        return None
+    return [
+        (env, name, role)
+        for env in sorted(ctx["envs"])
+        for name, role in _role_names(env, _env_mode(env, shared), roles)
+    ]
+
+
 def _shared_intro(env):
     """Opening clause of a shared-role finding."""
     return (
@@ -295,6 +309,14 @@ def _missing(name, env, role):
     )
 
 
+DEFAULT_TABLE_UNREADABLE = (
+    NOTICE,
+    "the environment probes were skipped — the default branch's `.github/shipmate.toml` "
+    "could not be read or is invalid, and it alone selects which GitHub Environments a run "
+    "binds. While it is missing or invalid there, every run refuses at detect.",
+)
+
+
 def _environment_warnings(ctx):
     if not ctx["envs_available"]:
         return [
@@ -305,13 +327,10 @@ def _environment_warnings(ctx):
             )
         ]
     names = _existing_env_names(ctx)
-    shared = _shared_envs(ctx)
-    out = []
-    for env in sorted(ctx["envs"]):
-        mode = _env_mode(env, shared)
-        selected = _role_names(env, mode)
-        out += [(WARNING, _missing(n, env, r)) for n, r in selected if n not in names]
-    return out
+    bound = _bound_names(ctx)
+    if bound is None:
+        return [DEFAULT_TABLE_UNREADABLE]
+    return [(WARNING, _missing(n, env, r)) for env, n, r in bound if n not in names]
 
 
 def _env_shape_findings(name, env, data, role):
@@ -413,24 +432,25 @@ def _env_protection_warnings(ctx):
         # that had no work to do. The skipped-probe statement lives in `_environment_warnings`.
         return out
     existing = _existing_env_names(ctx)
-    shared = _shared_envs(ctx)
-    for env in sorted(ctx["envs"]):
-        for name, role in _role_names(env, _env_mode(env, shared)):
-            if name not in existing:
-                continue  # existence is _environment_warnings' finding
-            try:
-                data = _gh_json(f"repos/{ctx['repo']}/environments/{name}")
-            except (Exception, SystemExit) as e:  # noqa: BLE001 - degrade, see docstring
-                out.append(
-                    (
-                        NOTICE,
-                        f"GitHub Environment `{name}` exists but its settings could not be "
-                        f"read ({_degrade_reason(e)}) — its plan/apply protection shape was "
-                        "not checked.",
-                    )
+    bound = _bound_names(ctx)
+    if bound is None:
+        return out  # DEFAULT_TABLE_UNREADABLE is `_environment_warnings`' finding
+    for env, name, role in bound:
+        if name not in existing:
+            continue  # existence is _environment_warnings' finding
+        try:
+            data = _gh_json(f"repos/{ctx['repo']}/environments/{name}")
+        except (Exception, SystemExit) as e:  # noqa: BLE001 - degrade, see docstring
+            out.append(
+                (
+                    NOTICE,
+                    f"GitHub Environment `{name}` exists but its settings could not be "
+                    f"read ({_degrade_reason(e)}) — its plan/apply protection shape was "
+                    "not checked.",
                 )
-                continue
-            out.extend(_env_shape_findings(name, env, data, role))
+            )
+            continue
+        out.extend(_env_shape_findings(name, env, data, role))
     return out
 
 
@@ -674,33 +694,34 @@ def _plan_env_secret_warnings(ctx):
     if not os.environ.get("SHIPMATE_ENV_TOKEN"):
         return [_ENV_TOKEN_UNCHECKED]
     existing = _existing_env_names(ctx)
-    shared = _shared_envs(ctx)
+    bound = _bound_names(ctx, ("plan", "shared"))
+    if bound is None:
+        return []  # DEFAULT_TABLE_UNREADABLE is `_environment_warnings`' finding
     out = []
-    for env in sorted(ctx["envs"]):
-        for name, role in _role_names(env, _env_mode(env, shared), ("plan", "shared")):
-            if name not in existing:
-                continue  # existence is _environment_warnings' finding
-            try:
-                names, total = _env_secret_names(ctx, name)
-            except (Exception, SystemExit) as e:  # noqa: BLE001 - degrade, see docstring
-                out.append(
-                    (
-                        NOTICE,
-                        f"GitHub Environment `{name}`'s secrets could not be listed "
-                        f"({_degrade_reason(e)}) — whether this {_env_noun(role)} holds "
-                        "credentials reachable by plan-time code was not checked.",
-                    )
+    for _env, name, role in bound:
+        if name not in existing:
+            continue  # existence is _environment_warnings' finding
+        try:
+            names, total = _env_secret_names(ctx, name)
+        except (Exception, SystemExit) as e:  # noqa: BLE001 - degrade, see docstring
+            out.append(
+                (
+                    NOTICE,
+                    f"GitHub Environment `{name}`'s secrets could not be listed "
+                    f"({_degrade_reason(e)}) — whether this {_env_noun(role)} holds "
+                    "credentials reachable by plan-time code was not checked.",
                 )
-                continue
-            if not names:
-                continue
-            # Capped like the all-clear line's env list: the settings section is never truncated, so
-            # one crowded environment would spend all of `sc.SIZE_BUDGET` and push the rest into the
-            # omitted fallback. `count` reports the true total, so the cap hides only names.
-            shown = _one_line(", ".join(f"`{n}`" for n in sorted(names)), 400)
-            count = f"at least {total}" if total > len(names) else str(len(names))
-            out.append((NOTICE, _secret_finding(name, role, count, shown)))
-            out += _app_key_findings(name, names, total, _env_noun(role))
+            )
+            continue
+        if not names:
+            continue
+        # Capped like the all-clear line's env list: the settings section is never truncated, so
+        # one crowded environment would spend all of `sc.SIZE_BUDGET` and push the rest into the
+        # omitted fallback. `count` reports the true total, so the cap hides only names.
+        shown = _one_line(", ".join(f"`{n}`" for n in sorted(names)), 400)
+        count = f"at least {total}" if total > len(names) else str(len(names))
+        out.append((NOTICE, _secret_finding(name, role, count, shown)))
+        out += _app_key_findings(name, names, total, _env_noun(role))
     return out
 
 
@@ -2029,7 +2050,7 @@ def _governing_team(ctx):
     that governs every apply once it merges.
 
     The ref is NOT comment-ops'. `_config_table` reads the commit under examination, as
-    every other reading of this file here does, while `gate-config` resolves from the
+    the configuration probe does, while `gate-config` resolves from the
     default branch. On a pull request that edits the gate table the two diverge: this
     reports the branch's team while that pull request's own applies are still authorized
     against the default branch's. That is the direction worth having — a bad team slug is
@@ -2040,11 +2061,22 @@ def _governing_team(ctx):
 
 
 def _shared_envs(ctx):
-    """The environments the file at the commit under examination shares, read like
-    `_governing_team`'s team. An unreadable or invalid file shares none: it carries its own
-    finding from `_config_warnings`, and `shared_envs` may only see a validated table."""
-    table, _ = _config_table(ctx)
-    return set() if table is None else bm.ec.shared_envs(table)
+    """The environments the default branch's file shares, or `None` when that file cannot be
+    read or is invalid.
+
+    The default branch, not the commit under examination: execution binds from that copy, so
+    on a pull request that edits `shared` every run until merge still binds the default
+    branch's naming. `None` is never read as "shares none": guessing split mode would probe
+    environments no job binds. `shared_envs` may only see a validated table.
+    """
+    ref = urllib.parse.quote(ctx["default_branch"], safe="")
+    text = _contents_text(f"repos/{ctx['repo']}/contents/{CONFIG_PATH}?ref={ref}")
+    if text is None:
+        return None
+    try:
+        return bm.ec.shared_envs(bm.ec.validate_structure(bm.ec.parse_table(text)))
+    except SystemExit:
+        return None
 
 
 def _team_warnings(ctx):

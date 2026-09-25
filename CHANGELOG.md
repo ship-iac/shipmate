@@ -21,7 +21,7 @@ grammar are declared unstable in `README.md`.
   no longer read, the `shared-envs` action inputs are gone, and `scripts/onboard` drops
   `--shared` and reads the key from the checkout's file. Every cell job binds
   `${{ matrix.env_binding }}`, which detect stamps on each row. `shipmate doctor` reads
-  the mode from the file and no longer reports a repository holding both namings;
+  the mode from the default branch's file, as the runs do, and no longer reports a repository holding both namings;
   `scripts/onboard` still refuses to create one beside the other.
 
 ## [0.32.0] — 2026-09-25

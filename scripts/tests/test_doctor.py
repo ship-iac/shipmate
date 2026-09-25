@@ -247,11 +247,14 @@ def _quiet_new_probes():
         f"repos/{_ENGINE_REPO}/releases/latest": {"tag_name": "v9.9.9"},
         f"repos/{_ENGINE_REPO}/commits/v9.9.9": {"sha": _SHA},
         _CONFIG_READ: _wf_file(CANONICAL),
+        _CONFIG_ON_DEFAULT: _wf_file(CANONICAL),
     }
 
 
 #: The config probe's read. `_quiet_new_probes` says why a sound table is silent here.
 _CONFIG_READ = f"repos/{_REPO}/contents/{doctor.CONFIG_PATH}{_REF}"
+#: The environment probes' read: execution binds from the default branch's copy.
+_CONFIG_ON_DEFAULT = f"repos/{_REPO}/contents/{doctor.CONFIG_PATH}?ref={_BRANCH}"
 
 
 def test_healthy_repo_emits_nothing(monkeypatch):
@@ -314,7 +317,7 @@ def _existence(*names, table=CANONICAL):
     """`_environment_warnings`' two reads: the environments listing and the table."""
     responses = {
         f"repos/{_REPO}/environments?per_page=100": _environments(*names),
-        _CONFIG_READ: _wf_file(table),
+        _CONFIG_ON_DEFAULT: _wf_file(table),
     }
     return lambda path: responses[path]
 
@@ -369,24 +372,34 @@ def test_the_table_selects_the_mode(monkeypatch):
     assert _env_findings(monkeypatch, _UNSHARED_TABLE, _env("dev-eu")) == split
 
 
-def test_an_invalid_table_shares_nothing_and_crashes_nothing(monkeypatch):
+#: Hand-written: the environment probes' one finding when the default branch's table is unusable.
+_DEFAULT_TABLE_SKIPPED = (
+    doctor.NOTICE,
+    "the environment probes were skipped — the default branch's `.github/shipmate.toml` "
+    "could not be read or is invalid, and it alone selects which GitHub Environments a run "
+    "binds. While it is missing or invalid there, every run refuses at detect.",
+)
+
+
+def test_an_invalid_default_table_skips_the_environment_probes(monkeypatch):
     """`shared_envs` reads entries without a mapping guard, so it may only see a table
-    `validate_structure` accepted. An invalid table reads as no shared environments; its
-    own finding is `_config_warnings`', not a second one here.
+    `validate_structure` accepted. An invalid default-branch table selects no naming: the
+    environment probes say they were skipped, once, beside the config probe's own finding
+    about the examined commit's copy.
 
     Mutation: have `_shared_envs` call `shared_envs` on the unvalidated `parse_table`
     result -- the non-table entry raises inside every environment probe and `warnings()`
-    degrades them; or return that result from `_config_table`."""
+    degrades them."""
     responses = {
         f"repos/{_REPO}/rules/branches/{_BRANCH}?per_page=100": _gate_rule(),
         f"repos/{_REPO}/environments?per_page=100": _environments("dev-eu", "shipmate-engine"),
         **_quiet_new_probes(),
         _CONFIG_READ: _wf_file(_INVALID_TABLE),
+        _CONFIG_ON_DEFAULT: _wf_file(_INVALID_TABLE),
     }
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
     assert doctor.warnings(_ctx()) == [
-        _MISSING_PLAN,
-        _MISSING_APPLY,
+        _DEFAULT_TABLE_SKIPPED,
         (
             doctor.WARNING,
             "`.github/shipmate.toml` at the commit under examination is not valid: "
@@ -394,6 +407,75 @@ def test_an_invalid_table_shares_nothing_and_crashes_nothing(monkeypatch):
             "operation that reads the table. Execution still reads the default branch's "
             "copy, which this says nothing about.",
         ),
+    ]
+
+
+def test_an_unreadable_default_table_is_not_read_as_split(monkeypatch):
+    """No naming is guessed when the default branch's table cannot be read: a split guess
+    reports `dev-eu-plan`/`dev-eu-apply` missing on a repository whose runs bind `dev-eu`.
+
+    Mutation: have `_shared_envs` return `set()` when the read fails -- the split
+    existence findings replace the NOTICE."""
+
+    def gh(path):
+        if path == _CONFIG_ON_DEFAULT:
+            raise SystemExit("::error::command failed (1): gh api ...")
+        return _environments("dev-eu")
+
+    monkeypatch.setattr(doctor, "_gh_json", gh)
+    found = (
+        doctor._environment_warnings(_ctx())
+        + doctor._env_protection_warnings(_ctx())
+        + doctor._plan_env_secret_warnings(_ctx())
+    )
+    assert found == [_DEFAULT_TABLE_SKIPPED]
+
+
+@pytest.mark.parametrize(
+    ("at_head", "branch", "ref"),
+    [(CANONICAL, "main", "main"), (_UNSHARED_TABLE, "release/v1", "release%2Fv1")],
+    ids=["key-absent-at-head", "shared-false-at-head-slashed-branch"],
+)
+def test_the_environment_probes_follow_the_default_branchs_table(monkeypatch, at_head, branch, ref):
+    """Execution binds from the default branch's table, so on a pull request that removes
+    `shared = true` every run until merge still binds the bare `dev-eu`: that is the
+    environment the probes inspect. The branch name is URL-quoted into `?ref=`.
+
+    Mutation: read the table at `_contents_ref(ctx)` instead of the default branch -- the
+    probes inspect `dev-eu-plan`/`dev-eu-apply`; or interpolate the branch unquoted --
+    the second case reads `?ref=release/v1`."""
+    on_default = f"repos/{_REPO}/contents/{doctor.CONFIG_PATH}?ref={ref}"
+    responses = {
+        f"repos/{_REPO}/environments?per_page=100": _environments("dev-eu"),
+        _CONFIG_READ: _wf_file(at_head),
+        on_default: _wf_file(_SHARED_TABLE),
+        f"repos/{_REPO}/environments/dev-eu": _env("dev-eu"),
+        f"repos/{_REPO}/environments/dev-eu/secrets?per_page=100": _secrets(),
+    }
+    asked = []
+
+    def gh(path):
+        asked.append(path)
+        return responses[path]
+
+    monkeypatch.setattr(doctor, "_gh_json", gh)
+    ctx = _ctx(default_branch=branch)
+    found = (
+        doctor._environment_warnings(ctx)
+        + doctor._env_protection_warnings(ctx)
+        + doctor._plan_env_secret_warnings(ctx)
+    )
+    assert found == [_SHARED_UNREVIEWED]
+    listing = f"repos/{_REPO}/environments?per_page=100"
+    assert asked == [
+        listing,
+        on_default,
+        listing,
+        on_default,
+        f"repos/{_REPO}/environments/dev-eu",
+        listing,
+        on_default,
+        f"repos/{_REPO}/environments/dev-eu/secrets?per_page=100",
     ]
 
 
@@ -577,7 +659,7 @@ def _protection(*envs, listed=None, table=CANONICAL):
     out = {f"repos/{_REPO}/environments/{e['name']}": e for e in envs}
     names = [e["name"] for e in envs] if listed is None else listed
     out[f"repos/{_REPO}/environments?per_page=100"] = _environments(*names)
-    out[_CONFIG_READ] = _wf_file(table)
+    out[_CONFIG_ON_DEFAULT] = _wf_file(table)
     return out
 
 
@@ -731,7 +813,7 @@ def test_the_protection_probe_reads_only_the_selected_naming(monkeypatch):
     assert doctor._env_protection_warnings(_ctx()) == []
     assert seen == [
         f"repos/{_REPO}/environments?per_page=100",
-        _CONFIG_READ,
+        _CONFIG_ON_DEFAULT,
         f"repos/{_REPO}/environments/dev-eu-plan",
         f"repos/{_REPO}/environments/dev-eu-apply",
     ]
@@ -3844,6 +3926,7 @@ def test_plan_env_holding_secrets_is_a_notice_naming_each(monkeypatch):
     note."""
     responses = {
         f"repos/{_REPO}/environments?per_page=100": _environments("dev-eu-plan", "dev-eu-apply"),
+        _CONFIG_ON_DEFAULT: _wf_file(CANONICAL),
         f"repos/{_REPO}/environments/dev-eu-plan/secrets?per_page=100": _secrets(
             "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"
         ),
@@ -3863,7 +3946,7 @@ def test_the_notice_states_the_rule_and_never_that_this_env_is_unprotected(monke
     settled without the sibling's protection read, so one failure cannot silence the other."""
     responses = {
         f"repos/{_REPO}/environments?per_page=100": _environments("dev-eu-plan"),
-        _CONFIG_READ: _wf_file(CANONICAL),
+        _CONFIG_ON_DEFAULT: _wf_file(CANONICAL),
         f"repos/{_REPO}/environments/dev-eu-plan/secrets?per_page=100": _secrets(
             "AWS_ACCESS_KEY_ID"
         ),
@@ -3883,7 +3966,7 @@ def test_the_notice_states_the_rule_and_never_that_this_env_is_unprotected(monke
     assert not [p for p in asked if "deployment-branch-policies" in p], asked
     assert asked == [
         f"repos/{_REPO}/environments?per_page=100",
-        _CONFIG_READ,
+        _CONFIG_ON_DEFAULT,
         f"repos/{_REPO}/environments/dev-eu-plan/secrets?per_page=100",
     ]
 
@@ -3895,7 +3978,7 @@ def test_shared_mode_reads_the_bare_env_and_says_it_is_the_apply_env_too(monkeyp
     a split plan environment understates the exposure."""
     responses = {
         f"repos/{_REPO}/environments?per_page=100": _environments("dev-eu", "dev-eu-plan"),
-        _CONFIG_READ: _wf_file(_SHARED_TABLE),
+        _CONFIG_ON_DEFAULT: _wf_file(_SHARED_TABLE),
         f"repos/{_REPO}/environments/dev-eu/secrets?per_page=100": _secrets("AWS_ROLE_ARN"),
     }
     asked = []
@@ -3921,7 +4004,7 @@ def test_shared_mode_reads_the_bare_env_and_says_it_is_the_apply_env_too(monkeyp
     # `dev-eu-plan` exists and is not read: the table selects the bare name.
     assert asked == [
         f"repos/{_REPO}/environments?per_page=100",
-        _CONFIG_READ,
+        _CONFIG_ON_DEFAULT,
         f"repos/{_REPO}/environments/dev-eu/secrets?per_page=100",
     ]
 
@@ -3957,6 +4040,7 @@ def test_a_truncated_listing_cannot_clear_the_app_key(monkeypatch):
     routine note. Absence is reportable only when the read was complete."""
     responses = {
         f"repos/{_REPO}/environments?per_page=100": _environments("dev-eu-plan"),
+        _CONFIG_ON_DEFAULT: _wf_file(CANONICAL),
         f"repos/{_REPO}/environments/dev-eu-plan/secrets?per_page=100": _secrets(
             "A", "B", total=150
         ),
@@ -3974,6 +4058,7 @@ def test_a_complete_listing_without_the_app_key_stays_a_single_notice(monkeypatc
     every environment that holds secrets."""
     responses = {
         f"repos/{_REPO}/environments?per_page=100": _environments("dev-eu-plan"),
+        _CONFIG_ON_DEFAULT: _wf_file(CANONICAL),
         f"repos/{_REPO}/environments/dev-eu-plan/secrets?per_page=100": _secrets("A", "B"),
     }
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
@@ -3985,6 +4070,7 @@ def test_a_truncated_listing_that_did_show_the_app_key_reports_holding_it(monkey
     the key was read, so the finding is that the environment holds it."""
     responses = {
         f"repos/{_REPO}/environments?per_page=100": _environments("dev-eu-plan"),
+        _CONFIG_ON_DEFAULT: _wf_file(CANONICAL),
         f"repos/{_REPO}/environments/dev-eu-plan/secrets?per_page=100": _secrets(
             "SHIPMATE_APP_PRIVATE_KEY", "A", total=150
         ),
@@ -4040,6 +4126,7 @@ def test_app_private_key_in_a_plan_env_is_a_warning(monkeypatch):
     could mint an App token with it. A name match, not a pattern guess."""
     responses = {
         f"repos/{_REPO}/environments?per_page=100": _environments("dev-eu-plan"),
+        _CONFIG_ON_DEFAULT: _wf_file(CANONICAL),
         f"repos/{_REPO}/environments/dev-eu-plan/secrets?per_page=100": _secrets(
             "SHIPMATE_APP_PRIVATE_KEY"
         ),
@@ -4059,7 +4146,7 @@ def test_shared_mode_app_key_warning_does_not_call_the_env_a_plan_environment(mo
     may not call the same environment the plan environment."""
     responses = {
         f"repos/{_REPO}/environments?per_page=100": _environments("dev-eu"),
-        _CONFIG_READ: _wf_file(_SHARED_TABLE),
+        _CONFIG_ON_DEFAULT: _wf_file(_SHARED_TABLE),
         f"repos/{_REPO}/environments/dev-eu/secrets?per_page=100": _secrets(
             "SHIPMATE_APP_PRIVATE_KEY"
         ),
@@ -4142,6 +4229,7 @@ def test_a_long_secret_list_is_capped_so_it_cannot_eat_the_size_budget(monkeypat
     names = [f"CONSUMER_CREDENTIAL_NUMBER_{i:03d}" for i in range(60)]
     responses = {
         f"repos/{_REPO}/environments?per_page=100": _environments("dev-eu-plan"),
+        _CONFIG_ON_DEFAULT: _wf_file(CANONICAL),
         f"repos/{_REPO}/environments/dev-eu-plan/secrets?per_page=100": _secrets(*names),
     }
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
@@ -4159,6 +4247,7 @@ def test_one_env_listing_failure_is_a_notice_and_the_others_still_report(monkeyp
     not silence the environment that could be read."""
     responses = {
         f"repos/{_REPO}/environments?per_page=100": _environments("dev-eu-plan", "dev-us-plan"),
+        _CONFIG_ON_DEFAULT: _wf_file(CANONICAL),
         f"repos/{_REPO}/environments/dev-us-plan/secrets?per_page=100": _secrets(
             "GOOGLE_CREDENTIALS"
         ),
@@ -4199,6 +4288,7 @@ def test_truncated_secret_listing_reads_as_at_least(monkeypatch):
     The same partial read also warns that the App-key check could not be completed."""
     responses = {
         f"repos/{_REPO}/environments?per_page=100": _environments("dev-eu-plan"),
+        _CONFIG_ON_DEFAULT: _wf_file(CANONICAL),
         f"repos/{_REPO}/environments/dev-eu-plan/secrets?per_page=100": _secrets(
             "A", "B", total=150
         ),
@@ -4218,6 +4308,8 @@ def test_secret_listing_uses_the_env_token_and_restores_gh_token(monkeypatch):
     seen = {}
 
     def fake(path):
+        if path == _CONFIG_ON_DEFAULT:
+            return _wf_file(CANONICAL)
         if path.endswith("/secrets?per_page=100"):
             seen["secrets_call"] = os.environ.get("GH_TOKEN")
             return _secrets()
@@ -4254,7 +4346,6 @@ def test_declared_envs_reads_a_flat_single_artifact_download(tmp_path):
     assert doctor._declared_envs(tmp_path) == {"dev-eu"}
 
 
-_CONFIG_ON_DEFAULT = f"repos/{_REPO}/contents/{doctor.CONFIG_PATH}?ref={_BRANCH}"
 #: The refusal the design's misplaced control earns, whole: the probe's own framing plus
 #: `validate_env_order`'s message with the `::error::` prefix stripped. Hand-written, not
 #: read back from the module, so a probe that reported a different refusal -- or reported
