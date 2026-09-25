@@ -494,8 +494,8 @@ def _naming_conflict(ctx, env):
         env,
         f"the engine binds {' / '.join(f'`{n}`' for n, _role in _env_names(env, ctx['shared']))} "
         f"for `{env}`, and {names} {'is' if len(unused) == 1 else 'are'} also present. Nothing "
-        f"binds {names}, which `shipmate doctor` reports as unused, so nothing was created or "
-        f"changed for `{env}`. Delete {names}, or {remedy}.",
+        f"binds {names}, so nothing was created or changed for `{env}`. Delete {names}, or "
+        f"{remedy}.",
     )
     return True
 

@@ -128,8 +128,7 @@ detect adds the suffix when it stamps the cell's binding.
 
 This tier needs `<env>-plan` and `shipmate-engine`. `<env>-apply` is the apply
 tier's, but create it now anyway — unless that env shares one environment
-(below), where an `<env>-apply` beside the bare `<env>` is an unused
-environment doctor warns about.
+(below), where nothing binds an `<env>-apply`.
 
 `shipmate doctor` runs on every plan run and warns for each half of a
 pair that does not exist, so tier 1 with only `<env>-plan` annotates every pull

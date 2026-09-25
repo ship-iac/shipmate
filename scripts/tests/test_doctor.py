@@ -338,27 +338,6 @@ _MISSING_SHARED = (
     "tagged `env:dev-eu` bind a name GitHub auto-creates empty, with no secrets and none of "
     "its protection rules. Create it.",
 )
-_UNUSED_BARE = (
-    doctor.WARNING,
-    "GitHub Environment `dev-eu` is unused under this file \u2014 once the file is on the "
-    "default branch, no job binds it, so its protection rules and secrets apply to nothing: "
-    "`[environments.dev-eu]` does not set `shared = true`, so plan binds `dev-eu-plan` and "
-    "apply binds `dev-eu-apply`. Delete it after that merge, or set `shared = true` in "
-    "`[environments.dev-eu]` to bind `dev-eu` on both paths.",
-)
-
-
-def _unused_suffixed(name):
-    return (
-        doctor.WARNING,
-        f"GitHub Environment `{name}` is unused under this file \u2014 once the file is on the "
-        "default branch, no job binds it, so its protection rules and secrets apply to nothing: "
-        "`[environments.dev-eu]` sets `shared = true`, so plan and apply both bind `dev-eu`. "
-        "Delete it after that merge, or remove `shared = true` from "
-        "`[environments.dev-eu]` to bind the split pair.",
-    )
-
-
 #: The shared-mode NOTICE for a bare `dev-eu` with no approval rules.
 _SHARED_UNREVIEWED = (
     doctor.NOTICE,
@@ -429,34 +408,19 @@ def test_a_missing_environment_is_named_by_the_selected_naming(monkeypatch):
     assert doctor._environment_warnings(_ctx()) == [_MISSING_SHARED]
 
 
-def test_the_naming_the_table_does_not_select_is_named_unused(monkeypatch):
-    """Both namings present is the one silent failure: the environment nothing binds keeps
-    protection rules that read as a control in no code path. The table decides which
-    naming that is, so the finding names it.
+def test_both_namings_present_report_only_the_selected_namings_gaps(monkeypatch):
+    """No finding names the naming the table does not select: with both present nothing
+    is reported, and beside a half pair only the missing half is.
 
-    Mutation: delete the unused-naming line from `_environment_warnings`, or swap the
-    two branches of `_unused`."""
+    Mutation: append a warning for each present environment of the other naming in
+    `_environment_warnings`."""
     names = ("dev-eu", "dev-eu-plan", "dev-eu-apply")
     monkeypatch.setattr(doctor, "_gh_json", _existence(*names))
-    assert doctor._environment_warnings(_ctx()) == [_UNUSED_BARE]
+    assert doctor._environment_warnings(_ctx()) == []
     monkeypatch.setattr(doctor, "_gh_json", _existence(*names, table=_SHARED_TABLE))
-    assert doctor._environment_warnings(_ctx()) == [
-        _unused_suffixed("dev-eu-plan"),
-        _unused_suffixed("dev-eu-apply"),
-    ]
-
-
-def test_a_half_split_pair_beside_a_bare_env_reports_both_findings(monkeypatch):
-    """`dev-eu` + `dev-eu-plan` under the split naming: the missing half is still named,
-    and the bare environment is unused. A bare environment alone, with no half of the
-    pair, is only the missing pair -- both namings existing is the unused finding's
-    precondition.
-
-    Mutation: drop the `any(...)` precondition -- the second case gains `_UNUSED_BARE`."""
+    assert doctor._environment_warnings(_ctx()) == []
     monkeypatch.setattr(doctor, "_gh_json", _existence("dev-eu", "dev-eu-plan"))
-    assert doctor._environment_warnings(_ctx()) == [_MISSING_APPLY, _UNUSED_BARE]
-    monkeypatch.setattr(doctor, "_gh_json", _existence("dev-eu"))
-    assert doctor._environment_warnings(_ctx()) == [_MISSING_PLAN, _MISSING_APPLY]
+    assert doctor._environment_warnings(_ctx()) == [_MISSING_APPLY]
 
 
 def test_split_missing_half_does_not_claim_the_jobs_cannot_run(monkeypatch):
@@ -748,8 +712,8 @@ def test_shared_env_without_approval_rules_says_no_gate_is_available(monkeypatch
 
 
 def test_the_protection_probe_reads_only_the_selected_naming(monkeypatch):
-    """The unused naming is `_environment_warnings`' finding; its protection shape is no
-    rule on any path, so it is not read.
+    """No job binds the naming the table does not select, so its protection shape is no
+    rule on any path and it is not read.
 
     Mutation: have `_env_protection_warnings` read both namings."""
     responses = _protection(
