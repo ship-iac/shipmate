@@ -47,8 +47,8 @@ cloud credentials or not. A called workflow's permissions are capped at the
 with no job and no log.
 
 **The credential split is the point.** The engine's `drift` matrix job binds the
-plan environment of the cell it is planning — the bare `<env>` for an env listed
-in `SHIPMATE_SHARED_ENVS`, `<env>-plan` otherwise
+plan environment of the cell it is planning — the bare `<env>` for an env
+holding `shared = true`, `<env>-plan` otherwise
 ([`../CONTRACT.md`](../CONTRACT.md) §Env model) — and holds no App credential.
 All it does with its result is upload one
 `drift-summary.<env>.<stack-slug>` artifact holding a `cell.json`. The `issues`

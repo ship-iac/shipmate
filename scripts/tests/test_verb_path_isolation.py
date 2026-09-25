@@ -133,16 +133,13 @@ WAVES = [f"wave{i}" for i in range(8)]
 #: The whole `with:` of unlock's `apply-detect` step. `mode` is a literal, not an expression:
 #: the file is the verb, so nothing may make it configurable. `review-decision` and
 #: `ungated-envs` are absent because `run_unlock` reads neither -- an approval reviews a diff
-#: and unlock applies none. `shared-envs` IS present: the unlock queue's cells are stamped from
-#: the environment table like every other row, and without it a shared env resolves the wrong
-#: tier.
+#: and unlock applies none.
 DETECT_WITH = {
     "environment": "${{ inputs.environment }}",
     "mode": "unlock",
     "head-sha": "${{ inputs.ref }}",
     "github-token": "${{ github.token }}",
     "app-id": "${{ vars.SHIPMATE_APP_ID }}",
-    "shared-envs": "${{ vars.SHIPMATE_SHARED_ENVS }}",
 }
 
 #: The whole `if:` and `with:` of the environment pre-flight. The queue is one flat array and
@@ -152,7 +149,6 @@ PREFLIGHT_ACTION = local_action("verify-environments")
 PREFLIGHT_IF = "${{ steps.d.outputs.cells != '[]' }}"
 PREFLIGHT_WITH = {
     "waves-json": "${{ format('{{\"wave0\":{0}}}', steps.d.outputs.cells) }}",
-    "shared-envs": "${{ vars.SHIPMATE_SHARED_ENVS }}",
     "github-token": "${{ github.token }}",
 }
 
@@ -352,8 +348,8 @@ def test_the_unlock_detect_refuses_an_unlock_into_a_missing_environment():
     )
     assert step.get("with") == PREFLIGHT_WITH, (
         f"the pre-flight's inputs are {step.get('with')!r}, not {PREFLIGHT_WITH!r} -- a "
-        "queue wrapped into the wrong shape, or a shared-envs value that is not the "
-        "repository variable, checks environments the unlock job does not bind"
+        "queue wrapped into the wrong shape checks environments the unlock job does "
+        "not bind"
     )
     assert step.get("continue-on-error") in (None, False), (
         "the pre-flight is continue-on-error: it would name the missing environment and "

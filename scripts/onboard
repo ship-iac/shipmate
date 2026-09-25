@@ -3,7 +3,7 @@
 
     python3 <engine>/scripts/onboard --team <team-slug> --app-id <id> \
         --key shipmate-app.private-key.pem [--state-suffix <s>] \
-        [--shared <env,env>] [--vars-at-org <NAME,NAME>] [--dry-run]
+        [--vars-at-org <NAME,NAME>] [--dry-run]
 
 Hand-run from inside the consumer checkout, with `gh` authenticated against that
 repository. It reads what is already there and
@@ -20,10 +20,6 @@ Flags:
   --key           path to the App's PEM private key (its text, not the path,
                   is what gets stored).
   --state-suffix  suffix appended to state artifact names; "" by default.
-  --shared        comma-separated environments bound as one bare `<env>` on
-                  both paths instead of the `<env>-plan` / `<env>-apply` split.
-                  Must agree with the SHIPMATE_SHARED_ENVS repository variable
-                  when both are set.
   --vars-at-org   comma-separated variable names already set at organization
                   level, so no repository copy is written for them. Accepts
                   SHIPMATE_APP_ID only. The name is verified against the
@@ -36,7 +32,9 @@ write. `argparse` also exits 2 on a usage error, so a wrapper branching on 2
 must distinguish the two by output, or validate its own arguments first.
 
 Environments are derived from the repository's own Terramate env/* tags, never
-passed in: the set of environments is a property of the stacks.
+passed in: the set of environments is a property of the stacks. Those bound as
+one bare `<env>` instead of the `<env>-plan` / `<env>-apply` pair are the entries
+holding `shared = true` in the checkout's `.github/shipmate.toml`.
 """
 
 import argparse
@@ -252,8 +250,7 @@ def _at_org(raw):
     Validated against AT_ORG_NAMES, not against everything this script writes: an
     unrecognised name would filter nothing and still report success, and a name nothing
     writes any more would make `_refuse_org_assertion_mismatch` raise a `KeyError` looking
-    it up in `_writable_variables`. SHIPMATE_SHARED_ENVS is excluded for a different
-    reason: `--shared` has to be passed either way. Uppercased because the API uppercases
+    it up in `_writable_variables`. Uppercased because the API uppercases
     variable names and every lookup here is on an uppercased key.
     """
     names = {name.upper() for name in _split(raw)}
@@ -266,28 +263,25 @@ def _at_org(raw):
     return names
 
 
-def _resolve_shared(flag, variables, envs):
-    """The shared-environment set, from --shared or SHIPMATE_SHARED_ENVS.
+def _resolve_shared(root, envs):
+    """The environments the checkout's `.github/shipmate.toml` marks `shared = true`.
 
-    Every name is validated the way a tag-derived one is: these reach the same
-    API paths and `gh --env` arguments, and a typo would otherwise bind nothing
-    and report success.
+    No file means no shared environments. The table is structurally validated first,
+    because `shared_envs` trusts its shape, and this runs before the first write. A shared
+    name no stack tags would bind nothing and report success, so it is refused.
     """
-    from_flag = _split(flag)
-    from_var = _split(variables.get("SHIPMATE_SHARED_ENVS", ""))
-    if from_flag and from_var and from_flag != from_var:
-        raise SystemExit(
-            f"--shared ({', '.join(sorted(from_flag))}) and the SHIPMATE_SHARED_ENVS variable "
-            f"({', '.join(sorted(from_var))}) disagree. Reconcile them, or drop --shared."
-        )
-    shared = from_flag or from_var
+    ec = _load("env-config")
+    path = root / ec.CONFIG_PATH
+    if not path.is_file():
+        return set()
+    table = ec.parse_table(path.read_text(encoding="utf-8"))
+    ec.validate_structure(table)
+    shared = ec.shared_envs(table)
     for name in sorted(shared):
-        if not _ENV_RE.fullmatch(name):
-            raise SystemExit(f"unusable shared environment name: {name!r}")
         if name not in envs:
             raise SystemExit(
-                f"shared environment {name!r} is not one this repository declares. "
-                f"Its environments are: {', '.join(envs)}."
+                f"[environments.{name}] in {ec.CONFIG_PATH} holds `shared = true`, but no "
+                f"stack declares {name!r}. Its environments are: {', '.join(envs)}."
             )
     return shared
 
@@ -394,8 +388,8 @@ def _report_shared_approval(ctx, name, env):
         name,
         f"it carries protection rules ({', '.join(approval)}) and is shared, so the plan "
         "cells and the nightly drift run do not start immediately either. To gate applies "
-        f"alone, split it into `{name}-plan` and `{name}-apply` and drop `{name}` from "
-        "--shared and SHIPMATE_SHARED_ENVS.",
+        f"alone, split it into `{name}-plan` and `{name}-apply` and drop `shared = true` "
+        f"from `[environments.{name}]`.",
     )
 
 
@@ -482,9 +476,7 @@ def _naming_conflict(ctx, env):
     only once both namings exist still lets a repository holding one of them get the
     other created here and be refused by the next run -- over environments this script
     itself wrote, falsifying "a second run changes nothing" and leaving the pair
-    unreconcilable from then on. Unlike `doctor`, which cannot read
-    SHIPMATE_SHARED_ENVS, this script resolved it in `_resolve_shared`, so which naming
-    goes unused is known rather than guessed.
+    unreconcilable from then on.
     """
     base = f"repos/{ctx['repo']}/environments/"
     unused = [n for n in _unused_naming(env, ctx["shared"]) if _gh_json_or_none(f"{base}{n}")]
@@ -492,19 +484,18 @@ def _naming_conflict(ctx, env):
         return False
     names = " and ".join(f"`{n}`" for n in unused)
     remedy = (
-        f"drop `{env}` from `--shared` and SHIPMATE_SHARED_ENVS"
+        f"drop `shared = true` from `[environments.{env}]`"
         if env in ctx["shared"]
-        else f"pass `--shared {env}` so the engine binds the bare `{env}` instead"
+        else f"set `shared = true` in `[environments.{env}]` so the engine binds the bare "
+        f"`{env}` instead"
     )
     report(
         "differs",
         env,
         f"the engine binds {' / '.join(f'`{n}`' for n, _role in _env_names(env, ctx['shared']))} "
-        f"for `{env}`, and {names} {'is' if len(unused) == 1 else 'are'} also present. Holding "
-        "both namings for one logical environment is the state `shipmate doctor` calls "
-        "ambiguous, "
-        "where which naming each path binds is undetermined, so nothing was created or changed "
-        f"for `{env}`. Delete {names}, or {remedy}.",
+        f"for `{env}`, and {names} {'is' if len(unused) == 1 else 'are'} also present. Nothing "
+        f"binds {names}, so nothing was created or changed for `{env}`. Delete {names}, or "
+        f"{remedy}.",
     )
     return True
 
@@ -520,12 +511,9 @@ def _reconcile_envs(ctx):
 
 def _writable_variables(ctx):
     """{name: (value, the flag it came from)}, in the order they are written."""
-    wanted = {
+    return {
         "SHIPMATE_APP_ID": (ctx["app_id"], "--app-id"),
     }
-    if ctx["shared"]:
-        wanted["SHIPMATE_SHARED_ENVS"] = (",".join(sorted(ctx["shared"])), "--shared")
-    return wanted
 
 
 def _wanted_variables(ctx):
@@ -668,26 +656,19 @@ def _refuse_org_assertion_mismatch(ctx):
             )
 
 
-def _matches(name, current, value):
-    # SHIPMATE_SHARED_ENVS is a set written as a list: order and spacing are not drift.
-    if name == "SHIPMATE_SHARED_ENVS":
-        return _split(current) == _split(value)
-    return current == value
-
-
 def _reconcile_variables(ctx):
     """Set the repository variables the workflows read.
 
     A variable that exists with another value is reported, never overwritten: a
-    consumer naming another App or another set of shared environments is making a
-    deliberate choice, and moving it silently is this script exceeding its mandate.
+    consumer naming another App is making a deliberate choice, and moving it silently is
+    this script exceeding its mandate.
     """
     existing = ctx["variables"]
     for name, (value, source) in _wanted_variables(ctx).items():
         current = existing.get(name)
         if current is None:
             write("set", name, ["gh", "variable", "set", name, "--body", value], detail=value)
-        elif _matches(name, current, value):
+        elif current == value:
             report("ok", name, value)
         else:
             report("differs", name, f"repository has {current}, {source} is {value}")
@@ -911,6 +892,10 @@ def _checklist(ctx):
         "  `-plan` / `-apply` half. Top-level settings go above the first table header: a",
         "  scalar written below one lands inside that table instead.",
         "",
+        "  `shared = true` in a table binds that environment as one bare `<name>` on both",
+        "  paths instead of the `<name>-plan` / `<name>-apply` pair. This script reads the key",
+        "  from this checkout's file, so re-run it after adding or dropping one.",
+        "",
         "  `[gate] approvers_team` names the team whose members may apply and unlock by",
         f"  pull request comment — `{ctx['team']}` here. Keep it above the first",
         "  `[environments.*]` header, where it reads with the other repository-wide",
@@ -1003,7 +988,6 @@ def main(argv=None):
     ap.add_argument("--app-id", required=True, help="the shipmate App's numeric id")
     ap.add_argument("--key", required=True, help="path to the App's PEM private key")
     ap.add_argument("--state-suffix", default="", help="suffix for state artifact names")
-    ap.add_argument("--shared", default="", help="environments bound as one bare `<env>`")
     ap.add_argument(
         "--vars-at-org",
         default="",
@@ -1041,7 +1025,7 @@ def main(argv=None):
         "team": args.team,
         "key": key,
         "envs": envs,
-        "shared": _resolve_shared(args.shared, variables, envs),
+        "shared": _resolve_shared(root, envs),
         "unresolved": set(),
         "state_suffix": args.state_suffix,
         "root": root,

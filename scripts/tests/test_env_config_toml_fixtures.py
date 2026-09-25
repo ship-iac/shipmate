@@ -57,7 +57,7 @@ def test_the_canonical_file_validates():
     deliberately, and the design's own file declares it that way.
     """
     table = ec.parse_table(CANONICAL)
-    assert ec.validate(table, ("dev-eu", "prod"), ()) is table
+    assert ec.validate(table, ("dev-eu", "prod")) is table
     assert ec.validate_structure(table) is table
 
 
@@ -72,7 +72,7 @@ def test_the_misplaced_control_refuses():
     table = ec.parse_table(MISPLACED_CONTROL)
     assert table == {"layout": "folder", "env_order": {"prod": ["dev"], "explicit_envs": ["prod"]}}
     with pytest.raises(SystemExit) as exc:
-        ec.validate(table, (), ())
+        ec.validate(table, ())
     assert str(exc.value) == (
         "::error::env_order['explicit_envs'] names a top-level setting, not an environment. "
         "A scalar written below a [table] header lands inside that table, so "
@@ -95,6 +95,7 @@ _CELLS = [
                 "TF_VAR_tier": "core",
             },
             "config_path": "apply",
+            "env_binding": "prod-apply",
         },
     ),
     (
@@ -110,6 +111,7 @@ _CELLS = [
                 "TF_VAR_tier": "core",
             },
             "config_path": "apply",
+            "env_binding": "prod-apply",
         },
     ),
     (
@@ -125,6 +127,7 @@ _CELLS = [
                 "TF_VAR_tier": "core",
             },
             "config_path": "plan",
+            "env_binding": "prod-plan",
         },
     ),
     (
@@ -136,6 +139,7 @@ _CELLS = [
             "cred_region": "eu-west-1",
             "tf_vars": {"TF_VAR_env": "dev-eu", "TF_VAR_region": "eu-west-1"},
             "config_path": "apply",
+            "env_binding": "dev-eu-apply",
         },
     ),
     (
@@ -147,6 +151,7 @@ _CELLS = [
             "cred_region": "eu-west-1",
             "tf_vars": {"TF_VAR_env": "dev-eu", "TF_VAR_region": "eu-west-1"},
             "config_path": "plan",
+            "env_binding": "dev-eu-plan",
         },
     ),
 ]
@@ -163,5 +168,5 @@ def test_the_canonical_file_resolves_each_cell(env, path, workload, expected):
     disappears); stop inheriting the environment's region into the provider block (every
     `cred_region` empties).
     """
-    table = ec.validate(ec.parse_table(CANONICAL), ("dev-eu", "prod"), ())
-    assert ec.resolve(table, env, path, workload, ()) == expected
+    table = ec.validate(ec.parse_table(CANONICAL), ("dev-eu", "prod"))
+    assert ec.resolve(table, env, path, workload) == expected

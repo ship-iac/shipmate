@@ -158,8 +158,8 @@ Six things to know beyond the schema:
   `workloads` under either carries the per-workload role. A field set at
   provider-block level applies to both paths unless a tier overrides it.
 - **A shared environment resolves `aws.apply` on both paths**, because it is one
-  environment with one role. Declaring `aws.plan` for an environment listed in
-  `SHIPMATE_SHARED_ENVS` is refused rather than silently ignored.
+  environment with one role. Declaring `aws.plan` for an environment holding
+  `shared = true` is refused rather than silently ignored.
 - **Adding or removing an environment takes two pull requests**, configuration
   first when adding and last when removing, because the table is read from the
   default branch while the stacks' tags come from the branch under test.
@@ -185,7 +185,7 @@ side, reading `<env>-apply` (or the bare `<env>` in shared mode), and
 [`getting-started.md`](getting-started.md) §Required — plan).
 
 The plan-side role is the `aws.plan` tier. In shared mode — a logical env
-listed in `SHIPMATE_SHARED_ENVS` binds one bare `<env>` on both paths — there
+holding `shared = true` binds one bare `<env>` on both paths — there
 is one role for both and the wave jobs use it, so it must be the apply role: plan-time
 branch code and the drift run then have write access, and the read-only plan
 role is unreachable for that env ([`hardening.md`](hardening.md) §7–9). Such an

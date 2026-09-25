@@ -4,9 +4,6 @@ inputs:
   waves-json:
     description: This run's wave matrices (the apply-env-level.yml waves_json shape).
     required: true
-  shared-envs:
-    description: The SHIPMATE_SHARED_ENVS repository variable, verbatim. Passed in because a script cannot read `vars` itself; it decides which envs bind the bare environment instead of <env>-apply.
-    required: true
   github-token:
     description: GITHUB_TOKEN. Listing environments needs no App key and no added permission.
     required: true
@@ -18,7 +15,6 @@ runs:
       env:
         GH_TOKEN: ${{ inputs.github-token }}
         SHIPMATE_WAVES_JSON: ${{ inputs.waves-json }}
-        SHIPMATE_SHARED_ENVS: ${{ inputs.shared-envs }}
       # Unpaginated on purpose: the script refuses a listing whose total_count exceeds what it
       # read, because a missing page is indistinguishable from a missing environment.
       run: |

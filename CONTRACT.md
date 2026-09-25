@@ -211,7 +211,8 @@ never used.
     row's resolved `tf_vars` serialised with `toJSON`. Anything but a JSON
     object of strings is refused before `terramate run`; the empty object is a
     legitimate value and an omitted input is not. Each row also carries
-    `role_arn`, `cred_region` and `config_path`, resolved from the same table.
+    `role_arn`, `cred_region`, `config_path` and `env_binding`, resolved from the
+    same table.
   - The consumer channels are two further inputs on the same actions:
     `github-vars` (`toJSON(vars)`, the enumeration) and `consumer-secrets` (the
     `SHIPMATE_SECRETS` envelope). Both default to empty and neither is required:
@@ -228,25 +229,24 @@ never used.
   protection rules (required reviewers, wait timers) than plan, even though both
   act against the same logical environment. "The apply environment" below means
   `<env>-apply` in split mode and the bare `<env>` in shared mode.
-- **One variable binds both sides, and the engine reads it on both.**
-  `SHIPMATE_SHARED_ENVS` is a repository variable, and the same expression reads
-  it in the eight wave jobs of `apply-env-level.yml`, in engine `unlock.yml`'s
-  `unlock` job, in engine `plan.yml`'s `plan` job and in engine `drift.yml`'s
-  `drift` job — `-apply` as the fallback suffix on the first nine, `-plan` on the
-  other two:
+- **Detect resolves the binding, and every cell job reads it from its row.**
+  `scripts/env-config` computes `env_binding` from the default-branch table
+  when detect stamps each matrix row, and the eight wave jobs of
+  `apply-env-level.yml`, engine `unlock.yml`'s `unlock` job, engine `plan.yml`'s
+  `plan` job and engine `drift.yml`'s `drift` job all bind it with the same
+  expression:
 
   ```yaml
-  environment: >-
-    ${{ contains(format(',{0},', vars.SHIPMATE_SHARED_ENVS), format(',{0},', matrix.environment))
-    && matrix.environment || format('{0}-plan', matrix.environment) }}
+  environment: ${{ matrix.env_binding }}
   ```
 
-  Both content lines sit at the same indent: a folded scalar keeps a newline
-  inside the parsed value where the indent changes, and GitHub then rejects the
-  expression.
+  A row whose `env_binding` is missing, not a string, or empty refuses at
+  detect, before any matrix is written: GitHub binds no environment for an
+  empty `environment:`, and the cell would run outside every environment
+  control.
 
   A repository may therefore mix modes freely — some envs shared, some split —
-  and a consumer configures none of it. The failure this arrangement exists to
+  and no workflow file names either. The failure this arrangement exists to
   prevent was a plan-side binding a consumer wrote by hand: a static bare
   `${{ matrix.environment }}` in a repository where only some envs are shared
   made the split envs' plan cells bind a bare `<env>` nobody created, and GitHub
@@ -254,31 +254,20 @@ never used.
   comes from `matrix.environment` and the default-branch table — but the cell
   still runs inside an environment carrying none of the protection rules the
   real one has, and nothing about its plan output says so.
-- **A logical env may opt into one shared environment (shared mode).** Listing
-  it in the `SHIPMATE_SHARED_ENVS` repository variable makes both paths bind
-  the bare `<env>` — one environment, no suffix. The price is stated in
+- **A logical env may opt into one shared environment (shared mode).**
+  `shared = true` in its `[environments.<env>]` entry makes both paths bind the
+  bare `<env>` — one environment, no suffix. The price is stated in
   `docs/hardening.md` (§6 and §7–9): a protection rule on a shared environment
   gates the plan cells and the nightly drift run too, so the reviewer gate is
   given up rather than relocated, and plan and apply OIDC tokens become identical
   in `sub`, so no trust policy can separate them.
-  - The value is a comma-separated list of logical env names, matched on
-    comma boundaries, so `dev-us` does not match an entry `dev-us-2`.
-  - **No spaces after the commas.** `dev-eu, dev-us` leaves `dev-us` unmatched:
-    the entry is ` dev-us` and each entry is compared whole, spaces included.
-    The direction is fail-safe — the env stays split, and with no `<env>-apply`
-    environment the existence pre-flight refuses the run before any wave
-    applies — but it is the mistake consumers actually make.
-  - Matching is case-insensitive, because GitHub's `contains()` is:
-    `SHIPMATE_SHARED_ENVS=Prod` opts `prod` into shared mode. The expression
-    normalizes nothing.
-  - The variable is deliberately repository-level, not a setting in
-    `.github/shipmate.toml` and not a workflow input. The mode is read inside
-    each cell job's `environment:` expression, which GitHub evaluates before any
-    step runs, so it cannot come from a file the engine has to read — that is a
-    platform constraint, not a preference. A workflow input buys nothing a
-    repository variable does not either: changing a repository variable needs
-    settings access, the same trust level as the environments and the ruleset it
-    interacts with.
+  - The key is read from the default branch like the rest of the file, so a
+    pull request cannot move its own cells between the two namings. Changing it
+    is an ordinary pull request to the default branch, under the same review as
+    any other change to the table.
+  - `shared` must be a TOML boolean: a quoted `"true"` refuses at detect
+    rather than reading as unshared. An absent key and `shared = false` both
+    mean split.
   - **`-plan` and `-apply` are reserved suffixes for logical env names.** A
     logical env literally named `foo-apply` makes the naming undecidable (is an
     existing `foo-apply` that env's shared environment, or `foo`'s apply
@@ -301,12 +290,12 @@ never used.
   deployment branch policy, against the right code and the right state.
 - **A binding that names no existing environment is refused before any wave
   applies.** `apply-env-level.yml`'s `snapshot` job — which every apply route
-  fans through, and which runs before `wave0` — computes the apply-side binding
-  for every cell in the incoming matrix, lists the repository's environments
-  once, and fails the run naming every computed binding the repository does not
-  have, plus both ways to fix it: create that environment, or correct
-  `SHIPMATE_SHARED_ENVS`. It is what refuses a binding naming no environment: it
-  compares existence, not variable content, and a cell resolves its variables
+  fans through, and which runs before `wave0` — reads the `env_binding` of
+  every cell in the incoming matrix, lists the repository's environments once,
+  and fails the run naming every binding the repository does not have, plus
+  both ways to fix it: create that environment, or correct the environment's
+  entry in `.github/shipmate.toml`. It is what refuses a binding naming no
+  environment: it compares existence, not table content, and a cell resolves its variables
   from the table whatever it bound. It runs once per `apply-env-level.yml` call,
   so an env-ordered deploy can have completed an earlier level's applies before a
   later level is refused — a partial deploy, not an unverified apply: every level
@@ -335,11 +324,11 @@ never used.
   below) and GitHub Environment configuration. Adding a new environment is
   purely a data change: add its entry to the environment table, create its
   GitHub Environments (`<env>-plan` and `<env>-apply`, or one bare `<env>`
-  listed in `SHIPMATE_SHARED_ENVS`), then tag the stacks that belong to it. The
+  when its entry holds `shared = true`), then tag the stacks that belong to it. The
   table entry merges on its own pull request, before the tags — §Adding and
   removing an environment has why the order is not optional. No workflow YAML is
-  edited to add or remove an environment — the suffix in `plan.yml`'s binding is
-  written once, for every env. The one carve-out is `shipmate-engine` — a single fixed
+  edited to add or remove an environment — every cell job binds the row's
+  `env_binding`, written once, for every env. The one carve-out is `shipmate-engine` — a single fixed
   environment name, not a logical environment a consumer defines or names
   itself, that exists purely to scope the App private key to the
   default-branch ref (see `docs/github-app.md` §Key-exposure boundary). It
@@ -449,8 +438,10 @@ aws.apply.role      = "arn:aws:iam::9817:role/shipmate-apply"
 aws.apply.workloads.net-edge.role = "arn:aws:iam::9817:role/net-edge"
 ```
 
-An environment entry holds `region`, `vars` and `aws`, and nothing else. `aws`
-is the only provider implemented; any other provider key is refused by name.
+An environment entry holds `region`, `vars`, `aws` and `shared`, and nothing
+else. `aws` is the only provider implemented; any other provider key is refused
+by name. `shared = true` binds the environment as one bare `<env>` on both paths
+instead of the `<env>-plan` / `<env>-apply` pair (§Env model, shared mode).
 
 TOML bare keys admit letters, digits, `_` and `-`, so an ordinary environment
 name needs no quoting. Quote anything outside that set.
@@ -577,7 +568,8 @@ Every condition below refuses at detect, before any cell starts.
 | A tier sets an empty role | that resolves to a skipped credentials step, not to a credential |
 | A provider block resolves no role on any tier | dead config; apply-only is legal, all-empty is not |
 | A field the provider does not define, or `vars` inside a provider block | a per-tier `vars` would let plan and apply inject different values, and every apply would then fail as stale |
-| An environment key other than `region`, `vars`, `aws` | catches an unimplemented provider and a misspelled key alike |
+| An environment key other than `region`, `vars`, `aws`, `shared` | catches an unimplemented provider and a misspelled key alike |
+| `shared` that is not a TOML boolean | a quoted `"true"` would otherwise read as unshared and bind the split pair the repository believes it gave up |
 | A shared environment declaring `aws.plan` | shared mode has one environment, and it resolves `aws.apply` on both paths |
 | `vars` naming anything outside `TF_VAR_*` / `TF_WORKSPACE`, or holding a non-string | see the allowlist above |
 | Malformed shape, or a structural key in a position the grammar does not give it | a string where a mapping is required, and the reverse |
@@ -595,9 +587,11 @@ Every condition below refuses at detect, before any cell starts.
 There is no fallback to `vars.*` on any path. An environment absent from the
 table resolves an empty role, and the cell's credentials step is skipped
 explicitly. A shared-mode environment resolves `aws.apply` on both paths. Each
-row carries what its detect resolved: `role_arn`, `cred_region`, `tf_vars` and
+row carries what its detect resolved: `role_arn`, `cred_region`, `tf_vars`,
 `config_path` — the tier actually consulted, which is diagnostic and read by
-nothing.
+nothing — and `env_binding`, the GitHub Environment the cell's job binds: the
+bare `<env>` when shared, `<env>-plan` or `<env>-apply` for the calling path
+otherwise.
 
 ### Adding and removing an environment
 
@@ -1160,13 +1154,10 @@ instead, and anything outside the env charset (lowercase letters, digits, `-`,
 leading space, an internal space, a path separator — is refused as not an
 environment name. None of them would match anything, and a silently inert entry
 would leave an operator believing an environment is ungated when it is not. This
-is `explicit_envs`' rule, in `validate_env_name_list`, and the opposite of
-`SHIPMATE_SHARED_ENVS` (§Env model), where a mistyped entry is silently
-un-listed.
+is `explicit_envs`' rule, in `validate_env_name_list`.
 
 **Absent or empty exempts nothing**: every environment keeps the ruleset's review
-requirement, so *what applies* is what applied before the setting existed. This
-is the opposite direction from `SHIPMATE_SHARED_ENVS`, where unset means split.
+requirement, so *what applies* is what applied before the setting existed.
 An absent key and `ungated_envs = []` are indistinguishable: both exempt nothing,
 and there is no second source for the absent one to fall through to.
 
@@ -2123,11 +2114,11 @@ reaches the process.
 | --- | --- | --- |
 | plan cells, drift cells | `<env>-plan` | the read key |
 | apply cells, unlock cells | `<env>-apply` | the write key |
-| any of the above when the env is in `SHIPMATE_SHARED_ENVS` | bare `<env>` | one value for both paths |
+| any of the above when the env's entry holds `shared = true` | bare `<env>` | one value for both paths |
 
 Drift reads and unlock writes, so each lands on the tier that matches what it
 does. **The read/write split needs the split environments**: an environment
-opted into `SHIPMATE_SHARED_ENVS` has one key serving both paths and forfeits
+holding `shared = true` has one key serving both paths and forfeits
 the split, consistent with what it already forfeits in §Env model.
 
 ### Values that differ between the two tiers

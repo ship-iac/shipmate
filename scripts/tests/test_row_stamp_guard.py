@@ -1,7 +1,8 @@
-"""Every matrix row every detect emits carries all four resolved fields: `role_arn`,
-`cred_region`, `tf_vars` and `config_path`. Only `tf_vars` reaches a cell action, as its
-`tf-vars` input; `role_arn` and `cred_region` are read by the job's credentials step, and
-`config_path` is diagnostic and read by nothing (`CONTRACT.md` §Resolution).
+"""Every matrix row every detect emits carries all five resolved fields: `role_arn`,
+`cred_region`, `tf_vars`, `config_path` and `env_binding`. Only `tf_vars` reaches a cell action,
+as its `tf-vars` input; `role_arn` and `cred_region` are read by the job's credentials step,
+`env_binding` names the GitHub Environment the job binds, and `config_path` is diagnostic and
+read by nothing (`CONTRACT.md` §Resolution).
 
 `scripts/env-inject` refuses anything but a JSON object of strings and there is no default
 anywhere on the route, so a row that reaches a cell without `tf_vars` fails that cell -- and one
@@ -67,12 +68,15 @@ _TABLE = {
 
 
 def _table(tier):
-    """The four fields `_TABLE` resolves for a dev-eu cell on `tier`."""
+    """The five fields `_TABLE` resolves for a dev-eu cell on `tier`. Every site's assertion
+    compares whole rows against this, so dropping `env_binding` from `resolve` reddens every site.
+    """
     return {
         "role_arn": _PLAN_ROLE if tier == "plan" else _APPLY_ROLE,
         "cred_region": "eu-west-1",
         "tf_vars": {},
         "config_path": tier,
+        "env_binding": "dev-eu-plan" if tier == "plan" else "dev-eu-apply",
     }
 
 
@@ -209,31 +213,30 @@ def test_the_bare_apply_all_rows_resolve_the_apply_tier(monkeypatch, tmp_path):
 
 
 def test_a_shared_environment_resolves_the_apply_tier_on_the_plan_path(monkeypatch, tmp_path):
-    """The plan detect passes `plan`, and a shared environment still resolves `aws.apply`: one
-    GitHub Environment on both paths means one credential on both paths. This is the property
-    the `shared-envs` wiring exists for, and `test_shared_envs_wiring_guard.py` pins the two
-    hops that carry the value.
+    """The plan detect passes `plan`, and an entry holding `shared = true` still resolves
+    `aws.apply` and binds the bare environment: one GitHub Environment on both paths means one
+    credential on both paths.
 
-    Mutation: pass an empty set as `stamp_rows`' `shared_envs` at `build-matrix`'s call site.
+    Mutation: pass `"plan"` as `config_path` for a shared entry in `resolve`, or bind
+    `f"{env}-{path}"` unconditionally.
     """
     shared = {
         "layout": "folder",
         "environments": {
-            "dev-eu": {"region": "eu-west-1", "aws": {"apply": {"role": _APPLY_ROLE}}}
+            "dev-eu": {
+                "region": "eu-west-1",
+                "shared": True,
+                "aws": {"apply": {"role": _APPLY_ROLE}},
+            }
         },
     }
-    outputs, _ = tbm._run_main(
-        monkeypatch,
-        tmp_path,
-        {**_PLAN_ENV, "SHIPMATE_SHARED_ENVS": "dev-eu"},
-        head_sha="cafe1234",
-        table=shared,
-    )
+    outputs, _ = tbm._run_main(monkeypatch, tmp_path, _PLAN_ENV, head_sha="cafe1234", table=shared)
     assert json.loads(outputs["matrix"])["include"] == [
         {
             "stack": "stacks/app",
             "environment": "dev-eu",
             "workload": "",
             **_table("apply"),
+            "env_binding": "dev-eu",
         }
     ]

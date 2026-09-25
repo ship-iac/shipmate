@@ -47,9 +47,8 @@ jobs:
           head-sha: ${{ inputs.ref }}
           github-token: ${{ github.token }}
           app-id: ${{ vars.SHIPMATE_APP_ID }}
-          shared-envs: ${{ vars.SHIPMATE_SHARED_ENVS }}
       # The apply path runs this pre-flight in apply-env-level.yml's `snapshot` job, before any
-      # wave binds an environment; the `unlock` job binds the same `<env>-apply`, so it needs the
+      # wave binds an environment; the `unlock` job binds the same environment, so it needs the
       # same refusal. A failure here fails `detect`, which `unlock`'s `!failure()` reads as "do
       # not run".
       - name: Verify the unlock-path environment exists
@@ -63,7 +62,6 @@ jobs:
           # object. It refuses an empty cell set by design, which is why the step's `if:` filters
           # `[]` out rather than letting it decide.
           waves-json: ${{ format('{{"wave0":{0}}}', steps.d.outputs.cells) }}
-          shared-envs: ${{ vars.SHIPMATE_SHARED_ENVS }}
           github-token: ${{ github.token }}
 
   unlock:
@@ -85,9 +83,7 @@ jobs:
       # flat.
       matrix:
         include: ${{ fromJSON(needs.detect.outputs.cells) }}
-    environment: >-
-      ${{ contains(format(',{0},', vars.SHIPMATE_SHARED_ENVS), format(',{0},', matrix.environment))
-      && matrix.environment || format('{0}-apply', matrix.environment) }}
+    environment: ${{ matrix.env_binding }}
     # Byte-identical to the wave jobs' group in apply-env-level.yml (guarded by
     # scripts/tests/test_apply_cell_concurrency_guard.py and test_verb_path_isolation.py). That
     # identity queues an unlock behind a live apply for the cell, so the lock is then gone or

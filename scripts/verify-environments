@@ -9,8 +9,8 @@ job bound, so plan and apply hash identically whatever it bound and the
 apply-match fingerprint pins nothing about the binding. Existence, checked before
 any wave starts, is the only discriminator.
 
-Scope: the apply-side binding only. The plan side is bound in the consumer's
-own `plan.yml`/`drift.yml`, which the engine cannot read.
+Scope: the apply-path and unlock bindings. Plan and drift cells are not
+checked here.
 """
 
 import json
@@ -18,35 +18,17 @@ import os
 import sys
 
 
-def apply_binding(env, shared_envs):
-    """The environment `apply-env-level.yml`'s wave jobs bind for a logical env.
-
-    The wave jobs' rule, restated — a listed env binds the bare name, anything
-    else falls through to `<env>-apply`. Entries are compared whole between comma
-    boundaries, so a space un-lists one (`dev-eu, dev-us` leaves `dev-us`
-    unlisted) and `dev-us` does not match an entry `dev-us-2`; matching is
-    case-insensitive because GitHub's `contains()` is.
-
-    This rule exists twice: here, and as the YAML ternary in eight wave jobs.
-    `scripts/env-config` reads the same variable a third time, to decide which tier
-    a cell resolves. No side is derived from another: all three are compared to one
-    hand-written constant in scripts/tests/test_apply_env_binding_guard.py.
-    """
-    listed = f",{env},".lower() in f",{shared_envs},".lower()
-    return env if listed else f"{env}-apply"
-
-
-def required_bindings(waves, shared_envs):
-    """Every apply-side environment name this run's cells will bind."""
+def required_bindings(waves):
+    """Every environment this run's cells will bind: the `env_binding` detect stamped."""
     try:
-        envs = {cell["environment"] for cells in waves.values() for cell in cells or []}
+        bindings = {cell["env_binding"] for cells in waves.values() for cell in cells or []}
     except KeyError as exc:
         raise SystemExit(
             f"::error::a wave matrix cell carries no {exc} key, so the environment it "
             "would bind could not be checked; this is a malformed hand-off rather than "
             "an empty run; refusing to apply."
         ) from exc
-    if not envs:
+    if not bindings:
         # The callers gate every route on a non-empty level, so a payload with no
         # cell is a broken handoff, not an idle run. Passing it would make an
         # unreadable matrix the way to skip this check entirely.
@@ -55,7 +37,7 @@ def required_bindings(waves, shared_envs):
             "checked; this workflow is only called when there is work to apply, so "
             "this is a malformed hand-off rather than an empty run."
         )
-    return sorted({apply_binding(env, shared_envs) for env in envs})
+    return sorted(bindings)
 
 
 def existing_names(listing):
@@ -85,7 +67,7 @@ def main():
             f"::error::the wave matrices did not parse as JSON ({exc}), so no "
             "environment could be checked; refusing to apply."
         ) from exc
-    bindings = required_bindings(waves, os.environ["SHIPMATE_SHARED_ENVS"])
+    bindings = required_bindings(waves)
     existing = existing_names(json.load(sys.stdin))
     missing = [b for b in bindings if b not in existing]
     if missing:
@@ -95,10 +77,9 @@ def main():
             "demand with no reviewers, no wait timer and no deployment branch "
             "policy, so the apply would run outside every control that environment "
             "is meant to carry. Two ways to fix it: create each environment named "
-            "above, or correct the SHIPMATE_SHARED_ENVS repository variable so the "
-            "apply binds the environments you did create — a listed env binds the "
-            "bare <env>, anything else binds <env>-apply, and entries are compared "
-            "whole between commas so a stray space un-lists one."
+            "above, or correct the environment's entry in `.github/shipmate.toml` so "
+            "the apply binds the environments you did create — `shared = true` binds "
+            "the bare <env>, anything else binds <env>-apply."
         )
     print(f"::notice::apply-path environments verified: {', '.join(bindings)}")
 

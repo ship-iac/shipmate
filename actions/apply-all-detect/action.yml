@@ -14,9 +14,6 @@ inputs:
     description: The PR's reviewDecision, from the review job. Only NONE and APPROVED apply everything; an empty value means the decision never arrived and holds every env.
     required: false
     default: ''
-  shared-envs:
-    description: The SHIPMATE_SHARED_ENVS repository variable, verbatim. Passed in because a script cannot read `vars` itself; it decides which envs resolve the apply-tier credential on both paths.
-    required: true
 outputs:
   envlevel0_waves: { description: JSON wave0..wave7 map for env-level 0, value: "${{ steps.d.outputs.envlevel0_waves }}" }
   envlevel1_waves: { description: JSON wave0..wave7 map for env-level 1, value: "${{ steps.d.outputs.envlevel1_waves }}" }
@@ -42,5 +39,4 @@ runs:
         SHIPMATE_HEAD_SHA: ${{ inputs.head-sha }}
         SHIPMATE_APP_ID: ${{ inputs.app-id }}
         SHIPMATE_REVIEW_DECISION: ${{ inputs.review-decision }}
-        SHIPMATE_SHARED_ENVS: ${{ inputs.shared-envs }}
       run: python3 "$GITHUB_ACTION_PATH/../../scripts/apply-all-detect"

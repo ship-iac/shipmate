@@ -62,7 +62,6 @@ jobs:
           base-sha: ${{ needs.facts.outputs.base-sha }}
           head-repo: ${{ needs.facts.outputs.head-repo }}
           head-sha: ${{ needs.facts.outputs.head-sha }}
-          shared-envs: ${{ vars.SHIPMATE_SHARED_ENVS }}
       - name: fmt check
         run: terramate fmt --check
       - name: stale codegen check
@@ -78,12 +77,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.detect.outputs.matrix) }}
-    # SHIPMATE_SHARED_ENVS is a repository variable, not a workflow input: which environment a
-    # cell binds decides whether the reviewer gate and the cloud role reach it, and branch content
-    # must not choose that. The apply side binds the same variable the same way.
-    environment: >-
-      ${{ contains(format(',{0},', vars.SHIPMATE_SHARED_ENVS), format(',{0},', matrix.environment))
-      && matrix.environment || format('{0}-plan', matrix.environment) }}
+    # Resolved by `scripts/env-config`'s `resolve` from the default branch's table, so branch
+    # content cannot choose it. Do not compute a binding here.
+    environment: ${{ matrix.env_binding }}
     name: ${{ matrix.stack }} / ${{ matrix.environment }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

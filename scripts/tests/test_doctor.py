@@ -84,36 +84,18 @@ def test_render_annotations_one_line_per_level_and_escapes():
 
 
 def test_envs_unavailable_skips_the_probes_that_need_the_declared_set(monkeypatch):
-    """Without the declared environment set, the only findings a listing alone
-    supports are the ambiguous-naming ones -- a missing half of a split pair is
-    unknowable, since nothing says `prod` is an environment this repository
-    declares."""
-    monkeypatch.setattr(doctor, "_gh_json", _existence("dev-eu", "dev-eu-plan", "prod-apply"))
-    out = doctor._environment_warnings(_ctx(envs=set(), envs_available=False))
-    assert [lvl for lvl, _ in out] == [doctor.WARNING, doctor.NOTICE]
-    assert "`dev-eu` and `dev-eu-plan` exist side by side" in out[0][1]
-    assert all("prod" not in text for _, text in out)
-    assert "no plan run" in out[1][1]
+    """Without the declared environment set there is nothing to check a listing
+    against, so the probe reads nothing and says the probes were skipped.
 
-
-def test_envs_unavailable_reports_the_ambiguity_the_declared_set_would_have(monkeypatch):
-    """The finding is the same one a green plan run produces, so a mid-migration
-    doctor is not worth less than a post-migration one. One flaked cell out of a
-    13-cell fan-out withholds the declared set, and the ambiguity warning is the
-    reason to run doctor between the merge and the delete."""
-    monkeypatch.setattr(doctor, "_gh_json", _existence("dev-eu", "dev-eu-plan", "dev-eu-apply"))
-    dark = doctor._environment_warnings(_ctx(envs=set(), envs_available=False))
-    lit = doctor._environment_warnings(_ctx(envs={"dev-eu"}))
-    assert [t for lvl, t in dark if lvl == doctor.WARNING] == [t for _, t in lit]
-
-
-def test_split_naming_alone_is_never_read_as_ambiguous(monkeypatch):
-    """The name scan must not turn every split repository's report into a
-    warning: `<env>-plan`/`<env>-apply` with no bare `<env>` is the default
-    naming, and only the bare name existing beside a suffixed one is ambiguous."""
-    monkeypatch.setattr(doctor, "_gh_json", _existence("dev-eu-plan", "dev-eu-apply", "prod-plan"))
-    out = doctor._environment_warnings(_ctx(envs=set(), envs_available=False))
-    assert [lvl for lvl, _ in out] == [doctor.NOTICE]
+    Mutation: move the listing read above the `envs_available` check."""
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: pytest.fail(f"read {path}"))
+    assert doctor._environment_warnings(_ctx(envs=set(), envs_available=False)) == [
+        (
+            doctor.NOTICE,
+            "no plan run with cell summaries for this commit \u2014 the declared "
+            "environment set is unknown, so the environment probes were skipped.",
+        )
+    ]
 
 
 def test_ctx_from_env_missing_cells_dir_yields_empty_envs(monkeypatch, tmp_path):
@@ -265,11 +247,14 @@ def _quiet_new_probes():
         f"repos/{_ENGINE_REPO}/releases/latest": {"tag_name": "v9.9.9"},
         f"repos/{_ENGINE_REPO}/commits/v9.9.9": {"sha": _SHA},
         _CONFIG_READ: _wf_file(CANONICAL),
+        _CONFIG_ON_DEFAULT: _wf_file(CANONICAL),
     }
 
 
 #: The config probe's read. `_quiet_new_probes` says why a sound table is silent here.
 _CONFIG_READ = f"repos/{_REPO}/contents/{doctor.CONFIG_PATH}{_REF}"
+#: The environment probes' read: execution binds from the default branch's copy.
+_CONFIG_ON_DEFAULT = f"repos/{_REPO}/contents/{doctor.CONFIG_PATH}?ref={_BRANCH}"
 
 
 def test_healthy_repo_emits_nothing(monkeypatch):
@@ -304,86 +289,277 @@ def test_missing_environment_of_the_split_pair_warned(monkeypatch):
     assert "`dev-eu-plan`" not in text
 
 
-def _existence(*names):
-    """`_environment_warnings`' only read: the environments listing."""
-    return lambda path: _environments(*names)
+#: Hand-written tables for the mode tests. `CANONICAL` declares `dev-eu` without the key.
+_SHARED_TABLE = """\
+layout = "dry"
+
+[environments.dev-eu]
+region = "eu-west-1"
+shared = true
+"""
+_UNSHARED_TABLE = """\
+layout = "dry"
+
+[environments.dev-eu]
+region = "eu-west-1"
+shared = false
+"""
+#: Well-formed TOML that `validate_structure` refuses: an entry that is not a table.
+_INVALID_TABLE = """\
+layout = "dry"
+
+[environments]
+dev-eu = 7
+"""
 
 
-def test_env_mode_names_each_of_the_four_listings():
-    """The whole inference table, pinned on the returned string. The mode comes
-    from environment NAMES and nothing else -- reading the repository variable
-    that actually selects it would need an App permission `app/manifest.json`
-    does not declare."""
-    assert doctor._env_mode("dev-eu", {"dev-eu", "dev-eu-apply"}) == "ambiguous"
-    assert doctor._env_mode("dev-eu", {"dev-eu"}) == "shared"
-    assert doctor._env_mode("dev-eu", {"dev-eu-plan", "dev-eu-apply"}) == "split"
-    assert doctor._env_mode("dev-eu", {"prod-eu-plan"}) == "missing"
-    # Either half of the suffixed pair alone still means split -- the missing
-    # half is a finding, not a different mode.
-    assert doctor._env_mode("dev-eu", {"dev-eu-plan"}) == "split"
-    assert doctor._env_mode("dev-eu", {"dev-eu-apply"}) == "split"
-    assert doctor._env_mode("dev-eu", {"dev-eu", "dev-eu-plan"}) == "ambiguous"
+def _existence(*names, table=CANONICAL):
+    """`_environment_warnings`' two reads: the environments listing and the table."""
+    responses = {
+        f"repos/{_REPO}/environments?per_page=100": _environments(*names),
+        _CONFIG_ON_DEFAULT: _wf_file(table),
+    }
+    return lambda path: responses[path]
 
 
-def test_no_environment_at_all_names_both_modes(monkeypatch):
-    """A consumer with nothing created must be able to reach either mode from
-    the finding alone: both split names, the shared name, and the variable that
-    opts into shared."""
+#: Every finding the split and shared namings produce, hand-written.
+_MISSING_PLAN = (
+    doctor.WARNING,
+    "GitHub Environment `dev-eu-plan` does not exist \u2014 the plan jobs for stacks tagged "
+    "`env:dev-eu` bind a name GitHub auto-creates empty, with no secrets and none of its "
+    "protection rules. Create it.",
+)
+_MISSING_APPLY = (
+    doctor.WARNING,
+    "GitHub Environment `dev-eu-apply` does not exist \u2014 the apply jobs for stacks tagged "
+    "`env:dev-eu` bind a name GitHub auto-creates empty, with no secrets and none of its "
+    "protection rules. Create it.",
+)
+_MISSING_SHARED = (
+    doctor.WARNING,
+    "GitHub Environment `dev-eu` does not exist \u2014 the plan and apply jobs for stacks "
+    "tagged `env:dev-eu` bind a name GitHub auto-creates empty, with no secrets and none of "
+    "its protection rules. Create it.",
+)
+#: The shared-mode NOTICE for a bare `dev-eu` with no approval rules.
+_SHARED_UNREVIEWED = (
+    doctor.NOTICE,
+    "GitHub Environment `dev-eu` \u2014 shared between plan and apply by `shared = true` in its "
+    "`[environments.dev-eu]` entry \u2014 has no approval rules (required reviewers or a wait "
+    "timer) \u2014 pre-merge applies to it are unreviewed, and no reviewer gate is available "
+    "while it is shared: a reviewer here would stall the plan cells and the nightly drift run. "
+    "Split it into `dev-eu-plan` and `dev-eu-apply` if you need one.",
+)
+
+
+def _env_findings(monkeypatch, table, *envs):
+    """Both existence and protection findings for `envs`, against `table`."""
+    responses = _protection(*envs, table=table)
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    return doctor._environment_warnings(_ctx()) + doctor._env_protection_warnings(_ctx())
+
+
+def test_the_table_selects_the_mode(monkeypatch):
+    """The mode comes from `shared = true` in the environment's table entry, never from
+    which environments exist: the same bare `dev-eu` is a healthy shared environment under
+    the key and two missing halves without it. `shared = false` reads as absent.
+
+    Mutation: have `_env_mode` return `SPLIT` regardless of the table -- the shared case
+    reddens; return `SHARED` -- the other two redden."""
+    assert _env_findings(monkeypatch, _SHARED_TABLE, _env("dev-eu")) == [_SHARED_UNREVIEWED]
+    split = [_MISSING_PLAN, _MISSING_APPLY]
+    assert _env_findings(monkeypatch, CANONICAL, _env("dev-eu")) == split
+    assert _env_findings(monkeypatch, _UNSHARED_TABLE, _env("dev-eu")) == split
+
+
+#: Hand-written: the environment probes' one finding when the default branch's table is unusable.
+_DEFAULT_TABLE_SKIPPED = (
+    doctor.NOTICE,
+    "the environment probes were skipped — the default branch's `.github/shipmate.toml` "
+    "could not be read or is invalid, and it alone selects which GitHub Environments a run "
+    "binds. While it is missing or invalid there, every run refuses at detect.",
+)
+
+
+def test_an_invalid_default_table_skips_the_environment_probes(monkeypatch):
+    """`shared_envs` reads entries without a mapping guard, so it may only see a table
+    `validate_structure` accepted. An invalid default-branch table selects no naming: the
+    environment probes say they were skipped, once, beside the config probe's own finding
+    about the examined commit's copy.
+
+    Mutation: have `_shared_envs` call `shared_envs` on the unvalidated `parse_table`
+    result -- the non-table entry raises inside every environment probe and `warnings()`
+    degrades them."""
+    responses = {
+        f"repos/{_REPO}/rules/branches/{_BRANCH}?per_page=100": _gate_rule(),
+        f"repos/{_REPO}/environments?per_page=100": _environments("dev-eu", "shipmate-engine"),
+        **_quiet_new_probes(),
+        _CONFIG_READ: _wf_file(_INVALID_TABLE),
+        _CONFIG_ON_DEFAULT: _wf_file(_INVALID_TABLE),
+    }
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    assert doctor.warnings(_ctx()) == [
+        _DEFAULT_TABLE_SKIPPED,
+        (
+            doctor.WARNING,
+            "`.github/shipmate.toml` at the commit under examination is not valid: "
+            "environment dev-eu must be a mapping, got int. Merging it refuses every "
+            "operation that reads the table. Execution still reads the default branch's "
+            "copy, which this says nothing about.",
+        ),
+    ]
+
+
+def test_an_unreadable_default_table_is_not_read_as_split(monkeypatch):
+    """No naming is guessed when the default branch's table cannot be read: a split guess
+    reports `dev-eu-plan`/`dev-eu-apply` missing on a repository whose runs bind `dev-eu`.
+
+    Mutation: have `_shared_envs` return `set()` when the read fails -- the split
+    existence findings replace the NOTICE."""
+
+    def gh(path):
+        if path == _CONFIG_ON_DEFAULT:
+            raise SystemExit("::error::command failed (1): gh api ...")
+        return _environments("dev-eu")
+
+    monkeypatch.setattr(doctor, "_gh_json", gh)
+    found = (
+        doctor._environment_warnings(_ctx())
+        + doctor._env_protection_warnings(_ctx())
+        + doctor._plan_env_secret_warnings(_ctx())
+    )
+    assert found == [_DEFAULT_TABLE_SKIPPED]
+
+
+def _environment_probes(monkeypatch, ctx):
+    """(the three environment probes' findings, every path they asked for)."""
+    responses = {
+        f"repos/{_REPO}/environments?per_page=100": _environments("dev-eu"),
+        _CONFIG_ON_DEFAULT: _wf_file(_SHARED_TABLE),
+    }
+    asked = []
+
+    def gh(path):
+        asked.append(path)
+        return responses[path]
+
+    monkeypatch.setattr(doctor, "_gh_json", gh)
+    found = (
+        doctor._environment_warnings(ctx)
+        + doctor._env_protection_warnings(ctx)
+        + doctor._plan_env_secret_warnings(ctx)
+    )
+    return found, asked
+
+
+def test_an_interpreter_below_the_floor_skips_the_environment_probes(monkeypatch):
+    """Below the Python floor no revision of the table is at fault, and the config probe's
+    WARNING already says so: the skip NOTICE blames the runner, not the file, and nothing is
+    read for probes that cannot select a naming.
+
+    Mutation: drop the NOTICE (`return []`) -- an empty list reads as every environment
+    existing; or move the refusal check after `_existing_env_names` in any probe -- the
+    listing is read."""
+    monkeypatch.setattr(sys, "version_info", (3, 10, 6, "final", 0))
+    found, asked = _environment_probes(monkeypatch, _ctx())
+    assert found == [
+        (
+            doctor.NOTICE,
+            "the environment probes were skipped — this runner's Python refuses the "
+            "environment table, so which GitHub Environments a run binds cannot be "
+            "determined here.",
+        )
+    ]
+    assert asked == []
+
+
+def test_no_declared_env_reads_nothing_in_the_environment_probes(monkeypatch):
+    """With no env to probe there is no binding to select, so neither the listing nor the
+    default branch's table is read, and a failed read cannot report probes that had no work.
+
+    Mutation: remove `_environment_warnings`' early return on an empty `ctx["envs"]` -- it
+    reads the listing and the table."""
+    found, asked = _environment_probes(monkeypatch, _ctx(envs=set()))
+    assert found == []
+    assert asked == []
+
+
+@pytest.mark.parametrize(
+    ("at_head", "branch", "ref"),
+    [(CANONICAL, "main", "main"), (_UNSHARED_TABLE, "release/v1", "release%2Fv1")],
+    ids=["key-absent-at-head", "shared-false-at-head-slashed-branch"],
+)
+def test_the_environment_probes_follow_the_default_branchs_table(monkeypatch, at_head, branch, ref):
+    """Execution binds from the default branch's table, so on a pull request that removes
+    `shared = true` every run until merge still binds the bare `dev-eu`: that is the
+    environment the probes inspect. The branch name is URL-quoted into `?ref=`.
+
+    Mutation: read the table at `_contents_ref(ctx)` instead of the default branch -- the
+    probes inspect `dev-eu-plan`/`dev-eu-apply`; or interpolate the branch unquoted --
+    the second case reads `?ref=release/v1`."""
+    on_default = f"repos/{_REPO}/contents/{doctor.CONFIG_PATH}?ref={ref}"
+    responses = {
+        f"repos/{_REPO}/environments?per_page=100": _environments("dev-eu"),
+        _CONFIG_READ: _wf_file(at_head),
+        on_default: _wf_file(_SHARED_TABLE),
+        f"repos/{_REPO}/environments/dev-eu": _env("dev-eu"),
+        f"repos/{_REPO}/environments/dev-eu/secrets?per_page=100": _secrets(),
+    }
+    asked = []
+
+    def gh(path):
+        asked.append(path)
+        return responses[path]
+
+    monkeypatch.setattr(doctor, "_gh_json", gh)
+    ctx = _ctx(default_branch=branch)
+    found = (
+        doctor._environment_warnings(ctx)
+        + doctor._env_protection_warnings(ctx)
+        + doctor._plan_env_secret_warnings(ctx)
+    )
+    assert found == [_SHARED_UNREVIEWED]
+    listing = f"repos/{_REPO}/environments?per_page=100"
+    assert asked == [
+        listing,
+        on_default,
+        listing,
+        on_default,
+        f"repos/{_REPO}/environments/dev-eu",
+        listing,
+        on_default,
+        f"repos/{_REPO}/environments/dev-eu/secrets?per_page=100",
+    ]
+
+
+def test_a_missing_environment_is_named_by_the_selected_naming(monkeypatch):
+    """With nothing created, split mode names each half and shared mode the bare name,
+    and neither names the naming the table does not select.
+
+    Mutation: report the other mode's names from `_environment_warnings`."""
     monkeypatch.setattr(doctor, "_gh_json", _existence("shipmate-engine"))
-    out = doctor._environment_warnings(_ctx())
-    assert len(out) == 1
-    level, text = out[0]
-    assert level == doctor.WARNING
-    assert "`dev-eu-plan`" in text
-    assert "`dev-eu-apply`" in text
-    assert "`dev-eu`" in text
-    assert "SHIPMATE_SHARED_ENVS" in text
+    assert doctor._environment_warnings(_ctx()) == [_MISSING_PLAN, _MISSING_APPLY]
+    monkeypatch.setattr(doctor, "_gh_json", _existence("shipmate-engine", table=_SHARED_TABLE))
+    assert doctor._environment_warnings(_ctx()) == [_MISSING_SHARED]
 
 
-def test_ambiguous_environment_naming_is_the_phantom_control_warning(monkeypatch):
-    """Both namings present is the one silent failure: whichever environment nothing binds
-    is protected by rules in no code path, reading as a control that is there. So the
-    finding names both, says the repository variable decides the binding on every path and
-    where each path binds it from, and hedges WHICH naming is unbound -- a consumer still
-    pinned to an engine that binds `-plan` statically leaves both live, so it may not call
-    one inert nor advise deleting it."""
-    monkeypatch.setattr(doctor, "_gh_json", _existence("dev-eu", "dev-eu-apply"))
-    out = doctor._environment_warnings(_ctx())
-    # Two findings and no more: the ambiguity WARNING plus the missing `dev-eu-plan`
-    # (its own test below). Without a count, `out[0]` is an unpinned position.
-    assert len(out) == 2, out
-    level, text = out[0]
-    assert level == doctor.WARNING
-    assert "`dev-eu`" in text
-    assert "`dev-eu-apply`" in text
-    assert "SHIPMATE_SHARED_ENVS" in text
-    assert "the engine's reusable plan and drift workflows" in text
-    # Both halves are asserted -- the binding one, and the phantom-control one this test
-    # is named for -- or the name and docstring claim more than the body checks.
-    assert "Either naming may therefore be bound by nothing" in text
-    assert "reading as a control that is in no code path" in text
-    assert "the other is bound by nothing" not in text
-    assert "Delete the environments" not in text
+def test_both_namings_present_report_only_the_selected_namings_gaps(monkeypatch):
+    """No finding names the naming the table does not select: with both present nothing
+    is reported, and beside a half pair only the missing half is.
 
-
-def test_ambiguous_naming_still_reports_the_missing_half(monkeypatch):
-    """A consumer holding `dev-eu` + `dev-eu-plan` and no `dev-eu-apply` must
-    still be told `dev-eu-apply` does not exist. The ambiguity WARNING says
-    nothing about which environments exist, so dropping this loop hides a
-    genuinely half-created split pair behind it -- fail-closed."""
+    Mutation: append a warning for each present environment of the other naming in
+    `_environment_warnings`."""
+    names = ("dev-eu", "dev-eu-plan", "dev-eu-apply")
+    monkeypatch.setattr(doctor, "_gh_json", _existence(*names))
+    assert doctor._environment_warnings(_ctx()) == []
+    monkeypatch.setattr(doctor, "_gh_json", _existence(*names, table=_SHARED_TABLE))
+    assert doctor._environment_warnings(_ctx()) == []
     monkeypatch.setattr(doctor, "_gh_json", _existence("dev-eu", "dev-eu-plan"))
-    out = doctor._environment_warnings(_ctx())
-    missing = [t for lvl, t in out if lvl == doctor.WARNING and "does not exist" in t]
-    assert len(missing) == 1, out
-    assert "`dev-eu-apply` does not exist" in missing[0]
-    # Not "cannot apply": while `dev-eu` exists it may be what the apply waves
-    # bind, so the consequence is conditional.
-    assert "cannot apply" not in missing[0]
+    assert doctor._environment_warnings(_ctx()) == [_MISSING_APPLY]
 
 
 def test_split_missing_half_does_not_claim_the_jobs_cannot_run(monkeypatch):
-    """Same correction as the MISSING-mode finding, in the other branch of the
-    same helper: with `dev-eu-plan` present and `dev-eu-apply` absent the apply
+    """With `dev-eu-plan` present and `dev-eu-apply` absent the apply
     binds a name GitHub auto-creates empty and proceeds. "cannot apply" sends the
     reader looking for a failed run."""
     monkeypatch.setattr(doctor, "_gh_json", _existence("dev-eu-plan"))
@@ -396,24 +572,10 @@ def test_split_missing_half_does_not_claim_the_jobs_cannot_run(monkeypatch):
     assert "auto-creates empty" in text
 
 
-def test_missing_mode_says_the_binding_auto_creates_an_empty_environment(monkeypatch):
-    """`env:<env>` stacks with neither suffixed environment do NOT stop planning:
-    the binding resolves to a name GitHub auto-creates empty, so the plan runs with
-    none of that environment's secrets or protection rules. Claiming they "cannot
-    plan or apply" sends the reader looking for a failed run there is none of."""
-    monkeypatch.setattr(doctor, "_gh_json", _existence("shipmate-engine"))
-    out = doctor._environment_warnings(_ctx())
-    assert len(out) == 1
-    level, text = out[0]
-    assert level == doctor.WARNING
-    assert "cannot plan or apply" not in text
-    assert "auto-creates empty" in text
-
-
 def test_shared_environment_produces_no_existence_finding(monkeypatch):
-    """The bare name alone IS shared mode, a supported configuration -- not a
-    half-created split pair."""
-    monkeypatch.setattr(doctor, "_gh_json", _existence("dev-eu"))
+    """The bare name alone under `shared = true` is a supported configuration --
+    not a half-created split pair."""
+    monkeypatch.setattr(doctor, "_gh_json", _existence("dev-eu", table=_SHARED_TABLE))
     assert doctor._environment_warnings(_ctx()) == []
 
 
@@ -542,13 +704,15 @@ def test_degrade_note_names_the_probe_and_drops_the_workflow_command_prefix(monk
     assert "gh api" not in text and "rules/branches" not in text
 
 
-def _protection(*envs, listed=None):
+def _protection(*envs, listed=None, table=CANONICAL):
     """Responses for `_env_protection_warnings`: the environments listing the
-    probe reads first (by default naming exactly the fixtures given), plus each
-    fixture's per-environment protection read."""
+    probe reads first (by default naming exactly the fixtures given), the table
+    that selects each environment's naming, plus each fixture's per-environment
+    protection read."""
     out = {f"repos/{_REPO}/environments/{e['name']}": e for e in envs}
     names = [e["name"] for e in envs] if listed is None else listed
     out[f"repos/{_REPO}/environments?per_page=100"] = _environments(*names)
+    out[_CONFIG_ON_DEFAULT] = _wf_file(table)
     return out
 
 
@@ -645,7 +809,7 @@ def test_shared_env_with_reviewers_warns_about_plan_cells_and_drift(monkeypatch)
     no per-job filter, so on a shared environment reviewers stall the plan cells
     AND the nightly drift run -- both have to be named, or a consumer reads the
     finding as being only about applies."""
-    responses = _protection(_env("dev-eu", rules=("required_reviewers",)))
+    responses = _protection(_env("dev-eu", rules=("required_reviewers",)), table=_SHARED_TABLE)
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
     out = doctor._env_protection_warnings(_ctx())
     assert len(out) == 1
@@ -661,7 +825,9 @@ def test_shared_env_with_a_branch_policy_is_a_notice_naming_the_trade_both_ways(
     policy is a real control over which branches may claim its secrets, and simultaneously
     what refuses plan cells whose base ref it does not name. A consumer whose pull requests
     all target the default branch is correct to set it, so a WARNING would be unclearable."""
-    responses = _protection(_env("dev-eu", branch_policy={"protected_branches": True}))
+    responses = _protection(
+        _env("dev-eu", branch_policy={"protected_branches": True}), table=_SHARED_TABLE
+    )
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
     out = doctor._env_protection_warnings(_ctx())
     assert [lvl for lvl, _ in out] == [doctor.NOTICE, doctor.NOTICE]
@@ -670,46 +836,21 @@ def test_shared_env_with_a_branch_policy_is_a_notice_naming_the_trade_both_ways(
     assert "base ref" in policy
 
 
-def test_ambiguous_bare_env_with_a_branch_policy_keeps_the_plan_stall_warning(monkeypatch):
-    """The NOTICE above is shared mode's accepted trade and only shared mode's. While both
-    namings exist the bare environment is what an unmigrated `plan.yml` still binds, so a
-    policy on it is the plan-stall misconfiguration the plan environment's WARNING
-    diagnoses, not a secret-release control; a downgrade demotes an unfinished migration."""
-    responses = _protection(
-        _env("dev-eu", branch_policy={"protected_branches": True}),
-        _env("dev-eu-apply"),
-    )
-    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
-    out = doctor._env_protection_warnings(_ctx())
-    policy = [(lvl, t) for lvl, t in out if "branch policy" in t]
-    assert len(policy) == 1, out
-    assert policy[0][0] == doctor.WARNING
-    assert "base ref" in policy[0][1]
-    # The shared-mode NOTICE's own clause: it may not be reused here, because
-    # while the naming is ambiguous the policy is not "correct".
-    assert "Correct while every pull request targets a branch it names" not in policy[0][1]
-
-
 def test_shared_env_without_approval_rules_says_no_gate_is_available(monkeypatch):
     """The split apply-env note says applies are unreviewed; on a shared
     environment it must also say that adding a reviewer is not an option while
     the environment is shared -- otherwise the fix it implies stalls every plan
     cell."""
-    responses = _protection(_env("dev-eu"))
+    responses = _protection(_env("dev-eu"), table=_SHARED_TABLE)
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
-    out = doctor._env_protection_warnings(_ctx())
-    assert len(out) == 1
-    assert out[0][0] == doctor.NOTICE
-    assert "`dev-eu`" in out[0][1]
-    assert "unreviewed" in out[0][1]
-    assert "no reviewer gate is available" in out[0][1]
+    assert doctor._env_protection_warnings(_ctx()) == [_SHARED_UNREVIEWED]
 
 
-def test_ambiguous_naming_reads_the_protection_shape_of_both_namings(monkeypatch):
-    """Ambiguous mode reads every environment that exists, not one naming's alone --
-    pinned on the requested paths, which is all this asserts. The report-level statement
-    that one naming may be bound by nothing is `_environment_warnings`' ambiguity WARNING,
-    not a per-rule finding here."""
+def test_the_protection_probe_reads_only_the_selected_naming(monkeypatch):
+    """No job binds the naming the table does not select, so its protection shape is no
+    rule on any path and it is not read.
+
+    Mutation: have `_env_protection_warnings` read both namings."""
     responses = _protection(
         _env("dev-eu"),
         _env("dev-eu-plan"),
@@ -722,64 +863,34 @@ def test_ambiguous_naming_reads_the_protection_shape_of_both_namings(monkeypatch
         return responses[path]
 
     monkeypatch.setattr(doctor, "_gh_json", gh)
-    doctor._env_protection_warnings(_ctx())
-    assert f"repos/{_REPO}/environments/dev-eu" in seen
-    assert f"repos/{_REPO}/environments/dev-eu-plan" in seen
-    assert f"repos/{_REPO}/environments/dev-eu-apply" in seen
+    assert doctor._env_protection_warnings(_ctx()) == []
+    assert seen == [
+        f"repos/{_REPO}/environments?per_page=100",
+        _CONFIG_ON_DEFAULT,
+        f"repos/{_REPO}/environments/dev-eu-plan",
+        f"repos/{_REPO}/environments/dev-eu-apply",
+    ]
 
 
-# The three forms of the shared-role opening clause, hand-written rather than
-# imported from `doctor`: `_SHARED_ASSERTED` is the flat assertion no mode may
-# produce, the other two are the whole opening clause each mode must produce.
-_SHARED_ASSERTED = "GitHub Environment `dev-eu`, shared between plan and apply,"
-_SHARED_INTRO = (
-    "GitHub Environment `dev-eu` — shared between plan and apply while `dev-eu` is "
-    "listed in the `SHIPMATE_SHARED_ENVS` repository variable, which doctor cannot "
-    "read —"
-)
-#: Hedged both ways: the ambiguous clause may not assert that the bare environment IS
-#: shared, nor that nothing binds it -- a static `<env>-plan` binding with the env shared
-#: leaves both namings live, and doctor reads neither the variable nor the `plan.yml`.
-_AMBIGUOUS_INTRO = (
-    "GitHub Environment `dev-eu` — shared between plan and apply only if `dev-eu` is "
-    "listed in the `SHIPMATE_SHARED_ENVS` repository variable, which doctor cannot "
-    "read, and the suffixed naming exists beside it, so which naming each path binds "
-    "is undetermined —"
-)
-#: The flat "nothing binds it" assertion the ambiguous clause used to make.
-_AMBIGUOUS_UNBOUND = "bound by nothing at all otherwise"
+def test_a_shared_env_with_reviewers_names_the_key_that_shares_it(monkeypatch):
+    """The whole WARNING: the table's key is what shares the environment, so both the
+    opening clause and the remedy name it.
 
-
-def test_shared_role_findings_hedge_the_mode_when_the_naming_is_ambiguous(monkeypatch):
-    """The sibling ambiguity WARNING says the binding is undetermined, so a finding here
-    may not assert that the bare environment IS shared, nor that nothing binds it -- the
-    ambiguous branch-policy WARNING in the same report would contradict that, and a reader
-    could act on it by deleting an environment an unmigrated `plan.yml` still binds."""
-    responses = _protection(
-        _env("dev-eu", rules=("required_reviewers",)),
-        _env("dev-eu-apply", rules=("required_reviewers",)),
-    )
+    Mutation: restore the remedy "remove `dev-eu` from `SHIPMATE_SHARED_ENVS`"."""
+    responses = _protection(_env("dev-eu", rules=("required_reviewers",)), table=_SHARED_TABLE)
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
-    out = doctor._env_protection_warnings(_ctx())
-    assert len(out) == 1
-    level, text = out[0]
-    assert level == doctor.WARNING
-    assert _SHARED_ASSERTED not in text
-    assert _AMBIGUOUS_UNBOUND not in text
-    assert text.startswith(_AMBIGUOUS_INTRO)
-
-
-def test_a_shared_env_names_the_variable_its_mode_depends_on(monkeypatch):
-    """Shared mode is selected by `SHIPMATE_SHARED_ENVS`, which doctor cannot read, so
-    this finding may not assert the mode: a migration that renamed the environments and
-    forgot the variable has applies binding `dev-eu-apply` while the bare `dev-eu` looks
-    shared. Its clause differs from the ambiguous one: here the plan side binds this env."""
-    responses = _protection(_env("dev-eu", rules=("required_reviewers",)))
-    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
-    out = doctor._env_protection_warnings(_ctx())
-    assert len(out) == 1
-    assert _SHARED_ASSERTED not in out[0][1]
-    assert out[0][1].startswith(_SHARED_INTRO)
+    assert doctor._env_protection_warnings(_ctx()) == [
+        (
+            doctor.WARNING,
+            "GitHub Environment `dev-eu` \u2014 shared between plan and apply by `shared = true` "
+            "in its `[environments.dev-eu]` entry \u2014 has protection rules "
+            "(required_reviewers) \u2014 a protection rule gates every job that binds the "
+            "environment and GitHub offers no per-job filter, so the plan cells and the "
+            "nightly drift run will not start immediately either. To gate applies only, split "
+            "it into `dev-eu-plan` and `dev-eu-apply` and remove `shared = true` from its "
+            "`[environments.dev-eu]` entry.",
+        )
+    ]
 
 
 def test_env_protection_missing_env_is_not_this_probes_problem(monkeypatch):
@@ -3868,6 +3979,7 @@ def test_plan_env_holding_secrets_is_a_notice_naming_each(monkeypatch):
     note."""
     responses = {
         f"repos/{_REPO}/environments?per_page=100": _environments("dev-eu-plan", "dev-eu-apply"),
+        _CONFIG_ON_DEFAULT: _wf_file(CANONICAL),
         f"repos/{_REPO}/environments/dev-eu-plan/secrets?per_page=100": _secrets(
             "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"
         ),
@@ -3887,6 +3999,7 @@ def test_the_notice_states_the_rule_and_never_that_this_env_is_unprotected(monke
     settled without the sibling's protection read, so one failure cannot silence the other."""
     responses = {
         f"repos/{_REPO}/environments?per_page=100": _environments("dev-eu-plan"),
+        _CONFIG_ON_DEFAULT: _wf_file(CANONICAL),
         f"repos/{_REPO}/environments/dev-eu-plan/secrets?per_page=100": _secrets(
             "AWS_ACCESS_KEY_ID"
         ),
@@ -3906,6 +4019,7 @@ def test_the_notice_states_the_rule_and_never_that_this_env_is_unprotected(monke
     assert not [p for p in asked if "deployment-branch-policies" in p], asked
     assert asked == [
         f"repos/{_REPO}/environments?per_page=100",
+        _CONFIG_ON_DEFAULT,
         f"repos/{_REPO}/environments/dev-eu-plan/secrets?per_page=100",
     ]
 
@@ -3916,7 +4030,8 @@ def test_shared_mode_reads_the_bare_env_and_says_it_is_the_apply_env_too(monkeyp
     plan-time code. Pinned on the requested paths as well as the wording -- wording it as
     a split plan environment understates the exposure."""
     responses = {
-        f"repos/{_REPO}/environments?per_page=100": _environments("dev-eu"),
+        f"repos/{_REPO}/environments?per_page=100": _environments("dev-eu", "dev-eu-plan"),
+        _CONFIG_ON_DEFAULT: _wf_file(_SHARED_TABLE),
         f"repos/{_REPO}/environments/dev-eu/secrets?per_page=100": _secrets("AWS_ROLE_ARN"),
     }
     asked = []
@@ -3926,72 +4041,32 @@ def test_shared_mode_reads_the_bare_env_and_says_it_is_the_apply_env_too(monkeyp
         return responses[path]
 
     monkeypatch.setattr(doctor, "_gh_json", fake)
-    found = doctor._plan_env_secret_warnings(_ctx())
-    assert [lvl for lvl, _ in found] == [doctor.NOTICE]
-    assert "`AWS_ROLE_ARN`" in found[0][1]
-    assert "apply environment" in found[0][1]
-    assert "plan-time code" in found[0][1]
+    assert doctor._plan_env_secret_warnings(_ctx()) == [
+        (
+            doctor.NOTICE,
+            "GitHub Environment `dev-eu` \u2014 shared between plan and apply by `shared = true` "
+            "in its `[environments.dev-eu]` entry \u2014 holds 1 secret(s) (`AWS_ROLE_ARN`) "
+            "\u2014 it is the apply environment too, so a plan cell runs the pull request "
+            "branch's own code with everything it releases: any credential held there for "
+            "applying is reachable by plan-time code. Protection rules on it would stall those "
+            "plan cells, so it cannot be gated either \u2014 treat anything it holds as readable "
+            "by anyone who can push a branch, and keep them read-only and blast-radius-free, or "
+            "move to OIDC (docs/hardening.md control 8).",
+        )
+    ]
+    # `dev-eu-plan` exists and is not read: the table selects the bare name.
     assert asked == [
         f"repos/{_REPO}/environments?per_page=100",
+        _CONFIG_ON_DEFAULT,
         f"repos/{_REPO}/environments/dev-eu/secrets?per_page=100",
     ]
 
 
-def test_ambiguous_mode_reads_both_plan_side_names_and_never_the_apply_one(monkeypatch):
-    """With both namings present either could be the plan environment, so both
-    are read -- and `<env>-apply` is read in neither mode, because control 7
-    *requires* credentials there."""
-    responses = {
-        f"repos/{_REPO}/environments?per_page=100": _environments(
-            "dev-eu", "dev-eu-plan", "dev-eu-apply"
-        ),
-        f"repos/{_REPO}/environments/dev-eu/secrets?per_page=100": _secrets(),
-        f"repos/{_REPO}/environments/dev-eu-plan/secrets?per_page=100": _secrets(),
-    }
-    asked = []
-
-    def fake(path):
-        asked.append(path)
-        return responses[path]
-
-    monkeypatch.setattr(doctor, "_gh_json", fake)
-    assert doctor._plan_env_secret_warnings(_ctx()) == []
-    assert f"repos/{_REPO}/environments/dev-eu/secrets?per_page=100" in asked
-    assert f"repos/{_REPO}/environments/dev-eu-plan/secrets?per_page=100" in asked
-    assert not [p for p in asked if "dev-eu-apply" in p], asked
-
-
-def test_ambiguous_mode_secret_findings_do_not_assert_the_environments_role(monkeypatch):
-    """Same rule as the protection findings: with both namings present the report already
-    says the binding is undetermined, so neither the notice nor the App-key warning may
-    call this environment shared or a plan environment -- including the notice's later
-    clause about the apply role, which used to assert what the opening clause had hedged."""
-    responses = {
-        f"repos/{_REPO}/environments?per_page=100": _environments(
-            "dev-eu", "dev-eu-plan", "dev-eu-apply"
-        ),
-        f"repos/{_REPO}/environments/dev-eu/secrets?per_page=100": _secrets(
-            "SHIPMATE_APP_PRIVATE_KEY"
-        ),
-        f"repos/{_REPO}/environments/dev-eu-plan/secrets?per_page=100": _secrets(),
-    }
-    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
-    found = doctor._plan_env_secret_warnings(_ctx())
-    assert [lvl for lvl, _ in found] == [doctor.NOTICE, doctor.WARNING]
-    assert _SHARED_ASSERTED not in found[0][1]
-    assert _AMBIGUOUS_UNBOUND not in found[0][1]
-    assert found[0][1].startswith(_AMBIGUOUS_INTRO)
-    assert "it is the apply environment too" not in found[0][1]
-    assert "it may be the apply environment too" in found[0][1]
-    assert "plan environment `dev-eu`" not in found[1][1]
-    assert "environment `dev-eu` holds `SHIPMATE_APP_PRIVATE_KEY`" in found[1][1]
-
-
 def test_no_probe_reads_a_repository_variable(monkeypatch):
-    """The mode is inferred from environment names precisely so that doctor needs no
-    `variables: read` permission -- `app/manifest.json` does not declare one, and adding
-    it costs every installation a re-accept. A future "just read the variable" edit must
-    break here rather than degrade silently. Asserted over every path `warnings()` reads."""
+    """doctor needs no `variables: read` permission -- `app/manifest.json` does not
+    declare one, and adding it costs every installation a re-accept. A probe that starts
+    reading a repository variable must break here rather than degrade silently. Asserted
+    over every path `warnings()` reads."""
     responses = {
         f"repos/{_REPO}/rules/branches/{_BRANCH}?per_page=100": _gate_rule(),
         f"repos/{_REPO}/environments?per_page=100": _environments(
@@ -4018,6 +4093,7 @@ def test_a_truncated_listing_cannot_clear_the_app_key(monkeypatch):
     routine note. Absence is reportable only when the read was complete."""
     responses = {
         f"repos/{_REPO}/environments?per_page=100": _environments("dev-eu-plan"),
+        _CONFIG_ON_DEFAULT: _wf_file(CANONICAL),
         f"repos/{_REPO}/environments/dev-eu-plan/secrets?per_page=100": _secrets(
             "A", "B", total=150
         ),
@@ -4035,6 +4111,7 @@ def test_a_complete_listing_without_the_app_key_stays_a_single_notice(monkeypatc
     every environment that holds secrets."""
     responses = {
         f"repos/{_REPO}/environments?per_page=100": _environments("dev-eu-plan"),
+        _CONFIG_ON_DEFAULT: _wf_file(CANONICAL),
         f"repos/{_REPO}/environments/dev-eu-plan/secrets?per_page=100": _secrets("A", "B"),
     }
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
@@ -4046,6 +4123,7 @@ def test_a_truncated_listing_that_did_show_the_app_key_reports_holding_it(monkey
     the key was read, so the finding is that the environment holds it."""
     responses = {
         f"repos/{_REPO}/environments?per_page=100": _environments("dev-eu-plan"),
+        _CONFIG_ON_DEFAULT: _wf_file(CANONICAL),
         f"repos/{_REPO}/environments/dev-eu-plan/secrets?per_page=100": _secrets(
             "SHIPMATE_APP_PRIVATE_KEY", "A", total=150
         ),
@@ -4101,6 +4179,7 @@ def test_app_private_key_in_a_plan_env_is_a_warning(monkeypatch):
     could mint an App token with it. A name match, not a pattern guess."""
     responses = {
         f"repos/{_REPO}/environments?per_page=100": _environments("dev-eu-plan"),
+        _CONFIG_ON_DEFAULT: _wf_file(CANONICAL),
         f"repos/{_REPO}/environments/dev-eu-plan/secrets?per_page=100": _secrets(
             "SHIPMATE_APP_PRIVATE_KEY"
         ),
@@ -4111,7 +4190,6 @@ def test_app_private_key_in_a_plan_env_is_a_warning(monkeypatch):
     assert "forge" in found[1][1]
     assert doctor.GATE in found[1][1]
     assert doctor._ENGINE_ENV in found[1][1]
-    # Split mode is not ambiguous, so the definite noun is correct here.
     assert "plan environment `dev-eu-plan` holds" in found[1][1]
 
 
@@ -4121,6 +4199,7 @@ def test_shared_mode_app_key_warning_does_not_call_the_env_a_plan_environment(mo
     may not call the same environment the plan environment."""
     responses = {
         f"repos/{_REPO}/environments?per_page=100": _environments("dev-eu"),
+        _CONFIG_ON_DEFAULT: _wf_file(_SHARED_TABLE),
         f"repos/{_REPO}/environments/dev-eu/secrets?per_page=100": _secrets(
             "SHIPMATE_APP_PRIVATE_KEY"
         ),
@@ -4132,11 +4211,10 @@ def test_shared_mode_app_key_warning_does_not_call_the_env_a_plan_environment(mo
     assert "environment `dev-eu` holds `SHIPMATE_APP_PRIVATE_KEY`" in found[1][1]
 
 
-def test_a_truncated_environments_listing_refuses_to_infer_a_mode(monkeypatch):
-    """A partial listing produces a false "does not exist" and a wrong MODE, which asserts
-    a naming the repository is not using and redirects the plan-secret probe to the wrong
-    environment. So it raises, and `warnings()` degrades every environment probe loudly
-    rather than reporting on half the names."""
+def test_a_truncated_environments_listing_refuses_to_report_existence(monkeypatch):
+    """A partial listing produces a false "does not exist" for every environment past the
+    page. So it raises, and `warnings()` degrades every environment probe loudly rather
+    than reporting on half the names."""
     monkeypatch.setattr(doctor, "_gh_json", lambda path: _environments("dev-eu-plan", total=140))
     with pytest.raises(SystemExit, match="truncated"):
         doctor._existing_env_names(_ctx())
@@ -4204,6 +4282,7 @@ def test_a_long_secret_list_is_capped_so_it_cannot_eat_the_size_budget(monkeypat
     names = [f"CONSUMER_CREDENTIAL_NUMBER_{i:03d}" for i in range(60)]
     responses = {
         f"repos/{_REPO}/environments?per_page=100": _environments("dev-eu-plan"),
+        _CONFIG_ON_DEFAULT: _wf_file(CANONICAL),
         f"repos/{_REPO}/environments/dev-eu-plan/secrets?per_page=100": _secrets(*names),
     }
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
@@ -4221,6 +4300,7 @@ def test_one_env_listing_failure_is_a_notice_and_the_others_still_report(monkeyp
     not silence the environment that could be read."""
     responses = {
         f"repos/{_REPO}/environments?per_page=100": _environments("dev-eu-plan", "dev-us-plan"),
+        _CONFIG_ON_DEFAULT: _wf_file(CANONICAL),
         f"repos/{_REPO}/environments/dev-us-plan/secrets?per_page=100": _secrets(
             "GOOGLE_CREDENTIALS"
         ),
@@ -4261,6 +4341,7 @@ def test_truncated_secret_listing_reads_as_at_least(monkeypatch):
     The same partial read also warns that the App-key check could not be completed."""
     responses = {
         f"repos/{_REPO}/environments?per_page=100": _environments("dev-eu-plan"),
+        _CONFIG_ON_DEFAULT: _wf_file(CANONICAL),
         f"repos/{_REPO}/environments/dev-eu-plan/secrets?per_page=100": _secrets(
             "A", "B", total=150
         ),
@@ -4280,6 +4361,8 @@ def test_secret_listing_uses_the_env_token_and_restores_gh_token(monkeypatch):
     seen = {}
 
     def fake(path):
+        if path == _CONFIG_ON_DEFAULT:
+            return _wf_file(CANONICAL)
         if path.endswith("/secrets?per_page=100"):
             seen["secrets_call"] = os.environ.get("GH_TOKEN")
             return _secrets()
@@ -4316,7 +4399,6 @@ def test_declared_envs_reads_a_flat_single_artifact_download(tmp_path):
     assert doctor._declared_envs(tmp_path) == {"dev-eu"}
 
 
-_CONFIG_ON_DEFAULT = f"repos/{_REPO}/contents/{doctor.CONFIG_PATH}?ref={_BRANCH}"
 #: The refusal the design's misplaced control earns, whole: the probe's own framing plus
 #: `validate_env_order`'s message with the `::error::` prefix stripped. Hand-written, not
 #: read back from the module, so a probe that reported a different refusal -- or reported
@@ -4455,9 +4537,9 @@ def test_the_config_probe_declines_without_a_usable_commit(monkeypatch):
 
 def test_a_valid_verdict_names_the_checks_it_did_not_run(monkeypatch):
     """The whole status section against hand-written text, and no finding beside it.
-    `doctor` runs `validate_structure` alone -- the remaining rules need a plan matrix, a
-    whole-tree environment scan and SHIPMATE_SHARED_ENVS -- so a verdict that stopped naming
-    them would report a clean bill over half the checks, and a reader would take "valid" for
+    `doctor` runs `validate_structure` alone -- the remaining rules need a plan matrix or a
+    whole-tree environment scan -- so a verdict that stopped naming them would report a
+    clean bill over the rest of the checks, and a reader would take "valid" for
     "this will run". It also states that execution reads the default branch's copy, without
     which the report reads as a verdict on what the pull request will do.
 
@@ -4477,10 +4559,10 @@ def test_a_valid_verdict_names_the_checks_it_did_not_run(monkeypatch):
             "`.github/shipmate.toml` at the commit under examination parses, and passes "
             "every check a file can be judged on by itself: its top-level keys, `version`, "
             "`layout`, the environment entries, `env_order`, `explicit_envs` and the "
-            "`[gate]` table. Not checked here, for want of a plan matrix, a whole-tree "
-            "environment scan and the SHIPMATE_SHARED_ENVS variable: `dry`-layout coverage "
-            "of the planned environments, the shared-environment rule, and entries that no "
-            "stack tags \u2014 `detect` checks each of those on the runs where it applies. "
+            "`[gate]` table. Not checked here, for want of a plan matrix and a whole-tree "
+            "environment scan: `dry`-layout coverage of the planned environments and entries "
+            "that no stack tags \u2014 `detect` checks each of those on the runs where it "
+            "applies. "
             "Execution reads the default branch's copy of this file, never this branch's.",
         ),
         (
@@ -4700,3 +4782,20 @@ def test_status_never_fails_the_run(monkeypatch):
 
     monkeypatch.setattr(doctor, "_contents_text", boom)
     assert doctor.config_status(_ctx()) == []
+
+
+def test_no_doctor_string_names_the_retired_variable_or_says_it_cannot_read_the_mode():
+    """The shared set is read from the table, so no finding or docstring may name the
+    retired repository variable or claim doctor cannot read what selects the mode. Over
+    every string constant in the parsed module, docstrings and f-string parts included.
+
+    Mutation: restore "remove `{env}` from `SHIPMATE_SHARED_ENVS`" in the shared
+    reviewer WARNING, or "which doctor cannot read" in `_shared_intro`."""
+    import ast
+
+    tree = ast.parse((SCRIPTS / "doctor").read_text(encoding="utf-8"))
+    strings = [
+        n.value for n in ast.walk(tree) if isinstance(n, ast.Constant) and isinstance(n.value, str)
+    ]
+    assert len(strings) > 500, "the walk found too few strings to be the whole module"
+    assert [t for t in strings if "SHIPMATE_SHARED_ENVS" in t or "cannot read" in t] == []

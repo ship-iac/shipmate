@@ -1,7 +1,7 @@
 """`env-config` resolves one cell's identity, credential and region from the table.
 
 Resolution turns a validated table plus a cell's coordinates -- environment, path,
-workload -- into the four values the row carries. Three things here are load-bearing and
+workload -- into the five values the row carries. Three things here are load-bearing and
 each has its own test: the block -> path -> workload merge order, the layout derivation,
 and that a shared environment resolves `aws.apply` on both paths.
 
@@ -15,7 +15,7 @@ from _loader import load_script
 env_config = load_script("env-config")
 
 
-def _three_tier(path, workload, shared_envs=()):
+def _three_tier(path, workload):
     """One table carrying a role at all three tiers, and a region only at the block."""
     table = {
         "layout": "folder",
@@ -32,7 +32,7 @@ def _three_tier(path, workload, shared_envs=()):
             }
         },
     }
-    return env_config.resolve(table, "dev-eu", path, workload, shared_envs)
+    return env_config.resolve(table, "dev-eu", path, workload)
 
 
 # --- 1: the three-tier merge, one boundary per test -----------------------------------
@@ -48,6 +48,7 @@ def test_the_block_tier_resolves_when_no_higher_tier_sets_the_field():
         "cred_region": "eu-west-1",
         "tf_vars": {},
         "config_path": "plan",
+        "env_binding": "dev-eu-plan",
     }
 
 
@@ -59,6 +60,7 @@ def test_the_path_tier_overrides_the_block():
         "cred_region": "eu-west-1",
         "tf_vars": {},
         "config_path": "apply",
+        "env_binding": "dev-eu-apply",
     }
 
 
@@ -73,6 +75,7 @@ def test_the_workload_tier_overrides_the_path():
         "cred_region": "eu-west-1",
         "tf_vars": {},
         "config_path": "apply",
+        "env_binding": "dev-eu-apply",
     }
 
 
@@ -84,6 +87,7 @@ def test_a_workload_with_no_tier_of_its_own_resolves_the_path_tier():
         "cred_region": "eu-west-1",
         "tf_vars": {},
         "config_path": "apply",
+        "env_binding": "dev-eu-apply",
     }
 
 
@@ -93,7 +97,7 @@ def test_a_workload_with_no_tier_of_its_own_resolves_the_path_tier():
 def _layout(layout, entry=None):
     entry = {"region": "eu-west-1"} if entry is None else entry
     table = {"layout": layout, "environments": {"dev-eu": entry}}
-    return env_config.resolve(table, "dev-eu", "plan", "", ())
+    return env_config.resolve(table, "dev-eu", "plan", "")
 
 
 def test_dry_derives_both_identity_variables():
@@ -104,6 +108,7 @@ def test_dry_derives_both_identity_variables():
         "cred_region": "",
         "tf_vars": {"TF_VAR_env": "dev-eu", "TF_VAR_region": "eu-west-1"},
         "config_path": "plan",
+        "env_binding": "dev-eu-plan",
     }
 
 
@@ -114,6 +119,7 @@ def test_workspace_derives_the_workspace_name():
         "cred_region": "",
         "tf_vars": {"TF_WORKSPACE": "dev-eu"},
         "config_path": "plan",
+        "env_binding": "dev-eu-plan",
     }
 
 
@@ -125,6 +131,7 @@ def test_folder_derives_nothing():
         "cred_region": "",
         "tf_vars": {},
         "config_path": "plan",
+        "env_binding": "dev-eu-plan",
     }
 
 
@@ -139,6 +146,7 @@ def test_the_environment_region_inherits_into_the_block():
         "cred_region": "eu-west-1",
         "tf_vars": {},
         "config_path": "plan",
+        "env_binding": "dev-eu-plan",
     }
 
 
@@ -158,6 +166,7 @@ def test_the_provider_region_wins_over_the_environment_region():
         "cred_region": "us-east-1",
         "tf_vars": {"TF_VAR_env": "dev-eu", "TF_VAR_region": "eu-west-1"},
         "config_path": "plan",
+        "env_binding": "dev-eu-plan",
     }
 
 
@@ -188,101 +197,110 @@ _COLLIDING = {
 def test_two_workloads_differing_only_in_separator_resolve_separately():
     """Mutation: normalize the key -- `{label}.workloads.{workload.upper().replace('-', '_')}`
     -- and neither entry matches, so both cells silently take the tier's own apply role."""
-    assert env_config.resolve(_COLLIDING, "dev-eu", "apply", "net-edge", ()) == {
+    assert env_config.resolve(_COLLIDING, "dev-eu", "apply", "net-edge") == {
         "role_arn": "arn:aws:iam::9817:role/hyphen",
         "cred_region": "eu-west-1",
         "tf_vars": {},
         "config_path": "apply",
+        "env_binding": "dev-eu-apply",
     }
-    assert env_config.resolve(_COLLIDING, "dev-eu", "apply", "net_edge", ()) == {
+    assert env_config.resolve(_COLLIDING, "dev-eu", "apply", "net_edge") == {
         "role_arn": "arn:aws:iam::9817:role/underscore",
         "cred_region": "eu-west-1",
         "tf_vars": {},
         "config_path": "apply",
+        "env_binding": "dev-eu-apply",
     }
 
 
-# --- 5 and 7: shared mode, and the tier the credential came from ----------------------
+# --- 5 and 7: shared mode, the binding, and the tier the credential came from --------
 
 _SHARED = {
     "layout": "folder",
     "environments": {
         "dev-eu": {
             "region": "eu-west-1",
+            "shared": True,
             "aws": {"apply": {"role": "arn:aws:iam::9817:role/apply"}},
         }
     },
 }
+
+#: (the entry's `shared` value, or None for absent; the requested path) -> (env_binding,
+#: config_path). Hand-written: a shared environment binds the bare name on both paths and
+#: resolves `aws.apply` on both; every other entry binds `<env>-<path>` and keeps the path.
+_BINDINGS = {
+    (None, "plan"): ("dev-eu-plan", "plan"),
+    (None, "apply"): ("dev-eu-apply", "apply"),
+    (False, "plan"): ("dev-eu-plan", "plan"),
+    (False, "apply"): ("dev-eu-apply", "apply"),
+    (True, "plan"): ("dev-eu", "apply"),
+    (True, "apply"): ("dev-eu", "apply"),
+}
+
+
+def _binding(shared, path):
+    entry = {} if shared is None else {"shared": shared}
+    resolved = env_config.resolve(
+        {"layout": "folder", "environments": {"dev-eu": entry}}, "dev-eu", path, ""
+    )
+    return resolved["env_binding"], resolved["config_path"]
+
+
+def test_the_binding_and_tier_follow_the_shared_key():
+    """Mutations: return `f"{env}-{path}"` as `env_binding` unconditionally -- both shared rows
+    red; resolve `config_path` from `path` for a shared entry -- the shared plan row reds.
+    """
+    assert {key: _binding(*key) for key in _BINDINGS} == _BINDINGS
 
 
 def test_a_shared_environment_resolves_apply_on_the_plan_path():
-    """One environment on both paths means one role, and `config_path` reports the tier
-    it came from rather than the one requested.
+    """One environment on both paths means one role.
 
-    Mutation: resolve `aws.plan` for a shared environment, or ignore `shared_envs`
-    entirely -- the plan cell then resolves an empty role and silently skips the
-    credentials step. Mutation: return the requested path as `config_path`.
+    Mutation: resolve `aws.plan` for a shared environment -- the plan cell then resolves an
+    empty role and silently skips the credentials step.
     """
-    assert env_config.resolve(_SHARED, "dev-eu", "plan", "", ("dev-eu",)) == {
+    assert env_config.resolve(_SHARED, "dev-eu", "plan", "") == {
         "role_arn": "arn:aws:iam::9817:role/apply",
         "cred_region": "eu-west-1",
         "tf_vars": {},
         "config_path": "apply",
-    }
-
-
-_SHARED_MIXED = {
-    "layout": "folder",
-    "environments": {
-        "Dev-EU": {
-            "region": "eu-west-1",
-            "aws": {"apply": {"role": "arn:aws:iam::9817:role/apply"}},
-        }
-    },
-}
-
-
-def test_a_case_only_difference_still_resolves_as_shared():
-    """`SHIPMATE_SHARED_ENVS` is read case-insensitively by the wave ternaries and by
-    `scripts/verify-environments`, so a spelling that binds the bare environment there
-    must resolve the apply tier here; a case-exact reading resolves `plan` instead.
-
-    Mutation: compare the two spellings directly.
-    """
-    assert env_config.resolve(_SHARED, "dev-eu", "plan", "", ("Dev-EU",)) == {
-        "role_arn": "arn:aws:iam::9817:role/apply",
-        "cred_region": "eu-west-1",
-        "tf_vars": {},
-        "config_path": "apply",
-    }
-
-
-def test_the_case_insensitivity_holds_with_the_spellings_swapped():
-    """The same difference the other way round.
-
-    Mutation: lower only the listed names -- this test then resolves `plan` while the
-    forward and exact-case tests stay green.
-    """
-    assert env_config.resolve(_SHARED_MIXED, "Dev-EU", "plan", "", ("dev-eu",)) == {
-        "role_arn": "arn:aws:iam::9817:role/apply",
-        "cred_region": "eu-west-1",
-        "tf_vars": {},
-        "config_path": "apply",
+        "env_binding": "dev-eu",
     }
 
 
 def test_an_unshared_environment_keeps_the_requested_path():
-    """The same table, the same path, one name out of `shared_envs`: the plan tier
-    declares nothing, so the apply role must not reach the plan path.
+    """The same table without the key: the plan tier declares nothing, so the apply role must
+    not reach the plan path.
 
     Mutation: treat every environment as shared.
     """
-    assert env_config.resolve(_SHARED, "dev-eu", "plan", "", ()) == {
+    unshared = {
+        "layout": "folder",
+        "environments": {
+            "dev-eu": {k: v for k, v in _SHARED["environments"]["dev-eu"].items() if k != "shared"}
+        },
+    }
+    assert env_config.resolve(unshared, "dev-eu", "plan", "") == {
         "role_arn": "",
         "cred_region": "eu-west-1",
         "tf_vars": {},
         "config_path": "plan",
+        "env_binding": "dev-eu-plan",
     }
+
+
+def test_shared_envs_names_the_entries_holding_shared_true():
+    """Mutation: test the key for presence rather than for `true` -- `dev-us` joins the set."""
+    table = {
+        "layout": "folder",
+        "environments": {
+            "dev-eu": {"shared": True},
+            "dev-us": {"shared": False},
+            "prod": {"region": "eu-west-1"},
+        },
+    }
+    assert env_config.shared_envs(table) == {"dev-eu"}
 
 
 # --- 6: no fallback to vars.* ---------------------------------------------------------
@@ -300,11 +318,12 @@ def test_an_environment_absent_from_the_table_resolves_no_credential(monkeypatch
     monkeypatch.setenv("AWS_ROLE_ARN", "arn:aws:iam::9817:role/loose")
     monkeypatch.setenv("AWS_REGION", "us-east-1")
     table = {"layout": "workspace", "environments": {"dev-eu": {"region": "eu-west-1"}}}
-    assert env_config.resolve(table, "prod-us", "plan", "", ()) == {
+    assert env_config.resolve(table, "prod-us", "plan", "") == {
         "role_arn": "",
         "cred_region": "",
         "tf_vars": {"TF_WORKSPACE": "prod-us"},
         "config_path": "plan",
+        "env_binding": "prod-us-plan",
     }
 
 
@@ -316,7 +335,7 @@ def _with_vars(variables):
         "layout": "workspace",
         "environments": {"dev-eu": {"vars": variables}},
     }
-    return env_config.resolve(table, "dev-eu", "plan", "", ())["tf_vars"]
+    return env_config.resolve(table, "dev-eu", "plan", "")["tf_vars"]
 
 
 def test_vars_overrides_the_derived_value():
@@ -368,5 +387,5 @@ def test_plan_and_apply_resolve_identical_tf_vars():
         },
     }
     expected = {"TF_VAR_env": "dev-eu", "TF_VAR_region": "eu-west-1"}
-    assert env_config.resolve(table, "dev-eu", "plan", "", ())["tf_vars"] == expected
-    assert env_config.resolve(table, "dev-eu", "apply", "", ())["tf_vars"] == expected
+    assert env_config.resolve(table, "dev-eu", "plan", "")["tf_vars"] == expected
+    assert env_config.resolve(table, "dev-eu", "apply", "")["tf_vars"] == expected

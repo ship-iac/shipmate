@@ -45,7 +45,6 @@ jobs:
           # Skips build-matrix's head-repository and head-commit refusals. A sweep has no pull
           # request; a plan workflow must never set this.
           no-pull-request: "true"
-          shared-envs: ${{ vars.SHIPMATE_SHARED_ENVS }}
 
   drift:
     needs: detect
@@ -55,12 +54,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.detect.outputs.matrix) }}
-    # SHIPMATE_SHARED_ENVS is a repository variable, not a workflow input: which environment a
-    # cell binds decides whether the reviewer gate and the cloud role reach it, and branch content
-    # must not choose that. The plan and apply sides bind the same variable the same way.
-    environment: >-
-      ${{ contains(format(',{0},', vars.SHIPMATE_SHARED_ENVS), format(',{0},', matrix.environment))
-      && matrix.environment || format('{0}-plan', matrix.environment) }}
+    environment: ${{ matrix.env_binding }}
     name: ${{ matrix.stack }} / ${{ matrix.environment }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

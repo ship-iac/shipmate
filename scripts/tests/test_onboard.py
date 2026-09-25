@@ -162,23 +162,6 @@ def test_empty_key_file_is_refused(tmp_path):
     assert "empty" in str(e.value)
 
 
-def test_shared_flag_conflicting_with_the_variable_is_refused():
-    """Two sources for one value, silently disagreeing, would bind the wrong
-    environments. Mutation: make the conflict a report instead of a refusal.
-    """
-    with pytest.raises(SystemExit) as e:
-        onboard._resolve_shared("dev-eu", {"SHIPMATE_SHARED_ENVS": "dev-us"}, ["dev-eu", "dev-us"])
-    assert "SHIPMATE_SHARED_ENVS" in str(e.value)
-
-
-def test_shared_falls_back_to_the_variable():
-    """Mutation: return the flag value when it is empty, so an already-shared
-    repository silently reverts to split mode."""
-    assert onboard._resolve_shared(
-        "", {"SHIPMATE_SHARED_ENVS": "dev-us, dev-eu"}, ["dev-eu", "dev-us"]
-    ) == {"dev-eu", "dev-us"}
-
-
 def test_zero_environments_is_refused(monkeypatch):
     """A repository whose stacks carry no env tag has nothing to bind; creating
     zero environments and reporting success is the fail-open form.
@@ -206,22 +189,29 @@ def test_dry_run_issues_no_write(monkeypatch):
     assert onboard.REPORT == [("would create", "thing", "")]
 
 
-def test_shared_name_outside_the_derived_environments_is_refused():
-    """A typo in --shared binds nothing and reports success. Mutation: drop the
-    membership check, so `dev-ue` is returned and every reconciler skips it.
-    """
-    with pytest.raises(SystemExit) as e:
-        onboard._resolve_shared("dev-ue", {}, ["dev-eu"])
-    assert "dev-ue" in str(e.value)
+def write_table(root, entry):
+    """A `.github/shipmate.toml` under `root` with one `dev-eu` table ending in `entry`."""
+    (root / ".github").mkdir(exist_ok=True)
+    (root / ".github" / "shipmate.toml").write_text(
+        f'layout = "dry"\n\n[environments.dev-eu]\nregion = "eu-west-1"\n{entry}',
+        encoding="utf-8",
+        newline="\n",
+    )
 
 
-def test_shared_name_failing_the_environment_regex_is_refused():
-    """Shared names reach the same API paths as derived ones. Mutation: drop the
-    `_ENV_RE` check, so `../x` is interpolated into an environment path.
+def test_shared_name_outside_the_derived_environments_is_refused(tmp_path):
+    """A shared name no stack tags binds nothing and reports success.
+
+    Mutation: drop the membership check, so `dev-eu` is returned and every reconciler
+    skips it.
     """
+    write_table(tmp_path, "shared = true\n")
     with pytest.raises(SystemExit) as e:
-        onboard._resolve_shared("../x", {}, ["../x"])
-    assert "unusable" in str(e.value)
+        onboard._resolve_shared(tmp_path, ["dev-us"])
+    assert str(e.value) == (
+        "[environments.dev-eu] in .github/shipmate.toml holds `shared = true`, but no stack "
+        "declares 'dev-eu'. Its environments are: dev-us."
+    )
 
 
 def test_derived_environment_failing_the_regex_is_refused(monkeypatch):
@@ -492,7 +482,7 @@ def test_main_calls_every_stage_in_order():
         "_derive_envs()",
         "_variables()",
         "_refuse_diverging_app_id(args.app_id, variables)",
-        "_resolve_shared(args.shared, variables, envs)",
+        "_resolve_shared(root, envs)",
         "_org_plan(ctx['repo'].split('/', 1)[0])",
         "_refuse_unreachable_org_variables(ctx)",
         "_refuse_org_assertion_mismatch(ctx)",
@@ -675,7 +665,7 @@ def test_repository_level_key_is_deleted(monkeypatch):
 
 
 def test_shared_mode_binds_one_bare_environment(monkeypatch):
-    """An environment listed in `--shared` / SHIPMATE_SHARED_ENVS is one bare
+    """An environment whose table entry holds `shared = true` is one bare
     `<env>` on both paths; no `<env>-plan` is created for it.
 
     The two suffixed reads are the naming-conflict probe, which in shared mode looks for
@@ -846,24 +836,22 @@ SPLIT_CONFLICT = (
     "differs",
     "dev-eu",
     "the engine binds `dev-eu-plan` / `dev-eu-apply` for `dev-eu`, and `dev-eu` is also "
-    "present. Holding both namings for one logical environment is the state `shipmate doctor` "
-    "calls ambiguous, where which naming each path binds is undetermined, so nothing was "
-    "created or changed for `dev-eu`. Delete `dev-eu`, or pass `--shared dev-eu` so the "
-    "engine binds the bare `dev-eu` instead.",
+    "present. Nothing binds `dev-eu`, so nothing was created or changed for `dev-eu`. "
+    "Delete `dev-eu`, or set `shared = true` in `[environments.dev-eu]` so the engine "
+    "binds the bare `dev-eu` instead.",
 )
 SHARED_CONFLICT = (
     "differs",
     "dev-eu",
     "the engine binds `dev-eu` for `dev-eu`, and `dev-eu-plan` and `dev-eu-apply` are "
-    "also present. Holding both namings for one logical environment is the state `shipmate "
-    "doctor` calls ambiguous, where which naming each path binds is undetermined, so "
-    "nothing was created or changed for `dev-eu`. Delete `dev-eu-plan` and "
-    "`dev-eu-apply`, or drop `dev-eu` from `--shared` and SHIPMATE_SHARED_ENVS.",
+    "also present. Nothing binds `dev-eu-plan` and `dev-eu-apply`, so nothing was created "
+    "or changed for `dev-eu`. Delete `dev-eu-plan` and `dev-eu-apply`, or drop "
+    "`shared = true` from `[environments.dev-eu]`.",
 )
 
 
-def test_a_bare_env_alongside_an_apply_env_is_reported_as_ambiguous(monkeypatch):
-    """Which naming the engine binds depends on SHIPMATE_SHARED_ENVS, so a repository
+def test_a_bare_env_alongside_an_apply_env_is_reported_as_unused(monkeypatch):
+    """Which naming the engine binds depends on the table's `shared` key, so a repository
     holding both is a state the script must not resolve by guessing: it reports and
     writes nothing.
 
@@ -893,8 +881,8 @@ def test_a_bare_env_alone_is_refused_before_the_split_pair_is_created(monkeypatc
     """The conflict is probed before the create, so this script never manufactures the
     state its own next run refuses. A repository carrying a plain `dev-eu` from before it
     adopted shipmate would otherwise have `dev-eu-plan` / `dev-eu-apply` created beside
-    it, exit 0, and then be reported ambiguous by every later run and by `shipmate
-    doctor` -- with the pair it just wrote never reconciled again.
+    it, exit 0, and then be refused by every later run -- with the pair it just wrote
+    never reconciled again.
 
     Mutation: `_naming_conflict` back to returning False unless a suffixed half already
     exists, which creates both halves here and reports nothing.
@@ -918,9 +906,9 @@ def test_a_bare_env_alone_is_refused_before_the_split_pair_is_created(monkeypatc
 
 
 def test_the_split_pair_alone_is_refused_before_the_bare_env_is_created(monkeypatch):
-    """The mirror of the case above, reached by migrating a split repository to
-    `--shared`: creating the bare `dev-eu` beside the pair is the same self-inflicted
-    ambiguity, so it is refused rather than written.
+    """The mirror of the case above, reached by marking a split repository's environment
+    `shared = true`: creating the bare `dev-eu` beside the pair leaves the same unused
+    naming behind, so it is refused rather than written.
 
     Mutation: `_unused_naming` returning `[env]` unconditionally, which reads the bare
     name, finds it absent, and creates it beside the pair.
@@ -1099,31 +1087,18 @@ def test_absent_variables_are_set_from_the_flags_and_no_tool_version_is_written(
 
 
 def test_variables_that_exist_with_another_value_are_reported(monkeypatch):
-    """A consumer naming another App, or another set of shared environments, is making a
-    deliberate choice: the reconciler names the disagreement and writes nothing over it.
-    Each `differs` line names where the value it would have written came from, so two
-    variables from different sources are driven here -- a swap of the `--app-id` and
-    `--shared` labels reddens both lines.
+    """A consumer naming another App is making a deliberate choice: the reconciler names
+    the disagreement, and where its own value came from, and writes nothing over it.
 
-    Mutation: overwrite the existing value instead of reporting -- both `differs` tuples
-    disappear and `gh variable set` calls for both appear.
+    Mutation: overwrite the existing value instead of reporting -- the `differs` tuple
+    disappears and a `gh variable set` call appears.
     """
-    fake = make_gh(
-        {
-            VARIABLE_LIST: [
-                {"name": "SHIPMATE_APP_ID", "value": "123"},
-                {"name": "SHIPMATE_SHARED_ENVS", "value": "dev-us"},
-            ]
-        }
-    )
+    fake = make_gh({VARIABLE_LIST: [{"name": "SHIPMATE_APP_ID", "value": "123"}]})
     monkeypatch.setattr(onboard, "_run", fake)
-    onboard._reconcile_variables(
-        ctx(app_id="456", shared={"dev-eu"}, variables=onboard._variables())
-    )
+    onboard._reconcile_variables(ctx(app_id="456", variables=onboard._variables()))
     assert fake.calls == [["gh", "variable", "list", "--json", "name,value"]]
     assert onboard.REPORT == [
         ("differs", "SHIPMATE_APP_ID", "repository has 123, --app-id is 456"),
-        ("differs", "SHIPMATE_SHARED_ENVS", "repository has dev-us, --shared is dev-eu"),
     ]
     assert onboard._exit_code() == 2
 
@@ -1136,52 +1111,9 @@ def test_variable_names_are_matched_uppercased(monkeypatch):
     """
     fake = make_gh({VARIABLE_LIST: [{"name": "shipmate_app_id", "value": "1"}]})
     monkeypatch.setattr(onboard, "_run", fake)
-    onboard._reconcile_variables(ctx(shared={"dev-eu"}, variables=onboard._variables()))
-    assert fake.calls == [
-        ["gh", "variable", "list", "--json", "name,value"],
-        ["gh", "variable", "set", "SHIPMATE_SHARED_ENVS", "--body", "dev-eu"],
-    ]
-    assert onboard.REPORT == [
-        ("ok", "SHIPMATE_APP_ID", "1"),
-        ("set", "SHIPMATE_SHARED_ENVS", "dev-eu"),
-    ]
-
-
-def test_shared_environments_are_written_as_one_sorted_variable(monkeypatch):
-    """SHIPMATE_SHARED_ENVS is a set written as a list, so the value written is sorted
-    and a repository whose variable lists the same names in another order is not drift.
-
-    Three names, not two: `PYTHONHASHSEED` randomises string hashing, so an unsorted
-    join of two names lands in sorted order about half the time. Three shortens that to
-    one run in six -- measured red on 9 of 12 seeds, so the unsorted mutation below is
-    the one probabilistic claim here, not a certain one.
-
-    Mutations: join the set unsorted (`",".join(ctx["shared"])`), or drop the
-    SHIPMATE_SHARED_ENVS entry from `_writable_variables` -- both redden the first case;
-    drop the `_matches` set comparison, which turns the second into a `differs` and a
-    rewrite of a variable that already says what it should.
-    """
-    shared = {"dev-us", "dev-eu", "dev-ap"}
-    fake = make_gh({VARIABLE_LIST: []})
-    monkeypatch.setattr(onboard, "_run", fake)
-    onboard._reconcile_variables(ctx(shared=shared, variables=onboard._variables()))
-    assert fake.calls == [
-        ["gh", "variable", "list", "--json", "name,value"],
-        ["gh", "variable", "set", "SHIPMATE_APP_ID", "--body", "1"],
-        ["gh", "variable", "set", "SHIPMATE_SHARED_ENVS", "--body", "dev-ap,dev-eu,dev-us"],
-    ]
-
-    onboard.REPORT.clear()
-    fake = make_gh(
-        {VARIABLE_LIST: [{"name": "SHIPMATE_SHARED_ENVS", "value": "dev-us, dev-ap, dev-eu"}]}
-    )
-    monkeypatch.setattr(onboard, "_run", fake)
-    onboard._reconcile_variables(ctx(shared=shared, variables=onboard._variables()))
-    assert onboard.REPORT == [
-        ("set", "SHIPMATE_APP_ID", "1"),
-        ("ok", "SHIPMATE_SHARED_ENVS", "dev-ap,dev-eu,dev-us"),
-    ]
-    assert onboard._exit_code() == 0
+    onboard._reconcile_variables(ctx(variables=onboard._variables()))
+    assert fake.calls == [["gh", "variable", "list", "--json", "name,value"]]
+    assert onboard.REPORT == [("ok", "SHIPMATE_APP_ID", "1")]
 
 
 def test_at_org_uppercases_the_names_it_returns():
@@ -1247,12 +1179,11 @@ def test_wanted_variables_removes_exactly_the_names_asserted_at_org():
     `"SHIPMATE_APP_ID" not in result` assertion is satisfied by a filter that drops
     everything.
 
-    Mutations: ignore `ctx["at_org"]` and return the unfiltered dict; filter out every
-    entry.
+    Mutations: ignore `ctx["at_org"]` and return the unfiltered dict (reddens the first
+    case); filter out every entry (reddens the second).
     """
-    assert onboard._wanted_variables(ctx(at_org={"SHIPMATE_APP_ID"}, shared={"dev-eu"})) == {
-        "SHIPMATE_SHARED_ENVS": ("dev-eu", "--shared"),
-    }
+    assert onboard._wanted_variables(ctx(at_org={"SHIPMATE_APP_ID"})) == {}
+    assert onboard._wanted_variables(ctx()) == {"SHIPMATE_APP_ID": ("1", "--app-id")}
 
 
 def test_a_repository_copy_of_an_org_variable_is_reported_and_never_written(monkeypatch):
@@ -1361,6 +1292,70 @@ def test_a_whole_run_writes_one_file_and_no_configuration(monkeypatch, tmp_path)
     assert sorted(
         p.relative_to(tmp_path).as_posix() for p in tmp_path.rglob("*") if p.is_file()
     ) == [".github/workflows/shipmate.yml", "key.pem"]
+
+
+def _environment_puts(fake):
+    return [c[4] for c in fake.calls if c[:4] == ["gh", "api", "-X", "PUT"]]
+
+
+def _variable_sets(fake):
+    return [c for c in fake.calls if c[:3] == ["gh", "variable", "set"]]
+
+
+def test_the_table_decides_which_naming_is_created(monkeypatch, tmp_path):
+    """The checkout's `.github/shipmate.toml` is the only source of the shared set: an
+    entry holding `shared = true` gets the bare environment and no split pair, and no run
+    writes a variable naming it.
+
+    Mutations: `_resolve_shared` returning `set()` without reading the file reddens the
+    shared case; writing a SHIPMATE_SHARED_ENVS variable from `_writable_variables`
+    reddens its variable list.
+    """
+    write_table(tmp_path, "shared = true\n")
+    fake, _ = run_main(
+        monkeypatch,
+        tmp_path,
+        {"repos/o/r/environments/dev-eu/deployment-branch-policies": ABSENT},
+        [],
+    )
+    assert _environment_puts(fake) == [ENGINE_PATH, "repos/o/r/environments/dev-eu"]
+    assert _variable_sets(fake) == [["gh", "variable", "set", "SHIPMATE_APP_ID", "--body", "1"]]
+
+
+def test_without_a_table_every_environment_is_split(monkeypatch, tmp_path):
+    """No file shares nothing. Mutation: `_resolve_shared` returning every derived
+    environment when the file is absent."""
+    fake, _ = run_main(monkeypatch, tmp_path, {}, [])
+    assert _environment_puts(fake) == [
+        ENGINE_PATH,
+        "repos/o/r/environments/dev-eu-plan",
+        "repos/o/r/environments/dev-eu-apply",
+    ]
+
+
+def test_an_invalid_table_refuses_before_any_write(monkeypatch, tmp_path):
+    """`shared_envs` trusts the table's shape, and a quoted `"true"` reads as unshared, the
+    split naming. The structural check refuses first, while no write has run.
+
+    Mutation: drop the `validate_structure` call in `_resolve_shared`, which reconciles
+    the split pair.
+    """
+    write_table(tmp_path, 'shared = "true"\n')
+    fake, exc = run_main(monkeypatch, tmp_path, {}, [])
+    assert fake.calls == [["gh", "variable", "list", "--json", "name,value"]]
+    assert str(exc) == (
+        "::error::environment dev-eu: shared must be a boolean, got str. "
+        "Write shared = true or shared = false, unquoted."
+    )
+
+
+def test_the_shared_flag_is_gone(monkeypatch, tmp_path, capsys):
+    """The table replaced `--shared`; argparse must reject it as unknown rather than
+    accept a value nothing reads. Mutation: restore the `--shared` argument."""
+    fake, exc = run_main(monkeypatch, tmp_path, {}, ["--shared", "dev-eu"])
+    assert exc.code == 2
+    assert fake.calls == []
+    assert "unrecognized arguments: --shared dev-eu" in capsys.readouterr().err
 
 
 def test_an_asserted_name_the_organization_does_not_reach_refuses(monkeypatch):
@@ -2094,6 +2089,10 @@ By hand:
   `-plan` / `-apply` half. Top-level settings go above the first table header: a
   scalar written below one lands inside that table instead.
 
+  `shared = true` in a table binds that environment as one bare `<name>` on both
+  paths instead of the `<name>-plan` / `<name>-apply` pair. This script reads the key
+  from this checkout's file, so re-run it after adding or dropping one.
+
   `[gate] approvers_team` names the team whose members may apply and unlock by
   pull request comment — `ops` here. Keep it above the first
   `[environments.*]` header, where it reads with the other repository-wide
@@ -2261,7 +2260,7 @@ def test_the_checklist_toml_example_is_a_configuration_a_consumer_could_merge(ca
     ec.validate_structure(ec.parse_table(snippet))
 
 
-def test_a_bare_env_alongside_only_a_plan_env_is_reported_as_ambiguous(monkeypatch):
+def test_a_bare_env_alongside_only_a_plan_env_is_reported_as_unused(monkeypatch):
     """The half-migrated repository: `dev-eu` and `dev-eu-plan`, no `dev-eu-apply`. The
     probe reads the unused naming alone, so it refuses on `dev-eu` without ever looking
     at the half that is there -- and the remedy it names is deleting `dev-eu`, never the
@@ -2292,10 +2291,10 @@ def test_a_bare_env_alongside_only_a_plan_env_is_reported_as_ambiguous(monkeypat
     assert context["unresolved"] == {"dev-eu"}
 
 
-def test_shared_mode_reports_the_ambiguity_too(monkeypatch):
-    """Running once without `--shared` and once with it produces all three environments.
-    The second run must not silently bind the bare one: the ambiguity is doctor's
-    shared-mode warning, so the probe runs in shared mode as well.
+def test_shared_mode_reports_the_unused_naming_too(monkeypatch):
+    """Running once without `shared = true` and once with it produces all three environments.
+    The second run must not silently bind the bare one: nothing binds the pair in shared
+    mode, so the probe runs in shared mode as well.
 
     Mutation: guard the probe with `if env not in ctx["shared"]`, which reconciles
     `dev-eu` and reports nothing.
@@ -2365,7 +2364,7 @@ def test_a_shared_environment_carrying_protection_rules_is_reported(monkeypatch)
             "it carries protection rules (required_reviewers, wait_timer) and is shared, "
             "so the plan cells and the nightly drift run do not start immediately either. "
             "To gate applies alone, split it into `dev-eu-plan` and `dev-eu-apply` and "
-            "drop `dev-eu` from --shared and SHIPMATE_SHARED_ENVS.",
+            "drop `shared = true` from `[environments.dev-eu]`.",
         ),
         ("ok", "dev-eu branch policy", "main"),
     ]

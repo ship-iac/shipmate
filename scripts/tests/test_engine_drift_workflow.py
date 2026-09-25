@@ -25,11 +25,7 @@ _GATED_IF = {
 
 #: The `drift` cell's whole `environment:` expression, whitespace-collapsed. Hand-written: a
 #: value read back from the file passes whatever the file says, literal env name included.
-_SHARED_PLAN_ENV = (
-    "${{ contains(format(',{0},', vars.SHIPMATE_SHARED_ENVS), "
-    "format(',{0},', matrix.environment)) && matrix.environment "
-    "|| format('{0}-plan', matrix.environment) }}"
-)
+_CELL_ENV = "${{ matrix.env_binding }}"
 
 
 def _doc():
@@ -107,7 +103,6 @@ def test_the_sweep_states_no_pull_request_and_no_head():
         "all-stacks": "true",
         "tags": "${{ inputs.tags }}",
         "no-pull-request": "true",
-        "shared-envs": "${{ vars.SHIPMATE_SHARED_ENVS }}",
     }
 
 
@@ -152,7 +147,7 @@ def test_every_job_binds_the_environment_it_should_and_no_other():
         j: (" ".join(v["environment"].split()) if "environment" in v else None)
         for j, v in _doc()["jobs"].items()
     }
-    assert parsed == {"detect": None, "drift": _SHARED_PLAN_ENV, "issues": "shipmate-engine"}
+    assert parsed == {"detect": None, "drift": _CELL_ENV, "issues": "shipmate-engine"}
 
 
 def test_every_checkout_takes_the_full_history_and_no_ref():

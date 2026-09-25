@@ -42,8 +42,8 @@ TABLE = {
 }
 
 
-def _validate(table, matrix_envs=(), shared_envs=(), all_envs=None):
-    return env_config.validate(table, matrix_envs, shared_envs, all_envs=all_envs)
+def _validate(table, matrix_envs=(), all_envs=None):
+    return env_config.validate(table, matrix_envs, all_envs=all_envs)
 
 
 # --- 1: an unused entry warns, and never refuses --------------------------------------

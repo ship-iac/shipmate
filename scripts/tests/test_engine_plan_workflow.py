@@ -98,7 +98,6 @@ def test_build_matrix_reads_the_facts_job_and_states_no_constant():
         "base-sha": "${{ needs.facts.outputs.base-sha }}",
         "head-repo": "${{ needs.facts.outputs.head-repo }}",
         "head-sha": "${{ needs.facts.outputs.head-sha }}",
-        "shared-envs": "${{ vars.SHIPMATE_SHARED_ENVS }}",
     }
 
 
@@ -134,18 +133,11 @@ def test_every_checkout_takes_the_head_the_facts_job_named():
     assert cell["with"]["expected-head"] == "${{ needs.facts.outputs.head-sha }}"
 
 
-def test_the_cell_binds_the_shared_or_plan_environment_from_the_repository_variable():
-    """Hand-written whole expression, whitespace-collapsed. `-apply` here would hand a plan the
-    apply role; a literal env name here is the thing CLAUDE.md forbids outright.
-
-    Mutations: `-plan` -> `-apply`, and the whole expression replaced by a literal `dev-eu`.
+def test_the_cell_binds_the_environment_detect_resolved():
+    """Hand-written whole value. A literal env name here is the thing CLAUDE.md forbids
+    outright. Mutation: replace it with a literal `dev-eu`.
     """
-    expected = (
-        "${{ contains(format(',{0},', vars.SHIPMATE_SHARED_ENVS), "
-        "format(',{0},', matrix.environment)) && matrix.environment "
-        "|| format('{0}-plan', matrix.environment) }}"
-    )
-    assert " ".join(_job("plan")["environment"].split()) == expected
+    assert _job("plan")["environment"] == "${{ matrix.env_binding }}"
 
 
 def test_the_cell_passes_this_whole_with_block():

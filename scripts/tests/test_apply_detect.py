@@ -200,7 +200,6 @@ def _apply_env(monkeypatch, tmp_path, table=None, reads=None, **overrides):
         "GITHUB_OUTPUT": str(out),
         "SHIPMATE_APP_ID": APP_ID,
         "SHIPMATE_REVIEW_DECISION": "APPROVED",
-        "SHIPMATE_SHARED_ENVS": "",
     }
     env.update(overrides)
     if "SHIPMATE_MODE" not in env:
@@ -455,6 +454,7 @@ def test_main_wires_the_tag_map_into_the_cells(tmp_path, monkeypatch):
             "cred_region": "",
             "tf_vars": {},
             "config_path": "apply",
+            "env_binding": "dev-eu-apply",
             "plan_run_id": "42",
             "plan_sha256": PLAN_SHA,
         }
@@ -646,7 +646,6 @@ def _unlock_env(monkeypatch, tmp_path, table=None, reads=None, **overrides):
         "SHIPMATE_HEAD_SHA": "a" * 40,
         "SHIPMATE_MODE": "unlock",
         "GITHUB_OUTPUT": str(out),
-        "SHIPMATE_SHARED_ENVS": "",
     }
     env.update(overrides)
     if "SHIPMATE_REVIEW_DECISION" not in env:
@@ -755,6 +754,7 @@ def test_unlock_queue_is_the_pending_cells_of_the_target_env(monkeypatch, tmp_pa
             "cred_region": "",
             "tf_vars": {},
             "config_path": "apply",
+            "env_binding": "dev-eu-apply",
         },
     ]
     assert _parsed(out)["empty"] == "false"
@@ -819,6 +819,7 @@ def test_unlock_is_not_capped_by_the_whole_tree_matrix_limit(monkeypatch, tmp_pa
             "cred_region": "",
             "tf_vars": {},
             "config_path": "apply",
+            "env_binding": "dev-eu-apply",
         }
     ]
 
@@ -908,6 +909,7 @@ def test_apply_mode_writes_the_whole_output_file_verbatim(monkeypatch, tmp_path)
         'waves={"wave0": [{"stack": "stacks/app", "environment": "dev-eu", '
         '"workload": "app", '
         '"role_arn": "", "cred_region": "", "tf_vars": {}, "config_path": "apply", '
+        '"env_binding": "dev-eu-apply", '
         '"plan_run_id": "42", '
         '"plan_sha256": "dddddddddddddddd'
         'dddddddddddddddddddddddddddddddddddddddddddddddd"}], "wave1": [], "wave2": [], '
@@ -943,5 +945,6 @@ def test_unlock_tolerates_an_untagged_stack_elsewhere_in_the_tree(monkeypatch, t
             "cred_region": "",
             "tf_vars": {},
             "config_path": "apply",
+            "env_binding": "dev-eu-apply",
         }
     ]

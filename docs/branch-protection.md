@@ -167,7 +167,7 @@ fails closed rather than proceeding unreviewed.)
   (`getting-started.md` §Required — apply → §Environment setup has those
   settings). This gates both pre-merge `shipmate apply <env>` and the
   post-merge `deploy` job's apply, since both run against the apply environment. An
-  env sharing one environment between plan and apply (`SHIPMATE_SHARED_ENVS`)
+  env sharing one environment between plan and apply (`shared = true`)
   cannot be gated this way at all — a reviewer there stalls the plan cells too
   (`hardening.md` §6).
   - Deployment approvals differ from PR reviews: a reviewer can approve

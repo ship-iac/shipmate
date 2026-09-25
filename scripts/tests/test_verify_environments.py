@@ -25,7 +25,10 @@ vf = load_script("verify-environments")
 
 _BASH = usable_bash()
 
-WAVES = {"wave0": [{"stack": "app", "environment": "dev-eu"}], "wave1": []}
+WAVES = {
+    "wave0": [{"stack": "app", "environment": "dev-eu", "env_binding": "dev-eu-apply"}],
+    "wave1": [],
+}
 
 
 def _listing(names, total=None):
@@ -35,25 +38,39 @@ def _listing(names, total=None):
     }
 
 
-def test_bindings_are_the_apply_side_names_for_every_distinct_env():
+def test_bindings_are_the_distinct_env_bindings_detect_resolved():
+    """`prod` is a shared environment, so its binding is the bare name; the script must take
+    that from the cell, not recompute `<env>-apply`."""
     waves = {
-        "wave0": [{"stack": "a", "environment": "dev-eu"}, {"stack": "b", "environment": "dev-eu"}],
-        "wave1": [{"stack": "a", "environment": "prod"}],
+        "wave0": [
+            {"stack": "a", "environment": "dev-eu", "env_binding": "dev-eu-apply"},
+            {"stack": "b", "environment": "dev-eu", "env_binding": "dev-eu-apply"},
+        ],
+        "wave1": [{"stack": "a", "environment": "prod", "env_binding": "prod"}],
         "wave2": None,
     }
-    assert vf.required_bindings(waves, "prod") == ["dev-eu-apply", "prod"]
+    assert vf.required_bindings(waves) == ["dev-eu-apply", "prod"]
 
 
 def test_a_payload_with_no_cell_is_refused_rather_than_passed():
     with pytest.raises(SystemExit) as exc:
-        vf.required_bindings({"wave0": [], "wave1": None}, "")
+        vf.required_bindings({"wave0": [], "wave1": None})
     assert "no cell" in str(exc.value)
 
 
-def test_a_cell_without_an_environment_is_refused_rather_than_tracebacking():
+def test_a_cell_without_an_env_binding_is_refused_as_a_malformed_hand_off():
+    """The cell carries `environment`, so a fallback that recomputes `<env>-apply` from it has
+    something to compute from.
+
+    Mutation: read `cell.get("env_binding", f"{cell['environment']}-apply")` -- no refusal.
+    """
     with pytest.raises(SystemExit) as exc:
-        vf.required_bindings({"wave0": [{"stack": "a"}]}, "")
-    assert "carries no 'environment' key" in str(exc.value)
+        vf.required_bindings({"wave0": [{"stack": "a", "environment": "dev-eu"}]})
+    assert str(exc.value) == (
+        "::error::a wave matrix cell carries no 'env_binding' key, so the environment it "
+        "would bind could not be checked; this is a malformed hand-off rather than "
+        "an empty run; refusing to apply."
+    )
 
 
 def test_a_truncated_listing_is_refused():
@@ -73,7 +90,7 @@ def test_a_complete_listing_yields_its_names():
     assert vf.existing_names(_listing(["dev-eu-apply", "prod"])) == {"dev-eu-apply", "prod"}
 
 
-def _run_step(tmp_path, listing, waves_json, shared_envs, gh_exit=0):
+def _run_step(tmp_path, listing, waves_json, gh_exit=0):
     assert _BASH is not None  # callers are skipif-gated on this; narrows the type too
     stub = (
         "gh() { "
@@ -94,12 +111,18 @@ def _run_step(tmp_path, listing, waves_json, shared_envs, gh_exit=0):
             "RUNNER_TEMP": str(tmp_path),
             "FAKE_LISTING": json.dumps(listing),
             "SHIPMATE_WAVES_JSON": waves_json,
-            "SHIPMATE_SHARED_ENVS": shared_envs,
             "PYTHON": sys.executable,
+            # The refusals carry an em dash; pinned both ends so the host locale cannot garble it.
+            "PYTHONIOENCODING": "utf-8",
         }
     )
     return subprocess.run(
-        [_BASH, str(script)], cwd=tmp_path, env=env, capture_output=True, text=True, timeout=60
+        [_BASH, str(script)],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        encoding="utf-8",
+        timeout=60,
     )
 
 
@@ -111,27 +134,36 @@ def _out(proc):
 
 @pytest.mark.skipif(_BASH is None, reason="bash not installed")
 def test_an_existing_apply_environment_passes(tmp_path):
-    proc = _run_step(tmp_path, _listing(["dev-eu-plan", "dev-eu-apply"]), json.dumps(WAVES), "")
+    proc = _run_step(tmp_path, _listing(["dev-eu-plan", "dev-eu-apply"]), json.dumps(WAVES))
     assert proc.returncode == 0, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
     assert "::notice::" in _out(proc)
 
 
 @pytest.mark.skipif(_BASH is None, reason="bash not installed")
 def test_a_missing_environment_fails_the_run_naming_every_one_and_both_fixes(tmp_path):
+    """Whole text on stderr, where SystemExit writes it: the action's own `echo` is stdout."""
     waves = {
-        "wave0": [{"stack": "a", "environment": "dev-eu"}, {"stack": "b", "environment": "prod"}]
+        "wave0": [
+            {"stack": "a", "environment": "dev-eu", "env_binding": "dev-eu-apply"},
+            {"stack": "b", "environment": "prod", "env_binding": "prod-apply"},
+        ]
     }
-    proc = _run_step(tmp_path, _listing(["dev-eu-plan"]), json.dumps(waves), "")
+    proc = _run_step(tmp_path, _listing(["dev-eu-plan"]), json.dumps(waves))
     assert proc.returncode != 0, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
-    assert "dev-eu-apply" in _out(proc)
-    assert "prod-apply" in _out(proc), "only the first missing environment was named"
-    assert "create each environment" in _out(proc)
-    assert "SHIPMATE_SHARED_ENVS" in _out(proc)
+    assert proc.stderr == (
+        "::error::this apply would bind GitHub Environment(s) that do not exist: "
+        "dev-eu-apply, prod-apply — GitHub creates a missing environment on demand with no "
+        "reviewers, no wait timer and no deployment branch policy, so the apply would run "
+        "outside every control that environment is meant to carry. Two ways to fix it: "
+        "create each environment named above, or correct the environment's entry in "
+        "`.github/shipmate.toml` so the apply binds the environments you did create — "
+        "`shared = true` binds the bare <env>, anything else binds <env>-apply.\n"
+    )
 
 
 @pytest.mark.skipif(_BASH is None, reason="bash not installed")
 def test_a_failed_listing_fails_the_run_and_says_a_re_run_clears_it(tmp_path):
-    proc = _run_step(tmp_path, _listing([]), json.dumps(WAVES), "", gh_exit=1)
+    proc = _run_step(tmp_path, _listing([]), json.dumps(WAVES), gh_exit=1)
     assert proc.returncode != 0, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
     assert "::error::" in _out(proc)
     assert "re-run" in _out(proc), (
@@ -142,21 +174,22 @@ def test_a_failed_listing_fails_the_run_and_says_a_re_run_clears_it(tmp_path):
 
 @pytest.mark.skipif(_BASH is None, reason="bash not installed")
 def test_a_truncated_listing_fails_the_run_through_the_step(tmp_path):
-    proc = _run_step(tmp_path, _listing(["dev-eu-apply"], total=200), json.dumps(WAVES), "")
+    proc = _run_step(tmp_path, _listing(["dev-eu-apply"], total=200), json.dumps(WAVES))
     assert proc.returncode != 0, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
     assert "truncated" in _out(proc)
 
 
 @pytest.mark.skipif(_BASH is None, reason="bash not installed")
 def test_unparseable_waves_json_fails_the_run(tmp_path):
-    proc = _run_step(tmp_path, _listing(["dev-eu-apply"]), "not json", "")
+    proc = _run_step(tmp_path, _listing(["dev-eu-apply"]), "not json")
     assert proc.returncode != 0, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
     assert "did not parse as JSON" in _out(proc)
 
 
 @pytest.mark.skipif(_BASH is None, reason="bash not installed")
 def test_a_shared_env_is_satisfied_by_the_bare_environment(tmp_path):
-    # The other half of the branch: with dev-eu listed, `dev-eu-apply` need not exist and
+    # The other half of the branch: with dev-eu shared, `dev-eu-apply` need not exist and
     # `dev-eu` must.
-    proc = _run_step(tmp_path, _listing(["dev-eu"]), json.dumps(WAVES), "dev-eu")
+    waves = {"wave0": [{"stack": "app", "environment": "dev-eu", "env_binding": "dev-eu"}]}
+    proc = _run_step(tmp_path, _listing(["dev-eu"]), json.dumps(waves))
     assert proc.returncode == 0, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"

@@ -43,7 +43,6 @@ jobs:
           base-sha: ${{ github.event.before }}
           github-token: ${{ github.token }}
           app-id: ${{ vars.SHIPMATE_APP_ID }}
-          shared-envs: ${{ vars.SHIPMATE_SHARED_ENVS }}
 
   envlevel0:
     # Display name only (job id unchanged) -- see apply.yml's `waves` job.
