@@ -43,6 +43,7 @@ EXPECTED_SUMMARY_WITH = {
     "on-demand": "${{ needs.facts.outputs.on-demand }}",
     "app-id": "${{ vars.SHIPMATE_APP_ID }}",
     "private-key": "${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}",
+    "github-vars": "${{ toJSON(vars) }}",
 }
 EXPECTED_JOB_IDS = ["facts", "detect", "plan", "summary"]
 

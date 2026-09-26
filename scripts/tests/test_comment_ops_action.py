@@ -840,21 +840,31 @@ def test_both_verb_steps_bind_shipmate_verb_to_the_parsed_route():
     }
 
 
-def test_exactly_the_two_table_readers_receive_the_callers_variables():
-    """`gate-config` and `doctor`'s report read `.github/shipmate.toml` through `parse_table`,
-    which refuses a file holding a variable reference when `SHIPMATE_GITHUB_VARS` is absent.
-    Selected over every step, so a third holder fails too.
+def test_exactly_the_table_readers_receive_the_callers_variables():
+    """`gate-config` and every `doctor` probe run read `.github/shipmate.toml` through
+    `parse_table`, which refuses a file holding a variable reference when
+    `SHIPMATE_GITHUB_VARS` is absent. Selected over every step of both actions, so a further
+    holder fails too.
 
-    Mutation: drop `SHIPMATE_GITHUB_VARS` from `Resolve gate configuration`'s `env:`.
+    Mutations: drop `SHIPMATE_GITHUB_VARS` from `Resolve gate configuration`'s `env:`, or from
+    `actions/summary`'s doctor step.
     """
     bound = {
-        s["name"]: s["env"]["SHIPMATE_GITHUB_VARS"]
-        for s in action_steps("comment-ops")
+        (action, s["name"]): s["env"]["SHIPMATE_GITHUB_VARS"]
+        for action in ("comment-ops", "summary")
+        for s in action_steps(action)
         if "SHIPMATE_GITHUB_VARS" in (s.get("env") or {})
     }
     assert bound == {
-        "Resolve gate configuration": "${{ inputs.github-vars }}",
-        "Doctor — render and upsert the sticky comment": "${{ inputs.github-vars }}",
+        ("comment-ops", "Resolve gate configuration"): "${{ inputs.github-vars }}",
+        (
+            "comment-ops",
+            "Doctor — render and upsert the sticky comment",
+        ): "${{ inputs.github-vars }}",
+        (
+            "summary",
+            "Doctor — settings-drift warnings (annotations only, never blocks)",
+        ): "${{ inputs.github-vars }}",
     }
 
 

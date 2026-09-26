@@ -35,6 +35,12 @@ inputs:
   private-key:
     description: shipmate App private key (from the shipmate-engine environment secret).
     required: true
+  github-vars:
+    description: >-
+      The caller's reachable GitHub variables, serialised with toJSON. Read only when the
+      environment table holds a variable reference; empty when unwired.
+    required: false
+    default: ""
 runs:
   using: composite
   steps:
@@ -180,6 +186,7 @@ runs:
         # did not run rather than reporting it clean.
         SHIPMATE_ENV_TOKEN: ${{ steps.envtoken.outputs.token }}
         SHIPMATE_DOCTOR_MODE: annotate
+        SHIPMATE_GITHUB_VARS: ${{ inputs.github-vars }}
         SHIPMATE_APP_ID: ${{ inputs.app-id }}
         SHIPMATE_CELLS_DIR: ${{ inputs.cells-dir }}
         SHIPMATE_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
