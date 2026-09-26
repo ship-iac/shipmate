@@ -13,6 +13,8 @@ grammar are declared unstable in `README.md`.
 
 ## [0.36.0] — 2026-09-26
 
+Tags `836b768`.
+
 ### Added
 
 - **Any string value in `.github/shipmate.toml` can name a GitHub variable.** Write
