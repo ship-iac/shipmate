@@ -1923,7 +1923,7 @@ CONFIG_NO_COMMIT = (
 CONFIG_VALID = (
     f"`{CONFIG_PATH}` at the commit under examination parses, and passes every check a "
     "file can be judged on by itself: its top-level keys, `schema_version`, `layout`, the "
-    "environment entries, `env_order`, `explicit_envs` and the `[gate]` table. Not checked "
+    "environment entries, `explicit_envs` and the `[gate]` table. Not checked "
     "here, for want of a plan matrix and a whole-tree environment scan: `tf_vars`-layout "
     "coverage of the planned environments and entries that no stack tags — `detect` checks "
     "each of those on the runs where it applies. Execution reads the default branch's copy of this "
@@ -1949,7 +1949,7 @@ def _config_defaults(table):
     `gate.ungated_envs` gets no line: its absence exempts nothing, which is the safe
     direction and the one a reader already assumes.
     """
-    order = table.get("env_order", {})
+    order = bm.ec.env_order(table)
     envs = table.get("explicit_envs", [])
     team = bm.ec.gate_approver_team(table)
     shown = "; ".join(
@@ -1958,11 +1958,11 @@ def _config_defaults(table):
     return [
         (
             NOTICE,
-            f"`env_order` orders {_one_line(shown, 400)} — a bare `shipmate apply` applies "
+            f"`needs` orders {_one_line(shown, 400)} — a bare `shipmate apply` applies "
             "one env-level fully before it starts the next."
             if order
-            else "`env_order`: absent — every environment sits at one level, and a bare "
-            "`shipmate apply` applies them all together.",
+            else "`needs`: declared by no environment — every environment sits at one level, "
+            "and a bare `shipmate apply` applies them all together.",
         ),
         (
             NOTICE,
@@ -2036,10 +2036,6 @@ def _config_table(ctx):
 def _config_warnings(ctx):
     """What is wrong with the table at the commit under examination, so a malformed or
     misplaced setting is reported before it merges to the branch the engine reads it from.
-
-    A placement mistake is the case that needs this: `explicit_envs` written below the
-    `[env_order]` header is well-formed TOML and lands inside that table, so before this
-    probe nothing reported it until the exclusion was already lost on the default branch.
 
     A sound table is reported by `config_status`, not here. The status lines are not
     findings: carried in this list they would render on every healthy plan run as

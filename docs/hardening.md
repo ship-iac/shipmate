@@ -1154,7 +1154,7 @@ for exactly the exposure control 1 exists to limit.
   understood it.
 - **Branch-controlled configuration.** Stack tags come from the pull request
   branch. They shape what the engine does; they do not constrain what it is
-  allowed to do. `env_order` and `explicit_envs` no longer belong on this list:
+  allowed to do. `needs` and `explicit_envs` no longer belong on this list:
   they moved into `.github/shipmate.toml` and are read from the default branch
   with the rest of it, so a branch can neither reorder its own apply waves nor
   drop its own exclusion.

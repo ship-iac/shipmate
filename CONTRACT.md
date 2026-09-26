@@ -399,9 +399,9 @@ identity, so a repository without one has nothing for its cells to run as. The
 two absences refuse at the same site, `scripts/env-config` (§Refusals) — a file
 absent from the default branch, and a file that parses but declares no `layout`.
 
-The file holds six top-level settings and no others: `schema_version`,
-`layout`, `environments`, `gate`, `env_order`, `explicit_envs`. Any other
-top-level key refuses, naming the offending key and the six that are allowed. A key a *newer* engine
+The file holds five top-level settings and no others: `schema_version`,
+`layout`, `environments`, `gate`, `explicit_envs`. Any other
+top-level key refuses, naming the offending key and the five that are allowed. A key a *newer* engine
 implements is refused by an older one on that same check, which is why a
 repository moves its pin before it adds a key (`docs/upgrading.md`).
 
@@ -423,11 +423,11 @@ API instead — comment-ops, resolving `[gate]` before it authorizes — with th
 same branch and the same refusal wording, so a consumer never gets two accounts
 of one problem depending on which job read it.
 
-**`env_order`, `explicit_envs` and `[gate]` come from the default branch too.**
+**`needs`, `explicit_envs` and `[gate]` come from the default branch too.**
 They are read from the same parsed mapping as the identity table, and a branch
 therefore cannot reorder its own apply waves, drop its own production exclusion,
 exempt itself from the review requirement or name the team that authorizes it.
-For the first two this is a change: `scripts/env-order` used to evaluate both out
+For the ordering and the exclusion this is a change: `scripts/env-order` used to evaluate both out
 of the checked-out tree, so an edit on a feature branch took effect on that
 branch's own apply. It no longer does. `docs/upgrading.md` carries the
 consumer-facing note.
@@ -536,10 +536,9 @@ closed.
   `environments.dev-eu.aws.plan.layout`. One mistake therefore refuses in
   several places. A misplaced `layout` always reaches the missing-`layout`
   refusal, which checks before anything reads `environments`; a misplaced
-  `explicit_envs`, `env_order` or `schema_version` refuses as an unimplemented
-  environment key or an unknown provider field, depending on the header it fell
-  under — and, after `[env_order]`, as a reserved control name, which is why the
-  top-level names are reserved as `env_order` keys at all.
+  `explicit_envs` or `schema_version` refuses as an unimplemented environment
+  key, an unknown provider field or an unknown `[gate]` key, depending on the
+  header it fell under.
   `docs/troubleshooting.md` has the message for each position.
 - **Declaring one table twice is a parse error.** A dotted `aws.plan.role` under
   `[environments.dev-eu]` plus a later `[environments.dev-eu.aws.plan]` header
@@ -655,15 +654,15 @@ Every condition below refuses at detect, before any cell starts.
 | A tier sets an empty role | that resolves to a skipped credentials step, not to a credential |
 | A provider block resolves no role on any tier | dead config; apply-only is legal, all-empty is not |
 | A field the provider does not define, or `tf_vars` inside a provider block | a per-tier `tf_vars` would let plan and apply inject different values, and every apply would then fail as stale |
-| An environment key other than `region`, `tf_vars`, `aws`, `shared` | catches an unimplemented provider and a misspelled key alike |
+| An environment name outside the env-name charset, or carrying a `-plan`/`-apply` suffix | the name is matched against the bare logical env name from a stack's tag, so such an entry resolves for nothing, and anything it declares orders nothing |
+| An environment key other than `region`, `tf_vars`, `aws`, `shared`, `needs` | catches an unimplemented provider and a misspelled key alike, and a top-level setting written below an entry's header |
 | `shared` that is not a TOML boolean | a quoted `"true"` would otherwise read as unshared and bind the split pair the repository believes it gave up |
 | A shared environment declaring `aws.plan` | shared mode has one environment, and it resolves `aws.apply` on both paths |
 | `tf_vars` naming anything outside `TF_VAR_*` / `TF_WORKSPACE`, or holding a non-string | see the allowlist above |
 | Malformed shape, or a structural key in a position the grammar does not give it | a string where a mapping is required, and the reverse |
-| A top-level key other than `schema_version`, `layout`, `environments`, `gate`, `env_order`, `explicit_envs` | catches a misspelled `environments`, which would otherwise yield zero environments and skip every cell's credentials step — and, on an engine that predates a key, catches a file written for a newer one before it decides anything |
-| A top-level control name used as an `env_order` key | a misplaced `explicit_envs` lands inside `[env_order]` as an ordering entry, and its exclusion from a bare apply is silently lost |
-| Malformed `env_order` or `explicit_envs` | one entry point validates every top-level field, so an ordering or exclusion error refuses at detect rather than when an apply finally reads it |
-| A cyclic `env_order`, a self-edge included | an ordering with no first environment sorts into no levels at all, and the refusal is decidable from the file alone, so it lands with the other structural checks rather than at the apply that topologically sorts it |
+| A top-level key other than `schema_version`, `layout`, `environments`, `gate`, `explicit_envs` | catches a misspelled `environments`, which would otherwise yield zero environments and skip every cell's credentials step — and, on an engine that predates a key, catches a file written for a newer one before it decides anything |
+| Malformed `needs` or `explicit_envs` | one entry point validates every field, so an ordering or exclusion error refuses at detect rather than when an apply finally reads it |
+| A cycle across `needs`, a self-edge included | an ordering with no first environment sorts into no levels at all, and the refusal is decidable from the file alone, so it lands with the other structural checks rather than at the apply that topologically sorts it |
 | A `[gate]` key other than `approver_team`, `ungated_envs` | a misspelled gate key leaves the setting at its default while the repository believes it declared one |
 | `gate.approver_team` that is not a GitHub team slug | a display name, an `@org/team` reference or a stray quote 404s in the membership lookup, refusing every commenter under a message naming the team as though it had resolved |
 | Malformed `gate.ungated_envs` | the `explicit_envs` env-name rule, on the setting that decides which environments apply unreviewed |
@@ -728,13 +727,13 @@ and a bare `shipmate apply`. The plan, deploy and targeted-apply paths see a
 changed set or a workset and stay silent.
 
 **The keys that reference an environment are checked the same way.**
-`explicit_envs`, `env_order` — both its keys and its predecessors — and
-`gate.ungated_envs` name environments rather than declaring them, and an entry
-matching no tag warns by name under the same whole-tree rule. Each names what it
-therefore fails to do, because all three are fail-open: an unmatched
-`explicit_envs` entry holds nothing back from a bare `shipmate apply`, an
-unmatched `env_order` entry orders nothing, and an unmatched `gate.ungated_envs`
-entry exempts nothing. The charset refusal catches only entries no environment
+`explicit_envs`, each entry's `needs` and `gate.ungated_envs` name environments
+rather than declaring them, and an entry matching no tag warns by name under the
+same whole-tree rule. Each names what it therefore fails to do, because all three
+are fail-open: an unmatched `explicit_envs` entry holds nothing back from a bare
+`shipmate apply`, an unmatched `needs` predecessor orders nothing, and an
+unmatched `gate.ungated_envs` entry exempts nothing. A `needs` predecessor needs
+no entry of its own, so it warns rather than refuses. The charset refusal catches only entries no environment
 name could take; a plain misspelling reaches this warning instead.
 
 **A typo'd table key therefore does not surface on the pull request that
@@ -901,11 +900,10 @@ example, a shared stack tagged both `env/staging` and `env/production`)
 when the same stack participates in more than one environment.
 
 Terramate refuses an uppercase letter in a tag, so an environment name is
-lowercase letters, digits, `-` and `_` — never uppercase. `explicit_envs` and
-`gate.ungated_envs` are held to that charset, and an uppercase entry is refused rather than left to match nothing.
-The `environments` table's own keys and `env_order`'s keys and predecessors are
-not charset-checked; a mis-cased one matches no stack tag and reaches the
-unused-entry warning below.
+lowercase letters, digits, `-` and `_` — never uppercase. The `environments`
+table's own keys, `needs`, `explicit_envs` and `gate.ungated_envs` are held to
+that charset and to the `-plan`/`-apply` suffix rule, and an uppercase name is
+refused rather than left to match nothing.
 
 An `env/<name>` tag is mandatory for every stack a run inspects, and an
 untagged one fails the whole run rather than being skipped. Which stacks
@@ -1156,7 +1154,7 @@ and intended for repositories the installing organization controls.
 
 The env is optional for `apply`. A targeted `shipmate apply <env>` applies one
 environment; a bare `shipmate apply` applies every environment that has a
-reviewed plan for the current PR head, in `env_order` env-levels (see Env
+reviewed plan for the current PR head, in `needs` env-levels (see Env
 apply order, below), except environments listed in `explicit_envs` in
 `.github/shipmate.toml` and environments held for review under
 `gate.ungated_envs` (below). Explicit environments (typically production)
@@ -1164,7 +1162,7 @@ must always be named: their `apply / <stack> / <env>` checks stay
 pending under a bare apply — so `shipmate / gate` keeps gating the
 merge — until someone runs `shipmate apply <env>` for them. An absent key
 (or `[]`) means a bare apply targets everything. Malformed `explicit_envs`
-shapes (not a list of strings) fail loud, like `env_order`, and so does an entry
+shapes (not a list of strings) fail loud, like `needs`, and so does an entry
 carrying a `-plan` or `-apply` suffix: the value is matched against the bare
 logical env name, so a suffixed entry would skip nothing.
 
@@ -2475,15 +2473,16 @@ of hashing nothing.
 
 A repository may declare a partial order over its GitHub Environments so that
 one environment's stacks fully apply before another's — for example, "`eu`
-fully green, then `us`." The order is the `env_order` table in
-`.github/shipmate.toml`: a map from an environment name to the list of
-environments that must complete their applies first (its predecessors). An
-environment absent from the map, or the whole key absent, is unordered relative
-to everything else. It is read from the default branch, like every other setting
+fully green, then `us`." The order is each entry's `needs` in
+`.github/shipmate.toml`: the list of environments that must complete their
+applies first (its predecessors), as `needs = ["dev-eu"]` under
+`[environments.dev-us]`. An environment without `needs` has no predecessors, and
+one that is no environment's predecessor either is unordered relative to
+everything else. It is read from the default branch, like every other setting
 in that file, so a feature branch cannot reorder its own applies.
 
-The merge-deploy path topologically sorts this map into `env-levels`
-(level 0 = no predecessors, or not listed at all): all pending applies whose
+The merge-deploy path topologically sorts these lists into `env-levels`
+(level 0 = no predecessors): all pending applies whose
 environment falls in level 0 run to completion (respecting the existing
 stack-wave DAG within that level) before any env-level-1 apply starts, and so
 on. A failure anywhere in an env-level skips every successor level's applies

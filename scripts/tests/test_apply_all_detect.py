@@ -626,9 +626,9 @@ def test_main_takes_ordering_and_exclusions_from_the_loaded_table(tmp_path, monk
     the same mapping, from the default branch, that supplies every cell's identity.
 
     Every assertion is on a populated value, because the broken shape returns the empty
-    default rather than raising. Mutation: replace `main`'s two `table.get(...)` reads with
-    the bare `{}` and `[]` -- dev-us drops to env-level 0 and prod-eu applies instead of
-    being excluded.
+    default rather than raising. Mutation: replace `main`'s `bm.ec.env_order(table)` and
+    `table.get("explicit_envs", [])` with the bare `{}` and `[]` -- dev-us drops to
+    env-level 0 and prod-eu applies instead of being excluded.
     """
     parsed = _run_main(
         tmp_path,
@@ -649,7 +649,7 @@ def test_main_loads_the_environment_table_exactly_once(tmp_path, monkeypatch):
     its own would make that three reads of the default branch, each able to disagree with the
     others if the branch moves mid-run.
 
-    Mutation: add `bm.ec.read_table()` beside `main`'s `env_order` read -- the count
+    Mutation: add `bm.ec.read_table()` beside `main`'s `bm.ec.env_order` call -- the count
     becomes 2.
     """
     reads = []

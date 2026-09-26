@@ -140,8 +140,8 @@ UNUSED_UNGATED = (
     "branch and the tags from this branch, so an environment arrives and leaves over two "
     "pull requests."
 )
-UNUSED_ORDER = (
-    "::warning::env_order names prd, which no stack tags, so it orders nothing. Remove "
+UNUSED_NEEDS = (
+    "::warning::needs names ghost, which no stack tags, so it orders nothing. Remove "
     "the entry, or tag the stacks that belong to it. This is a warning rather than a "
     "refusal because the table is read from the default branch and the tags from this "
     "branch, so an environment arrives and leaves over two pull requests."
@@ -167,32 +167,26 @@ def test_an_ungated_env_naming_no_environment_warns(capsys):
     assert capsys.readouterr().out.splitlines() == [UNUSED_UNGATED]
 
 
-def test_an_env_order_key_naming_no_environment_warns(capsys):
-    """`env_order` is never charset-checked at all, so this warning is its only diagnostic.
-    An unmatched key leaves a phantom graph node while the real environment stays at level
-    0 and applies alongside the predecessor it was ordered after.
+def test_a_needs_predecessor_naming_no_environment_warns(capsys):
+    """A predecessor matching nothing reads as declared and constrains nothing. It needs no
+    entry of its own, so it passes the structural checks and warns here instead: refusing it
+    would make adding an environment and ordering after it two pull requests in lockstep.
 
-    Mutation: collect only the mapping's values, not its keys."""
-    _validate({**USED, "env_order": {"prd": []}}, all_envs={"prod"})
-    assert capsys.readouterr().out.splitlines() == [UNUSED_ORDER]
-
-
-def test_an_env_order_predecessor_naming_no_environment_warns(capsys):
-    """A predecessor matching nothing is the same hole from the other side: the ordering
-    reads as declared and constrains nothing.
-
-    Mutation: collect only the mapping's keys, not its values."""
-    _validate({**USED, "env_order": {"prod": ["prd"]}}, all_envs={"prod"})
-    assert capsys.readouterr().out.splitlines() == [UNUSED_ORDER]
+    Mutations: require an entry for every predecessor in `validate_structure` -- this raises;
+    or drop `needs` from the reference-key mapping -- nothing prints."""
+    table = {"layout": "folder", "environments": {"prod": {"needs": ["ghost"]}}}
+    assert env_config.validate_structure(table) is table
+    assert _validate(table, all_envs={"prod"}) == table
+    assert capsys.readouterr().out.splitlines() == [UNUSED_NEEDS]
 
 
 def test_reference_keys_naming_real_environments_say_nothing(capsys):
     """Mutation: warn whenever a reference key is present."""
     table = {
-        **USED,
+        "layout": "folder",
+        "environments": {"prod": {"needs": ["dev"]}},
         "explicit_envs": ["prod"],
         "gate": {"ungated_envs": ["prod"]},
-        "env_order": {"prod": ["dev"]},
     }
     _validate(table, all_envs={"prod", "dev"})
     assert capsys.readouterr().out == ""

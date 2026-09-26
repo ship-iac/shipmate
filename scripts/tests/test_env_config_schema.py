@@ -59,12 +59,12 @@ def test_a_table_with_no_layout_refuses():
 
 
 def test_a_file_holding_only_an_ordering_refuses():
-    """`env_order` is a legal top-level key, so a file carrying only that parses cleanly and
+    """`needs` is a legal entry key, so a file carrying only an ordering parses cleanly and
     reaches validation. The layout refusal is the only thing that can stop it.
 
     Mutation: as above.
     """
-    table = {"env_order": {"prod-us": ["dev-eu"]}}
+    table = {"environments": {"prod-us": {"needs": ["dev-eu"]}}}
     assert _refusal(table) == NO_LAYOUT
 
 
@@ -203,7 +203,7 @@ def test_an_unimplemented_provider_key_refuses():
     }
     assert _refusal(table) == (
         "::error::environment dev-eu: azure is not a key this engine implements. "
-        "An environment holds region, tf_vars, aws, shared."
+        "An environment holds region, tf_vars, aws, shared, needs."
     )
 
 
@@ -215,7 +215,7 @@ def test_a_misspelled_environment_key_refuses():
     table = {"layout": "folder", "environments": {"dev-eu": {"regoin": "eu-west-1"}}}
     assert _refusal(table) == (
         "::error::environment dev-eu: regoin is not a key this engine implements. "
-        "An environment holds region, tf_vars, aws, shared."
+        "An environment holds region, tf_vars, aws, shared, needs."
     )
 
 
@@ -525,10 +525,11 @@ def test_a_whole_table_is_returned_unchanged():
     """
     table = {
         "layout": "tf_vars",
-        "env_order": {"prod-us": ["dev-eu"]},
+        "gate": {"approver_team": "deployers"},
         "environments": {
             "dev-eu": {
                 "region": "eu-west-1",
+                "needs": ["prod-us"],
                 "tf_vars": {"TF_VAR_team": "core"},
                 "aws": {
                     "region": "eu-central-1",
@@ -543,10 +544,11 @@ def test_a_whole_table_is_returned_unchanged():
     }
     assert env_config.validate(table, ("dev-eu",)) == {
         "layout": "tf_vars",
-        "env_order": {"prod-us": ["dev-eu"]},
+        "gate": {"approver_team": "deployers"},
         "environments": {
             "dev-eu": {
                 "region": "eu-west-1",
+                "needs": ["prod-us"],
                 "tf_vars": {"TF_VAR_team": "core"},
                 "aws": {
                     "region": "eu-central-1",
@@ -586,14 +588,13 @@ def test_a_misspelled_top_level_key_refuses():
     """
     assert _refusal({"layout": "folder", "enviroments": {}}) == (
         "::error::enviroments is not a setting this engine implements. "
-        ".github/shipmate.toml holds schema_version, layout, environments, gate, env_order, "
-        "explicit_envs."
+        ".github/shipmate.toml holds schema_version, layout, environments, gate, explicit_envs."
     )
 
 
 def test_every_allowed_top_level_key_is_accepted():
-    """The other half of the strict-key rule: the six names are the whole allowed set, so a
-    table using all six must validate. Compared against a hand-written table, never against
+    """The other half of the strict-key rule: the five names are the whole allowed set, so a
+    table using all five must validate. Compared against a hand-written table, never against
     the module's own constant.
 
     This is also where the `explicit_envs` half of "nothing cross-checks a control against
@@ -601,13 +602,12 @@ def test_every_allowed_top_level_key_is_accepted():
     shape the canonical-file guard cannot catch because it declares every environment it
     excludes.
 
-    Mutations: remove a name from the allowed set -- one of these six then refuses; or make
+    Mutations: remove a name from the allowed set -- one of these five then refuses; or make
     `validate_structure` require an `environments` entry for every `explicit_envs` name.
     """
     table = {
         "layout": "folder",
         "environments": {},
-        "env_order": {"prod": ["dev-eu"]},
         "explicit_envs": ["prod"],
         "gate": {"approver_team": "deployers", "ungated_envs": ["dev-eu"]},
         "schema_version": 1,
@@ -615,20 +615,32 @@ def test_every_allowed_top_level_key_is_accepted():
     assert env_config.validate(table, ()) == table
 
 
+def _needs(value):
+    return {"layout": "folder", "environments": {"prod": {"needs": value}}}
+
+
 _ORDERING = [
     (
-        {"layout": "folder", "env_order": "dev-eu"},
-        "::error::env_order must be a mapping of env -> [predecessor envs], got str ('dev-eu')",
-    ),
-    (
-        {"layout": "folder", "env_order": {"prod": "dev-eu"}},
-        "::error::env_order['prod'] must be a list of predecessor envs, got str "
+        _needs("dev-eu"),
+        "::error::environments.prod.needs must be a list of env-name strings, got str "
         "('dev-eu'); did you mean ['dev-eu']?",
     ),
     (
-        {"layout": "folder", "env_order": {"prod": ["dev-eu", 123]}},
-        "::error::env_order['prod'] predecessors must all be env-name strings; "
-        "got non-string element(s) [123]",
+        _needs([1]),
+        "::error::environments.prod.needs elements must all be env-name strings; "
+        "got non-string element(s) [1]",
+    ),
+    (
+        _needs(["Dev"]),
+        "::error::environments.prod.needs entry 'Dev' is not an environment name; entries are "
+        "bare logical env names (lowercase letters, digits, '-' and '_'), with no quotes, "
+        "spaces or path separators.",
+    ),
+    (
+        _needs(["dev-eu-plan"]),
+        "::error::environments.prod.needs entry 'dev-eu-plan' carries the environment suffix "
+        "'-plan'; environments.prod.needs is matched against the bare logical env name — "
+        "write 'dev-eu' instead.",
     ),
     (
         {"layout": "folder", "explicit_envs": "prod"},
@@ -657,7 +669,7 @@ _ORDERING = [
 
 @pytest.mark.parametrize(("table", "message"), _ORDERING, ids=range(len(_ORDERING)))
 def test_the_single_entry_point_validates_ordering_and_exclusions(table, message):
-    """`env_order` and `explicit_envs` are checked by the same entry point as `layout` and
+    """`needs` and `explicit_envs` are checked by the same entry point as `layout` and
     `environments`, so a "valid configuration" verdict cannot leave an ordering or exclusion
     error to surface when an apply finally reads the field.
 
@@ -665,9 +677,10 @@ def test_the_single_entry_point_validates_ordering_and_exclusions(table, message
     documented environment name carries `-plan` or `-apply`, and a suffixed entry matches no
     apply check, excludes nothing and lets prod apply on a bare `shipmate apply`.
 
-    Mutations: delete the `validate_env_order` and `validate_explicit_envs` calls from
-    `validate_structure` -- every case here validates instead of refusing; or drop either
-    entry from the suffix tuple in `validate_explicit_envs` -- that suffix's case validates.
+    Mutations: delete the `validate_env_name_list` call from `validate_env_order` -- the four
+    `needs` cases validate; delete the `validate_explicit_envs` call from
+    `validate_structure` -- the `explicit_envs` cases validate; or drop either entry from the
+    suffix tuple in `_check_env_name` -- that suffix's case validates.
     """
     assert _refusal(table) == message
 
@@ -681,7 +694,7 @@ def test_a_tier_word_that_is_not_the_trailing_suffix_is_accepted():
     matched with their hyphen, so `plan-eu` and `apply-svc` survive a containment test too
     and pin the leading-word half rather than this one.
 
-    Mutation: `e.endswith(suffix)` -> `suffix in e` in `validate_explicit_envs` -- `eu-plan-1`
+    Mutation: `e.endswith(suffix)` -> `suffix in e` in `_check_env_name` -- `eu-plan-1`
     then refuses.
     """
     table = {"layout": "folder", "explicit_envs": ["prod", "plan-eu", "apply-svc", "eu-plan-1"]}
@@ -700,7 +713,7 @@ _CYCLES = [
 
 
 @pytest.mark.parametrize(("order", "cycle"), _CYCLES, ids=range(len(_CYCLES)))
-def test_a_cyclic_env_order_refuses_structurally(order, cycle):
+def test_a_cycle_across_needs_refuses_structurally(order, cycle):
     """Acyclicity is decidable from the file alone, so it belongs with the structural checks:
     without it `validate_structure` passes a file that `env_levels` later refuses with a raw
     `CycleError`, and `shipmate doctor` certifies it as sound in the meantime.
@@ -710,16 +723,16 @@ def test_a_cyclic_env_order_refuses_structurally(order, cycle):
     for the direction the path is rendered in -- `graphlib` reports each node before its
     successor, so reversing the join silently mislabels every cycle longer than two.
 
-    Mutation: delete the `TopologicalSorter` block from `validate_env_order` -- all three
-    tables validate.
+    Mutations: delete the `TopologicalSorter` block from `validate_env_order`, or the
+    `validate_env_order` call from `_check_entries` -- all three tables validate.
     """
-    table = {"layout": "folder", "env_order": order}
+    table = {"layout": "folder", "environments": {e: {"needs": p} for e, p in order.items()}}
     with pytest.raises(SystemExit) as excinfo:
         env_config.validate_structure(table)
-    assert str(excinfo.value) == f"::error::env_order is cyclic: {cycle}{_CYCLE_TAIL}"
+    assert str(excinfo.value) == f"::error::needs is cyclic: {cycle}{_CYCLE_TAIL}"
 
 
-def test_a_deep_acyclic_env_order_still_validates():
+def test_a_deep_acyclic_needs_chain_still_validates():
     """The other half of the cycle rule: a legitimate chain must keep validating. A check that
     refuses a valid ordering is worse than the defect it fixes, and three levels is what the
     engine's own `MAX_ENV_LEVELS` cap allows.
@@ -729,9 +742,77 @@ def test_a_deep_acyclic_env_order_still_validates():
     """
     table = {
         "layout": "folder",
-        "env_order": {"stage": ["dev"], "prod": ["stage"], "prod-us": ["prod", "stage"]},
+        "environments": {
+            "stage": {"needs": ["dev"]},
+            "prod": {"needs": ["stage"]},
+            "prod-us": {"needs": ["prod", "stage"]},
+        },
     }
     assert env_config.validate_structure(table) is table
+
+
+def test_env_order_reads_needs_off_every_entry_holding_it():
+    """A declared empty `needs` is an ordering entry with no predecessors, and an entry
+    without `needs` is no entry at all.
+
+    Mutations: read `needs` only when it is non-empty -- `b` drops out; or default an absent
+    `needs` to `[]` -- `c` appears.
+    """
+    table = {
+        "layout": "folder",
+        "environments": {
+            "c": {"region": "eu-west-1"},
+            "a": {"needs": ["x", "y"]},
+            "b": {"needs": []},
+        },
+    }
+    assert env_config.env_order(table) == {"a": ["x", "y"], "b": []}
+
+
+def test_the_old_env_order_table_refuses_as_unknown():
+    """No alias: the old top-level ordering table refuses through the strict top-level loop.
+
+    Mutation: keep `"env_order"` in `_TOP_KEYS` -- the file then validates.
+    """
+    assert _refusal({"layout": "folder", "env_order": {"prod": ["dev"]}}) == (
+        "::error::env_order is not a setting this engine implements. "
+        ".github/shipmate.toml holds schema_version, layout, environments, gate, explicit_envs."
+    )
+
+
+_ENTRY_NAMES = [
+    (
+        "Prod",
+        "::error::environments entry 'Prod' is not an environment name; entries are bare "
+        "logical env names (lowercase letters, digits, '-' and '_'), with no quotes, spaces "
+        "or path separators.",
+    ),
+    (
+        "dev eu",
+        "::error::environments entry 'dev eu' is not an environment name; entries are bare "
+        "logical env names (lowercase letters, digits, '-' and '_'), with no quotes, spaces "
+        "or path separators.",
+    ),
+    (
+        "dev-plan",
+        "::error::environments entry 'dev-plan' carries the environment suffix '-plan'; "
+        "environments is matched against the bare logical env name — write 'dev' instead.",
+    ),
+]
+
+
+@pytest.mark.parametrize(("name", "message"), _ENTRY_NAMES, ids=range(len(_ENTRY_NAMES)))
+def test_an_entry_name_no_environment_can_take_refuses(name, message):
+    """Flags and ordering hang off the entry name, so an entry no Terramate tag can name
+    orders nothing and is never resolved. The name is checked before the entry is read: each
+    entry here is otherwise valid.
+
+    Mutation: check the charset on list items only -- drop the entry-name loop from
+    `_check_entries`; every case validates.
+    """
+    assert _refusal({"layout": "folder", "environments": {name: {"region": "eu-west-1"}}}) == (
+        message
+    )
 
 
 # --- 11: schema_version and the gate table ------------------------------------------------
@@ -781,8 +862,7 @@ def test_the_old_version_key_refuses_as_unknown():
     """
     assert _refusal({"layout": "folder", "version": 1}) == (
         "::error::version is not a setting this engine implements. "
-        ".github/shipmate.toml holds schema_version, layout, environments, gate, env_order, "
-        "explicit_envs."
+        ".github/shipmate.toml holds schema_version, layout, environments, gate, explicit_envs."
     )
 
 
@@ -974,7 +1054,7 @@ def test_the_old_entry_vars_table_refuses_as_an_unknown_key():
     table = {"layout": "folder", "environments": {"dev-eu": {"vars": {"TF_VAR_x": "y"}}}}
     assert _refusal(table) == (
         "::error::environment dev-eu: vars is not a key this engine implements. "
-        "An environment holds region, tf_vars, aws, shared."
+        "An environment holds region, tf_vars, aws, shared, needs."
     )
 
 

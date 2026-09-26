@@ -3,8 +3,8 @@
 
 The pre-merge equivalent of deploy-detect, sourced like apply-detect: cells are
 the tree's stacks whose `apply / <stack> / <env>` check is on the head, each
-applying from the plan run its own check records, and the environment table's
-`env_order` buckets the pending ones into env-levels exactly as on the
+applying from the plan run its own check records, and the environment entries'
+`needs` bucket the pending ones into env-levels exactly as on the
 merge-deploy path. Env membership comes from stack tags
 (build-matrix.env_membership) so check names are only ever constructed forward,
 never reverse-parsed.
@@ -96,7 +96,7 @@ def main():
 
     pending = ad.filter_pending(cells, ad.completed_apply_names(lines, app_id))
 
-    order = table.get("env_order", {})
+    order = bm.ec.env_order(table)
     pending_envs = {c["environment"] for c in pending}
     ungated = bm.ec.gate_ungated_envs(table)
     decision = os.environ.get("SHIPMATE_REVIEW_DECISION", "")

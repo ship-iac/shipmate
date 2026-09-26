@@ -284,15 +284,13 @@ def read_table_at_default_branch(run=None):
 #: and one conditional step in each cell action.
 _LAYOUTS = ("tf_vars", "workspace", "folder")
 _AWS_FIELDS = ("region", "role")
-_ENV_KEYS = ("region", "tf_vars", "aws", "shared")
+_ENV_KEYS = ("region", "tf_vars", "aws", "shared", "needs")
 
 #: Reserved at every level: a tier selector, never a provider field.
 _STRUCTURAL = ("plan", "apply", "workloads")
 
-#: Everything the file may declare at its top level. Also the names reserved inside
-#: `env_order`, which is keyed by environment name and would otherwise accept a
-#: misplaced control as an ordering entry.
-_TOP_KEYS = ("schema_version", "layout", "environments", "gate", "env_order", "explicit_envs")
+#: Everything the file may declare at its top level.
+_TOP_KEYS = ("schema_version", "layout", "environments", "gate", "explicit_envs")
 
 #: Everything a `[gate]` table may declare.
 _GATE_KEYS = ("approver_team", "ungated_envs")
@@ -507,18 +505,17 @@ _TWO_PULL_REQUESTS = (
 #: ordering something while the run does none of it. The charset rule catches only entries
 #: no env name could take; a plain typo passes it and lands here.
 _REFERENCE_KEYS = {
-    "env_order": "so it orders nothing",
+    "needs": "so it orders nothing",
     "explicit_envs": "so it holds nothing back from a bare `shipmate apply`",
     "gate.ungated_envs": "so it exempts nothing from the review requirement",
 }
 
 
 def _referenced_envs(table):
-    """Env names per reference key. `env_order` references from both sides -- an unmatched
-    key and an unmatched predecessor each leave the ordering declared and unenforced."""
-    order = table.get("env_order", {})
+    """Env names per reference key. `needs` references by its predecessors only: the env
+    holding it is an entry, which the unused-entry warning already covers."""
     return {
-        "env_order": set(order) | {p for preds in order.values() for p in preds},
+        "needs": {p for preds in env_order(table).values() for p in preds},
         "explicit_envs": set(table.get("explicit_envs", [])),
         "gate.ungated_envs": set(table.get("gate", {}).get("ungated_envs", [])),
     }
@@ -551,18 +548,13 @@ def _report_unused(table, all_envs):
             )
 
 
-def _validate_predecessors(env, preds):
-    if not isinstance(preds, list):
-        raise SystemExit(
-            f"::error::env_order[{env!r}] must be a list of predecessor envs, "
-            f"got {type(preds).__name__} ({preds!r}); did you mean [{preds!r}]?"
-        )
-    bad = [p for p in preds if not isinstance(p, str)]
-    if bad:
-        raise SystemExit(
-            f"::error::env_order[{env!r}] predecessors must all be env-name "
-            f"strings; got non-string element(s) {bad!r}"
-        )
+def env_order(table):
+    """`{env: [predecessors]}` from each entry's `needs`: the order `env-order` sorts."""
+    return {
+        env: entry["needs"]
+        for env, entry in sorted(table.get("environments", {}).items())
+        if "needs" in entry
+    }
 
 
 def validate_env_order(order):
@@ -575,26 +567,18 @@ def validate_env_order(order):
     """
     if not isinstance(order, dict):
         raise SystemExit(
-            "::error::env_order must be a mapping of env -> [predecessor envs], "
+            "::error::the needs order must be a mapping of env -> [predecessor envs], "
             f"got {type(order).__name__} ({order!r})"
         )
     for env, preds in order.items():
-        if env in _TOP_KEYS:
-            raise SystemExit(
-                f"::error::env_order[{env!r}] names a top-level setting, not an "
-                "environment. A scalar written below a [table] header lands inside that "
-                f"table, so `{env} = ...` after [env_order] becomes an ordering entry "
-                "instead of a top-level setting. Move it above the first header in "
-                f"{CONFIG_PATH}."
-            )
-        _validate_predecessors(env, preds)
+        validate_env_name_list(preds, f"environments.{env}.needs")
     # After the shape checks, or the sorter consumes a string predecessor character by character.
     try:
         graphlib.TopologicalSorter(order).prepare()
     except graphlib.CycleError as exc:
         cycle = " -> ".join(exc.args[1])
         raise SystemExit(
-            f"::error::env_order is cyclic: {cycle} — each of those must fully apply "
+            f"::error::needs is cyclic: {cycle} — each of those must fully apply "
             "before the next, so the ordering has no first environment and no apply path "
             f"can sort it. Break the chain in {CONFIG_PATH}."
         ) from exc
@@ -604,15 +588,9 @@ def validate_env_order(order):
 def validate_env_name_list(envs, key):
     """`envs`, or `SystemExit` unless it is a list of bare env-name strings.
 
-    The one env-name rule, shared by `explicit_envs` and `gate.ungated_envs`. `key` names
+    The list rule, shared by `needs`, `explicit_envs` and `gate.ungated_envs`. `key` names
     the setting in every message. Guards a bare string, which would otherwise be iterated
-    character by character, a non-list value, an entry no environment name can match, and an entry
-    carrying a `-plan`/`-apply` environment suffix -- each of the last two is matched against
-    the bare logical env name, matches nothing, and so excludes or exempts nothing while
-    reading as if it did.
-
-    Charset before suffix: a suffixed name passes the charset, so the two are separate
-    checks, and this order gives `"dev eu-plan"` the message about its space.
+    character by character, a non-list value, and each element under `_check_env_name`.
     """
     if not isinstance(envs, list):
         raise SystemExit(
@@ -626,20 +604,33 @@ def validate_env_name_list(envs, key):
             f"got non-string element(s) {bad!r}"
         )
     for e in envs:
-        if not _ENV_ENTRY.fullmatch(e):
-            raise SystemExit(
-                f"::error::{key} entry {e!r} is not an environment name; entries are bare "
-                f"logical env names (lowercase letters, digits, '-' and '_'), with no "
-                f"quotes, spaces or path separators."
-            )
-        for suffix in ("-plan", "-apply"):
-            if e.endswith(suffix):
-                raise SystemExit(
-                    f"::error::{key} entry {e!r} carries the environment suffix "
-                    f"{suffix!r}; {key} is matched against the bare logical env name — "
-                    f"write {e[: -len(suffix)]!r} instead."
-                )
+        _check_env_name(e, key)
     return envs
+
+
+def _check_env_name(e, key):
+    """Refuse a name no environment can take, as an entry key or a list element.
+
+    Guards a name outside the charset, and one carrying a `-plan`/`-apply` environment
+    suffix -- each is matched against the bare logical env name, matches nothing, and so
+    orders, excludes or exempts nothing while reading as if it did.
+
+    Charset before suffix: a suffixed name passes the charset, so the two are separate
+    checks, and this order gives `"dev eu-plan"` the message about its space.
+    """
+    if not _ENV_ENTRY.fullmatch(e):
+        raise SystemExit(
+            f"::error::{key} entry {e!r} is not an environment name; entries are bare "
+            f"logical env names (lowercase letters, digits, '-' and '_'), with no "
+            f"quotes, spaces or path separators."
+        )
+    for suffix in ("-plan", "-apply"):
+        if e.endswith(suffix):
+            raise SystemExit(
+                f"::error::{key} entry {e!r} carries the environment suffix "
+                f"{suffix!r}; {key} is matched against the bare logical env name — "
+                f"write {e[: -len(suffix)]!r} instead."
+            )
 
 
 def validate_team_slug(team, key):
@@ -722,6 +713,15 @@ def _check_version(table):
         )
 
 
+def _check_entries(environments):
+    """Every entry name, then every entry, then the order their `needs` declare."""
+    for env in sorted(environments):
+        _check_env_name(env, "environments")
+    for env in sorted(environments):
+        _check_environment(environments[env], env)
+    validate_env_order(env_order({"environments": environments}))
+
+
 def validate_structure(table):
     """Everything the file can be judged on by itself, or `SystemExit`.
 
@@ -754,10 +754,7 @@ def validate_structure(table):
     layout = table["layout"]
     if layout not in _LAYOUTS:
         raise SystemExit(f"::error::layout is {layout!r}; it must be one of {', '.join(_LAYOUTS)}.")
-    environments = _mapping(table.get("environments", {}), "environments")
-    for env in sorted(environments):
-        _check_environment(environments[env], env)
-    validate_env_order(table.get("env_order", {}))
+    _check_entries(_mapping(table.get("environments", {}), "environments"))
     validate_explicit_envs(table.get("explicit_envs", []))
     validate_gate(table.get("gate", {}))
     return table

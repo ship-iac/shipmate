@@ -124,10 +124,10 @@ live probes.
   request that introduces it rather than after it merges. A missing or unreadable
   file is a note saying so, never an all-clear. Only the checks a file can be judged
   on by itself run here — the top-level keys, `schema_version`, `layout`, the
-  environment entries, `env_order`, `explicit_envs` and `[gate]`; `tf_vars`-layout
+  environment entries, `explicit_envs` and `[gate]`; `tf_vars`-layout
   coverage and unused entries need a plan matrix or a whole-tree environment
   scan, and the verdict names them as unchecked. A valid
-  file also gets its `env_order` and
+  file also gets its `needs` and
   `explicit_envs` values read back, absent ones included: an absent `explicit_envs`
   is legitimate configuration that no validator can question, and it means a bare
   `shipmate apply` applies production too. Each variable reference is resolved
@@ -583,16 +583,16 @@ the only copy execution reads.
 | `is not valid TOML: <message>` | `tomllib`'s own message, with the line and column. See the two parse traps below |
 | `is read with tomllib, which needs Python 3.11 or later; this runner has …` | the `runs_on:` image is older than the floor `../CONTRACT.md` §Runner prerequisites states — `ubuntu-22.04` ships 3.10. Name a newer image |
 | `declares no layout` | either the key is genuinely absent, or it is written below a `[table]` header — see the placement trap below |
-| `<key> is not a setting this engine implements` | a top-level key this engine does not have, most often a misspelled `environments`. Only `schema_version`, `layout`, `environments`, `gate`, `env_order` and `explicit_envs` are accepted — the message lists them. A *newer* engine's key lands here too, which is why a pin moves before a key does ([`upgrading.md`](upgrading.md)) |
+| `<key> is not a setting this engine implements` | a top-level key this engine does not have, most often a misspelled `environments`. Only `schema_version`, `layout`, `environments`, `gate` and `explicit_envs` are accepted — the message lists them. A *newer* engine's key lands here too, which is why a pin moves before a key does ([`upgrading.md`](upgrading.md)) |
 | `gate.<key> is not a key this engine implements` | the `[gate]` table holds `approver_team` and `ungated_envs`. A misspelled one would leave the setting at its default while the repository believed it declared one |
 | `schema_version is <value>; this engine implements version 1` | `schema_version` is optional and, written, must be the integer `1`. `schema_version = true` is refused by name rather than read as 1 |
-| `env_order['explicit_envs'] names a top-level setting, not an environment` | the placement trap, caught by name: `explicit_envs` was written below `[env_order]` and became an ordering entry |
+| `environments entry '<name>' is not an environment name` or `environments entry '<name>' carries the environment suffix` | an `[environments.<name>]` header whose name no stack tag can carry: Terramate refuses an uppercase letter in a tag, and the name is the bare logical env name, never `<env>-plan` or `<env>-apply`. Rename the entry to the name in the stacks' `env/<name>` tags |
 | `<key> references GitHub variable <NAME>, which is not set` | no repository or organization variable of that name reaches the repository. Set it with `gh variable set <NAME>`; the next run reads it, no pull request needed. A variable on a cell's `<env>-plan`, `<env>-apply` or shared `<env>` Environment is never read, and on GitHub Free an organization variable does not reach a private repository ([`../CONTRACT.md`](../CONTRACT.md) §Variable references) |
 | `<key> references GitHub variable <NAME>, which is set to an empty value` | a reference never means an empty string; give the variable a value or write the value into the file |
 | `<key> references GitHub variable "<name>"; GitHub variable names are uppercase` | GitHub stores every variable name uppercase. Write the reference with the spelling the message gives |
 | `<key> references GitHub variable '<name>', which is not a GitHub variable name` | the name is empty or holds a character GitHub refuses in a variable name. Names are `[A-Z_][A-Z0-9_]*` |
 | `<key> references GitHub variable <NAME>, but this step received no GitHub variables` | either the engine did not pass `github-vars` to the step reading the file, or no repository or organization variable reaches the repository at all. With variables set, report it as an engine defect |
-| `env_order is cyclic: <a> -> <b> -> <a>` | the environments order each other in a loop, so none of them can go first. The path names the loop in apply order; an env listing itself is the one-node case. Drop one of the entries |
+| `needs is cyclic: <a> -> <b> -> <a>` | the environments' `needs` order them in a loop, so none of them can go first. The path names the loop in apply order; an env listing itself is the one-node case. Drop one of the `needs` items |
 
 **Trap 1: a top-level setting written below a `[table]` header.** TOML puts a
 scalar into whatever table header precedes it, so the line is well-formed and
@@ -603,17 +603,13 @@ A misplaced `layout` always reports as `declares no layout`, whatever header it
 fell under — the missing-`layout` check runs before anything looks inside
 `environments`, and its message names the placement rule.
 
-A misplaced `explicit_envs` or `env_order` reports differently in each position:
+A misplaced `explicit_envs` reports differently in each position:
 
 | Where it landed | What `detect` says |
 | --- | --- |
-| after `[env_order]` | `env_order['explicit_envs'] names a top-level setting, not an environment` |
-| after `[environments.dev-eu]` | `environment dev-eu: explicit_envs is not a key this engine implements. An environment holds region, vars, aws, shared.` |
+| after `[gate]` | `gate.explicit_envs is not a key this engine implements. The gate table holds approver_team, ungated_envs.` |
+| after `[environments.dev-eu]` | `environment dev-eu: explicit_envs is not a key this engine implements. An environment holds region, tf_vars, aws, shared, needs.` |
 | after `[environments.dev-eu.aws.plan]` | `environment dev-eu: aws.plan.explicit_envs is not a field the aws provider defines. It defines region, role.` |
-
-The first of those is the one worth knowing about: before the reserved-name
-check existed, a misplaced `explicit_envs` read as a legitimate ordering entry,
-the exclusion was silently lost, and a bare `shipmate apply` reached production.
 
 The fix in every case is the same: put the top-level settings above the first
 `[table]` header.
@@ -630,7 +626,7 @@ A leading byte-order mark is `Invalid statement (at line 1, column 1)`. Save the
 file as UTF-8 without a BOM; nothing strips it, deliberately, so that
 `shipmate doctor` and the run reach the same verdict on the same bytes.
 
-**Three settings refuse nothing when they are absent.** `env_order`,
+**Three settings refuse nothing when they are absent.** `needs`,
 `explicit_envs` and `gate.approver_team` are optional and take tolerant
 defaults — no ordering, no exclusions, and no one authorized. A file that omits
 `explicit_envs` is structurally valid, and a bare `shipmate apply` then applies
@@ -639,7 +635,7 @@ every `shipmate apply` and `shipmate unlock` as though the commenter were an
 outsider. Nothing warns. `shipmate doctor` echoes all three on every report for
 exactly this reason; read them before merging.
 
-**Editing them on a branch does not change what that branch applies.** `env_order`
+**Editing them on a branch does not change what that branch applies.** `needs`
 and `explicit_envs` are read from the default branch with the rest of the file.
 Validate the change with `shipmate doctor` on the pull request, then merge it —
 that is what makes it take effect.

@@ -1,8 +1,7 @@
-"""The two configuration files the design publishes, parsed and validated as written.
+"""Two whole configuration files, parsed and validated as written.
 
-`docs/` and the design both show these exact bytes, so they are the cases a reader will
-copy. One must validate and resolve; the other must refuse. Both are used verbatim rather
-than paraphrased: a paraphrase drops the notation -- dotted keys, comment placement, the
+One must validate and resolve; the other must refuse. Both are TOML text rather than
+mappings: a mapping drops the notation -- dotted keys, comment placement, the
 ordering of top-level scalars against the first `[table]` header -- which is the part TOML
 gets wrong silently.
 
@@ -16,19 +15,20 @@ from _loader import load_script
 
 ec = load_script("env-config")
 
-#: The canonical file, verbatim from the design's schema section.
+#: Every top-level key the schema allows, and every entry key but `shared`.
 CANONICAL = """\
 schema_version = 1                 # optional
 layout         = "tf_vars"         # "tf_vars" | "workspace" | "folder", required
 explicit_envs  = ["prod"]          # optional
 
-[env_order]                        # optional: env -> envs that must fully apply first
-dev-us = ["dev-eu"]
-
 [environments.dev-eu]
 region         = "eu-west-1"
 aws.plan.role  = "arn:aws:iam::981781037707:role/shipmate-plan"
 aws.apply.role = "arn:aws:iam::981781037707:role/shipmate-apply"
+
+[environments.dev-us]
+region = "us-east-1"
+needs  = ["dev-eu"]                # optional: envs that must fully apply first
 
 [environments.prod]
 region         = "eu-west-1"
@@ -39,23 +39,22 @@ aws.apply.workloads.net-edge.role = "arn:aws:iam::981781037707:role/net-edge"
 tf_vars.TF_VAR_tier = "core"       # optional, merged over the derived TF_VAR_*
 """
 
-#: The misplaced control, verbatim from the design's strict-validation section.
+#: A top-level setting written below a header, where TOML puts it inside that table.
 MISPLACED_CONTROL = """\
 layout = "folder"
 
-[env_order]
-prod = ["dev"]
-explicit_envs = ["prod"]      # intended as a top-level control
+[environments.prod]
+region = "eu-west-1"
+schema_version = 1            # intended as a top-level setting
 """
 
 
 def test_the_canonical_file_validates():
     """Every top-level key the schema allows, dotted provider keys, a workload tier and an
-    environment named only by `env_order`.
+    ordering.
 
-    Mutation: remove any of the five names from the allowed top-level set, or add a check
-    that every `env_order` key has an `environments` entry -- `dev-us` has none,
-    deliberately, and the design's own file declares it that way.
+    Mutation: remove any of the four names from the allowed top-level set, or `"needs"` from
+    the allowed entry keys.
     """
     table = ec.parse_table(CANONICAL)
     assert ec.validate(table, ("dev-eu", "prod")) is table
@@ -63,22 +62,22 @@ def test_the_canonical_file_validates():
 
 
 def test_the_misplaced_control_refuses():
-    """`explicit_envs` written below `[env_order]` parses as an ordering entry for an
-    environment of that name, and `prod` then silently loses its exclusion from a bare
-    apply. The file is well-formed TOML and every pre-existing check passes it.
+    """`schema_version` written below `[environments.prod]` parses as a key of that entry.
+    The file is well-formed TOML, and the strict entry-key check is the only thing that
+    refuses it.
 
-    Mutation: delete the `_TOP_KEYS` membership check from `validate_env_order` -- the file
-    validates and the exclusion is lost with no diagnostic anywhere.
+    Mutation: add `"schema_version"` to `_ENV_KEYS` -- the file validates.
     """
     table = ec.parse_table(MISPLACED_CONTROL)
-    assert table == {"layout": "folder", "env_order": {"prod": ["dev"], "explicit_envs": ["prod"]}}
+    assert table == {
+        "layout": "folder",
+        "environments": {"prod": {"region": "eu-west-1", "schema_version": 1}},
+    }
     with pytest.raises(SystemExit) as exc:
         ec.validate(table, ())
     assert str(exc.value) == (
-        "::error::env_order['explicit_envs'] names a top-level setting, not an environment. "
-        "A scalar written below a [table] header lands inside that table, so "
-        "`explicit_envs = ...` after [env_order] becomes an ordering entry instead of a "
-        "top-level setting. Move it above the first header in .github/shipmate.toml."
+        "::error::environment prod: schema_version is not a key this engine implements. "
+        "An environment holds region, tf_vars, aws, shared, needs."
     )
 
 

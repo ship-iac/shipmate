@@ -1584,12 +1584,12 @@ def test_release_lookup_restores_gh_token_unset(monkeypatch):
     assert "GH_TOKEN" not in os.environ
 
 
-#: The design's canonical file with a `[gate]` table, placed above the first header the way
+#: The canonical file with a `[gate]` table, placed above the first entry the way
 #: `onboard`'s checklist prints it. Built from that file rather than retyped, so the fixture
-#: cannot drift from the bytes the docs publish; an insertion that found no anchor leaves the
+#: cannot drift from it; an insertion that found no anchor leaves the
 #: key undeclared, which every assertion below reads as a lookup of the wrong team.
 _GATE_TABLE = CANONICAL.replace(
-    "[env_order]", '[gate]\napprover_team = "platform"\n\n[env_order]', 1
+    "[environments.dev-eu]", '[gate]\napprover_team = "platform"\n\n[environments.dev-eu]', 1
 )
 
 
@@ -4401,17 +4401,15 @@ def test_declared_envs_reads_a_flat_single_artifact_download(tmp_path):
     assert doctor._declared_envs(tmp_path) == {"dev-eu"}
 
 
-#: The refusal the design's misplaced control earns, whole: the probe's own framing plus
-#: `validate_env_order`'s message with the `::error::` prefix stripped. Hand-written, not
+#: The refusal the misplaced control earns, whole: the probe's own framing plus
+#: `_check_environment`'s message with the `::error::` prefix stripped. Hand-written, not
 #: read back from the module, so a probe that reported a different refusal -- or reported
 #: this one as a skipped probe -- reddens here.
 _MISPLACED_FINDING = (
     doctor.WARNING,
     "`.github/shipmate.toml` at the commit under examination is not valid: "
-    "env_order['explicit_envs'] names a top-level setting, not an environment. A scalar "
-    "written below a [table] header lands inside that table, so `explicit_envs = ...` after "
-    "[env_order] becomes an ordering entry instead of a top-level setting. Move it above the "
-    "first header in .github/shipmate.toml. Merging it refuses every operation that reads "
+    "environment prod: schema_version is not a key this engine implements. An environment "
+    "holds region, tf_vars, aws, shared, needs. Merging it refuses every operation that reads "
     "the table. Execution still reads the default branch's copy, which this says nothing "
     "about.",
 )
@@ -4563,7 +4561,7 @@ def test_a_valid_verdict_names_the_checks_it_did_not_run(monkeypatch):
             doctor.NOTICE,
             "`.github/shipmate.toml` at the commit under examination parses, and passes "
             "every check a file can be judged on by itself: its top-level keys, `schema_version`, "
-            "`layout`, the environment entries, `env_order`, `explicit_envs` and the "
+            "`layout`, the environment entries, `explicit_envs` and the "
             "`[gate]` table. Not checked here, for want of a plan matrix and a whole-tree "
             "environment scan: `tf_vars`-layout coverage of the planned environments and entries "
             "that no stack tags \u2014 `detect` checks each of those on the runs where it "
@@ -4572,7 +4570,7 @@ def test_a_valid_verdict_names_the_checks_it_did_not_run(monkeypatch):
         ),
         (
             doctor.NOTICE,
-            "`env_order` orders dev-us after dev-eu \u2014 a bare `shipmate apply` applies "
+            "`needs` orders dev-us after dev-eu \u2014 a bare `shipmate apply` applies "
             "one env-level fully before it starts the next.",
         ),
         (
@@ -4626,8 +4624,8 @@ def test_a_valid_file_holding_references_lists_each_one(monkeypatch):
         ),
         (
             doctor.NOTICE,
-            "`env_order`: absent — every environment sits at one level, and a bare "
-            "`shipmate apply` applies them all together.",
+            "`needs`: declared by no environment — every environment sits at one level, "
+            "and a bare `shipmate apply` applies them all together.",
         ),
         (
             doctor.NOTICE,
@@ -4667,7 +4665,7 @@ def test_an_unset_reference_is_the_invalid_file_finding(monkeypatch):
 
 
 def test_the_tolerant_defaults_are_read_back_when_absent(monkeypatch):
-    """A table omitting `env_order`, `explicit_envs` and `[gate]` is valid and takes the
+    """A table omitting `needs`, `explicit_envs` and `[gate]` is valid and takes the
     empty default for each: a bare `shipmate apply` applies every environment -- including
     the one a consumer meant to exclude -- and no commenter may apply at all. Nothing
     refuses and no validator can, so the report says it.
@@ -4679,8 +4677,8 @@ def test_the_tolerant_defaults_are_read_back_when_absent(monkeypatch):
     assert doctor.config_status(_ctx())[1:] == [
         (
             doctor.NOTICE,
-            "`env_order`: absent \u2014 every environment sits at one level, and a bare "
-            "`shipmate apply` applies them all together.",
+            "`needs`: declared by no environment \u2014 every environment sits at one level, "
+            "and a bare `shipmate apply` applies them all together.",
         ),
         (
             doctor.NOTICE,
@@ -4823,15 +4821,17 @@ def test_no_status_section_beside_a_refusal(monkeypatch):
 #: subject is the bytes `docs/` publishes, and this is neither of them.
 CYCLIC_ORDER = """layout = "folder"
 
-[env_order]
-dev = ["prod"]
-prod = ["dev"]
+[environments.dev]
+needs = ["prod"]
+
+[environments.prod]
+needs = ["dev"]
 """
 #: Hand-written whole, like `_MISPLACED_FINDING`: the probe's framing plus
 #: `validate_env_order`'s cycle message with the `::error::` prefix stripped.
 _CYCLIC_FINDING = (
     doctor.WARNING,
-    "`.github/shipmate.toml` at the commit under examination is not valid: env_order is "
+    "`.github/shipmate.toml` at the commit under examination is not valid: needs is "
     "cyclic: dev -> prod -> dev — each of those must fully apply before the next, so the "
     "ordering has no first environment and no apply path can sort it. Break the chain in "
     ".github/shipmate.toml. Merging it refuses every operation that reads the table. "
@@ -4839,7 +4839,7 @@ _CYCLIC_FINDING = (
 )
 
 
-def test_a_cyclic_env_order_is_a_finding_and_gets_no_valid_verdict(monkeypatch):
+def test_a_cycle_across_needs_is_a_finding_and_gets_no_valid_verdict(monkeypatch):
     """Both halves of the same claim, because either one alone can pass while the file is
     still certified: the cycle is reported as a finding, and the CONFIG_VALID verdict -- which
     says the file "passes every check a file can be judged on by itself" -- is withheld. Before
