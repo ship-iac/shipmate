@@ -376,8 +376,9 @@ def test_the_table_selects_the_mode(monkeypatch):
 _DEFAULT_TABLE_SKIPPED = (
     doctor.NOTICE,
     "the environment probes were skipped — the default branch's `.github/shipmate.toml` "
-    "could not be read or is invalid, and it alone selects which GitHub Environments a run "
-    "binds. While it is missing or invalid there, every run refuses at detect.",
+    "could not be read, is invalid, or references a GitHub variable that is unset or empty, "
+    "and it alone selects which GitHub Environments a run binds. While that holds, every run "
+    "refuses at detect.",
 )
 
 
@@ -4620,7 +4621,8 @@ def test_a_valid_file_holding_references_lists_each_one(monkeypatch):
             "GitHub variables instead of holding them: `environments.dev.aws.plan.role` from "
             "variable `DEV_PLAN_ROLE`; `explicit_envs[0]` from variable `HELD_ENV`. Every run "
             "resolves them again from repository and organization variables, never from a "
-            "cell's Environment.",
+            "cell's Environment; in comment-ops and the plan summary a `shipmate-engine` "
+            "Environment variable of the same name wins.",
         ),
         (
             doctor.NOTICE,

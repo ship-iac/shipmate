@@ -312,8 +312,9 @@ def _missing(name, env, role):
 DEFAULT_TABLE_UNREADABLE = (
     NOTICE,
     "the environment probes were skipped — the default branch's `.github/shipmate.toml` "
-    "could not be read or is invalid, and it alone selects which GitHub Environments a run "
-    "binds. While it is missing or invalid there, every run refuses at detect.",
+    "could not be read, is invalid, or references a GitHub variable that is unset or empty, "
+    "and it alone selects which GitHub Environments a run binds. While that holds, every run "
+    "refuses at detect.",
 )
 
 # The runner, not the file: the config probe's WARNING names the floor, and every revision of the
@@ -1931,7 +1932,8 @@ CONFIG_VALID = (
 CONFIG_REFERENCES = (
     f"`{CONFIG_PATH}` at the commit under examination takes these values from GitHub "
     "variables instead of holding them: {refs}. Every run resolves them again from "
-    "repository and organization variables, never from a cell's Environment."
+    "repository and organization variables, never from a cell's Environment; in comment-ops "
+    "and the plan summary a `shipmate-engine` Environment variable of the same name wins."
 )
 
 
