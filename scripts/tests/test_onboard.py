@@ -1376,6 +1376,7 @@ def test_a_repository_variable_resolves_a_reference(monkeypatch, tmp_path):
 def test_an_organization_variable_resolves_a_reference(monkeypatch, tmp_path):
     """Mutation: pass only the repository `variables` to `parse_table`, so the name reads
     as unset."""
+    monkeypatch.delenv("SHIPMATE_GITHUB_VARS", raising=False)
     monkeypatch.setattr(onboard, "_run", make_gh(org_region("eu-west-1")))
     write_referencing_table(tmp_path)
     assert onboard._resolve_shared(tmp_path, ["dev-eu"], "o/r", {}) == {"dev-eu"}
@@ -1384,10 +1385,30 @@ def test_an_organization_variable_resolves_a_reference(monkeypatch, tmp_path):
 def test_the_repository_variable_wins_over_the_organization_one(monkeypatch, tmp_path):
     """GitHub gives a repository variable precedence over an organization variable of the
     same name. Mutation: swap the merge order, so the organization's empty value refuses."""
+    monkeypatch.delenv("SHIPMATE_GITHUB_VARS", raising=False)
     monkeypatch.setattr(onboard, "_run", make_gh(org_region("")))
     write_referencing_table(tmp_path)
     shared = onboard._resolve_shared(tmp_path, ["dev-eu"], "o/r", {"DEV_EU_REGION": "eu-west-1"})
     assert shared == {"dev-eu"}
+
+
+def test_a_failed_organization_read_names_the_table_reference(monkeypatch, tmp_path):
+    """From the table path the operator may have passed no `--vars-at-org`, so that flag's
+    remedy would be false here. Mutation: pass the `--vars-at-org` remedy from
+    `_resolve_shared`."""
+    monkeypatch.setattr(
+        onboard, "_run", make_gh({ORG_VARS: SystemExit("gh: Forbidden (HTTP 403)")})
+    )
+    write_referencing_table(tmp_path)
+    with pytest.raises(SystemExit) as excinfo:
+        onboard._resolve_shared(tmp_path, ["dev-eu"], "o/r", {"DEV_EU_REGION": "eu-west-1"})
+    assert str(excinfo.value) == (
+        "could not read the organization variables reaching o/r: gh: Forbidden (HTTP 403)\n"
+        "A fine-grained token needs this repository's Variables read permission, and "
+        "`--slurp` needs a recent `gh`. .github/shipmate.toml environments.dev-eu.region "
+        "references GitHub variable DEV_EU_REGION, and onboard resolves a reference from "
+        "these variables and the repository's."
+    )
 
 
 def test_a_table_without_a_reference_makes_no_api_call(monkeypatch, tmp_path):

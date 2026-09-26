@@ -273,8 +273,15 @@ def _resolve_shared(root, envs, repo, variables):
         return set()
     text = path.read_text(encoding="utf-8")
     table = ec.load_toml(text)
-    if ec.references(table):
-        table = ec.parse_table(text, {**_reaching_variables(repo), **variables})
+    refs = ec.references(table)
+    if refs:
+        key, var = refs[0]
+        reaching = _reaching_variables(
+            repo,
+            f"{ec.CONFIG_PATH} {key} references GitHub variable {var}, and onboard "
+            "resolves a reference from these variables and the repository's.",
+        )
+        table = ec.parse_table(text, {**reaching, **variables})
     ec.validate_structure(table)
     shared = ec.shared_envs(table)
     for name in sorted(shared):
@@ -587,8 +594,11 @@ def _refuse_unreachable_org_variables(ctx):
     )
 
 
-def _reaching_variables(repo):
+def _reaching_variables(repo, remedy):
     """{NAME: value} for the organization variables that reach `repo`.
+
+    A failed read refuses with the permission hint followed by `remedy`, the caller's
+    own sentence on why the read ran.
 
     GitHub applies each variable's visibility policy to this endpoint, so a
     variable missing here does not reach this repository and contributes nothing
@@ -613,8 +623,7 @@ def _reaching_variables(repo):
         raise SystemExit(
             f"could not read the organization variables reaching {repo}: {exc}\n"
             "A fine-grained token needs this repository's Variables read permission, and "
-            "`--slurp` needs a recent `gh`. Drop the names from --vars-at-org to skip "
-            "this check."
+            f"`--slurp` needs a recent `gh`. {remedy}"
         ) from exc
     return {
         var["name"].upper(): var["value"] for page in pages for var in page.get("variables", [])
@@ -633,7 +642,9 @@ def _refuse_org_assertion_mismatch(ctx):
     """
     if not ctx["at_org"]:
         return
-    reaching = _reaching_variables(ctx["repo"])
+    reaching = _reaching_variables(
+        ctx["repo"], "Drop the names from --vars-at-org to skip this check."
+    )
     writable = _writable_variables(ctx)
     for name in sorted(ctx["at_org"]):
         wanted, source = writable[name]
