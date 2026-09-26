@@ -720,9 +720,10 @@ no order in which the two pull requests can land — every add and every remove
 deadlocks. The refusal stays on the side that would otherwise run a cell with no
 identity at all.
 
-Entry keys are matched exactly against the tag-derived environment names, as
-resolution matches them, so an entry differing only in case is genuinely unused:
-nothing will ever resolve it.
+An entry name holding an uppercase letter refuses (§Refusals), so no entry can
+differ from a tag only in case. Entry keys are matched exactly against the
+tag-derived environment names, as resolution matches them, so a lowercase entry
+no stack tags is unused and warns.
 
 ### What the diagnostics can and cannot see
 

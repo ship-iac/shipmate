@@ -579,7 +579,7 @@ the only copy execution reads.
 
 | What `detect` says | What it means |
 | --- | --- |
-| `could not be read from the default branch` | the file is not on the default branch yet, or the ref is unfetched. A pull request that only *adds* the file is refused: merge it first ([`upgrading.md`](upgrading.md) has the two-merge procedure) |
+| `could not be read from the default branch` | the file is not on the default branch yet, or the ref is unfetched. A pull request that only *adds* the file is refused: merge it first ([`../CONTRACT.md`](../CONTRACT.md) §Environment table, "The file must reach the default branch before the first plan run") |
 | `is not valid TOML: <message>` | `tomllib`'s own message, with the line and column. See the two parse traps below |
 | `is read with tomllib, which needs Python 3.11 or later; this runner has …` | the `runs_on:` image is older than the floor `../CONTRACT.md` §Runner prerequisites states — `ubuntu-22.04` ships 3.10. Name a newer image |
 | `declares no layout` | either the key is genuinely absent, or it is written below a `[table]` header — see the placement trap below |
@@ -807,8 +807,9 @@ names `dev-eu2` as an entry no stack tags
 See
 [`upgrading.md`](upgrading.md) §"Opt-in: per-environment review gating".
 
-**The run failed with an `environments.<env>.gated` error.** The value is
-rejected loudly rather than left silently inert:
+**The run failed with an `environments.<env>.gated` or `environments.<name> is not an
+environment name` error.** The value or name is rejected loudly rather than left
+silently inert:
 
 - anything but an unquoted TOML boolean — `gated = "false"`, `gated = 0` or a
   variable reference would otherwise resolve as gated while reading as ungated;
