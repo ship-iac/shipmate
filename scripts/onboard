@@ -257,18 +257,24 @@ def _at_org(raw):
     return names
 
 
-def _resolve_shared(root, envs):
+def _resolve_shared(root, envs, repo, variables):
     """The environments the checkout's `.github/shipmate.toml` marks `shared = true`.
 
-    No file means no shared environments. The table is structurally validated first,
-    because `shared_envs` trusts its shape, and this runs before the first write. A shared
-    name no stack tags would bind nothing and report success, so it is refused.
+    No file means no shared environments. A file holding a `{ var = "NAME" }` reference
+    resolves it from the repository `variables` over the organization variables reaching
+    `repo`, GitHub's precedence; a file without one makes no API call. The table is
+    structurally validated first, because `shared_envs` trusts its shape, and this runs
+    before the first write. A shared name no stack tags would bind nothing and report
+    success, so it is refused.
     """
     ec = _load("env-config")
     path = root / ec.CONFIG_PATH
     if not path.is_file():
         return set()
-    table = ec.parse_table(path.read_text(encoding="utf-8"))
+    text = path.read_text(encoding="utf-8")
+    table = ec.load_toml(text)
+    if ec.references(table):
+        table = ec.parse_table(text, {**_reaching_variables(repo), **variables})
     ec.validate_structure(table)
     shared = ec.shared_envs(table)
     for name in sorted(shared):
@@ -1011,7 +1017,7 @@ def main(argv=None):
         "team": args.team,
         "key": key,
         "envs": envs,
-        "shared": _resolve_shared(root, envs),
+        "shared": _resolve_shared(root, envs, repo, variables),
         "unresolved": set(),
         "root": root,
         "engine": engine,
