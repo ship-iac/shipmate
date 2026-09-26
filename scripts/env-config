@@ -152,7 +152,7 @@ def _lookup(path, name, variables):
     where = f"::error::{CONFIG_PATH} {path} references GitHub variable"
     if not _VARIABLE_NAME.fullmatch(name):
         raise SystemExit(
-            f'{where} "{name}", which is not a GitHub variable name ([A-Z_][A-Z0-9_]*).'
+            f"{where} {name!r}, which is not a GitHub variable name ([A-Z_][A-Z0-9_]*)."
         )
     if name != name.upper():
         raise SystemExit(

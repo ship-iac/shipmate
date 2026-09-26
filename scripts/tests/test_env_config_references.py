@@ -125,15 +125,25 @@ def test_a_lowercase_name_refuses_and_names_the_uppercase_spelling():
     )
 
 
-@pytest.mark.parametrize("name", ["", "A-B", "a-b", "1ROLE"])
-def test_a_name_outside_the_charset_refuses_naming_the_rule(name):
-    """`a-b` is lowercase too, but uppercasing it cannot help. Reddens on dropping the charset
-    check: `""`, `A-B` and `1ROLE` then resolve to the value set for them and `a-b` refuses as
-    lowercase, suggesting `A-B`."""
-    text = f'[environments.prod]\naws.apply.role = {{ var = "{name}" }}\n'
+@pytest.mark.parametrize(
+    ("toml_name", "name", "rendered"),
+    [
+        ("", "", "''"),
+        ("A-B", "A-B", "'A-B'"),
+        ("a-b", "a-b", "'a-b'"),
+        ("1ROLE", "1ROLE", "'1ROLE'"),
+        ("A\\nB", "A\nB", "'A\\nB'"),
+    ],
+)
+def test_a_name_outside_the_charset_refuses_naming_the_rule(toml_name, name, rendered):
+    """`a-b` is lowercase too, but uppercasing it cannot help. The name renders escaped, so a
+    TOML `\\n` in it cannot split the `::error::` line. Reddens on dropping the charset check:
+    `""`, `A-B` and `1ROLE` then resolve to the value set for them and `a-b` refuses as
+    lowercase, suggesting `A-B`. Reddens on rendering the name raw instead of with `!r`."""
+    text = f'[environments.prod]\naws.apply.role = {{ var = "{toml_name}" }}\n'
     assert _refusal(text, {name: "v", name.upper(): "v"}) == (
         "::error::.github/shipmate.toml environments.prod.aws.apply.role references GitHub "
-        f'variable "{name}", which is not a GitHub variable name ([A-Z_][A-Z0-9_]*).'
+        f"variable {rendered}, which is not a GitHub variable name ([A-Z_][A-Z0-9_]*)."
     )
 
 

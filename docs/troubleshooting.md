@@ -590,7 +590,7 @@ the only copy execution reads.
 | `<key> references GitHub variable <NAME>, which is not set` | no repository or organization variable of that name reaches the repository. Set it with `gh variable set <NAME>`; the next run reads it, no pull request needed. A variable on a cell's `<env>-plan`, `<env>-apply` or shared `<env>` Environment is never read, and on GitHub Free an organization variable does not reach a private repository ([`../CONTRACT.md`](../CONTRACT.md) §Variable references) |
 | `<key> references GitHub variable <NAME>, which is set to an empty value` | a reference never means an empty string; give the variable a value or write the value into the file |
 | `<key> references GitHub variable "<name>"; GitHub variable names are uppercase` | GitHub stores every variable name uppercase. Write the reference with the spelling the message gives |
-| `<key> references GitHub variable "<name>", which is not a GitHub variable name` | the name is empty or holds a character GitHub refuses in a variable name. Names are `[A-Z_][A-Z0-9_]*` |
+| `<key> references GitHub variable '<name>', which is not a GitHub variable name` | the name is empty or holds a character GitHub refuses in a variable name. Names are `[A-Z_][A-Z0-9_]*` |
 | `<key> references GitHub variable <NAME>, but this step received no GitHub variables` | either the engine did not pass `github-vars` to the step reading the file, or no repository or organization variable reaches the repository at all. With variables set, report it as an engine defect |
 | `env_order is cyclic: <a> -> <b> -> <a>` | the environments order each other in a loop, so none of them can go first. The path names the loop in apply order; an env listing itself is the one-node case. Drop one of the entries |
 
