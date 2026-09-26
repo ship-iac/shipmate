@@ -621,10 +621,11 @@ vars.TF_VAR_account = { var = "PROD_ACCOUNT" }
   as an invalid file, and lists every reference as `<key> from variable <NAME>`.
   After the merge, a missing variable refuses every run until it is set; the fix
   is a variable edit, not a pull request.
-- **Authority.** A referenced value is governed by whoever can edit the
-  repository's or the organization's variable it names, not by whoever can
-  merge to the default branch. That includes `gate.approvers_team`,
-  `gate.ungated_envs` and `explicit_envs`. A variable edit takes effect on the
+- **Authority.** A referenced value is governed by whoever GitHub permits to
+  edit the repository's or the organization's variable it names, not by whoever
+  can merge to the default branch. That includes `gate.approvers_team`,
+  `gate.ungated_envs` and `explicit_envs`. Who may edit a variable is a GitHub
+  permission setting, outside this contract. A variable edit takes effect on the
   next run.
 - **Plan and apply.** A cell's role and credentials region are outside the
   apply-match fingerprint (§Apply-match fingerprint): a variable feeding either,
@@ -1328,10 +1329,11 @@ default branch. Relaxing the gate is therefore a merged commit, under whatever
 the branch ruleset requires of one, rather than a line in the pull request that
 benefits from it. This is the inverse of the reasoning that held while the list
 was a repository variable, where the point was that it could *not* be a commit:
-the variable was editable by anyone holding the Write role and reviewed by
+a variable edit is governed by GitHub's permission settings and reviewed by
 nobody. `shipmate doctor` validates the file it is in and reports a malformed
 entry, but does not echo the list itself. A `gate.ungated_envs` holding a
-reference hands the decision back to whoever can edit the variable it names
+reference hands the decision back to whoever GitHub permits to edit the
+variable it names
 (§Variable references).
 
 `shipmate unlock <env>` releases an OpenTofu state lock stranded by a cancelled
