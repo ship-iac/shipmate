@@ -43,7 +43,7 @@ def _review_reason(review_decision, environment="", ungated_envs=frozenset()):
     null decision — no review required by the ruleset) and APPROVED. Anything
     else fails closed. An environment whose entry holds `gated = false` is exempt
     from REVIEW_REQUIRED and from nothing else; a bare apply passes here when
-    any env is listed and is partitioned per env in apply-all-detect."""
+    any entry holds `gated = false`, and is partitioned per env in apply-all-detect."""
     if review_decision == "REVIEW_REQUIRED":
         if ungated_envs and (not environment or environment.casefold() in ungated_envs):
             return None
@@ -109,7 +109,7 @@ def decide(
     if not is_member:
         return False, (
             f"not authorized: the commenter is not a member of the "
-            f"required approvers team `{approvers_team}`."
+            f"required approver team `{approvers_team}`."
         )
     if verb == "unlock":
         # Everything below authorizes applying a reviewed plan; unlock applies

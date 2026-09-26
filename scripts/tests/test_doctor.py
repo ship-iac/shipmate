@@ -1620,7 +1620,7 @@ def _team_probe(monkeypatch, table=CANONICAL, found=None, report_mode=True):
 def _unresolved(team):
     return (
         doctor.WARNING,
-        f"approvers team `{team}` does not resolve in org `o` — every `shipmate apply` "
+        f"approver team `{team}` does not resolve in org `o` — every `shipmate apply` "
         'will be rejected as "not a team member". Check `[gate] approver_team` in '
         "`.github/shipmate.toml` and that the App has members:read.",
     )
@@ -3870,7 +3870,7 @@ def test_probe_count_is_stated_correctly_in_the_docs():
       and (7) the reader-facing probe list itself, one `- **` bullet per probe.
 
     The number words come from the count, so this keeps biting when a further probe lands.
-    `<n-2>` is the plan-path subset: the approvers-team and App-permission probes cannot
+    `<n-2>` is the plan-path subset: the approver-team and App-permission probes cannot
     report from `annotate` mode.
 
     Mutations, one per claim: change `len(PROBES)`; delete a bullet from the `Probes:`

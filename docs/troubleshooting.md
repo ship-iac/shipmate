@@ -117,7 +117,7 @@ live probes.
   never runs completes green with nothing done, and a job whose `if:` is too
   wide runs on an event it was never meant to see. The fence in
   [`getting-started.md`](getting-started.md) has every expression.
-- **Whether the configured approvers team resolves in the org.**
+- **Whether the configured approver team resolves in the org.**
 - **Whether `.github/shipmate.toml` at the commit under examination is valid.**
   Read through the API at that commit, never from the default branch and never
   substituted by it, so a malformed or misplaced setting is reported on the pull
@@ -144,7 +144,7 @@ own and any other Actions workflow run on that commit; third-party-app-authored
 check runs are excluded.
 
 Only fourteen of the sixteen probes can produce a finding from the plan path's
-own `annotate`-mode run (`actions/summary`). The approvers-team probe runs only
+own `annotate`-mode run (`actions/summary`). The approver-team probe runs only
 in `report` mode, because the plan path's App token is minted without
 `members: read` and could not look a team up, and
 the App-permission-drift probe only has something to report when a
@@ -227,7 +227,7 @@ repository collaborators (§Who can ask for the report, and who can see it).
 
 The report is an inventory of what is *not* configured: that no ruleset
 requires `shipmate / gate` on the default branch, that `<env>-apply` has no
-approval rule so pre-merge applies to it are unreviewed, which approvers
+approval rule so pre-merge applies to it are unreviewed, which approver
 team is configured and whether it resolves, and whether the App installation is
 missing permissions the manifest declares.
 
@@ -387,7 +387,7 @@ These fail-safes are defence in depth behind that control, not the only thing
 behind it.
 
 **If the mismatch names only variables the table derives — `TF_VAR_env` and
-`TF_VAR_region` under `tf_vars`, `TF_WORKSPACE` under `workspace` — look at the
+`TF_VAR_region` under the `tf_vars` layout, `TF_WORKSPACE` under `workspace` — look at the
 environment table rather than the plan.** These come from `matrix.environment`
 and the table on the default branch, and both sides resolve them from that one
 table, so they hash identically whatever environment the job bound. What moves
@@ -644,7 +644,7 @@ that is what makes it take effect.
 ### A cell fails with no AWS credential
 
 The credentials step is skipped and the cell fails at `tofu init` with no role
-assumed, on a `folder` or `workspace` layout. Under `tf_vars` this does not happen:
+assumed, on a `folder` or `workspace` layout. Under the `tf_vars` layout this does not happen:
 `detect` refuses first, because that layout needs an entry with a region for
 every environment in the matrix.
 
@@ -696,7 +696,7 @@ carrying no such file gets no run at all — the dispatch is refused with a 404,
 the comment-handling run carries an error saying so, and the pull request gets a
 comment saying the dispatch failed and linking that run. A file GitHub does
 dispatch but whose jobs do not select `unlock` produces a run in which every job
-skips (§A dispatched verb produced a run in which every job was skipped). It authorizes on approvers-team
+skips (§A dispatched verb produced a run in which every job was skipped). It authorizes on approver-team
 membership and the `<env>-apply` environment, not on a review — so a lock
 stranded after the pull request merged is still releasable
 ([`../CONTRACT.md`](../CONTRACT.md) §Comment-ops has the contract). Every cell

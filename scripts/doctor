@@ -45,7 +45,7 @@ Probes:
 - the environment table at the commit under examination: `.github/shipmate.toml`
   parses and passes the checks a file can be judged on by itself, before it merges
   to the default branch execution reads it from.
-- approvers team resolvability in the repo's org.
+- approver team resolvability in the repo's org.
 - GitHub App installation permission drift.
 """
 
@@ -2067,7 +2067,7 @@ def config_status(ctx):
 
 
 def _governing_team(ctx):
-    """The approvers team the file at the commit under examination declares — the value
+    """The approver team the file at the commit under examination declares — the value
     that governs every apply once it merges.
 
     The ref is NOT comment-ops'. `_config_table` reads the commit under examination, as
@@ -2101,7 +2101,7 @@ def _shared_envs(ctx):
 
 
 def _team_warnings(ctx):
-    """A typo'd or cross-org approvers team surfaces today only as every apply being
+    """A typo'd or cross-org approver team surfaces today only as every apply being
     rejected "not a team member" — one API call names it.
 
     Comment-path-only, and by the token rather than by the value: the plan path's App
@@ -2123,7 +2123,7 @@ def _team_warnings(ctx):
     return [
         (
             WARNING,
-            f"approvers team `{team}` does not resolve in org `{ctx['owner']}` — "
+            f"approver team `{team}` does not resolve in org `{ctx['owner']}` — "
             'every `shipmate apply` will be rejected as "not a team member". Check '
             f"`[gate] approver_team` in `{CONFIG_PATH}` and that the App has members:read.",
         ),

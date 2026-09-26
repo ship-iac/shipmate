@@ -66,7 +66,7 @@ release tag:
 
 ```bash
 python3 <engine-checkout>/scripts/onboard \
-  --team <approvers-team-slug> --app-id <app-id> \
+  --team <approver-team-slug> --app-id <app-id> \
   --key shipmate-app.private-key.pem
 ```
 
@@ -89,7 +89,7 @@ It writes:
 - `.github/workflows/shipmate.yml`, rendered from the fence on this page and
   pinned to the engine checkout's release.
 
-`--team` writes nothing. The approvers team is `gate.approver_team` in
+`--team` writes nothing. The approver team is `gate.approver_team` in
 `.github/shipmate.toml`, which this script does not write, so the slug you pass
 is printed in the closing by-hand checklist instead — with the file it belongs
 in and the pin it needs first.

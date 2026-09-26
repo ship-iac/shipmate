@@ -175,11 +175,11 @@ never used.
 
   | Repo layout | Env identity injected | Mechanism |
   |-------------|--------------------------------------------------|-----------|
-  | **DRY / dynamic backend** (one stack config deployed N×; backend path `…/${var.env}/${var.region}/…`) | `TF_VAR_env`, `TF_VAR_region` | OpenTofu variables drive the backend path and resources |
+  | **Variable-driven backend**, `layout = "tf_vars"` (one stack config deployed N×; backend path `…/${var.env}/${var.region}/…`) | `TF_VAR_env`, `TF_VAR_region` | OpenTofu variables drive the backend path and resources |
   | **Workspace-per-env** | `TF_WORKSPACE` | OpenTofu auto-selects (and auto-creates) the named workspace |
   | **Folder-per-env/region** (leaf per env×region, hardcoded state) | *none* | env/region are fixed by the leaf's path; each leaf owns its state |
 
-  This is the DRY model's injection (`TF_VAR_env`/`TF_VAR_region`) — the
+  This is the `tf_vars` layout's injection (`TF_VAR_env`/`TF_VAR_region`) — the
   target for real consumer repos and shipmate's internal adoption. The other
   two are proven-generalization layouts (sample repos
   `repo-example-workspaces` / `repo-example-folders`). The folder layout
@@ -427,10 +427,6 @@ of one problem depending on which job read it.
 They are read from the same parsed mapping as the identity table, and a branch
 therefore cannot reorder its own apply waves, drop its own production exclusion,
 exempt itself from the review requirement or name the team that authorizes it.
-For the ordering and the exclusion this is a change: `scripts/env-order` used to evaluate both out
-of the checked-out tree, so an edit on a feature branch took effect on that
-branch's own apply. It no longer does. `docs/upgrading.md` carries the
-consumer-facing note.
 
 **The file must reach the default branch before the first plan run.** A pull
 request that only *adds* it is refused, because the branch its plan is compared
@@ -461,6 +457,18 @@ aws.region          = "eu-west-1" # the credentials step's region; omitted, it i
 aws.plan.role       = "arn:aws:iam::9817:role/shipmate-plan"
 aws.apply.role      = "arn:aws:iam::9817:role/shipmate-apply"
 aws.apply.workloads.net-edge.role = "arn:aws:iam::9817:role/net-edge"
+gated               = false       # applies without an approving review
+
+[environments.prod]
+region              = "eu-west-1"
+needs               = ["dev-eu"]  # dev-eu fully applies first
+explicit            = true        # a bare `shipmate apply` skips it
+tf_vars.TF_VAR_account = "4402"   # merged over the layout's TF_VAR_*
+aws.apply.role      = "arn:aws:iam::4402:role/shipmate-apply"
+
+[environments.sbx]
+region              = "eu-west-1"
+shared              = true        # one bare `sbx` Environment on both paths
 ```
 
 An environment entry holds `region`, `tf_vars`, `aws`, `shared`, `needs`,
@@ -511,8 +519,7 @@ emptying the setting removes what it granted and nothing else grants it back.
 
 The team and the review exemption once lived in the `SHIPMATE_APPROVERS_TEAM` and
 `SHIPMATE_UNGATED_ENVS` repository variables. Neither is read any more, at any
-level, unless the file references it (§Variable references) —
-`docs/upgrading.md` has the procedure.
+level, unless the file references it (§Variable references).
 
 ### The schema version
 
@@ -556,8 +563,8 @@ reach the same verdict rather than one of them stripping it.
 structural keys reserved at every level; everything else inside a provider block
 is a provider field. A field may sit at provider-block level, under `plan` or
 `apply`, or under `plan.workloads[<name>]` / `apply.workloads[<name>]`, and each
-tier overrides the last field by field. The workload tier is keyed by the raw
-`workload/<name>` tag, exactly as the tag is written. `workloads`
+tier overrides the last field by field. The workload tier is keyed by the `<name>`
+of the cell's `workload/<name>` tag, exactly as written. `workloads`
 directly under a provider block is malformed shape, not a fourth tier: a
 workload role means nothing without the path it applies to.
 
@@ -1031,7 +1038,7 @@ the environment table at the commit under examination — `.github/shipmate.toml
 parsed and checked against every rule a file can be judged on by itself, so a
 malformed or misplaced setting is reported before it merges to the branch
 execution reads it from,
-approvers-team resolvability, and App installation permission
+approver-team resolvability, and App installation permission
 drift — see `docs/branch-protection.md`) with a harvest of the warning and
 failure annotations GitHub already recorded on this commit's workflow runs
 (shipmate's own and any other Actions workflow run on that commit;
@@ -1044,7 +1051,7 @@ too — the two are separate statements, since a run that has not finished has
 recorded nothing yet while a run that could not be read may have recorded
 plenty. Only fourteen of the sixteen
 probes can produce a finding from the plan path's own `annotate`-mode
-invocation: the approvers-team probe runs only in `report` mode, because the
+invocation: the approver-team probe runs only in `report` mode, because the
 plan path's App token is minted without `members: read` and could not look a
 team up; the
 App-permission-drift probe only has something to report when a
@@ -1111,7 +1118,7 @@ never affects `shipmate / gate`.
 
 Because the report enumerates the guardrails a repository is *missing* — an
 ungated default branch, an apply environment with no approval rule, the
-configured approvers team and whether it resolves, an App installation short of
+configured approver team and whether it resolves, an App installation short of
 the manifest's permissions — the `doctor` route is gated on the commenter's
 GitHub `author_association`.
 

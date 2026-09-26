@@ -83,15 +83,15 @@ not a repository-wide audit.
 
 `help` and `doctor` are read-only. `plan` changes no infrastructure, but is open
 to the same commenters `doctor` is. `apply` and `unlock` are authorized. `apply`
-carries the full check: approvers-team membership, a non-draft, mergeable and
+carries the full check: approver-team membership, a non-draft, mergeable and
 reviewed PR, and a reviewed plan for the current head (see Comment-ops above).
-`unlock` carries a narrower one — approvers-team membership and the
+`unlock` carries a narrower one — approver-team membership and the
 `<env>-apply` environment, but no draft check, no review and no plan —
 because it releases a lock rather than changing infrastructure.
 
 `help` answers any commenter. `doctor` does not: it names the guardrails this
 repository is missing — that `shipmate / gate` is not required on the default
-branch, that an apply environment has no approval rule, which approvers team is
+branch, that an apply environment has no approval rule, which approver team is
 configured and whether it resolves. So the engine runs it only for a commenter
 GitHub classifies as `OWNER`, `MEMBER` or `COLLABORATOR`: organization members
 and repository collaborators. Anyone else gets a one-line refusal. No App token

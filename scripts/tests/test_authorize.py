@@ -28,7 +28,7 @@ DRAFT_REASON = (
 #: The membership refusal for `_decide`'s default team, hand-written for the
 #: same reason.
 MEMBER_REASON = (
-    "not authorized: the commenter is not a member of the required approvers team `deployers`."
+    "not authorized: the commenter is not a member of the required approver team `deployers`."
 )
 
 

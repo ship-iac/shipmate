@@ -1065,7 +1065,7 @@ def test_dry_run_reaches_every_write_path_and_issues_only_reads(monkeypatch, tmp
 
 def test_absent_variables_are_set_from_the_flags_and_no_tool_version_is_written(monkeypatch):
     """A repository with no variables gets exactly the one the workflows still read. Neither
-    the approvers team -- it is declared in `.github/shipmate.toml`, which this script does
+    the approver team -- it is declared in `.github/shipmate.toml`, which this script does
     not write -- nor the tool versions are among them: `actions/setup` takes both from the
     release's own VERSIONS file, so a repository copy would only be a second source of truth.
 

@@ -177,7 +177,7 @@ Grant repository write only to people you would let apply to production
 unreviewed, because that is what it amounts to. This is the only control that
 closes the branch-authored-workflow path outright; everything else narrows it.
 
-Review the list whenever the approvers team changes — write access and
+Review the list whenever the approver team changes — write access and
 `gate.approver_team` membership are separate grants, and the first one is
 the stronger of the two.
 
@@ -293,7 +293,7 @@ the other:
   and from nothing else.** It is a flag on the environment's entry in
   `.github/shipmate.toml` on the default branch. The
   ruleset still requires the review before the merge, `CHANGES_REQUESTED`
-  still refuses, and the approvers-team, not-a-draft, mergeable and exact-plan
+  still refuses, and the approver-team, not-a-draft, mergeable and exact-plan
   requirements are untouched (CONTRACT.md §Comment-ops). Environments without
   it are held out of a bare `shipmate apply` and refused on a targeted
   one, their apply checks left pending, so the gate keeps blocking the merge
@@ -308,16 +308,16 @@ the other:
 
 Two things to know before relying on it:
 
-- **What bounds the list is the default branch — once the file declares one.**
+- **What bounds the exemption is the default branch.**
   All three readers resolve the
   file there, so the pull request that benefits from an exemption cannot also
   grant it: adding an entry is a commit, under whatever your ruleset requires of
   one, and a reviewer reads it as code. Anyone who can push a branch can still
   *propose* the entry, so this bounds when it takes effect, not who may ask.
   `shipmate doctor` validates the file and reports a malformed entry, but does not
-  echo the list.
+  echo the ungated set.
 - **The setting is inert at `required_approving_review_count: 0`.** Every
-  environment is already ungated there, so listing some narrows nothing. It
+  environment is already ungated there, so `gated = false` on some narrows nothing. It
   can only relax an existing requirement, never create one, and nothing
   warns about the combination — a repository that sets both, and believes prod is
   gated, gets no signal that it is not.
@@ -1155,9 +1155,9 @@ for exactly the exposure control 1 exists to limit.
   understood it.
 - **Branch-controlled configuration.** Stack tags come from the pull request
   branch. They shape what the engine does; they do not constrain what it is
-  allowed to do. `needs` and `explicit` no longer belong on this list:
-  they moved into `.github/shipmate.toml` and are read from the default branch
-  with the rest of it, so a branch can neither reorder its own apply waves nor
+  allowed to do. `needs` and `explicit` are not on this list:
+  they live in `.github/shipmate.toml`, read from the default branch with the
+  rest of it, so a branch can neither reorder its own apply waves nor
   drop its own exclusion.
 - **The gate is an assertion, not a proof.** The App identity and pull request
   approvals are out of a push-capable developer's reach only because control 16
