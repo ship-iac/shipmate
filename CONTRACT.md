@@ -273,8 +273,9 @@ never used.
   - **`-plan` and `-apply` are reserved suffixes for logical env names.** A
     logical env literally named `foo-apply` makes the naming undecidable (is an
     existing `foo-apply` that env's shared environment, or `foo`'s apply
-    environment?) and binds `foo-apply-apply` on the apply path. Nothing
-    validates this; it is a naming rule.
+    environment?) and binds `foo-apply-apply` on the apply path. An
+    `[environments.<name>]` entry or a `needs` item carrying the suffix refuses;
+    an `env/<name>` stack tag is not checked.
 - **A binding that disagrees with the environment names is invisible to the
   fingerprint, on every layout.** Both sides derive a cell's variables from
   `matrix.environment` and the same default-branch table, so they hash
