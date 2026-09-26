@@ -10,6 +10,12 @@ inputs:
   app-id:
     description: shipmate App id (repo/org variable); only checks authored by this App count as done.
     required: true
+  github-vars:
+    description: >-
+      The caller's reachable GitHub variables, serialised with toJSON. Read only when the
+      environment table holds a variable reference; empty when unwired.
+    required: false
+    default: ""
 outputs:
   envlevel0_waves:
     description: JSON wave0..wave7 map for env-level 0.
@@ -48,4 +54,5 @@ runs:
         GH_TOKEN: ${{ inputs.github-token }}
         SHIPMATE_BASE_SHA: ${{ inputs.base-sha }}
         SHIPMATE_APP_ID: ${{ inputs.app-id }}
+        SHIPMATE_GITHUB_VARS: ${{ inputs.github-vars }}
       run: python3 "$GITHUB_ACTION_PATH/../../scripts/deploy-detect"

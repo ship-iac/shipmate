@@ -14,6 +14,12 @@ inputs:
     description: The PR's reviewDecision, from the review job. Only NONE and APPROVED apply everything; an empty value means the decision never arrived and holds every env.
     required: false
     default: ''
+  github-vars:
+    description: >-
+      The caller's reachable GitHub variables, serialised with toJSON. Read only when the
+      environment table holds a variable reference; empty when unwired.
+    required: false
+    default: ""
 outputs:
   envlevel0_waves: { description: JSON wave0..wave7 map for env-level 0, value: "${{ steps.d.outputs.envlevel0_waves }}" }
   envlevel1_waves: { description: JSON wave0..wave7 map for env-level 1, value: "${{ steps.d.outputs.envlevel1_waves }}" }
@@ -39,4 +45,5 @@ runs:
         SHIPMATE_HEAD_SHA: ${{ inputs.head-sha }}
         SHIPMATE_APP_ID: ${{ inputs.app-id }}
         SHIPMATE_REVIEW_DECISION: ${{ inputs.review-decision }}
+        SHIPMATE_GITHUB_VARS: ${{ inputs.github-vars }}
       run: python3 "$GITHUB_ACTION_PATH/../../scripts/apply-all-detect"

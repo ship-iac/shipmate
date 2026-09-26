@@ -122,6 +122,7 @@ jobs:
           # Passed through raw, never defaulted: an empty decision means the review signal never
           # arrived, and empty is the hold-everything value.
           review-decision: ${{ needs.review.outputs.decision }}
+          github-vars: ${{ toJSON(vars) }}
 
   envlevel0:
     # Display name only (job id unchanged) -- see apply.yml's `waves` job.

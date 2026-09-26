@@ -139,6 +139,7 @@ DETECT_WITH = {
     "head-sha": "${{ inputs.ref }}",
     "github-token": "${{ github.token }}",
     "app-id": "${{ vars.SHIPMATE_APP_ID }}",
+    "github-vars": "${{ toJSON(vars) }}",
 }
 
 #: The whole `if:` and `with:` of the environment pre-flight. The queue is one flat array and

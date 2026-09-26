@@ -61,6 +61,7 @@ jobs:
           base-sha: ${{ needs.facts.outputs.base-sha }}
           head-repo: ${{ needs.facts.outputs.head-repo }}
           head-sha: ${{ needs.facts.outputs.head-sha }}
+          github-vars: ${{ toJSON(vars) }}
       - name: fmt check
         run: terramate fmt --check
       - name: stale codegen check
