@@ -605,8 +605,9 @@ vars.TF_VAR_account = { var = "PROD_ACCOUNT" }
   `scripts/onboard` gives a repository variable precedence over an organization
   variable of the same name, as GitHub does. The variables of a cell's
   `<env>-plan`, `<env>-apply` or shared `<env>` Environment are never read: no
-  job that reads the file binds one. One Environment can still shadow a
-  reference; `docs/getting-started.md` §Environments for this tier names it.
+  job that reads the file binds one. comment-ops and the plan `summary` job
+  bind `shipmate-engine`, so a variable of the same name on that Environment
+  shadows the repository value in those two jobs, and nowhere else.
 - **Values.** A resolved value is always a string, so `shared` and `version`
   refuse a reference through their own type checks. The name is uppercase
   (`[A-Z_][A-Z0-9_]*`), as GitHub stores it.
@@ -620,10 +621,11 @@ vars.TF_VAR_account = { var = "PROD_ACCOUNT" }
   as an invalid file, and lists every reference as `<key> from variable <NAME>`.
   After the merge, a missing variable refuses every run until it is set; the fix
   is a variable edit, not a pull request.
-- **Authority.** A referenced value is governed by whoever administers the
-  repository's and the organization's variables, not by whoever can merge to
-  the default branch. That includes `gate.approvers_team`, `gate.ungated_envs`
-  and `explicit_envs`. A variable edit takes effect on the next run.
+- **Authority.** A referenced value is governed by whoever can edit the
+  repository's or the organization's variable it names, not by whoever can
+  merge to the default branch. That includes `gate.approvers_team`,
+  `gate.ungated_envs` and `explicit_envs`. A variable edit takes effect on the
+  next run.
 - **Plan and apply.** A cell's role and credentials region are outside the
   apply-match fingerprint (§Apply-match fingerprint): a variable feeding either,
   changed between plan and apply, reaches the apply with no re-plan. A
@@ -665,11 +667,11 @@ Every condition below refuses at detect, before any cell starts.
 
 ### Resolution
 
-The table chooses on every path; a reference in it is resolved from a
-repository or organization variable (§Variable references). An environment
-absent from the table resolves an empty role, and the cell's credentials step is
-skipped explicitly. A shared-mode environment resolves `aws.apply` on both
-paths. Each row carries what its detect resolved: `role_arn`, `cred_region`, `tf_vars`,
+The table chooses on every path; a reference in it is resolved from a repository
+or organization variable (§Variable references). An environment absent from the
+table resolves an empty role, and the cell's credentials step is skipped
+explicitly. A shared-mode environment resolves `aws.apply` on both paths. Each
+row carries what its detect resolved: `role_arn`, `cred_region`, `tf_vars`,
 `config_path` — the tier actually consulted, which is diagnostic and read by
 nothing — and `env_binding`, the GitHub Environment the cell's job binds: the
 bare `<env>` when shared, `<env>-plan` or `<env>-apply` for the calling path

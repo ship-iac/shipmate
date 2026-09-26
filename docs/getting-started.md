@@ -685,7 +685,9 @@ that needs neither sets nothing.
 configuration stay the first option for endpoints, sizes and resource settings.
 These channels exist for inputs that genuinely come from outside the repository
 — credentials, and values the repository should not hold. Do not re-create your
-configuration as GitHub variables.
+stacks' configuration as GitHub variables. A value in `.github/shipmate.toml`
+can name a variable instead ([`../CONTRACT.md`](../CONTRACT.md) §Variable
+references).
 
 What carries what:
 
