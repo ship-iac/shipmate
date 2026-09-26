@@ -352,12 +352,17 @@ def check_run_env(table, pairs, environ, run=subprocess.run):
         value = table[name]
         got = reported.get(name)
         if got != value:
-            shown = "(unset)" if got is None else repr(got)
+            # Never print `got`: run.env may assign a secret, and `repr` escaping defeats its mask.
+            what = (
+                f"unsets {name} for {stack}, and the environment table resolves {value!r}"
+                if got is None
+                else f"sets {name} for {stack} to a different value than the environment table "
+                f"resolves ({value!r})"
+            )
             raise SystemExit(
-                f"::error::terramate.config.run.env sets {name} for {stack} to {shown}, and the "
-                f"environment table resolves {value!r}. The table decides a cell's identity: plan "
-                "and apply would both run under the rewritten value, and the fingerprint, "
-                "computed outside `terramate run`, would agree. Stop assigning "
+                f"::error::terramate.config.run.env {what}. The table decides a cell's "
+                "identity: plan and apply would both run under the rewritten value, and the "
+                "fingerprint, computed outside `terramate run`, would agree. Stop assigning "
                 f'{name} in run.env, or read it first: tm_try(env.{name}, "<local default>"). '
                 "See CONTRACT.md §Env model."
             )

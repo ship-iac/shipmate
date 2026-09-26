@@ -25,9 +25,9 @@ ENVIRON = {"STACK": "stacks/app", "HOME": "/home/runner"}
 PAIRS = {**TABLE, "TF_VAR_size": "small", "API_KEY": "s3cr3t"}
 
 OVERRIDE = (
-    "::error::terramate.config.run.env sets TF_VAR_env for stacks/app to 'prod', and the "
-    "environment table resolves 'dev-eu'. The table decides a cell's identity: plan and apply "
-    "would both run under the rewritten value, and the fingerprint, computed outside "
+    "::error::terramate.config.run.env sets TF_VAR_env for stacks/app to a different value "
+    "than the environment table resolves ('dev-eu'). The table decides a cell's identity: plan "
+    "and apply would both run under the rewritten value, and the fingerprint, computed outside "
     "`terramate run`, would agree. Stop assigning TF_VAR_env in run.env, or read it first: "
     'tm_try(env.TF_VAR_env, "<local default>"). See CONTRACT.md §Env model.'
 )
@@ -57,12 +57,23 @@ def _refusal(table=TABLE, pairs=PAIRS, environ=ENVIRON, run=None):
     return str(excinfo.value)
 
 
-def test_a_changed_value_refuses_naming_both_values():
-    """Mutations: compare `==` in place of `!=`; swap the reported and table values in the
-    refusal's format arguments.
-    """
+def test_a_changed_value_refuses_naming_the_table_value():
+    """Mutation: compare `==` in place of `!=`."""
     run = _reporting({"TF_VAR_env": "prod", "TF_VAR_region": "eu-west-1"})
     assert _refusal(run=run) == OVERRIDE
+
+
+def test_a_rewritten_value_stays_out_of_the_log(capsys):
+    """`run.env` may assign a secret, and `repr` escapes it past its `::add-mask::`: the log would
+    carry `'test\\'pass"word'`, which a mask for `test'pass"word` does not match.
+
+    Mutation: `{got!r}` back in the refusal.
+    """
+    run = _reporting({"TF_VAR_env": "test'pass\"word", "TF_VAR_region": "eu-west-1"})
+    refusal = _refusal(run=run)
+    assert refusal == OVERRIDE
+    assert "pass" not in refusal
+    assert capsys.readouterr() == ("", "")
 
 
 @pytest.mark.parametrize(
@@ -70,14 +81,14 @@ def test_a_changed_value_refuses_naming_both_values():
     [{"TF_VAR_env": "dev-eu", "TF_VAR_region": None}, {"TF_VAR_env": "dev-eu"}],
     ids=["null", "missing"],
 )
-def test_an_absent_name_refuses_showing_unset(report):
+def test_an_absent_name_refuses_saying_unset(report):
     """The child reports an unset name as `null`; a report missing the key refuses the same way.
 
     Mutation: `reported.get(name, value)`, which fills the table's value in for the missing key.
     """
     run = _reporting(report)
     assert _refusal(run=run) == (
-        "::error::terramate.config.run.env sets TF_VAR_region for stacks/app to (unset), and the "
+        "::error::terramate.config.run.env unsets TF_VAR_region for stacks/app, and the "
         "environment table resolves 'eu-west-1'. The table decides a cell's identity: plan and "
         "apply would both run under the rewritten value, and the fingerprint, computed outside "
         "`terramate run`, would agree. Stop assigning TF_VAR_region in run.env, or read it first: "
@@ -93,11 +104,12 @@ def test_a_vars_only_name_is_checked():
     table = {**TABLE, "TF_VAR_account": "123"}
     run = _reporting({**TABLE, "TF_VAR_account": "999"})
     assert _refusal(table=table, run=run) == (
-        "::error::terramate.config.run.env sets TF_VAR_account for stacks/app to '999', and the "
-        "environment table resolves '123'. The table decides a cell's identity: plan and apply "
-        "would both run under the rewritten value, and the fingerprint, computed outside "
-        "`terramate run`, would agree. Stop assigning TF_VAR_account in run.env, or read it "
-        'first: tm_try(env.TF_VAR_account, "<local default>"). See CONTRACT.md §Env model.'
+        "::error::terramate.config.run.env sets TF_VAR_account for stacks/app to a different "
+        "value than the environment table resolves ('123'). The table decides a cell's "
+        "identity: plan and apply would both run under the rewritten value, and the fingerprint, "
+        "computed outside `terramate run`, would agree. Stop assigning TF_VAR_account in "
+        'run.env, or read it first: tm_try(env.TF_VAR_account, "<local default>"). '
+        "See CONTRACT.md §Env model."
     )
 
 
