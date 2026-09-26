@@ -591,7 +591,7 @@ the only copy execution reads.
 | `<key> references GitHub variable <NAME>, which is set to an empty value` | a reference never means an empty string; give the variable a value or write the value into the file |
 | `<key> references GitHub variable "<name>"; GitHub variable names are uppercase` | GitHub stores every variable name uppercase. Write the reference with the spelling the message gives |
 | `<key> references GitHub variable "<name>", which is not a GitHub variable name` | the name is empty or holds a character GitHub refuses in a variable name. Names are `[A-Z_][A-Z0-9_]*` |
-| `<key> references GitHub variable <NAME>, but this step received no GitHub variables` | the step reading the file was not handed the caller's variables. The engine's own workflows always hand them over, so report it as an engine defect |
+| `<key> references GitHub variable <NAME>, but this step received no GitHub variables` | either the engine did not pass `github-vars` to the step reading the file, or no repository or organization variable reaches the repository at all. With variables set, report it as an engine defect |
 | `env_order is cyclic: <a> -> <b> -> <a>` | the environments order each other in a loop, so none of them can go first. The path names the loop in apply order; an env listing itself is the one-node case. Drop one of the entries |
 
 **Trap 1: a top-level setting written below a `[table]` header.** TOML puts a

@@ -144,15 +144,26 @@ def test_no_reference_never_reads_the_environment(monkeypatch):
     assert ec.parse_table(text) == {"layout": "dry", "explicit_envs": ["prod"]}
 
 
+_NO_VARIABLES_REFUSAL = (
+    "::error::.github/shipmate.toml environments.prod.aws.apply.role references GitHub "
+    "variable PROD_APPLY_ROLE, but this step received no GitHub variables: the engine did not "
+    "pass github-vars to this step, or the repository reaches no variables at all."
+)
+
+
 def test_a_reference_without_wiring_refuses_naming_the_wiring(monkeypatch):
     """Reddens on treating an absent `SHIPMATE_GITHUB_VARS` as `{}`, which blames the
     consumer's variable for the engine's missing wiring."""
     monkeypatch.delenv("SHIPMATE_GITHUB_VARS", raising=False)
-    assert _refusal(_ROLE_REF, None) == (
-        "::error::.github/shipmate.toml environments.prod.aws.apply.role references GitHub "
-        "variable PROD_APPLY_ROLE, but this step received no GitHub variables; the engine did "
-        "not wire them."
-    )
+    assert _refusal(_ROLE_REF, None) == _NO_VARIABLES_REFUSAL
+
+
+def test_an_empty_variables_input_refuses_naming_the_wiring(monkeypatch):
+    """Every action defaults `github-vars` to "", so an unpassed input arrives empty. Reddens
+    on refusing only an absent `SHIPMATE_GITHUB_VARS` (`raw is None`), which parses "" as
+    `{}` and blames the variable as unset."""
+    monkeypatch.setenv("SHIPMATE_GITHUB_VARS", "")
+    assert _refusal(_ROLE_REF, None) == _NO_VARIABLES_REFUSAL
 
 
 def test_a_null_enumeration_refuses_as_unset(monkeypatch):

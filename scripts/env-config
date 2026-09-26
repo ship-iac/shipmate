@@ -127,14 +127,15 @@ def references(parsed):
 def _environ_variables(path, name):
     """The GitHub variables the engine wired into this step as `SHIPMATE_GITHUB_VARS`.
 
-    Absent is the engine's wiring fault, never the consumer's unset variable, so it refuses
-    before any lookup could blame `name`.
+    Absent or empty refuses before any lookup could blame `name`: every action defaults
+    `github-vars` to "", so an unpassed input arrives empty, not absent.
     """
     raw = os.environ.get("SHIPMATE_GITHUB_VARS")
-    if raw is None:
+    if not raw:
         raise SystemExit(
             f"::error::{CONFIG_PATH} {path} references GitHub variable {name}, but this step "
-            "received no GitHub variables; the engine did not wire them."
+            "received no GitHub variables: the engine did not pass github-vars to this step, "
+            "or the repository reaches no variables at all."
         )
     from _shipmate import _load
 
