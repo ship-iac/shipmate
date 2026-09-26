@@ -124,11 +124,11 @@ live probes.
   request that introduces it rather than after it merges. A missing or unreadable
   file is a note saying so, never an all-clear. Only the checks a file can be judged
   on by itself run here — the top-level keys, `schema_version`, `layout`, the
-  environment entries, `explicit_envs` and `[gate]`; `tf_vars`-layout
+  environment entries and `[gate]`; `tf_vars`-layout
   coverage and unused entries need a plan matrix or a whole-tree environment
   scan, and the verdict names them as unchecked. A valid
   file also gets its `needs` and
-  `explicit_envs` values read back, absent ones included: an absent `explicit_envs`
+  `explicit` values read back, absent ones included: `explicit` set on no entry
   is legitimate configuration that no validator can question, and it means a bare
   `shipmate apply` applies production too. Each variable reference is resolved
   and listed as `<key> from variable <NAME>`; an unset one is the invalid-file
@@ -583,10 +583,11 @@ the only copy execution reads.
 | `is not valid TOML: <message>` | `tomllib`'s own message, with the line and column. See the two parse traps below |
 | `is read with tomllib, which needs Python 3.11 or later; this runner has …` | the `runs_on:` image is older than the floor `../CONTRACT.md` §Runner prerequisites states — `ubuntu-22.04` ships 3.10. Name a newer image |
 | `declares no layout` | either the key is genuinely absent, or it is written below a `[table]` header — see the placement trap below |
-| `<key> is not a setting this engine implements` | a top-level key this engine does not have, most often a misspelled `environments`. Only `schema_version`, `layout`, `environments`, `gate` and `explicit_envs` are accepted — the message lists them. A *newer* engine's key lands here too, which is why a pin moves before a key does ([`upgrading.md`](upgrading.md)) |
-| `gate.<key> is not a key this engine implements` | the `[gate]` table holds `approver_team` and `ungated_envs`. A misspelled one would leave the setting at its default while the repository believed it declared one |
+| `<key> is not a setting this engine implements` | a top-level key this engine does not have, most often a misspelled `environments`. Only `schema_version`, `layout`, `environments` and `gate` are accepted — the message lists them. A *newer* engine's key lands here too, which is why a pin moves before a key does ([`upgrading.md`](upgrading.md)) |
+| `gate.<key> is not a key this engine implements` | the `[gate]` table holds `approver_team` alone. A misspelled one would leave the setting at its default while the repository believed it declared one. The review exemption is `gated = false` on the environment's own entry |
+| `environments.<env>.<key> must be a boolean` | `shared`, `explicit` and `gated` are TOML booleans: write `explicit = true`, unquoted. A quoted `"true"` or `"false"`, a number, or a variable reference would otherwise resolve to the default |
 | `schema_version is <value>; this engine implements version 1` | `schema_version` is optional and, written, must be the integer `1`. `schema_version = true` is refused by name rather than read as 1 |
-| `environments entry '<name>' is not an environment name` or `environments entry '<name>' carries the environment suffix` | an `[environments.<name>]` header whose name no stack tag can carry: Terramate refuses an uppercase letter in a tag, and the name is the bare logical env name, never `<env>-plan` or `<env>-apply`. Rename the entry to the name in the stacks' `env/<name>` tags |
+| `environments.<name> is not an environment name` or `environments.<name> carries the environment suffix` | an `[environments.<name>]` header whose name no stack tag can carry: Terramate refuses an uppercase letter in a tag, and the name is the bare logical env name, never `<env>-plan` or `<env>-apply`. Rename the entry to the name in the stacks' `env/<name>` tags |
 | `<key> references GitHub variable <NAME>, which is not set` | no repository or organization variable of that name reaches the repository. Set it with `gh variable set <NAME>`; the next run reads it, no pull request needed. A variable on a cell's `<env>-plan`, `<env>-apply` or shared `<env>` Environment is never read, and on GitHub Free an organization variable does not reach a private repository ([`../CONTRACT.md`](../CONTRACT.md) §Variable references) |
 | `<key> references GitHub variable <NAME>, which is set to an empty value` | a reference never means an empty string; give the variable a value or write the value into the file |
 | `<key> references GitHub variable "<name>"; GitHub variable names are uppercase` | GitHub stores every variable name uppercase. Write the reference with the spelling the message gives |
@@ -603,13 +604,13 @@ A misplaced `layout` always reports as `declares no layout`, whatever header it
 fell under — the missing-`layout` check runs before anything looks inside
 `environments`, and its message names the placement rule.
 
-A misplaced `explicit_envs` reports differently in each position:
+A misplaced `schema_version` reports differently in each position:
 
 | Where it landed | What `detect` says |
 | --- | --- |
-| after `[gate]` | `gate.explicit_envs is not a key this engine implements. The gate table holds approver_team, ungated_envs.` |
-| after `[environments.dev-eu]` | `environment dev-eu: explicit_envs is not a key this engine implements. An environment holds region, tf_vars, aws, shared, needs.` |
-| after `[environments.dev-eu.aws.plan]` | `environment dev-eu: aws.plan.explicit_envs is not a field the aws provider defines. It defines region, role.` |
+| after `[gate]` | `gate.schema_version is not a key this engine implements. The gate table holds approver_team.` |
+| after `[environments.dev-eu]` | `environment dev-eu: schema_version is not a key this engine implements. An environment holds region, tf_vars, aws, shared, needs, explicit, gated.` |
+| after `[environments.dev-eu.aws.plan]` | `environment dev-eu: aws.plan.schema_version is not a field the aws provider defines. It defines region, role.` |
 
 The fix in every case is the same: put the top-level settings above the first
 `[table]` header.
@@ -627,16 +628,16 @@ file as UTF-8 without a BOM; nothing strips it, deliberately, so that
 `shipmate doctor` and the run reach the same verdict on the same bytes.
 
 **Three settings refuse nothing when they are absent.** `needs`,
-`explicit_envs` and `gate.approver_team` are optional and take tolerant
-defaults — no ordering, no exclusions, and no one authorized. A file that omits
-`explicit_envs` is structurally valid, and a bare `shipmate apply` then applies
+`explicit` and `gate.approver_team` are optional and take tolerant
+defaults — no ordering, no exclusions, and no one authorized. A file that sets
+`explicit` on no entry is structurally valid, and a bare `shipmate apply` then applies
 every environment, production included; one that omits `approver_team` refuses
 every `shipmate apply` and `shipmate unlock` as though the commenter were an
 outsider. Nothing warns. `shipmate doctor` echoes all three on every report for
 exactly this reason; read them before merging.
 
 **Editing them on a branch does not change what that branch applies.** `needs`
-and `explicit_envs` are read from the default branch with the rest of the file.
+and `explicit` are read from the default branch with the rest of the file.
 Validate the change with `shipmate doctor` on the pull request, then merge it —
 that is what makes it take effect.
 
@@ -770,10 +771,10 @@ ruleset.
 The apply comment says *"Held — the pull request's review state does not
 permit applying"*, or `shipmate apply` was refused with a review reason.
 
-`gate.ungated_envs` in `.github/shipmate.toml` exempts the environments it names
+`gated = false` on an entry in `.github/shipmate.toml` exempts that environment
 from the review requirement and nothing else. A targeted `shipmate apply <env>`
-is decided at comment time: an unlisted env gets the usual refusal, extended to
-say the env is not listed in that setting, and the engine re-applies the same rule to
+is decided at comment time: a gated env gets the usual refusal, extended to
+name its `environments.<env>.gated` setting, and the engine re-applies the same rule to
 the decision it reads at apply time — a run refused there dies before any wave,
 leaving the apply checks pending. A bare `shipmate apply` is partitioned
 per environment on the apply path, from the review decision read there:
@@ -781,41 +782,40 @@ per environment on the apply path, from the review decision read there:
 | `reviewDecision` when the apply runs | what applies |
 |---|---|
 | `NONE` (the ruleset requires no review) or `APPROVED` | everything pending — no partition |
-| `REVIEW_REQUIRED` | the listed environments; every other pending environment is held — all of them when the list is absent or empty |
-| `CHANGES_REQUESTED` | nothing — every environment is held, listed ones included |
+| `REVIEW_REQUIRED` | the ungated environments; every other pending environment is held — all of them when no entry holds `gated = false` |
+| `CHANGES_REQUESTED` | nothing — every environment is held, ungated ones included |
 | anything else, or no decision arrived | nothing — every environment is held |
 
 Held environments keep their `apply / <stack> / <env>` checks pending, so
 `shipmate / gate` stays pending and the merge stays blocked; environments
-ordered after a held one are skipped for the same run. The list only ever
+ordered after a held one are skipped for the same run. `gated = false` only ever
 narrows what a `REVIEW_REQUIRED` decision holds; it is the decision that
 decides, so an unreviewed pull request holds every environment in a repository
 that declares nothing.
 
-**The apply is refused although the environment is listed.** Check which copy of
-the file you edited: all three readers resolve `gate.ungated_envs` from the
-**default branch**, so an entry added on the pull request asking for the apply
+**The apply is refused although the environment is ungated.** Check which copy
+of the file you edited: all three readers resolve `gated` from the
+**default branch**, so a flag added on the pull request asking for the apply
 does nothing until it merges. Then check the entry against the rules below. The
-refusal is by *shape*: a suffix or a character outside the env charset is
-rejected loudly, naming the entry. Spelling is never refused, and it warns only
-where a run has already scanned the whole tree: `dev-eu2` for `dev-eu` is
-accepted and that environment simply keeps its review requirement, but a run
-that scanned the tree names the entry as matching no stack tag
+refusal is by *shape*: a non-boolean `gated`, or an entry name with a suffix or a
+character outside the env charset, is rejected loudly, naming the key. Spelling
+is never refused, and it warns only where a run has already scanned the whole
+tree: `gated = false` on `[environments.dev-eu2]` for `dev-eu` is accepted and
+`dev-eu` simply keeps its review requirement, but a run that scanned the tree
+names `dev-eu2` as an entry no stack tags
 ([`../CONTRACT.md`](../CONTRACT.md) §What the diagnostics can and cannot see).
 See
 [`upgrading.md`](upgrading.md) §"Opt-in: per-environment review gating".
 
-**The run failed with a `gate.ungated_envs` error.** An entry that is not a
-bare env name is rejected loudly rather than left silently inert, because none
-of these would ever match an environment:
+**The run failed with an `environments.<env>.gated` error.** The value is
+rejected loudly rather than left silently inert:
 
-- a `-plan` / `-apply` suffix — the list is matched against the bare logical
-  env name carried by the apply checks, so write `dev-eu`, not `dev-eu-apply`;
-- anything outside the env charset (lowercase letters, digits, `-`, `_`) — an
-  uppercase letter, a leading or internal space, a `/`, a nested quote. The
-  entries are bare names, quoted once as TOML strings and nothing more;
-- anything that is not a list of strings at all — `ungated_envs = "dev-eu"` is
-  refused rather than iterated character by character.
+- anything but an unquoted TOML boolean — `gated = "false"`, `gated = 0` or a
+  variable reference would otherwise resolve as gated while reading as ungated;
+- an entry name with a `-plan` / `-apply` suffix, or outside the env charset
+  (lowercase letters, digits, `-`, `_`) — the name is matched against the bare
+  logical env name carried by the apply checks, so write `[environments.dev-eu]`,
+  not `[environments.dev-eu-apply]`.
 
 **`shipmate apply` answers “could not resolve the gate settings” and carries no
 🚀 reaction.** A malformed entry, or any other refusal of the file, is raised
@@ -833,17 +833,16 @@ the two.
 **A held environment is also an explicit environment.** When both causes apply
 it is reported as held, not as excluded, because the review is the thing to get
 first. Getting it does not release the environment into a bare
-`shipmate apply`, though: it is still listed in `explicit_envs`, so it still
+`shipmate apply`, though: its entry still holds `explicit = true`, so it still
 needs a targeted `shipmate apply <env>`. That is why the held sentence names no
 command.
 
-**A listed environment that is also explicit is not held.** It is reported as
+**An ungated environment that is also explicit is not held.** It is reported as
 excluded, with the usual "run `shipmate apply <env>`" — and that targeted apply
 then succeeds without an approving review, because the environment is
-listed. Listing an environment and marking it explicit are independent: the
-first decides whether a review is required, the second only decides that a bare
-apply will not reach it. An environment that must never apply unreviewed does
-not belong in `gate.ungated_envs`.
+ungated. `gated` and `explicit` are independent: the first decides whether a
+review is required, the second only decides that a bare apply will not reach it.
+An environment that must never apply unreviewed must not hold `gated = false`.
 
 ### A pull request planned zero cells
 

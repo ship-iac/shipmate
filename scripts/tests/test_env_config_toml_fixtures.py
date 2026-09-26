@@ -15,14 +15,14 @@ from _loader import load_script
 
 ec = load_script("env-config")
 
-#: Every top-level key the schema allows, and every entry key but `shared`.
+#: Every top-level key but `gate`, and every entry key but `shared`.
 CANONICAL = """\
 schema_version = 1                 # optional
 layout         = "tf_vars"         # "tf_vars" | "workspace" | "folder", required
-explicit_envs  = ["prod"]          # optional
 
 [environments.dev-eu]
 region         = "eu-west-1"
+gated          = false             # optional: a targeted apply needs no approving review
 aws.plan.role  = "arn:aws:iam::981781037707:role/shipmate-plan"
 aws.apply.role = "arn:aws:iam::981781037707:role/shipmate-apply"
 
@@ -32,6 +32,7 @@ needs  = ["dev-eu"]                # optional: envs that must fully apply first
 
 [environments.prod]
 region         = "eu-west-1"
+explicit       = true              # optional: a bare `shipmate apply` skips it
 aws.plan.role  = "arn:aws:iam::981781037707:role/prod-plan"
 aws.apply.role = "arn:aws:iam::981781037707:role/prod-apply"
 # A workload inherits its tier's fields and overrides one:
@@ -50,11 +51,11 @@ schema_version = 1            # intended as a top-level setting
 
 
 def test_the_canonical_file_validates():
-    """Every top-level key the schema allows, dotted provider keys, a workload tier and an
-    ordering.
+    """Every top-level key but `gate`, dotted provider keys, a workload tier, an ordering and
+    both entry flags.
 
-    Mutation: remove any of the four names from the allowed top-level set, or `"needs"` from
-    the allowed entry keys.
+    Mutation: remove any of the three names from the allowed top-level set, or `"needs"`,
+    `"explicit"` or `"gated"` from the allowed entry keys.
     """
     table = ec.parse_table(CANONICAL)
     assert ec.validate(table, ("dev-eu", "prod")) is table
@@ -77,7 +78,7 @@ def test_the_misplaced_control_refuses():
         ec.validate(table, ())
     assert str(exc.value) == (
         "::error::environment prod: schema_version is not a key this engine implements. "
-        "An environment holds region, tf_vars, aws, shared, needs."
+        "An environment holds region, tf_vars, aws, shared, needs, explicit, gated."
     )
 
 

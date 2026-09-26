@@ -97,7 +97,7 @@ set. [`../CONTRACT.md`](../CONTRACT.md) §Env model has the rule and the
 
 ## Opt-in: per-environment review gating
 
-`gate.ungated_envs` lets named environments be applied without an approving
+`gated = false` on an environment's entry lets it be applied without an approving
 review while the rest keep the branch ruleset's requirement. Declare it in
 `.github/shipmate.toml` and nothing else — no repository setting, no workflow
 line: comment-ops and both apply paths each read the file from your default

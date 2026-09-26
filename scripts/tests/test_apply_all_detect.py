@@ -207,11 +207,6 @@ def test_review_held_holds_everything_unreviewed_when_the_variable_is_unset(deci
     assert aad.review_held(PENDING, frozenset(), decision) == expected
 
 
-def test_review_held_matches_the_exemption_list_case_insensitively():
-    ungated = aad.bm.ec.gate_ungated_envs({"gate": {"ungated_envs": ["DEV-EU"]}})
-    assert aad.review_held({"dev-eu", "prod-eu"}, ungated, "REVIEW_REQUIRED") == ["prod-eu"]
-
-
 def _run_main(
     tmp_path,
     monkeypatch,
@@ -253,7 +248,10 @@ def _run_main(
         # Annotated for the same reason `stub_read_table` annotates its own copy: the
         # table's values are mixed by design and `MINIMAL_TABLE` alone infers dict[str, str].
         gated: dict[str, object] = dict(table or MINIMAL_TABLE)
-        gated["gate"] = {"ungated_envs": ungated.split(",")}
+        entries = {e: dict(v) for e, v in dict(gated.get("environments", {})).items()}
+        for env in ungated.split(","):
+            entries.setdefault(env, {})["gated"] = False
+        gated["environments"] = entries
         table = gated
     if checks is None:
         checks = [_apply_check("stacks/app", e) for e in envs]
@@ -498,9 +496,9 @@ def test_main_holds_unlisted_envs_and_skips_their_successors(tmp_path, monkeypat
     assert json.loads(parsed["skipped_envs"]) == ["dev-us"]
 
 
-def test_main_takes_the_exemption_list_from_the_gate_table(tmp_path, monkeypatch):
-    """The hold and the applied-ungated report both resolve from `[gate]` on the default
-    branch, which is the only source: an environment the table does not name is held.
+def test_main_takes_the_exemption_from_the_entry_flag(tmp_path, monkeypatch):
+    """The hold and the applied-ungated report both resolve from `gated = false` on the
+    default branch's entry, which is the only source: an environment without it is held.
 
     Mutation: resolve `ungated` from the process environment -- nothing sets it, so every
     environment is held and the applied report goes empty."""
@@ -508,7 +506,7 @@ def test_main_takes_the_exemption_list_from_the_gate_table(tmp_path, monkeypatch
         tmp_path,
         monkeypatch,
         envs=["dev-eu", "prod-eu"],
-        table={"layout": "folder", "gate": {"ungated_envs": ["dev-eu"]}},
+        table={"layout": "folder", "environments": {"dev-eu": {"gated": False}}},
         decision="REVIEW_REQUIRED",
     )
     assert _wave_envs(parsed) == ["dev-eu"]
@@ -627,7 +625,7 @@ def test_main_takes_ordering_and_exclusions_from_the_loaded_table(tmp_path, monk
 
     Every assertion is on a populated value, because the broken shape returns the empty
     default rather than raising. Mutation: replace `main`'s `bm.ec.env_order(table)` and
-    `table.get("explicit_envs", [])` with the bare `{}` and `[]` -- dev-us drops to
+    `bm.ec.explicit_envs(table)` with the bare `{}` and `[]` -- dev-us drops to
     env-level 0 and prod-eu applies instead of being excluded.
     """
     parsed = _run_main(

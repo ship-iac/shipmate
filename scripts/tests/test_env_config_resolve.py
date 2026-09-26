@@ -303,6 +303,48 @@ def test_shared_envs_names_the_entries_holding_shared_true():
     assert env_config.shared_envs(table) == {"dev-eu"}
 
 
+_FLAGGED = {
+    "layout": "folder",
+    "environments": {
+        "held": {"explicit": True, "gated": True},
+        "open": {"explicit": False, "gated": False},
+        "plain": {"region": "eu-west-1"},
+        "mixed": {"explicit": True, "gated": False},
+    },
+}
+
+
+def test_the_flag_accessors_read_each_entry_against_its_default(capsys):
+    """`explicit` defaults to false and `gated` to true, so `plain` is in neither set, and a
+    table with no entries exempts and holds back nothing. Neither accessor prints.
+
+    Mutations: read `gated` as "absent means ungated" -- `plain` joins the ungated set;
+    invert `ungated_envs` to `gated is True` -- `held` replaces `open` and `mixed`; test
+    `explicit` for presence rather than `True` -- `open` joins.
+    """
+    assert env_config.validate_structure(_FLAGGED) is _FLAGGED
+    assert env_config.explicit_envs(_FLAGGED) == ["held", "mixed"]
+    assert env_config.ungated_envs(_FLAGGED) == frozenset({"open", "mixed"})
+    assert env_config.explicit_envs({"layout": "folder"}) == []
+    assert env_config.ungated_envs({"layout": "folder"}) == frozenset()
+    assert capsys.readouterr().out == ""
+
+
+def test_the_flag_accessors_read_only_a_boolean_as_set():
+    """On a table nothing validated, a quoted value sets neither flag: `"false"` leaves an
+    entry gated, the protected direction, and `"true"` leaves it off a bare apply's
+    exclusions exactly as `validate_structure` would otherwise have refused it.
+
+    Mutations: test `explicit` for truthiness -- `quoted` joins the explicit list; test
+    `gated` for falsiness -- `zero` joins the ungated set.
+    """
+    table = {
+        "environments": {"quoted": {"explicit": "true", "gated": "false"}, "zero": {"gated": 0}}
+    }
+    assert env_config.explicit_envs(table) == []
+    assert env_config.ungated_envs(table) == frozenset()
+
+
 # --- 6: no fallback to vars.* ---------------------------------------------------------
 
 

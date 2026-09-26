@@ -1342,7 +1342,7 @@ def test_an_invalid_table_refuses_before_any_write(monkeypatch, tmp_path):
     fake, exc = run_main(monkeypatch, tmp_path, {}, [])
     assert fake.calls == [["gh", "variable", "list", "--json", "name,value"]]
     assert str(exc) == (
-        "::error::environment dev-eu: shared must be a boolean, got str. "
+        "::error::environments.dev-eu.shared must be a boolean, got str. "
         "Write shared = true or shared = false, unquoted."
     )
 

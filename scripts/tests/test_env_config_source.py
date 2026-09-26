@@ -391,26 +391,6 @@ def _warnings(capsys):
     return [ln for ln in capsys.readouterr().out.splitlines() if ln.startswith("::warning::")]
 
 
-def test_a_declared_ungated_envs_list_resolves_casefolded(capsys):
-    """The resolver's whole job. Casefolded because the apply paths compare a casefolded
-    env name against it, and an entry that survives with its own case matches nothing while
-    reading as if it did. Reddens on returning the entries verbatim, and on any output at
-    all -- this resolver is silent now that it has one source."""
-    assert ec.gate_ungated_envs(_gate(ungated_envs=["SBX", "dev-eu"])) == frozenset(
-        {"sbx", "dev-eu"}
-    )
-    assert _warnings(capsys) == []
-
-
-def test_a_declared_empty_ungated_envs_list_exempts_nothing(capsys):
-    """A declared empty list exempts nothing, which is what an absent key does too.
-    Reddens on any reading that hands back a non-empty set for `[]` -- every environment of
-    a repository that deliberately emptied the list would apply unreviewed."""
-    assert ec.gate_ungated_envs(_gate(ungated_envs=[])) == frozenset()
-    assert ec.gate_ungated_envs(_SHARED_TABLE) == frozenset()
-    assert _warnings(capsys) == []
-
-
 def test_a_declared_approver_team_resolves(capsys):
     """Reddens on returning anything but the declared slug, and on any output."""
     assert ec.gate_approver_team(_gate(approver_team="platform")) == "platform"

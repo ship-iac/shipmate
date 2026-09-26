@@ -10,7 +10,7 @@ merge-deploy path. Env membership comes from stack tags
 never reverse-parsed.
 
 Three exclusions distinguish the bare form from deploy:
-- envs listed in the table's `explicit_envs` (typically prod) are removed
+- envs whose entry holds `explicit = true` (typically prod) are removed
   before env-levels are built; their apply checks stay pending, so
   `shipmate / gate` keeps gating the merge until a targeted
   `shipmate apply <env>` completes them;
@@ -19,8 +19,8 @@ Three exclusions distinguish the bare form from deploy:
   precondition cannot be met this run, exactly like a failed predecessor
   level;
 - envs the PR's review decision does not authorize are held until it carries
-  an approving review, dropped the same way; the `[gate]` table's
-  `ungated_envs` narrows that hold by naming the envs exempt from it.
+  an approving review, dropped the same way; an entry holding
+  `gated = false` is exempt from that hold.
 """
 
 import json
@@ -68,8 +68,8 @@ def review_held(pending_envs, ungated, decision):
     """Envs whose apply waits for a review this run.
 
     The decision decides, and `ungated` only narrows what REVIEW_REQUIRED holds:
-    the two pass values apply everything regardless of the list; REVIEW_REQUIRED
-    applies the listed envs and holds the rest — every env when the list is
+    the two pass values apply everything regardless of `ungated`; REVIEW_REQUIRED
+    applies the ungated envs and holds the rest — every env when `ungated` is
     empty; and every remaining value — an explicit CHANGES_REQUESTED, an unknown
     enum, an absent decision — holds all of them. An absent decision is reachable
     only through wiring drift: the review job carries no `if:`, and a review job
@@ -98,10 +98,10 @@ def main():
 
     order = bm.ec.env_order(table)
     pending_envs = {c["environment"] for c in pending}
-    ungated = bm.ec.gate_ungated_envs(table)
+    ungated = bm.ec.ungated_envs(table)
     decision = os.environ.get("SHIPMATE_REVIEW_DECISION", "")
     held = review_held(pending_envs, ungated, decision)
-    excluded, skipped = partition_envs(pending_envs, table.get("explicit_envs", []) + held, order)
+    excluded, skipped = partition_envs(pending_envs, bm.ec.explicit_envs(table) + held, order)
     # An explicit env is "run `shipmate apply <env>`", a held one is "get a
     # review" -- two causes, two outputs, or the comment names the wrong fix.
     excluded = sorted(set(excluded) - set(held))
@@ -114,7 +114,7 @@ def main():
         ad.ag.plan_runs_by_name(lines, app_id),
         ad.ag.plan_hashes_by_name(lines, app_id),
     )
-    # From `runnable`, never from `pending & ungated`: a listed env can still be
+    # From `runnable`, never from `pending & ungated`: an ungated env can still be
     # excluded or skipped, and claiming it applied is worse than saying nothing.
     applied_ungated = (
         sorted({c["environment"] for c in runnable})

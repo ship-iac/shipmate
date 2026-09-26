@@ -1923,7 +1923,7 @@ CONFIG_NO_COMMIT = (
 CONFIG_VALID = (
     f"`{CONFIG_PATH}` at the commit under examination parses, and passes every check a "
     "file can be judged on by itself: its top-level keys, `schema_version`, `layout`, the "
-    "environment entries, `explicit_envs` and the `[gate]` table. Not checked "
+    "environment entries and the `[gate]` table. Not checked "
     "here, for want of a plan matrix and a whole-tree environment scan: `tf_vars`-layout "
     "coverage of the planned environments and entries that no stack tags — `detect` checks "
     "each of those on the runs where it applies. Execution reads the default branch's copy of this "
@@ -1941,16 +1941,16 @@ def _config_defaults(table):
     """The three tolerant defaults, echoed whether they are set or not.
 
     No absence here is invalid, so no validator can report any of them, and each decides
-    what a comment can do. An omitted `explicit_envs` applies every environment, including
+    what a comment can do. An `explicit` set on no entry applies every environment, including
     the one a consumer meant to hold back; an omitted `approver_team` authorizes nobody, so
     every `shipmate apply` is refused as though the commenter were an outsider. This is the
     last moment before the merge at which reading either costs nothing.
 
-    `gate.ungated_envs` gets no line: its absence exempts nothing, which is the safe
-    direction and the one a reader already assumes.
+    `gated` gets no line: its absence exempts nothing, which is the safe direction and the
+    one a reader already assumes.
     """
     order = bm.ec.env_order(table)
-    envs = table.get("explicit_envs", [])
+    envs = bm.ec.explicit_envs(table)
     team = bm.ec.gate_approver_team(table)
     shown = "; ".join(
         f"{env} after {', '.join(preds) or 'nothing'}" for env, preds in sorted(order.items())
@@ -1966,10 +1966,10 @@ def _config_defaults(table):
         ),
         (
             NOTICE,
-            f"`explicit_envs` names {_one_line(', '.join(envs), 400)} — a bare "
+            f"`explicit = true` on {_one_line(', '.join(envs), 400)} — a bare "
             "`shipmate apply` skips those, and each needs its own `shipmate apply <env>`."
             if envs
-            else "`explicit_envs`: absent — every environment applies on a bare "
+            else "`explicit`: set on no environment — every environment applies on a bare "
             "`shipmate apply`, production included.",
         ),
         (

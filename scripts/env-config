@@ -284,23 +284,22 @@ def read_table_at_default_branch(run=None):
 #: and one conditional step in each cell action.
 _LAYOUTS = ("tf_vars", "workspace", "folder")
 _AWS_FIELDS = ("region", "role")
-_ENV_KEYS = ("region", "tf_vars", "aws", "shared", "needs")
+_ENV_KEYS = ("region", "tf_vars", "aws", "shared", "needs", "explicit", "gated")
 
 #: Reserved at every level: a tier selector, never a provider field.
 _STRUCTURAL = ("plan", "apply", "workloads")
 
 #: Everything the file may declare at its top level.
-_TOP_KEYS = ("schema_version", "layout", "environments", "gate", "explicit_envs")
+_TOP_KEYS = ("schema_version", "layout", "environments", "gate")
 
 #: Everything a `[gate]` table may declare.
-_GATE_KEYS = ("approver_team", "ungated_envs")
+_GATE_KEYS = ("approver_team",)
 
 #: Env names come from Terramate `env/<name>` tags, so the charset is comment-parse's env
 #: grammar plus `_`, a legal tag character no `shipmate apply <env>` can name. Lowercase
 #: because Terramate refuses an uppercase letter in a tag: an entry carrying an uppercase
-#: letter can never name an environment, and the readers would not agree about it --
-#: `gate.ungated_envs` casefolds both sides, while `explicit_envs` is intersected
-#: case-sensitively in `apply-all-detect:partition_envs` and would exclude nothing.
+#: letter can never name an environment, so its flags and its `needs` would apply to
+#: nothing while reading as though they held.
 _ENV_ENTRY = re.compile(r"[a-z0-9][a-z0-9_-]*")
 
 #: A GitHub team slug: the bare name from the team's URL. Wider than an env entry, which is
@@ -420,18 +419,22 @@ def _check_vars(entry, env):
             )
 
 
-def _check_shared_key(entry, env):
-    """`shared` is a TOML boolean, and a shared entry declares no `aws.plan`.
+def _check_flags(entry, env):
+    """`shared`, `explicit` and `gated` are TOML booleans, and a shared entry declares no
+    `aws.plan`.
 
-    Runs after `_check_provider`, which is what has proven the `aws` block a mapping.
+    A quoted `"true"` reads as set to a person and resolves as unset; for `explicit` that
+    puts the environment on a bare `shipmate apply`. A reference resolves to a string, so
+    it refuses here too. Runs after `_check_provider`, which is what has proven the `aws`
+    block a mapping.
     """
-    value = entry["shared"]
-    if not isinstance(value, bool):
-        raise SystemExit(
-            f"::error::environment {env}: shared must be a boolean, got "
-            f"{type(value).__name__}. Write shared = true or shared = false, unquoted."
-        )
-    if value and "plan" in entry.get("aws", {}):
+    for key in ("shared", "explicit", "gated"):
+        if key in entry and not isinstance(entry[key], bool):
+            raise SystemExit(
+                f"::error::environments.{env}.{key} must be a boolean, got "
+                f"{type(entry[key]).__name__}. Write {key} = true or {key} = false, unquoted."
+            )
+    if entry.get("shared") is True and "plan" in entry.get("aws", {}):
         raise SystemExit(
             f"::error::environment {env} is shared between the plan and apply paths, so "
             "aws.plan cannot apply to it: a shared environment resolves aws.apply on both "
@@ -451,6 +454,28 @@ def shared_envs(table):
     }
 
 
+def explicit_envs(table):
+    """Environments a bare `shipmate apply` skips: each needs its own `shipmate apply <env>`.
+
+    Only `explicit = true` holds one back; `validate_structure` refuses any other value.
+    """
+    return sorted(
+        e for e, entry in table.get("environments", {}).items() if entry.get("explicit") is True
+    )
+
+
+def ungated_envs(table):
+    """Environments a targeted apply reaches without an approving review.
+
+    Only `gated = false` exempts one; anything else is gated, the protected direction.
+    Entry names are lowercase by `_check_env_name`, so the set already matches the
+    casefolded env name `authorize` compares against it.
+    """
+    return frozenset(
+        e for e, entry in table.get("environments", {}).items() if entry.get("gated") is False
+    )
+
+
 def _check_environment(entry, env):
     """One entry's own shape. Nothing here reads context outside the file."""
     entry = _mapping(entry, f"environment {env}")
@@ -466,8 +491,7 @@ def _check_environment(entry, env):
         _check_vars(entry, env)
     if "aws" in entry:
         _check_provider(entry["aws"], env, entry.get("region"))
-    if "shared" in entry:
-        _check_shared_key(entry, env)
+    _check_flags(entry, env)
 
 
 def _check_dry_coverage(environments, matrix_envs):
@@ -501,24 +525,19 @@ _TWO_PULL_REQUESTS = (
 
 #: The keys that reference an environment rather than declaring one, and what an entry
 #: naming no environment silently fails to do. The consequence is the diagnostic's whole
-#: value: every one of these is fail-open, so the entry reads as holding, exempting or
-#: ordering something while the run does none of it. The charset rule catches only entries
-#: no env name could take; a plain typo passes it and lands here.
+#: value: the key is fail-open, so it reads as ordering something while the run does
+#: nothing of the kind. The charset rule catches only names no env name could take; a
+#: plain typo passes it and lands here. `explicit` and `gated` sit on the entry itself,
+#: which the unused-entry warning covers.
 _REFERENCE_KEYS = {
     "needs": "so it orders nothing",
-    "explicit_envs": "so it holds nothing back from a bare `shipmate apply`",
-    "gate.ungated_envs": "so it exempts nothing from the review requirement",
 }
 
 
 def _referenced_envs(table):
     """Env names per reference key. `needs` references by its predecessors only: the env
     holding it is an entry, which the unused-entry warning already covers."""
-    return {
-        "needs": {p for preds in env_order(table).values() for p in preds},
-        "explicit_envs": set(table.get("explicit_envs", [])),
-        "gate.ungated_envs": set(table.get("gate", {}).get("ungated_envs", [])),
-    }
+    return {"needs": {p for preds in env_order(table).values() for p in preds}}
 
 
 def _report_unused(table, all_envs):
@@ -588,9 +607,9 @@ def validate_env_order(order):
 def validate_env_name_list(envs, key):
     """`envs`, or `SystemExit` unless it is a list of bare env-name strings.
 
-    The list rule, shared by `needs`, `explicit_envs` and `gate.ungated_envs`. `key` names
-    the setting in every message. Guards a bare string, which would otherwise be iterated
-    character by character, a non-list value, and each element under `_check_env_name`.
+    The list rule `needs` follows. `key` names the setting in every message. Guards a bare
+    string, which would otherwise be iterated character by character, a non-list value, and
+    each element under `_check_env_name`.
     """
     if not isinstance(envs, list):
         raise SystemExit(
@@ -604,31 +623,32 @@ def validate_env_name_list(envs, key):
             f"got non-string element(s) {bad!r}"
         )
     for e in envs:
-        _check_env_name(e, key)
+        _check_env_name(e, f"{key} entry {e!r}", key)
     return envs
 
 
-def _check_env_name(e, key):
+def _check_env_name(e, label, matched):
     """Refuse a name no environment can take, as an entry key or a list element.
 
     Guards a name outside the charset, and one carrying a `-plan`/`-apply` environment
     suffix -- each is matched against the bare logical env name, matches nothing, and so
-    orders, excludes or exempts nothing while reading as if it did.
+    orders, holds back or exempts nothing while reading as if it did. `label` opens each
+    message and `matched` names what the suffix message says is matched.
 
     Charset before suffix: a suffixed name passes the charset, so the two are separate
     checks, and this order gives `"dev eu-plan"` the message about its space.
     """
     if not _ENV_ENTRY.fullmatch(e):
         raise SystemExit(
-            f"::error::{key} entry {e!r} is not an environment name; entries are bare "
+            f"::error::{label} is not an environment name; entries are bare "
             f"logical env names (lowercase letters, digits, '-' and '_'), with no "
             f"quotes, spaces or path separators."
         )
     for suffix in ("-plan", "-apply"):
         if e.endswith(suffix):
             raise SystemExit(
-                f"::error::{key} entry {e!r} carries the environment suffix "
-                f"{suffix!r}; {key} is matched against the bare logical env name — "
+                f"::error::{label} carries the environment suffix "
+                f"{suffix!r}; {matched} is matched against the bare logical env name — "
                 f"write {e[: -len(suffix)]!r} instead."
             )
 
@@ -636,12 +656,11 @@ def _check_env_name(e, key):
 def validate_team_slug(team, key):
     """`team`, or `SystemExit` unless it is a GitHub team slug or the empty string.
 
-    The charset rule `gate.ungated_envs` already has, applied to the setting beside it. An
-    empty team is legal and authorizes nobody. Anything
-    else that is not a slug -- a display name carrying a space, an `@org/team` reference, a
-    pasted quote, a trailing space -- 404s in the membership lookup that decides
-    `is_member`, so every commenter is refused under a message naming the team as though it
-    had resolved.
+    A charset rule, as environment names have one. An empty team is legal and authorizes
+    nobody. Anything else that is not a slug -- a display name carrying a space, an
+    `@org/team` reference, a pasted quote, a trailing space -- 404s in the membership lookup
+    that decides `is_member`, so every commenter is refused under a message naming the team
+    as though it had resolved.
     """
     _string(team, key)
     if team and not _TEAM_SLUG.fullmatch(team):
@@ -651,11 +670,6 @@ def validate_team_slug(team, key):
             f"or an @org/team reference."
         )
     return team
-
-
-def validate_explicit_envs(envs):
-    """`envs`, or `SystemExit`: the shared env-name rule, reported under this key."""
-    return validate_env_name_list(envs, "explicit_envs")
 
 
 def validate_gate(gate):
@@ -673,19 +687,7 @@ def validate_gate(gate):
             )
     if "approver_team" in gate:
         validate_team_slug(gate["approver_team"], "gate.approver_team")
-    if "ungated_envs" in gate:
-        validate_env_name_list(gate["ungated_envs"], "gate.ungated_envs")
     return gate
-
-
-def gate_ungated_envs(table):
-    """The environments exempt from the review requirement, casefolded.
-
-    Entries came through `validate_structure`, so the charset rule has already run. An
-    absent key and a declared empty list both exempt nothing; they differ nowhere now that
-    there is no second source for an absent key to fall through to.
-    """
-    return frozenset(e.casefold() for e in table.get("gate", {}).get("ungated_envs", []))
 
 
 def gate_approver_team(table):
@@ -716,7 +718,7 @@ def _check_version(table):
 def _check_entries(environments):
     """Every entry name, then every entry, then the order their `needs` declare."""
     for env in sorted(environments):
-        _check_env_name(env, "environments")
+        _check_env_name(env, f"environments.{env}", "an entry name")
     for env in sorted(environments):
         _check_environment(environments[env], env)
     validate_env_order(env_order({"environments": environments}))
@@ -726,7 +728,7 @@ def validate_structure(table):
     """Everything the file can be judged on by itself, or `SystemExit`.
 
     Every top-level field, so a "valid configuration" verdict cannot hide an ordering
-    or exclusion error until an apply reads it. `doctor` and `gate-config` validate with
+    or flag error until an apply reads it. `doctor` and `gate-config` validate with
     this alone: the rules left to `validate` need a matrix or a whole-tree environment scan,
     neither of which either of them has.
 
@@ -755,7 +757,6 @@ def validate_structure(table):
     if layout not in _LAYOUTS:
         raise SystemExit(f"::error::layout is {layout!r}; it must be one of {', '.join(_LAYOUTS)}.")
     _check_entries(_mapping(table.get("environments", {}), "environments"))
-    validate_explicit_envs(table.get("explicit_envs", []))
     validate_gate(table.get("gate", {}))
     return table
 

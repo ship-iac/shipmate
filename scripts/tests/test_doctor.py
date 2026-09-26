@@ -4409,9 +4409,9 @@ _MISPLACED_FINDING = (
     doctor.WARNING,
     "`.github/shipmate.toml` at the commit under examination is not valid: "
     "environment prod: schema_version is not a key this engine implements. An environment "
-    "holds region, tf_vars, aws, shared, needs. Merging it refuses every operation that reads "
-    "the table. Execution still reads the default branch's copy, which this says nothing "
-    "about.",
+    "holds region, tf_vars, aws, shared, needs, explicit, gated. Merging it refuses every "
+    "operation that reads the table. Execution still reads the default branch's copy, which "
+    "this says nothing about.",
 )
 
 
@@ -4561,7 +4561,7 @@ def test_a_valid_verdict_names_the_checks_it_did_not_run(monkeypatch):
             doctor.NOTICE,
             "`.github/shipmate.toml` at the commit under examination parses, and passes "
             "every check a file can be judged on by itself: its top-level keys, `schema_version`, "
-            "`layout`, the environment entries, `explicit_envs` and the "
+            "`layout`, the environment entries and the "
             "`[gate]` table. Not checked here, for want of a plan matrix and a whole-tree "
             "environment scan: `tf_vars`-layout coverage of the planned environments and entries "
             "that no stack tags \u2014 `detect` checks each of those on the runs where it "
@@ -4575,7 +4575,7 @@ def test_a_valid_verdict_names_the_checks_it_did_not_run(monkeypatch):
         ),
         (
             doctor.NOTICE,
-            "`explicit_envs` names prod \u2014 a bare `shipmate apply` skips those, and each "
+            "`explicit = true` on prod \u2014 a bare `shipmate apply` skips those, and each "
             "needs its own `shipmate apply <env>`.",
         ),
         (
@@ -4587,26 +4587,32 @@ def test_a_valid_verdict_names_the_checks_it_did_not_run(monkeypatch):
 
 
 #: Two references, one of them a list item, hand-written.
-_REFERENCED = """layout        = "folder"
-explicit_envs = [{ vars = "HELD_ENV" }]
+_REFERENCED = """layout = "folder"
 
 [environments.dev]
 region         = "eu-west-1"
 aws.plan.role  = { vars = "DEV_PLAN_ROLE" }
 aws.apply.role = "arn:aws:iam::981781037707:role/shipmate-apply"
+
+[environments.prod]
+explicit = true
+needs    = [{ vars = "FIRST_ENV" }]
 """
 
 
 def test_a_valid_file_holding_references_lists_each_one(monkeypatch):
     """The report names the values the file does not hold, sorted by key path, beside the
     verdict and never as a finding: in `_config_warnings` the notice would annotate every
-    plan run and displace the settings-probe all-clear.
+    plan run and displace the settings-probe all-clear. The `needs` line shows the resolved
+    predecessor, and the explicit line reads the entry's flag.
 
-    Mutation: omit the references notice from `config_status`.
+    Mutations: omit the references notice from `config_status`; stop `_replace` recursing
+    into lists -- the `needs` line renders the mapping; or read the old top-level list in
+    `_config_defaults` -- the explicit line reports none.
     """
     monkeypatch.setenv(
         "SHIPMATE_GITHUB_VARS",
-        '{"DEV_PLAN_ROLE": "arn:aws:iam::981781037707:role/shipmate-plan", "HELD_ENV": "dev"}',
+        '{"DEV_PLAN_ROLE": "arn:aws:iam::981781037707:role/shipmate-plan", "FIRST_ENV": "dev"}',
     )
     responses = {_CONFIG_READ: _wf_file(_REFERENCED)}
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
@@ -4617,19 +4623,20 @@ def test_a_valid_file_holding_references_lists_each_one(monkeypatch):
             doctor.NOTICE,
             "`.github/shipmate.toml` at the commit under examination takes these values from "
             "GitHub variables instead of holding them: `environments.dev.aws.plan.role` from "
-            "variable `DEV_PLAN_ROLE`; `explicit_envs[0]` from variable `HELD_ENV`. Every run "
+            "variable `DEV_PLAN_ROLE`; `environments.prod.needs[0]` from variable `FIRST_ENV`. "
+            "Every run "
             "resolves them again from repository and organization variables, never from a "
             "cell's Environment; in comment-ops and the plan summary a `shipmate-engine` "
             "Environment variable of the same name wins.",
         ),
         (
             doctor.NOTICE,
-            "`needs`: declared by no environment — every environment sits at one level, "
-            "and a bare `shipmate apply` applies them all together.",
+            "`needs` orders prod after dev — a bare `shipmate apply` applies "
+            "one env-level fully before it starts the next.",
         ),
         (
             doctor.NOTICE,
-            "`explicit_envs` names dev — a bare `shipmate apply` skips those, and each "
+            "`explicit = true` on prod — a bare `shipmate apply` skips those, and each "
             "needs its own `shipmate apply <env>`.",
         ),
         (
@@ -4646,7 +4653,7 @@ def test_an_unset_reference_is_the_invalid_file_finding(monkeypatch):
 
     Mutation: catch the refusal in `_config_table` and return the unresolved table.
     """
-    monkeypatch.setenv("SHIPMATE_GITHUB_VARS", '{"HELD_ENV": "dev"}')
+    monkeypatch.setenv("SHIPMATE_GITHUB_VARS", '{"FIRST_ENV": "dev"}')
     responses = {_CONFIG_READ: _wf_file(_REFERENCED)}
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
     assert doctor._config_warnings(_ctx()) == [
@@ -4665,7 +4672,7 @@ def test_an_unset_reference_is_the_invalid_file_finding(monkeypatch):
 
 
 def test_the_tolerant_defaults_are_read_back_when_absent(monkeypatch):
-    """A table omitting `needs`, `explicit_envs` and `[gate]` is valid and takes the
+    """A table omitting `needs`, `explicit` and `[gate]` is valid and takes the
     empty default for each: a bare `shipmate apply` applies every environment -- including
     the one a consumer meant to exclude -- and no commenter may apply at all. Nothing
     refuses and no validator can, so the report says it.
@@ -4682,7 +4689,7 @@ def test_the_tolerant_defaults_are_read_back_when_absent(monkeypatch):
         ),
         (
             doctor.NOTICE,
-            "`explicit_envs`: absent \u2014 every environment applies on a bare "
+            "`explicit`: set on no environment \u2014 every environment applies on a bare "
             "`shipmate apply`, production included.",
         ),
         (
@@ -4784,12 +4791,12 @@ def test_the_all_clear_survives_a_sound_environment_table(monkeypatch):
     # The status section renders too, and below the all-clear rather than instead of it.
     assert doctor.CONFIG_HEADING in body
     assert body.index("no problems found") < body.index(doctor.CONFIG_HEADING)
-    assert "`explicit_envs` names prod" in body
+    assert "`explicit = true` on prod" in body
 
 
 def test_the_report_renders_the_table_status_beside_a_finding(monkeypatch):
     """A repository with a settings problem still gets the table's status: the two sections
-    are independent, and a reader fixing a gate ruleset must not lose the `explicit_envs`
+    are independent, and a reader fixing a gate ruleset must not lose the `explicit`
     line because of it. Mutation: render the status only in the `else` branch."""
     responses = _config_responses(CANONICAL)
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
@@ -4799,7 +4806,7 @@ def test_the_report_renders_the_table_status_beside_a_finding(monkeypatch):
     )
     assert "gate rule missing" in body
     assert "no problems found" not in body
-    assert "`explicit_envs` names prod" in body
+    assert "`explicit = true` on prod" in body
 
 
 def test_no_status_section_beside_a_refusal(monkeypatch):

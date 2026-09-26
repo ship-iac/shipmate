@@ -641,7 +641,7 @@ runs:
         ENVIRONMENT: ${{ steps.authz.outputs.environment }}
       run: |
         set -euo pipefail
-        gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -f body=":memo: shipmate: environment \`$ENVIRONMENT\` is permitted to apply without an approving review, per \`gate.ungated_envs\` in \`.github/shipmate.toml\` — see the apply result comment for what actually applied." >/dev/null
+        gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -f body=":memo: shipmate: environment \`$ENVIRONMENT\` is permitted to apply without an approving review, per \`gated = false\` on its entry in \`.github/shipmate.toml\` — see the apply result comment for what actually applied." >/dev/null
 
     - name: Reject with reason
       if: ${{ (steps.parse.outputs.route == 'apply' || steps.parse.outputs.route == 'unlock') && steps.apptoken.outcome == 'success' && steps.authz.outputs.authorized != 'true' }}

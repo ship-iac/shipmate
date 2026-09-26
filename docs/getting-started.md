@@ -555,10 +555,10 @@ rules from Settings → Environments → `<name>` (or the API):
   maximally-hardened position gates every apply environment.
   [`hardening.md`](hardening.md) #6 states what each choice costs — shipmate
   does not make it for you.
-- **Pair a reviewer-gated environment with `explicit_envs` in
+- **Pair a reviewer-gated environment with `explicit = true` in
   `.github/shipmate.toml`.**
-  List the bare env name (`prod` — neither `prod-plan` nor `prod-apply`). A bare
-  `shipmate apply` then skips it, and it is only ever reached via the targeted
+  Set it on the bare env's entry (`[environments.prod]` — neither `prod-plan`
+  nor `prod-apply`). A bare `shipmate apply` then skips it, and it is only ever reached via the targeted
   `shipmate apply prod`, which pauses for the environment reviewer.
 
 ### The apply jobs
@@ -785,8 +785,8 @@ the last green check, so the PR merges itself:
 
 Properties that fall out of the existing gate semantics:
 
-- **Explicit environments still gate.** An environment listed in
-  `explicit_envs` is skipped by the bare `shipmate apply` and its apply checks
+- **Explicit environments still gate.** An environment whose entry holds
+  `explicit = true` is skipped by the bare `shipmate apply` and its apply checks
   stay pending — gate stays pending, so auto-merge waits until someone runs the
   targeted `shipmate apply <env>`. Arming auto-merge never weakens the
   apply-before-merge guarantee; it only removes the final click.
@@ -813,21 +813,22 @@ Properties that fall out of the existing gate semantics:
 
 The branch ruleset's review requirement is repository-wide, so requiring an
 approval before merge also requires one before every apply. To keep a low-tier
-environment self-service while the rest stay gated, name it in
-`gate.ungated_envs` in `.github/shipmate.toml` — bare logical env names:
+environment self-service while the rest stay gated, set `gated = false` on its
+entry in `.github/shipmate.toml`:
 
 ```toml
 layout = "tf_vars"
 
-[gate]
-ungated_envs = ["dev-eu", "dev-us"]
+[environments.dev-eu]
+region = "eu-west-1"
+gated  = false
 ```
 
 Your workflow file needs no line for it, and neither does a repository setting.
-Comment-ops and both apply paths each resolve the list themselves, from the file
+Comment-ops and both apply paths each resolve the flag themselves, from the file
 on your **default branch** — so an edit takes effect when it merges, and a pull
-request cannot exempt itself. Declare no list and *what applies* is unchanged:
-every environment keeps the ruleset's requirement.
+request cannot exempt itself. Set it on no entry and *what applies* is
+unchanged: every environment keeps the ruleset's requirement.
 
 The second part is a pin. An apply is authorized by the engine
 `comment-ops.yml` the `comment-ops` job calls and enforced by the engine
@@ -836,16 +837,16 @@ three pins must sit at the same release (or the enforcing two later). One file
 carrying all seven pins is what makes that automatic: `dev/repin_consumer.py`
 moves them together, and there is no longer a second file to bump on its own.
 
-Both edges need the list declared — the exemption is opt-in and there is no
-consumer-written input that could authorize a dispatch without it.
+Both edges need an entry declaring `gated = false` — the exemption is opt-in and
+there is no consumer-written input that could authorize a dispatch without it.
 
-What this does and does not do: a listed environment may be applied without an
+What this does and does not do: an ungated environment may be applied without an
 approving review; every other apply requirement still decides, including
-`CHANGES_REQUESTED`, and every unlisted environment keeps the requirement. A
-bare `shipmate apply` on an unreviewed pull request applies the listed
+`CHANGES_REQUESTED`, and every gated environment keeps the requirement. A
+bare `shipmate apply` on an unreviewed pull request applies the ungated
 environments and holds the rest — their apply checks stay pending, so
 `shipmate / gate` stays pending and the merge stays blocked until they are
-applied with a review in hand. Adding an environment to the list is a commit to
+applied with a review in hand. Ungating an environment is a commit to
 the default branch, under whatever your ruleset requires of one, so the pull
 request that benefits from the exemption cannot also grant it. That is all
 it claims. Full semantics in [`../CONTRACT.md`](../CONTRACT.md)

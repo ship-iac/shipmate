@@ -16,20 +16,20 @@ ec = load_script("env-config")
 
 _TABLE = """\
 layout = "tf_vars"
-explicit_envs = [{ vars = "PROD_ENV" }, "stage"]
 
 [gate]
 approver_team = { vars = "APPROVERS" }
 
 [environments.prod]
 region = "eu-west-1"
+needs = [{ vars = "FIRST_ENV" }, "stage"]
 aws.plan.role = "arn:aws:iam::1:role/plan"
 aws.apply.role = { vars = "PROD_APPLY_ROLE" }
 aws.apply.workloads.net-edge.role = { vars = "NET_EDGE_ROLE" }
 """
 
 _VARIABLES = {
-    "PROD_ENV": "prod",
+    "FIRST_ENV": "dev",
     "APPROVERS": "platform",
     "PROD_APPLY_ROLE": "arn:aws:iam::1:role/apply",
     "NET_EDGE_ROLE": "arn:aws:iam::1:role/net-edge",
@@ -38,11 +38,11 @@ _VARIABLES = {
 
 _RESOLVED = {
     "layout": "tf_vars",
-    "explicit_envs": ["prod", "stage"],
     "gate": {"approver_team": "platform"},
     "environments": {
         "prod": {
             "region": "eu-west-1",
+            "needs": ["dev", "stage"],
             "aws": {
                 "plan": {"role": "arn:aws:iam::1:role/plan"},
                 "apply": {
@@ -59,10 +59,45 @@ _ROLE_REF = '[environments.prod]\naws.apply.role = { vars = "PROD_APPLY_ROLE" }\
 
 def test_every_reference_is_replaced_by_its_value():
     """Covers an environment tier, a list item, a workload tier and `gate.approver_team`.
-    Reddens on returning the raw table, on recursing into dicts only (the `explicit_envs`
-    item stays a mapping), and on stopping at depth 3 (the workload and apply roles stay
-    mappings)."""
+    Reddens on returning the raw table, on recursing into dicts only (the `needs` item stays
+    a mapping), and on stopping at depth 3 (the workload and apply roles stay mappings)."""
     assert ec.parse_table(_TABLE, _VARIABLES) == _RESOLVED
+
+
+def test_a_reference_inside_needs_orders_by_its_value():
+    """The resolved list is what `env_order` hands the sorter. Reddens on `_replace` no
+    longer recursing into lists: the first predecessor stays a mapping."""
+    assert ec.env_order(ec.parse_table(_TABLE, _VARIABLES)) == {"prod": ["dev", "stage"]}
+
+
+_NEEDS_REF = 'layout = "folder"\n[environments.prod]\nneeds = [{ vars = "FIRST_ENV" }]\n'
+
+
+@pytest.mark.parametrize(
+    ("value", "message"),
+    [
+        (
+            "Dev",
+            "::error::environments.prod.needs entry 'Dev' is not an environment name; entries "
+            "are bare logical env names (lowercase letters, digits, '-' and '_'), with no "
+            "quotes, spaces or path separators.",
+        ),
+        (
+            "dev-eu-plan",
+            "::error::environments.prod.needs entry 'dev-eu-plan' carries the environment "
+            "suffix '-plan'; environments.prod.needs is matched against the bare logical env "
+            "name — write 'dev-eu' instead.",
+        ),
+    ],
+    ids=["uppercase", "suffix"],
+)
+def test_a_resolved_needs_value_is_name_checked(value, message):
+    """A variable's value meets the rule a written one does, because resolution runs before
+    validation. Reddens on validating the unresolved table: the mapping then refuses as a
+    non-string element instead."""
+    with pytest.raises(SystemExit) as exc:
+        ec.validate_structure(ec.parse_table(_NEEDS_REF, {"FIRST_ENV": value}))
+    assert str(exc.value) == message
 
 
 def test_a_mapping_that_merely_contains_vars_is_data():
@@ -150,8 +185,11 @@ def test_a_name_outside_the_charset_refuses_naming_the_rule(toml_name, name, ren
 def test_no_reference_never_reads_the_environment(monkeypatch):
     """Reddens on reading `SHIPMATE_GITHUB_VARS` unconditionally: absent, it refuses."""
     monkeypatch.delenv("SHIPMATE_GITHUB_VARS", raising=False)
-    text = 'layout = "tf_vars"\nexplicit_envs = ["prod"]\n'
-    assert ec.parse_table(text) == {"layout": "tf_vars", "explicit_envs": ["prod"]}
+    text = 'layout = "tf_vars"\n[environments.prod]\nneeds = ["dev"]\n'
+    assert ec.parse_table(text) == {
+        "layout": "tf_vars",
+        "environments": {"prod": {"needs": ["dev"]}},
+    }
 
 
 _NO_VARIABLES_REFUSAL = (
@@ -192,11 +230,12 @@ def test_a_root_level_vars_key_is_a_setting_not_a_reference():
 
 
 def test_references_lists_every_reference_sorted_by_path():
-    """Reddens on dropping list recursion (the `explicit_envs[0]` row disappears)."""
+    """Reddens on dropping list recursion (the `environments.prod.needs[0]` row
+    disappears)."""
     assert ec.references(tomllib.loads(_TABLE)) == [
         ("environments.prod.aws.apply.role", "PROD_APPLY_ROLE"),
         ("environments.prod.aws.apply.workloads.net-edge.role", "NET_EDGE_ROLE"),
-        ("explicit_envs[0]", "PROD_ENV"),
+        ("environments.prod.needs[0]", "FIRST_ENV"),
         ("gate.approver_team", "APPROVERS"),
     ]
 

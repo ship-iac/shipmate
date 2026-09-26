@@ -149,9 +149,9 @@ row 6 — the one row that is unforgeable at apply time.
 **What is left when row 6 is unavailable.** It is a coherent posture rather than
 a broken one:
 
-- production absent from `gate.ungated_envs` in `.github/shipmate.toml`, so no
+- production's entry in `.github/shipmate.toml` without `gated = false`, so no
   apply reaches it without an approving review on the pull request;
-- production in `explicit_envs` in `.github/shipmate.toml`, so before the merge
+- production's entry holding `explicit = true`, so before the merge
   a bare `shipmate apply` skips it and only the targeted `shipmate apply <env>`
   reaches it — the setting constrains that path only. The post-merge deploy
   applies every cell whose apply check is still pending, explicit environments
@@ -289,13 +289,13 @@ get self-service applies on a low-blast-radius tier. The two per-environment
 controls below do different jobs, and an organization can want either without
 the other:
 
-- **`gate.ungated_envs` exempts named environments from the code review
-  before apply, and from nothing else.** It is a setting in
+- **`gated = false` exempts an environment from the code review before apply,
+  and from nothing else.** It is a flag on the environment's entry in
   `.github/shipmate.toml` on the default branch. The
   ruleset still requires the review before the merge, `CHANGES_REQUESTED`
   still refuses, and the approvers-team, not-a-draft, mergeable and exact-plan
-  requirements are untouched (CONTRACT.md §Comment-ops). Environments it does
-  not name are held out of a bare `shipmate apply` and refused on a targeted
+  requirements are untouched (CONTRACT.md §Comment-ops). Environments without
+  it are held out of a bare `shipmate apply` and refused on a targeted
   one, their apply checks left pending, so the gate keeps blocking the merge
   until they are applied with a review in hand. Both engine apply paths resolve
   the setting themselves and enforce on it; engine `comment-ops.yml`'s read of it
@@ -424,17 +424,17 @@ costs, so the choice is made with the price visible:
   while every pull request targets a branch it names. Who may flip this posture
   on is a separate question from what it costs — see §7–9.
 
-Pair every environment you gate with `explicit_envs` in
-`.github/shipmate.toml`, whichever ones those are: list it there so a bare
+Pair every environment you gate with `explicit = true` on its entry in
+`.github/shipmate.toml`, whichever ones those are, so a bare
 `shipmate apply` skips it and it is reached only by the targeted
 `shipmate apply <env>`. Left off, a bare `shipmate apply` fans out into that
 environment and stalls there waiting for the reviewer nobody expected to be
-asked. Use the bare environment name — `staging`, not `staging-plan` or
-`staging-apply`. The value is matched against the environment name carried by
-the apply checks (see CONTRACT.md), and an entry carrying either suffix is a
-configuration error the engine rejects loudly.
+asked. The entry is the bare environment name — `[environments.staging]`, not
+`staging-plan` or `staging-apply`. The name is matched against the environment
+name carried by the apply checks (see CONTRACT.md), and an entry carrying either
+suffix is a configuration error the engine rejects loudly.
 
-`explicit_envs` is read from the *default branch*, so editing it is a pull
+`explicit` is read from the *default branch*, so editing it is a pull
 request under row 4 rather than something the branch being applied can change
 for itself. It is still ergonomics, not enforcement: it decides which command
 reaches an environment, never who may run it. The environment reviewer is the
@@ -442,10 +442,11 @@ enforcement.
 
 **A key holding a variable reference is governed by whoever GitHub permits to
 edit the repository's or the organization's variable it names, not by a merge.**
-`explicit_envs`, `gate.ungated_envs` and `gate.approver_team` each accept
-`{ vars = "NAME" }` like any other string, and a variable edit then changes which
-environments a bare apply skips, which apply unreviewed, or who may apply by
-comment, on the next run and with no pull request. Where this page says editing
+`gate.approver_team` accepts `{ vars = "NAME" }` like any other string, and a
+variable edit then changes who may apply by comment, on the next run and with no
+pull request. `explicit` and `gated` are booleans and refuse a reference, so
+which environments a bare apply skips and which apply unreviewed stay merged
+commits. Where this page says editing
 one of these keys is a pull request, that holds only for a value the file writes
 out ([`../CONTRACT.md`](../CONTRACT.md) §Variable references).
 
@@ -1154,7 +1155,7 @@ for exactly the exposure control 1 exists to limit.
   understood it.
 - **Branch-controlled configuration.** Stack tags come from the pull request
   branch. They shape what the engine does; they do not constrain what it is
-  allowed to do. `needs` and `explicit_envs` no longer belong on this list:
+  allowed to do. `needs` and `explicit` no longer belong on this list:
   they moved into `.github/shipmate.toml` and are read from the default branch
   with the rest of it, so a branch can neither reorder its own apply waves nor
   drop its own exclusion.

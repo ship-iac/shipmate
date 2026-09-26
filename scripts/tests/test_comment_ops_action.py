@@ -734,7 +734,7 @@ def test_authorize_step_receives_the_resolved_ungated_envs():
 #: about the outcome would be a claim this step cannot make.
 _EXEMPTION_BODY = (
     ":memo: shipmate: environment \\`$ENVIRONMENT\\` is permitted to apply "
-    "without an approving review, per \\`gate.ungated_envs\\` in "
+    "without an approving review, per \\`gated = false\\` on its entry in "
     "\\`.github/shipmate.toml\\` — see the apply result comment for what actually applied."
 )
 

@@ -203,7 +203,7 @@ def test_an_unimplemented_provider_key_refuses():
     }
     assert _refusal(table) == (
         "::error::environment dev-eu: azure is not a key this engine implements. "
-        "An environment holds region, tf_vars, aws, shared, needs."
+        "An environment holds region, tf_vars, aws, shared, needs, explicit, gated."
     )
 
 
@@ -215,7 +215,7 @@ def test_a_misspelled_environment_key_refuses():
     table = {"layout": "folder", "environments": {"dev-eu": {"regoin": "eu-west-1"}}}
     assert _refusal(table) == (
         "::error::environment dev-eu: regoin is not a key this engine implements. "
-        "An environment holds region, tf_vars, aws, shared, needs."
+        "An environment holds region, tf_vars, aws, shared, needs, explicit, gated."
     )
 
 
@@ -296,23 +296,55 @@ _PLAN_AND_APPLY = {
 }
 
 
+_FLAGS = ("shared", "explicit", "gated")
+
+
+@pytest.mark.parametrize("key", _FLAGS)
 @pytest.mark.parametrize("value", [True, False])
-def test_a_boolean_shared_key_validates(value):
-    """Mutation: drop `shared` from the implemented environment keys."""
-    table = {"layout": "folder", "environments": {"dev-eu": {"shared": value}}}
+def test_a_boolean_flag_validates(key, value):
+    """Mutation: drop any of the three from the implemented environment keys."""
+    table = {"layout": "folder", "environments": {"dev-eu": {key: value}}}
     assert env_config.validate_structure(table) is table
 
 
-@pytest.mark.parametrize(("value", "found"), [("true", "str"), (1, "int"), ("yes", "str")])
-def test_a_shared_key_that_is_not_a_boolean_refuses(value, found):
-    """A quoted `"true"` reads as shared to a person and would resolve as unshared.
+_NOT_BOOLEAN = [
+    ("shared", "true", "str"),
+    ("shared", 1, "int"),
+    ("shared", "yes", "str"),
+    ("explicit", "true", "str"),
+    ("explicit", {"vars": "X"}, "dict"),
+    ("gated", "false", "str"),
+    ("gated", 0, "int"),
+]
 
-    Mutation: replace the boolean check with `bool(value)` -- all three values then validate.
+
+@pytest.mark.parametrize(("key", "value", "found"), _NOT_BOOLEAN, ids=range(len(_NOT_BOOLEAN)))
+def test_a_flag_that_is_not_a_boolean_refuses(key, value, found):
+    """A quoted `"true"` reads as set to a person and resolves as unset. For `explicit` that
+    is the fail-open case: the environment lands on a bare `shipmate apply`.
+
+    Mutations: replace the boolean check with `bool(value)` -- every case validates; or drop
+    one key from the checked flags -- that key's cases validate.
     """
-    table = {"layout": "folder", "environments": {"dev-eu": {"shared": value}}}
+    table = {"layout": "folder", "environments": {"dev-eu": {key: value}}}
     assert _refusal(table) == (
-        f"::error::environment dev-eu: shared must be a boolean, got {found}. Write "
-        "shared = true or shared = false, unquoted."
+        f"::error::environments.dev-eu.{key} must be a boolean, got {found}. Write "
+        f"{key} = true or {key} = false, unquoted."
+    )
+
+
+def test_a_referenced_flag_refuses_as_the_string_it_resolves_to():
+    """A reference resolves before validation, so `explicit = { vars = "X" }` reaches the
+    boolean check as the variable's string value, and that is the message a run prints.
+
+    Mutation: drop `explicit` from the checked flags -- this validates.
+    """
+    text = 'layout = "folder"\n[environments.prod]\nexplicit = { vars = "HOLD" }\n'
+    with pytest.raises(SystemExit) as excinfo:
+        env_config.validate_structure(env_config.parse_table(text, {"HOLD": "true"}))
+    assert str(excinfo.value) == (
+        "::error::environments.prod.explicit must be a boolean, got str. Write "
+        "explicit = true or explicit = false, unquoted."
     )
 
 
@@ -588,31 +620,35 @@ def test_a_misspelled_top_level_key_refuses():
     """
     assert _refusal({"layout": "folder", "enviroments": {}}) == (
         "::error::enviroments is not a setting this engine implements. "
-        ".github/shipmate.toml holds schema_version, layout, environments, gate, explicit_envs."
+        ".github/shipmate.toml holds schema_version, layout, environments, gate."
     )
 
 
 def test_every_allowed_top_level_key_is_accepted():
-    """The other half of the strict-key rule: the five names are the whole allowed set, so a
-    table using all five must validate. Compared against a hand-written table, never against
+    """The other half of the strict-key rule: the four names are the whole allowed set, so a
+    table using all four must validate. Compared against a hand-written table, never against
     the module's own constant.
 
-    This is also where the `explicit_envs` half of "nothing cross-checks a control against
-    `environments`" is pinned: `explicit_envs` names `prod` and `environments` is empty, a
-    shape the canonical-file guard cannot catch because it declares every environment it
-    excludes.
-
-    Mutations: remove a name from the allowed set -- one of these five then refuses; or make
-    `validate_structure` require an `environments` entry for every `explicit_envs` name.
+    Mutation: remove a name from the allowed set -- one of these four then refuses.
     """
     table = {
         "layout": "folder",
         "environments": {},
-        "explicit_envs": ["prod"],
-        "gate": {"approver_team": "deployers", "ungated_envs": ["dev-eu"]},
+        "gate": {"approver_team": "deployers"},
         "schema_version": 1,
     }
     assert env_config.validate(table, ()) == table
+
+
+def test_the_old_explicit_envs_list_refuses_as_unknown():
+    """No alias: the old top-level list refuses through the strict top-level loop.
+
+    Mutation: keep `"explicit_envs"` in `_TOP_KEYS` -- the file then validates.
+    """
+    assert _refusal({"layout": "folder", "explicit_envs": ["prod"]}) == (
+        "::error::explicit_envs is not a setting this engine implements. "
+        ".github/shipmate.toml holds schema_version, layout, environments, gate."
+    )
 
 
 def _needs(value):
@@ -643,51 +679,48 @@ _ORDERING = [
         "write 'dev-eu' instead.",
     ),
     (
-        {"layout": "folder", "explicit_envs": "prod"},
-        "::error::explicit_envs must be a list of env-name strings, got str ('prod'); "
-        "did you mean ['prod']?",
+        _needs(["dev-eu-apply"]),
+        "::error::environments.prod.needs entry 'dev-eu-apply' carries the environment "
+        "suffix '-apply'; environments.prod.needs is matched against the bare logical env "
+        "name — write 'dev-eu' instead.",
     ),
     (
-        {"layout": "folder", "explicit_envs": ["prod", 123]},
-        "::error::explicit_envs elements must all be env-name strings; "
-        "got non-string element(s) [123]",
+        _needs(["dev eu"]),
+        "::error::environments.prod.needs entry 'dev eu' is not an environment name; entries "
+        "are bare logical env names (lowercase letters, digits, '-' and '_'), with no quotes, "
+        "spaces or path separators.",
     ),
     (
-        {"layout": "folder", "explicit_envs": ["prod-apply"]},
-        "::error::explicit_envs entry 'prod-apply' carries the environment suffix "
-        "'-apply'; explicit_envs is matched against the bare logical env name — write "
-        "'prod' instead.",
-    ),
-    (
-        {"layout": "folder", "explicit_envs": ["prod-plan"]},
-        "::error::explicit_envs entry 'prod-plan' carries the environment suffix "
-        "'-plan'; explicit_envs is matched against the bare logical env name — write "
-        "'prod' instead.",
+        _needs(['"dev-eu"']),
+        "::error::environments.prod.needs entry '\"dev-eu\"' is not an environment name; "
+        "entries are bare logical env names (lowercase letters, digits, '-' and '_'), with no "
+        "quotes, spaces or path separators.",
     ),
 ]
 
 
 @pytest.mark.parametrize(("table", "message"), _ORDERING, ids=range(len(_ORDERING)))
-def test_the_single_entry_point_validates_ordering_and_exclusions(table, message):
-    """`needs` and `explicit_envs` are checked by the same entry point as `layout` and
-    `environments`, so a "valid configuration" verdict cannot leave an ordering or exclusion
-    error to surface when an apply finally reads the field.
+def test_the_single_entry_point_validates_ordering(table, message):
+    """`needs` is checked by the same entry point as `layout` and `environments`, so a
+    "valid configuration" verdict cannot leave an ordering error to surface when an apply
+    finally reads the field.
 
     Both environment suffixes are cases here, not one: the refusal exists because every
-    documented environment name carries `-plan` or `-apply`, and a suffixed entry matches no
-    apply check, excludes nothing and lets prod apply on a bare `shipmate apply`.
+    documented environment name carries `-plan` or `-apply`, and a suffixed predecessor
+    matches no environment and orders nothing. A pasted quote is its own case: TOML quotes
+    the string itself, so a pasted `"dev-eu"` arrives with its quotes still on.
 
-    Mutations: delete the `validate_env_name_list` call from `validate_env_order` -- the four
-    `needs` cases validate; delete the `validate_explicit_envs` call from
-    `validate_structure` -- the `explicit_envs` cases validate; or drop either entry from the
-    suffix tuple in `_check_env_name` -- that suffix's case validates.
+    Mutations: delete the `validate_env_name_list` call from `validate_env_order` -- every
+    case validates; drop either entry from the suffix tuple in `_check_env_name` -- that
+    suffix's case validates; or widen `_ENV_ENTRY` to `.+` -- the space, quote and
+    uppercase cases validate.
     """
     assert _refusal(table) == message
 
 
 def test_a_tier_word_that_is_not_the_trailing_suffix_is_accepted():
     """The other half of the suffix rule: only a trailing `-plan`/`-apply` is the tier
-    suffix. A refusal here would strand every exclusion a repository declared under a name
+    suffix. A refusal here would strand every ordering a repository declared under a name
     that merely carries one of the two words.
 
     `eu-plan-1` is the case that discriminates, and it is the only one: the suffixes are
@@ -697,7 +730,7 @@ def test_a_tier_word_that_is_not_the_trailing_suffix_is_accepted():
     Mutation: `e.endswith(suffix)` -> `suffix in e` in `_check_env_name` -- `eu-plan-1`
     then refuses.
     """
-    table = {"layout": "folder", "explicit_envs": ["prod", "plan-eu", "apply-svc", "eu-plan-1"]}
+    table = _needs(["dev", "plan-eu", "apply-svc", "eu-plan-1"])
     assert env_config.validate(table, ()) == table
 
 
@@ -776,27 +809,27 @@ def test_the_old_env_order_table_refuses_as_unknown():
     """
     assert _refusal({"layout": "folder", "env_order": {"prod": ["dev"]}}) == (
         "::error::env_order is not a setting this engine implements. "
-        ".github/shipmate.toml holds schema_version, layout, environments, gate, explicit_envs."
+        ".github/shipmate.toml holds schema_version, layout, environments, gate."
     )
 
 
 _ENTRY_NAMES = [
     (
         "Prod",
-        "::error::environments entry 'Prod' is not an environment name; entries are bare "
-        "logical env names (lowercase letters, digits, '-' and '_'), with no quotes, spaces "
-        "or path separators.",
+        "::error::environments.Prod is not an environment name; entries are bare logical env "
+        "names (lowercase letters, digits, '-' and '_'), with no quotes, spaces or path "
+        "separators.",
     ),
     (
         "dev eu",
-        "::error::environments entry 'dev eu' is not an environment name; entries are bare "
-        "logical env names (lowercase letters, digits, '-' and '_'), with no quotes, spaces "
-        "or path separators.",
+        "::error::environments.dev eu is not an environment name; entries are bare logical "
+        "env names (lowercase letters, digits, '-' and '_'), with no quotes, spaces or path "
+        "separators.",
     ),
     (
         "dev-plan",
-        "::error::environments entry 'dev-plan' carries the environment suffix '-plan'; "
-        "environments is matched against the bare logical env name — write 'dev' instead.",
+        "::error::environments.dev-plan carries the environment suffix '-plan'; an entry "
+        "name is matched against the bare logical env name — write 'dev' instead.",
     ),
 ]
 
@@ -862,17 +895,14 @@ def test_the_old_version_key_refuses_as_unknown():
     """
     assert _refusal({"layout": "folder", "version": 1}) == (
         "::error::version is not a setting this engine implements. "
-        ".github/shipmate.toml holds schema_version, layout, environments, gate, explicit_envs."
+        ".github/shipmate.toml holds schema_version, layout, environments, gate."
     )
 
 
-def test_a_gate_table_holding_both_keys_is_accepted():
+def test_a_gate_table_holding_its_key_is_accepted():
     """Mutation: remove `"gate"` from `_TOP_KEYS` -- the table a repository declares ahead of
     the release that reads it is refused as an unknown setting."""
-    table = {
-        "layout": "folder",
-        "gate": {"approver_team": "deployers", "ungated_envs": ["dev-eu", "dev_us"]},
-    }
+    table = {"layout": "folder", "gate": {"approver_team": "deployers"}}
     assert env_config.validate(table, ()) == table
 
 
@@ -891,7 +921,18 @@ def test_an_unknown_key_in_the_gate_table_refuses_by_name():
     """
     assert _refusal({"layout": "folder", "gate": {"approvers_team": "deployers"}}) == (
         "::error::gate.approvers_team is not a key this engine implements. "
-        "The gate table holds approver_team, ungated_envs."
+        "The gate table holds approver_team."
+    )
+
+
+def test_the_old_ungated_envs_list_refuses_as_an_unknown_gate_key():
+    """No alias: the exemption now sits on each entry as `gated = false`.
+
+    Mutation: keep `"ungated_envs"` in `_GATE_KEYS` -- the file then validates.
+    """
+    assert _refusal({"layout": "folder", "gate": {"ungated_envs": ["dev"]}}) == (
+        "::error::gate.ungated_envs is not a key this engine implements. "
+        "The gate table holds approver_team."
     )
 
 
@@ -917,10 +958,10 @@ _NOT_A_TEAM_SLUG = (
 
 @pytest.mark.parametrize("team", ["Platform Team", "@ship-iac/platform", "platform ", '"platform"'])
 def test_an_approver_team_that_is_not_a_slug_refuses(team):
-    """The charset rule `gate.ungated_envs` already has, on the setting beside it. A display
-    name, an `@org/team` reference or a padded slug 404s in the membership lookup, so every
-    commenter is refused under a message naming the team as though it had resolved -- the
-    same failure a missing team produces, with no diagnostic distinguishing them.
+    """A charset rule, as environment names have one. A display name, an `@org/team`
+    reference or a padded slug 404s in the membership lookup, so every commenter is refused
+    under a message naming the team as though it had resolved -- the same failure a missing
+    team produces, with no diagnostic distinguishing them.
 
     Mutation: drop the `_TEAM_SLUG.fullmatch` check, or widen the pattern to `.*`.
     """
@@ -937,90 +978,6 @@ def test_a_declared_empty_approver_team_still_validates():
     """
     table = {"layout": "folder", "gate": {"approver_team": ""}}
     assert env_config.validate_structure(table) == table
-
-
-_NOT_AN_ENV_NAME = (
-    "entry {entry!r} is not an environment name; entries are bare logical env names "
-    "(lowercase letters, digits, '-' and '_'), with no quotes, spaces or path separators."
-)
-
-
-def test_an_ungated_env_with_an_internal_space_refuses():
-    """An entry no environment name can match exempts nothing, and leaves an operator
-    believing an environment is ungated when it is not.
-
-    Mutation: drop the `_ENV_ENTRY` full match from `validate_env_name_list`.
-    """
-    assert _refusal({"layout": "folder", "gate": {"ungated_envs": ["dev eu"]}}) == (
-        "::error::gate.ungated_envs " + _NOT_AN_ENV_NAME.format(entry="dev eu")
-    )
-
-
-def test_an_ungated_env_carrying_a_pasted_quote_refuses():
-    """TOML quotes the string itself, so a pasted `"dev-eu"` reaches the engine with its
-    quotes still on and matches no environment.
-
-    Mutation: as above -- the charset is what rejects the quote characters.
-    """
-    assert _refusal({"layout": "folder", "gate": {"ungated_envs": ['"dev-eu"']}}) == (
-        "::error::gate.ungated_envs " + _NOT_AN_ENV_NAME.format(entry='"dev-eu"')
-    )
-
-
-@pytest.mark.parametrize("key", ["gate.ungated_envs", "explicit_envs"])
-def test_an_uppercase_entry_refuses(key):
-    """Terramate refuses an uppercase letter in a tag, and env names come from `env/<name>`
-    tags, so an entry carrying an uppercase letter can never name an environment. Accepting
-    it is fail-open twice over: `explicit_envs = ["Prod"]` excludes nothing, so a bare
-    `shipmate apply` applies production while the operator reads the file as holding it,
-    and `gate.ungated_envs` only appears to work because it casefolds a misspelling.
-
-    Mutation: restore `A-Za-z` in `_ENV_ENTRY`.
-    """
-    table = (
-        {"layout": "folder", "gate": {"ungated_envs": ["Prod"]}}
-        if key == "gate.ungated_envs"
-        else {"layout": "folder", "explicit_envs": ["Prod"]}
-    )
-    assert _refusal(table) == f"::error::{key} " + _NOT_AN_ENV_NAME.format(entry="Prod")
-
-
-def test_an_ungated_env_carrying_an_environment_suffix_refuses():
-    """The list is matched against the bare logical env name, so a suffixed entry exempts
-    nothing. It passes the charset, which is why the suffix is its own check.
-
-    Mutation: drop the `-plan`/`-apply` loop from `validate_env_name_list`.
-    """
-    assert _refusal({"layout": "folder", "gate": {"ungated_envs": ["dev-eu-apply"]}}) == (
-        "::error::gate.ungated_envs entry 'dev-eu-apply' carries the environment suffix "
-        "'-apply'; gate.ungated_envs is matched against the bare logical env name — write "
-        "'dev-eu' instead."
-    )
-
-
-def test_a_bare_string_ungated_envs_refuses():
-    """A bare string is iterated character by character, so `"dev-eu"` would exempt six
-    one-character environments and the real one not at all.
-
-    Mutation: drop the `isinstance(envs, list)` check from `validate_env_name_list`.
-    """
-    assert _refusal({"layout": "folder", "gate": {"ungated_envs": "dev-eu"}}) == (
-        "::error::gate.ungated_envs must be a list of env-name strings, got str "
-        "('dev-eu'); did you mean ['dev-eu']?"
-    )
-
-
-def test_an_explicit_env_with_an_internal_space_now_refuses():
-    """`explicit_envs` and `gate.ungated_envs` share one env-name rule, and it is the
-    stricter of the two that existed: an entry with an internal space excludes nothing,
-    and the weaker rule accepted it.
-
-    Mutation: point `validate_explicit_envs` back at its own list/suffix body, with no
-    charset check.
-    """
-    assert _refusal({"layout": "folder", "explicit_envs": ["dev eu"]}) == (
-        "::error::explicit_envs " + _NOT_AN_ENV_NAME.format(entry="dev eu")
-    )
 
 
 # --- 12: the tf_vars layout, the entry's tf_vars table, the vars reference -------------
@@ -1054,7 +1011,7 @@ def test_the_old_entry_vars_table_refuses_as_an_unknown_key():
     table = {"layout": "folder", "environments": {"dev-eu": {"vars": {"TF_VAR_x": "y"}}}}
     assert _refusal(table) == (
         "::error::environment dev-eu: vars is not a key this engine implements. "
-        "An environment holds region, tf_vars, aws, shared, needs."
+        "An environment holds region, tf_vars, aws, shared, needs, explicit, gated."
     )
 
 

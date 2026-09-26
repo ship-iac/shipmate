@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Resolve the gate settings the comment-ops authorization path runs on.
 
-`gate.approver_team` and `gate.ungated_envs` from `.github/shipmate.toml` on the default
-branch, and from nowhere else. The comment-ops job checks out no consumer content, so the
-file is read through the contents API.
+`gate.approver_team` and the environments whose entry holds `gated = false`, from
+`.github/shipmate.toml` on the default branch, and from nowhere else. The comment-ops job
+checks out no consumer content, so the file is read through the contents API.
 
 This runs BEFORE `Gather authorization inputs` because that step is where team membership
 is established -- `authorize` receives `IS_MEMBER` and uses the team only to label a
@@ -11,8 +11,8 @@ refusal. A team resolved after `gather` would change a message and leave the mem
 lookup on the old value.
 
 `validate_structure` is not optional: the resolvers document a validated table and do not
-enforce it, and an unvalidated `ungated_envs` that is a bare string iterates into a set of
-single letters, exempting nothing while reading as though it did.
+enforce it, and an unvalidated `gated = "false"` resolves as gated, exempting nothing while
+reading as though it did.
 """
 
 import os
@@ -24,7 +24,7 @@ ec = _load("env-config")
 
 def main():
     table = ec.validate_structure(ec.read_table_at_default_branch())
-    ungated = ec.gate_ungated_envs(table)
+    ungated = ec.ungated_envs(table)
     team = ec.gate_approver_team(table)
     with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
         # Sorted, so two runs over one file cannot produce two different output strings.

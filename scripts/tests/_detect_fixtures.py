@@ -70,7 +70,7 @@ MINIMAL_TABLE = {"layout": "folder"}
 
 def stub_read_table(monkeypatch, modules, base=None, order=None, explicit=(), reads=None):
     """Stub `read_table` on every `env-config` instance `modules` can reach, carrying `order`
-    as each entry's `needs` and `explicit` as the table field it is.
+    as each entry's `needs` and `explicit` as each named entry's `explicit = true`.
 
     Shared by the two ordering detects so neither can drift back to stubbing `env-order`'s
     readers: a double there answers whatever the test asked for even when the caller has
@@ -81,15 +81,15 @@ def stub_read_table(monkeypatch, modules, base=None, order=None, explicit=(), re
     other.
     """
     # Annotated: the table's values are mixed by design -- a string layout, a mapping of
-    # entries, a list of exclusions -- and `MINIMAL_TABLE` alone infers `dict[str, str]`.
+    # entries -- and `MINIMAL_TABLE` alone infers `dict[str, str]`.
     cfg: dict[str, object] = dict(base or MINIMAL_TABLE)
-    if order is not None:
+    if order is not None or explicit:
         entries = {env: dict(entry) for env, entry in dict(cfg.get("environments", {})).items()}
-        for env, preds in order.items():
+        for env, preds in (order or {}).items():
             entries.setdefault(env, {})["needs"] = list(preds)
+        for env in explicit:
+            entries.setdefault(env, {})["explicit"] = True
         cfg["environments"] = entries
-    if explicit:
-        cfg["explicit_envs"] = list(explicit)
 
     def read_table(run=None):
         if reads is not None:
