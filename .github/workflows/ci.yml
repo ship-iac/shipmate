@@ -16,7 +16,7 @@ jobs:
         # Full history: scripts/tests/test_repin.py is fixtured on a real historical commit,
         # which a shallow clone omits -- those tests then skip loudly instead of running.
         with: { fetch-depth: 0 }
-      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
 
       # actionlint lints .github/workflows/ and shellchecks their `run:` blocks. It does not
       # cover actions/*/action.yml; GitHub itself parses those in manifest-load.yml on push to
