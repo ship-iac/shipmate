@@ -323,8 +323,8 @@ def test_a_flag_that_is_not_a_boolean_refuses(key, value, found):
     """A quoted `"true"` reads as set to a person and resolves as unset. For `explicit` that
     is the fail-open case: the environment lands on a bare `shipmate apply`.
 
-    Mutations: replace the boolean check with `bool(value)` -- every case validates; or drop
-    one key from the checked flags -- that key's cases validate.
+    Mutations: drop the `isinstance` check from `_check_flags` -- every case validates; or
+    drop one key from the checked flags -- that key's cases validate.
     """
     table = {"layout": "folder", "environments": {"dev-eu": {key: value}}}
     assert _refusal(table) == (
