@@ -11,6 +11,25 @@ section below names the SHA the release tags.
 The version line stays `v0.x` while action inputs, check names, and the comment
 grammar are declared unstable in `README.md`.
 
+## [Unreleased]
+
+### Changed
+
+- **A `run.env` override is refused in the cell, not at detect.** `scripts/env-inject` reads
+  the row's `tf_vars` back through `terramate run` for the cell's own stack and refuses before
+  `tofu init` when one comes back changed or unset. A repository with an overriding `run.env`
+  now fails once per affected cell. The check covers only what the row holds, so `run.env` may
+  now set `TF_VAR_env` under `layout = "folder"` and `TF_WORKSPACE` under `dry` and `folder`,
+  which detect refused. See `CONTRACT.md` §Env model.
+
+### Fixed
+
+- **A `run.env` that rewrites a table-resolved variable no longer passes.** Detect probed one
+  stack with a fixed set of three names, so it missed a rewrite conditional on the stack, a
+  `terramate.config.run.env` block below the root, and a name from an environment's `vars`. A
+  `run.env` reading a variable only the cell has made `terramate run` fail at detect, which
+  warned and continued. The dispatched `shipmate apply` path never reached the probe.
+
 ## [0.34.0] — 2026-09-25
 
 Tags `3c9c71e`.
