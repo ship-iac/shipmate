@@ -13,6 +13,8 @@ grammar are declared unstable in `README.md`.
 
 ## [0.35.0] — 2026-09-26
 
+Tags `6c6aed1`.
+
 ### Changed
 
 - **A `run.env` override is refused in the cell, not at detect.** `scripts/env-inject` reads
