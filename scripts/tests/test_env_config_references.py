@@ -82,7 +82,8 @@ def test_a_mapping_that_merely_contains_var_is_data():
 
 def test_a_one_key_var_mapping_holding_no_string_is_data():
     """The existing validation refuses it later. Reddens on treating any one-key `var`
-    mapping as a reference: the lookup of a non-string name refuses here instead."""
+    mapping as a reference: the lookup then matches the integer against the name charset
+    and raises `TypeError`."""
     text = "[environments.prod]\nregion = { var = 3 }\n"
     assert ec.parse_table(text, {}) == {"environments": {"prod": {"region": {"var": 3}}}}
 
@@ -93,34 +94,47 @@ def _refusal(text, variables):
     return str(exc.value)
 
 
+_UNSET_REFUSAL = (
+    "::error::.github/shipmate.toml environments.prod.aws.apply.role references GitHub "
+    "variable PROD_APPLY_ROLE, which is not set. A reference reads repository and "
+    "organization variables; the variables of a cell's <env>-plan, <env>-apply or shared "
+    "<env> Environment are never read."
+)
+
+
 def test_an_unset_variable_refuses_naming_the_path_and_name():
     """Reddens on swallowing the `KeyError` and substituting `""`."""
-    assert _refusal(_ROLE_REF, {"OTHER": "secret-looking-value"}) == (
-        "::error::.github/shipmate.toml environments.prod.aws.apply.role references GitHub "
-        "variable PROD_APPLY_ROLE, which is not set. A reference reads repository and "
-        "organization variables; the variables of a cell's <env>-plan, <env>-apply or shared "
-        "<env> Environment are never read."
-    )
+    assert _refusal(_ROLE_REF, {"OTHER": "secret-looking-value"}) == _UNSET_REFUSAL
 
 
 def test_an_empty_variable_refuses():
     """Reddens on dropping the empty check."""
-    message = _refusal(_ROLE_REF, {"PROD_APPLY_ROLE": ""})
-    assert message.startswith("::error::")
-    assert "environments.prod.aws.apply.role" in message
-    assert "PROD_APPLY_ROLE" in message
-    assert "empty" in message
+    assert _refusal(_ROLE_REF, {"PROD_APPLY_ROLE": ""}) == (
+        "::error::.github/shipmate.toml environments.prod.aws.apply.role references GitHub "
+        "variable PROD_APPLY_ROLE, which is set to an empty value."
+    )
 
 
 def test_a_lowercase_name_refuses_and_names_the_uppercase_spelling():
     """Reddens on uppercasing the name before the lookup, which resolves it silently."""
     text = '[environments.prod]\naws.apply.role = { var = "prod_apply_role" }\n'
-    message = _refusal(text, {"PROD_APPLY_ROLE": "arn:aws:iam::1:role/apply"})
-    assert message.startswith("::error::")
-    assert "environments.prod.aws.apply.role" in message
-    assert '"prod_apply_role"' in message
-    assert '"PROD_APPLY_ROLE"' in message
-    assert "arn:aws:iam::1:role/apply" not in message
+    assert _refusal(text, {"PROD_APPLY_ROLE": "arn:aws:iam::1:role/apply"}) == (
+        "::error::.github/shipmate.toml environments.prod.aws.apply.role references GitHub "
+        'variable "prod_apply_role"; GitHub variable names are uppercase. Write '
+        '{ var = "PROD_APPLY_ROLE" }.'
+    )
+
+
+@pytest.mark.parametrize("name", ["", "A-B", "a-b", "1ROLE"])
+def test_a_name_outside_the_charset_refuses_naming_the_rule(name):
+    """`a-b` is lowercase too, but uppercasing it cannot help. Reddens on dropping the charset
+    check: `""`, `A-B` and `1ROLE` then resolve to the value set for them and `a-b` refuses as
+    lowercase, suggesting `A-B`."""
+    text = f'[environments.prod]\naws.apply.role = {{ var = "{name}" }}\n'
+    assert _refusal(text, {name: "v", name.upper(): "v"}) == (
+        "::error::.github/shipmate.toml environments.prod.aws.apply.role references GitHub "
+        f'variable "{name}", which is not a GitHub variable name ([A-Z_][A-Z0-9_]*).'
+    )
 
 
 def test_no_reference_never_reads_the_environment(monkeypatch):
@@ -134,24 +148,26 @@ def test_a_reference_without_wiring_refuses_naming_the_wiring(monkeypatch):
     """Reddens on treating an absent `SHIPMATE_GITHUB_VARS` as `{}`, which blames the
     consumer's variable for the engine's missing wiring."""
     monkeypatch.delenv("SHIPMATE_GITHUB_VARS", raising=False)
-    with pytest.raises(SystemExit) as exc:
-        ec.parse_table(_ROLE_REF)
-    message = str(exc.value)
-    assert message.startswith("::error::")
-    assert "environments.prod.aws.apply.role" in message
-    assert "received no GitHub variables" in message
-    assert "not set" not in message
+    assert _refusal(_ROLE_REF, None) == (
+        "::error::.github/shipmate.toml environments.prod.aws.apply.role references GitHub "
+        "variable PROD_APPLY_ROLE, but this step received no GitHub variables; the engine did "
+        "not wire them."
+    )
 
 
 def test_a_null_enumeration_refuses_as_unset(monkeypatch):
     """`toJSON(vars)` renders `null` for a repository reaching no variable. Reddens on
     parsing `null` as malformed, which reports an engine bug instead of the unset name."""
     monkeypatch.setenv("SHIPMATE_GITHUB_VARS", "null")
-    with pytest.raises(SystemExit) as exc:
-        ec.parse_table(_ROLE_REF)
-    message = str(exc.value)
-    assert "PROD_APPLY_ROLE" in message
-    assert "not set" in message
+    assert _refusal(_ROLE_REF, None) == _UNSET_REFUSAL
+
+
+def test_a_root_level_var_key_is_a_setting_not_a_reference():
+    """Reddens on `references` walking from the root table, which reports it under an empty
+    path; with `parse_table` also replacing from the root, the whole file resolves to the
+    variable's value."""
+    assert ec.parse_table('var = "X"\n', {"X": "v"}) == {"var": "X"}
+    assert ec.references({"var": "X"}) == []
 
 
 def test_references_lists_every_reference_sorted_by_path():

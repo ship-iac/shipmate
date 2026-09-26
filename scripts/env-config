@@ -105,15 +105,23 @@ def _walk(value, path):
     yield path, value
     if isinstance(value, dict) and not _is_reference(value):
         for key, child in value.items():
-            yield from _walk(child, f"{path}.{key}" if path else key)
+            yield from _walk(child, f"{path}.{key}")
     elif isinstance(value, list):
         for i, child in enumerate(value):
             yield from _walk(child, f"{path}[{i}]")
 
 
 def references(parsed):
-    """`(dotted key path, NAME)` for every reference in a raw `load_toml` result, by path."""
-    return sorted((path, node["var"]) for path, node in _walk(parsed, "") if _is_reference(node))
+    """`(dotted key path, NAME)` for every reference in a raw `load_toml` result, by path.
+
+    The root table is never a reference: a file holding only `var = "X"` is a setting.
+    """
+    return sorted(
+        (path, node["var"])
+        for key, child in parsed.items()
+        for path, node in _walk(child, key)
+        if _is_reference(node)
+    )
 
 
 def _environ_variables(path, name):
@@ -133,9 +141,18 @@ def _environ_variables(path, name):
     return _load("env-inject").parse_enumeration(raw, "SHIPMATE_GITHUB_VARS")
 
 
+#: GitHub's variable-name charset in either case; a lowercase name refuses separately, naming
+#: its uppercase spelling.
+_VARIABLE_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+
+
 def _lookup(path, name, variables):
     """The value of `name`. No refusal quotes a value."""
     where = f"::error::{CONFIG_PATH} {path} references GitHub variable"
+    if not _VARIABLE_NAME.fullmatch(name):
+        raise SystemExit(
+            f'{where} "{name}", which is not a GitHub variable name ([A-Z_][A-Z0-9_]*).'
+        )
     if name != name.upper():
         raise SystemExit(
             f'{where} "{name}"; GitHub variable names are uppercase. Write '
@@ -156,7 +173,7 @@ def _replace(value, path, variables):
     if _is_reference(value):
         return _lookup(path, value["var"], variables)
     if isinstance(value, dict):
-        return {k: _replace(v, f"{path}.{k}" if path else k, variables) for k, v in value.items()}
+        return {k: _replace(v, f"{path}.{k}", variables) for k, v in value.items()}
     if isinstance(value, list):
         return [_replace(v, f"{path}[{i}]", variables) for i, v in enumerate(value)]
     return value
@@ -173,7 +190,7 @@ def parse_table(text, variables=None):
 
     `variables` maps uppercase names to values. `None` reads `SHIPMATE_GITHUB_VARS`, and
     only when the file holds a reference: a file without one never touches it. An unset,
-    empty or lowercase name refuses, naming the key path and the name.
+    empty, lowercase or malformed name refuses, naming the key path and the name.
     """
     parsed = load_toml(text)
     refs = references(parsed)
@@ -181,7 +198,7 @@ def parse_table(text, variables=None):
         return parsed
     if variables is None:
         variables = _environ_variables(*refs[0])
-    return _replace(parsed, "", variables)
+    return {key: _replace(value, key, variables) for key, value in parsed.items()}
 
 
 def read_table(run=None):
