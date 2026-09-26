@@ -8,8 +8,9 @@
   block against a hand-written constant, so a renamed or dropped binding cannot hide behind a
   present input. `build-matrix`'s block is pinned by
   `test_build_matrix.py::test_build_matrix_action_hands_the_script_the_names_it_reads`.
-- Every detect action declares `github-vars` and every detect call site passes it
-  `toJSON(vars)`, so `env-config` can resolve a `{ var = "NAME" }` reference in the table. The
+- Every detect action, `comment-ops` and `summary` declares `github-vars`, and every detect call
+  site passes it `toJSON(vars)`, so `env-config` can resolve a `{ var = "NAME" }` reference in
+  the table. The
   `with:` of `plan.yml`, `drift.yml` and `unlock.yml`'s detect steps is pinned whole beside the
   rest of those workflows; the other three are pinned here.
 - The set of workflow steps carrying `toJSON(vars)` is exactly the detect and cell steps. The
@@ -48,7 +49,16 @@ _SCRIPT_ENV = {
     },
 }
 
-_DETECT_ACTIONS = ("build-matrix", "apply-detect", "apply-all-detect", "deploy-detect")
+#: Every non-cell action that reads the table. The cell actions are pinned by
+#: `test_env_inject_wiring_guard.py::test_each_cell_action_declares_both_consumer_channels`.
+_TABLE_READERS = (
+    "build-matrix",
+    "apply-detect",
+    "apply-all-detect",
+    "deploy-detect",
+    "comment-ops",
+    "summary",
+)
 
 #: The whole `with:` of the detect steps no other guard pins whole, by workflow.
 _DETECT_WITH = {
@@ -128,12 +138,14 @@ def test_every_apply_side_detect_action_hands_its_script_exactly_these_names(act
     assert steps[0]["env"] == _SCRIPT_ENV[action]
 
 
-@pytest.mark.parametrize("action", _DETECT_ACTIONS)
-def test_every_detect_action_declares_the_variables_input(action):
+@pytest.mark.parametrize("action", _TABLE_READERS)
+def test_every_table_reader_declares_the_variables_input(action):
     """An undeclared `with:` key on a composite action is dropped with a warning, so the
-    input would arrive empty. Description aside, the whole entry.
+    input would arrive empty and every reference would refuse as unset. Description aside,
+    the whole entry.
 
-    Mutation: delete the `github-vars:` input block from `apply-all-detect`.
+    Mutation: delete the `github-vars:` input block from `apply-all-detect`, `comment-ops` or
+    `summary`.
     """
     doc = yaml.safe_load((ACTIONS / action / "action.yml").read_text(encoding="utf-8"))
     declared = dict(doc["inputs"].get("github-vars") or {})
