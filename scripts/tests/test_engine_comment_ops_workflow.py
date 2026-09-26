@@ -103,7 +103,9 @@ def test_the_authz_step_passes_this_whole_with_block():
     `*[bot]`, and shipmate's own help output re-triggers the command grammar; rewire it to a
     constant privileged login, and every commenter's `shipmate apply` passes the membership
     check; add an `approvers-team` or `ungated-envs` back, and the gate settings acquire a
-    second source that a repository variable can set without a pull request.
+    second source that a repository variable can set without a pull request. `github-vars` is
+    not that: it resolves only the `{ var = "NAME" }` references the file itself names, so the
+    file still chooses; delete it, and a file holding a reference refuses every apply and unlock.
     """
     assert _step("actions/comment-ops")["with"] == {
         "app-id": "${{ vars.SHIPMATE_APP_ID }}",
@@ -113,6 +115,7 @@ def test_the_authz_step_passes_this_whole_with_block():
         "comment-id": "${{ github.event.comment.id }}",
         "pr-number": "${{ github.event.issue.number }}",
         "github-token": "${{ github.token }}",
+        "github-vars": "${{ toJSON(vars) }}",
     }
 
 

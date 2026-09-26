@@ -840,6 +840,24 @@ def test_both_verb_steps_bind_shipmate_verb_to_the_parsed_route():
     }
 
 
+def test_exactly_the_two_table_readers_receive_the_callers_variables():
+    """`gate-config` and `doctor`'s report read `.github/shipmate.toml` through `parse_table`,
+    which refuses a file holding a variable reference when `SHIPMATE_GITHUB_VARS` is absent.
+    Selected over every step, so a third holder fails too.
+
+    Mutation: drop `SHIPMATE_GITHUB_VARS` from `Resolve gate configuration`'s `env:`.
+    """
+    bound = {
+        s["name"]: s["env"]["SHIPMATE_GITHUB_VARS"]
+        for s in action_steps("comment-ops")
+        if "SHIPMATE_GITHUB_VARS" in (s.get("env") or {})
+    }
+    assert bound == {
+        "Resolve gate configuration": "${{ inputs.github-vars }}",
+        "Doctor — render and upsert the sticky comment": "${{ inputs.github-vars }}",
+    }
+
+
 #: The comment-ops verb table in CONTRACT.md: the header row that opens it and
 #: the blank line that ends it. Bounded rather than whole-file, so a `shipmate
 #: <verb>` mention in the surrounding prose cannot satisfy the guard.

@@ -1928,6 +1928,11 @@ CONFIG_VALID = (
     "each of those on the runs where it applies. Execution reads the default branch's copy of this "
     "file, never this branch's."
 )
+CONFIG_REFERENCES = (
+    f"`{CONFIG_PATH}` at the commit under examination takes these values from GitHub "
+    "variables instead of holding them: {refs}. Every run resolves them again from the "
+    "repository and organization variables it reads."
+)
 
 
 def _config_defaults(table):
@@ -1977,8 +1982,9 @@ def _config_defaults(table):
 
 
 def _config_table(ctx):
-    """(table, findings) for the file at the commit under examination: a table and no
-    findings, or findings and no table.
+    """(table, findings, notes) for the file at the commit under examination: a table, no
+    findings and the variable-references notice when it holds a reference, or findings and
+    nothing else.
 
     Reports only. Nothing read here is passed to `read_table` or `resolve`: execution reads
     the default branch, and a branch's file must never become a value a run uses.
@@ -1992,36 +1998,37 @@ def _config_table(ctx):
     if refusal:
         # Ahead of every read, and outside the try below: the floor is a property of this
         # runner, so no revision of the file can be at fault and none is worth reading.
-        return None, [
-            (
-                WARNING,
-                "this runner's Python refuses the environment table before any revision "
-                f"of it is read: {_one_line(refusal.removeprefix('::error::'), 400)} "
-                "Nothing is wrong with the file: merging it changes nothing, and every "
-                "operation that reads the table meets the same refusal on the default "
-                "branch too.",
-            )
-        ]
+        floor = (
+            WARNING,
+            "this runner's Python refuses the environment table before any revision "
+            f"of it is read: {_one_line(refusal.removeprefix('::error::'), 400)} "
+            "Nothing is wrong with the file: merging it changes nothing, and every "
+            "operation that reads the table meets the same refusal on the default "
+            "branch too.",
+        )
+        return None, [floor], []
     ref = _contents_ref(ctx)
     if ref is None:
-        return None, [CONFIG_NO_COMMIT]
+        return None, [CONFIG_NO_COMMIT], []
     text = _contents_text(f"repos/{ctx['repo']}/contents/{CONFIG_PATH}{ref}")
     if text is None:
-        return None, [CONFIG_UNREADABLE]
+        return None, [CONFIG_UNREADABLE], []
     try:
-        return bm.ec.validate_structure(bm.ec.parse_table(text)), []
+        table = bm.ec.validate_structure(bm.ec.parse_table(text))
     except SystemExit as exc:
         # The refusal IS the finding, and it must not reach warnings()'s degrade handler:
         # that one reports a probe as skipped and truncates the message to 120 characters.
-        return None, [
-            (
-                WARNING,
-                f"`{CONFIG_PATH}` at the commit under examination is not valid: "
-                f"{_one_line(str(exc).removeprefix('::error::'), 400)} Merging it refuses "
-                "every operation that reads the table. Execution still reads the default "
-                "branch's copy, which this says nothing about.",
-            )
-        ]
+        invalid = (
+            WARNING,
+            f"`{CONFIG_PATH}` at the commit under examination is not valid: "
+            f"{_one_line(str(exc).removeprefix('::error::'), 400)} Merging it refuses "
+            "every operation that reads the table. Execution still reads the default "
+            "branch's copy, which this says nothing about.",
+        )
+        return None, [invalid], []
+    refs = bm.ec.references(bm.ec.load_toml(text))
+    shown = "; ".join(f"`{path}` from variable `{name}`" for path, name in refs)
+    return table, [], [(NOTICE, CONFIG_REFERENCES.format(refs=shown))] if refs else []
 
 
 def _config_warnings(ctx):
@@ -2041,9 +2048,10 @@ def _config_warnings(ctx):
 
 
 def config_status(ctx):
-    """The report's environment-table section: the verdict and the two tolerant defaults,
-    or nothing when there is no sound table to describe — `_config_warnings` reports that
-    case instead, and a status section beside a refusal would read as a second opinion.
+    """The report's environment-table section: the verdict, the variable-references notice
+    and the tolerant defaults, or nothing when there is no sound table to describe —
+    `_config_warnings` reports that case instead, and a status section beside a refusal
+    would read as a second opinion.
 
     Read a second time rather than shared with the probe: `ctx` cannot carry it
     (`test_the_config_probe_feeds_nothing_a_run_reads`), and a module-level cache would
@@ -2054,10 +2062,10 @@ def config_status(ctx):
     `doctor` must not fail the run over it.
     """
     try:
-        table, _ = _config_table(ctx)
+        table, _, notes = _config_table(ctx)
     except (Exception, SystemExit):  # noqa: BLE001 - the probe reports the failure itself
         return []
-    return [] if table is None else [(NOTICE, CONFIG_VALID), *_config_defaults(table)]
+    return [] if table is None else [(NOTICE, CONFIG_VALID), *notes, *_config_defaults(table)]
 
 
 def _governing_team(ctx):
@@ -2071,7 +2079,7 @@ def _governing_team(ctx):
     against the default branch's. That is the direction worth having — a bad team slug is
     warned about before it merges, which a default-branch read cannot do.
     """
-    table, _ = _config_table(ctx)
+    table = _config_table(ctx)[0]
     return "" if table is None else bm.ec.gate_approvers_team(table)
 
 

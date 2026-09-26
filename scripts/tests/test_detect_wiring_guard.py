@@ -84,7 +84,8 @@ _DETECT_WITH = {
     ),
 }
 
-#: Every (workflow, job, step) that carries `toJSON(vars)`: six detect steps, eleven cell steps.
+#: Every (workflow, job, step) that carries `toJSON(vars)`: six detect steps, eleven cell steps
+#: and the `comment-ops` step.
 _VARS_HOLDERS = {
     ("plan.yml", "detect", "$/actions/build-matrix"),
     ("drift.yml", "detect", "$/actions/build-matrix"),
@@ -96,6 +97,7 @@ _VARS_HOLDERS = {
     ("drift.yml", "drift", "$/actions/drift-cell"),
     ("unlock.yml", "unlock", "$/actions/unlock-cell"),
     *(("apply-env-level.yml", f"wave{n}", "$/actions/apply-cell") for n in range(8)),
+    ("comment-ops.yml", "ops", "$/actions/comment-ops"),
 }
 
 
@@ -148,7 +150,7 @@ def test_the_detect_step_passes_exactly_these_inputs(workflow):
     assert steps[0]["with"] == expected
 
 
-def test_only_the_detect_and_cell_steps_carry_the_variables():
+def test_only_the_detect_cell_and_comment_ops_steps_carry_the_variables():
     """Every workflow, every job and step, the whole parsed node searched, so a holder in a
     job-level `with:` or `env:` counts as well as one in a step.
 

@@ -4546,11 +4546,14 @@ def test_a_valid_verdict_names_the_checks_it_did_not_run(monkeypatch):
 
     Mutation: shorten the verdict to "parses and is valid"; or return it from
     `_config_warnings` again, which reddens the `== []` line here and the end-to-end
-    all-clear guard. Swapping `validate_structure` for `validate` is NOT a mutation that reds
+    all-clear guard; or emit the variable-references notice with an empty list for a file
+    holding no reference. Swapping `validate_structure` for `validate` is NOT a mutation that reds
     here -- the canonical file passes both -- so this guard pins the words, and
     `test_the_config_probe_feeds_nothing_a_run_reads` pins that the run-context reader is
     never reached.
     """
+    # A file with no reference must not need the caller's variables at all.
+    monkeypatch.delenv("SHIPMATE_GITHUB_VARS", raising=False)
     responses = _config_responses(CANONICAL, on_default=MISPLACED_CONTROL)
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
     assert doctor._config_warnings(_ctx()) == []
@@ -4582,6 +4585,81 @@ def test_a_valid_verdict_names_the_checks_it_did_not_run(monkeypatch):
             "`shipmate unlock` by comment.",
         ),
     ]
+
+
+#: Two references, one of them a list item, hand-written.
+_REFERENCED = """layout        = "folder"
+explicit_envs = [{ var = "HELD_ENV" }]
+
+[environments.dev]
+region         = "eu-west-1"
+aws.plan.role  = { var = "DEV_PLAN_ROLE" }
+aws.apply.role = "arn:aws:iam::981781037707:role/shipmate-apply"
+"""
+
+
+def test_a_valid_file_holding_references_lists_each_one(monkeypatch):
+    """The report names the values the file does not hold, sorted by key path, beside the
+    verdict and never as a finding: in `_config_warnings` the notice would annotate every
+    plan run and displace the settings-probe all-clear.
+
+    Mutation: omit the references notice from `config_status`.
+    """
+    monkeypatch.setenv(
+        "SHIPMATE_GITHUB_VARS",
+        '{"DEV_PLAN_ROLE": "arn:aws:iam::981781037707:role/shipmate-plan", "HELD_ENV": "dev"}',
+    )
+    responses = {_CONFIG_READ: _wf_file(_REFERENCED)}
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    assert doctor._config_warnings(_ctx()) == []
+    assert doctor.config_status(_ctx()) == [
+        (doctor.NOTICE, doctor.CONFIG_VALID),
+        (
+            doctor.NOTICE,
+            "`.github/shipmate.toml` at the commit under examination takes these values from "
+            "GitHub variables instead of holding them: `environments.dev.aws.plan.role` from "
+            "variable `DEV_PLAN_ROLE`; `explicit_envs[0]` from variable `HELD_ENV`. Every run "
+            "resolves them again from the repository and organization variables it reads.",
+        ),
+        (
+            doctor.NOTICE,
+            "`env_order`: absent — every environment sits at one level, and a bare "
+            "`shipmate apply` applies them all together.",
+        ),
+        (
+            doctor.NOTICE,
+            "`explicit_envs` names dev — a bare `shipmate apply` skips those, and each "
+            "needs its own `shipmate apply <env>`.",
+        ),
+        (
+            doctor.NOTICE,
+            "`gate.approvers_team`: absent — nobody may `shipmate apply` or "
+            "`shipmate unlock` by comment.",
+        ),
+    ]
+
+
+def test_an_unset_reference_is_the_invalid_file_finding(monkeypatch):
+    """A pull request adding a misspelled reference plans green, because plans read the
+    default branch's file; `shipmate doctor` is where the refusal shows before the merge.
+
+    Mutation: catch the refusal in `_config_table` and return the unresolved table.
+    """
+    monkeypatch.setenv("SHIPMATE_GITHUB_VARS", '{"HELD_ENV": "dev"}')
+    responses = {_CONFIG_READ: _wf_file(_REFERENCED)}
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    assert doctor._config_warnings(_ctx()) == [
+        (
+            doctor.WARNING,
+            "`.github/shipmate.toml` at the commit under examination is not valid: "
+            ".github/shipmate.toml environments.dev.aws.plan.role references GitHub variable "
+            "DEV_PLAN_ROLE, which is not set. A reference reads repository and organization "
+            "variables only; an Environment variable is not visible where the table is read. "
+            "Merging it refuses every operation that reads the table. Execution still reads "
+            "the default branch's copy, which this says nothing about.",
+        )
+    ]
+    assert doctor.config_status(_ctx()) == []
 
 
 def test_the_tolerant_defaults_are_read_back_when_absent(monkeypatch):
