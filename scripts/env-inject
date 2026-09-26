@@ -340,9 +340,12 @@ def check_run_env(table, pairs, environ, run=subprocess.run):
         env={**environ, **pairs},
     )
     if p.returncode != 0:
+        # Raw, never reflowed: `::add-mask::` matches exact strings, so collapsing whitespace
+        # would unmask a secret that terramate echoes in an evaluation error.
+        sys.stderr.write(p.stderr)
         raise SystemExit(
             f"::error::terramate run in {stack} exited {p.returncode} while checking "
-            f"terramate.config.run.env: {' '.join(p.stderr.split())}"
+            "terramate.config.run.env. Terramate's output is above."
         )
     reported = _parse_report(p.stdout, stack)
     for name in sorted(table):
@@ -355,7 +358,7 @@ def check_run_env(table, pairs, environ, run=subprocess.run):
                 f"environment table resolves {value!r}. The table decides a cell's identity: plan "
                 "and apply would both run under the rewritten value, and the fingerprint, "
                 "computed outside `terramate run`, would agree. Stop assigning "
-                f'{name} in run.env, or read it first: tm_try(env.{name}, "dev"). '
+                f'{name} in run.env, or read it first: tm_try(env.{name}, "<local default>"). '
                 "See CONTRACT.md §Env model."
             )
 

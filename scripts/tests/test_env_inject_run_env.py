@@ -29,7 +29,7 @@ OVERRIDE = (
     "environment table resolves 'dev-eu'. The table decides a cell's identity: plan and apply "
     "would both run under the rewritten value, and the fingerprint, computed outside "
     "`terramate run`, would agree. Stop assigning TF_VAR_env in run.env, or read it first: "
-    'tm_try(env.TF_VAR_env, "dev"). See CONTRACT.md §Env model.'
+    'tm_try(env.TF_VAR_env, "<local default>"). See CONTRACT.md §Env model.'
 )
 
 
@@ -81,7 +81,7 @@ def test_an_absent_name_refuses_showing_unset(report):
         "environment table resolves 'eu-west-1'. The table decides a cell's identity: plan and "
         "apply would both run under the rewritten value, and the fingerprint, computed outside "
         "`terramate run`, would agree. Stop assigning TF_VAR_region in run.env, or read it first: "
-        'tm_try(env.TF_VAR_region, "dev"). See CONTRACT.md §Env model.'
+        'tm_try(env.TF_VAR_region, "<local default>"). See CONTRACT.md §Env model.'
     )
 
 
@@ -97,20 +97,25 @@ def test_a_vars_only_name_is_checked():
         "environment table resolves '123'. The table decides a cell's identity: plan and apply "
         "would both run under the rewritten value, and the fingerprint, computed outside "
         "`terramate run`, would agree. Stop assigning TF_VAR_account in run.env, or read it "
-        'first: tm_try(env.TF_VAR_account, "dev"). See CONTRACT.md §Env model.'
+        'first: tm_try(env.TF_VAR_account, "<local default>"). See CONTRACT.md §Env model.'
     )
 
 
-def test_a_failing_terramate_run_refuses_with_its_stderr_on_one_line():
+def test_a_failing_terramate_run_refuses_and_passes_its_stderr_through_raw(capsys):
     """`init` would fail on the same `run.env` one step later, so nothing is gained by continuing.
+    Terramate's stderr reaches the log byte for byte, so a mask registered for a secret holding a
+    tab or a double space still matches it.
 
-    Mutation: `return` in place of the non-zero-exit raise.
+    Mutations: `return` in place of the non-zero-exit raise; the refusal carrying
+    `' '.join(p.stderr.split())` again; delete the `sys.stderr.write`.
     """
-    run = _Run(returncode=1, stderr="Error: evaluating run.env\n  unknown variable env.X\n")
+    stderr = "Error: evaluating run.env\n  unknown variable env.X\tvalue  a  b\n"
+    run = _Run(returncode=1, stderr=stderr)
     assert _refusal(run=run) == (
         "::error::terramate run in stacks/app exited 1 while checking "
-        "terramate.config.run.env: Error: evaluating run.env unknown variable env.X"
+        "terramate.config.run.env. Terramate's output is above."
     )
+    assert capsys.readouterr() == ("", stderr)
 
 
 @pytest.mark.parametrize("stdout", ["not json\n", '["TF_VAR_env"]\n'], ids=["unparseable", "list"])
@@ -213,21 +218,35 @@ def test_a_passing_check_prints_nothing(capsys):
     assert capsys.readouterr().out == ""
 
 
-def test_main_checks_the_resolved_table(tmp_path, monkeypatch):
-    """Mutation: delete the `check_run_env` call from `main`."""
+def test_main_checks_the_resolved_table_after_masking_and_writing(tmp_path, monkeypatch, capsys):
+    """The check runs `terramate`, which can echo a secret, so the masks are registered first;
+    the cell's environment is already written when it runs.
+
+    Mutations: delete the `check_run_env` call from `main`; move it above `mask`.
+    """
+    path = tmp_path / "github_env"
     calls = []
 
     def fake_check_run_env(table, pairs, environ, run=subprocess.run):
-        calls.append((table, pairs, environ is os.environ))
+        written = path.read_text(encoding="utf-8") if path.exists() else None
+        calls.append((table, pairs, environ is os.environ, capsys.readouterr().out, written))
 
     monkeypatch.setattr(env_inject, "check_run_env", fake_check_run_env)
-    monkeypatch.setenv("GITHUB_ENV", str(tmp_path / "github_env"))
+    monkeypatch.setenv("GITHUB_ENV", str(path))
     monkeypatch.setenv("SHIPMATE_TF_VARS", '{"TF_VAR_env": "dev-eu"}')
     monkeypatch.setenv("SHIPMATE_GITHUB_VARS", '{"TF_VAR_SIZE": "small"}')
-    monkeypatch.delenv("SHIPMATE_SECRETS", raising=False)
+    monkeypatch.setenv("SHIPMATE_SECRETS", '{"API_KEY": "s3cr3t"}')
     env_inject.main()
     assert calls == [
-        ({"TF_VAR_env": "dev-eu"}, {"TF_VAR_env": "dev-eu", "TF_VAR_size": "small"}, True)
+        (
+            {"TF_VAR_env": "dev-eu"},
+            {"TF_VAR_env": "dev-eu", "TF_VAR_size": "small", "API_KEY": "s3cr3t"},
+            True,
+            "::add-mask::s3cr3t\n",
+            "API_KEY<<SHIPMATE_EOF\ns3cr3t\nSHIPMATE_EOF\n"
+            "TF_VAR_env<<SHIPMATE_EOF\ndev-eu\nSHIPMATE_EOF\n"
+            "TF_VAR_size<<SHIPMATE_EOF\nsmall\nSHIPMATE_EOF\n",
+        )
     ]
 
 
