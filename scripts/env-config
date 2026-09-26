@@ -144,8 +144,8 @@ def _lookup(path, name, variables):
     if name not in variables:
         raise SystemExit(
             f"{where} {name}, which is not set. A reference reads repository and "
-            "organization variables only; an Environment variable is not visible where "
-            "the table is read."
+            "organization variables; the variables of a cell's <env>-plan, <env>-apply or "
+            "shared <env> Environment are never read."
         )
     if variables[name] == "":
         raise SystemExit(f"{where} {name}, which is set to an empty value.")
@@ -781,9 +781,10 @@ def resolve(table, env, path, workload):
     `path` is the calling detect's tier, never inferred; a shared environment resolves
     `aws.apply` on both paths, and `config_path` reports the tier actually consulted
     rather than the one requested. `env_binding` is the GitHub Environment the cell's job
-    binds: the bare `env` when shared, `<env>-<path>` otherwise. There is no fallback to
-    `vars.*`: an environment with no entry resolves an empty role and the caller skips the
-    credentials step.
+    binds: the bare `env` when shared, `<env>-<path>` otherwise. The table chooses; a
+    reference in it was resolved from a repository or organization variable by
+    `parse_table`. An environment with no entry resolves an empty role and the caller skips
+    the credentials step.
 
     The workload tier is keyed by the raw `workload` tag value, never by a normalized
     form of it: `net-edge` and `net_edge` are two workloads. The environment's own `vars`

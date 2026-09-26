@@ -4619,7 +4619,8 @@ def test_a_valid_file_holding_references_lists_each_one(monkeypatch):
             "`.github/shipmate.toml` at the commit under examination takes these values from "
             "GitHub variables instead of holding them: `environments.dev.aws.plan.role` from "
             "variable `DEV_PLAN_ROLE`; `explicit_envs[0]` from variable `HELD_ENV`. Every run "
-            "resolves them again from the repository and organization variables it reads.",
+            "resolves them again from repository and organization variables, never from a "
+            "cell's Environment.",
         ),
         (
             doctor.NOTICE,
@@ -4654,7 +4655,8 @@ def test_an_unset_reference_is_the_invalid_file_finding(monkeypatch):
             "`.github/shipmate.toml` at the commit under examination is not valid: "
             ".github/shipmate.toml environments.dev.aws.plan.role references GitHub variable "
             "DEV_PLAN_ROLE, which is not set. A reference reads repository and organization "
-            "variables only; an Environment variable is not visible where the table is read. "
+            "variables; the variables of a cell's <env>-plan, <env>-apply or shared <env> "
+            "Environment are never read. "
             "Merging it refuses every operation that reads the table. Execution still reads "
             "the default branch's copy, which this says nothing about.",
         )

@@ -1930,8 +1930,8 @@ CONFIG_VALID = (
 )
 CONFIG_REFERENCES = (
     f"`{CONFIG_PATH}` at the commit under examination takes these values from GitHub "
-    "variables instead of holding them: {refs}. Every run resolves them again from the "
-    "repository and organization variables it reads."
+    "variables instead of holding them: {refs}. Every run resolves them again from "
+    "repository and organization variables, never from a cell's Environment."
 )
 
 

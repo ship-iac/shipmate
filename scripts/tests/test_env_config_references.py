@@ -95,14 +95,12 @@ def _refusal(text, variables):
 
 def test_an_unset_variable_refuses_naming_the_path_and_name():
     """Reddens on swallowing the `KeyError` and substituting `""`."""
-    message = _refusal(_ROLE_REF, {"OTHER": "secret-looking-value"})
-    assert message.startswith("::error::")
-    assert "\n" not in message
-    assert "environments.prod.aws.apply.role" in message
-    assert "PROD_APPLY_ROLE" in message
-    assert "not set" in message
-    assert "Environment variable" in message
-    assert "secret-looking-value" not in message
+    assert _refusal(_ROLE_REF, {"OTHER": "secret-looking-value"}) == (
+        "::error::.github/shipmate.toml environments.prod.aws.apply.role references GitHub "
+        "variable PROD_APPLY_ROLE, which is not set. A reference reads repository and "
+        "organization variables; the variables of a cell's <env>-plan, <env>-apply or shared "
+        "<env> Environment are never read."
+    )
 
 
 def test_an_empty_variable_refuses():
