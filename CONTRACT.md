@@ -661,7 +661,7 @@ Every condition below refuses at detect, before any cell starts.
 | A `[gate]` key other than `approvers_team`, `ungated_envs` | a misspelled gate key leaves the setting at its default while the repository believes it declared one |
 | `gate.approvers_team` that is not a GitHub team slug | a display name, an `@org/team` reference or a stray quote 404s in the membership lookup, refusing every commenter under a message naming the team as though it had resolved |
 | Malformed `gate.ungated_envs` | the `explicit_envs` env-name rule, on the setting that decides which environments apply unreviewed |
-| A reference to a variable that is unset or empty, or whose name holds a lowercase letter | §Variable references; the refusal names the key path and the variable, never a value |
+| A reference to a variable that is unset or empty, whose name holds a lowercase letter, or a name that is not a GitHub variable name | §Variable references; the refusal names the key path and the variable, never a value |
 | A file holding a reference, read by a step whose variables input is absent or empty | the engine did not pass `github-vars` to that step, or the repository reaches no variables at all; named as such rather than blamed on one variable |
 | `version` other than the integer `1` | this engine implements version 1; a bool is refused explicitly, since `True == 1` would otherwise read `version = true` as it |
 

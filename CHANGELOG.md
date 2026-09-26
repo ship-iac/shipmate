@@ -19,9 +19,10 @@ grammar are declared unstable in `README.md`.
   `{ var = "NAME" }` in place of a string, list items and `[gate]` included, and every reader
   of the file replaces it with that repository or organization variable's value: every
   detect, comment-ops, `shipmate doctor` and `scripts/onboard`. A value then changes with a
-  variable edit and no pull request. An unset or empty variable, or a lowercase name, refuses
-  naming the key and the variable. A resolved value is public, so reference variables, never
-  secrets. `shipmate doctor` lists every reference. The detect actions, `comment-ops` and
+  variable edit and no pull request. An unset or empty variable, a lowercase name, or a name
+  that is not a GitHub variable name refuses naming the key and the variable. A resolved
+  value is public, so reference variables, never secrets. `shipmate doctor` lists every
+  reference. The detect actions, `comment-ops` and
   `summary` take a new `github-vars` input, which the engine's reusable workflows pass; a file
   with no reference behaves as before. See `CONTRACT.md` §Variable references.
 
