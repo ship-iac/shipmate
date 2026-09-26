@@ -97,9 +97,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { fetch-depth: 0, ref: "${{ inputs.ref }}" }
       - uses: $/actions/setup
-      # Role and region come from the row the table resolved, never from vars.*: a fallback would
-      # hand the cell a role the table did not choose while the run stays green. Byte-identical
-      # to the wave jobs' step (scripts/tests/test_aws_oidc_wiring_guard.py).
+      # The table chooses role and region; detect resolves a reference in it from a repository or
+      # organization variable. A vars.* fallback would pick a role the table did not and stay green.
+      # Byte-identical to the wave jobs' step (scripts/tests/test_aws_oidc_wiring_guard.py).
       - name: Configure cloud credentials (AWS OIDC)
         if: ${{ matrix.role_arn != '' }}
         uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4

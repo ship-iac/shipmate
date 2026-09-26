@@ -440,6 +440,15 @@ for itself. It is still ergonomics, not enforcement: it decides which command
 reaches an environment, never who may run it. The environment reviewer is the
 enforcement.
 
+**A key holding a variable reference is governed by whoever administers that
+variable, not by a merge.** `explicit_envs`, `gate.ungated_envs` and
+`gate.approvers_team` each accept `{ var = "NAME" }` like any other string, and
+a variable edit then changes which environments a bare apply skips, which
+apply unreviewed, or who may apply by comment, on the next run and with no pull
+request. Where this page says editing one of these keys is a pull request, that
+holds only for a value the file writes out
+([`../CONTRACT.md`](../CONTRACT.md) §Variable references).
+
 What the reviewer sees is a deployment-approval prompt naming the environment —
 not a diff. Approving it means "I have read this pull request's plans", so the
 approval is only as good as that habit.
@@ -877,7 +886,9 @@ than a new disclosure: someone who can push a branch can usually already read
 those variables through the API, and variables are not secrets. Treat it as the
 reason not to keep anything sensitive in a variable, and note that it applies
 per bound environment — a `<env>-plan` variable reaches plan and drift cells, an
-`<env>-apply` one reaches apply and unlock cells.
+`<env>-apply` one reaches apply and unlock cells. Every detect job, comment-ops
+and the plan `summary` job are handed `${{ toJSON(vars) }}` too, to resolve the
+table's variable references.
 
 `secrets: inherit` forwards every secret the calling repository can see:
 cloud access keys, PATs, third-party API tokens, anything a later, unrelated
