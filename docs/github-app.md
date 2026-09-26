@@ -177,7 +177,7 @@ the `shipmate-app.private-key.pem` step 1 wrote. Keep that file until every
 consumer repo has it. `scripts/onboard` does all of this, and additionally
 deletes any repository-level copy of the key.
 
-The approvers team is not set here. It is `gate.approvers_team` in
+The approvers team is not set here. It is `gate.approver_team` in
 `.github/shipmate.toml` on the consumer's default branch, committed with the rest
 of that repository's configuration ([`../CONTRACT.md`](../CONTRACT.md) §The gate
 table). Every repository declares its own, including one that would previously
@@ -224,7 +224,7 @@ App differs — one App per trust domain means one id per trust domain
 ([`hardening.md`](hardening.md) §13–14).
 
 It is the only name that shares this way. The approvers team used to be the
-second, and the file replaced that: `gate.approvers_team` is per repository by
+second, and the file replaced that: `gate.approver_team` is per repository by
 construction, so every repository declares its own team, and one that declares
 none authorizes nobody by comment.
 

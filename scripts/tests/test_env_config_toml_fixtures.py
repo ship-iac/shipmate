@@ -18,8 +18,9 @@ ec = load_script("env-config")
 
 #: The canonical file, verbatim from the design's schema section.
 CANONICAL = """\
-layout        = "dry"              # "dry" | "workspace" | "folder", required
-explicit_envs = ["prod"]           # optional
+schema_version = 1                 # optional
+layout         = "tf_vars"         # "tf_vars" | "workspace" | "folder", required
+explicit_envs  = ["prod"]          # optional
 
 [env_order]                        # optional: env -> envs that must fully apply first
 dev-us = ["dev-eu"]
@@ -35,7 +36,7 @@ aws.plan.role  = "arn:aws:iam::981781037707:role/prod-plan"
 aws.apply.role = "arn:aws:iam::981781037707:role/prod-apply"
 # A workload inherits its tier's fields and overrides one:
 aws.apply.workloads.net-edge.role = "arn:aws:iam::981781037707:role/net-edge"
-vars.TF_VAR_tier = "core"          # optional, merged over the derived TF_VAR_*
+tf_vars.TF_VAR_tier = "core"       # optional, merged over the derived TF_VAR_*
 """
 
 #: The misplaced control, verbatim from the design's strict-validation section.
@@ -52,7 +53,7 @@ def test_the_canonical_file_validates():
     """Every top-level key the schema allows, dotted provider keys, a workload tier and an
     environment named only by `env_order`.
 
-    Mutation: remove any of the four names from the allowed top-level set, or add a check
+    Mutation: remove any of the five names from the allowed top-level set, or add a check
     that every `env_order` key has an `environments` entry -- `dev-us` has none,
     deliberately, and the design's own file declares it that way.
     """
@@ -164,7 +165,7 @@ def test_the_canonical_file_resolves_each_cell(env, path, workload, expected):
 
     Mutations, each reddening one row: stop the workload tier overriding its path (row 0
     resolves the plain apply role); resolve the plan tier for an apply cell, or the reverse
-    (rows 1 and 2 swap roles); drop the environment's own `vars` from the merge (`TF_VAR_tier`
+    (rows 1 and 2 swap roles); drop the environment's own `tf_vars` from the merge (`TF_VAR_tier`
     disappears); stop inheriting the environment's region into the provider block (every
     `cred_region` empties).
     """

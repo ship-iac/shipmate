@@ -1922,9 +1922,9 @@ CONFIG_NO_COMMIT = (
 # bill over the rest of the rules.
 CONFIG_VALID = (
     f"`{CONFIG_PATH}` at the commit under examination parses, and passes every check a "
-    "file can be judged on by itself: its top-level keys, `version`, `layout`, the "
+    "file can be judged on by itself: its top-level keys, `schema_version`, `layout`, the "
     "environment entries, `env_order`, `explicit_envs` and the `[gate]` table. Not checked "
-    "here, for want of a plan matrix and a whole-tree environment scan: `dry`-layout "
+    "here, for want of a plan matrix and a whole-tree environment scan: `tf_vars`-layout "
     "coverage of the planned environments and entries that no stack tags — `detect` checks "
     "each of those on the runs where it applies. Execution reads the default branch's copy of this "
     "file, never this branch's."
@@ -1942,7 +1942,7 @@ def _config_defaults(table):
 
     No absence here is invalid, so no validator can report any of them, and each decides
     what a comment can do. An omitted `explicit_envs` applies every environment, including
-    the one a consumer meant to hold back; an omitted `approvers_team` authorizes nobody, so
+    the one a consumer meant to hold back; an omitted `approver_team` authorizes nobody, so
     every `shipmate apply` is refused as though the commenter were an outsider. This is the
     last moment before the merge at which reading either costs nothing.
 
@@ -1951,7 +1951,7 @@ def _config_defaults(table):
     """
     order = table.get("env_order", {})
     envs = table.get("explicit_envs", [])
-    team = bm.ec.gate_approvers_team(table)
+    team = bm.ec.gate_approver_team(table)
     shown = "; ".join(
         f"{env} after {', '.join(preds) or 'nothing'}" for env, preds in sorted(order.items())
     )
@@ -1974,10 +1974,10 @@ def _config_defaults(table):
         ),
         (
             NOTICE,
-            f"`gate.approvers_team` is `{_one_line(team, 400)}` — its members may "
+            f"`gate.approver_team` is `{_one_line(team, 400)}` — its members may "
             "`shipmate apply` and `shipmate unlock` by comment."
             if team
-            else "`gate.approvers_team`: absent — nobody may `shipmate apply` or "
+            else "`gate.approver_team`: absent — nobody may `shipmate apply` or "
             "`shipmate unlock` by comment.",
         ),
     ]
@@ -2082,7 +2082,7 @@ def _governing_team(ctx):
     warned about before it merges, which a default-branch read cannot do.
     """
     table = _config_table(ctx)[0]
-    return "" if table is None else bm.ec.gate_approvers_team(table)
+    return "" if table is None else bm.ec.gate_approver_team(table)
 
 
 def _shared_envs(ctx):
@@ -2129,7 +2129,7 @@ def _team_warnings(ctx):
             WARNING,
             f"approvers team `{team}` does not resolve in org `{ctx['owner']}` — "
             'every `shipmate apply` will be rejected as "not a team member". Check '
-            f"`[gate] approvers_team` in `{CONFIG_PATH}` and that the App has members:read.",
+            f"`[gate] approver_team` in `{CONFIG_PATH}` and that the App has members:read.",
         ),
     ]
 

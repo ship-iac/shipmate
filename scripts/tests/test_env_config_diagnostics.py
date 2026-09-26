@@ -72,7 +72,7 @@ def test_a_fully_used_table_says_nothing(capsys):
 
 
 def test_an_entry_matching_only_in_case_is_unused(capsys):
-    """Matching is exact, as `resolve` and the `dry` coverage check match: an entry a cell's
+    """Matching is exact, as `resolve` and the `tf_vars` coverage check match: an entry a cell's
     environment name does not equal resolves for nothing, so it IS unused.
 
     Mutation: lower both sides. The entry is then reported as used while `resolve` still
@@ -103,11 +103,11 @@ def test_a_tagged_environment_missing_from_the_table_refuses_without_a_scan(caps
 
     Mutation: gate `_check_dry_coverage` on `all_envs is not None`. Every path without a
     whole-tree scan then stops refusing."""
-    table = {"layout": "dry", "environments": {"dev-eu": {"region": "eu-west-1"}}}
+    table = {"layout": "tf_vars", "environments": {"dev-eu": {"region": "eu-west-1"}}}
     with pytest.raises(SystemExit) as excinfo:
         _validate(table, matrix_envs=("dev-eu", "prod-us"), all_envs=None)
     assert str(excinfo.value) == (
-        '::error::layout = "dry" derives TF_VAR_env and TF_VAR_region from the '
+        '::error::layout = "tf_vars" derives TF_VAR_env and TF_VAR_region from the '
         "environment table, and prod-us has no entry in it."
     )
 
@@ -115,7 +115,7 @@ def test_a_tagged_environment_missing_from_the_table_refuses_without_a_scan(caps
 def test_the_refusal_precedes_the_unused_warning(capsys):
     """A table that is both incomplete and over-complete refuses; it does not warn and
     continue. Mutation: run the diagnostic before the coverage check."""
-    table = {"layout": "dry", "environments": {"dev-us": {"region": "us-east-1"}}}
+    table = {"layout": "tf_vars", "environments": {"dev-us": {"region": "us-east-1"}}}
     with pytest.raises(SystemExit):
         _validate(table, matrix_envs=("dev-eu",), all_envs={"dev-eu"})
     assert capsys.readouterr().out == ""

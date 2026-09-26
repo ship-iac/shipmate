@@ -291,14 +291,14 @@ def test_missing_environment_of_the_split_pair_warned(monkeypatch):
 
 #: Hand-written tables for the mode tests. `CANONICAL` declares `dev-eu` without the key.
 _SHARED_TABLE = """\
-layout = "dry"
+layout = "tf_vars"
 
 [environments.dev-eu]
 region = "eu-west-1"
 shared = true
 """
 _UNSHARED_TABLE = """\
-layout = "dry"
+layout = "tf_vars"
 
 [environments.dev-eu]
 region = "eu-west-1"
@@ -306,7 +306,7 @@ shared = false
 """
 #: Well-formed TOML that `validate_structure` refuses: an entry that is not a table.
 _INVALID_TABLE = """\
-layout = "dry"
+layout = "tf_vars"
 
 [environments]
 dev-eu = 7
@@ -1589,7 +1589,7 @@ def test_release_lookup_restores_gh_token_unset(monkeypatch):
 #: cannot drift from the bytes the docs publish; an insertion that found no anchor leaves the
 #: key undeclared, which every assertion below reads as a lookup of the wrong team.
 _GATE_TABLE = CANONICAL.replace(
-    "[env_order]", '[gate]\napprovers_team = "platform"\n\n[env_order]', 1
+    "[env_order]", '[gate]\napprover_team = "platform"\n\n[env_order]', 1
 )
 
 
@@ -1621,7 +1621,7 @@ def _unresolved(team):
     return (
         doctor.WARNING,
         f"approvers team `{team}` does not resolve in org `o` — every `shipmate apply` "
-        'will be rejected as "not a team member". Check `[gate] approvers_team` in '
+        'will be rejected as "not a team member". Check `[gate] approver_team` in '
         "`.github/shipmate.toml` and that the App has members:read.",
     )
 
@@ -1678,7 +1678,7 @@ def test_unresolvable_team_warned(monkeypatch):
 
     Mutation: swallow the lookup failure -- a typo'd team then reports healthy.
     """
-    bad = _GATE_TABLE.replace('approvers_team = "platform"', 'approvers_team = "platfrom"')
+    bad = _GATE_TABLE.replace('approver_team = "platform"', 'approver_team = "platfrom"')
     out, looked_up = _team_probe(monkeypatch, table=bad, found=SystemExit("404 Not Found"))
     assert looked_up == ["orgs/o/teams/platfrom"]
     assert out == [_unresolved("platfrom")]
@@ -4562,10 +4562,10 @@ def test_a_valid_verdict_names_the_checks_it_did_not_run(monkeypatch):
         (
             doctor.NOTICE,
             "`.github/shipmate.toml` at the commit under examination parses, and passes "
-            "every check a file can be judged on by itself: its top-level keys, `version`, "
+            "every check a file can be judged on by itself: its top-level keys, `schema_version`, "
             "`layout`, the environment entries, `env_order`, `explicit_envs` and the "
             "`[gate]` table. Not checked here, for want of a plan matrix and a whole-tree "
-            "environment scan: `dry`-layout coverage of the planned environments and entries "
+            "environment scan: `tf_vars`-layout coverage of the planned environments and entries "
             "that no stack tags \u2014 `detect` checks each of those on the runs where it "
             "applies. "
             "Execution reads the default branch's copy of this file, never this branch's.",
@@ -4582,7 +4582,7 @@ def test_a_valid_verdict_names_the_checks_it_did_not_run(monkeypatch):
         ),
         (
             doctor.NOTICE,
-            "`gate.approvers_team`: absent \u2014 nobody may `shipmate apply` or "
+            "`gate.approver_team`: absent \u2014 nobody may `shipmate apply` or "
             "`shipmate unlock` by comment.",
         ),
     ]
@@ -4590,11 +4590,11 @@ def test_a_valid_verdict_names_the_checks_it_did_not_run(monkeypatch):
 
 #: Two references, one of them a list item, hand-written.
 _REFERENCED = """layout        = "folder"
-explicit_envs = [{ var = "HELD_ENV" }]
+explicit_envs = [{ vars = "HELD_ENV" }]
 
 [environments.dev]
 region         = "eu-west-1"
-aws.plan.role  = { var = "DEV_PLAN_ROLE" }
+aws.plan.role  = { vars = "DEV_PLAN_ROLE" }
 aws.apply.role = "arn:aws:iam::981781037707:role/shipmate-apply"
 """
 
@@ -4636,7 +4636,7 @@ def test_a_valid_file_holding_references_lists_each_one(monkeypatch):
         ),
         (
             doctor.NOTICE,
-            "`gate.approvers_team`: absent — nobody may `shipmate apply` or "
+            "`gate.approver_team`: absent — nobody may `shipmate apply` or "
             "`shipmate unlock` by comment.",
         ),
     ]
@@ -4689,13 +4689,13 @@ def test_the_tolerant_defaults_are_read_back_when_absent(monkeypatch):
         ),
         (
             doctor.NOTICE,
-            "`gate.approvers_team`: absent \u2014 nobody may `shipmate apply` or "
+            "`gate.approver_team`: absent \u2014 nobody may `shipmate apply` or "
             "`shipmate unlock` by comment.",
         ),
     ]
 
 
-def test_the_declared_approvers_team_is_reported(monkeypatch):
+def test_the_declared_approver_team_is_reported(monkeypatch):
     """The team the file declares reaches the report by name. `_team_warnings` says nothing
     about a team that resolves, so without this line a reader cannot tell a repository
     whose gate is wired from one whose `[gate]` table never merged.
@@ -4706,7 +4706,7 @@ def test_the_declared_approvers_team_is_reported(monkeypatch):
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
     assert doctor.config_status(_ctx())[-1] == (
         doctor.NOTICE,
-        "`gate.approvers_team` is `platform` \u2014 its members may `shipmate apply` and "
+        "`gate.approver_team` is `platform` \u2014 its members may `shipmate apply` and "
         "`shipmate unlock` by comment.",
     )
 

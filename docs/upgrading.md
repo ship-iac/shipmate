@@ -86,8 +86,8 @@ while still planning fine locally. See [`aws.md`](aws.md).
 
 **`terramate.config.run.env` rewriting `TF_VAR_*`.** Terramate applies `run.env`
 after the ambient environment, so an assignment to a name the environment table
-resolves for a cell — `TF_VAR_env` and `TF_VAR_region` under `dry`,
-`TF_WORKSPACE` under `workspace`, any name in an environment's `vars` — wins
+resolves for a cell — `TF_VAR_env` and `TF_VAR_region` under `tf_vars`,
+`TF_WORKSPACE` under `workspace`, any name in an environment's `tf_vars` — wins
 over whatever the cell was given, invisibly, because the fingerprint is computed
 outside `terramate run` and so agrees on both sides. Each cell reads those names
 back through `terramate run` before `tofu init` and refuses when one comes back

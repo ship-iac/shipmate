@@ -129,7 +129,7 @@ branch, so a pull request cannot choose which role its own plan assumes.
 this is what it looks like for the AWS sample:
 
 ```toml
-layout = "dry"
+layout = "tf_vars"
 
 [environments.dev-eu]
 region         = "eu-west-1"

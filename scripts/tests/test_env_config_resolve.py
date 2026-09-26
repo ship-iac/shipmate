@@ -100,10 +100,10 @@ def _layout(layout, entry=None):
     return env_config.resolve(table, "dev-eu", "plan", "")
 
 
-def test_dry_derives_both_identity_variables():
+def test_tf_vars_derives_both_identity_variables():
     """Mutation: emit a constant instead of the environment key -- every cell then
     fingerprints identically and applies against the wrong state."""
-    assert _layout("dry") == {
+    assert _layout("tf_vars") == {
         "role_arn": "",
         "cred_region": "",
         "tf_vars": {"TF_VAR_env": "dev-eu", "TF_VAR_region": "eu-west-1"},
@@ -124,7 +124,7 @@ def test_workspace_derives_the_workspace_name():
 
 
 def test_folder_derives_nothing():
-    """Mutation: fall through to the dry derivation -- folders inject nothing at plan
+    """Mutation: fall through to the tf_vars derivation -- folders inject nothing at plan
     and apply alike, and injecting here would change the fingerprint on one side."""
     assert _layout("folder") == {
         "role_arn": "",
@@ -151,7 +151,7 @@ def test_the_environment_region_inherits_into_the_block():
 
 
 def test_the_provider_region_wins_over_the_environment_region():
-    """`cred_region` is the credentials step's region; `TF_VAR_region` under dry is the
+    """`cred_region` is the credentials step's region; `TF_VAR_region` under tf_vars is the
     environment's own, and the two are not the same value.
 
     Mutation: always use the environment-level value -- the credentials step then
@@ -161,7 +161,7 @@ def test_the_provider_region_wins_over_the_environment_region():
         "region": "eu-west-1",
         "aws": {"region": "us-east-1", "role": "arn:aws:iam::9817:role/block"},
     }
-    assert _layout("dry", entry) == {
+    assert _layout("tf_vars", entry) == {
         "role_arn": "arn:aws:iam::9817:role/block",
         "cred_region": "us-east-1",
         "tf_vars": {"TF_VAR_env": "dev-eu", "TF_VAR_region": "eu-west-1"},
@@ -309,7 +309,7 @@ def test_shared_envs_names_the_entries_holding_shared_true():
 def test_an_environment_absent_from_the_table_resolves_no_credential(monkeypatch):
     """Once `layout` is set there is no fallback: the caller skips the credentials step.
 
-    `workspace`, not `dry` -- a matrix environment absent from a `dry` table is refused
+    `workspace`, not `tf_vars` -- a matrix environment absent from a `tf_vars` table is refused
     by validation instead.
 
     Mutation: fall back to `AWS_ROLE_ARN`, a repository variable, which is branch-editable
@@ -327,24 +327,24 @@ def test_an_environment_absent_from_the_table_resolves_no_credential(monkeypatch
     }
 
 
-# --- 8: the environment's vars merge over the derivation ------------------------------
+# --- 8: the environment's tf_vars merge over the derivation ---------------------------
 
 
 def _with_vars(variables):
     table = {
         "layout": "workspace",
-        "environments": {"dev-eu": {"vars": variables}},
+        "environments": {"dev-eu": {"tf_vars": variables}},
     }
     return env_config.resolve(table, "dev-eu", "plan", "")["tf_vars"]
 
 
-def test_vars_overrides_the_derived_value():
-    """Mutation: ignore `vars`, or merge it under the derivation instead of over it."""
+def test_tf_vars_overrides_the_derived_value():
+    """Mutation: ignore `tf_vars`, or merge it under the derivation instead of over it."""
     assert _with_vars({"TF_WORKSPACE": "shared-tenant"}) == {"TF_WORKSPACE": "shared-tenant"}
 
 
-def test_vars_extends_the_derived_set():
-    """Mutation: ignore `vars` -- this reds while the override case stays green under a
+def test_tf_vars_extends_the_derived_set():
+    """Mutation: ignore `tf_vars` -- this reds while the override case stays green under a
     merge-order mutation, which is why the two are written separately."""
     assert _with_vars({"TF_VAR_team": "core"}) == {
         "TF_WORKSPACE": "dev-eu",
@@ -352,7 +352,7 @@ def test_vars_extends_the_derived_set():
     }
 
 
-def test_vars_may_set_a_value_to_an_explicit_empty_string():
+def test_tf_vars_may_set_a_value_to_an_explicit_empty_string():
     """`plan-classify` excludes an empty `TF_VAR_*` from the fingerprint on both sides,
     so an explicit empty value stays consistent -- but only if it is emitted.
 
@@ -375,7 +375,7 @@ def test_plan_and_apply_resolve_identical_tf_vars():
     region, say, instead of the environment key.
     """
     table = {
-        "layout": "dry",
+        "layout": "tf_vars",
         "environments": {
             "dev-eu": {
                 "region": "eu-west-1",

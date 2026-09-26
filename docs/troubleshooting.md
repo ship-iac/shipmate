@@ -123,8 +123,8 @@ live probes.
   substituted by it, so a malformed or misplaced setting is reported on the pull
   request that introduces it rather than after it merges. A missing or unreadable
   file is a note saying so, never an all-clear. Only the checks a file can be judged
-  on by itself run here — the top-level keys, `version`, `layout`, the
-  environment entries, `env_order`, `explicit_envs` and `[gate]`; `dry`-layout
+  on by itself run here — the top-level keys, `schema_version`, `layout`, the
+  environment entries, `env_order`, `explicit_envs` and `[gate]`; `tf_vars`-layout
   coverage and unused entries need a plan matrix or a whole-tree environment
   scan, and the verdict names them as unchecked. A valid
   file also gets its `env_order` and
@@ -354,7 +354,7 @@ Two fail-safes of the exact-plan model produce this, and both mean the reviewed
 generated, and OpenTofu itself rejects the stored plan; or `apply-cell`'s
 pre-apply check found that the current environment's `TF_VAR_*` set no longer
 hashes to the fingerprint recorded with the plan — a variable was added,
-removed or changed, a GitHub variable that an `[environments.<env>.vars]`
+removed or changed, a GitHub variable that an `[environments.<env>.tf_vars]`
 reference names included ([`../CONTRACT.md`](../CONTRACT.md) §Apply-match
 fingerprint). That error names the current variable names only; it never
 prints a value.
@@ -387,12 +387,12 @@ These fail-safes are defence in depth behind that control, not the only thing
 behind it.
 
 **If the mismatch names only variables the table derives — `TF_VAR_env` and
-`TF_VAR_region` under `dry`, `TF_WORKSPACE` under `workspace` — look at the
+`TF_VAR_region` under `tf_vars`, `TF_WORKSPACE` under `workspace` — look at the
 environment table rather than the plan.** These come from `matrix.environment`
 and the table on the default branch, and both sides resolve them from that one
 table, so they hash identically whatever environment the job bound. What moves
 the whole set is the table changing between the plan and the apply — an
-environment's `vars`, its `region`, or the `layout` itself, edited on the
+environment's `tf_vars`, its `region`, or the `layout` itself, edited on the
 default branch in between. A re-plan is the fix, as above.
 
 **If it names a variable you set yourself, look at the consumer channels.** What
@@ -583,9 +583,9 @@ the only copy execution reads.
 | `is not valid TOML: <message>` | `tomllib`'s own message, with the line and column. See the two parse traps below |
 | `is read with tomllib, which needs Python 3.11 or later; this runner has …` | the `runs_on:` image is older than the floor `../CONTRACT.md` §Runner prerequisites states — `ubuntu-22.04` ships 3.10. Name a newer image |
 | `declares no layout` | either the key is genuinely absent, or it is written below a `[table]` header — see the placement trap below |
-| `<key> is not a setting this engine implements` | a top-level key this engine does not have, most often a misspelled `environments`. Only `layout`, `environments`, `env_order`, `explicit_envs`, `gate` and `version` are accepted — the message lists them. A *newer* engine's key lands here too, which is why a pin moves before a key does ([`upgrading.md`](upgrading.md)) |
-| `gate.<key> is not a key this engine implements` | the `[gate]` table holds `approvers_team` and `ungated_envs`. A misspelled one would leave the setting at its default while the repository believed it declared one |
-| `version is <value>; this engine implements version 1` | `version` is optional and, written, must be the integer `1`. `version = true` is refused by name rather than read as 1 |
+| `<key> is not a setting this engine implements` | a top-level key this engine does not have, most often a misspelled `environments`. Only `schema_version`, `layout`, `environments`, `gate`, `env_order` and `explicit_envs` are accepted — the message lists them. A *newer* engine's key lands here too, which is why a pin moves before a key does ([`upgrading.md`](upgrading.md)) |
+| `gate.<key> is not a key this engine implements` | the `[gate]` table holds `approver_team` and `ungated_envs`. A misspelled one would leave the setting at its default while the repository believed it declared one |
+| `schema_version is <value>; this engine implements version 1` | `schema_version` is optional and, written, must be the integer `1`. `schema_version = true` is refused by name rather than read as 1 |
 | `env_order['explicit_envs'] names a top-level setting, not an environment` | the placement trap, caught by name: `explicit_envs` was written below `[env_order]` and became an ordering entry |
 | `<key> references GitHub variable <NAME>, which is not set` | no repository or organization variable of that name reaches the repository. Set it with `gh variable set <NAME>`; the next run reads it, no pull request needed. A variable on a cell's `<env>-plan`, `<env>-apply` or shared `<env>` Environment is never read, and on GitHub Free an organization variable does not reach a private repository ([`../CONTRACT.md`](../CONTRACT.md) §Variable references) |
 | `<key> references GitHub variable <NAME>, which is set to an empty value` | a reference never means an empty string; give the variable a value or write the value into the file |
@@ -631,10 +631,10 @@ file as UTF-8 without a BOM; nothing strips it, deliberately, so that
 `shipmate doctor` and the run reach the same verdict on the same bytes.
 
 **Three settings refuse nothing when they are absent.** `env_order`,
-`explicit_envs` and `gate.approvers_team` are optional and take tolerant
+`explicit_envs` and `gate.approver_team` are optional and take tolerant
 defaults — no ordering, no exclusions, and no one authorized. A file that omits
 `explicit_envs` is structurally valid, and a bare `shipmate apply` then applies
-every environment, production included; one that omits `approvers_team` refuses
+every environment, production included; one that omits `approver_team` refuses
 every `shipmate apply` and `shipmate unlock` as though the commenter were an
 outsider. Nothing warns. `shipmate doctor` echoes all three on every report for
 exactly this reason; read them before merging.
@@ -647,7 +647,7 @@ that is what makes it take effect.
 ### A cell fails with no AWS credential
 
 The credentials step is skipped and the cell fails at `tofu init` with no role
-assumed, on a `folder` or `workspace` layout. Under `dry` this does not happen:
+assumed, on a `folder` or `workspace` layout. Under `tf_vars` this does not happen:
 `detect` refuses first, because that layout needs an entry with a region for
 every environment in the matrix.
 

@@ -42,7 +42,7 @@ RESERVED = (
     "identity variables, its credentials, and OpenTofu's execution controls."
 )
 
-#: The identity a `dry` cell derives; a `folder` cell derives none.
+#: The identity a `tf_vars` cell derives; a `folder` cell derives none.
 DRY_TABLE = {"TF_VAR_env": "dev-eu", "TF_VAR_region": "eu-west-1"}
 
 #: The static half of the reserved set, hand-written. The behavioural guards below cover

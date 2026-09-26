@@ -89,7 +89,7 @@ It writes:
 - `.github/workflows/shipmate.yml`, rendered from the fence on this page and
   pinned to the engine checkout's release.
 
-`--team` writes nothing. The approvers team is `gate.approvers_team` in
+`--team` writes nothing. The approvers team is `gate.approver_team` in
 `.github/shipmate.toml`, which this script does not write, so the slug you pass
 is printed in the closing by-hand checklist instead — with the file it belongs
 in and the pin it needs first.
@@ -177,7 +177,7 @@ creates all of them, including `shipmate-engine` and its branch policy:
   `.github/shipmate.toml` on your repository's default branch
   ([`../CONTRACT.md`](../CONTRACT.md) §Environment table). It is required: a
   repository without one has nothing for its cells to run as, and every run
-  refuses. `layout` is the discriminator — `dry` derives `TF_VAR_env` and
+  refuses. `layout` is the discriminator — `tf_vars` derives `TF_VAR_env` and
   `TF_VAR_region` from each environment's key and its region, `workspace`
   derives `TF_WORKSPACE`, and `folder` derives nothing, its leaves fixing env
   and region by path. `scripts/env-inject` is the cell's one writer of the job
@@ -188,7 +188,7 @@ creates all of them, including `shipmate-engine` and its branch policy:
   [`concepts.md`](concepts.md) explains where they land.
 
   ```toml
-  layout = "dry"
+  layout = "tf_vars"
 
   [environments.dev-eu]
   region         = "eu-west-1"
@@ -211,19 +211,19 @@ creates all of them, including `shipmate-engine` and its branch policy:
   `[environments.*]` header, with the other repository-wide settings:
 
   ```toml
-  layout = "dry"
+  layout = "tf_vars"
 
   [gate]
-  approvers_team = "platform-approvers"
+  approver_team = "platform-approvers"
 
   [environments.dev-eu]
   region = "eu-west-1"
   ```
 
-  **A value can come from a GitHub variable.** Write `{ var = "NAME" }` in
+  **A value can come from a GitHub variable.** Write `{ vars = "NAME" }` in
   place of any string, list items included, and every run reads that
   repository or organization variable instead:
-  `aws.apply.role = { var = "PROD_APPLY_ROLE" }`. Changing the variable changes
+  `aws.apply.role = { vars = "PROD_APPLY_ROLE" }`. Changing the variable changes
   the value with no pull request. Define the name as a repository or
   organization variable; no cell's Environment is read. Never define it on
   `shipmate-engine`: comment-ops and the plan summary bind that Environment, so
@@ -507,7 +507,7 @@ of the reviewed plan) and an idempotent post-merge apply on push to the default
 branch.
 
 `shipmate apply` runs only for a member of the team named by
-`gate.approvers_team` in `.github/shipmate.toml` on your default branch
+`gate.approver_team` in `.github/shipmate.toml` on your default branch
 (§Environments for this tier), on a pull request that is mergeable and
 satisfies the branch ruleset's review policy, and only against a plan for the
 pull request's current head, and only on a pull request that is not a
@@ -817,7 +817,7 @@ environment self-service while the rest stay gated, name it in
 `gate.ungated_envs` in `.github/shipmate.toml` — bare logical env names:
 
 ```toml
-layout = "dry"
+layout = "tf_vars"
 
 [gate]
 ungated_envs = ["dev-eu", "dev-us"]

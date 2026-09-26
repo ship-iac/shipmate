@@ -148,7 +148,7 @@ def _fake_run(recorder=None, git=None):
     real-git fixture keeps `main`, which is the branch git actually creates there, and the two
     disagreeing is what makes such a hardcode visible in whichever guard sees it.
     """
-    result = git or types.SimpleNamespace(returncode=0, stdout="layout = 'dry'\n", stderr="")
+    result = git or types.SimpleNamespace(returncode=0, stdout="layout = 'tf_vars'\n", stderr="")
 
     def run(args, check=True):
         if recorder is not None:
@@ -180,10 +180,10 @@ def test_the_table_is_returned_as_parsed(monkeypatch):
     """Reddens on returning the raw stdout rather than the mapping `tomllib` parsed from it.
     The whole mapping is compared, so a partial parse reddens here too."""
     _env(monkeypatch)
-    text = 'layout = "dry"\n\n[environments.dev-eu]\nregion = "eu-west-1"\n'
+    text = 'layout = "tf_vars"\n\n[environments.dev-eu]\nregion = "eu-west-1"\n'
     git = types.SimpleNamespace(returncode=0, stdout=text, stderr="")
     assert ec.read_table(run=_fake_run(git=git)) == {
-        "layout": "dry",
+        "layout": "tf_vars",
         "environments": {"dev-eu": {"region": "eu-west-1"}},
     }
 
@@ -212,7 +212,7 @@ def test_invalid_toml_refuses_with_the_decoder_line_number(monkeypatch):
     drops the decoder's own text: the line number is the only thing that locates the typo in a
     file the runner never shows."""
     _env(monkeypatch)
-    git = types.SimpleNamespace(returncode=0, stdout='layout = "dry"\nregion =\n', stderr="")
+    git = types.SimpleNamespace(returncode=0, stdout='layout = "tf_vars"\nregion =\n', stderr="")
     with pytest.raises(SystemExit) as exc:
         ec.read_table(run=_fake_run(git=git))
     message = str(exc.value)
@@ -228,7 +228,7 @@ def test_an_interpreter_below_the_floor_refuses_before_the_import(monkeypatch):
     monkeypatch.setattr(sys, "version_info", (3, 10, 6, "final", 0))
     monkeypatch.setitem(sys.modules, "tomllib", None)
     with pytest.raises(SystemExit) as exc:
-        ec.parse_table('layout = "dry"\n')
+        ec.parse_table('layout = "tf_vars"\n')
     message = str(exc.value)
     assert message.startswith("::error::")
     assert "3.11" in message
@@ -248,7 +248,7 @@ def test_a_failing_gh_refuses(monkeypatch):
             return types.SimpleNamespace(returncode=1, stdout="trunk\n", stderr="gh: boom\n")
         # Valid TOML, so a `_run` that stopped refusing would produce a table here rather than
         # redden this test for an unrelated reason.
-        return types.SimpleNamespace(returncode=0, stdout='layout = "dry"\n', stderr="")
+        return types.SimpleNamespace(returncode=0, stdout='layout = "tf_vars"\n', stderr="")
 
     monkeypatch.setattr(ec.subprocess, "run", fake_subprocess_run)
     with pytest.raises(SystemExit) as exc:
@@ -259,8 +259,8 @@ def test_a_failing_gh_refuses(monkeypatch):
 #: One fixture both readers are driven over. The multi-line string's indentation is the
 #: part a transformation applied by one reader and not the other shows up in.
 _SHARED_TEXT = (
-    'layout = "dry"\n'
-    "version = 1\n"
+    'layout = "tf_vars"\n'
+    "schema_version = 1\n"
     "\n"
     "[environments.dev-eu]\n"
     'region = "eu-west-1"\n'
@@ -275,8 +275,8 @@ _SHARED_TEXT = (
 #: Hand-written, never derived from `_SHARED_TEXT`: a derived expectation agrees with
 #: whatever the parser did.
 _SHARED_TABLE = {
-    "layout": "dry",
-    "version": 1,
+    "layout": "tf_vars",
+    "schema_version": 1,
     "environments": {"dev-eu": {"region": "eu-west-1", "note": "  indented\n"}},
     "env_order": {"prod": ["dev-eu"]},
 }
@@ -409,16 +409,16 @@ def test_a_declared_empty_ungated_envs_list_exempts_nothing(capsys):
     assert _warnings(capsys) == []
 
 
-def test_a_declared_approvers_team_resolves(capsys):
+def test_a_declared_approver_team_resolves(capsys):
     """Reddens on returning anything but the declared slug, and on any output."""
-    assert ec.gate_approvers_team(_gate(approvers_team="platform")) == "platform"
+    assert ec.gate_approver_team(_gate(approver_team="platform")) == "platform"
     assert _warnings(capsys) == []
 
 
-def test_a_declared_empty_approvers_team_authorizes_nobody(capsys):
+def test_a_declared_empty_approver_team_authorizes_nobody(capsys):
     """An empty slug is a declared empty team, which 404s to `is_member=false` downstream.
     An absent key resolves the same way. Reddens on any reading that yields a non-empty
     team for either, which authorizes comments against a team the file does not name."""
-    assert ec.gate_approvers_team(_gate(approvers_team="")) == ""
-    assert ec.gate_approvers_team(_SHARED_TABLE) == ""
+    assert ec.gate_approver_team(_gate(approver_team="")) == ""
+    assert ec.gate_approver_team(_SHARED_TABLE) == ""
     assert _warnings(capsys) == []

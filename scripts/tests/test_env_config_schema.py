@@ -29,20 +29,20 @@ def _refusal(table, matrix_envs=()):
 def test_an_unknown_layout_refuses():
     """Mutation: drop the layout membership check -- a typo disables injection silently."""
     assert _refusal({"layout": "drys"}) == (
-        "::error::layout is 'drys'; it must be one of dry, workspace, folder."
+        "::error::layout is 'drys'; it must be one of tf_vars, workspace, folder."
     )
 
 
 def test_a_non_string_layout_refuses():
     """Mutation: as above; a mapping is not one of the three names either."""
     assert _refusal({"layout": {"dry": True}}) == (
-        "::error::layout is {'dry': True}; it must be one of dry, workspace, folder."
+        "::error::layout is {'dry': True}; it must be one of tf_vars, workspace, folder."
     )
 
 
 NO_LAYOUT = (
     "::error::.github/shipmate.toml declares no layout, so no cell can resolve its "
-    'environment identity. Declare layout = "dry", "workspace" or "folder" on the default '
+    'environment identity. Declare layout = "tf_vars", "workspace" or "folder" on the default '
     "branch, which is where this table is read from. A scalar written below a [table] header "
     "lands inside that table rather than at the top level, so layout must come before the "
     "first header."
@@ -68,40 +68,40 @@ def test_a_file_holding_only_an_ordering_refuses():
     assert _refusal(table) == NO_LAYOUT
 
 
-# --- 2: dry needs an entry with a region for every matrix environment -----------------
+# --- 2: tf_vars needs an entry with a region for every matrix environment -----------------
 
 
-def test_dry_refuses_a_matrix_environment_with_no_entry():
+def test_tf_vars_refuses_a_matrix_environment_with_no_entry():
     """Mutation: drop the coverage check -- the layout cannot derive its variables."""
-    table = {"layout": "dry", "environments": {"dev-eu": {"region": "eu-west-1"}}}
+    table = {"layout": "tf_vars", "environments": {"dev-eu": {"region": "eu-west-1"}}}
     assert _refusal(table, matrix_envs=("dev-eu", "prod-us")) == (
-        '::error::layout = "dry" derives TF_VAR_env and TF_VAR_region from the '
+        '::error::layout = "tf_vars" derives TF_VAR_env and TF_VAR_region from the '
         "environment table, and prod-us has no entry in it."
     )
 
 
-def test_dry_refuses_an_entry_with_no_region():
+def test_tf_vars_refuses_an_entry_with_no_region():
     """Mutation: check only that the entry exists, not that it carries a region."""
-    table = {"layout": "dry", "environments": {"dev-eu": {}}}
+    table = {"layout": "tf_vars", "environments": {"dev-eu": {}}}
     assert _refusal(table, matrix_envs=("dev-eu",)) == (
-        '::error::layout = "dry" derives TF_VAR_env and TF_VAR_region from the '
+        '::error::layout = "tf_vars" derives TF_VAR_env and TF_VAR_region from the '
         "environment table, and dev-eu has an entry with no region."
     )
 
 
-def test_dry_refuses_an_empty_region():
+def test_tf_vars_refuses_an_empty_region():
     """An empty TF_VAR_region drops out of the plan fingerprint, so it is not a region.
 
     Mutation: accept a present-but-empty region.
     """
-    table = {"layout": "dry", "environments": {"dev-eu": {"region": ""}}}
+    table = {"layout": "tf_vars", "environments": {"dev-eu": {"region": ""}}}
     assert _refusal(table, matrix_envs=("dev-eu",)) == (
-        '::error::layout = "dry" derives TF_VAR_env and TF_VAR_region from the '
+        '::error::layout = "tf_vars" derives TF_VAR_env and TF_VAR_region from the '
         "environment table, and dev-eu has an entry with no region."
     )
 
 
-def test_a_non_dry_layout_needs_no_entry():
+def test_a_non_tf_vars_layout_needs_no_entry():
     """Mutation: run the coverage check for every layout."""
     table = {"layout": "workspace", "environments": {}}
     assert env_config.validate(table, ("dev-eu",)) == table
@@ -175,19 +175,19 @@ def test_a_field_the_provider_does_not_define_refuses():
     )
 
 
-def test_vars_inside_a_provider_block_refuses():
-    """`vars` sits at environment level; a per-tier one fails every apply as stale.
+def test_tf_vars_inside_a_provider_block_refuses():
+    """`tf_vars` sits at environment level; a per-tier one fails every apply as stale.
 
-    Mutation: drop the `vars` case from the field check (it then refuses as an unknown
-    field, with a message that does not say where `vars` belongs).
+    Mutation: drop the `tf_vars` case from the field check (it then refuses as an unknown
+    field, with a message that does not say where `tf_vars` belongs).
     """
     table = {
         "layout": "folder",
-        "environments": {"dev-eu": {"aws": {"plan": {"vars": {"TF_VAR_x": "y"}}}}},
+        "environments": {"dev-eu": {"aws": {"plan": {"tf_vars": {"TF_VAR_x": "y"}}}}},
     }
     assert _refusal(table) == (
-        "::error::environment dev-eu: aws.plan.vars is not a field the aws provider "
-        "defines. vars sits at environment level: a per-tier one would let plan and "
+        "::error::environment dev-eu: aws.plan.tf_vars is not a field the aws provider "
+        "defines. tf_vars sits at environment level: a per-tier one would let plan and "
         "apply inject different values, and every apply would then fail as stale."
     )
 
@@ -203,7 +203,7 @@ def test_an_unimplemented_provider_key_refuses():
     }
     assert _refusal(table) == (
         "::error::environment dev-eu: azure is not a key this engine implements. "
-        "An environment holds region, vars, aws, shared."
+        "An environment holds region, tf_vars, aws, shared."
     )
 
 
@@ -215,7 +215,7 @@ def test_a_misspelled_environment_key_refuses():
     table = {"layout": "folder", "environments": {"dev-eu": {"regoin": "eu-west-1"}}}
     assert _refusal(table) == (
         "::error::environment dev-eu: regoin is not a key this engine implements. "
-        "An environment holds region, vars, aws, shared."
+        "An environment holds region, tf_vars, aws, shared."
     )
 
 
@@ -357,37 +357,37 @@ def test_a_shared_environment_declaring_only_apply_validates():
     assert env_config.validate_structure(table) is table
 
 
-# --- 8: vars names and values ----------------------------------------------------------
+# --- 8: tf_vars names and values ----------------------------------------------------------
 
 
-def test_vars_naming_anything_outside_the_allowlist_refuses():
+def test_tf_vars_naming_anything_outside_the_allowlist_refuses():
     """Mutation: drop the name allowlist -- the table becomes a general env injector."""
     table = {
         "layout": "folder",
-        "environments": {"dev-eu": {"vars": {"AWS_REGION": "eu-west-1"}}},
+        "environments": {"dev-eu": {"tf_vars": {"AWS_REGION": "eu-west-1"}}},
     }
     assert _refusal(table) == (
-        "::error::environment dev-eu: vars may name only TF_VAR_* and TF_WORKSPACE, "
+        "::error::environment dev-eu: tf_vars may name only TF_VAR_* and TF_WORKSPACE, "
         "and AWS_REGION is neither."
     )
 
 
-def test_vars_holding_a_non_string_refuses():
+def test_tf_vars_holding_a_non_string_refuses():
     """Caught here rather than per cell: env-inject would refuse once per cell instead.
 
     Mutation: check the names and not the values.
     """
     table = {
         "layout": "folder",
-        "environments": {"dev-eu": {"vars": {"TF_VAR_count": 3}}},
+        "environments": {"dev-eu": {"tf_vars": {"TF_VAR_count": 3}}},
     }
     assert _refusal(table) == (
-        "::error::environment dev-eu: vars.TF_VAR_count must be a string, got int. "
+        "::error::environment dev-eu: tf_vars.TF_VAR_count must be a string, got int. "
         "A non-string value would otherwise refuse once per cell at injection time."
     )
 
 
-def test_vars_may_hold_an_empty_string():
+def test_tf_vars_may_hold_an_empty_string():
     """An explicit empty value is excluded from the plan fingerprint on both paths, so it
     is legal.
 
@@ -395,7 +395,7 @@ def test_vars_may_hold_an_empty_string():
     """
     table = {
         "layout": "folder",
-        "environments": {"dev-eu": {"vars": {"TF_VAR_region": "", "TF_WORKSPACE": "w"}}},
+        "environments": {"dev-eu": {"tf_vars": {"TF_VAR_region": "", "TF_WORKSPACE": "w"}}},
     }
     assert env_config.validate(table, ()) == table
 
@@ -416,8 +416,8 @@ _MALFORMED = [
         "::error::environment dev-eu: region must be a string, got dict.",
     ),
     (
-        {"layout": "folder", "environments": {"dev-eu": {"vars": "TF_VAR_x"}}},
-        "::error::environment dev-eu: vars must be a mapping, got str.",
+        {"layout": "folder", "environments": {"dev-eu": {"tf_vars": "TF_VAR_x"}}},
+        "::error::environment dev-eu: tf_vars must be a mapping, got str.",
     ),
     (
         {"layout": "folder", "environments": {"dev-eu": {"aws": "arn:aws:iam::9817:role/a"}}},
@@ -524,12 +524,12 @@ def test_a_whole_table_is_returned_unchanged():
     Mutation: return only the `environments` mapping.
     """
     table = {
-        "layout": "dry",
+        "layout": "tf_vars",
         "env_order": {"prod-us": ["dev-eu"]},
         "environments": {
             "dev-eu": {
                 "region": "eu-west-1",
-                "vars": {"TF_VAR_team": "core"},
+                "tf_vars": {"TF_VAR_team": "core"},
                 "aws": {
                     "region": "eu-central-1",
                     "plan": {"role": "arn:aws:iam::9817:role/p"},
@@ -542,12 +542,12 @@ def test_a_whole_table_is_returned_unchanged():
         },
     }
     assert env_config.validate(table, ("dev-eu",)) == {
-        "layout": "dry",
+        "layout": "tf_vars",
         "env_order": {"prod-us": ["dev-eu"]},
         "environments": {
             "dev-eu": {
                 "region": "eu-west-1",
-                "vars": {"TF_VAR_team": "core"},
+                "tf_vars": {"TF_VAR_team": "core"},
                 "aws": {
                     "region": "eu-central-1",
                     "plan": {"role": "arn:aws:iam::9817:role/p"},
@@ -570,7 +570,7 @@ def test_an_empty_layout_refuses():
     telling it to declare one.
     """
     assert _refusal({"layout": ""}) == (
-        "::error::layout is ''; it must be one of dry, workspace, folder."
+        "::error::layout is ''; it must be one of tf_vars, workspace, folder."
     )
 
 
@@ -586,8 +586,8 @@ def test_a_misspelled_top_level_key_refuses():
     """
     assert _refusal({"layout": "folder", "enviroments": {}}) == (
         "::error::enviroments is not a setting this engine implements. "
-        ".github/shipmate.toml holds layout, environments, env_order, explicit_envs, "
-        "gate, version."
+        ".github/shipmate.toml holds schema_version, layout, environments, gate, env_order, "
+        "explicit_envs."
     )
 
 
@@ -609,8 +609,8 @@ def test_every_allowed_top_level_key_is_accepted():
         "environments": {},
         "env_order": {"prod": ["dev-eu"]},
         "explicit_envs": ["prod"],
-        "gate": {"approvers_team": "deployers", "ungated_envs": ["dev-eu"]},
-        "version": 1,
+        "gate": {"approver_team": "deployers", "ungated_envs": ["dev-eu"]},
+        "schema_version": 1,
     }
     assert env_config.validate(table, ()) == table
 
@@ -734,43 +734,55 @@ def test_a_deep_acyclic_env_order_still_validates():
     assert env_config.validate_structure(table) is table
 
 
-# --- 11: version and the gate table -------------------------------------------------------
+# --- 11: schema_version and the gate table ------------------------------------------------
 
 
-def test_a_declared_version_1_is_accepted():
-    """Mutation: remove `"version"` from `_TOP_KEYS` -- the strict top-level loop then
+def test_a_declared_schema_version_1_is_accepted():
+    """Mutation: remove `"schema_version"` from `_TOP_KEYS` -- the strict top-level loop then
     refuses a file declaring the version this engine implements."""
-    table = {"layout": "folder", "version": 1}
+    table = {"layout": "folder", "schema_version": 1}
     assert env_config.validate(table, ()) == table
 
 
-def test_an_absent_version_is_accepted():
-    """`version` is optional: every file written before the key existed omits it, and the
-    engine must keep reading those.
+def test_an_absent_schema_version_is_accepted():
+    """`schema_version` is optional: absent reads as version 1.
 
-    Mutation: make the version check unconditional -- `table["version"]` then raises on
-    every file that omits it.
+    Mutation: make the version check unconditional -- `table["schema_version"]` then raises
+    on every file that omits it.
     """
     table = {"layout": "folder"}
     assert env_config.validate(table, ()) == table
 
 
-def test_a_future_version_refuses_naming_the_one_implemented():
+def test_a_future_schema_version_refuses_naming_the_one_implemented():
     """Mutation: compare against 2 rather than 1 -- a file this engine cannot read
-    validates."""
-    assert _refusal({"layout": "folder", "version": 2}) == (
-        "::error::version is 2; this engine implements version 1 of .github/shipmate.toml."
+    validates. Or read `table["version"]` in `_check_version` -- this raises `KeyError`."""
+    assert _refusal({"layout": "folder", "schema_version": 2}) == (
+        "::error::schema_version is 2; this engine implements version 1 of .github/shipmate.toml."
     )
 
 
-def test_a_boolean_version_refuses():
-    """`True == 1` in Python, so a bare equality accepts `version = true` as version 1 and
-    the file passes with a value no schema version can be.
+def test_a_boolean_schema_version_refuses():
+    """`True == 1` in Python, so a bare equality accepts `schema_version = true` as version 1
+    and the file passes with a value no schema version can be.
 
     Mutation: drop the `isinstance(v, bool)` exclusion from `_check_version`.
     """
-    assert _refusal({"layout": "folder", "version": True}) == (
-        "::error::version is True; this engine implements version 1 of .github/shipmate.toml."
+    assert _refusal({"layout": "folder", "schema_version": True}) == (
+        "::error::schema_version is True; this engine implements version 1 of "
+        ".github/shipmate.toml."
+    )
+
+
+def test_the_old_version_key_refuses_as_unknown():
+    """No alias: the old name refuses through the strict top-level loop.
+
+    Mutation: keep `"version"` in `_TOP_KEYS` -- the file then validates.
+    """
+    assert _refusal({"layout": "folder", "version": 1}) == (
+        "::error::version is not a setting this engine implements. "
+        ".github/shipmate.toml holds schema_version, layout, environments, gate, env_order, "
+        "explicit_envs."
     )
 
 
@@ -779,7 +791,7 @@ def test_a_gate_table_holding_both_keys_is_accepted():
     the release that reads it is refused as an unknown setting."""
     table = {
         "layout": "folder",
-        "gate": {"approvers_team": "deployers", "ungated_envs": ["dev-eu", "dev_us"]},
+        "gate": {"approver_team": "deployers", "ungated_envs": ["dev-eu", "dev_us"]},
     }
     assert env_config.validate(table, ()) == table
 
@@ -793,21 +805,27 @@ def test_an_absent_gate_table_is_accepted():
 
 def test_an_unknown_key_in_the_gate_table_refuses_by_name():
     """A misspelled gate key is silently inert: the setting keeps its default and the
-    repository believes it declared one.
+    repository believes it declared one. The old `approvers_team` is one such key: no alias.
 
-    Mutation: widen `_GATE_KEYS` to accept any key.
+    Mutation: widen `_GATE_KEYS` to accept any key, or keep `"approvers_team"` in it.
     """
-    assert _refusal({"layout": "folder", "gate": {"approver_team": "deployers"}}) == (
-        "::error::gate.approver_team is not a key this engine implements. "
-        "The gate table holds approvers_team, ungated_envs."
+    assert _refusal({"layout": "folder", "gate": {"approvers_team": "deployers"}}) == (
+        "::error::gate.approvers_team is not a key this engine implements. "
+        "The gate table holds approver_team, ungated_envs."
     )
 
 
-def test_a_non_string_approvers_team_refuses():
+def test_the_declared_approver_team_is_what_the_accessor_returns():
+    """Mutation: read `approvers_team` in `gate_approver_team` -- it then returns ""."""
+    table = env_config.validate_structure({"layout": "folder", "gate": {"approver_team": "ops"}})
+    assert env_config.gate_approver_team(table) == "ops"
+
+
+def test_a_non_string_approver_team_refuses():
     """Mutation: drop the `_string` call inside `validate_team_slug` -- a non-string team slug
     validates here and fails once per membership query instead."""
-    assert _refusal({"layout": "folder", "gate": {"approvers_team": 1}}) == (
-        "::error::gate.approvers_team must be a string, got int."
+    assert _refusal({"layout": "folder", "gate": {"approver_team": 1}}) == (
+        "::error::gate.approver_team must be a string, got int."
     )
 
 
@@ -818,7 +836,7 @@ _NOT_A_TEAM_SLUG = (
 
 
 @pytest.mark.parametrize("team", ["Platform Team", "@ship-iac/platform", "platform ", '"platform"'])
-def test_an_approvers_team_that_is_not_a_slug_refuses(team):
+def test_an_approver_team_that_is_not_a_slug_refuses(team):
     """The charset rule `gate.ungated_envs` already has, on the setting beside it. A display
     name, an `@org/team` reference or a padded slug 404s in the membership lookup, so every
     commenter is refused under a message naming the team as though it had resolved -- the
@@ -826,18 +844,18 @@ def test_an_approvers_team_that_is_not_a_slug_refuses(team):
 
     Mutation: drop the `_TEAM_SLUG.fullmatch` check, or widen the pattern to `.*`.
     """
-    assert _refusal({"layout": "folder", "gate": {"approvers_team": team}}) == (
-        f"::error::gate.approvers_team {_NOT_A_TEAM_SLUG.format(team=team)}"
+    assert _refusal({"layout": "folder", "gate": {"approver_team": team}}) == (
+        f"::error::gate.approver_team {_NOT_A_TEAM_SLUG.format(team=team)}"
     )
 
 
-def test_a_declared_empty_approvers_team_still_validates():
+def test_a_declared_empty_approver_team_still_validates():
     """An empty team is legal and authorizes nobody, so the charset rule must not refuse it.
 
     Mutation: drop the `if team and` guard -- a repository deliberately closing the comment
     path is then refused at every read of its file, including `doctor`'s.
     """
-    table = {"layout": "folder", "gate": {"approvers_team": ""}}
+    table = {"layout": "folder", "gate": {"approver_team": ""}}
     assert env_config.validate_structure(table) == table
 
 
@@ -922,4 +940,92 @@ def test_an_explicit_env_with_an_internal_space_now_refuses():
     """
     assert _refusal({"layout": "folder", "explicit_envs": ["dev eu"]}) == (
         "::error::explicit_envs " + _NOT_AN_ENV_NAME.format(entry="dev eu")
+    )
+
+
+# --- 12: the tf_vars layout, the entry's tf_vars table, the vars reference -------------
+
+
+def test_the_tf_vars_layout_derives_both_identity_variables():
+    """Mutation: leave `_derived` switching on `"dry"` -- the layout then derives nothing."""
+    table = {"layout": "tf_vars", "environments": {"dev-eu": {"region": "eu-west-1"}}}
+    assert env_config.resolve(table, "dev-eu", "plan", "") == {
+        "role_arn": "",
+        "cred_region": "",
+        "tf_vars": {"TF_VAR_env": "dev-eu", "TF_VAR_region": "eu-west-1"},
+        "config_path": "plan",
+        "env_binding": "dev-eu-plan",
+    }
+
+
+@pytest.mark.parametrize("layout", ["dry", "vars"])
+def test_the_old_layout_name_and_the_reference_key_refuse_as_layouts(layout):
+    """No alias: `dry` is the old name, and `vars` names GitHub variables, not a layout.
+
+    Mutation: leave `"dry"` in `_LAYOUTS` -- the `dry` case then validates.
+    """
+    assert _refusal({"layout": layout}) == (
+        f"::error::layout is {layout!r}; it must be one of tf_vars, workspace, folder."
+    )
+
+
+def test_the_old_entry_vars_table_refuses_as_an_unknown_key():
+    """Mutation: keep `"vars"` in `_ENV_KEYS` -- the entry then validates."""
+    table = {"layout": "folder", "environments": {"dev-eu": {"vars": {"TF_VAR_x": "y"}}}}
+    assert _refusal(table) == (
+        "::error::environment dev-eu: vars is not a key this engine implements. "
+        "An environment holds region, tf_vars, aws, shared."
+    )
+
+
+def test_the_entry_tf_vars_table_reaches_the_row():
+    """Mutation: `resolve` reads `entry.get("vars")` -- the row then carries only the
+    derivation."""
+    table = {
+        "layout": "tf_vars",
+        "environments": {"dev-eu": {"region": "eu-west-1", "tf_vars": {"TF_VAR_x": "y"}}},
+    }
+    assert env_config.resolve(table, "dev-eu", "apply", "") == {
+        "role_arn": "",
+        "cred_region": "",
+        "tf_vars": {"TF_VAR_env": "dev-eu", "TF_VAR_region": "eu-west-1", "TF_VAR_x": "y"},
+        "config_path": "apply",
+        "env_binding": "dev-eu-apply",
+    }
+
+
+_ROLE_TEXT = 'layout = "folder"\n\n[environments.prod]\nregion = "eu-west-1"\naws.apply.role = {}\n'
+
+
+def test_a_vars_reference_resolves():
+    """Mutation: `_is_reference` reads `var` -- the mapping then reaches validation."""
+    table = env_config.parse_table(_ROLE_TEXT.format('{ vars = "ROLE" }'), {"ROLE": "r"})
+    assert table == {
+        "layout": "folder",
+        "environments": {"prod": {"region": "eu-west-1", "aws": {"apply": {"role": "r"}}}},
+    }
+    assert env_config.validate_structure(table) == table
+
+
+def test_the_old_var_reference_is_ordinary_data():
+    """`{ var = "X" }` is a mapping again, so a string position refuses it.
+
+    Mutation: `_is_reference` accepts `var` as well as `vars` -- the value then resolves from
+    the variable set here and the table validates.
+    """
+    table = env_config.parse_table(_ROLE_TEXT.format('{ var = "ROLE" }'), {"ROLE": "r"})
+    with pytest.raises(SystemExit) as excinfo:
+        env_config.validate_structure(table)
+    assert str(excinfo.value) == (
+        "::error::environment prod: aws.apply.role must be a string, got dict."
+    )
+
+
+def test_a_lowercase_reference_refusal_spells_the_vars_key():
+    """Mutation: leave the refusal writing `{ var = ... }`."""
+    with pytest.raises(SystemExit) as excinfo:
+        env_config.parse_table(_ROLE_TEXT.format('{ vars = "role" }'), {})
+    assert str(excinfo.value) == (
+        "::error::.github/shipmate.toml environments.prod.aws.apply.role references GitHub "
+        'variable "role"; GitHub variable names are uppercase. Write { vars = "ROLE" }.'
     )

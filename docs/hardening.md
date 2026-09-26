@@ -178,7 +178,7 @@ unreviewed, because that is what it amounts to. This is the only control that
 closes the branch-authored-workflow path outright; everything else narrows it.
 
 Review the list whenever the approvers team changes — write access and
-`gate.approvers_team` membership are separate grants, and the first one is
+`gate.approver_team` membership are separate grants, and the first one is
 the stronger of the two.
 
 ## 2. Restrict pushes that touch executable paths
@@ -442,8 +442,8 @@ enforcement.
 
 **A key holding a variable reference is governed by whoever GitHub permits to
 edit the repository's or the organization's variable it names, not by a merge.**
-`explicit_envs`, `gate.ungated_envs` and `gate.approvers_team` each accept
-`{ var = "NAME" }` like any other string, and a variable edit then changes which
+`explicit_envs`, `gate.ungated_envs` and `gate.approver_team` each accept
+`{ vars = "NAME" }` like any other string, and a variable edit then changes which
 environments a bare apply skips, which apply unreviewed, or who may apply by
 comment, on the next run and with no pull request. Where this page says editing
 one of these keys is a pull request, that holds only for a value the file writes
@@ -539,7 +539,7 @@ no split of its own.
   Yes:
 
   ```toml
-  layout = "dry"
+  layout = "tf_vars"
 
   [environments.prod]
   region         = "eu-west-1"
@@ -550,7 +550,7 @@ no split of its own.
   No — the plan tier inherits the apply role:
 
   ```toml
-  layout = "dry"
+  layout = "tf_vars"
 
   [environments.prod]
   region   = "eu-west-1"

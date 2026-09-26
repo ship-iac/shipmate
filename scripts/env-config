@@ -96,8 +96,8 @@ def load_toml(text):
 
 
 def _is_reference(value):
-    """Exactly `{ var = "NAME" }`. Any other mapping holding `var` is ordinary data."""
-    return isinstance(value, dict) and len(value) == 1 and isinstance(value.get("var"), str)
+    """Exactly `{ vars = "NAME" }`. Any other mapping holding `vars` is ordinary data."""
+    return isinstance(value, dict) and len(value) == 1 and isinstance(value.get("vars"), str)
 
 
 def _walk(value, path):
@@ -114,10 +114,10 @@ def _walk(value, path):
 def references(parsed):
     """`(dotted key path, NAME)` for every reference in a raw `load_toml` result, by path.
 
-    The root table is never a reference: a file holding only `var = "X"` is a setting.
+    The root table is never a reference: a file holding only `vars = "X"` is a setting.
     """
     return sorted(
-        (path, node["var"])
+        (path, node["vars"])
         for key, child in parsed.items()
         for path, node in _walk(child, key)
         if _is_reference(node)
@@ -157,7 +157,7 @@ def _lookup(path, name, variables):
     if name != name.upper():
         raise SystemExit(
             f'{where} "{name}"; GitHub variable names are uppercase. Write '
-            f'{{ var = "{name.upper()}" }}.'
+            f'{{ vars = "{name.upper()}" }}.'
         )
     if name not in variables:
         raise SystemExit(
@@ -172,7 +172,7 @@ def _lookup(path, name, variables):
 
 def _replace(value, path, variables):
     if _is_reference(value):
-        return _lookup(path, value["var"], variables)
+        return _lookup(path, value["vars"], variables)
     if isinstance(value, dict):
         return {k: _replace(v, f"{path}.{k}", variables) for k, v in value.items()}
     if isinstance(value, list):
@@ -181,7 +181,7 @@ def _replace(value, path, variables):
 
 
 def parse_table(text, variables=None):
-    """The table parsed from `text`, each `{ var = "NAME" }` replaced by that GitHub
+    """The table parsed from `text`, each `{ vars = "NAME" }` replaced by that GitHub
     variable's value, or `SystemExit`.
 
     Shared by every reader: `read_table` below reads the file with `git show`, while
@@ -282,9 +282,9 @@ def read_table_at_default_branch(run=None):
 #: The layouts a repository may declare, and the environment-level keys an entry may
 #: hold. `aws` is the only provider implemented; a second one costs a field list here
 #: and one conditional step in each cell action.
-_LAYOUTS = ("dry", "workspace", "folder")
+_LAYOUTS = ("tf_vars", "workspace", "folder")
 _AWS_FIELDS = ("region", "role")
-_ENV_KEYS = ("region", "vars", "aws", "shared")
+_ENV_KEYS = ("region", "tf_vars", "aws", "shared")
 
 #: Reserved at every level: a tier selector, never a provider field.
 _STRUCTURAL = ("plan", "apply", "workloads")
@@ -292,10 +292,10 @@ _STRUCTURAL = ("plan", "apply", "workloads")
 #: Everything the file may declare at its top level. Also the names reserved inside
 #: `env_order`, which is keyed by environment name and would otherwise accept a
 #: misplaced control as an ordering entry.
-_TOP_KEYS = ("layout", "environments", "env_order", "explicit_envs", "gate", "version")
+_TOP_KEYS = ("schema_version", "layout", "environments", "gate", "env_order", "explicit_envs")
 
 #: Everything a `[gate]` table may declare.
-_GATE_KEYS = ("approvers_team", "ungated_envs")
+_GATE_KEYS = ("approver_team", "ungated_envs")
 
 #: Env names come from Terramate `env/<name>` tags, so the charset is comment-parse's env
 #: grammar plus `_`, a legal tag character no `shipmate apply <env>` can name. Lowercase
@@ -335,10 +335,10 @@ def _fields(level, env, where, allowed_structural):
                     "provider block; workloads sits only under plan or apply."
                 )
             continue
-        if key == "vars":
+        if key == "tf_vars":
             raise SystemExit(
-                f"::error::environment {env}: {where}.vars is not a field the aws provider "
-                "defines. vars sits at environment level: a per-tier one would let plan "
+                f"::error::environment {env}: {where}.tf_vars is not a field the aws provider "
+                "defines. tf_vars sits at environment level: a per-tier one would let plan "
                 "and apply inject different values, and every apply would then fail as "
                 "stale."
             )
@@ -408,15 +408,15 @@ def _check_vars(entry, env):
     A non-string value would otherwise pass here and refuse once per cell at injection
     time -- forty identical failures in a forty-cell matrix instead of one at the top.
     """
-    for name, value in sorted(_mapping(entry["vars"], f"environment {env}: vars").items()):
+    for name, value in sorted(_mapping(entry["tf_vars"], f"environment {env}: tf_vars").items()):
         if not name.startswith("TF_VAR_") and name != "TF_WORKSPACE":
             raise SystemExit(
-                f"::error::environment {env}: vars may name only TF_VAR_* and "
+                f"::error::environment {env}: tf_vars may name only TF_VAR_* and "
                 f"TF_WORKSPACE, and {name} is neither."
             )
         if not isinstance(value, str):
             raise SystemExit(
-                f"::error::environment {env}: vars.{name} must be a string, got "
+                f"::error::environment {env}: tf_vars.{name} must be a string, got "
                 f"{type(value).__name__}. A non-string value would otherwise refuse once "
                 "per cell at injection time."
             )
@@ -464,7 +464,7 @@ def _check_environment(entry, env):
             )
     if "region" in entry:
         _string(entry["region"], f"environment {env}: region")
-    if "vars" in entry:
+    if "tf_vars" in entry:
         _check_vars(entry, env)
     if "aws" in entry:
         _check_provider(entry["aws"], env, entry.get("region"))
@@ -473,7 +473,7 @@ def _check_environment(entry, env):
 
 
 def _check_dry_coverage(environments, matrix_envs):
-    """`dry` derives both identity variables from the table, so every cell needs an entry.
+    """`tf_vars` derives both identity variables from the table, so every cell needs an entry.
 
     An empty region is no region: `plan-classify` excludes an empty `TF_VAR_*` from the
     fingerprint, so the layout would derive nothing the cell could be distinguished by.
@@ -487,7 +487,7 @@ def _check_dry_coverage(environments, matrix_envs):
         else:
             continue
         raise SystemExit(
-            '::error::layout = "dry" derives TF_VAR_env and TF_VAR_region from the '
+            '::error::layout = "tf_vars" derives TF_VAR_env and TF_VAR_region from the '
             f"environment table, and {env} has {missing}."
         )
 
@@ -679,8 +679,8 @@ def validate_gate(gate):
                 f"::error::gate.{key} is not a key this engine implements. "
                 f"The gate table holds {', '.join(_GATE_KEYS)}."
             )
-    if "approvers_team" in gate:
-        validate_team_slug(gate["approvers_team"], "gate.approvers_team")
+    if "approver_team" in gate:
+        validate_team_slug(gate["approver_team"], "gate.approver_team")
     if "ungated_envs" in gate:
         validate_env_name_list(gate["ungated_envs"], "gate.ungated_envs")
     return gate
@@ -696,7 +696,7 @@ def gate_ungated_envs(table):
     return frozenset(e.casefold() for e in table.get("gate", {}).get("ungated_envs", []))
 
 
-def gate_approvers_team(table):
+def gate_approver_team(table):
     """The team slug whose members may `apply` and `unlock` by comment.
 
     Those two verbs only: `plan`, `doctor` and `help` are gated by the commenter's
@@ -704,19 +704,20 @@ def gate_approvers_team(table):
 
     A declared empty team authorizes nobody, which is what an absent key does too.
     """
-    return table.get("gate", {}).get("approvers_team", "")
+    return table.get("gate", {}).get("approver_team", "")
 
 
 def _check_version(table):
     """Refuse a file declaring a schema version this engine does not implement.
 
     A bool is excluded explicitly: `True == 1` in Python, so a plain comparison reads
-    `version = true` as version 1.
+    `schema_version = true` as version 1.
     """
-    found = table["version"]
+    found = table["schema_version"]
     if not (isinstance(found, int) and not isinstance(found, bool) and found == 1):
         raise SystemExit(
-            f"::error::version is {found!r}; this engine implements version 1 of {CONFIG_PATH}."
+            f"::error::schema_version is {found!r}; this engine implements version 1 of "
+            f"{CONFIG_PATH}."
         )
 
 
@@ -737,12 +738,12 @@ def validate_structure(table):
                 f"::error::{key} is not a setting this engine implements. "
                 f"{CONFIG_PATH} holds {', '.join(_TOP_KEYS)}."
             )
-    if "version" in table:
+    if "schema_version" in table:
         _check_version(table)
     if "layout" not in table:
         raise SystemExit(
             f"::error::{CONFIG_PATH} declares no layout, so no cell can resolve its "
-            'environment identity. Declare layout = "dry", "workspace" or "folder" on the '
+            'environment identity. Declare layout = "tf_vars", "workspace" or "folder" on the '
             "default branch, which is where this table is read from. A scalar written below "
             "a [table] header lands inside that table rather than at the top level, so "
             "layout must come before the first header."
@@ -771,7 +772,7 @@ def validate(table, matrix_envs, all_envs=None):
     """
     validate_structure(table)
     environments = table.get("environments", {})
-    if table["layout"] == "dry":
+    if table["layout"] == "tf_vars":
         _check_dry_coverage(environments, matrix_envs)
     if all_envs is not None:
         _report_unused(table, all_envs)
@@ -785,7 +786,7 @@ def _derived(layout, env, entry):
     A mis-cased name is not refused anywhere -- plan and apply derive it from the same
     table, so it hashes identically on both sides -- it just never reaches OpenTofu.
     """
-    if layout == "dry":
+    if layout == "tf_vars":
         return {"TF_VAR_env": env, "TF_VAR_region": entry.get("region", "")}
     if layout == "workspace":
         return {"TF_WORKSPACE": env}
@@ -805,7 +806,7 @@ def resolve(table, env, path, workload):
     the credentials step.
 
     The workload tier is keyed by the raw `workload` tag value, never by a normalized
-    form of it: `net-edge` and `net_edge` are two workloads. The environment's own `vars`
+    form of it: `net-edge` and `net_edge` are two workloads. The environment's own `tf_vars`
     merges last, over the derivation.
     """
     environments = _mapping(table.get("environments", {}), "environments")
@@ -821,7 +822,7 @@ def resolve(table, env, path, workload):
     return {
         "role_arn": fields.get("role", ""),
         "cred_region": fields.get("region", ""),
-        "tf_vars": {**_derived(table.get("layout"), env, entry), **entry.get("vars", {})},
+        "tf_vars": {**_derived(table.get("layout"), env, entry), **entry.get("tf_vars", {})},
         "config_path": config_path,
         "env_binding": env if shared else f"{env}-{path}",
     }

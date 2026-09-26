@@ -129,8 +129,8 @@ def test_the_file_is_the_only_source(monkeypatch, tmp_path):
     process environment -- there is no variable left to read, so the output goes empty and
     every environment holds while the file says otherwise."""
     table = {
-        "layout": "dry",
-        "gate": {"approvers_team": "platform", "ungated_envs": ["dev-us", "dev-eu"]},
+        "layout": "tf_vars",
+        "gate": {"approver_team": "platform", "ungated_envs": ["dev-us", "dev-eu"]},
     }
     assert _resolve(monkeypatch, tmp_path, table) == {
         "ungated_envs": "dev-eu,dev-us",
@@ -141,7 +141,7 @@ def test_the_file_is_the_only_source(monkeypatch, tmp_path):
 def test_a_file_declaring_no_gate_resolves_to_empty(monkeypatch, tmp_path):
     """The minimum configuration: a file with no `[gate]` is valid, authorizes nobody by
     team and exempts no environment. Mutation: return a non-empty default for either."""
-    assert _resolve(monkeypatch, tmp_path, {"layout": "dry"}) == {
+    assert _resolve(monkeypatch, tmp_path, {"layout": "tf_vars"}) == {
         "ungated_envs": "",
         "approvers_team": "",
     }
@@ -155,7 +155,7 @@ def test_the_table_is_validated_before_it_is_resolved(monkeypatch, tmp_path):
     Mutation: resolve the table straight from `read_table_at_default_branch` without
     validating it; this test then reports `d,e,u,-` instead of refusing.
     """
-    table = {"layout": "dry", "gate": {"ungated_envs": "dev-eu"}}
+    table = {"layout": "tf_vars", "gate": {"ungated_envs": "dev-eu"}}
     with pytest.raises(SystemExit) as exc:
         _resolve(monkeypatch, tmp_path, table)
     assert "gate.ungated_envs" in str(exc.value)

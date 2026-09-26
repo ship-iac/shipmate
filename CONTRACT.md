@@ -202,11 +202,11 @@ never used.
   names it may set.
   - **The injected names are lowercase after the prefix.** `TF_VAR_ENV` is a
     different variable from the `TF_VAR_env` OpenTofu reads, and the table's
-    `vars` allowlist accepts either spelling. Nothing refuses the mis-cased one:
+    `tf_vars` allowlist accepts either spelling. Nothing refuses the mis-cased one:
     plan and apply resolve it from the same table, so it hashes identically on
     both sides. The variable simply never reaches OpenTofu, and the stack runs on
     whatever default it declares for the name it does read.
-  - A `vars` entry holding the empty string is written through as empty rather
+  - A `tf_vars` entry holding the empty string is written through as empty rather
     than dropped, which is what the fingerprint already excludes (see
     Apply-match fingerprint, below).
   - Each cell action takes one identity input, with no default: `tf-vars`, the
@@ -348,7 +348,7 @@ never used.
   literal exception, spelled identically everywhere it appears because it
   names one fixed thing, not a per-repo variable.
 - For every name in the row's `tf_vars` — the layout's derived names plus the
-  environment's own `vars` — the value `tofu` receives is the table's. A
+  environment's own `tf_vars` — the value `tofu` receives is the table's. A
   consuming repository's `terramate.config.run.env` may read any name, and may
   set any name the row does not hold. Terramate applies `run.env` to the child
   process after the ambient environment, so an assignment to one of the row's
@@ -358,13 +358,14 @@ never used.
   one. Cells then collapse onto one state key with plan, gate and apply all
   green. To give local runs a default, read the injected name first in the
   chain — `tm_try(env.TF_VAR_env, env.env, "dev")`. To let `run.env` own a
-  variable, leave it out of the table's `vars`.
+  variable, leave it out of the table's `tf_vars`.
   - What the row does not hold stays the consumer's. `TF_VAR_env` is an
     ordinary variable under `layout = "folder"`, and `TF_WORKSPACE` is the
-    table's only under `workspace` or through a `vars` entry. Under `dry` and
-    `folder`, a `run.env` `TF_WORKSPACE` selects the same workspace at plan and
-    apply, and the cell actions run `scripts/state-path` inside `terramate run`
-    (§State backend), so the state path the cell records is that workspace's.
+    table's only under `workspace` or through a `tf_vars` entry. Under the
+    `tf_vars` and `folder` layouts, a `run.env` `TF_WORKSPACE` selects the same
+    workspace at plan and apply, and the cell actions run `scripts/state-path`
+    inside `terramate run` (§State backend), so the state path the cell records
+    is that workspace's.
     `TF_DATA_DIR` is the same: consumer-declared, never derived by the table,
     and read inside `terramate run` by `scripts/state-path`. The export policy
     still reserves both names from GitHub variables and envelopes in every
@@ -379,7 +380,7 @@ never used.
     a name comes back different from the table's value or unset, when
     `terramate run` exits non-zero, when the child's output is not a JSON
     object, and when the step received no stack. A row whose `tf_vars` is empty
-    (`folder` with no `vars`) runs nothing. The comparison is against the real
+    (`folder` with no `tf_vars`) runs nothing. The comparison is against the real
     value, so a `run.env` literal equal to it passes in that cell and refuses in
     any cell where it differs.
   - `run.env` is evaluated per stack, and a `terramate.config.run.env` block
@@ -398,9 +399,9 @@ identity, so a repository without one has nothing for its cells to run as. The
 two absences refuse at the same site, `scripts/env-config` (§Refusals) — a file
 absent from the default branch, and a file that parses but declares no `layout`.
 
-The file holds six top-level settings and no others: `layout`, `environments`,
-`env_order`, `explicit_envs`, `gate`, `version`. Any other top-level key refuses,
-naming the offending key and the six that are allowed. A key a *newer* engine
+The file holds six top-level settings and no others: `schema_version`,
+`layout`, `environments`, `gate`, `env_order`, `explicit_envs`. Any other
+top-level key refuses, naming the offending key and the six that are allowed. A key a *newer* engine
 implements is refused by an older one on that same check, which is why a
 repository moves its pin before it adds a key (`docs/upgrading.md`).
 
@@ -451,7 +452,8 @@ header parses to exactly the same mapping, but mixing the two notations for one
 environment is a parse error (§TOML placement).
 
 ```toml
-layout = "dry"                    # dry | workspace | folder
+schema_version = 1
+layout = "tf_vars"                # tf_vars | workspace | folder
 
 [environments.dev-eu]
 region              = "eu-west-1" # the layout's TF_VAR_region, cloud-neutral
@@ -461,7 +463,7 @@ aws.apply.role      = "arn:aws:iam::9817:role/shipmate-apply"
 aws.apply.workloads.net-edge.role = "arn:aws:iam::9817:role/net-edge"
 ```
 
-An environment entry holds `region`, `vars`, `aws` and `shared`, and nothing
+An environment entry holds `region`, `tf_vars`, `aws` and `shared`, and nothing
 else. `aws` is the only provider implemented; any other provider key is refused
 by name. `shared = true` binds the environment as one bare `<env>` on both paths
 instead of the `<env>-plan` / `<env>-apply` pair (§Env model, shared mode).
@@ -485,14 +487,14 @@ are optional, both are strict about their own key names, and a misspelled one is
 refused rather than left at its default:
 
 ```toml
-layout = "dry"
+layout = "tf_vars"
 
 [gate]
-approvers_team = "platform-approvers"
-ungated_envs   = ["dev-eu", "dev-us"]
+approver_team = "platform-approvers"
+ungated_envs  = ["dev-eu", "dev-us"]
 ```
 
-- **`approvers_team`** — the bare GitHub team slug from the team's URL, not a
+- **`approver_team`** — the bare GitHub team slug from the team's URL, not a
   display name and not an `@org/team` reference. Its members are the ones the
   `shipmate team` apply requirement admits (§Comment-ops). A value that is not a
   slug is refused, because it would 404 in the membership lookup and refuse every
@@ -501,7 +503,7 @@ ungated_envs   = ["dev-eu", "dev-us"]
   `explicit_envs` already follows: no `-plan` / `-apply` suffix, nothing outside
   the env charset. §Comment-ops has what the list exempts and what it does not.
 
-**A declared empty value means what it says.** `approvers_team = ""` authorizes
+**A declared empty value means what it says.** `approver_team = ""` authorizes
 nobody and `ungated_envs = []` exempts nothing — which is also what an absent key
 does. The file is the only source, so emptying a setting removes the thing it
 granted and nothing else grants it back.
@@ -513,14 +515,15 @@ level, unless the file references it (§Variable references) —
 
 ### The schema version
 
-`version` is optional and, when written, must be the integer `1`. An absent
-`version` reads as 1, so no existing file has to gain the line. `version = true`
-is refused explicitly: Python compares `True == 1`, and a bool left to a plain
-comparison would read as version 1.
+`schema_version` is optional and, when written, must be the integer `1`. An
+absent `schema_version` reads as 1, so no existing file has to gain the line.
+`schema_version = true` is refused explicitly: Python compares `True == 1`, and
+a bool left to a plain comparison would read as version 1.
 
 The key exists so that a future incompatible schema can be told from this one by
 a file that has not yet been migrated. It is not a pin and it grants nothing: an
-engine still refuses every key it does not implement, whatever `version` says.
+engine still refuses every key it does not implement, whatever `schema_version`
+says.
 
 ### TOML placement
 
@@ -533,7 +536,7 @@ closed.
   `environments.dev-eu.aws.plan.layout`. One mistake therefore refuses in
   several places. A misplaced `layout` always reaches the missing-`layout`
   refusal, which checks before anything reads `environments`; a misplaced
-  `explicit_envs`, `env_order` or `version` refuses as an unimplemented
+  `explicit_envs`, `env_order` or `schema_version` refuses as an unimplemented
   environment key or an unknown provider field, depending on the header it fell
   under — and, after `[env_order]`, as a reserved control name, which is why the
   top-level names are reserved as `env_order` keys at all.
@@ -565,15 +568,15 @@ cross-level default. Every other field resolves inside its own provider block.
 how the three credential-free sample repositories work. A file holding only
 `layout = "workspace"` is a complete, warning-free table.
 
-**What each layout derives**, before the environment's own `vars` merges over it:
+**What each layout derives**, before the environment's own `tf_vars` merges over it:
 
 | `layout` | Injected |
 |---|---|
-| `dry` | `TF_VAR_env = <environment key>`, `TF_VAR_region = <region>` |
+| `tf_vars` | `TF_VAR_env = <environment key>`, `TF_VAR_region = <region>` |
 | `workspace` | `TF_WORKSPACE = <environment key>` |
 | `folder` | nothing |
 
-`vars` accepts only `TF_VAR_*` and `TF_WORKSPACE` names and only string values.
+`tf_vars` accepts only `TF_VAR_*` and `TF_WORKSPACE` names and only string values.
 Without that allowlist the table would be a general environment injector and
 would stop describing environment identity.
 
@@ -582,21 +585,22 @@ would stop describing environment identity.
 Any string value in the file may instead name a GitHub variable:
 
 ```toml
-layout        = "dry"
-explicit_envs = [{ var = "HELD_ENV" }]
+layout        = "tf_vars"
+explicit_envs = [{ vars = "HELD_ENV" }]
 
 [gate]
-approvers_team = { var = "APPROVERS" }
+approver_team = { vars = "APPROVERS" }
 
 [environments.prod]
-region              = { var = "PROD_REGION" }
-aws.apply.role      = { var = "PROD_APPLY_ROLE" }
-vars.TF_VAR_account = { var = "PROD_ACCOUNT" }
+region                 = { vars = "PROD_REGION" }
+aws.apply.role         = { vars = "PROD_APPLY_ROLE" }
+tf_vars.TF_VAR_account = { vars = "PROD_ACCOUNT" }
 ```
 
-- **Shape.** Exactly `{ var = "NAME" }`: a mapping with one key, `var`, holding
-  a string. It is valid at every string position, list items and `[gate]`
-  included. Any other mapping is ordinary data for the checks in §Refusals.
+- **Shape.** Exactly `{ vars = "NAME" }`: a mapping with one key, `vars`,
+  holding a string, named after GitHub's `vars` context. It is valid at every
+  string position, list items and `[gate]` included. Any other mapping is
+  ordinary data for the checks in §Refusals.
 - **Resolution.** Every reader of the file replaces each reference with the
   variable's value before it validates anything: every detect, comment-ops'
   gate resolution, `shipmate doctor` and `scripts/onboard`. The checks then run
@@ -608,9 +612,9 @@ vars.TF_VAR_account = { var = "PROD_ACCOUNT" }
   job that reads the file binds one. comment-ops and the plan `summary` job
   bind `shipmate-engine`, so a variable of the same name on that Environment
   shadows the repository value in those two jobs, and nowhere else.
-- **Values.** A resolved value is always a string, so `shared` and `version`
-  refuse a reference through their own type checks. The name is uppercase
-  (`[A-Z_][A-Z0-9_]*`), as GitHub stores it.
+- **Values.** A resolved value is always a string, so `shared` and
+  `schema_version` refuse a reference through their own type checks. The name is
+  uppercase (`[A-Z_][A-Z0-9_]*`), as GitHub stores it.
 - **Variables only, never secrets.** A resolved value is not hidden: it lands in
   job outputs, the detect `matrix` among them, and in step logs, and
   `configure-aws-credentials` prints `role-to-assume`. Secret cell inputs travel
@@ -623,16 +627,17 @@ vars.TF_VAR_account = { var = "PROD_ACCOUNT" }
   is a variable edit, not a pull request.
 - **Authority.** A referenced value is governed by whoever GitHub permits to
   edit the repository's or the organization's variable it names, not by whoever
-  can merge to the default branch. That includes `gate.approvers_team`,
+  can merge to the default branch. That includes `gate.approver_team`,
   `gate.ungated_envs` and `explicit_envs`. Who may edit a variable is a GitHub
   permission setting, outside this contract. A variable edit takes effect on the
   next run.
 - **Plan and apply.** A cell's role and credentials region are outside the
   apply-match fingerprint (§Apply-match fingerprint): a variable feeding either,
   changed between plan and apply, reaches the apply with no re-plan. A
-  referenced `[environments.<env>.vars]` value is inside it, and so is `region`
-  under `dry`, which derives `TF_VAR_region`: changing that variable between
-  plan and apply refuses the apply as stale, and a re-plan clears it.
+  referenced `[environments.<env>.tf_vars]` value is inside it, and so is
+  `region` under the `tf_vars` layout, which derives `TF_VAR_region`: changing
+  that variable between plan and apply refuses the apply as stale, and a re-plan
+  clears it.
 
 ### Refusals
 
@@ -644,27 +649,27 @@ Every condition below refuses at detect, before any cell starts.
 | The file is not valid TOML | `tomllib`'s message, with its line number, is the refusal |
 | The runner's Python is older than 3.11 | `tomllib` arrived there; §Runner prerequisites already requires it, and the refusal names the version found |
 | The table declares no `layout` | it is the only source of a cell's environment identity, and a scalar written below a `[table]` header lands inside that table rather than at the top level, so a misplaced `layout` arrives here as an undeclared one |
-| `layout` is not `dry`, `workspace` or `folder` | a typo would silently disable injection |
-| `dry` and a matrix environment has no entry, or an entry with no region | the layout cannot derive its variables, and an empty region derives nothing the fingerprint can tell apart |
+| `layout` is not `tf_vars`, `workspace` or `folder` | a typo would silently disable injection |
+| `layout = "tf_vars"` and a matrix environment has no entry, or an entry with no region | the layout cannot derive its variables, and an empty region derives nothing the fingerprint can tell apart |
 | A tier resolves a role but no region | the credentials step requires one |
 | A tier sets an empty role | that resolves to a skipped credentials step, not to a credential |
 | A provider block resolves no role on any tier | dead config; apply-only is legal, all-empty is not |
-| A field the provider does not define, or `vars` inside a provider block | a per-tier `vars` would let plan and apply inject different values, and every apply would then fail as stale |
-| An environment key other than `region`, `vars`, `aws`, `shared` | catches an unimplemented provider and a misspelled key alike |
+| A field the provider does not define, or `tf_vars` inside a provider block | a per-tier `tf_vars` would let plan and apply inject different values, and every apply would then fail as stale |
+| An environment key other than `region`, `tf_vars`, `aws`, `shared` | catches an unimplemented provider and a misspelled key alike |
 | `shared` that is not a TOML boolean | a quoted `"true"` would otherwise read as unshared and bind the split pair the repository believes it gave up |
 | A shared environment declaring `aws.plan` | shared mode has one environment, and it resolves `aws.apply` on both paths |
-| `vars` naming anything outside `TF_VAR_*` / `TF_WORKSPACE`, or holding a non-string | see the allowlist above |
+| `tf_vars` naming anything outside `TF_VAR_*` / `TF_WORKSPACE`, or holding a non-string | see the allowlist above |
 | Malformed shape, or a structural key in a position the grammar does not give it | a string where a mapping is required, and the reverse |
-| A top-level key other than `layout`, `environments`, `env_order`, `explicit_envs`, `gate`, `version` | catches a misspelled `environments`, which would otherwise yield zero environments and skip every cell's credentials step — and, on an engine that predates a key, catches a file written for a newer one before it decides anything |
+| A top-level key other than `schema_version`, `layout`, `environments`, `gate`, `env_order`, `explicit_envs` | catches a misspelled `environments`, which would otherwise yield zero environments and skip every cell's credentials step — and, on an engine that predates a key, catches a file written for a newer one before it decides anything |
 | A top-level control name used as an `env_order` key | a misplaced `explicit_envs` lands inside `[env_order]` as an ordering entry, and its exclusion from a bare apply is silently lost |
 | Malformed `env_order` or `explicit_envs` | one entry point validates every top-level field, so an ordering or exclusion error refuses at detect rather than when an apply finally reads it |
 | A cyclic `env_order`, a self-edge included | an ordering with no first environment sorts into no levels at all, and the refusal is decidable from the file alone, so it lands with the other structural checks rather than at the apply that topologically sorts it |
-| A `[gate]` key other than `approvers_team`, `ungated_envs` | a misspelled gate key leaves the setting at its default while the repository believes it declared one |
-| `gate.approvers_team` that is not a GitHub team slug | a display name, an `@org/team` reference or a stray quote 404s in the membership lookup, refusing every commenter under a message naming the team as though it had resolved |
+| A `[gate]` key other than `approver_team`, `ungated_envs` | a misspelled gate key leaves the setting at its default while the repository believes it declared one |
+| `gate.approver_team` that is not a GitHub team slug | a display name, an `@org/team` reference or a stray quote 404s in the membership lookup, refusing every commenter under a message naming the team as though it had resolved |
 | Malformed `gate.ungated_envs` | the `explicit_envs` env-name rule, on the setting that decides which environments apply unreviewed |
 | A reference to a variable that is unset or empty, whose name holds a lowercase letter, or a name that is not a GitHub variable name | §Variable references; the refusal names the key path and the variable, never a value |
 | A file holding a reference, read by a step whose variables input is absent or empty | the engine did not pass `github-vars` to that step, or the repository reaches no variables at all; named as such rather than blamed on one variable |
-| `version` other than the integer `1` | this engine implements version 1; a bool is refused explicitly, since `True == 1` would otherwise read `version = true` as it |
+| `schema_version` other than the integer `1` | this engine implements version 1; a bool is refused explicitly, since `True == 1` would otherwise read `schema_version = true` as it |
 
 ### Resolution
 
@@ -694,10 +699,12 @@ configuration last when removing:
 
 Doing it the other way round fails rather than warns, and not always as a
 refusal: a branch whose stacks produce a matrix row for an environment the
-default branch's table does not name is refused at detect under `dry`, while
+default branch's table does not name is refused at detect under the `tf_vars`
+layout, while
 under `folder` or `workspace` nothing refuses it — the cell's credentials step
 resolves no role, skips, and the cell fails at `tofu init`. The sequence applies to
-any environment that needs an entry: every environment under `dry`, and under
+any environment that needs an entry: every environment under the `tf_vars`
+layout, and under
 `workspace` or `folder` any environment declaring a provider block. An
 environment needing no entry at all lands in one pull request.
 
@@ -1175,7 +1182,7 @@ A parsed `shipmate apply <env>` command is authorized only when it satisfies
 apply requirements — named, Atlantis-style, checked in order, each with
 its own actionable rejection reason:
 
-- **shipmate team**: the commenter is a member of the team `gate.approvers_team`
+- **shipmate team**: the commenter is a member of the team `gate.approver_team`
   names in `.github/shipmate.toml` on the default branch (checked via a
   short-lived GitHub App installation token, `members:read`). A repository that
   declares no team authorizes nobody: every apply and unlock comment is
@@ -1234,7 +1241,7 @@ may be applied without an approving review — bare logical env names, lowercase
 as every environment name is, matched against the env on the apply checks:
 
 ```toml
-layout = "dry"
+layout = "tf_vars"
 
 [gate]
 ungated_envs = ["dev-eu", "dev-us"]
