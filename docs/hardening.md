@@ -440,8 +440,8 @@ for itself. It is still ergonomics, not enforcement: it decides which command
 reaches an environment, never who may run it. The environment reviewer is the
 enforcement.
 
-**A key holding a variable reference is governed by whoever can edit the
-repository's or the organization's variable it names, not by a merge.**
+**A key holding a variable reference is governed by whoever GitHub permits to
+edit the repository's or the organization's variable it names, not by a merge.**
 `explicit_envs`, `gate.ungated_envs` and `gate.approvers_team` each accept
 `{ var = "NAME" }` like any other string, and a variable edit then changes which
 environments a bare apply skips, which apply unreviewed, or who may apply by
