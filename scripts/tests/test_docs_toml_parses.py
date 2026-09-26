@@ -16,6 +16,10 @@ the example. The rule is not to loosen the assertion for fragments but to write 
 a snippet worth publishing for this file is a snippet worth being able to merge. A fence that
 genuinely cannot be complete does not belong in ```toml.
 
+A fence holding `{ var = "NAME" }` references is validated with every referenced variable set
+to `_PLACEHOLDER`, a value every string position accepts, so the example is judged on its
+shape rather than on this runner's variables.
+
 Sibling of `test_docs_yaml_parses.py`, whose fence-discovery shape this copies.
 """
 
@@ -37,6 +41,9 @@ _FENCE = re.compile(r"^(?P<indent>[ \t]*)```toml[ \t]*$\n(?P<body>.*?)^\1```", r
 # Openers as a reader sees them, not as _FENCE pairs them: an info string after the language
 # counts here and does not pair in _FENCE.
 _OPENER = re.compile(r"^[ \t]*```toml\b", re.M)
+
+#: An environment name, a team slug and a non-empty role or region all at once.
+_PLACEHOLDER = "dev"
 
 
 def _fences():
@@ -92,7 +99,8 @@ def test_toml_fence_is_a_configuration_a_consumer_could_merge(page, line, body):
     """
     where = f"{page.relative_to(ENGINE).as_posix()}:{line}"
     try:
-        table = ec.parse_table(body)
+        variables = {name: _PLACEHOLDER for _, name in ec.references(ec.load_toml(body))}
+        table = ec.parse_table(body, variables)
     except SystemExit as exc:
         pytest.fail(f"{where} ```toml fence does not parse: {str(exc).removeprefix('::error::')}")
     try:

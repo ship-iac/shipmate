@@ -469,9 +469,10 @@ instead of the `<env>-plan` / `<env>-apply` pair (§Env model, shared mode).
 TOML bare keys admit letters, digits, `_` and `-`, so an ordinary environment
 name needs no quoting. Quote anything outside that set.
 
-**The file is data, and only data.** TOML has no expression language: no
-substitution, no variables, no functions, no way to derive one entry from
-another. A repository with many environments repeats itself, deliberately — for
+**The file is data.** TOML has no expression language: no functions, no way to
+derive one entry from another. The one indirection is a value that names a
+GitHub variable (§Variable references), and it replaces a value; it computes
+nothing. A repository with many environments repeats itself, deliberately — for
 a file that decides which cloud role a job assumes, explicit repetition is the
 safer artifact. There is no `[defaults]` table and no merge rule between
 environments; the only cross-level default is the one named below.
@@ -507,7 +508,8 @@ granted and nothing else grants it back.
 
 The two settings once lived in the `SHIPMATE_APPROVERS_TEAM` and
 `SHIPMATE_UNGATED_ENVS` repository variables. Neither is read any more, at any
-level — `docs/upgrading.md` has the procedure.
+level, unless the file references it (§Variable references) —
+`docs/upgrading.md` has the procedure.
 
 ### The schema version
 
@@ -575,6 +577,62 @@ how the three credential-free sample repositories work. A file holding only
 Without that allowlist the table would be a general environment injector and
 would stop describing environment identity.
 
+### Variable references
+
+Any string value in the file may instead name a GitHub variable:
+
+```toml
+layout        = "dry"
+explicit_envs = [{ var = "HELD_ENV" }]
+
+[gate]
+approvers_team = { var = "APPROVERS" }
+
+[environments.prod]
+region              = { var = "PROD_REGION" }
+aws.apply.role      = { var = "PROD_APPLY_ROLE" }
+vars.TF_VAR_account = { var = "PROD_ACCOUNT" }
+```
+
+- **Shape.** Exactly `{ var = "NAME" }`: a mapping with one key, `var`, holding
+  a string. It is valid at every string position, list items and `[gate]`
+  included. Any other mapping is ordinary data for the checks in §Refusals.
+- **Resolution.** Every reader of the file replaces each reference with the
+  variable's value before it validates anything: every detect, comment-ops'
+  gate resolution, `shipmate doctor` and `scripts/onboard`. The checks then run
+  on the values, unchanged. A file holding no reference reads no variable.
+- **Scope.** A reference reads repository and organization variables;
+  `scripts/onboard` gives a repository variable precedence over an organization
+  variable of the same name, as GitHub does. The variables of a cell's
+  `<env>-plan`, `<env>-apply` or shared `<env>` Environment are never read: no
+  job that reads the file binds one. comment-ops and the plan `summary` job
+  bind `shipmate-engine`, so a variable of the same name on that Environment
+  shadows the repository value in those two jobs, and nowhere else.
+- **Values.** A resolved value is always a string, so `shared` and `version`
+  refuse a reference through their own type checks. The name is uppercase
+  (`[A-Z_][A-Z0-9_]*`), as GitHub stores it.
+- **Variables only, never secrets.** A resolved value is not hidden: it lands in
+  job outputs, the detect `matrix` among them, and in step logs, and
+  `configure-aws-credentials` prints `role-to-assume`. Secret cell inputs travel
+  in `SHIPMATE_SECRETS` (§Consumer variables and secrets).
+- **Pull requests.** A pull request adding a reference is not checked by its own
+  plan, because plans read the default branch's file. `shipmate doctor` on that
+  pull request resolves the branch's file, reports an unset or empty variable
+  as an invalid file, and lists every reference as `<key> from variable <NAME>`.
+  After the merge, a missing variable refuses every run until it is set; the fix
+  is a variable edit, not a pull request.
+- **Authority.** A referenced value is governed by whoever can edit the
+  repository's or the organization's variable it names, not by whoever can
+  merge to the default branch. That includes `gate.approvers_team`,
+  `gate.ungated_envs` and `explicit_envs`. A variable edit takes effect on the
+  next run.
+- **Plan and apply.** A cell's role and credentials region are outside the
+  apply-match fingerprint (§Apply-match fingerprint): a variable feeding either,
+  changed between plan and apply, reaches the apply with no re-plan. A
+  referenced `[environments.<env>.vars]` value is inside it, and so is `region`
+  under `dry`, which derives `TF_VAR_region`: changing that variable between
+  plan and apply refuses the apply as stale, and a re-plan clears it.
+
 ### Refusals
 
 Every condition below refuses at detect, before any cell starts.
@@ -603,11 +661,14 @@ Every condition below refuses at detect, before any cell starts.
 | A `[gate]` key other than `approvers_team`, `ungated_envs` | a misspelled gate key leaves the setting at its default while the repository believes it declared one |
 | `gate.approvers_team` that is not a GitHub team slug | a display name, an `@org/team` reference or a stray quote 404s in the membership lookup, refusing every commenter under a message naming the team as though it had resolved |
 | Malformed `gate.ungated_envs` | the `explicit_envs` env-name rule, on the setting that decides which environments apply unreviewed |
+| A reference to a variable that is unset or empty, whose name holds a lowercase letter, or a name that is not a GitHub variable name | §Variable references; the refusal names the key path and the variable, never a value |
+| A file holding a reference, read by a step whose variables input is absent or empty | the engine did not pass `github-vars` to that step, or the repository reaches no variables at all; named as such rather than blamed on one variable |
 | `version` other than the integer `1` | this engine implements version 1; a bool is refused explicitly, since `True == 1` would otherwise read `version = true` as it |
 
 ### Resolution
 
-There is no fallback to `vars.*` on any path. An environment absent from the
+The table chooses on every path; a reference in it is resolved from a repository
+or organization variable (§Variable references). An environment absent from the
 table resolves an empty role, and the cell's credentials step is skipped
 explicitly. A shared-mode environment resolves `aws.apply` on both paths. Each
 row carries what its detect resolved: `role_arn`, `cred_region`, `tf_vars`,
@@ -739,11 +800,12 @@ artifact, so it can never be blocked on one.
 
 The engine is cloud-agnostic by default and ships no credential of its own. A
 consumer opts in per environment, in that environment's `aws` block on the
-default branch, resolved through the three tiers (§Environment table). There is
-no fallback to a `vars.*` value on any path, and no `vars.*` value can widen
-what the table resolved. The trust policy on each role is the enforcing control
-(`docs/hardening.md` §7–9): the table decides which role a cell names, not who
-may assume it.
+default branch, resolved through the three tiers (§Environment table). The table
+chooses on every path: a reference in it is resolved from a repository or
+organization variable (§Variable references), and no variable the table does
+not reference can widen what it resolved. The trust policy on each role is the
+enforcing control (`docs/hardening.md` §7–9): the table decides which role a
+cell names, not who may assume it.
 
 With no role resolving — no provider block, or no entry for the environment —
 the credentials step is skipped and the job holds no cloud credential at all,
@@ -1268,7 +1330,9 @@ benefits from it. This is the inverse of the reasoning that held while the list
 was a repository variable, where the point was that it could *not* be a commit:
 the variable was editable by anyone holding the Write role and reviewed by
 nobody. `shipmate doctor` validates the file it is in and reports a malformed
-entry, but does not echo the list itself.
+entry, but does not echo the list itself. A `gate.ungated_envs` holding a
+reference hands the decision back to whoever can edit the variable it names
+(§Variable references).
 
 `shipmate unlock <env>` releases an OpenTofu state lock stranded by a cancelled
 or killed apply. The env is required: a destructive verb gets no wildcard,

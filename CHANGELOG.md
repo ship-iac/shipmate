@@ -11,6 +11,21 @@ section below names the SHA the release tags.
 The version line stays `v0.x` while action inputs, check names, and the comment
 grammar are declared unstable in `README.md`.
 
+## [Unreleased]
+
+### Added
+
+- **Any string value in `.github/shipmate.toml` can name a GitHub variable.** Write
+  `{ var = "NAME" }` in place of a string, list items and `[gate]` included, and every reader
+  of the file replaces it with that repository or organization variable's value: every
+  detect, comment-ops, `shipmate doctor` and `scripts/onboard`. A value then changes with a
+  variable edit and no pull request. An unset or empty variable, a lowercase name, or a name
+  that is not a GitHub variable name refuses naming the key and the variable. A resolved
+  value is public, so reference variables, never secrets. `shipmate doctor` lists every
+  reference. The detect actions, `comment-ops` and
+  `summary` take a new `github-vars` input, which the engine's reusable workflows pass; a file
+  with no reference behaves as before. See `CONTRACT.md` §Variable references.
+
 ## [0.35.0] — 2026-09-26
 
 Tags `6c6aed1`.

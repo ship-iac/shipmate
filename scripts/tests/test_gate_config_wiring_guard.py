@@ -22,9 +22,12 @@ from _loader import action_steps, load_script
 _TEAM = "${{ steps.gate.outputs.approvers_team }}"
 
 #: The whole `env:` of the resolve step, hand-written. `GH_TOKEN` is the workflow token: the
-#: contents read needs no App token. Nothing else is bound: the file on the default branch
-#: is the only source, so a second binding here would be a second source.
-_GATE_ENV = {"GH_TOKEN": "${{ inputs.github-token }}"}
+#: contents read needs no App token. The file on the default branch is the only source;
+#: `SHIPMATE_GITHUB_VARS` resolves only the variable references that file names.
+_GATE_ENV = {
+    "GH_TOKEN": "${{ inputs.github-token }}",
+    "SHIPMATE_GITHUB_VARS": "${{ inputs.github-vars }}",
+}
 
 
 def _step(name):

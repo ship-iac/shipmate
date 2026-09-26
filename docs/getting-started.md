@@ -168,11 +168,11 @@ creates all of them, including `shipmate-engine` and its branch policy:
   pull request's *base* ref) ([`hardening.md`](hardening.md) #8;
   `shipmate doctor` warns on either). Plan-time cloud credentials are not
   configured here: a plan cell's role is the environment's `aws.plan` tier in
-  the table ([`aws.md`](aws.md) §"The environment table"), and nothing outside
-  that entry can supply one. A plan environment can have no protection at all,
-  so anyone who can push a branch can reach whatever role a plan cell resolves;
-  what refuses it is that role's own trust-policy claim condition
-  ([`hardening.md`](hardening.md) §7–9).
+  the table ([`aws.md`](aws.md) §"The environment table"), and nothing but
+  that entry, a literal or a variable reference in it, can supply one. A plan
+  environment can have no protection at all, so anyone who can push a branch
+  can reach whatever role a plan cell resolves; what refuses it is that role's
+  own trust-policy claim condition ([`hardening.md`](hardening.md) §7–9).
 - **The identity your layout injects comes from the environment table**,
   `.github/shipmate.toml` on your repository's default branch
   ([`../CONTRACT.md`](../CONTRACT.md) §Environment table). It is required: a
@@ -219,6 +219,21 @@ creates all of them, including `shipmate-engine` and its branch policy:
   [environments.dev-eu]
   region = "eu-west-1"
   ```
+
+  **A value can come from a GitHub variable.** Write `{ var = "NAME" }` in
+  place of any string, list items included, and every run reads that
+  repository or organization variable instead:
+  `aws.apply.role = { var = "PROD_APPLY_ROLE" }`. Changing the variable changes
+  the value with no pull request. Define the name as a repository or
+  organization variable; no cell's Environment is read. Never define it on
+  `shipmate-engine`: comment-ops and the plan summary bind that Environment, so
+  a variable of the same name there shadows the repository value in those two
+  jobs only. A resolved value is printed in job
+  outputs and logs, so reference variables only, never secrets. Run
+  `shipmate doctor` on the pull request that adds a reference; its own plan
+  reads the default branch's file and cannot catch an unset name.
+  [`../CONTRACT.md`](../CONTRACT.md) §Variable references has the rest,
+  including what a changed value does to a pending apply.
 
   **The table has to be on the default branch before your first plan run.** The
   engine reads it from `origin/<default>`, so a pull request that only adds the
@@ -465,10 +480,10 @@ callee runs one — that is every job but `comment-ops`, whose callee asks for n
 such scope, and it applies to consumers with no cloud credentials at all. The
 engine runs `aws-actions/configure-aws-credentials` in the `plan` job, gated on
 a role resolving non-empty. That role is the environment's `aws.plan` tier in
-the table, read from the default branch, and nothing outside that entry can
-supply one. The step is skipped, and the consumer runs with no cloud
-credentials, wherever that entry resolves no role; where it resolves one, the
-role's own trust-policy claim condition is the bound
+the table, read from the default branch, and nothing but that entry, a literal
+or a variable reference in it, can supply one. The step is skipped, and the
+consumer runs with no cloud credentials, wherever that entry resolves no role;
+where it resolves one, the role's own trust-policy claim condition is the bound
 ([`hardening.md`](hardening.md) §7–9). The grant is required either way,
 because the job requests it whether or not the step fires.
 
@@ -670,7 +685,9 @@ that needs neither sets nothing.
 configuration stay the first option for endpoints, sizes and resource settings.
 These channels exist for inputs that genuinely come from outside the repository
 — credentials, and values the repository should not hold. Do not re-create your
-configuration as GitHub variables.
+stacks' configuration as GitHub variables. A value in `.github/shipmate.toml`
+can name a variable instead ([`../CONTRACT.md`](../CONTRACT.md) §Variable
+references).
 
 What carries what:
 

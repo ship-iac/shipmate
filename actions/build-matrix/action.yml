@@ -39,6 +39,12 @@ inputs:
       query matching no cell, both fail the run.
     required: false
     default: ""
+  github-vars:
+    description: >-
+      The caller's reachable GitHub variables, serialised with toJSON. Read only when the
+      environment table holds a variable reference; empty when unwired.
+    required: false
+    default: ""
 outputs:
   matrix:
     description: 'JSON {"include":[{stack,environment,workload,role_arn,cred_region,tf_vars,config_path,env_binding},...]} for the plan matrix.'
@@ -65,4 +71,5 @@ runs:
         SHIPMATE_HEAD_SHA: ${{ inputs.head-sha }}
         SHIPMATE_NO_PULL_REQUEST: ${{ inputs.no-pull-request }}
         SHIPMATE_TAGS: ${{ inputs.tags }}
+        SHIPMATE_GITHUB_VARS: ${{ inputs.github-vars }}
       run: python3 "$GITHUB_ACTION_PATH/../../scripts/build-matrix"

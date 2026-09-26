@@ -130,8 +130,11 @@ live probes.
   file also gets its `env_order` and
   `explicit_envs` values read back, absent ones included: an absent `explicit_envs`
   is legitimate configuration that no validator can question, and it means a bare
-  `shipmate apply` applies production too. Execution keeps reading the default
-  branch's copy — this reports, it changes nothing a run uses.
+  `shipmate apply` applies production too. Each variable reference is resolved
+  and listed as `<key> from variable <NAME>`; an unset one is the invalid-file
+  finding, which is how a pull request adding it learns before the merge.
+  Execution keeps reading the default branch's copy — this reports, it changes
+  nothing a run uses.
 - **Whether the shipmate App installation still grants the manifest's full
   permission set.**
 
@@ -351,7 +354,8 @@ Two fail-safes of the exact-plan model produce this, and both mean the reviewed
 generated, and OpenTofu itself rejects the stored plan; or `apply-cell`'s
 pre-apply check found that the current environment's `TF_VAR_*` set no longer
 hashes to the fingerprint recorded with the plan — a variable was added,
-removed or changed ([`../CONTRACT.md`](../CONTRACT.md) §Apply-match
+removed or changed, a GitHub variable that an `[environments.<env>.vars]`
+reference names included ([`../CONTRACT.md`](../CONTRACT.md) §Apply-match
 fingerprint). That error names the current variable names only; it never
 prints a value.
 
@@ -583,6 +587,11 @@ the only copy execution reads.
 | `gate.<key> is not a key this engine implements` | the `[gate]` table holds `approvers_team` and `ungated_envs`. A misspelled one would leave the setting at its default while the repository believed it declared one |
 | `version is <value>; this engine implements version 1` | `version` is optional and, written, must be the integer `1`. `version = true` is refused by name rather than read as 1 |
 | `env_order['explicit_envs'] names a top-level setting, not an environment` | the placement trap, caught by name: `explicit_envs` was written below `[env_order]` and became an ordering entry |
+| `<key> references GitHub variable <NAME>, which is not set` | no repository or organization variable of that name reaches the repository. Set it with `gh variable set <NAME>`; the next run reads it, no pull request needed. A variable on a cell's `<env>-plan`, `<env>-apply` or shared `<env>` Environment is never read, and on GitHub Free an organization variable does not reach a private repository ([`../CONTRACT.md`](../CONTRACT.md) §Variable references) |
+| `<key> references GitHub variable <NAME>, which is set to an empty value` | a reference never means an empty string; give the variable a value or write the value into the file |
+| `<key> references GitHub variable "<name>"; GitHub variable names are uppercase` | GitHub stores every variable name uppercase. Write the reference with the spelling the message gives |
+| `<key> references GitHub variable '<name>', which is not a GitHub variable name` | the name is empty or holds a character GitHub refuses in a variable name. Names are `[A-Z_][A-Z0-9_]*` |
+| `<key> references GitHub variable <NAME>, but this step received no GitHub variables` | either the engine did not pass `github-vars` to the step reading the file, or no repository or organization variable reaches the repository at all. With variables set, report it as an engine defect |
 | `env_order is cyclic: <a> -> <b> -> <a>` | the environments order each other in a loop, so none of them can go first. The path names the loop in apply order; an env listing itself is the one-node case. Drop one of the entries |
 
 **Trap 1: a top-level setting written below a `[table]` header.** TOML puts a

@@ -206,7 +206,7 @@ def test_shared_name_outside_the_derived_environments_is_refused(tmp_path):
     """
     write_table(tmp_path, "shared = true\n")
     with pytest.raises(SystemExit) as e:
-        onboard._resolve_shared(tmp_path, ["dev-us"])
+        onboard._resolve_shared(tmp_path, ["dev-us"], "o/r", {})
     assert str(e.value) == (
         "[environments.dev-eu] in .github/shipmate.toml holds `shared = true`, but no stack "
         "declares 'dev-eu'. Its environments are: dev-us."
@@ -480,7 +480,7 @@ def test_main_calls_every_stage_in_order():
         "_derive_envs()",
         "_variables()",
         "_refuse_diverging_app_id(args.app_id, variables)",
-        "_resolve_shared(root, envs)",
+        "_resolve_shared(root, envs, repo, variables)",
         "_org_plan(ctx['repo'].split('/', 1)[0])",
         "_refuse_unreachable_org_variables(ctx)",
         "_refuse_org_assertion_mismatch(ctx)",
@@ -1345,6 +1345,81 @@ def test_an_invalid_table_refuses_before_any_write(monkeypatch, tmp_path):
         "::error::environment dev-eu: shared must be a boolean, got str. "
         "Write shared = true or shared = false, unquoted."
     )
+
+
+def write_referencing_table(root):
+    """A `.github/shipmate.toml` whose shared `dev-eu` takes its region from DEV_EU_REGION."""
+    (root / ".github").mkdir(exist_ok=True)
+    (root / ".github" / "shipmate.toml").write_text(
+        'layout = "dry"\n\n[environments.dev-eu]\nregion = { var = "DEV_EU_REGION" }\n'
+        "shared = true\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+
+
+def org_region(value):
+    return {ORG_VARS: [{"variables": [{"name": "DEV_EU_REGION", "value": value}]}]}
+
+
+def test_a_repository_variable_resolves_a_reference(monkeypatch, tmp_path):
+    """A reference-holding table resolves from the repository listing, and `shared` is read
+    from the resolved table. Mutation: pass `variables=None` to `parse_table`, which reads
+    the absent SHIPMATE_GITHUB_VARS and refuses."""
+    monkeypatch.delenv("SHIPMATE_GITHUB_VARS", raising=False)
+    monkeypatch.setattr(onboard, "_run", make_gh({ORG_VARS: NO_ORG_VARS}))
+    write_referencing_table(tmp_path)
+    shared = onboard._resolve_shared(tmp_path, ["dev-eu"], "o/r", {"DEV_EU_REGION": "eu-west-1"})
+    assert shared == {"dev-eu"}
+
+
+def test_an_organization_variable_resolves_a_reference(monkeypatch, tmp_path):
+    """Mutation: pass only the repository `variables` to `parse_table`, so the name reads
+    as unset."""
+    monkeypatch.delenv("SHIPMATE_GITHUB_VARS", raising=False)
+    monkeypatch.setattr(onboard, "_run", make_gh(org_region("eu-west-1")))
+    write_referencing_table(tmp_path)
+    assert onboard._resolve_shared(tmp_path, ["dev-eu"], "o/r", {}) == {"dev-eu"}
+
+
+def test_the_repository_variable_wins_over_the_organization_one(monkeypatch, tmp_path):
+    """GitHub gives a repository variable precedence over an organization variable of the
+    same name. Mutation: swap the merge order, so the organization's empty value refuses."""
+    monkeypatch.delenv("SHIPMATE_GITHUB_VARS", raising=False)
+    monkeypatch.setattr(onboard, "_run", make_gh(org_region("")))
+    write_referencing_table(tmp_path)
+    shared = onboard._resolve_shared(tmp_path, ["dev-eu"], "o/r", {"DEV_EU_REGION": "eu-west-1"})
+    assert shared == {"dev-eu"}
+
+
+def test_a_failed_organization_read_names_the_table_reference(monkeypatch, tmp_path):
+    """From the table path the operator may have passed no `--vars-at-org`, so that flag's
+    remedy would be false here. Mutation: pass the `--vars-at-org` remedy from
+    `_resolve_shared`."""
+    monkeypatch.setattr(
+        onboard, "_run", make_gh({ORG_VARS: SystemExit("gh: Forbidden (HTTP 403)")})
+    )
+    write_referencing_table(tmp_path)
+    with pytest.raises(SystemExit) as excinfo:
+        onboard._resolve_shared(tmp_path, ["dev-eu"], "o/r", {"DEV_EU_REGION": "eu-west-1"})
+    assert str(excinfo.value) == (
+        "could not read the organization variables reaching o/r: gh: Forbidden (HTTP 403)\n"
+        "A fine-grained token needs this repository's Variables read permission, and "
+        "`--slurp` needs a recent `gh`. .github/shipmate.toml environments.dev-eu.region "
+        "references GitHub variable DEV_EU_REGION, and onboard resolves a reference from "
+        "these variables and the repository's."
+    )
+
+
+def test_a_table_without_a_reference_makes_no_api_call(monkeypatch, tmp_path):
+    """Mutation: call `_reaching_variables` whether or not the file holds a reference."""
+
+    def refuse(*args, **kwargs):
+        raise AssertionError(f"unexpected call: {args}")
+
+    monkeypatch.setattr(onboard, "_run", refuse)
+    write_table(tmp_path, "shared = true\n")
+    assert onboard._resolve_shared(tmp_path, ["dev-eu"], "o/r", {}) == {"dev-eu"}
 
 
 def test_the_shared_flag_is_gone(monkeypatch, tmp_path, capsys):

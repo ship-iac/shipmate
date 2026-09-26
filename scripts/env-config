@@ -73,14 +73,12 @@ def interpreter_refusal():
     )
 
 
-def parse_table(text):
-    """The table parsed from `text`, or `SystemExit`.
+def load_toml(text):
+    """The table parsed from `text` with no reference resolved, or `SystemExit`.
 
-    Shared by every reader: `read_table` below reads the file with `git show`, while
-    `contents_text` reads the same bytes through the contents API for the jobs that check
-    out no consumer content. The interpreter check runs ahead of the import, because a module-level
-    `import tomllib` would raise `ModuleNotFoundError` before any caller could report the
-    real cause -- an older runner image than CONTRACT.md requires.
+    The interpreter check runs ahead of the import, because a module-level `import tomllib`
+    would raise `ModuleNotFoundError` before any caller could report the real cause -- an
+    older runner image than CONTRACT.md requires.
 
     A leading U+FEFF is refused, not stripped: `tomllib` rejects it, `git show` and the
     contents API both deliver it, and every reader must reach the same verdict on the same
@@ -95,6 +93,113 @@ def parse_table(text):
         return tomllib.loads(text)
     except tomllib.TOMLDecodeError as exc:
         raise SystemExit(f"::error::{CONFIG_PATH} is not valid TOML: {exc}") from exc
+
+
+def _is_reference(value):
+    """Exactly `{ var = "NAME" }`. Any other mapping holding `var` is ordinary data."""
+    return isinstance(value, dict) and len(value) == 1 and isinstance(value.get("var"), str)
+
+
+def _walk(value, path):
+    """`(path, node)` for every node, depth first. List items render as `key[i]`."""
+    yield path, value
+    if isinstance(value, dict) and not _is_reference(value):
+        for key, child in value.items():
+            yield from _walk(child, f"{path}.{key}")
+    elif isinstance(value, list):
+        for i, child in enumerate(value):
+            yield from _walk(child, f"{path}[{i}]")
+
+
+def references(parsed):
+    """`(dotted key path, NAME)` for every reference in a raw `load_toml` result, by path.
+
+    The root table is never a reference: a file holding only `var = "X"` is a setting.
+    """
+    return sorted(
+        (path, node["var"])
+        for key, child in parsed.items()
+        for path, node in _walk(child, key)
+        if _is_reference(node)
+    )
+
+
+def _environ_variables(path, name):
+    """The GitHub variables the engine wired into this step as `SHIPMATE_GITHUB_VARS`.
+
+    Absent or empty refuses before any lookup could blame `name`: every action defaults
+    `github-vars` to "", so an unpassed input arrives empty, not absent.
+    """
+    raw = os.environ.get("SHIPMATE_GITHUB_VARS")
+    if not raw:
+        raise SystemExit(
+            f"::error::{CONFIG_PATH} {path} references GitHub variable {name}, but this step "
+            "received no GitHub variables: the engine did not pass github-vars to this step, "
+            "or the repository reaches no variables at all."
+        )
+    from _shipmate import _load
+
+    return _load("env-inject").parse_enumeration(raw, "SHIPMATE_GITHUB_VARS")
+
+
+#: GitHub's variable-name charset in either case; a lowercase name refuses separately, naming
+#: its uppercase spelling.
+_VARIABLE_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+
+
+def _lookup(path, name, variables):
+    """The value of `name`. No refusal quotes a value."""
+    where = f"::error::{CONFIG_PATH} {path} references GitHub variable"
+    if not _VARIABLE_NAME.fullmatch(name):
+        raise SystemExit(
+            f"{where} {name!r}, which is not a GitHub variable name ([A-Z_][A-Z0-9_]*)."
+        )
+    if name != name.upper():
+        raise SystemExit(
+            f'{where} "{name}"; GitHub variable names are uppercase. Write '
+            f'{{ var = "{name.upper()}" }}.'
+        )
+    if name not in variables:
+        raise SystemExit(
+            f"{where} {name}, which is not set. A reference reads repository and "
+            "organization variables; the variables of a cell's <env>-plan, <env>-apply or "
+            "shared <env> Environment are never read."
+        )
+    if variables[name] == "":
+        raise SystemExit(f"{where} {name}, which is set to an empty value.")
+    return variables[name]
+
+
+def _replace(value, path, variables):
+    if _is_reference(value):
+        return _lookup(path, value["var"], variables)
+    if isinstance(value, dict):
+        return {k: _replace(v, f"{path}.{k}", variables) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_replace(v, f"{path}[{i}]", variables) for i, v in enumerate(value)]
+    return value
+
+
+def parse_table(text, variables=None):
+    """The table parsed from `text`, each `{ var = "NAME" }` replaced by that GitHub
+    variable's value, or `SystemExit`.
+
+    Shared by every reader: `read_table` below reads the file with `git show`, while
+    `contents_text` reads the same bytes through the contents API for the jobs that check
+    out no consumer content. Resolving here and nowhere else is what makes every reader see
+    the same values.
+
+    `variables` maps uppercase names to values. `None` reads `SHIPMATE_GITHUB_VARS`, and
+    only when the file holds a reference: a file without one never touches it. An unset,
+    empty, lowercase or malformed name refuses, naming the key path and the name.
+    """
+    parsed = load_toml(text)
+    refs = references(parsed)
+    if not refs:
+        return parsed
+    if variables is None:
+        variables = _environ_variables(*refs[0])
+    return {key: _replace(value, key, variables) for key, value in parsed.items()}
 
 
 def read_table(run=None):
@@ -135,7 +240,7 @@ def contents_text(path, fetch=None):
     Anything that is not a base64 blob is UNREADABLE, not empty: a >1 MB file answers with
     `encoding: "none"` and empty `content`, which would otherwise decode to a readable
     EMPTY file a caller reads as clean. A leading U+FEFF is left in place for the reason
-    `parse_table` gives.
+    `load_toml` gives.
 
     `fetch` reads the JSON, defaulting to this module's `gh api` call. It is a seam, not
     flexibility: `doctor` passes its own reader so that the mocks in its tests keep
@@ -694,9 +799,10 @@ def resolve(table, env, path, workload):
     `path` is the calling detect's tier, never inferred; a shared environment resolves
     `aws.apply` on both paths, and `config_path` reports the tier actually consulted
     rather than the one requested. `env_binding` is the GitHub Environment the cell's job
-    binds: the bare `env` when shared, `<env>-<path>` otherwise. There is no fallback to
-    `vars.*`: an environment with no entry resolves an empty role and the caller skips the
-    credentials step.
+    binds: the bare `env` when shared, `<env>-<path>` otherwise. The table chooses; a
+    reference in it was resolved from a repository or organization variable by
+    `parse_table`. An environment with no entry resolves an empty role and the caller skips
+    the credentials step.
 
     The workload tier is keyed by the raw `workload` tag value, never by a normalized
     form of it: `net-edge` and `net_edge` are two workloads. The environment's own `vars`

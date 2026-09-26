@@ -22,6 +22,12 @@ inputs:
   github-token:
     description: 'GITHUB_TOKEN with issues:write and pull-requests:write (reactions + reject comments + PR reads).'
     required: true
+  github-vars:
+    description: >-
+      The caller's reachable GitHub variables, serialised with toJSON. Read only when the
+      environment table holds a variable reference; empty when unwired.
+    required: false
+    default: ""
 outputs:
   authorized:
     description: true when the command is valid and authorized.
@@ -364,6 +370,7 @@ runs:
         SHIPMATE_ENV_TOKEN: ${{ steps.envtoken.outputs.token }}
         PR_NUMBER: ${{ inputs.pr-number }}
         SHIPMATE_DOCTOR_MODE: report
+        SHIPMATE_GITHUB_VARS: ${{ inputs.github-vars }}
         SHIPMATE_APP_ID: ${{ inputs.app-id }}
         SHIPMATE_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         SHIPMATE_CELLS_DIR: doctor-cells
@@ -488,6 +495,7 @@ runs:
       env:
         # The workflow token, not the App token: this reads repository contents only.
         GH_TOKEN: ${{ inputs.github-token }}
+        SHIPMATE_GITHUB_VARS: ${{ inputs.github-vars }}
       run: python3 "$GITHUB_ACTION_PATH/../../scripts/gate-config"
 
     - name: Gate configuration unreadable
@@ -498,7 +506,7 @@ runs:
         PR_NUMBER: ${{ inputs.pr-number }}
       run: |
         set -euo pipefail
-        gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -f body=":x: shipmate: could not resolve the gate settings from \`.github/shipmate.toml\` on the default branch, so this command was not run. The file is not merged there, or it does not validate — this run's log says which. Fix that and comment again." >/dev/null
+        gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -f body=":x: shipmate: could not resolve the gate settings from \`.github/shipmate.toml\` on the default branch, so this command was not run. The file is not merged there, it does not validate, or a variable it references is unset or empty — this run's log says which. Fix that and comment again." >/dev/null
         # The resolve's own failure, re-raised: `continue-on-error` above kept the job alive
         # long enough to post this, and a green run over an unauthorized command is not a
         # verdict this action may render.

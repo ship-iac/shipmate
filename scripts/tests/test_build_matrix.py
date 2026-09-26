@@ -660,6 +660,7 @@ def test_build_matrix_action_declares_its_inputs():
         "head-sha": "",
         "no-pull-request": "false",
         "tags": "",
+        "github-vars": "",
     }
 
 
@@ -677,6 +678,7 @@ def test_build_matrix_action_hands_the_script_the_names_it_reads():
         "SHIPMATE_HEAD_SHA": "${{ inputs.head-sha }}",
         "SHIPMATE_NO_PULL_REQUEST": "${{ inputs.no-pull-request }}",
         "SHIPMATE_TAGS": "${{ inputs.tags }}",
+        "SHIPMATE_GITHUB_VARS": "${{ inputs.github-vars }}",
         "GH_TOKEN": "${{ github.token }}",
     }
 

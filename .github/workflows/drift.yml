@@ -44,6 +44,7 @@ jobs:
           # Skips build-matrix's head-repository and head-commit refusals. A sweep has no pull
           # request; a plan workflow must never set this.
           no-pull-request: "true"
+          github-vars: ${{ toJSON(vars) }}
 
   drift:
     needs: detect

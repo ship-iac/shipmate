@@ -115,6 +115,7 @@ jobs:
           # Passed through raw, never defaulted: an empty decision means the review signal never
           # arrived, and empty refuses the run.
           review-decision: ${{ needs.review.outputs.decision }}
+          github-vars: ${{ toJSON(vars) }}
 
   # A targeted apply is single-env by design, so its pending wave set is exactly one env-level's
   # wave matrix. It runs through the same engine the deploy and bare-apply paths use, rather than
