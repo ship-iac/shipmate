@@ -199,7 +199,7 @@ never used.
   supply. Two sources for one name would make precedence load-bearing, so there
   is exactly one writer and no precedence rule. `terramate.config.run.env` is
   applied after it, inside `terramate run`; the `run.env` rule below says which
-  names that may set.
+  names it may set.
   - **The injected names are lowercase after the prefix.** `TF_VAR_ENV` is a
     different variable from the `TF_VAR_env` OpenTofu reads, and the table's
     `vars` allowlist accepts either spelling. Nothing refuses the mis-cased one:
