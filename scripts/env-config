@@ -473,7 +473,8 @@ def _check_environment(entry, env):
 
 
 def _check_dry_coverage(environments, matrix_envs):
-    """`tf_vars` derives both identity variables from the table, so every cell needs an entry.
+    """The `tf_vars` layout derives both identity variables from the table, so every cell
+    needs an entry.
 
     An empty region is no region: `plan-classify` excludes an empty `TF_VAR_*` from the
     fingerprint, so the layout would derive nothing the cell could be distinguished by.
