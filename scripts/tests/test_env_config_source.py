@@ -256,24 +256,6 @@ def test_a_failing_gh_refuses(monkeypatch):
     assert str(exc.value).startswith("::error::")
 
 
-def test_run_forwards_its_env_to_the_subprocess(monkeypatch):
-    """The `env` argument reaches `subprocess.run`, which no caller-side test can show:
-    `build-matrix`'s run.env probe stubs `_run` itself, so it pins that the probe *passes*
-    an environment, not that this wrapper hands it on. Dropping it silently reverts the
-    probe to the ambient environment, where every sentinel comparison passes.
-
-    Mutation: delete `env=env` from the `subprocess.run` call -- `seen` becomes None."""
-    seen = []
-
-    def fake_subprocess_run(args, capture_output=False, text=False, env=None):
-        seen.append(env)
-        return types.SimpleNamespace(returncode=0, stdout="", stderr="")
-
-    monkeypatch.setattr(ec.subprocess, "run", fake_subprocess_run)
-    ec._run(["gh", "api", "repos/an-org/a-repo"], env={"TF_VAR_env": "SHIPMATE_RT_PROBE"})
-    assert seen == [{"TF_VAR_env": "SHIPMATE_RT_PROBE"}]
-
-
 #: One fixture both readers are driven over. The multi-line string's indentation is the
 #: part a transformation applied by one reader and not the other shows up in.
 _SHARED_TEXT = (

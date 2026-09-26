@@ -16,6 +16,7 @@ out of the enumeration and parsing it as an envelope.
 """
 
 import json
+import subprocess
 
 import pytest
 from _loader import load_script
@@ -281,6 +282,7 @@ def test_a_table_derived_pair_is_never_filtered():
     assert env_inject.compose({"SHIPMATE_TF_VARS": '{"TF_WORKSPACE": "dev-eu"}'}) == (
         {"TF_WORKSPACE": "dev-eu"},
         {},
+        {"TF_WORKSPACE": "dev-eu"},
     )
 
 
@@ -294,6 +296,7 @@ def test_shipmate_vars_is_lifted_out_of_the_enumeration():
     enumeration = {"SHIPMATE_VARS": '{"TF_VAR_myThing": "v"}', "TF_VAR_SIZE": "small"}
     assert env_inject.compose({"SHIPMATE_TF_VARS": "{}", ENUM: json.dumps(enumeration)}) == (
         {"TF_VAR_myThing": "v", "TF_VAR_size": "small"},
+        {},
         {},
     )
 
@@ -318,6 +321,10 @@ def test_the_secret_envelope_set_as_a_variable_is_refused():
     )
 
 
+def _no_run_env_check(table, pairs, environ, run=subprocess.run):
+    """`main`'s `run.env` check, stubbed out; `test_env_inject_run_env.py` pins it."""
+
+
 def test_a_plain_variable_supplies_a_tofu_variable_end_to_end(tmp_path, monkeypatch):
     """The setup promise: a consumer sets the repository variable `TF_VAR_ENDPOINT` and
     `variable "endpoint"` is populated, with no envelope and no per-cell wiring.
@@ -326,6 +333,7 @@ def test_a_plain_variable_supplies_a_tofu_variable_end_to_end(tmp_path, monkeypa
     transport wired and exports nothing through it.
     """
     path = tmp_path / "github_env"
+    monkeypatch.setattr(env_inject, "check_run_env", _no_run_env_check)
     monkeypatch.setenv("GITHUB_ENV", str(path))
     monkeypatch.setenv("SHIPMATE_TF_VARS", '{"TF_VAR_env": "dev-eu"}')
     monkeypatch.setenv(ENUM, '{"TF_VAR_ENDPOINT": "https://api.example.com"}')
@@ -355,6 +363,7 @@ def test_every_secret_is_masked_before_anything_is_written(tmp_path, monkeypatch
         calls.append((capsys.readouterr().out, pairs, path))
 
     monkeypatch.setattr(env_inject, "write_env", fake_write_env)
+    monkeypatch.setattr(env_inject, "check_run_env", _no_run_env_check)
     monkeypatch.setenv("GITHUB_ENV", str(tmp_path / "github_env"))
     monkeypatch.setenv("SHIPMATE_TF_VARS", '{"TF_VAR_env": "dev-eu"}')
     monkeypatch.setenv(SECRETS, '{"TF_VAR_token": "s3cr3t"}')

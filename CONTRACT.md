@@ -197,7 +197,9 @@ never used.
   the cell's `terramate run`. It composes the consumer channels of §Consumer
   variables and secrets into that same write, and refuses any name two channels
   supply. Two sources for one name would make precedence load-bearing, so there
-  is exactly one writer and no precedence rule.
+  is exactly one writer and no precedence rule. `terramate.config.run.env` is
+  applied after it, inside `terramate run`; the `run.env` rule below says which
+  names it may set.
   - **The injected names are lowercase after the prefix.** `TF_VAR_ENV` is a
     different variable from the `TF_VAR_env` OpenTofu reads, and the table's
     `vars` allowlist accepts either spelling. Nothing refuses the mis-cased one:
@@ -345,26 +347,47 @@ never used.
   (`staging`, `dev-eu`) hardcoded anywhere — `shipmate-engine` is the one
   literal exception, spelled identically everywhere it appears because it
   names one fixed thing, not a per-repo variable.
-- A consuming repository's `terramate.config.run.env` must not assign
-  `TF_VAR_env`, `TF_VAR_region` or `TF_WORKSPACE`. Terramate applies `run.env`
-  to the child process after the ambient environment, so such an assignment
-  wins over whatever `env-inject` wrote — and silently: the
-  plan/apply fingerprint is computed outside `terramate run`, so both sides
-  hash the same correct job environment while `tofu` on both sides ran under
-  the rewritten one. Every cell then collapses onto one state key with plan,
-  gate and apply all green. To give local runs a default, put the injected
-  name first in the chain — `tm_try(env.TF_VAR_env, env.env, "dev")`.
-  `TF_DATA_DIR` needs the same resolution, or the per-env `.terraform` split
-  drifts from what tofu receives.
-
-  Every path that calls `compute_cells` injects a sentinel value into those
-  three variables, runs `terramate run … -- env` for one stack,
-  and fails the run when any of them comes back changed: the plan matrix's
-  `detect` job, the post-merge deploy's own detect, and the nightly drift run.
-  Repo-wide config, so one stack answers for the tree. The dispatched and bare
-  `shipmate apply` detects reconstruct their cells from the head's own apply
-  checks instead and never reach this probe — by then the plan run that would
-  have caught it has already happened.
+- For every name in the row's `tf_vars` — the layout's derived names plus the
+  environment's own `vars` — the value `tofu` receives is the table's. A
+  consuming repository's `terramate.config.run.env` may read any name, and may
+  set any name the row does not hold. Terramate applies `run.env` to the child
+  process after the ambient environment, so an assignment to one of the row's
+  names wins over whatever `env-inject` wrote — and silently: the plan/apply
+  fingerprint is computed outside `terramate run`, so both sides hash the same
+  correct job environment while `tofu` on both sides ran under the rewritten
+  one. Cells then collapse onto one state key with plan, gate and apply all
+  green. To give local runs a default, read the injected name first in the
+  chain — `tm_try(env.TF_VAR_env, env.env, "dev")`. To let `run.env` own a
+  variable, leave it out of the table's `vars`.
+  - What the row does not hold stays the consumer's. `TF_VAR_env` is an
+    ordinary variable under `layout = "folder"`, and `TF_WORKSPACE` is the
+    table's only under `workspace` or through a `vars` entry. Under `dry` and
+    `folder`, a `run.env` `TF_WORKSPACE` selects the same workspace at plan and
+    apply, and the cell actions run `scripts/state-path` inside `terramate run`
+    (§State backend), so the state path the cell records is that workspace's.
+    `TF_DATA_DIR` is the same: consumer-declared, never derived by the table,
+    and read inside `terramate run` by `scripts/state-path`. The export policy
+    still reserves both names from GitHub variables and envelopes in every
+    layout (§Export policy), so `run.env` is where a consumer sets them.
+  - Each cell checks the rule before `tofu init`. In the plan, apply, drift and
+    unlock cells, `scripts/env-inject` runs, after writing `$GITHUB_ENV`,
+    `terramate run --no-recursive -C <stack>` with a child that prints the
+    row's `tf_vars` names and their values as JSON and nothing else — never the
+    whole environment, which holds the raw `SHIPMATE_SECRETS` envelope. The
+    expected values stay in the `env-inject` process: `run.env` can rewrite the
+    child's `SHIPMATE_TF_VARS` as easily as `TF_VAR_env`. The cell refuses when
+    a name comes back different from the table's value or unset, when
+    `terramate run` exits non-zero, when the child's output is not a JSON
+    object, and when the step received no stack. A row whose `tf_vars` is empty
+    (`folder` with no `vars`) runs nothing. The comparison is against the real
+    value, so a `run.env` literal equal to it passes in that cell and refuses in
+    any cell where it differs.
+  - `run.env` is evaluated per stack, and a `terramate.config.run.env` block
+    below the root applies to the stacks under it, so no one stack answers for
+    the tree. Each cell checks its own stack, which covers every path that runs
+    a cell, the dispatched and bare `shipmate apply` included. A repository
+    with an overriding `run.env` therefore fails once per affected cell, not
+    once at detect.
 
 ## Environment table
 

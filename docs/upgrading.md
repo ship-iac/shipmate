@@ -85,12 +85,15 @@ session, so a literal `profile` in a `provider` or `backend` block fails there
 while still planning fine locally. See [`aws.md`](aws.md).
 
 **`terramate.config.run.env` rewriting `TF_VAR_*`.** Terramate applies `run.env`
-after the ambient environment, so an assignment to `TF_VAR_env`, `TF_VAR_region`
-or `TF_WORKSPACE` wins over whatever the cell was given — invisibly,
-because the fingerprint is computed outside `terramate run` and so agrees on
-both sides. `detect` injects a sentinel into those three variables and fails the
-run when one comes back changed. [`../CONTRACT.md`](../CONTRACT.md) §Env model
-has the rule and the `tm_try` form that keeps a local default.
+after the ambient environment, so an assignment to a name the environment table
+resolves for a cell — `TF_VAR_env` and `TF_VAR_region` under `dry`,
+`TF_WORKSPACE` under `workspace`, any name in an environment's `vars` — wins
+over whatever the cell was given, invisibly, because the fingerprint is computed
+outside `terramate run` and so agrees on both sides. Each cell reads those names
+back through `terramate run` before `tofu init` and refuses when one comes back
+changed or unset. A name the table does not resolve for the cell is yours to
+set. [`../CONTRACT.md`](../CONTRACT.md) §Env model has the rule and the
+`tm_try` form that keeps a local default.
 
 ## Opt-in: per-environment review gating
 

@@ -11,6 +11,8 @@ whose values are masked before anything is written.
 import json
 import os
 import re
+import subprocess
+import sys
 import uuid
 
 #: The matrix row's resolved `tf_vars`, serialised by `toJSON` at the cell step.
@@ -236,7 +238,7 @@ def write_env(pairs, path):
 
 
 def compose(environ):
-    """The cell's whole environment, and the subset of it that is secret.
+    """The cell's whole environment, the subset of it that is secret, and the resolved table.
 
     Channel order is the composition contract: the table is the engine's own identity
     and is never filtered, the enumeration is consumer configuration swept up wholesale
@@ -255,7 +257,7 @@ def compose(environ):
             (_SECRETS, secrets),
         ]
     )
-    return merged, secrets
+    return merged, secrets, table
 
 
 def mask(values):
@@ -283,10 +285,94 @@ def mask(values):
                 )
 
 
+#: The child `terramate run` executes: the checked names' values only, never the whole
+#: environment, which holds the raw `SHIPMATE_SECRETS` envelope.
+_REPORT = "import json, os, sys; print(json.dumps({n: os.environ.get(n) for n in sys.argv[1:]}))"
+
+
+def _parse_report(stdout, stack):
+    """The name-to-value object the child printed, refusing anything else."""
+    try:
+        reported = json.loads(stdout)
+    except ValueError:
+        reported = None
+    if not isinstance(reported, dict):
+        raise SystemExit(
+            f"::error::terramate run in {stack} did not print the JSON object env-inject asked "
+            "for, so terramate.config.run.env cannot be checked against the environment table."
+        )
+    return reported
+
+
+def check_run_env(table, pairs, environ, run=subprocess.run):
+    """Refuse when `terramate.config.run.env` changes a name the table resolved for this cell.
+
+    Terramate applies `run.env` after the ambient environment, and the plan/apply fingerprint is
+    computed outside `terramate run`, so an override is invisible to both. The expectation stays
+    in this process: the child's own `SHIPMATE_TF_VARS` is as rewritable as `TF_VAR_env`.
+    Every failure refuses; `tofu init` would run under the same `run.env` one step later.
+    """
+    if not table:
+        return
+    stack = environ.get("STACK", "")
+    if not stack:
+        raise SystemExit(
+            "::error::STACK is empty, and this cell's environment table resolves "
+            f"{', '.join(sorted(table))}. The cell step must pass the stack directory as STACK, "
+            "so terramate.config.run.env can be checked against the table."
+        )
+    p = run(
+        [
+            "terramate",
+            "run",
+            "--disable-safeguards=git-out-of-sync",
+            "--no-recursive",
+            "-C",
+            stack,
+            "--",
+            sys.executable,
+            "-c",
+            _REPORT,
+            *sorted(table),
+        ],
+        capture_output=True,
+        text=True,
+        env={**environ, **pairs},
+    )
+    if p.returncode != 0:
+        # Raw, never reflowed: `::add-mask::` matches exact strings, so collapsing whitespace
+        # would unmask a secret that terramate echoes in an evaluation error.
+        sys.stderr.write(p.stderr)
+        raise SystemExit(
+            f"::error::terramate run in {stack} exited {p.returncode} while checking "
+            "terramate.config.run.env. Terramate's output is above."
+        )
+    reported = _parse_report(p.stdout, stack)
+    for name in sorted(table):
+        value = table[name]
+        got = reported.get(name)
+        if got != value:
+            # Never print `got`: run.env may assign a secret, and `repr` escaping defeats its mask.
+            what = (
+                f"unsets {name} for {stack}, and the environment table resolves {value!r}"
+                if got is None
+                else f"sets {name} for {stack} to a different value than the environment table "
+                f"resolves ({value!r})"
+            )
+            raise SystemExit(
+                f"::error::terramate.config.run.env {what}. The table decides a cell's "
+                "identity: plan and apply would both run under the rewritten value, and the "
+                "fingerprint, computed outside `terramate run`, would agree. Stop assigning "
+                f'{name} in run.env, or read it first: tm_try(env.{name}, "<local default>"). '
+                "See CONTRACT.md §Env model."
+            )
+
+
 def main():
-    pairs, secrets = compose(os.environ)
+    pairs, secrets, table = compose(os.environ)
     mask(secrets.values())
     write_env(pairs, os.environ["GITHUB_ENV"])
+    check_run_env(table, pairs, os.environ)
 
 
 if __name__ == "__main__":

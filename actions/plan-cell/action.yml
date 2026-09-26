@@ -61,6 +61,7 @@ runs:
         SHIPMATE_TF_VARS: ${{ inputs.tf-vars }}
         SHIPMATE_GITHUB_VARS: ${{ inputs.github-vars }}
         SHIPMATE_SECRETS: ${{ inputs.consumer-secrets }}
+        STACK: ${{ inputs.stack }}
       run: python3 "$GITHUB_ACTION_PATH/../../scripts/env-inject"
 
     - name: Stack slug

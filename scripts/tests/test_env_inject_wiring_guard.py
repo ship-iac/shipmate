@@ -45,6 +45,7 @@ _INJECT_ENV = {
     "SHIPMATE_TF_VARS": "${{ inputs.tf-vars }}",
     "SHIPMATE_GITHUB_VARS": "${{ inputs.github-vars }}",
     "SHIPMATE_SECRETS": "${{ inputs.consumer-secrets }}",
+    "STACK": "${{ inputs.stack }}",
 }
 
 #: The identity input every cell step passes, and the only `with:` entry this file owns.
