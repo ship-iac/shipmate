@@ -25,6 +25,18 @@ def test_classify_no_op_and_read_are_not_changes():
     assert pc.classify(plan) == {"changed": False, "add": 0, "change": 0, "destroy": 0}
 
 
+def test_classify_import_only_is_a_change():
+    """Reddens when classify ignores `change.importing`."""
+    plan = {"resource_changes": [{"change": {"actions": ["no-op"], "importing": {"id": "x"}}}]}
+    assert pc.classify(plan) == {"changed": True, "add": 0, "change": 0, "destroy": 0}
+
+
+def test_classify_applied_import_block_is_not_a_change():
+    """Reddens when classify tests for the `importing` key rather than a non-null value."""
+    plan = {"resource_changes": [{"change": {"actions": ["no-op"], "importing": None}}]}
+    assert pc.classify(plan) == {"changed": False, "add": 0, "change": 0, "destroy": 0}
+
+
 def test_classify_output_only_change_is_a_change():
     plan = {"resource_changes": [], "output_changes": {"name": {"actions": ["update"]}}}
     assert pc.classify(plan)["changed"] is True

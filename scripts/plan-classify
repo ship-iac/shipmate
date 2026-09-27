@@ -15,7 +15,13 @@ def classify(plan):
     """Classify an OpenTofu `show -json` plan dict into change counts."""
     rcs = plan.get("resource_changes") or []
     # "no-op" means unchanged, and "read" is a deferred data-source read, not a real change.
-    changed = [r for r in rcs if any(a not in ("no-op", "read") for a in r["change"]["actions"])]
+    # An import renders "no-op" with `importing` set; once applied, `importing` is null.
+    changed = [
+        r
+        for r in rcs
+        if any(a not in ("no-op", "read") for a in r["change"]["actions"])
+        or r["change"].get("importing")
+    ]
     oc = plan.get("output_changes") or {}
     out_changed = any(c.get("actions", ["no-op"]) != ["no-op"] for c in oc.values())
     add = sum(1 for r in changed if "create" in r["change"]["actions"])
