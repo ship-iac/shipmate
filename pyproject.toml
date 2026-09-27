@@ -10,7 +10,7 @@ requires-python = ">=3.11"
 package = false
 
 [tool.pytest.ini_options]
-# dev/ holds dev-time tooling (the consumer re-pin CLI and its helpers), not
+# dev/ holds dev-time tooling (the consumer re-pin CLI), not
 # shipped runtime surface, so it is not importable from scripts/. Tests of that
 # tooling import it by name; this is what makes `import repin_consumer` resolve
 # without a sys.path hack in every test module.
@@ -29,53 +29,18 @@ dev = [
     "ruff>=0.16.0",
     "ty>=0.0.64",  # Astral type checker — still beta; kept non-blocking in CI
     "pytest>=8",
-    "pyyaml>=6",         # parse composite action.yml in the shellcheck test
+    "pyyaml>=6",         # parse workflow and action YAML in the guard tests
     "shellcheck-py>=0.10",  # pip-packaged shellcheck binary (cross-platform)
 ]
 
 [tool.ruff]
 target-version = "py311"
 line-length = 100
-# The helper scripts are executable, extension-less files (they run as GHA
-# steps, not as an importable module), so ruff won't discover them by glob —
-# list them explicitly.
-extend-include = [
-    "scripts/apply-all-detect",
-    "scripts/apply-cell-summary",
-    "scripts/apply-comment",
-    "scripts/apply-complete",
-    "scripts/apply-detect",
-    "scripts/apply-gate",
-    "scripts/apply-snapshot",
-    "scripts/authorize",
-    "scripts/build-matrix",
-    "scripts/comment-parse",
-    "scripts/deploy-detect",
-    "scripts/dispatch-body",
-    "scripts/doctor",
-    "scripts/doctor-cells",
-    "scripts/drift-cell-summary",
-    "scripts/drift-issues",
-    "scripts/env-config",
-    "scripts/env-inject",
-    "scripts/env-order",
-    "scripts/gate-config",
-    "scripts/gate-state",
-    "scripts/gate-status-body",
-    "scripts/lock-info",
-    "scripts/mirror-checks",
-    "scripts/onboard",
-    "scripts/pending-checks",
-    "scripts/plan-cell-summary",
-    "scripts/plan-classify",
-    "scripts/plan-crypt",
-    "scripts/pr-facts",
-    "scripts/register-app",
-    "scripts/state-path",
-    "scripts/summary-comment",
-    "scripts/verify-environments",
-    "scripts/waves",
-]
+# The helper scripts are extension-less, so the glob feeds every non-gitignored
+# file under scripts/, at any depth, to ruff as Python. Non-Python test data
+# must live under scripts/tests/fixtures/.
+extend-include = ["scripts/*"]
+extend-exclude = ["scripts/tests/fixtures"]
 
 [tool.ruff.lint]
 select = [
@@ -105,7 +70,7 @@ max-complexity = 8
 "scripts/tests/*" = ["S101", "S603", "S607"]
 
 [tool.ty.environment]
-# dev/ is on the pytest pythonpath, not on ty's module path, so `import pinrefs`
-# / `import repin_consumer` read as unresolved without this. Same list, one
-# consumer each: pytest resolves them at runtime, ty at check time.
+# dev/ is on the pytest pythonpath but not on ty's module path, so
+# `import repin_consumer` reads as unresolved without this. ty resolves the
+# pythonpath's other two entries, scripts/ and scripts/tests/, on its own.
 extra-paths = ["dev"]

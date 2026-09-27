@@ -11,7 +11,6 @@ abort this module's collection and redden an unrelated scripts/ edit's run. CI c
 fetch-depth: 0, where the condition is always False.
 """
 
-import pinrefs
 import pytest
 import repin_consumer as rc
 
@@ -26,7 +25,7 @@ OTHER = "c" * 40
 REAL = "4914d074df71f8c3d0b4ccb73a22c153cacaca7c"
 
 pytestmark = pytest.mark.skipif(
-    pinrefs.resolve(REAL) is None,
+    rc.resolve(REAL) is None,
     reason=(
         f"history fixture commit {REAL[:12]} not in this clone -- these tests read real "
         "history; check out with fetch-depth: 0"
@@ -280,7 +279,7 @@ def test_consumer_survivor_scan_ignores_a_correctly_rewritten_quoted_ref(tmp_pat
 
     planned = rc._plan_consumer(root, NEW, None)
 
-    assert pinrefs.scan_survivors([(p.path, p.text) for p in planned], NEW) == []
+    assert rc.scan_survivors([(p.path, p.text) for p in planned], NEW) == []
 
 
 def test_main_reports_partial_rewrite_when_a_ref_survives(tmp_path, capsys):
@@ -368,7 +367,7 @@ def test_non_ancestor_is_flagged_unreachable(monkeypatch):
     class _R:
         returncode = 1
 
-    monkeypatch.setattr(pinrefs, "git", lambda *a: _R())
+    monkeypatch.setattr(rc, "git", lambda *a: _R())
     assert rc.unreachable_from_main("0" * 40) is True
 
 
@@ -395,7 +394,7 @@ def test_git_error_on_origin_main_falls_through_to_main(monkeypatch):
             return _R(1)  # real "no" from merge-base --is-ancestor
         raise AssertionError(f"unexpected base {base!r}")
 
-    monkeypatch.setattr(pinrefs, "git", fake_git)
+    monkeypatch.setattr(rc, "git", fake_git)
     assert rc.unreachable_from_main("0" * 40) is True
 
 
@@ -407,7 +406,7 @@ def test_git_error_on_every_base_reports_cannot_judge(monkeypatch):
         def __init__(self, returncode):
             self.returncode = returncode
 
-    monkeypatch.setattr(pinrefs, "git", lambda *a: _R(128))
+    monkeypatch.setattr(rc, "git", lambda *a: _R(128))
     assert rc.unreachable_from_main("0" * 40) is None
 
 
@@ -418,7 +417,7 @@ def test_main_refuses_when_no_mainline_ref_resolves(tmp_path, capsys, monkeypatc
     Mutation: return False instead of None from ``unreachable_from_main``'s fall-through -- the
     rewrite then succeeds (exit 0) and the file carries the new SHA.
     """
-    real_git = pinrefs.git
+    real_git = rc.git
 
     class _R:
         returncode = 128
@@ -431,7 +430,7 @@ def test_main_refuses_when_no_mainline_ref_resolves(tmp_path, capsys, monkeypatc
         tmp_path,
         {".github/workflows/plan.yml": f"      - uses: ship-iac/shipmate/actions/setup@{OLD}\n"},
     )
-    monkeypatch.setattr(pinrefs, "git", fake_git)
+    monkeypatch.setattr(rc, "git", fake_git)
 
     code = rc.main(["--repo", str(root), "--sha", REAL])
 

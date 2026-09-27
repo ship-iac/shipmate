@@ -12,13 +12,12 @@ Contribution etiquette and licensing: [`CONTRIBUTING.md`](../CONTRIBUTING.md).
 - `dev/` — maintainer tooling you run by hand, never from a workflow. Nothing in
   `actions/` or `.github/workflows/` references it and it adds no action input.
   It exists because consumers pin by SHA and all seven refs move together:
-  - `pinrefs.py` — the shared file and git helpers.
-  - `repin_consumer.py` — re-pin a consuming repo, refusing a target not reachable from
-    `origin/main`.
+  `repin_consumer.py` re-pins a consuming repo, refusing a target not reachable
+  from `origin/main`.
 
-  [`releasing.md`](releasing.md) is the runbook that drives them.
+  [`releasing.md`](releasing.md) is the runbook that drives it.
   `pyproject.toml` puts `dev/` on the pytest `pythonpath`. That is how the
-  tests under `scripts/tests/` import `pinrefs`.
+  tests under `scripts/tests/` import `repin_consumer`.
 - `app/` — the GitHub App manifest.
 - `docs/` — these pages.
 
