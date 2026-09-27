@@ -30,7 +30,6 @@ from _shipmate import _load
 
 ad = _load("apply-detect")
 bm = _load("build-matrix")
-wv = _load("waves")
 eo = _load("env-order")
 # No apply-gate load of its own -- see deploy-detect and test_detect_app_scoping. The
 # apply-gate functions this path needs are reached through `ad.ag`, so there is no
@@ -125,7 +124,7 @@ def main():
     levels = eo.env_levels(order, {c["environment"] for c in runnable})
     per_level = eo.waves_by_env_level(runnable, deps, levels)
 
-    level_counts = [sum(len(w[f"wave{i}"]) for i in range(wv.MAX_WAVES)) for w in per_level]
+    level_counts = [sum(map(len, w.values())) for w in per_level]
     print(
         f"::notice title=apply-all-detect::head={head} "
         f"cells={len(cells)} pending={len(pending)} envlevels={level_counts} "

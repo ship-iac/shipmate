@@ -4,8 +4,7 @@
 Ordering is over the FULL graph, then filtered to the work set, so transitive
 order through unchanged stacks is preserved and empty middle waves are normal.
 
-A module, never a program: apply-detect, env-order and the detect scripts
-`_load` it.
+A module, never a program: apply-detect and env-order `_load` it.
 """
 
 import json

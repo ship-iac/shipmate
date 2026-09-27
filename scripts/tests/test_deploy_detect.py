@@ -175,7 +175,7 @@ def _wave_cells(parsed):
         c
         for lvl in range(dd.eo.MAX_ENV_LEVELS)
         for w in [json.loads(parsed[f"envlevel{lvl}_waves"])]
-        for i in range(dd.wv.MAX_WAVES)
+        for i in range(dd.ad.wv.MAX_WAVES)
         for c in w[f"wave{i}"]
     ]
 
