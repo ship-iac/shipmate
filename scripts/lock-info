@@ -25,7 +25,6 @@ hosted runner), so it cannot attribute a run, and a caller that could see it
 would eventually render it as if it could.
 """
 
-import json
 import os
 import re
 import sys
@@ -126,14 +125,12 @@ def parse(text):
 
 def main():
     lock = parse(sys.stdin.read())
-    out = os.environ.get("GITHUB_OUTPUT")
-    if out:
-        with open(out, "a", encoding="utf-8") as fh:
-            fh.write(f"held={'true' if lock else 'false'}\n")
-            if lock:
-                fh.write(f"lock_id={lock['id']}\n")
-                fh.write(f"lock_created={lock['created']}\n")
-                fh.write(f"lock_operation={lock['operation']}\n")
+    with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
+        fh.write(f"held={'true' if lock else 'false'}\n")
+        if lock:
+            fh.write(f"lock_id={lock['id']}\n")
+            fh.write(f"lock_created={lock['created']}\n")
+            fh.write(f"lock_operation={lock['operation']}\n")
     if lock:
         print(
             f"::notice title=lock-info::state lock held — id={lock['id']} "
@@ -141,7 +138,6 @@ def main():
         )
     else:
         print("::notice title=lock-info::no state lock reported in this output")
-    print(json.dumps(lock or {}))
 
 
 if __name__ == "__main__":
