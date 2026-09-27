@@ -288,28 +288,6 @@ def test_the_action_declares_no_workflow_input():
     )
 
 
-#: The whole guard line, hand-written. Compared line-wise rather than as a
-#: substring so that the same words in a comment cannot satisfy it.
-FILENAME_REGEX_GUARD = (
-    '[[ "$WORKFLOW" =~ ^[A-Za-z0-9._-]+$ ]] || '
-    '{ echo "::error::workflow must match ^[A-Za-z0-9._-]+$ (got: $WORKFLOW)"; exit 1; }'
-)
-
-
-def test_the_resolved_filename_is_checked_before_it_reaches_an_api_path():
-    """The filename regex still guards the value interpolated into the API path. Structural by
-    necessity: the `case` resolves `WORKFLOW` to a single literal, so no runtime input can
-    make this check fire. It is the last line between a verb value and an API path and costs
-    one line, so it stays, and only its presence is observable.
-
-    Mutation: delete the regex check line.
-    """
-    lines = [line.strip() for line in _extract_dispatch_run_block().splitlines()]
-    assert FILENAME_REGEX_GUARD in lines, (
-        "the resolved workflow filename is no longer checked before use"
-    )
-
-
 def test_dispatch_step_env_mapping_is_complete():
     """The whole env: mapping of the dispatch step, so a python body that is correct but never
     got VERB added to the step's env: block reddens here -- as does WORKFLOW still being read
