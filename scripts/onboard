@@ -46,6 +46,8 @@ import textwrap
 
 from _shipmate import REPO_RE, _load, scrub
 
+ec = _load("env-config")
+
 ENGINE_ENV = "shipmate-engine"
 GATE = "shipmate / gate"
 #: The one repository variable this script writes, and the one name `--vars-at-org` accepts.
@@ -243,7 +245,6 @@ def _resolve_shared(root, envs, repo, variables):
     before the first write. A shared name no stack tags would bind nothing and report
     success, so it is refused.
     """
-    ec = _load("env-config")
     path = root / ec.CONFIG_PATH
     if not path.is_file():
         return set()
@@ -431,15 +432,15 @@ def _reconcile_key(ctx):
 def _env_names(env, shared):
     """[(environment name, role)] for one derived environment; a shared one is reconciled
     as an apply environment."""
-    names = _load("env-config").env_names(env, shared)
+    names = ec.env_names(env, shared)
     return [(name, "apply" if role == "shared" else role) for name, role in names]
 
 
 def _unused_naming(env, shared):
-    """The environment names for the naming this repository does *not* bind."""
-    if env in shared:
-        return [f"{env}-plan", f"{env}-apply"]
-    return [env]
+    """The environment names for the naming this repository does *not* bind: `env_names`
+    under the opposite `shared` setting."""
+    unused = set() if env in shared else {env}
+    return [name for name, _role in ec.env_names(env, unused)]
 
 
 def _naming_conflict(ctx, env):
