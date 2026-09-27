@@ -38,7 +38,7 @@ FOOTER_HINT = "Comment `shipmate help` for the available commands."
 SIZE_BUDGET = 60_000
 HARD_CAP = 65_536
 MIN_PLAN_CHARS = 500
-CELL_KEYS = ("stack", "stack_path", "environment", "add", "change", "destroy", "changed")
+CELL_KEYS = ("stack", "stack_path", "environment", "changed")
 
 #: The consumer names its plan-calling job `shipmate`, and GitHub names a called workflow's
 #: check runs `<caller job> / <callee job>`. A plan cell's callee job name is already
@@ -244,22 +244,41 @@ def build_comment(cells, checks, run_url):
 
 
 _STR_KEYS = ("stack", "stack_path", "environment")
-_INT_KEYS = ("add", "change", "destroy")
+_TALLY = re.compile(
+    r"Plan: (?:\d+ to import, )?(\d+) to add, (\d+) to change, (\d+) to destroy"
+    r"(?:, \d+ to forget)?\."
+)
+_ZERO_COUNT = ("No changes.", "You can apply this plan to save these new output values")
+
+
+def counts(path):
+    """(add, change, destroy) from the `tofu show` text at `path`: its one column-0 `Plan:`
+    tally line, or (0, 0, 0) when it has none and ends in the no-changes or outputs-only
+    sentence. None for a missing file, no recognised line, or two tally lines. Author text
+    (heredoc bodies, multi-line outputs) renders indented, so only column 0 counts. The whole
+    file is read: the tally sits at the end, past the SIZE_BUDGET cap on the rendered text."""
+    if not path.exists():
+        return None
+    hits, zero = [], False
+    with open(path, encoding="utf-8") as fh:
+        for line in fh:
+            line = line.rstrip("\n")
+            if m := _TALLY.fullmatch(line):
+                hits.append(m)
+            zero = zero or line.startswith(_ZERO_COUNT)
+    if len(hits) == 1:
+        return tuple(int(g) for g in hits[0].groups())
+    return (0, 0, 0) if not hits and zero else None
 
 
 def _validate_cell(cell, path):
     """Type-check cell.json values past the missing-keys check. A
     pin-skewed/crafted cell.json can carry the right keys with the wrong
-    types (e.g. `add = "1 |</summary>..."`, or `changed = "false"` — a
-    truthy string) and would otherwise land unescaped in the comment and
-    wedge the gate. `type(v) is int`, not `isinstance`, because
-    `isinstance(True, int)` is `True` and a bool must not pass as an int."""
+    types (e.g. `changed = "false"`, a truthy string that would mark a
+    no-change cell pending)."""
     for k in _STR_KEYS:
         if type(cell[k]) is not str:
             raise SystemExit(f"::error::cell summary {path} key {k!r} must be a string")
-    for k in _INT_KEYS:
-        if type(cell[k]) is not int:
-            raise SystemExit(f"::error::cell summary {path} key {k!r} must be an int")
     if type(cell["changed"]) is not bool:
         raise SystemExit(f"::error::cell summary {path} key 'changed' must be a bool")
 
@@ -268,7 +287,9 @@ def load_cells(cells_dir):
     """(cell, plan_text) per downloaded cell-summary artifact, sorted by
     (environment, stack). A cell.json missing schema keys, or carrying the
     right keys with the wrong types, fails loud — that is plan-cell/summary
-    pin skew, not a state to render around."""
+    pin skew, not a state to render around. Each cell's `add`, `change` and
+    `destroy` are set here from `counts` over its `plan.txt`, whatever
+    cell.json holds; underivable counts become "?" each, with one warning."""
     out = []
     for p in sorted(glob.glob(os.path.join(cells_dir, "**", "cell.json"), recursive=True)):
         with open(p, encoding="utf-8") as fh:
@@ -281,6 +302,18 @@ def load_cells(cells_dir):
             )
         _validate_cell(cell, p)
         txt = pathlib.Path(p).with_name("plan.txt")
+        tally = counts(txt)
+        if tally is None:
+            name = f"{cell['stack_path']} / {cell['environment']}"
+            # Workflow-command data escaping: cell.json is untrusted, and a raw newline in a
+            # name would start a second workflow command.
+            name = name.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+            print(
+                f"::warning::plan text for {name} carries no OpenTofu tally line; "
+                "its counts render as ?"
+            )
+            tally = ("?", "?", "?")
+        cell["add"], cell["change"], cell["destroy"] = tally
         text = None
         if txt.exists():
             # Cap the read at SIZE_BUDGET: a body that long exceeds every section's limit
