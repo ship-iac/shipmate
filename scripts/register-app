@@ -35,15 +35,11 @@ import threading
 import urllib.parse
 import webbrowser
 
-REDACTED = "***"
+from _shipmate import _REPO_RE, _scrub
 
 #: `code` is interpolated into the `app-manifests/<code>/conversions` API path and arrives over
 #: a loopback socket; a '/' or '..' in it retargets that request at another endpoint.
 _CODE_RE = re.compile(r"[A-Za-z0-9_-]+")
-#: `--repo`'s owner half is interpolated into the registration URL, and both halves into
-#: `gh variable set --repo`. Each half starts alphanumeric, as GitHub logins and repository names
-#: do: that forecloses '.' and '..', and a value beginning with '-' reads to a CLI as a flag.
-_REPO_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9][A-Za-z0-9._-]*")
 #: `--name` is embedded in the local HTML form, where a quote would escape the attribute holding
 #: it. 34 is GitHub's App-name limit.
 _NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9 ._-]{0,33}")
@@ -57,13 +53,6 @@ DONE_PAGE = b"""<!doctype html><meta charset=utf-8>
 <p>The code was captured locally. Return to the terminal &mdash; it is storing the
 credentials now.</p>
 """
-
-
-def _scrub(text, secrets):
-    for secret in secrets:
-        if secret:
-            text = text.replace(secret, REDACTED)
-    return text
 
 
 def _run(args, secrets=(), **kw):

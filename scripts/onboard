@@ -44,18 +44,14 @@ import subprocess
 import sys
 import textwrap
 
-from _shipmate import _load
+from _shipmate import _REPO_RE, _load, _scrub
 
 ENGINE_ENV = "shipmate-engine"
 GATE = "shipmate / gate"
 AT_ORG_NAMES = ("SHIPMATE_APP_ID",)
-REDACTED = "***"
 REPORT = []
 _DRY = False
 
-#: Both halves start alphanumeric, as GitHub logins and repository names do: that
-#: forecloses '.' and '..', and a value beginning with '-' reads to a CLI as a flag.
-_REPO_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9][A-Za-z0-9._-]*")
 #: Environment names are interpolated into API paths and `gh --env` arguments.
 _ENV_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 #: A team slug is interpolated into an action input and an API path: starting
@@ -64,13 +60,6 @@ _ENV_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 _TEAM_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*")
 _VERSION_RE = re.compile(r"v[0-9]+\.[0-9]+\.[0-9]+")
 _APP_ID_RE = re.compile(r"[0-9]+")
-
-
-def _scrub(text, secrets):
-    for secret in secrets:
-        if secret:
-            text = text.replace(secret, REDACTED)
-    return text
 
 
 def _run(args, secrets=(), stdin=None):

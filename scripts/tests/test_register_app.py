@@ -259,5 +259,5 @@ def test_run_error_scrubs_secrets_out_of_ghs_own_stderr(monkeypatch, capsys):
 
     err = capsys.readouterr().err
     assert "CODE123" not in err
-    assert ra.REDACTED in err
+    assert "***" in err
     assert "HTTP 404" in err  # the diagnosis itself survives

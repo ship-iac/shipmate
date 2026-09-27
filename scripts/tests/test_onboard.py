@@ -381,7 +381,7 @@ def test_run_scrubs_secrets_from_a_failure():
             secrets=("tok-abc",),
         )
     assert "tok-abc" not in str(e.value)
-    assert onboard.REDACTED in str(e.value)
+    assert "***" in str(e.value)
     assert "command failed (3)" in str(e.value)
 
 
