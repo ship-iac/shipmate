@@ -19,14 +19,12 @@ so they render only on the run page, and the comment commands would otherwise
 have no pull-request-visible surface at all.
 """
 
-import glob
-import json
 import os
 import pathlib
 import re
 import sys
 
-from _shipmate import _load
+from _shipmate import _load, cell_summaries, current_run_url
 
 ag = _load("apply-gate")
 
@@ -294,15 +292,8 @@ def load_cells(cells_dir):
     `destroy` are set here from `counts` over its `plan.txt`, whatever
     cell.json holds; underivable counts become "?" each, with one warning."""
     out = []
-    for p in sorted(glob.glob(os.path.join(cells_dir, "**", "cell.json"), recursive=True)):
-        with open(p, encoding="utf-8") as fh:
-            cell = json.load(fh)
-        missing = [k for k in CELL_KEYS if k not in cell]
-        if missing:
-            raise SystemExit(
-                f"::error::cell summary {p} missing keys {missing} — "
-                "plan-cell and summary must be pinned at the same engine SHA"
-            )
+    skew = "— plan-cell and summary must be pinned at the same engine SHA"
+    for p, cell in cell_summaries(cells_dir, CELL_KEYS, skew):
         _validate_cell(cell, p)
         txt = pathlib.Path(p).with_name("plan.txt")
         tally = counts(txt)
@@ -337,12 +328,9 @@ def main():
     cells = load_cells(os.environ.get("CELLS", "cells"))
     # This job runs inside the plan run, so this run holds the logs and the
     # artifacts the footer and the per-cell fallback link promise.
-    run_url = (
-        f"{os.environ['GITHUB_SERVER_URL']}/{os.environ['GITHUB_REPOSITORY']}"
-        f"/actions/runs/{os.environ['GITHUB_RUN_ID']}"
-    )
+    url = current_run_url()
     with open("comment.md", "w", encoding="utf-8") as fh:
-        fh.write(build_comment(cells, checks, run_url))
+        fh.write(build_comment(cells, checks, url))
     pending = any(c["changed"] for c, _ in cells)
     with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
         fh.write(f"pending={'true' if pending else 'false'}\ncount={len(cells)}\n")

@@ -202,6 +202,16 @@ def parse_table(text, variables=None):
     return {key: _replace(value, key, variables) for key, value in parsed.items()}
 
 
+def _unreadable(where):
+    """The refusal both default-branch readers raise when the table cannot be read."""
+    return SystemExit(
+        f"::error::{CONFIG_PATH} could not be read from the default branch "
+        f"({where}). The engine reads the environment table from the default "
+        "branch, never from this branch, so the file must be merged there "
+        "before the first plan."
+    )
+
+
 def read_table(run=None):
     """The table from the default branch. Every failure here refuses."""
     run = run or _run
@@ -209,12 +219,7 @@ def read_table(run=None):
     p = run(["git", "show", ref], check=False)
     if p.returncode != 0:
         sys.stderr.write(p.stderr)
-        raise SystemExit(
-            f"::error::{CONFIG_PATH} could not be read from the default branch "
-            f"({ref}). The engine reads the environment table from the default "
-            "branch, never from this branch, so the file must be merged there "
-            "before the first plan."
-        )
+        raise _unreadable(ref)
     return parse_table(p.stdout)
 
 
@@ -270,12 +275,7 @@ def read_table_at_default_branch(run=None):
     path = f"repos/{repo}/contents/{CONFIG_PATH}?ref={branch}"
     text = contents_text(path, fetch=lambda p: gh_json(p, run))
     if text is None:
-        raise SystemExit(
-            f"::error::{CONFIG_PATH} could not be read from the default branch "
-            f"({branch}). The engine reads the environment table from the default "
-            "branch, never from this branch, so the file must be merged there "
-            "before the first plan."
-        )
+        raise _unreadable(branch)
     return parse_table(text)
 
 
@@ -531,22 +531,6 @@ _TWO_PULL_REQUESTS = (
     "pull requests."
 )
 
-#: The keys that reference an environment rather than declaring one, and what an entry
-#: naming no environment silently fails to do. The consequence is the diagnostic's whole
-#: value: the key is fail-open, so it reads as ordering something while the run does
-#: nothing of the kind. The charset rule catches only names no env name could take; a
-#: plain typo passes it and lands here. `explicit` and `gated` sit on the entry itself,
-#: which the unused-entry warning covers.
-_REFERENCE_KEYS = {
-    "needs": "so it orders nothing",
-}
-
-
-def _referenced_envs(table):
-    """Env names per reference key. `needs` references by its predecessors only: the env
-    holding it is an entry, which the unused-entry warning already covers."""
-    return {"needs": {p for preds in env_order(table).values() for p in preds}}
-
 
 def _report_unused(table, all_envs):
     """Name the entries no stack tags. A warning, deliberately, and never a refusal.
@@ -556,6 +540,12 @@ def _report_unused(table, all_envs):
     would deadlock both. Names are matched exactly, as `resolve`, `_check_dry_coverage` and
     `partition_envs` match them. An uppercase entry name never gets here: `_check_env_name`
     refuses it, so an unused entry is a lowercase one no stack tags.
+
+    A `needs` predecessor no stack tags gets its own warning, because the key is fail-open: it
+    reads as ordering something while the run orders nothing. The charset rule catches only
+    names no env name could take; a plain typo passes it and lands here. Only predecessors are
+    checked: the env holding `needs` is an entry, like one holding `explicit` or `gated`, and
+    the unused-entry warning covers it.
     """
     tagged = set(all_envs)
     unused = sorted(set(table.get("environments", {})) - tagged)
@@ -564,15 +554,12 @@ def _report_unused(table, all_envs):
             f"::warning::the environment table declares {', '.join(unused)}, which no stack "
             "tags. Remove the entry, or tag the stacks that belong to it. " + _TWO_PULL_REQUESTS
         )
-    referenced = _referenced_envs(table)
-    for key, consequence in _REFERENCE_KEYS.items():
-        stale = sorted(referenced[key] - tagged)
-        if stale:
-            print(
-                f"::warning::{key} names {', '.join(stale)}, which no stack tags, "
-                f"{consequence}. Remove the entry, or tag the stacks that belong to it. "
-                + _TWO_PULL_REQUESTS
-            )
+    stale = sorted({p for preds in env_order(table).values() for p in preds} - tagged)
+    if stale:
+        print(
+            f"::warning::needs names {', '.join(stale)}, which no stack tags, so it orders "
+            "nothing. Remove the entry, or tag the stacks that belong to it. " + _TWO_PULL_REQUESTS
+        )
 
 
 def env_order(table):

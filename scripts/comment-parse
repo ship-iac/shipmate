@@ -199,9 +199,7 @@ def main():
     with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
         fh.write(f"is_command={'true' if r['is_command'] else 'false'}\n")
         fh.write(f"valid={'true' if r['valid'] else 'false'}\n")
-        fh.write(f"verb={r['verb'] or ''}\n")
         fh.write(f"env={r['env'] or ''}\n")
-        fh.write(f"tag_filter={r['tag_filter'] or ''}\n")
         fh.write(f"route={r['route'] or ''}\n")
         fh.write(f"error={r['error'] or ''}\n")
 

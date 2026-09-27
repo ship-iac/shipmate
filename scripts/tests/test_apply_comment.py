@@ -544,29 +544,10 @@ def test_resources_parses_colour_wrapped_apply_complete_line():
     not defeat the line-anchored (`^...$`, `re.MULTILINE`) regex. `_resources` runs on
     already-stripped text, as `load_cells` produces, which pins the anchor itself once the colour
     codes are gone."""
-    text = ac._strip_ansi(
-        "\x1b[1mApply complete! Resources: 3 added, 1 changed, 2 destroyed.\x1b[0m\n"
+    text = ac.li.ANSI_RE.sub(
+        "", "\x1b[1mApply complete! Resources: 3 added, 1 changed, 2 destroyed.\x1b[0m\n"
     )
     assert ac._resources(text) == "+3 ~1 -2"
-
-
-def test_strip_ansi_covers_csi_two_char_and_osc_forms():
-    # CSI (SGR), a bare two-character escape (ESC + byte in @-_), an OSC sequence
-    # terminated by BEL, and the same OSC form terminated by ST (ESC \).
-    csi = "before\x1b[36;1mcolour\x1b[0mafter"
-    two_char = "before\x1bMreset-ish\x1bDafter"
-    osc_bel = "before\x1b]0;window title\x07after"
-    osc_st = "before\x1b]0;window title\x1b\\after"
-    for sample in (csi, two_char, osc_bel, osc_st):
-        stripped = ac._strip_ansi(sample)
-        assert "\x1b" not in stripped
-        assert "before" in stripped
-        assert "after" in stripped
-
-
-def test_strip_ansi_leaves_ordinary_text_and_newlines_and_carriage_returns_alone():
-    text = "plain line one\nplain line two\r\nno escapes here at all"
-    assert ac._strip_ansi(text) == text
 
 
 def test_load_cells_reads_apply_text_only_when_present(tmp_path):
@@ -645,17 +626,6 @@ def test_short_form_omits_excluded_skipped_for_targeted_env():
     assert "Skipped" not in body
 
 
-def test_env_disposition_lines_escape_evil_env_names():
-    # Excluded and skipped env names are author-controlled (Terramate tags, GitHub
-    # Environment names), like every other display value here; these sentences must not
-    # be the one place that guarantee lapses.
-    evil = "x</summary><b>evil"
-    lines = ac._env_disposition_lines([evil], [evil])
-    joined = " ".join(lines)
-    assert "</summary><b>evil" not in joined
-    assert "&lt;/summary&gt;&lt;b&gt;evil" in joined
-
-
 def test_short_form_escapes_evil_excluded_and_skipped_env_names():
     evil = "x</summary><b>evil"
     body = ac._short_form("success,skipped", "", "complete", RUN_URL, [evil], [evil])
@@ -665,7 +635,7 @@ def test_short_form_escapes_evil_excluded_and_skipped_env_names():
 
 def test_footer_escapes_evil_excluded_and_skipped_env_names():
     evil = "x</summary><b>evil"
-    footer = ac._footer("pending", RUN_URL, [evil], [evil], "")
+    footer = "\n\n".join(ac._footer_parts("pending", RUN_URL, [evil], [evil], ""))
     assert "</summary><b>evil" not in footer
     assert "&lt;/summary&gt;&lt;b&gt;evil" in footer
 
@@ -686,7 +656,7 @@ def test_held_line_names_review_and_never_a_targeted_apply_command():
     # A held env can also be an explicit env, where the review alone does not release it,
     # so this sentence must not name a command at all. `shipmate apply prod` would
     # additionally be a command that refuses.
-    (line,) = ac._env_disposition_lines([], [], ["prod"], [])
+    (line,) = ac._footer_parts("pending", RUN_URL, [], [], "", ["prod"], [])[:-2]
     assert line == _HELD_SENTENCE
     assert "shipmate apply prod" not in line
 
@@ -697,7 +667,7 @@ def test_applied_ungated_line_states_no_review_and_names_the_setting():
     Whole-value also because no clause may claim the named envs COMPLETED: detect derives the set
     from `runnable`, so a failed wave leaves a named env unapplied, and because the sentence must
     name the setting that governs -- naming a source an operator has deleted is a false record."""
-    (line,) = ac._env_disposition_lines([], [], [], ["dev-eu"])
+    (line,) = ac._footer_parts("pending", RUN_URL, [], [], "", [], ["dev-eu"])[:-2]
     assert line == _UNGATED_SENTENCE
 
 
@@ -710,14 +680,14 @@ def test_short_form_carries_held_and_ungated_sentences():
 
 
 def test_footer_carries_held_and_ungated_sentences():
-    footer = ac._footer("pending", RUN_URL, [], [], "", ["prod"], ["dev-eu"])
+    footer = "\n\n".join(ac._footer_parts("pending", RUN_URL, [], [], "", ["prod"], ["dev-eu"]))
     assert _HELD_SENTENCE in footer
     assert _UNGATED_SENTENCE in footer
 
 
 def test_held_and_ungated_lines_escape_evil_env_names():
     evil = "x</summary><b>evil"
-    joined = " ".join(ac._env_disposition_lines([], [], [evil], [evil]))
+    joined = " ".join(ac._footer_parts("pending", RUN_URL, [], [], "", [evil], [evil])[:-2])
     assert "</summary><b>evil" not in joined
     assert "&lt;/summary&gt;&lt;b&gt;evil" in joined
 
@@ -840,9 +810,9 @@ def test_job_url_does_not_false_match_on_bare_endswith():
 
 
 def test_footer_excluded_and_skipped_only_for_all_environments_form():
-    footer_env = ac._footer("pending", RUN_URL, ["prod"], ["staging"], "dev-eu")
+    footer_env = "\n\n".join(ac._footer_parts("pending", RUN_URL, ["prod"], ["staging"], "dev-eu"))
     assert "Explicit environment" not in footer_env
-    footer_all = ac._footer("pending", RUN_URL, ["prod"], ["staging"], "")
+    footer_all = "\n\n".join(ac._footer_parts("pending", RUN_URL, ["prod"], ["staging"], ""))
     assert (
         "Explicit environment(s) left pending: `prod` — run `shipmate apply prod` to apply them."
         in footer_all
@@ -1041,21 +1011,26 @@ def test_check_state_maps_judges_the_newest_run_per_name():
     assert done == set()
 
 
-def test_check_state_maps_empty_app_id_warns_and_returns_no_data(capsys):
-    # Must NOT fail loud the way from_app does: a missing SHIPMATE_APP_ID is
-    # only allowed to cost this one display axis, never the whole comment.
-    lines = _jsonl(_check("apply / stacks/app / dev-eu"))
-    present, done = ac.check_state_maps(lines, "")
-    assert (present, done) == (set(), set())
-    assert "::warning::" in capsys.readouterr().out
+def test_load_check_maps_empty_app_id_warns_and_returns_no_data(tmp_path, capsys):
+    """Must NOT fail loud the way from_app does: a missing SHIPMATE_APP_ID is only allowed to cost
+    this one display axis, never the whole comment, and the warning names the variable rather
+    than blaming the file. Mutation: delete load_check_maps' `if not app_id` early return (the
+    catch-all then warns about checks.jsonl instead)."""
+    p = tmp_path / "checks.jsonl"
+    p.write_text("\n".join(_jsonl(_check("apply / stacks/app / dev-eu"))), encoding="utf-8")
+    assert ac.load_check_maps(str(p), "") == (set(), set())
+    assert capsys.readouterr().out == (
+        "::warning::SHIPMATE_APP_ID is empty — the apply result comment falls back "
+        "to artifact-only status (see docs/github-app.md).\n"
+    )
 
 
-def test_check_state_three_way_lookup():
-    present = {"apply / stacks/app / dev-eu", "apply / stacks/db / dev-eu"}
-    done = {"apply / stacks/app / dev-eu"}
-    assert ac._check_state(_row(stack_path="stacks/app"), present, done) == ac.CHECK_DONE
-    assert ac._check_state(_row(stack_path="stacks/db"), present, done) == ac.CHECK_PENDING
-    assert ac._check_state(_row(stack_path="stacks/gone"), present, done) == ac.CHECK_UNKNOWN
+def test_apply_check_state_applied_with_done_check_stays_applied():
+    """A done check is not a pending one, though its name is in both sets. Mutation: drop
+    `and name not in done` from apply_check_state."""
+    rows = [_row(status="applied", stack_path="stacks/app")]
+    ac.apply_check_state(rows, {"apply / stacks/app / dev-eu"}, {"apply / stacks/app / dev-eu"})
+    assert rows[0]["status"] == "applied"
 
 
 def test_apply_check_state_applied_with_pending_check_becomes_unrecorded():
@@ -1078,7 +1053,7 @@ def test_apply_check_state_not_attempted_with_done_check_becomes_applied():
 
 
 def test_apply_check_state_leaves_rows_alone_when_check_state_is_unknown():
-    # Degradation contract: no data (scan failed, empty file, pin skew) must
+    # Degradation contract: no data (scan failed, empty file) must
     # render byte-identically to the artifact-only behaviour.
     rows = [
         _row(status="applied", stack_path="stacks/app"),
@@ -1101,11 +1076,13 @@ def test_apply_check_state_never_downgrades_failed_or_blocked():
     assert [r["status"] for r in rows] == ["failed", "blocked"]
 
 
-def test_load_check_maps_missing_file_is_no_data(tmp_path):
-    # The pinned-action skew window: an older apply-summary never writes
-    # checks.jsonl. Silent no-data, not a crash.
+def test_load_check_maps_missing_file_warns_and_is_no_data(tmp_path, capsys):
+    """The scan step always writes checks.jsonl, so absence is a failure: no data and a warning,
+    not a crash and not silence. Mutation: restore `except FileNotFoundError: return set(), set()`
+    ahead of the catch-all."""
     present, done = ac.load_check_maps(str(tmp_path / "nope.jsonl"), APP_ID)
     assert (present, done) == (set(), set())
+    assert "::warning::" in capsys.readouterr().out
 
 
 def test_load_check_maps_empty_file_is_no_data(tmp_path):
@@ -1124,19 +1101,11 @@ def test_load_check_maps_reads_jsonl(tmp_path):
 def test_load_check_maps_malformed_line_degrades_with_a_warning(tmp_path, capsys):
     # A malformed checks.jsonl (parse_jsonl's SystemExit) must cost only the
     # check-state axis, never the whole render step -- degrade to no data with
-    # a warning, exactly like the missing-file case, rather than propagate.
+    # a warning rather than propagate.
     p = tmp_path / "checks.jsonl"
     p.write_text("not json\n", encoding="utf-8")
     assert ac.load_check_maps(str(p), APP_ID) == (set(), set())
     assert "::warning::" in capsys.readouterr().out
-
-
-def test_load_check_maps_missing_file_stays_silent(tmp_path, capsys):
-    # Pins the deliberate asymmetry: the pinned-action skew window (an older
-    # apply-summary that never writes checks.jsonl) is expected, not an error,
-    # so it must NOT warn -- unlike a malformed or otherwise unreadable file.
-    ac.load_check_maps(str(tmp_path / "nope.jsonl"), APP_ID)
-    assert "::warning::" not in capsys.readouterr().out
 
 
 def test_load_check_maps_non_numeric_app_id_degrades_with_a_warning(tmp_path, capsys):
@@ -1383,20 +1352,21 @@ def test_check_name_grammar_matches_apply_cells_construction():
     """Coupling: apply-snapshot builds the apply check's name, to look up the pre-existing check
     ids before any wave runs -- apply-cell holds no App key and builds none -- and apply-comment
     forward-builds the same string to look it up. A divergence is silent: every lookup misses,
-    `_check_state` returns CHECK_UNKNOWN, and the comment reverts to the artifact-only rendering
-    this corrects. Same posture as test_cell_schema_guard_apply_cell_writes_every_required_key."""
+    `apply_check_state` reads every check as unknown, and the comment reverts to the
+    artifact-only rendering this corrects. Same posture as
+    test_cell_schema_guard_apply_cell_writes_every_required_key."""
     src = (_ENGINE / "scripts" / "apply-snapshot").read_text(encoding="utf-8")
     expected = 'f"apply / {stack} / {env}"'
     assert expected in src, (
         "apply-snapshot no longer builds the apply check name as "
-        "'apply / <stack path> / <env>' -- scripts/apply-comment's _check_state "
+        "'apply / <stack path> / <env>' -- scripts/apply-comment's _check_name "
         "and _job_url forward-build that exact grammar to look the check up, "
         "and a mismatch makes every lookup miss silently"
     )
-    # And the reader's half, exercised rather than restated: the name `_check_state`
+    # And the reader's half, exercised rather than restated: the name `_check_name`
     # builds for a known row must be that same string.
     row = _row(environment="dev-eu", stack_path="stacks/app")
-    assert ac._check_state(row, {"apply / stacks/app / dev-eu"}, set()) == ac.CHECK_PENDING
+    assert ac._check_name(row) == "apply / stacks/app / dev-eu"
 
 
 def test_env_level_count_matches_env_orders():
@@ -1436,7 +1406,7 @@ def test_wave_job_name_matches_the_apply_check_grammar():
         f"source for either silently breaks the name/job-name equality (got: {sorted(set(wired))})"
     )
     # The reader's half, exercised: a nested-display job name built from that grammar
-    # must resolve, for the same row `_check_state` agrees on.
+    # must resolve, for the same row `_check_name` builds.
     row = _row(environment="dev-eu", stack_path="stacks/app")
     jobs = [_job("post-merge / L0 / apply / stacks/app / dev-eu", "https://gh/job/1")]
     assert ac._job_url(row, jobs, RUN_URL) == "https://gh/job/1"
@@ -1503,8 +1473,8 @@ def test_main_promotes_a_missing_artifact_whose_check_is_done(monkeypatch, tmp_p
 
 
 def test_main_without_checks_file_renders_the_artifact_only_comment(monkeypatch, tmp_path):
-    # The pinned-action skew window and every scan failure land here: no checks.jsonl
-    # means no data, which means unknown, so the comment reads as the artifact-only one.
+    # Every scan failure lands here: no checks.jsonl means no data, which means unknown,
+    # so the comment reads as the artifact-only one.
     cells = tmp_path / "cells"
     _write_cell(cells, "dev-eu", "stacks-app", _cell(stack="app", stack_path="stacks/app"))
     waves = json.dumps({"wave0": [{"stack": "stacks/app", "environment": "dev-eu"}]})

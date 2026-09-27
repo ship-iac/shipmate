@@ -1,11 +1,18 @@
 """Unit tests for scripts/drift-issues."""
 
 import json
+import os
 
 import pytest
 from _loader import action_steps, load_script
 
 di = load_script("drift-issues")
+
+
+@pytest.fixture(autouse=True)
+def _fresh_label_cache():
+    """`_ensure_label` is cached per process; clear it so no test inherits another's call."""
+    di._ensure_label.cache_clear()
 
 
 def _cell(**over):
@@ -37,12 +44,19 @@ def test_load_cells_reads_every_downloaded_cell_sorted(tmp_path):
 
 
 def test_load_cells_missing_key_fails_loud(tmp_path):
+    """The whole refusal, so the pin-skew sentence the caller passes to `cell_summaries` is
+    checked too. Mutation: drop `{skew}` from `cell_summaries`' message."""
     d = tmp_path / "drift-summary.dev-eu.app"
     d.mkdir(parents=True)
     (d / "cell.json").write_text(json.dumps({"stack": "stacks/app"}), encoding="utf-8")
     with pytest.raises(SystemExit) as exc:
         di.load_cells(str(tmp_path))
-    assert "missing keys" in str(exc.value)
+    path = os.path.join(str(tmp_path), "drift-summary.dev-eu.app", "cell.json")
+    assert str(exc.value) == (
+        f"::error::cell summary {path} missing keys ['stack_name', 'environment', 'plan_ok', "
+        "'drifted', 'add', 'change', 'destroy'] -- drift-cell and this script must be pinned "
+        "at the same engine SHA"
+    )
 
 
 def test_load_cells_on_missing_directory_is_empty(tmp_path):
@@ -82,7 +96,7 @@ def test_plan_not_ok_cell_is_skipped_entirely(monkeypatch):
     rec = _Recorder()
     monkeypatch.setattr(di, "_run", rec)
     cell = _cell(plan_ok=False, drifted=True)
-    result = di.upsert_or_close(cell, {"drift: dev-eu / app": 7}, "url", [False])
+    result = di.upsert_or_close(cell, {"drift: dev-eu / app": 7}, "url")
     assert result is False
     assert rec.calls == []  # An existing open issue is left untouched.
 
@@ -96,18 +110,31 @@ def test_drifted_with_no_existing_issue_creates_one(monkeypatch):
         lambda *a, **k: label_calls.append(a) or type("R", (), {"returncode": 0})(),
     )
     cell = _cell(drifted=True, add=1)
-    result = di.upsert_or_close(cell, {}, "url", [False])
+    result = di.upsert_or_close(cell, {}, "url")
     assert result is True
     assert len(rec.calls) == 1
     assert rec.calls[0][:3] == ["gh", "issue", "create"]
     assert label_calls, "expected the label to be (best-effort) created"
 
 
+def test_two_new_issues_create_the_label_once(monkeypatch):
+    """Mutation: `@functools.cache` -> `@functools.lru_cache(maxsize=0)` on `_ensure_label`."""
+    monkeypatch.setattr(di, "_run", _Recorder())
+    label_calls = []
+    monkeypatch.setattr(
+        "subprocess.run",
+        lambda *a, **k: label_calls.append(a) or type("R", (), {"returncode": 0})(),
+    )
+    di.upsert_or_close(_cell(drifted=True, stack_name="app"), {}, "url")
+    di.upsert_or_close(_cell(drifted=True, stack_name="db"), {}, "url")
+    assert len(label_calls) == 1
+
+
 def test_drifted_with_existing_issue_edits_it(monkeypatch):
     rec = _Recorder()
     monkeypatch.setattr(di, "_run", rec)
     cell = _cell(drifted=True)
-    result = di.upsert_or_close(cell, {"drift: dev-eu / app": 42}, "url", [True])
+    result = di.upsert_or_close(cell, {"drift: dev-eu / app": 42}, "url")
     assert result is True
     assert rec.calls == [["gh", "issue", "edit", "42", "--body", di._body(cell, "url")]]
 
@@ -116,7 +143,7 @@ def test_clean_with_existing_issue_closes_it(monkeypatch):
     rec = _Recorder()
     monkeypatch.setattr(di, "_run", rec)
     cell = _cell(drifted=False)
-    result = di.upsert_or_close(cell, {"drift: dev-eu / app": 42}, "url", [True])
+    result = di.upsert_or_close(cell, {"drift: dev-eu / app": 42}, "url")
     assert result is False
     assert rec.calls[0][:3] == ["gh", "issue", "close"]
 
@@ -125,7 +152,7 @@ def test_clean_with_no_existing_issue_touches_nothing(monkeypatch):
     rec = _Recorder()
     monkeypatch.setattr(di, "_run", rec)
     cell = _cell(drifted=False)
-    result = di.upsert_or_close(cell, {}, "url", [True])
+    result = di.upsert_or_close(cell, {}, "url")
     assert result is False
     assert rec.calls == []
 
