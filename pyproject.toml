@@ -10,7 +10,7 @@ requires-python = ">=3.11"
 package = false
 
 [tool.pytest.ini_options]
-# dev/ holds dev-time tooling (the consumer re-pin CLI and its helpers), not
+# dev/ holds dev-time tooling (the consumer re-pin CLI), not
 # shipped runtime surface, so it is not importable from scripts/. Tests of that
 # tooling import it by name; this is what makes `import repin_consumer` resolve
 # without a sys.path hack in every test module.
@@ -70,7 +70,7 @@ max-complexity = 8
 "scripts/tests/*" = ["S101", "S603", "S607"]
 
 [tool.ty.environment]
-# dev/ is on the pytest pythonpath, not on ty's module path, so `import pinrefs`
-# / `import repin_consumer` read as unresolved without this. Same list, one
-# consumer each: pytest resolves them at runtime, ty at check time.
+# dev/ is on the pytest pythonpath, not on ty's module path, so
+# `import repin_consumer` reads as unresolved without this. Same list, one
+# consumer each: pytest resolves it at runtime, ty at check time.
 extra-paths = ["dev"]
