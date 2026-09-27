@@ -13,6 +13,8 @@ grammar are declared unstable in `README.md`.
 
 ## [0.38.0] — 2026-09-27
 
+Tags `2435bdb`.
+
 ### Fixed
 
 - **An import-only plan counts as a change.** `scripts/plan-classify` read an `import` block's
