@@ -83,7 +83,6 @@ runs:
       env:
         GH_TOKEN: ${{ steps.token.outputs.token }}
         SHIPMATE_HEAD_SHA: ${{ inputs.head-sha }}
-        SHIPMATE_CELLS_DIR: cells
       run: |
         set -euo pipefail
         [[ "$SHIPMATE_HEAD_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::head-sha must be a 40-char lowercase hex SHA (got: $SHIPMATE_HEAD_SHA)"; exit 1; }
@@ -134,7 +133,6 @@ runs:
       shell: bash
       env:
         GH_TOKEN: ${{ steps.token.outputs.token }}
-        CELLS: cells
         HEAD_SHA: ${{ inputs.head-sha }}
       run: |
         set -euo pipefail
@@ -177,7 +175,6 @@ runs:
         SHIPMATE_DOCTOR_MODE: annotate
         SHIPMATE_GITHUB_VARS: ${{ inputs.github-vars }}
         SHIPMATE_APP_ID: ${{ inputs.app-id }}
-        SHIPMATE_CELLS_DIR: cells
         SHIPMATE_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         # The commit the pin probe reads the consumer's workflow files at. Without it the
         # contents API falls back to the default branch, where a pin bump on this pull request

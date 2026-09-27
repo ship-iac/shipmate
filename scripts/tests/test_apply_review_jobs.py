@@ -96,6 +96,17 @@ def test_the_decision_output_reaches_the_callers():
     assert _review()["outputs"] == {"decision": "${{ steps.rd.outputs.decision }}"}
 
 
+def test_the_review_job_binds_the_engine_environment_and_displays_as_decision():
+    """The App key reaches this job only through `shipmate-engine`, whose branch policy admits the
+    default branch alone. `name` is pinned beside it because the job-name table in CONTRACT.md
+    lists `review / decision`.
+
+    Mutations: delete the `environment:` line; rename the job's `name:`.
+    """
+    assert _review().get("environment") == "shipmate-engine"
+    assert _review().get("name") == "decision"
+
+
 def test_the_review_job_checks_nothing_out():
     """It holds an App token, and a checkout would put branch-controlled content in the same
     job. Terramate over pull request head content belongs in `detect`, which holds no token."""

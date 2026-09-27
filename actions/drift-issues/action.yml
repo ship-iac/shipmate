@@ -39,7 +39,6 @@ runs:
         # without GH_REPO every one of those calls fails with "failed to determine base
         # repository".
         GH_REPO: ${{ github.repository }}
-        SHIPMATE_CELLS_DIR: drift
         SHIPMATE_SLACK_WEBHOOK: ${{ inputs.slack-webhook }}
       run: |
         set -euo pipefail

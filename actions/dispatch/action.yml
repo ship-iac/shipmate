@@ -44,7 +44,9 @@ runs:
       env:
         GH_TOKEN: ${{ steps.token.outputs.token }}
         REPO: ${{ github.repository }}
-        # A dispatched workflow file only resolves on the default branch.
+        # `ref` picks which branch's copy of shipmate.yml runs. The default branch's copy is the
+        # reviewed one (a head ref runs the PR author's), and only it passes the shipmate-engine
+        # environment's branch policy.
         DISPATCH_REF: ${{ github.event.repository.default_branch }}
         ENVIRONMENT: ${{ inputs.environment }}
         VERB: ${{ inputs.verb }}

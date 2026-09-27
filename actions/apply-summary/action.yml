@@ -146,7 +146,6 @@ runs:
     - name: Render apply result comment
       shell: bash
       env:
-        CELLS: cells
         SHIPMATE_ENVIRONMENT: ${{ inputs.environment }}
         SHIPMATE_WAVES_JSON: ${{ inputs.waves-json }}
         SHIPMATE_ENVLEVEL0_WAVES: ${{ inputs.envlevel0-waves }}

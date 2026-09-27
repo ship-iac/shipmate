@@ -30,6 +30,8 @@ _APPLY_COMMENT = load_script("apply-comment")
 
 # Ambient in every GHA step, so excluded from the "fed by render step" assertion below.
 _AMBIENT_GHA_VARS = frozenset({"GITHUB_SERVER_URL", "GITHUB_REPOSITORY", "GITHUB_RUN_ID"})
+# Read with a default equal to the directory the download step writes, so the step feeds none.
+_SCRIPT_DEFAULTED = frozenset({"CELLS"})
 
 _SUBSCRIPT_RE = re.compile(r'os\.environ\[\s*f?([\'"])([A-Za-z0-9_{}]+)\1\s*\]')
 _GET_RE = re.compile(r'os\.environ\.get\(\s*f?([\'"])([A-Za-z0-9_{}]+)\1')
@@ -96,7 +98,7 @@ def test_render_step_feeds_every_env_var_the_script_reads():
     assert render_step is not None, "no run step invokes scripts/apply-comment"
 
     fed = set((render_step.get("env") or {}).keys())
-    required = read_names - _AMBIENT_GHA_VARS
+    required = read_names - _AMBIENT_GHA_VARS - _SCRIPT_DEFAULTED
 
     missing = required - fed
     assert not missing, (
@@ -114,7 +116,6 @@ def test_render_step_feeds_every_env_var_the_script_reads():
 # Hand-written, never derived from the action; asserted whole by
 # test_render_step_env_block_matches_the_expected_mapping.
 _RENDER_ENV = {
-    "CELLS": "cells",
     "SHIPMATE_ENVIRONMENT": "${{ inputs.environment }}",
     "SHIPMATE_WAVES_JSON": "${{ inputs.waves-json }}",
     "SHIPMATE_ENVLEVEL0_WAVES": "${{ inputs.envlevel0-waves }}",

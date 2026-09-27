@@ -94,10 +94,9 @@ jobs:
     # `complete` job would hold no key, its applies would execute, and their apply checks would
     # strand pending forever.
     secrets:
-      # Adding a secret here is ordered: declare it in apply-env-level.yml, merge, bump this
-      # job's `uses:` pin, and only then map it. Mapping a secret the pinned callee does not
-      # declare is a hard load-time error, unlike an undeclared action input, which is silently
-      # ignored (docs/releasing.md).
+      # Declare a new secret in apply-env-level.yml in the same change that maps it here: the
+      # `./` callee is read at this commit, and mapping a secret it does not declare is a hard
+      # load-time error, unlike an undeclared action input, which is silently ignored.
       SHIPMATE_APP_PRIVATE_KEY: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
       SHIPMATE_PLAN_PASSPHRASE: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
       SHIPMATE_SECRETS: ${{ secrets.SHIPMATE_SECRETS }}

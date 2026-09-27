@@ -289,8 +289,9 @@ def test_the_action_declares_no_workflow_input():
 def test_dispatch_step_env_mapping_is_complete():
     """The whole env: mapping of the dispatch step, so a python body that is correct but never
     got VERB added to the step's env: block reddens here -- as does WORKFLOW still being read
-    from an input, or the dispatch ref leaving the default branch: a dispatched workflow file
-    only ever resolves there, so pointing it at the head ref dispatches nothing.
+    from an input, or the dispatch ref leaving the default branch. The dispatch ref picks which
+    branch's copy of `shipmate.yml` runs: a head ref runs the pull request author's copy, and
+    the `shipmate-engine` environment's branch policy admits only the default branch.
 
     Mutation: rename VERB in the env: block, re-add WORKFLOW, or set
     `DISPATCH_REF: ${{ github.head_ref }}`.

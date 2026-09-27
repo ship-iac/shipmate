@@ -84,8 +84,9 @@ job displays as `<caller job> / <callee job>`, applied at every level, and GHA
 cannot suppress a level. The apply leaf is therefore three deep, e.g.
 `post-merge / L0 / apply / <stack> / <env>`. The intermediate names are kept
 short and non-redundant (`L0`..`L3` for env-levels in `apply-all.yml` /
-`deploy.yml`, `waves` for the single-env `apply.yml`) rather than repeating the
-verb the leaf already carries; the consumer's calling job supplies the outermost
+`deploy.yml`, `waves` for the single-env `apply.yml`, `review / decision` for
+the review re-read both apply paths call from `apply-review.yml`) rather than
+repeating the verb the leaf already carries; the consumer's calling job supplies the outermost
 segment (`post-merge` on the deploy path). Its file is named `shipmate`, so the
 pull request's checks UI renders that workflow name and then the job path
 (`shipmate / shipmate / facts`); the repetition is cosmetic and the check-run
