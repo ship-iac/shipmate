@@ -2595,29 +2595,6 @@ def test_strip_comment_keeps_a_hash_inside_a_token():
     assert doctor._strip_comment("branches: [release#1]") == "branches: [release#1]"
 
 
-def test_fork_trigger_without_a_commit_is_a_note_not_a_read(monkeypatch):
-    # Same reasoning as the pin probe: reading the default branch instead would
-    # report the trigger on the very pull request that removes it.
-    def gh(path):
-        pytest.fail(f"the fork-trigger probe read the API with no commit: {path}")
-
-    monkeypatch.setattr(doctor, "_gh_json", gh)
-    out = doctor._fork_trigger_warnings(_ctx(head_sha=""))
-    assert out == [doctor.FORK_TRIGGER_NO_COMMIT]
-    assert out[0][0] == doctor.NOTICE
-
-
-def test_fork_trigger_unreadable_directory_degrades_to_a_note(monkeypatch):
-    def gh(path):
-        raise SystemExit(f"::error::command failed (1): gh api {path}")
-
-    monkeypatch.setattr(doctor, "_gh_json", gh)
-    out = doctor._fork_trigger_warnings(_ctx())
-    assert out == [doctor.FORK_TRIGGER_UNREADABLE]
-    assert out[0][0] == doctor.NOTICE
-    assert "::error::" not in out[0][1] and "gh api" not in out[0][1]
-
-
 def test_fork_trigger_unreadable_file_degrades_to_a_note(monkeypatch):
     listing = {f"{_WF_DIR}{_REF}": _wf_listing("label.yml")}
 
@@ -2781,28 +2758,6 @@ def test_an_unparseable_shim_reports_nothing_and_does_not_crash(monkeypatch):
     responses = _fork_responses({"shipmate.yml": text})
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
     assert doctor._shim_job_name_warnings(_ctx()) == []
-
-
-def test_shim_job_name_without_a_commit_is_a_note_not_a_read(monkeypatch):
-    # Same reasoning as the pin and fork-trigger probes: a default-branch read would report
-    # the old name on the very pull request that renames the job.
-    def gh(path):
-        pytest.fail(f"the shim-job-name probe read the API with no commit: {path}")
-
-    monkeypatch.setattr(doctor, "_gh_json", gh)
-    out = doctor._shim_job_name_warnings(_ctx(head_sha=""))
-    assert out == [doctor.SHIM_JOB_NO_COMMIT]
-    assert out[0][0] == doctor.NOTICE
-
-
-def test_shim_job_name_unreadable_directory_degrades_to_a_note(monkeypatch):
-    def gh(path):
-        raise SystemExit(f"::error::command failed (1): gh api {path}")
-
-    monkeypatch.setattr(doctor, "_gh_json", gh)
-    out = doctor._shim_job_name_warnings(_ctx())
-    assert out == [doctor.SHIM_JOB_UNREADABLE]
-    assert out[0][0] == doctor.NOTICE
 
 
 def test_shim_job_name_probe_is_registered(monkeypatch):
@@ -3100,29 +3055,6 @@ def test_the_filename_filter_lives_in_the_dispatch_wiring_dispatcher(monkeypatch
     assert doctor._dispatch_wiring_warnings(_ctx()) == []
 
 
-def test_dispatch_wiring_without_a_commit_is_a_note_not_a_read(monkeypatch):
-    # Same reasoning as the pin, fork-trigger and shim-job-name probes: a default-branch
-    # read would report the missing trigger on the very pull request that adds it. The
-    # `gh` stub pins that no read happens at all, so a weaker read cannot stand in.
-    def gh(path):
-        pytest.fail(f"the dispatch-wiring probe read the API with no commit: {path}")
-
-    monkeypatch.setattr(doctor, "_gh_json", gh)
-    out = doctor._dispatch_wiring_warnings(_ctx(head_sha=""))
-    assert out == [doctor.DISPATCH_WIRING_NO_COMMIT]
-    assert out[0][0] == doctor.NOTICE
-
-
-def test_dispatch_wiring_unreadable_directory_degrades_to_a_note(monkeypatch):
-    def gh(path):
-        raise SystemExit(f"::error::command failed (1): gh api {path}")
-
-    monkeypatch.setattr(doctor, "_gh_json", gh)
-    out = doctor._dispatch_wiring_warnings(_ctx())
-    assert out == [doctor.DISPATCH_WIRING_UNREADABLE]
-    assert out[0][0] == doctor.NOTICE
-
-
 def test_dispatch_wiring_probe_is_registered(monkeypatch):
     """An unregistered probe runs nowhere while its own unit tests stay green --
     assert it actually executes as part of `warnings()`."""
@@ -3245,27 +3177,61 @@ def test_the_routing_probe_ignores_every_other_workflow_file(monkeypatch):
     assert doctor._routing_warnings(_ctx()) == []
 
 
-def test_routing_without_a_commit_is_a_note_not_a_read(monkeypatch):
-    # Same reasoning as the pin, fork-trigger and dispatch probes: a default-branch read
-    # would report the old expression on the very pull request that fixes it. The `gh` stub
-    # pins that no read happens at all, so a weaker read cannot stand in.
+# The workflow-directory probes whose two degrades share one shape. Without a commit, a
+# default-branch read would report the old state on the very pull request that fixes it, so
+# the `gh` stub pins that no read happens at all and a weaker read cannot stand in:
+# fork-trigger reports the trigger on the pull request that removes it, shim-job-name the old
+# name on the one that renames the job, dispatch-wiring the missing trigger on the one that
+# adds it, routing the old expression on the one that fixes it.
+_WORKFLOW_DIR_DEGRADES = [
+    pytest.param(
+        doctor._fork_trigger_warnings,
+        doctor.FORK_TRIGGER_NO_COMMIT,
+        doctor.FORK_TRIGGER_UNREADABLE,
+        id="fork_trigger",
+    ),
+    pytest.param(
+        doctor._shim_job_name_warnings,
+        doctor.SHIM_JOB_NO_COMMIT,
+        doctor.SHIM_JOB_UNREADABLE,
+        id="shim_job_name",
+    ),
+    pytest.param(
+        doctor._dispatch_wiring_warnings,
+        doctor.DISPATCH_WIRING_NO_COMMIT,
+        doctor.DISPATCH_WIRING_UNREADABLE,
+        id="dispatch_wiring",
+    ),
+    pytest.param(
+        doctor._routing_warnings,
+        doctor.ROUTING_NO_COMMIT,
+        doctor.ROUTING_UNREADABLE,
+        id="routing",
+    ),
+]
+
+
+@pytest.mark.parametrize(("probe", "no_commit", "_unreadable"), _WORKFLOW_DIR_DEGRADES)
+def test_without_a_commit_is_a_note_not_a_read(monkeypatch, probe, no_commit, _unreadable):
     def gh(path):
-        pytest.fail(f"the routing probe read the API with no commit: {path}")
+        pytest.fail(f"{probe.__name__} read the API with no commit: {path}")
 
     monkeypatch.setattr(doctor, "_gh_json", gh)
-    out = doctor._routing_warnings(_ctx(head_sha=""))
-    assert out == [doctor.ROUTING_NO_COMMIT]
+    out = probe(_ctx(head_sha=""))
+    assert out == [no_commit]
     assert out[0][0] == doctor.NOTICE
 
 
-def test_routing_unreadable_directory_degrades_to_a_note(monkeypatch):
+@pytest.mark.parametrize(("probe", "_no_commit", "unreadable"), _WORKFLOW_DIR_DEGRADES)
+def test_unreadable_directory_degrades_to_a_note(monkeypatch, probe, _no_commit, unreadable):
     def gh(path):
         raise SystemExit(f"::error::command failed (1): gh api {path}")
 
     monkeypatch.setattr(doctor, "_gh_json", gh)
-    out = doctor._routing_warnings(_ctx())
-    assert out == [doctor.ROUTING_UNREADABLE]
+    out = probe(_ctx())
+    assert out == [unreadable]
     assert out[0][0] == doctor.NOTICE
+    assert "::error::" not in out[0][1] and "gh api" not in out[0][1]
 
 
 def test_routing_probe_is_registered(monkeypatch):
