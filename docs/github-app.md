@@ -541,7 +541,7 @@ what every repository would get and writes nothing.
 
 Each run ends with the checklist of what it cannot set: the cloud role and
 region, the env identity your layout injects, `SHIPMATE_PLAN_PASSPHRASE`,
-`SLACK_WEBHOOK`, environment reviewers, a `CODEOWNERS` entry, and the pull
+`SHIPMATE_SLACK_WEBHOOK`, environment reviewers, a `CODEOWNERS` entry, and the pull
 request carrying the workflow file.
 
 Then confirm, per repository, that no repository-level

@@ -333,13 +333,15 @@ never used.
   edited to add or remove an environment — every cell job binds the row's
   `env_binding`, written once, for every env. The one carve-out is `shipmate-engine` — a single fixed
   environment name, not a logical environment a consumer defines or names
-  itself, that exists purely to scope the App private key to the
-  default-branch ref (see `docs/github-app.md` §Key-exposure boundary). It
-  appears only inside the engine's reusable workflows — `plan.yml`'s
+  itself, that exists purely to scope the App private key and the Slack
+  webhook to the default-branch ref (see `docs/github-app.md` §Key-exposure
+  boundary for the key, `docs/drift.md` §Slack (optional) for the webhook).
+  It appears only inside the engine's reusable workflows — `plan.yml`'s
   `summary` job, `comment-ops.yml`'s `ops` job, `drift.yml`'s `issues` job, and
   the apply path (`apply.yml`, `apply-all.yml`, `apply-env-level.yml`,
   `deploy.yml`). No consumer file names it: the consumer's `shipmate.yml`
-  passes the key by name and binds no environment of its own. Each of those
+  passes the key, and on its `deploy` and `drift` jobs the webhook, by name and
+  binds no environment of its own. Each of those
   engine jobs runs at a ref the environment's default-branch policy admits —
   the base ref under
   `pull_request_target`, the default branch under `issue_comment`, the nightly

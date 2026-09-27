@@ -94,14 +94,19 @@ the plan path sees only the changed set
 
 ## Slack (optional)
 
-Slack needs no line in your workflow file. The engine's `issues` job passes
-`slack-webhook: ${{ vars.SLACK_WEBHOOK }}` to `drift-issues`, and `vars` inherit
-into a called workflow, so setting that one GitHub variable is the whole
-configuration. Set it at repo or org level, or on the `shipmate-engine`
-environment that job binds (for `vars.`, most specific wins: environment
-overrides repository overrides organization). The input's default is the empty
-string, so with `SLACK_WEBHOOK` unset the expression renders empty and no
-notification is attempted — nothing else changes.
+Store the webhook as the secret `SHIPMATE_SLACK_WEBHOOK` on the
+`shipmate-engine` environment that the engine's `issues` job binds. The `deploy`
+and `drift` jobs of the workflow file in [`getting-started.md`](getting-started.md),
+and each slice file's own `secrets:` block ([§Spreading a sweep across the
+week](#spreading-a-sweep-across-the-week)), map it by name. Without that line the
+environment's value never arrives at that job. It is a secret, not a variable,
+because every plan cell receives the repository's variables and a step's inputs
+print in its log; a cell refuses a variable of that name, and so do `deploy.yml`'s
+`summary` and `drift.yml`'s `issues` jobs, which also see one set on
+`shipmate-engine`. It belongs on the
+environment, not in a repository secret: any workflow on any branch reads a
+repository secret. Unset, the input is empty and no notification is attempted. The `deploy` job's
+mapping feeds the deploy failure notice.
 
 When it is set, `drift-issues` POSTs one message per cell that is drifted on this
 run (the same cells whose Issue it created or updated), a single-line
@@ -199,6 +204,8 @@ jobs:
     secrets:
       SHIPMATE_APP_PRIVATE_KEY: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
       SHIPMATE_SECRETS: ${{ secrets.SHIPMATE_SECRETS }}
+      # Without this mapping, this slice sends no Slack.
+      SHIPMATE_SLACK_WEBHOOK: ${{ secrets.SHIPMATE_SLACK_WEBHOOK }}
     with:
       tags: "env/dev-eu"
 ```

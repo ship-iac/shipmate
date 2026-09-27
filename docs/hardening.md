@@ -870,12 +870,14 @@ included, because it compares the policy names against the default branch alone.
 
 ## What the engine receives from your repository
 
-The documented file's jobs pass three secrets by name:
+The documented file's jobs pass four secrets by name:
 `SHIPMATE_APP_PRIVATE_KEY`, `SHIPMATE_PLAN_PASSPHRASE` wherever the callee
 writes or reads an encrypted plan artifact (the `plan`, `deploy`, `targeted` and
-`all` jobs; `unlock` passes neither engine secret), and `SHIPMATE_SECRETS` on
-every job whose callee runs a cell. Nothing else crosses into a called workflow, because
-GHA forwards no secret a caller does not name.
+`all` jobs; `unlock` passes neither engine secret), `SHIPMATE_SECRETS` on
+every job whose callee runs a cell, and `SHIPMATE_SLACK_WEBHOOK` on the `deploy`
+and `drift` jobs, read only by engine jobs that bind `shipmate-engine`. Nothing
+else crosses into a called workflow, because GHA forwards no secret a caller does
+not name.
 
 **Variables are a wider surface than that, and they are not named one by one.**
 Each cell is handed `${{ toJSON(vars) }}`, which enumerates every GitHub

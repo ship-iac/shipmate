@@ -54,6 +54,7 @@ _APP_KEY_AND_PASSPHRASE = {
     "SHIPMATE_PLAN_PASSPHRASE": "${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}",
 }
 _APP_KEY_PASSPHRASE_AND_SECRETS = {**_APP_KEY_AND_PASSPHRASE, **_CONSUMER_SECRETS}
+_SLACK_SECRET = {"SHIPMATE_SLACK_WEBHOOK": "${{ secrets.SHIPMATE_SLACK_WEBHOOK }}"}
 
 #: The whole `secrets:` block every caller of an engine reusable workflow must write, keyed by
 #: callee file name. Hand-written, never derived from the callee's own declarations: a guard that
@@ -64,16 +65,17 @@ _APP_KEY_PASSPHRASE_AND_SECRETS = {**_APP_KEY_AND_PASSPHRASE, **_CONSUMER_SECRET
 #: `environment:` would otherwise supply. Mapping a secret the callee does not declare is a
 #: load-time failure, which is why each entry is the callee's exact declaration set: `plan.yml`
 #: encrypts plan artifacts and mints the gate, so it takes both engine secrets; `drift.yml`
-#: mints only; `comment-ops.yml` runs no cell, so it is the one entry taking no consumer
-#: envelope. Every other callee runs a cell, and `SHIPMATE_SECRETS` is how a consumer's own
-#: secrets reach it.
+#: mints but encrypts nothing, so it takes no passphrase; `comment-ops.yml` runs no cell, so it
+#: is the one entry taking no consumer envelope. Every other callee runs a cell, and
+#: `SHIPMATE_SECRETS` is how a consumer's own secrets reach it. `deploy.yml` and `drift.yml`
+#: also take the webhook, because their `shipmate-engine` jobs post to Slack.
 ENGINE_CALL_SECRETS = {
     "plan.yml": _APP_KEY_PASSPHRASE_AND_SECRETS,
-    "drift.yml": _APP_KEY_AND_SECRETS,
+    "drift.yml": {**_APP_KEY_AND_SECRETS, **_SLACK_SECRET},
     "comment-ops.yml": _APP_KEY,
     "apply.yml": _APP_KEY_PASSPHRASE_AND_SECRETS,
     "apply-all.yml": _APP_KEY_PASSPHRASE_AND_SECRETS,
-    "deploy.yml": _APP_KEY_PASSPHRASE_AND_SECRETS,
+    "deploy.yml": {**_APP_KEY_PASSPHRASE_AND_SECRETS, **_SLACK_SECRET},
     "apply-env-level.yml": _APP_KEY_PASSPHRASE_AND_SECRETS,
     # Unlock reads no plan artifact and mints no App token, so the consumer envelope is the
     # whole block: `unlock-cell` runs `tofu init`, which a consumer's backend may configure

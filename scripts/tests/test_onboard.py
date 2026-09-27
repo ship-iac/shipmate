@@ -2136,10 +2136,10 @@ def test_a_file_still_carrying_the_docs_placeholder_is_not_reported_pin_only(tmp
 _CHECKLIST_HEAD = """
 Still yours — these values are the consumer's, so this script cannot set them.
 
-Repository-wide, both optional:
+Both optional:
 
   gh secret set SHIPMATE_PLAN_PASSPHRASE
-  gh variable set SLACK_WEBHOOK --body <value>
+  gh secret set SHIPMATE_SLACK_WEBHOOK --env shipmate-engine
 
 By hand:
 
