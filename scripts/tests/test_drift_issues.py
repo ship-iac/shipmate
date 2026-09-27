@@ -82,12 +82,13 @@ def test_plan_not_ok_cell_is_skipped_entirely(monkeypatch):
     rec = _Recorder()
     monkeypatch.setattr(di, "_run", rec)
     cell = _cell(plan_ok=False, drifted=True)
-    result = di.upsert_or_close(cell, {"drift: dev-eu / app": 7}, "url", [False])
+    result = di.upsert_or_close(cell, {"drift: dev-eu / app": 7}, "url")
     assert result is False
     assert rec.calls == []  # An existing open issue is left untouched.
 
 
 def test_drifted_with_no_existing_issue_creates_one(monkeypatch):
+    di._ensure_label.cache_clear()
     rec = _Recorder()
     monkeypatch.setattr(di, "_run", rec)
     label_calls = []
@@ -96,18 +97,32 @@ def test_drifted_with_no_existing_issue_creates_one(monkeypatch):
         lambda *a, **k: label_calls.append(a) or type("R", (), {"returncode": 0})(),
     )
     cell = _cell(drifted=True, add=1)
-    result = di.upsert_or_close(cell, {}, "url", [False])
+    result = di.upsert_or_close(cell, {}, "url")
     assert result is True
     assert len(rec.calls) == 1
     assert rec.calls[0][:3] == ["gh", "issue", "create"]
     assert label_calls, "expected the label to be (best-effort) created"
 
 
+def test_two_new_issues_create_the_label_once(monkeypatch):
+    """Mutation: `@functools.cache` -> `@functools.lru_cache(maxsize=0)` on `_ensure_label`."""
+    di._ensure_label.cache_clear()
+    monkeypatch.setattr(di, "_run", _Recorder())
+    label_calls = []
+    monkeypatch.setattr(
+        "subprocess.run",
+        lambda *a, **k: label_calls.append(a) or type("R", (), {"returncode": 0})(),
+    )
+    di.upsert_or_close(_cell(drifted=True, stack_name="app"), {}, "url")
+    di.upsert_or_close(_cell(drifted=True, stack_name="db"), {}, "url")
+    assert len(label_calls) == 1
+
+
 def test_drifted_with_existing_issue_edits_it(monkeypatch):
     rec = _Recorder()
     monkeypatch.setattr(di, "_run", rec)
     cell = _cell(drifted=True)
-    result = di.upsert_or_close(cell, {"drift: dev-eu / app": 42}, "url", [True])
+    result = di.upsert_or_close(cell, {"drift: dev-eu / app": 42}, "url")
     assert result is True
     assert rec.calls == [["gh", "issue", "edit", "42", "--body", di._body(cell, "url")]]
 
@@ -116,7 +131,7 @@ def test_clean_with_existing_issue_closes_it(monkeypatch):
     rec = _Recorder()
     monkeypatch.setattr(di, "_run", rec)
     cell = _cell(drifted=False)
-    result = di.upsert_or_close(cell, {"drift: dev-eu / app": 42}, "url", [True])
+    result = di.upsert_or_close(cell, {"drift: dev-eu / app": 42}, "url")
     assert result is False
     assert rec.calls[0][:3] == ["gh", "issue", "close"]
 
@@ -125,7 +140,7 @@ def test_clean_with_no_existing_issue_touches_nothing(monkeypatch):
     rec = _Recorder()
     monkeypatch.setattr(di, "_run", rec)
     cell = _cell(drifted=False)
-    result = di.upsert_or_close(cell, {}, "url", [True])
+    result = di.upsert_or_close(cell, {}, "url")
     assert result is False
     assert rec.calls == []
 

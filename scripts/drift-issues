@@ -26,6 +26,7 @@ stack x env is left untouched rather than being auto-closed as if the
 environment were clean.
 """
 
+import functools
 import json
 import os
 import subprocess
@@ -107,18 +108,16 @@ def _body(cell, run_url):
     )
 
 
-def _ensure_label(created):
-    if created[0]:
-        return
+@functools.cache
+def _ensure_label():
     # Best-effort: the label may already exist. Not run through `_run` (which
     # would fail the whole job on the common "already exists" case).
     args = ["gh", "label", "create", LABEL, "--color", "FBCA04"]  # noqa: S607
     args += ["--description", "shipmate drift", "--force"]
     subprocess.run(args, capture_output=True, text=True)  # noqa: S603
-    created[0] = True
 
 
-def upsert_or_close(cell, existing, run_url, label_created):
+def upsert_or_close(cell, existing, run_url):
     """Create, update or close this cell's Issue. Returns True when the cell is
     drifted and its Issue carries a fresh body -- the Slack-notify signal."""
     if not cell["plan_ok"]:
@@ -130,7 +129,7 @@ def upsert_or_close(cell, existing, run_url, label_created):
         if number is not None:
             _run(["gh", "issue", "edit", str(number), "--body", body])
         else:
-            _ensure_label(label_created)
+            _ensure_label()
             _run(["gh", "issue", "create", "--title", title, "--label", LABEL, "--body", body])
         return True
     if number is not None:
@@ -160,14 +159,13 @@ def main():
     url = run_url()
     existing = existing_issue_numbers()
     webhook = os.environ.get("SHIPMATE_SLACK_WEBHOOK", "")
-    label_created = [False]
     # Failures are collected here, not raised: one cell's failure must not abandon the rest,
     # and the run still exits nonzero at the end. The module docstring says why, per kind.
     failed = []
     for cell in cells:
         label = f"{cell['environment']} / {cell['stack_name']}"
         try:
-            drifted_now = upsert_or_close(cell, existing, url, label_created)
+            drifted_now = upsert_or_close(cell, existing, url)
         except SystemExit as exc:
             print(f"::error::drift issue update failed for {label}: {exc}")
             failed.append(label)
