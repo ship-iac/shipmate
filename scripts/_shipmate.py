@@ -6,10 +6,14 @@ suffix-less file, so the ``SourceFileLoader`` is passed explicitly. Nothing is c
 ``bm._run`` cannot leak the patch into every other holder of ``build_matrix``.
 
 Also holds the secret scrubber and repository-slug check that ``onboard`` and ``register-app``
-share.
+share, and the cell-summary reader and run link that ``apply-comment``, ``summary-comment`` and
+``drift-issues`` share.
 """
 
+import glob
 import importlib.util
+import json
+import os
 import pathlib
 import re
 from importlib.machinery import SourceFileLoader
@@ -29,6 +33,29 @@ def scrub(text, secrets):
         if secret:
             text = text.replace(secret, REDACTED)
     return text
+
+
+def cell_summaries(cells_dir, keys, skew):
+    """Yield ``(path, cell)`` for every ``cell.json`` under ``cells_dir``, sorted by path.
+
+    A cell missing any of ``keys`` raises ``SystemExit`` naming it; ``skew`` ends that message
+    with the producer and reader that must share one engine SHA.
+    """
+    for p in sorted(glob.glob(os.path.join(cells_dir, "**", "cell.json"), recursive=True)):
+        with open(p, encoding="utf-8") as fh:
+            cell = json.load(fh)
+        missing = [k for k in keys if k not in cell]
+        if missing:
+            raise SystemExit(f"::error::cell summary {p} missing keys {missing} {skew}")
+        yield p, cell
+
+
+def run_url():
+    """This workflow run's page, from the runner's default environment variables."""
+    return (
+        f"{os.environ['GITHUB_SERVER_URL']}/{os.environ['GITHUB_REPOSITORY']}"
+        f"/actions/runs/{os.environ['GITHUB_RUN_ID']}"
+    )
 
 
 def _load(fname):

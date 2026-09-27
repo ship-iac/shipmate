@@ -26,14 +26,13 @@ stack x env is left untouched rather than being auto-closed as if the
 environment were clean.
 """
 
-import glob
 import json
 import os
 import subprocess
 import urllib.error
 import urllib.request
 
-from _shipmate import _load
+from _shipmate import _load, cell_summaries, run_url
 
 _run = _load("build-matrix")._run
 
@@ -56,18 +55,8 @@ def load_cells(cells_dir):
     for a deterministic run order. A cell.json missing a schema key is
     drift-cell/this-script pin skew -- fail loud rather than silently drop a
     stack x env's drift state."""
-    out = []
-    for p in sorted(glob.glob(os.path.join(cells_dir, "**", "cell.json"), recursive=True)):
-        with open(p, encoding="utf-8") as fh:
-            cell = json.load(fh)
-        missing = [k for k in CELL_KEYS if k not in cell]
-        if missing:
-            raise SystemExit(
-                f"::error::cell summary {p} missing keys {missing} -- drift-cell and "
-                "this script must be pinned at the same engine SHA"
-            )
-        out.append(cell)
-    return out
+    skew = "-- drift-cell and this script must be pinned at the same engine SHA"
+    return [cell for _, cell in cell_summaries(cells_dir, CELL_KEYS, skew)]
 
 
 def existing_issue_numbers():
@@ -168,10 +157,7 @@ def main():
     cells = load_cells(os.environ.get("SHIPMATE_CELLS_DIR", "drift"))
     if not cells:
         return
-    run_url = (
-        f"{os.environ['GITHUB_SERVER_URL']}/{os.environ['GITHUB_REPOSITORY']}"
-        f"/actions/runs/{os.environ['GITHUB_RUN_ID']}"
-    )
+    url = run_url()
     existing = existing_issue_numbers()
     webhook = os.environ.get("SHIPMATE_SLACK_WEBHOOK", "")
     label_created = [False]
@@ -181,7 +167,7 @@ def main():
     for cell in cells:
         label = f"{cell['environment']} / {cell['stack_name']}"
         try:
-            drifted_now = upsert_or_close(cell, existing, run_url, label_created)
+            drifted_now = upsert_or_close(cell, existing, url, label_created)
         except SystemExit as exc:
             print(f"::error::drift issue update failed for {label}: {exc}")
             failed.append(label)
