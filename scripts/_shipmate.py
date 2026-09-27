@@ -21,10 +21,10 @@ REDACTED = "***"
 #: A repository slug is interpolated into API paths, URLs and `gh --repo` arguments. Both halves
 #: start alphanumeric, as GitHub logins and repository names do: that forecloses '.' and '..',
 #: and a value beginning with '-' reads to a CLI as a flag.
-_REPO_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9][A-Za-z0-9._-]*")
+REPO_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9][A-Za-z0-9._-]*")
 
 
-def _scrub(text, secrets):
+def scrub(text, secrets):
     for secret in secrets:
         if secret:
             text = text.replace(secret, REDACTED)

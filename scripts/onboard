@@ -44,10 +44,12 @@ import subprocess
 import sys
 import textwrap
 
-from _shipmate import _REPO_RE, _load, _scrub
+from _shipmate import REPO_RE, _load, scrub
 
 ENGINE_ENV = "shipmate-engine"
 GATE = "shipmate / gate"
+#: The one repository variable this script writes, and the one name `--vars-at-org` accepts.
+APP_ID_VAR = "SHIPMATE_APP_ID"
 REPORT = []
 _DRY = False
 
@@ -87,8 +89,8 @@ def _run(args, secrets=(), stdin=None):
         # gh's stderr is the only diagnosis a hand-run reconciler gets.
         stderr = p.stderr.decode("utf-8", "replace").strip()
         raise SystemExit(
-            f"command failed ({p.returncode}): {_scrub(' '.join(args), secrets)}"
-            + (f"\n{_scrub(stderr, secrets)}" if stderr else "")
+            f"command failed ({p.returncode}): {scrub(' '.join(args), secrets)}"
+            + (f"\n{scrub(stderr, secrets)}" if stderr else "")
         )
     return p.stdout.decode("utf-8", "replace")
 
@@ -188,7 +190,7 @@ def _repo_facts():
             "`gh repo view` returned no repository slug or no default branch. Run this from "
             "inside the consumer checkout, with `gh` authenticated against it."
         )
-    if not _REPO_RE.fullmatch(slug):
+    if not REPO_RE.fullmatch(slug):
         raise SystemExit(f"unusable repository slug: {slug!r}")
     return slug, branch, bool(facts.get("isPrivate"))
 
@@ -219,16 +221,15 @@ def _read_key(path):
 
 
 def _at_org(raw):
-    """True when `--vars-at-org` asserts SHIPMATE_APP_ID is set at organization level.
+    """True when `--vars-at-org` asserts APP_ID_VAR is set at organization level.
 
-    Any other name is refused: it would filter nothing and still report success.
-    Uppercased because the API uppercases variable names.
+    Any other value is refused: it would filter nothing and still report success. The
+    refusal quotes the value as received, so `SHIPMATE_APP_ID,` reads as different from the
+    accepted name. Compared uppercased because the API uppercases variable names.
     """
     name = raw.strip().upper()
-    if name not in ("", "SHIPMATE_APP_ID"):
-        raise SystemExit(
-            f"--vars-at-org names {name}, which it does not accept. It accepts SHIPMATE_APP_ID."
-        )
+    if name not in ("", APP_ID_VAR):
+        raise SystemExit(f"--vars-at-org accepts {APP_ID_VAR} only, not {raw!r}.")
     return bool(name)
 
 
@@ -490,15 +491,15 @@ def _report_org_leftovers(ctx):
     """
     if not ctx["at_org"]:
         return
-    current = ctx["variables"].get("SHIPMATE_APP_ID")
+    current = ctx["variables"].get(APP_ID_VAR)
     if current is None:
-        report("ok", "SHIPMATE_APP_ID", "asserted at organization level")
+        report("ok", APP_ID_VAR, "asserted at organization level")
     else:
         report(
             "differs",
-            "SHIPMATE_APP_ID",
+            APP_ID_VAR,
             f"repository has {current}, asserted at organization level — delete it with "
-            "`gh variable delete SHIPMATE_APP_ID` or drop the name from --vars-at-org",
+            f"`gh variable delete {APP_ID_VAR}` or drop --vars-at-org",
         )
 
 
@@ -514,7 +515,7 @@ def _org_plan(owner):
     if facts is None:
         raise SystemExit(
             f"{owner} is a personal account, not an organization, so no organization "
-            "variable can reach this repository and every asserted name would resolve to "
+            f"variable can reach this repository and {APP_ID_VAR} would resolve to "
             "empty. Drop --vars-at-org."
         )
     return (facts.get("plan") or {}).get("name", "")
@@ -540,9 +541,9 @@ def _refuse_unreachable_org_variables(ctx):
     raise SystemExit(
         f"{ctx['repo']} is private and {owner}'s plan reads {plan or 'unknown'}. "
         "Organization variables do not reach private repositories on GitHub Free, so "
-        "SHIPMATE_APP_ID would resolve to empty and every run would fail. Upgrade the "
-        "organization, keep them as repository variables (drop them from "
-        "--vars-at-org), or -- if the plan reads 'unknown' -- re-run as an "
+        f"{APP_ID_VAR} would resolve to empty and every run would fail. Upgrade the "
+        "organization, keep it as a repository variable (drop --vars-at-org), or -- if "
+        "the plan reads 'unknown' -- re-run as an "
         "organization owner, because `gh api orgs/<org>` reports no plan to anyone else."
     )
 
@@ -595,52 +596,41 @@ def _refuse_org_assertion_mismatch(ctx):
     """
     if not ctx["at_org"]:
         return
-    reaching = _reaching_variables(
-        ctx["repo"], "Drop the names from --vars-at-org to skip this check."
-    )
+    reaching = _reaching_variables(ctx["repo"], "Drop --vars-at-org to skip this check.")
     wanted = ctx["app_id"]
-    if "SHIPMATE_APP_ID" not in reaching:
+    if APP_ID_VAR not in reaching:
         raise SystemExit(
-            "--vars-at-org names SHIPMATE_APP_ID, but no organization variable of that name "
+            f"--vars-at-org names {APP_ID_VAR}, but no organization variable of that name "
             f"reaches {ctx['repo']} -- it is unset, or its visibility excludes this "
             "repository, so it would resolve to empty and every run would fail. Set it "
-            f"with `gh variable set SHIPMATE_APP_ID --org {ctx['repo'].split('/', 1)[0]} "
+            f"with `gh variable set {APP_ID_VAR} --org {ctx['repo'].split('/', 1)[0]} "
             f"--body {wanted} --visibility all`, add this repository to its selected list, "
-            "or drop SHIPMATE_APP_ID from --vars-at-org."
+            "or drop --vars-at-org."
         )
-    if reaching["SHIPMATE_APP_ID"] != wanted:
+    if reaching[APP_ID_VAR] != wanted:
         raise SystemExit(
-            f"SHIPMATE_APP_ID reaches {ctx['repo']} as {reaching['SHIPMATE_APP_ID']}, but "
+            f"{APP_ID_VAR} reaches {ctx['repo']} as {reaching[APP_ID_VAR]}, but "
             f"--app-id says {wanted}. The workflows read the resolved value, so this run "
             "would configure one thing and every later run would use another. Re-run with "
             "--app-id matching, correct the organization variable first, or drop "
-            "SHIPMATE_APP_ID from --vars-at-org."
+            "--vars-at-org."
         )
 
 
 def _reconcile_variables(ctx):
-    """Set SHIPMATE_APP_ID, the repository variable the workflows read, unless it is
+    """Set APP_ID_VAR, the repository variable the workflows read, unless it is
     asserted at organization level.
 
-    A variable that exists with another value is reported, never overwritten: a
-    consumer naming another App is making a deliberate choice, and moving it silently is
-    this script exceeding its mandate.
+    An existing value always equals --app-id here: `_refuse_diverging_app_id` refuses any
+    other before the first reconciler.
     """
     if ctx["at_org"]:
         return
     value = ctx["app_id"]
-    current = ctx["variables"].get("SHIPMATE_APP_ID")
-    if current is None:
-        write(
-            "set",
-            "SHIPMATE_APP_ID",
-            ["gh", "variable", "set", "SHIPMATE_APP_ID", "--body", value],
-            detail=value,
-        )
-    elif current == value:
-        report("ok", "SHIPMATE_APP_ID", value)
-    else:
-        report("differs", "SHIPMATE_APP_ID", f"repository has {current}, --app-id is {value}")
+    if APP_ID_VAR in ctx["variables"]:
+        report("ok", APP_ID_VAR, value)
+        return
+    write("set", APP_ID_VAR, ["gh", "variable", "set", APP_ID_VAR, "--body", value], detail=value)
 
 
 def _ruleset_body(ctx):
@@ -910,20 +900,20 @@ def _checklist(ctx):
 
 
 def _refuse_diverging_app_id(app_id, variables):
-    """Refuse when SHIPMATE_APP_ID exists and disagrees with --app-id.
+    """Refuse when APP_ID_VAR exists and disagrees with --app-id.
 
-    Every other variable is reported and left alone, which is right for a value nothing
-    else derives from. `app_id` has three consumers: the workflows mint their token from
-    the variable, while `--app-id` pins the gate ruleset's `integration_id` and selects
-    whose PEM goes on `shipmate-engine`. Reconciling those separately writes a required
-    check no workflow can satisfy, and the default branch stays blocked until an admin
-    deletes the ruleset. Called before the first reconciler, while failing is still free.
+    Refused rather than reported, because `app_id` has three consumers: the workflows
+    mint their token from the variable, while `--app-id` pins the gate ruleset's
+    `integration_id` and selects whose PEM goes on `shipmate-engine`. Reconciling those
+    separately writes a required check no workflow can satisfy, and the default branch
+    stays blocked until an admin deletes the ruleset. Called before the first
+    reconciler, while failing is still free.
     """
-    current = variables.get("SHIPMATE_APP_ID")
+    current = variables.get(APP_ID_VAR)
     if current is None or current == app_id:
         return
     raise SystemExit(
-        f"the SHIPMATE_APP_ID repository variable is {current} and --app-id is {app_id}. "
+        f"the {APP_ID_VAR} repository variable is {current} and --app-id is {app_id}. "
         "The workflows mint their token from the variable, so a gate ruleset pinned to "
         f"{app_id} could never be satisfied and the default branch would be blocked. "
         f"Re-run with --app-id {current}, or change the variable first."
@@ -953,7 +943,8 @@ def main(argv=None):
     ap.add_argument(
         "--vars-at-org",
         default="",
-        help="variables already set at organization level; not written here",
+        help=f"{APP_ID_VAR}, when it is already set at organization level; "
+        "it is then not written here",
     )
     ap.add_argument("--dry-run", action="store_true", help="report changes, write nothing")
     args = ap.parse_args(argv)

@@ -95,9 +95,9 @@ is printed in the closing by-hand checklist instead, with the file it belongs
 in.
 
 It reads before it writes and creates or updates only what differs, so a second
-run over a configured repository changes nothing. What it will not touch — a
-variable holding another value, an environment carrying a protection it did not
-set — it reports as a `differs` line and exits 2
+run over a configured repository changes nothing. What it will not touch — an
+environment carrying a protection it did not set, a ruleset it did not create —
+it reports as a `differs` line and exits 2
 ([`troubleshooting.md`](troubleshooting.md) §What `scripts/onboard` reports).
 Some disagreements are not reported but refused, before the first write and
 with exit 1 rather than a `differs` line. A `SHIPMATE_APP_ID` repository variable

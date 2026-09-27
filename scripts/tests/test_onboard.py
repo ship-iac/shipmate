@@ -320,7 +320,7 @@ def test_repo_facts_reports_a_private_repository_and_asks_gh_for_the_field(monke
 
 
 def test_repo_facts_refuses_an_unusable_slug(monkeypatch):
-    """The slug is interpolated into API paths. Mutation: drop the `_REPO_RE`
+    """The slug is interpolated into API paths. Mutation: drop the `REPO_RE`
     check, so `../../o/r` reaches them.
     """
     monkeypatch.setattr(
@@ -369,9 +369,9 @@ def test_run_scrubs_secrets_from_a_failure():
     its stderr and never in the argv: scrubbing the argv alone cannot satisfy the
     assertions, and the stderr clause is load-bearing rather than incidental.
 
-    Three mutations redden it: drop the `_scrub` call around the stderr, so the token
+    Three mutations redden it: drop the `scrub` call around the stderr, so the token
     appears verbatim; drop the `raise` and return `p.stdout`, so a failed write is
-    reported as done; or drop the `+ f"\\n{_scrub(stderr, secrets)}"` clause, which also
+    reported as done; or drop the `+ f"\\n{scrub(stderr, secrets)}"` clause, which also
     takes `_gh_json_or_none`'s only channel for spotting an `HTTP 404`.
     """
     with pytest.raises(SystemExit) as e:
@@ -1091,23 +1091,6 @@ def test_absent_variables_are_set_from_the_flags_and_no_tool_version_is_written(
     ]
 
 
-def test_variables_that_exist_with_another_value_are_reported(monkeypatch):
-    """A consumer naming another App is making a deliberate choice: the reconciler names
-    the disagreement, and where its own value came from, and writes nothing over it.
-
-    Mutation: overwrite the existing value instead of reporting -- the `differs` tuple
-    disappears and a `gh variable set` call appears.
-    """
-    fake = make_gh({VARIABLE_LIST: [{"name": "SHIPMATE_APP_ID", "value": "123"}]})
-    monkeypatch.setattr(onboard, "_run", fake)
-    onboard._reconcile_variables(ctx(app_id="456", variables=onboard._variables()))
-    assert fake.calls == [["gh", "variable", "list", "--json", "name,value"]]
-    assert onboard.REPORT == [
-        ("differs", "SHIPMATE_APP_ID", "repository has 123, --app-id is 456"),
-    ]
-    assert onboard._exit_code() == 2
-
-
 def test_variable_names_are_matched_uppercased(monkeypatch):
     """The API returns variable names uppercased whatever case they were created in, so
     a case-sensitive lookup would set a variable that is already there.
@@ -1136,21 +1119,23 @@ def test_at_org_uppercases_the_name_it_accepts():
     [
         pytest.param(
             "not_a_shipmate_variable",
-            "--vars-at-org names NOT_A_SHIPMATE_VARIABLE, which it does not accept. "
-            "It accepts SHIPMATE_APP_ID.",
+            "--vars-at-org accepts SHIPMATE_APP_ID only, not 'not_a_shipmate_variable'.",
             id="unrecognised",
         ),
         pytest.param(
             "SHIPMATE_APPROVERS_TEAM",
-            "--vars-at-org names SHIPMATE_APPROVERS_TEAM, which it does not accept. "
-            "It accepts SHIPMATE_APP_ID.",
+            "--vars-at-org accepts SHIPMATE_APP_ID only, not 'SHIPMATE_APPROVERS_TEAM'.",
             id="approvers-team",
         ),
         pytest.param(
             "TERRAMATE_VERSION",
-            "--vars-at-org names TERRAMATE_VERSION, which it does not accept. "
-            "It accepts SHIPMATE_APP_ID.",
+            "--vars-at-org accepts SHIPMATE_APP_ID only, not 'TERRAMATE_VERSION'.",
             id="version-pin",
+        ),
+        pytest.param(
+            "SHIPMATE_APP_ID,",
+            "--vars-at-org accepts SHIPMATE_APP_ID only, not 'SHIPMATE_APP_ID,'.",
+            id="trailing-comma",
         ),
     ],
 )
@@ -1162,9 +1147,12 @@ def test_at_org_refuses_a_name_it_does_not_accept(raw, message):
     `approvers-team` is the name a consumer is most likely to type, because earlier releases
     accepted it; the team is declared in `.github/shipmate.toml` now. `version-pin` is a
     variable nothing writes or reads any more: the release's own VERSIONS file decides it.
+    `trailing-comma` is the old list form; the quoted value is what tells it apart from the
+    accepted name.
 
     Mutations: skip the comparison, so every non-empty value returns True (reddens every
-    row); accept the row's name beside SHIPMATE_APP_ID (reddens that row alone).
+    row); accept the row's name beside SHIPMATE_APP_ID (reddens that row alone); print the
+    value unquoted (reddens every row).
     """
     with pytest.raises(SystemExit) as excinfo:
         onboard._at_org(raw)
@@ -1188,7 +1176,7 @@ def test_a_repository_copy_of_an_org_variable_is_reported_and_never_written(monk
             "differs",
             "SHIPMATE_APP_ID",
             "repository has 123, asserted at organization level — delete it with "
-            "`gh variable delete SHIPMATE_APP_ID` or drop the name from --vars-at-org",
+            "`gh variable delete SHIPMATE_APP_ID` or drop --vars-at-org",
         )
     ]
     assert onboard._exit_code() == 2
@@ -1217,20 +1205,20 @@ UNREACHED_APP_ID = (
     "reaches o/r -- it is unset, or its visibility excludes this repository, so it "
     "would resolve to empty and every run would fail. Set it with `gh variable set "
     "SHIPMATE_APP_ID --org o --body 1 --visibility all`, add this repository to its "
-    "selected list, or drop SHIPMATE_APP_ID from --vars-at-org."
+    "selected list, or drop --vars-at-org."
 )
 FREE_APP_ID = (
     "o/r is private and o's plan reads free. Organization variables do not reach private "
     "repositories on GitHub Free, so SHIPMATE_APP_ID would resolve to empty and every run "
-    "would fail. Upgrade the organization, keep them as repository variables (drop them "
-    "from --vars-at-org), or -- if the plan reads 'unknown' -- re-run as an organization "
+    "would fail. Upgrade the organization, keep it as a repository variable (drop "
+    "--vars-at-org), or -- if the plan reads 'unknown' -- re-run as an organization "
     "owner, because `gh api orgs/<org>` reports no plan to anyone else."
 )
 UNKNOWN_APP_ID = (
     "o/r is private and o's plan reads unknown. Organization variables do not reach private "
     "repositories on GitHub Free, so SHIPMATE_APP_ID would resolve to empty and every run "
-    "would fail. Upgrade the organization, keep them as repository variables (drop them "
-    "from --vars-at-org), or -- if the plan reads 'unknown' -- re-run as an organization "
+    "would fail. Upgrade the organization, keep it as a repository variable (drop "
+    "--vars-at-org), or -- if the plan reads 'unknown' -- re-run as an organization "
     "owner, because `gh api orgs/<org>` reports no plan to anyone else."
 )
 
@@ -1457,7 +1445,7 @@ def test_an_organization_value_disagreeing_with_this_run_refuses_naming_both(mon
         "SHIPMATE_APP_ID reaches o/r as 222, but --app-id says 111. The workflows read the "
         "resolved value, so this run would configure one thing and every later run would use "
         "another. Re-run with --app-id matching, correct the organization variable first, "
-        "or drop SHIPMATE_APP_ID from --vars-at-org."
+        "or drop --vars-at-org."
     )
 
 
@@ -1481,7 +1469,7 @@ def test_a_repository_copy_does_not_rescue_a_disagreeing_organization_value(monk
         "SHIPMATE_APP_ID reaches o/r as 222, but --app-id says 111. The workflows read the "
         "resolved value, so this run would configure one thing and every later run would use "
         "another. Re-run with --app-id matching, correct the organization variable first, "
-        "or drop SHIPMATE_APP_ID from --vars-at-org."
+        "or drop --vars-at-org."
     )
 
 
@@ -1599,7 +1587,7 @@ def test_a_personal_account_is_refused_by_name(monkeypatch, tmp_path):
     )
     assert str(exit_) == (
         "o is a personal account, not an organization, so no organization variable can "
-        "reach this repository and every asserted name would resolve to empty. Drop "
+        "reach this repository and SHIPMATE_APP_ID would resolve to empty. Drop "
         "--vars-at-org."
     )
 
@@ -1695,7 +1683,7 @@ def test_a_failed_organization_read_names_its_two_causes(monkeypatch):
     assert str(excinfo.value) == (
         "could not read the organization variables reaching o/r: gh: Forbidden (HTTP 403)\n"
         "A fine-grained token needs this repository's Variables read permission, and "
-        "`--slurp` needs a recent `gh`. Drop the names from --vars-at-org to skip this check."
+        "`--slurp` needs a recent `gh`. Drop --vars-at-org to skip this check."
     )
 
 

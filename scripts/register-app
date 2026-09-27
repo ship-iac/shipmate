@@ -35,7 +35,7 @@ import threading
 import urllib.parse
 import webbrowser
 
-from _shipmate import _REPO_RE, _scrub
+from _shipmate import REPO_RE, scrub
 
 #: `code` is interpolated into the `app-manifests/<code>/conversions` API path and arrives over
 #: a loopback socket; a '/' or '..' in it retargets that request at another endpoint.
@@ -68,11 +68,11 @@ def _run(args, secrets=(), **kw):
     """
     # args is a `gh` invocation built here, shell=False, and the two values
     # interpolated into it -- `--repo` and the manifest `code`, which lands in an
-    # API *path* -- passed _REPO_RE / _CODE_RE at their entry point in main().
+    # API *path* -- passed REPO_RE / _CODE_RE at their entry point in main().
     p = subprocess.run(args, capture_output=True, text=True, **kw)  # noqa: S603
     if p.returncode != 0:
         # gh's stderr is the only diagnosis a hand-run bootstrap gets.
-        sys.stderr.write(_scrub(p.stderr, secrets))
+        sys.stderr.write(scrub(p.stderr, secrets))
         raise SystemExit(f"command failed ({p.returncode}): {' '.join(args[:2])}")
     return p.stdout
 
@@ -189,7 +189,7 @@ def main(argv=None):
     ap.add_argument("--out", required=True, help="path the private key is written to (mode 0600)")
     ap.add_argument("--code", help="skip the browser leg and convert this manifest code")
     args = ap.parse_args(argv)
-    if not _REPO_RE.fullmatch(args.repo):
+    if not REPO_RE.fullmatch(args.repo):
         raise SystemExit(f"--repo must be <owner>/<repo>: {args.repo!r}")
     if not _NAME_RE.fullmatch(args.name):
         raise SystemExit(
