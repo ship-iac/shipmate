@@ -431,14 +431,10 @@ def apply_check_state(rows, present, done):
 
 
 def _resources(text):
-    if not text:
+    matches = _RESOURCES_RE.findall(text or "")
+    if not matches:
         return ""
-    last = None
-    for m in _RESOURCES_RE.finditer(text):
-        last = m
-    if not last:
-        return ""
-    added, changed, destroyed = last.groups()
+    added, changed, destroyed = matches[-1]
     return f"+{added} ~{changed} -{destroyed}"
 
 
