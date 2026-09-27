@@ -28,31 +28,3 @@ GitHub cache entries can be evicted at any time. Sample-repo stacks use
 for concurrent read/modify/write races is closed later by a per-env
 `concurrency` group that serializes applies; `actions/state` itself makes no
 locking guarantees.
-
-## Usage
-
-Call once with `mode: restore` after `tofu init` and before plan/apply, and
-once with `mode: save` after apply. Pass the same `path` both times:
-
-```yaml
-- name: Restore state
-  id: restore-state
-  if: ${{ steps.locate-state.outputs.path != '' }}
-  uses: $/actions/state
-  with:
-    stack-slug: ${{ steps.ids.outputs.slug }}
-    env: dev-eu
-    mode: restore
-    path: ${{ steps.locate-state.outputs.path }}
-
-# ... run `tofu plan` / `tofu apply` (state lives under the path above) ...
-
-- name: Save state
-  if: ${{ always() && steps.restore-state.outcome == 'success' }}
-  uses: $/actions/state
-  with:
-    stack-slug: ${{ steps.ids.outputs.slug }}
-    env: dev-eu
-    mode: save
-    path: ${{ steps.locate-state.outputs.path }}
-```
