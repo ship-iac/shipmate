@@ -13,6 +13,8 @@ grammar are declared unstable in `README.md`.
 
 ## [0.37.0] — 2026-09-27
 
+Tags `352eb83`.
+
 ### Changed — BREAKING
 
 - **`.github/shipmate.toml` takes its final key names.** Top level: `schema_version`,
