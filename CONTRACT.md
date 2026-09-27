@@ -1016,7 +1016,7 @@ only labels the output as shipmate's own.
 `shipmate doctor` posts a consolidated, sticky report — one comment per pull
 request, identified by the HTML marker `<!-- shipmate:doctor -->` (distinct
 from the plan comment's `<!-- shipmate:summary -->`) and upserted in place the
-same way. It combines sixteen live settings probes (gate ruleset,
+same way. It combines fourteen live settings probes (gate ruleset,
 default-branch `pull_request` rule, environment existence, environment
 protection shape, plan-environment secrets, the `shipmate-engine`
 environment's own existence and default-branch scoping, `pull_request_target`
@@ -1025,12 +1025,6 @@ that trigger by design, engine action-pin freshness,
 the plan-calling job name in the consumer's `shipmate.yml`, which must be
 `shipmate` or the plan cell checks are not `shipmate / <stack> / <env>` and
 every `[plan]` link in the plan comment falls back to the workflow-run page,
-a retired `plan_run_id` input still declared or forwarded by the consumer's
-`shipmate.yml` (a forward to a reusable workflow is rejected as the run LOADS,
-so there is no job and no log to read),
-a retired `mode` input on the same file — declared under `on:`, or forwarded
-to the engine's reusable apply workflows, where the same load-time rejection
-applies — only those two placements are read as the retired rail,
 the dispatch wiring of the consumer's `shipmate.yml` — the `workflow_dispatch`
 trigger every commented verb dispatches, the four inputs that dispatch sends,
 and its call of the engine's plan workflow, without which the dispatch starts a
@@ -1053,7 +1047,7 @@ when the report was rendered, it says so and asks for the command again once
 they have, and if the harvest itself could not be read in full it says that
 too — the two are separate statements, since a run that has not finished has
 recorded nothing yet while a run that could not be read may have recorded
-plenty. Only fourteen of the sixteen
+plenty. Only twelve of the fourteen
 probes can produce a finding from the plan path's own `annotate`-mode
 invocation: the approver-team probe runs only in `report` mode, because the
 plan path's App token is minted without `members: read` and could not look a
@@ -1647,10 +1641,9 @@ The four jobs:
   dispatched run evaluates at the default branch.
 
 Nothing matches on the workflow's `name:` any more. Doctor reads the consumer's
-workflow files for seven probes — stale engine pins, `pull_request_target`
-triggers, a retired `plan_run_id` input in `shipmate.yml`, a retired `mode`
-input in the same file, its plan-calling job name, its dispatch wiring, and its
-event routing; the last three observe whether the plan comment's per-cell links
+workflow files for five probes — stale engine pins, `pull_request_target`
+triggers, and `shipmate.yml`'s plan-calling job name, dispatch wiring and event
+routing; the last three observe whether the plan comment's per-cell links
 will resolve, whether a commented verb reaches anything at all, and whether the
 job it reaches is the one that verb names — and they report rather than fail.
 
@@ -1661,8 +1654,8 @@ to that literal filename, naming the verb in the dispatch body, so a renamed
 file is dispatched nowhere, and the pull request is told only that the dispatch
 failed, with the API's refusal left in the comment-handling run that comment
 links; and doctor keys on the exact name for its `pull_request_target`
-exemption and for the calling-job-name, `plan_run_id`, `mode`, dispatch-wiring
-and routing probes, all of which report nothing on a file called anything else.
+exemption and for the calling-job-name, dispatch-wiring and routing probes,
+all of which report nothing on a file called anything else.
 Rename the file and planning is refused from that commit on, and the renamed
 file starts drawing doctor's own `pull_request_target` warning. Each symptom
 surfaces on its own — the refusal names the path it looked for — but none of
