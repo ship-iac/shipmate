@@ -542,7 +542,7 @@ def _gate_sentence(gate):
 
 def _env_disposition_lines(excluded, skipped, held=(), applied_ungated=()):
     """One sentence per env disposition this run produced: excluded, skipped,
-    held for review, applied ungated. Shared by `_footer` and `_short_form` so
+    held for review, applied ungated. Shared by `_footer_parts` and `_short_form` so
     the short form cannot silently drop the comment's most actionable warning.
     Env names are author-controlled, so `_md_escape`d.
 
@@ -592,15 +592,16 @@ def _env_disposition_lines(excluded, skipped, held=(), applied_ungated=()):
     return lines
 
 
-def _footer(gate, run_url, excluded, skipped, env_name, held=(), applied_ungated=()):
+def _footer_parts(gate, run_url, excluded, skipped, env_name, held=(), applied_ungated=()):
     """Excluded/skipped/held/ungated-env lines (all-environments form only), the
-    gate sentence, then the run link."""
+    gate sentence, then the run link. `build_comment` joins them as paragraphs,
+    `_short_form` as one line."""
     parts = []
     if not env_name:
         parts.extend(_env_disposition_lines(excluded, skipped, held, applied_ungated))
     parts.append(_gate_sentence(gate))
     parts.append(f"[Logs & artifacts]({run_url})")
-    return "\n\n".join(parts)
+    return parts
 
 
 def _results_failed(results_csv):
@@ -640,12 +641,8 @@ def _short_form(
         )
     else:
         head = _apply_head(env_name, ":white_check_mark:", "found no pending applies to run")
-    parts = [head]
-    if not env_name:
-        parts.extend(_env_disposition_lines(excluded, skipped, held, applied_ungated))
-    parts.append(_gate_sentence(gate))
-    parts.append(f"[Logs & artifacts]({run_url})")
-    return " ".join(parts)
+    tail = _footer_parts(gate, run_url, excluded, skipped, env_name, held, applied_ungated)
+    return " ".join([head, *tail])
 
 
 def _failure_line(results_csv, rows, env_name):
@@ -711,7 +708,8 @@ def build_comment(
     later cell's link, and hundreds of blocked cells starve the first attempted
     cell's guaranteed minimum by going uncounted until too late."""
     top = _top_section(env_name, results_csv, rows, jobs, run_url)
-    footer = "\n\n" + _footer(gate, run_url, excluded, skipped, env_name, held, applied_ungated)
+    footer_parts = _footer_parts(gate, run_url, excluded, skipped, env_name, held, applied_ungated)
+    footer = "\n\n" + "\n\n".join(footer_parts)
     used = len(top) + len(footer)
 
     urls = {id(r): _job_url(r, jobs, run_url) for r in rows}

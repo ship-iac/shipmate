@@ -646,7 +646,7 @@ def test_short_form_escapes_evil_excluded_and_skipped_env_names():
 
 def test_footer_escapes_evil_excluded_and_skipped_env_names():
     evil = "x</summary><b>evil"
-    footer = ac._footer("pending", RUN_URL, [evil], [evil], "")
+    footer = "\n\n".join(ac._footer_parts("pending", RUN_URL, [evil], [evil], ""))
     assert "</summary><b>evil" not in footer
     assert "&lt;/summary&gt;&lt;b&gt;evil" in footer
 
@@ -691,7 +691,7 @@ def test_short_form_carries_held_and_ungated_sentences():
 
 
 def test_footer_carries_held_and_ungated_sentences():
-    footer = ac._footer("pending", RUN_URL, [], [], "", ["prod"], ["dev-eu"])
+    footer = "\n\n".join(ac._footer_parts("pending", RUN_URL, [], [], "", ["prod"], ["dev-eu"]))
     assert _HELD_SENTENCE in footer
     assert _UNGATED_SENTENCE in footer
 
@@ -821,9 +821,9 @@ def test_job_url_does_not_false_match_on_bare_endswith():
 
 
 def test_footer_excluded_and_skipped_only_for_all_environments_form():
-    footer_env = ac._footer("pending", RUN_URL, ["prod"], ["staging"], "dev-eu")
+    footer_env = "\n\n".join(ac._footer_parts("pending", RUN_URL, ["prod"], ["staging"], "dev-eu"))
     assert "Explicit environment" not in footer_env
-    footer_all = ac._footer("pending", RUN_URL, ["prod"], ["staging"], "")
+    footer_all = "\n\n".join(ac._footer_parts("pending", RUN_URL, ["prod"], ["staging"], ""))
     assert (
         "Explicit environment(s) left pending: `prod` — run `shipmate apply prod` to apply them."
         in footer_all
