@@ -437,16 +437,6 @@ def _reconcile_key(ctx):
     )
 
 
-def _reconcile_engine_env(ctx):
-    """`shipmate-engine`: the environment, its branch policy, and the key on it.
-
-    It is an apply environment in every respect, so it goes through the same
-    reconciler; only the key placement is its own.
-    """
-    _reconcile_env(ctx, ENGINE_ENV, "apply")
-    _reconcile_key(ctx)
-
-
 def _env_names(env, shared):
     """[(environment name, role)] for one derived environment."""
     if env in shared:
@@ -829,6 +819,11 @@ def _depin(text):
 
 
 def _reconcile_shim(ctx):
+    """Write the consumer workflow file, reporting anything already there.
+
+    `pin-only` is not drift: moving a pin is `dev/repin_consumer.py`'s job, driven by
+    docs/releasing.md, so it does not reach `_exit_code`.
+    """
     filename = "shipmate.yml"
     path = pathlib.Path(ctx["root"]) / ".github" / "workflows" / filename
     text = _render(ctx["engine"], ctx["sha"], ctx["version"])
@@ -845,15 +840,6 @@ def _reconcile_shim(ctx):
         report("differs", filename, "the published fence, never pinned: delete it and run again")
     else:
         report("differs", filename, "differs beyond its pin, not overwritten")
-
-
-def _reconcile_shims(ctx):
-    """Write the consumer workflow file, reporting anything already there.
-
-    `pin-only` is not drift: moving a pin is `dev/repin_consumer.py`'s job, driven by
-    docs/releasing.md, so it does not reach `_exit_code`.
-    """
-    _reconcile_shim(ctx)
 
 
 def _checklist(ctx):
@@ -1037,12 +1023,13 @@ def main(argv=None):
     print(f"shared: {', '.join(sorted(ctx['shared'])) or '(none)'}")
     print(f"engine pin: {ctx['sha']} ({ctx['version']})")
 
-    _reconcile_engine_env(ctx)
+    _reconcile_env(ctx, ENGINE_ENV, "apply")
+    _reconcile_key(ctx)
     _reconcile_envs(ctx)
     _reconcile_variables(ctx)
     _report_org_leftovers(ctx)
     _reconcile_ruleset(ctx)
-    _reconcile_shims(ctx)
+    _reconcile_shim(ctx)
     _checklist(ctx)
 
     sys.exit(_exit_code())

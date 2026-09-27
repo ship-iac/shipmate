@@ -450,9 +450,10 @@ def test_main_calls_every_stage_in_order():
     deliberately. Ceiling: the filter is exactly that -- a stage added as `report(...)`
     or `write(...)` directly in `main` is not seen.
 
-    Mutations, each proven: delete `_reconcile_engine_env(ctx)`; delete
-    `_reconcile_envs(ctx)`; delete `_reconcile_variables(ctx)`; delete
-    `_reconcile_ruleset(ctx)`; delete `_reconcile_shims(ctx)`; delete `_checklist(ctx)`;
+    Mutations, each proven: delete `_reconcile_env(ctx, ENGINE_ENV, "apply")`; delete
+    `_reconcile_key(ctx)`; swap those two, which writes the key to an environment that
+    does not exist yet; delete `_reconcile_envs(ctx)`; delete `_reconcile_variables(ctx)`;
+    delete `_reconcile_ruleset(ctx)`; delete `_reconcile_shim(ctx)`; delete `_checklist(ctx)`;
     `_repo_root()` back to `pathlib.Path.cwd()`; delete
     `_refuse_diverging_app_id(args.app_id, variables)`, which is the only guard against a
     ruleset pinned to an App the workflows do not use; delete `sys.exit(_exit_code())`;
@@ -482,12 +483,13 @@ def test_main_calls_every_stage_in_order():
         "_org_plan(ctx['repo'].split('/', 1)[0])",
         "_refuse_unreachable_org_variables(ctx)",
         "_refuse_org_assertion_mismatch(ctx)",
-        "_reconcile_engine_env(ctx)",
+        "_reconcile_env(ctx, ENGINE_ENV, 'apply')",
+        "_reconcile_key(ctx)",
         "_reconcile_envs(ctx)",
         "_reconcile_variables(ctx)",
         "_report_org_leftovers(ctx)",
         "_reconcile_ruleset(ctx)",
-        "_reconcile_shims(ctx)",
+        "_reconcile_shim(ctx)",
         "_checklist(ctx)",
         "sys.exit(_exit_code())",
         "_exit_code()",
@@ -521,7 +523,8 @@ def test_fresh_engine_environment_is_created_with_the_policy_and_the_key(monkeyp
         }
     )
     monkeypatch.setattr(onboard, "_run", fake)
-    onboard._reconcile_engine_env(ctx())
+    onboard._reconcile_env(ctx(), onboard.ENGINE_ENV, "apply")
+    onboard._reconcile_key(ctx())
     assert fake.calls == [
         ["gh", "api", "repos/o/r/environments/shipmate-engine"],
         ["gh", "api", "-X", "PUT", "repos/o/r/environments/shipmate-engine", "--input", "-"],
@@ -591,7 +594,8 @@ def test_null_policy_on_an_existing_engine_environment_is_repaired(monkeypatch):
         }
     )
     monkeypatch.setattr(onboard, "_run", fake)
-    onboard._reconcile_engine_env(ctx())
+    onboard._reconcile_env(ctx(), onboard.ENGINE_ENV, "apply")
+    onboard._reconcile_key(ctx())
     assert fake.calls == [
         ["gh", "api", "repos/o/r/environments/shipmate-engine"],
         ["gh", "api", "-X", "PUT", "repos/o/r/environments/shipmate-engine", "--input", "-"],
@@ -622,7 +626,8 @@ def test_conforming_engine_environment_writes_nothing(monkeypatch):
     """
     fake = make_gh(dict(_CONFORMING_ENGINE))
     monkeypatch.setattr(onboard, "_run", fake)
-    onboard._reconcile_engine_env(ctx())
+    onboard._reconcile_env(ctx(), onboard.ENGINE_ENV, "apply")
+    onboard._reconcile_key(ctx())
     assert fake.calls == [
         ["gh", "api", "repos/o/r/environments/shipmate-engine"],
         ["gh", "api", "repos/o/r/environments/shipmate-engine/deployment-branch-policies"],
@@ -644,7 +649,8 @@ def test_repository_level_key_is_deleted(monkeypatch):
         dict(_CONFORMING_ENGINE, **{REPO_KEY_LIST: [{"name": "SHIPMATE_APP_PRIVATE_KEY"}]})
     )
     monkeypatch.setattr(onboard, "_run", fake)
-    onboard._reconcile_engine_env(ctx())
+    onboard._reconcile_env(ctx(), onboard.ENGINE_ENV, "apply")
+    onboard._reconcile_key(ctx())
     assert fake.calls == [
         ["gh", "api", "repos/o/r/environments/shipmate-engine"],
         ["gh", "api", "repos/o/r/environments/shipmate-engine/deployment-branch-policies"],
@@ -755,7 +761,8 @@ def test_existing_policy_naming_another_branch_is_reported_not_edited(monkeypatc
         )
     )
     monkeypatch.setattr(onboard, "_run", fake)
-    onboard._reconcile_engine_env(ctx())
+    onboard._reconcile_env(ctx(), onboard.ENGINE_ENV, "apply")
+    onboard._reconcile_key(ctx())
     assert fake.calls == [
         ["gh", "api", "repos/o/r/environments/shipmate-engine"],
         ["gh", "api", "repos/o/r/environments/shipmate-engine/deployment-branch-policies"],
@@ -1029,11 +1036,12 @@ def test_dry_run_reaches_every_write_path_and_issues_only_reads(monkeypatch, tmp
     )
     monkeypatch.setattr(onboard, "_run", fake)
     monkeypatch.setattr(onboard, "_DRY", True)
-    onboard._reconcile_engine_env(ctx())
+    onboard._reconcile_env(ctx(), onboard.ENGINE_ENV, "apply")
+    onboard._reconcile_key(ctx())
     onboard._reconcile_envs(ctx())
     onboard._reconcile_variables(ctx())
     onboard._reconcile_ruleset(ctx())
-    onboard._reconcile_shims(ctx(root=tmp_path, engine=ENGINE))
+    onboard._reconcile_shim(ctx(root=tmp_path, engine=ENGINE))
     onboard._checklist(ctx())
     assert list(tmp_path.iterdir()) == []
     assert fake.calls == [
