@@ -36,9 +36,9 @@ dev = [
 [tool.ruff]
 target-version = "py311"
 line-length = 100
-# The helper scripts are executable, extension-less files, so ruff does not
-# discover them by suffix. The glob matches every file under scripts/ at any
-# depth; the fixtures are captured tool output, not Python.
+# The helper scripts are extension-less, so the glob feeds every non-gitignored
+# file under scripts/, at any depth, to ruff as Python. Non-Python test data
+# must live under scripts/tests/fixtures/.
 extend-include = ["scripts/*"]
 extend-exclude = ["scripts/tests/fixtures"]
 
@@ -70,7 +70,7 @@ max-complexity = 8
 "scripts/tests/*" = ["S101", "S603", "S607"]
 
 [tool.ty.environment]
-# dev/ is on the pytest pythonpath, not on ty's module path, so
-# `import repin_consumer` reads as unresolved without this. Same list, one
-# consumer each: pytest resolves it at runtime, ty at check time.
+# dev/ is on the pytest pythonpath but not on ty's module path, so
+# `import repin_consumer` reads as unresolved without this. ty resolves the
+# pythonpath's other two entries, scripts/ and scripts/tests/, on its own.
 extra-paths = ["dev"]
