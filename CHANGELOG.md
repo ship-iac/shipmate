@@ -15,23 +15,14 @@ grammar are declared unstable in `README.md`.
 
 ### Changed — BREAKING
 
-- **`.github/shipmate.toml` keys are renamed.** An old key refuses as an unknown key; no alias
-  reads it.
-
-  | Old | New |
-  | --- | --- |
-  | `version = 1` | `schema_version = 1` |
-  | `layout = "dry"` | `layout = "tf_vars"` |
-  | `env_order = { dev-us = ["dev-eu"] }` | `needs = ["dev-eu"]` on `[environments.dev-us]` |
-  | `explicit_envs = ["prod"]` | `explicit = true` on `[environments.prod]` |
-  | `gate.ungated_envs = ["dev-eu"]` | `gated = false` on `[environments.dev-eu]` |
-  | `gate.approvers_team` | `gate.approver_team` |
-  | `[environments.<env>.vars]` | `[environments.<env>.tf_vars]` |
-  | `{ var = "NAME" }` | `{ vars = "NAME" }` |
-
-  An entry name outside the env-name charset, or with a `-plan` / `-apply` suffix, now refuses;
-  it used to warn as unused. `explicit` and `gated` are TOML booleans and accept no
-  variable reference, so a variable can no longer decide which environment is held back. See
+- **`.github/shipmate.toml` takes its final key names.** Top level: `schema_version`,
+  `layout` (`tf_vars`, `workspace` or `folder`), `[environments.<name>]` and `[gate]`.
+  `[gate]` holds `approver_team`. An entry holds `region`, `tf_vars`, `aws`, `shared`,
+  `needs` (the environments that fully apply first), `explicit` (a bare `shipmate apply`
+  skips it) and `gated` (`false`: a targeted apply needs no approving review). A variable
+  reference is `{ vars = "NAME" }`. Any other key refuses as unknown.
+- An entry name outside the env-name charset, or with a `-plan` / `-apply` suffix, refuses.
+  `explicit` and `gated` are TOML booleans and accept no variable reference. See
   `CONTRACT.md` §Environment table.
 
 ## [0.36.0] — 2026-09-26
