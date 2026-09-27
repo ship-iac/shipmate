@@ -25,17 +25,15 @@ Three exclusions distinguish the bare form from deploy:
 
 import json
 import os
-from graphlib import CycleError
 
 from _shipmate import _load
 
 ad = _load("apply-detect")
 bm = _load("build-matrix")
-wv = _load("waves")
 eo = _load("env-order")
-# No apply-gate alias -- see deploy-detect and test_detect_app_scoping. The one
-# apply-gate function this path needs is reached through `ad`, so there is no
-# second route to the done predicate and no second apply-gate instance.
+# No apply-gate load of its own -- see deploy-detect and test_detect_app_scoping. The
+# apply-gate functions this path needs are reached through `ad.ag`, so there is no
+# second apply-gate instance.
 
 
 def cells_from_checks(check_names, stacks_by_env, tags_by_stack):
@@ -94,7 +92,7 @@ def main():
     table = bm.env_config(cells, set(stacks_by_env))
     cells = bm.stamp_rows(cells, table, "apply")
 
-    pending = ad.filter_pending(cells, ad.completed_apply_names(lines, app_id))
+    pending = ad.filter_pending(cells, ad.ag.app_done_names(lines, app_id))
 
     order = bm.ec.env_order(table)
     pending_envs = {c["environment"] for c in pending}
@@ -126,7 +124,7 @@ def main():
     levels = eo.env_levels(order, {c["environment"] for c in runnable})
     per_level = eo.waves_by_env_level(runnable, deps, levels)
 
-    level_counts = [sum(len(w[f"wave{i}"]) for i in range(wv.MAX_WAVES)) for w in per_level]
+    level_counts = [sum(map(len, w.values())) for w in per_level]
     print(
         f"::notice title=apply-all-detect::head={head} "
         f"cells={len(cells)} pending={len(pending)} envlevels={level_counts} "
@@ -147,11 +145,4 @@ def main():
 
 
 if __name__ == "__main__":
-    try:
-        main()
-    except CycleError as e:
-        raise SystemExit(
-            f"::error::dependency cycle in the Terramate stack run-graph: {e}. Two or more "
-            "stacks order each other through `after`/`before`; break the loop in their stack "
-            "configuration."
-        ) from e
+    main()

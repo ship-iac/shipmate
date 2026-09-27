@@ -20,6 +20,7 @@ this script emits, and a caller holding `actions: write` must not be able to
 state it.
 """
 
+import json
 import os
 import re
 
@@ -118,8 +119,24 @@ def from_api(number, repository):
     return _facts(_gh_json(f"repos/{repository}/pulls/{number}"), "true")
 
 
+def _event_payload(path):
+    """The triggering event's payload, or {} when it cannot be read.
+
+    `main` REFUSES a payload it could not read: {} carries neither a pull request
+    nor a `pr_number`, so there is nothing to resolve the head from, and a run
+    with no stated head is refused rather than planned."""
+    if not path:
+        return {}
+    try:
+        with open(path, encoding="utf-8") as fh:
+            payload = json.load(fh)
+    except (OSError, ValueError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
 def main():
-    payload = bm._event_payload(os.environ.get("GITHUB_EVENT_PATH", ""))
+    payload = _event_payload(os.environ.get("GITHUB_EVENT_PATH", ""))
     pr = payload.get("pull_request")
     if isinstance(pr, dict) and pr:
         facts = from_payload(pr)

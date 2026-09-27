@@ -338,13 +338,31 @@ def test_main_emits_the_dag_shape_notice(monkeypatch, tmp_path, capsys):
     )
 
 
+def test_main_refuses_a_cyclic_run_graph_naming_the_cycle(monkeypatch, tmp_path):
+    """Mutation: `wv.levels` for `wv.stack_levels` in main's `assign_waves` call -- a raw
+    `CycleError` escapes instead of this `SystemExit`."""
+    _apply_env(monkeypatch, tmp_path)
+    _stub_apply(
+        monkeypatch,
+        {"stacks/a": {"stacks/b"}, "stacks/b": {"stacks/a"}},
+        [_apply_check("stacks/a"), _apply_check("stacks/b")],
+    )
+    with pytest.raises(SystemExit) as exc:
+        ad.main()
+    assert str(exc.value) == (
+        "::error::dependency cycle in the Terramate stack run-graph: ('nodes are in a cycle', "
+        "['stacks/a', 'stacks/b', 'stacks/a']). Two or more stacks order each other through "
+        "`after`/`before`; break the loop in their stack configuration."
+    )
+
+
 def test_main_refuses_a_change_deeper_than_max_waves(monkeypatch, tmp_path):
     """`main` reaches the guarded writer, so a chain too deep for the pre-declared wave jobs
     refuses instead of emitting wave0..wave7 with the deepest cells dropped. The AST test that
     used to pin this caller's reach into `write_waves` is gone; nothing else covers it.
 
-    Mutation: pad and write the waves inline in `main` without `wv.guard_max_waves` -- the run
-    writes eight truncated waves and exits 0.
+    Mutation: pad and write the waves inline in `main` without `wv.pad_waves`' refusal -- the
+    run writes eight truncated waves and exits 0.
     """
     depth = ad.wv.MAX_WAVES + 1
     stacks = [f"stacks/s{i}" for i in range(depth)]
@@ -761,7 +779,6 @@ def test_unlock_queue_is_the_pending_cells_of_the_target_env(monkeypatch, tmp_pa
             "env_binding": "dev-eu-apply",
         },
     ]
-    assert _parsed(out)["empty"] == "false"
 
 
 def test_unlock_empty_queue_warns_that_nothing_was_probed(monkeypatch, tmp_path, capsys):
@@ -772,8 +789,8 @@ def test_unlock_empty_queue_warns_that_nothing_was_probed(monkeypatch, tmp_path,
     _boom_on_plan_path(monkeypatch)
     _stub_unlock_tree(monkeypatch, _DEV_EU_CELLS, [_check(name="apply / stacks/app / dev-eu")])
     ad.main()
-    assert _parsed(out)["empty"] == "true"
-    assert json.loads(_parsed(out)["cells"]) == []
+    # Whole file: unlock.yml reads `cells` alone, so nothing else is written.
+    assert out.read_text(encoding="utf-8") == "cells=[]\n"
     assert (
         "::warning::no cell in dev-eu has a pending apply check, so no lock was "
         "probed; a lock on a cell whose check already completed, or on a stack "
@@ -902,10 +919,8 @@ def test_unlock_notice_names_the_mode(monkeypatch, tmp_path, capsys):
 
 
 def test_apply_mode_writes_the_whole_output_file_verbatim(monkeypatch, tmp_path):
-    """`cells` is written in both modes and is never an empty string: the unlock job's
-    strategy.matrix.include is fromJSON(cells), and fromJSON('') errors. Whole-file comparison
-    against a hand-written constant, so an added, dropped or reordered key on the apply path is
-    caught here too."""
+    """Whole-file comparison against a hand-written constant, so an added, dropped or reordered
+    key on the apply path is caught. apply.yml reads `waves`, `empty` and `head_sha`."""
     out = _apply_env(monkeypatch, tmp_path)
     _stub_apply(monkeypatch, {"stacks/app": set()}, [_apply_check("stacks/app", plan_run="42")])
     ad.main()
@@ -919,7 +934,6 @@ def test_apply_mode_writes_the_whole_output_file_verbatim(monkeypatch, tmp_path)
         'dddddddddddddddddddddddddddddddddddddddddddddddd"}], "wave1": [], "wave2": [], '
         '"wave3": [], "wave4": [], "wave5": [], "wave6": [], "wave7": []}\n'
         "empty=false\n"
-        "cells=[]\n"
         "head_sha=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n"
     )
 

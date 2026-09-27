@@ -4,13 +4,12 @@
 Ordering is over the FULL graph, then filtered to the work set, so transitive
 order through unchanged stacks is preserved and empty middle waves are normal.
 
-A module, never a program: apply-detect, env-order and the detect scripts
-`_load` it.
+A module, never a program: apply-detect and env-order `_load` it.
 """
 
 import json
 import re
-from graphlib import TopologicalSorter
+from graphlib import CycleError, TopologicalSorter
 
 MAX_WAVES = 8
 _NODE = re.compile(r'(\w+)\s*\[label="([^"]+)"\]')
@@ -53,6 +52,22 @@ def levels(deps):
     return out
 
 
+def stack_levels(deps):
+    """`levels` over the stack run-graph, or `SystemExit` naming the cycle.
+
+    Every stack-graph sort goes through here, so no detect reaches a raw
+    `CycleError`. The env graph sorts with `levels` directly, after
+    `env-config.validate_env_order` has refused its cycles with its own message."""
+    try:
+        return levels(deps)
+    except CycleError as e:
+        raise SystemExit(
+            f"::error::dependency cycle in the Terramate stack run-graph: {e}. Two or more "
+            "stacks order each other through `after`/`before`; break the loop in their stack "
+            "configuration."
+        ) from e
+
+
 def assign_waves(levels_, cells):
     """Bucket cells by the full-graph level of their stack (index-preserving)."""
     level_of = {stack: i for i, lv in enumerate(levels_) for stack in lv}
@@ -76,25 +91,20 @@ def assign_waves(levels_, cells):
     return waves
 
 
-def guard_max_waves(waves):
-    """Fail if a populated wave lands beyond the pre-declared wave0..wave7 jobs.
-    A deep FULL graph with only low-level cells in the work set is fine — empty
-    trailing levels do not count."""
+def pad_waves(waves):
+    """`waves` as a {wave0..wave{MAX_WAVES-1}: cells} dict, short lists padded.
+
+    Refuses a populated wave beyond the pre-declared wave0..wave7 jobs before
+    truncating. A deep FULL graph with only low-level cells in the work set is
+    fine -- empty trailing levels do not count.
+
+    Every key is always present -- apply-env-level.yml indexes
+    `fromJSON(waves_json).waveN` for every N and errors on a missing one."""
     over = [i for i, w in enumerate(waves) if w and i >= MAX_WAVES]
     if over:
         raise SystemExit(
             f"::error::change spans {over[-1] + 1} dependency levels (> {MAX_WAVES}); split the PR."
         )
-
-
-def pad_waves(waves):
-    """`waves` as a {wave0..wave{MAX_WAVES-1}: cells} dict, short lists padded.
-
-    Refuses populated waves beyond MAX_WAVES before truncating empty trailing levels.
-
-    Every key is always present -- apply-env-level.yml indexes
-    `fromJSON(waves_json).waveN` for every N and errors on a missing one."""
-    guard_max_waves(waves)
     return {f"wave{i}": (waves[i] if i < len(waves) else []) for i in range(MAX_WAVES)}
 
 

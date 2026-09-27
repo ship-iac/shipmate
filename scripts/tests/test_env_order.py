@@ -10,14 +10,13 @@ def _boom(*args, **kwargs):
 
 def test_the_level_computation_reads_nothing(monkeypatch):
     """env-order's own Terramate evaluation is gone: the ordering map arrives as an argument
-    from the mapping the operation already loaded. Both shared `_run` wrappers raise -- the
-    realistic regression is this module fetching its own order through one of them, not a
+    from the mapping the operation already loaded. The shared `_run` wrapper raises -- the
+    realistic regression is this module fetching its own order through it, not a
     hand-rolled `subprocess` call in a module that imports no such thing.
 
-    Mutation: add `bm.ec.read_table()` to `env_levels` -- `_boom` fires.
+    Mutation: add `ec.read_table()` to `env_levels` -- `_boom` fires.
     """
-    monkeypatch.setattr(eo.bm, "_run", _boom)
-    monkeypatch.setattr(eo.bm.ec, "_run", _boom)
+    monkeypatch.setattr(eo.ec, "_run", _boom)
     assert eo.env_levels({"prod": ["dev-eu"]}, ["dev-eu", "prod"]) == {"dev-eu": 0, "prod": 1}
 
 
@@ -85,6 +84,20 @@ def test_waves_by_env_level_refuses_an_env_beyond_the_cap():
             {"stacks/app": set()},
             {"prod": eo.MAX_ENV_LEVELS},
         )
+
+
+def test_waves_by_env_level_refuses_a_cyclic_stack_graph():
+    """deploy-detect and apply-all-detect sort the stack graph only here.
+
+    Mutation: `wv.levels` for `wv.stack_levels` in `waves_by_env_level` -- a raw `CycleError`
+    escapes instead of the `SystemExit`."""
+    with pytest.raises(SystemExit) as exc:
+        eo.waves_by_env_level(
+            [{"stack": "stacks/a", "environment": "prod"}],
+            {"stacks/a": {"stacks/b"}, "stacks/b": {"stacks/a"}},
+            {"prod": 0},
+        )
+    assert str(exc.value).startswith("::error::dependency cycle in the Terramate stack run-graph")
 
 
 def test_env_levels_rejects_string_predecessor():

@@ -11,7 +11,6 @@ tree, and naming that branch takes an API call.
 
 import json
 import os
-import sys
 
 from _shipmate import _load
 
@@ -49,10 +48,6 @@ RESERVED_STACK_PATHS = {
         "the stack."
     ),
 }
-
-
-class MatrixTooLarge(Exception):
-    pass
 
 
 def workload_of(tags):
@@ -165,12 +160,12 @@ def build_matrix(envs, stacks_by_env, tags_by_stack, tags=""):
             raise SystemExit(message)
     guard_slug_collisions(cells)
     if len(cells) > MATRIX_LIMIT:
-        raise MatrixTooLarge(
-            f"{len(cells)} plan cells exceeds the GitHub Actions matrix limit of {MATRIX_LIMIT}. "
-            "Split the change across several pull requests -- the matrix is built over "
-            "`terramate list --changed`. A one-line edit to a shared local module correctly "
-            "marks every dependent stack changed and is one atomic change by nature; there the "
-            "only lever is to reduce the number of environments in play."
+        raise SystemExit(
+            f"::error::{len(cells)} plan cells exceeds the GitHub Actions matrix limit of "
+            f"{MATRIX_LIMIT}. Split the change across several pull requests -- the matrix is "
+            "built over `terramate list --changed`. A one-line edit to a shared local module "
+            "correctly marks every dependent stack changed and is one atomic change by nature; "
+            "there the only lever is to reduce the number of environments in play."
         )
     return cells
 
@@ -272,25 +267,7 @@ def stamp_rows(cells, table, tier):
     return rows
 
 
-def _event_payload(path):
-    """The triggering event's payload, or {} when it cannot be read.
-
-    `scripts/pr-facts` REFUSES a payload it could not read: {} carries neither a
-    pull request nor a `pr_number`, so there is nothing to resolve the head from,
-    and a run with no stated head is refused rather than planned. Every reader
-    shares this one parser, so no two of them can disagree about what the event
-    said."""
-    if not path:
-        return {}
-    try:
-        with open(path, encoding="utf-8") as fh:
-            payload = json.load(fh)
-    except (OSError, ValueError):
-        return {}
-    return payload if isinstance(payload, dict) else {}
-
-
-def fork_pr_error(repository, head_repo, no_pull_request):
+def fork_pr_error(repository, head_repo, no_pull_request: bool):
     """The `::error::` line rejecting a run this script may not plan, or "" when
     it may.
 
@@ -317,11 +294,11 @@ def fork_pr_error(repository, head_repo, no_pull_request):
     The stated value is trustworthy against the threat this guards: the caller
     is the consumer's own default-branch workflow, which a pull-request author
     cannot edit. The residual risk is consumer misconfiguration, which is what
-    doctor's wiring probe reports."""
-    # Case- and whitespace-insensitive: a `no-pull-request: True` would otherwise
-    # redden a nightly for a YAML capitalisation, and honouring it is no fork
-    # exposure -- only this repository's default-branch workflow can set it.
-    if no_pull_request.strip().lower() == "true":
+    doctor's wiring probe reports.
+
+    Only the bool `True` skips the refusal, here and in the two checks below: a
+    caller passing the raw input string would otherwise skip it for "false"."""
+    if no_pull_request is True:
         return ""
     head_repo = head_repo.strip()
     if not head_repo:
@@ -344,7 +321,7 @@ def fork_pr_error(repository, head_repo, no_pull_request):
     )
 
 
-def head_checkout_error(head_sha, no_pull_request):
+def head_checkout_error(head_sha, no_pull_request: bool):
     """The `::error::` line refusing a checkout that is not the commit this run
     says it is planning, or "" when it may be planned.
 
@@ -368,7 +345,7 @@ def head_checkout_error(head_sha, no_pull_request):
     head under both pull-request events, so a `pull_request` consumer names `ref:`
     like every other one.
     """
-    if no_pull_request.strip().lower() == "true":
+    if no_pull_request is True:
         return ""
     head_sha = head_sha.strip()
     if not head_sha:
@@ -415,7 +392,7 @@ def plan_workflow_error(event_name, root="."):
     )
 
 
-def tag_filter_error(tags, no_pull_request):
+def tag_filter_error(tags, no_pull_request: bool):
     """The `::error::` line refusing a `tags` filter outside a run with no pull
     request, or "" when it may be honoured.
 
@@ -429,7 +406,7 @@ def tag_filter_error(tags, no_pull_request):
     as never belonging in a plan job."""
     if not tags.strip():
         return ""
-    if no_pull_request.strip().lower() == "true":
+    if no_pull_request is True:
         return ""
     return (
         "::error::the `tags` filter is only for a workflow with no pull request at all "
@@ -445,20 +422,21 @@ def main():
     base = os.environ.get("SHIPMATE_BASE_SHA", "")
     event_name = os.environ.get("GITHUB_EVENT_NAME", "")
     tags = os.environ.get("SHIPMATE_TAGS", "")
+    # Case- and whitespace-insensitive: a `no-pull-request: True` would otherwise
+    # redden a nightly for a YAML capitalisation, and honouring it is no fork
+    # exposure -- only this repository's default-branch workflow can set it.
+    no_pull_request = os.environ.get("SHIPMATE_NO_PULL_REQUEST", "").strip().lower() == "true"
     # `or`, so the fork refusal precedes the two consumer-wiring checks: a fork
     # head must be turned away before this script shells out or reads its tree.
     rejection = (
         fork_pr_error(
             os.environ.get("GITHUB_REPOSITORY", ""),
             os.environ.get("SHIPMATE_HEAD_REPO", ""),
-            os.environ.get("SHIPMATE_NO_PULL_REQUEST", ""),
+            no_pull_request,
         )
-        or head_checkout_error(
-            os.environ.get("SHIPMATE_HEAD_SHA", ""),
-            os.environ.get("SHIPMATE_NO_PULL_REQUEST", ""),
-        )
+        or head_checkout_error(os.environ.get("SHIPMATE_HEAD_SHA", ""), no_pull_request)
         or plan_workflow_error(event_name)
-        or tag_filter_error(tags, os.environ.get("SHIPMATE_NO_PULL_REQUEST", ""))
+        or tag_filter_error(tags, no_pull_request)
     )
     if rejection:
         raise SystemExit(rejection)
@@ -477,8 +455,4 @@ def main():
 
 
 if __name__ == "__main__":
-    try:
-        main()
-    except MatrixTooLarge as e:
-        print(f"::error::{e}", file=sys.stderr)
-        sys.exit(1)
+    main()

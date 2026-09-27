@@ -17,18 +17,11 @@ envs is handled separately on the apply-all path.
 Before any of that, the PR's review decision — read server-side by the `review`
 job, narrowed by `gated = false` on the environment's entry — must authorize this
 environment, or the run refuses.
-
-`completed_apply_names` lives here and this module's `main` calls it, so
-test_detect_app_scoping's textual guard covers all three detects — but for this
-one it proves nothing by itself: a substring cannot tell a call site from the
-definition in the same file. The stronger pin on this `main` stays the
-behavioural test_a_forged_completed_check_does_not_mark_a_cell_applied.
 """
 
 import json
 import os
 import re
-from graphlib import CycleError
 
 from _shipmate import _load
 
@@ -163,29 +156,14 @@ def apply_check_names(check_run_lines, app_id):
     return set(ag.latest_by_name(ag.from_app(ag.parse_jsonl(check_run_lines), app_id)))
 
 
-def completed_apply_names(check_run_lines, app_id):
-    """App-authored apply checks already completed in `check_run_lines`, shared by
-    all three detects so they judge the identical "already applied" set.
-
-    Pure like `apply_check_names`, and for the same reason: every detect asks
-    several questions of one listing, so the caller owns the fetch. Fetching here
-    as well would give a caller two reads of one listing, and a re-plan landing
-    between them re-opens a name the first read saw completed while its cell keeps
-    the first read's plan-run record.
-
-    Only App-authored checks count: a forged same-name check from any other
-    identity must not mark work done (see apply-gate.app_done_names)."""
-    return ag.app_done_names(check_run_lines, app_id)
-
-
 def pending_apply_names(repo, head_sha):
     """App-authored apply checks on `head_sha` whose latest run is present and
-    NOT completed — the inverse question `completed_apply_names` answers, and the
+    NOT completed — the inverse question `ag.app_done_names` answers, and the
     unlock queue's only membership authority.
 
-    Not `not app_done_names(...)`: a name absent from the listing has no run at
-    all and is not pending, and a completed run with a bad conclusion is done
-    being run whatever its verdict. Both would otherwise enrol a cell nobody
+    Not the complement of `ag.app_done_names`: a name absent from the listing has
+    no run at all and is not pending, and a completed run with a bad conclusion is
+    done being run whatever its verdict. Both would otherwise enrol a cell nobody
     asked about into a force-unlock. Built on the same apply-gate primitives so
     "newest run per name" and "authored by our App" have one definition each."""
     runs = ag.from_app(
@@ -212,7 +190,7 @@ def dag_shape_notice(deps):
     ordering behind in that tool's config with nothing to say so. What this line
     buys is a reader who knows the repository seeing the concurrency figure and
     knowing at once whether it is true."""
-    lv = wv.levels(deps)
+    lv = wv.stack_levels(deps)
     return (
         f"::notice::{len(deps)} stacks, {sum(len(d) for d in deps.values())} after edges, "
         f"{len(lv)} wave levels; {max((len(x) for x in lv), default=0)} stacks would apply "
@@ -315,9 +293,9 @@ def run_unlock(repo, env, head):
 
     `refuse_unreviewed` is skipped because an approval reviews a diff and unlock
     applies none — the run-time half of the decision `scripts/authorize` already
-    made at comment time. `cells` is written in BOTH modes (`[]` on the apply
-    path) because the unlock job's `strategy.matrix.include` is
-    `fromJSON(cells)` and `fromJSON('')` is an error."""
+    made at comment time. `cells` is written even for an empty queue, as `[]`,
+    because the unlock job's `strategy.matrix.include` is `fromJSON(cells)` and
+    `fromJSON('')` is an error."""
     stacks_by_env, tags_by_stack = bm.env_membership(all_stacks=True, require_env_tag=False)
     cells = bm.build_matrix([env], stacks_by_env, tags_by_stack)
     table = bm.env_config(cells, set(stacks_by_env))
@@ -337,8 +315,6 @@ def run_unlock(repo, env, head):
         )
     with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
         fh.write(f"cells={json.dumps(pending)}\n")
-        fh.write(f"empty={'false' if pending else 'true'}\n")
-        fh.write(f"head_sha={head}\n")
 
 
 def main():
@@ -374,7 +350,7 @@ def main():
     # workflow; there is no workflow-path check to re-add here.
     plan_runs = ag.plan_runs_by_name(lines, app_id)
     plan_hashes = ag.plan_hashes_by_name(lines, app_id)
-    completed = completed_apply_names(lines, app_id)
+    completed = ag.app_done_names(lines, app_id)
 
     # Tags only for the workset: this path reconstructs its cells from the head's
     # apply checks plus the run-graph, and evaluating the whole tree would let one
@@ -386,7 +362,7 @@ def main():
 
     pending = with_plan_runs(filter_pending(cells, completed), plan_runs, plan_hashes)
 
-    waves = wv.assign_waves(wv.levels(deps), pending)
+    waves = wv.assign_waves(wv.stack_levels(deps), pending)
     print(dag_shape_notice(deps))
     print(
         f"::notice title=apply-detect::env={env} head={head} "
@@ -395,19 +371,8 @@ def main():
     )
     with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
         wv.write_waves(fh, waves)
-        # Written on both branches so the output shape is one shape. No caller
-        # reads it here -- unlock.yml's matrix is the only consumer, and it never
-        # takes this branch.
-        fh.write("cells=[]\n")
         fh.write(f"head_sha={head}\n")
 
 
 if __name__ == "__main__":
-    try:
-        main()
-    except CycleError as e:
-        raise SystemExit(
-            f"::error::dependency cycle in the Terramate stack run-graph: {e}. Two or more "
-            "stacks order each other through `after`/`before`; break the loop in their stack "
-            "configuration."
-        ) from e
+    main()

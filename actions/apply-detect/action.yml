@@ -29,9 +29,9 @@ inputs:
     default: ""
 outputs:
   waves: { description: "Apply mode only: all waves as one JSON object {wave0..wave7} (apply-env-level.yml waves_json shape). In unlock mode nothing is written and this resolves to the empty string, NOT {} — a consumer must not fromJSON it there; use `cells` instead.", value: "${{ steps.d.outputs.waves }}" }
-  cells: { description: "Flat JSON array of cells — the unlock queue in unlock mode, [] in apply mode. Always valid JSON, never empty: consumers fromJSON it unconditionally.", value: "${{ steps.d.outputs.cells }}" }
-  empty: { description: true when no cell is pending, value: "${{ steps.d.outputs.empty }}" }
-  head_sha: { description: Echoed head SHA, value: "${{ steps.d.outputs.head_sha }}" }
+  cells: { description: "Unlock mode only: the unlock queue as a flat JSON array, [] when it is empty, never the empty string.", value: "${{ steps.d.outputs.cells }}" }
+  empty: { description: "Apply mode only: true when no cell is pending. In unlock mode nothing is written and this resolves to the empty string.", value: "${{ steps.d.outputs.empty }}" }
+  head_sha: { description: "Apply mode only: the echoed head SHA. In unlock mode nothing is written and this resolves to the empty string.", value: "${{ steps.d.outputs.head_sha }}" }
 runs:
   using: composite
   steps:

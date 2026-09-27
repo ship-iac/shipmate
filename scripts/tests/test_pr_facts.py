@@ -209,3 +209,19 @@ def test_the_actions_outputs_are_exactly_the_six_step_outputs():
     # No inputs at all: `github.token` is available inside a composite action, so an input for
     # it would be a consumer surface with no decision behind it.
     assert "inputs" not in spec
+
+
+def test_event_payload_degrades_to_empty_dict(tmp_path):
+    """Each of these reaches main() as {}, which has neither a pull request nor a `pr_number`
+    and so refuses rather than emitting empty facts.
+
+    Mutation: return `payload` without the `isinstance(payload, dict)` check -- the list case
+    returns `[1, 2]`."""
+    assert pf._event_payload("") == {}
+    assert pf._event_payload(str(tmp_path / "absent.json")) == {}
+    bad = tmp_path / "bad.json"
+    bad.write_text("{not json", encoding="utf-8")
+    assert pf._event_payload(str(bad)) == {}
+    listy = tmp_path / "list.json"
+    listy.write_text("[1, 2]", encoding="utf-8")
+    assert pf._event_payload(str(listy)) == {}
