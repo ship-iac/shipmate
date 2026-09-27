@@ -2246,181 +2246,290 @@ def _fork_responses(files):
     return responses
 
 
-def test_pull_request_target_trigger_warned(monkeypatch):
-    responses = _fork_responses({"label.yml": "on:\n  pull_request_target:\n    types: [opened]\n"})
-    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
-    out = doctor._fork_trigger_warnings(_ctx())
-    assert len(out) == 1
-    assert out[0][0] == doctor.WARNING
-    assert "label.yml" in out[0][1]
-    assert "pull_request_target" in out[0][1]
-
-
-def test_pull_request_target_in_a_flow_sequence_warned(monkeypatch):
+# Each row is one workflow directory, {filename: text}, and the substrings the one WARNING must
+# carry: the level and filename matter because the unreadable-directory degrade also returns
+# exactly one item, so a length-only assertion passes on a probe that recognised nothing.
+_FORK_WARNED = [
+    pytest.param(
+        {"label.yml": "on:\n  pull_request_target:\n    types: [opened]\n"},
+        ["label.yml", "pull_request_target"],
+        id="pull_request_target_trigger_warned",
+    ),
     # `on: [push, pull_request_target]` is the same trigger written inline; a
     # probe that only recognised the block form would miss it entirely.
-    responses = _fork_responses({"label.yml": "on: [push, pull_request_target]\n"})
-    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
-    out = doctor._fork_trigger_warnings(_ctx())
-    assert len(out) == 1
-    assert "label.yml" in out[0][1]
-
-
-def test_pull_request_target_as_a_single_event_scalar_warned(monkeypatch):
+    pytest.param(
+        {"label.yml": "on: [push, pull_request_target]\n"},
+        ["label.yml"],
+        id="pull_request_target_in_a_flow_sequence_warned",
+    ),
     # `on: pull_request_target` is the legal one-event scalar form -- no block,
     # no sequence, no brackets. The shortest way to declare the trigger must not
     # be the one shape the probe misses.
-    responses = _fork_responses({"label.yml": "on: pull_request_target\njobs: {}\n"})
-    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
-    out = doctor._fork_trigger_warnings(_ctx())
-    assert len(out) == 1
-    assert out[0][0] == doctor.WARNING
-    assert "label.yml" in out[0][1]
-
-
-def test_pull_request_target_as_a_flow_mapping_key_warned(monkeypatch):
-    responses = _fork_responses({"label.yml": "on: {pull_request_target: {types: [opened]}}\n"})
-    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
-    out = doctor._fork_trigger_warnings(_ctx())
-    # Level and filename too: the unreadable-directory degrade also returns
-    # exactly one item, so a length-only assertion passes on a probe that
-    # recognised nothing at all.
-    assert len(out) == 1
-    assert out[0][0] == doctor.WARNING
-    assert "label.yml" in out[0][1]
-
-
-def test_pull_request_target_as_a_sequence_item_warned(monkeypatch):
-    responses = _fork_responses({"label.yml": "on:\n  - push\n  - pull_request_target\n"})
-    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
-    out = doctor._fork_trigger_warnings(_ctx())
-    assert len(out) == 1
-    assert out[0][0] == doctor.WARNING
-    assert "label.yml" in out[0][1]
-
-
-def test_pull_request_target_in_a_wrapped_flow_sequence_warned(monkeypatch):
+    pytest.param(
+        {"label.yml": "on: pull_request_target\njobs: {}\n"},
+        ["label.yml"],
+        id="pull_request_target_as_a_single_event_scalar_warned",
+    ),
+    pytest.param(
+        {"label.yml": "on: {pull_request_target: {types: [opened]}}\n"},
+        ["label.yml"],
+        id="pull_request_target_as_a_flow_mapping_key_warned",
+    ),
+    pytest.param(
+        {"label.yml": "on:\n  - push\n  - pull_request_target\n"},
+        ["label.yml"],
+        id="pull_request_target_as_a_sequence_item_warned",
+    ),
     # A flow sequence is one value however it is wrapped across lines.
-    responses = _fork_responses({"label.yml": "on: [push,\n     pull_request_target]\n"})
-    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
-    out = doctor._fork_trigger_warnings(_ctx())
-    assert len(out) == 1
-    assert out[0][0] == doctor.WARNING
-    assert "label.yml" in out[0][1]
-
-
-def test_pull_request_target_in_a_flow_sequence_with_brackets_on_own_lines_warned(monkeypatch):
-    responses = _fork_responses(
-        {"label.yml": "on: [\n  push,\n  pull_request_target,\n]\njobs: {}\n"}
-    )
-    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
-    out = doctor._fork_trigger_warnings(_ctx())
-    assert len(out) == 1
-    assert out[0][0] == doctor.WARNING
-    assert "label.yml" in out[0][1]
-
-
-def test_folded_event_name_comparison_is_silent(monkeypatch):
-    # The same comparison as the single-line case below, folded across lines by
-    # a block scalar -- outside the `on:` block either way.
-    responses = _fork_responses(
-        {
-            "plan.yml": "on:\n  pull_request:\njobs:\n  a:\n"
-            "    if: >-\n      github.event_name ==\n      'pull_request_target'\n"
-        }
-    )
-    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
-    assert doctor._fork_trigger_warnings(_ctx()) == []
-
-
-def test_the_word_in_a_run_body_is_silent(monkeypatch):
-    responses = _fork_responses(
-        {
-            "plan.yml": "on:\n  pull_request:\njobs:\n  a:\n    steps:\n"
-            "      - run: |\n          echo this repo has no pull_request_target trigger\n"
-        }
-    )
-    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
-    assert doctor._fork_trigger_warnings(_ctx()) == []
-
-
-def test_a_workflow_dispatch_choice_option_is_silent(monkeypatch):
-    # Inside the `on:` block, but nested below the event-name level: it is one
-    # input's allowed value, not a trigger.
-    responses = _fork_responses(
-        {
-            "ops.yml": "on:\n  workflow_dispatch:\n    inputs:\n      event:\n"
-            "        type: choice\n        options:\n          - pull_request_target\n"
-        }
-    )
-    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
-    assert doctor._fork_trigger_warnings(_ctx()) == []
-
-
-def test_a_longer_trigger_name_is_not_the_token(monkeypatch):
-    responses = _fork_responses({"label.yml": "on: pull_request_target_foo\n"})
-    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
-    assert doctor._fork_trigger_warnings(_ctx()) == []
-
-
-def test_plain_pull_request_trigger_is_silent(monkeypatch):
-    # The prefix must not match: `pull_request:` is the ordinary plan trigger
-    # and every consumer has one. A probe that fired on it would fire always.
-    responses = _fork_responses({"shipmate.yml": "on:\n  pull_request:\n    branches: [main]\n"})
-    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
-    assert doctor._fork_trigger_warnings(_ctx()) == []
-
-
-def test_commented_out_pull_request_target_is_silent(monkeypatch):
-    # These are the lines a careful repository writes *because* it has no such trigger, and
-    # reporting them trains readers to ignore the finding. Both shapes the pattern would match
-    # are here: a trailing comment, and a commented-out key at the head of a line.
-    responses = _fork_responses(
-        {
-            "plan.yml": "on: [pull_request]  # never [pull_request_target]\n",
-            "drift.yml": "on:\n  # pull_request_target:  <- deliberately absent\n  schedule:\n",
-        }
-    )
-    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
-    assert doctor._fork_trigger_warnings(_ctx()) == []
-
-
-def test_quoted_event_name_comparison_is_silent(monkeypatch):
-    # `github.event_name == 'pull_request_target'` compares against the
-    # trigger; it does not declare one.
-    responses = _fork_responses(
-        {
-            "plan.yml": "on:\n  pull_request:\njobs:\n  a:\n"
-            "    if: github.event_name == 'pull_request_target'\n"
-        }
-    )
-    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
-    assert doctor._fork_trigger_warnings(_ctx()) == []
-
-
-def test_the_consumer_workflow_file_is_not_warned_about(monkeypatch):
-    # `shipmate.yml` declaring `pull_request_target` IS the shape the engine ships: the job
-    # holding the App key is the engine plan workflow's `summary` job, which checks out no
-    # consumer content. Warning about it trains readers to ignore the dangerous labeler workflow.
-    responses = _fork_responses(
-        {"shipmate.yml": "on:\n  pull_request_target:\n    types: [opened]\n"}
-    )
-    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
-    assert doctor._fork_trigger_warnings(_ctx()) == []
-
-
-def test_another_workflow_is_still_warned_about_alongside_shipmate_yml(monkeypatch):
-    # The exemption is by exact filename and nothing else.
-    responses = _fork_responses(
+    pytest.param(
+        {"label.yml": "on: [push,\n     pull_request_target]\n"},
+        ["label.yml"],
+        id="pull_request_target_in_a_wrapped_flow_sequence_warned",
+    ),
+    pytest.param(
+        {"label.yml": "on: [\n  push,\n  pull_request_target,\n]\njobs: {}\n"},
+        ["label.yml"],
+        id="pull_request_target_in_a_flow_sequence_with_brackets_on_own_lines_warned",
+    ),
+    # The `shipmate.yml` exemption is by exact filename and nothing else.
+    pytest.param(
         {
             "shipmate.yml": "on:\n  pull_request_target:\n    types: [opened]\n",
             "labeler.yml": "on:\n  pull_request_target:\n    types: [opened]\n",
-        }
-    )
+        },
+        ["labeler.yml"],
+        id="another_workflow_is_still_warned_about_alongside_shipmate_yml",
+    ),
+    # `_on_block`'s column-0 anchoring. Any key ending in `on` is an unanchored match --
+    # `python-version: 3.12` is `versi` + `on:` -- and matching it retargets the block this
+    # probe reads onto a line that can never name an event, so the trigger goes unreported.
+    pytest.param(
+        {"label.yml": "env:\n  python-version: 3.12\non:\n  pull_request_target:\n"},
+        ["label.yml"],
+        id="an_indented_on_is_not_the_top_level_one",
+    ),
+    # `_on_block` promises neither ends the block, and workflows written by hand put a
+    # column-0 comment block right above their events -- the same author style one line
+    # lower would otherwise read as an empty trigger.
+    pytest.param(
+        {"label.yml": "on:\n\n# runs at the base ref\n  pull_request_target:\n"},
+        ["label.yml"],
+        id="a_blank_line_or_a_column_zero_comment_does_not_end_the_on_block",
+    ),
+    # `shipmate.yml` is exempt from the trigger finding, but it is exactly the file where a
+    # fork checkout would be turned on -- so this check must run BEFORE that exemption.
+    # Below it, the one workflow that matters reports nothing.
+    pytest.param(
+        {
+            "shipmate.yml": "on:\n  pull_request_target:\njobs:\n  detect:\n"
+            "    steps:\n      - uses: actions/checkout@v7\n"
+            "        with:\n          allow-unsafe-pr-checkout: true\n"
+        },
+        ["allow-unsafe-pr-checkout", "shipmate.yml"],
+        id="unsafe_pr_checkout_in_shipmate_yml_is_warned",
+    ),
+    # No `pull_request_target` here, so the trigger finding cannot account for the
+    # warning: it is this check or nothing. The detection is deliberately trigger-blind,
+    # so the message must be true of a `pull_request`-only file, handed no secrets.
+    pytest.param(
+        {
+            "label.yml": "on:\n  pull_request:\njobs:\n  x:\n    steps:\n"
+            "      - uses: actions/checkout@v7\n"
+            '        with:\n          allow-unsafe-pr-checkout: "true"\n'
+        },
+        ["allow-unsafe-pr-checkout", "`pull_request`"],
+        id="unsafe_pr_checkout_in_another_workflow_is_warned",
+    ),
+    # Unknown, not false: it may evaluate true, and doctor cannot evaluate it.
+    pytest.param(
+        {
+            "label.yml": "on:\n  pull_request:\njobs:\n  x:\n    steps:\n"
+            "      - with:\n          allow-unsafe-pr-checkout: ${{ vars.UNSAFE }}\n"
+        },
+        ["allow-unsafe-pr-checkout"],
+        id="unsafe_pr_checkout_as_an_expression_is_warned",
+    ),
+    # A line-anchored key misses this, and flow style is not exotic authoring: the engine's
+    # own `.github/workflows/drift.yml` and all four sample repositories write
+    # `with: { fetch-depth: 0 }`. Missing it is fail-open on the outermost guard of the plan path.
+    pytest.param(
+        {
+            "shipmate.yml": "on:\n  pull_request_target:\njobs:\n  x:\n    steps:\n"
+            "      - uses: actions/checkout@v7\n"
+            "        with: { fetch-depth: 0, allow-unsafe-pr-checkout: true }\n",
+        },
+        ["allow-unsafe-pr-checkout"],
+        id="flow_style_unsafe_pr_checkout_is_warned",
+    ),
+    # A consumer file checks out in more than one job, and this probe's own finding asks for
+    # an explicit `false`, so both occurrences coexist in one file routinely. Examining only
+    # the first reads the `false` and returns nothing. Both are in ONE file here;
+    # `unsafe_pr_checkout_set_to_false_is_silent` uses two files with one each.
+    pytest.param(
+        {
+            "shipmate.yml": "on:\n  pull_request_target:\njobs:\n"
+            "  detect:\n    steps:\n      - with:\n"
+            "          allow-unsafe-pr-checkout: false\n"
+            "  plan:\n    steps:\n      - with:\n"
+            "          allow-unsafe-pr-checkout: true\n",
+        },
+        ["allow-unsafe-pr-checkout"],
+        id="a_false_in_one_job_does_not_silence_a_true_in_another",
+    ),
+]
+
+
+@pytest.mark.parametrize(("files", "needles"), _FORK_WARNED)
+def test_fork_trigger_warned(monkeypatch, files, needles):
+    responses = _fork_responses(files)
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
     out = doctor._fork_trigger_warnings(_ctx())
     assert len(out) == 1
-    assert "labeler.yml" in out[0][1]
+    assert out[0][0] == doctor.WARNING
+    for needle in needles:
+        assert needle in out[0][1]
+
+
+_FORK_SILENT = [
+    # The same comparison as `quoted_event_name_comparison_is_silent`, folded across lines by
+    # a block scalar -- outside the `on:` block either way.
+    pytest.param(
+        {
+            "plan.yml": "on:\n  pull_request:\njobs:\n  a:\n"
+            "    if: >-\n      github.event_name ==\n      'pull_request_target'\n"
+        },
+        id="folded_event_name_comparison_is_silent",
+    ),
+    pytest.param(
+        {
+            "plan.yml": "on:\n  pull_request:\njobs:\n  a:\n    steps:\n"
+            "      - run: |\n          echo this repo has no pull_request_target trigger\n"
+        },
+        id="the_word_in_a_run_body_is_silent",
+    ),
+    # Inside the `on:` block, but nested below the event-name level: it is one
+    # input's allowed value, not a trigger.
+    pytest.param(
+        {
+            "ops.yml": "on:\n  workflow_dispatch:\n    inputs:\n      event:\n"
+            "        type: choice\n        options:\n          - pull_request_target\n"
+        },
+        id="a_workflow_dispatch_choice_option_is_silent",
+    ),
+    pytest.param(
+        {"label.yml": "on: pull_request_target_foo\n"},
+        id="a_longer_trigger_name_is_not_the_token",
+    ),
+    # The prefix must not match: `pull_request:` is the ordinary plan trigger
+    # and every consumer has one. A probe that fired on it would fire always.
+    pytest.param(
+        {"shipmate.yml": "on:\n  pull_request:\n    branches: [main]\n"},
+        id="plain_pull_request_trigger_is_silent",
+    ),
+    # These are the lines a careful repository writes *because* it has no such trigger, and
+    # reporting them trains readers to ignore the finding. Both shapes the pattern would match
+    # are here: a trailing comment, and a commented-out key at the head of a line.
+    pytest.param(
+        {
+            "plan.yml": "on: [pull_request]  # never [pull_request_target]\n",
+            "drift.yml": "on:\n  # pull_request_target:  <- deliberately absent\n  schedule:\n",
+        },
+        id="commented_out_pull_request_target_is_silent",
+    ),
+    # `github.event_name == 'pull_request_target'` compares against the
+    # trigger; it does not declare one.
+    pytest.param(
+        {
+            "plan.yml": "on:\n  pull_request:\njobs:\n  a:\n"
+            "    if: github.event_name == 'pull_request_target'\n"
+        },
+        id="quoted_event_name_comparison_is_silent",
+    ),
+    # `shipmate.yml` declaring `pull_request_target` IS the shape the engine ships: the job
+    # holding the App key is the engine plan workflow's `summary` job, which checks out no
+    # consumer content. Warning about it trains readers to ignore the dangerous labeler workflow.
+    pytest.param(
+        {"shipmate.yml": "on:\n  pull_request_target:\n    types: [opened]\n"},
+        id="the_consumer_workflow_file_is_not_warned_about",
+    ),
+    # The input written out and explicitly disabled is the safe default made
+    # visible. Reporting the key regardless of its value would fire on it.
+    pytest.param(
+        {
+            "shipmate.yml": "on:\n  pull_request_target:\njobs:\n  x:\n    steps:\n"
+            "      - with:\n          allow-unsafe-pr-checkout: false\n",
+            "label.yml": "on:\n  pull_request:\njobs:\n  x:\n    steps:\n"
+            "      - with:\n          allow-unsafe-pr-checkout: 'false'\n",
+        },
+        id="unsafe_pr_checkout_set_to_false_is_silent",
+    ),
+    # `False` and `FALSE` are the same legal YAML boolean as `false`, so both are the safe
+    # configuration and a case-sensitive comparison reports them. `build-matrix`'s fork
+    # refusal normalizes with `.strip().lower()`; two guards in one release may not disagree.
+    pytest.param(
+        {
+            "shipmate.yml": "on:\n  pull_request_target:\njobs:\n  x:\n    steps:\n"
+            "      - with:\n          allow-unsafe-pr-checkout: False\n",
+            "label.yml": "on:\n  pull_request:\njobs:\n  x:\n    steps:\n"
+            "      - with:\n          allow-unsafe-pr-checkout: FALSE\n",
+        },
+        id="a_capitalised_false_is_silent",
+    ),
+    # The other half of recognising flow style: the value must stop at `,`/`}`,
+    # or a flow-style `false` reads as `false }` and the safest shape a consumer
+    # can write is reported.
+    pytest.param(
+        {
+            "shipmate.yml": "on:\n  pull_request_target:\njobs:\n  x:\n    steps:\n"
+            "      - uses: actions/checkout@v7\n"
+            "        with: { allow-unsafe-pr-checkout: false, fetch-depth: 0 }\n",
+            "label.yml": "on:\n  pull_request:\njobs:\n  x:\n    steps:\n"
+            "      - with: { fetch-depth: 0, allow-unsafe-pr-checkout: false }\n",
+        },
+        id="a_flow_style_false_is_silent",
+    ),
+    # The line a careful repository writes *because* it does not have one. Two independent
+    # things keep it quiet -- the comment strip empties the line, and the key anchor rejects a
+    # key with `set ` in front -- so only removing BOTH reddens this row.
+    # `a_trailing_comment_after_a_false_value_is_silent` pins the strip,
+    # `a_key_merely_ending_in_the_input_name_is_not_reported` the anchor.
+    pytest.param(
+        {
+            "shipmate.yml": "on:\n  pull_request_target:\njobs:\n  x:\n    steps:\n"
+            "      # never set allow-unsafe-pr-checkout: true\n"
+            "      - uses: actions/checkout@v7\n",
+        },
+        id="commented_out_unsafe_pr_checkout_is_silent",
+    ),
+    # The comment strip is what makes the value comparison read `false` rather
+    # than `false  # deliberate`, which is not the literal and would be reported
+    # -- a false positive on the safest shape a consumer can write.
+    pytest.param(
+        {
+            "shipmate.yml": "on:\n  pull_request_target:\njobs:\n  x:\n    steps:\n"
+            "      - with:\n"
+            "          allow-unsafe-pr-checkout: false  # deliberate, never true\n",
+        },
+        id="a_trailing_comment_after_a_false_value_is_silent",
+    ),
+    # The key anchor -- a line start, `{` or `,` -- is what makes this the input
+    # and not a longer key that happens to end in the same characters: a different
+    # input entirely, and reporting it names a line the reader cannot find.
+    pytest.param(
+        {
+            "shipmate.yml": "on:\n  pull_request_target:\njobs:\n  x:\n    steps:\n"
+            "      - with:\n          no-allow-unsafe-pr-checkout: true\n",
+        },
+        id="a_key_merely_ending_in_the_input_name_is_not_reported",
+    ),
+]
+
+
+@pytest.mark.parametrize("files", _FORK_SILENT)
+def test_fork_trigger_silent(monkeypatch, files):
+    responses = _fork_responses(files)
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    assert doctor._fork_trigger_warnings(_ctx()) == []
 
 
 def test_every_offending_workflow_is_named(monkeypatch):
@@ -2440,34 +2549,6 @@ def _wf_bytes(data):
     import base64
 
     return {"encoding": "base64", "content": base64.b64encode(data).decode()}
-
-
-def test_an_indented_on_is_not_the_top_level_one(monkeypatch):
-    """`_on_block`'s column-0 anchoring. Any key ending in `on` is an unanchored
-    match -- `python-version: 3.12` is `versi` + `on:` -- and matching it
-    retargets the block this probe reads, onto a line that can never name an
-    event, so the trigger one line below goes unreported."""
-    responses = _fork_responses(
-        {"label.yml": "env:\n  python-version: 3.12\non:\n  pull_request_target:\n"}
-    )
-    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
-    out = doctor._fork_trigger_warnings(_ctx())
-    assert len(out) == 1
-    assert out[0][0] == doctor.WARNING
-    assert "label.yml" in out[0][1]
-
-
-def test_a_blank_line_or_a_column_zero_comment_does_not_end_the_on_block(monkeypatch):
-    """`_on_block` promises neither ends the block, and workflows written by
-    hand put a column-0 comment block right above their events -- the same
-    author style one line lower would otherwise read as an empty trigger."""
-    responses = _fork_responses(
-        {"label.yml": "on:\n\n# runs at the base ref\n  pull_request_target:\n"}
-    )
-    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
-    out = doctor._fork_trigger_warnings(_ctx())
-    assert len(out) == 1
-    assert out[0][0] == doctor.WARNING
 
 
 def test_a_byte_order_mark_does_not_hide_the_on_block(monkeypatch):
@@ -2563,194 +2644,6 @@ def test_fork_trigger_probe_is_registered(monkeypatch):
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
     out = doctor.warnings(_ctx())
     assert any("pull_request_target" in t for _, t in out)
-
-
-def test_unsafe_pr_checkout_in_shipmate_yml_is_warned(monkeypatch):
-    """`shipmate.yml` is exempt from the trigger finding, but it is exactly the file
-    where a fork checkout would be turned on -- so this check must run BEFORE
-    that exemption. Below it, the one workflow that matters reports nothing."""
-    responses = _fork_responses(
-        {
-            "shipmate.yml": "on:\n  pull_request_target:\njobs:\n  detect:\n"
-            "    steps:\n      - uses: actions/checkout@v7\n"
-            "        with:\n          allow-unsafe-pr-checkout: true\n"
-        }
-    )
-    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
-    out = doctor._fork_trigger_warnings(_ctx())
-    assert len(out) == 1
-    assert out[0][0] == doctor.WARNING
-    assert "allow-unsafe-pr-checkout" in out[0][1]
-    assert "shipmate.yml" in out[0][1]
-
-
-def test_unsafe_pr_checkout_in_another_workflow_is_warned(monkeypatch):
-    # No `pull_request_target` here, so the trigger finding cannot account for the
-    # warning: it is this check or nothing. The detection is deliberately trigger-blind,
-    # so the message must be true of a `pull_request`-only file, handed no secrets.
-    responses = _fork_responses(
-        {
-            "label.yml": "on:\n  pull_request:\njobs:\n  x:\n    steps:\n"
-            "      - uses: actions/checkout@v7\n"
-            '        with:\n          allow-unsafe-pr-checkout: "true"\n'
-        }
-    )
-    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
-    out = doctor._fork_trigger_warnings(_ctx())
-    assert len(out) == 1
-    assert out[0][0] == doctor.WARNING
-    assert "allow-unsafe-pr-checkout" in out[0][1]
-    assert "`pull_request`" in out[0][1]
-
-
-def test_unsafe_pr_checkout_as_an_expression_is_warned(monkeypatch):
-    # Unknown, not false: it may evaluate true, and doctor cannot evaluate it.
-    responses = _fork_responses(
-        {
-            "label.yml": "on:\n  pull_request:\njobs:\n  x:\n    steps:\n"
-            "      - with:\n          allow-unsafe-pr-checkout: ${{ vars.UNSAFE }}\n"
-        }
-    )
-    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
-    out = doctor._fork_trigger_warnings(_ctx())
-    assert len(out) == 1
-    assert "allow-unsafe-pr-checkout" in out[0][1]
-
-
-def test_unsafe_pr_checkout_set_to_false_is_silent(monkeypatch):
-    # The input written out and explicitly disabled is the safe default made
-    # visible. Reporting the key regardless of its value would fire on it.
-    responses = _fork_responses(
-        {
-            "shipmate.yml": "on:\n  pull_request_target:\njobs:\n  x:\n    steps:\n"
-            "      - with:\n          allow-unsafe-pr-checkout: false\n",
-            "label.yml": "on:\n  pull_request:\njobs:\n  x:\n    steps:\n"
-            "      - with:\n          allow-unsafe-pr-checkout: 'false'\n",
-        }
-    )
-    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
-    assert doctor._fork_trigger_warnings(_ctx()) == []
-
-
-def test_a_capitalised_false_is_silent(monkeypatch):
-    """`False` and `FALSE` are the same legal YAML boolean as `false`, so both are the safe
-    configuration and a case-sensitive comparison reports them -- a probe firing on a
-    correct repository trains readers to ignore the suite. `build-matrix`'s fork refusal
-    normalizes with `.strip().lower()`; two guards in one release may not disagree."""
-    responses = _fork_responses(
-        {
-            "shipmate.yml": "on:\n  pull_request_target:\njobs:\n  x:\n    steps:\n"
-            "      - with:\n          allow-unsafe-pr-checkout: False\n",
-            "label.yml": "on:\n  pull_request:\njobs:\n  x:\n    steps:\n"
-            "      - with:\n          allow-unsafe-pr-checkout: FALSE\n",
-        }
-    )
-    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
-    assert doctor._fork_trigger_warnings(_ctx()) == []
-
-
-def test_flow_style_unsafe_pr_checkout_is_warned(monkeypatch):
-    """A line-anchored key misses this, and flow style is not exotic authoring: the
-    engine's own `.github/workflows/drift.yml` and all four sample repositories write
-    `with: { fetch-depth: 0 }`, so it is what a consumer copying those files produces.
-    Missing it is fail-open on the outermost guard of the whole plan path."""
-    responses = _fork_responses(
-        {
-            "shipmate.yml": "on:\n  pull_request_target:\njobs:\n  x:\n    steps:\n"
-            "      - uses: actions/checkout@v7\n"
-            "        with: { fetch-depth: 0, allow-unsafe-pr-checkout: true }\n",
-        }
-    )
-    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
-    out = doctor._fork_trigger_warnings(_ctx())
-    assert len(out) == 1
-    assert out[0][0] == doctor.WARNING
-    assert "allow-unsafe-pr-checkout" in out[0][1]
-
-
-def test_a_flow_style_false_is_silent(monkeypatch):
-    """The other half of recognising flow style: the value must stop at `,`/`}`,
-    or a flow-style `false` reads as `false }` and the safest shape a consumer
-    can write is reported."""
-    responses = _fork_responses(
-        {
-            "shipmate.yml": "on:\n  pull_request_target:\njobs:\n  x:\n    steps:\n"
-            "      - uses: actions/checkout@v7\n"
-            "        with: { allow-unsafe-pr-checkout: false, fetch-depth: 0 }\n",
-            "label.yml": "on:\n  pull_request:\njobs:\n  x:\n    steps:\n"
-            "      - with: { fetch-depth: 0, allow-unsafe-pr-checkout: false }\n",
-        }
-    )
-    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
-    assert doctor._fork_trigger_warnings(_ctx()) == []
-
-
-def test_commented_out_unsafe_pr_checkout_is_silent(monkeypatch):
-    """The line a careful repository writes *because* it does not have one; reporting it trains
-    readers to ignore the finding. Two independent things keep it quiet -- the comment strip
-    empties the line, and the key anchor rejects a key with `set ` in front -- so only removing
-    BOTH reddens this. `test_a_trailing_comment_after_a_false_value_is_silent` pins the strip,
-    `test_a_key_merely_ending_in_the_input_name_is_not_reported` the anchor."""
-    responses = _fork_responses(
-        {
-            "shipmate.yml": "on:\n  pull_request_target:\njobs:\n  x:\n    steps:\n"
-            "      # never set allow-unsafe-pr-checkout: true\n"
-            "      - uses: actions/checkout@v7\n",
-        }
-    )
-    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
-    assert doctor._fork_trigger_warnings(_ctx()) == []
-
-
-def test_a_trailing_comment_after_a_false_value_is_silent(monkeypatch):
-    """The comment strip is what makes the value comparison read `false` rather
-    than `false  # deliberate`, which is not the literal and would be reported
-    -- a false positive on the safest shape a consumer can write."""
-    responses = _fork_responses(
-        {
-            "shipmate.yml": "on:\n  pull_request_target:\njobs:\n  x:\n    steps:\n"
-            "      - with:\n"
-            "          allow-unsafe-pr-checkout: false  # deliberate, never true\n",
-        }
-    )
-    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
-    assert doctor._fork_trigger_warnings(_ctx()) == []
-
-
-def test_a_false_in_one_job_does_not_silence_a_true_in_another(monkeypatch):
-    """A consumer file checks out in more than one job, and this probe's own finding asks for an
-    explicit `false`, so both occurrences coexist in one file routinely. Examining only the
-    first reads the `false` and returns nothing -- fail-open on the outermost guard of the plan
-    path. Both occurrences are in ONE file here;
-    `test_unsafe_pr_checkout_set_to_false_is_silent` uses two files with one each."""
-    responses = _fork_responses(
-        {
-            "shipmate.yml": "on:\n  pull_request_target:\njobs:\n"
-            "  detect:\n    steps:\n      - with:\n"
-            "          allow-unsafe-pr-checkout: false\n"
-            "  plan:\n    steps:\n      - with:\n"
-            "          allow-unsafe-pr-checkout: true\n",
-        }
-    )
-    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
-    out = doctor._fork_trigger_warnings(_ctx())
-    assert len(out) == 1
-    assert out[0][0] == doctor.WARNING
-    assert "allow-unsafe-pr-checkout" in out[0][1]
-
-
-def test_a_key_merely_ending_in_the_input_name_is_not_reported(monkeypatch):
-    """The key anchor -- a line start, `{` or `,` -- is what makes this the input
-    and not a longer key that happens to end in the same characters: a different
-    input entirely, and reporting it names a line the reader cannot find."""
-    responses = _fork_responses(
-        {
-            "shipmate.yml": "on:\n  pull_request_target:\njobs:\n  x:\n    steps:\n"
-            "      - with:\n          no-allow-unsafe-pr-checkout: true\n",
-        }
-    )
-    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
-    assert doctor._fork_trigger_warnings(_ctx()) == []
 
 
 # The finding's whole text, hand-written and never derived from `doctor`: `shipmate` is
