@@ -1022,21 +1022,22 @@ def test_check_state_maps_judges_the_newest_run_per_name():
     assert done == set()
 
 
-def test_check_state_maps_empty_app_id_warns_and_returns_no_data(capsys):
-    # Must NOT fail loud the way from_app does: a missing SHIPMATE_APP_ID is
-    # only allowed to cost this one display axis, never the whole comment.
-    lines = _jsonl(_check("apply / stacks/app / dev-eu"))
-    present, done = ac.check_state_maps(lines, "")
-    assert (present, done) == (set(), set())
+def test_load_check_maps_empty_app_id_warns_and_returns_no_data(tmp_path, capsys):
+    """Must NOT fail loud the way from_app does: a missing SHIPMATE_APP_ID is only allowed to cost
+    this one display axis, never the whole comment. Mutation: drop SystemExit from
+    load_check_maps' except tuple."""
+    p = tmp_path / "checks.jsonl"
+    p.write_text("\n".join(_jsonl(_check("apply / stacks/app / dev-eu"))), encoding="utf-8")
+    assert ac.load_check_maps(str(p), "") == (set(), set())
     assert "::warning::" in capsys.readouterr().out
 
 
-def test_check_state_three_way_lookup():
-    present = {"apply / stacks/app / dev-eu", "apply / stacks/db / dev-eu"}
-    done = {"apply / stacks/app / dev-eu"}
-    assert ac._check_state(_row(stack_path="stacks/app"), present, done) == ac.CHECK_DONE
-    assert ac._check_state(_row(stack_path="stacks/db"), present, done) == ac.CHECK_PENDING
-    assert ac._check_state(_row(stack_path="stacks/gone"), present, done) == ac.CHECK_UNKNOWN
+def test_apply_check_state_applied_with_done_check_stays_applied():
+    """A done check is not a pending one, though its name is in both sets. Mutation: drop
+    `and name not in done` from apply_check_state."""
+    rows = [_row(status="applied", stack_path="stacks/app")]
+    ac.apply_check_state(rows, {"apply / stacks/app / dev-eu"}, {"apply / stacks/app / dev-eu"})
+    assert rows[0]["status"] == "applied"
 
 
 def test_apply_check_state_applied_with_pending_check_becomes_unrecorded():
@@ -1059,7 +1060,7 @@ def test_apply_check_state_not_attempted_with_done_check_becomes_applied():
 
 
 def test_apply_check_state_leaves_rows_alone_when_check_state_is_unknown():
-    # Degradation contract: no data (scan failed, empty file, pin skew) must
+    # Degradation contract: no data (scan failed, empty file) must
     # render byte-identically to the artifact-only behaviour.
     rows = [
         _row(status="applied", stack_path="stacks/app"),
@@ -1083,8 +1084,8 @@ def test_apply_check_state_never_downgrades_failed_or_blocked():
 
 
 def test_load_check_maps_missing_file_is_no_data(tmp_path):
-    # The pinned-action skew window: an older apply-summary never writes
-    # checks.jsonl. Silent no-data, not a crash.
+    # The scan step always writes checks.jsonl, so absence is an unexpected failure: no data,
+    # not a crash.
     present, done = ac.load_check_maps(str(tmp_path / "nope.jsonl"), APP_ID)
     assert (present, done) == (set(), set())
 
@@ -1105,19 +1106,11 @@ def test_load_check_maps_reads_jsonl(tmp_path):
 def test_load_check_maps_malformed_line_degrades_with_a_warning(tmp_path, capsys):
     # A malformed checks.jsonl (parse_jsonl's SystemExit) must cost only the
     # check-state axis, never the whole render step -- degrade to no data with
-    # a warning, exactly like the missing-file case, rather than propagate.
+    # a warning rather than propagate.
     p = tmp_path / "checks.jsonl"
     p.write_text("not json\n", encoding="utf-8")
     assert ac.load_check_maps(str(p), APP_ID) == (set(), set())
     assert "::warning::" in capsys.readouterr().out
-
-
-def test_load_check_maps_missing_file_stays_silent(tmp_path, capsys):
-    # Pins the deliberate asymmetry: the pinned-action skew window (an older
-    # apply-summary that never writes checks.jsonl) is expected, not an error,
-    # so it must NOT warn -- unlike a malformed or otherwise unreadable file.
-    ac.load_check_maps(str(tmp_path / "nope.jsonl"), APP_ID)
-    assert "::warning::" not in capsys.readouterr().out
 
 
 def test_load_check_maps_non_numeric_app_id_degrades_with_a_warning(tmp_path, capsys):
@@ -1364,20 +1357,21 @@ def test_check_name_grammar_matches_apply_cells_construction():
     """Coupling: apply-snapshot builds the apply check's name, to look up the pre-existing check
     ids before any wave runs -- apply-cell holds no App key and builds none -- and apply-comment
     forward-builds the same string to look it up. A divergence is silent: every lookup misses,
-    `_check_state` returns CHECK_UNKNOWN, and the comment reverts to the artifact-only rendering
-    this corrects. Same posture as test_cell_schema_guard_apply_cell_writes_every_required_key."""
+    `apply_check_state` reads every check as unknown, and the comment reverts to the
+    artifact-only rendering this corrects. Same posture as
+    test_cell_schema_guard_apply_cell_writes_every_required_key."""
     src = (_ENGINE / "scripts" / "apply-snapshot").read_text(encoding="utf-8")
     expected = 'f"apply / {stack} / {env}"'
     assert expected in src, (
         "apply-snapshot no longer builds the apply check name as "
-        "'apply / <stack path> / <env>' -- scripts/apply-comment's _check_state "
+        "'apply / <stack path> / <env>' -- scripts/apply-comment's _check_name "
         "and _job_url forward-build that exact grammar to look the check up, "
         "and a mismatch makes every lookup miss silently"
     )
-    # And the reader's half, exercised rather than restated: the name `_check_state`
+    # And the reader's half, exercised rather than restated: the name `_check_name`
     # builds for a known row must be that same string.
     row = _row(environment="dev-eu", stack_path="stacks/app")
-    assert ac._check_state(row, {"apply / stacks/app / dev-eu"}, set()) == ac.CHECK_PENDING
+    assert ac._check_name(row) == "apply / stacks/app / dev-eu"
 
 
 def test_env_level_count_matches_env_orders():
@@ -1417,7 +1411,7 @@ def test_wave_job_name_matches_the_apply_check_grammar():
         f"source for either silently breaks the name/job-name equality (got: {sorted(set(wired))})"
     )
     # The reader's half, exercised: a nested-display job name built from that grammar
-    # must resolve, for the same row `_check_state` agrees on.
+    # must resolve, for the same row `_check_name` builds.
     row = _row(environment="dev-eu", stack_path="stacks/app")
     jobs = [_job("post-merge / L0 / apply / stacks/app / dev-eu", "https://gh/job/1")]
     assert ac._job_url(row, jobs, RUN_URL) == "https://gh/job/1"
@@ -1484,8 +1478,8 @@ def test_main_promotes_a_missing_artifact_whose_check_is_done(monkeypatch, tmp_p
 
 
 def test_main_without_checks_file_renders_the_artifact_only_comment(monkeypatch, tmp_path):
-    # The pinned-action skew window and every scan failure land here: no checks.jsonl
-    # means no data, which means unknown, so the comment reads as the artifact-only one.
+    # Every scan failure lands here: no checks.jsonl means no data, which means unknown,
+    # so the comment reads as the artifact-only one.
     cells = tmp_path / "cells"
     _write_cell(cells, "dev-eu", "stacks-app", _cell(stack="app", stack_path="stacks/app"))
     waves = json.dumps({"wave0": [{"stack": "stacks/app", "environment": "dev-eu"}]})

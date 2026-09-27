@@ -2068,10 +2068,9 @@ job believed before its check was completed:
   unrelated run's completed check hide a real failure in this one.
 
 If the check scan is unavailable — an API failure (warned, degraded to no
-data), an older pinned `apply-summary` that never wrote the file, or an empty
-`SHIPMATE_APP_ID` (warned) — every name reads as *absent*, which means
-*unknown*, and the comment falls back to artifact-only status. Absence never
-manufactures a ⚠️.
+data) or an empty `SHIPMATE_APP_ID` (warned) — every name reads as *absent*,
+which means *unknown*, and the comment falls back to artifact-only status.
+Absence never manufactures a ⚠️.
 
 `cell.json`'s `result` grammar is unchanged (`applied | failed | blocked`).
 ⚠️ is a display status derived at render time, never a value `apply-cell`

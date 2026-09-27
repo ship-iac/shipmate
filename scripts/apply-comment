@@ -319,51 +319,31 @@ def build_rows(expected, downloaded):
     return rows
 
 
-CHECK_UNKNOWN, CHECK_DONE, CHECK_PENDING = "unknown", "done", "pending"
-
-
 def check_state_maps(check_run_lines, app_id):
     """(present, done) apply-check name sets from check-runs JSONL.
 
     `present` is every App-authored `apply / ...` check name on the head SHA
     (newest run per name); `done` is the subset whose newest run completed with
     a good conclusion. Both come from `apply-gate`, per this module's COUPLING
-    note.
-
-    An empty app id warns and reports no data rather than raising the way
-    `from_app` does: for comment-ops the comment IS the feedback channel, so a
-    missing SHIPMATE_APP_ID must cost this one display axis, never the whole
-    comment."""
-    if not app_id:
-        print(
-            "::warning::SHIPMATE_APP_ID is empty — the apply result comment falls back "
-            "to artifact-only status (see docs/github-app.md)."
-        )
-        return set(), set()
+    note."""
     runs = ag.from_app(ag.parse_jsonl(check_run_lines), app_id)
     return set(ag.latest_by_name(runs)), ag.done_names(runs)
 
 
 def load_check_maps(path, app_id):
-    """check_state_maps over the scan step's output file, tolerating absence
-    or corruption.
+    """check_state_maps over the scan step's output file, tolerating failure.
 
-    A MISSING file is silent no-data: the scan step degrades a failed fetch to
-    an empty file, so absence means a consumer pinned to an engine commit whose
-    apply-summary predates the scan step — expected, not an error.
-
-    Every other failure degrades to no data WITH a warning, never propagates:
-    for comment-ops the comment IS the feedback channel, so losing this one
-    display axis must not cost the whole render. That covers a malformed line
-    (parse_jsonl's SystemExit), an unreadable file (OSError), a non-numeric
-    SHIPMATE_APP_ID (ValueError from `int(app_id)`), and a valid-JSON line of
-    the wrong shape reaching `latest_by_name` (KeyError/TypeError/
-    AttributeError). See apply_check_state for why no data is the safe state."""
+    Every failure degrades to no data with a warning, never propagates: for
+    comment-ops the comment IS the feedback channel, so losing this one display
+    axis must not cost the whole render. That covers a malformed line or an
+    empty SHIPMATE_APP_ID (SystemExit from parse_jsonl or from_app), an
+    unreadable file (OSError), a non-numeric SHIPMATE_APP_ID (ValueError from
+    `int(app_id)`), and a valid-JSON line of the wrong shape reaching
+    `latest_by_name` (KeyError/TypeError/AttributeError). See apply_check_state
+    for why no data is the safe state."""
     try:
         with open(path, encoding="utf-8") as fh:
             return check_state_maps(fh, app_id)
-    except FileNotFoundError:
-        return set(), set()
     except (OSError, SystemExit, ValueError, KeyError, TypeError, AttributeError) as exc:
         print(
             f"::warning::{path} could not be read as apply checks ({exc}) -- "
@@ -376,21 +356,6 @@ def _check_name(row):
     """This row's apply check name, forward-built per the CONTRACT grammar
     `apply / <stack> / <env>` -- never reverse-parsed."""
     return f"apply / {row['stack_path']} / {row['environment']}"
-
-
-def _check_state(row, present, done):
-    """This row's apply check: CHECK_DONE, CHECK_PENDING, or CHECK_UNKNOWN.
-
-    Absence means UNKNOWN, never pending: a failed scan, an empty file, an
-    app-id mismatch and from_app dropping a forged same-name check all land
-    here, and every one of them must fall back to the artifact-only rendering
-    rather than invent a stranded cell."""
-    name = _check_name(row)
-    if name in done:
-        return CHECK_DONE
-    if name in present:
-        return CHECK_PENDING
-    return CHECK_UNKNOWN
 
 
 def apply_check_state(rows, present, done):
@@ -409,15 +374,20 @@ def apply_check_state(rows, present, done):
     - not_attempted + done check -> `applied`: the check proves the apply
       landed; apply_text stays None so the section degrades to link-only.
 
+    A check absent from both sets is unknown, never pending: a failed scan, an
+    empty file, an app-id mismatch and from_app dropping a forged same-name
+    check all land there, and every one of them must fall back to the
+    artifact-only rendering rather than invent a stranded cell.
+
     `failed`/`blocked` are never re-derived. A red row against a done check
     means some other run applied that cell -- over-reporting, nothing
     stranded -- and downgrading on check state would let an unrelated run's
     green check hide a real failure in this one."""
     for row in rows:
-        state = _check_state(row, present, done)
-        if row["status"] == "applied" and state == CHECK_PENDING:
+        name = _check_name(row)
+        if row["status"] == "applied" and name in present and name not in done:
             row["status"] = "unrecorded"
-        elif row["status"] == "not_attempted" and state == CHECK_DONE:
+        elif row["status"] == "not_attempted" and name in done:
             row["status"] = "applied"
     return rows
 
