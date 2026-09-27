@@ -412,6 +412,7 @@ jobs:
     secrets:
       SHIPMATE_APP_PRIVATE_KEY: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
       SHIPMATE_SECRETS: ${{ secrets.SHIPMATE_SECRETS }}
+      # Same `shipmate-engine` webhook as `deploy`; delete this line and drift sends no Slack message.
       SHIPMATE_SLACK_WEBHOOK: ${{ secrets.SHIPMATE_SLACK_WEBHOOK }}
     with:
       # Empty covers every cell. Split the sweep by adding more files, one tag query each.

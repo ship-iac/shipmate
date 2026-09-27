@@ -24,6 +24,10 @@ grammar are declared unstable in `README.md`.
   the `deploy` and `drift` jobs and of every drift slice file. Mapping it before re-pinning
   to this release fails the workflow at load. A cell refuses a variable named
   `SHIPMATE_SLACK_WEBHOOK`.
+- **A `SHIPMATE_SLACK_WEBHOOK` variable fails the deploy and drift runs.** The last step of
+  `deploy.yml`'s `summary` job and of `drift.yml`'s `issues` job fails when a variable of that
+  name is set, including one on the `shipmate-engine` environment, which no cell binds. It
+  runs after the gate write and the Issue authoring, so it blocks neither.
 
 ### Fixed
 

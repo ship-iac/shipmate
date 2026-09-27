@@ -335,7 +335,8 @@ never used.
   environment name, not a logical environment a consumer defines or names
   itself, that exists purely to scope the App private key and the Slack
   webhook to the default-branch ref (see `docs/github-app.md` §Key-exposure
-  boundary). It appears only inside the engine's reusable workflows — `plan.yml`'s
+  boundary for the key, `docs/drift.md` §Slack (optional) for the webhook).
+  It appears only inside the engine's reusable workflows — `plan.yml`'s
   `summary` job, `comment-ops.yml`'s `ops` job, `drift.yml`'s `issues` job, and
   the apply path (`apply.yml`, `apply-all.yml`, `apply-env-level.yml`,
   `deploy.yml`). No consumer file names it: the consumer's `shipmate.yml`

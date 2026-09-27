@@ -185,3 +185,8 @@ jobs:
           [ -n "$SLACK" ] || exit 0
           python3 -c "import json;open('p.json','w').write(json.dumps({'text':':rotating_light: shipmate deploy failed on main — a wave apply failed or was cancelled.'}))"
           curl -sS --fail-with-body -X POST -H 'Content-Type: application/json' --data @p.json "$SLACK"
+      - name: Refuse a Slack webhook set as a variable
+        if: ${{ always() && vars.SHIPMATE_SLACK_WEBHOOK != '' }}
+        run: |
+          echo "::error::SHIPMATE_SLACK_WEBHOOK is set as a GitHub variable, and it must be a secret on the shipmate-engine environment. Its value is readable by anyone who can see the repository. Delete the variable, rotate the webhook, and run gh secret set SHIPMATE_SLACK_WEBHOOK --env shipmate-engine."
+          exit 1
