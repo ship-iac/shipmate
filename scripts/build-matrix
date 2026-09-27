@@ -267,24 +267,6 @@ def stamp_rows(cells, table, tier):
     return rows
 
 
-def _event_payload(path):
-    """The triggering event's payload, or {} when it cannot be read.
-
-    `scripts/pr-facts` REFUSES a payload it could not read: {} carries neither a
-    pull request nor a `pr_number`, so there is nothing to resolve the head from,
-    and a run with no stated head is refused rather than planned. Every reader
-    shares this one parser, so no two of them can disagree about what the event
-    said."""
-    if not path:
-        return {}
-    try:
-        with open(path, encoding="utf-8") as fh:
-            payload = json.load(fh)
-    except (OSError, ValueError):
-        return {}
-    return payload if isinstance(payload, dict) else {}
-
-
 def fork_pr_error(repository, head_repo, no_pull_request):
     """The `::error::` line rejecting a run this script may not plan, or "" when
     it may.

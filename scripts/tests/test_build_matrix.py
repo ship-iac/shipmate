@@ -250,20 +250,6 @@ def test_an_unknown_this_repository_refuses_a_stated_head_repository():
     assert "fork pull requests are not supported" in bm.fork_pr_error("", "acme/iac", "false")
 
 
-def test_event_payload_degrades_to_empty_dict(tmp_path):
-    # `scripts/pr-facts` is the reader: each of these reaches it as {}, which has
-    # neither a pull request nor a `pr_number` and so refuses rather than
-    # emitting empty facts. Neither guard in this module reads the event.
-    assert bm._event_payload("") == {}
-    assert bm._event_payload(str(tmp_path / "absent.json")) == {}
-    bad = tmp_path / "bad.json"
-    bad.write_text("{not json", encoding="utf-8")
-    assert bm._event_payload(str(bad)) == {}
-    listy = tmp_path / "list.json"
-    listy.write_text("[1, 2]", encoding="utf-8")
-    assert bm._event_payload(str(listy)) == {}
-
-
 def _run_main(
     monkeypatch,
     tmp_path,
