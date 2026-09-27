@@ -295,10 +295,7 @@ def fork_pr_error(repository, head_repo, no_pull_request):
     is the consumer's own default-branch workflow, which a pull-request author
     cannot edit. The residual risk is consumer misconfiguration, which is what
     doctor's wiring probe reports."""
-    # Case- and whitespace-insensitive: a `no-pull-request: True` would otherwise
-    # redden a nightly for a YAML capitalisation, and honouring it is no fork
-    # exposure -- only this repository's default-branch workflow can set it.
-    if no_pull_request.strip().lower() == "true":
+    if no_pull_request:
         return ""
     head_repo = head_repo.strip()
     if not head_repo:
@@ -345,7 +342,7 @@ def head_checkout_error(head_sha, no_pull_request):
     head under both pull-request events, so a `pull_request` consumer names `ref:`
     like every other one.
     """
-    if no_pull_request.strip().lower() == "true":
+    if no_pull_request:
         return ""
     head_sha = head_sha.strip()
     if not head_sha:
@@ -406,7 +403,7 @@ def tag_filter_error(tags, no_pull_request):
     as never belonging in a plan job."""
     if not tags.strip():
         return ""
-    if no_pull_request.strip().lower() == "true":
+    if no_pull_request:
         return ""
     return (
         "::error::the `tags` filter is only for a workflow with no pull request at all "
@@ -422,20 +419,21 @@ def main():
     base = os.environ.get("SHIPMATE_BASE_SHA", "")
     event_name = os.environ.get("GITHUB_EVENT_NAME", "")
     tags = os.environ.get("SHIPMATE_TAGS", "")
+    # Case- and whitespace-insensitive: a `no-pull-request: True` would otherwise
+    # redden a nightly for a YAML capitalisation, and honouring it is no fork
+    # exposure -- only this repository's default-branch workflow can set it.
+    no_pull_request = os.environ.get("SHIPMATE_NO_PULL_REQUEST", "").strip().lower() == "true"
     # `or`, so the fork refusal precedes the two consumer-wiring checks: a fork
     # head must be turned away before this script shells out or reads its tree.
     rejection = (
         fork_pr_error(
             os.environ.get("GITHUB_REPOSITORY", ""),
             os.environ.get("SHIPMATE_HEAD_REPO", ""),
-            os.environ.get("SHIPMATE_NO_PULL_REQUEST", ""),
+            no_pull_request,
         )
-        or head_checkout_error(
-            os.environ.get("SHIPMATE_HEAD_SHA", ""),
-            os.environ.get("SHIPMATE_NO_PULL_REQUEST", ""),
-        )
+        or head_checkout_error(os.environ.get("SHIPMATE_HEAD_SHA", ""), no_pull_request)
         or plan_workflow_error(event_name)
-        or tag_filter_error(tags, os.environ.get("SHIPMATE_NO_PULL_REQUEST", ""))
+        or tag_filter_error(tags, no_pull_request)
     )
     if rejection:
         raise SystemExit(rejection)

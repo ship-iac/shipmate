@@ -207,11 +207,11 @@ def test_env_membership_require_env_tag_false_ignores_untagged(monkeypatch):
 
 
 def test_a_stated_head_repository_equal_to_this_repository_is_planned():
-    assert bm.fork_pr_error("acme/iac", "acme/iac", "false") == ""
+    assert bm.fork_pr_error("acme/iac", "acme/iac", False) == ""
 
 
 def test_a_stated_foreign_head_repository_is_refused_naming_both():
-    err = bm.fork_pr_error("acme/iac", "outsider/iac", "false")
+    err = bm.fork_pr_error("acme/iac", "outsider/iac", False)
     assert err.startswith("::error::")
     assert "outsider/iac" in err
     assert "acme/iac" in err
@@ -221,7 +221,7 @@ def test_an_unstated_head_repository_is_refused_naming_the_input():
     # Pinning the message, not the refusal: letting an empty value fall through to the
     # equality check refuses too, with the fork wording, which tells a consumer who forgot
     # the input to push their branch to where it already is.
-    err = bm.fork_pr_error("acme/iac", "   ", "false")
+    err = bm.fork_pr_error("acme/iac", "   ", False)
     assert err.startswith("::error::")
     assert "head-repo" in err
     assert "no-pull-request" in err
@@ -231,23 +231,13 @@ def test_an_unstated_head_repository_is_refused_naming_the_input():
 
 def test_the_opt_out_plans_whatever_the_head_repository():
     for head in ("", "   ", "acme/iac", "outsider/iac"):
-        assert bm.fork_pr_error("acme/iac", head, "true") == ""
-    # A consumer's `no-pull-request: True` must not redden a nightly over a YAML
-    # capitalisation; only this repository's default-branch workflow can set it.
-    assert bm.fork_pr_error("acme/iac", "", " True ") == ""
-
-
-def test_only_the_opt_out_skips_the_head_repository_check():
-    # The manifest default is the non-empty string "false", so anything that
-    # treats a non-empty value as the opt-out would plan every unstated run.
-    for value in ("false", "False", " false ", "yes", "1", "", "no-pull-request"):
-        assert bm.fork_pr_error("acme/iac", "", value).startswith("::error::")
+        assert bm.fork_pr_error("acme/iac", head, True) == ""
 
 
 def test_an_unknown_this_repository_refuses_a_stated_head_repository():
     # GITHUB_REPOSITORY unset is not reachable on a runner; if it ever is, the
     # empty string must not compare equal to whatever was stated.
-    assert "fork pull requests are not supported" in bm.fork_pr_error("", "acme/iac", "false")
+    assert "fork pull requests are not supported" in bm.fork_pr_error("", "acme/iac", False)
 
 
 def _run_main(
@@ -350,7 +340,7 @@ def test_main_passes_the_three_environment_values_to_the_guard(monkeypatch, tmp_
             "SHIPMATE_NO_PULL_REQUEST": "true",
         },
     )
-    assert seen == [("acme/iac", "outsider/iac", "true")]
+    assert seen == [("acme/iac", "outsider/iac", True)]
 
 
 def test_main_refuses_the_fork_before_the_consumer_wiring_checks(monkeypatch, tmp_path):
@@ -447,7 +437,7 @@ def test_main_drift_run_is_unaffected(monkeypatch, tmp_path):
 
 def test_a_stated_head_equal_to_the_checkout_is_planned(monkeypatch):
     monkeypatch.setattr(bm, "_run", lambda args: "cafe1234\n")
-    assert bm.head_checkout_error("cafe1234", "false") == ""
+    assert bm.head_checkout_error("cafe1234", False) == ""
 
 
 def test_a_checkout_that_is_not_the_stated_head_is_refused_naming_both(monkeypatch):
@@ -456,7 +446,7 @@ def test_a_checkout_that_is_not_the_stated_head_is_refused_naming_both(monkeypat
     diffs the wrong tree against the base and reports nothing changed. Both SHAs are asserted
     because the message is the only place naming the tree planned and the one that should be."""
     monkeypatch.setattr(bm, "_run", lambda args: "basebase\n")
-    err = bm.head_checkout_error("cafe1234", "false")
+    err = bm.head_checkout_error("cafe1234", False)
     assert err.startswith("::error::")
     assert "cafe1234" in err and "basebase" in err
     assert "nothing queued to apply" in err
@@ -469,7 +459,7 @@ def test_an_unstated_head_is_refused_naming_the_input(monkeypatch):
     refusal alone: it names the input and the drift opt-out, never the mismatch wording."""
     monkeypatch.setattr(bm, "_run", lambda args: pytest.fail("probed with no stated head"))
     for head in ("", "   "):
-        err = bm.head_checkout_error(head, "false")
+        err = bm.head_checkout_error(head, False)
         assert err.startswith("::error::")
         assert "head-sha" in err
         assert "no-pull-request" in err
@@ -478,20 +468,45 @@ def test_an_unstated_head_is_refused_naming_the_input(monkeypatch):
 
 def test_the_opt_out_skips_the_head_checkout_check(monkeypatch):
     """The drift path has no pull-request context and no reason to be at any particular commit, so
-    `git rev-parse` must not even run. Case- and whitespace-insensitive for the same reason as the
-    fork refusal's opt-out: a `no-pull-request: True` must not redden a nightly over YAML
-    capitalisation."""
+    `git rev-parse` must not even run."""
     monkeypatch.setattr(bm, "_run", lambda args: pytest.fail("head checkout was probed"))
-    for value in ("true", "True", " TRUE "):
-        for head in ("", "cafe1234"):
-            assert bm.head_checkout_error(head, value) == ""
+    for head in ("", "cafe1234"):
+        assert bm.head_checkout_error(head, True) == ""
 
 
-def test_only_the_opt_out_skips_the_head_checkout_check():
-    # The manifest default is the non-empty string "false", so anything that
-    # treats a non-empty value as the opt-out would leave every run unchecked.
-    for value in ("false", "False", " false ", "yes", "1", "", "no-pull-request"):
-        assert bm.head_checkout_error("", value).startswith("::error::")
+@pytest.mark.parametrize(
+    ("value", "opted_out"),
+    [
+        pytest.param("true", True, id="true"),
+        pytest.param("True", True, id="capitalised"),
+        pytest.param(" TRUE ", True, id="padded-upper"),
+        pytest.param("false", False, id="manifest-default"),
+        pytest.param("False", False, id="capitalised-false"),
+        pytest.param(" false ", False, id="padded-false"),
+        pytest.param("yes", False, id="yes"),
+        pytest.param("1", False, id="one"),
+        pytest.param("", False, id="empty"),
+        pytest.param("no-pull-request", False, id="input-name"),
+    ],
+)
+def test_main_parses_the_opt_out_once_for_all_three_guards(monkeypatch, tmp_path, value, opted_out):
+    """Case- and whitespace-insensitive, so a `no-pull-request: True` does not redden a nightly
+    over YAML capitalisation. Only "true" opts out: the manifest default is the non-empty string
+    "false", so anything that treats a non-empty value as the opt-out would plan every unstated
+    run unchecked.
+
+    Mutations: drop `.strip()` or `.lower()` from main's parse -- a padded or capitalised row
+    reddens; parse with `bool(...)` -- every non-empty `False` row reddens; pass the raw variable
+    to one guard -- that guard records a string."""
+    seen = []
+    for name in ("fork_pr_error", "head_checkout_error", "tag_filter_error"):
+        monkeypatch.setattr(bm, name, lambda *args, _n=name: seen.append((_n, args[-1])) or "")
+    _run_main(monkeypatch, tmp_path, {"SHIPMATE_NO_PULL_REQUEST": value})
+    assert seen == [
+        ("fork_pr_error", opted_out),
+        ("head_checkout_error", opted_out),
+        ("tag_filter_error", opted_out),
+    ]
 
 
 def test_main_refuses_a_run_that_states_no_head(monkeypatch, tmp_path):
@@ -1031,11 +1046,10 @@ def test_the_tag_filter_refusal_is_keyed_on_the_value():
 
     Fails when the manifest is relied on instead and the runtime check deleted:
     `tag_filter_error` is gone and every case below errors."""
-    for no_pull_request in ("", "false"):
-        assert bm.tag_filter_error("env/dev-eu", no_pull_request).startswith("::error::")
-        assert bm.tag_filter_error("", no_pull_request) == ""
-        assert bm.tag_filter_error("   ", no_pull_request) == ""
-    assert bm.tag_filter_error("env/dev-eu", "true") == ""
+    assert bm.tag_filter_error("env/dev-eu", False).startswith("::error::")
+    assert bm.tag_filter_error("", False) == ""
+    assert bm.tag_filter_error("   ", False) == ""
+    assert bm.tag_filter_error("env/dev-eu", True) == ""
 
 
 def test_main_with_no_tags_input_filters_nothing(monkeypatch, tmp_path):
