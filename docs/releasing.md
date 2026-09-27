@@ -3,8 +3,8 @@
 Consumers pin shipmate's reusable workflows by commit SHA. The engine itself has
 no pins: every engine step calls its action as `$/actions/<name>`, which GitHub
 resolves in this repository at the commit of the reusable workflow the consumer
-pinned, and the three callers of `apply-env-level.yml` reach it as
-`./.github/workflows/apply-env-level.yml`. One commit, one tree.
+pinned, and the engine's own nested workflows, `apply-env-level.yml` and
+`apply-review.yml`, are reached as `./.github/workflows/<file>`. One commit, one tree.
 `scripts/tests/test_engine_self_reference.py` refuses a
 `ship-iac/shipmate/<path>@<sha>` reference in any workflow or action manifest.
 

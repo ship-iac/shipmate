@@ -338,8 +338,8 @@ never used.
   boundary for the key, `docs/drift.md` §Slack (optional) for the webhook).
   It appears only inside the engine's reusable workflows — `plan.yml`'s
   `summary` job, `comment-ops.yml`'s `ops` job, `drift.yml`'s `issues` job, and
-  the apply path (`apply.yml`, `apply-all.yml`, `apply-env-level.yml`,
-  `deploy.yml`). No consumer file names it: the consumer's `shipmate.yml`
+  the apply path (`apply.yml`, `apply-all.yml`, `apply-review.yml`,
+  `apply-env-level.yml`, `deploy.yml`). No consumer file names it: the consumer's `shipmate.yml`
   passes the key, and on its `deploy` and `drift` jobs the webhook, by name and
   binds no environment of its own. Each of those
   engine jobs runs at a ref the environment's default-branch policy admits —
@@ -1305,8 +1305,9 @@ input without failing there.
 The decision has two seats, because `authorize` returns one verdict per
 dispatch while a bare apply spans many environments:
 
-Both engine workflows re-read `reviewDecision` themselves in a `review` job
-rather than trusting a dispatch input, and that job is unconditional — the
+Both engine workflows re-read `reviewDecision` themselves in a `review` job,
+which calls `apply-review.yml`, rather than trusting a dispatch input, and that
+job is unconditional — the
 default branch's `gated = false` entries are the only source of this policy, and only
 engine-owned scripts read it.
 
@@ -1625,11 +1626,12 @@ The four jobs:
   policy. It reads every fact it decides on from `needs.facts.outputs`, and the
   rest from the two other jobs' results; nothing is recovered from artifacts or
   from a second API lookup.
-- **`apply.yml` / `apply-all.yml` / `apply-env-level.yml` / `deploy.yml`**
-  (engine, reached through the `targeted`, `all` and `deploy` jobs —
+- **`apply.yml` / `apply-all.yml` / `apply-review.yml` / `apply-env-level.yml` /
+  `deploy.yml`** (engine, reached through the `targeted`, `all` and `deploy` jobs —
   `workflow_dispatch` via comment-ops, or `push` to the default branch) — the
-  jobs that mint an App token (completing apply checks, refreshing the gate,
-  posting the apply result comment) are likewise bound to `shipmate-engine`.
+  jobs that mint an App token (reading the review decision, completing apply
+  checks, refreshing the gate, posting the apply result comment) are likewise
+  bound to `shipmate-engine`.
 - **`comment-ops.yml`**'s `ops` job (engine, reached through the consumer's
   `comment-ops` job on `issue_comment`) — binds `shipmate-engine` for comment
   authorization and for the `workflow_dispatch` that kicks off an apply.

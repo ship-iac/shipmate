@@ -1,5 +1,5 @@
-"""Guards the `review` job both apply workflows carry, and its wiring into each
-`detect`.
+"""Guards the `review` job both apply workflows call from `apply-review.yml`, and its wiring into
+each `detect`.
 
 The job re-reads the pull request's `reviewDecision` server-side, on both apply paths, so the
 apply decision rests on GitHub's answer rather than on a dispatch input. Threat model is
@@ -7,7 +7,8 @@ accidental regression -- a line reverted in a refactor, a flag dropped, an `if:`
 not a hostile edit to a SHA-pinned engine file. Three of the regressions are silently fail-open,
 which is why they are pinned whole:
 
-- an `if:` re-appearing on either `review` job. A conditional review job can be skipped, a
+- an `if:` re-appearing on either calling `review` job or on the called one. A conditional
+  review job can be skipped, a
   skipped job delivers an empty decision, and that is the state an `ungated-envs` action input
   wider than the repository variable used to exploit. Absence is the property, so it is asserted
   rather than assumed.
@@ -34,6 +35,17 @@ _CHECKOUT = "actions/checkout"
 _DETECT_IF = "${{ !failure() && !cancelled() }}"
 _DETECT_NEEDS = ["guard", "review"]
 _APPLY_PATHS = ("apply-all.yml", "apply.yml")
+_REVIEW_WORKFLOW = "apply-review.yml"
+
+#: The whole calling job, hand-written, identical in both apply paths. No `if:` is part of the
+#: value; the `secrets:` mapping is what lets the callee's `shipmate-engine` binding supply the key.
+_CALLER = {
+    "needs": ["guard"],
+    "uses": f"./.github/workflows/{_REVIEW_WORKFLOW}",
+    "permissions": {},
+    "with": {"pr_number": "${{ inputs.pr_number }}"},
+    "secrets": {"SHIPMATE_APP_PRIVATE_KEY": "${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}"},
+}
 
 #: The whole `--jq` program, hand-written. It is the entire mapping from the GraphQL response to
 #: the decision `detect` partitions on, and the fail-open form is one edit away:
@@ -56,47 +68,57 @@ def _jobs(workflow):
     return yaml.safe_load((WORKFLOWS / workflow).read_text(encoding="utf-8"))["jobs"]
 
 
-def _review(workflow="apply-all.yml"):
-    return _jobs(workflow)["review"]
+def _review():
+    return _jobs(_REVIEW_WORKFLOW)["review"]
 
 
-def test_both_apply_paths_carry_an_identical_review_job():
+@pytest.mark.parametrize("workflow", _APPLY_PATHS)
+def test_both_apply_paths_call_the_review_workflow_with_this_whole_job(workflow):
     """The targeted path once consulted the review decision nowhere at all, so an
     `ungated-envs` input wider than the repository variable applied unreviewed there
-    unconditionally. One job, one shape, both files, compared whole, so the two cannot drift
-    apart. `_REVIEW_JQ` is the hand-written content anchor that keeps them from drifting
-    together."""
-    assert _review("apply.yml") == _review("apply-all.yml")
+    unconditionally. One called workflow, and each caller compared whole, so neither path can
+    drop the call, gain an `if:` that skips it, or stop mapping the key.
+
+    Mutations: add `if: ${{ inputs.pr_number != '' }}` to either caller; delete its `secrets:`.
+    """
+    assert _jobs(workflow)["review"] == _CALLER
+
+
+def test_the_decision_output_reaches_the_callers():
+    """An unmapped output arrives empty, which detect holds everything on: fail-closed, but every
+    apply would then refuse. Mutation: point the workflow output at a job output that does not
+    exist."""
+    spec = yaml.safe_load((WORKFLOWS / _REVIEW_WORKFLOW).read_text(encoding="utf-8"))
+    # PyYAML reads the bare key `on` as the boolean True.
+    assert spec[True]["workflow_call"]["outputs"]["decision"]["value"] == (
+        "${{ jobs.review.outputs.decision }}"
+    )
+    assert _review()["outputs"] == {"decision": "${{ steps.rd.outputs.decision }}"}
 
 
 def test_the_review_job_checks_nothing_out():
     """It holds an App token, and a checkout would put branch-controlled content in the same
     job. Terramate over pull request head content belongs in `detect`, which holds no token."""
-    for name in _APPLY_PATHS:
-        offenders = [s for s in _review(name)["steps"] if _CHECKOUT in str(s.get("uses") or "")]
-        assert not offenders, f"{name}: the review job checks out branch content: {offenders}"
+    offenders = [s for s in _review()["steps"] if _CHECKOUT in str(s.get("uses") or "")]
+    assert not offenders, f"the review job checks out branch content: {offenders}"
 
 
 def test_the_review_job_carries_no_if_and_so_always_runs():
     """The absence is the property, and an absence nothing asserts is fail-open by construction.
     A conditional review job can be skipped, and a skipped job yields an empty decision --
     which detect must read as hold-everything rather than as no-review-required."""
-    for name in _APPLY_PATHS:
-        assert "if" not in _review(name), (
-            f"{name}: the review job grew an `if:` ({_review(name).get('if')!r}); a review "
-            "job that can be skipped delivers an empty decision to detect"
-        )
+    assert "if" not in _review(), (
+        f"the review job grew an `if:` ({_review().get('if')!r}); a review "
+        "job that can be skipped delivers an empty decision to detect"
+    )
 
 
 def test_the_review_mint_requests_only_pull_requests_read():
-    for name in _APPLY_PATHS:
-        mints = [s for s in _review(name)["steps"] if _MINT in str(s.get("uses") or "")]
-        assert len(mints) == 1, (
-            f"{name}: expected exactly one App-token mint in review, got {len(mints)}"
-        )
-        with_ = mints[0]["with"]
-        got = {k: v for k, v in with_.items() if k.startswith("permission-")}
-        assert got == _MINT_PERMISSIONS
+    mints = [s for s in _review()["steps"] if _MINT in str(s.get("uses") or "")]
+    assert len(mints) == 1, f"expected exactly one App-token mint in review, got {len(mints)}"
+    with_ = mints[0]["with"]
+    got = {k: v for k, v in with_.items() if k.startswith("permission-")}
+    assert got == _MINT_PERMISSIONS
 
 
 def test_detect_needs_review_and_refuses_to_run_after_it_failed():
