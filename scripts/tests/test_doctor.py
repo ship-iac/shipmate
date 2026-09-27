@@ -3231,6 +3231,25 @@ _WORKFLOW_DIR_DEGRADES = [
 ]
 
 
+def test_the_workflow_directory_degrades_read_as_written():
+    """The table above compares each probe against doctor's own constants, which one template
+    builds, so it cannot see the template itself go wrong. These are hand-written.
+
+    Mutation: swap the two elements `_unverified` returns, or reword either sentence --
+    this reddens."""
+    assert (doctor.ROUTING_UNREADABLE, doctor.ROUTING_NO_COMMIT) == (
+        (
+            "notice",
+            "could not read `.github/workflows` — the workflow file's event routing not verified.",
+        ),
+        (
+            "notice",
+            "the workflow file's event routing not verified — the commit under examination "
+            "could not be determined.",
+        ),
+    )
+
+
 @pytest.mark.parametrize(("probe", "no_commit", "_unreadable"), _WORKFLOW_DIR_DEGRADES)
 def test_without_a_commit_is_a_note_not_a_read(monkeypatch, probe, no_commit, _unreadable):
     def gh(path):
