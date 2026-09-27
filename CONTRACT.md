@@ -1796,8 +1796,8 @@ trigger alone closes two paths a trigger check alone would not:
   which environments) fans out into up to N×M plan units and N×M apply
   units, each with its own check (see Check names, above).
 - The plan fan-out is bounded at 256 cells (`build-matrix`'s `MATRIX_LIMIT`,
-  the GitHub Actions matrix limit). Above it `build-matrix` raises
-  `MatrixTooLarge` and `detect` fails the run before any cell starts.
+  the GitHub Actions matrix limit). Above it `build-matrix` refuses
+  and `detect` fails the run before any cell starts.
   The way past it is to split the change across several pull requests: the
   matrix is built over `terramate list --changed`, so a narrower diff is a
   smaller matrix. Splitting cannot help when the fan-out comes from a one-line

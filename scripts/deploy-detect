@@ -15,7 +15,6 @@ the bare-apply path's explicit and held envs.
 
 import os
 import time
-from graphlib import CycleError
 
 from _shipmate import _load
 
@@ -98,13 +97,4 @@ def main():
 
 
 if __name__ == "__main__":
-    try:
-        main()
-    except bm.MatrixTooLarge as e:
-        raise SystemExit(f"::error::{e}") from e
-    except CycleError as e:
-        raise SystemExit(
-            f"::error::dependency cycle in the Terramate stack run-graph: {e}. Two or more "
-            "stacks order each other through `after`/`before`; break the loop in their stack "
-            "configuration."
-        ) from e
+    main()
