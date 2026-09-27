@@ -53,6 +53,17 @@ def test_the_workflow_call_secrets_are_exactly_these():
     assert _doc()[True]["workflow_call"]["secrets"] == {
         "SHIPMATE_APP_PRIVATE_KEY": {"required": False},
         "SHIPMATE_SECRETS": {"required": False},
+        "SHIPMATE_SLACK_WEBHOOK": {"required": False},
+    }
+
+
+def test_drift_issues_reads_the_webhook_from_the_engine_secret():
+    """Mutation: point `slack-webhook` back at `${{ vars.SLACK_WEBHOOK }}`, a variable every plan
+    cell exports and the run log prints."""
+    assert _step("issues", "actions/drift-issues")["with"] == {
+        "app-id": "${{ vars.SHIPMATE_APP_ID }}",
+        "private-key": "${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}",
+        "slack-webhook": "${{ secrets.SHIPMATE_SLACK_WEBHOOK }}",
     }
 
 

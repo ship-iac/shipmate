@@ -2,7 +2,7 @@ name: deploy
 on:
   workflow_call:
     secrets:
-      # Consumers pass this by name. A `vars` entry such as SLACK_WEBHOOK is inherited by a
+      # Consumers pass this by name. A `vars` entry such as SHIPMATE_APP_ID is inherited by a
       # called workflow automatically; secrets are NOT, and an encrypting consumer
       # that forwards nothing has every env-level apply fail its decrypt fail-safe. No environment
       # can supply it either: the wave jobs bind the env's apply environment, not `shipmate-engine`.
@@ -11,6 +11,7 @@ on:
       # step earlier, in that job's `Verify the App key arrived`.
       SHIPMATE_APP_PRIVATE_KEY: { required: false }
       SHIPMATE_SECRETS: { required: false }
+      SHIPMATE_SLACK_WEBHOOK: { required: false }
 jobs:
   detect:
     runs-on: ubuntu-latest
@@ -175,10 +176,12 @@ jobs:
           PY
           gh api "repos/$GITHUB_REPOSITORY/statuses/$HEAD_SHA" --input body.json >/dev/null
       - name: Slack on failed deploy (outranks drift)
-        if: ${{ always() && (contains(join(needs.*.result, ','), 'failure') || contains(join(needs.*.result, ','), 'cancelled')) && vars.SLACK_WEBHOOK != '' }}
+        if: ${{ always() && (contains(join(needs.*.result, ','), 'failure') || contains(join(needs.*.result, ','), 'cancelled')) }}
         env:
-          SLACK: ${{ vars.SLACK_WEBHOOK }}
+          SLACK: ${{ secrets.SHIPMATE_SLACK_WEBHOOK }}
         run: |
           set -euo pipefail
+          # The `secrets` context is not available in a step's `if:`.
+          [ -n "$SLACK" ] || exit 0
           python3 -c "import json;open('p.json','w').write(json.dumps({'text':':rotating_light: shipmate deploy failed on main — a wave apply failed or was cancelled.'}))"
-          curl -sS -X POST -H 'Content-Type: application/json' --data @p.json "$SLACK" >/dev/null
+          curl -sS --fail-with-body -X POST -H 'Content-Type: application/json' --data @p.json "$SLACK" >/dev/null

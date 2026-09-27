@@ -9,6 +9,7 @@ on:
     secrets:
       SHIPMATE_APP_PRIVATE_KEY: { required: false }
       SHIPMATE_SECRETS: { required: false }
+      SHIPMATE_SLACK_WEBHOOK: { required: false }
 # Floor, not a default to inherit from: every job here declares its own block, so a job that
 # loses its block gets nothing rather than everything the caller granted.
 permissions: {}
@@ -93,4 +94,4 @@ jobs:
         with:
           app-id: ${{ vars.SHIPMATE_APP_ID }}
           private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
-          slack-webhook: ${{ vars.SLACK_WEBHOOK }}
+          slack-webhook: ${{ secrets.SHIPMATE_SLACK_WEBHOOK }}

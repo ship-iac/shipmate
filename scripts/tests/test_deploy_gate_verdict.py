@@ -94,3 +94,61 @@ def test_missing_head_sha_fails_loud():
     r = _run("success", head_sha="")
     assert r.returncode == 1, r.stdout
     assert "::error::" in r.stdout
+
+
+_SLACK_STEP = "Slack on failed deploy (outranks drift)"
+
+#: The Slack step's whole `if:`, `env:` and `run:`, hand-written: a value read back from the
+#: file passes whatever the file says.
+_SLACK_IF = (
+    "${{ always() && (contains(join(needs.*.result, ','), 'failure') || "
+    "contains(join(needs.*.result, ','), 'cancelled')) }}"
+)
+_SLACK_ENV = {"SLACK": "${{ secrets.SHIPMATE_SLACK_WEBHOOK }}"}
+_SLACK_RUN = (
+    "set -euo pipefail\n"
+    "# The `secrets` context is not available in a step's `if:`.\n"
+    '[ -n "$SLACK" ] || exit 0\n'
+    "python3 -c \"import json;open('p.json','w').write(json.dumps({'text':':rotating_light: "
+    "shipmate deploy failed on main — a wave apply failed or was cancelled.'}))\"\n"
+    "curl -sS --fail-with-body -X POST -H 'Content-Type: application/json' "
+    '--data @p.json "$SLACK" >/dev/null\n'
+)
+
+
+def _slack_step():
+    spec = yaml.safe_load((WORKFLOWS / "deploy.yml").read_text(encoding="utf-8"))
+    found = [s for s in spec["jobs"]["summary"]["steps"] if s.get("name") == _SLACK_STEP]
+    assert len(found) == 1, f"deploy.yml summary job has {len(found)} steps named {_SLACK_STEP!r}"
+    return found[0]
+
+
+def test_slack_step_reads_the_engine_secret_and_fails_on_a_rejected_post():
+    """Mutations: read `vars.SLACK_WEBHOOK` again; restore `&& vars.SLACK_WEBHOOK != ''` in the
+    `if:`; delete the empty-webhook exit; drop `--fail-with-body`, which lets a revoked
+    webhook's 4xx exit 0."""
+    step = _slack_step()
+    run = step["run"].replace("\r\n", "\n").replace("\r", "\n")
+    assert (" ".join(step["if"].split()), step["env"], run) == (_SLACK_IF, _SLACK_ENV, _SLACK_RUN)
+
+
+@bash_only
+def test_slack_step_with_no_webhook_calls_nothing(tmp_path):
+    """No webhook set, failed wave: the step exits 0 before it writes a payload or posts.
+    Mutation: delete `[ -n "$SLACK" ] || exit 0`, and the stubbed curl records a call."""
+    stubs = tmp_path / "bin"
+    stubs.mkdir()
+    marker = tmp_path / "called"
+    for name in ("curl", "python3"):
+        stub = stubs / name
+        stub.write_text(f'#!/bin/sh\necho {name} >> "{marker.as_posix()}"\nexit 0\n')
+        stub.chmod(0o755)
+    r = subprocess.run(
+        [usable_bash(), "-c", _slack_step()["run"]],
+        capture_output=True,
+        text=True,
+        cwd=tmp_path,
+        env={"SLACK": "", "PATH": f"{stubs.as_posix()}:/usr/bin:/bin"},
+    )
+    assert r.returncode == 0, r.stderr
+    assert not marker.exists(), f"called with no webhook: {marker.read_text()}"
