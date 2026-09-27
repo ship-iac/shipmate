@@ -11,6 +11,26 @@ section below names the SHA the release tags.
 The version line stays `v0.x` while action inputs, check names, and the comment
 grammar are declared unstable in `README.md`.
 
+## [Unreleased]
+
+### Changed — BREAKING
+
+- **The Slack webhook is a `shipmate-engine` secret.** `deploy.yml` and `drift.yml` read
+  `secrets.SHIPMATE_SLACK_WEBHOOK` and no longer read the `SLACK_WEBHOOK` variable: every
+  plan cell receives the repository's variables, and a step's inputs print in its log.
+  Delete the `SLACK_WEBHOOK` variable, set `SHIPMATE_SLACK_WEBHOOK` as a secret on the
+  `shipmate-engine` environment, and add
+  `SHIPMATE_SLACK_WEBHOOK: ${{ secrets.SHIPMATE_SLACK_WEBHOOK }}` to the `secrets:` block of
+  the `deploy` and `drift` jobs and of every drift slice file. Mapping it before re-pinning
+  to this release fails the workflow at load. A cell refuses a variable named
+  `SHIPMATE_SLACK_WEBHOOK`.
+
+### Fixed
+
+- **The deploy failure notice fails its step on a rejected webhook.** Its `curl` carries
+  `--fail-with-body`, so a revoked or rotated webhook no longer leaves the step green with no
+  message sent.
+
 ## [0.38.0] — 2026-09-27
 
 Tags `2435bdb`.

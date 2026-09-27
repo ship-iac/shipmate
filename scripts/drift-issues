@@ -154,10 +154,9 @@ def notify_slack(webhook, cell):
     payload = json.dumps(
         {"text": f":ocean: drift detected: {cell['environment']} / {cell['stack_name']}"}
     ).encode()
-    # webhook is a fixed repo/org variable (a GitHub Environment var this
-    # action's caller supplies), never user input -- not an arbitrary scheme
-    # (create-github-app-token/gh already require https endpoints throughout
-    # this codebase).
+    # webhook is the consumer's `shipmate-engine` secret, never user input --
+    # not an arbitrary scheme (create-github-app-token/gh already require https
+    # endpoints throughout this codebase).
     req = urllib.request.Request(  # noqa: S310
         webhook, data=payload, headers={"Content-Type": "application/json"}, method="POST"
     )

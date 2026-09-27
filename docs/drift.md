@@ -94,14 +94,17 @@ the plan path sees only the changed set
 
 ## Slack (optional)
 
-Slack needs no line in your workflow file. The engine's `issues` job passes
-`slack-webhook: ${{ vars.SLACK_WEBHOOK }}` to `drift-issues`, and `vars` inherit
-into a called workflow, so setting that one GitHub variable is the whole
-configuration. Set it at repo or org level, or on the `shipmate-engine`
-environment that job binds (for `vars.`, most specific wins: environment
-overrides repository overrides organization). The input's default is the empty
-string, so with `SLACK_WEBHOOK` unset the expression renders empty and no
-notification is attempted — nothing else changes.
+Store the webhook as the secret `SHIPMATE_SLACK_WEBHOOK` on the
+`shipmate-engine` environment that the engine's `issues` job binds. The `drift`
+job of the workflow file in [`getting-started.md`](getting-started.md), and each
+slice file's own `secrets:` block ([§Spreading a sweep across the
+week](#spreading-a-sweep-across-the-week)), map it by name. Without that line the
+environment's value never arrives. It is a secret, not a variable, because every
+plan cell receives the repository's variables and a step's inputs print in its
+log; a cell refuses a variable of that name. It belongs on the environment, not
+in a repository secret: any workflow on any branch reads a repository secret.
+Unset, the input is empty and no notification is attempted. The same secret
+feeds the deploy failure notice.
 
 When it is set, `drift-issues` POSTs one message per cell that is drifted on this
 run (the same cells whose Issue it created or updated), a single-line
