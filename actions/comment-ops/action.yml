@@ -32,9 +32,6 @@ outputs:
   authorized:
     description: true when the command is valid and authorized.
     value: ${{ steps.verdict.outputs.authorized }}
-  is-command:
-    description: true when the comment is a shipmate command at all.
-    value: ${{ steps.parse.outputs.is_command }}
   environment:
     description: Parsed target environment; empty for a bare `shipmate apply` (all non-explicit environments) and on the plan route, whose dispatched run carries no environment.
     value: ${{ steps.authz.outputs.environment }}
