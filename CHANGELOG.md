@@ -13,6 +13,8 @@ grammar are declared unstable in `README.md`.
 
 ## [0.39.0] — 2026-09-27
 
+Tags `ca75e4e`.
+
 ### Changed — BREAKING
 
 - **The Slack webhook is a `shipmate-engine` secret.** `deploy.yml` and `drift.yml` read
