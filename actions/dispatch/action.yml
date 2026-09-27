@@ -20,12 +20,6 @@ inputs:
   pr-number:
     description: PR number the dispatched run belongs to — the plan body carries it beside the verb alone, and the unlock body not at all.
     required: true
-  dispatch-ref:
-    description: Branch whose workflow file runs (usually the default branch).
-    required: true
-  repository:
-    description: owner/repo to dispatch in.
-    required: true
 runs:
   using: composite
   steps:
@@ -56,8 +50,9 @@ runs:
       # a shell heredoc with interpolation — injection-safe.
       env:
         GH_TOKEN: ${{ steps.token.outputs.token }}
-        REPO: ${{ inputs.repository }}
-        DISPATCH_REF: ${{ inputs.dispatch-ref }}
+        REPO: ${{ github.repository }}
+        # A dispatched workflow file only resolves on the default branch.
+        DISPATCH_REF: ${{ github.event.repository.default_branch }}
         ENVIRONMENT: ${{ inputs.environment }}
         VERB: ${{ inputs.verb }}
         REF: ${{ inputs.ref }}

@@ -172,8 +172,8 @@ the release commit, from `repo-example-stacks-aws`:
    names.
 
    **Not by commenting the verb.** An `issue_comment` workflow always runs from
-   the repository's default branch, and the engine's `comment-ops.yml` passes
-   `dispatch-ref: ${{ github.event.repository.default_branch }}` — so a comment
+   the repository's default branch, and the engine's `actions/dispatch` dispatches
+   on `github.event.repository.default_branch` — so a comment
    drives the default branch's copy of `shipmate.yml` and dispatches that same
    copy, still on the *old* pin. The scratch
    branch is never read, and the smoke goes green without touching the new
