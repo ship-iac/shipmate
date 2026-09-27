@@ -238,43 +238,16 @@ def _existing_env_names(ctx):
     return names
 
 
-SPLIT, SHARED = "split", "shared"
-
-# Which environments each mode's probes read, and the role each plays; see `_role_names`.
-_MODE_ROLES = {
-    SPLIT: ("plan", "apply"),
-    SHARED: ("shared",),
-}
-
-
-def _env_mode(env, shared):
-    """Which naming one logical env uses: `shared` is `_shared_envs`' set."""
-    return SHARED if env in shared else SPLIT
-
-
-def _role_names(env, mode, roles=None):
-    """[(environment name, role)] a mode's probes read for one logical env.
-    `roles` narrows it to a subset (the plan-side names). The advice texts spell
-    the suffixed names out inline; what is single here is which environments a
-    mode is probed through, and `_env_mode` is the only place the mode is
-    decided."""
-    return [
-        (env if role == "shared" else f"{env}-{role}", role)
-        for role in _MODE_ROLES[mode]
-        if roles is None or role in roles
-    ]
-
-
-def _bound_names(ctx, roles=None):
+def _bound_names(ctx):
     """[(env, environment name, role)] the default branch's table binds for each declared
-    env, narrowed like `_role_names`, or `None` when `_shared_envs` cannot tell."""
+    env, or `None` when `_shared_envs` cannot tell."""
     shared = _shared_envs(ctx)
     if shared is None:
         return None
     return [
         (env, name, role)
         for env in sorted(ctx["envs"])
-        for name, role in _role_names(env, _env_mode(env, shared), roles)
+        for name, role in bm.ec.env_names(env, shared)
     ]
 
 
@@ -426,7 +399,7 @@ def _env_shape_findings(name, env, data, role):
 
 def _env_protection_warnings(ctx):
     """Protection shape per environment, checked live, with the role each
-    environment plays taken from `_env_mode`. An approval-type protection rule on
+    environment plays taken from `env_names`. An approval-type protection rule on
     a PLAN env — a required reviewer, or a wait timer — stops plan jobs from
     starting when they should: no error, only a stalled matrix — the hardest
     shipmate misconfiguration to diagnose. An APPLY env with no approval
@@ -695,8 +668,8 @@ def _plan_env_secret_warnings(ctx):
     Order is load-bearing. The declared-env check comes first: a docs-only pull
     request reads nothing, so the dark-check WARNING would be a false alarm
     there. Existence then comes from `_existing_env_names`; see its docstring.
-    Scope is the plan-side environment of each mode -- `<env>-plan` in split
-    mode, the bare `<env>` in shared mode.
+    Scope is the plan-side environment of each env -- `<env>-plan`, or the
+    bare `<env>` when shared.
     Never `<env>-apply`: that is where control 7 *requires* credentials, and
     `shipmate-engine` holds the App key by design.
     """
@@ -706,12 +679,12 @@ def _plan_env_secret_warnings(ctx):
     if not os.environ.get("SHIPMATE_ENV_TOKEN"):
         return [_ENV_TOKEN_UNCHECKED]
     existing = _existing_env_names(ctx)
-    bound = _bound_names(ctx, ("plan", "shared"))
+    bound = _bound_names(ctx)
     if bound is None:
         return []  # DEFAULT_TABLE_UNREADABLE is `_environment_warnings`' finding
     out = []
     for _env, name, role in bound:
-        if name not in existing:
+        if role == "apply" or name not in existing:
             continue  # existence is _environment_warnings' finding
         try:
             names, total = _env_secret_names(ctx, name)

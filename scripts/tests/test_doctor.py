@@ -363,8 +363,9 @@ def test_the_table_selects_the_mode(monkeypatch):
     which environments exist: the same bare `dev-eu` is a healthy shared environment under
     the key and two missing halves without it. `shared = false` reads as absent.
 
-    Mutation: have `_env_mode` return `SPLIT` regardless of the table -- the shared case
-    reddens; return `SHARED` -- the other two redden."""
+    Mutation: make env-config's `env_names` ignore `shared` and always return the split
+    pair -- the shared case reddens; always return the bare shared name -- the other two
+    redden."""
     assert _env_findings(monkeypatch, _SHARED_TABLE, _env("dev-eu")) == [_SHARED_UNREVIEWED]
     split = [_MISSING_PLAN, _MISSING_APPLY]
     assert _env_findings(monkeypatch, CANONICAL, _env("dev-eu")) == split

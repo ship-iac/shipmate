@@ -454,6 +454,14 @@ def shared_envs(table):
     }
 
 
+def env_names(env, shared):
+    """[(GitHub Environment name, role)] one logical env binds, `shared` being
+    `shared_envs`' set: `[(env, "shared")]`, or the `<env>-plan` / `<env>-apply` pair."""
+    if env in shared:
+        return [(env, "shared")]
+    return [(f"{env}-plan", "plan"), (f"{env}-apply", "apply")]
+
+
 def explicit_envs(table):
     """Environments a bare `shipmate apply` skips: each needs its own `shipmate apply <env>`.
 
