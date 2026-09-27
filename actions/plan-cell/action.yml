@@ -191,9 +191,6 @@ runs:
         STACK: ${{ inputs.stack }}
         STACK_NAME: ${{ inputs.stack-name }}
         ENV: ${{ inputs.env }}
-        ADD: ${{ steps.plan.outputs.add }}
-        CHANGE: ${{ steps.plan.outputs.change }}
-        DESTROY: ${{ steps.plan.outputs.destroy }}
         CHANGED: ${{ steps.plan.outputs.changed }}
       run: |
         python3 "$GITHUB_ACTION_PATH/../../scripts/plan-cell-summary"

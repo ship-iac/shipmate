@@ -19,6 +19,10 @@ grammar are declared unstable in `README.md`.
   resource, which OpenTofu renders as a `no-op` action with `importing` set, as unchanged, so
   its cell got a neutral apply check and the import never applied. A resource whose import
   has already applied stays unchanged.
+- **The plan comment's counts come from the plan text the apply verifies.** The
+  `+add ~change -destroy` tally was read from the plan cell's `cell.json`, which
+  the author's pipeline writes, so it could disagree with the bound `plan.txt`.
+  `cell.json` no longer carries `add`, `change` or `destroy`.
 
 ## [0.37.0] — 2026-09-27
 

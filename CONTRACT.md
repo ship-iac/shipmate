@@ -1954,10 +1954,11 @@ exactly like the plan artifact, never reverse-parsed). Consumers download it
 with the glob pattern `cell-summary.*`. It contains verbatim:
 
 - `cell.json` — keys `stack` (display name), `stack_path` (Terramate stack
-  path, feeds the check-name construction), `environment`, `add`, `change`,
-  `destroy` (integers), `changed` (boolean); written by `plan-cell` at plan
-  time from `scripts/plan-classify` output — the summary never re-parses
-  plan text.
+  path, feeds the check-name construction), `environment`, `changed`
+  (boolean), `fingerprint`; written by `plan-cell` at plan time. `changed`
+  comes from `scripts/plan-classify`; the comment's `+add ~change -destroy`
+  counts come from `plan.txt`'s OpenTofu tally line, and a cell whose text
+  carries none renders `?`.
 - `plan.txt` — the `tofu show -no-color` rendering of the reviewed plan. The
   `summary` job hashes these exact bytes and records the digest on the cell's
   apply check; the apply re-renders the stored plan and refuses a difference

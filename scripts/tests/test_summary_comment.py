@@ -454,18 +454,43 @@ def test_load_cells_still_fails_loud_without_changed(tmp_path):
         sc.load_cells(str(tmp_path))
 
 
-def test_cell_schema_guard_plan_cell_writes_every_required_key():
-    # Coupling: plan-cell (writer of cell.json) <-> summary-comment (reader). Every key the
-    # reader requires must appear as a JSON key literal in the writer's source.
-    src = (_ENGINE / "scripts" / "plan-cell-summary").read_text(encoding="utf-8")
-    missing = [k for k in sc.CELL_KEYS if f'"{k}"' not in src]
-    assert missing == [], f"plan-cell-summary no longer writes cell.json keys: {missing}"
+def test_cell_schema_guard_plan_cell_writes_every_required_key(tmp_path, monkeypatch):
+    """Reddens when plan-cell-summary writes a key back (`"add": int(os.environ["ADD"])`) or
+    drops one summary-comment requires, when the step stops invoking it, or when the step's
+    env gains a key back (`ADD: ${{ steps.plan.outputs.add }}`)."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "fingerprint.txt").write_text("fp\n", encoding="utf-8")
+    for k, v in {
+        "STACK_NAME": "app",
+        "STACK": "stacks/app",
+        "ENV": "dev",
+        "CHANGED": "true",
+    }.items():
+        monkeypatch.setenv(k, v)
+    for k in ("ADD", "CHANGE", "DESTROY"):
+        monkeypatch.delenv(k, raising=False)
+    load_script("plan-cell-summary").main()
+    written = json.loads((tmp_path / "cell.json").read_text(encoding="utf-8"))
+    assert written == {
+        "stack": "app",
+        "stack_path": "stacks/app",
+        "environment": "dev",
+        "changed": True,
+        "fingerprint": "fp",
+    }
+    assert set(sc.CELL_KEYS) <= set(written)
     # And the step still runs that writer: a guard over a script nothing invokes pins nothing.
     # Matched as a whole run line, so neither prose elsewhere in the file nor a commented-out
     # invocation satisfies it.
     steps = [s for s in action_steps("plan-cell") if s.get("name") == "Write cell summary"]
     assert len(steps) == 1, f"expected one Write cell summary step, got {len(steps)}"
     assert 'python3 "$GITHUB_ACTION_PATH/../../scripts/plan-cell-summary"' in run_lines(steps[0])
+    assert steps[0]["env"] == {
+        "STACK": "${{ inputs.stack }}",
+        "STACK_NAME": "${{ inputs.stack-name }}",
+        "ENV": "${{ inputs.env }}",
+        "CHANGED": "${{ steps.plan.outputs.changed }}",
+    }
 
 
 def test_cell_summary_artifact_name_is_dot_delimited_env_first():
