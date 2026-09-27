@@ -306,9 +306,9 @@ def run_unlock(repo, env, head):
 
     `refuse_unreviewed` is skipped because an approval reviews a diff and unlock
     applies none — the run-time half of the decision `scripts/authorize` already
-    made at comment time. `cells` is written in BOTH modes (`[]` on the apply
-    path) because the unlock job's `strategy.matrix.include` is
-    `fromJSON(cells)` and `fromJSON('')` is an error."""
+    made at comment time. `cells` is written even for an empty queue, as `[]`,
+    because the unlock job's `strategy.matrix.include` is `fromJSON(cells)` and
+    `fromJSON('')` is an error."""
     stacks_by_env, tags_by_stack = bm.env_membership(all_stacks=True, require_env_tag=False)
     cells = bm.build_matrix([env], stacks_by_env, tags_by_stack)
     table = bm.env_config(cells, set(stacks_by_env))
@@ -328,8 +328,6 @@ def run_unlock(repo, env, head):
         )
     with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
         fh.write(f"cells={json.dumps(pending)}\n")
-        fh.write(f"empty={'false' if pending else 'true'}\n")
-        fh.write(f"head_sha={head}\n")
 
 
 def main():
@@ -386,10 +384,6 @@ def main():
     )
     with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
         wv.write_waves(fh, waves)
-        # Written on both branches so the output shape is one shape. No caller
-        # reads it here -- unlock.yml's matrix is the only consumer, and it never
-        # takes this branch.
-        fh.write("cells=[]\n")
         fh.write(f"head_sha={head}\n")
 
 
