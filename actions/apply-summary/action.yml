@@ -1,5 +1,5 @@
 name: shipmate apply-summary
-description: Render the apply result comment and post it to the pull request. Downloads the per-cell apply-summary.* artifacts, mints a shipmate App installation token, scans the head SHA's apply checks, and lists the run's jobs for per-cell log links.
+description: Render the apply result comment and post it to the pull request. Downloads the per-cell apply-summary.* artifacts, mints a shipmate App installation token, scans the head SHA's apply checks, and lists the run's jobs for per-cell log links. Reads the job's GITHUB_TOKEN, which needs actions:read for the artifact download and the jobs listing.
 inputs:
   pr-number:
     description: Pull request number to comment on.
@@ -54,13 +54,6 @@ inputs:
   head-sha:
     description: PR head SHA carrying the apply checks; their state tells an applied cell from a recorded one.
     required: true
-  cells-dir:
-    description: Directory to download apply-summary.*/cell.json trees into.
-    required: false
-    default: cells
-  github-token:
-    description: GITHUB_TOKEN with actions:read (artifact download + run jobs listing).
-    required: true
   app-id:
     description: shipmate App id (a repo/org variable, not a secret).
     required: true
@@ -71,17 +64,10 @@ runs:
   using: composite
   steps:
     - name: Verify the App key arrived
-      shell: bash
-      env:
-        APP_ID: ${{ inputs.app-id }}
-        PRIVATE_KEY: ${{ inputs.private-key }}
-      run: |
-        set -euo pipefail
-        if [ -z "$PRIVATE_KEY" ]; then
-          echo "::error::The shipmate App private key did not reach this job. Three causes, in the order worth checking: (1) the calling workflow used 'secrets: inherit' across an organization boundary -- GitHub delivers no inherited secrets there, and inherit also suppresses the value this job's environment binding would otherwise supply, so pass the secret by name instead; (2) the caller left SHIPMATE_APP_PRIVATE_KEY out of its secrets block; (3) this job binds no environment, or binds one that holds no secret of that name. See docs/getting-started.md."
-          exit 1
-        fi
-        [ -n "$APP_ID" ] || { echo "::error::SHIPMATE_APP_ID is unset. Set it as a repository or organization variable (docs/github-app.md)."; exit 1; }
+      uses: $/actions/verify-app-key
+      with:
+        app-id: ${{ inputs.app-id }}
+        private-key: ${{ inputs.private-key }}
     - name: Download apply cell summaries
       id: download
       # continue-on-error because for comment-ops the comment IS the feedback channel: a
@@ -93,8 +79,8 @@ runs:
       uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
       with:
         pattern: apply-summary.*
-        path: ${{ inputs.cells-dir }}
-        github-token: ${{ inputs.github-token }}
+        path: cells
+        github-token: ${{ github.token }}
         merge-multiple: false
 
     - name: Warn on apply cell summaries download failure
@@ -146,7 +132,7 @@ runs:
     - name: List run jobs (log links; degrade to none on failure)
       shell: bash
       env:
-        GH_TOKEN: ${{ inputs.github-token }}
+        GH_TOKEN: ${{ github.token }}
       run: |
         set -euo pipefail
         # Cosmetic: apply-comment falls back to the workflow-run URL per row. Mirror
@@ -160,7 +146,6 @@ runs:
     - name: Render apply result comment
       shell: bash
       env:
-        CELLS: ${{ inputs.cells-dir }}
         SHIPMATE_ENVIRONMENT: ${{ inputs.environment }}
         SHIPMATE_WAVES_JSON: ${{ inputs.waves-json }}
         SHIPMATE_ENVLEVEL0_WAVES: ${{ inputs.envlevel0-waves }}

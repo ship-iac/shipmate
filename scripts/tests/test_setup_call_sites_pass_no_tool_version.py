@@ -1,13 +1,10 @@
 """No workflow call site hands `actions/setup` a tool version.
 
-`actions/setup` resolves both versions from the release's own `VERSIONS` file when its
-inputs are empty, so a call site passing `${{ vars.TOFU_VERSION }}` would *work* -- it
-would silently restore the repository-variable round trip the engine stopped using, one
-call site at a time, and nothing else in the suite reads these steps.
+`actions/setup` takes no input and resolves both versions from the release's own `VERSIONS`
+file. A composite action only warns on an undeclared input, so a call site passing
+`${{ vars.TOFU_VERSION }}` would read as an override and silently do nothing.
 
-Each step's whole `with:` block is asserted, not the two input names: those two were the
-only inputs any call site ever passed, so an empty block is the whole known value. A call
-site that genuinely needs an input changes the constant below deliberately.
+Each step's whole `with:` block is asserted: an empty block is the whole known value.
 """
 
 import yaml

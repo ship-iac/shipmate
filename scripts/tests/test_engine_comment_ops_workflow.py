@@ -114,16 +114,14 @@ def test_the_authz_step_passes_this_whole_with_block():
         "comment-user": "${{ github.event.comment.user.login }}",
         "comment-id": "${{ github.event.comment.id }}",
         "pr-number": "${{ github.event.issue.number }}",
-        "github-token": "${{ github.token }}",
         "github-vars": "${{ toJSON(vars) }}",
     }
 
 
 def test_the_dispatch_step_passes_this_whole_with_block():
-    """Hand-written. `dispatch-ref` is the default branch on purpose: a dispatched workflow file
-    only ever resolves there, so pointing it at the head ref dispatches nothing.
+    """Hand-written.
 
-    Mutation: `dispatch-ref: ${{ github.head_ref }}`.
+    Mutation: `ref: ${{ github.event.pull_request.head.sha }}`.
     """
     assert _step("actions/dispatch")["with"] == {
         "app-id": "${{ vars.SHIPMATE_APP_ID }}",
@@ -132,6 +130,4 @@ def test_the_dispatch_step_passes_this_whole_with_block():
         "environment": "${{ steps.authz.outputs.environment }}",
         "ref": "${{ steps.authz.outputs.head-sha }}",
         "pr-number": "${{ github.event.issue.number }}",
-        "dispatch-ref": "${{ github.event.repository.default_branch }}",
-        "repository": "${{ github.repository }}",
     }

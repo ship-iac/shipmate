@@ -37,7 +37,6 @@ jobs:
           comment-user: ${{ github.event.comment.user.login }}
           comment-id: ${{ github.event.comment.id }}
           pr-number: ${{ github.event.issue.number }}
-          github-token: ${{ github.token }}
           github-vars: ${{ toJSON(vars) }}
       # The refusal is this `if:` alone: a refused apply still carries a verb, an environment and
       # the real head SHA out of the step above, so a dispatch reaching this action would be
@@ -51,5 +50,3 @@ jobs:
           environment: ${{ steps.authz.outputs.environment }}
           ref: ${{ steps.authz.outputs.head-sha }}
           pr-number: ${{ github.event.issue.number }}
-          dispatch-ref: ${{ github.event.repository.default_branch }}
-          repository: ${{ github.repository }}

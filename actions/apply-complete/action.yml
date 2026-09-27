@@ -1,5 +1,5 @@
 name: shipmate apply-complete
-description: Complete the apply checks for every wave cell whose job succeeded in this run. The only step in the apply path that mints the App key.
+description: Complete the apply checks for every wave cell whose job succeeded in this run. The only step in the apply path that mints the App key. Reads the job's GITHUB_TOKEN, which needs actions:read to list this run's jobs.
 inputs:
   snapshot:
     description: JSON object from apply-snapshot mapping each cell to its pre-existing apply-check ids.
@@ -10,28 +10,18 @@ inputs:
   private-key:
     description: shipmate App private key (from the shipmate-engine environment secret).
     required: true
-  github-token:
-    description: GITHUB_TOKEN with actions:read (this run's jobs listing).
-    required: true
 runs:
   using: composite
   steps:
     - name: Verify the App key arrived
-      shell: bash
-      env:
-        APP_ID: ${{ inputs.app-id }}
-        PRIVATE_KEY: ${{ inputs.private-key }}
-      run: |
-        set -euo pipefail
-        if [ -z "$PRIVATE_KEY" ]; then
-          echo "::error::The shipmate App private key did not reach this job. Three causes, in the order worth checking: (1) the calling workflow used 'secrets: inherit' across an organization boundary -- GitHub delivers no inherited secrets there, and inherit also suppresses the value this job's environment binding would otherwise supply, so pass the secret by name instead; (2) the caller left SHIPMATE_APP_PRIVATE_KEY out of its secrets block; (3) this job binds no environment, or binds one that holds no secret of that name. See docs/getting-started.md."
-          exit 1
-        fi
-        [ -n "$APP_ID" ] || { echo "::error::SHIPMATE_APP_ID is unset. Set it as a repository or organization variable (docs/github-app.md)."; exit 1; }
+      uses: $/actions/verify-app-key
+      with:
+        app-id: ${{ inputs.app-id }}
+        private-key: ${{ inputs.private-key }}
     - name: List run jobs and select the checks earned by this run
       shell: bash
       env:
-        GH_TOKEN: ${{ inputs.github-token }}
+        GH_TOKEN: ${{ github.token }}
         SHIPMATE_SNAPSHOT_JSON: ${{ inputs.snapshot }}
       # A 256-cell level exceeds the 100-per-page cap, so `--paginate --jq` streams one job
       # object per line to scripts/apply-complete on stdin. Unlike actions/apply-summary's

@@ -3,8 +3,8 @@
 Consumers pin shipmate's reusable workflows by commit SHA. The engine itself has
 no pins: every engine step calls its action as `$/actions/<name>`, which GitHub
 resolves in this repository at the commit of the reusable workflow the consumer
-pinned, and the three callers of `apply-env-level.yml` reach it as
-`./.github/workflows/apply-env-level.yml`. One commit, one tree.
+pinned, and the engine's own nested workflows, `apply-env-level.yml` and
+`apply-review.yml`, are reached as `./.github/workflows/<file>`. One commit, one tree.
 `scripts/tests/test_engine_self_reference.py` refuses a
 `ship-iac/shipmate/<path>@<sha>` reference in any workflow or action manifest.
 
@@ -24,7 +24,7 @@ extra key named for the tail of the sentence and accepts the file, while
 `GitHub.DistributedTask.ObjectTemplating` refuses it outright. `v0.16.0` shipped
 that and every apply and deploy job died in `Set up job`, before its first step.
 
-The workflow is one job of 20 steps, each `if: false` and each `uses:` one action
+The workflow is one job of 21 steps, each `if: false` and each `uses:` one action
 at the remote ref `ship-iac/shipmate/actions/<name>@main`. Both halves are
 load-bearing, measured 2026-08-22:
 
@@ -172,8 +172,8 @@ the release commit, from `repo-example-stacks-aws`:
    names.
 
    **Not by commenting the verb.** An `issue_comment` workflow always runs from
-   the repository's default branch, and the engine's `comment-ops.yml` passes
-   `dispatch-ref: ${{ github.event.repository.default_branch }}` — so a comment
+   the repository's default branch, and the engine's `actions/dispatch` dispatches
+   on `github.event.repository.default_branch` — so a comment
    drives the default branch's copy of `shipmate.yml` and dispatches that same
    copy, still on the *old* pin. The scratch
    branch is never read, and the smoke goes green without touching the new

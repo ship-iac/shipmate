@@ -84,8 +84,9 @@ job displays as `<caller job> / <callee job>`, applied at every level, and GHA
 cannot suppress a level. The apply leaf is therefore three deep, e.g.
 `post-merge / L0 / apply / <stack> / <env>`. The intermediate names are kept
 short and non-redundant (`L0`..`L3` for env-levels in `apply-all.yml` /
-`deploy.yml`, `waves` for the single-env `apply.yml`) rather than repeating the
-verb the leaf already carries; the consumer's calling job supplies the outermost
+`deploy.yml`, `waves` for the single-env `apply.yml`, `review / decision` for
+the review re-read both apply paths call from `apply-review.yml`) rather than
+repeating the verb the leaf already carries; the consumer's calling job supplies the outermost
 segment (`post-merge` on the deploy path). Its file is named `shipmate`, so the
 pull request's checks UI renders that workflow name and then the job path
 (`shipmate / shipmate / facts`); the repetition is cosmetic and the check-run
@@ -338,8 +339,8 @@ never used.
   boundary for the key, `docs/drift.md` §Slack (optional) for the webhook).
   It appears only inside the engine's reusable workflows — `plan.yml`'s
   `summary` job, `comment-ops.yml`'s `ops` job, `drift.yml`'s `issues` job, and
-  the apply path (`apply.yml`, `apply-all.yml`, `apply-env-level.yml`,
-  `deploy.yml`). No consumer file names it: the consumer's `shipmate.yml`
+  the apply path (`apply.yml`, `apply-all.yml`, `apply-review.yml`,
+  `apply-env-level.yml`, `deploy.yml`). No consumer file names it: the consumer's `shipmate.yml`
   passes the key, and on its `deploy` and `drift` jobs the webhook, by name and
   binds no environment of its own. Each of those
   engine jobs runs at a ref the environment's default-branch policy admits —
@@ -1305,8 +1306,9 @@ input without failing there.
 The decision has two seats, because `authorize` returns one verdict per
 dispatch while a bare apply spans many environments:
 
-Both engine workflows re-read `reviewDecision` themselves in a `review` job
-rather than trusting a dispatch input, and that job is unconditional — the
+Both engine workflows re-read `reviewDecision` themselves in a `review` job,
+which calls `apply-review.yml`, rather than trusting a dispatch input, and that
+job is unconditional — the
 default branch's `gated = false` entries are the only source of this policy, and only
 engine-owned scripts read it.
 
@@ -1625,11 +1627,12 @@ The four jobs:
   policy. It reads every fact it decides on from `needs.facts.outputs`, and the
   rest from the two other jobs' results; nothing is recovered from artifacts or
   from a second API lookup.
-- **`apply.yml` / `apply-all.yml` / `apply-env-level.yml` / `deploy.yml`**
-  (engine, reached through the `targeted`, `all` and `deploy` jobs —
+- **`apply.yml` / `apply-all.yml` / `apply-review.yml` / `apply-env-level.yml` /
+  `deploy.yml`** (engine, reached through the `targeted`, `all` and `deploy` jobs —
   `workflow_dispatch` via comment-ops, or `push` to the default branch) — the
-  jobs that mint an App token (completing apply checks, refreshing the gate,
-  posting the apply result comment) are likewise bound to `shipmate-engine`.
+  jobs that mint an App token (reading the review decision, completing apply
+  checks, refreshing the gate, posting the apply result comment) are likewise
+  bound to `shipmate-engine`.
 - **`comment-ops.yml`**'s `ops` job (engine, reached through the consumer's
   `comment-ops` job on `issue_comment`) — binds `shipmate-engine` for comment
   authorization and for the `workflow_dispatch` that kicks off an apply.
@@ -1784,9 +1787,8 @@ trigger alone closes two paths a trigger check alone would not:
 - Terramate and OpenTofu are not assumed to be on the image: the
   `setup` action installs the versions the engine release declares in its own
   root-level `VERSIONS` file, read at the commit the consumer pins. Moving to
-  other versions is a pin bump. The action's `terramate-version` /
-  `tofu-version` inputs still override that file, but an *empty* value is not an
-  override: it resolves to the pinned version rather than to the installer's
+  other versions is a pin bump; the action takes no version input. A missing
+  file or line fails the step rather than falling back to the installer's
   latest.
 
 ## Fan-out
@@ -1871,8 +1873,8 @@ still reports); `actions/apply-summary` downloads every `apply-summary.*`
 artifact for the run with the glob pattern `apply-summary.*`. It contains
 verbatim:
 
-- `cell.json` — always present, keys `stack` (display name), `stack_path`
-  (Terramate stack path, feeds the check-name construction), `environment`,
+- `cell.json` — always present, keys `stack` (the stack path as displayed),
+  `stack_path` (Terramate stack path, feeds the check-name construction), `environment`,
   `result` (one of `applied`, `failed`, `blocked`), `reason` (which fail-safe
   blocked it, or why an earlier step failed first; the empty string for
   `applied`/`failed`).
@@ -1948,7 +1950,7 @@ The data feeding the comment ships in the per-cell artifact
 exactly like the plan artifact, never reverse-parsed). Consumers download it
 with the glob pattern `cell-summary.*`. It contains verbatim:
 
-- `cell.json` — keys `stack` (display name), `stack_path` (Terramate stack
+- `cell.json` — keys `stack` (the stack path as displayed), `stack_path` (Terramate stack
   path, feeds the check-name construction), `environment`, `changed`
   (boolean), `fingerprint`; written by `plan-cell` at plan time. `changed`
   comes from `scripts/plan-classify`; the comment's `+add ~change -destroy`

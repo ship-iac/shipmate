@@ -1,23 +1,11 @@
 name: shipmate setup
 description: Install pinned Terramate + OpenTofu and enable a shared provider plugin cache.
-inputs:
-  terramate-version:
-    description: Override the Terramate CLI version, e.g. 0.17.1. Empty uses the version this release pins.
-    required: false
-    default: ""
-  tofu-version:
-    description: Override the OpenTofu version, e.g. 1.12.4. Empty uses the version this release pins.
-    required: false
-    default: ""
 runs:
   using: composite
   steps:
     - name: Resolve versions
       id: versions
       shell: bash
-      env:
-        TERRAMATE_VERSION: ${{ inputs.terramate-version }}
-        TOFU_VERSION: ${{ inputs.tofu-version }}
       run: |
         set -euo pipefail
         # `$/` fetches the whole engine repository at the pinned SHA, so this reads the
@@ -28,14 +16,14 @@ runs:
           echo "::error::$versions does not exist: it carries the terramate= and tofu= versions this release pins."
           exit 1
         fi
-        [ -n "$TERRAMATE_VERSION" ] || TERRAMATE_VERSION="$(sed -n 's/^terramate=//p' "$versions" | tail -n1 | tr -d '[:space:]')"
-        [ -n "$TOFU_VERSION" ] || TOFU_VERSION="$(sed -n 's/^tofu=//p' "$versions" | tail -n1 | tr -d '[:space:]')"
+        TERRAMATE_VERSION="$(sed -n 's/^terramate=//p' "$versions" | tail -n1 | tr -d '[:space:]')"
+        TOFU_VERSION="$(sed -n 's/^tofu=//p' "$versions" | tail -n1 | tr -d '[:space:]')"
         if [ -z "$TERRAMATE_VERSION" ]; then
-          echo "::error::$versions carries no terramate= line: pass terramate-version to actions/setup, or restore the line."
+          echo "::error::$versions carries no terramate= line; restore it."
           exit 1
         fi
         if [ -z "$TOFU_VERSION" ]; then
-          echo "::error::$versions carries no tofu= line: pass tofu-version to actions/setup, or restore the line."
+          echo "::error::$versions carries no tofu= line; restore it."
           exit 1
         fi
         {

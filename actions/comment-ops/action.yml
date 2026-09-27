@@ -1,5 +1,5 @@
 name: shipmate comment-ops
-description: Parse a shipmate command comment, authorize it (team membership via a short-lived App token; `apply` additionally requires that the PR satisfies the branch ruleset's review policy + mergeable + reviewed-plan-exists, while `unlock` is membership-only; `plan` needs no App token and sits at `doctor`'s tier), and react or reject. Outputs feed actions/dispatch.
+description: Parse a shipmate command comment, authorize it (team membership via a short-lived App token; `apply` additionally requires that the PR satisfies the branch ruleset's review policy + mergeable + reviewed-plan-exists, while `unlock` is membership-only; `plan` needs no App token and sits at `doctor`'s tier), and react or reject. Outputs feed actions/dispatch. Reads the job's GITHUB_TOKEN, which needs issues:write and pull-requests:write for reactions, refusal comments and pull request reads.
 inputs:
   app-id:
     description: GitHub App id (a repo/org variable).
@@ -19,9 +19,6 @@ inputs:
   pr-number:
     description: PR number.
     required: true
-  github-token:
-    description: 'GITHUB_TOKEN with issues:write and pull-requests:write (reactions + reject comments + PR reads).'
-    required: true
   github-vars:
     description: >-
       The caller's reachable GitHub variables, serialised with toJSON. Read only when the
@@ -32,9 +29,6 @@ outputs:
   authorized:
     description: true when the command is valid and authorized.
     value: ${{ steps.verdict.outputs.authorized }}
-  is-command:
-    description: true when the comment is a shipmate command at all.
-    value: ${{ steps.parse.outputs.is_command }}
   environment:
     description: Parsed target environment; empty for a bare `shipmate apply` (all non-explicit environments) and on the plan route, whose dispatched run carries no environment.
     value: ${{ steps.authz.outputs.environment }}
@@ -105,7 +99,7 @@ runs:
       if: ${{ steps.parse.outputs.is_command == 'true' && steps.parse.outputs.valid != 'true' }}
       shell: bash
       env:
-        GH_TOKEN: ${{ inputs.github-token }}
+        GH_TOKEN: ${{ github.token }}
         PR_NUMBER: ${{ inputs.pr-number }}
         ERROR: ${{ steps.parse.outputs.error }}
       run: |
@@ -116,7 +110,7 @@ runs:
       if: ${{ steps.parse.outputs.route == 'help' }}
       shell: bash
       env:
-        GH_TOKEN: ${{ inputs.github-token }}
+        GH_TOKEN: ${{ github.token }}
         PR_NUMBER: ${{ inputs.pr-number }}
       run: |
         set -euo pipefail
@@ -132,7 +126,7 @@ runs:
       if: ${{ steps.parse.outputs.route == 'doctor' || steps.parse.outputs.route == 'help' || steps.parse.outputs.route == 'plan' }}
       shell: bash
       env:
-        GH_TOKEN: ${{ inputs.github-token }}
+        GH_TOKEN: ${{ github.token }}
         COMMENT_ID: ${{ inputs.comment-id }}
       run: |
         set -euo pipefail
@@ -152,7 +146,7 @@ runs:
       shell: bash
       env:
         PRIVILEGED: ${{ steps.guard.outputs.privileged_association }}
-        GH_TOKEN: ${{ inputs.github-token }}
+        GH_TOKEN: ${{ github.token }}
         PR_NUMBER: ${{ inputs.pr-number }}
       run: |
         set -euo pipefail
@@ -182,7 +176,7 @@ runs:
       if: ${{ steps.parse.outputs.route == 'plan' && steps.planauthz.outputs.authorized != 'true' }}
       shell: bash
       env:
-        GH_TOKEN: ${{ inputs.github-token }}
+        GH_TOKEN: ${{ github.token }}
         PR_NUMBER: ${{ inputs.pr-number }}
         REASON: ${{ steps.planauthz.outputs.reason }}
       run: |
@@ -197,7 +191,7 @@ runs:
       if: ${{ steps.parse.outputs.route == 'doctor' && steps.guard.outputs.privileged_association != 'true' }}
       shell: bash
       env:
-        GH_TOKEN: ${{ inputs.github-token }}
+        GH_TOKEN: ${{ github.token }}
         PR_NUMBER: ${{ inputs.pr-number }}
       run: |
         set -euo pipefail
@@ -231,7 +225,7 @@ runs:
       if: ${{ steps.parse.outputs.route == 'doctor' && steps.guard.outputs.privileged_association == 'true' && steps.doctortoken.outcome != 'success' }}
       shell: bash
       env:
-        GH_TOKEN: ${{ inputs.github-token }}
+        GH_TOKEN: ${{ github.token }}
         PR_NUMBER: ${{ inputs.pr-number }}
       run: |
         set -euo pipefail
@@ -278,7 +272,7 @@ runs:
       if: ${{ steps.parse.outputs.route == 'doctor' && steps.guard.outputs.privileged_association == 'true' && steps.doctortoken.outcome == 'success' }}
       shell: bash
       env:
-        GH_TOKEN: ${{ inputs.github-token }}
+        GH_TOKEN: ${{ github.token }}
         APP_TOKEN: ${{ steps.doctortoken.outputs.token }}
         PR_NUMBER: ${{ inputs.pr-number }}
         SHIPMATE_DOCTOR_MODE: check-ids
@@ -390,7 +384,7 @@ runs:
         SHIPMATE_APP_PERMISSIONS_CHECKED: 'true'
         # Workflow token for the pin probe's cross-repo release read: the App token is
         # scoped to the consumer repo.
-        SHIPMATE_PUBLIC_TOKEN: ${{ inputs.github-token }}
+        SHIPMATE_PUBLIC_TOKEN: ${{ github.token }}
         FULLMINT_OUTCOME: ${{ steps.fullmint.outcome }}
       run: |
         set -euo pipefail
@@ -474,7 +468,7 @@ runs:
       if: ${{ (steps.parse.outputs.route == 'apply' || steps.parse.outputs.route == 'unlock') && steps.apptoken.outcome != 'success' }}
       shell: bash
       env:
-        GH_TOKEN: ${{ inputs.github-token }}
+        GH_TOKEN: ${{ github.token }}
         PR_NUMBER: ${{ inputs.pr-number }}
       run: |
         set -euo pipefail
@@ -494,7 +488,7 @@ runs:
       shell: bash
       env:
         # The workflow token, not the App token: this reads repository contents only.
-        GH_TOKEN: ${{ inputs.github-token }}
+        GH_TOKEN: ${{ github.token }}
         SHIPMATE_GITHUB_VARS: ${{ inputs.github-vars }}
       run: python3 "$GITHUB_ACTION_PATH/../../scripts/gate-config"
 
@@ -502,7 +496,7 @@ runs:
       if: ${{ (steps.parse.outputs.route == 'apply' || steps.parse.outputs.route == 'unlock') && steps.apptoken.outcome == 'success' && steps.gate.outcome != 'success' }}
       shell: bash
       env:
-        GH_TOKEN: ${{ inputs.github-token }}
+        GH_TOKEN: ${{ github.token }}
         PR_NUMBER: ${{ inputs.pr-number }}
       run: |
         set -euo pipefail
@@ -517,7 +511,7 @@ runs:
       if: ${{ (steps.parse.outputs.route == 'apply' || steps.parse.outputs.route == 'unlock') && steps.apptoken.outcome == 'success' }}
       shell: bash
       env:
-        GH_TOKEN: ${{ inputs.github-token }}
+        GH_TOKEN: ${{ github.token }}
         APP_TOKEN: ${{ steps.apptoken.outputs.token }}
         OWNER: ${{ github.repository_owner }}
         # The membership lookup below is where the team decides anything; `Authorize` only
@@ -620,7 +614,7 @@ runs:
       if: ${{ steps.verdict.outputs.authorized == 'true' }}
       shell: bash
       env:
-        GH_TOKEN: ${{ inputs.github-token }}
+        GH_TOKEN: ${{ github.token }}
         COMMENT_ID: ${{ inputs.comment-id }}
       run: |
         set -euo pipefail
@@ -636,7 +630,7 @@ runs:
       if: ${{ steps.authz.outputs.ungated_exemption == 'true' }}
       shell: bash
       env:
-        GH_TOKEN: ${{ inputs.github-token }}
+        GH_TOKEN: ${{ github.token }}
         PR_NUMBER: ${{ inputs.pr-number }}
         ENVIRONMENT: ${{ steps.authz.outputs.environment }}
       run: |
@@ -647,7 +641,7 @@ runs:
       if: ${{ (steps.parse.outputs.route == 'apply' || steps.parse.outputs.route == 'unlock') && steps.apptoken.outcome == 'success' && steps.authz.outputs.authorized != 'true' }}
       shell: bash
       env:
-        GH_TOKEN: ${{ inputs.github-token }}
+        GH_TOKEN: ${{ github.token }}
         PR_NUMBER: ${{ inputs.pr-number }}
         REASON: ${{ steps.authz.outputs.reason }}
       run: |

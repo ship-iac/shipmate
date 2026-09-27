@@ -227,7 +227,6 @@ def test_the_cell_takes_no_credential_or_artifact_inputs():
     """
     assert set(action_yaml(_ACTION).get("inputs") or {}) == {
         "stack",
-        "stack-name",
         "env",
         "tf-vars",
         "github-vars",

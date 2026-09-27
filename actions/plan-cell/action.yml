@@ -4,19 +4,12 @@ inputs:
   stack:
     description: Stack path, e.g. stacks/app.
     required: true
-  stack-name:
-    description: Stack display name for the check, e.g. app.
-    required: true
   env:
     description: Environment name, e.g. dev-eu.
     required: true
   expected-head:
     description: The commit this run is planning, e.g. the pull request's head SHA. Empty is refused — a plan whose provenance is unrecorded cannot be applied.
     required: true
-  retention-days:
-    description: Plan artifact retention (days); caps how long the plan artifact stays downloadable. Empty = the repository default.
-    required: false
-    default: "7"
   plan-passphrase:
     description: Passphrase to encrypt the .otplan artifact at rest. Empty = plaintext (backward compatible).
     required: false
@@ -143,7 +136,7 @@ runs:
       shell: bash
       env:
         ENV: ${{ inputs.env }}
-        STACK_NAME: ${{ inputs.stack-name }}
+        STACK_NAME: ${{ inputs.stack }}
       run: |
         {
           echo "## $STACK_NAME / $ENV"
@@ -181,15 +174,15 @@ runs:
           ${{ inputs.stack }}/stack.otplan
           fingerprint.txt
           planned-head.txt
-        retention-days: ${{ inputs.retention-days }}
+        retention-days: 7
 
     - name: Write cell summary
       shell: bash
-      # Build via python from env vars so an author-controlled stack-name/env
+      # Build via python from env vars so an author-controlled stack/env
       # cannot inject shell or break the JSON.
       env:
         STACK: ${{ inputs.stack }}
-        STACK_NAME: ${{ inputs.stack-name }}
+        STACK_NAME: ${{ inputs.stack }}
         ENV: ${{ inputs.env }}
         CHANGED: ${{ steps.plan.outputs.changed }}
       run: |
@@ -202,4 +195,4 @@ runs:
         path: |
           cell.json
           plan.txt
-        retention-days: ${{ inputs.retention-days }}
+        retention-days: 7

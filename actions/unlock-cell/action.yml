@@ -4,9 +4,6 @@ inputs:
   stack:
     description: Stack path, e.g. stacks/app.
     required: true
-  stack-name:
-    description: Stack display name for the report, e.g. app.
-    required: true
   env:
     description: Environment name, e.g. dev-eu.
     required: true
@@ -75,7 +72,7 @@ runs:
       if: ${{ steps.probe.outputs.held != 'true' }}
       shell: bash
       env:
-        STACK_NAME: ${{ inputs.stack-name }}
+        STACK_NAME: ${{ inputs.stack }}
         ENV: ${{ inputs.env }}
         PROBE_STATUS: ${{ steps.probe.outputs.probe_status }}
       run: |
@@ -103,7 +100,7 @@ runs:
       # and an unclosed group collapses it.
       env:
         STACK: ${{ inputs.stack }}
-        STACK_NAME: ${{ inputs.stack-name }}
+        STACK_NAME: ${{ inputs.stack }}
         ENV: ${{ inputs.env }}
         LOCK_ID: ${{ steps.probe.outputs.lock_id }}
         LOCK_CREATED: ${{ steps.probe.outputs.lock_created }}

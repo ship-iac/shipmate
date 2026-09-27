@@ -487,7 +487,7 @@ def test_cell_schema_guard_plan_cell_writes_every_required_key(tmp_path, monkeyp
     assert 'python3 "$GITHUB_ACTION_PATH/../../scripts/plan-cell-summary"' in run_lines(steps[0])
     assert steps[0]["env"] == {
         "STACK": "${{ inputs.stack }}",
-        "STACK_NAME": "${{ inputs.stack-name }}",
+        "STACK_NAME": "${{ inputs.stack }}",
         "ENV": "${{ inputs.env }}",
         "CHANGED": "${{ steps.plan.outputs.changed }}",
     }

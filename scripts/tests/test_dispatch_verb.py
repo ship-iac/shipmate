@@ -274,12 +274,10 @@ def test_the_action_declares_no_workflow_input():
     inputs = action_yaml(DISPATCH_ACTION)["inputs"]
     assert sorted(inputs) == [
         "app-id",
-        "dispatch-ref",
         "environment",
         "pr-number",
         "private-key",
         "ref",
-        "repository",
         "verb",
     ], f"the dispatch action's inputs changed: {sorted(inputs)}"
     assert "default" not in inputs["verb"], (
@@ -288,54 +286,26 @@ def test_the_action_declares_no_workflow_input():
     )
 
 
-#: The whole guard line, hand-written. Compared line-wise rather than as a
-#: substring so that the same words in a comment cannot satisfy it.
-FILENAME_REGEX_GUARD = (
-    '[[ "$WORKFLOW" =~ ^[A-Za-z0-9._-]+$ ]] || '
-    '{ echo "::error::workflow must match ^[A-Za-z0-9._-]+$ (got: $WORKFLOW)"; exit 1; }'
-)
-
-
-def test_the_resolved_filename_is_checked_before_it_reaches_an_api_path():
-    """The filename regex still guards the value interpolated into the API path. Structural by
-    necessity: the `case` resolves `WORKFLOW` to a single literal, so no runtime input can
-    make this check fire. It is the last line between a verb value and an API path and costs
-    one line, so it stays, and only its presence is observable.
-
-    Mutation: delete the regex check line.
-    """
-    lines = [line.strip() for line in _extract_dispatch_run_block().splitlines()]
-    assert FILENAME_REGEX_GUARD in lines, (
-        "the resolved workflow filename is no longer checked before use"
-    )
-
-
 def test_dispatch_step_env_mapping_is_complete():
     """The whole env: mapping of the dispatch step, so a python body that is correct but never
     got VERB added to the step's env: block reddens here -- as does WORKFLOW still being read
-    from an input.
+    from an input, or the dispatch ref leaving the default branch. The dispatch ref picks which
+    branch's copy of `shipmate.yml` runs: a head ref runs the pull request author's copy, and
+    the `shipmate-engine` environment's branch policy admits only the default branch.
 
-    Mutation: rename VERB in the env: block, or re-add WORKFLOW.
+    Mutation: rename VERB in the env: block, re-add WORKFLOW, or set
+    `DISPATCH_REF: ${{ github.head_ref }}`.
     """
-    step = _dispatch_step()
-    env = step.get("env") or {}
-
-    expected_env_vars = {
-        "GH_TOKEN",
-        "REPO",
-        "DISPATCH_REF",
-        "ENVIRONMENT",
-        "VERB",
-        "REF",
-        "PR_NUMBER",
-        "COMMENT_TOKEN",
+    assert _dispatch_step().get("env") == {
+        "GH_TOKEN": "${{ steps.token.outputs.token }}",
+        "REPO": "${{ github.repository }}",
+        "DISPATCH_REF": "${{ github.event.repository.default_branch }}",
+        "ENVIRONMENT": "${{ inputs.environment }}",
+        "VERB": "${{ inputs.verb }}",
+        "REF": "${{ inputs.ref }}",
+        "PR_NUMBER": "${{ inputs.pr-number }}",
+        "COMMENT_TOKEN": "${{ github.token }}",
     }
-    actual_env_vars = set(env.keys())
-
-    assert actual_env_vars == expected_env_vars, (
-        f"dispatch step env vars should be {sorted(expected_env_vars)}, "
-        f"got {sorted(actual_env_vars)}"
-    )
 
 
 def test_the_verb_output_of_comment_ops_is_the_parsed_route_alone():

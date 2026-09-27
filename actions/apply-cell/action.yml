@@ -1,11 +1,8 @@
 name: shipmate apply-cell
-description: Apply one stack x env from its reviewed .otplan artifact. Never re-plans. Holds no App key — a trusted trailing job completes the apply check afterwards.
+description: Apply one stack x env from its reviewed .otplan artifact. Never re-plans. Holds no App key — a trusted trailing job completes the apply check afterwards. Reads the job's GITHUB_TOKEN, which needs actions:read to download the reviewed-plan artifact.
 inputs:
   stack:
     description: Stack path, e.g. stacks/app.
-    required: true
-  stack-name:
-    description: Stack display name for the check, e.g. app.
     required: true
   env:
     description: Environment name, e.g. dev-eu.
@@ -18,9 +15,6 @@ inputs:
     required: true
   plan-sha256:
     description: sha256 of the reviewed plan text, recorded on the apply check by the trusted summary job. The apply re-renders the stored plan and refuses if it does not match.
-    required: true
-  github-token:
-    description: GITHUB_TOKEN with actions:read (reviewed-plan artifact download).
     required: true
   plan-passphrase:
     description: Passphrase to decrypt the .otplan artifact; must match plan-cell's. Empty = expect plaintext.
@@ -64,11 +58,11 @@ runs:
       id: download
       shell: bash
       env:
-        GH_TOKEN: ${{ inputs.github-token }}
+        GH_TOKEN: ${{ github.token }}
         RUN_ID: ${{ inputs.plan-run-id }}
         ART: plan.${{ inputs.env }}.${{ steps.ids.outputs.slug }}
         ENV: ${{ inputs.env }}
-        STACK_NAME: ${{ inputs.stack-name }}
+        STACK_NAME: ${{ inputs.stack }}
       run: |
         set -euo pipefail
         if [ -z "$RUN_ID" ]; then
@@ -89,7 +83,7 @@ runs:
       shell: bash
       env:
         ENV: ${{ inputs.env }}
-        STACK_NAME: ${{ inputs.stack-name }}
+        STACK_NAME: ${{ inputs.stack }}
       # Runs before the decrypt, the state restore and the apply, so a plan of another tree
       # is refused at the cheapest point. The record moves out of the repo tree because the
       # action runs in the consumer's checkout and must not leave a stray file at its root.
@@ -123,7 +117,7 @@ runs:
       shell: bash
       env:
         ENV: ${{ inputs.env }}
-        STACK_NAME: ${{ inputs.stack-name }}
+        STACK_NAME: ${{ inputs.stack }}
       run: |
         set -euo pipefail
         # The reviewed fingerprint moves out of the repo tree, as the planned-commit record
@@ -142,7 +136,7 @@ runs:
       shell: bash
       env:
         ENV: ${{ inputs.env }}
-        STACK_NAME: ${{ inputs.stack-name }}
+        STACK_NAME: ${{ inputs.stack }}
         PLAN_SHA256: ${{ inputs.plan-sha256 }}
       run: |
         set -euo pipefail
@@ -188,7 +182,7 @@ runs:
       shell: bash
       env:
         STACK: ${{ inputs.stack }}
-        STACK_NAME: ${{ inputs.stack-name }}
+        STACK_NAME: ${{ inputs.stack }}
         ENV: ${{ inputs.env }}
         PLAN_SHA256: ${{ inputs.plan-sha256 }}
       run: |
@@ -274,7 +268,7 @@ runs:
       shell: bash
       env:
         STACK: ${{ inputs.stack }}
-        STACK_NAME: ${{ inputs.stack-name }}
+        STACK_NAME: ${{ inputs.stack }}
         ENV: ${{ inputs.env }}
         DOWNLOAD_OUTCOME: ${{ steps.download.outcome }}
         PLANNED_HEAD_OUTCOME: ${{ steps.planned-head.outcome }}

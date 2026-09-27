@@ -1,11 +1,8 @@
 name: shipmate verify-environments
-description: Refuse an apply run before its first wave when a cell would bind a GitHub Environment that does not exist. Holds no App key — GITHUB_TOKEN can list environments under the snapshot job's checks:read floor.
+description: Refuse an apply run before its first wave when a cell would bind a GitHub Environment that does not exist. Holds no App key — GITHUB_TOKEN lists environments with checks:read plus actions:read, which a private repository needs as well.
 inputs:
   waves-json:
     description: This run's wave matrices (the apply-env-level.yml waves_json shape).
-    required: true
-  github-token:
-    description: GITHUB_TOKEN. Listing environments needs no App key and no added permission.
     required: true
 runs:
   using: composite
@@ -13,7 +10,7 @@ runs:
     - name: Verify the apply-path environments exist
       shell: bash
       env:
-        GH_TOKEN: ${{ inputs.github-token }}
+        GH_TOKEN: ${{ github.token }}
         SHIPMATE_WAVES_JSON: ${{ inputs.waves-json }}
       # Unpaginated on purpose: the script refuses a listing whose total_count exceeds what it
       # read, because a missing page is indistinguishable from a missing environment.

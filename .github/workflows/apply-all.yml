@@ -30,62 +30,19 @@ jobs:
           echo "::error::apply-all must be dispatched by the shipmate App via comment-ops, not by a direct workflow_dispatch"
           exit 1
 
-  # The review state the bare-apply partition needs, re-read here rather than accepted as a
-  # dispatch input: `guard` admits any bot actor holding actions:write, so an input would be a
-  # claim that surface could forge. Its own job because `detect` checks out the PR head and runs
-  # Terramate over branch-controlled HCL, where no token belongs.
   review:
     # Deliberately unconditional -- no `if:`. Running always closes the TOCTOU between the
     # comment that authorized this apply and the dispatch: the decision is re-read here, so an
     # approval dismissed in between holds.
     needs: [guard]
-    runs-on: ubuntu-latest
-    # How a callee reaches the App key, the same mechanism the `summary` job uses.
-    environment: shipmate-engine
+    uses: ./.github/workflows/apply-review.yml
     permissions: {}
-    outputs:
-      decision: ${{ steps.rd.outputs.decision }}
-    steps:
-      - name: Verify the App key arrived
-        shell: bash
-        env:
-          APP_ID: ${{ vars.SHIPMATE_APP_ID }}
-          PRIVATE_KEY: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
-        run: |
-          set -euo pipefail
-          if [ -z "$PRIVATE_KEY" ]; then
-            echo "::error::The shipmate App private key did not reach this job. Three causes, in the order worth checking: (1) the calling workflow used 'secrets: inherit' across an organization boundary -- GitHub delivers no inherited secrets there, and inherit also suppresses the value this job's environment binding would otherwise supply, so pass the secret by name instead; (2) the caller left SHIPMATE_APP_PRIVATE_KEY out of its secrets block; (3) this job binds no environment, or binds one that holds no secret of that name. See docs/getting-started.md."
-            exit 1
-          fi
-          [ -n "$APP_ID" ] || { echo "::error::SHIPMATE_APP_ID is unset. Set it as a repository or organization variable (docs/github-app.md)."; exit 1; }
-      - id: token
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
-        with:
-          client-id: ${{ vars.SHIPMATE_APP_ID }}
-          private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
-          owner: ${{ github.repository_owner }}
-          repositories: ${{ github.event.repository.name }}
-          permission-pull-requests: read
-      - id: rd
-        shell: bash
-        env:
-          GH_TOKEN: ${{ steps.token.outputs.token }}
-          OWNER: ${{ github.repository_owner }}
-          PR_NUMBER: ${{ inputs.pr_number }}
-        run: |
-          set -euo pipefail
-          # NONE is the sentinel for a PR that exists with a null decision: the ruleset requires
-          # no review. Nothing here has proved the PR exists -- comment-ops reads it over REST
-          # first, this does not -- and a pr_number matching no pull request returns a null
-          # `pullRequest` with no errors and exit 0, so MISSING_PR is its own value, which
-          # detect's catch-all holds every env on.
-          # The $owner/$repo/$pr tokens are GraphQL query variables (bound via
-          # -F), not shell variables -- single quotes are intentional.
-          # shellcheck disable=SC2016
-          rd=$(gh api graphql -f query='query($owner:String!,$repo:String!,$pr:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$pr){reviewDecision}}}' \
-            -F owner="$OWNER" -F repo="${GITHUB_REPOSITORY#*/}" -F pr="$PR_NUMBER" \
-            --jq '.data.repository.pullRequest | if type == "object" then (.reviewDecision // "NONE") else "MISSING_PR" end')
-          echo "decision=$rd" >> "$GITHUB_OUTPUT"
+    with:
+      pr_number: ${{ inputs.pr_number }}
+    # Named, never `inherit`: the callee's `shipmate-engine` binding supplies the key only when
+    # the name is mapped here, even to an empty value.
+    secrets:
+      SHIPMATE_APP_PRIVATE_KEY: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
 
   detect:
     # A `review` that FAILS is caught by `!failure()`, so nothing applies and the run is visibly
@@ -117,7 +74,6 @@ jobs:
         uses: $/actions/apply-all-detect
         with:
           head-sha: ${{ inputs.ref }}
-          github-token: ${{ github.token }}
           app-id: ${{ vars.SHIPMATE_APP_ID }}
           # Passed through raw, never defaulted: an empty decision means the review signal never
           # arrived, and empty is the hold-everything value.
@@ -143,10 +99,9 @@ jobs:
     # `complete` job would hold no key, its applies would execute, and their apply checks would
     # strand pending forever.
     secrets:
-      # Adding a secret here is ordered: declare it in apply-env-level.yml, merge, bump this
-      # job's `uses:` pin, and only then map it. Mapping a secret the pinned callee does not
-      # declare is a hard load-time error, unlike an undeclared action input, which is silently
-      # ignored (docs/releasing.md).
+      # Declare a new secret in apply-env-level.yml in the same change that maps it here: the
+      # `./` callee is read at this commit, and mapping a secret it does not declare is a hard
+      # load-time error, unlike an undeclared action input, which is silently ignored.
       SHIPMATE_APP_PRIVATE_KEY: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
       SHIPMATE_PLAN_PASSPHRASE: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
       SHIPMATE_SECRETS: ${{ secrets.SHIPMATE_SECRETS }}
@@ -237,6 +192,5 @@ jobs:
           applied-ungated-envs: ${{ needs.detect.outputs.applied_ungated_envs }}
           results: ${{ join(needs.*.result, ',') }}
           gate-verdict: ${{ steps.gate.outputs.verdict }}
-          github-token: ${{ github.token }}
           app-id: ${{ vars.SHIPMATE_APP_ID }}
           private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}

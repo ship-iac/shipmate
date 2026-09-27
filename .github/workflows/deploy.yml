@@ -36,7 +36,6 @@ jobs:
           # The caller is `on: push` to the default branch; its event payload
           # (and so the previous main tip) is visible here.
           base-sha: ${{ github.event.before }}
-          github-token: ${{ github.token }}
           app-id: ${{ vars.SHIPMATE_APP_ID }}
           github-vars: ${{ toJSON(vars) }}
 
@@ -55,10 +54,9 @@ jobs:
     # `complete` job would hold no key, its applies would execute, and their apply checks would
     # strand pending forever.
     secrets:
-      # Adding a secret here is ordered: declare it in apply-env-level.yml, merge, bump this
-      # job's `uses:` pin, and only then map it. Mapping a secret the pinned callee does not
-      # declare is a hard load-time error, unlike an undeclared action input, which is silently
-      # ignored (docs/releasing.md).
+      # Declare a new secret in apply-env-level.yml in the same change that maps it here: the
+      # `./` callee is read at this commit, and mapping a secret it does not declare is a hard
+      # load-time error, unlike an undeclared action input, which is silently ignored.
       SHIPMATE_APP_PRIVATE_KEY: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
       SHIPMATE_PLAN_PASSPHRASE: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
       SHIPMATE_SECRETS: ${{ secrets.SHIPMATE_SECRETS }}
@@ -116,17 +114,10 @@ jobs:
     permissions: {}
     steps:
       - name: Verify the App key arrived
-        shell: bash
-        env:
-          APP_ID: ${{ vars.SHIPMATE_APP_ID }}
-          PRIVATE_KEY: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
-        run: |
-          set -euo pipefail
-          if [ -z "$PRIVATE_KEY" ]; then
-            echo "::error::The shipmate App private key did not reach this job. Three causes, in the order worth checking: (1) the calling workflow used 'secrets: inherit' across an organization boundary -- GitHub delivers no inherited secrets there, and inherit also suppresses the value this job's environment binding would otherwise supply, so pass the secret by name instead; (2) the caller left SHIPMATE_APP_PRIVATE_KEY out of its secrets block; (3) this job binds no environment, or binds one that holds no secret of that name. See docs/getting-started.md."
-            exit 1
-          fi
-          [ -n "$APP_ID" ] || { echo "::error::SHIPMATE_APP_ID is unset. Set it as a repository or organization variable (docs/github-app.md)."; exit 1; }
+        uses: $/actions/verify-app-key
+        with:
+          app-id: ${{ vars.SHIPMATE_APP_ID }}
+          private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
       - name: Mint App installation token
         id: token
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
