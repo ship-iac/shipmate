@@ -21,7 +21,7 @@ LOCAL_PREFIX = "$/actions/"
 REMOTE_PREFIX = "ship-iac/shipmate/"
 #: Composite actions today. Hand-written: the two tests globbing `actions/*/action.yml` assert
 #: nothing at all if that glob matches nothing.
-ACTION_COUNT = 20
+ACTION_COUNT = 21
 SHA_PIN = re.compile(r"ship-iac/shipmate/[^@\s'\"]+@[0-9a-f]{40}")
 
 
@@ -106,7 +106,7 @@ def test_every_job_running_an_engine_action_is_counted():
         for job_name, job in (doc.get("jobs") or {}).items()
         if any(_uses(s).startswith(LOCAL_PREFIX) for s in job.get("steps") or [])
     ]
-    assert len(covered) == 25, f"{len(covered)} jobs run an engine action: {covered}"
+    assert len(covered) == 27, f"{len(covered)} jobs run an engine action: {covered}"
 
 
 #: The steps that run an engine action calling `scripts/doctor`, and so must hand it the
@@ -151,7 +151,7 @@ def test_nested_reusable_calls_are_local():
                 )
 
 
-def test_composite_actions_reach_state_through_the_local_path_only():
+def test_composite_actions_reach_nested_actions_through_the_local_path_only():
     """Mutation: `uses: $/actions/stat` in plan-cell; or glob `*/action.yaml`, which matches
     nothing and trips ACTION_COUNT."""
     manifests = sorted(ACTIONS.glob("*/action.yml"))
@@ -162,7 +162,7 @@ def test_composite_actions_reach_state_through_the_local_path_only():
         for step in doc["runs"].get("steps") or []:
             if _uses(step).startswith("$/"):
                 local.add(_uses(step))
-    assert local == {local_action("state")}
+    assert local == {local_action("state"), local_action("verify-app-key")}
 
 
 #: Every engine action referenced from a workflow step or a composite action step, hand-written
@@ -187,6 +187,7 @@ LOCAL_ACTIONS = {
     "state",
     "summary",
     "unlock-cell",
+    "verify-app-key",
     "verify-environments",
 }
 

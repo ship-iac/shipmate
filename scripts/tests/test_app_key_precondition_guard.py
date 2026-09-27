@@ -6,16 +6,18 @@ credential chain, and the failure it produces is unhelpful: the upstream mint
 action reports only "must be set to a non-empty string", and three unrelated
 causes produce it. A cross-organization consumer hit all three in sequence.
 
-Threat model: accidental regression -- the step deleted in a refactor, or a new
-mint site added without one. The two halves need opposite techniques, and using
-either alone leaves a hole:
+The check lives once, in `actions/verify-app-key`, and every mint site calls it as
+its first step. Threat model: accidental regression -- the call deleted in a
+refactor, a new mint site added without one, or the shared message reworded. The
+two halves need opposite techniques, and using either alone leaves a hole:
 
 - **which files must carry it** is *discovered*, by reading every file that
   invokes the mint action. A hand-written list is exactly what a ninth mint site
   escapes.
-- **what the step must say** is a hand-written constant compared whole. Reading
-  the expectation back out of the files under test would pass whatever they say,
-  and a substring would survive both a comment and an inverted test.
+- **what the call and the shared step must say** are hand-written constants
+  compared whole. Reading the expectation back out of the files under test would
+  pass whatever they say, and a substring would survive both a comment and an
+  inverted test.
 
 `comment-ops` is the one file that mints and carries no precondition, and that is asserted rather
 than skipped. All four of its mints are `continue-on-error: true`, each paired with a fallback
@@ -52,31 +54,40 @@ _RUN = (
     f'[ -n "$APP_ID" ] || {{ echo "::error::{_APP_MSG}"; exit 1; }}\n'
 )
 
-_ACTION_ENV = {"APP_ID": "${{ inputs.app-id }}", "PRIVATE_KEY": "${{ inputs.private-key }}"}
-_WORKFLOW_ENV = {
-    "APP_ID": "${{ vars.SHIPMATE_APP_ID }}",
-    "PRIVATE_KEY": "${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}",
+_ACTION_WITH = {"app-id": "${{ inputs.app-id }}", "private-key": "${{ inputs.private-key }}"}
+_WORKFLOW_WITH = {
+    "app-id": "${{ vars.SHIPMATE_APP_ID }}",
+    "private-key": "${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}",
+}
+_NAME = "Verify the App key arrived"
+
+#: The shared action's one step, whole.
+_CHECK_STEP = {
+    "name": _NAME,
+    "shell": "bash",
+    "env": {"APP_ID": "${{ inputs.app-id }}", "PRIVATE_KEY": "${{ inputs.private-key }}"},
+    "run": _RUN,
 }
 
 
-def _step(env):
-    return {"name": "Verify the App key arrived", "shell": "bash", "env": env, "run": _RUN}
+def _call(with_):
+    return {"name": _NAME, "uses": "$/actions/verify-app-key", "with": with_}
 
 
 _MINT_ACTION = "actions/create-github-app-token@"
 
-#: file -> (step list to read, expected env), or None for the file that mints without a
+#: file -> (step list to read, expected `with:`), or None for the file that mints without a
 #: precondition; the module docstring says which and why. Hand-written, and compared as a whole
 #: set against what discovery finds, so a ninth mint site fails rather than escaping.
 _SITES = {
-    ACTIONS / "summary" / "action.yml": (("runs", "steps"), _ACTION_ENV),
-    ACTIONS / "apply-summary" / "action.yml": (("runs", "steps"), _ACTION_ENV),
-    ACTIONS / "apply-complete" / "action.yml": (("runs", "steps"), _ACTION_ENV),
-    ACTIONS / "gate-refresh" / "action.yml": (("runs", "steps"), _ACTION_ENV),
-    ACTIONS / "dispatch" / "action.yml": (("runs", "steps"), _ACTION_ENV),
-    ACTIONS / "drift-issues" / "action.yml": (("runs", "steps"), _ACTION_ENV),
-    WORKFLOWS / "deploy.yml": (("jobs", "summary", "steps"), _WORKFLOW_ENV),
-    WORKFLOWS / "apply-review.yml": (("jobs", "review", "steps"), _WORKFLOW_ENV),
+    ACTIONS / "summary" / "action.yml": (("runs", "steps"), _ACTION_WITH),
+    ACTIONS / "apply-summary" / "action.yml": (("runs", "steps"), _ACTION_WITH),
+    ACTIONS / "apply-complete" / "action.yml": (("runs", "steps"), _ACTION_WITH),
+    ACTIONS / "gate-refresh" / "action.yml": (("runs", "steps"), _ACTION_WITH),
+    ACTIONS / "dispatch" / "action.yml": (("runs", "steps"), _ACTION_WITH),
+    ACTIONS / "drift-issues" / "action.yml": (("runs", "steps"), _ACTION_WITH),
+    WORKFLOWS / "deploy.yml": (("jobs", "summary", "steps"), _WORKFLOW_WITH),
+    WORKFLOWS / "apply-review.yml": (("jobs", "review", "steps"), _WORKFLOW_WITH),
     ACTIONS / "comment-ops" / "action.yml": None,
 }
 
@@ -107,15 +118,21 @@ def test_the_mint_sites_are_the_ones_this_guard_knows_about():
 
 
 def test_every_mint_site_verifies_the_key_arrived():
+    """Mutation: delete the call from one site, or wire its `private-key` to the app id."""
     for path, site in _SITES.items():
         if site is None:
             continue
-        keys, env = site
+        keys, with_ = site
         step = _steps(path, keys)[0]
-        assert step == _step(env), (
-            f"{path.name} must open with the App-key precondition verbatim "
-            f"(differences hide an inverted test or a reworded cause); got {step!r}"
+        assert step == _call(with_), (
+            f"{path.name} must open with the App-key precondition call verbatim; got {step!r}"
         )
+
+
+def test_the_shared_check_says_why_the_key_did_not_arrive():
+    """Mutations: reword a cause in the message; invert `-z`."""
+    steps = _steps(ACTIONS / "verify-app-key" / "action.yml", ("runs", "steps"))
+    assert steps == [_CHECK_STEP]
 
 
 def test_comment_ops_answers_instead_of_aborting():
@@ -124,7 +141,9 @@ def test_comment_ops_answers_instead_of_aborting():
     `shipmate help` needs no App token at all."""
     doc = yaml.safe_load((ACTIONS / "comment-ops" / "action.yml").read_text(encoding="utf-8"))
     steps = doc["runs"]["steps"]
-    assert not [s for s in steps if s.get("name") == "Verify the App key arrived"], (
+    assert not [
+        s for s in steps if s.get("name") == _NAME or "verify-app-key" in (s.get("uses") or "")
+    ], (
         "comment-ops carries the aborting precondition; that replaces its "
         "PR-visible 'App token unavailable' answers with a red run"
     )

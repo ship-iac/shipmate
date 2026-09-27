@@ -66,4 +66,6 @@ jobs:
       - if: false
         uses: ship-iac/shipmate/actions/unlock-cell@main
       - if: false
+        uses: ship-iac/shipmate/actions/verify-app-key@main
+      - if: false
         uses: ship-iac/shipmate/actions/verify-environments@main
