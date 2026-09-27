@@ -2155,9 +2155,7 @@ By hand:
   `[gate] approver_team` names the team whose members may apply and unlock by
   pull request comment — `ops` here. Keep it above the first
   `[environments.*]` header, where it reads with the other repository-wide
-  settings. Add it only once this repository's pin names an engine that accepts
-  the key: an older one refuses the whole file, and moving a pin is not this
-  script's job.
+  settings.
 
     schema_version = 1
     layout = "tf_vars"

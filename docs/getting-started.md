@@ -91,8 +91,8 @@ It writes:
 
 `--team` writes nothing. The approver team is `gate.approver_team` in
 `.github/shipmate.toml`, which this script does not write, so the slug you pass
-is printed in the closing by-hand checklist instead — with the file it belongs
-in and the pin it needs first.
+is printed in the closing by-hand checklist instead, with the file it belongs
+in.
 
 It reads before it writes and creates or updates only what differs, so a second
 run over a configured repository changes nothing. What it will not touch — a
