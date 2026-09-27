@@ -92,7 +92,7 @@ def ctx(**over):
         "variables": {},
         "sha": "a" * 40,
         "version": "v0.26.0",
-        "at_org": set(),
+        "at_org": False,
         "is_private": False,
         "org_plan": "",
     }
@@ -459,10 +459,11 @@ def test_main_calls_every_stage_in_order():
     ruleset pinned to an App the workflows do not use; delete `sys.exit(_exit_code())`;
     swap two reconcilers; delete `_report_org_leftovers(ctx)`; delete the
     `at_org = _at_org(args.vars_at_org)` line; move that line below `_read_key(args.key)`,
-    which pays a filesystem read before a pure string check can refuse; delete the
-    `ctx["org_plan"] = _org_plan(...)` line; delete `_refuse_unreachable_org_variables(ctx)`,
-    which leaves a private Free repository onboarded with names that resolve to empty; delete
-    `_refuse_org_assertion_mismatch(ctx)`, which leaves every `--vars-at-org` name filtered
+    which pays a filesystem read before a pure string check can refuse; replace the
+    `"org_plan"` entry's `_org_plan(...)` call with `""`; delete
+    `_refuse_unreachable_org_variables(ctx)`, which leaves a private Free repository
+    onboarded with names that resolve to empty; delete
+    `_refuse_org_assertion_mismatch(ctx)`, which leaves the `--vars-at-org` name filtered
     with nothing verifying the assertion behind it.
     """
     tree = ast.parse((ENGINE / "scripts" / "onboard").read_text(encoding="utf-8"))
@@ -480,7 +481,7 @@ def test_main_calls_every_stage_in_order():
         "_variables()",
         "_refuse_diverging_app_id(args.app_id, variables)",
         "_resolve_shared(root, envs, repo, variables)",
-        "_org_plan(ctx['repo'].split('/', 1)[0])",
+        "_org_plan(repo.split('/', 1)[0])",
         "_refuse_unreachable_org_variables(ctx)",
         "_refuse_org_assertion_mismatch(ctx)",
         "_reconcile_env(ctx, ENGINE_ENV, 'apply')",
@@ -1078,8 +1079,8 @@ def test_absent_variables_are_set_from_the_flags_and_no_tool_version_is_written(
     The whole recorded call list is compared against a hand-written constant: an assertion
     that TERRAMATE_VERSION is absent is satisfied by a run that wrote nothing at all.
 
-    Mutations: restore either version entry to `_writable_variables`; restore the
-    SHIPMATE_APPROVERS_TEAM entry.
+    Mutation: add a second `write("set", ...)` for SHIPMATE_APPROVERS_TEAM to
+    `_reconcile_variables`.
     """
     fake = make_gh({VARIABLE_LIST: []})
     monkeypatch.setattr(onboard, "_run", fake)
@@ -1120,74 +1121,54 @@ def test_variable_names_are_matched_uppercased(monkeypatch):
     assert onboard.REPORT == [("ok", "SHIPMATE_APP_ID", "1")]
 
 
-def test_at_org_uppercases_the_names_it_returns():
+def test_at_org_uppercases_the_name_it_accepts():
     """The API uppercases variable names and every lookup here is on an uppercased key, so
-    an operator typing the lowercase name must still reach the same entry. The whole set is
-    compared against a hand-written literal.
+    an operator typing the lowercase name must still reach the same entry.
 
-    Mutation: drop the `.upper()` in `_at_org` -- `shipmate_app_id` then matches no entry in
-    AT_ORG_NAMES and the call exits with the unrecognised-name refusal.
+    Mutation: drop the `.upper()` in `_at_org` -- `shipmate_app_id` then exits with the
+    unrecognised-name refusal.
     """
-    assert onboard._at_org("shipmate_app_id") == {"SHIPMATE_APP_ID"}
+    assert onboard._at_org("shipmate_app_id") is True
 
 
-def test_at_org_refuses_a_name_it_does_not_accept():
+@pytest.mark.parametrize(
+    ("raw", "message"),
+    [
+        pytest.param(
+            "not_a_shipmate_variable",
+            "--vars-at-org names NOT_A_SHIPMATE_VARIABLE, which it does not accept. "
+            "It accepts SHIPMATE_APP_ID.",
+            id="unrecognised",
+        ),
+        pytest.param(
+            "SHIPMATE_APPROVERS_TEAM",
+            "--vars-at-org names SHIPMATE_APPROVERS_TEAM, which it does not accept. "
+            "It accepts SHIPMATE_APP_ID.",
+            id="approvers-team",
+        ),
+        pytest.param(
+            "TERRAMATE_VERSION",
+            "--vars-at-org names TERRAMATE_VERSION, which it does not accept. "
+            "It accepts SHIPMATE_APP_ID.",
+            id="version-pin",
+        ),
+    ],
+)
+def test_at_org_refuses_a_name_it_does_not_accept(raw, message):
     """A name the flag does not accept filters nothing: the repository copy keeps being
     written and the run still reports success. The whole message is compared, because it is
     the only thing that tells the operator which name was wrong.
 
-    Mutation: return the names without checking them against `AT_ORG_NAMES`.
+    `approvers-team` is the name a consumer is most likely to type, because earlier releases
+    accepted it; the team is declared in `.github/shipmate.toml` now. `version-pin` is a
+    variable nothing writes or reads any more: the release's own VERSIONS file decides it.
+
+    Mutations: skip the comparison, so every non-empty value returns True (reddens every
+    row); accept the row's name beside SHIPMATE_APP_ID (reddens that row alone).
     """
     with pytest.raises(SystemExit) as excinfo:
-        onboard._at_org("not_a_shipmate_variable")
-    assert str(excinfo.value) == (
-        "--vars-at-org names NOT_A_SHIPMATE_VARIABLE, which it does not accept. "
-        "It accepts SHIPMATE_APP_ID."
-    )
-
-
-def test_at_org_refuses_the_approvers_team():
-    """The name a consumer is most likely to type, because earlier releases accepted it.
-    Nothing writes a repository copy of it any more -- the team is declared in
-    `.github/shipmate.toml` -- so accepting it would take `_refuse_org_assertion_mismatch`
-    into a `KeyError` on a `_writable_variables` entry that is gone.
-
-    Mutation: leave "SHIPMATE_APPROVERS_TEAM" in `AT_ORG_NAMES`.
-    """
-    with pytest.raises(SystemExit) as excinfo:
-        onboard._at_org("SHIPMATE_APPROVERS_TEAM")
-    assert str(excinfo.value) == (
-        "--vars-at-org names SHIPMATE_APPROVERS_TEAM, which it does not accept. "
-        "It accepts SHIPMATE_APP_ID."
-    )
-
-
-def test_at_org_refuses_a_version_pin():
-    """TERRAMATE_VERSION is not assertable at organization level, because nothing writes or
-    reads it any more: the release's own VERSIONS file decides the version. Accepting the
-    name would take `_refuse_org_assertion_mismatch` into a `KeyError` on a
-    `_writable_variables` entry that no longer exists.
-
-    Mutation: add "TERRAMATE_VERSION" to `AT_ORG_NAMES`.
-    """
-    with pytest.raises(SystemExit) as excinfo:
-        onboard._at_org("TERRAMATE_VERSION")
-    assert str(excinfo.value) == (
-        "--vars-at-org names TERRAMATE_VERSION, which it does not accept. "
-        "It accepts SHIPMATE_APP_ID."
-    )
-
-
-def test_wanted_variables_removes_exactly_the_names_asserted_at_org():
-    """The whole filtered dict is compared against a hand-written constant: a
-    `"SHIPMATE_APP_ID" not in result` assertion is satisfied by a filter that drops
-    everything.
-
-    Mutations: ignore `ctx["at_org"]` and return the unfiltered dict (reddens the first
-    case); filter out every entry (reddens the second).
-    """
-    assert onboard._wanted_variables(ctx(at_org={"SHIPMATE_APP_ID"})) == {}
-    assert onboard._wanted_variables(ctx()) == {"SHIPMATE_APP_ID": ("1", "--app-id")}
+        onboard._at_org(raw)
+    assert str(excinfo.value) == message
 
 
 def test_a_repository_copy_of_an_org_variable_is_reported_and_never_written(monkeypatch):
@@ -1200,9 +1181,7 @@ def test_a_repository_copy_of_an_org_variable_is_reported_and_never_written(monk
     """
     fake = make_gh({})
     monkeypatch.setattr(onboard, "_run", fake)
-    onboard._report_org_leftovers(
-        ctx(at_org={"SHIPMATE_APP_ID"}, variables={"SHIPMATE_APP_ID": "123"})
-    )
+    onboard._report_org_leftovers(ctx(at_org=True, variables={"SHIPMATE_APP_ID": "123"}))
     assert fake.calls == []
     assert onboard.REPORT == [
         (
@@ -1213,6 +1192,16 @@ def test_a_repository_copy_of_an_org_variable_is_reported_and_never_written(monk
         )
     ]
     assert onboard._exit_code() == 2
+
+
+def test_a_repository_variable_is_no_leftover_without_the_flag():
+    """Without `--vars-at-org` the repository copy is the configuration itself: reporting it
+    as a leftover would exit 2 on every configured repository.
+
+    Mutation: drop the `if not ctx["at_org"]: return` in `_report_org_leftovers`.
+    """
+    onboard._report_org_leftovers(ctx(variables={"SHIPMATE_APP_ID": "1"}))
+    assert onboard.REPORT == []
 
 
 ORG_VARS = "repos/o/r/actions/organization-variables"
@@ -1312,7 +1301,7 @@ def test_the_table_decides_which_naming_is_created(monkeypatch, tmp_path):
     writes a variable naming it.
 
     Mutations: `_resolve_shared` returning `set()` without reading the file reddens the
-    shared case; writing a SHIPMATE_SHARED_ENVS variable from `_writable_variables`
+    shared case; writing a SHIPMATE_SHARED_ENVS variable from `_reconcile_variables`
     reddens its variable list.
     """
     write_table(tmp_path, "shared = true\n")
@@ -1447,7 +1436,7 @@ def test_an_asserted_name_the_organization_does_not_reach_refuses(monkeypatch):
     fake = make_gh({ORG_VARS: NO_ORG_VARS})
     monkeypatch.setattr(onboard, "_run", fake)
     with pytest.raises(SystemExit) as excinfo:
-        onboard._refuse_org_assertion_mismatch(ctx(at_org={"SHIPMATE_APP_ID"}))
+        onboard._refuse_org_assertion_mismatch(ctx(at_org=True))
     assert str(excinfo.value) == UNREACHED_APP_ID
 
 
@@ -1463,7 +1452,7 @@ def test_an_organization_value_disagreeing_with_this_run_refuses_naming_both(mon
     )
     monkeypatch.setattr(onboard, "_run", fake)
     with pytest.raises(SystemExit) as excinfo:
-        onboard._refuse_org_assertion_mismatch(ctx(at_org={"SHIPMATE_APP_ID"}, app_id="111"))
+        onboard._refuse_org_assertion_mismatch(ctx(at_org=True, app_id="111"))
     assert str(excinfo.value) == (
         "SHIPMATE_APP_ID reaches o/r as 222, but --app-id says 111. The workflows read the "
         "resolved value, so this run would configure one thing and every later run would use "
@@ -1486,7 +1475,7 @@ def test_a_repository_copy_does_not_rescue_a_disagreeing_organization_value(monk
     monkeypatch.setattr(onboard, "_run", fake)
     with pytest.raises(SystemExit) as excinfo:
         onboard._refuse_org_assertion_mismatch(
-            ctx(at_org={"SHIPMATE_APP_ID"}, app_id="111", variables={"SHIPMATE_APP_ID": "111"})
+            ctx(at_org=True, app_id="111", variables={"SHIPMATE_APP_ID": "111"})
         )
     assert str(excinfo.value) == (
         "SHIPMATE_APP_ID reaches o/r as 222, but --app-id says 111. The workflows read the "
@@ -1659,7 +1648,7 @@ def test_a_private_repository_without_the_flag_reads_no_organization_plan(monkey
     Driven through `main()` on purpose: the same property at function level is what missed this,
     because a second endpoint on the common path is invisible to a check scoped to the first.
 
-    Mutation: gate the ternary on `ctx["is_private"]` alone, which reads the plan here.
+    Mutation: gate the `"org_plan"` ternary on `is_private` alone, which reads the plan here.
     """
     fake, exit_ = run_main(monkeypatch, tmp_path, {}, [], is_private=True)
     assert exit_.code == 0
@@ -1681,12 +1670,12 @@ def test_the_organization_read_is_paginated_and_slurped(monkeypatch):
     ]
     fake = make_gh({ORG_VARS: two_pages})
     monkeypatch.setattr(onboard, "_run", fake)
-    onboard._refuse_org_assertion_mismatch(ctx(at_org={"SHIPMATE_APP_ID"}))
+    onboard._refuse_org_assertion_mismatch(ctx(at_org=True))
     assert fake.calls == [ORG_VARS_READ]
     fake = make_gh({ORG_VARS: [NO_ORG_VARS[0], NO_ORG_VARS[0]]})
     monkeypatch.setattr(onboard, "_run", fake)
     with pytest.raises(SystemExit) as excinfo:
-        onboard._refuse_org_assertion_mismatch(ctx(at_org={"SHIPMATE_APP_ID"}))
+        onboard._refuse_org_assertion_mismatch(ctx(at_org=True))
     assert str(excinfo.value) == UNREACHED_APP_ID
 
 
@@ -1702,7 +1691,7 @@ def test_a_failed_organization_read_names_its_two_causes(monkeypatch):
     fake = make_gh({ORG_VARS: SystemExit("gh: Forbidden (HTTP 403)")})
     monkeypatch.setattr(onboard, "_run", fake)
     with pytest.raises(SystemExit) as excinfo:
-        onboard._refuse_org_assertion_mismatch(ctx(at_org={"SHIPMATE_APP_ID"}))
+        onboard._refuse_org_assertion_mismatch(ctx(at_org=True))
     assert str(excinfo.value) == (
         "could not read the organization variables reaching o/r: gh: Forbidden (HTTP 403)\n"
         "A fine-grained token needs this repository's Variables read permission, and "
