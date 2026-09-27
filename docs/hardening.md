@@ -1128,6 +1128,11 @@ for exactly the exposure control 1 exists to limit.
   environment *stores*; it cannot observe what plan-time code does with it, and
   a credential the consumer's own workflow maps in from a repository secret is
   outside what it can see at all.
+  What plan-time code reads leaves over the runner's network, and a
+  GitHub-hosted runner allows all outbound traffic. Restricting egress is the
+  consumer's control, not the engine's: point the calling job's `runs_on:` at a
+  self-hosted runner behind an egress allowlist, or at GitHub-hosted runners
+  attached to a private network you filter.
 - **Unconditional OIDC minting in every cell-running job.** GHA's `permissions:`
   cannot be an expression, so `id-token: write` on the wave, unlock, plan and
   drift jobs is not gated on a role resolving — every consumer, cloud or not, runs

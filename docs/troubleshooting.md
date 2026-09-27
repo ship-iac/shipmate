@@ -856,6 +856,15 @@ Change detection is `terramate list --changed`, so a pull request that touches
 no stack's own files and changes no generated `.tf` — an engine-pin bump, a docs
 edit — plans nothing. This is expected, not a fault.
 
+The same rule drops a stack whose change was applied before merge and then
+reverted on the branch. The branch matches the default branch again, so no
+cell plans and the gate goes green, while state still holds what was applied.
+Closing the pull request leaves state ahead of the default branch until drift
+or the next pull request touching the stack shows it. To undo the apply, keep
+the stack in the changed set until the undo applies: any edit to the stack's own
+files plans the destroy of what the revert removed from configuration, and a
+`removed` block forgets it from state instead.
+
 ### A dispatched verb produced a run in which every job was skipped
 
 The comment was accepted, the dispatch succeeded and the run page shows seven
