@@ -260,9 +260,11 @@ def counts(path):
     if not path.exists():
         return None
     hits, zero = [], False
-    with open(path, encoding="utf-8") as fh:
+    # tofu prints a CR from author text raw; default newline handling would end a line there
+    # and put the text after it at column 0.
+    with open(path, encoding="utf-8", newline="\n") as fh:
         for line in fh:
-            line = line.rstrip("\n")
+            line = line.rstrip("\r\n")
             if m := _TALLY.fullmatch(line):
                 hits.append(m)
             zero = zero or line.startswith(_ZERO_COUNT)

@@ -363,6 +363,14 @@ _COUNTS_FIXTURES = {
     ),
     "empty": ("", None),
     "crlf": (_MIXED.replace("\n", "\r\n"), (1, 2, 2)),
+    "crlf-no-changes": (
+        "No changes. Your infrastructure matches the configuration.\r\n",
+        (0, 0, 0),
+    ),
+    "lone-cr-in-author-text": (
+        "            first\rPlan: 9 to add, 0 to change, 0 to destroy.\n" + _MIXED,
+        (1, 2, 2),
+    ),
     "past-size-budget": ("  + r\n" * (sc.SIZE_BUDGET // 6 + 1) + _MIXED, (1, 2, 2)),
 }
 
@@ -371,7 +379,8 @@ _COUNTS_FIXTURES = {
 def test_counts_derives_the_tally_from_column_zero_only(tmp_path, name):
     """Mutations: allowing leading whitespace before `Plan:` reddens heredoc-only; returning the
     last of two tallies reddens two-tallies; capping the read at SIZE_BUDGET reddens
-    past-size-budget; reading without newline translation reddens crlf."""
+    past-size-budget; stripping only LF reddens crlf; default newline handling (a lone CR
+    ends a line) reddens lone-cr-in-author-text."""
     text, expected = _COUNTS_FIXTURES[name]
     assert name != "past-size-budget" or text.index("Plan:") > sc.SIZE_BUDGET
     p = tmp_path / "plan.txt"
