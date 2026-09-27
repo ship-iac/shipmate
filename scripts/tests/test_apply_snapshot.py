@@ -1,3 +1,6 @@
+import io
+import json
+
 import pytest
 from _loader import load_script
 
@@ -83,3 +86,24 @@ def test_a_run_where_no_cell_has_a_check_fails_loudly():
 
 def test_an_empty_wave_set_needs_no_checks():
     assert apply_snapshot.snapshot({"wave0": [], "wave1": None}, [], APP_ID) == {}
+
+
+def test_an_empty_app_id_refuses_before_any_check_is_read(monkeypatch):
+    """An unset App id is refused as the misconfiguration it is, not reported as a missing
+    check on every cell.
+
+    Mutation: filter on `(c.get("app") or {}).get("id") == app_id` inline in `snapshot` instead
+    of calling `ag.from_app` -- the run fails with the no-check message, not this one."""
+    monkeypatch.setenv("SHIPMATE_APP_ID", "")
+    monkeypatch.setenv("SHIPMATE_WAVES_JSON", json.dumps(WAVES))
+    stdin = "\n".join(
+        json.dumps(check(n, i))
+        for i, n in enumerate(("apply / stacks/dns / dev-eu", "apply / stacks/app / dev-eu"))
+    )
+    monkeypatch.setattr(apply_snapshot.sys, "stdin", io.StringIO(stdin))
+    with pytest.raises(SystemExit) as exc:
+        apply_snapshot.main()
+    assert str(exc.value) == (
+        "::error::SHIPMATE_APP_ID is empty — set the SHIPMATE_APP_ID repo/org "
+        "variable to the shipmate App id (see docs/github-app.md)."
+    )
