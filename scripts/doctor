@@ -549,8 +549,8 @@ _ENV_TOKEN_UNCHECKED = (
 @contextlib.contextmanager
 def _gh_token(value):
     """Run the block with GH_TOKEN set to `value`, then restore it, unset included.
-    `None` leaves GH_TOKEN alone."""
-    if value is None:
+    An unset or empty `value` leaves GH_TOKEN alone."""
+    if not value:
         yield
         return
     saved = os.environ.get("GH_TOKEN")
@@ -582,7 +582,7 @@ def _env_secret_names(ctx, name):
     # `.get`, never a subscript: SHIPMATE_ENV_TOKEN is optional by contract --
     # absent, the probe reports the check as not performed
     # (`_ENV_TOKEN_UNCHECKED`) rather than killing the report.
-    with _gh_token(os.environ.get("SHIPMATE_ENV_TOKEN", "")):
+    with _gh_token(os.environ.get("SHIPMATE_ENV_TOKEN")):
         data = _gh_json(f"repos/{ctx['repo']}/environments/{name}/secrets?per_page=100")
     names = [
         s.get("name")
@@ -694,8 +694,10 @@ def _plan_env_secret_warnings(ctx):
         return []  # DEFAULT_TABLE_UNREADABLE is `_environment_warnings`' finding
     out = []
     for _env, name, role in bound:
-        if role == "apply" or name not in existing:
-            continue  # existence is _environment_warnings' finding
+        # Plan-side only: `<env>-apply` is where control 7 requires credentials. A missing
+        # environment is `_environment_warnings`' finding.
+        if role not in ("plan", "shared") or name not in existing:
+            continue
         try:
             names, total = _env_secret_names(ctx, name)
         except (Exception, SystemExit) as e:  # noqa: BLE001 - degrade, see docstring
@@ -747,7 +749,8 @@ def _unverified(subject):
 
 
 PIN_UNREADABLE, PIN_NO_COMMIT = _unverified("engine pin freshness")
-# NOTICE like the two above, and for the same reason.
+# NOTICE: the calling step supplies the engine repository, so an unknown one is not a
+# repository misconfiguration, and no other repository is read in its place.
 PIN_NO_ENGINE = (
     NOTICE,
     "engine pin freshness not verified — the engine repository could not be determined.",
@@ -911,7 +914,7 @@ def _latest_release_sha(slug):
     for these two calls only, restoring GH_TOKEN afterwards.
     """
     try:
-        with _gh_token(os.environ.get("SHIPMATE_PUBLIC_TOKEN") or None):
+        with _gh_token(os.environ.get("SHIPMATE_PUBLIC_TOKEN")):
             tag = _gh_json(f"repos/{slug}/releases/latest").get("tag_name")
             if not tag:
                 return None, None
@@ -1629,8 +1632,8 @@ def _one_line(s, limit=200):
 
 CONFIG_PATH = bm.ec.CONFIG_PATH
 
-# Same degrade posture and reason as `_unverified`: a branch need not carry the file at
-# all. Never an all-clear, and never a read of another revision in its place.
+# NOTICE: a branch need not carry the file at all, so an unreadable one is not a
+# misconfiguration. Never an all-clear, and never a read of another revision in its place.
 CONFIG_UNREADABLE = (
     NOTICE,
     f"could not read `{CONFIG_PATH}` at the commit under examination — its settings were "

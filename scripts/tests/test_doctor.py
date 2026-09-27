@@ -1589,6 +1589,26 @@ def test_release_lookup_restores_gh_token_unset(monkeypatch):
     assert "GH_TOKEN" not in os.environ
 
 
+def test_an_empty_public_token_leaves_gh_token_alone(monkeypatch):
+    """A set-but-empty SHIPMATE_PUBLIC_TOKEN is no token: swapping it in would make both
+    cross-repo calls authenticate as nobody instead of with the ambient App token.
+
+    Mutation: have `_gh_token` skip only `None` -- this reddens."""
+    seen = []
+
+    def gh(path):
+        seen.append(os.environ.get("GH_TOKEN"))
+        if path == "repos/acme/engine/releases/latest":
+            return {"tag_name": "v1.4.0"}
+        return {"sha": _SHA}
+
+    monkeypatch.setattr(doctor, "_gh_json", gh)
+    monkeypatch.setenv("GH_TOKEN", "app-token")
+    monkeypatch.setenv("SHIPMATE_PUBLIC_TOKEN", "")
+    assert doctor._latest_release_sha("acme/engine") == ("v1.4.0", _SHA)
+    assert seen == ["app-token", "app-token"]
+
+
 #: The canonical file with a `[gate]` table, placed above the first entry the way
 #: `onboard`'s checklist prints it. Built from that file rather than retyped, so the fixture
 #: cannot drift from it; an insertion that found no anchor leaves the
