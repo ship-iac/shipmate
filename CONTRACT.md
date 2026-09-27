@@ -1872,8 +1872,8 @@ still reports); `actions/apply-summary` downloads every `apply-summary.*`
 artifact for the run with the glob pattern `apply-summary.*`. It contains
 verbatim:
 
-- `cell.json` — always present, keys `stack` (display name), `stack_path`
-  (Terramate stack path, feeds the check-name construction), `environment`,
+- `cell.json` — always present, keys `stack` (the stack path as displayed),
+  `stack_path` (Terramate stack path, feeds the check-name construction), `environment`,
   `result` (one of `applied`, `failed`, `blocked`), `reason` (which fail-safe
   blocked it, or why an earlier step failed first; the empty string for
   `applied`/`failed`).
@@ -1949,7 +1949,7 @@ The data feeding the comment ships in the per-cell artifact
 exactly like the plan artifact, never reverse-parsed). Consumers download it
 with the glob pattern `cell-summary.*`. It contains verbatim:
 
-- `cell.json` — keys `stack` (display name), `stack_path` (Terramate stack
+- `cell.json` — keys `stack` (the stack path as displayed), `stack_path` (Terramate stack
   path, feeds the check-name construction), `environment`, `changed`
   (boolean), `fingerprint`; written by `plan-cell` at plan time. `changed`
   comes from `scripts/plan-classify`; the comment's `+add ~change -destroy`

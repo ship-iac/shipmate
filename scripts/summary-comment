@@ -113,7 +113,7 @@ def emoji(cell):
 
 def _md_escape(s):
     """Neutralize table/summary-line structure characters in author-controlled
-    display names (stack-name is a free-form action input). `<`/`>` are
+    display names (a stack path is chosen by the pull request author). `<`/`>` are
     escaped so a name like `x</summary><b>` cannot close the `<summary>` /
     `<details>` HTML elements the table and section headers are built from.
     `[`/`]` are escaped so a name like `[approve this deploy](https://evil)`
