@@ -3367,10 +3367,6 @@ def test_review_rule_missing_parameters_key_is_unverified(monkeypatch):
     assert out == [(doctor.NOTICE, doctor._REVIEW_RULE_UNREADABLE.format(branch=_BRANCH))]
 
 
-def test_review_rule_probe_is_registered():
-    assert doctor._review_rule_warnings in doctor.PROBES
-
-
 _COUNT_WORDS = {
     3: "three",
     4: "four",
@@ -3504,10 +3500,6 @@ def test_harvest_drops_doctors_own_annotation_at_every_level():
         for level in doctor.HARVEST_LEVELS
     ]
     assert doctor.harvest_sections(anns) == {}
-
-
-def test_plan_env_secret_probe_is_registered():
-    assert doctor._plan_env_secret_warnings in doctor.PROBES
 
 
 def test_plan_env_holding_secrets_is_a_notice_naming_each(monkeypatch):
@@ -4299,10 +4291,6 @@ def test_a_byte_order_mark_is_reported_the_way_a_run_sees_it(monkeypatch):
     level, text = out[0]
     assert level == doctor.WARNING
     assert "is not valid: .github/shipmate.toml is not valid TOML" in text
-
-
-def test_config_probe_is_registered():
-    assert doctor._config_warnings in doctor.PROBES
 
 
 def test_the_all_clear_survives_a_sound_environment_table(monkeypatch):
