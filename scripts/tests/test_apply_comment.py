@@ -544,29 +544,10 @@ def test_resources_parses_colour_wrapped_apply_complete_line():
     not defeat the line-anchored (`^...$`, `re.MULTILINE`) regex. `_resources` runs on
     already-stripped text, as `load_cells` produces, which pins the anchor itself once the colour
     codes are gone."""
-    text = ac._strip_ansi(
-        "\x1b[1mApply complete! Resources: 3 added, 1 changed, 2 destroyed.\x1b[0m\n"
+    text = ac.li.ANSI_RE.sub(
+        "", "\x1b[1mApply complete! Resources: 3 added, 1 changed, 2 destroyed.\x1b[0m\n"
     )
     assert ac._resources(text) == "+3 ~1 -2"
-
-
-def test_strip_ansi_covers_csi_two_char_and_osc_forms():
-    # CSI (SGR), a bare two-character escape (ESC + byte in @-_), an OSC sequence
-    # terminated by BEL, and the same OSC form terminated by ST (ESC \).
-    csi = "before\x1b[36;1mcolour\x1b[0mafter"
-    two_char = "before\x1bMreset-ish\x1bDafter"
-    osc_bel = "before\x1b]0;window title\x07after"
-    osc_st = "before\x1b]0;window title\x1b\\after"
-    for sample in (csi, two_char, osc_bel, osc_st):
-        stripped = ac._strip_ansi(sample)
-        assert "\x1b" not in stripped
-        assert "before" in stripped
-        assert "after" in stripped
-
-
-def test_strip_ansi_leaves_ordinary_text_and_newlines_and_carriage_returns_alone():
-    text = "plain line one\nplain line two\r\nno escapes here at all"
-    assert ac._strip_ansi(text) == text
 
 
 def test_load_cells_reads_apply_text_only_when_present(tmp_path):

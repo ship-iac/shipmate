@@ -236,12 +236,6 @@ def _read_tail(path, budget):
     return text
 
 
-def _strip_ansi(text):
-    """Strip terminal escape sequences from `text`. `\\r` is left alone — not an
-    escape sequence."""
-    return li.ANSI_RE.sub("", text)
-
-
 def load_cells(cells_dir):
     """(cell, apply_text) per downloaded apply-summary artifact. A cell.json
     missing schema keys, or carrying the right keys with the wrong types/an
@@ -274,7 +268,7 @@ def load_cells(cells_dir):
         txt = pathlib.Path(p).with_name("apply.txt")
         text = None
         if txt.exists():
-            text = _strip_ansi(_read_tail(txt, sc.SIZE_BUDGET))
+            text = li.ANSI_RE.sub("", _read_tail(txt, sc.SIZE_BUDGET))
         out.append((cell, text))
     return out
 
