@@ -202,6 +202,16 @@ def parse_table(text, variables=None):
     return {key: _replace(value, key, variables) for key, value in parsed.items()}
 
 
+def _unreadable(where):
+    """The refusal both default-branch readers raise when the table cannot be read."""
+    return SystemExit(
+        f"::error::{CONFIG_PATH} could not be read from the default branch "
+        f"({where}). The engine reads the environment table from the default "
+        "branch, never from this branch, so the file must be merged there "
+        "before the first plan."
+    )
+
+
 def read_table(run=None):
     """The table from the default branch. Every failure here refuses."""
     run = run or _run
@@ -209,12 +219,7 @@ def read_table(run=None):
     p = run(["git", "show", ref], check=False)
     if p.returncode != 0:
         sys.stderr.write(p.stderr)
-        raise SystemExit(
-            f"::error::{CONFIG_PATH} could not be read from the default branch "
-            f"({ref}). The engine reads the environment table from the default "
-            "branch, never from this branch, so the file must be merged there "
-            "before the first plan."
-        )
+        raise _unreadable(ref)
     return parse_table(p.stdout)
 
 
@@ -270,12 +275,7 @@ def read_table_at_default_branch(run=None):
     path = f"repos/{repo}/contents/{CONFIG_PATH}?ref={branch}"
     text = contents_text(path, fetch=lambda p: gh_json(p, run))
     if text is None:
-        raise SystemExit(
-            f"::error::{CONFIG_PATH} could not be read from the default branch "
-            f"({branch}). The engine reads the environment table from the default "
-            "branch, never from this branch, so the file must be merged there "
-            "before the first plan."
-        )
+        raise _unreadable(branch)
     return parse_table(text)
 
 
