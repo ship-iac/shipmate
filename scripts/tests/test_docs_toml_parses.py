@@ -16,7 +16,7 @@ the example. The rule is not to loosen the assertion for fragments but to write 
 a snippet worth publishing for this file is a snippet worth being able to merge. A fence that
 genuinely cannot be complete does not belong in ```toml.
 
-A fence holding `{ var = "NAME" }` references is validated with every referenced variable set
+A fence holding `{ vars = "NAME" }` references is validated with every referenced variable set
 to `_PLACEHOLDER`, a value every string position accepts, so the example is judged on its
 shape rather than on this runner's variables.
 

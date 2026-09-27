@@ -677,7 +677,7 @@ _HELD_SENTENCE = (
 )
 _UNGATED_SENTENCE = (
     "Ungated environment(s) permitted to apply without an approving review, "
-    "per `gate.ungated_envs` in `.github/shipmate.toml`: `dev-eu` — "
+    "per `gated = false` on their entries in `.github/shipmate.toml`: `dev-eu` — "
     "see this run for what actually applied."
 )
 

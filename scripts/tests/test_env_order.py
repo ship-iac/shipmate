@@ -59,7 +59,7 @@ def test_cycle_raises():
     Mutation: delete the `TopologicalSorter` block from `validate_env_order` -- `wv.levels`
     then raises `CycleError`, which is a `ValueError` and not a `SystemExit`.
     """
-    with pytest.raises(SystemExit, match="env_order is cyclic: a -> b -> a"):
+    with pytest.raises(SystemExit, match="needs is cyclic: a -> b -> a"):
         eo.env_levels({"a": ["b"], "b": ["a"]}, ["a", "b"])
 
 

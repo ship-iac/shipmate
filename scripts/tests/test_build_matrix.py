@@ -1188,7 +1188,7 @@ def test_a_whole_tree_run_does_report_the_unused_entry(monkeypatch, tmp_path, ca
 
 def test_a_supplied_table_is_validated_exactly_as_a_read_one_is(monkeypatch):
     """`table=` exists to spare a second read, not to skip the checks. `validate_structure`
-    alone does not supply `_check_dry_coverage`, so a supplied `dry`
+    alone does not supply `_check_dry_coverage`, so a supplied `tf_vars`
     table with no entry for a cell's environment would derive neither identity variable and
     the cell would plan undistinguished from every other environment's.
 
@@ -1198,7 +1198,7 @@ def test_a_supplied_table_is_validated_exactly_as_a_read_one_is(monkeypatch):
     monkeypatch.setattr(bm.ec, "read_table", _no_read)
     cells = [{"stack": "stacks/app", "environment": "dev-eu", "workload": ""}]
     with pytest.raises(SystemExit) as exc:
-        bm.env_config(cells, table={"layout": "dry", "environments": {}})
+        bm.env_config(cells, table={"layout": "tf_vars", "environments": {}})
     assert "dev-eu" in str(exc.value) and "no entry in it" in str(exc.value)
 
 

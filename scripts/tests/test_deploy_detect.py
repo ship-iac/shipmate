@@ -394,8 +394,8 @@ def test_main_takes_the_ordering_map_from_the_loaded_table(tmp_path, monkeypatch
     checked-out tree. The assertion is on a populated split, because the broken shape returns
     an empty ordering rather than raising.
 
-    Mutation: replace `main`'s `table.get("env_order", {})` with a bare `{}` -- dev-us
-    joins dev-eu in env-level 0 and envlevel1 is empty.
+    Mutation: replace `main`'s `bm.ec.env_order(table)` with `table.get("env_order", {})`
+    -- dev-us joins dev-eu in env-level 0 and envlevel1 is empty.
     """
     parsed = _run_main(
         tmp_path,
@@ -412,7 +412,7 @@ def test_main_loads_the_environment_table_exactly_once(tmp_path, monkeypatch):
     """One parse per operation: the cells' identity and the ordering map come off the same
     read of the default branch, so a branch moving mid-run cannot give them different answers.
 
-    Mutation: add `bm.ec.read_table()` beside `main`'s `env_order` read -- the count
+    Mutation: add `bm.ec.read_table()` beside `main`'s `bm.ec.env_order` call -- the count
     becomes 2.
     """
     reads = []

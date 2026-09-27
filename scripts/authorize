@@ -11,8 +11,8 @@ ruleset via GitHub's `reviewDecision`, not re-derived here: only the explicit
 pass values `NONE` (comment-ops' sentinel for a null
 decision — no review required by the ruleset) and `APPROVED` authorize; any
 other value — including an absent/empty one — fails closed, except that
-`REVIEW_REQUIRED` also authorizes for an environment listed in
-`gate.ungated_envs`.
+`REVIEW_REQUIRED` also authorizes for an environment whose entry holds
+`gated = false`.
 
 The `ungated_exemption` output is the targeted path's audit trail: `reviewDecision`
 is a live value with no history, so once the review lands nothing else distinguishes
@@ -30,8 +30,8 @@ def parse_ungated_envs(raw):
     """Env names exempt from the review requirement, casefolded.
 
     `SHIPMATE_GATE_UNGATED_ENVS` carries `gate-config`'s own step output:
-    a sorted, comma-joined list that `validate_env_name_list` already refused every bad
-    shape of, in the same job. This undoes the join and nothing else.
+    a sorted, comma-joined list of entry names `validate_structure` already charset-checked,
+    in the same job. This undoes the join and nothing else.
     """
     return frozenset(e.casefold() for e in (raw or "").split(",") if e)
 
@@ -41,17 +41,17 @@ def _review_reason(review_decision, environment="", ungated_envs=frozenset()):
 
     Only the explicit pass values authorize: NONE (comment-ops' sentinel for a
     null decision — no review required by the ruleset) and APPROVED. Anything
-    else fails closed. An environment listed in `gate.ungated_envs` is exempt
+    else fails closed. An environment whose entry holds `gated = false` is exempt
     from REVIEW_REQUIRED and from nothing else; a bare apply passes here when
-    any env is listed and is partitioned per env in apply-all-detect."""
+    any entry holds `gated = false`, and is partitioned per env in apply-all-detect."""
     if review_decision == "REVIEW_REQUIRED":
         if ungated_envs and (not environment or environment.casefold() in ungated_envs):
             return None
         if ungated_envs:
             return (
                 f"not authorized: PR review is required by the branch ruleset "
-                f"and has not been satisfied, and `{environment}` is not listed "
-                f"in `gate.ungated_envs` in `.github/shipmate.toml`; obtain the "
+                f"and has not been satisfied, and `environments.{environment}.gated` is "
+                f"not `false` in `.github/shipmate.toml`; obtain the "
                 f"required approving review(s), then re-run `shipmate apply`."
             )
         return (
@@ -109,7 +109,7 @@ def decide(
     if not is_member:
         return False, (
             f"not authorized: the commenter is not a member of the "
-            f"required approvers team `{approvers_team}`."
+            f"required approver team `{approvers_team}`."
         )
     if verb == "unlock":
         # Everything below authorizes applying a reviewed plan; unlock applies
@@ -182,7 +182,7 @@ def main():
         ungated_envs=ungated_envs,
         verb=verb,
     )
-    # The targeted path's audit trail. REVIEW_REQUIRED plus a listed env define the
+    # The targeted path's audit trail. REVIEW_REQUIRED plus an ungated env define the
     # exemption; `ok`, a named environment and verb="apply" are the gates the module
     # docstring explains.
     exempted = (

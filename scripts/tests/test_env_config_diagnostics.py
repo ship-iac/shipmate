@@ -72,13 +72,30 @@ def test_a_fully_used_table_says_nothing(capsys):
 
 
 def test_an_entry_matching_only_in_case_is_unused(capsys):
-    """Matching is exact, as `resolve` and the `dry` coverage check match: an entry a cell's
+    """Matching is exact, as `resolve` and the `tf_vars` coverage check match: an entry a cell's
     environment name does not equal resolves for nothing, so it IS unused.
 
     Mutation: lower both sides. The entry is then reported as used while `resolve` still
     misses it."""
     _validate(TABLE, matrix_envs=("dev-eu",), all_envs={"dev-eu", "DEV-US"})
     assert capsys.readouterr().out.splitlines() == [UNUSED_DEV_US]
+
+
+def test_a_misspelled_flagged_entry_warns_as_unused(capsys):
+    """`explicit` is the only thing holding an environment back from a bare `shipmate
+    apply`, so a flag on a misspelled entry holds nothing back and the apply runs. The flag
+    sits on the entry, so the unused-entry warning is what names it.
+
+    Mutation: drop the unused-entry print from `_report_unused`.
+    """
+    table = {"layout": "folder", "environments": {"prd": {"explicit": True, "gated": False}}}
+    _validate(table, all_envs={"prod"})
+    assert capsys.readouterr().out.splitlines() == [
+        "::warning::the environment table declares prd, which no stack tags. Remove the "
+        "entry, or tag the stacks that belong to it. This is a warning rather than a refusal "
+        "because the table is read from the default branch and the tags from this branch, so "
+        "an environment arrives and leaves over two pull requests."
+    ]
 
 
 # --- 2: no whole-tree scan, no diagnostic ---------------------------------------------
@@ -103,11 +120,11 @@ def test_a_tagged_environment_missing_from_the_table_refuses_without_a_scan(caps
 
     Mutation: gate `_check_dry_coverage` on `all_envs is not None`. Every path without a
     whole-tree scan then stops refusing."""
-    table = {"layout": "dry", "environments": {"dev-eu": {"region": "eu-west-1"}}}
+    table = {"layout": "tf_vars", "environments": {"dev-eu": {"region": "eu-west-1"}}}
     with pytest.raises(SystemExit) as excinfo:
         _validate(table, matrix_envs=("dev-eu", "prod-us"), all_envs=None)
     assert str(excinfo.value) == (
-        '::error::layout = "dry" derives TF_VAR_env and TF_VAR_region from the '
+        '::error::layout = "tf_vars" derives TF_VAR_env and TF_VAR_region from the '
         "environment table, and prod-us has no entry in it."
     )
 
@@ -115,7 +132,7 @@ def test_a_tagged_environment_missing_from_the_table_refuses_without_a_scan(caps
 def test_the_refusal_precedes_the_unused_warning(capsys):
     """A table that is both incomplete and over-complete refuses; it does not warn and
     continue. Mutation: run the diagnostic before the coverage check."""
-    table = {"layout": "dry", "environments": {"dev-us": {"region": "us-east-1"}}}
+    table = {"layout": "tf_vars", "environments": {"dev-us": {"region": "us-east-1"}}}
     with pytest.raises(SystemExit):
         _validate(table, matrix_envs=("dev-eu",), all_envs={"dev-eu"})
     assert capsys.readouterr().out == ""
@@ -126,73 +143,35 @@ def test_the_refusal_precedes_the_unused_warning(capsys):
 
 #: Hand-written, whole: the consequence clause is the warning's entire value, and a partial
 #: match would pass a message that named the key and dropped what it fails to do.
-UNUSED_EXPLICIT = (
-    "::warning::explicit_envs names prd, which no stack tags, so it holds nothing back "
-    "from a bare `shipmate apply`. Remove the entry, or tag the stacks that belong to it. "
-    "This is a warning rather than a refusal because the table is read from the default "
-    "branch and the tags from this branch, so an environment arrives and leaves over two "
-    "pull requests."
-)
-UNUSED_UNGATED = (
-    "::warning::gate.ungated_envs names prd, which no stack tags, so it exempts nothing "
-    "from the review requirement. Remove the entry, or tag the stacks that belong to it. "
-    "This is a warning rather than a refusal because the table is read from the default "
-    "branch and the tags from this branch, so an environment arrives and leaves over two "
-    "pull requests."
-)
-UNUSED_ORDER = (
-    "::warning::env_order names prd, which no stack tags, so it orders nothing. Remove "
+UNUSED_NEEDS = (
+    "::warning::needs names ghost, which no stack tags, so it orders nothing. Remove "
     "the entry, or tag the stacks that belong to it. This is a warning rather than a "
     "refusal because the table is read from the default branch and the tags from this "
     "branch, so an environment arrives and leaves over two pull requests."
 )
 
-USED = {"layout": "folder", "environments": {}}
 
+def test_a_needs_predecessor_naming_no_environment_warns(capsys):
+    """A predecessor matching nothing reads as declared and constrains nothing. It needs no
+    entry of its own, so it passes the structural checks and warns here instead: refusing it
+    would make adding an environment and ordering after it two pull requests in lockstep.
 
-def test_an_explicit_env_naming_no_environment_warns(capsys):
-    """The fail-open this whole diagnostic exists for: `explicit_envs` is the only thing
-    holding an environment back from a bare `shipmate apply`, and `partition_envs`
-    intersects it with the pending set, so an entry matching nothing excludes nothing and
-    the apply runs. The charset rule cannot catch a plain typo.
-
-    Mutation: drop `explicit_envs` from the reference-key mapping."""
-    _validate({**USED, "explicit_envs": ["prd"]}, all_envs={"prod"})
-    assert capsys.readouterr().out.splitlines() == [UNUSED_EXPLICIT]
-
-
-def test_an_ungated_env_naming_no_environment_warns(capsys):
-    """Mutation: drop `gate.ungated_envs` from the mapping."""
-    _validate({**USED, "gate": {"ungated_envs": ["prd"]}}, all_envs={"prod"})
-    assert capsys.readouterr().out.splitlines() == [UNUSED_UNGATED]
-
-
-def test_an_env_order_key_naming_no_environment_warns(capsys):
-    """`env_order` is never charset-checked at all, so this warning is its only diagnostic.
-    An unmatched key leaves a phantom graph node while the real environment stays at level
-    0 and applies alongside the predecessor it was ordered after.
-
-    Mutation: collect only the mapping's values, not its keys."""
-    _validate({**USED, "env_order": {"prd": []}}, all_envs={"prod"})
-    assert capsys.readouterr().out.splitlines() == [UNUSED_ORDER]
-
-
-def test_an_env_order_predecessor_naming_no_environment_warns(capsys):
-    """A predecessor matching nothing is the same hole from the other side: the ordering
-    reads as declared and constrains nothing.
-
-    Mutation: collect only the mapping's keys, not its values."""
-    _validate({**USED, "env_order": {"prod": ["prd"]}}, all_envs={"prod"})
-    assert capsys.readouterr().out.splitlines() == [UNUSED_ORDER]
+    Mutations: require an entry for every predecessor in `validate_structure` -- this raises;
+    or drop `needs` from the reference-key mapping -- nothing prints."""
+    table = {"layout": "folder", "environments": {"prod": {"needs": ["ghost"]}}}
+    assert env_config.validate_structure(table) is table
+    assert _validate(table, all_envs={"prod"}) == table
+    assert capsys.readouterr().out.splitlines() == [UNUSED_NEEDS]
 
 
 def test_reference_keys_naming_real_environments_say_nothing(capsys):
-    """Mutation: warn whenever a reference key is present."""
+    """The flags sit on an entry, so they reference no other environment and add no warning.
+
+    Mutation: warn whenever a reference key is present.
+    """
     table = {
-        **USED,
-        "explicit_envs": ["prod"],
-        "gate": {"ungated_envs": ["prod"]},
-        "env_order": {"prod": ["dev"]},
+        "layout": "folder",
+        "environments": {"prod": {"needs": ["dev"], "explicit": True, "gated": False}},
     }
     _validate(table, all_envs={"prod", "dev"})
     assert capsys.readouterr().out == ""
@@ -203,5 +182,6 @@ def test_a_reference_key_warns_only_under_a_whole_tree_scan(capsys):
     an environment does not exist.
 
     Mutation: report reference keys regardless of `all_envs`."""
-    _validate({**USED, "explicit_envs": ["prd"]}, all_envs=None)
+    table = {"layout": "folder", "environments": {"prod": {"needs": ["ghost"]}}}
+    _validate(table, all_envs=None)
     assert capsys.readouterr().out == ""

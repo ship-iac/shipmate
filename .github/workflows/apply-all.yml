@@ -202,7 +202,7 @@ jobs:
     # `always()` alone would still run this job, and mint the App key, when the bot-actor rejection
     # failed; `needs.guard.result == 'success'` closes that. Keyed on `guard`, not `detect`, since
     # `always()` must still post the comment and refresh the gate when an envlevel failed or was
-    # cancelled, and when `detect` itself failed: an env_order cycle, a cell recording no plan run.
+    # cancelled, and when `detect` itself failed: a `needs` cycle, a cell recording no plan run.
     if: ${{ always() && needs.guard.result == 'success' }}
     runs-on: ubuntu-latest
     # Both steps mint the App key from secrets.SHIPMATE_APP_PRIVATE_KEY, the same as

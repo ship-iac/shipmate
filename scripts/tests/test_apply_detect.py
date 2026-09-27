@@ -463,9 +463,12 @@ def test_main_wires_the_tag_map_into_the_cells(tmp_path, monkeypatch):
 
 
 def _gate(ungated):
-    """A structure-valid table exempting `ungated`, a comma-separated string for symmetry
-    with the variable the same names used to arrive in."""
-    return {"layout": "folder", "gate": {"ungated_envs": [e for e in ungated.split(",") if e]}}
+    """A structure-valid table whose entries named in `ungated`, a comma-separated string,
+    hold `gated = false`."""
+    return {
+        "layout": "folder",
+        "environments": {e: {"gated": False} for e in ungated.split(",") if e},
+    }
 
 
 # The engine resolves the exemption list itself and refuses on it, because an `ungated-envs`
@@ -478,7 +481,7 @@ def _gate(ungated):
         ("APPROVED", ""),
         ("APPROVED", "prod-eu"),
         ("REVIEW_REQUIRED", "dev-eu"),
-        ("REVIEW_REQUIRED", "other,DEV-EU"),
+        ("REVIEW_REQUIRED", "other,dev-eu"),
     ],
 )
 def test_refuse_unreviewed_lets_an_authorized_apply_through(decision, ungated):
@@ -491,7 +494,7 @@ def test_refuse_unreviewed_lets_an_authorized_apply_through(decision, ungated):
         # The hole: an unreviewed pull request with the variable unset. The input the
         # consumer wired into comment-ops cannot widen this.
         ("REVIEW_REQUIRED", ""),
-        # Listed, but not this env.
+        # Ungated, but not this env.
         ("REVIEW_REQUIRED", "prod-eu"),
         ("CHANGES_REQUESTED", "dev-eu"),
         # The review job's sentinel for a pr_number matching no pull request.
@@ -518,16 +521,16 @@ def test_refuse_unreviewed_reuses_authorizes_selector_verbatim():
     assert str(exc_info.value) == f"::error::{reason}"
 
 
-def test_refuse_unreviewed_refuses_an_env_the_gate_list_does_not_name():
-    """`gate.ungated_envs` on the default branch is the only source, so an environment it
-    does not name is refused whatever else is set.
+def test_refuse_unreviewed_refuses_an_env_whose_entry_is_gated():
+    """`gated = false` on the default branch's entry is the only source, so an environment
+    without it is refused whatever else is set.
 
     Mutation: resolve the exemption from the process environment -- nothing sets it, so this
     stays green while the refusal it pins stops depending on the table at all."""
     with pytest.raises(SystemExit) as exc_info:
         ad.refuse_unreviewed("dev-eu", _gate("prod-eu"), "REVIEW_REQUIRED")
     assert str(exc_info.value).startswith("::error::not authorized")
-    # The empty list is a declared empty list, not an absent one.
+    # A table flagging no environment exempts none.
     with pytest.raises(SystemExit):
         ad.refuse_unreviewed("dev-eu", _gate(""), "REVIEW_REQUIRED")
 
@@ -570,8 +573,8 @@ def test_main_refuses_an_env_the_gate_table_does_not_exempt(monkeypatch, tmp_pat
     """The table reaches the refusal. `main` resolves the env under test from the table the
     run loaded, so an env the table exempts elsewhere is still refused here.
 
-    Mutation: exempt unconditionally once the table declares any list -- dev-eu is then
-    exempted by prod-eu's entry and main() runs to completion."""
+    Mutation: exempt unconditionally once any entry is ungated -- dev-eu is then exempted
+    by prod-eu's entry and main() runs to completion."""
     _apply_env(
         monkeypatch,
         tmp_path,
@@ -584,7 +587,7 @@ def test_main_refuses_an_env_the_gate_table_does_not_exempt(monkeypatch, tmp_pat
     assert str(exc_info.value).startswith("::error::not authorized")
 
 
-def test_main_exempts_an_env_the_gate_table_lists(monkeypatch, tmp_path):
+def test_main_exempts_an_env_whose_entry_is_ungated(monkeypatch, tmp_path):
     """The other half: an unreviewed apply of a listed env runs.
 
     Mutation: drop the gate read -- dev-eu is no longer exempt and main() refuses."""
@@ -600,23 +603,24 @@ def test_main_exempts_an_env_the_gate_table_lists(monkeypatch, tmp_path):
 
 
 def test_main_validates_the_table_before_it_reads_the_gate(monkeypatch, tmp_path):
-    """A bare string in `gate.ungated_envs` iterates character by character into a set of
-    single letters, exempting nothing while reading as though it did. The run must die on the
-    configuration error instead.
+    """A quoted `gated = "false"` reads as ungated to a person and resolves as gated. The run
+    must die naming the malformed setting, not refuse the apply as unreviewed.
 
     Mutation: drop `bm.ec.validate_structure(table)` from main -- the refusal passes the
-    unvalidated table on and raises "not authorized" over `{'d','e','v','-','u'}` rather than
-    naming the malformed setting."""
+    unvalidated table on and raises "not authorized" rather than naming the setting."""
     _apply_env(
         monkeypatch,
         tmp_path,
-        table={"layout": "folder", "gate": {"ungated_envs": "dev-eu"}},
+        table={"layout": "folder", "environments": {"dev-eu": {"gated": "false"}}},
         SHIPMATE_REVIEW_DECISION="REVIEW_REQUIRED",
     )
     _boom_on_the_workset(monkeypatch)
     with pytest.raises(SystemExit) as exc_info:
         ad.main()
-    assert str(exc_info.value).startswith("::error::gate.ungated_envs must be a list")
+    assert str(exc_info.value) == (
+        "::error::environments.dev-eu.gated must be a boolean, got str. Write "
+        "gated = true or gated = false, unquoted."
+    )
 
 
 def test_apply_path_loads_the_environment_table_exactly_once(monkeypatch, tmp_path):

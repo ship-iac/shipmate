@@ -192,7 +192,7 @@ def write_table(root, entry):
     """A `.github/shipmate.toml` under `root` with one `dev-eu` table ending in `entry`."""
     (root / ".github").mkdir(exist_ok=True)
     (root / ".github" / "shipmate.toml").write_text(
-        f'layout = "dry"\n\n[environments.dev-eu]\nregion = "eu-west-1"\n{entry}',
+        f'layout = "tf_vars"\n\n[environments.dev-eu]\nregion = "eu-west-1"\n{entry}',
         encoding="utf-8",
         newline="\n",
     )
@@ -1065,7 +1065,7 @@ def test_dry_run_reaches_every_write_path_and_issues_only_reads(monkeypatch, tmp
 
 def test_absent_variables_are_set_from_the_flags_and_no_tool_version_is_written(monkeypatch):
     """A repository with no variables gets exactly the one the workflows still read. Neither
-    the approvers team -- it is declared in `.github/shipmate.toml`, which this script does
+    the approver team -- it is declared in `.github/shipmate.toml`, which this script does
     not write -- nor the tool versions are among them: `actions/setup` takes both from the
     release's own VERSIONS file, so a repository copy would only be a second source of truth.
 
@@ -1342,7 +1342,7 @@ def test_an_invalid_table_refuses_before_any_write(monkeypatch, tmp_path):
     fake, exc = run_main(monkeypatch, tmp_path, {}, [])
     assert fake.calls == [["gh", "variable", "list", "--json", "name,value"]]
     assert str(exc) == (
-        "::error::environment dev-eu: shared must be a boolean, got str. "
+        "::error::environments.dev-eu.shared must be a boolean, got str. "
         "Write shared = true or shared = false, unquoted."
     )
 
@@ -1351,7 +1351,7 @@ def write_referencing_table(root):
     """A `.github/shipmate.toml` whose shared `dev-eu` takes its region from DEV_EU_REGION."""
     (root / ".github").mkdir(exist_ok=True)
     (root / ".github" / "shipmate.toml").write_text(
-        'layout = "dry"\n\n[environments.dev-eu]\nregion = { var = "DEV_EU_REGION" }\n'
+        'layout = "tf_vars"\n\n[environments.dev-eu]\nregion = { vars = "DEV_EU_REGION" }\n'
         "shared = true\n",
         encoding="utf-8",
         newline="\n",
@@ -2145,7 +2145,7 @@ By hand:
 
   A `.github/shipmate.toml` declaring `layout`, plus an `[environments.<name>]`
   table for every environment that needs a region or a cloud role — under `layout
-  = "dry"` every environment needs one, carrying a region, or the run refuses.
+  = "tf_vars"` every environment needs one, carrying a region, or the run refuses.
   Tables are keyed by the logical environment name (`dev-eu`), never by its
   `-plan` / `-apply` half. Top-level settings go above the first table header: a
   scalar written below one lands inside that table instead.
@@ -2154,17 +2154,18 @@ By hand:
   paths instead of the `<name>-plan` / `<name>-apply` pair. This script reads the key
   from this checkout's file, so re-run it after adding or dropping one.
 
-  `[gate] approvers_team` names the team whose members may apply and unlock by
+  `[gate] approver_team` names the team whose members may apply and unlock by
   pull request comment — `ops` here. Keep it above the first
   `[environments.*]` header, where it reads with the other repository-wide
   settings. Add it only once this repository's pin names an engine that accepts
   the key: an older one refuses the whole file, and moving a pin is not this
   script's job.
 
-    layout = "dry"
+    schema_version = 1
+    layout = "tf_vars"
 
     [gate]
-    approvers_team = "ops"
+    approver_team = "ops"
 
     [environments.dev-eu]
     region         = "eu-west-1"
@@ -2317,7 +2318,9 @@ def test_the_checklist_toml_example_is_a_configuration_a_consumer_could_merge(ca
     snippet = textwrap.dedent("\n".join(ln for ln in lines if ln.startswith("    ")))
     # An extraction that finds nothing parses and validates cleanly, so it is green over an
     # unchecked example.
-    assert snippet.startswith('layout = "dry"'), f"no TOML example found in the block: {snippet!r}"
+    assert snippet.startswith("schema_version = 1"), (
+        f"no TOML example found in the block: {snippet!r}"
+    )
     ec.validate_structure(ec.parse_table(snippet))
 
 

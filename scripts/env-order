@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Env apply-ordering: read env-levels out of the operation's environment table.
 
-`env_order` in `.github/shipmate.toml` maps an env -> the envs that must fully
-apply before it. Topologically sorted into levels; deploy applies level 0 fully,
-then level 1, etc. Unlisted envs are level 0. Absent key -> {} -> all level 0.
+An environment's `needs` in `.github/shipmate.toml` lists the envs that must
+fully apply before it; `env-config.env_order` collects them into env -> predecessors.
+Topologically sorted into levels; deploy applies level 0 fully, then level 1, etc.
+Unlisted envs are level 0. No `needs` anywhere -> {} -> all level 0.
 
 Nothing here reads anything: the callers pass the mapping `env-config` already
 loaded for the operation, which comes from the default branch. A pull request

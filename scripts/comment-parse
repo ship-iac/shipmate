@@ -176,7 +176,7 @@ def help_markdown():
         "",
         (
             "The environment is a GitHub Environment name such as `dev-eu`. "
-            "Applying requires approvers-team membership, an approving review "
+            "Applying requires approver-team membership, an approving review "
             "where the branch ruleset asks for one, a plan for the current "
             "head commit, and a pull request that is not a draft. Unlocking "
             "requires that membership, but no review, no plan and no such "

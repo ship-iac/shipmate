@@ -177,7 +177,7 @@ the `shipmate-app.private-key.pem` step 1 wrote. Keep that file until every
 consumer repo has it. `scripts/onboard` does all of this, and additionally
 deletes any repository-level copy of the key.
 
-The approvers team is not set here. It is `gate.approvers_team` in
+The approver team is not set here. It is `gate.approver_team` in
 `.github/shipmate.toml` on the consumer's default branch, committed with the rest
 of that repository's configuration ([`../CONTRACT.md`](../CONTRACT.md) §The gate
 table). Every repository declares its own, including one that would previously
@@ -223,8 +223,8 @@ value and nothing else in the pipeline changes. Set it per repository wherever t
 App differs — one App per trust domain means one id per trust domain
 ([`hardening.md`](hardening.md) §13–14).
 
-It is the only name that shares this way. The approvers team used to be the
-second, and the file replaced that: `gate.approvers_team` is per repository by
+It is the only name that shares this way. The approver team used to be the
+second, and the file replaced that: `gate.approver_team` is per repository by
 construction, so every repository declares its own team, and one that declares
 none authorizes nobody by comment.
 
@@ -245,7 +245,7 @@ it per repository:
 
 ```bash
 python3 <engine-checkout>/scripts/onboard \
-  --team <approvers-team-slug> --app-id <app-id> \
+  --team <approver-team-slug> --app-id <app-id> \
   --key shipmate-app.private-key.pem \
   --vars-at-org SHIPMATE_APP_ID
 ```
@@ -520,7 +520,7 @@ behind the flag answers to nobody else.
 ```bash
 ENGINE=<path-to-engine-checkout>    # on a release tag
 CHECKOUTS="<path>/<repo> <path>/<repo>"
-TEAM=<approvers-team-slug>          # may differ per repo; pass it per repo either way
+TEAM=<approver-team-slug>          # may differ per repo; pass it per repo either way
 APP_ID=<app-id-from-step-1-output>
 KEY=$PWD/shipmate-app.private-key.pem
 

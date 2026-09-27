@@ -1,4 +1,4 @@
-"""`env-config.parse_table` resolves `{ var = "NAME" }` references against GitHub variables.
+"""`env-config.parse_table` resolves `{ vars = "NAME" }` references against GitHub variables.
 
 Every expectation is a hand-written constant compared whole: a partial check leaves the rest
 of the table free to be rewritten. Each docstring names the mutation its test reddens on.
@@ -15,21 +15,21 @@ from _loader import load_script
 ec = load_script("env-config")
 
 _TABLE = """\
-layout = "dry"
-explicit_envs = [{ var = "PROD_ENV" }, "stage"]
+layout = "tf_vars"
 
 [gate]
-approvers_team = { var = "APPROVERS" }
+approver_team = { vars = "APPROVERS" }
 
 [environments.prod]
 region = "eu-west-1"
+needs = [{ vars = "FIRST_ENV" }, "stage"]
 aws.plan.role = "arn:aws:iam::1:role/plan"
-aws.apply.role = { var = "PROD_APPLY_ROLE" }
-aws.apply.workloads.net-edge.role = { var = "NET_EDGE_ROLE" }
+aws.apply.role = { vars = "PROD_APPLY_ROLE" }
+aws.apply.workloads.net-edge.role = { vars = "NET_EDGE_ROLE" }
 """
 
 _VARIABLES = {
-    "PROD_ENV": "prod",
+    "FIRST_ENV": "dev",
     "APPROVERS": "platform",
     "PROD_APPLY_ROLE": "arn:aws:iam::1:role/apply",
     "NET_EDGE_ROLE": "arn:aws:iam::1:role/net-edge",
@@ -37,12 +37,12 @@ _VARIABLES = {
 }
 
 _RESOLVED = {
-    "layout": "dry",
-    "explicit_envs": ["prod", "stage"],
-    "gate": {"approvers_team": "platform"},
+    "layout": "tf_vars",
+    "gate": {"approver_team": "platform"},
     "environments": {
         "prod": {
             "region": "eu-west-1",
+            "needs": ["dev", "stage"],
             "aws": {
                 "plan": {"role": "arn:aws:iam::1:role/plan"},
                 "apply": {
@@ -54,38 +54,73 @@ _RESOLVED = {
     },
 }
 
-_ROLE_REF = '[environments.prod]\naws.apply.role = { var = "PROD_APPLY_ROLE" }\n'
+_ROLE_REF = '[environments.prod]\naws.apply.role = { vars = "PROD_APPLY_ROLE" }\n'
 
 
 def test_every_reference_is_replaced_by_its_value():
-    """Covers an environment tier, a list item, a workload tier and `gate.approvers_team`.
-    Reddens on returning the raw table, on recursing into dicts only (the `explicit_envs`
-    item stays a mapping), and on stopping at depth 3 (the workload and apply roles stay
-    mappings)."""
+    """Covers an environment tier, a list item, a workload tier and `gate.approver_team`.
+    Reddens on returning the raw table, on recursing into dicts only (the `needs` item stays
+    a mapping), and on stopping at depth 3 (the workload and apply roles stay mappings)."""
     assert ec.parse_table(_TABLE, _VARIABLES) == _RESOLVED
 
 
-def test_a_mapping_that_merely_contains_var_is_data():
-    """An environment and a workload named `var` are ordinary data. Reddens on detecting a
-    reference as "a dict containing `var`"."""
+def test_a_reference_inside_needs_orders_by_its_value():
+    """The resolved list is what `env_order` hands the sorter. Reddens on `_replace` no
+    longer recursing into lists: the first predecessor stays a mapping."""
+    assert ec.env_order(ec.parse_table(_TABLE, _VARIABLES)) == {"prod": ["dev", "stage"]}
+
+
+_NEEDS_REF = 'layout = "folder"\n[environments.prod]\nneeds = [{ vars = "FIRST_ENV" }]\n'
+
+
+@pytest.mark.parametrize(
+    ("value", "message"),
+    [
+        (
+            "Dev",
+            "::error::environments.prod.needs entry 'Dev' is not an environment name; entries "
+            "are bare logical env names (lowercase letters, digits, '-' and '_'), with no "
+            "quotes, spaces or path separators.",
+        ),
+        (
+            "dev-eu-plan",
+            "::error::environments.prod.needs entry 'dev-eu-plan' carries the environment "
+            "suffix '-plan'; environments.prod.needs is matched against the bare logical env "
+            "name — write 'dev-eu' instead.",
+        ),
+    ],
+    ids=["uppercase", "suffix"],
+)
+def test_a_resolved_needs_value_is_name_checked(value, message):
+    """A variable's value meets the rule a written one does, because resolution runs before
+    validation. Reddens on validating the unresolved table: the mapping then refuses as a
+    non-string element instead."""
+    with pytest.raises(SystemExit) as exc:
+        ec.validate_structure(ec.parse_table(_NEEDS_REF, {"FIRST_ENV": value}))
+    assert str(exc.value) == message
+
+
+def test_a_mapping_that_merely_contains_vars_is_data():
+    """An environment and a workload named `vars` are ordinary data. Reddens on detecting a
+    reference as "a dict containing `vars`"."""
     text = (
-        '[environments.var]\nregion = "eu-west-1"\n'
-        '[environments.prod.aws.apply.workloads.var]\nrole = "r"\n'
+        '[environments.vars]\nregion = "eu-west-1"\n'
+        '[environments.prod.aws.apply.workloads.vars]\nrole = "r"\n'
     )
     assert ec.parse_table(text, {}) == {
         "environments": {
-            "var": {"region": "eu-west-1"},
-            "prod": {"aws": {"apply": {"workloads": {"var": {"role": "r"}}}}},
+            "vars": {"region": "eu-west-1"},
+            "prod": {"aws": {"apply": {"workloads": {"vars": {"role": "r"}}}}},
         }
     }
 
 
-def test_a_one_key_var_mapping_holding_no_string_is_data():
-    """The existing validation refuses it later. Reddens on treating any one-key `var`
+def test_a_one_key_vars_mapping_holding_no_string_is_data():
+    """The existing validation refuses it later. Reddens on treating any one-key `vars`
     mapping as a reference: the lookup then matches the integer against the name charset
     and raises `TypeError`."""
-    text = "[environments.prod]\nregion = { var = 3 }\n"
-    assert ec.parse_table(text, {}) == {"environments": {"prod": {"region": {"var": 3}}}}
+    text = "[environments.prod]\nregion = { vars = 3 }\n"
+    assert ec.parse_table(text, {}) == {"environments": {"prod": {"region": {"vars": 3}}}}
 
 
 def _refusal(text, variables):
@@ -117,11 +152,11 @@ def test_an_empty_variable_refuses():
 
 def test_a_lowercase_name_refuses_and_names_the_uppercase_spelling():
     """Reddens on uppercasing the name before the lookup, which resolves it silently."""
-    text = '[environments.prod]\naws.apply.role = { var = "prod_apply_role" }\n'
+    text = '[environments.prod]\naws.apply.role = { vars = "prod_apply_role" }\n'
     assert _refusal(text, {"PROD_APPLY_ROLE": "arn:aws:iam::1:role/apply"}) == (
         "::error::.github/shipmate.toml environments.prod.aws.apply.role references GitHub "
         'variable "prod_apply_role"; GitHub variable names are uppercase. Write '
-        '{ var = "PROD_APPLY_ROLE" }.'
+        '{ vars = "PROD_APPLY_ROLE" }.'
     )
 
 
@@ -140,7 +175,7 @@ def test_a_name_outside_the_charset_refuses_naming_the_rule(toml_name, name, ren
     TOML `\\n` in it cannot split the `::error::` line. Reddens on dropping the charset check:
     `""`, `A-B` and `1ROLE` then resolve to the value set for them and `a-b` refuses as
     lowercase, suggesting `A-B`. Reddens on rendering the name raw instead of with `!r`."""
-    text = f'[environments.prod]\naws.apply.role = {{ var = "{toml_name}" }}\n'
+    text = f'[environments.prod]\naws.apply.role = {{ vars = "{toml_name}" }}\n'
     assert _refusal(text, {name: "v", name.upper(): "v"}) == (
         "::error::.github/shipmate.toml environments.prod.aws.apply.role references GitHub "
         f"variable {rendered}, which is not a GitHub variable name ([A-Z_][A-Z0-9_]*)."
@@ -150,8 +185,11 @@ def test_a_name_outside_the_charset_refuses_naming_the_rule(toml_name, name, ren
 def test_no_reference_never_reads_the_environment(monkeypatch):
     """Reddens on reading `SHIPMATE_GITHUB_VARS` unconditionally: absent, it refuses."""
     monkeypatch.delenv("SHIPMATE_GITHUB_VARS", raising=False)
-    text = 'layout = "dry"\nexplicit_envs = ["prod"]\n'
-    assert ec.parse_table(text) == {"layout": "dry", "explicit_envs": ["prod"]}
+    text = 'layout = "tf_vars"\n[environments.prod]\nneeds = ["dev"]\n'
+    assert ec.parse_table(text) == {
+        "layout": "tf_vars",
+        "environments": {"prod": {"needs": ["dev"]}},
+    }
 
 
 _NO_VARIABLES_REFUSAL = (
@@ -183,21 +221,22 @@ def test_a_null_enumeration_refuses_as_unset(monkeypatch):
     assert _refusal(_ROLE_REF, None) == _UNSET_REFUSAL
 
 
-def test_a_root_level_var_key_is_a_setting_not_a_reference():
+def test_a_root_level_vars_key_is_a_setting_not_a_reference():
     """Reddens on `references` walking from the root table, which reports it under an empty
     path; with `parse_table` also replacing from the root, the whole file resolves to the
     variable's value."""
-    assert ec.parse_table('var = "X"\n', {"X": "v"}) == {"var": "X"}
-    assert ec.references({"var": "X"}) == []
+    assert ec.parse_table('vars = "X"\n', {"X": "v"}) == {"vars": "X"}
+    assert ec.references({"vars": "X"}) == []
 
 
 def test_references_lists_every_reference_sorted_by_path():
-    """Reddens on dropping list recursion (the `explicit_envs[0]` row disappears)."""
+    """Reddens on dropping list recursion (the `environments.prod.needs[0]` row
+    disappears)."""
     assert ec.references(tomllib.loads(_TABLE)) == [
         ("environments.prod.aws.apply.role", "PROD_APPLY_ROLE"),
         ("environments.prod.aws.apply.workloads.net-edge.role", "NET_EDGE_ROLE"),
-        ("explicit_envs[0]", "PROD_ENV"),
-        ("gate.approvers_team", "APPROVERS"),
+        ("environments.prod.needs[0]", "FIRST_ENV"),
+        ("gate.approver_team", "APPROVERS"),
     ]
 
 

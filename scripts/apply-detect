@@ -15,7 +15,7 @@ design — it never blocks on other environments; region-level sequencing across
 envs is handled separately on the apply-all path.
 
 Before any of that, the PR's review decision — read server-side by the `review`
-job, narrowed by the `[gate]` table's `ungated_envs` — must authorize this
+job, narrowed by `gated = false` on the environment's entry — must authorize this
 environment, or the run refuses.
 
 `completed_apply_names` lives here and this module's `main` calls it, so
@@ -264,9 +264,10 @@ def refuse_unreviewed(env, table, decision):
     no checkout, so it holds no scripts. The run dies before any wave, the apply
     checks stay pending, and the gate stays pending with them.
 
-    `table` must have been through `validate_structure`: `gate_ungated_envs` iterates
-    whatever `ungated_envs` holds, and a bare string there exempts single letters."""
-    ungated = bm.ec.gate_ungated_envs(table)
+    `table` must have been through `validate_structure`: `ungated_envs` reads only a
+    boolean `false` as ungated, so a quoted `gated = "false"` would otherwise refuse as
+    unreviewed rather than as the malformed setting it is."""
+    ungated = bm.ec.ungated_envs(table)
     reason = az._review_reason(decision, env, ungated)
     if reason:
         raise SystemExit(f"::error::{reason}")

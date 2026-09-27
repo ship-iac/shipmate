@@ -86,8 +86,8 @@ while still planning fine locally. See [`aws.md`](aws.md).
 
 **`terramate.config.run.env` rewriting `TF_VAR_*`.** Terramate applies `run.env`
 after the ambient environment, so an assignment to a name the environment table
-resolves for a cell — `TF_VAR_env` and `TF_VAR_region` under `dry`,
-`TF_WORKSPACE` under `workspace`, any name in an environment's `vars` — wins
+resolves for a cell — `TF_VAR_env` and `TF_VAR_region` under the `tf_vars` layout,
+`TF_WORKSPACE` under `workspace`, any name in an environment's `tf_vars` — wins
 over whatever the cell was given, invisibly, because the fingerprint is computed
 outside `terramate run` and so agrees on both sides. Each cell reads those names
 back through `terramate run` before `tofu init` and refuses when one comes back
@@ -97,7 +97,7 @@ set. [`../CONTRACT.md`](../CONTRACT.md) §Env model has the rule and the
 
 ## Opt-in: per-environment review gating
 
-`gate.ungated_envs` lets named environments be applied without an approving
+`gated = false` on an environment's entry lets it be applied without an approving
 review while the rest keep the branch ruleset's requirement. Declare it in
 `.github/shipmate.toml` and nothing else — no repository setting, no workflow
 line: comment-ops and both apply paths each read the file from your default

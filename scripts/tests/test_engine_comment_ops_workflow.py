@@ -104,7 +104,7 @@ def test_the_authz_step_passes_this_whole_with_block():
     constant privileged login, and every commenter's `shipmate apply` passes the membership
     check; add an `approvers-team` or `ungated-envs` back, and the gate settings acquire a
     second source that a repository variable can set without a pull request. `github-vars` is
-    not that: it resolves only the `{ var = "NAME" }` references the file itself names, so the
+    not that: it resolves only the `{ vars = "NAME" }` references the file itself names, so the
     file still chooses; delete it, and a file holding a reference refuses every apply and unlock.
     """
     assert _step("actions/comment-ops")["with"] == {

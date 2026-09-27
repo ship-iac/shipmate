@@ -125,12 +125,19 @@ def _resolve(monkeypatch, tmp_path, table):
 
 
 def test_the_file_is_the_only_source(monkeypatch, tmp_path):
-    """Both outputs come from the table, sorted. Mutation: read either value from the
+    """Both outputs come from the table, sorted. Mutations: read either value from the
     process environment -- there is no variable left to read, so the output goes empty and
-    every environment holds while the file says otherwise."""
+    every environment holds while the file says otherwise; or have `ungated_envs` return the
+    `gated = true` entries -- `prod` replaces both dev entries."""
     table = {
-        "layout": "dry",
-        "gate": {"approvers_team": "platform", "ungated_envs": ["dev-us", "dev-eu"]},
+        "layout": "folder",
+        "gate": {"approver_team": "platform"},
+        "environments": {
+            "dev-us": {"gated": False},
+            "dev-eu": {"gated": False},
+            "prod": {"gated": True},
+            "stage": {},
+        },
     }
     assert _resolve(monkeypatch, tmp_path, table) == {
         "ungated_envs": "dev-eu,dev-us",
@@ -141,21 +148,24 @@ def test_the_file_is_the_only_source(monkeypatch, tmp_path):
 def test_a_file_declaring_no_gate_resolves_to_empty(monkeypatch, tmp_path):
     """The minimum configuration: a file with no `[gate]` is valid, authorizes nobody by
     team and exempts no environment. Mutation: return a non-empty default for either."""
-    assert _resolve(monkeypatch, tmp_path, {"layout": "dry"}) == {
+    assert _resolve(monkeypatch, tmp_path, {"layout": "tf_vars"}) == {
         "ungated_envs": "",
         "approvers_team": "",
     }
 
 
 def test_the_table_is_validated_before_it_is_resolved(monkeypatch, tmp_path):
-    """`validate_structure` is what the resolvers assume and do not enforce. A bare string
-    under `ungated_envs` iterates character by character into a frozenset of single letters,
-    which exempts nothing while reading as a declared list -- fail-open, and invisible.
+    """`validate_structure` is what the resolvers assume and do not enforce. A quoted
+    `gated = "false"` reads as ungated to a person and resolves as gated -- invisible unless
+    the run refuses it.
 
     Mutation: resolve the table straight from `read_table_at_default_branch` without
-    validating it; this test then reports `d,e,u,-` instead of refusing.
+    validating it; this test then writes an empty exemption instead of refusing.
     """
-    table = {"layout": "dry", "gate": {"ungated_envs": "dev-eu"}}
+    table = {"layout": "folder", "environments": {"dev-eu": {"gated": "false"}}}
     with pytest.raises(SystemExit) as exc:
         _resolve(monkeypatch, tmp_path, table)
-    assert "gate.ungated_envs" in str(exc.value)
+    assert str(exc.value) == (
+        "::error::environments.dev-eu.gated must be a boolean, got str. Write "
+        "gated = true or gated = false, unquoted."
+    )

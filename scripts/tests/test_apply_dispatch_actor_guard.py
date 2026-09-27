@@ -7,7 +7,7 @@ have to be told apart:
 
 - an unauthorised dispatch must not reach `summary`, which mints the App key and comments on the
   dispatcher-supplied pull request number;
-- a genuine `detect` failure -- a matrix over the 256-cell cap, an env_order cycle, a cell whose
+- a genuine `detect` failure -- a matrix over the 256-cell cap, a `needs` cycle, a cell whose
   apply check records no plan run -- must still reach `summary`, or the developer gets no failure
   comment and no gate refresh at all.
 

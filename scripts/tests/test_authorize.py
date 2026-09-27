@@ -28,7 +28,7 @@ DRAFT_REASON = (
 #: The membership refusal for `_decide`'s default team, hand-written for the
 #: same reason.
 MEMBER_REASON = (
-    "not authorized: the commenter is not a member of the required approvers team `deployers`."
+    "not authorized: the commenter is not a member of the required approver team `deployers`."
 )
 
 
@@ -249,7 +249,7 @@ def test_unlisted_env_reason_names_the_setting():
     assert not ok
     assert reason == (
         "not authorized: PR review is required by the branch ruleset and has not been "
-        "satisfied, and `prod-eu` is not listed in `gate.ungated_envs` in "
+        "satisfied, and `environments.prod-eu.gated` is not `false` in "
         "`.github/shipmate.toml`; obtain the required approving review(s), then re-run "
         "`shipmate apply`."
     )
@@ -283,7 +283,7 @@ def test_exemption_does_not_reach_the_other_checks():
 
 def test_main_reads_ungated_envs_and_environment(tmp_path, monkeypatch):
     # Pins that both SHIPMATE_GATE_UNGATED_ENVS and SHIPMATE_ENV reach decide(). The env is
-    # deliberately not in the list, so the refusal carries the list-aware message only if
+    # deliberately not ungated, so the refusal carries the exemption-aware message only if
     # both values arrived.
     pr_json = tmp_path / "pr.json"
     pr_json.write_text(json.dumps(PR_OK), encoding="utf-8")
@@ -304,10 +304,13 @@ def test_main_reads_ungated_envs_and_environment(tmp_path, monkeypatch):
         monkeypatch.setenv(key, value)
     az.main()
     text = out.read_text(encoding="utf-8")
-    assert "authorized=false" in text
-    assert "`gate.ungated_envs`" in text
-    assert "`prod-eu`" in text
-    assert "environment=prod-eu" in text
+    assert "authorized=false" in text.splitlines()
+    assert (
+        "reason=not authorized: PR review is required by the branch ruleset and has not been "
+        "satisfied, and `environments.prod-eu.gated` is not `false` in `.github/shipmate.toml`; "
+        "obtain the required approving review(s), then re-run `shipmate apply`."
+    ) in text.splitlines()
+    assert "environment=prod-eu" in text.splitlines()
 
 
 def _main_output(tmp_path, monkeypatch, *, pr=PR_OK, plan_runs=RUNS_OK, **env):

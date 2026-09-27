@@ -260,7 +260,7 @@ def _at_org(raw):
 def _resolve_shared(root, envs, repo, variables):
     """The environments the checkout's `.github/shipmate.toml` marks `shared = true`.
 
-    No file means no shared environments. A file holding a `{ var = "NAME" }` reference
+    No file means no shared environments. A file holding a `{ vars = "NAME" }` reference
     resolves it from the repository `variables` over the organization variables reaching
     `repo`, GitHub's precedence; a file without one makes no API call. The table is
     structurally validated first, because `shared_envs` trusts its shape, and this runs
@@ -897,7 +897,7 @@ def _checklist(ctx):
         "",
         "  A `.github/shipmate.toml` declaring `layout`, plus an `[environments.<name>]`",
         "  table for every environment that needs a region or a cloud role — under `layout",
-        '  = "dry"` every environment needs one, carrying a region, or the run refuses.',
+        '  = "tf_vars"` every environment needs one, carrying a region, or the run refuses.',
         "  Tables are keyed by the logical environment name (`dev-eu`), never by its",
         "  `-plan` / `-apply` half. Top-level settings go above the first table header: a",
         "  scalar written below one lands inside that table instead.",
@@ -906,17 +906,18 @@ def _checklist(ctx):
         "  paths instead of the `<name>-plan` / `<name>-apply` pair. This script reads the key",
         "  from this checkout's file, so re-run it after adding or dropping one.",
         "",
-        "  `[gate] approvers_team` names the team whose members may apply and unlock by",
+        "  `[gate] approver_team` names the team whose members may apply and unlock by",
         f"  pull request comment — `{ctx['team']}` here. Keep it above the first",
         "  `[environments.*]` header, where it reads with the other repository-wide",
         "  settings. Add it only once this repository's pin names an engine that accepts",
         "  the key: an older one refuses the whole file, and moving a pin is not this",
         "  script's job.",
         "",
-        '    layout = "dry"',
+        "    schema_version = 1",
+        '    layout = "tf_vars"',
         "",
         "    [gate]",
-        f'    approvers_team = "{ctx["team"]}"',
+        f'    approver_team = "{ctx["team"]}"',
         "",
         "    [environments.dev-eu]",
         '    region         = "eu-west-1"',

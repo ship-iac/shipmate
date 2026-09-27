@@ -66,7 +66,7 @@ release tag:
 
 ```bash
 python3 <engine-checkout>/scripts/onboard \
-  --team <approvers-team-slug> --app-id <app-id> \
+  --team <approver-team-slug> --app-id <app-id> \
   --key shipmate-app.private-key.pem
 ```
 
@@ -89,7 +89,7 @@ It writes:
 - `.github/workflows/shipmate.yml`, rendered from the fence on this page and
   pinned to the engine checkout's release.
 
-`--team` writes nothing. The approvers team is `gate.approvers_team` in
+`--team` writes nothing. The approver team is `gate.approver_team` in
 `.github/shipmate.toml`, which this script does not write, so the slug you pass
 is printed in the closing by-hand checklist instead — with the file it belongs
 in and the pin it needs first.
@@ -177,7 +177,7 @@ creates all of them, including `shipmate-engine` and its branch policy:
   `.github/shipmate.toml` on your repository's default branch
   ([`../CONTRACT.md`](../CONTRACT.md) §Environment table). It is required: a
   repository without one has nothing for its cells to run as, and every run
-  refuses. `layout` is the discriminator — `dry` derives `TF_VAR_env` and
+  refuses. `layout` is the discriminator — `tf_vars` derives `TF_VAR_env` and
   `TF_VAR_region` from each environment's key and its region, `workspace`
   derives `TF_WORKSPACE`, and `folder` derives nothing, its leaves fixing env
   and region by path. `scripts/env-inject` is the cell's one writer of the job
@@ -188,7 +188,7 @@ creates all of them, including `shipmate-engine` and its branch policy:
   [`concepts.md`](concepts.md) explains where they land.
 
   ```toml
-  layout = "dry"
+  layout = "tf_vars"
 
   [environments.dev-eu]
   region         = "eu-west-1"
@@ -211,19 +211,19 @@ creates all of them, including `shipmate-engine` and its branch policy:
   `[environments.*]` header, with the other repository-wide settings:
 
   ```toml
-  layout = "dry"
+  layout = "tf_vars"
 
   [gate]
-  approvers_team = "platform-approvers"
+  approver_team = "platform-approvers"
 
   [environments.dev-eu]
   region = "eu-west-1"
   ```
 
-  **A value can come from a GitHub variable.** Write `{ var = "NAME" }` in
+  **A value can come from a GitHub variable.** Write `{ vars = "NAME" }` in
   place of any string, list items included, and every run reads that
   repository or organization variable instead:
-  `aws.apply.role = { var = "PROD_APPLY_ROLE" }`. Changing the variable changes
+  `aws.apply.role = { vars = "PROD_APPLY_ROLE" }`. Changing the variable changes
   the value with no pull request. Define the name as a repository or
   organization variable; no cell's Environment is read. Never define it on
   `shipmate-engine`: comment-ops and the plan summary bind that Environment, so
@@ -507,7 +507,7 @@ of the reviewed plan) and an idempotent post-merge apply on push to the default
 branch.
 
 `shipmate apply` runs only for a member of the team named by
-`gate.approvers_team` in `.github/shipmate.toml` on your default branch
+`gate.approver_team` in `.github/shipmate.toml` on your default branch
 (§Environments for this tier), on a pull request that is mergeable and
 satisfies the branch ruleset's review policy, and only against a plan for the
 pull request's current head, and only on a pull request that is not a
@@ -555,10 +555,10 @@ rules from Settings → Environments → `<name>` (or the API):
   maximally-hardened position gates every apply environment.
   [`hardening.md`](hardening.md) #6 states what each choice costs — shipmate
   does not make it for you.
-- **Pair a reviewer-gated environment with `explicit_envs` in
+- **Pair a reviewer-gated environment with `explicit = true` in
   `.github/shipmate.toml`.**
-  List the bare env name (`prod` — neither `prod-plan` nor `prod-apply`). A bare
-  `shipmate apply` then skips it, and it is only ever reached via the targeted
+  Set it on the bare env's entry (`[environments.prod]` — neither `prod-plan`
+  nor `prod-apply`). A bare `shipmate apply` then skips it, and it is only ever reached via the targeted
   `shipmate apply prod`, which pauses for the environment reviewer.
 
 ### The apply jobs
@@ -785,8 +785,8 @@ the last green check, so the PR merges itself:
 
 Properties that fall out of the existing gate semantics:
 
-- **Explicit environments still gate.** An environment listed in
-  `explicit_envs` is skipped by the bare `shipmate apply` and its apply checks
+- **Explicit environments still gate.** An environment whose entry holds
+  `explicit = true` is skipped by the bare `shipmate apply` and its apply checks
   stay pending — gate stays pending, so auto-merge waits until someone runs the
   targeted `shipmate apply <env>`. Arming auto-merge never weakens the
   apply-before-merge guarantee; it only removes the final click.
@@ -813,21 +813,22 @@ Properties that fall out of the existing gate semantics:
 
 The branch ruleset's review requirement is repository-wide, so requiring an
 approval before merge also requires one before every apply. To keep a low-tier
-environment self-service while the rest stay gated, name it in
-`gate.ungated_envs` in `.github/shipmate.toml` — bare logical env names:
+environment self-service while the rest stay gated, set `gated = false` on its
+entry in `.github/shipmate.toml`:
 
 ```toml
-layout = "dry"
+layout = "tf_vars"
 
-[gate]
-ungated_envs = ["dev-eu", "dev-us"]
+[environments.dev-eu]
+region = "eu-west-1"
+gated  = false
 ```
 
 Your workflow file needs no line for it, and neither does a repository setting.
-Comment-ops and both apply paths each resolve the list themselves, from the file
+Comment-ops and both apply paths each resolve the flag themselves, from the file
 on your **default branch** — so an edit takes effect when it merges, and a pull
-request cannot exempt itself. Declare no list and *what applies* is unchanged:
-every environment keeps the ruleset's requirement.
+request cannot exempt itself. Set it on no entry and *what applies* is
+unchanged: every environment keeps the ruleset's requirement.
 
 The second part is a pin. An apply is authorized by the engine
 `comment-ops.yml` the `comment-ops` job calls and enforced by the engine
@@ -836,16 +837,16 @@ three pins must sit at the same release (or the enforcing two later). One file
 carrying all seven pins is what makes that automatic: `dev/repin_consumer.py`
 moves them together, and there is no longer a second file to bump on its own.
 
-Both edges need the list declared — the exemption is opt-in and there is no
-consumer-written input that could authorize a dispatch without it.
+Both edges need an entry declaring `gated = false` — the exemption is opt-in and
+there is no consumer-written input that could authorize a dispatch without it.
 
-What this does and does not do: a listed environment may be applied without an
+What this does and does not do: an ungated environment may be applied without an
 approving review; every other apply requirement still decides, including
-`CHANGES_REQUESTED`, and every unlisted environment keeps the requirement. A
-bare `shipmate apply` on an unreviewed pull request applies the listed
+`CHANGES_REQUESTED`, and every gated environment keeps the requirement. A
+bare `shipmate apply` on an unreviewed pull request applies the ungated
 environments and holds the rest — their apply checks stay pending, so
 `shipmate / gate` stays pending and the merge stays blocked until they are
-applied with a review in hand. Adding an environment to the list is a commit to
+applied with a review in hand. Ungating an environment is a commit to
 the default branch, under whatever your ruleset requires of one, so the pull
 request that benefits from the exemption cannot also grant it. That is all
 it claims. Full semantics in [`../CONTRACT.md`](../CONTRACT.md)

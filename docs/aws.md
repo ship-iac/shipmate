@@ -129,7 +129,7 @@ branch, so a pull request cannot choose which role its own plan assumes.
 this is what it looks like for the AWS sample:
 
 ```toml
-layout = "dry"
+layout = "tf_vars"
 
 [environments.dev-eu]
 region         = "eu-west-1"
@@ -162,8 +162,8 @@ Six things to know beyond the schema:
   The same rule governs the first table of all: it has to be on the default
   branch before the first plan run, so it lands in the commit that adds the
   workflow files rather than in a pull request of its own.
-- **A workload tier is keyed by the raw `workload/<name>` tag**, exactly as the
-  tag is written, so two workloads whose names differ only in punctuation
+- **A workload tier is keyed by the `<name>` of the `workload/<name>` tag**,
+  exactly as written, so two workloads whose names differ only in punctuation
   resolve separately.
 
 ## Where the credentials step goes

@@ -291,14 +291,14 @@ def test_missing_environment_of_the_split_pair_warned(monkeypatch):
 
 #: Hand-written tables for the mode tests. `CANONICAL` declares `dev-eu` without the key.
 _SHARED_TABLE = """\
-layout = "dry"
+layout = "tf_vars"
 
 [environments.dev-eu]
 region = "eu-west-1"
 shared = true
 """
 _UNSHARED_TABLE = """\
-layout = "dry"
+layout = "tf_vars"
 
 [environments.dev-eu]
 region = "eu-west-1"
@@ -306,7 +306,7 @@ shared = false
 """
 #: Well-formed TOML that `validate_structure` refuses: an entry that is not a table.
 _INVALID_TABLE = """\
-layout = "dry"
+layout = "tf_vars"
 
 [environments]
 dev-eu = 7
@@ -1584,12 +1584,12 @@ def test_release_lookup_restores_gh_token_unset(monkeypatch):
     assert "GH_TOKEN" not in os.environ
 
 
-#: The design's canonical file with a `[gate]` table, placed above the first header the way
+#: The canonical file with a `[gate]` table, placed above the first entry the way
 #: `onboard`'s checklist prints it. Built from that file rather than retyped, so the fixture
-#: cannot drift from the bytes the docs publish; an insertion that found no anchor leaves the
+#: cannot drift from it; an insertion that found no anchor leaves the
 #: key undeclared, which every assertion below reads as a lookup of the wrong team.
 _GATE_TABLE = CANONICAL.replace(
-    "[env_order]", '[gate]\napprovers_team = "platform"\n\n[env_order]', 1
+    "[environments.dev-eu]", '[gate]\napprover_team = "platform"\n\n[environments.dev-eu]', 1
 )
 
 
@@ -1620,8 +1620,8 @@ def _team_probe(monkeypatch, table=CANONICAL, found=None, report_mode=True):
 def _unresolved(team):
     return (
         doctor.WARNING,
-        f"approvers team `{team}` does not resolve in org `o` — every `shipmate apply` "
-        'will be rejected as "not a team member". Check `[gate] approvers_team` in '
+        f"approver team `{team}` does not resolve in org `o` — every `shipmate apply` "
+        'will be rejected as "not a team member". Check `[gate] approver_team` in '
         "`.github/shipmate.toml` and that the App has members:read.",
     )
 
@@ -1678,7 +1678,7 @@ def test_unresolvable_team_warned(monkeypatch):
 
     Mutation: swallow the lookup failure -- a typo'd team then reports healthy.
     """
-    bad = _GATE_TABLE.replace('approvers_team = "platform"', 'approvers_team = "platfrom"')
+    bad = _GATE_TABLE.replace('approver_team = "platform"', 'approver_team = "platfrom"')
     out, looked_up = _team_probe(monkeypatch, table=bad, found=SystemExit("404 Not Found"))
     assert looked_up == ["orgs/o/teams/platfrom"]
     assert out == [_unresolved("platfrom")]
@@ -3870,7 +3870,7 @@ def test_probe_count_is_stated_correctly_in_the_docs():
       and (7) the reader-facing probe list itself, one `- **` bullet per probe.
 
     The number words come from the count, so this keeps biting when a further probe lands.
-    `<n-2>` is the plan-path subset: the approvers-team and App-permission probes cannot
+    `<n-2>` is the plan-path subset: the approver-team and App-permission probes cannot
     report from `annotate` mode.
 
     Mutations, one per claim: change `len(PROBES)`; delete a bullet from the `Probes:`
@@ -4401,19 +4401,17 @@ def test_declared_envs_reads_a_flat_single_artifact_download(tmp_path):
     assert doctor._declared_envs(tmp_path) == {"dev-eu"}
 
 
-#: The refusal the design's misplaced control earns, whole: the probe's own framing plus
-#: `validate_env_order`'s message with the `::error::` prefix stripped. Hand-written, not
+#: The refusal the misplaced control earns, whole: the probe's own framing plus
+#: `_check_environment`'s message with the `::error::` prefix stripped. Hand-written, not
 #: read back from the module, so a probe that reported a different refusal -- or reported
 #: this one as a skipped probe -- reddens here.
 _MISPLACED_FINDING = (
     doctor.WARNING,
     "`.github/shipmate.toml` at the commit under examination is not valid: "
-    "env_order['explicit_envs'] names a top-level setting, not an environment. A scalar "
-    "written below a [table] header lands inside that table, so `explicit_envs = ...` after "
-    "[env_order] becomes an ordering entry instead of a top-level setting. Move it above the "
-    "first header in .github/shipmate.toml. Merging it refuses every operation that reads "
-    "the table. Execution still reads the default branch's copy, which this says nothing "
-    "about.",
+    "environment prod: schema_version is not a key this engine implements. An environment "
+    "holds region, tf_vars, aws, shared, needs, explicit, gated. Merging it refuses every "
+    "operation that reads the table. Execution still reads the default branch's copy, which "
+    "this says nothing about.",
 )
 
 
@@ -4562,53 +4560,59 @@ def test_a_valid_verdict_names_the_checks_it_did_not_run(monkeypatch):
         (
             doctor.NOTICE,
             "`.github/shipmate.toml` at the commit under examination parses, and passes "
-            "every check a file can be judged on by itself: its top-level keys, `version`, "
-            "`layout`, the environment entries, `env_order`, `explicit_envs` and the "
+            "every check a file can be judged on by itself: its top-level keys, `schema_version`, "
+            "`layout`, the environment entries and the "
             "`[gate]` table. Not checked here, for want of a plan matrix and a whole-tree "
-            "environment scan: `dry`-layout coverage of the planned environments and entries "
+            "environment scan: `tf_vars`-layout coverage of the planned environments and entries "
             "that no stack tags \u2014 `detect` checks each of those on the runs where it "
             "applies. "
             "Execution reads the default branch's copy of this file, never this branch's.",
         ),
         (
             doctor.NOTICE,
-            "`env_order` orders dev-us after dev-eu \u2014 a bare `shipmate apply` applies "
+            "`needs` orders dev-us after dev-eu \u2014 a bare `shipmate apply` applies "
             "one env-level fully before it starts the next.",
         ),
         (
             doctor.NOTICE,
-            "`explicit_envs` names prod \u2014 a bare `shipmate apply` skips those, and each "
+            "`explicit = true` on prod \u2014 a bare `shipmate apply` skips those, and each "
             "needs its own `shipmate apply <env>`.",
         ),
         (
             doctor.NOTICE,
-            "`gate.approvers_team`: absent \u2014 nobody may `shipmate apply` or "
+            "`gate.approver_team`: absent \u2014 nobody may `shipmate apply` or "
             "`shipmate unlock` by comment.",
         ),
     ]
 
 
 #: Two references, one of them a list item, hand-written.
-_REFERENCED = """layout        = "folder"
-explicit_envs = [{ var = "HELD_ENV" }]
+_REFERENCED = """layout = "folder"
 
 [environments.dev]
 region         = "eu-west-1"
-aws.plan.role  = { var = "DEV_PLAN_ROLE" }
+aws.plan.role  = { vars = "DEV_PLAN_ROLE" }
 aws.apply.role = "arn:aws:iam::981781037707:role/shipmate-apply"
+
+[environments.prod]
+explicit = true
+needs    = [{ vars = "FIRST_ENV" }]
 """
 
 
 def test_a_valid_file_holding_references_lists_each_one(monkeypatch):
     """The report names the values the file does not hold, sorted by key path, beside the
     verdict and never as a finding: in `_config_warnings` the notice would annotate every
-    plan run and displace the settings-probe all-clear.
+    plan run and displace the settings-probe all-clear. The `needs` line shows the resolved
+    predecessor, and the explicit line reads the entry's flag.
 
-    Mutation: omit the references notice from `config_status`.
+    Mutations: omit the references notice from `config_status`; stop `_replace` recursing
+    into lists -- the `needs` line renders the mapping; or read the old top-level list in
+    `_config_defaults` -- the explicit line reports none.
     """
     monkeypatch.setenv(
         "SHIPMATE_GITHUB_VARS",
-        '{"DEV_PLAN_ROLE": "arn:aws:iam::981781037707:role/shipmate-plan", "HELD_ENV": "dev"}',
+        '{"DEV_PLAN_ROLE": "arn:aws:iam::981781037707:role/shipmate-plan", "FIRST_ENV": "dev"}',
     )
     responses = {_CONFIG_READ: _wf_file(_REFERENCED)}
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
@@ -4619,24 +4623,25 @@ def test_a_valid_file_holding_references_lists_each_one(monkeypatch):
             doctor.NOTICE,
             "`.github/shipmate.toml` at the commit under examination takes these values from "
             "GitHub variables instead of holding them: `environments.dev.aws.plan.role` from "
-            "variable `DEV_PLAN_ROLE`; `explicit_envs[0]` from variable `HELD_ENV`. Every run "
+            "variable `DEV_PLAN_ROLE`; `environments.prod.needs[0]` from variable `FIRST_ENV`. "
+            "Every run "
             "resolves them again from repository and organization variables, never from a "
             "cell's Environment; in comment-ops and the plan summary a `shipmate-engine` "
             "Environment variable of the same name wins.",
         ),
         (
             doctor.NOTICE,
-            "`env_order`: absent — every environment sits at one level, and a bare "
-            "`shipmate apply` applies them all together.",
+            "`needs` orders prod after dev — a bare `shipmate apply` applies "
+            "one env-level fully before it starts the next.",
         ),
         (
             doctor.NOTICE,
-            "`explicit_envs` names dev — a bare `shipmate apply` skips those, and each "
+            "`explicit = true` on prod — a bare `shipmate apply` skips those, and each "
             "needs its own `shipmate apply <env>`.",
         ),
         (
             doctor.NOTICE,
-            "`gate.approvers_team`: absent — nobody may `shipmate apply` or "
+            "`gate.approver_team`: absent — nobody may `shipmate apply` or "
             "`shipmate unlock` by comment.",
         ),
     ]
@@ -4648,7 +4653,7 @@ def test_an_unset_reference_is_the_invalid_file_finding(monkeypatch):
 
     Mutation: catch the refusal in `_config_table` and return the unresolved table.
     """
-    monkeypatch.setenv("SHIPMATE_GITHUB_VARS", '{"HELD_ENV": "dev"}')
+    monkeypatch.setenv("SHIPMATE_GITHUB_VARS", '{"FIRST_ENV": "dev"}')
     responses = {_CONFIG_READ: _wf_file(_REFERENCED)}
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
     assert doctor._config_warnings(_ctx()) == [
@@ -4667,7 +4672,7 @@ def test_an_unset_reference_is_the_invalid_file_finding(monkeypatch):
 
 
 def test_the_tolerant_defaults_are_read_back_when_absent(monkeypatch):
-    """A table omitting `env_order`, `explicit_envs` and `[gate]` is valid and takes the
+    """A table omitting `needs`, `explicit` and `[gate]` is valid and takes the
     empty default for each: a bare `shipmate apply` applies every environment -- including
     the one a consumer meant to exclude -- and no commenter may apply at all. Nothing
     refuses and no validator can, so the report says it.
@@ -4679,23 +4684,23 @@ def test_the_tolerant_defaults_are_read_back_when_absent(monkeypatch):
     assert doctor.config_status(_ctx())[1:] == [
         (
             doctor.NOTICE,
-            "`env_order`: absent \u2014 every environment sits at one level, and a bare "
-            "`shipmate apply` applies them all together.",
+            "`needs`: declared by no environment \u2014 every environment sits at one level, "
+            "and a bare `shipmate apply` applies them all together.",
         ),
         (
             doctor.NOTICE,
-            "`explicit_envs`: absent \u2014 every environment applies on a bare "
+            "`explicit`: set on no environment \u2014 every environment applies on a bare "
             "`shipmate apply`, production included.",
         ),
         (
             doctor.NOTICE,
-            "`gate.approvers_team`: absent \u2014 nobody may `shipmate apply` or "
+            "`gate.approver_team`: absent \u2014 nobody may `shipmate apply` or "
             "`shipmate unlock` by comment.",
         ),
     ]
 
 
-def test_the_declared_approvers_team_is_reported(monkeypatch):
+def test_the_declared_approver_team_is_reported(monkeypatch):
     """The team the file declares reaches the report by name. `_team_warnings` says nothing
     about a team that resolves, so without this line a reader cannot tell a repository
     whose gate is wired from one whose `[gate]` table never merged.
@@ -4706,7 +4711,7 @@ def test_the_declared_approvers_team_is_reported(monkeypatch):
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
     assert doctor.config_status(_ctx())[-1] == (
         doctor.NOTICE,
-        "`gate.approvers_team` is `platform` \u2014 its members may `shipmate apply` and "
+        "`gate.approver_team` is `platform` \u2014 its members may `shipmate apply` and "
         "`shipmate unlock` by comment.",
     )
 
@@ -4786,12 +4791,12 @@ def test_the_all_clear_survives_a_sound_environment_table(monkeypatch):
     # The status section renders too, and below the all-clear rather than instead of it.
     assert doctor.CONFIG_HEADING in body
     assert body.index("no problems found") < body.index(doctor.CONFIG_HEADING)
-    assert "`explicit_envs` names prod" in body
+    assert "`explicit = true` on prod" in body
 
 
 def test_the_report_renders_the_table_status_beside_a_finding(monkeypatch):
     """A repository with a settings problem still gets the table's status: the two sections
-    are independent, and a reader fixing a gate ruleset must not lose the `explicit_envs`
+    are independent, and a reader fixing a gate ruleset must not lose the `explicit`
     line because of it. Mutation: render the status only in the `else` branch."""
     responses = _config_responses(CANONICAL)
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
@@ -4801,7 +4806,7 @@ def test_the_report_renders_the_table_status_beside_a_finding(monkeypatch):
     )
     assert "gate rule missing" in body
     assert "no problems found" not in body
-    assert "`explicit_envs` names prod" in body
+    assert "`explicit = true` on prod" in body
 
 
 def test_no_status_section_beside_a_refusal(monkeypatch):
@@ -4823,15 +4828,17 @@ def test_no_status_section_beside_a_refusal(monkeypatch):
 #: subject is the bytes `docs/` publishes, and this is neither of them.
 CYCLIC_ORDER = """layout = "folder"
 
-[env_order]
-dev = ["prod"]
-prod = ["dev"]
+[environments.dev]
+needs = ["prod"]
+
+[environments.prod]
+needs = ["dev"]
 """
 #: Hand-written whole, like `_MISPLACED_FINDING`: the probe's framing plus
 #: `validate_env_order`'s cycle message with the `::error::` prefix stripped.
 _CYCLIC_FINDING = (
     doctor.WARNING,
-    "`.github/shipmate.toml` at the commit under examination is not valid: env_order is "
+    "`.github/shipmate.toml` at the commit under examination is not valid: needs is "
     "cyclic: dev -> prod -> dev — each of those must fully apply before the next, so the "
     "ordering has no first environment and no apply path can sort it. Break the chain in "
     ".github/shipmate.toml. Merging it refuses every operation that reads the table. "
@@ -4839,7 +4846,7 @@ _CYCLIC_FINDING = (
 )
 
 
-def test_a_cyclic_env_order_is_a_finding_and_gets_no_valid_verdict(monkeypatch):
+def test_a_cycle_across_needs_is_a_finding_and_gets_no_valid_verdict(monkeypatch):
     """Both halves of the same claim, because either one alone can pass while the file is
     still certified: the cycle is reported as a finding, and the CONFIG_VALID verdict -- which
     says the file "passes every check a file can be judged on by itself" -- is withheld. Before

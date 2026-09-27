@@ -145,16 +145,16 @@ fails closed rather than proceeding unreviewed.)
   `shipmate apply` stays blocked until `reviewDecision` clears — for every
   environment, unless some are exempted (next bullet). No shipmate
   config — set it on the ruleset (the `pull_request` rule).
-- **Team mode with named environments exempted** (`gate.ungated_envs`): the
+- **Team mode with named environments exempted** (`gated = false`): the
   ruleset requirement is repository-wide, so the two bullets above are
-  otherwise all-or-nothing. This setting in `.github/shipmate.toml` names the
-  logical environments `shipmate apply` may apply without an approving review,
-  while the ruleset keeps requiring one for the merge and every unnamed
-  environment keeps it for apply too. It exempts `REVIEW_REQUIRED` and nothing
+  otherwise all-or-nothing. This flag on an environment's entry in
+  `.github/shipmate.toml` lets `shipmate apply` apply that environment without
+  an approving review, while the ruleset keeps requiring one for the merge and
+  every gated environment keeps it for apply too. It exempts `REVIEW_REQUIRED` and nothing
   else — `CHANGES_REQUESTED` still blocks, as do the other apply requirements. A
-  bare `shipmate apply` on an unreviewed pull request applies the named
+  bare `shipmate apply` on an unreviewed pull request applies the ungated
   environments and holds the rest, their apply checks left pending, so the gate
-  keeps blocking the merge. With the list absent or empty, "the rest" is
+  keeps blocking the merge. With no entry holding `gated = false`, "the rest" is
   every environment, since the engine enforces on the setting itself. Opting in
   takes no line in your workflow file; the engine reads the file from the
   default branch, so an edit takes effect when it merges. Semantics:
@@ -174,7 +174,7 @@ fails closed rather than proceeding unreviewed.)
     their own deployment by default, so a sole maintainer still gets a
     confirm-step on a gated environment. Tick "Prevent self-review" on the
     environment for genuine four-eyes once there's a team.
-  - Pair a reviewer-gated production env with `explicit_envs` in
+  - Pair a reviewer-gated production env with `explicit = true` on its entry in
     `.github/shipmate.toml` so the bare `shipmate apply` skips it and
     it is only ever applied via the targeted `shipmate apply <env>` (which
     then pauses for the environment reviewer).
