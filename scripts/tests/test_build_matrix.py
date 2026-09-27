@@ -229,6 +229,30 @@ def test_an_unstated_head_repository_is_refused_naming_the_input():
     assert "fork pull requests are not supported" not in err
 
 
+#: Values that are not the bool True, so every refusal helper must still refuse on them.
+_NOT_OPTED_OUT = [
+    pytest.param(False, id="False"),
+    pytest.param("false", id="str-false"),
+    pytest.param("true", id="str-true"),
+    pytest.param(1, id="one"),
+    pytest.param("", id="empty"),
+    pytest.param(None, id="None"),
+]
+
+
+@pytest.mark.parametrize("value", _NOT_OPTED_OUT)
+def test_only_the_bool_true_skips_the_three_refusals(monkeypatch, value):
+    """main() parses the input to a bool, so a raw string here is a caller that forgot to parse.
+    A truthy check would skip the fork refusal for "false".
+
+    Mutation: `if no_pull_request is True:` -> `if no_pull_request:` in any of the three
+    helpers -- its str-false, str-true and one rows redden."""
+    monkeypatch.setattr(bm, "_run", lambda args: "basebase\n")
+    assert bm.fork_pr_error("acme/iac", "outsider/iac", value).startswith("::error::")
+    assert bm.head_checkout_error("cafe1234", value).startswith("::error::")
+    assert bm.tag_filter_error("env/dev-eu", value).startswith("::error::")
+
+
 def test_the_opt_out_plans_whatever_the_head_repository():
     for head in ("", "   ", "acme/iac", "outsider/iac"):
         assert bm.fork_pr_error("acme/iac", head, True) == ""

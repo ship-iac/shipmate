@@ -267,7 +267,7 @@ def stamp_rows(cells, table, tier):
     return rows
 
 
-def fork_pr_error(repository, head_repo, no_pull_request):
+def fork_pr_error(repository, head_repo, no_pull_request: bool):
     """The `::error::` line rejecting a run this script may not plan, or "" when
     it may.
 
@@ -294,8 +294,11 @@ def fork_pr_error(repository, head_repo, no_pull_request):
     The stated value is trustworthy against the threat this guards: the caller
     is the consumer's own default-branch workflow, which a pull-request author
     cannot edit. The residual risk is consumer misconfiguration, which is what
-    doctor's wiring probe reports."""
-    if no_pull_request:
+    doctor's wiring probe reports.
+
+    Only the bool `True` skips the refusal, here and in the two checks below: a
+    caller passing the raw input string would otherwise skip it for "false"."""
+    if no_pull_request is True:
         return ""
     head_repo = head_repo.strip()
     if not head_repo:
@@ -318,7 +321,7 @@ def fork_pr_error(repository, head_repo, no_pull_request):
     )
 
 
-def head_checkout_error(head_sha, no_pull_request):
+def head_checkout_error(head_sha, no_pull_request: bool):
     """The `::error::` line refusing a checkout that is not the commit this run
     says it is planning, or "" when it may be planned.
 
@@ -342,7 +345,7 @@ def head_checkout_error(head_sha, no_pull_request):
     head under both pull-request events, so a `pull_request` consumer names `ref:`
     like every other one.
     """
-    if no_pull_request:
+    if no_pull_request is True:
         return ""
     head_sha = head_sha.strip()
     if not head_sha:
@@ -389,7 +392,7 @@ def plan_workflow_error(event_name, root="."):
     )
 
 
-def tag_filter_error(tags, no_pull_request):
+def tag_filter_error(tags, no_pull_request: bool):
     """The `::error::` line refusing a `tags` filter outside a run with no pull
     request, or "" when it may be honoured.
 
@@ -403,7 +406,7 @@ def tag_filter_error(tags, no_pull_request):
     as never belonging in a plan job."""
     if not tags.strip():
         return ""
-    if no_pull_request:
+    if no_pull_request is True:
         return ""
     return (
         "::error::the `tags` filter is only for a workflow with no pull request at all "
