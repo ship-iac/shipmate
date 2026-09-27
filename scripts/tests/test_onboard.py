@@ -182,8 +182,7 @@ def test_dry_run_issues_no_write(monkeypatch):
     monkeypatch.setattr(onboard, "_run", fake)
     monkeypatch.setattr(onboard, "_DRY", True)
     onboard.REPORT.clear()
-    wrote = onboard.write("create", "thing", ["gh", "api", "-X", "PUT", "x"])
-    assert wrote is False
+    onboard.write("create", "thing", ["gh", "api", "-X", "PUT", "x"])
     assert fake.calls == []
     assert onboard.REPORT == [("would create", "thing", "")]
 
@@ -427,8 +426,7 @@ def test_write_forwards_secrets_to_run(monkeypatch):
         return ""
 
     monkeypatch.setattr(onboard, "_run", fake)
-    wrote = onboard.write("set", "key", ["gh", "secret", "set", "X"], stdin="pem", secrets=("pem",))
-    assert wrote is True
+    onboard.write("set", "key", ["gh", "secret", "set", "X"], stdin="pem", secrets=("pem",))
     assert seen["secrets"] == ("pem",)
 
 

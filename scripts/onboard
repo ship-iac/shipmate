@@ -126,15 +126,12 @@ def write(verb, subject, args, stdin=None, detail="", secrets=()):
 
     `secrets` reaches `_run` unchanged: a write that carries a credential must
     go through here, not around it, or --dry-run stops being read-only.
-
-    Returns True when the command ran.
     """
     if _DRY:
         report(f"would {verb}", subject, detail)
-        return False
+        return
     _run(args, secrets=secrets, stdin=stdin)
     report(verb, subject, detail)
-    return True
 
 
 def write_file(path, text, subject):
@@ -146,11 +143,10 @@ def write_file(path, text, subject):
     """
     if _DRY:
         report("would create", subject)
-        return False
+        return
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8", newline="\n")
     report("created", subject)
-    return True
 
 
 def _env_membership():
