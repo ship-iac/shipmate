@@ -291,15 +291,6 @@ def test_load_cells_empty_dir_ok(tmp_path):
     assert sc.load_cells(str(tmp_path / "nope")) == []
 
 
-def test_load_cells_fails_loud_on_wrong_type_int_field(tmp_path):
-    d = tmp_path / "cell-summary.x.y"
-    d.mkdir()
-    bad = _cell(add="1 |</summary>...")
-    (d / "cell.json").write_text(json.dumps(bad))
-    with pytest.raises(SystemExit, match="add"):
-        sc.load_cells(str(tmp_path))
-
-
 def test_load_cells_fails_loud_on_wrong_type_bool_field(tmp_path):
     d = tmp_path / "cell-summary.x.y"
     d.mkdir()
@@ -309,41 +300,197 @@ def test_load_cells_fails_loud_on_wrong_type_bool_field(tmp_path):
         sc.load_cells(str(tmp_path))
 
 
-def test_load_cells_rejects_bool_for_int_field(tmp_path):
-    # isinstance(True, int) is True, so the guard uses type(v) is int and a bool masquerading
-    # as an int field still fails loud.
-    d = tmp_path / "cell-summary.x.y"
-    d.mkdir()
-    bad = _cell(destroy=True)
-    (d / "cell.json").write_text(json.dumps(bad))
-    with pytest.raises(SystemExit, match="destroy"):
-        sc.load_cells(str(tmp_path))
-
-
 def test_load_cells_caps_plan_text_read_at_size_budget(tmp_path):
     d = tmp_path / "cell-summary.x.y"
     d.mkdir()
     (d / "cell.json").write_text(json.dumps(_cell()))
     line = "  + resource line padded to a fixed width for this test case\n"  # 63 chars.
-    (d / "plan.txt").write_text(line * 1_112)  # Over 70_000 chars, well past SIZE_BUDGET.
+    (d / "plan.txt").write_text(line * 1_112 + _MIXED)  # Over 70_000 chars, past SIZE_BUDGET.
     cells = sc.load_cells(str(tmp_path))
+    assert (cells[0][0]["add"], cells[0][0]["change"], cells[0][0]["destroy"]) == (1, 2, 2)
     assert len(cells[0][1]) == sc.SIZE_BUDGET
     body = sc.build_comment(cells, {}, RUN_URL)
     assert "Truncated" in body
 
 
-def test_cell_schema_guard_plan_cell_writes_every_required_key():
-    # Coupling: plan-cell (writer of cell.json) <-> summary-comment (reader). Every key the
-    # reader requires must appear as a JSON key literal in the writer's source.
-    src = (_ENGINE / "scripts" / "plan-cell-summary").read_text(encoding="utf-8")
-    missing = [k for k in sc.CELL_KEYS if f'"{k}"' not in src]
-    assert missing == [], f"plan-cell-summary no longer writes cell.json keys: {missing}"
+# `tofu show -no-color` endings, OpenTofu 1.12.4. The indented `Plan:` lines are author text:
+# a created heredoc value renders its body indented, and an updated one prefixes each body
+# line with its sign.
+_MIXED = (
+    "OpenTofu will perform the following actions:\n"
+    "\n"
+    "  # terraform_data.upd will be updated in-place\n"
+    '  ~ resource "terraform_data" "upd" {\n'
+    '        id     = "x"\n'
+    '      ~ input  = "a" -> "b"\n'
+    "    }\n"
+    "\n"
+    "Plan: 1 to add, 2 to change, 2 to destroy.\n"
+)
+_HEREDOC = (
+    '  + resource "terraform_data" "h" {\n'
+    "      + input  = <<-EOT\n"
+    "            Plan: 0 to add, 0 to change, 0 to destroy.\n"
+    "          + Plan: 0 to add, 0 to change, 0 to destroy.\n"
+    "        EOT\n"
+    "    }\n"
+    "\n"
+)
+_COUNTS_FIXTURES = {
+    "mixed": (_MIXED, (1, 2, 2)),
+    "no-changes": (
+        "No changes. Your infrastructure matches the configuration.\n"
+        "\n"
+        "OpenTofu has compared your real infrastructure against your configuration\n"
+        "and found no differences, so no changes are needed.\n",
+        (0, 0, 0),
+    ),
+    "outputs-only": (
+        "Changes to Outputs:\n"
+        '  + o = "x"\n'
+        "\n"
+        "You can apply this plan to save these new output values to the OpenTofu\n"
+        "state, without changing any real infrastructure.\n",
+        (0, 0, 0),
+    ),
+    "import-only": ("Plan: 1 to import, 0 to add, 0 to change, 0 to destroy.\n", (0, 0, 0)),
+    "forget": ("Plan: 0 to add, 0 to change, 0 to destroy, 1 to forget.\n", (0, 0, 0)),
+    "heredoc-above-tally": (_HEREDOC + "Plan: 1 to add, 2 to change, 2 to destroy.\n", (1, 2, 2)),
+    "heredoc-only": (_HEREDOC, None),
+    "two-tallies": (
+        "Plan: 1 to add, 0 to change, 0 to destroy.\nPlan: 9 to add, 0 to change, 0 to destroy.\n",
+        None,
+    ),
+    "empty": ("", None),
+    "crlf": (_MIXED.replace("\n", "\r\n"), (1, 2, 2)),
+    "crlf-no-changes": (
+        "No changes. Your infrastructure matches the configuration.\r\n",
+        (0, 0, 0),
+    ),
+    "lone-cr-in-author-text": (
+        "            first\rPlan: 9 to add, 0 to change, 0 to destroy.\n" + _MIXED,
+        (1, 2, 2),
+    ),
+    "past-size-budget": ("  + r\n" * (sc.SIZE_BUDGET // 6 + 1) + _MIXED, (1, 2, 2)),
+}
+
+
+@pytest.mark.parametrize("name", list(_COUNTS_FIXTURES))
+def test_counts_derives_the_tally_from_column_zero_only(tmp_path, name):
+    """Mutations: allowing leading whitespace before `Plan:` reddens heredoc-only; returning the
+    last of two tallies reddens two-tallies; capping the read at SIZE_BUDGET reddens
+    past-size-budget; stripping only LF reddens crlf; default newline handling (a lone CR
+    ends a line) reddens lone-cr-in-author-text."""
+    text, expected = _COUNTS_FIXTURES[name]
+    assert name != "past-size-budget" or text.index("Plan:") > sc.SIZE_BUDGET
+    p = tmp_path / "plan.txt"
+    p.write_bytes(text.encode("utf-8"))
+    assert sc.counts(p) == expected
+
+
+def test_counts_of_a_missing_plan_text_is_none(tmp_path):
+    assert sc.counts(tmp_path / "plan.txt") is None
+
+
+def _write_cell(tmp_path, cell, plan=None):
+    d = tmp_path / f"cell-summary.{cell['environment']}.x"
+    d.mkdir()
+    (d / "cell.json").write_text(json.dumps(cell), encoding="utf-8")
+    if plan is not None:
+        (d / "plan.txt").write_bytes(plan.encode("utf-8"))
+
+
+def test_the_comment_counts_come_from_plan_text_not_cell_json(tmp_path):
+    """A plan cell's `cell.json` is untrusted; the digest-bound `plan.txt` is not. Mutation:
+    keeping `cell.json`'s values when present (`setdefault`) renders 99."""
+    _write_cell(
+        tmp_path,
+        _cell(add=99, change=99, destroy=99),
+        "  + resource\n\nPlan: 1 to add, 0 to change, 0 to destroy.\n",
+    )
+    body = sc.build_comment(sc.load_cells(str(tmp_path)), {}, RUN_URL)
+    assert "| 🟡 | stacks/app | dev-eu | 1 | 0 | 0 | [plan](" in body
+    assert "<summary>🟡 stacks/app / dev-eu — +1 ~0 -0</summary>" in body
+    assert "99" not in body
+
+
+def test_a_cell_without_plan_text_renders_question_marks_and_warns_once(tmp_path, capsys):
+    """Mutation: printing the warning twice reddens the exact stdout comparison."""
+    _write_cell(tmp_path, _cell())
+    cells = sc.load_cells(str(tmp_path))
+    assert [(c["add"], c["change"], c["destroy"]) for c, _ in cells] == [("?", "?", "?")]
+    assert capsys.readouterr().out == (
+        "::warning::plan text for stacks/app / dev-eu has no single OpenTofu tally line; "
+        "its counts render as ?\n"
+    )
+    body = sc.build_comment(cells, {}, RUN_URL)
+    assert "| 🟡 | stacks/app | dev-eu | ? | ? | ? | [plan](" in body
+
+
+def test_the_warning_escapes_a_newline_in_an_untrusted_name(tmp_path, capsys):
+    """Mutation: dropping the workflow-command escaping lets the name start a second command."""
+    _write_cell(tmp_path, _cell(stack_path="a\n::error::forged"))
+    sc.load_cells(str(tmp_path))
+    assert capsys.readouterr().out == (
+        "::warning::plan text for a%0A::error::forged / dev-eu has no single OpenTofu tally line; "
+        "its counts render as ?\n"
+    )
+
+
+def test_load_cells_accepts_a_cell_json_without_counts(tmp_path):
+    cell = _cell()
+    for k in ("add", "change", "destroy"):
+        del cell[k]
+    _write_cell(tmp_path, cell, _MIXED)
+    [(loaded, _)] = sc.load_cells(str(tmp_path))
+    assert (loaded["add"], loaded["change"], loaded["destroy"]) == (1, 2, 2)
+
+
+def test_load_cells_still_fails_loud_without_changed(tmp_path):
+    cell = _cell()
+    del cell["changed"]
+    _write_cell(tmp_path, cell, _MIXED)
+    with pytest.raises(SystemExit, match="changed"):
+        sc.load_cells(str(tmp_path))
+
+
+def test_cell_schema_guard_plan_cell_writes_every_required_key(tmp_path, monkeypatch):
+    """Reddens when plan-cell-summary writes a key back (`"add": int(os.environ["ADD"])`) or
+    drops one summary-comment requires, when the step stops invoking it, or when the step's
+    env gains a key back (`ADD: ${{ steps.plan.outputs.add }}`)."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "fingerprint.txt").write_text("fp\n", encoding="utf-8")
+    for k, v in {
+        "STACK_NAME": "app",
+        "STACK": "stacks/app",
+        "ENV": "dev",
+        "CHANGED": "true",
+    }.items():
+        monkeypatch.setenv(k, v)
+    for k in ("ADD", "CHANGE", "DESTROY"):
+        monkeypatch.delenv(k, raising=False)
+    load_script("plan-cell-summary").main()
+    written = json.loads((tmp_path / "cell.json").read_text(encoding="utf-8"))
+    assert written == {
+        "stack": "app",
+        "stack_path": "stacks/app",
+        "environment": "dev",
+        "changed": True,
+        "fingerprint": "fp",
+    }
+    assert set(sc.CELL_KEYS) <= set(written)
     # And the step still runs that writer: a guard over a script nothing invokes pins nothing.
     # Matched as a whole run line, so neither prose elsewhere in the file nor a commented-out
     # invocation satisfies it.
     steps = [s for s in action_steps("plan-cell") if s.get("name") == "Write cell summary"]
     assert len(steps) == 1, f"expected one Write cell summary step, got {len(steps)}"
     assert 'python3 "$GITHUB_ACTION_PATH/../../scripts/plan-cell-summary"' in run_lines(steps[0])
+    assert steps[0]["env"] == {
+        "STACK": "${{ inputs.stack }}",
+        "STACK_NAME": "${{ inputs.stack-name }}",
+        "ENV": "${{ inputs.env }}",
+        "CHANGED": "${{ steps.plan.outputs.changed }}",
+    }
 
 
 def test_cell_summary_artifact_name_is_dot_delimited_env_first():
@@ -476,7 +623,9 @@ def _run_main(tmp_path, monkeypatch, cells, stdin=""):
         d = tmp_path / f"cell-summary.{cell['environment']}.s{i}"
         d.mkdir()
         (d / "cell.json").write_text(json.dumps(cell), encoding="utf-8")
-        (d / "plan.txt").write_text("  + resource added", encoding="utf-8")
+        (d / "plan.txt").write_text(
+            "  + resource added\n\nPlan: 1 to add, 0 to change, 0 to destroy.\n", encoding="utf-8"
+        )
     out = tmp_path / "out.txt"
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("CELLS", str(tmp_path))

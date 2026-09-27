@@ -964,8 +964,9 @@ providers fails on the dependency lock.
 
 What this binds is agreement, not honesty. A privileged author still authors
 both the plan text and the `.otplan`; what they can no longer do is have the two
-disagree. The `+add ~change -destroy` counts beside the text are a separate
-matter — see "What none of this fixes".
+disagree. The `+add ~change -destroy` counts in the comment are read from that
+same bound text, which is checked against the stored plan only when the cell
+applies.
 
 ## Contributors without push access
 
@@ -1108,16 +1109,6 @@ for exactly the exposure control 1 exists to limit.
   plan text a reviewer approves"). Nothing here makes the gate
   unforgeable from inside the repository; control 1 (who can push a branch) is
   what bounds that.
-- **The counts beside the plan text.** The `+add ~change -destroy` tally in
-  every comment section comes from `cell.json`, which the plan cell writes; the
-  summary never re-parses the plan text to check it (`CONTRACT.md` §Plan
-  comment). The plan-text binding does not reach it. The sharp case is a plan
-  too large to embed in full: the comment cuts the text at a line boundary, so
-  an author can name a resource such that it sorts past the cut, lie in the
-  counts, and have the digest pass over a genuine prefix carrying a false tally.
-  The link-only degradation is milder only because the reviewer can see they
-  were shown nothing. Making the counts trustworthy means deriving them in the
-  trusted job from the plan text it already holds; nothing here does that.
 - **Plan-time code execution.** Reviewing a plan means reading output produced
   by a pipeline running the author's code. A hostile provider, an `external`
   data source, or a module the branch points at executes during plan. Control 8
