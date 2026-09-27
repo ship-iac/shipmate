@@ -12,7 +12,7 @@ findings as workflow annotations titled `shipmate doctor`
 (`::warning title=shipmate doctor::<text>` / `::notice title=shipmate
 doctor::<text>`) — read-only, never blocking. Comment `shipmate doctor` on a
 pull request for a consolidated report: a sticky comment (marker `<!--
-shipmate:doctor -->`, upserted in place like the plan comment) combining sixteen
+shipmate:doctor -->`, upserted in place like the plan comment) combining fourteen
 live probes.
 
 - **The `shipmate / gate` rule on the default branch is missing or mis-pinned.**
@@ -79,20 +79,6 @@ live probes.
   every `[plan]` link in the plan comment, which falls back to the workflow-run
   page instead of the cell's own check. A job with no `name:` is judged by its
   job id, which is what GitHub displays then.
-- **Whether `shipmate.yml` still declares or forwards the retired
-  `plan_run_id` input.** The engine dispatches no such value and nothing it
-  calls accepts one. A `with:` line forwarding it to the engine's reusable
-  `apply.yml` or `apply-all.yml` makes GitHub reject the run as it LOADS the
-  workflow — the run has no jobs and no logs, only a workflow-validation error
-  on the run itself — while the same line on a composite action is only a
-  warning.
-- **Whether that same file still carries the retired `mode` input.**
-  `shipmate unlock` no longer uses it, now that it routes to its own job and
-  the engine's reusable `unlock.yml`. Declared under `on:` it is dead weight; forwarded to the
-  engine's reusable `apply.yml` or `apply-all.yml` it is the same load-time
-  rejection. Those two
-  placements are what the probe reads, so an ordinary `mode:` elsewhere in the
-  file, such as an `actions/state` step's, is not reported.
 - **Whether `shipmate.yml` can serve a dispatched verb at all.** That needs the
   `workflow_dispatch` trigger every commented verb dispatches; all four inputs
   those bodies name (`verb`, `environment`, `ref` and `pr_number`); a `verb`
@@ -143,7 +129,7 @@ annotations GitHub already recorded on this commit's workflow runs — shipmate'
 own and any other Actions workflow run on that commit; third-party-app-authored
 check runs are excluded.
 
-Only fourteen of the sixteen probes can produce a finding from the plan path's
+Only twelve of the fourteen probes can produce a finding from the plan path's
 own `annotate`-mode run (`actions/summary`). The approver-team probe runs only
 in `report` mode, because the plan path's App token is minted without
 `members: read` and could not look a team up, and
