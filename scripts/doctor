@@ -297,7 +297,7 @@ ENV_PROBES_INTERPRETER_REFUSED = (
 
 
 def _environment_warnings(ctx):
-    if not ctx["envs_available"]:
+    if not ctx["envs"]:
         return [
             (
                 NOTICE,
@@ -305,8 +305,6 @@ def _environment_warnings(ctx):
                 "environment set is unknown, so the environment probes were skipped.",
             )
         ]
-    if not ctx["envs"]:
-        return []
     if bm.ec.interpreter_refusal():
         return [ENV_PROBES_INTERPRETER_REFUSED]
     names = _existing_env_names(ctx)
@@ -1967,7 +1965,6 @@ def ctx_from_env():
         "app_id": os.environ["SHIPMATE_APP_ID"],
         "default_branch": os.environ["SHIPMATE_DEFAULT_BRANCH"],
         "envs": envs,
-        "envs_available": bool(envs),
         # The team probe's route marker: only the comment path's token requests
         # `members: read`, and `report` mode runs nowhere else.
         "report_mode": os.environ.get("SHIPMATE_DOCTOR_MODE") == "report",
@@ -2117,7 +2114,7 @@ def _provenance(ctx):
     probes did with it.
 
     Environment-probe coverage is stated only by `_environment_warnings`, keyed
-    on `envs_available`, because the two signals can disagree: the id set names
+    on `envs`, because the two signals can disagree: the id set names
     the plan runs this head's apply checks recorded, whether or not their cell
     summaries could then be downloaded, so a non-empty set is no evidence that
     any environment was probed. A preamble keyed on it would claim a coverage

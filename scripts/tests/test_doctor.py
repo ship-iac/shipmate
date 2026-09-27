@@ -39,7 +39,6 @@ def _ctx(**over):
         "app_id": _APP_ID,
         "default_branch": _BRANCH,
         "envs": set(_ENVS),
-        "envs_available": True,
         "report_mode": True,
         "app_permissions_checked": False,
         "app_permission_error": "",
@@ -87,9 +86,9 @@ def test_envs_unavailable_skips_the_probes_that_need_the_declared_set(monkeypatc
     """Without the declared environment set there is nothing to check a listing
     against, so the probe reads nothing and says the probes were skipped.
 
-    Mutation: move the listing read above the `envs_available` check."""
+    Mutation: move the listing read above the empty-`envs` check."""
     monkeypatch.setattr(doctor, "_gh_json", lambda path: pytest.fail(f"read {path}"))
-    assert doctor._environment_warnings(_ctx(envs=set(), envs_available=False)) == [
+    assert doctor._environment_warnings(_ctx(envs=set())) == [
         (
             doctor.NOTICE,
             "no plan run with cell summaries for this commit \u2014 the declared "
@@ -105,7 +104,6 @@ def test_ctx_from_env_missing_cells_dir_yields_empty_envs(monkeypatch, tmp_path)
     monkeypatch.setenv("SHIPMATE_CELLS_DIR", str(tmp_path / "missing"))
     ctx = doctor.ctx_from_env()
     assert ctx["envs"] == set()
-    assert ctx["envs_available"] is False
 
 
 def test_declared_envs_skips_malformed_cell_json(tmp_path):
@@ -120,7 +118,7 @@ def test_declared_envs_skips_malformed_cell_json(tmp_path):
 def test_declared_envs_skips_cell_json_without_a_usable_environment(tmp_path):
     """Well-formed JSON of the wrong shape degrades like unparsable JSON: KeyError, not
     only JSONDecodeError, is a guarded exception. A null, non-string or empty
-    `environment` is dropped too, or `envs_available` goes true and every environment
+    `environment` is dropped too, or `envs` goes non-empty and every environment
     probe runs against a name that cannot exist."""
     for i, payload in enumerate(
         [{"stack": "app"}, {"environment": None}, {"environment": 7}, {"environment": ""}]
@@ -477,11 +475,18 @@ def test_an_interpreter_below_the_floor_skips_the_environment_probes(monkeypatch
 def test_no_declared_env_reads_nothing_in_the_environment_probes(monkeypatch):
     """With no env to probe there is no binding to select, so neither the listing nor the
     default branch's table is read, and a failed read cannot report probes that had no work.
+    The one finding is the skipped-probes NOTICE.
 
-    Mutation: remove `_environment_warnings`' early return on an empty `ctx["envs"]` -- it
-    reads the listing and the table."""
+    Mutation: remove `_env_protection_warnings`' early return on an empty `ctx["envs"]` --
+    it reads the listing and the table."""
     found, asked = _environment_probes(monkeypatch, _ctx(envs=set()))
-    assert found == []
+    assert found == [
+        (
+            doctor.NOTICE,
+            "no plan run with cell summaries for this commit — the declared "
+            "environment set is unknown, so the environment probes were skipped.",
+        )
+    ]
     assert asked == []
 
 
@@ -921,7 +926,7 @@ def test_env_protection_reads_nothing_when_no_environment_was_declared(monkeypat
         pytest.fail(f"the env protection probe hit the API with no envs: {path}")
 
     monkeypatch.setattr(doctor, "_gh_json", gh)
-    assert doctor._env_protection_warnings(_ctx(envs=set(), envs_available=False)) == []
+    assert doctor._env_protection_warnings(_ctx(envs=set())) == []
 
 
 def test_env_protection_unreadable_existing_env_is_a_notice_naming_it(monkeypatch):
@@ -1829,7 +1834,7 @@ def test_all_clear_names_the_environments_the_probes_actually_covered():
 
 
 def test_all_clear_says_when_no_environments_were_probed():
-    body = doctor.render_report([], [], _ctx(envs=set(), envs_available=False))
+    body = doctor.render_report([], [], _ctx(envs=set()))
     assert "no environments were probed" in body
 
 
@@ -2009,11 +2014,11 @@ def test_report_escapes_hostile_annotation_text():
 
 def test_skipped_environment_probes_are_stated_exactly_once(monkeypatch):
     """The "skipped" wording comes from one place -- `_environment_warnings`,
-    keyed on `envs_available` -- so the preamble and the finding can neither
+    keyed on `envs` -- so the preamble and the finding can neither
     repeat it nor disagree about it."""
     monkeypatch.setattr(doctor, "_gh_json", _existence("dev-eu-plan", "dev-eu-apply"))
-    findings = doctor._environment_warnings(_ctx(envs=set(), envs_available=False))
-    body = doctor.render_report(findings, [], _ctx(envs_available=False, plan_run_ids=[]))
+    findings = doctor._environment_warnings(_ctx(envs=set()))
+    body = doctor.render_report(findings, [], _ctx(plan_run_ids=[]))
     assert "environment probes were skipped" in body
     assert body.count("environment probes were skipped") == 1
 
@@ -2022,10 +2027,10 @@ def test_provenance_and_probe_coverage_can_disagree_without_contradicting(monkey
     """The id set is written from the plan records on the head's apply checks whether or
     not those runs' cell summaries could be downloaded, so a non-empty set with no
     declared environments is a live state. The preamble still names the runs read, and its
-    coverage claim still comes from `envs_available` alone, or it contradicts the next line."""
+    coverage claim still comes from `envs` alone, or it contradicts the next line."""
     monkeypatch.setattr(doctor, "_gh_json", _existence("dev-eu-plan", "dev-eu-apply"))
-    findings = doctor._environment_warnings(_ctx(envs=set(), envs_available=False))
-    body = doctor.render_report(findings, [], _ctx(envs_available=False, plan_run_ids=["1281"]))
+    findings = doctor._environment_warnings(_ctx(envs=set()))
+    body = doctor.render_report(findings, [], _ctx(plan_run_ids=["1281"]))
     assert "cell summaries from plan run 1281" in body
     assert "environment probes were skipped" in body
 
@@ -2064,7 +2069,7 @@ def test_provenance_names_every_run_the_head_recorded():
 def test_provenance_states_the_run_without_a_coverage_claim():
     """The run branch must name what was read and claim nothing about what the probes did
     with it: that claim belongs to `_environment_warnings`' NOTICE, keyed on
-    `envs_available`. Wording that implies the declared environment set came from these
+    `envs`. Wording that implies the declared environment set came from these
     runs, or that mentions the probes at all, fails here."""
     text = doctor._provenance(_ctx(plan_run_ids=["1281"]))
     assert text == f"_Commit `{_HEAD[:7]}`; cell summaries from plan run 1281._"
@@ -3923,7 +3928,7 @@ def test_no_declared_env_reads_nothing_and_says_nothing(monkeypatch):
     dark-check WARNING instead of nothing."""
     monkeypatch.delenv("SHIPMATE_ENV_TOKEN", raising=False)
     monkeypatch.setattr(doctor, "_gh_json", lambda path: pytest.fail(f"read {path}"))
-    assert doctor._plan_env_secret_warnings(_ctx(envs=set(), envs_available=False)) == []
+    assert doctor._plan_env_secret_warnings(_ctx(envs=set())) == []
 
 
 def test_an_environment_that_does_not_exist_is_never_read(monkeypatch):
