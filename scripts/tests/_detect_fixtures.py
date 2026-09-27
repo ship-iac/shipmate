@@ -66,8 +66,8 @@ def completed_names(apply_detect, monkeypatch, checks, app_id=APP_ID):
 MINIMAL_TABLE = {"layout": "folder"}
 
 
-def stub_read_table(monkeypatch, modules, base=None, order=None, explicit=(), reads=None):
-    """Stub `read_table` on every `env-config` instance `modules` can reach, carrying `order`
+def stub_read_table(monkeypatch, configs, base=None, order=None, explicit=(), reads=None):
+    """Stub `read_table` on every `env-config` instance in `configs`, carrying `order`
     as each entry's `needs` and `explicit` as each named entry's `explicit = true`.
 
     Shared by the two ordering detects so neither can drift back to stubbing `env-order`'s
@@ -94,5 +94,5 @@ def stub_read_table(monkeypatch, modules, base=None, order=None, explicit=(), re
             reads.append(cfg)
         return dict(cfg)
 
-    for module in modules:
-        monkeypatch.setattr(module.bm.ec, "read_table", read_table)
+    for config in configs:
+        monkeypatch.setattr(config, "read_table", read_table)
