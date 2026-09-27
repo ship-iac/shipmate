@@ -114,7 +114,6 @@ def test_the_authz_step_passes_this_whole_with_block():
         "comment-user": "${{ github.event.comment.user.login }}",
         "comment-id": "${{ github.event.comment.id }}",
         "pr-number": "${{ github.event.issue.number }}",
-        "github-token": "${{ github.token }}",
         "github-vars": "${{ toJSON(vars) }}",
     }
 

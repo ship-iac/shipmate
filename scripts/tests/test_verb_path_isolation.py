@@ -137,7 +137,6 @@ DETECT_WITH = {
     "environment": "${{ inputs.environment }}",
     "mode": "unlock",
     "head-sha": "${{ inputs.ref }}",
-    "github-token": "${{ github.token }}",
     "app-id": "${{ vars.SHIPMATE_APP_ID }}",
     "github-vars": "${{ toJSON(vars) }}",
 }
@@ -149,7 +148,6 @@ PREFLIGHT_ACTION = local_action("verify-environments")
 PREFLIGHT_IF = "${{ steps.d.outputs.cells != '[]' }}"
 PREFLIGHT_WITH = {
     "waves-json": "${{ format('{{\"wave0\":{0}}}', steps.d.outputs.cells) }}",
-    "github-token": "${{ github.token }}",
 }
 
 

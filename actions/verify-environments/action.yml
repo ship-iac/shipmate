@@ -4,16 +4,13 @@ inputs:
   waves-json:
     description: This run's wave matrices (the apply-env-level.yml waves_json shape).
     required: true
-  github-token:
-    description: GITHUB_TOKEN. Listing environments needs no App key and no added permission.
-    required: true
 runs:
   using: composite
   steps:
     - name: Verify the apply-path environments exist
       shell: bash
       env:
-        GH_TOKEN: ${{ inputs.github-token }}
+        GH_TOKEN: ${{ github.token }}
         SHIPMATE_WAVES_JSON: ${{ inputs.waves-json }}
       # Unpaginated on purpose: the script refuses a listing whose total_count exceeds what it
       # read, because a missing page is indistinguishable from a missing environment.

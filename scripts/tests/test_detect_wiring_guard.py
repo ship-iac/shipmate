@@ -26,7 +26,7 @@ RETIRED = ("SHIPMATE_SHARED_ENVS", "shared-envs")
 #: The whole `env:` of the step that runs each detect script.
 _SCRIPT_ENV = {
     "apply-detect": {
-        "GH_TOKEN": "${{ inputs.github-token }}",
+        "GH_TOKEN": "${{ github.token }}",
         "SHIPMATE_ENV": "${{ inputs.environment }}",
         "SHIPMATE_HEAD_SHA": "${{ inputs.head-sha }}",
         "SHIPMATE_APP_ID": "${{ inputs.app-id }}",
@@ -35,14 +35,14 @@ _SCRIPT_ENV = {
         "SHIPMATE_GITHUB_VARS": "${{ inputs.github-vars }}",
     },
     "apply-all-detect": {
-        "GH_TOKEN": "${{ inputs.github-token }}",
+        "GH_TOKEN": "${{ github.token }}",
         "SHIPMATE_HEAD_SHA": "${{ inputs.head-sha }}",
         "SHIPMATE_APP_ID": "${{ inputs.app-id }}",
         "SHIPMATE_REVIEW_DECISION": "${{ inputs.review-decision }}",
         "SHIPMATE_GITHUB_VARS": "${{ inputs.github-vars }}",
     },
     "deploy-detect": {
-        "GH_TOKEN": "${{ inputs.github-token }}",
+        "GH_TOKEN": "${{ github.token }}",
         "SHIPMATE_BASE_SHA": "${{ inputs.base-sha }}",
         "SHIPMATE_APP_ID": "${{ inputs.app-id }}",
         "SHIPMATE_GITHUB_VARS": "${{ inputs.github-vars }}",
@@ -67,7 +67,6 @@ _DETECT_WITH = {
         {
             "environment": "${{ inputs.environment }}",
             "head-sha": "${{ inputs.ref }}",
-            "github-token": "${{ github.token }}",
             "app-id": "${{ vars.SHIPMATE_APP_ID }}",
             "review-decision": "${{ needs.review.outputs.decision }}",
             "github-vars": "${{ toJSON(vars) }}",
@@ -77,7 +76,6 @@ _DETECT_WITH = {
         "$/actions/apply-all-detect",
         {
             "head-sha": "${{ inputs.ref }}",
-            "github-token": "${{ github.token }}",
             "app-id": "${{ vars.SHIPMATE_APP_ID }}",
             "review-decision": "${{ needs.review.outputs.decision }}",
             "github-vars": "${{ toJSON(vars) }}",
@@ -87,7 +85,6 @@ _DETECT_WITH = {
         "$/actions/deploy-detect",
         {
             "base-sha": "${{ github.event.before }}",
-            "github-token": "${{ github.token }}",
             "app-id": "${{ vars.SHIPMATE_APP_ID }}",
             "github-vars": "${{ toJSON(vars) }}",
         },

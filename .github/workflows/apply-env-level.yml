@@ -35,14 +35,12 @@ jobs:
       - uses: $/actions/verify-environments
         with:
           waves-json: ${{ inputs.waves_json }}
-          github-token: ${{ github.token }}
       - id: snap
         uses: $/actions/apply-snapshot
         with:
           head-sha: ${{ inputs.head_sha }}
           waves-json: ${{ inputs.waves_json }}
           app-id: ${{ vars.SHIPMATE_APP_ID }}
-          github-token: ${{ github.token }}
 
   wave0:
     needs: [snapshot]
@@ -81,7 +79,6 @@ jobs:
           head-sha: ${{ inputs.head_sha }}
           plan-run-id: ${{ matrix.plan_run_id }}
           plan-sha256: ${{ matrix.plan_sha256 }}
-          github-token: ${{ github.token }}
           plan-passphrase: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
   wave1:
     needs: [wave0]
@@ -117,7 +114,6 @@ jobs:
           head-sha: ${{ inputs.head_sha }}
           plan-run-id: ${{ matrix.plan_run_id }}
           plan-sha256: ${{ matrix.plan_sha256 }}
-          github-token: ${{ github.token }}
           plan-passphrase: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
   wave2:
     needs: [wave0, wave1]
@@ -153,7 +149,6 @@ jobs:
           head-sha: ${{ inputs.head_sha }}
           plan-run-id: ${{ matrix.plan_run_id }}
           plan-sha256: ${{ matrix.plan_sha256 }}
-          github-token: ${{ github.token }}
           plan-passphrase: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
   wave3:
     needs: [wave0, wave1, wave2]
@@ -189,7 +184,6 @@ jobs:
           head-sha: ${{ inputs.head_sha }}
           plan-run-id: ${{ matrix.plan_run_id }}
           plan-sha256: ${{ matrix.plan_sha256 }}
-          github-token: ${{ github.token }}
           plan-passphrase: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
   wave4:
     needs: [wave0, wave1, wave2, wave3]
@@ -225,7 +219,6 @@ jobs:
           head-sha: ${{ inputs.head_sha }}
           plan-run-id: ${{ matrix.plan_run_id }}
           plan-sha256: ${{ matrix.plan_sha256 }}
-          github-token: ${{ github.token }}
           plan-passphrase: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
   wave5:
     needs: [wave0, wave1, wave2, wave3, wave4]
@@ -261,7 +254,6 @@ jobs:
           head-sha: ${{ inputs.head_sha }}
           plan-run-id: ${{ matrix.plan_run_id }}
           plan-sha256: ${{ matrix.plan_sha256 }}
-          github-token: ${{ github.token }}
           plan-passphrase: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
   wave6:
     needs: [wave0, wave1, wave2, wave3, wave4, wave5]
@@ -297,7 +289,6 @@ jobs:
           head-sha: ${{ inputs.head_sha }}
           plan-run-id: ${{ matrix.plan_run_id }}
           plan-sha256: ${{ matrix.plan_sha256 }}
-          github-token: ${{ github.token }}
           plan-passphrase: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
   wave7:
     needs: [wave0, wave1, wave2, wave3, wave4, wave5, wave6]
@@ -333,7 +324,6 @@ jobs:
           head-sha: ${{ inputs.head_sha }}
           plan-run-id: ${{ matrix.plan_run_id }}
           plan-sha256: ${{ matrix.plan_sha256 }}
-          github-token: ${{ github.token }}
           plan-passphrase: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
 
   # Completes the checks the `snapshot` job captured, for every cell whose wave job succeeded in
@@ -352,4 +342,3 @@ jobs:
           snapshot: ${{ needs.snapshot.outputs.snapshot }}
           app-id: ${{ vars.SHIPMATE_APP_ID }}
           private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
-          github-token: ${{ github.token }}

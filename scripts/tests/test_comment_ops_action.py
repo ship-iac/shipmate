@@ -167,8 +167,11 @@ def test_a_lost_job_summary_write_does_not_cost_the_comment():
 def test_help_does_not_require_the_app():
     """help must answer even when the App is not installed — the state where a newcomer most needs
     it — so it posts with the workflow token."""
-    block = _ACTION.split("route == 'help'", 1)[1].split("- name:", 1)[0]
-    assert "inputs.github-token" in block
+    post = next(s for s in action_steps("comment-ops") if s.get("name") == "Post help")
+    assert post["env"] == {
+        "GH_TOKEN": "${{ github.token }}",
+        "PR_NUMBER": "${{ inputs.pr-number }}",
+    }
 
 
 def _step(marker):
@@ -444,7 +447,7 @@ def test_a_rejected_doctor_commenter_is_told_with_the_workflow_token():
     App (which may not be installed) and must disclose no probe results."""
     block = _step(_DOCTOR_REASON)
     assert _CLAIM in block
-    assert "inputs.github-token" in block
+    assert "GH_TOKEN: ${{ github.token }}" in block
     assert f"{_GATE} != 'true'" in block
     assert "app-id" not in block
     # The malformed/reserved rejection is a different step with a different
@@ -1024,7 +1027,7 @@ def test_the_plan_route_is_gated_on_the_association_the_help_footer_promises():
     assert planauthz["if"] == "${{ steps.parse.outputs.route == 'plan' }}"
     assert planauthz["env"] == {
         "PRIVILEGED": "${{ " + _GATE + " }}",
-        "GH_TOKEN": "${{ inputs.github-token }}",
+        "GH_TOKEN": "${{ github.token }}",
         "PR_NUMBER": "${{ inputs.pr-number }}",
     }
 
@@ -1035,7 +1038,7 @@ def test_the_plan_route_is_gated_on_the_association_the_help_footer_promises():
         "${{ steps.parse.outputs.route == 'plan' && steps.planauthz.outputs.authorized != 'true' }}"
     )
     assert reject["env"] == {
-        "GH_TOKEN": "${{ inputs.github-token }}",
+        "GH_TOKEN": "${{ github.token }}",
         "PR_NUMBER": "${{ inputs.pr-number }}",
         "REASON": "${{ steps.planauthz.outputs.reason }}",
     }

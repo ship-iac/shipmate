@@ -1,5 +1,5 @@
 name: shipmate apply-detect
-description: Compute the single-env apply work set (from the head's apply checks) and wave-order it, or in unlock mode the flat queue of cells whose apply check is still pending. Skips already-applied cells.
+description: Compute the single-env apply work set (from the head's apply checks) and wave-order it, or in unlock mode the flat queue of cells whose apply check is still pending. Skips already-applied cells. Reads the job's GITHUB_TOKEN, which needs actions:read, checks:read and contents:read.
 inputs:
   environment:
     description: Target environment, e.g. dev-eu.
@@ -10,9 +10,6 @@ inputs:
     default: apply
   head-sha:
     description: PR head SHA carrying the pending apply checks.
-    required: true
-  github-token:
-    description: 'GITHUB_TOKEN with actions:read, checks:read, contents:read.'
     required: true
   app-id:
     description: shipmate App id (repo/org variable); only checks authored by this App count as done.
@@ -39,7 +36,7 @@ runs:
       id: d
       shell: bash
       env:
-        GH_TOKEN: ${{ inputs.github-token }}
+        GH_TOKEN: ${{ github.token }}
         SHIPMATE_ENV: ${{ inputs.environment }}
         SHIPMATE_HEAD_SHA: ${{ inputs.head-sha }}
         SHIPMATE_APP_ID: ${{ inputs.app-id }}

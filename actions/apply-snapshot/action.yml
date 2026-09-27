@@ -10,9 +10,6 @@ inputs:
   app-id:
     description: shipmate App id (repo/org variable); only checks authored by this App count.
     required: true
-  github-token:
-    description: GITHUB_TOKEN with checks:read (listing check-runs needs no App key).
-    required: true
 outputs:
   snapshot:
     description: JSON object mapping each cell's stack/env key (NUL-joined, matching scripts/apply-complete's SEP) to its list of pre-existing App-authored apply-check ids.
@@ -23,7 +20,7 @@ runs:
     - id: snap
       shell: bash
       env:
-        GH_TOKEN: ${{ inputs.github-token }}
+        GH_TOKEN: ${{ github.token }}
         HEAD_SHA: ${{ inputs.head-sha }}
         SHIPMATE_WAVES_JSON: ${{ inputs.waves-json }}
         SHIPMATE_APP_ID: ${{ inputs.app-id }}

@@ -25,7 +25,7 @@ _TEAM = "${{ steps.gate.outputs.approvers_team }}"
 #: contents read needs no App token. The file on the default branch is the only source;
 #: `SHIPMATE_GITHUB_VARS` resolves only the variable references that file names.
 _GATE_ENV = {
-    "GH_TOKEN": "${{ inputs.github-token }}",
+    "GH_TOKEN": "${{ github.token }}",
     "SHIPMATE_GITHUB_VARS": "${{ inputs.github-vars }}",
 }
 
@@ -54,7 +54,7 @@ def test_a_failed_resolve_reports_to_the_commenter_and_still_fails_the_job():
     assert _step("Resolve gate configuration")["continue-on-error"] is True
     report = _step("Gate configuration unreadable")
     assert report["env"] == {
-        "GH_TOKEN": "${{ inputs.github-token }}",
+        "GH_TOKEN": "${{ github.token }}",
         "PR_NUMBER": "${{ inputs.pr-number }}",
     }
     run = report["run"]

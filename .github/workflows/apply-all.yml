@@ -117,7 +117,6 @@ jobs:
         uses: $/actions/apply-all-detect
         with:
           head-sha: ${{ inputs.ref }}
-          github-token: ${{ github.token }}
           app-id: ${{ vars.SHIPMATE_APP_ID }}
           # Passed through raw, never defaulted: an empty decision means the review signal never
           # arrived, and empty is the hold-everything value.
@@ -237,6 +236,5 @@ jobs:
           applied-ungated-envs: ${{ needs.detect.outputs.applied_ungated_envs }}
           results: ${{ join(needs.*.result, ',') }}
           gate-verdict: ${{ steps.gate.outputs.verdict }}
-          github-token: ${{ github.token }}
           app-id: ${{ vars.SHIPMATE_APP_ID }}
           private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}

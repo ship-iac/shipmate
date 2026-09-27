@@ -1,11 +1,8 @@
 name: shipmate apply-all-detect
-description: Compute the bare `shipmate apply` work set (all non-explicit envs, from the head's apply checks), bucket it into env-levels, and wave-order each level. Skips already-applied cells; explicit envs stay pending.
+description: Compute the bare `shipmate apply` work set (all non-explicit envs, from the head's apply checks), bucket it into env-levels, and wave-order each level. Skips already-applied cells; explicit envs stay pending. Reads the job's GITHUB_TOKEN, which needs actions:read, checks:read and contents:read.
 inputs:
   head-sha:
     description: PR head SHA carrying the pending apply checks.
-    required: true
-  github-token:
-    description: 'GITHUB_TOKEN with actions:read, checks:read, contents:read.'
     required: true
   app-id:
     description: shipmate App id (repo/org variable); only checks authored by this App count as done.
@@ -41,7 +38,7 @@ runs:
       id: d
       shell: bash
       env:
-        GH_TOKEN: ${{ inputs.github-token }}
+        GH_TOKEN: ${{ github.token }}
         SHIPMATE_HEAD_SHA: ${{ inputs.head-sha }}
         SHIPMATE_APP_ID: ${{ inputs.app-id }}
         SHIPMATE_REVIEW_DECISION: ${{ inputs.review-decision }}

@@ -1,5 +1,5 @@
 name: shipmate apply-summary
-description: Render the apply result comment and post it to the pull request. Downloads the per-cell apply-summary.* artifacts, mints a shipmate App installation token, scans the head SHA's apply checks, and lists the run's jobs for per-cell log links.
+description: Render the apply result comment and post it to the pull request. Downloads the per-cell apply-summary.* artifacts, mints a shipmate App installation token, scans the head SHA's apply checks, and lists the run's jobs for per-cell log links. Reads the job's GITHUB_TOKEN, which needs actions:read for the artifact download and the jobs listing.
 inputs:
   pr-number:
     description: Pull request number to comment on.
@@ -54,9 +54,6 @@ inputs:
   head-sha:
     description: PR head SHA carrying the apply checks; their state tells an applied cell from a recorded one.
     required: true
-  github-token:
-    description: GITHUB_TOKEN with actions:read (artifact download + run jobs listing).
-    required: true
   app-id:
     description: shipmate App id (a repo/org variable, not a secret).
     required: true
@@ -90,7 +87,7 @@ runs:
       with:
         pattern: apply-summary.*
         path: cells
-        github-token: ${{ inputs.github-token }}
+        github-token: ${{ github.token }}
         merge-multiple: false
 
     - name: Warn on apply cell summaries download failure
@@ -142,7 +139,7 @@ runs:
     - name: List run jobs (log links; degrade to none on failure)
       shell: bash
       env:
-        GH_TOKEN: ${{ inputs.github-token }}
+        GH_TOKEN: ${{ github.token }}
       run: |
         set -euo pipefail
         # Cosmetic: apply-comment falls back to the workflow-run URL per row. Mirror
