@@ -807,7 +807,8 @@ def resolve(table, env, path, workload):
     `path` is the calling detect's tier, never inferred; a shared environment resolves
     `aws.apply` on both paths, and `config_path` reports the tier actually consulted
     rather than the one requested. `env_binding` is the GitHub Environment the cell's job
-    binds: the bare `env` when shared, `<env>-<path>` otherwise. The table chooses; a
+    binds, taken from `env_names`: the bare `env` when shared, `<env>-<path>` otherwise.
+    A `path` other than `plan` or `apply` raises KeyError. The table chooses; a
     reference in it was resolved from a repository or organization variable by
     `parse_table`. An environment with no entry resolves an empty role and the caller skips
     the credentials step.
@@ -818,7 +819,8 @@ def resolve(table, env, path, workload):
     """
     environments = _mapping(table.get("environments", {}), "environments")
     entry = _mapping(environments.get(env, {}), f"environment {env}")
-    shared = env in shared_envs(table)
+    names = {role: name for name, role in env_names(env, shared_envs(table))}
+    shared = "shared" in names
     config_path = "apply" if shared else path
     fields = {}
     if "aws" in entry:
@@ -831,5 +833,5 @@ def resolve(table, env, path, workload):
         "cred_region": fields.get("region", ""),
         "tf_vars": {**_derived(table.get("layout"), env, entry), **entry.get("tf_vars", {})},
         "config_path": config_path,
-        "env_binding": env if shared else f"{env}-{path}",
+        "env_binding": names["shared" if shared else path],
     }
