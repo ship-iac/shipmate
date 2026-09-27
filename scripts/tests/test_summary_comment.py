@@ -420,7 +420,7 @@ def test_a_cell_without_plan_text_renders_question_marks_and_warns_once(tmp_path
     cells = sc.load_cells(str(tmp_path))
     assert [(c["add"], c["change"], c["destroy"]) for c, _ in cells] == [("?", "?", "?")]
     assert capsys.readouterr().out == (
-        "::warning::plan text for stacks/app / dev-eu carries no OpenTofu tally line; "
+        "::warning::plan text for stacks/app / dev-eu has no single OpenTofu tally line; "
         "its counts render as ?\n"
     )
     body = sc.build_comment(cells, {}, RUN_URL)
@@ -432,7 +432,7 @@ def test_the_warning_escapes_a_newline_in_an_untrusted_name(tmp_path, capsys):
     _write_cell(tmp_path, _cell(stack_path="a\n::error::forged"))
     sc.load_cells(str(tmp_path))
     assert capsys.readouterr().out == (
-        "::warning::plan text for a%0A::error::forged / dev-eu carries no OpenTofu tally line; "
+        "::warning::plan text for a%0A::error::forged / dev-eu has no single OpenTofu tally line; "
         "its counts render as ?\n"
     )
 

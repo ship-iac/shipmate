@@ -965,7 +965,8 @@ providers fails on the dependency lock.
 What this binds is agreement, not honesty. A privileged author still authors
 both the plan text and the `.otplan`; what they can no longer do is have the two
 disagree. The `+add ~change -destroy` counts in the comment are read from that
-same bound text.
+same bound text, which is checked against the stored plan only when the cell
+applies.
 
 ## Contributors without push access
 

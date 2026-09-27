@@ -253,10 +253,11 @@ _ZERO_COUNT = ("No changes.", "You can apply this plan to save these new output 
 
 def counts(path):
     """(add, change, destroy) from the `tofu show` text at `path`: its one column-0 `Plan:`
-    tally line, or (0, 0, 0) when it has none and ends in the no-changes or outputs-only
-    sentence. None for a missing file, no recognised line, or two tally lines. Author text
-    (heredoc bodies, multi-line outputs) renders indented, so only column 0 counts. The whole
-    file is read: the tally sits at the end, past the SIZE_BUDGET cap on the rendered text."""
+    tally line, or (0, 0, 0) when it has none and has a line starting with the no-changes or
+    outputs-only sentence. None for a missing file, no recognised line, or two tally lines.
+    Author text (heredoc bodies, multi-line outputs) renders indented, so only column 0 counts.
+    The whole file is read: the tally sits at the end, past the SIZE_BUDGET cap on the rendered
+    text."""
     if not path.exists():
         return None
     hits, zero = [], False
@@ -311,7 +312,7 @@ def load_cells(cells_dir):
             # name would start a second workflow command.
             name = name.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
             print(
-                f"::warning::plan text for {name} carries no OpenTofu tally line; "
+                f"::warning::plan text for {name} has no single OpenTofu tally line; "
                 "its counts render as ?"
             )
             tally = ("?", "?", "?")
