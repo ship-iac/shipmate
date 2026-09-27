@@ -9,6 +9,7 @@ runner, escape bytes intact, and is the only one that proves the strip.
 
 import pathlib
 
+import pytest
 from _loader import load_script
 
 li = load_script("lock-info")
@@ -173,20 +174,24 @@ def test_parses_real_ansi_coloured_ci_output():
     }
 
 
-def test_ansi_re_strips_csi_two_char_and_osc_forms():
-    # CSI (SGR), a bare two-character escape (ESC + byte in @-_), an OSC sequence
-    # terminated by BEL, and the same OSC form terminated by ST (ESC \).
-    csi = "before\x1b[36;1mcolour\x1b[0mafter"
-    two_char = "before\x1bMreset-ish\x1bDafter"
-    osc_bel = "before\x1b]0;window title\x07after"
-    osc_st = "before\x1b]0;window title\x1b\\after"
-    for sample in (csi, two_char, osc_bel, osc_st):
-        stripped = li.ANSI_RE.sub("", sample)
-        assert "\x1b" not in stripped
-        assert "before" in stripped
-        assert "after" in stripped
+@pytest.mark.parametrize(
+    ("sample", "expected"),
+    [
+        pytest.param("before\x1b[36;1mcolour\x1b[0mafter", "beforecolourafter", id="csi"),
+        pytest.param("before\x1bMreset-ish\x1bDafter", "beforereset-ishafter", id="two-char"),
+        pytest.param("before\x1b]0;window title\x07after", "beforeafter", id="osc-bel"),
+        pytest.param("before\x1b]0;window title\x1b\\after", "beforeafter", id="osc-st"),
+    ],
+)
+def test_ansi_re_strips_csi_two_char_and_osc_forms(sample, expected):
+    """CSI (SGR), a bare two-character escape (ESC + byte in @-_), an OSC sequence terminated by
+    BEL, and the same OSC form terminated by ST (ESC \\), each compared whole: the two-character
+    alternative alone strips `ESC ]` and leaves the OSC payload behind. Mutation: drop the OSC
+    alternative from ANSI_RE (reddens both osc rows)."""
+    assert li.ANSI_RE.sub("", sample) == expected
 
 
 def test_ansi_re_leaves_ordinary_text_and_newlines_and_carriage_returns_alone():
+    """Mutation: add `|\\r` to ANSI_RE."""
     text = "plain line one\nplain line two\r\nno escapes here at all"
     assert li.ANSI_RE.sub("", text) == text

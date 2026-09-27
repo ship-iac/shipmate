@@ -1,11 +1,18 @@
 """Unit tests for scripts/drift-issues."""
 
 import json
+import os
 
 import pytest
 from _loader import action_steps, load_script
 
 di = load_script("drift-issues")
+
+
+@pytest.fixture(autouse=True)
+def _fresh_label_cache():
+    """`_ensure_label` is cached per process; clear it so no test inherits another's call."""
+    di._ensure_label.cache_clear()
 
 
 def _cell(**over):
@@ -37,12 +44,19 @@ def test_load_cells_reads_every_downloaded_cell_sorted(tmp_path):
 
 
 def test_load_cells_missing_key_fails_loud(tmp_path):
+    """The whole refusal, so the pin-skew sentence the caller passes to `cell_summaries` is
+    checked too. Mutation: drop `{skew}` from `cell_summaries`' message."""
     d = tmp_path / "drift-summary.dev-eu.app"
     d.mkdir(parents=True)
     (d / "cell.json").write_text(json.dumps({"stack": "stacks/app"}), encoding="utf-8")
     with pytest.raises(SystemExit) as exc:
         di.load_cells(str(tmp_path))
-    assert "missing keys" in str(exc.value)
+    path = os.path.join(str(tmp_path), "drift-summary.dev-eu.app", "cell.json")
+    assert str(exc.value) == (
+        f"::error::cell summary {path} missing keys ['stack_name', 'environment', 'plan_ok', "
+        "'drifted', 'add', 'change', 'destroy'] -- drift-cell and this script must be pinned "
+        "at the same engine SHA"
+    )
 
 
 def test_load_cells_on_missing_directory_is_empty(tmp_path):
@@ -88,7 +102,6 @@ def test_plan_not_ok_cell_is_skipped_entirely(monkeypatch):
 
 
 def test_drifted_with_no_existing_issue_creates_one(monkeypatch):
-    di._ensure_label.cache_clear()
     rec = _Recorder()
     monkeypatch.setattr(di, "_run", rec)
     label_calls = []
@@ -106,7 +119,6 @@ def test_drifted_with_no_existing_issue_creates_one(monkeypatch):
 
 def test_two_new_issues_create_the_label_once(monkeypatch):
     """Mutation: `@functools.cache` -> `@functools.lru_cache(maxsize=0)` on `_ensure_label`."""
-    di._ensure_label.cache_clear()
     monkeypatch.setattr(di, "_run", _Recorder())
     label_calls = []
     monkeypatch.setattr(

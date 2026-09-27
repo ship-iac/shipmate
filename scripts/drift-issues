@@ -33,7 +33,7 @@ import subprocess
 import urllib.error
 import urllib.request
 
-from _shipmate import _load, cell_summaries, run_url
+from _shipmate import _load, cell_summaries, current_run_url
 
 _run = _load("build-matrix")._run
 
@@ -156,7 +156,7 @@ def main():
     cells = load_cells(os.environ.get("SHIPMATE_CELLS_DIR", "drift"))
     if not cells:
         return
-    url = run_url()
+    url = current_run_url()
     existing = existing_issue_numbers()
     webhook = os.environ.get("SHIPMATE_SLACK_WEBHOOK", "")
     # Failures are collected here, not raised: one cell's failure must not abandon the rest,

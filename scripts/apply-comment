@@ -24,7 +24,7 @@ import pathlib
 import re
 import sys
 
-from _shipmate import _load, cell_summaries, run_url
+from _shipmate import _load, cell_summaries, current_run_url
 
 sc = _load("summary-comment")
 # COUPLING: "what counts as a done apply check" is written once in apply-gate and shared with
@@ -325,7 +325,8 @@ def check_state_maps(check_run_lines, app_id):
     `present` is every App-authored `apply / ...` check name on the head SHA
     (newest run per name); `done` is the subset whose newest run completed with
     a good conclusion. Both come from `apply-gate`, per this module's COUPLING
-    note."""
+    note. Raises SystemExit on a malformed line or an empty app id, and ValueError
+    on a non-numeric one."""
     runs = ag.from_app(ag.parse_jsonl(check_run_lines), app_id)
     return set(ag.latest_by_name(runs)), ag.done_names(runs)
 
@@ -335,12 +336,19 @@ def load_check_maps(path, app_id):
 
     Every failure degrades to no data with a warning, never propagates: for
     comment-ops the comment IS the feedback channel, so losing this one display
-    axis must not cost the whole render. That covers a malformed line or an
-    empty SHIPMATE_APP_ID (SystemExit from parse_jsonl or from_app), an
+    axis must not cost the whole render. An empty SHIPMATE_APP_ID gets its own
+    warning before the file is read, since the file is not at fault. The
+    catch-all covers a malformed line (parse_jsonl's SystemExit), a missing or
     unreadable file (OSError), a non-numeric SHIPMATE_APP_ID (ValueError from
     `int(app_id)`), and a valid-JSON line of the wrong shape reaching
     `latest_by_name` (KeyError/TypeError/AttributeError). See apply_check_state
     for why no data is the safe state."""
+    if not app_id:
+        print(
+            "::warning::SHIPMATE_APP_ID is empty — the apply result comment falls back "
+            "to artifact-only status (see docs/github-app.md)."
+        )
+        return set(), set()
     try:
         with open(path, encoding="utf-8") as fh:
             return check_state_maps(fh, app_id)
@@ -502,11 +510,11 @@ def _gate_sentence(gate):
     )
 
 
-def _env_disposition_lines(excluded, skipped, held=(), applied_ungated=()):
-    """One sentence per env disposition this run produced: excluded, skipped,
-    held for review, applied ungated. Shared by `_footer_parts` and `_short_form` so
-    the short form cannot silently drop the comment's most actionable warning.
-    Env names are author-controlled, so `_md_escape`d.
+def _footer_parts(gate, run_url, excluded, skipped, env_name, held=(), applied_ungated=()):
+    """The comment's closing lines: in the all-environments form, one sentence per env
+    disposition this run produced (excluded, skipped, held for review, applied ungated);
+    then the gate sentence and the run link. Env names are author-controlled, so
+    `_md_escape`d.
 
     The held sentence names no command: a held env can also be an explicit env
     (the held cause wins, so it is not in `excluded`), and a bare `shipmate
@@ -528,42 +536,35 @@ def _env_disposition_lines(excluded, skipped, held=(), applied_ungated=()):
     beside it. It points at the run rather than the table because the short
     form has no table."""
     lines = []
-    if excluded:
-        envs = ", ".join(f"`{sc._md_escape(e)}`" for e in excluded)
-        cmds = ", ".join(f"`shipmate apply {sc._md_escape(e)}`" for e in excluded)
-        lines.append(f"Explicit environment(s) left pending: {envs} — run {cmds} to apply them.")
-    if skipped:
-        envs = ", ".join(f"`{sc._md_escape(e)}`" for e in skipped)
-        # Cause-agnostic: `partition_envs` blocks on explicit AND held envs, so
-        # naming "explicit" here misattributes every hold-induced skip.
-        lines.append(f"Skipped (ordered after an environment not applying this run): {envs}.")
-    if held:
-        envs = ", ".join(f"`{sc._md_escape(e)}`" for e in held)
-        lines.append(
-            f"Held — the pull request's review state does not permit applying: {envs}. "
-            "Get an approving review, or resolve or dismiss a requested-changes "
-            "review; the run log's apply-all-detect notice names the decision seen."
-        )
-    if applied_ungated:
-        envs = ", ".join(f"`{sc._md_escape(e)}`" for e in applied_ungated)
-        lines.append(
-            "Ungated environment(s) permitted to apply without an approving review, "
-            f"per `gated = false` on their entries in `.github/shipmate.toml`: {envs} — "
-            "see this run for what actually applied."
-        )
-    return lines
-
-
-def _footer_parts(gate, run_url, excluded, skipped, env_name, held=(), applied_ungated=()):
-    """Excluded/skipped/held/ungated-env lines (all-environments form only), the
-    gate sentence, then the run link. `build_comment` joins them as paragraphs,
-    `_short_form` as one line."""
-    parts = []
     if not env_name:
-        parts.extend(_env_disposition_lines(excluded, skipped, held, applied_ungated))
-    parts.append(_gate_sentence(gate))
-    parts.append(f"[Logs & artifacts]({run_url})")
-    return parts
+        if excluded:
+            envs = ", ".join(f"`{sc._md_escape(e)}`" for e in excluded)
+            cmds = ", ".join(f"`shipmate apply {sc._md_escape(e)}`" for e in excluded)
+            lines.append(
+                f"Explicit environment(s) left pending: {envs} — run {cmds} to apply them."
+            )
+        if skipped:
+            envs = ", ".join(f"`{sc._md_escape(e)}`" for e in skipped)
+            # Cause-agnostic: `partition_envs` blocks on explicit AND held envs, so
+            # naming "explicit" here misattributes every hold-induced skip.
+            lines.append(f"Skipped (ordered after an environment not applying this run): {envs}.")
+        if held:
+            envs = ", ".join(f"`{sc._md_escape(e)}`" for e in held)
+            lines.append(
+                f"Held — the pull request's review state does not permit applying: {envs}. "
+                "Get an approving review, or resolve or dismiss a requested-changes "
+                "review; the run log's apply-all-detect notice names the decision seen."
+            )
+        if applied_ungated:
+            envs = ", ".join(f"`{sc._md_escape(e)}`" for e in applied_ungated)
+            lines.append(
+                "Ungated environment(s) permitted to apply without an approving review, "
+                f"per `gated = false` on their entries in `.github/shipmate.toml`: {envs} — "
+                "see this run for what actually applied."
+            )
+    lines.append(_gate_sentence(gate))
+    lines.append(f"[Logs & artifacts]({run_url})")
+    return lines
 
 
 def _results_failed(results_csv):
@@ -727,7 +728,7 @@ def main():
     rows = apply_check_state(build_rows(expected, downloaded), present, done)
     env_name = os.environ.get("SHIPMATE_ENVIRONMENT", "") or ""
     gate = os.environ.get("SHIPMATE_GATE", "")
-    url = run_url()
+    url = current_run_url()
     # Both render paths need these: an excluded explicit env can be the entire
     # reason nothing else is pending.
     excluded = json.loads(os.environ.get("SHIPMATE_EXCLUDED_ENVS") or "[]")

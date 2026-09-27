@@ -626,17 +626,6 @@ def test_short_form_omits_excluded_skipped_for_targeted_env():
     assert "Skipped" not in body
 
 
-def test_env_disposition_lines_escape_evil_env_names():
-    # Excluded and skipped env names are author-controlled (Terramate tags, GitHub
-    # Environment names), like every other display value here; these sentences must not
-    # be the one place that guarantee lapses.
-    evil = "x</summary><b>evil"
-    lines = ac._env_disposition_lines([evil], [evil])
-    joined = " ".join(lines)
-    assert "</summary><b>evil" not in joined
-    assert "&lt;/summary&gt;&lt;b&gt;evil" in joined
-
-
 def test_short_form_escapes_evil_excluded_and_skipped_env_names():
     evil = "x</summary><b>evil"
     body = ac._short_form("success,skipped", "", "complete", RUN_URL, [evil], [evil])
@@ -667,7 +656,7 @@ def test_held_line_names_review_and_never_a_targeted_apply_command():
     # A held env can also be an explicit env, where the review alone does not release it,
     # so this sentence must not name a command at all. `shipmate apply prod` would
     # additionally be a command that refuses.
-    (line,) = ac._env_disposition_lines([], [], ["prod"], [])
+    (line,) = ac._footer_parts("pending", RUN_URL, [], [], "", ["prod"], [])[:-2]
     assert line == _HELD_SENTENCE
     assert "shipmate apply prod" not in line
 
@@ -678,7 +667,7 @@ def test_applied_ungated_line_states_no_review_and_names_the_setting():
     Whole-value also because no clause may claim the named envs COMPLETED: detect derives the set
     from `runnable`, so a failed wave leaves a named env unapplied, and because the sentence must
     name the setting that governs -- naming a source an operator has deleted is a false record."""
-    (line,) = ac._env_disposition_lines([], [], [], ["dev-eu"])
+    (line,) = ac._footer_parts("pending", RUN_URL, [], [], "", [], ["dev-eu"])[:-2]
     assert line == _UNGATED_SENTENCE
 
 
@@ -698,7 +687,7 @@ def test_footer_carries_held_and_ungated_sentences():
 
 def test_held_and_ungated_lines_escape_evil_env_names():
     evil = "x</summary><b>evil"
-    joined = " ".join(ac._env_disposition_lines([], [], [evil], [evil]))
+    joined = " ".join(ac._footer_parts("pending", RUN_URL, [], [], "", [evil], [evil])[:-2])
     assert "</summary><b>evil" not in joined
     assert "&lt;/summary&gt;&lt;b&gt;evil" in joined
 
@@ -1024,12 +1013,16 @@ def test_check_state_maps_judges_the_newest_run_per_name():
 
 def test_load_check_maps_empty_app_id_warns_and_returns_no_data(tmp_path, capsys):
     """Must NOT fail loud the way from_app does: a missing SHIPMATE_APP_ID is only allowed to cost
-    this one display axis, never the whole comment. Mutation: drop SystemExit from
-    load_check_maps' except tuple."""
+    this one display axis, never the whole comment, and the warning names the variable rather
+    than blaming the file. Mutation: delete load_check_maps' `if not app_id` early return (the
+    catch-all then warns about checks.jsonl instead)."""
     p = tmp_path / "checks.jsonl"
     p.write_text("\n".join(_jsonl(_check("apply / stacks/app / dev-eu"))), encoding="utf-8")
     assert ac.load_check_maps(str(p), "") == (set(), set())
-    assert "::warning::" in capsys.readouterr().out
+    assert capsys.readouterr().out == (
+        "::warning::SHIPMATE_APP_ID is empty — the apply result comment falls back "
+        "to artifact-only status (see docs/github-app.md).\n"
+    )
 
 
 def test_apply_check_state_applied_with_done_check_stays_applied():
@@ -1083,11 +1076,13 @@ def test_apply_check_state_never_downgrades_failed_or_blocked():
     assert [r["status"] for r in rows] == ["failed", "blocked"]
 
 
-def test_load_check_maps_missing_file_is_no_data(tmp_path):
-    # The scan step always writes checks.jsonl, so absence is an unexpected failure: no data,
-    # not a crash.
+def test_load_check_maps_missing_file_warns_and_is_no_data(tmp_path, capsys):
+    """The scan step always writes checks.jsonl, so absence is a failure: no data and a warning,
+    not a crash and not silence. Mutation: restore `except FileNotFoundError: return set(), set()`
+    ahead of the catch-all."""
     present, done = ac.load_check_maps(str(tmp_path / "nope.jsonl"), APP_ID)
     assert (present, done) == (set(), set())
+    assert "::warning::" in capsys.readouterr().out
 
 
 def test_load_check_maps_empty_file_is_no_data(tmp_path):

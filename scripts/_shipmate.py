@@ -6,8 +6,7 @@ suffix-less file, so the ``SourceFileLoader`` is passed explicitly. Nothing is c
 ``bm._run`` cannot leak the patch into every other holder of ``build_matrix``.
 
 Also holds the secret scrubber and repository-slug check that ``onboard`` and ``register-app``
-share, and the cell-summary reader and run link that ``apply-comment``, ``summary-comment`` and
-``drift-issues`` share.
+share. It also reads the per-cell ``cell.json`` summaries and builds this run's page link.
 """
 
 import glob
@@ -50,7 +49,7 @@ def cell_summaries(cells_dir, keys, skew):
         yield p, cell
 
 
-def run_url():
+def current_run_url():
     """This workflow run's page, from the runner's default environment variables."""
     return (
         f"{os.environ['GITHUB_SERVER_URL']}/{os.environ['GITHUB_REPOSITORY']}"

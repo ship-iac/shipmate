@@ -24,7 +24,7 @@ import pathlib
 import re
 import sys
 
-from _shipmate import _load, cell_summaries, run_url
+from _shipmate import _load, cell_summaries, current_run_url
 
 ag = _load("apply-gate")
 
@@ -328,7 +328,7 @@ def main():
     cells = load_cells(os.environ.get("CELLS", "cells"))
     # This job runs inside the plan run, so this run holds the logs and the
     # artifacts the footer and the per-cell fallback link promise.
-    url = run_url()
+    url = current_run_url()
     with open("comment.md", "w", encoding="utf-8") as fh:
         fh.write(build_comment(cells, checks, url))
     pending = any(c["changed"] for c, _ in cells)
