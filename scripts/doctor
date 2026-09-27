@@ -398,7 +398,7 @@ def _env_shape_findings(name, env, data, role):
 
 def _env_protection_warnings(ctx):
     """Protection shape per environment, checked live, with the role each
-    environment plays taken from `env_names`. An approval-type protection rule on
+    environment plays taken from `_bound_names`. An approval-type protection rule on
     a PLAN env — a required reviewer, or a wait timer — stops plan jobs from
     starting when they should: no error, only a stalled matrix — the hardest
     shipmate misconfiguration to diagnose. An APPLY env with no approval
