@@ -29,7 +29,7 @@ import sys
 import tempfile
 from typing import NamedTuple
 
-ROOT = pathlib.Path(__file__).resolve().parent.parent
+ENGINE_ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 
 # Any engine ref regardless of shape -- what _CONSUMER_REF, which matches only a 40-hex pin,
@@ -61,7 +61,7 @@ def git(*args):
     # encoding="utf-8": Windows' cp1252 default cannot decode non-ASCII git output.
     # argv is a fixed literal list, no shell, no user-controlled executable name.
     return subprocess.run(  # noqa: S603
-        ["git", "-C", str(ROOT), *args],  # noqa: S607
+        ["git", "-C", str(ENGINE_ROOT), *args],  # noqa: S607
         capture_output=True,
         text=True,
         encoding="utf-8",
@@ -211,14 +211,6 @@ def _commit_consumer(root, planned):
     return changed, matched
 
 
-def _resolve_sha(sha):
-    """Full 40-hex sha for ``sha``, or None if it does not resolve here."""
-    resolved = resolve(sha)
-    if resolved is None:
-        print(f"{sha} does not resolve to a commit in this engine clone")
-    return resolved
-
-
 def main(argv=None):
     ap = argparse.ArgumentParser(description="Re-pin a consumer repo to one engine commit.")
     ap.add_argument("--repo", required=True, help="path to the consumer repo checkout")
@@ -231,8 +223,9 @@ def main(argv=None):
         print(f"{root} has no .github/workflows -- not a consumer repo checkout")
         return 3
 
-    new_sha = _resolve_sha(args.sha)
+    new_sha = resolve(args.sha)
     if new_sha is None:
+        print(f"{args.sha} does not resolve to a commit in this engine clone")
         return 3
 
     verdict = unreachable_from_main(new_sha)
