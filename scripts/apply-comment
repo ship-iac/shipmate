@@ -674,29 +674,29 @@ def build_comment(
     footer = "\n\n" + "\n\n".join(footer_parts)
     used = len(top) + len(footer)
 
-    urls = {id(r): _job_url(r, jobs, run_url) for r in rows}
-    link_onlys = {
-        id(r): _link_only(r, urls[id(r)]) for r in rows if r["status"] in _SECTION_STATUSES
-    }
-    blocked_lines = {id(r): _blocked_line(r, urls[id(r)]) for r in rows if r["status"] == "blocked"}
-    reserve = sum(len(lo) + 2 for lo in link_onlys.values())
-    reserve += sum(len(bl) + 2 for bl in blocked_lines.values())
+    # (row, url, smallest form) per rendered row: a section's link-only fallback, or a blocked
+    # row's one-liner. not_attempted rows render nothing: the table row + the note is the whole
+    # statement.
+    enriched = []
+    for r in rows:
+        url = _job_url(r, jobs, run_url)
+        if r["status"] in _SECTION_STATUSES:
+            enriched.append((r, url, _link_only(r, url)))
+        elif r["status"] == "blocked":
+            enriched.append((r, url, _blocked_line(r, url)))
+    reserve = sum(len(smallest) + 2 for *_, smallest in enriched)
 
     parts = [top]
-    for r in rows:
-        url = urls[id(r)]
-        if r["status"] in _SECTION_STATUSES:
-            reserve -= len(link_onlys[id(r)]) + 2
-            limit = sc.SIZE_BUDGET - used - reserve - 2
-            section = render_apply_section(r, r["apply_text"], url, limit)
-            parts.append(section)
-            used += len(section) + 2
-        elif r["status"] == "blocked":
-            line = blocked_lines[id(r)]
-            reserve -= len(line) + 2
-            parts.append(line)
-            used += len(line) + 2
-        # not_attempted: the table row + the note above is the whole statement.
+    for r, url, smallest in enriched:
+        reserve -= len(smallest) + 2
+        if r["status"] == "blocked":
+            section = smallest
+        else:
+            section = render_apply_section(
+                r, r["apply_text"], url, sc.SIZE_BUDGET - used - reserve - 2
+            )
+        parts.append(section)
+        used += len(section) + 2
 
     body = "\n\n".join(parts) + footer
     if len(body) > sc.HARD_CAP:
